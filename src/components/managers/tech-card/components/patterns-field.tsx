@@ -1632,7 +1632,7 @@ export function PatternsField({
             ) : busy ? (
               <Placeholder dashed label='uploading…' className='h-[84px] w-full' />
             ) : dxfIndex && blocks > 0 ? (
-              <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-bgZebra p-1'>
+              <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-pageBg p-1'>
                 <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
               </div>
             ) : (

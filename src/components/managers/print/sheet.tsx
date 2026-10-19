@@ -40,7 +40,7 @@ export function Sheet({ title, children }: { title: string; children: ReactNode 
 export function KV({ k, v }: { k: string; v?: ReactNode }) {
   const empty = v == null || v === '' || v === '—';
   return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-control leading-tight'>
+    <div className='flex gap-2 break-inside-avoid border-b border-borderColor py-0.5 text-control leading-tight'>
       <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
       <span className='font-medium'>{empty ? '—' : v}</span>
     </div>

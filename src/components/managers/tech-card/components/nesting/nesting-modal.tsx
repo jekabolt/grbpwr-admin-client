@@ -168,7 +168,7 @@ const articleUrl = (materialId: number) => `${ROUTES.materials}?tab=catalog&mate
 // ОДНА КОРОБКА НА ВЕСЬ РЯД ТУЛБАРА: поле ввода, селект, переключатель и дверь деталей — одной
 // ширины (FIELD), одной высоты и одной рамки (владелец: ряд полей ввода = один размер плиток).
 const BOX =
-  'flex h-6 w-full min-w-0 items-center rounded-none border border-borderColor bg-bgColor px-[7px] text-textBaseSize tabular-nums transition-colors hover:border-textColor focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'flex h-6 w-full min-w-0 items-center rounded-none border border-borderColor bg-bgColor px-[7px] text-textBaseSize tabular-nums transition-colors hover:border-textColor focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 const BOX_LABEL = 'block h-[14px] truncate uppercase leading-[14px]';
 
 // Prior manual-edit notes are replaced, not stacked, on each re-save of a marker.

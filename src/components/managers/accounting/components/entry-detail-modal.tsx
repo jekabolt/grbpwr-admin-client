@@ -38,8 +38,8 @@ export function EntryDetailModal({ entryId, onOpenChange, actions }: Props) {
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal container={document.body}>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[640px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[640px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
               journal entry{entryId ? ` #${entryId}` : ''}
             </DialogPrimitives.Title>
@@ -101,8 +101,8 @@ export function EntryDetailModal({ entryId, onOpenChange, actions }: Props) {
 
                 <div className='overflow-x-auto'>
                   <table className='w-full min-w-max border-collapse border border-borderColor'>
-                    <thead className='h-10 bg-textInactiveColor'>
-                      <tr className='border-b border-textInactiveColor'>
+                    <thead className='h-10 bg-borderColor'>
+                      <tr className='border-b border-borderColor'>
                         <th className='px-2 text-left text-textBaseSize uppercase'>account</th>
                         <th className='px-2 text-right text-textBaseSize uppercase'>debit</th>
                         <th className='px-2 text-right text-textBaseSize uppercase'>credit</th>
@@ -111,7 +111,7 @@ export function EntryDetailModal({ entryId, onOpenChange, actions }: Props) {
                     </thead>
                     <tbody>
                       {(entry.lines ?? []).map((line, idx) => (
-                        <tr key={line.id ?? idx} className='border-b border-textInactiveColor'>
+                        <tr key={line.id ?? idx} className='border-b border-borderColor'>
                           <td className='px-2 py-1'>
                             {line.accountCode} — {line.accountName}
                           </td>

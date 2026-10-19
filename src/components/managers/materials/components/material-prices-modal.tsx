@@ -7,7 +7,7 @@ import { ConfirmationModal, Row, Text, EmptyCell } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { useAddMaterialPrice, useMaterialPrices } from './useMaterials';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // Price history timeline (🔒 costing) + AddMaterialPrice. New prices are `manual`;
 // `production_run`-sourced entries are written by receiving a production run.
@@ -137,7 +137,7 @@ export function MaterialPricesModal({
             </div>
 
             {canWriteCosting && (
-              <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-3'>
+              <div className='flex flex-col gap-2 border-t border-borderColor pt-3'>
                 <Text variant='uppercase' size='small'>
                   add price — NET, ex-VAT
                 </Text>

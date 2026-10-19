@@ -73,7 +73,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                     trigger={
                       <span
                         tabIndex={0}
-                        className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
+                        className='cursor-help text-textBaseSize uppercase text-borderColor'
                       >
                         read-only
                       </span>
@@ -93,7 +93,7 @@ export function PeriodsList({ periods, canWrite, onClose, onReopen }: Props) {
                     trigger={
                       <span
                         tabIndex={0}
-                        className='cursor-help text-textBaseSize uppercase text-textInactiveColor'
+                        className='cursor-help text-textBaseSize uppercase text-borderColor'
                       >
                         not over yet
                       </span>

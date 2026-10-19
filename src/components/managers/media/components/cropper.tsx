@@ -402,7 +402,7 @@ export const MediaCropper: FC<CropperInterface> = ({
 
       <div className='grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_224px] lg:items-start'>
         <div className='min-w-0'>
-          <div className='crop-stage relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-bgSecondary p-3'>
+          <div className='crop-stage relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-3'>
             <div aria-hidden className='pointer-events-none absolute inset-0 bg-textColor/55' />
             <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
               {disp && !loadFailed ? (

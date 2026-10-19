@@ -225,12 +225,12 @@ const FIELD_KEYS = [
 // No width of its own: a `w-full` here beat the caller's `w-24`/`w-56` in the stylesheet and
 // squeezed the row's name to nothing (the gone-pieces rows read just «delete»).
 const selectCls =
-  'block min-h-[22px] appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block min-h-[22px] appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
 // The piece panel beside the sheet: one type size (micro) and one box height (22px) for every
 // field, toggle and select in it.
 const BOX =
-  'block h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] text-micro transition-colors focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+  'block h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] text-micro transition-colors focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 const INPUT_BOX = 'h-[22px] py-0 text-micro';
 const TOGGLE_BOX = 'h-[22px] w-full justify-center';
 

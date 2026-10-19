@@ -122,7 +122,7 @@ export function TechCardField() {
           placeholder={selected ? 'change tech card…' : 'search name / style number'}
         />
         {open && (
-          <div className='absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-auto border border-textInactiveColor bg-bgColor'>
+          <div className='absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-auto border border-borderColor bg-bgColor'>
             {isLoading ? (
               <Text variant='inactive' size='small' className='block p-2'>
                 searching…
@@ -138,7 +138,7 @@ export function TechCardField() {
                   type='button'
                   onClick={() => choose(tc)}
                   className={cn(
-                    'flex w-full flex-col items-start gap-0.5 border-b border-textInactiveColor px-2 py-1.5 text-left transition-colors last:border-b-0 hover:bg-highlightColor/5',
+                    'flex w-full flex-col items-start gap-0.5 border-b border-borderColor px-2 py-1.5 text-left transition-colors last:border-b-0 hover:bg-highlightColor/5',
                     tc.id === id && 'bg-highlightColor/10',
                   )}
                 >

@@ -242,10 +242,10 @@ export function AddFilesToProjectModal({
                           src={f.previewUrl}
                           alt=''
                           loading='lazy'
-                          className='aspect-square w-full bg-bgSecondary object-contain'
+                          className='aspect-square w-full bg-pageBg object-contain'
                         />
                       ) : (
-                        <div className='flex aspect-square w-full items-center justify-center bg-bgSecondary'>
+                        <div className='flex aspect-square w-full items-center justify-center bg-pageBg'>
                           <Text size='micro' variant='label' className='uppercase'>
                             {(f.fileName ?? '').split('.').pop()?.slice(0, 4) || 'file'}
                           </Text>

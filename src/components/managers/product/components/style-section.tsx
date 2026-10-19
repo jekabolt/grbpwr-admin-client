@@ -98,7 +98,7 @@ export function StyleSection({
     <FieldsGroupContainer
       title='model presentation'
       isOpen={hasModelWears}
-      className='border border-textInactiveColor p-4'
+      className='border border-borderColor p-4'
       childrenSpacingClass='space-y-3'
       headerContentGapClass='space-y-3'
       preview={

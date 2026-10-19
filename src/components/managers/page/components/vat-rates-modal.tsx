@@ -9,7 +9,7 @@ import { AddDoor, ConfirmationModal, Text, Close } from 'ui';
 
 type Row = { countryCode: string; ratePct: string; validFrom: string };
 const cell =
-  'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 // Destination-country VAT rates used to compute net-of-VAT revenue. Get + Upsert.
 export function VatRatesModal({

@@ -174,7 +174,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           <Link
             to={`${BASE_PATH}/products/${product.id}`}
             target='_blank'
-            className='cursor-pointer text-blue underline hover:text-blue'
+            className='cursor-pointer text-warning underline hover:text-warning'
           >
             {product.id}
           </Link>
@@ -253,13 +253,13 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
         </div>
         <div className='overflow-auto w-full max-h-[min(70vh,500px)]'>
           <table className='w-full border-collapse border border-borderColor min-w-max'>
-            <thead className='bg-textInactiveColor h-10'>
-              <tr className='border-b border-textInactiveColor'>
+            <thead className='bg-borderColor h-10'>
+              <tr className='border-b border-borderColor'>
                 {COLUMNS.map((col) => (
                   <th
                     key={col.label}
                     className={cn(
-                      'sticky top-0 z-10 bg-textInactiveColor text-center w-auto lg:min-w-26 border border-r border-textInactiveColor px-2',
+                      'sticky top-0 z-10 bg-borderColor text-center w-auto lg:min-w-26 border border-r border-borderColor px-2',
                       col.className,
                     )}
                   >
@@ -293,7 +293,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
                         <td
                           key={col.label}
                           className={cn(
-                            'border border-textInactiveColor text-center px-2 w-16 lg:w-auto',
+                            'border border-borderColor text-center px-2 w-16 lg:w-auto',
                             col.className,
                           )}
                         >

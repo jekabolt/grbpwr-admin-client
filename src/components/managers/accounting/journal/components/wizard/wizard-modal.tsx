@@ -322,7 +322,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
       </Text>
     </div>
   ) : monthInfo?.isPast ? (
-    <div className='border border-textInactiveColor p-3'>
+    <div className='border border-borderColor p-3'>
       <Text size='small' variant='inactive'>
         dated {monthInfo.month} (an open past month) — the list shows the current month by default,
         so this entry won&apos;t appear there after posting. use the toast&apos;s &quot;view&quot;
@@ -342,9 +342,9 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content
           onOpenAutoFocus={(e) => e.preventDefault()}
-          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[680px] lg:-translate-x-1/2'
+          className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[680px] lg:-translate-x-1/2'
         >
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
             <div className='flex items-baseline gap-3'>
               <DialogPrimitives.Title className='text-lg uppercase'>
                 new journal entry
@@ -425,7 +425,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                             key={s.id}
                             type='button'
                             onClick={() => pickScenario(s)}
-                            className='flex w-full flex-col gap-0.5 border border-textInactiveColor p-2.5 text-left hover:border-textColor'
+                            className='flex w-full flex-col gap-0.5 border border-borderColor p-2.5 text-left hover:border-textColor'
                           >
                             <span className='flex w-full items-center gap-2'>
                               <Text component='span' className='font-bold'>
@@ -517,8 +517,8 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                   </Text>
                 </div>
 
-                <div className='border border-textInactiveColor'>
-                  <div className='grid grid-cols-[56px_1fr_40px_96px] gap-2 border-b border-textInactiveColor bg-bgSecondary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
+                <div className='border border-borderColor'>
+                  <div className='grid grid-cols-[56px_1fr_40px_96px] gap-2 border-b border-borderColor bg-pageBg px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-labelColor'>
                     <span>code</span>
                     <span>account</span>
                     <span>side</span>
@@ -527,7 +527,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                   {result.lines.map((l, i) => (
                     <div
                       key={i}
-                      className='grid grid-cols-[56px_1fr_40px_96px] items-baseline gap-2 border-b border-textInactiveColor px-2.5 py-1 last:border-b-0'
+                      className='grid grid-cols-[56px_1fr_40px_96px] items-baseline gap-2 border-b border-borderColor px-2.5 py-1 last:border-b-0'
                     >
                       <span className='tabular-nums'>{l.accountCode}</span>
                       <span>
@@ -564,7 +564,7 @@ export function WizardModal({ onClose, onAdvanced, onCreated }: Props) {
                 ))}
 
                 {result.checklist.length > 0 && (
-                  <div className='border border-textInactiveColor p-2.5'>
+                  <div className='border border-borderColor p-2.5'>
                     <Text size='small' className='mb-1 font-bold uppercase'>
                       after posting, also do:
                     </Text>

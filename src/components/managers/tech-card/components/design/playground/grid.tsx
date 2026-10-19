@@ -43,8 +43,8 @@ export function WorkflowGrid({
               <span
                 className={
                   live
-                    ? 'flex aspect-[4/3] items-center justify-center bg-bgSecondary text-textColor'
-                    : 'flex aspect-[4/3] items-center justify-center text-textInactiveColor'
+                    ? 'flex aspect-[4/3] items-center justify-center bg-pageBg text-textColor'
+                    : 'flex aspect-[4/3] items-center justify-center text-borderColor'
                 }
                 data-workflow-tile={def.key}
                 data-workflow-live={live ? '' : undefined}

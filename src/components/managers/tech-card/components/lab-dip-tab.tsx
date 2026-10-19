@@ -345,7 +345,7 @@ function Steps({ phase }: { phase: Phase }) {
   const at = phase === 'ask' ? 0 : phase === 'swatch' ? 1 : 2;
   const steps = ['ask', 'swatch', phase === 'rejected' ? 'rejected' : 'decide'];
   return (
-    <div className={cn(STEP, 'flex gap-1.5 text-textInactiveColor')}>
+    <div className={cn(STEP, 'flex gap-1.5 text-borderColor')}>
       {steps.map((s, i) => (
         <span key={s} className='flex gap-1.5'>
           {i > 0 && <span>›</span>}

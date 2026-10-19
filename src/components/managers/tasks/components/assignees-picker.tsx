@@ -184,7 +184,7 @@ export function AssigneesPicker({
       >
         <span className='flex min-w-0 flex-1 items-center gap-1.5'>
           <AvatarStack names={draft} size={16} />
-          <span className={cn('min-w-0 flex-1 truncate', !summary && 'text-textInactiveColor')}>
+          <span className={cn('min-w-0 flex-1 truncate', !summary && 'text-borderColor')}>
             {summary || 'unassigned'}
           </span>
         </span>
@@ -194,7 +194,7 @@ export function AssigneesPicker({
       </Button>
 
       {open && (
-        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-textInactiveColor bg-bgColor'>
+        <div className='absolute left-0 right-0 top-full z-[var(--z-popover)] mt-px border border-borderColor bg-bgColor'>
           <Input
             ref={inputRef}
             type='text'
@@ -233,7 +233,7 @@ export function AssigneesPicker({
                   onClick={() => toggle(name)}
                   className={cn(
                     'flex min-h-11 w-full items-center gap-2 px-2.5 py-px text-left leading-tight sm:min-h-6',
-                    i === active && 'bg-bgSecondary',
+                    i === active && 'bg-pageBg',
                   )}
                 >
                   {/* Квадрат-отметка, а не галочка текстом: она обязана занимать место и когда
@@ -241,7 +241,7 @@ export function AssigneesPicker({
                   <span
                     aria-hidden
                     className={cn(
-                      'flex size-3 shrink-0 items-center justify-center border border-textInactiveColor',
+                      'flex size-3 shrink-0 items-center justify-center border border-borderColor',
                       on && 'bg-textColor',
                     )}
                   />

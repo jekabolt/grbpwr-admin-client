@@ -11,11 +11,11 @@ import { useDeleteCampaign } from './useCampaign';
 // Brand-token status chips: gray for inert states, warning (amber) for in-flight,
 // red only for cancelled (loss). No coral/pastel washes.
 const STATUS_CHIP: Record<common_EmailCampaignStatus, string> = {
-  EMAIL_CAMPAIGN_STATUS_UNKNOWN: 'border-textInactiveColor text-textInactiveColor',
-  EMAIL_CAMPAIGN_STATUS_DRAFT: 'border-textInactiveColor text-textInactiveColor',
+  EMAIL_CAMPAIGN_STATUS_UNKNOWN: 'border-borderColor text-borderColor',
+  EMAIL_CAMPAIGN_STATUS_DRAFT: 'border-borderColor text-borderColor',
   EMAIL_CAMPAIGN_STATUS_SCHEDULED: 'border-warning text-warning',
   EMAIL_CAMPAIGN_STATUS_SENDING: 'border-warning text-warning',
-  EMAIL_CAMPAIGN_STATUS_PAUSED: 'border-textInactiveColor text-textInactiveColor',
+  EMAIL_CAMPAIGN_STATUS_PAUSED: 'border-borderColor text-borderColor',
   EMAIL_CAMPAIGN_STATUS_SENT: 'border-textColor text-textColor',
   EMAIL_CAMPAIGN_STATUS_CANCELLED: 'border-error text-error',
 };

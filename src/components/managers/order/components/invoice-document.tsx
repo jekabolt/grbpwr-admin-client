@@ -7,7 +7,7 @@ import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
 
 const TD = 'border border-black px-1.5 py-1 align-top';
-const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-bgZebra uppercase';
+const TH = 'border border-black px-1.5 py-1 text-left font-semibold uppercase';
 
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
 // entity address is carried in the client, so we surface what we know.
@@ -47,7 +47,7 @@ function Sheet({ title, children }: { title: string; children: ReactNode }) {
 function KV({ k, v }: { k: string; v?: ReactNode }) {
   const empty = v == null || v === '' || v === '—';
   return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-[11px] leading-tight'>
+    <div className='flex gap-2 break-inside-avoid border-b border-borderColor py-0.5 text-[11px] leading-tight'>
       <span className='w-28 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
       <span className='font-medium'>{empty ? '—' : v}</span>
     </div>
@@ -129,7 +129,9 @@ export function InvoiceDocument({
 
   // Product names are translated per dictionary language. The rail lets the operator print the
   // sheet in any active language; with none chosen we keep the first translation (today's default).
-  const pickName = (translations?: { languageId?: number; name?: string }[]): string | undefined => {
+  const pickName = (
+    translations?: { languageId?: number; name?: string }[],
+  ): string | undefined => {
     if (!translations?.length) return undefined;
     if (languageId != null) {
       const match = translations.find((t) => t.languageId === languageId)?.name;
@@ -322,16 +324,16 @@ export function InvoiceDocument({
       {/* SUMMARY */}
       <div className='mb-5 flex justify-end'>
         <div className='w-full max-w-[280px] text-[11px]'>
-          <div className='flex justify-between border-b border-textInactiveColor py-0.5'>
+          <div className='flex justify-between border-b border-borderColor py-0.5'>
             <span className='uppercase text-labelColor'>subtotal</span>
             <span>{money(subtotal)}</span>
           </div>
-          <div className='flex justify-between border-b border-textInactiveColor py-0.5'>
+          <div className='flex justify-between border-b border-borderColor py-0.5'>
             <span className='uppercase text-labelColor'>shipping</span>
             <span>{shipment?.freeShipping ? 'free' : money(shippingCost)}</span>
           </div>
           {discount > 0.005 && (
-            <div className='flex justify-between border-b border-textInactiveColor py-0.5'>
+            <div className='flex justify-between border-b border-borderColor py-0.5'>
               <span className='uppercase text-labelColor'>
                 discount{promo?.code ? ` · ${promo.code}` : ''}
               </span>
@@ -385,7 +387,7 @@ export function InvoiceDocument({
         {order.refundReason && <KV k='refund reason' v={order.refundReason} />}
       </Sheet>
 
-      <footer className='mt-6 border-t border-textInactiveColor pt-2 text-[9px] uppercase tracking-wide text-labelColor'>
+      <footer className='mt-6 border-t border-borderColor pt-2 text-[9px] uppercase tracking-wide text-labelColor'>
         {SELLER.name} · invoice #{order.id ?? ''} · questions? {SELLER.email}
       </footer>
     </div>

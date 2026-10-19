@@ -44,7 +44,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
             {rows.map((r, idx) => (
               <tr
                 key={r.techCardId ?? r.styleNumber ?? idx}
-                className='border-b border-hairline hover:bg-bgSecondary'
+                className='border-b border-hairline hover:bg-pageBg'
               >
                 <td className='p-2'>
                   {r.techCardId ? (

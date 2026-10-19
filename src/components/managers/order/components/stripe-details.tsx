@@ -57,11 +57,9 @@ export function composePaymentMethod(args: {
   // specific paymentMethodType label is used, so an operator can tell a test order from a real one.
   const isTest = (paymentMethodEnum ?? '').toUpperCase().includes('_TEST');
   const primary = paymentMethodType
-    ? (METHOD_TYPE_LABEL[paymentMethodType] ?? titleCase(paymentMethodType))
+    ? METHOD_TYPE_LABEL[paymentMethodType] ?? titleCase(paymentMethodType)
     : paymentMethodEnum
-      ? titleCase(
-          paymentMethodEnum.replace('PAYMENT_METHOD_NAME_ENUM_', '').replace(/_TEST$/i, ''),
-        )
+      ? titleCase(paymentMethodEnum.replace('PAYMENT_METHOD_NAME_ENUM_', '').replace(/_TEST$/i, ''))
       : '';
   const card =
     cardBrand || cardLast4
@@ -128,13 +126,19 @@ export function RiskBanner({ riskLevel }: { riskLevel: string | undefined }) {
 
 // External link to a Stripe-hosted URL (dashboard payment, or the customer receipt). Never
 // rendered when the URL is empty; hidden in print (a hosted URL is useless on paper).
-export function StripeExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+export function StripeExternalLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
   return (
     <a
       href={href}
       target='_blank'
       rel='noopener noreferrer'
-      className='inline-flex items-center gap-1 text-textBaseSize uppercase underline hover:text-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor print:hidden'
+      className='inline-flex items-center gap-1 text-textBaseSize uppercase underline hover:text-warning focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor print:hidden'
     >
       {children}
       <span aria-hidden>↗</span>
@@ -188,7 +192,7 @@ export function SettlementBlock({
   const showFx = fx != null && fx !== 1 && !!presentmentCurrency && presentmentCurrency !== 'EUR';
 
   return (
-    <div className='space-y-1 border-t border-textInactiveColor pt-3'>
+    <div className='space-y-1 border-t border-borderColor pt-3'>
       <Text variant='label' size='small' className='uppercase'>
         settlement (EUR)
       </Text>
@@ -232,7 +236,7 @@ export function SettlementCompact({
   const value = netStr ?? formatEur(sd.totalSettledBase);
   const rowLabel = netStr ? 'net settled' : 'settled';
   return (
-    <div className='flex flex-col gap-1 border-t border-textInactiveColor pt-4'>
+    <div className='flex flex-col gap-1 border-t border-borderColor pt-4'>
       <Text variant='uppercase' size='small' className='text-labelColor'>
         settlement
       </Text>

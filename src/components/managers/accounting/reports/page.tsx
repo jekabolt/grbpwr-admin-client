@@ -97,7 +97,7 @@ export function AcctReportsPage() {
                 tabBtn,
                 active
                   ? 'border-textColor text-textColor'
-                  : 'border-textInactiveColor text-textInactiveColor hover:text-textColor',
+                  : 'border-borderColor text-borderColor hover:text-textColor',
               )}
             >
               {t.label}

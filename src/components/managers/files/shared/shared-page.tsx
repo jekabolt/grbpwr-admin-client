@@ -481,7 +481,7 @@ function SharedRow({
   return (
     <tr>
       <td>
-        <div className='flex h-9 w-9 items-center justify-center overflow-hidden border border-hairline bg-bgZebra'>
+        <div className='flex h-9 w-9 items-center justify-center overflow-hidden border border-hairline bg-pageBg'>
           {file?.previewUrl ? (
             <img src={file.previewUrl} alt='' className='h-full w-full object-cover' />
           ) : (

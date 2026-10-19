@@ -6,7 +6,7 @@ export function Progress({ value, className }: { value: number; className?: stri
   return (
     <div
       // twMerge, so a caller's height (a 2px rail) wins over the default 4px.
-      className={cn('h-1 w-full bg-progressBg', className)}
+      className={cn('h-1 w-full bg-hairline', className)}
       role='progressbar'
       aria-valuenow={pct}
       aria-valuemin={0}

@@ -122,8 +122,8 @@ export function Chip({
               selected ? 'text-textColor' : 'text-labelColor underline hover:text-textColor',
               tone === 'error' && 'text-error',
               tone === 'attention' && 'text-warning',
-              'disabled:cursor-not-allowed disabled:text-textInactiveColor',
-              nonForm && disabled && 'text-textInactiveColor',
+              'disabled:cursor-not-allowed disabled:text-borderColor',
+              nonForm && disabled && 'text-borderColor',
             )
           : chipVariants({ selected, tone, dashed }),
         spanRole.className,

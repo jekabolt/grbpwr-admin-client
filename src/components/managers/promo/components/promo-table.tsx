@@ -189,7 +189,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
               {visibleColumns.map((col) => (
                 <th
                   key={col.label}
-                  className='min-w-1 border border-r border-borderColor bg-bgSecondary text-center'
+                  className='min-w-1 border border-r border-borderColor bg-pageBg text-center'
                 >
                   <Text variant='uppercase'>{col.label}</Text>
                 </th>
@@ -219,7 +219,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                 <tr
                   key={code}
                   className={cn(
-                    !allowed && 'bg-textInactiveColor',
+                    !allowed && 'bg-borderColor',
                     allowed && expired && 'text-labelColor',
                   )}
                 >

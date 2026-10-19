@@ -338,7 +338,7 @@ export function MediaSlot({
       {...intake.regionHandlers}
       className={cn(
         'relative overflow-hidden border',
-        intake.dragging ? 'border-textColor' : 'border-textInactiveColor',
+        intake.dragging ? 'border-textColor' : 'border-borderColor',
         sizeClass,
         className,
       )}
@@ -384,7 +384,7 @@ export function MediaSlot({
       )}
 
       {editMode && toolbar && (
-        <div className='absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-between gap-1 border-t border-textInactiveColor bg-bgColor/90 px-1.5 py-1'>
+        <div className='absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-between gap-1 border-t border-borderColor bg-bgColor/90 px-1.5 py-1'>
           <MediaSelector
             label='change'
             purpose={purpose}

@@ -241,7 +241,7 @@ export function ArchiveForm({
         className='flex flex-col gap-gutter px-2 pt-0 pb-12 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, onError)}
       >
-        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
+        <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-borderColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
           <div className='flex flex-wrap items-center gap-3'>
             <BackLink to={ROUTES.archives}>timeline</BackLink>
             <Text variant='uppercase' size='large'>

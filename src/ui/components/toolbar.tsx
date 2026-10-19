@@ -16,7 +16,7 @@ export function Toolbar({
     <div
       className={cn(
         'flex flex-wrap items-center gap-2 border border-borderColor px-2.5 py-2',
-        sticky ? 'bg-bgSecondary' : 'bg-bgColor',
+        sticky ? 'bg-pageBg' : 'bg-bgColor',
         className,
       )}
     >

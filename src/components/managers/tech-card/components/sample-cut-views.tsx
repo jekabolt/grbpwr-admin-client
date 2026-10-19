@@ -344,7 +344,7 @@ export function SampleCutPieces({
             <div
               key={p.key}
               className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border p-1.5 ${
-                fabric ? 'border-borderColor' : 'border-dashed border-textInactiveColor'
+                fabric ? 'border-borderColor' : 'border-dashed border-borderColor'
               }`}
             >
               <Text component='span' size='micro' className='w-14 shrink-0 font-bold uppercase'>

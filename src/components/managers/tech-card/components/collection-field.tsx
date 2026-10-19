@@ -50,7 +50,7 @@ export function CollectionField({
   readOnly?: boolean;
   /**
    * The account cannot write the style's collection (UpdateStyle is `products:write`, Codex R3):
-   * a dead control like FIT's — disabled, zebra ground — and no «+ new collection…» door.
+   * a dead control like FIT's — disabled, pageBg ground — and no «+ new collection…» door.
    */
   locked?: boolean;
 }) {
@@ -91,7 +91,7 @@ export function CollectionField({
         value={collection ? nameItem(collection) : NONE}
         readOnly={readOnly}
         disabled={locked}
-        className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+        className={locked ? 'bg-pageBg text-labelColor' : undefined}
         onValueChange={(v?: string) => {
           if (v === NEW) {
             // Opened on the next frame: the list is still closing and hands focus back to its

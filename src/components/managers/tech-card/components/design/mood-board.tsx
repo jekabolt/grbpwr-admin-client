@@ -1592,7 +1592,7 @@ export function MoodBoard({
                 <div
                   data-mb-describe-placeholder=''
                   className={cn(
-                    'pointer-events-none absolute inset-0 select-none border border-transparent px-[7px] py-[3px] text-textBaseSize text-textInactiveColor',
+                    'pointer-events-none absolute inset-0 select-none border border-transparent px-[7px] py-[3px] text-textBaseSize text-borderColor',
                     conceptDrafted && 'border-0',
                   )}
                 >
@@ -1602,7 +1602,7 @@ export function MoodBoard({
                     disabled={describing}
                     onClick={describeFromBoard}
                     data-mb-describe-from-board=''
-                    className='pointer-events-auto underline decoration-1 underline-offset-2 hover:text-textColor focus-visible:text-textColor focus-visible:outline-none disabled:cursor-default disabled:hover:text-textInactiveColor'
+                    className='pointer-events-auto underline decoration-1 underline-offset-2 hover:text-textColor focus-visible:text-textColor focus-visible:outline-none disabled:cursor-default disabled:hover:text-borderColor'
                   >
                     {describing ? 'writing…' : 'write from the board ✦'}
                   </button>

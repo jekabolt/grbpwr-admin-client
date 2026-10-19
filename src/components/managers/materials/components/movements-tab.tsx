@@ -9,7 +9,7 @@ import { useMaterials } from './useMaterials';
 import { MovementFilter, useMaterialMovements } from './useWarehouse';
 import { movementDelta, movementTypeFilterOptions, movementTypeLabel } from './warehouse-options';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
+const cell = 'border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 // A movement's reference target, deep-linked where a destination exists (the production run detail
 // page; a sample lives inside its tech card, wired in W3).
@@ -29,7 +29,7 @@ function MovementRef({
       </Link>
     );
   if (sampleId) return <>sample #{sampleId}</>;
-  if (lot) return <span className='text-textInactiveColor'>lot {lot}</span>;
+  if (lot) return <span className='text-borderColor'>lot {lot}</span>;
   return <EmptyCell />;
 }
 

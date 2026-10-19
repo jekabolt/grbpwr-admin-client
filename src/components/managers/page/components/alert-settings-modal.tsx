@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { ConfirmationModal, Text } from 'ui';
 
 const cell =
-  'w-24 border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'w-24 border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 type Draft = {
   coverageWarnPct: string;

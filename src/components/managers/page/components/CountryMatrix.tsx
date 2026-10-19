@@ -101,7 +101,7 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
               </td>
               <td className='p-2 text-right'>
                 <div>{formatCurrency(revenue)}</div>
-                <div className='mt-0.5 h-1 w-full bg-bgSecondary/40'>
+                <div className='mt-0.5 h-1 w-full bg-pageBg/40'>
                   <div
                     className='h-1 bg-textColor/50'
                     style={{ width: `${Math.min(100, (revenue / maxRevenue) * 100)}%` }}

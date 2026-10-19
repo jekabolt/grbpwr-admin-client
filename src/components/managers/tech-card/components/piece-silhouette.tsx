@@ -152,7 +152,7 @@ export function PieceTile({
     <span
       title={title}
       className={cn(
-        'relative flex size-14 shrink-0 items-center justify-center overflow-hidden bg-bgZebra',
+        'relative flex size-14 shrink-0 items-center justify-center overflow-hidden bg-pageBg',
         SILHOUETTE_INK,
         className,
       )}

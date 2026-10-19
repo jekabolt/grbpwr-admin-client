@@ -235,7 +235,7 @@ export function ApplyColorwaysAction({
   }
 
   return (
-    <div className='flex flex-col gap-1.5 border border-textInactiveColor p-2.5'>
+    <div className='flex flex-col gap-1.5 border border-borderColor p-2.5'>
       <div className='flex flex-wrap items-center gap-2.5'>
         <Text size='control'>
           {pending} colour(s) from the archive are not on this card
@@ -269,9 +269,9 @@ export function ApplyColorwaysAction({
 export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[] }) {
   return (
     <div className='w-full overflow-x-auto'>
-      <table className='w-full min-w-max border-collapse border border-textInactiveColor'>
+      <table className='w-full min-w-max border-collapse border border-borderColor'>
         <thead className='bg-bgColor'>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-borderColor'>
             <th className={TH}>entity</th>
             <th className={TH}>ref</th>
             <th className={TH}>status</th>
@@ -295,7 +295,7 @@ export function ImportReportTable({ lines }: { lines: TechCardImportReportLine[]
               return (
                 <tr
                   key={`${l.entity ?? ''}-${l.ref ?? ''}-${reason}-${i}`}
-                  className='border-b border-textInactiveColor align-top last:border-b-0'
+                  className='border-b border-borderColor align-top last:border-b-0'
                 >
                   <td className='px-2 py-1.5 uppercase'>{l.entity || <EmptyCell />}</td>
                   <td className={`${REF_CELL} py-1.5`} title={l.ref || undefined}>

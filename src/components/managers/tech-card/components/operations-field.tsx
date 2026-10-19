@@ -1502,7 +1502,7 @@ function TrayChip({
         // flashed by the editor's «＋ piece» — pull the eye to the chips now clickable. The border
         // and fill carry the state on their own, so the pulse is pure decoration and is dropped for
         // anyone who asked for less motion.
-        highlighted && 'motion-safe:animate-pulse border-textColor bg-bgZebra text-textColor',
+        highlighted && 'motion-safe:animate-pulse border-textColor bg-pageBg text-textColor',
       )}
     >
       {piece.name}

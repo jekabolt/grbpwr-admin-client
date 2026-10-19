@@ -110,7 +110,7 @@ export function ColourwayStrip({
             className={cn(
               TILE,
               'flex items-center justify-center border border-dashed border-borderColor bg-bgColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
-              (disabled || !onCreate) && 'text-textInactiveColor',
+              (disabled || !onCreate) && 'text-borderColor',
             )}
           >
             <Text component='span' size='control' className='font-bold'>

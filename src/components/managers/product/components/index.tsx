@@ -232,7 +232,7 @@ export function ProductForm({
         onSubmit={form.handleSubmit(handleSubmit, handleFormError)}
       >
         {/* Header — identity + status */}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
           <div className='flex flex-wrap items-center gap-3'>
             <BackLink to={ROUTES.product}>products</BackLink>
             <Text variant='uppercase' size='large'>
@@ -385,7 +385,7 @@ export function ProductForm({
       </form>
 
       {/* Sticky action bar */}
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2 print:hidden'>
+      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2 print:hidden'>
         <Text variant='inactive' size='small'>
           {editMode && isFormChanged ? 'unsaved changes' : ' '}
         </Text>
@@ -439,7 +439,7 @@ function SectionNav({ items }: { items: { id: string; label: string }[] }) {
   const jump = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
-    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-textInactiveColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
+    <nav className='sticky top-0 z-30 -mx-2 flex flex-wrap gap-2 border-b border-borderColor bg-bgColor px-2 py-2 lg:-mx-6 lg:px-6 print:hidden'>
       {items.map((it) => (
         <Button
           key={it.id}

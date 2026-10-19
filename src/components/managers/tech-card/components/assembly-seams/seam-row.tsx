@@ -176,7 +176,7 @@ export function SeamRow({
       title={
         frozen ? FROZEN_REFUSAL : busy ? 'saving…' : rereading ? 're-reading the pattern…' : title
       }
-      className='disabled:border-hairline disabled:text-textInactiveColor'
+      className='disabled:border-hairline disabled:text-borderColor'
       {...extra}
     >
       {label}
@@ -197,7 +197,7 @@ export function SeamRow({
       onMouseLeave={() => doors.hover(null)}
       className={cn(
         'flex cursor-pointer flex-col gap-1 border-b border-hairline px-1.5 py-2 last:border-b-0',
-        selected ? 'bg-bgSecondary' : 'hover:bg-bgZebra',
+        selected ? 'bg-pageBg' : 'hover:bg-pageBg',
       )}
     >
       <div className='flex items-baseline gap-2'>

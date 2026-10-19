@@ -164,7 +164,7 @@ function FixedAssetCard({ asset, rangeEnd }: { asset: FixedAsset; rangeEnd: stri
         }
         value={monthly != null ? `≈ ${fmtNum(monthly)} / mo over ${life} mo` : '—'}
       />
-      <div className='border-b border-textInactiveColor'>
+      <div className='border-b border-borderColor'>
         <BarRow
           name='Depreciated'
           pct={clampPct(pct)}
@@ -214,7 +214,10 @@ function AddFixedAssetModal({
     () => ({ name: '', cost: '', acquiredOn: toISODate(new Date()), usefulLifeMonths: 36 }),
     [],
   );
-  const form = useForm<AssetSchema>({ resolver: zodResolver(assetSchema), defaultValues: defaults });
+  const form = useForm<AssetSchema>({
+    resolver: zodResolver(assetSchema),
+    defaultValues: defaults,
+  });
 
   useEffect(() => {
     if (open) form.reset(defaults);

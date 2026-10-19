@@ -130,7 +130,7 @@ export const InventoryTargetForm: FC = () => {
 
 const Field: FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <label className='flex flex-col gap-1'>
-    <Text variant='uppercase' className='text-textInactiveColor text-[10px]'>
+    <Text variant='uppercase' className='text-borderColor text-[10px]'>
       {label}
     </Text>
     {children}

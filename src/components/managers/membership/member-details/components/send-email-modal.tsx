@@ -38,7 +38,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-20 h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex h-auto -translate-y-1/2 flex-col gap-3 border border-textInactiveColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex h-auto -translate-y-1/2 flex-col gap-3 border border-borderColor bg-bgColor p-4 text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
           <DialogPrimitives.Title asChild>
             <Text variant='uppercase' size='large'>
               Send custom email
@@ -68,7 +68,7 @@ export function SendEmailModal({ open, onOpenChange, userId }: SendEmailModalPro
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={5}
-              className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
+              className='w-full resize-none border border-borderColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
             />
           </div>
 

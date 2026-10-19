@@ -11,7 +11,7 @@ import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { runCostKindOptions } from './options';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
-const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
+const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 

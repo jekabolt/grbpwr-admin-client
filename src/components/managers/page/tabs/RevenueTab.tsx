@@ -359,7 +359,7 @@ export function RevenueTab({
       {/* SHIPPING & DELIVERY — ops detail, collapsed (not a headline metric). */}
       <Section className='p-0'>
         <details>
-          <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
+          <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-pageBg/30 px-4 py-3 hover:bg-pageBg/50'>
             <span className='text-textBaseSize font-bold uppercase'>Shipping &amp; Delivery</span>
             {deliverySummary && (
               <span className='text-textBaseSize text-labelColor normal-case'>

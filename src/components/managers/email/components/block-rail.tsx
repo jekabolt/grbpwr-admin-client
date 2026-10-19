@@ -198,7 +198,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                         <div
                           ref={setRefs}
                           style={style}
-                          className='flex items-center justify-between gap-2 border border-dashed border-textInactiveColor px-2 py-1.5'
+                          className='flex items-center justify-between gap-2 border border-dashed border-borderColor px-2 py-1.5'
                         >
                           <Text variant='inactive' size='small'>
                             #{index + 1} deleted
@@ -228,7 +228,7 @@ export const BlockRail: FC<BlockRailProps> = ({
                       >
                         <button
                           type='button'
-                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-textInactiveColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                          className='flex items-center px-1.5 py-1 leading-none cursor-grab touch-none select-none text-borderColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                           aria-label='drag to reorder block'
                           {...dragHandleProps}
                         >

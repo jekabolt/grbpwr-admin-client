@@ -143,8 +143,8 @@ export function FitCell({
                 items={items}
                 value={value ? fitItem(value) : FIT_NONE}
                 disabled={locked}
-                // Reads as a dead control, like a disabled `Input` (zebra ground, label ink).
-                className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+                // Reads as a dead control, like a disabled `Input` (pageBg ground, label ink).
+                className={locked ? 'bg-pageBg text-labelColor' : undefined}
                 onValueChange={(v: string) => {
                   const next = fitOfItem(v);
                   field.onChange(next);

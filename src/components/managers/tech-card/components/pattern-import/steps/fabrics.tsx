@@ -362,7 +362,7 @@ export function FabricsStep({ api, card }: { api: ImportSessionApi; card: CardCo
       </thead>
       <tbody>
         {rows.map((seed) => (
-          <tr key={seed} className={cn(asked.has(seed) && 'bg-bgZebra')}>
+          <tr key={seed} className={cn(asked.has(seed) && 'bg-pageBg')}>
             <td
               title={
                 [idsOf(seed).join(' + '), ...refusedOf(seed).map((r) => r.reason)].join('\n') ||

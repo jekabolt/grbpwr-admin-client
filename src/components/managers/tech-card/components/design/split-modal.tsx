@@ -498,7 +498,7 @@ export function SplitStage({
 }) {
   const { frames, selected, ratio, src, mode } = cut;
   return (
-    <div className='flex justify-center bg-bgSecondary p-2'>
+    <div className='flex justify-center bg-pageBg p-2'>
       <div
         ref={cut.stageRef}
         data-split-stage=''

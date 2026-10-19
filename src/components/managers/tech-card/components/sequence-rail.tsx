@@ -244,7 +244,7 @@ function RailStep({
               : selected || over || mapLit
                 ? 'border-textColor'
                 : 'border-borderColor hover:border-labelColor',
-            selected && 'bg-bgZebra',
+            selected && 'bg-pageBg',
           )}
         >
           <button
