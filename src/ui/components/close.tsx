@@ -3,12 +3,14 @@ import { cn } from 'lib/utility';
 import { Button } from './button';
 
 const closeVariants = cva(
-  'inline-flex size-8 shrink-0 items-center justify-center rounded-none border-0 bg-transparent p-2 leading-4 text-textColor no-underline shadow-none transition-colors underline-offset-2 hover:underline disabled:text-textInactiveColor [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:p-3.5',
+  'inline-flex shrink-0 items-center justify-center rounded-none border-0 bg-transparent leading-4 text-textColor no-underline shadow-none transition-colors underline-offset-2 hover:underline disabled:text-textInactiveColor',
   {
     variants: {
       size: {
-        sm: 'text-micro',
-        default: 'text-textBaseSize',
+        // Dense: the glyph keeps its line height; the 32px / 44px target is an invisible ::after,
+        // so a chip or row does not grow around it.
+        sm: "relative size-4 p-0 text-micro after:absolute after:-inset-2 after:content-[''] [@media(pointer:coarse)]:after:-inset-3.5",
+        default: 'size-8 p-2 text-textBaseSize [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:p-3.5',
       },
     },
     defaultVariants: { size: 'default' },
