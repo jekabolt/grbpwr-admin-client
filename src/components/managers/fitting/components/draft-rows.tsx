@@ -1,4 +1,4 @@
-import { Button, Chip } from 'ui';
+import { Button, Chip, Close } from 'ui';
 import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { DraftEdit, useFittingWorkspace } from './workspace';
@@ -30,17 +30,17 @@ export function DraftRows() {
       {drafts.map((d, i) => (
         <li
           key={`${i}-${d.note}`}
-          className='grid grid-cols-[16px_1fr_auto] items-start gap-x-2 border-b border-hairline py-1'
+          className='flex flex-wrap items-start gap-x-2 border-b border-hairline py-1'
         >
           <span className='grid h-4 w-4 place-items-center border border-warning text-warning'>
             ·
           </span>
-          <span className='min-w-0 text-warning'>{d.note}</span>
+          <span className='min-w-0 flex-1 text-warning'>{d.note}</span>
           <span className='flex gap-1'>
             <Button
               type='button'
               variant='main'
-              className='px-[7px] py-px'
+              size='xs'
               aria-label='add draft'
               disabled={busy || readOnly}
               onClick={async () => {
@@ -51,18 +51,14 @@ export function DraftRows() {
             >
               ✓
             </Button>
-            <Button
-              type='button'
-              variant='simpleReverseWithBorder'
-              className='h-5 w-5 text-labelColor hover:text-textColor'
+            <Close
+              size='sm'
               aria-label='drop draft'
               disabled={busy}
               onClick={() => setDrafts(drafts.filter((x) => x !== d))}
-            >
-              ×
-            </Button>
+            />
           </span>
-          <span className='col-start-2 col-end-4 flex gap-2 text-labelColor'>
+          <span className='basis-full flex gap-2 pl-6 text-labelColor'>
             <Chip tone='attention'>draft</Chip>
             {d.target && <span>{d.target}</span>}
           </span>
