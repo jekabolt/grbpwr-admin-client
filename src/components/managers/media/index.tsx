@@ -241,12 +241,18 @@ export function MediaManager({
   // кадры без адреса, и индекс, посчитанный по `filteredMedia`, разъезжался с рядом на каждой
   // такой строке: открытым оказывался соседний снимок. Пока это стоило неверной картинки, теперь
   // ценой была бы неверная подпись «ни на что не заведён, можно удалять» — про чужой файл.
-  const viewable = useMemo(
-    () => (filteredMedia || []).filter((m) => !!mediaFullViewerSrc(m)),
-    [filteredMedia],
-  );
   // Copies saved this session wear `new` in the filmstrip (frame 4).
   const [newIds, setNewIds] = useState<ReadonlySet<number>>(() => new Set());
+  // A fresh copy stays in the row even when the filters exclude it (a ratio filter, `in use`, an
+  // id search) — otherwise `open` on the saved bar has nothing to jump to.
+  const viewable = useMemo(() => {
+    const shown = filteredMedia || [];
+    const shownIds = new Set(shown.map((m) => m.id));
+    const extra = newIds.size
+      ? media.filter((m) => m.id != null && newIds.has(m.id) && !shownIds.has(m.id))
+      : [];
+    return [...extra, ...shown].filter((m) => !!mediaFullViewerSrc(m));
+  }, [filteredMedia, media, newIds]);
   const viewerItems = useMemo(() => {
     const items = mediaFullListToViewerItems(viewable, viewerUsageOf);
     if (!newIds.size) return items;

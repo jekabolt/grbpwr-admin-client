@@ -122,9 +122,9 @@ export function MediaItem({
   const aspectRatio = mediaAspectRatio(media, videoSizes);
   const video = isVideo(mediaUrl);
   const selectable = !disabled;
-  // ЗАНЯТО — ЭТО ТОЧНОЕ ЗНАНИЕ, а не отсутствие ответа: пока `usage` не приехал, плитка ведёт
-  // себя ровно как раньше (удаление предлагается, отказ бакета ловится постфактум).
+  // Unknown usage counts as in use: delete is offered only for a file known to be free.
   const inUse = (usage?.length ?? 0) > 0;
+  const deletable = usage !== undefined && usage.length === 0;
 
   // ДОЛГОЕ НАЖАТИЕ — вход в режим выбора. Клик, который браузер шлёт следом за отпусканием,
   // гасится, иначе та же карточка тут же снялась бы с выбора или открыла просмотрщик.
@@ -195,6 +195,7 @@ export function MediaItem({
   // и что это навсегда. Теперь взвод разворачивает подпись плитки в вопрос с двумя разными
   // кнопками.
   const handleDelete = () => {
+    if (!deletable) return;
     setFailure(undefined);
     deleteMediaMutation.mutate(media.id || 0, {
       onError: (error) => {
@@ -342,16 +343,18 @@ export function MediaItem({
               <EnterFullScreenIcon className='size-3' />
             </TileAction>
           )}
-          <TileAction
-            label='delete'
-            tone='danger'
-            onClick={(e) => {
-              e.stopPropagation();
-              setArmed((v) => !v);
-            }}
-          >
-            <TrashIcon className='size-3' />
-          </TileAction>
+          {!selectionMode && (
+            <TileAction
+              label='delete'
+              tone='danger'
+              onClick={(e) => {
+                e.stopPropagation();
+                setArmed((v) => !v);
+              }}
+            >
+              <TrashIcon className='size-3' />
+            </TileAction>
+          )}
         </div>
       )}
 
@@ -384,10 +387,16 @@ export function MediaItem({
             <button
               type='button'
               onClick={handleDelete}
-              disabled={deleteMediaMutation.isPending || inUse}
+              disabled={deleteMediaMutation.isPending || !deletable}
               className='border border-error px-1.5 py-px text-micro uppercase leading-4 tracking-label text-error hover:bg-error hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:border-borderColor disabled:text-borderColor'
             >
-              {deleteMediaMutation.isPending ? 'deleting…' : inUse ? 'in use' : 'delete'}
+              {deleteMediaMutation.isPending
+                ? 'deleting…'
+                : inUse
+                  ? 'in use'
+                  : !deletable
+                    ? 'not checked'
+                    : 'delete'}
             </button>
             <Button type='button' size='xs' variant='secondary' onClick={() => setArmed(false)}>
               cancel
