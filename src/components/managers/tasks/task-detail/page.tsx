@@ -131,7 +131,8 @@ export function TaskDetail() {
     // рисования или по счётчику кадров доходил бы сюда, открывал правку и размонтировал
     // просмотрщик вместе с ненарисованным.
     if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
-    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select')) return;
+    if (e.target.closest('a, button, [role="button"], img, video, input, textarea, select'))
+      return;
     // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
     window.getSelection()?.removeAllRanges();
     setEditingDescription(true);
