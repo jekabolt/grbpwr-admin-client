@@ -977,6 +977,11 @@ export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): P
   for (const t of truths) t.wrong = wrongOf.get(`${t.seed}:${t.rank}`) ?? t.wrong;
   const passing = truths.filter((t) => t.passes);
   const wrongPassing = passing.filter((t) => t.wrong.length);
+  const notchBlocks = out.scopes.flatMap((sc) =>
+    sc.manifest.blocks
+      .filter((b) => b.notches > 0)
+      .map((b) => ({ scope: sc.target.label, block: b.block, notches: b.notches })),
+  );
   // (3) pieces named: overview letters "A - FRONT"
   const letters = new Set(
     sheet.texts.flatMap((t) => {
@@ -996,6 +1001,8 @@ export function analyse(sm: Sample, s: Session, out: StageIO['write']['out']): P
     passingUnverified: passing.filter((t) => !t.wrong.length && t.unverified).length,
     wrongPassing: wrongPassing.length,
     wrongBlocked: truths.filter((t) => !t.passes && t.wrong.length).length,
+    notches: notchBlocks.reduce((n, b) => n + b.notches, 0),
+    notchBlocks,
     // (4) kinks over the written outlines judged by their own pen, and over the passing ones
     kinkJudged: truths.filter((t) => t.kinks != null).length,
     kinks: truths.reduce((a, t) => a + (t.kinks ?? 0), 0),
