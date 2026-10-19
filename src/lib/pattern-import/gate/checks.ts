@@ -834,7 +834,32 @@ export function g6(ctx: GateCtx): GateCheck {
     const seam = ctx.contours.get(b.block)?.get(LAYERS.seam) ?? null;
     // owner decision 8 + "fold edge offset 0": fold pieces are exported unfolded; the fold line
     // then spans the piece from cut line to cut line.
-    if (s.fold) {
+    if (s.fold && spec.halfFold) {
+      // L13 (owner decision 19.10 a): a half on fold is written as drawn — its fold line is the cut
+      // line's own straight run (end to end on the cut, the cut along it all the way), never a
+      // line across the piece; no unfold to judge
+      if (spec.unfoldedFold) bad('a half on fold marked unfolded');
+      else if (cut) {
+        const da = closestOnPolyline(s.fold.a, cut, true).d;
+        const db = closestOnPolyline(s.fold.b, cut, true).d;
+        if (Math.max(da, db) > PATIMPORT.snapMm)
+          bad(`fold line ends ${da.toFixed(2)}/${db.toFixed(2)} mm off the cut line`);
+        const len = dist(s.fold.a, s.fold.b);
+        const steps = Math.max(2, Math.ceil(len / 2));
+        let on = 0;
+        for (let k = 0; k <= steps; k++) {
+          const q = {
+            x: s.fold.a.x + ((s.fold.b.x - s.fold.a.x) * k) / steps,
+            y: s.fold.a.y + ((s.fold.b.y - s.fold.a.y) * k) / steps,
+          };
+          if (closestOnPolyline(q, cut, true).d <= PATIMPORT.snapMm) on++;
+        }
+        if (on < 0.95 * (steps + 1))
+          bad(
+            `half on fold: the cut runs along only ${Math.round((100 * on) / (steps + 1))} % of its fold line`,
+          );
+      }
+    } else if (s.fold) {
       if (!spec.unfoldedFold) bad('fold piece not unfolded');
       else if (cut) {
         const da = closestOnPolyline(s.fold.a, cut, true).d;
@@ -847,6 +872,7 @@ export function g6(ctx: GateCtx): GateCheck {
         if (why) bad(`unfold: ${why}`);
       }
     } else if (spec.unfoldedFold) bad('marked unfolded but carries no fold line');
+    else if (spec.halfFold) bad('a half on fold carries no fold line');
     const derived = s.offset != null || spec.allowance.meaning === 'seam';
     if (!derived) continue;
     const r = s.offset;
@@ -886,7 +912,8 @@ export function g6(ctx: GateCtx): GateCheck {
       derivedLine,
       baseLine,
       spec.allowance.meaning === 'seam' ? allowance : -allowance,
-      { lenient: true },
+      // L13: a half on fold keeps no allowance across its fold line
+      { lenient: true, fold: spec.halfFold && s.fold ? { a: s.fold.a, b: s.fold.b } : null },
     );
     worstDev = Math.max(worstDev, dev);
     if (dev > OFFSET_MAX_DEV_MM)

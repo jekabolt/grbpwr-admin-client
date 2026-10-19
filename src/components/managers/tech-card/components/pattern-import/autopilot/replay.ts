@@ -1580,7 +1580,8 @@ type PieceRec = {
   qty?: string;
   ov?: Record<string, unknown>;
   grain?: { a: PtMm; b: PtMm; acc?: string[] };
-  fold?: { a: PtMm; b: PtMm };
+  /** `half`: exported as the half with its fold line marked (L13). */
+  fold?: { a: PtMm; b: PtMm; half?: true };
   fab?: string[];
   auto?: string[];
   strong?: string[];
@@ -1835,20 +1836,28 @@ function meaningStep(c: Ctx): Out | null {
       if (!f && overrides[sd]?.unfoldedFold !== false && c.fresh('fold-edge', { seed: sd })) {
         const ask = sem.folds?.find((q) => q.seed === sd);
         const fold = v.fold;
+        // L13: a half's fold edge is the half offer's edge (a straight run, maybe no hull edge)
+        const same = (e: { a: PtMm; b: PtMm }) =>
+          (near(e.a, fold.a, 1) && near(e.b, fold.b, 1)) ||
+          (near(e.a, fold.b, 1) && near(e.b, fold.a, 1));
         const ok = ask
-          ? ask.edges.some(
-              (e) =>
-                (near(e.a, fold.a, 1) && near(e.b, fold.b, 1)) ||
-                (near(e.a, fold.b, 1) && near(e.b, fold.a, 1)),
-            )
+          ? fold.half
+            ? !!ask.half && same(ask.half.edge)
+            : ask.edges.some(same)
           : onEdge(fold.a) && onEdge(fold.b);
         if (ok) {
-          operatorFold[sd] = { a: fold.a, b: fold.b };
+          operatorFold[sd] = {
+            a: fold.a,
+            b: fold.b,
+            ...(fold.half ? { half: true as const } : {}),
+          };
           changed.add('operatorFold');
           field(
             'fold',
             'fold-edge',
-            `unfolded across the ${Math.round(Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y))} mm edge`,
+            fold.half
+              ? `half on fold: the fold line along the ${Math.round(Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y))} mm edge`
+              : `unfolded across the ${Math.round(Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y))} mm edge`,
             fold as unknown as ReplayAnswer['value'],
             ['the same edge of the outline'],
           );

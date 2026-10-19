@@ -525,7 +525,7 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     }
     case 'fold-edge': {
       const f = act?.kind === 'semantics' && sd != null ? act.patch.operatorFold?.[sd] : undefined;
-      return f ? { seed: sd!, a: pt(f.a), b: pt(f.b) } : null;
+      return f ? { seed: sd!, a: pt(f.a), b: pt(f.b), ...(f.half ? { half: true } : {}) } : null;
     }
     case 'outline': {
       const f = act?.kind === 'semantics' ? act.patch.fileAllowance : undefined;
@@ -1678,12 +1678,40 @@ function meaningStep(snap: Snap): AutopilotDecision {
       );
     }
     const q = sem.folds?.find((f) => f.seed === b.seed);
+    // L13 (owner decision 19.10 a): printed «cut on fold», the sheet points at ONE straight edge
+    // in every size and unfolding across it fails for an overlap or a slot in every size — the
+    // half is exported as drawn with its fold line marked (D3: the claim, the pointer, the
+    // failure; the engine sets `auto` only when all hold)
+    if (q?.half?.auto) {
+      const h = q.half;
+      operatorFold[b.seed] = { a: h.edge.a, b: h.edge.b, half: true };
+      out.push(
+        A(
+          'meaning',
+          'fold-edge',
+          subj(b.seed),
+          `half on fold: exported as drawn, the fold line along the ${h.edge.lenMm.toFixed(0)} mm edge`,
+          'printed cut on fold, the sheet points at one straight edge in every size, and unfolding across it fails (overlap/slot) — the half is cut on the folded fabric',
+          h.evidence,
+          0.7,
+          false,
+          b.seed,
+        ),
+      );
+      touched = true;
+      continue;
+    }
     const e = q && q.suggested != null ? q.edges[q.suggested] : null;
     const second = [
       ...(q?.evidence.length ? [`the sheet says «${q.evidence[0].slice(0, 40)}»`] : []),
       ...(listed.has(b.seed) ? ['the cutting list'] : []),
       ...(hinted.has(b.seed) ? ['the AI read "on fold"'] : []),
     ];
+    if ((!e || !second.length) && q?.half)
+      return stopAt(
+        'meaning',
+        `${subj(b.seed)}: printed cut on fold, but unfolding fails (overlap/slot) — export the half with a fold line?${q.half.missing ? ` (${q.half.missing})` : ''}`,
+      );
     if (!e || !second.length)
       return stopAt(
         'meaning',

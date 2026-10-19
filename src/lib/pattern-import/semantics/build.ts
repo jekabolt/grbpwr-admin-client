@@ -40,6 +40,7 @@ import type {
   Feature,
   FoldAsk,
   FoldFeature,
+  FoldHalfOffer,
   FoldMiss,
   GrainFeature,
   IdentityGeometry,
@@ -115,9 +116,18 @@ import {
   normFoldLine,
   foldShapeProblem,
   FOLD_LOOSE_TOL_MM,
+  FOLD_MATCH_ANGLE_DEG,
+  type FoldBracket,
+  bindFoldText,
+  bracketEdges,
+  foldBracket,
+  halfFoldLine,
+  halfFoldReason,
   looseFoldEdge,
   matchFoldEdge,
+  saysCutOnFold,
   sideOf,
+  straightRuns,
   unfold,
 } from './fold';
 import {
@@ -133,7 +143,13 @@ import {
   reflection,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
-import { cleanTracedOutline, familyCornerKinds, offsetContour } from './offset';
+import {
+  cleanTracedOutline,
+  familyCornerKinds,
+  offsetAcrossFold,
+  offsetContour,
+  snapOntoFold,
+} from './offset';
 import { repairMinorityKinks, kinkRepairOff, ownLineOn, type KinkDone } from './kink-repair';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
@@ -444,6 +460,113 @@ function otherLinesNear(fam: PieceFamily, set: ChainSet): OtherLines {
       }
       return best;
     },
+    within: (p, r) =>
+      lines
+        .filter(
+          ({ ch, b }) =>
+            !(b.minX > p.x + r || b.maxX < p.x - r || b.minY > p.y + r || b.maxY < p.y - r) &&
+            closestOnPolyline(p, ch.pts, ch.closed).d <= r,
+        )
+        .map(({ ch }) => ({ pts: ch.pts, closed: ch.closed })),
+  };
+}
+
+/**
+ * L13: the straight edge(s) of one size's outline the sheet points at for a half on fold — the
+ * runs a fold bracket aims at (`bracketEdges`), else the runs a «cut on fold» text lies along
+ * (`bindFoldText`, over every straight run: no convex-hull filter). Null when nothing points.
+ */
+function halfPointerOf(
+  outer: readonly PtMm[],
+  brackets: readonly FoldBracket[],
+  words: readonly FoldText[],
+  lines: OtherLines,
+): { edges: FoldEdge[]; how: 'bracket' | 'text'; by: string[] } | null {
+  const runs = straightRuns(outer);
+  const uniq = (es: FoldEdge[]) =>
+    es.filter((e, i) => es.findIndex((x) => x.a === e.a && x.b === e.b) === i);
+  const fromBr = brackets
+    .map((br) => ({ br, es: bracketEdges(br, outer, runs) }))
+    .filter((x) => x.es.length);
+  if (fromBr.length)
+    return {
+      edges: uniq(fromBr.flatMap((x) => x.es)),
+      how: 'bracket',
+      by: [...new Set(fromBr.map((x) => x.br.text))],
+    };
+  const fromText = words
+    .map((t) => ({ t, e: bindFoldText(t, runs, lines.nearer)?.edge ?? null }))
+    .filter((x): x is { t: FoldText; e: FoldEdge } => !!x.e);
+  if (fromText.length)
+    return {
+      edges: uniq(fromText.map((x) => x.e)),
+      how: 'text',
+      by: [...new Set(fromText.map((x) => x.t.text))],
+    };
+  return null;
+}
+
+const lineDeg = (a: PtMm, b: PtMm) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+/** Smallest angle between two undirected lines, degrees. */
+const lineAngleOf = (e: FoldLine, f: FoldLine) => {
+  const x = (((lineDeg(e.a, e.b) - lineDeg(f.a, f.b)) % 180) + 180) % 180;
+  return Math.min(x, 180 - x);
+};
+
+/**
+ * L13 (owner decision 19.10 a): the «export the half with a fold line» offer of a fold question,
+ * or null. Offered when the sheet prints «cut on fold» for the piece (`claims`, never an AI hint)
+ * and, on the question's size (the last of `sizes`), the sheet points at one straight edge across
+ * which the unfold fails for an overlap or a slot. `auto` (D3) when, in EVERY size, a bracket or
+ * the claim text points at exactly one straight edge, parallel to the question's, and the unfold
+ * across it fails for an overlap or a slot — anything else is named in `missing`.
+ */
+function halfOfferOf(
+  sizes: readonly { outer: PtMm[]; token: string }[],
+  claims: readonly string[],
+  brackets: readonly FoldBracket[],
+  words: readonly FoldText[],
+  lines: OtherLines | null,
+): FoldHalfOffer | null {
+  if (!claims.length || !sizes.length || !lines) return null;
+  const per = sizes.map((z) => {
+    const ptr = halfPointerOf(z.outer, brackets, words, lines);
+    const edge = ptr && ptr.edges.length === 1 ? ptr.edges[0] : null;
+    return { z, ptr, edge, why: edge ? halfFoldReason(z.outer, edge) : null };
+  });
+  const big = per[per.length - 1];
+  const isHalf = (w: (typeof per)[number]['why']) =>
+    !!w && (w.kind === 'overlap' || w.kind === 'slot');
+  if (!big.edge || !isHalf(big.why)) return null;
+  const problems: FoldHalfOffer['problems'] = [];
+  for (const x of per)
+    if (x.why && (x.why.kind === 'overlap' || x.why.kind === 'slot'))
+      problems.push({ size: x.z.token, kind: x.why.kind, detail: x.why.detail });
+  let missing: string | undefined;
+  for (const x of per) {
+    const tok = x.z.token;
+    if (!x.ptr) missing = `size ${tok}: no bracket or fold text points at a straight edge`;
+    else if (!x.edge)
+      missing = `size ${tok}: the ${x.ptr.how === 'bracket' ? 'bracket' : 'fold text'} points at ${x.ptr.edges.length} edges`;
+    else if (lineAngleOf(x.edge, big.edge) > FOLD_MATCH_ANGLE_DEG)
+      missing = `size ${tok}: the edge pointed at is not the same edge`;
+    else if (x.why?.kind === 'unfolds') missing = `size ${tok}: it unfolds across that edge`;
+    else if (x.why?.kind === 'other') missing = `size ${tok}: ${x.why.detail}`;
+    if (missing) break;
+  }
+  const by = [...new Set(per.flatMap((x) => x.ptr?.by ?? []))];
+  const how = per.every((x) => x.ptr?.how === 'bracket') ? 'a fold bracket beside' : 'the text';
+  const evidence = [
+    ...claims.map((c) => `printed «${c.slice(0, 60)}»`),
+    `${how} ${by.map((t) => `«${t.slice(0, 40)}»`).join(', ')} points at the ${big.edge.lenMm.toFixed(0)} mm straight edge${missing ? '' : ' in every size'}`,
+    `unfolding there fails: ${problems.map((x) => `${x.size} ${x.kind}`).join(', ')}`,
+  ];
+  return {
+    edge: { a: big.edge.a, b: big.edge.b, lenMm: big.edge.lenMm },
+    problems,
+    evidence,
+    auto: !missing,
+    ...(missing ? { missing } : {}),
   };
 }
 
@@ -1082,8 +1205,10 @@ export function buildPieceSpecsDetailed(
     const refBox: BoxMm | null = opFold ? largest.bbox : null;
     let refWhy: string | null = opFold ? 'picked by you' : null;
     const internalWords = new Set<string>();
+    let famLinesMemo: OtherLines | null = null;
+    const famLines = () => (famLinesMemo ??= otherLinesNear(p.fam, set));
     if (!refEdge && foldWords.length) {
-      const lines = otherLinesNear(p.fam, set);
+      const lines = famLines();
       for (const { c } of [...p.cands].reverse()) {
         const edges = foldEdges(c.outer);
         let best: { edge: FoldEdge; d: number; text: string; how: string } | null = null;
@@ -1111,6 +1236,27 @@ export function buildPieceSpecsDetailed(
       ),
       ...(foldHints.has(seed) ? ['AI: cut on fold'] : []),
     ];
+    // L13 (owner decision 19.10 a): a half the sheet says is cut on fold but that cannot be
+    // unfolded is exported as drawn with its fold line marked. The printed claims (never the AI's
+    // hint), the «cut on fold» words that may point at the edge, and the brackets beside them.
+    const halfPick = opFold?.half ? opFold : null;
+    const cofWords = foldWords
+      .filter((w) => saysCutOnFold(w.t.text) && !internalWords.has(w.t.text))
+      .map((w) => w.t);
+    const claims = [
+      ...listBound.filter((l) => l.seed === seed).map((l) => l.entry),
+      ...new Set(
+        foldWords
+          .filter((w) => w.inside && saysCutOnFold(w.t.text) && !internalWords.has(w.t.text))
+          .map((w) => w.t.text),
+      ),
+    ];
+    let bracketsMemo: FoldBracket[] | null = null;
+    const brackets = () =>
+      (bracketsMemo ??= cofWords
+        .map((t) => foldBracket(t, famLines()))
+        .filter((b): b is FoldBracket => !!b));
+    if (halfPick) refWhy = 'a half on fold (answered)';
     // MOOD Ф3.3 (R11): a facing fold line across the piece (semantics/facing.ts) — every size
     // shows it, or none does; an outline that stops at it while the size goes on beyond it has lost
     // its facing. Never either silently. "Not a fold" (the operator's) exports the outline as drawn.
@@ -1162,6 +1308,8 @@ export function buildPieceSpecsDetailed(
     /** 'fold-unresolved': where the answered fold fails (the details step asks again from it). */
     let missHere: Pick<FoldMiss, 'size' | 'kind' | 'problem' | 'picked'> | null = null;
     let anyFold = false;
+    /** L13: the sizes exported as a half on fold, each with why it cannot be unfolded. */
+    const halfSizes: string[] = [];
     let lastGrain: GrainFeature | null = null;
     const opGrain = operatorGrain[seed];
     // A1: the family's box (the ungraded-line test looks for the size copies inside it)
@@ -1410,10 +1558,51 @@ export function buildPieceSpecsDetailed(
       let foldFeat: FoldFeature | null = null;
       let edgeLen: number | null = null;
       let foldTol: number | undefined;
+      /** L13: the half's fold edge (exported as drawn, the fold line marked), or null. */
+      let halfEdge: FoldEdge | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
         if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
-        else if (refEdge) {
+        else if (halfPick) {
+          // L13: the edge the sheet points at in THIS size (parallel to the answer), else the
+          // straight run matching the answered edge — no convex-hull filter (a half whose tips
+          // cross the fold line has no hull edge there)
+          const ptr = halfPointerOf(outer, brackets(), cofWords, famLines());
+          const along = (ptr?.edges ?? []).filter(
+            (e) => lineAngleOf(e, halfPick) <= FOLD_MATCH_ANGLE_DEG,
+          );
+          const e =
+            along.length === 1
+              ? along[0]
+              : matchFoldEdge(straightRuns(outer), halfPick, refBox, c.bbox);
+          if (!e) {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: no straight edge of this size matches the fold edge you picked`,
+            };
+            missHere = { size: card.token, kind: 'no-edge', problem: null, picked: halfPick };
+            break;
+          }
+          const why = halfFoldReason(outer, e);
+          if (why.kind === 'other') {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: cannot export the half on fold — ${why.detail}`,
+            };
+            missHere = { size: card.token, kind: 'unfold', problem: why.detail, picked: halfPick };
+            break;
+          }
+          halfEdge = e;
+          // its fold edge exactly straight (a drawn wobble ≤ 0.5 mm), as an unfold's fold line is
+          outer = snapOntoFold(outer, e, FOLD_TOL_MM);
+          if (c === p.cands[p.cands.length - 1].c)
+            pieceNotes.push(
+              `half on fold: the ${e.lenMm.toFixed(0)} mm straight edge — exported as drawn, its fold line on the mirror layer (the cutter folds the fabric)`,
+            );
+          halfSizes.push(
+            why.kind === 'unfolds' ? `${card.token} would unfold` : `${card.token} ${why.kind}`,
+          );
+        } else if (refEdge) {
           let e = matchFoldEdge(foldEdges(outer), refEdge, refBox, c.bbox);
           // E4: no clean straight edge in this size (a notch bump, a drift): the loose match
           if (!e && refBox) {
@@ -1461,6 +1650,16 @@ export function buildPieceSpecsDetailed(
       let notches = feats.filter((f): f is NotchFeature => f.kind === 'notch');
       let drills = feats.filter((f): f is DrillFeature => f.kind === 'drill');
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');
+      // L13: the fold bracket the half was read by is the sheet's «cut on fold» mark, not an
+      // internal line of the piece (its ticks are another class, already left out)
+      if (halfEdge && brackets().length) {
+        const brs = brackets();
+        internal = internal.filter(
+          (f) =>
+            f.closed ||
+            !brs.some((br) => f.pts.every((q) => closestOnPolyline(q, [br.a, br.b], false).d <= 1)),
+        );
+      }
       // A1: a proposed line the operator did not take as the grain stays an internal line
       if (proposedLine && opGrain && !sameLine(proposedLine, opGrain))
         internal.push({
@@ -1546,7 +1745,10 @@ export function buildPieceSpecsDetailed(
       let derived: { base: PtMm[]; mm: number } | null = null;
       if (meaning === 'seam') {
         seam = outer;
-        const r = offsetContour(seam, allowMm);
+        // L13: a half on fold keeps no allowance across its fold line
+        const r = halfEdge
+          ? offsetAcrossFold(seam, allowMm, halfEdge)
+          : offsetContour(seam, allowMm);
         cut = r.pts;
         offset = r.report;
         derived = { base: seam, mm: allowMm };
@@ -1564,7 +1766,9 @@ export function buildPieceSpecsDetailed(
         cut = outer;
         if (drawnSeam) seam = drawnSeam;
         else {
-          const r = offsetContour(cut, -allowMm);
+          const r = halfEdge
+            ? offsetAcrossFold(cut, -allowMm, halfEdge)
+            : offsetContour(cut, -allowMm);
           seam = r.pts;
           offset = r.report;
           derived = { base: cut, mm: -allowMm };
@@ -1650,17 +1854,42 @@ export function buildPieceSpecsDetailed(
       }
       lastGrain = grain;
 
-      const fold2 = foldEdge
+      // L13: the half's fold line — the cut line's own run along the fold edge
+      const halfLine = halfEdge ? halfFoldLine(halfEdge, cut) : null;
+      if (halfEdge && !halfLine) {
+        blockedHere = {
+          reason: 'fold-unresolved',
+          detail: `${card.token}: the cut line does not run along the ${halfEdge.lenMm.toFixed(0)} mm fold edge`,
+        };
+        missHere = {
+          size: card.token,
+          kind: 'unfold',
+          problem: 'the cut line does not run along the fold edge',
+          picked: halfPick,
+        };
+        break;
+      }
+      const fold2 = halfLine
         ? ({
             kind: 'fold',
-            a: foldLineOnCut(foldEdge, cut)[0],
-            b: foldLineOnCut(foldEdge, cut)[1],
-            label: foldFeat?.label ?? 'fold (unfolded)',
-            origin: foldFeat ? foldFeat.origin : 'derived',
-            ranges: foldFeat?.ranges ?? [],
-            confidence: foldFeat ? foldFeat.confidence : 0.6,
+            a: halfLine[0],
+            b: halfLine[1],
+            label: 'cut on fold — half shown',
+            origin: 'derived',
+            ranges: [],
+            confidence: 0.6,
           } satisfies FoldFeature)
-        : null;
+        : foldEdge
+          ? ({
+              kind: 'fold',
+              a: foldLineOnCut(foldEdge, cut)[0],
+              b: foldLineOnCut(foldEdge, cut)[1],
+              label: foldFeat?.label ?? 'fold (unfolded)',
+              origin: foldFeat ? foldFeat.origin : 'derived',
+              ranges: foldFeat?.ranges ?? [],
+              confidence: foldFeat ? foldFeat.confidence : 0.6,
+            } satisfies FoldFeature)
+          : null;
       const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
@@ -1756,21 +1985,43 @@ export function buildPieceSpecsDetailed(
           picked: missHere.picked ? { a: missHere.picked.a, b: missHere.picked.b } : null,
           edges: foldEdges(ccw(largest.outer)).map((e) => ({ a: e.a, b: e.b, lenMm: e.lenMm })),
         });
-      if (blockedHere.reason === 'fold-question')
-        foldAsks.push(
-          foldAskOf(
-            seed,
-            largest,
-            foldWords,
-            foldEvidence,
-            askWhy ?? blockedHere.detail,
-            opGrain ??
-              (classifyFeatures(largest, set, sheet).find((f) => f.kind === 'grain') as
-                | GrainFeature
-                | undefined) ??
-              null,
-          ),
+      if (blockedHere.reason === 'fold-question') {
+        const ask = foldAskOf(
+          seed,
+          largest,
+          foldWords,
+          foldEvidence,
+          askWhy ?? blockedHere.detail,
+          opGrain ??
+            (classifyFeatures(largest, set, sheet).find((f) => f.kind === 'grain') as
+              | GrainFeature
+              | undefined) ??
+            null,
         );
+        // L13: printed «cut on fold» and the sheet points at an edge the unfold fails across —
+        // offer the half with a fold line (auto when every size agrees, D3)
+        const offer = claims.length
+          ? halfOfferOf(
+              p.cands.map(({ c: x, card: k }) => ({ outer: x.outer, token: k.token })),
+              claims,
+              brackets(),
+              cofWords,
+              famLines(),
+            )
+          : null;
+        // another edge unfolds cleanly (the question's suggestion): the sheet's pointer and the
+        // geometry disagree — offered, never auto (D3)
+        const sug = ask.suggested != null ? ask.edges[ask.suggested] : null;
+        const half =
+          offer?.auto && sug
+            ? {
+                ...offer,
+                auto: false,
+                missing: `the ${sug.lenMm.toFixed(0)} mm edge unfolds cleanly`,
+              }
+            : offer;
+        foldAsks.push(half ? { ...ask, half } : ask);
+      }
       continue;
     }
     // SILENT-TAIL: one corner, one treatment in every size — the derived lines are cut again with
@@ -1877,7 +2128,8 @@ export function buildPieceSpecsDetailed(
             qty,
             saysPair: saysPair || !!aiQ?.pair,
             symmetric,
-            onFold: anyFold,
+            // L13: a half on fold is cut once, on the fold — one whole piece, never a pair
+            onFold: anyFold || halfSizes.length > 0,
             namedHand: !!name.hand,
           });
     if (lq && !listAsk && qtyText == null) pp.why = `cutting list «${lq.entry}»: ${pp.why}`;
@@ -1925,7 +2177,12 @@ export function buildPieceSpecsDetailed(
     // long straight edge (≥ 30 % of the perimeter) would unfold it into a believable whole — the
     // same outline may be the half of a piece cut on fold. Offered as the alternative, never applied.
     const foldAlt =
-      !qtyProven && mode === 'derived' && !anyFold && wantFold !== false && !saysPair
+      !qtyProven &&
+      mode === 'derived' &&
+      !anyFold &&
+      !halfSizes.length &&
+      wantFold !== false &&
+      !saysPair
         ? foldAlternative(largest.outer)
         : null;
     if (!qtyProven)
@@ -1954,6 +2211,9 @@ export function buildPieceSpecsDetailed(
       seed,
       variant: null,
       unfoldedFold: anyFold,
+      ...(halfSizes.length
+        ? { halfFold: { evidence: ['answered: export the half with a fold line', ...halfSizes] } }
+        : {}),
       // per WRITTEN identity: both hands of a pair count for one hand each (contract §3)
       piecesPerGarment: ppg,
       allowance: { ...A, allowanceMm: allowMm },

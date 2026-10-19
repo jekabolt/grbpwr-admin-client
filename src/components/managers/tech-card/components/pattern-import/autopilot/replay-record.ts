@@ -622,7 +622,12 @@ export function answerRecordOf(
         ...(g.accepted ? { acc: [...g.accepted] } : {}),
       };
     const fo = live.operatorFold[sd];
-    if (fo) v.fold = { a: { x: fo.a.x, y: fo.a.y }, b: { x: fo.b.x, y: fo.b.y } };
+    if (fo)
+      v.fold = {
+        a: { x: fo.a.x, y: fo.a.y },
+        b: { x: fo.b.x, y: fo.b.y },
+        ...(fo.half ? { half: true as const } : {}),
+      };
     if (s.fabrics && fabSeeds.has(sd))
       v.fab = Object.entries(s.fabrics.byPurpose)
         .filter(([, xs]) => xs.includes(sd))

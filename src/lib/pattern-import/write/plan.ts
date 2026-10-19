@@ -384,7 +384,8 @@ export function planBlocks(
       }));
       let foldLines = 0;
       if (s.fold) {
-        if (!w.spec.unfoldedFold)
+        // L13: a half on fold (owner decision 19.10 a) is meant so — its fold line IS the mirror line
+        if (!w.spec.unfoldedFold && !w.spec.halfFold)
           warnings.push(
             `${who}: fold line on a piece that is not unfolded — written as a mirror line`,
           );

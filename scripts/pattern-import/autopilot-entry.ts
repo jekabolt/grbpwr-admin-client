@@ -786,6 +786,13 @@ type GoldenAnswers = {
   asides?: boolean;
   outline?: 'cut' | 'seam';
   sizes?: Record<string, string>;
+  /**
+   * L13: the fold question of a seed (`fold:<seed>=half|no|edge:<n>` in cases.tsv) — export the
+   * half with a fold line, not a fold, or unfold across the question's edge n.
+   */
+  folds?: Record<string, string>;
+  /** The count of a piece drawn once with nothing said (`qty:<seed>=<n>` in cases.tsv). */
+  qty?: Record<string, number>;
 };
 const golden = (): GoldenAnswers | null =>
   process.env.GOLDEN_ANSWERS ? (JSON.parse(process.env.GOLDEN_ANSWERS) as GoldenAnswers) : null;
@@ -873,6 +880,63 @@ export async function runCase(c: Case, mutate: string | null) {
               allowanceMm: PATIMPORT.defaultAllowanceMm,
               origin: 'operator',
               evidence: [],
+            },
+          },
+          events: [{ type: 'names', decisions: snap.session.names }],
+          assumptions: [],
+        };
+      }
+      const sem = snap.session.semantics;
+      if (ga.folds && step === 'meaning' && /cut on fold/.test(reason) && sem) {
+        const b = sem.blocked.find(
+          (x) => x.reason === 'fold-question' && ga.folds![String(x.seed)] != null,
+        );
+        const want = b ? ga.folds[String(b.seed)] : null;
+        const ask = b ? sem.folds?.find((f) => f.seed === b.seed) : undefined;
+        const n = /^edge:(\d+)$/.exec(want ?? '')?.[1];
+        const sug = ask && ask.suggested != null ? ask.edges[ask.suggested] : null;
+        const e =
+          want === 'half' ? ask?.half?.edge ?? sug : n != null ? ask?.edges[+n] ?? null : null;
+        const patch =
+          b && want === 'no'
+            ? {
+                overrides: {
+                  ...snap.inputs.overrides,
+                  [b.seed]: { ...(snap.inputs.overrides[b.seed] ?? {}), unfoldedFold: false },
+                },
+              }
+            : b && e
+              ? {
+                  operatorFold: {
+                    ...snap.inputs.operatorFold,
+                    [b.seed]: {
+                      a: e.a,
+                      b: e.b,
+                      ...(want === 'half' ? { half: true as const } : {}),
+                    },
+                  },
+                }
+              : null;
+        if (patch) {
+          operatorAnswers++;
+          return {
+            patch,
+            events: [{ type: 'names', decisions: snap.session.names }],
+            assumptions: [],
+          };
+        }
+      }
+      const qs = /\(seed (\d+)\) is drawn once and nothing on the sheet says how many/.exec(
+        reason,
+      )?.[1];
+      if (ga.qty && step === 'meaning' && qs != null && ga.qty[qs] != null) {
+        const sd = +qs as SeedId;
+        operatorAnswers++;
+        return {
+          patch: {
+            overrides: {
+              ...snap.inputs.overrides,
+              [sd]: { ...(snap.inputs.overrides[sd] ?? {}), piecesPerGarment: ga.qty[qs] },
             },
           },
           events: [{ type: 'names', decisions: snap.session.names }],
@@ -1269,12 +1333,15 @@ export async function runCase(c: Case, mutate: string | null) {
           assumed: assumedOn(sd, ['quantity', 'fold-edge', 'not-a-fold']),
         });
       // the fold, both ways: a fold piece not unfolded, a piece unfolded that is not cut on fold
-      const unfolded = ps.some((p) => p.unfoldedFold);
+      // L13: a half exported on fold with its fold line marked (owner decision 19.10 a) IS the
+      // piece cut on fold
+      const half = ps.some((p) => !!p.halfFold);
+      const unfolded = half || ps.some((p) => p.unfoldedFold);
       if ((t.fold === true) !== unfolded && (t.fold === true || t.fold === false))
         wrong.push({
           kind: 'fold',
           subject,
-          got: unfolded ? 'unfolded' : 'not unfolded',
+          got: half ? 'half on fold' : unfolded ? 'unfolded' : 'not unfolded',
           want: t.fold === true ? 'unfolded' : 'as drawn',
           assumed:
             assumedOn(sd, ['fold-edge', 'not-a-fold', 'cutting-list']) ??

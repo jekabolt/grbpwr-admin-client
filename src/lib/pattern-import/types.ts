@@ -1550,6 +1550,14 @@ export type PieceSpec = {
   pairOf: PieceKey | null;
   /** Owner decision 8: fold pieces are unfolded; the fold line goes to layer 8. */
   unfoldedFold: boolean;
+  /**
+   * L13 (owner decision 19.10 a): printed «cut on fold» but no believable unfold (the half overlaps
+   * itself or leaves a slot when mirrored): the HALF is exported as drawn, its fold edge written as
+   * the AAMA mirror line (layer 6, «CUT ON FOLD») with no allowance across it; the cutter folds
+   * the fabric. `evidence` = why (the printed claim, the bracket, each size's unfold failure).
+   * Never set with `unfoldedFold`. Not part of the manifest (the block's mirror line is).
+   */
+  halfFold?: { evidence: string[] };
   /** Number of this identity in one garment (both hands of a pair count 1 each). */
   piecesPerGarment: number;
   allowance: AllowanceDecision;
@@ -1717,9 +1725,11 @@ export type SemanticsInput = {
   /**
    * The fold edge the operator picked per seed (E1a): a straight edge of the outline in the rank of
    * that seed's `FoldAsk`; every size unfolds across its own matching edge. "Not a fold" is
-   * `pieceOverrides[seed].unfoldedFold = false`.
+   * `pieceOverrides[seed].unfoldedFold = false`. `half: true` (L13, answer «half» to
+   * `FoldAsk.half`): no unfold — the half is exported as drawn with its fold edge (the edge matching
+   * a..b in each size) as the mirror line.
    */
-  operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm; half?: true }>>;
   /**
    * Seeds the AI, reading the drawing, says are cut on fold (F10 `suggestion.onFold`) — the sheet's
    * words may be curves. Asked, never unfolded on that alone (E1a, D3).
@@ -1794,6 +1804,31 @@ export type FoldAsk = {
   suggested: number | null;
   /** One line for the operator. */
   why: string;
+  /**
+   * L13 (owner decision 19.10 a): the sheet prints «cut on fold» but unfolding fails for an
+   * overlap or a slot — the answer «export the half with a fold line» is offered:
+   * `operatorFold[seed] = { ...edge, half: true }`. Absent when there is no such edge.
+   */
+  half?: FoldHalfOffer;
+};
+
+/**
+ * L13: the half-with-fold-line offer of a fold question. `auto` = the rule holds (D3, ≥ 2
+ * independent evidences): a printed claim on the piece, a bracket / arrow (or the claim text)
+ * aiming at exactly one straight edge in every size, and the unfold across that edge failing in
+ * every size for an overlap or a slot. The autopilot then answers «half» and records a 'fold-edge'
+ * assumption with `evidence`; else it stops with the plain question.
+ */
+export type FoldHalfOffer = {
+  /** The fold edge on the question's size (rank of the FoldAsk): a straight run of the outline. */
+  edge: { a: PtMm; b: PtMm; lenMm: number };
+  /** Each size's unfold failure across its own matching edge, smallest size first. */
+  problems: { size: string; kind: 'overlap' | 'slot'; detail: string }[];
+  /** The printed claims, the pointer and the failures, as the assumption records them. */
+  evidence: string[];
+  auto: boolean;
+  /** Why not auto (one line), when `auto` is false. */
+  missing?: string;
 };
 
 /**
