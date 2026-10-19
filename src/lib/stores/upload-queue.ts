@@ -120,17 +120,20 @@ interface Batch {
 }
 let batch: Batch | null = null;
 let batchNo = 0;
+/** RETRY reuses its notification: the inbox keeps one entry per batch. */
+let retryKey: string | null = null;
 
 function trackJob(queue: QueueState): void {
   const live = hasLiveUploads(queue);
   if (!batch) {
     if (!live) return;
     batch = {
-      key: `upload-${(batchNo += 1)}`,
+      key: retryKey ?? `upload-${(batchNo += 1)}`,
       prior: new Set(queue.rows.filter((r) => !isLive(r.status)).map((r) => r.id)),
       touched: new Set(),
       said: '',
     };
+    retryKey = null;
   }
   const b = batch;
   for (const r of queue.rows) if (isLive(r.status)) b.touched.add(r.id);
@@ -163,7 +166,14 @@ function trackJob(queue: QueueState): void {
       ...input,
       key: b.key,
       action: retryable.length
-        ? { label: 'retry', onClick: () => retryable.forEach((id) => engine.retry(id)) }
+        ? {
+            label: 'retry',
+            onClick: () => {
+              // A running batch takes the rows in; only an idle queue reuses this key.
+              if (!batch) retryKey = b.key;
+              retryable.forEach((id) => engine.retry(id));
+            },
+          }
         : undefined,
     },
     { toast },
