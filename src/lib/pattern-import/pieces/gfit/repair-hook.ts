@@ -78,6 +78,15 @@ export function gradeP2Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.GRADE_P2_OFF;
 }
 
+/** LEAKS-D: other sizes' lines as `shared` walls of a repair (off: `GRADE_D_OFF=1`). */
+export function gradeDOff(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.GRADE_D_OFF;
+}
+/** LEAKS-D: GRADE_D_STRAY_OFF=1 keeps the shared runs to other sizes' lines (no unranked lines). */
+export function strayOff(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.GRADE_D_STRAY_OFF;
+}
+
 export type RepairWallIn = { chain: ChainId; pts: readonly PtMm[]; closed?: boolean };
 
 export type RepairCtx = {
@@ -88,6 +97,8 @@ export type RepairCtx = {
   /** The wall model (size classes, common lines) — the G26 check for 'neighbour' targets. */
   wm: Pick<WallModel, 'mode' | 'byRank' | 'common'>;
   texts: readonly { id: TextId; at: PtMm }[];
+  /** LEAKS-D: unranked lines no size closes on ('ignore' / 'notch', unanswered, not rescued). */
+  stray?: readonly RepairWallIn[];
 };
 
 export type RepairDiag = {
@@ -121,6 +132,7 @@ export function repairPass(
   const ownMemo = new Map<number, { w: RepairWallIn; box: BoxMm }[]>();
   const withBox = (ws: readonly RepairWallIn[]) => ws.map((w) => ({ w, box: bboxOf(w.pts) }));
   const commonB = withBox(ctx.common);
+  const strayB = withBox(ctx.stray ?? []);
   const ownOf = (r: number) => {
     let v = ownMemo.get(r);
     if (!v) ownMemo.set(r, (v = withBox(ctx.own(r))));
@@ -230,6 +242,28 @@ export function repairPass(
       ws.push({ pts: ch.pts, kind: 'overlay', closed: ch.closed });
       chainOf.push(id);
     }
+    // LEAKS-D · shared: every other size's line near the anchors — one line drawn once for several
+    // sizes is credited to one of them; the size runs on it only along a run its own line lands on
+    // and leaves (repairSize), never through a hole
+    if (!gradeDOff()) {
+      const inWs = new Set(chainOf);
+      for (let k = 0; k < ctx.wm.byRank.length; k++) {
+        if (k === r) continue;
+        for (const { w, box: b } of ownOf(k))
+          if (!inWs.has(w.chain) && meets(b, box)) {
+            ws.push({ pts: w.pts, kind: 'shared', closed: !!w.closed });
+            chainOf.push(w.chain);
+            inWs.add(w.chain);
+          }
+      }
+      if (!strayOff())
+        for (const { w, box: b } of strayB)
+          if (!inWs.has(w.chain) && meets(b, box)) {
+            ws.push({ pts: w.pts, kind: 'shared', closed: !!w.closed });
+            chainOf.push(w.chain);
+            inWs.add(w.chain);
+          }
+    }
     let fitCache = fitCaches.get(c.seed);
     if (!fitCache) fitCaches.set(c.seed, (fitCache = new Map()));
     const rep = repairSize(ins, r, ws, {
@@ -237,6 +271,7 @@ export function repairPass(
       frame: 'stacked',
       fitCache,
       fast: true,
+      shared: !gradeDOff(),
     });
     const why: string[] = rep.refusals.map((w) =>
       w === 'no-model' && rep.modelWhy ? `no-model:${rep.modelWhy}` : w,
@@ -271,6 +306,16 @@ export function repairPass(
         holesMm: Math.round(holesMm * 10) / 10,
         score: Math.round((rep.score ?? 0) * 1000) / 1000,
         devMm: Math.round((rep.devMm ?? 0) * 100) / 100,
+        ...(rep.localFit ? { local: rep.localFit } : {}),
+        ...(rep.sharedRuns
+          ? {
+              shared: {
+                runs: rep.sharedRuns,
+                mm: Math.round(rep.sharedMm * 10) / 10,
+                chains: [...new Set(rep.sharedWalls.map((k) => chainOf[k]))],
+              },
+            }
+          : {}),
         ...(kind === 'neighbour' && c.outer.length > 2
           ? { was: simplify([...c.outer, c.outer[0]], 0.3).slice(0, -1) }
           : {}),
@@ -314,7 +359,7 @@ export function repairPass(
     if (!why.length && cand) {
       if (DEBUG)
         console.log(
-          `GRADEP2 seed ${c.seed} r${r} ${kind} REPAIRED cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')}`,
+          `GRADEP2 seed ${c.seed} r${r} ${kind} REPAIRED cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')} local ${rep.localFit?.join('/') ?? '-'} shared ${rep.sharedRuns}/${rep.sharedMm.toFixed(0)}mm`,
         );
       if (kind === 'leak') orig.set(`${c.seed}:${r}`, c);
       list[i] = cand;
@@ -324,7 +369,7 @@ export function repairPass(
     for (const w of why) refuse(`${kind}:${w}`);
     if (DEBUG)
       console.log(
-        `GRADEP2 seed ${c.seed} r${r} ${kind} REFUSED ${why.join(',')} trusted ${rep.trusted?.join('/')} of ${ins.map((x) => x.rank).join('/')} cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')} offRun ${rep.offRunMm.toFixed(1)} dev ${rep.devMm?.toFixed(2)} score ${rep.score?.toFixed(2)}`,
+        `GRADEP2 seed ${c.seed} r${r} ${kind} REFUSED ${why.join(',')} local ${rep.localFit?.join('/') ?? '-'}(${rep.familyWhy ?? ''}; ${rep.localWhy ?? ''}) shared ${rep.sharedRuns}/${rep.sharedMm.toFixed(0)}mm trusted ${rep.trusted?.join('/')} of ${ins.map((x) => x.rank).join('/')} cover ${rep.cover.toFixed(3)} holes ${rep.holes.map((h) => h.lenMm.toFixed(1)).join('/')} offRun ${rep.offRunMm.toFixed(1)} dev ${rep.devMm?.toFixed(2)} score ${rep.score?.toFixed(2)}${rep.famDbg ? ` fam ${rep.famDbg}` : ''}${rep.sharedDbg ? ` SH ${rep.sharedDbg.slice(0, 8).join(' ; ')}` : ''}`,
       );
     if (DEBUG && rep.holes.length) {
       // what is drawn under each hole: the nearest chain within 1.5 mm and how the model files it

@@ -1262,6 +1262,13 @@ export type RepairRecord = {
   devMm: number;
   /** kind 'neighbour': the outline it had closed to (simplified 0.3 mm) — for the audit picture. */
   was?: PtMm[];
+  /**
+   * LEAKS-D: runs on another size's line drawn once for several sizes (the size's own line lands on
+   * it and leaves it at both ends of every run): count and length, mm.
+   */
+  shared?: { runs: number; mm: number; chains: ChainId[] };
+  /** LEAKS-D: the family's grade model failed; the grade came from these nearby anchors. */
+  local?: number[];
 };
 export type DerivedEdge = {
   kind: DerivedEdgeKind;

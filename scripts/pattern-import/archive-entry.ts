@@ -471,6 +471,18 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       ),
     ),
     familiesRepaired: fams.filter((f) => f.candidates.some((c) => c.rankFrom === 'repair')).length,
+    /** LEAKS-D: repaired sizes that run on another size's line between junctions (count, mm) */
+    repairedShared: fams.flatMap((f) =>
+      f.candidates
+        .filter((c) => c.rankFrom === 'repair' && c.repair?.shared)
+        .map((c) => `${f.seed}:${c.rank}:${c.repair!.shared!.mm}`),
+    ),
+    /** LEAKS-D: repaired sizes whose grade came from nearby anchors (the family's model failed) */
+    repairedLocal: fams.flatMap((f) =>
+      f.candidates
+        .filter((c) => c.rankFrom === 'repair' && c.repair?.local)
+        .map((c) => `${f.seed}:${c.rank}`),
+    ),
     gradeHints: countBy(
       fams.flatMap((f) =>
         f.candidates.filter((c) => c.gradeHint).flatMap((c) => c.gradeHint!.refusals.slice(0, 3)),
@@ -1169,9 +1181,16 @@ function renderRepairPng(
         width: 0.7,
       });
   if (r.was) strokes.push({ pts: r.was, closed: true, color: '#888', width: 5, dash: '6 4' });
+  const shared = new Set(r.shared?.chains ?? []);
   for (const w of c.walls) {
     const ch = set?.chains[w];
-    if (ch) strokes.push({ pts: ch.pts, closed: ch.closed, color: '#06c', width: 1.3 });
+    if (ch)
+      strokes.push({
+        pts: ch.pts,
+        closed: ch.closed,
+        color: shared.has(w) ? '#f80' : '#06c',
+        width: shared.has(w) ? 2.6 : 1.3,
+      });
   }
   strokes.push({ pts: c.outer, closed: true, color: '#0a0', width: 2 });
   for (const d of c.derived ?? []) {
@@ -1236,6 +1255,14 @@ function renderRepairPng(
       color: '#06c',
       text: 'blue = own/common lines it runs on; grey = the drawing; grey dashed thick = before; thin colours = other sizes',
     },
+    ...(r.shared
+      ? [
+          {
+            color: '#f80',
+            text: `orange = another size's line it shares: ${r.shared.runs} run(s), ${r.shared.mm} mm`,
+          },
+        ]
+      : []),
   ]);
 }
 

@@ -25,9 +25,18 @@ import { analyseOutline, ringOf } from './outline';
  * unranked) line the size may run on only where BOTH bracketing anchors' outlines run on it too
  * (within `overlayMm`): the sizes coincide there, the drawing draws the edge once (a shared stretch
  * in one size's pen) — the grade puts this size between them, on it.
+ * shared (LEAKS-D) = another size's line drawn once for several sizes and credited to one of them:
+ * the size runs on it only where nothing of its own, common or overlay lies in the corridor, and
+ * only along a run its OWN (or common) line lands on and leaves — the line ends right where the
+ * run starts and starts again right where it ends (the junction), with the grade's prediction in
+ * the corridor all along (two evidences; a run without both stays a hole). In that second pass an
+ * overlay line counts as shared too (an anchor's line the other anchor leaves). `opts.shared`
+ * false switches the pass off.
  */
-export type GfitWallKind = 'own' | 'common' | 'overlay';
+export type GfitWallKind = 'own' | 'common' | 'overlay' | 'shared';
 export type GfitWall = { pts: readonly PtMm[]; kind: GfitWallKind; closed?: boolean };
+
+const DBG = typeof process !== 'undefined' && !!process.env?.GRADEP2_DEBUG;
 
 export const GFIT_REPAIR = {
   corridorMm: 0.6,
@@ -46,6 +55,14 @@ export const GFIT_REPAIR = {
   maxHoleShare: 0.04,
   /** A hole end is a wall end when the wall stops within this (+ the corridor) of the snap. */
   endMm: 1.0,
+  /** LEAKS-D: a run on a shared line is at least this long, mm (shorter: the junction is noise). */
+  sharedMinMm: 3,
+  /**
+   * LEAKS-D: the own line's END lands on the shared line when it is within this of it, mm — NOT
+   * widened by the corridor: with the corridor (3–4 mm on a large grade step) a stroke drawn 3 mm
+   * off passed both evidences at once (honesty probe, komb shared-shift, 3 of 192, 3.25 mm).
+   */
+  sharedLandMm: 1.0,
   offRunMm: 10,
   /** An overlay wall covers a sample only where both bracketing anchors lie within this, mm. */
   overlayMm: 0.5,
@@ -106,10 +123,24 @@ export type GfitRepair = {
   score?: number;
   /** Indices (into the `walls` given) of the walls the repaired outline runs on. */
   usedWalls: number[];
+  /** LEAKS-D: the runs on shared lines (junction-bounded), count and length, mm. */
+  sharedRuns: number;
+  sharedMm: number;
+  /** LEAKS-D: indices (into the `walls` given) of the shared / overlay lines those runs are on. */
+  sharedWalls: number[];
   /** The anchors the grade model trusts (after the robust fit). */
   trusted?: number[];
   /** Why there is no model ('inconsistent', 'anchors<2', … — fitFamily; 'no-pair-match'). */
   modelWhy?: string;
+  /** LEAKS-D: the family's model failed (why) and the grade came from these nearby anchors. */
+  localFit?: number[];
+  familyWhy?: string;
+  /** LEAKS-D debug: the local fit tried (ranks:why:trusted:minRatio). */
+  localWhy?: string;
+  /** Debug: the anchors the family fit could not explain (rank:status:score:cause:run:onN). */
+  famDbg?: string;
+  /** Debug: every shared-run candidate and why it was (not) taken. */
+  sharedDbg?: string[];
 };
 
 export type RepairOpts = {
@@ -121,6 +152,11 @@ export type RepairOpts = {
   fitCache?: Map<string, GfitFamily>;
   /** Stop at the first failing E1/E2 (the rest of the checks cannot accept it; hook A: time). */
   fast?: boolean;
+  /** LEAKS-D: run on shared (and overlay) lines between junctions, and the local grade when the
+   * family's model fails; false = as before D. */
+  shared?: boolean;
+  /** Probes only: the local grade even where the family's model holds. */
+  forceLocal?: boolean;
 };
 
 type Snap = { w: number; arc: number; q: PtMm; d: number };
@@ -149,6 +185,9 @@ export function repairSize(
     wallBridges: 0,
     offRunMm: 0,
     usedWalls: [],
+    sharedRuns: 0,
+    sharedMm: 0,
+    sharedWalls: [],
   };
   const refuse = (r: GfitRepairRefusal) => {
     if (!res.refusals.includes(r)) res.refusals.push(r);
@@ -163,8 +202,47 @@ export function repairSize(
     fam = fitFamily(ins, { tol, ...(opts.frame ? { frame: opts.frame } : {}) });
     opts.fitCache?.set(fitKey, fam);
   }
+  if ((opts.forceLocal || !fam.model || fam.why === 'inconsistent') && opts.shared !== false) {
+    // LEAKS-D · local grade: the family's grade does not hold over all its sizes (a grade jump
+    // between the small and the big sizes, one ambiguous pair far off) — the two anchors below and
+    // the two above this size may still agree: taken only when there are at least three and every
+    // one of them is predicted from the others within tolerance
+    const near = (below: boolean) =>
+      ins
+        .filter((x) => x.anchor && (below ? x.rank < rank : x.rank > rank))
+        .sort((a, b) => (below ? b.rank - a.rank : a.rank - b.rank))
+        .slice(0, 2);
+    const loc = [...near(true), ...near(false)].sort((a, b) => a.rank - b.rank);
+    if (loc.some((x) => x.rank < rank) && loc.some((x) => x.rank > rank) && loc.length >= 3) {
+      const key = `L${loc.map((x) => x.rank).join(',')}`;
+      let lf = opts.fitCache?.get(key);
+      if (!lf) {
+        lf = fitFamily(loc, { tol, ...(opts.frame ? { frame: opts.frame } : {}) });
+        opts.fitCache?.set(key, lf);
+      }
+      res.localWhy = `${loc.map((x) => x.rank).join('/')}:${lf.why ?? (lf.model ? 'ok' : '?')}:t${lf.trusted.join('/')}:r${lf.minRatio?.toFixed(2)}`;
+      if (lf.model && lf.why !== 'inconsistent' && lf.trusted.length === loc.length) {
+        res.localFit = loc.map((x) => x.rank);
+        res.familyWhy = fam.model && fam.why !== 'inconsistent' ? 'forced' : fam.why ?? 'no-model';
+        fam = lf;
+      }
+    }
+    if (opts.forceLocal && !res.localFit) {
+      res.modelWhy = 'no-local';
+      refuse('no-model');
+      return res;
+    }
+  }
   if (!fam.model || fam.why === 'inconsistent') {
     res.modelWhy = fam.why ?? 'no-model';
+    if (DBG)
+      res.famDbg = `step ${fam.stepMm?.toFixed(2)} ${fam.sizes
+        .filter((v) => v.anchor && v.status !== 'ok')
+        .map(
+          (v) =>
+            `${v.rank}:${v.status}:${v.score?.toFixed(1)}:${v.cause ?? '-'}:${v.offRunMm?.toFixed(0) ?? '-'}:${v.onNeighbour?.toFixed(2) ?? '-'}`,
+        )
+        .join(' ')}`;
     refuse('no-model');
     return res;
   }
@@ -222,7 +300,7 @@ export function repairSize(
   W.forEach((w, k) => grid.addPolyline(k, w.p));
   /** Own walls that come within the corridor somewhere (E4 audits them all — Codex r1). */
   const touched = new Set<number>();
-  const snapAt = (p: PtMm, r: number): Snap | null => {
+  const snapAt = (p: PtMm, r: number, shared = false): Snap | null => {
     // per wall the TRUE nearest point (over all its segments); a nearest point at a wall's END is
     // no cover beyond the base corridor — past the end the line is not drawn (else the hole shrinks
     // and its fill starts from a point the line never reached, cutting the corner the hole took)
@@ -239,9 +317,14 @@ export function repairSize(
       // every own wall that reaches the corridor is audited by E4, chosen here or not
       if (sn.d <= r && W[sn.w].kind === 'own') touched.add(sn.w);
       const w = W[sn.w];
+      // shared lines are read only where nothing else covers (the second pass below), and there an
+      // overlay line counts as a shared one: an anchor's line the other anchor leaves
+      if (w.kind === 'shared' && !shared) continue;
+      if (shared && w.kind !== 'shared' && w.kind !== 'overlay') continue;
       const atEnd = !w.closed && (sn.arc <= 1e-6 || sn.arc >= w.L - 1e-6);
       if (sn.d > r || (atEnd && sn.d > C.corridorMm)) continue;
-      if (w.kind === 'overlay' && !(onRing(g1, ring1, sn.q) && onRing(g2, ring2, sn.q))) continue;
+      if (w.kind === 'overlay' && !shared && !(onRing(g1, ring1, sn.q) && onRing(g2, ring2, sn.q)))
+        continue;
       if (!best || sn.d < best.d) best = sn;
     }
     return best;
@@ -250,6 +333,78 @@ export function repairSize(
   const segLen = (i: number) => hyp(pts[i], pts[(i + 1) % n]);
   let L = 0;
   for (let i = 0; i < n; i++) L += segLen(i);
+  const isEnd = (s: Snap, r: number) => {
+    const w = W[s.w];
+    if (w.closed) return false;
+    return Math.min(s.arc, w.L - s.arc) <= C.endMm + r;
+  };
+  // LEAKS-D: runs of uncovered samples on a shared line, each taken only when the size's own (or
+  // common) line ENDS at both sides of it, ON that shared line — the size's line lands on the
+  // shared stroke and leaves it. Anything else (a run that touches a hole, an own line running on
+  // past the run or stopping short of the stroke, an overlay or another shared stretch at its
+  // side) stays uncovered: the repair sees what it saw before.
+  /** the end of wall `s.w` nearer to the snap */
+  const endPt = (s: Snap) => {
+    const w = W[s.w];
+    return s.arc <= w.L - s.arc ? w.p[0] : w.p[w.p.length - 1];
+  };
+  /** wall `k` passes within `rad` of `q` */
+  const touches = (q: PtMm, k: number, rad: number) => {
+    let hit = false;
+    grid.near(q, rad, (kk, s) => {
+      if (!hit && kk === k && segNearest(q, W[k].p[s], W[k].p[s + 1]).d <= rad) hit = true;
+    });
+    return hit;
+  };
+  if (opts.shared !== false && W.some((w) => w.kind === 'shared' || w.kind === 'overlay')) {
+    const sh = pts.map((p, i) => (snaps[i] ? null : snapAt(p, cor[i], true)));
+    const firstCovered = snaps.findIndex((s) => !!s);
+    if (firstCovered >= 0)
+      for (let k = 0; k < n; ) {
+        const i = (firstCovered + k) % n;
+        if (!sh[i]) {
+          k++;
+          continue;
+        }
+        let k2 = k;
+        while (k2 < n && sh[(firstCovered + k2) % n]) k2++;
+        const iPrev = (firstCovered + k - 1 + n) % n;
+        const iNext = (firstCovered + k2) % n;
+        const sp = snaps[iPrev];
+        const sn = snaps[iNext];
+        const landed = (s: Snap | null, r: number, on: Snap) =>
+          !!s &&
+          (W[s.w].kind === 'own' || W[s.w].kind === 'common') &&
+          isEnd(s, r) &&
+          touches(endPt(s), on.w, C.sharedLandMm);
+        let runL = 0;
+        for (let j = k; j < k2; j++) runL += segLen((firstCovered + j) % n);
+        const iLast = (firstCovered + k2 - 1) % n;
+        if (DBG) {
+          const why = (s: Snap | null, r: number, on: Snap) =>
+            !s
+              ? 'none'
+              : `${W[s.w].kind}${W[s.w].closed ? 'C' : ''}:${isEnd(s, r) ? 'end' : `mid${Math.min(s.arc, W[s.w].L - s.arc).toFixed(1)}/${W[s.w].L.toFixed(0)}`}:${touches(endPt(s), on.w, C.sharedLandMm) ? 'T' : 'f'}`;
+          (res.sharedDbg ??= []).push(
+            `${runL.toFixed(1)}mm@${pts[i].x.toFixed(0)},${pts[i].y.toFixed(0)} on ${W[sh[i]!.w].kind} [${why(sp, cor[iPrev], sh[i]!)} | ${why(sn, cor[iNext], sh[iLast]!)}]`,
+          );
+        }
+        if (
+          runL >= C.sharedMinMm &&
+          landed(sp, cor[iPrev], sh[i]!) &&
+          landed(sn, cor[iNext], sh[iLast]!)
+        ) {
+          for (let j = k; j < k2; j++) {
+            const ii = (firstCovered + j) % n;
+            snaps[ii] = sh[ii];
+            if (!res.sharedWalls.includes(sh[ii]!.w)) res.sharedWalls.push(sh[ii]!.w);
+          }
+          res.sharedRuns++;
+          res.sharedMm += runL;
+        }
+        k = k2;
+      }
+  }
   const start = snaps.findIndex((s) => !!s);
   if (start < 0) {
     refuse('E1-cover');
@@ -284,11 +439,6 @@ export function repairSize(
     const d = Math.abs(a1 - a0);
     return w.closed ? Math.min(d, w.L - d) : d;
   };
-  const isEnd = (s: Snap, r: number) => {
-    const w = W[s.w];
-    if (w.closed) return false;
-    return Math.min(s.arc, w.L - s.arc) <= C.endMm + r;
-  };
 
   // walk the ring from a covered sample: covered samples take the wall point; a gap is either the
   // same wall running on (drawn: follow the wall) or a hole (derived: prediction + blended offset)
@@ -315,10 +465,12 @@ export function repairSize(
     const sn = snaps[iNext]!;
     let gapL = segLen(iPrev);
     for (let j = k; j < k2; j++) gapL += segLen((start + j) % n);
-    // (an overlay wall proves only where the anchors run on it: never followed through a gap)
+    // (an overlay or shared wall proves only where the anchors / the junctions say: never followed
+    // through a gap)
     const sameWall =
       sp.w === sn.w &&
       W[sp.w].kind !== 'overlay' &&
+      W[sp.w].kind !== 'shared' &&
       wallArcGap(sp.w, sp.arc, sn.arc) <= 1.5 * gapL + C.notchPathMm;
     if (sameWall) {
       // drawn: the wall runs on between both sides

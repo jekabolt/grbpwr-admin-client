@@ -3,7 +3,10 @@
 // sizes of CAD-graded DXF (corpus dxf-clo, block per size) and of kombinezon (PDF read by the
 // pipeline, family dump) with 10–30 mm of their own line deleted (also: short deletions, a hidden
 // bump under the deletion, a stretch swapped for the neighbour's line); every accept is compared
-// with the real size. EXIT 1 when any accepted repair is beyond tolerance (a wrong repair).
+// with the real size; LEAKS-D adds a stretch drawn once for the size and a neighbour (a 'shared'
+// wall) and its mutations (the neighbour's line there, the own line stopping short, the stretch
+// moved off). EXIT 1 when any accepted repair is beyond tolerance (a wrong repair) or a mutation's
+// shared line is run on.
 //   node scripts/pattern-import/gradep2.mjs [honesty] [<e2e case>|mood:<id> …]
 //   (GRADEP2_OUT, GRADEP2_PNG, GRADEP2_TRIALS, GRADEP2_ONLY)
 // A case runs the pipeline twice (GRADE_P2_OFF=1, then on): which sizes the hook repaired (or held
@@ -20,7 +23,12 @@ import {
   type GfitTol,
 } from 'lib/pattern-import/pieces/gfit/fit';
 import { analyseOutline, ringOf } from 'lib/pattern-import/pieces/gfit/outline';
-import { repairSize, type GfitRepair, type GfitWall } from 'lib/pattern-import/pieces/gfit/repair';
+import {
+  repairSize,
+  type GfitRepair,
+  type GfitWall,
+  type RepairOpts,
+} from 'lib/pattern-import/pieces/gfit/repair';
 import {
   chordBumps,
   cutSlits,
@@ -128,7 +136,19 @@ function rng(seed: number) {
   };
 }
 
-type Variant = 'delete' | 'short' | 'bump' | 'swap';
+type Variant =
+  | 'delete'
+  | 'short'
+  | 'bump'
+  | 'swap'
+  | 'shared'
+  | 'shared-swap'
+  | 'shared-gap'
+  | 'shared-shift'
+  | 'local'
+  | 'local-shared';
+/** LEAKS-D mutations: a shared run must never be taken there. */
+const MUST_REFUSE_SHARED: readonly Variant[] = ['shared-gap', 'shared-shift'];
 type RepRow = {
   src: string;
   fam: string;
@@ -153,6 +173,8 @@ type RepRow = {
   bridges: number;
   falseNotch: number;
   tolPt: number;
+  /** LEAKS-D: runs taken on shared lines. */
+  sharedRuns: number;
 };
 
 /** Deletion intervals [a, b) in samples on a ring of n samples, non-overlapping. */
@@ -229,9 +251,16 @@ function repRow(
   walls: GfitWall[],
   delMm: number[],
   rows: RepRow[],
+  extra: RepairOpts = {},
 ): GfitRepair {
   const others = f.sizes.filter((s) => s.rank !== rank);
-  const rep = repairSize(others, rank, walls, { tol: f.tol });
+  // GRADE_D_OFF=1: the repair as before LEAKS-D (no shared pass, no local grade) — the same trials
+  const dOff = !!process.env.GRADE_D_OFF;
+  const rep = repairSize(others, rank, walls, {
+    tol: f.tol,
+    ...extra,
+    ...(dOff ? { shared: false, forceLocal: false } : {}),
+  });
   let errMax = NaN;
   let errMaxRaw = NaN;
   let errP95 = NaN;
@@ -288,6 +317,7 @@ function repRow(
     bridges: rep.wallBridges,
     falseNotch,
     tolPt: f.tol.ptMm,
+    sharedRuns: rep.sharedRuns,
   });
   return rep;
 }
@@ -342,6 +372,24 @@ function p2(fams: Fam[], png: string | null, trials: number) {
           );
           shoot('delete', ring, walls, rep);
         }
+      // local: the delete k = 1 trials again, the grade from the nearby anchors only (LEAKS-D: the
+      // fallback where the family's model fails)
+      for (let t = 0; t < trials; t++) {
+        const R = rng(seed++);
+        const dels = pickDeletions(n, 1, R);
+        const walls = fragments(ring, dels).map((p) => ({ pts: p, kind: 'own' as const }));
+        const rep = repRow(
+          f,
+          r,
+          'local',
+          ring,
+          walls,
+          dels.map(([a, b]) => (b - a) * 0.5),
+          rows,
+          { forceLocal: true },
+        );
+        shoot('local', ring, walls, rep);
+      }
       // short: 1–2 stretches of 8–14 mm (inside the E2 hole limit — stresses the accepts)
       for (let k = 1; k <= 2; k++)
         for (let t = 0; t < trials; t++) {
@@ -395,6 +443,66 @@ function p2(fams: Fam[], png: string | null, trials: number) {
         const rep = repRow(f, r, 'swap', ring, walls, [(b - a) * 0.5], rows);
         shoot('swap', ring, walls, rep);
       }
+      // LEAKS-D · shared: a 30–120 mm stretch of the size drawn once for it and a neighbour and
+      // credited to the neighbour — the own line ends at both sides of the stretch, the stretch is
+      // a 'shared' wall (the true line): the repair runs on it. Mutations, none may be accepted
+      // beyond tolerance, gap and shift may take no shared run at all: the neighbour's own line
+      // there instead (shared-swap), the own line stopping 4–8 mm short of the stretch
+      // (shared-gap), the stretch moved 3–5 mm off (shared-shift).
+      for (let t = 0; t < trials; t++) {
+        const R = rng(seed++);
+        const del = pickDeletions(n, 1, R, 30, 120)[0];
+        if (!del || del[1] - del[0] > n / 3) continue;
+        const [a, b] = del;
+        const at = (j: number) => ring[((j % n) + n) % n];
+        const stretch: PtMm[] = [];
+        for (let j = a - 2; j <= b + 1; j++) stretch.push(at(j));
+        const own = fragments(ring, [[a, b]]).map((p) => ({ pts: p, kind: 'own' as const }));
+        const lenMm = [(b - a) * 0.5];
+        {
+          const walls: GfitWall[] = [...own, { pts: stretch, kind: 'shared' }];
+          const rep = repRow(f, r, 'shared', ring, walls, lenMm, rows);
+          shoot('shared', ring, walls, rep);
+          // the same on the local grade (the two anchors below and above; LEAKS-D fallback)
+          const rl = repRow(f, r, 'local-shared', ring, walls, lenMm, rows, { forceLocal: true });
+          shoot('local-shared', ring, walls, rl);
+        }
+        const nb = f.sizes.find((s) => s.rank === (R() < 0.5 ? r - 1 : r + 1));
+        if (nb) {
+          const nring = ringOf(nb.outer);
+          const m = nring.length;
+          const na = nearestIdx(nring, at(a));
+          const span = (nearestIdx(nring, at(b)) - na + m) % m;
+          if (span <= m / 2) {
+            const pts: PtMm[] = [];
+            for (let j = -2; j <= span + 2; j++) pts.push(nring[(((na + j) % m) + m) % m]);
+            const walls: GfitWall[] = [...own, { pts, kind: 'shared' }];
+            const rep = repRow(f, r, 'shared-swap', ring, walls, lenMm, rows);
+            shoot('shared-swap', ring, walls, rep);
+          }
+        }
+        {
+          const g = 8 + Math.floor(9 * R());
+          const walls: GfitWall[] = [
+            ...fragments(ring, [[a - g, b]]).map((p) => ({ pts: p, kind: 'own' as const })),
+            { pts: stretch, kind: 'shared' },
+          ];
+          const rep = repRow(f, r, 'shared-gap', ring, walls, [(b - a + g) * 0.5], rows);
+          shoot('shared-gap', ring, walls, rep);
+        }
+        {
+          const off = (3 + 2 * R()) * (R() < 0.5 ? -1 : 1);
+          const pts = stretch.map((p, k) => {
+            const u = stretch[Math.max(0, k - 2)];
+            const v = stretch[Math.min(stretch.length - 1, k + 2)];
+            const L = Math.hypot(v.x - u.x, v.y - u.y) || 1;
+            return { x: p.x + (off * (v.y - u.y)) / L, y: p.y - (off * (v.x - u.x)) / L };
+          });
+          const walls: GfitWall[] = [...own, { pts, kind: 'shared' }];
+          const rep = repRow(f, r, 'shared-shift', ring, walls, lenMm, rows);
+          shoot('shared-shift', ring, walls, rep);
+        }
+      }
     }
   }
   if (png)
@@ -417,7 +525,19 @@ function sumRep(rows: RepRow[]) {
   );
   const all = [...keys].sort();
   for (const src of ['CAD', 'komb']) {
-    for (const v of ['delete', 'short', 'bump', 'swap']) all.push(`${src} ${v} (all)`);
+    for (const v of [
+      'delete',
+      'short',
+      'bump',
+      'swap',
+      'shared',
+      'shared-swap',
+      'shared-gap',
+      'shared-shift',
+      'local',
+      'local-shared',
+    ])
+      all.push(`${src} ${v} (all)`);
   }
   for (const k of all) {
     const rs = rows.filter((r) =>
@@ -454,6 +574,9 @@ function sumRep(rows: RepRow[]) {
       acc_errMax_max: r2(mx([0, ...acc.map((r) => r.errMax)])),
       acc_derivedMax: r2(mx([0, ...acc.map((r) => r.errDerivedMax)])),
       acc_falseNotch: acc.reduce((a, r) => a + r.falseNotch, 0),
+      // LEAKS-D: attempts / accepts that ran on a shared line
+      sharedTaken: rs.filter((r) => r.sharedRuns > 0).length,
+      sharedAccepted: acc.filter((r) => r.sharedRuns > 0).length,
       refused_wouldBe_beyondTol: rs.filter((r) => !r.ok && r.errMax > lim(r)).length,
       // refused ONLY by the end-offset rule: within tolerance (lost) / beyond (caught)
       endOffsetOnly_lost: rs.filter(
@@ -877,8 +1000,15 @@ async function honesty(): Promise<number> {
   for (const x of s) console.log(`P2 ${JSON.stringify(x)}`);
   const acc = rows.filter((r) => r.ok);
   const bad = acc.filter((r) => !(r.errMax <= Math.max(1, r.tolPt)));
+  // LEAKS-D: a shared run taken where the junction or the corridor says no
+  const badShared = rows.filter((r) => MUST_REFUSE_SHARED.includes(r.variant) && r.sharedRuns > 0);
+  const sh = rows.filter((r) => r.variant === 'shared');
   console.log(
-    `${bad.length ? 'FAIL' : 'PASS'}  honesty: ${rows.length} attempts, ${acc.length} accepted, ${bad.length} accepted beyond tolerance (max error of accepts ${r2(mx([0, ...acc.map((r) => r.errMax)]))} mm) · ${Date.now() - t1} ms`,
+    `D shared: ${sh.length} true stretches, ${sh.filter((r) => r.ok).length} accepted (${sh.filter((r) => r.ok && r.sharedRuns > 0).length} on the shared line) · mutations taking a shared run: ${badShared.length}`,
   );
-  return bad.length ? 1 : 0;
+  const fail = bad.length + badShared.length;
+  console.log(
+    `${fail ? 'FAIL' : 'PASS'}  honesty: ${rows.length} attempts, ${acc.length} accepted, ${bad.length} accepted beyond tolerance (max error of accepts ${r2(mx([0, ...acc.map((r) => r.errMax)]))} mm), ${badShared.length} shared runs taken by a mutation · ${Date.now() - t1} ms`,
+  );
+  return fail ? 1 : 0;
 }

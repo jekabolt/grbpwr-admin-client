@@ -57,6 +57,7 @@ import { snapOutline, type WallItem } from './snap';
 import { variantKnifeItems } from './variants';
 import { localRanks } from './bundle-rank';
 import {
+  answeredLines,
   continuityWalls,
   type ContinuityWall,
   frameLike,
@@ -1421,6 +1422,19 @@ function fillOneSheet(
         ],
         wm: model,
         texts: textCentres,
+        // LEAKS-D: F3's furniture / notch lines the operator never answered, not rescued, not page
+        // margins — a size line drawn once for several sizes, filed by none (repairSize runs a size
+        // on one only along a run its own line lands on and leaves, where the grade puts it)
+        stray: (() => {
+          const answered = answeredLines(set).all;
+          const skipS = new Set<ChainId>([...rescued, ...margins, ...corners]);
+          return live(
+            set.classes
+              .filter((c) => c.role === 'ignore' || c.role === 'notch')
+              .flatMap((c) => c.chains)
+              .filter((id) => !answered.has(id) && !skipS.has(id)),
+          );
+        })(),
       },
       new Set([...dropped, ...(graded?.skip ?? [])]),
     );
