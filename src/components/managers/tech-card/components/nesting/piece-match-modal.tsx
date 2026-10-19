@@ -1873,7 +1873,8 @@ export function PieceMatchModal({
     );
   }
   for (const r of outcome.rewritten) warnings.push(`${r.name}: cut as drawn, identical copies`);
-  if (massVanish) {
+  // Once the operator has answered the old-pieces question, the alarm has done its job.
+  if (massVanish && deleteChoice.size === 0) {
     warnings.push({
       text: `${deleteCandidates.length} of ${scopeBoundPieces} pieces gone from the file`,
       error: true,

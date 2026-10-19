@@ -1,5 +1,5 @@
 import type { DesignQuizAnswer, DesignQuizQuestion } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -178,7 +178,6 @@ export function MoodQuiz({
   const { draftIdea } = useGenerationWrites(card || undefined);
   const autosave = useTechCardAutosave();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
   const record = useDraftMemory((s) => s.record);
 
   const [live, setLive] = useState<Live | null>(null);
@@ -535,7 +534,12 @@ export function MoodQuiz({
         flushed = 'error';
       }
       if (!flushAllowsRun(flushed)) {
-        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        notify({
+          sev: 'error',
+          subject: 'MOOD QUIZ',
+          text: 'not drafted',
+          detail: flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal),
+        });
         return;
       }
       const before = ((getValues('concept') as string | null | undefined) ?? '') as string;
@@ -544,10 +548,7 @@ export function MoodQuiz({
       if (!text || shownCard.current !== card) return;
       const now = ((getValues('concept') as string | null | undefined) ?? '') as string;
       if (now !== before) {
-        showMessage(
-          'the description changed while the model wrote, so it was left as typed',
-          'error',
-        );
+        notify({ sev: 'error', subject: 'MOOD QUIZ', text: 'not applied', bad: 'text changed' });
         return;
       }
       if (text === before) return;

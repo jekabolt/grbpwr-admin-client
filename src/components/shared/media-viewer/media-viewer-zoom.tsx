@@ -1131,7 +1131,8 @@ export function ZoomDrawToolbar({
       )}
 
       <div className='flex max-w-full flex-wrap items-center justify-center gap-1.5'>
-      <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
+      {/* Phone: pinch does the zoom, so the +/- group is desktop only. */}
+      <div className='hidden items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm lg:flex'>
         <ToolbarIconButton label='Zoom out' onClick={onZoomOut} disabled={!canZoomOut}>
           <ZoomOutIcon className='size-4' />
         </ToolbarIconButton>
@@ -1150,7 +1151,14 @@ export function ZoomDrawToolbar({
         </ToolbarIconButton>
       </div>
 
-      <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
+      {/* Phone: adjust / draw open from the viewer's `more` sheet; this group shows only while
+          one of them is on, to work it and to switch it off. */}
+      <div
+        className={cn(
+          'flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm',
+          !drawMode && !adjustOpen && 'max-lg:hidden',
+        )}
+      >
         {/* ЧИП КОРРЕКЦИИ — В ТОЙ ЖЕ КОРОБКЕ, ЧТО КАРАНДАШ, И ПЕРЕД НИМ. Это два режима одного
             занятия «поправить снимок», и разводить их по разным группам значило бы сказать, что они
             из разных семейств. ПЕРЕД, а не после: когда перо раскрыто, его собственные органы

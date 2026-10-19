@@ -8,9 +8,9 @@ import { FilterType, OTHER_RATIO, UsageShelf } from '../utils/useFilter';
  * вообще лежит» ответа не было: чтобы узнать, есть ли в библиотеке хоть один кадр 2:1 под баннер,
  * приходилось листать бесконечную сетку. Рельс отвечает на него до первого движения колесом.
  *
- * Цифры считаются по УЖЕ ЗАГРУЖЕННЫМ страницам: `ListObjectsPaged` не отдаёт ни общего числа, ни
- * разбивки. Молчаливый счётчик читался бы как «во всей библиотеке», поэтому знаменатель подписан
- * прямо под рельсом.
+ * Цифры — по всей библиотеке, из куба `ListMediaFacets`. Пока его нет (в пути, не ответил) или
+ * набран поиск, они считаются по УЖЕ ЗАГРУЖЕННЫМ страницам, и тогда знаменатель подписан прямо
+ * под рельсом: молчаливый счётчик читался бы как «во всей библиотеке».
  */
 export function MediaRail({
   type,
@@ -40,8 +40,12 @@ export function MediaRail({
   /** Хотя бы одна корзина занятости не ответила. */
   usageFailed: boolean;
   isFiltered: boolean;
-  /** Сколько объектов подгружено — знаменатель, к которому относятся все счётчики. */
-  loaded: number;
+  /**
+   * Сколько объектов подгружено — знаменатель, к которому относятся все счётчики. `null` —
+   * счётчики по всей библиотеке (куб фасетов): подписывать нечего, и строки про занятость
+   * загруженного тоже молчат — куб знает занятость каждого id.
+   */
+  loaded: number | null;
   onType: (t: FilterType) => void;
   onRatio: (r: string | null) => void;
   onUsage: (u: UsageShelf | null) => void;
@@ -124,13 +128,15 @@ export function MediaRail({
         </Button>
       )}
 
-      <Text size='micro' variant='label' component='p' className='mt-2'>
-        counted over the {loaded} loaded so far
-      </Text>
+      {loaded !== null && (
+        <Text size='micro' variant='label' component='p' className='mt-2'>
+          counted over the {loaded} loaded so far
+        </Text>
+      )}
       {/* ТРИ РАЗНЫХ МОЛЧАНИЯ. Пока запрос идёт — «считаем»; если корзина не ответила — так и
           сказано, иначе провал выглядел бы как вечное «ещё не проверено» и человек ждал бы
           ответа, которого не будет. Остаток — честное «столько ещё не спрошено». */}
-      {usageFailed ? (
+      {loaded === null ? null : usageFailed ? (
         <Text size='micro' variant='label' component='p'>
           usage could not be checked
         </Text>

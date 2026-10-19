@@ -1,7 +1,8 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { Button, CalloutBox, Close, Text } from 'ui';
+import { errorText, isRefused, isTransient, reasonOf } from '../../utils/feedback';
 import { useImportBankCsv } from '../../utils/hooks';
 
 // Parsers the backend accepts (PostBankTxnRequest.source; empty = revolut). Revolut is the only one
@@ -15,16 +16,18 @@ const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textB
 // skipped) are surfaced verbatim so an operator sees exactly what landed. Kept as a raw dialog (not
 // ConfirmationModal) so a parse error keeps the pasted text on screen instead of closing.
 export function ImportCsvModal({ onClose }: { onClose: () => void }) {
-  const { showMessage } = useSnackBarStore();
   const importCsv = useImportBankCsv();
   const [source, setSource] = useState('revolut');
   const [csvText, setCsvText] = useState('');
+  // An empty paste or the parser's refusal stands in the dialog until the next edit or attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const submit = () => {
     if (!csvText.trim()) {
-      showMessage('Paste the CSV export first', 'error');
+      setRefusal('paste the CSV export');
       return;
     }
+    setRefusal(null);
     importCsv.mutate(
       { source, csvText },
       {
@@ -32,16 +35,33 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
           const parsed = res.parsed ?? 0;
           const imported = res.imported ?? 0;
           const skipped = res.skipped ?? 0;
-          showMessage(
-            `Imported ${imported} of ${parsed} line(s)${
-              skipped > 0 ? ` · ${skipped} duplicate(s) skipped` : ''
-            }`,
-            'success',
-          );
+          // The counts live nowhere else once the dialog closes: one result toast.
+          const failed = Math.max(0, parsed - imported - skipped);
+          notify({
+            sev: failed > 0 ? 'warn' : 'ok',
+            subject: 'BANK CSV',
+            text: `imported ${imported} of ${parsed}`,
+            bad: failed > 0 ? `${failed} failed` : undefined,
+            detail: skipped > 0 ? `${skipped} duplicates skipped` : undefined,
+          });
           onClose();
         },
-        onError: (e) =>
-          showMessage(e instanceof Error ? e.message : 'Failed to import CSV', 'error'),
+        onError: (e) => {
+          const said = errorText(e, 'failed to import CSV') ?? '';
+          if (isRefused(e)) {
+            setRefusal(said);
+            return;
+          }
+          // Re-importing the same export is safe: duplicates are skipped.
+          notify({
+            sev: 'error',
+            subject: 'BANK CSV',
+            text: 'not imported',
+            bad: reasonOf(e),
+            detail: said,
+            action: isTransient(e) ? { label: 'retry', onClick: submit } : undefined,
+          });
+        },
       },
     );
   };
@@ -83,14 +103,21 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
                 className={`${cell} min-h-[220px] font-mono`}
                 placeholder='paste the raw CSV here — header row included'
                 value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
+                aria-invalid={(refusal !== null && !csvText.trim()) || undefined}
+                onChange={(e) => {
+                  setRefusal(null);
+                  setCsvText(e.target.value);
+                }}
                 autoFocus
               />
             </label>
 
             <Text variant='inactive' size='small'>
-              Already-imported lines are skipped automatically — re-importing the same export is safe.
+              Already-imported lines are skipped automatically — re-importing the same export is
+              safe.
             </Text>
+
+            {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
 
             <div className='flex items-center justify-end gap-2'>
               <Button type='button' variant='secondary' size='lg' onClick={onClose}>

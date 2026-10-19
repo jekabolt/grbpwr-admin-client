@@ -1,7 +1,13 @@
 import { CostingFxRate, OpexRecurring } from 'api/proto-http/admin';
 import { useEmployees } from 'components/managers/employees/utils/hooks';
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import {
+  errorText,
+  isRefused,
+  isTransient,
+  reasonOf,
+} from 'components/managers/accounting/utils/feedback';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -14,7 +20,8 @@ import {
   StatGrid,
   Text,
   Toolbar,
-  ToolbarSpacer, EmptyCell,
+  ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
 import {
@@ -60,8 +67,6 @@ export function RecurringTab({
   canWrite: boolean;
   canRead: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
-
   const [showArchived, setShowArchived] = useState(false);
   const { data, isLoading, isError, refetch } = useOpexRecurring(showArchived);
   const archive = useArchiveOpexRecurring();
@@ -103,13 +108,25 @@ export function RecurringTab({
     return { total, uncosted, active };
   }, [rows, fxRates, base]);
 
-  const confirmArchive = () => {
-    if (!archiving?.id) return;
-    archive.mutate(archiving.id, {
-      onSuccess: () => showMessage('Template archived', 'success'),
-      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to archive', 'error'),
+  // No receipt: the row leaves the list.
+  const archiveTemplate = (id: number, label: string): void =>
+    archive.mutate(id, {
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: `TEMPLATE ${label}`.trim(),
+          text: 'not archived',
+          bad: reasonOf(e),
+          detail: errorText(e),
+          action: isTransient(e)
+            ? { label: 'retry', onClick: () => archiveTemplate(id, label) }
+            : undefined,
+        }),
       onSettled: () => setArchiving(undefined),
     });
+  const confirmArchive = () => {
+    if (!archiving?.id) return;
+    archiveTemplate(archiving.id, archiving.recurring?.label ?? '');
   };
 
   return (
@@ -121,7 +138,13 @@ export function RecurringTab({
             checked={showArchived}
             onChange={(v: boolean) => setShowArchived(v)}
           />
-          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
             show archived
           </Text>
         </label>
@@ -140,7 +163,11 @@ export function RecurringTab({
             // With the FX read denied we cannot fold non-base templates, so the total would be
             // silently short — say "—" rather than print a plausible-looking lie.
             value={
-              fxUnavailable && runRate.uncosted > 0 ? <EmptyCell /> : money(runRate.total, base, canRead)
+              fxUnavailable && runRate.uncosted > 0 ? (
+                <EmptyCell />
+              ) : (
+                money(runRate.total, base, canRead)
+              )
             }
             sub={
               fxUnavailable && runRate.uncosted > 0
@@ -174,7 +201,13 @@ export function RecurringTab({
         </CalloutBox>
       ) : rows.length === 0 ? (
         <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
-          <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='font-bold uppercase'
+          >
             no recurring templates
           </Text>
           <Text size='micro' variant='label' component='span'>
@@ -183,7 +216,13 @@ export function RecurringTab({
             active-from month.
           </Text>
           {canWrite && (
-            <Button type='button' variant='main' size='sm' className='mt-1' onClick={() => setWizardOpen(true)}>
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              className='mt-1'
+              onClick={() => setWizardOpen(true)}
+            >
               + template
             </Button>
           )}
@@ -356,8 +395,9 @@ function RecurringFormModal({
   onOpenChange: (v: boolean) => void;
   existing?: OpexRecurring;
 }) {
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOpexRecurring();
+  // A check or refusal stands over the form until the next edit or attempt; `field` goes red.
+  const [formError, setFormError] = useState<{ text: string; field?: keyof Draft } | null>(null);
   const { data: employeeData } = useEmployees(false, open);
   const employees = employeeData?.employees ?? [];
 
@@ -375,6 +415,7 @@ function RecurringFormModal({
 
   useEffect(() => {
     if (!open) return;
+    setFormError(null);
     const ins = existing?.recurring;
     setD(
       ins
@@ -393,23 +434,31 @@ function RecurringFormModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing, open]);
 
-  const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
+  const set = (patch: Partial<Draft>) => {
+    setFormError(null);
+    setD((prev) => ({ ...prev, ...patch }));
+  };
+  const bad = (field: keyof Draft) => formError?.field === field;
 
   const submit = async () => {
     if (!d.label.trim() || !d.amount.trim() || !d.activeFrom) {
-      showMessage('Enter a label, amount and active-from month', 'error');
+      setFormError({
+        text: 'enter a label, amount and active-from month',
+        field: !d.label.trim() ? 'label' : !d.amount.trim() ? 'amount' : 'activeFrom',
+      });
       return;
     }
     const amountNum = parseDecimalNumber(d.amount);
     if (!Number.isFinite(amountNum) || amountNum < 0) {
-      showMessage('Amount must be a non-negative number', 'error');
+      setFormError({ text: 'amount must be a non-negative number', field: 'amount' });
       return;
     }
     // YYYY-MM strings compare lexicographically, so this is a real month comparison.
     if (d.activeTo && d.activeTo < d.activeFrom) {
-      showMessage('Active-to month is before active-from', 'error');
+      setFormError({ text: 'active-to month is before active-from', field: 'activeTo' });
       return;
     }
+    setFormError(null);
     try {
       await upsert.mutateAsync({
         id: existing?.id ?? 0,
@@ -424,10 +473,21 @@ function RecurringFormModal({
           employeeId: d.employeeId || 0,
         },
       });
-      showMessage('Template saved', 'success');
+      // No receipt: the list shows the saved template.
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to save template', 'error');
+      const said = errorText(e, 'failed to save template') ?? '';
+      if (isRefused(e)) {
+        setFormError({ text: said });
+        return;
+      }
+      notify({
+        sev: 'error',
+        subject: `TEMPLATE ${d.label.trim()}`,
+        text: 'not saved',
+        bad: reasonOf(e),
+        detail: said,
+      });
     }
   };
 
@@ -447,6 +507,7 @@ function RecurringFormModal({
           <input
             className={fieldCls}
             value={d.label}
+            aria-invalid={bad('label') || undefined}
             onChange={(e) => set({ label: e.target.value })}
             placeholder='e.g. Adobe CC'
           />
@@ -478,7 +539,11 @@ function RecurringFormModal({
         ) : null}
         <div className='grid grid-cols-[1fr_7rem] gap-2'>
           <Field label='amount'>
-            <AmountInput value={d.amount} onChange={(v) => set({ amount: v })} />
+            <AmountInput
+              value={d.amount}
+              invalid={bad('amount')}
+              onChange={(v) => set({ amount: v })}
+            />
           </Field>
           <Field label='currency'>
             <CurrencySelect value={d.currency} onChange={(v) => set({ currency: v })} />
@@ -486,10 +551,19 @@ function RecurringFormModal({
         </div>
         <div className='grid grid-cols-2 gap-2'>
           <Field label='active from'>
-            <MonthInput value={d.activeFrom} onChange={(v) => set({ activeFrom: v })} />
+            <MonthInput
+              value={d.activeFrom}
+              invalid={bad('activeFrom')}
+              onChange={(v) => set({ activeFrom: v })}
+            />
           </Field>
           <Field label='active to (optional)'>
-            <MonthInput value={d.activeTo} min={d.activeFrom} onChange={(v) => set({ activeTo: v })} />
+            <MonthInput
+              value={d.activeTo}
+              min={d.activeFrom}
+              invalid={bad('activeTo')}
+              onChange={(v) => set({ activeTo: v })}
+            />
           </Field>
         </div>
         <Field label='note (optional)'>
@@ -499,6 +573,7 @@ function RecurringFormModal({
             onChange={(e) => set({ note: e.target.value })}
           />
         </Field>
+        {formError && <CalloutBox tone='error'>{formError.text}</CalloutBox>}
       </div>
     </ConfirmationModal>
   );

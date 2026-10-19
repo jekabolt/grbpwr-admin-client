@@ -106,7 +106,7 @@ await Promise.all(
       const r = await runOne(id);
       results.push(r);
       console.log(
-        `${String(r.id).padEnd(12)} ${String(r.verdict).padEnd(15)} ${String(r.wallS).padStart(6)}s enc ${r.encoding ?? '-'} ${r.found ?? '?'}/${r.keyN ?? '?'} closed ${r.closed ?? 0}/${r.candidates ?? 0} pass ${r.passing ?? 0}/${r.blocks ?? 0} kinks ${r.kinks ?? '-'} autoKinks ${r.autoKinks ?? '-'}/${r.autoKinkOutlines ?? '-'}/${r.autoKinkJudged ?? '-'} wrongPassing ${r.wrongPassing}`,
+        `${String(r.id).padEnd(12)} ${String(r.verdict).padEnd(15)} ${String(r.wallS).padStart(6)}s enc ${r.encoding ?? '-'} ${r.found ?? '?'}/${r.keyN ?? '?'} closed ${r.closed ?? 0}/${r.candidates ?? 0} pass ${r.passing ?? 0}/${r.blocks ?? 0} notches ${r.notches ?? 0} kinks ${r.kinks ?? '-'} autoKinks ${r.autoKinks ?? '-'}/${r.autoKinkOutlines ?? '-'}/${r.autoKinkJudged ?? '-'} wrongPassing ${r.wrongPassing}`,
       );
     }
   }),
@@ -124,6 +124,7 @@ const total = {
   passing: sum('passing'),
   passingRight: sum('passingRight'),
   passingUnverified: sum('passingUnverified'),
+  notches: sum('notches'),
   // (4) kinks: stretches of written outlines off their own pen's lines (MOOD-DIAG Ф2)
   kinks: sum('kinks'),
   kinkOutlines: sum('kinkOutlines'),
@@ -157,7 +158,7 @@ for (const r of results)
     `${String(r.id).padEnd(12)} ${String(r.gen ?? '').padEnd(8)} ${String(r.encoding ?? '-').padEnd(14)} ${String(`${r.found ?? '?'}/${r.keyN ?? '?'}`).padStart(5)} ${String(`${r.closed ?? 0}/${r.candidates ?? 0}`).padStart(8)} ${String(`${r.passing ?? 0}/${r.blocks ?? 0}`).padStart(7)} ${String(r.passingRight ?? 0).padStart(6)} ${String(r.passingUnverified ?? 0).padStart(5)} ${String(r.wrongPassing).padStart(6)} ${String(r.kinkJudged != null ? `${r.kinks}/${r.kinkOutlines}/${r.kinkJudged}` : '-').padStart(9)} ${String(r.autoKinkJudged != null ? `${r.autoKinks}/${r.autoKinkOutlines}/${r.autoKinkJudged}` : '-').padStart(11)}${r.wrongList?.length ? `  ${r.wrongList.slice(0, 2).join(' | ')}` : ''}`,
   );
 console.log(
-  `\nTOTAL wrongPassing ${total.wrongPassing} · closed share ${total.closedShare} (${total.closed}/${total.candidates}) · passing ${total.passing}/${total.blocks} (right ${total.passingRight}, unverified ${total.passingUnverified}) · wrong but blocked ${total.wrongBlocked} · kinks ${total.kinks} in ${total.kinkOutlines}/${total.kinkJudged} outlines (passing ${total.kinksPassing}) · auto closed: kinks ${total.autoKinks} in ${total.autoKinkOutlines}/${total.autoKinkJudged}${total.timeouts ? ` · ${total.timeouts} timeout/crash` : ''}${total.unjudged.length ? ` · unjudged ${total.unjudged.length}` : ''}`,
+  `\nTOTAL wrongPassing ${total.wrongPassing} · closed share ${total.closedShare} (${total.closed}/${total.candidates}) · passing ${total.passing}/${total.blocks} (right ${total.passingRight}, unverified ${total.passingUnverified}) · notches ${total.notches} · wrong but blocked ${total.wrongBlocked} · kinks ${total.kinks} in ${total.kinkOutlines}/${total.kinkJudged} outlines (passing ${total.kinksPassing}) · auto closed: kinks ${total.autoKinks} in ${total.autoKinkOutlines}/${total.autoKinkJudged}${total.timeouts ? ` · ${total.timeouts} timeout/crash` : ''}${total.unjudged.length ? ` · unjudged ${total.unjudged.length}` : ''}`,
 );
 const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 const file = resolve(REPORTS, `${tag}-${date}.json`);

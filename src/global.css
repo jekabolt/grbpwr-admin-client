@@ -99,6 +99,10 @@
 }
 
 * {
+  /* FeatureMono ships coding ligatures under `liga` (</ -> <= >> || …) and browsers turn `liga` on by
+     default, so typed text glued pairs into one glyph that overlapped its neighbours. Every character
+     stays its own cell. */
+  font-variant-ligatures: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 
@@ -304,6 +308,16 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   opacity: 0.3;
 }
 
+/* Toast job with no known total (snackbar.tsx): a third of the 2px track shuttles across. */
+@keyframes toastShuttle {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 /* Top-bar nav dropdowns (Radix NavigationMenu.Content). A short state-conveying
    drop on open/close; disabled under reduced-motion. */
 @keyframes navDropdownIn {
@@ -363,9 +377,33 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 .drawer-panel[data-state='closed'] {
   animation: drawerOut 140ms ease-in;
 }
+@keyframes drawerBottomIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes drawerBottomOut {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+.drawer-panel-bottom[data-state='open'] {
+  animation: drawerBottomIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.drawer-panel-bottom[data-state='closed'] {
+  animation: drawerBottomOut 140ms ease-in;
+}
 @media (prefers-reduced-motion: reduce) {
   .drawer-panel[data-state='open'],
-  .drawer-panel[data-state='closed'] {
+  .drawer-panel[data-state='closed'],
+  .drawer-panel-bottom[data-state='open'],
+  .drawer-panel-bottom[data-state='closed'] {
     animation: none;
   }
 }

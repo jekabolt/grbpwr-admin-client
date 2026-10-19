@@ -6,7 +6,7 @@ import {
   techCardKeys,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
@@ -485,7 +485,6 @@ export function ColourwayProposals({
   const setVerdict = useDraftMemory((s) => s.setVerdict);
   const patchProposal = useDraftMemory((s) => s.patchProposal);
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { data: techCard } = useTechCard(techCardId);
   const { confirm, writeColours, pending } = useConfirmColourway(techCardId);
   const qc = useQueryClient();
@@ -717,7 +716,12 @@ export function ColourwayProposals({
         { throwOnError: true },
       );
     } catch {
-      showMessage('the card could not be re-read — try again', 'error');
+      notify({
+        sev: 'error',
+        subject: 'COLOURWAY',
+        text: 'not re-read',
+        detail: 'the card could not be re-read — try again',
+      });
     } finally {
       setRereading(false);
     }
@@ -908,14 +912,20 @@ export function ColourwayProposals({
                               );
                               setVerdict(techCardId, p.id, v);
                               const half = v.status === 'confirmed' && !!v.recipeFailed;
-                              showMessage(
-                                half
-                                  ? 'colourway created — its slot colours did not save'
-                                  : 'colourway created',
-                                half ? 'error' : 'success',
-                              );
+                              if (half)
+                                notify({
+                                  sev: 'warn',
+                                  subject: 'COLOURWAY',
+                                  text: 'created',
+                                  bad: 'slot colours not saved',
+                                });
                             } catch (e) {
-                              showMessage(createColorwayErrorMessage(e), 'error');
+                              notify({
+                                sev: 'error',
+                                subject: 'COLOURWAY',
+                                text: 'not created',
+                                detail: createColorwayErrorMessage(e),
+                              });
                             } finally {
                               setBusy(null);
                             }

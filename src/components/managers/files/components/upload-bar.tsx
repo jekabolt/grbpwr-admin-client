@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDockBottom } from 'hooks/useDockBottom';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -63,25 +64,6 @@ const PILL_TONE = {
   ink: 'ink',
   plain: 'mut',
 } as const;
-
-/**
- * Занятый полосой низ экрана, объявленный всей странице.
- *
- * Прецедент — док очереди медиа (`pending-media-plate.tsx`): отступ `body` поднимает то, что
- * лежит в потоке, а `--dock-bottom-h` + `data-dock-bottom` поднимают прилипшее к низу вьюпорта
- * (правило в `global.css`). Без второго полоса группового выбора файлов — `sticky bottom-0` —
- * ушла бы под эту полосу вместе со всеми своими кнопками.
- */
-function setInset(px: string) {
-  document.body.style.paddingBottom = px;
-  if (px) {
-    document.body.style.setProperty('--dock-bottom-h', px);
-    document.body.dataset.dockBottom = '';
-  } else {
-    document.body.style.removeProperty('--dock-bottom-h');
-    delete document.body.dataset.dockBottom;
-  }
-}
 
 /** Мини-кадр строки: расширение, а не превью. Превью живёт в движке и наружу не выдаётся. */
 function RowMini({ row }: { row: QueueRow }) {
@@ -265,24 +247,8 @@ export function FilesUploadBar({
   // Меряется РАССТОЯНИЕ ОТ НИЗА ОКНА, а не высота узла: свёрнутая до кнопки «показать
   // загрузку» полоса висит в 10px над краем, и по высоте кнопки полоса выделения всё равно
   // ложилась бы поверх неё.
-  useLayoutEffect(() => {
-    const node = dockRef.current;
-    if (!node) {
-      setInset('');
-      return;
-    }
-    const apply = () =>
-      setInset(
-        `${Math.max(0, Math.round(window.innerHeight - node.getBoundingClientRect().top))}px`,
-      );
-    apply();
-    const observer = new ResizeObserver(apply);
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      setInset('');
-    };
-  }, [collapsed, hidden, rows.length]);
+  // Same rule as the media dock (`pending-media-plate.tsx`); `lift` raises sticky bars too.
+  useDockBottom(dockRef, [collapsed, hidden, rows.length], { lift: true });
 
   // СТРАЖ ЗАКРЫТИЯ ВКЛАДКИ переехал В СТОР (`lib/stores/upload-queue`): здесь он защищал
   // только тех, кто не уходил с двух экранов раздела, — то есть как раз не тот случай,

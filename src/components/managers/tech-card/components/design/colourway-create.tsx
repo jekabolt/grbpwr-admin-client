@@ -1,16 +1,12 @@
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { ConfirmationModal } from 'ui';
 
 import type { TechCardFormData } from '../schema';
-import {
-  ColourwayPaletteEditor,
-  emptyPaletteValue,
-  type PaletteValue,
-} from '../colourway-palette';
+import { ColourwayPaletteEditor, emptyPaletteValue, type PaletteValue } from '../colourway-palette';
 import { nameI18nPatch, paletteRefusal, paletteToWire } from '../colourway-palette-model';
 import { createColorwayErrorMessage, useCreateColorway } from '../useColorwayRecipe';
 import { createRefusal, normalizeColourwayName } from './colourway-create-model';
@@ -96,7 +92,6 @@ export function ColourwayCreatePopover({
 
   const { data: techCard } = useTechCard(techCardId);
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const create = useCreateColorway(techCardId);
 
   const [value, setValue] = useState<PaletteValue>(() => seed ?? emptyPaletteValue());
@@ -152,9 +147,7 @@ export function ColourwayCreatePopover({
   const takenNames = useMemo(
     () =>
       new Set(
-        colorways
-          .map((c) => normalizeColourwayName(c.devName || c.colorCode))
-          .filter(Boolean),
+        colorways.map((c) => normalizeColourwayName(c.devName || c.colorCode)).filter(Boolean),
       ),
     [colorways],
   );
@@ -210,7 +203,6 @@ export function ColourwayCreatePopover({
       });
       const colorwayId = res?.colorwayId ?? 0;
       if (!colorwayId) throw new Error('the server created no colourway id');
-      showMessage('colourway created', 'success');
       clear();
       onOpenChange(false);
       /* ⚠ ЦЕЛЬ ВСТАЁТ НА НОВЫЙ КОЛОРВЕЙ ТОЛЬКО ПОТОМУ, ЧТО `useCreateColorway.onSuccess` ВОЗВРАЩАЕТ

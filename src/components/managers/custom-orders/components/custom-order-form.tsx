@@ -10,8 +10,9 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { getFilteredSizes } from 'components/managers/product/utility/sizes';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo } from 'react';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
+import { useEffect, useMemo, useState } from 'react';
 import type { Resolver } from 'react-hook-form';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
@@ -72,8 +73,9 @@ export function CustomOrderForm({
   onSuccess,
 }: CustomOrderFormProps) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { canWrite } = usePermissions();
+  // A refusal of what was filled in stands over the action bar until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
   const currency = dictionary?.baseCurrency || '';
   const navigate = useNavigate();
 
@@ -108,6 +110,7 @@ export function CustomOrderForm({
     const billingAddress = data.billingSameAsShipping
       ? { ...data.shippingAddress }
       : data.billingAddress;
+    setFormError(null);
     try {
       // R2/p021: a custom-order line references a variant now. The picker yields colourways (no
       // variants), and the form tracks the chosen size per line, so resolve size_id -> variant_id per
@@ -117,7 +120,7 @@ export function CustomOrderForm({
         const full = await adminService.GetColorwayByID({ colorwayId: item.productId });
         const variant = full.colorway?.variants?.find((v) => v.sizeId === item.sizeId);
         if (!variant?.variantId) {
-          showMessage('Selected size is not an available variant of the product', 'error');
+          setFormError('a selected size is not a variant of its product');
           return;
         }
         items.push({
@@ -135,14 +138,16 @@ export function CustomOrderForm({
         buyerVatId: data.buyerVatId?.trim() || undefined,
       } as CreateCustomOrderRequest;
       const response = await adminService.CreateCustomOrder(payload);
-      showMessage('Custom order created successfully', 'success');
+      // Opening the new order is the receipt.
       onSuccess?.();
       if (response.order?.uuid) {
         navigate(`${ROUTES.orders}/${response.order.uuid}`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create order';
-      showMessage(msg, 'error');
+      // Money path: no retry action — a lost response may still have created the order.
+      if (failureClassOfError(e) === 'refused') setFormError(msg);
+      else notify({ sev: 'error', subject: 'CUSTOM ORDER', text: 'not created', detail: msg });
     }
   };
 
@@ -257,6 +262,14 @@ export function CustomOrderForm({
                 />
               </div>
             </Section>
+
+            {formError && (
+              <CalloutBox tone='error'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not created</b> · {formError}
+                </Text>
+              </CalloutBox>
+            )}
 
             {/* action bar — sticky chrome, not a floating slab */}
             {canCreate && (

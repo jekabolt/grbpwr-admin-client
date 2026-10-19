@@ -1,4 +1,5 @@
 import { revealField } from 'utils/field-errors';
+import { notify } from 'lib/stores/store';
 
 import { studioSwitchSolo } from './history-recall';
 
@@ -38,9 +39,14 @@ export function benchDoor(slot: { viewKey?: string; id?: number }): string {
  * карточка). Молчаливый неуспех здесь читался бы как сломанная кнопка, а не как «оно на другой
  * вкладке».
  */
-export function openDoor(path: string, where: string, say: (m: string, t: 'error') => void): void {
+export function openDoor(path: string, where: string): void {
   if (revealField(path)) return;
-  say(`${where} — it is not on this tab`, 'error');
+  sayElsewhere(where);
+}
+
+/** The door has no field on screen: the one place left to say where it is. */
+function sayElsewhere(where: string): void {
+  notify({ sev: 'error', subject: 'FIELD', text: 'not on this tab', detail: where });
 }
 
 /**
@@ -71,7 +77,6 @@ export function openDoorAcrossKind(
   path: string,
   needKind: 'flat' | 'render' | 'threed',
   where: string,
-  say: (m: string, t: 'error') => void,
   close?: () => void,
 ): void {
   close?.();
@@ -79,7 +84,7 @@ export function openDoorAcrossKind(
 
   const sw = studioSwitchSolo();
   if (!sw || sw.kind === needKind) {
-    say(`${where} — it is not on this tab`, 'error');
+    sayElsewhere(where);
     return;
   }
   sw.go(needKind);
@@ -90,7 +95,7 @@ export function openDoorAcrossKind(
   const tick = (): void => {
     if (revealField(path)) return;
     if (--left <= 0) {
-      say(`${where} — it is not on this tab`, 'error');
+      sayElsewhere(where);
       return;
     }
     requestAnimationFrame(tick);

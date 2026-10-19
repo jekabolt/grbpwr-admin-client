@@ -1,6 +1,6 @@
 import { common_MediaFull, common_ColorwayFull } from 'api/proto-http/admin';
 import { MediaGallerySelector } from 'components/managers/media/components/media-gallery-selector';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { Control, useController } from 'react-hook-form';
 import { ProductFormData } from '../utility/schema';
@@ -18,7 +18,6 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
     control,
   });
   const [mediaAds, setMediaAds] = useState<common_MediaFull[]>([]);
-  const { showMessage } = useSnackBarStore();
   const productMedia = product?.media || [];
 
   const mediaById = new Map<number, common_MediaFull>(
@@ -43,12 +42,12 @@ export function MediaAds({ product, control, clearKey, editMode }: Props) {
     if (!uniqueMediaAds.length) {
       // Нативный `alert()` — чужая по языку и по виду коробка, которую ещё надо закрыть кнопкой
       // «ОК». Вся остальная подсистема отвечает тостом, отвечаем им же.
-      showMessage(
-        mediaAds.length === 1
-          ? 'this frame is already in the gallery'
-          : 'these frames are already in the gallery',
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: 'GALLERY',
+        text: 'not added',
+        bad: mediaAds.length === 1 ? 'already there' : 'all already there',
+      });
       return;
     }
     setMediaAds((prevMediaAds) => [...prevMediaAds, ...uniqueMediaAds]);

@@ -1,6 +1,6 @@
 import { AssigneeSelect } from 'components/managers/tasks/components/assignee-select';
 import { useEffect, useRef, useState } from 'react';
-import { Button, Text, Textarea } from 'ui';
+import { Button, Text, Textarea, useDoneFlash } from 'ui';
 import { FulfillmentAnnotation as AnnotationModel } from '../api/types';
 import { useSetFulfillmentAssignee, useSetFulfillmentNotes } from '../hooks/useFulfillment';
 import { FulfillmentChecklist } from './fulfillment-checklist';
@@ -18,6 +18,7 @@ export function FulfillmentAnnotation({
   const orderUuid = annotation.orderUuid;
   const setAssignee = useSetFulfillmentAssignee(orderUuid);
   const setNotes = useSetFulfillmentNotes(orderUuid);
+  const notesSaved = useDoneFlash();
 
   const [notes, setNotesDraft] = useState(annotation.notes);
   const baselineUuid = useRef(annotation.orderUuid);
@@ -47,9 +48,7 @@ export function FulfillmentAnnotation({
           <AssigneeSelect value={annotation.assignee} onChange={(u) => setAssignee.mutate(u)} />
         ) : (
           <Text size='micro' component='span'>
-            {annotation.assignee || (
-              <span className='text-labelColor'>unassigned</span>
-            )}
+            {annotation.assignee || <span className='text-labelColor'>unassigned</span>}
           </Text>
         )}
       </label>
@@ -77,7 +76,8 @@ export function FulfillmentAnnotation({
               className='self-end'
               loading={setNotes.isPending}
               disabled={!notesDirty}
-              onClick={() => setNotes.mutate(notes)}
+              done={notesSaved.on}
+              onClick={() => setNotes.mutate(notes, { onSuccess: notesSaved.flash })}
             >
               save notes
             </Button>
@@ -93,7 +93,11 @@ export function FulfillmentAnnotation({
         )}
       </div>
 
-      <FulfillmentChecklist orderUuid={orderUuid} items={annotation.checklist} canWrite={canWrite} />
+      <FulfillmentChecklist
+        orderUuid={orderUuid}
+        items={annotation.checklist}
+        canWrite={canWrite}
+      />
     </div>
   );
 }

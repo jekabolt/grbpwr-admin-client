@@ -105,7 +105,7 @@ declare global {
 let root: Root | null = null;
 window.__pg = {
   mount: (band) => {
-    useSnackBarStore.setState({ alerts: [] });
+    useSnackBarStore.setState({ toasts: [] });
     root?.unmount();
     const host = document.getElementById('root')!;
     root = createRoot(host);
@@ -137,5 +137,5 @@ window.__pg = {
   },
   raw: (input) => rawStart?.(input),
   recall: (run, threedRetired) => recallDesignRun(CARD, run, 'input', !!threedRetired),
-  alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
+  alerts: () => useSnackBarStore.getState().toasts.map((a) => a.message),
 };

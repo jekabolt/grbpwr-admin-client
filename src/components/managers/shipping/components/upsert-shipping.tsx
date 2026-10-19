@@ -7,10 +7,20 @@ import {
 } from 'api/proto-http/admin';
 import { CarrierPrices } from 'components/managers/settings/components/carrier-prices';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { GroupLabel, Form, InputField, TextareaField, ToggleField, ToggleGroupField } from 'ui';
+import {
+  CalloutBox,
+  GroupLabel,
+  Form,
+  InputField,
+  Text,
+  TextareaField,
+  ToggleField,
+  ToggleGroupField,
+} from 'ui';
 import { shippingSchema, ShippingSchema, transformDictionaryToShipping } from './schema';
 import { UpsertShippingModal } from './upsert-modal';
 
@@ -30,7 +40,6 @@ const ALLOWED_REGIONS: { value: common_ShippingRegion; label: string }[] = [
 
 export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) {
   const { dictionary, refetch } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const [isLoading, setIsLoading] = useState(false);
 
   const initialValues = useMemo(
@@ -47,7 +56,15 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
     form.reset(initialValues);
   }, [form, initialValues]);
 
+  // A refused save stands in the dialog until the next attempt.
+  const [formError, setFormError] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setFormError(null);
+  }, [open]);
+
+  // No receipt: the dialog closing and the carrier list changing are it.
   const onSubmit: SubmitHandler<ShippingSchema> = async (data: ShippingSchema) => {
+    setFormError(null);
     try {
       setIsLoading(true);
       const { from, to, autoDeliverAfterHours, ...rest } = data;
@@ -61,18 +78,27 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
           ...(payload as unknown as Omit<UpdateShipmentCarrierRequest, 'id'>),
           id,
         });
-        showMessage('Shipping updated successfully', 'success');
       } else {
         await adminService.AddShipmentCarrier({
           ...(payload as unknown as AddShipmentCarrierRequest),
         });
-        showMessage('Shipping created successfully', 'success');
       }
       await refetch();
       onOpenChange(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to save shipping';
-      showMessage(msg, 'error');
+      if (failureClassOfError(e) === 'refused') setFormError(msg);
+      else
+        notify({
+          sev: 'error',
+          subject: `CARRIER ${data.carrier || id || ''}`.trim(),
+          text: 'not saved',
+          detail: msg,
+          action:
+            failureClassOfError(e) === 'transient'
+              ? { label: 'retry', onClick: () => void onSubmit(data) }
+              : undefined,
+        });
       console.error('Failed to save shipping', e);
     } finally {
       setIsLoading(false);
@@ -87,6 +113,13 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
     >
       <Form {...form}>
         <form>
+          {formError && (
+            <CalloutBox tone='error' className='mb-4'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not saved</b> · {formError}
+              </Text>
+            </CalloutBox>
+          )}
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-10 h-full'>
             <div className='flex flex-col gap-6'>
               <InputField name='carrier' label='Carrier *' />

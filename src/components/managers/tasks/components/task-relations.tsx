@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
+  AddDoor,
   Button,
   Close,
   Combobox,
@@ -23,7 +24,7 @@ import {
 } from '../hooks/useTasks';
 import { emptyTaskInsert } from '../api/types';
 import { BOARD_LABEL, STATUS_LABEL } from '../utils/meta';
-import { openBlockers, RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relations';
+import { RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relations';
 
 /**
  * САБТАСКИ, БЛОКЕРЫ И СВЯЗИ — ОДИН БЛОК НА ДЕТАЛЬНОЙ СТРАНИЦЕ.
@@ -167,7 +168,76 @@ function TaskCombobox({
   );
 }
 
-export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolean }) {
+/** Дети карточки — фильтр того же списка (см. довод в `TaskRelations`). */
+function useChildren(taskId: number) {
+  const childFilter = useMemo(() => ({ parentTaskId: taskId }), [taskId]);
+  const { data } = useTasks(childFilter);
+  return data?.tasks ?? EMPTY_TASKS;
+}
+
+const EMPTY_TASKS: Task[] = [];
+
+/**
+ * ПИКЕР РОДИТЕЛЯ — живёт в меню «⋯» страницы (detail v2): ставить родителя — редкое действие, и
+ * всегда открытое поле «make this a subtask of…» в блоке связей было шумом на каждой карточке.
+ * Тот же пикер и та же мутация, что стояли здесь; меняется только дверь к ним.
+ */
+export function ParentPicker({ task, onDone }: { task: Task; onDone: () => void }) {
+  const setParent = useSetTaskParent();
+  const children = useChildren(task.id);
+
+  // Нельзя предложить себя (петля) и собственных детей.
+  const exclude = useMemo(() => {
+    const s = new Set<number>([task.id]);
+    for (const c of children) s.add(c.id);
+    return s;
+  }, [task.id, children]);
+
+  return (
+    <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
+      <TaskCombobox
+        placeholder='make this a subtask of…'
+        exclude={exclude}
+        onPick={(id) =>
+          setParent.mutate({ id: task.id, parentTaskId: id }, { onSuccess: () => onDone() })
+        }
+      />
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        className='min-h-11 sm:min-h-0'
+        onClick={onDone}
+      >
+        cancel
+      </Button>
+    </div>
+  );
+}
+
+type Editor = 'subtask' | 'relation' | null;
+
+/** Подпись группы внутри блока — тот же микро-капс, что у соседних групп. */
+function GroupWord({ children }: { children: React.ReactNode }) {
+  return (
+    <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+      {children}
+    </Text>
+  );
+}
+
+export function TaskRelations({
+  task,
+  canWrite,
+  doors,
+  className,
+}: {
+  task: Task;
+  canWrite: boolean;
+  /** Чужие двери в тот же ряд (`+ file` у пустых вложений) — один ряд «+ …» на страницу. */
+  doors?: React.ReactNode;
+  className?: string;
+}) {
   const setParent = useSetTaskParent();
   const addRelation = useAddTaskRelation();
   const deleteRelation = useDeleteTaskRelation();
@@ -175,6 +245,12 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
 
   const [kind, setKind] = useState<TaskRelationKind>('TASK_LINK_KIND_BLOCKED_BY');
   const [subtitle, setSubtitle] = useState('');
+  /**
+   * ФОРМЫ ОТКРЫВАЮТСЯ ДВЕРЬЮ (detail v2). Пустая группа не рисует свою форму — вместо неё один
+   * ряд «+ subtask / + blocker / + link»; нажатие открывает ту самую форму, что стояла здесь
+   * всегда открытой.
+   */
+  const [editor, setEditor] = useState<Editor>(null);
 
   // РОДИТЕЛЬ. Единственное место, где приходится сходить за вторым концом: на проводе у него
   // только номер. `useTask` сам не стреляет при нуле.
@@ -182,29 +258,19 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
 
   // ДЕТИ — ФИЛЬТР ТОГО ЖЕ СПИСКА, А НЕ НОВЫЙ RPC: тот же ответ, просто суженный, и он обязан
   // идти под тем же правом на раздел, что и доска.
-  const childFilter = useMemo(() => ({ parentTaskId: task.id }), [task.id]);
-  const { data: childData } = useTasks(childFilter);
-  const children = childData?.tasks ?? [];
+  const children = useChildren(task.id);
 
-  const blockers = openBlockers(task.relations);
-
-  // Кого нельзя предложить: себя (петля), уже связанных ЭТИМ видом (повтор — no-op, то есть
-  // щелчок без последствий) и собственного родителя с детьми у пикера родителя.
+  // Кого нельзя предложить: себя (петля) и уже связанных ЭТИМ видом (повтор — no-op, то есть
+  // щелчок без последствий).
   const excludeForKind = useMemo(() => {
     const s = new Set<number>([task.id]);
     for (const r of relationsOfKind(task.relations, kind)) s.add(r.taskId);
     return s;
   }, [task.id, task.relations, kind]);
 
-  const excludeForParent = useMemo(() => {
-    const s = new Set<number>([task.id]);
-    for (const c of children) s.add(c.id);
-    return s;
-  }, [task.id, children]);
-
   async function addSubtask() {
     const title = subtitle.trim();
-    if (!title) return;
+    if (!title || createTask.isPending) return;
     try {
       await createTask.mutateAsync({
         // Сабтаска РОЖДАЕТСЯ НА ТОЙ ЖЕ ДОСКЕ, что родитель, и в первой рабочей колонке.
@@ -221,25 +287,58 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
     }
   }
 
+  function closeEditor() {
+    setEditor(null);
+    setSubtitle('');
+  }
+
+  function openRelation(k: TaskRelationKind) {
+    setKind(k);
+    setEditor('relation');
+  }
+
   const busy = addRelation.isPending || deleteRelation.isPending || setParent.isPending;
 
+  const hasParent = task.parentTaskId > 0;
+  const showSubtasks = children.length > 0 || editor === 'subtask';
+  const showRelations = task.relations.length > 0 || editor === 'relation';
+  const hasContent = hasParent || showSubtasks || showRelations;
+
+  if (!hasContent && !canWrite) return null;
+
+  const doorClass = 'min-h-11 sm:min-h-0';
+  const doorRow = canWrite && (
+    <div className='flex flex-wrap gap-2'>
+      <AddDoor shape='inline' className={doorClass} onClick={() => setEditor('subtask')}>
+        subtask
+      </AddDoor>
+      <AddDoor
+        shape='inline'
+        className={doorClass}
+        onClick={() => openRelation('TASK_LINK_KIND_BLOCKED_BY')}
+      >
+        blocker
+      </AddDoor>
+      <AddDoor
+        shape='inline'
+        className={doorClass}
+        onClick={() => openRelation('TASK_LINK_KIND_RELATES')}
+      >
+        link
+      </AddDoor>
+      {doors}
+    </div>
+  );
+
+  // Пусто: блок — один ряд дверей, без заголовка над пустотой.
+  if (!hasContent) return <Section className={className}>{doorRow}</Section>;
+
   return (
-    <Section
-      title='subtasks & links'
-      question={
-        blockers.length ? (
-          <Text size='micro' component='span' className='text-error'>
-            waiting on {blockers.length} unfinished {blockers.length === 1 ? 'task' : 'tasks'}
-          </Text>
-        ) : undefined
-      }
-    >
-      {/* ── РОДИТЕЛЬ ───────────────────────────────────────────────────────────────────── */}
-      <div className='flex flex-col gap-1'>
-        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          parent
-        </Text>
-        {task.parentTaskId > 0 ? (
+    <Section title='subtasks & links' className={className}>
+      {/* ── РОДИТЕЛЬ — только когда он есть; поставить его — пункт меню «⋯». ─────────────── */}
+      {hasParent && (
+        <div className='flex flex-col gap-1'>
+          <GroupWord>parent</GroupWord>
           <TaskRow
             id={task.parentTaskId}
             title={parent?.task.title ?? `#${task.parentTaskId}`}
@@ -252,156 +351,160 @@ export function TaskRelations({ task, canWrite }: { task: Task; canWrite: boolea
             removeLabel='detach from parent'
             removing={busy}
           />
-        ) : canWrite ? (
-          <TaskCombobox
-            placeholder='make this a subtask of…'
-            exclude={excludeForParent}
-            onPick={(id) => setParent.mutate({ id: task.id, parentTaskId: id })}
-          />
-        ) : (
-          <Text size='micro' variant='label' component='span'>
-            top level
-          </Text>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── ДЕТИ ───────────────────────────────────────────────────────────────────────── */}
-      <div className='flex flex-col gap-1 border-t border-hairline pt-2.5'>
-        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          subtasks{task.subtaskTotal ? ` · ${task.subtaskDone}/${task.subtaskTotal}` : ''}
-        </Text>
-        {children.length === 0 ? (
-          <Text size='micro' variant='label' component='span'>
-            none yet
-          </Text>
-        ) : (
-          <div className='flex flex-col'>
-            {children.map((c) => (
-              <TaskRow
-                key={c.id}
-                id={c.id}
-                title={c.task.title}
-                status={STATUS_LABEL[c.status]}
-                archived={!!c.archivedAt}
-                muted={c.status === 'TASK_STATUS_DONE' || !!c.archivedAt}
-                onRemove={
-                  canWrite ? () => setParent.mutate({ id: c.id, parentTaskId: 0 }) : undefined
-                }
-                removeLabel={`detach subtask ${c.task.title}`}
-                removing={busy}
+      {showSubtasks && (
+        <div className='flex flex-col gap-1'>
+          <GroupWord>
+            subtasks{task.subtaskTotal ? ` · ${task.subtaskDone}/${task.subtaskTotal}` : ''}
+          </GroupWord>
+          {children.length > 0 && (
+            <div className='flex flex-col'>
+              {children.map((c) => (
+                <TaskRow
+                  key={c.id}
+                  id={c.id}
+                  title={c.task.title}
+                  status={STATUS_LABEL[c.status]}
+                  archived={!!c.archivedAt}
+                  muted={c.status === 'TASK_STATUS_DONE' || !!c.archivedAt}
+                  onRemove={
+                    canWrite ? () => setParent.mutate({ id: c.id, parentTaskId: 0 }) : undefined
+                  }
+                  removeLabel={`detach subtask ${c.task.title}`}
+                  removing={busy}
+                />
+              ))}
+            </div>
+          )}
+          {canWrite && editor === 'subtask' && (
+            <div className='flex flex-col items-stretch gap-2 pt-1 sm:flex-row sm:items-center'>
+              <Input
+                name='new-subtask'
+                aria-label='new subtask title'
+                placeholder='add a subtask…'
+                value={subtitle}
+                disabled={createTask.isPending}
+                autoFocus
+                className='min-h-11 sm:min-h-0'
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtitle(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  // Enter и Escape сравниваются по `e.key` сознательно: они не буквы и на любой
+                  // раскладке приезжают одними и теми же именами.
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addSubtask();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeEditor();
+                  }
+                }}
               />
-            ))}
-          </div>
-        )}
-        {canWrite && (
-          <div className='flex flex-col items-stretch gap-2 pt-1 sm:flex-row sm:items-center'>
-            <Input
-              name='new-subtask'
-              aria-label='new subtask title'
-              placeholder='add a subtask…'
-              value={subtitle}
-              disabled={createTask.isPending}
-              className='min-h-11 sm:min-h-0'
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtitle(e.target.value)}
-              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                // Enter и Escape сравниваются по `e.key` сознательно: они не буквы и на любой
-                // раскладке приезжают одними и теми же именами.
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addSubtask();
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  setSubtitle('');
-                }
-              }}
-            />
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='min-h-11 sm:min-h-0'
-              loading={createTask.isPending}
-              disabled={!subtitle.trim()}
-              onClick={addSubtask}
-            >
-              add
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* ── СВЯЗИ ──────────────────────────────────────────────────────────────────────── */}
-      <div className='flex flex-col gap-2 border-t border-hairline pt-2.5'>
-        {RELATION_KINDS.map((k) => {
-          const rows = relationsOfKind(task.relations, k);
-          if (rows.length === 0) return null;
-          return (
-            <div key={k} className='flex flex-col gap-1'>
-              <Text
-                size='micro'
-                variant='label'
-                tracking='label'
-                component='span'
-                className='uppercase'
-              >
-                {RELATION_LABEL[k]}
-              </Text>
-              <div className='flex flex-col'>
-                {rows.map((r: TaskRelation) => (
-                  <TaskRow
-                    key={`${k}-${r.taskId}`}
-                    id={r.taskId}
-                    title={r.title}
-                    status={STATUS_LABEL[r.status]}
-                    board={BOARD_LABEL[r.board]}
-                    archived={r.archived}
-                    muted={r.status === 'TASK_STATUS_DONE'}
-                    onRemove={
-                      canWrite
-                        ? () =>
-                            deleteRelation.mutate({
-                              taskId: task.id,
-                              otherTaskId: r.taskId,
-                              kind: k,
-                            })
-                        : undefined
-                    }
-                    removeLabel={`remove link to ${r.title || `#${r.taskId}`}`}
-                    removing={busy}
-                  />
-                ))}
+              <div className='flex items-center gap-2'>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  className='min-h-11 sm:min-h-0'
+                  loading={createTask.isPending}
+                  disabled={!subtitle.trim()}
+                  onClick={addSubtask}
+                >
+                  add
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  className='min-h-11 sm:min-h-0'
+                  onClick={closeEditor}
+                >
+                  cancel
+                </Button>
               </div>
             </div>
-          );
-        })}
+          )}
+        </div>
+      )}
 
-        {canWrite && (
-          <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
-            {/* Три пункта, все три ВСЕГДА среди items: значение, которого нет в списке, скрытый
-                нативный select у Radix стирает — а стирать здесь нечего, потому что стартовое
-                значение тоже из этого списка. */}
-            <Select
-              name='relation-kind'
-              items={kindOptions}
-              value={kind}
-              onValueChange={(v: string) => setKind(v as TaskRelationKind)}
-              className='min-h-11 w-full shrink-0 sm:min-h-0 sm:w-36'
-            />
-            <TaskCombobox
-              placeholder='link a task…'
-              exclude={excludeForKind}
-              onPick={(id) => addRelation.mutate({ taskId: task.id, otherTaskId: id, kind })}
-            />
-          </div>
-        )}
+      {/* ── СВЯЗИ ──────────────────────────────────────────────────────────────────────── */}
+      {showRelations && (
+        <div className='flex flex-col gap-2'>
+          {RELATION_KINDS.map((k) => {
+            const rows = relationsOfKind(task.relations, k);
+            if (rows.length === 0) return null;
+            return (
+              <div key={k} className='flex flex-col gap-1'>
+                <GroupWord>{RELATION_LABEL[k]}</GroupWord>
+                <div className='flex flex-col'>
+                  {rows.map((r: TaskRelation) => (
+                    <TaskRow
+                      key={`${k}-${r.taskId}`}
+                      id={r.taskId}
+                      title={r.title}
+                      status={STATUS_LABEL[r.status]}
+                      board={BOARD_LABEL[r.board]}
+                      archived={r.archived}
+                      muted={r.status === 'TASK_STATUS_DONE'}
+                      onRemove={
+                        canWrite
+                          ? () =>
+                              deleteRelation.mutate({
+                                taskId: task.id,
+                                otherTaskId: r.taskId,
+                                kind: k,
+                              })
+                          : undefined
+                      }
+                      removeLabel={`remove link to ${r.title || `#${r.taskId}`}`}
+                      removing={busy}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
 
-        {!canWrite && task.relations.length === 0 && (
-          <Text size='micro' variant='label' component='span'>
-            no linked tasks
-          </Text>
-        )}
-      </div>
+          {canWrite && editor === 'relation' && (
+            <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
+              {/* Три пункта, все три ВСЕГДА среди items: значение, которого нет в списке, скрытый
+                  нативный select у Radix стирает — а стирать здесь нечего, потому что стартовое
+                  значение тоже из этого списка. */}
+              <Select
+                name='relation-kind'
+                items={kindOptions}
+                value={kind}
+                onValueChange={(v: string) => setKind(v as TaskRelationKind)}
+                className='min-h-11 w-full shrink-0 sm:min-h-0 sm:w-36'
+              />
+              <TaskCombobox
+                placeholder='link a task…'
+                exclude={excludeForKind}
+                onPick={(id) =>
+                  addRelation.mutate(
+                    { taskId: task.id, otherTaskId: id, kind },
+                    { onSuccess: () => setEditor(null) },
+                  )
+                }
+              />
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className='min-h-11 sm:min-h-0'
+                onClick={closeEditor}
+              >
+                cancel
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {doorRow}
     </Section>
   );
 }

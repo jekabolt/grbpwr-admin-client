@@ -21,15 +21,15 @@ import {
   createQueue,
   hasLiveUploads,
   inheritTopics,
+  isLive,
   isSettled,
-  tally,
   type BatchTopics,
   type QueueRow,
   type QueueState,
 } from 'components/managers/files/upload/queue';
-import { batchSummary } from 'components/managers/files/upload/text';
+import { uploadJob } from 'components/managers/files/upload/text';
 import { browserUploadTransport } from 'components/managers/files/upload/transport';
-import { useSnackBarStore } from './store';
+import { notify, removeNotify, updateNotify } from './store';
 
 export interface UploadQueueStore {
   queue: QueueState;
@@ -109,32 +109,81 @@ export function noteUploadBarMounted(): () => void {
   };
 }
 
-let wasLive = false;
+/* ONE JOB PER BATCH. A batch starts when the queue goes live and ends when it settles; it holds
+   the rows that were new or went live in between (a retried old row too), not the whole queue. */
+interface Batch {
+  key: string;
+  prior: Set<string>;
+  touched: Set<string>;
+  /** Last text + progress sent: XHR ticks that change nothing are dropped. */
+  said: string;
+}
+let batch: Batch | null = null;
+let batchNo = 0;
+/** RETRY reuses its notification: the inbox keeps one entry per batch. */
+let retryKey: string | null = null;
 
-function announceSettled(queue: QueueState): void {
-  if (hasLiveUploads(queue)) {
-    wasLive = true;
+function trackJob(queue: QueueState): void {
+  const live = hasLiveUploads(queue);
+  if (!batch) {
+    if (!live) return;
+    batch = {
+      key: retryKey ?? `upload-${(batchNo += 1)}`,
+      prior: new Set(queue.rows.filter((r) => !isLive(r.status)).map((r) => r.id)),
+      touched: new Set(),
+      said: '',
+    };
+    retryKey = null;
+  }
+  const b = batch;
+  for (const r of queue.rows) if (isLive(r.status)) b.touched.add(r.id);
+  const rows = queue.rows.filter((r) => !b.prior.has(r.id) || b.touched.has(r.id));
+  const { collapsed, hidden, topicNames } = useUploadQueueStore.getState();
+  // No toast while the expanded bar already prints it; the inbox gets the job either way.
+  const toast = !(barsMounted > 0 && !collapsed && !hidden);
+
+  if (live) {
+    const { input } = uploadJob(rows, []);
+    const said = `${input.text}|${Math.round((input.progress ?? 0) * 50)}`;
+    if (said === b.said) return;
+    const first = !b.said;
+    b.said = said;
+    if (first) notify({ ...input, key: b.key }, { toast });
+    else updateNotify(b.key, input, { toast });
     return;
   }
-  if (!wasLive) return;
-  wasLive = false;
-  if (!queue.rows.length) return;
-  const { collapsed, hidden, topicNames } = useUploadQueueStore.getState();
-  const readable = barsMounted > 0 && !collapsed && !hidden;
-  if (readable) return;
+
+  batch = null;
+  // Nothing settled (all cancelled, dismissed, reset): drop the job, or it spins forever.
+  if (!rows.length) {
+    removeNotify(b.key);
+    return;
+  }
   const union = inheritTopics(
-    queue.rows.flatMap((r) => r.topicIds),
-    queue.rows.flatMap((r) => r.newTopics),
+    rows.flatMap((r) => r.topicIds),
+    rows.flatMap((r) => r.newTopics),
   );
-  const labels = [
-    ...union.topicIds.map((id) => topicNames[id] ?? `#${id}`),
-    ...union.newTopics,
-  ];
-  const t = tally(queue);
-  // Тон по факту, а не по намерению: пачка, где половина не уехала, «успехом» не была.
-  useSnackBarStore
-    .getState()
-    .showMessage(batchSummary(queue, labels), t.lost + t.fail ? 'error' : 'success');
+  const labels = [...union.topicIds.map((id) => topicNames[id] ?? `#${id}`), ...union.newTopics];
+  const { input, retryable } = uploadJob(rows, labels);
+  notify(
+    {
+      ...input,
+      key: b.key,
+      action: retryable.length
+        ? {
+            label: 'retry',
+            onClick: () => {
+              // A running batch takes the rows in; only an idle queue reuses this key.
+              if (!batch) retryKey = b.key;
+              retryable.forEach((id) => engine.retry(id));
+              // No row went live: the key must not leak into the next batch.
+              if (!hasLiveUploads(engine.state())) retryKey = null;
+            },
+          }
+        : undefined,
+    },
+    { toast },
+  );
 }
 
 const engine = createUploadEngine<File, Blob>({
@@ -154,7 +203,7 @@ const engine = createUploadEngine<File, Blob>({
     for (const id of counted) if (!alive.has(id)) counted.delete(id);
     useUploadQueueStore.setState((s) => ({ queue, completions: s.completions + fresh }));
     syncGuard(queue);
-    announceSettled(queue);
+    trackJob(queue);
   },
 });
 
@@ -180,6 +229,7 @@ export const useUploadQueueStore = create<UploadQueueStore>((set) => ({
   clearSettled: () => engine.clearSettled(),
   reset: () => {
     counted.clear();
+    retryKey = null;
     engine.reset();
   },
   setCollapsed: (collapsed) => set({ collapsed }),

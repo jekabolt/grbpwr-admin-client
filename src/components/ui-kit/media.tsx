@@ -1,5 +1,18 @@
 import { useState } from 'react';
-import { Arrow, Avatar, AvatarPicker, Canvas, GrbpwrMark, Media, Pin, RatioGlyph } from 'ui';
+import {
+  Arrow,
+  Avatar,
+  AvatarPicker,
+  Canvas,
+  DateScrubber,
+  GrbpwrMark,
+  Media,
+  Pin,
+  RatioGlyph,
+  scrubLabel,
+  useMonthIndex,
+  type ScrubMonth,
+} from 'ui';
 import { KitDemo, KitLines, KitMatrix } from './kit-entry';
 
 // A file this app serves itself: no network beyond the page, so the screenshot stays stable.
@@ -125,10 +138,47 @@ function IconsDemo() {
   );
 }
 
+// Fixed sample library, newest first; a quiet month in the middle shows the greyed sheet cell.
+const SCRUB_MONTHS: ScrubMonth[] = [
+  { year: 2026, month: 10, count: 14 },
+  { year: 2026, month: 9, count: 31 },
+  { year: 2026, month: 8, count: 0 },
+  { year: 2026, month: 7, count: 9 },
+  { year: 2026, month: 2, count: 40 },
+  { year: 2025, month: 11, count: 12 },
+  { year: 2025, month: 2, count: 22 },
+];
+const SCRUB_ROW = 24;
+
+// The pill appears on a touch screen only; on a mouse the list keeps its native scrollbar.
+function DateScrubberDemo() {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const index = useMonthIndex(SCRUB_MONTHS);
+  const rows = SCRUB_MONTHS.flatMap((m) =>
+    Array.from({ length: m.count }, (_, i) => `${scrubLabel(m.year, m.month)} · ${i + 1}`),
+  );
+  return (
+    <div ref={setEl} className='h-40 overflow-y-auto border border-borderColor'>
+      {rows.map((r) => (
+        <div key={r} className='border-b border-hairline px-2.5 leading-6 tabular-nums'>
+          {r}
+        </div>
+      ))}
+      <DateScrubber
+        scrollEl={el}
+        months={SCRUB_MONTHS}
+        labelAt={(top) => index.monthAt(Math.floor(top / (SCRUB_ROW + 1)))}
+        offsetToScrollTop={(offset) => offset * (SCRUB_ROW + 1)}
+      />
+    </div>
+  );
+}
+
 export const mediaDemos: KitDemo[] = [
   { names: ['Media'], Demo: MediaDemo },
   { names: ['Canvas', 'Pin'], Demo: CanvasDemo },
   { names: ['Avatar', 'AvatarPicker'], Demo: AvatarDemo },
   { names: ['RatioGlyph'], Demo: RatioGlyphDemo },
+  { names: ['DateScrubber'], Demo: DateScrubberDemo, keywords: ['scrubber', 'date', 'month'] },
   { names: ['Arrow', 'GrbpwrMark'], Demo: IconsDemo },
 ];

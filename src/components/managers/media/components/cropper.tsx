@@ -5,22 +5,12 @@ import getCroppedImg, {
   type CropFrame,
 } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
-import { cn } from 'lib/utility';
-import { FC, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactCrop, { PercentCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
-import {
-  Button,
-  CalloutBox,
-  RatioGlyph,
-  Row,
-  SideRailGroup,
-  SideRailItem,
-  Text,
-  EmptyCell,
-  Close,
-} from 'ui';
+import { Button, CalloutBox, Text, EmptyCell, Close } from 'ui';
 import './cropper.css';
+import { EditorTopBar, editorToolClass, FREE_CHIP, RATIO_CHIPS, RatioChips } from './editor-mobile';
 
 // Ratios are compared with a small tolerance rather than strict equality: ASPECT_RATIOS rounds
 // 16:9 to 1.7778, but a caller-supplied ratio computes it as the repeating 16/9 = 1.77778… —
@@ -116,7 +106,14 @@ interface CropperInterface {
    * четырёх местах, где живёт кроппер; хост, который знает контекст точнее (очередь, медиатека,
    * слот формы), передаёт свою.
    */
-  footerNote?: ReactNode;
+  /**
+   * `mobile` — полноэкранная раскладка ниже `lg` (MEDIA-MOBILE, кадр 3): шапка «cancel · title ·
+   * save», сцена на всю середину, чипы пропорций и одна строка инструментов. Хост сам решает,
+   * когда её просить; по умолчанию — прежняя настольная раскладка, побайтово.
+   */
+  layout?: 'default' | 'mobile';
+  /** Заголовок мобильной шапки. */
+  title?: string;
 }
 
 export const MediaCropper: FC<CropperInterface> = ({
@@ -133,7 +130,8 @@ export const MediaCropper: FC<CropperInterface> = ({
   // и рядом с «кадрировать» читалось как отказ, а не как второй способ закончить.
   originalLabel = 'use as is',
   hideHeader = false,
-  footerNote,
+  layout = 'default',
+  title = 'crop',
 }) => {
   const { showMessage } = useSnackBarStore();
 
@@ -304,14 +302,6 @@ export const MediaCropper: FC<CropperInterface> = ({
     [natural, boxRatio, scale, center.x, center.y],
   );
 
-  const applyScale = useCallback(
-    (next: number) => {
-      if (!natural) return;
-      setCrop(buildCrop(shapeAspect, boxRatio, clamp(next, MIN_SCALE, 1), center.x, center.y));
-    },
-    [natural, shapeAspect, boxRatio, center.x, center.y],
-  );
-
   const rotate = useCallback(
     (delta: number) => {
       if (!natural) return;
@@ -324,11 +314,6 @@ export const MediaCropper: FC<CropperInterface> = ({
     },
     [natural, rotation, aspect, scale],
   );
-
-  const recenter = useCallback(() => {
-    if (!natural) return;
-    setCrop(buildCrop(shapeAspect, boxRatio, scale, 50, 50));
-  }, [natural, shapeAspect, boxRatio, scale]);
 
   const resetFrame = useCallback(() => {
     if (!natural) return;
@@ -378,304 +363,230 @@ export const MediaCropper: FC<CropperInterface> = ({
   // …но КАЖДАЯ ПРИЧИНА ГОВОРИТСЯ РОВНО ОДИН РАЗ. Отказ источника стоит красной коробкой прямо
   // над этими кнопками — там же, где «прочитать снова»; загрузка написана словом на самой сцене.
   // Здесь остаётся только то, чего не говорят больше нигде.
-  const blockedReason = !loadFailed && natural && !rect ? 'no frame set' : null;
 
-  const lostShare = rect && srcW && srcH ? 1 - (rect.width * rect.height) / (srcW * srcH) : 0;
-  const lostLabel = rect ? (lostShare > 0.005 ? `−${Math.round(lostShare * 100)}%` : 'full') : '—';
   const resultRatio = rect ? (aspect ? presetLabel(aspect) : undefined) : undefined;
   const resultLabel = rect ? resultRatio ?? ratioLabel(rect.width, rect.height) : '—';
-  const sourceRatio = srcW && srcH ? presetLabel(srcW / srcH) ?? ratioLabel(srcW, srcH) : '—';
-  const capBelow = (crop?.y ?? 0) < 6;
+  const mobile = layout === 'mobile';
+  // Рамка во весь кадр без поворота — это тот же файл: копию такого «кропа» делать незачем.
+  const noChange =
+    !!rect &&
+    rotation === 0 &&
+    rect.x === 0 &&
+    rect.y === 0 &&
+    rect.width === srcW &&
+    rect.height === srcH;
+
+  const stageContent =
+    disp && !loadFailed ? (
+      <ReactCrop
+        className='crop-rc'
+        crop={crop}
+        aspect={aspect}
+        onChange={(pixelCrop, percentCrop) => {
+          // Нажатие без протяжки библиотека объявляет рамкой 0×0 — то самое молчаливое
+          // стирание кадра, из-за которого раньше приходилось начинать заново. Пустая
+          // рамка не принимается: клик мимо оставляет всё как было, а протяжка растёт
+          // из точки нажатия и приезжает сюда уже настоящей.
+          if (pixelCrop.width < 1 || pixelCrop.height < 1) return;
+          setCrop(percentCrop);
+        }}
+        ruleOfThirds
+        minWidth={MIN_FRAME_PX}
+        minHeight={MIN_FRAME_PX}
+        disabled={busy}
+      >
+        <div style={{ width: disp.w, height: disp.h }} className='relative overflow-hidden'>
+          <img
+            src={selectedFile}
+            alt=''
+            draggable={false}
+            className='select-none'
+            style={
+              turned
+                ? {
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: disp.h,
+                    height: disp.w,
+                    maxWidth: 'none',
+                    maxHeight: 'none',
+                    transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
+                  }
+                : {
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    width: disp.w,
+                    height: disp.h,
+                    transform: rotation === 180 ? 'rotate(180deg)' : undefined,
+                  }
+            }
+          />
+        </div>
+      </ReactCrop>
+    ) : loadFailed ? null : (
+      // Про отказ источника сцена молчит: он сказан красной коробкой в подвале, вместе
+      // с причиной и кнопкой «прочитать снова». Здесь остаётся только ожидание.
+      <Text size='micro' variant='uppercase' className='text-bgColor'>
+        loading the image
+      </Text>
+    );
+
+  const loadFailedBox = loadFailed && (
+    <CalloutBox tone='error'>
+      <Text size='micro' component='span'>
+        source not loading
+      </Text>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        className='ml-2 inline-block cursor-pointer align-middle'
+        onClick={() => {
+          setLoadFailed(false);
+          setReloadKey((k) => k + 1);
+        }}
+      >
+        load again
+      </Button>
+    </CalloutBox>
+  );
+  const saveErrorBox = saveError && !loadFailed && (
+    <CalloutBox tone='error'>
+      <Text size='micro' component='span'>
+        <b>cropping failed.</b> {saveError}
+      </Text>
+    </CalloutBox>
+  );
+
+  const chipOptions = lockedAspect
+    ? [{ key: ratios[0].label, label: ratios[0].label, value: ratios[0].value }]
+    : [FREE_CHIP, ...RATIO_CHIPS];
+  const selectedChip =
+    aspect === undefined
+      ? FREE_CHIP.key
+      : chipOptions.find((o) => o.value !== undefined && Math.abs(o.value - aspect) < RATIO_EPSILON)
+          ?.key;
+
+  if (mobile) {
+    return (
+      <div className='flex h-full min-h-0 w-full flex-col'>
+        <EditorTopBar
+          title={title}
+          onCancel={onCancel}
+          onSave={handleSave}
+          saveDisabled={blocked || noChange}
+          busy={busy}
+          saveLabel={saveLabel}
+        />
+        <div className='crop-stage crop-stage-mobile relative min-h-0 flex-1 touch-none overflow-hidden p-6'>
+          <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
+            {stageContent}
+          </div>
+        </div>
+        {(loadFailedBox || saveErrorBox) && (
+          <div className='shrink-0 px-2.5 pb-2'>
+            {loadFailedBox}
+            {saveErrorBox}
+          </div>
+        )}
+        <div className='flex shrink-0 flex-col gap-2.5 border-t border-bgColor/20 pt-2.5 pb-3'>
+          <RatioChips
+            options={chipOptions}
+            selected={selectedChip}
+            disabled={!natural || busy}
+            onSelect={(o) => applyRatio(o.value)}
+          />
+          <div className='flex items-center gap-1.5 px-2.5'>
+            <Button
+              type='button'
+              variant={null}
+              className={editorToolClass}
+              onClick={() => rotate(90)}
+              disabled={!natural || busy}
+            >
+              ↻ rotate
+            </Button>
+            <Button
+              type='button'
+              variant={null}
+              className={editorToolClass}
+              onClick={resetFrame}
+              disabled={!natural || busy}
+            >
+              reset
+            </Button>
+            <span className='ml-auto text-control tabular-nums text-bgColor'>
+              {!rect ? (
+                <EmptyCell />
+              ) : noChange ? (
+                'no change'
+              ) : (
+                `${rect.width}×${rect.height} · ${resultLabel}`
+              )}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className='flex w-full flex-col gap-3'>
+    <div className='flex w-full flex-col gap-2.5'>
       {!hideHeader && (
         <div className='flex items-center justify-between border-b border-hairline pb-2'>
-          {/* Заголовок ПАНЕЛИ, а не страницы: 12px жирным прописным, как `SectionHeader`.
-              18px в этой системе отданы одному заголовку страницы. */}
           <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
-            crop image
+            {title}
           </Text>
           <Close onClick={onCancel} />
         </div>
       )}
-
-      <div className='grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_224px] lg:items-start'>
-        <div className='min-w-0'>
-          <div className='crop-stage relative flex aspect-[3/2] max-h-[52vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-3'>
-            <div aria-hidden className='pointer-events-none absolute inset-0 bg-textColor/55' />
-            <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
-              {disp && !loadFailed ? (
-                <ReactCrop
-                  className='crop-rc'
-                  crop={crop}
-                  aspect={aspect}
-                  onChange={(pixelCrop, percentCrop) => {
-                    // Нажатие без протяжки библиотека объявляет рамкой 0×0 — то самое молчаливое
-                    // стирание кадра, из-за которого раньше приходилось начинать заново. Пустая
-                    // рамка не принимается: клик мимо оставляет всё как было, а протяжка растёт
-                    // из точки нажатия и приезжает сюда уже настоящей.
-                    if (pixelCrop.width < 1 || pixelCrop.height < 1) return;
-                    setCrop(percentCrop);
-                  }}
-                  ruleOfThirds
-                  minWidth={MIN_FRAME_PX}
-                  minHeight={MIN_FRAME_PX}
-                  disabled={busy}
-                  renderSelectionAddon={() =>
-                    rect ? (
-                      <span
-                        className={cn(
-                          'pointer-events-none absolute -left-px whitespace-nowrap bg-textColor px-1 text-nano uppercase tracking-label text-bgColor',
-                          capBelow ? 'top-0' : 'bottom-full mb-0.5',
-                        )}
-                      >
-                        {rect.width}×{rect.height} · {resultLabel}
-                      </span>
-                    ) : null
-                  }
-                >
-                  <div
-                    style={{ width: disp.w, height: disp.h }}
-                    className='relative overflow-hidden'
-                  >
-                    <img
-                      src={selectedFile}
-                      alt=''
-                      draggable={false}
-                      className='select-none'
-                      style={
-                        turned
-                          ? {
-                              position: 'absolute',
-                              left: '50%',
-                              top: '50%',
-                              width: disp.h,
-                              height: disp.w,
-                              maxWidth: 'none',
-                              maxHeight: 'none',
-                              transform: `translate(-50%,-50%) rotate(${rotation}deg)`,
-                            }
-                          : {
-                              position: 'absolute',
-                              left: 0,
-                              top: 0,
-                              width: disp.w,
-                              height: disp.h,
-                              transform: rotation === 180 ? 'rotate(180deg)' : undefined,
-                            }
-                      }
-                    />
-                  </div>
-                </ReactCrop>
-              ) : loadFailed ? null : (
-                // Про отказ источника сцена молчит: он сказан красной коробкой в подвале, вместе
-                // с причиной и кнопкой «прочитать снова». Здесь остаётся только ожидание.
-                <Text size='micro' variant='uppercase' className='text-bgColor'>
-                  loading the image
-                </Text>
-              )}
-            </div>
-          </div>
-          <Text size='nano' variant='label' className='mt-1.5'>
-            drag the frame to move it, the handles resize it, a drag across the image draws a new
-            one · the gesture is the same for every ratio, “free” only takes the lock off · the
-            rule-of-thirds guides are always on
-          </Text>
-        </div>
-
-        <div className='flex flex-col'>
-          {/* Капсом — только метка группы. Требование слота это фраза, а не метка, поэтому оно
-              стоит рядом обычным текстом. */}
-          <SideRailGroup
-            flush
-            action={
-              lockedAspect ? (
-                <Text size='nano' variant='label' component='span'>
-                  the slot requires {ratios[0].label}
-                </Text>
-              ) : undefined
-            }
-          >
-            ratios
-          </SideRailGroup>
-          {ratios.map((r) => {
-            const f = maxFrame(r.value, boxRatio);
-            const w = Math.round(srcW * Math.min(1, f.fw * scale));
-            const h = Math.round(srcH * Math.min(1, f.fh * scale));
-            return (
-              <SideRailItem
-                key={r.label}
-                className='text-control uppercase tracking-label'
-                selected={aspect !== undefined && Math.abs(aspect - r.value) < RATIO_EPSILON}
-                onClick={() => applyRatio(r.value)}
-                label={
-                  <span className='flex items-center gap-1.5'>
-                    <RatioGlyph width={r.value * 100} height={100} size={12} />
-                    {r.label}
-                    {lockedAspect ? ' *' : ''}
-                  </span>
-                }
-                count={natural ? `${w}×${h}` : '—'}
-              />
-            );
-          })}
-
-          {!lockedAspect && (
-            <>
-              <SideRailGroup>no ratio</SideRailGroup>
-              <SideRailItem
-                className='text-control uppercase tracking-label'
-                selected={aspect === undefined}
-                onClick={() => applyRatio(undefined)}
-                label={
-                  <span className='flex items-center gap-1.5'>
-                    <span
-                      aria-hidden
-                      className='inline-block h-2 w-3 shrink-0 border border-dashed border-current'
-                    />
-                    free
-                  </span>
-                }
-                count={aspect === undefined && rect ? `${rect.width}×${rect.height}` : undefined}
-              />
-              <Text size='nano' variant='label' className='mt-1'>
-                not a ratio, but the absence of one
-              </Text>
-            </>
-          )}
-
-          <SideRailGroup>frame</SideRailGroup>
-          <div className='flex items-baseline justify-between gap-2'>
-            <Text size='nano' variant='label' component='span'>
-              frame size
-            </Text>
-            <Text size='micro' component='span' className='tabular-nums'>
-              {Math.round(scale * 100)}%
-            </Text>
-          </div>
-          <div className='mt-1 flex items-center gap-1.5'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='cursor-pointer'
-              onClick={() => applyScale(scale - 0.1)}
-              disabled={!natural || scale <= MIN_SCALE + 0.001}
-            >
-              −
-            </Button>
-            <input
-              type='range'
-              min={MIN_SCALE * 100}
-              max={100}
-              step={1}
-              value={Math.round(scale * 100)}
-              disabled={!natural}
-              aria-label='frame size'
-              className='crop-range h-4 min-w-0 flex-1'
-              onChange={(e) => applyScale(Number(e.target.value) / 100)}
-            />
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='cursor-pointer'
-              onClick={() => applyScale(scale + 0.1)}
-              disabled={!natural || scale >= 0.999}
-            >
-              +
-            </Button>
-          </div>
-          <div className='mt-1.5 flex flex-wrap gap-1'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='cursor-pointer'
-              onClick={() => rotate(-90)}
-              disabled={!natural}
-            >
-              ↺ 90°
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='cursor-pointer'
-              onClick={() => rotate(90)}
-              disabled={!natural}
-            >
-              ↻ 90°
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='cursor-pointer'
-              onClick={recenter}
-              disabled={!natural}
-            >
-              centre frame
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='cursor-pointer'
-              onClick={resetFrame}
-              disabled={!natural}
-            >
-              reset frame
-            </Button>
-          </div>
-
-          <SideRailGroup>what you get</SideRailGroup>
-          <SummaryRow label='source' value={natural ? `${srcW}×${srcH} · ${sourceRatio}` : '—'} />
-          <SummaryRow
-            label='result'
-            value={rect ? `${rect.width}×${rect.height} · ${resultLabel}` : '—'}
-          />
-          <SummaryRow label='area' value={lostLabel} />
-          <SummaryRow label='rotation' value={rotation ? `${rotation}°` : 'none'} />
+      <div className='crop-stage relative flex h-[62vh] w-full items-center justify-center overflow-hidden border border-borderColor bg-pageBg p-6'>
+        <div ref={stageRef} className='relative flex h-full w-full items-center justify-center'>
+          {stageContent}
         </div>
       </div>
-
-      <div className='flex flex-col gap-2 border-t border-hairline pt-2.5'>
-        {loadFailed && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='span'>
-              <b>the source will not load.</b> There is nothing for the browser to cut: the image
-              never opened — the bucket may not have sent a CORS header, or the url is dead.
-            </Text>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='ml-2 inline-block cursor-pointer align-middle'
-              onClick={() => {
-                setLoadFailed(false);
-                setReloadKey((k) => k + 1);
-              }}
-            >
-              load again
-            </Button>
-          </CalloutBox>
-        )}
-        {saveError && !loadFailed && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='span'>
-              <b>cropping failed.</b> {saveError}
-            </Text>
-          </CalloutBox>
-        )}
-
-        <Text size='nano' variant='label'>
-          {footerNote ??
-            'cropping does not touch the source: the frame produces a NEW file, and that is the one that goes to the bucket.'}
+      {loadFailedBox}
+      {saveErrorBox}
+      <RatioChips
+        tone='light'
+        options={chipOptions}
+        selected={selectedChip}
+        disabled={!natural || busy}
+        onSelect={(o) => applyRatio(o.value)}
+      />
+      <div className='flex flex-wrap items-center gap-2 px-2.5'>
+        <Button
+          type='button'
+          variant='secondary'
+          size='lg'
+          className='cursor-pointer uppercase'
+          onClick={() => rotate(90)}
+          disabled={!natural || busy}
+        >
+          ↻ rotate
+        </Button>
+        <Button
+          type='button'
+          variant='secondary'
+          size='lg'
+          className='cursor-pointer uppercase'
+          onClick={resetFrame}
+          disabled={!natural || busy}
+        >
+          reset
+        </Button>
+        <Text size='micro' variant='label' component='span' className='tabular-nums'>
+          {!rect ? (
+            <EmptyCell />
+          ) : noChange ? (
+            'no change'
+          ) : (
+            `${rect.width}×${rect.height} · ${resultLabel}`
+          )}
         </Text>
-
-        <div className='flex flex-wrap items-center gap-2'>
+        <div className='ml-auto flex flex-wrap items-center gap-2'>
           {onUseOriginal && (
             <Button
               type='button'
@@ -688,57 +599,29 @@ export const MediaCropper: FC<CropperInterface> = ({
               {originalLabel}
             </Button>
           )}
-          <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {rect ? `${rect.width}×${rect.height}` : <EmptyCell />}
-          </Text>
-          <div className='ml-auto flex flex-wrap items-center gap-2'>
-            {blockedReason && (
-              <Text size='micro' variant='label' component='span'>
-                {blockedReason}
-              </Text>
-            )}
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='cursor-pointer uppercase'
-              onClick={onCancel}
-              disabled={busy}
-            >
-              cancel
-            </Button>
-            <Button
-              type='button'
-              size='lg'
-              variant='main'
-              className='cursor-pointer uppercase'
-              onClick={handleSave}
-              disabled={blocked || busy}
-              loading={busy}
-            >
-              {saveLabel}
-            </Button>
-          </div>
+          <Button
+            type='button'
+            variant='secondary'
+            size='lg'
+            className='cursor-pointer uppercase'
+            onClick={onCancel}
+            disabled={busy}
+          >
+            cancel
+          </Button>
+          <Button
+            type='button'
+            size='lg'
+            variant='main'
+            className='cursor-pointer uppercase'
+            onClick={handleSave}
+            disabled={blocked || busy || (noChange && !onUseOriginal)}
+            loading={busy}
+          >
+            {saveLabel}
+          </Button>
         </div>
       </div>
     </div>
   );
 };
-
-function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <Row
-      className='py-0.5'
-      label={
-        <Text size='nano' variant='label' component='span' tracking='label' className='uppercase'>
-          {label}
-        </Text>
-      }
-      value={
-        <Text size='micro' component='span'>
-          {value}
-        </Text>
-      }
-    />
-  );
-}

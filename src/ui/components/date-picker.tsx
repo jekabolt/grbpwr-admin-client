@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { cn } from 'lib/utility';
+import { Arrow } from '../icons/arrow';
 import { Close } from './close';
 
 interface DatePickerProps {
@@ -11,6 +12,11 @@ interface DatePickerProps {
   onChange: (date: Date | undefined) => void;
   disabled?: boolean;
   placeholder?: string;
+  /**
+   * Chip row look: one 11px uppercase line, short date (`31 JUL 2026`), no underline, the clear ×
+   * and the arrow in the text colour — so a red (overdue) chip stays red end to end.
+   */
+  compact?: boolean;
 }
 
 // Monochrome, portalled date field. The calendar internals are themed globally
@@ -22,6 +28,7 @@ export function DatePicker({
   onChange,
   disabled,
   placeholder = 'pick a date',
+  compact,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
 
@@ -33,10 +40,12 @@ export function DatePicker({
           disabled={disabled}
           className={cn(
             'flex w-full items-center justify-between gap-2 border-b border-borderColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
+            compact &&
+              'border-b-0 bg-transparent py-0 text-control uppercase leading-none tracking-label',
           )}
         >
           <span className={cn(!value && 'text-labelColor')}>
-            {value ? format(value, 'PPP') : placeholder}
+            {value ? format(value, compact ? 'd MMM yyyy' : 'PPP') : placeholder}
           </span>
           {value ? (
             <Close
@@ -44,14 +53,19 @@ export function DatePicker({
               size='sm'
               tabIndex={-1}
               aria-label='clear date'
+              className={cn(compact && 'text-current')}
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(undefined);
               }}
             />
           ) : (
-            <span aria-hidden className='shrink-0 text-labelColor'>
-              ▾
+            // Та же стрелка, что у Select: один глиф раскрытия на весь экран.
+            <span
+              aria-hidden
+              className={cn('shrink-0 rotate-180', compact ? 'text-current' : 'text-textColor')}
+            >
+              <Arrow />
             </span>
           )}
         </button>

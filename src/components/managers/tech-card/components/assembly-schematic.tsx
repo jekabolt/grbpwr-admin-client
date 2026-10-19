@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { refuseGesture } from './refuse-gesture';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow, ConfirmationModal, Text } from 'ui';
 
@@ -239,7 +239,6 @@ export function AssemblySchematic({
     });
   }, [auto, res, renamedUnit]);
 
-  const showMessage = useSnackBarStore((st) => st.showMessage);
   /** Человеческое имя ноды: имя детали или код узла. */
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
 
@@ -529,7 +528,7 @@ export function AssemblySchematic({
       if (v && !v.ok) {
         // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
         // отказ. Причина словами движка.
-        showMessage(v.reason, 'error');
+        refuseGesture('ASSEMBLY', 'not joined', v.reason);
       } else if (v?.ok && hit) {
         onCreate({
           inputKeys: [d.key, hit.key],
@@ -574,7 +573,6 @@ export function AssemblySchematic({
     frozen,
     onMove,
     onCreate,
-    showMessage,
     toLayoutPoint,
     commitDrag,
   ]);

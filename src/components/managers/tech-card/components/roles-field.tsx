@@ -1,5 +1,5 @@
 import { AdminRef, common_TechCardRole, common_TechCardRoleAssignment } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Chip, ChipRow, Input, Pill, GenericPopover, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
@@ -53,7 +53,6 @@ function RoleRow({
    *  unsaved card the note that follows is not a row. */
   last: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   // Options only — never captions: a disabled account drops out of this list, and whoever holds
   // the role is named from the assignment itself (`adminUsername`), see useRoles.
   const { data: adminsData } = useAdmins(canEdit && !!techCardId);
@@ -76,13 +75,27 @@ function RoleRow({
     if (!adminId) return;
     assign.mutate(
       { role, adminId },
-      { onError: (e) => showMessage(fieldErrorSummary(e, 'could not assign role'), 'error') },
+      {
+        onError: (e) =>
+          notify({
+            sev: 'error',
+            subject: 'ROLE',
+            text: 'not assigned',
+            detail: fieldErrorSummary(e, 'could not assign role'),
+          }),
+      },
     );
   };
   const drop = (id?: number) => {
     if (id == null) return;
     remove.mutate(id, {
-      onError: (e) => showMessage(fieldErrorSummary(e, 'could not remove assignment'), 'error'),
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: 'ROLE',
+          text: 'not removed',
+          detail: fieldErrorSummary(e, 'could not remove assignment'),
+        }),
     });
   };
   const toggle = (a: AdminRef) => {

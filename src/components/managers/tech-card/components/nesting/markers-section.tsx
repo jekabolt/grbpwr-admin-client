@@ -13,7 +13,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { colorwayLabelOf } from './colorway-widths';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -242,7 +242,6 @@ export function MarkersSection({
   const patternRows = (useWatch<TechCardFormData>({ name: 'patterns' }) ??
     []) as MarkerPatternRow[];
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
 
   const [view, setView] = useState<common_TechCardMarker | null>(null);
   const [openingId, setOpeningId] = useState<number | null>(null);
@@ -337,12 +336,15 @@ export function MarkersSection({
     try {
       const r = await adminService.GetTechCardMarker({ id });
       if (r.marker) setView(r.marker);
-      else showMessage('marker not found', 'error');
+      else notify({ sev: 'error', subject: `MARKER ${id}`, text: 'not opened', bad: 'not found' });
     } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : "couldn't open the marker",
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: `MARKER ${id}`,
+        text: 'not opened',
+        detail: e instanceof Error && e.message ? e.message : undefined,
+        action: { label: 'retry', onClick: () => void openMarker(id) },
+      });
     } finally {
       setOpeningId(null);
     }
@@ -406,12 +408,12 @@ export function MarkersSection({
           }
         } catch (e) {
           // Тихо не глотаем: оператор должен знать, что у ткани осталась прежняя норма (или никакой).
-          showMessage(
-            `couldn't make “${s.marker.name ?? ''}” the norm: ${
-              e instanceof Error && e.message ? e.message : 'unknown error'
-            }`,
-            'error',
-          );
+          notify({
+            sev: 'error',
+            subject: `MARKER ${s.marker.name ?? ''}`.trim(),
+            text: 'not the norm',
+            detail: e instanceof Error && e.message ? e.message : undefined,
+          });
         }
       }
       if (notes.length > 0) setNormNote(notes.join('\n'));
@@ -422,22 +424,24 @@ export function MarkersSection({
       normRunning.current = false;
       setNormPass((n) => n + 1);
     })();
-  }, [autoSteps, normPass, qc, showMessage, techCardId]);
+  }, [autoSteps, normPass, qc, techCardId]);
 
   const deleteMarker = async () => {
     if (!deleting) return;
     setDeleteBusy(true);
     try {
       await adminService.DeleteTechCardMarker({ id: deleting.id });
-      showMessage('marker deleted', 'success');
+      // The row leaving the list is the receipt.
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setDeleting(null);
     } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : "couldn't delete the marker",
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: `MARKER ${deleting.name ?? deleting.id}`,
+        text: 'not deleted',
+        detail: e instanceof Error && e.message ? e.message : undefined,
+      });
     } finally {
       setDeleteBusy(false);
     }

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignBenchSlot } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useState } from 'react';
 
 import { errorInfoReason } from './generation/refusal';
@@ -15,7 +15,6 @@ import { designKeys, rereadBandNow } from './use-design-band';
  */
 export function useKeepStale(techCardId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const [busy, setBusy] = useState<ReadonlySet<number>>(new Set());
   const keep = useCallback(
     async (slot: common_DesignBenchSlot, on = true) => {
@@ -34,10 +33,12 @@ export function useKeepStale(techCardId: number) {
         const reason = errorInfoReason(e) ?? '';
         if (reason === 'views_changed') await rereadBandNow(qc, techCardId).catch(() => undefined);
         else void qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
-        showMessage(
-          `not kept — ${KEEP_REFUSAL_WORDS[reason] ?? ((e instanceof Error && e.message) || 'the keep did not go through')}`,
-          'error',
-        );
+        notify({
+          sev: 'error',
+          subject: 'DETAIL',
+          text: 'not kept',
+          detail: KEEP_REFUSAL_WORDS[reason] ?? ((e instanceof Error && e.message) || undefined),
+        });
       } finally {
         setBusy((b) => {
           const next = new Set(b);
@@ -46,7 +47,7 @@ export function useKeepStale(techCardId: number) {
         });
       }
     },
-    [qc, techCardId, showMessage],
+    [qc, techCardId],
   );
   return { keep, busy };
 }

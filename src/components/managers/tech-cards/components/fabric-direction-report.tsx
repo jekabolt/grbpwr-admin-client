@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -130,7 +130,6 @@ type Tier = {
 };
 
 export function FabricDirectionReport() {
-  const { showMessage } = useSnackBarStore();
   const queryClient = useQueryClient();
   // The filter lives in the URL like every other filter on this page (R-1), so the go/no-go view is
   // a shareable link rather than a state somebody has to be told to reproduce.
@@ -410,7 +409,6 @@ export function FabricDirectionReport() {
                           card={card}
                           isNext={(card.techCardId ?? 0) === nextId}
                           onCleared={markCleared}
-                          onMessage={showMessage}
                         />
                       ))}
                     </Tiles>
@@ -537,31 +535,33 @@ function GapCardTile({
   card,
   isNext,
   onCleared,
-  onMessage,
 }: {
   card: GapCard;
   isNext: boolean;
   onCleared: (id: number) => void;
-  onMessage: (message: string, severity: 'success' | 'error') => void;
 }) {
   const id = card.techCardId ?? 0;
 
-  const recheck = useMutation({
+  // Typed so the retry action can call it from inside its own onError.
+  const recheck: UseMutationResult<
+    Awaited<ReturnType<typeof recheckFabricDirectionGaps>>,
+    Error,
+    void
+  > = useMutation({
     mutationFn: () => recheckFabricDirectionGaps(id),
+    // The tile is the receipt: the cleared pill, or the fresh list of open lines.
     onSuccess: (res) => {
-      const remaining = openLines(res);
-      if (remaining === 0) {
-        onCleared(id);
-        onMessage('direction answered — nothing left on this card', 'success');
-      } else {
-        onMessage(
-          `still ${remaining} line${remaining === 1 ? '' : 's'} without a direction`,
-          'error',
-        );
-      }
+      if (openLines(res) === 0) onCleared(id);
     },
     onError: (error) =>
-      onMessage(error instanceof Error ? error.message : 'could not re-check this card', 'error'),
+      notify({
+        sev: 'error',
+        subject: `TECH CARD ${id}`,
+        text: 'not re-checked',
+        bad: 'check failed',
+        detail: error instanceof Error ? error.message : undefined,
+        action: { label: 'retry', onClick: () => recheck.mutate() },
+      }),
   });
 
   // The freshest thing we know about this card: its own re-check if it has one, else the portfolio

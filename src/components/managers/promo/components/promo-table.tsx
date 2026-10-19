@@ -4,8 +4,18 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
 import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
+import { Fragment } from 'react';
 import { useForm } from 'react-hook-form';
-import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell, Close } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  ConfirmationModal,
+  Section,
+  Text,
+  EmptyCell,
+  Close,
+} from 'ui';
 import { PromoCreateRow } from './promo-create-row';
 import { PromoEditRow } from './promo-edit-row';
 import { emptyPromoDraft, promoDraftSchema, type PromoDraftSchema } from './schema';
@@ -45,6 +55,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
     startEdit,
     cancelEdit,
     submitEdit,
+    draftError,
   } = usePromo();
 
   const { canWrite } = usePermissions();
@@ -200,17 +211,40 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
             {isCreating && (
               <PromoCreateRow form={form} onSubmit={submitCreate} onCancel={cancelCreate} />
             )}
+            {draftError && isCreating && (
+              <tr>
+                <td colSpan={visibleColumns.length}>
+                  <CalloutBox tone='error'>
+                    <Text size='micro' component='span' role='alert'>
+                      <b>not saved</b> · {draftError}
+                    </Text>
+                  </CalloutBox>
+                </td>
+              </tr>
+            )}
             {promos.map((p) => {
               const code = p.promoCodeInsert?.code || '';
               if (editingCode && editingCode === code) {
                 return (
-                  <PromoEditRow
-                    key={code}
-                    form={editForm}
-                    allowed={!!p.promoCodeInsert?.allowed}
-                    onSubmit={submitEdit}
-                    onCancel={cancelEdit}
-                  />
+                  <Fragment key={code}>
+                    <PromoEditRow
+                      form={editForm}
+                      allowed={!!p.promoCodeInsert?.allowed}
+                      onSubmit={submitEdit}
+                      onCancel={cancelEdit}
+                    />
+                    {draftError && (
+                      <tr>
+                        <td colSpan={visibleColumns.length}>
+                          <CalloutBox tone='error'>
+                            <Text size='micro' component='span' role='alert'>
+                              <b>not saved</b> · {draftError}
+                            </Text>
+                          </CalloutBox>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               }
               const allowed = !!p.promoCodeInsert?.allowed;

@@ -7,12 +7,13 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Close, Text } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { isVariantRun, materialLabel } from './aux-run-plan';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { receiptErrorMessage, usePostRunReceipt } from './useProductionRuns';
 
 const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -63,7 +64,8 @@ export function ReceiveModal({
   /** The card's registered colours, for naming each variant line's destination. */
   outputVariants?: common_TechCardOutputVariant[];
 }) {
-  const { showMessage } = useSnackBarStore();
+  // A failed check or the server's refusal stands above the receive button.
+  const [fail, setFail] = useState<string | null>(null);
   const { dictionary } = useDictionary();
   const { canWriteCosting } = usePermissions();
   const receive = usePostRunReceipt();
@@ -191,17 +193,19 @@ export function ReceiveModal({
     setFinalReceipt(true);
     setNotifyWaitlist(false);
     setIdempotencyKey(ulid());
+    setFail(null);
   }, [run, open, canWriteCosting, variantMode, outputVariants]);
 
   const submit = async () => {
     if (!run?.id || !run.run) return;
+    setFail(null);
     if (isAux) {
       // NF-07: a legacy aux receive books into output_material_id — the card must name one, or the
       // RPC fails with FailedPrecondition. A per-colour run needs no such check: each line's bucket
       // comes from the card's variant registry, which the server reads inside the receipt's own
       // transaction, so there is nothing here for the client to assert.
       if (!variantMode && !outputMaterialId) {
-        showMessage('Set an output material on the tech card before receiving', 'error');
+        setFail('Set an output material on the tech card before receiving');
         return;
       }
       // A colour-mode run cannot receipt a colourless line — the server refuses the mix, and its
@@ -212,9 +216,8 @@ export function ReceiveModal({
           r.outputVariantId === 0 && ((Number(r.received) || 0) > 0 || (Number(r.defect) || 0) > 0),
       );
       if (variantMode && strayCounted.length > 0) {
-        showMessage(
+        setFail(
           "this run was planned before the card's colours were registered — re-plan it per colour on the run page first",
-          'error',
         );
         return;
       }
@@ -223,9 +226,8 @@ export function ReceiveModal({
       // defect-only count on an unpublished colour-model is fine (recorded, never stocked).
       const orphans = rows.filter((r) => (Number(r.received) || 0) > 0 && !r.productId);
       if (orphans.length > 0) {
-        showMessage(
+        setFail(
           `${orphans.length} line(s) have no product — publish the product or set received to 0`,
-          'error',
         );
         return;
       }
@@ -237,7 +239,7 @@ export function ReceiveModal({
       const rec = Number(r.received);
       const def = Number(r.defect);
       if (!Number.isFinite(rec) || rec < 0 || !Number.isFinite(def) || def < 0) {
-        showMessage('the “good received” / “defect” quantities must be zero or more', 'error');
+        setFail('the “good received” / “defect” quantities must be zero or more');
         return;
       }
     }
@@ -255,12 +257,12 @@ export function ReceiveModal({
     if (counted.length === 0 && !(isFinal && isPartiallyReceived)) {
       // The one legal empty receipt is the FINAL short-close of a partially received run — the
       // operator declares the series complete without a last delivery.
-      showMessage('nothing counted — enter good and/or defect on at least one line', 'error');
+      setFail('nothing counted — enter good and/or defect on at least one line');
       return;
     }
     if (counted.some((l) => !l.lineKey)) {
       // Every stored line carries a key since 0230; a keyless row means a stale pre-deploy read.
-      showMessage('the run was read before an update — refresh the page and try again', 'error');
+      setFail('the run was read before an update — refresh the page and try again');
       return;
     }
     // All-scrap is a real outcome now: the run closes with the defect recorded and NOTHING posted
@@ -279,23 +281,29 @@ export function ReceiveModal({
         partial: !isFinal,
         notifyWaitlist,
       });
-      showMessage(
-        !isFinal
-          ? 'delivery received: the run stays open for further receipts'
+      // Money path: the dialog is gone, and what the receipt posted is not on the page — an ok toast
+      // (never logged) names it.
+      notify({
+        sev: 'ok',
+        subject: `PR-${run.id}`,
+        text: !isFinal ? 'delivery received' : counted.length === 0 ? 'closed' : 'received',
+        detail: !isFinal
+          ? 'run stays open'
           : isAux
-            ? 'Run received · material stock posted'
+            ? 'material stock posted'
             : counted.length === 0
-              ? 'run closed: the remainder is declared undelivered'
+              ? 'remainder undelivered'
               : allScrap
-                ? 'run received: the whole output is defect, stock was not topped up'
+                ? 'all defect · no stock'
                 : res.costPriceUpdated
-                  ? 'Run received · product cost updated'
-                  : 'Run received · stock posted',
-        'success',
-      );
+                  ? 'cost updated'
+                  : 'stock posted',
+      });
       onOpenChange(false);
     } catch (e) {
-      showMessage(receiptErrorMessage(e), 'error');
+      // Money path: no retry from the toast; the dialog keeps the count.
+      if (isRefusal(e)) setFail(receiptErrorMessage(e));
+      else notifyFailure(`PR-${run.id}`, 'not received', e, receiptErrorMessage(e));
     }
   };
 
@@ -579,7 +587,8 @@ export function ReceiveModal({
             </Text>
           </div>
 
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
+            <FailNote verb='not received' text={fail} className='w-full' />
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>

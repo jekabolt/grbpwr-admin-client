@@ -325,6 +325,7 @@ export const tasksService: TasksService = {
         sampleId: filter.sampleId ?? 0,
         projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
+        query: filter.query ?? '',
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 

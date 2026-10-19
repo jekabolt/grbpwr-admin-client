@@ -3,11 +3,11 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Text, EmptyCell, Close } from 'ui';
+import { Button, Text, EmptyCell, Close, useDoneFlash } from 'ui';
 import { ulid } from 'utils/ulid';
+import { FailNote, isRefusal, notifyFailure } from './feedback';
 import { runDate } from './options';
 import { updateRunErrorMessage, useProductionRuns, useUpdateRunSection } from './useProductionRuns';
 
@@ -38,7 +38,9 @@ export function LinesGrid({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
+  const saved = useDoneFlash();
+  // What the grid's own buttons answered: a refusal, or what a copy carried over. Stands above the grid.
+  const [note, setNote] = useState<{ fail: boolean; verb: string; text: string } | null>(null);
   const update = useUpdateRunSection();
   const editable = canEdit && !locked;
 
@@ -131,7 +133,11 @@ export function LinesGrid({
         (l.productId ?? 0) === productId && ((l.receivedQty ?? 0) > 0 || (l.defectQty ?? 0) > 0),
     );
     if (counted) {
-      showMessage('This colour-model has received/defect counts — it cannot be removed', 'error');
+      setNote({
+        fail: true,
+        verb: 'not removed',
+        text: 'this colour-model has received/defect counts',
+      });
       return;
     }
     setDirty(true);
@@ -234,24 +240,23 @@ export function LinesGrid({
     if (filledCells === 0) {
       // Ничего не заполнено — это ответ, а не сбой, и он обязан назвать причину: пустых клеток,
       // которые прошлый прогон умеет закрыть, просто не осталось.
-      showMessage(
-        `nothing to copy from ${from}: there are no empty cells for its quantities${
-          skipped.length ? ` (not carried over: ${skipped.join(', ')})` : ''
-        }`,
-        'error',
-      );
+      setNote({
+        fail: true,
+        verb: 'not copied',
+        text: `no empty cells for ${from}${skipped.length ? ` · skipped: ${skipped.join(', ')}` : ''}`,
+      });
       return;
     }
     setDirty(true);
     setQty(next);
-    showMessage(
-      `copied from ${from}: ${copiedQty} pcs into ${filledCells} empty ${
-        filledCells === 1 ? 'cell' : 'cells'
-      }${
-        skipped.length ? `; not carried over: ${skipped.join(', ')}` : ''
-      }. check it — this is a past run, not a norm`,
-      'success',
-    );
+    // The filled cells are the receipt; what came from where stays named until the save.
+    setNote({
+      fail: false,
+      verb: `from ${from}`,
+      text: `${copiedQty} pcs · ${filledCells} ${filledCells === 1 ? 'cell' : 'cells'}${
+        skipped.length ? ` · skipped: ${skipped.join(', ')}` : ''
+      }`,
+    });
   };
 
   // Почему кнопка неактивна — одной строкой, тем же текстом в title и на экране: title у disabled
@@ -329,9 +334,11 @@ export function LinesGrid({
         patch: { lines: next },
       });
       setDirty(false);
-      showMessage('Lines saved', 'success');
+      setNote(null);
+      saved.flash();
     } catch (e) {
-      showMessage(updateRunErrorMessage(e), 'error');
+      if (isRefusal(e)) setNote({ fail: true, verb: 'not saved', text: updateRunErrorMessage(e) });
+      else notifyFailure(`PR-${run.id}`, 'lines not saved', e, updateRunErrorMessage(e), save);
     }
   };
 
@@ -367,6 +374,7 @@ export function LinesGrid({
               size='lg'
               className='uppercase'
               disabled={update.isPending}
+              done={saved.on && 'saved'}
               onClick={save}
             >
               {update.isPending ? 'saving…' : 'save lines'}
@@ -374,6 +382,13 @@ export function LinesGrid({
           </div>
         )}
       </div>
+
+      {note?.fail ? <FailNote verb={note.verb} text={note.text} /> : null}
+      {note && !note.fail ? (
+        <Text variant='inactive' size='small'>
+          <b>{note.verb}</b> · {note.text}
+        </Text>
+      ) : null}
 
       {editable && copyBlockedReason && rows.length > 0 ? (
         <Text variant='inactive' size='small'>

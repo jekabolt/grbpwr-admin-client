@@ -1,44 +1,33 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Fitting, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useCurrentAccount } from 'components/managers/accounts/utils/hooks';
 import {
   fittingSaveErrorMessage,
   useCreateFitting,
-  useUpdateFitting,
 } from 'components/managers/fittings/components/useFittingQuery';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
-import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
 import { useSamples } from 'components/managers/tech-card/components/useSamples';
-import { fittingStatusOptions } from 'constants/filter';
+import {
+  useTechCard,
+  useTechCardFittings,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { findInDictionary } from 'lib/features/findInDictionary';
+import { cn } from 'lib/utility';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, UseFormReturn, useWatch } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  BackLink,
-  Button,
-  Section,
-  SectionStack,
-  Text,
-  Form,
-  InputField,
-  SelectField,
-  TextareaField,
-} from 'ui';
-import {
-  applyServerFieldErrors,
-  extractFieldViolations,
-  fieldErrorSummary,
-  revealField,
-} from 'utils/field-errors';
-import { ChangeRequestsFields } from './change-requests-fields';
-import { FittingCallouts } from './fitting-callouts';
-import { FittingMedia } from './fitting-media';
-import { PatternsFields } from './patterns-fields';
-import { RecordedByField } from './recorded-by-field';
+import { BackLink, Button, Form, Section, Text } from 'ui';
+import { DetailsDrawer } from './details-drawer';
+import { EditsList } from './edits-list';
+import { FittingNote } from './fitting-note';
+import { OutcomeDock } from './outcome-dock';
+import { PhotoStage } from './photo-stage';
 import {
   FittingFormData,
   fittingDefaultData,
@@ -47,18 +36,48 @@ import {
   mapFormToFittingInsert,
   todayDateInput,
 } from './schema';
-import { SampleSizeInfo } from './sizes-fields';
 import { TechCardField } from './tech-card-field';
+import { useFittingAutosave } from './use-fitting-autosave';
+import { DraftEdit, FittingWorkspace, FittingWorkspaceContext, PendingMark } from './workspace';
 
-// Structured round outcome (raw strings per the FittingInsert contract; distinct from verdict).
-// The wire uses '' for undecided, but a Radix <Select.Item> may not carry an empty-string value —
-// the form/UI use the 'undecided' sentinel and the schema maps it back to '' on save.
-const fittingOutcomeOptions = [
-  { value: 'undecided', label: 'undecided' },
-  { value: 'approved', label: 'approved' },
-  { value: 'new_round', label: 'new round' },
-  { value: 'dropped', label: 'dropped' },
-];
+// Where to go back to — the sample panel passes ?returnTo=<its URL>. Only in-app paths: an
+// absolute / protocol-relative value would make navigate() throw.
+function useReturnTo(): string {
+  const [searchParams] = useSearchParams();
+  const raw = searchParams.get('returnTo') || '';
+  return raw.startsWith('/') && !raw.startsWith('//') ? raw : '';
+}
+
+// A sample belongs to its tech card: drop a stale sample link whenever the style changes, and keep
+// roundNumber mirroring the linked sample's development round (the carry-over filter reads it).
+// Returns the sample actually tried on and its size.
+function useSampleLink(form: UseFormReturn<FittingFormData>) {
+  const techCardId = useWatch({ control: form.control, name: 'techCardId' }) || 0;
+  const sampleId = useWatch({ control: form.control, name: 'sampleId' }) || 0;
+
+  const prevTechCardId = useRef(techCardId);
+  useEffect(() => {
+    const changed = prevTechCardId.current !== techCardId;
+    prevTechCardId.current = techCardId;
+    if (changed && form.getValues('sampleId')) {
+      form.setValue('sampleId', 0, { shouldDirty: true });
+    }
+  }, [techCardId, form]);
+
+  const { data: samplesData, isFetched: samplesFetched } = useSamples(techCardId || undefined);
+  const sample = (samplesData?.samples ?? []).find((s) => s.id === sampleId);
+  const sampleSizeId = sample?.sample?.sizeId || 0;
+  const sampleRoundNumber = sample?.sample?.roundNumber || 0;
+
+  useEffect(() => {
+    if (!sample) return;
+    if (form.getValues('roundNumber') !== sampleRoundNumber) {
+      form.setValue('roundNumber', sampleRoundNumber);
+    }
+  }, [sample, sampleRoundNumber, form]);
+
+  return { techCardId, sampleId, sample, sampleSizeId, sampleRoundNumber, samplesFetched };
+}
 
 export function FittingForm({
   isEditMode,
@@ -69,324 +88,308 @@ export function FittingForm({
   id?: string;
   fitting?: common_Fitting;
 }) {
-  const { showMessage } = useSnackBarStore();
+  if (isEditMode && fitting) {
+    return <FittingWorkspaceScreen fittingId={parseInt(id || '0', 10)} fitting={fitting} />;
+  }
+  return <FittingStart />;
+}
+
+// ─── Create: there is nothing to annotate without a fitting row, so the new-fitting screen only
+// links the tech card and the sample, creates the row and opens the workspace on it. A deep link
+// carrying both (?techCardId=&sampleId=) skips even that.
+function FittingStart() {
   const navigate = useNavigate();
-  const createFitting = useCreateFitting();
-  const updateFitting = useUpdateFitting();
-  const { canWrite } = usePermissions();
-  const { data: models } = useAllModels();
+  const returnTo = useReturnTo();
   const [searchParams] = useSearchParams();
-  // Deep-link from the tech card editor: /add-fitting?techCardId=123 pre-links the style;
-  // the sample panel adds &sampleId=45 to pre-link the specific sample tried on (W3.4).
   const initialTechCardId = Number(searchParams.get('techCardId')) || 0;
   const initialSampleId = Number(searchParams.get('sampleId')) || 0;
-  // Where to go after saving — the sample panel passes ?returnTo=<its URL> so we land back there
-  // instead of the flat fittings list (R-5). Only in-app paths: an absolute/protocol-relative
-  // value would make navigate() throw AFTER a successful create, reading as a failed submit.
-  const rawReturnTo = searchParams.get('returnTo') || '';
-  const returnTo = rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//') ? rawReturnTo : '';
+  const createFitting = useCreateFitting();
+  const { canWrite } = usePermissions();
+  const { data: account, isFetched: accountFetched } = useCurrentAccount();
 
   const form = useForm<FittingFormData>({
     resolver: zodResolver(fittingSchema),
-    defaultValues: fitting
-      ? mapFittingToForm(fitting)
-      : {
-          ...fittingDefaultData,
-          fittingDate: todayDateInput(),
-          techCardId: initialTechCardId,
-          sampleId: initialSampleId,
-        },
-    mode: 'onSubmit',
+    defaultValues: {
+      ...fittingDefaultData,
+      fittingDate: todayDateInput(),
+      techCardId: initialTechCardId,
+      sampleId: initialSampleId,
+    },
+  });
+  const { techCardId, sampleId, sample, sampleSizeId, sampleRoundNumber, samplesFetched } =
+    useSampleLink(form);
+  const allowed = canWrite(SECTION.fittings);
+
+  const startedRef = useRef(false);
+  async function start() {
+    if (startedRef.current || !techCardId || !sampleId || !allowed) return;
+    startedRef.current = true;
+    const values = form.getValues();
+    try {
+      const res = await createFitting.mutateAsync(
+        mapFormToFittingInsert(
+          {
+            ...values,
+            fittingDate: todayDateInput(),
+            status: 'FITTING_STATUS_PLANNED',
+            modelId: 0,
+            roundNumber: sampleRoundNumber,
+            recordedBy: account?.account?.username || '',
+          },
+          undefined,
+          sampleSizeId,
+        ),
+      );
+      if (!res.id) throw new Error('no fitting id in the response');
+      const query = returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
+      navigate(`${ROUTES.fittings}/${res.id}${query}`, { replace: true });
+    } catch (error) {
+      startedRef.current = false;
+      console.error('Failed to create fitting', error);
+      notify({
+        sev: 'error',
+        subject: 'FITTING',
+        text: 'not added',
+        detail: fittingSaveErrorMessage(error),
+      });
+    }
+  }
+
+  // Deep link with both links: create at once (once the sample's size/round and the current
+  // account are known, so the row is born complete).
+  const autoStart = !!initialTechCardId && !!initialSampleId;
+  useEffect(() => {
+    if (!autoStart || !samplesFetched || !accountFetched) return;
+    if (techCardId !== initialTechCardId || sampleId !== initialSampleId || !sample) return;
+    void start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, samplesFetched, accountFetched, sample]);
+
+  const busy = createFitting.isPending;
+
+  return (
+    <Form {...form}>
+      <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
+        <div className='flex flex-wrap items-baseline gap-3'>
+          <BackLink to={returnTo || ROUTES.fittings} />
+          <Text
+            component='h1'
+            variant='uppercase'
+            tracking='section'
+            className='font-bold md:text-lg'
+          >
+            New fitting
+          </Text>
+        </div>
+        <Section className='max-w-xl'>
+          <div className='grid gap-stack'>
+            <div className='grid gap-1'>
+              <Text size='micro' variant='label' className='uppercase tracking-label'>
+                tech card
+              </Text>
+              <TechCardField />
+            </div>
+            <div className='grid gap-1'>
+              <Text size='micro' variant='label' className='uppercase tracking-label'>
+                sample
+              </Text>
+              <SamplePicker
+                techCardId={techCardId || undefined}
+                value={sampleId}
+                onChange={(id) => form.setValue('sampleId', id, { shouldDirty: true })}
+              />
+            </div>
+            <div>
+              <Button
+                type='button'
+                variant='main'
+                size='lg'
+                disabled={!techCardId || !sampleId || !sample || !allowed || busy}
+                loading={busy}
+                onClick={() => void start()}
+              >
+                Start
+              </Button>
+            </div>
+          </div>
+        </Section>
+      </div>
+    </Form>
+  );
+}
+
+// ─── Edit: the workspace (FITTING-WORKSPACE mockup v7).
+function FittingWorkspaceScreen({
+  fittingId,
+  fitting,
+}: {
+  fittingId: number;
+  fitting: common_Fitting;
+}) {
+  const returnTo = useReturnTo();
+  const { canWrite } = usePermissions();
+  const { dictionary } = useDictionary();
+  const { data: models } = useAllModels();
+
+  const form = useForm<FittingFormData>({
+    resolver: zodResolver(fittingSchema),
+    defaultValues: mapFittingToForm(fitting),
+  });
+  const { techCardId, sample, sampleSizeId, sampleRoundNumber } = useSampleLink(form);
+  const { saveNow, saveState, saveError } = useFittingAutosave({
+    form,
+    fitting,
+    fittingId,
+    sampleSizeId,
   });
 
-  const modelOptions = useMemo(
-    () => [
-      { value: 0, label: '— none —' },
-      ...(models ?? []).map((m) => ({
-        value: m.id ?? 0,
-        label: m.model?.name ? `${m.model.name} (#${m.id})` : `#${m.id}`,
-      })),
-    ],
-    [models],
-  );
-
-  const selectedModelId = form.watch('modelId');
-  const selectedModel = (models ?? []).find((m) => m.id === selectedModelId);
-  // The sample chooser is only meaningful once a style is linked (ListSamples needs a tech card).
-  const selectedTechCardId = form.watch('techCardId');
-  const selectedSampleId = form.watch('sampleId');
-  // Drop a stale sample link whenever the style changes — a sample belongs to its tech card.
-  // Tracking the previous id also covers a direct A→B switch (possible on a cold cache, when
-  // the picker shows the search box before GetTechCard resolves), not just unlink→relink.
-  const prevTechCardId = useRef(selectedTechCardId);
-  useEffect(() => {
-    const changed = prevTechCardId.current !== selectedTechCardId;
-    prevTechCardId.current = selectedTechCardId;
-    if (changed && selectedSampleId) {
-      form.setValue('sampleId', 0, { shouldDirty: true });
-    }
-  }, [selectedTechCardId, selectedSampleId, form]);
-
-  // The sample actually tried on already carries its own size and development round — surface
-  // both read-only (tasks 2/3) instead of asking the fitter to re-enter them. Same list query
-  // SamplePicker itself uses for this tech card, so React Query dedupes it into one request.
-  const { data: samplesData } = useSamples(selectedTechCardId);
-  const selectedSample = (samplesData?.samples ?? []).find((s) => s.id === selectedSampleId);
-  const sampleSizeId = selectedSample?.sample?.sizeId || 0;
-  const sampleRoundNumber = selectedSample?.sample?.roundNumber || 0;
-
-  // Keep roundNumber mirroring the sample's round live, not just at submit — ChangeRequestsFields
-  // → FittingCarryOver watches this field to filter carry-over items to "before this round", so
-  // it has to already be right while the form is still open, not only in the saved payload.
-  useEffect(() => {
-    if (form.getValues('roundNumber') !== sampleRoundNumber) {
-      form.setValue('roundNumber', sampleRoundNumber);
-    }
-  }, [sampleRoundNumber, form]);
-
-  // Resolved-media map shared by the photo carousel and the callouts editor, so a
-  // freshly-picked photo can be annotated before the fitting is saved (saved
-  // fitting.media + media picked this session).
-  //
-  // ТРЕТЬЯ СТУПЕНЬ — МЕДИАТЕКА, как у тех-карты (`details-editor`, `tech-pack-document`).
-  // GetFitting возвращает снимки разрешёнными, но это не единственный путь, которым id попадает
-  // на экран: AddFitting отвечает одним `{id}`, а UpdateFitting — пустым телом, поэтому между
-  // сохранением и приездом свежего GetFitting карта знает ровно то, что выбрано в этой сессии.
-  // Запасной путь стоит один запрос на пять минут (react-query отдаёт его из кэша) и убирает
-  // целый класс «снимок есть, а показать нечем».
+  // Resolved-media map shared by the stage and the edit list: the media library first, then the
+  // fitting's own resolved media, then what was picked in this session (UpdateFitting answers
+  // with an empty body, so a fresh pick is known only from here until GetFitting refetches).
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
   const libraryMap = useMediaMap();
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
-    // Порядок ступеней — от общего к частному: библиотека кладётся первой, ответ примерки и
-    // выбранное в этой сессии её перекрывают.
-    for (const [id, item] of libraryMap) m.set(id, item);
-    for (const item of fitting?.media ?? []) if (item.id != null) m.set(item.id, item);
+    for (const [mid, item] of libraryMap) m.set(mid, item);
+    for (const item of fitting.media ?? []) if (item.id != null) m.set(item.id, item);
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [fitting?.media, picked, libraryMap]);
+  }, [fitting.media, picked, libraryMap]);
 
-  const patternsCount = (form.watch('patterns') ?? []).length;
+  const mediaIds = useWatch({ control: form.control, name: 'mediaIds' }) ?? [];
+  const status = useWatch({ control: form.control, name: 'status' });
 
-  async function handleSubmit(data: FittingFormData) {
-    const fittingInsert = mapFormToFittingInsert(data, fitting?.fitting, sampleSizeId);
-    try {
-      if (isEditMode) {
-        await updateFitting.mutateAsync({
-          id: parseInt(id || '0', 10),
-          fitting: fittingInsert,
-          // S25: echo the lock_version the form loaded — a stale value is rejected (409).
-          expectedLockVersion: fitting?.lockVersion ?? 0,
-        });
-        showMessage('fitting updated', 'success');
-        form.reset(data);
-      } else {
-        await createFitting.mutateAsync(fittingInsert);
-        showMessage('fitting created', 'success');
-        navigate(returnTo || ROUTES.fittings);
-      }
-    } catch (error) {
-      // ОТКАЗ, НАЗЫВАЮЩИЙ ПОЛЕ, САДИТСЯ НА ПОЛЕ. Сервер отвергает пин без записки адресно —
-      // `callouts[3].note` — и общий тост «Failed to save» на примерке с тридцатью заметками
-      // заставлял бы искать ту самую глазами, при том что индекс приехал в ответе.
-      //
-      // РАБОТАЕТ ЭТО ТОЛЬКО ПОТОМУ, ЧТО ПОСЫЛКА БОЛЬШЕ НЕ ФИЛЬТРУЕТСЯ: индекс выноски на проводе
-      // равен индексу в форме (см. mapFormToFittingInsert). Вернуть фильтр — значит посадить отказ
-      // на соседнюю заметку, и это будет выглядеть как ошибка сервера.
-      //
-      // Пиним ТОЛЬКО `.note`: это единственное поле выноски с нарисованным полем ввода (у него есть
-      // и `data-field`, и место под сообщение). Отказ про якорь или координату полю не
-      // соответствует — такой уходит в тост со своим путём, а не садится молча на чужой ввод.
-      const { applied } = applyServerFieldErrors(error, form.setError, {
-        allow: (path) => /^callouts\.\d+\.note$/.test(path),
-      });
-      // Список заметок может быть свёрнут — тогда подсветке не за что зацепиться, и человека
-      // выручает тот же тост. Поэтому сообщение показывается всегда, а не «вместо».
-      if (applied[0]) revealField(applied[0]);
-      showMessage(
-        // Путь поля читается ЧЕЛОВЕКОМ только вместе с описанием, поэтому для полевых отказов тост
-        // берётся из них; 409-й и сетевые остаются за прежним сообщением.
-        extractFieldViolations(error).length
-          ? fieldErrorSummary(error, 'Failed to save fitting')
-          : fittingSaveErrorMessage(error),
-        'error',
-      );
-      console.error('Failed to submit fitting', error);
-    }
-  }
+  const [chosenMediaId, setCurrentMediaId] = useState(0);
+  const currentMediaId = mediaIds.includes(chosenMediaId) ? chosenMediaId : mediaIds[0] ?? 0;
+  const [hotNumber, setHotNumber] = useState<number | null>(null);
+  const [pendingMark, setPendingMark] = useState<PendingMark | null>(null);
+  const [drafts, setDrafts] = useState<DraftEdit[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // The schema's .refine()s (tech card / sample required) previously failed dead silent — clicking
-  // "add" with nothing picked ran validation, rejected the submit, and gave zero feedback (no toast,
-  // no red text). onInvalid fires whenever handleSubmit's own validation blocks the call, so a snackbar
-  // always fires on a blocked submit; the field-level messages are additionally rendered inline below.
-  function onInvalid() {
-    showMessage('Fix the highlighted fields before saving', 'error');
-  }
-  const submit = form.handleSubmit(handleSubmit, onInvalid);
-  const techCardError = form.formState.errors.techCardId?.message;
-  const sampleError = form.formState.errors.sampleId?.message;
+  const done = status === 'FITTING_STATUS_DONE';
+  const readOnly = !canWrite(SECTION.fittings);
+  const changeRequests = fitting.fitting?.changeRequests;
+
+  const workspace = useMemo<FittingWorkspace>(
+    () => ({
+      fittingId,
+      techCardId,
+      roundNumber: sampleRoundNumber,
+      done,
+      readOnly,
+      mediaById,
+      addPicked: (items) => setPicked((prev) => [...prev, ...items]),
+      changeRequests: changeRequests ?? [],
+      currentMediaId,
+      setCurrentMediaId,
+      hotNumber,
+      setHotNumber,
+      pendingMark,
+      setPendingMark,
+      drafts,
+      setDrafts,
+      saveNow,
+      saveState,
+    }),
+    [
+      fittingId,
+      techCardId,
+      sampleRoundNumber,
+      done,
+      readOnly,
+      mediaById,
+      changeRequests,
+      currentMediaId,
+      hotNumber,
+      pendingMark,
+      drafts,
+      saveNow,
+      saveState,
+    ],
+  );
+
+  // Title = the garment, its size and which fitting of this garment it is: more telling than the id.
+  const { data: techCard } = useTechCard(techCardId || undefined);
+  const { data: siblings } = useTechCardFittings(techCardId || undefined);
+  const garment = techCard?.techCard?.name || techCard?.techCard?.styleNumber || '';
+  const sizeName = sampleSizeId
+    ? String(findInDictionary(dictionary, sampleSizeId, 'size') || sampleSizeId)
+    : '';
+  const ordinal = useMemo(() => {
+    const sorted = [...(siblings ?? [])].sort(
+      (x, y) =>
+        String(x.fitting?.fittingDate ?? '').localeCompare(String(y.fitting?.fittingDate ?? '')) ||
+        (x.id ?? 0) - (y.id ?? 0),
+    );
+    const i = sorted.findIndex((f) => f.id === fittingId);
+    return i >= 0 ? i + 1 : 0;
+  }, [siblings, fittingId]);
+  const title = garment
+    ? [garment, sizeName, ordinal ? `fitting\u00a0${ordinal}` : ''].filter(Boolean).join('\u00a0· ')
+    : `fitting\u00a0${fittingId}`;
+
+  const statusWord =
+    status === 'FITTING_STATUS_DONE'
+      ? 'done'
+      : status === 'FITTING_STATUS_CANCELLED'
+        ? 'cancelled'
+        : 'in progress';
 
   return (
     <Form {...form}>
-      <form className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6' onSubmit={submit}>
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
-          <div className='flex flex-wrap items-center gap-3'>
-            {/* Back respects ?returnTo= so bailing from the sample-panel loop lands back in
-                the sample, not on the flat fittings list. */}
-            <BackLink to={returnTo || ROUTES.fittings} />
-            <Text variant='uppercase' size='large'>
-              {isEditMode ? 'edit fitting' : 'new fitting'}
-            </Text>
+      <FittingWorkspaceContext.Provider value={workspace}>
+        <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
+          <div className='flex flex-col gap-2'>
+            <div className='flex items-baseline gap-3'>
+              <BackLink to={returnTo || ROUTES.fittings} className='shrink-0' />
+              <Text
+                component='h1'
+                variant='uppercase'
+                tracking='label'
+                className='min-w-0 font-bold'
+              >
+                {title}{' '}
+                <span
+                  className={cn(
+                    'ml-1 whitespace-nowrap font-normal',
+                    status === 'FITTING_STATUS_DONE' ? 'text-success' : 'text-labelColor',
+                  )}
+                >
+                  {statusWord}
+                </span>
+              </Text>
+              <span className='flex-1' />
+              <Button
+                type='button'
+                variant='underline'
+                className='shrink-0 uppercase tracking-label'
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsOpen(true)}
+              >
+                Details
+              </Button>
+            </div>
+          </div>
+
+          <div className='flex flex-col gap-gutter lg:flex-row lg:items-start'>
+            <div className='min-w-0 lg:flex-[1.5]'>
+              <PhotoStage />
+            </div>
+            <div className='flex min-w-0 flex-col gap-gutter lg:sticky lg:top-0 lg:flex-1'>
+              <EditsList />
+              <FittingNote />
+            </div>
           </div>
         </div>
 
-        <SectionStack>
-          {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
-            round and the tech card) — surfaced full-width at the top, not buried below the fold. */}
-          <Section title='change requests (what to fix) — the main outcome of a fitting'>
-            <ChangeRequestsFields
-              fittingId={isEditMode ? parseInt(id || '0', 10) : 0}
-              techCardId={selectedTechCardId || undefined}
-              serverChangeRequests={fitting?.fitting?.changeRequests}
-            />
-          </Section>
-
-          {/* Visual evidence for the change requests above: a photo carousel with fit-note pins
-            shown in place on the photo (hover/focus a pin for its note), task 5. */}
-          <Section title='photos & fit notes (remarks on the fit)'>
-            <FittingMedia
-              mediaById={mediaById}
-              onPicked={(items) => setPicked((prev) => [...prev, ...items])}
-            />
-            <FittingCallouts mediaById={mediaById} />
-          </Section>
-
-          <Section title='session'>
-            <div className='grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2'>
-              <div className='space-y-1 sm:col-span-2'>
-                <Text variant='uppercase' size='small'>
-                  tech card (style) *
-                </Text>
-                <TechCardField />
-                {techCardError && (
-                  <Text size='small' className='text-error'>
-                    {String(techCardError)}
-                  </Text>
-                )}
-                <Text variant='inactive' size='small'>
-                  a fitting is done against a tech card and its sample (not against a product)
-                </Text>
-              </div>
-
-              {!!selectedTechCardId && (
-                <div className='space-y-1 sm:col-span-2'>
-                  <Text variant='uppercase' size='small'>
-                    sample (tried on) *
-                  </Text>
-                  <SamplePicker
-                    techCardId={selectedTechCardId}
-                    value={selectedSampleId ?? 0}
-                    onChange={(sampleId) =>
-                      form.setValue('sampleId', sampleId, { shouldDirty: true })
-                    }
-                  />
-                  {sampleError && (
-                    <Text size='small' className='text-error'>
-                      {String(sampleError)}
-                    </Text>
-                  )}
-                  <Text variant='inactive' size='small'>
-                    a fitting is done on one specific sample — required
-                  </Text>
-                  <SampleSizeInfo sampleId={selectedSampleId ?? 0} sampleSizeId={sampleSizeId} />
-                </div>
-              )}
-
-              <div className='space-y-3 sm:col-span-2'>
-                <SelectField
-                  name='modelId'
-                  label='model (optional)'
-                  items={modelOptions}
-                  valueAsNumber
-                />
-                {!!selectedModelId && (
-                  <ModelMeasurementsView measurements={selectedModel?.model?.measurements} />
-                )}
-              </div>
-
-              <InputField name='fittingDate' type='date' label='fitting date' />
-              <SelectField name='status' label='status' items={fittingStatusOptions} />
-
-              {/* Round is no longer typed in — it always mirrors the linked sample's development
-                round (task 3), so there is nothing to disagree with the carry-over filter. */}
-              <div className='space-y-1'>
-                <Text variant='uppercase' size='small'>
-                  round
-                </Text>
-                <div className='border-b border-hairline py-1.5'>
-                  <Text>
-                    {selectedSampleId
-                      ? `round ${sampleRoundNumber || '—'} · from sample #${
-                          selectedSample?.number ?? selectedSampleId
-                        }`
-                      : 'round — · pick a sample first'}
-                  </Text>
-                </div>
-              </div>
-              <SelectField name='outcome' label='outcome' items={fittingOutcomeOptions} />
-
-              <div className='sm:col-span-2'>
-                <RecordedByField isEditMode={isEditMode} />
-              </div>
-
-              <div className='sm:col-span-2'>
-                <TextareaField
-                  name='comment'
-                  label='comment (optional)'
-                  rows={4}
-                  maxLength={2000}
-                />
-              </div>
-            </div>
-          </Section>
-
-          {/* Secondary/advanced: attaching the exact PDF выкройка measured is common but not part
-            of the primary decision flow, so it starts collapsed once there's nothing in it yet. */}
-          <Section title='pattern (what was measured)' collapsible defaultOpen={patternsCount > 0}>
-            <PatternsFields sampleSizeId={sampleSizeId} />
-          </Section>
-        </SectionStack>
-      </form>
-
-      <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
-        <Text variant='inactive' size='small'>
-          {form.formState.isDirty ? 'unsaved changes' : ' '}
-        </Text>
-        <div className='flex items-center gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase cursor-pointer'
-            onClick={() => navigate(returnTo || ROUTES.fittings)}
-          >
-            cancel
-          </Button>
-          {canWrite(SECTION.fittings) && (
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              className='uppercase cursor-pointer'
-              disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
-              loading={form.formState.isSubmitting}
-              onClick={() => submit()}
-            >
-              {isEditMode ? 'save' : 'add'}
-            </Button>
-          )}
-        </div>
-      </div>
+        <OutcomeDock saveError={saveError} />
+        <DetailsDrawer
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          models={models ?? []}
+          readOnly={readOnly}
+        />
+      </FittingWorkspaceContext.Provider>
     </Form>
   );
 }

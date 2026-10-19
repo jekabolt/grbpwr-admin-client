@@ -12,7 +12,8 @@ import { adminService } from 'api/api';
 import type { common_TechCardSeam } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { refuseGesture } from '../refuse-gesture';
 import type { PieceGeom, SeamGraph } from 'lib/assembly-skeleton/types';
 import { toWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
 import { useCallback, useMemo, useRef } from 'react';
@@ -89,7 +90,6 @@ export type SeamWrites = {
 
 export function useSeamWrites(cardId: number | undefined, frozen: boolean): SeamWrites {
   const qc = useQueryClient();
-  const showMessage = useSnackBarStore((s) => s.showMessage);
 
   const settle = useCallback(
     (
@@ -126,11 +126,15 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       errorAt?: string,
     ): Promise<boolean> => {
       if (frozen) {
-        showMessage(FROZEN_REFUSAL, 'error');
+        refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
         return false;
       }
       if (!cardId) {
-        showMessage('save the card first — seams are stored on a saved card', 'error');
+        refuseGesture(
+          'SEAMS',
+          'not saved',
+          'save the card first — seams are stored on a saved card',
+        );
         return false;
       }
       const keys = Object.keys(ops);
@@ -147,11 +151,15 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       } catch (e) {
         const why = message(e);
         settle(keys, undefined, why, errorAt);
-        showMessage(`the seam ${verb} was not saved: ${why}`, 'error');
+        // The row says «refused: …» on the page; the inbox keeps it.
+        notify(
+          { sev: 'error', subject: 'SEAM', text: `${verb} not saved`, detail: why },
+          { toast: false },
+        );
         return false;
       }
     },
-    [cardId, frozen, settle, showMessage],
+    [cardId, frozen, settle],
   );
 
   // The list a new row is checked against must be recent: another client may have confirmed the

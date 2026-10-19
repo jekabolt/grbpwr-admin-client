@@ -1,7 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
@@ -27,7 +26,8 @@ export function useUpdateStock({
   onStockUpdated?: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
+  // A refused write stands inside the dialog; the closing dialog + refreshed table is the receipt.
+  const [submitError, setSubmitError] = useState<string | null>(null);
   // Controlled modal open state so a successful save can auto-close the dialog (M5: the form used to
   // silently reset to blank, leaving the operator unsure the write landed).
   const [open, setOpen] = useState(false);
@@ -64,8 +64,9 @@ export function useUpdateStock({
   }, [mode, reason]);
 
   async function onSubmit(data: UpdateStockData) {
+    setSubmitError(null);
     if (!data.variantId) {
-      showMessage('Select a size/variant', 'error');
+      form.setError('variantId', { message: 'pick a size' });
       return;
     }
     const payload: Parameters<typeof adminService.UpdateVariantStock>[0] = {
@@ -78,22 +79,13 @@ export function useUpdateStock({
     };
     try {
       await adminService.UpdateVariantStock(payload);
-      // Summarise the applied change (the RPC returns no quantity), then auto-close and refresh the
-      // table behind the modal so the operator can confirm the new stock.
-      const sizeLabel =
-        variants.find((v) => v.variantId === data.variantId)?.name ?? `#${data.variantId}`;
-      const summary =
-        data.mode === 'STOCK_ADJUSTMENT_MODE_SET'
-          ? `set to ${data.quantity}`
-          : `${data.direction === 'STOCK_ADJUSTMENT_DIRECTION_DECREASE' ? '−' : '+'}${data.quantity}`;
-      showMessage(`Stock updated — ${sizeLabel} ${summary}`, 'success');
+      // Auto-close and refresh the table behind the modal so the operator sees the new stock.
       form.reset();
       queryClient.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
       onStockUpdated?.();
       setOpen(false);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update stock';
-      showMessage(message, 'error');
+      setSubmitError(error instanceof Error ? error.message : 'update failed');
       console.error('Failed to update stock', error);
     }
   }
@@ -128,7 +120,10 @@ export function useUpdateStock({
   // never reopens showing a stale half-filled entry.
   function onOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) form.reset();
+    if (!next) {
+      form.reset();
+      setSubmitError(null);
+    }
   }
 
   return {
@@ -145,5 +140,6 @@ export function useUpdateStock({
     commentPlaceholder:
       reason === 'STOCK_CHANGE_REASON_OTHER' ? 'comment (required)' : 'leave comment (optional)',
     onSubmit,
+    submitError,
   };
 }

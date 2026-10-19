@@ -1,8 +1,10 @@
+import { useDockBottom } from 'hooks/useDockBottom';
 import { TierConfigEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useState } from 'react';
-import { BackLink, Button, Input, Section, SectionStack, Text } from 'ui';
+import { useEffect, useRef, useState } from 'react';
+import { errorSentence, isRefusal } from 'components/shared/notify-failure';
+import { BackLink, Button, CalloutBox, Input, Section, SectionStack, Text, useDoneFlash } from 'ui';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
 
@@ -11,6 +13,18 @@ export function TierConfig() {
   const update = useUpdateTierConfig();
   const [entries, setEntries] = useState<TierConfigEntry[]>([]);
   const { canWrite } = usePermissions();
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  const saved = useDoneFlash();
+  // The server's refusal of the config stands on the page until the next save.
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const save = () => {
+    setRefusal(null);
+    update.mutate(entries, {
+      onSuccess: saved.flash,
+      onError: (e) => isRefusal(e) && setRefusal(errorSentence(e, 'not saved')),
+    });
+  };
+  useDockBottom(saveBarRef, [entries.length > 0]);
 
   useEffect(() => {
     if (data?.entries) setEntries(data.entries.map((e) => ({ ...e })));
@@ -139,8 +153,19 @@ export function TierConfig() {
         ))}
       </SectionStack>
 
+      {refusal && (
+        <CalloutBox tone='error'>
+          <Text size='micro' component='span' role='alert'>
+            <b>not saved</b> · {refusal}
+          </Text>
+        </CalloutBox>
+      )}
+
       {canWrite(SECTION.members) && entries.length > 0 && (
-        <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'>
+        <div
+          ref={saveBarRef}
+          className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
+        >
           <Text variant='inactive' size='small'>
             {dirty ? 'unsaved changes' : ' '}
           </Text>
@@ -158,8 +183,9 @@ export function TierConfig() {
               variant='main'
               size='lg'
               className='uppercase cursor-pointer'
-              onClick={() => update.mutate(entries)}
-              disabled={!dirty}
+              onClick={save}
+              done={saved.on}
+              disabled={!dirty && !saved.on}
               loading={update.isPending}
             >
               save

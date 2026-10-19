@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { AcctJournalEntry, AcctJournalLineInput } from 'api/proto-http/admin';
 import { CreateSupplierModal } from 'components/managers/accounting/subledgers/components/create-supplier-modal';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import {
   Controller,
@@ -15,6 +15,7 @@ import {
 import {
   AddDoor,
   Button,
+  CalloutBox,
   Close,
   ConfirmationModal,
   Input,
@@ -29,6 +30,7 @@ import { inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors } from 'utils/field-errors';
 import CurrencySelect from 'components/shared/currency-select';
 import { Callout, CheckStrip, Verdict } from '../../components/kit';
+import { errorText, isRefused, reasonOf } from '../../utils/feedback';
 import { MANUAL_ENTRY_PRESETS, ManualEntryPreset } from '../../utils/constants';
 import {
   useAcctAccounts,
@@ -113,8 +115,9 @@ function computeBalance(lines: ManualEntryLine[]): Balance {
 }
 
 export function ManualEntryModal({ onClose, onCreated }: Props) {
-  const { showMessage } = useSnackBarStore();
   const { data, isLoading: accountsLoading } = useAcctAccounts(false);
+  // A refusal no field took stands over the buttons until the next attempt.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const { data: periodsData } = useAcctPeriods();
   const { data: suppliersData } = useSuppliers();
   const createEntry = useCreateJournalEntry();
@@ -246,6 +249,7 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
       setSupplierError(true);
       return;
     }
+    setRefusal(null);
     const lines: AcctJournalLineInput[] = formData.lines.map((l) => {
       const base = l.amountMode === 'base';
       const note = l.note && l.note.trim() ? l.note.trim() : undefined;
@@ -271,17 +275,32 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
           // Name the month when it is not the current one — that is exactly the case where the
           // entry will NOT be visible in the list's default range, and the "view" action is the
           // one-click way back to it.
+          // Kept as a toast: it carries the «view» door back to an entry the list may not show.
           const suffix = monthInfo?.isPast ? ` in ${monthInfo.month}` : '';
-          showMessage(
-            `Entry #${entry?.id ?? '?'} posted${suffix}`,
-            'success',
-            entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
-          );
+          notify({
+            sev: 'ok',
+            subject: `ENTRY ${entry?.id ?? ''}`.trim(),
+            text: `posted${suffix}`,
+            action:
+              entry && onCreated ? { label: 'view', onClick: () => onCreated(entry) } : undefined,
+          });
           onClose();
         },
         onError: (e) => {
-          applyServerFieldErrors(e, form.setError);
-          showMessage(e instanceof Error ? e.message : 'Failed to create entry', 'error');
+          const { applied, unmapped } = applyServerFieldErrors(e, form.setError);
+          const said = errorText(e, 'failed to create entry') ?? '';
+          if (isRefused(e)) {
+            if (applied.length === 0 || unmapped.length > 0) setRefusal(said);
+            return;
+          }
+          // No retry: a lost reply may still have posted the entry.
+          notify({
+            sev: 'error',
+            subject: 'ENTRY',
+            text: 'not posted',
+            bad: reasonOf(e),
+            detail: said,
+          });
         },
       },
     );
@@ -485,6 +504,8 @@ export function ManualEntryModal({ onClose, onCreated }: Props) {
                   className='mt-0'
                 />
               )}
+
+              {refusal && <CalloutBox tone='error'>{refusal}</CalloutBox>}
 
               <div className='flex items-center justify-end gap-2'>
                 <Button type='button' variant='secondary' size='lg' onClick={requestClose}>

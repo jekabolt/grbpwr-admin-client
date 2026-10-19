@@ -13,7 +13,7 @@ import {
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Board as BoardRow, ViewSwitch } from 'ui';
+import { Board as BoardRow, Button, Text } from 'ui';
 import { ListTasksFilter, Task, TaskStatus } from '../api/types';
 import { useMoveTask } from '../hooks/useTasks';
 import { STATUS_LABEL, STATUSES } from '../utils/meta';
@@ -21,6 +21,14 @@ import { BoardColumn } from './board-column';
 import { TaskCardBody } from './task-card';
 
 const PHONE_STATUS_KEY = 'grbpwr.kanban.phoneStatus';
+const PHONE_STATUS_LABEL: Record<TaskStatus, string> = {
+  TASK_STATUS_UNKNOWN: 'unknown',
+  TASK_STATUS_BACKLOG: 'backlog',
+  TASK_STATUS_TODO: 'to do',
+  TASK_STATUS_IN_PROGRESS: 'doing',
+  TASK_STATUS_REVIEW: 'review',
+  TASK_STATUS_DONE: 'done',
+};
 
 /**
  * ДРАГ — ТОЛЬКО МЫШЬЮ/ПЕРОМ. На телефоне палец, начавший жест на карточке, обязан листать
@@ -61,6 +69,54 @@ function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   for (const t of tasks) (map[t.status] ??= []).push(t);
   for (const s of STATUSES) map[s].sort((a, b) => a.position - b.position);
   return map;
+}
+
+function PhoneStatusStrip({
+  value,
+  counts,
+  onChange,
+}: {
+  value: TaskStatus;
+  counts: Record<TaskStatus, Task[]>;
+  onChange: (status: TaskStatus) => void;
+}) {
+  return (
+    <div
+      role='tablist'
+      aria-label='status'
+      className='sticky top-14 z-[var(--z-sticky)] -mx-2.5 grid grid-cols-5 overflow-hidden border-y border-hairline bg-bgColor sm:hidden'
+    >
+      {STATUSES.map((status) => {
+        const selected = status === value;
+        return (
+          <Button
+            key={status}
+            role='tab'
+            aria-selected={selected}
+            onClick={() => onChange(status)}
+            className={
+              selected
+                ? '!flex h-13 min-w-0 flex-col items-center justify-center gap-0.5 border-b-2 border-textColor px-0 text-textColor'
+                : '!flex h-13 min-w-0 flex-col items-center justify-center gap-0.5 border-b-2 border-bgColor px-0 text-labelColor hover:text-textColor'
+            }
+          >
+            <Text
+              size='micro'
+              variant='uppercase'
+              tracking='pill'
+              component='span'
+              className='!text-inherit'
+            >
+              {PHONE_STATUS_LABEL[status]}
+            </Text>
+            <Text component='span' className='font-bold tabular-nums !text-inherit'>
+              {counts[status].length}
+            </Text>
+          </Button>
+        );
+      })}
+    </div>
+  );
 }
 
 // Groups a board's tasks into ordered status columns and wires cross-column
@@ -200,22 +256,10 @@ export function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      {/* Телефон: полоса статусов липнет под шапкой (h-12 + top-2 = top-14), колонка под ней
-          одна и во всю ширину. С sm — пять колонок, как были. */}
-      <div className='sticky top-14 z-[var(--z-sticky)] -mx-2.5 overflow-x-auto bg-pageBg px-2.5 pb-2 sm:hidden'>
-        <ViewSwitch
-          label='status'
-          value={phoneStatus}
-          onChange={setPhoneStatus}
-          options={STATUSES.map((s) => ({
-            value: s,
-            label: `${STATUS_LABEL[s]} ${byStatus[s].length}`,
-          }))}
-          className='h-11 whitespace-nowrap'
-        />
-      </div>
+      {/* On a phone one status names the visible list; the strip stays under the 48px nav. */}
+      <PhoneStatusStrip value={phoneStatus} counts={byStatus} onChange={setPhoneStatus} />
 
-      <BoardRow className='block gap-4 pb-4 sm:flex'>
+      <BoardRow className='block gap-4 overflow-visible pb-4 sm:flex sm:overflow-x-auto'>
         {STATUSES.map((status) => (
           <BoardColumn
             key={status}

@@ -29,4 +29,4 @@ export {
   copyText,
   latestRunOfKind,
 } from './wmg';
-export type { NotSentItem, Say, WmgDoor, WmgOrigin } from './wmg';
+export type { NotSentItem, WmgDoor, WmgOrigin } from './wmg';

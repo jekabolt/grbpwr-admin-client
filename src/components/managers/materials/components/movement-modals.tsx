@@ -5,7 +5,12 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
 import { runConfig, sampleConfig } from 'components/managers/tasks/utils/entity-configs';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
-import { useSnackBarStore } from 'lib/stores/store';
+import {
+  FailNote,
+  isRefusal,
+  notifyFailure,
+} from 'components/managers/production-runs/components/feedback';
+import { notify } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
 import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
@@ -36,11 +41,24 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
-// Snackbar copy that reports the balance change straight from the posted ledger row.
-function posted(m?: common_MaterialMovement): string {
-  return `Movement posted · on hand ${decimalToInput(m?.onHandBefore) || '0'} → ${
-    decimalToInput(m?.onHandAfter) || '0'
-  }`;
+// The balance change straight from the posted ledger row. The dialog is gone by then and no screen
+// shows before → after, so it is the one receipt kept as an ok toast (never logged).
+function posted(target: MovementTarget, m?: common_MaterialMovement) {
+  notify({
+    sev: 'ok',
+    subject: target.materialLabel.toUpperCase(),
+    text: 'posted',
+    detail: `on hand ${decimalToInput(m?.onHandBefore) || '0'} → ${
+      decimalToInput(m?.onHandAfter) || '0'
+    }`,
+  });
+}
+
+// Money path (stock valuation): no retry from the toast; a refusal stays in the dialog.
+function failed(target: MovementTarget, text: string, e: unknown, setFail: (v: string) => void) {
+  const sentence = e instanceof Error ? e.message : text;
+  if (isRefusal(e)) setFail(sentence);
+  else notifyFailure(target.materialLabel.toUpperCase(), text, e, sentence);
 }
 
 // Shared raw-dialog shell (not ConfirmationModal, which auto-closes on confirm — a validation
@@ -52,6 +70,8 @@ function MovementDialog({
   busy,
   onSubmit,
   submitLabel,
+  fail,
+  failVerb,
   children,
 }: {
   open: boolean;
@@ -60,6 +80,9 @@ function MovementDialog({
   busy: boolean;
   onSubmit: () => void;
   submitLabel: string;
+  /** A failed check or the server's refusal: one line above the footer. */
+  fail: string | null;
+  failVerb: string;
   children: ReactNode;
 }) {
   return (
@@ -74,7 +97,10 @@ function MovementDialog({
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>{title}</DialogPrimitives.Description>
-          <div className='flex flex-col gap-3 p-4'>{children}</div>
+          <div className='flex flex-col gap-3 p-4'>
+            {children}
+            <FailNote verb={failVerb} text={fail} />
+          </div>
           <div className='sticky bottom-0 flex justify-end gap-2 border-t border-borderColor bg-bgColor px-4 py-3'>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
@@ -118,7 +144,7 @@ export function ReceiveStockModal({
   onOpenChange: (v: boolean) => void;
   target: MovementTarget;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const [fail, setFail] = useState<string | null>(null);
   const { canWriteCosting } = usePermissions();
   const receive = useReceiveMaterialStock();
   // Supplier catalog for the AP-by-supplier tag (phase 2, wave 4): a costed receipt accrues 2010
@@ -145,6 +171,7 @@ export function ReceiveStockModal({
 
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     setQuantity('');
     setUnitCost('');
     setCurrency('EUR');
@@ -159,9 +186,10 @@ export function ReceiveStockModal({
   }, [open]);
 
   const submit = async () => {
+    setFail(null);
     const qty = parseDecimalNumber(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
-      showMessage('Quantity must be greater than zero', 'error');
+      setFail('quantity must be greater than zero');
       return;
     }
     // Input VAT is all-or-nothing (the backend rejects one without the other); catch it here to save a
@@ -169,7 +197,7 @@ export function ReceiveStockModal({
     const hasInputVat = inputVat.trim() !== '';
     const hasInputVatRegime = inputVatRegime !== '';
     if (hasInputVat !== hasInputVatRegime) {
-      showMessage('Input VAT needs both an amount and a regime, or neither', 'error');
+      setFail('input VAT needs both an amount and a regime, or neither');
       return;
     }
     // Setting a cost is a costing write; omit it (uncosted receipt, average unchanged) otherwise.
@@ -197,10 +225,10 @@ export function ReceiveStockModal({
         measuredWidthCm: undefined,
         shadeCode: undefined,
       });
-      showMessage(posted(res.movement), 'success');
+      posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to receive stock', 'error');
+      failed(target, 'not received', e, setFail);
     }
   };
 
@@ -212,6 +240,8 @@ export function ReceiveStockModal({
       busy={receive.isPending}
       onSubmit={submit}
       submitLabel='receive'
+      fail={fail}
+      failVerb='not received'
     >
       <Field label={`quantity (${target.unit || 'unit'})`}>
         <input
@@ -393,7 +423,7 @@ export function IssueStockModal({
   // for (feeds ProductionRunActuals.by_colorway). Only meaningful when issuing to a run.
   colorways?: { productId: number; label: string }[];
 }) {
-  const { showMessage } = useSnackBarStore();
+  const [fail, setFail] = useState<string | null>(null);
   const issue = useIssueMaterialStock();
   const [quantity, setQuantity] = useState('');
   const [targetKind, setTargetKind] = useState<'run' | 'sample'>('run');
@@ -413,6 +443,7 @@ export function IssueStockModal({
   // (e.g. a stock refetch) must not reset the form mid-edit.
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     setQuantity(defaultQty ?? '');
     setTargetKind(defSample > 0 ? 'sample' : 'run');
     setTargetId(defSample > 0 ? String(defSample) : defRun > 0 ? String(defRun) : '');
@@ -444,13 +475,14 @@ export function IssueStockModal({
     qtyNum > onHandNum;
 
   const submit = async () => {
+    setFail(null);
     if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
-      showMessage('Quantity must be greater than zero', 'error');
+      setFail('quantity must be greater than zero');
       return;
     }
     const id = Number(targetId) || 0;
     if (id <= 0) {
-      showMessage(`Enter the ${targetKind === 'run' ? 'production run' : 'sample'} id`, 'error');
+      setFail(`enter the ${targetKind === 'run' ? 'production run' : 'sample'} id`);
       return;
     }
     try {
@@ -467,10 +499,10 @@ export function IssueStockModal({
         productId: targetKind === 'run' ? productId : 0,
         lotId,
       });
-      showMessage(posted(res.movement), 'success');
+      posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to issue stock', 'error');
+      failed(target, isReturn ? 'not returned' : 'not issued', e, setFail);
     }
   };
 
@@ -482,6 +514,8 @@ export function IssueStockModal({
       busy={issue.isPending}
       onSubmit={submit}
       submitLabel={isReturn ? 'return' : 'issue'}
+      fail={fail}
+      failVerb={isReturn ? 'not returned' : 'not issued'}
     >
       {target.onHand != null ? (
         <Text variant='inactive' size='small'>
@@ -624,7 +658,7 @@ export function AdjustStockModal({
   onOpenChange: (v: boolean) => void;
   target: MovementTarget;
 }) {
-  const { showMessage } = useSnackBarStore();
+  const [fail, setFail] = useState<string | null>(null);
   const adjust = useAdjustMaterialStock();
   const [mode, setMode] = useState<'set' | 'adjust' | 'writeoff'>('set');
   const [quantity, setQuantity] = useState('');
@@ -633,6 +667,7 @@ export function AdjustStockModal({
 
   useEffect(() => {
     if (!open) return;
+    setFail(null);
     setMode('set');
     setQuantity('');
     setReason('stock_count');
@@ -661,13 +696,14 @@ export function AdjustStockModal({
     removed > onHandNum;
 
   const submit = async () => {
+    setFail(null);
     const n = parseDecimalNumber(quantity);
     if (!Number.isFinite(n) || (mode !== 'adjust' && n < 0)) {
-      showMessage('Enter a valid quantity', 'error');
+      setFail('enter a valid quantity');
       return;
     }
     if (mode === 'adjust' && n === 0) {
-      showMessage('Adjustment delta cannot be zero', 'error');
+      setFail('adjustment delta cannot be zero');
       return;
     }
     try {
@@ -678,10 +714,10 @@ export function AdjustStockModal({
         reason,
         comment: comment.trim(),
       });
-      showMessage(posted(res.movement), 'success');
+      posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Failed to adjust stock', 'error');
+      failed(target, 'not posted', e, setFail);
     }
   };
 
@@ -693,6 +729,8 @@ export function AdjustStockModal({
       busy={adjust.isPending}
       onSubmit={submit}
       submitLabel='post'
+      fail={fail}
+      failVerb='not posted'
     >
       {target.onHand != null ? (
         <Text variant='inactive' size='small'>

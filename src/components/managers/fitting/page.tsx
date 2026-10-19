@@ -31,5 +31,5 @@ export function Fitting() {
     );
   }
 
-  return <FittingForm isEditMode={isEditMode} id={id} fitting={data} />;
+  return <FittingForm key={id ?? 'new'} isEditMode={isEditMode} id={id} fitting={data} />;
 }

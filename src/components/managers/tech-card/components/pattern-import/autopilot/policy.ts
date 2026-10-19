@@ -676,7 +676,7 @@ function inkRole(c: ImportSession['pages'][number]): boolean {
   return c.cls === 'cover' && !!c.ink && (c.ink.raster >= 0.3 || c.ink.texts >= 10);
 }
 
-function notPatternEvidence(
+export function notPatternEvidence(
   d: NonNullable<ImportSession['clean']>['dropped'][number],
   pages: ImportSession['pages'],
 ): string | null {

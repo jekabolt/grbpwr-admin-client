@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { common_OrderFull, common_OrderStripeDetails } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { fulfillmentService } from '../api/fulfillmentService';
 import { FulfillmentAnnotation, SchedulePickupInput, ShippingParcel } from '../api/types';
 
@@ -17,6 +17,19 @@ export const fulfillmentKeys = {
   card: (uuid: string) => [...fulfillmentKeys.all, 'card', uuid] as const,
   label: (uuid: string) => [...fulfillmentKeys.all, 'label', uuid] as const,
 };
+
+// MONEY PATH (order transitions): only the feedback changed here — no retry actions, the
+// requests and their order are untouched. Errors carry the order on them into the inbox.
+const orderSubject = (uuid: string) => `ORDER ${uuid.slice(0, 8)}`;
+function failed(
+  subject: string,
+  text: string,
+  e: unknown,
+  fallback: string,
+  opts?: { toast?: boolean },
+) {
+  notify({ sev: 'error', subject, text, detail: e instanceof Error ? e.message : fallback }, opts);
+}
 
 // ---- Reads ----
 
@@ -43,7 +56,6 @@ export function useFulfillmentCard(uuid: string | null) {
 
 export function useSetFulfillmentAssignee(uuid: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = fulfillmentKeys.card(uuid);
   return useMutation({
     mutationFn: (assignee: string) => fulfillmentService.setAssignee(uuid, assignee),
@@ -62,7 +74,7 @@ export function useSetFulfillmentAssignee(uuid: string) {
     },
     onError: (e, _assignee, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to set assignee', 'error');
+      failed(orderSubject(uuid), 'assignee not saved', e, 'Failed to set assignee');
     },
     onSettled: () => qc.invalidateQueries({ queryKey: fulfillmentKeys.all }),
   });
@@ -70,14 +82,12 @@ export function useSetFulfillmentAssignee(uuid: string) {
 
 export function useSetFulfillmentNotes(uuid: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (notes: string) => fulfillmentService.setNotes(uuid, notes),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
-      showMessage('Notes saved', 'success');
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save notes', 'error'),
+    onError: (e) => failed(orderSubject(uuid), 'notes not saved', e, 'Failed to save notes'),
   });
 }
 
@@ -85,18 +95,15 @@ export function useSetFulfillmentNotes(uuid: string) {
 
 export function useAddFulfillmentChecklistItem(uuid: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (content: string) => fulfillmentService.addChecklistItem(uuid, content),
     onSuccess: () => qc.invalidateQueries({ queryKey: fulfillmentKeys.all }),
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to add checklist item', 'error'),
+    onError: (e) => failed(orderSubject(uuid), 'item not added', e, 'Failed to add checklist item'),
   });
 }
 
 export function useSetFulfillmentChecklistItemDone(uuid: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = fulfillmentKeys.card(uuid);
   return useMutation({
     mutationFn: (vars: { id: number; isDone: boolean }) =>
@@ -119,7 +126,7 @@ export function useSetFulfillmentChecklistItemDone(uuid: string) {
     },
     onError: (e, _vars, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to update checklist', 'error');
+      failed(orderSubject(uuid), 'checklist not saved', e, 'Failed to update checklist');
     },
     onSettled: () => qc.invalidateQueries({ queryKey: fulfillmentKeys.all }),
   });
@@ -127,7 +134,6 @@ export function useSetFulfillmentChecklistItemDone(uuid: string) {
 
 export function useDeleteFulfillmentChecklistItem(uuid: string) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = fulfillmentKeys.card(uuid);
   return useMutation({
     mutationFn: (id: number) => fulfillmentService.deleteChecklistItem(id),
@@ -147,7 +153,7 @@ export function useDeleteFulfillmentChecklistItem(uuid: string) {
     },
     onError: (e, _id, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to remove checklist item', 'error');
+      failed(orderSubject(uuid), 'item not removed', e, 'Failed to remove checklist item');
     },
     onSettled: () => qc.invalidateQueries({ queryKey: fulfillmentKeys.all }),
   });
@@ -159,29 +165,31 @@ export function useDeleteFulfillmentChecklistItem(uuid: string) {
 
 export function useShipFulfillmentOrder() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { orderUuid: string; trackingCode: string }) =>
       fulfillmentService.ship(vars.orderUuid, vars.trackingCode),
+    // The card moving to «shipped» is the receipt.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
-      showMessage('Order marked shipped', 'success');
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to ship order', 'error'),
+    // The ship dialog shows it; the inbox keeps it.
+    onError: (e, vars) =>
+      failed(orderSubject(vars.orderUuid), 'not shipped', e, 'Failed to ship order', {
+        toast: false,
+      }),
   });
 }
 
 export function useMarkFulfillmentDelivered() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (orderUuid: string) => fulfillmentService.markDelivered(orderUuid),
+    // The card moving to «delivered» is the receipt.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
-      showMessage('Order marked delivered', 'success');
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to mark delivered', 'error'),
+    onError: (e, orderUuid) =>
+      failed(orderSubject(orderUuid), 'not delivered', e, 'Failed to mark delivered'),
   });
 }
 
@@ -202,12 +210,20 @@ export function useShippingLabelPrep(uuid: string | null, enabled: boolean) {
 // On-demand carrier quote for the (possibly overridden) parcel. A mutation, not a
 // query, because it's a POST triggered by an explicit "get options" click.
 export function useShippingOptions() {
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { orderUuid: string; parcel: ShippingParcel }) =>
       fulfillmentService.getShippingOptions(vars.orderUuid, vars.parcel),
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to fetch shipping options', 'error'),
+    // The ship dialog shows it; the inbox keeps it.
+    onError: (e, vars) =>
+      failed(
+        orderSubject(vars.orderUuid),
+        'no carrier options',
+        e,
+        'Failed to fetch shipping options',
+        {
+          toast: false,
+        },
+      ),
   });
 }
 
@@ -216,49 +232,62 @@ export function useShippingOptions() {
 // the whole tree so the board/card/label all reflect the new SHIPPED state.
 export function useGenerateShippingLabel() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: {
       orderUuid: string;
       parcel: ShippingParcel;
       shippingOptionCode?: string;
     }) => fulfillmentService.generateLabel(vars.orderUuid, vars.parcel, vars.shippingOptionCode),
+    // The label in the dialog is the receipt.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
-      showMessage('Label generated — order shipped', 'success');
     },
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to generate label', 'error'),
+    onError: (e, vars) =>
+      failed(orderSubject(vars.orderUuid), 'no label', e, 'Failed to generate label', {
+        toast: false,
+      }),
   });
 }
 
 // VoidShippingLabel cancels the carrier label and reverts Shipped -> Confirmed.
 export function useVoidShippingLabel() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (orderUuid: string) => fulfillmentService.voidLabel(orderUuid),
+    // The dialog going back to the parcel step is the receipt.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: fulfillmentKeys.all });
-      showMessage('Label voided — order reverted to confirmed', 'success');
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to void label', 'error'),
+    onError: (e, orderUuid) =>
+      failed(orderSubject(orderUuid), 'label not voided', e, 'Failed to void label', {
+        toast: false,
+      }),
   });
 }
 
 // SchedulePickup books an end-of-day carrier handover. Board-level, touches no order.
 export function useSchedulePickup() {
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (input: SchedulePickupInput) => fulfillmentService.schedulePickup(input),
+    // Kept as a receipt: the carrier's pickup number shows nowhere else. An unconfirmed booking
+    // and a failure stand in the pickup dialog (it stays open); the inbox keeps them.
     onSuccess: (r) =>
-      showMessage(
-        r.confirmed
-          ? `Pickup scheduled${r.pickupId ? ` (#${r.pickupId})` : ''}`
-          : r.message || 'Pickup could not be confirmed',
-        r.confirmed ? 'success' : 'error',
-      ),
+      r.confirmed
+        ? notify({
+            sev: 'ok',
+            subject: 'PICKUP',
+            text: r.pickupId ? `scheduled #${r.pickupId}` : 'scheduled',
+          })
+        : notify(
+            {
+              sev: 'warn',
+              subject: 'PICKUP',
+              text: 'not confirmed',
+              detail: r.message || 'Pickup could not be confirmed',
+            },
+            { toast: false },
+          ),
     onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to schedule pickup', 'error'),
+      failed('PICKUP', 'not scheduled', e, 'Failed to schedule pickup', { toast: false }),
   });
 }

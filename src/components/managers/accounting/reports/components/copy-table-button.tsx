@@ -1,5 +1,5 @@
-import { useSnackBarStore } from 'lib/stores/store';
-import { Button } from 'ui';
+import { notify } from 'lib/stores/store';
+import { Button, useDoneFlash } from 'ui';
 
 type Props = {
   headers: string[];
@@ -22,14 +22,22 @@ function cell(v: string | number | undefined): string {
 // TSV and drop it on the clipboard, so an analyst pastes straight into a spreadsheet with columns
 // intact. Cheap: the data is already in memory.
 export function CopyTableButton({ headers, rows }: Props) {
-  const { showMessage } = useSnackBarStore();
+  const copied = useDoneFlash();
 
   const onCopy = () => {
     const tsv = [headers, ...rows].map((r) => r.map(cell).join('\t')).join('\n');
     navigator.clipboard
       .writeText(tsv)
-      .then(() => showMessage('Table copied — paste into a spreadsheet', 'success'))
-      .catch(() => showMessage('Failed to copy table', 'error'));
+      .then(() => copied.flash())
+      .catch(() =>
+        notify({
+          sev: 'error',
+          subject: 'TABLE',
+          text: 'not copied',
+          bad: 'clipboard blocked',
+          action: { label: 'retry', onClick: onCopy },
+        }),
+      );
   };
 
   return (
@@ -38,6 +46,7 @@ export function CopyTableButton({ headers, rows }: Props) {
       variant='secondary'
       size='sm'
       className='px-3 py-1 uppercase'
+      done={copied.on && 'copied'}
       onClick={onCopy}
     >
       copy table

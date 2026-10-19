@@ -12,7 +12,6 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -34,6 +33,7 @@ import {
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { CutReceipts } from './components/cut-receipts';
+import { isRefusal, notifyFailure } from './components/feedback';
 import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
@@ -84,7 +84,6 @@ export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
   const navigate = useNavigate();
-  const { showMessage } = useSnackBarStore();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
   const { dictionary } = useDictionary();
@@ -146,7 +145,13 @@ export function ProductionRunDetail() {
   );
   // Phase 6: reversing a receipt needs a mandatory reason — the dialog carries it. null = closed.
   const [reverseTarget, setReverseTarget] = useState<number | null>(null);
-  const [reverseReason, setReverseReason] = useState('');
+  const [reverseReason, setReverseReasonState] = useState('');
+  // The server's refusal of the reversal: stands in the dialog until the reason is edited.
+  const [reverseError, setReverseError] = useState<string | null>(null);
+  const setReverseReason = (v: string) => {
+    setReverseError(null);
+    setReverseReasonState(v);
+  };
   const reverse = useReverseRunReceipt();
   // The server demands production:write + products:write + costing:write (it moves stock and
   // rolls back cost_price); the client gates on the two it can see.
@@ -302,13 +307,12 @@ export function ProductionRunDetail() {
     techCardId: ins?.techCardId,
   });
 
-  const confirmDelete = () =>
+  const confirmDelete = (): void =>
     del.mutate(runId, {
-      onSuccess: () => {
-        showMessage('Run deleted', 'success');
-        navigate(ROUTES.productionRuns);
-      },
-      onError: (e) => showMessage(deleteRunErrorMessage(e), 'error'),
+      // Navigation back to the list is the receipt.
+      onSuccess: () => navigate(ROUTES.productionRuns),
+      onError: (e) =>
+        notifyFailure(`PR-${runId}`, 'not deleted', e, deleteRunErrorMessage(e), confirmDelete),
     });
 
   if (isLoading) return <Text size='small'>loading…</Text>;
@@ -938,11 +942,17 @@ export function ProductionRunDetail() {
               expectedLockVersion: run?.lockVersion ?? 0,
             },
             {
-              onSuccess: () => {
-                setReverseTarget(null);
-                showMessage('receipt reversed: stock removed, money returned to WIP', 'success');
-              },
-              onError: (e) => showMessage(reversalErrorMessage(e), 'error'),
+              // The receipt table shows the reversal; no toast. Money path: no retry offered.
+              onSuccess: () => setReverseTarget(null),
+              onError: (e) =>
+                isRefusal(e)
+                  ? setReverseError(reversalErrorMessage(e))
+                  : notifyFailure(
+                      `RECEIPT #${reverseTarget}`,
+                      'not reversed',
+                      e,
+                      reversalErrorMessage(e),
+                    ),
             },
           );
         }}
@@ -961,6 +971,13 @@ export function ProductionRunDetail() {
             value={reverseReason}
             onChange={(e) => setReverseReason(e.target.value)}
           />
+          {reverseError && (
+            <CalloutBox tone='error'>
+              <Text size='micro' component='span' role='alert'>
+                <b>not reversed</b> · {reverseError}
+              </Text>
+            </CalloutBox>
+          )}
         </div>
       </ConfirmationModal>
 

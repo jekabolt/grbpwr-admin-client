@@ -1209,9 +1209,9 @@ export type PieceCandidate = {
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
   /**
-   * SHAPE (pieces/notch-marks.ts): notch marks (small closed marks centred on the line) the outline
-   * ran around and now crosses on the size's own line — taken out of `walls`, read as notches by
-   * semantics. Absent = none.
+   * SHAPE / NOTCH (pieces/notch-marks.ts): compact closed marks the outline ran around and now
+   * crosses on the size's own line — taken out of `walls`, then classified by semantics. A mark
+   * containing a source-size word is a size tag and writes no layer-4 notch. Absent = none.
    */
   notchMarks?: ChainId[];
   /**

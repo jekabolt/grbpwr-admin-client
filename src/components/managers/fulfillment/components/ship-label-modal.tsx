@@ -1,6 +1,15 @@
 import { riskTone } from 'components/managers/order/components/stripe-details';
 import { useEffect, useState } from 'react';
-import { BackLink, Button, CalloutBox, ConfirmationModal, CopyToClipboard, Input, Pill, Text } from 'ui';
+import {
+  BackLink,
+  Button,
+  CalloutBox,
+  ConfirmationModal,
+  CopyToClipboard,
+  Input,
+  Pill,
+  Text,
+} from 'ui';
 import { emptyParcel, GeneratedLabel, ShippingOptionVM, ShippingParcel } from '../api/types';
 import {
   useFulfillmentCard,
@@ -63,6 +72,10 @@ export function ShipLabelModal({
     setConfirmVoid(false);
     setStep('parcel');
     setRiskAck(false);
+    manualShip.reset();
+    options.reset();
+    generate.reset();
+    voidLabel.reset();
   }, [open]);
 
   // Seed the parcel from the backend default once per open — but never clobber the
@@ -130,6 +143,9 @@ export function ShipLabelModal({
           : d && !d.labelsEnabled
             ? 'manual'
             : step;
+
+  // The last failed step of this dialog: said here (the inbox keeps it too).
+  const failure = [manualShip, options, generate, voidLabel].find((m) => m.error)?.error;
 
   const hideActions = view === 'loading' || view === 'error' || view === 'ready';
 
@@ -325,7 +341,13 @@ export function ShipLabelModal({
           <div className='flex flex-col gap-1 border border-borderColor px-2.5 py-2'>
             {carrierName && (
               <div className='flex items-center gap-2'>
-                <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                <Text
+                  size='micro'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='uppercase'
+                >
                   carrier
                 </Text>
                 <Text size='micro' component='span'>
@@ -334,10 +356,20 @@ export function ShipLabelModal({
               </div>
             )}
             <div className='flex items-center gap-2'>
-              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
                 tracking
               </Text>
-              {trackingCode ? <CopyToClipboard text={trackingCode} /> : <Pill tone='mut'>none</Pill>}
+              {trackingCode ? (
+                <CopyToClipboard text={trackingCode} />
+              ) : (
+                <Pill tone='mut'>none</Pill>
+              )}
             </div>
           </div>
 
@@ -380,6 +412,13 @@ export function ShipLabelModal({
             </Button>
           </div>
         </div>
+      )}
+      {failure && (
+        <CalloutBox tone='error' className='mt-2.5'>
+          <Text size='micro' component='span' role='alert'>
+            <b>failed</b> · {failure instanceof Error ? failure.message : 'request failed'}
+          </Text>
+        </CalloutBox>
       )}
     </ConfirmationModal>
   );

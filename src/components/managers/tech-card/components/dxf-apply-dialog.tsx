@@ -40,7 +40,7 @@ import {
 import { parseDecimalNumber } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { mmToEngineCm } from './nesting/allowance-units';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { publishPieceAreas, useUnsavedAreaSource } from './piece-areas';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
 import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
@@ -149,7 +149,6 @@ export default function DxfApplyDialog({
   // писать в карточку.
   const applicable = complete && canEdit && !conditions.blocked;
 
-  const { showMessage } = useSnackBarStore();
   const queryClient = useQueryClient();
   const patternRows = (useWatch({ control, name: 'patterns' }) ?? []) as {
     lineKey?: string;
@@ -229,10 +228,14 @@ export default function DxfApplyDialog({
     // Норму это НЕ отменяет: её человек только что подтвердил, она посчитана и применяется ниже.
     // Не уезжают только площади — и об этом говорится вслух, вместе с тем, что делать.
     if (publishTarget && outcome?.ok && sourceDirty) {
-      showMessage(
-        'the norm is applied; the areas are NOT saved: the patterns or the block→piece links have been edited and not saved — the server checks the set against the saved links. once the card has saved, measure the areas on the patterns tab',
-        'error',
-      );
+      notify({
+        sev: 'warn',
+        subject: 'PIECE AREAS',
+        text: 'norm applied',
+        bad: 'areas not saved',
+        detail:
+          'the patterns or the block→piece links have been edited and not saved — the server checks the set against the saved links. once the card has saved, measure the areas on the patterns tab',
+      });
     } else if (publishTarget && outcome?.ok) {
       void publishPieceAreas({
         techCardId: publishTarget.techCardId,
@@ -244,7 +247,13 @@ export default function DxfApplyDialog({
         nameOfPiece: (key) => pieces.find((p) => (p.lineKey ?? '').trim() === key)?.name ?? key,
       }).then((res) => {
         if (!res.ok) {
-          showMessage(`the norm is applied, but the areas were not saved: ${res.reason}`, 'error');
+          notify({
+            sev: 'warn',
+            subject: 'PIECE AREAS',
+            text: 'norm applied',
+            bad: 'areas not saved',
+            detail: res.reason,
+          });
           return;
         }
         // Состояние замера показывает вкладка выкроек, и читает она его ИЗ ОТВЕТА СЕРВЕРА (свежесть

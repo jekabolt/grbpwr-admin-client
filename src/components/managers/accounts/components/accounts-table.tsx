@@ -65,6 +65,8 @@ interface Props {
   canWrite: boolean;
   onEdit: (account: AdminAccount) => void;
   onResetPassword: (account: AdminAccount) => void;
+  /** Username whose password was just reset: its door shows the receipt. */
+  passwordDoneFor?: string;
 }
 
 export function AccountsTable({
@@ -74,6 +76,7 @@ export function AccountsTable({
   canWrite,
   onEdit,
   onResetPassword,
+  passwordDoneFor,
 }: Props) {
   const setDisabled = useSetAccountDisabled();
   const del = useDeleteAccount();
@@ -157,7 +160,11 @@ export function AccountsTable({
                     <Button variant='underline' onClick={() => onEdit(a)}>
                       edit
                     </Button>
-                    <Button variant='underline' onClick={() => onResetPassword(a)}>
+                    <Button
+                      variant='underline'
+                      done={!!a.username && passwordDoneFor === a.username && 'reset'}
+                      onClick={() => onResetPassword(a)}
+                    >
                       password
                     </Button>
                     <Button

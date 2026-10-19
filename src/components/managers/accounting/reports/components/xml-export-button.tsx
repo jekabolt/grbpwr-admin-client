@@ -1,6 +1,7 @@
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui';
+import { Button, useDoneFlash } from 'ui';
+import { errorText, isTransient, reasonOf } from '../../utils/feedback';
 
 type Props = {
   label: string;
@@ -12,8 +13,8 @@ type Props = {
 
 // Fetches a statutory XML export (JPK_V7M, OSS, …) from the backend and saves it as a file.
 export function XmlExportButton({ label, fallbackName, run }: Props) {
-  const { showMessage } = useSnackBarStore();
   const [busy, setBusy] = useState(false);
+  const downloaded = useDoneFlash();
 
   const onExport = async () => {
     setBusy(true);
@@ -28,12 +29,16 @@ export function XmlExportButton({ label, fallbackName, run }: Props) {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      showMessage(`${res.filename || fallbackName} downloaded`, 'success');
+      downloaded.flash();
     } catch (e) {
-      showMessage(
-        e instanceof Error ? e.message : 'Export failed — check the taxpayer identity is configured',
-        'error',
-      );
+      notify({
+        sev: 'error',
+        subject: fallbackName.toUpperCase(),
+        text: 'not exported',
+        bad: reasonOf(e),
+        detail: errorText(e, 'check the taxpayer identity is configured'),
+        action: isTransient(e) ? { label: 'retry', onClick: () => void onExport() } : undefined,
+      });
     } finally {
       setBusy(false);
     }
@@ -46,6 +51,7 @@ export function XmlExportButton({ label, fallbackName, run }: Props) {
       size='sm'
       className='px-3 py-1 uppercase'
       disabled={busy}
+      done={downloaded.on && 'downloaded'}
       onClick={onExport}
     >
       {busy ? 'generating…' : label}

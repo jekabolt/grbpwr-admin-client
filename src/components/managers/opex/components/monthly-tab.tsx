@@ -1,6 +1,7 @@
 import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
+import { errorText, isTransient, reasonOf } from 'components/managers/accounting/utils/feedback';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -14,7 +15,8 @@ import {
   SkeletonLine,
   Text,
   Toolbar,
-  ToolbarSpacer, EmptyCell,
+  ToolbarSpacer,
+  EmptyCell,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
@@ -64,8 +66,6 @@ export function MonthlyContent({
   isError: boolean;
   refetch: () => void;
 }) {
-  const { showMessage } = useSnackBarStore();
-
   const lines = useMemo(() => linesByMonth.get(month) ?? [], [linesByMonth, month]);
   const prevMonth = shiftMonth(month, -1);
   const prevManual = useMemo(
@@ -95,13 +95,25 @@ export function MonthlyContent({
   // opxUncosted v2: the first line the backend could not fold to base — the "one-click fix" target.
   const firstUncosted = useMemo(() => lines.find(isUncostedLine), [lines]);
 
-  const confirmDelete = () => {
-    if (!deleting?.id) return;
-    del.mutate(deleting.id, {
-      onSuccess: () => showMessage('Line deleted', 'success'),
-      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to delete', 'error'),
+  // No receipt: the row leaves the month's table.
+  const deleteLine = (id: number, label: string): void =>
+    del.mutate(id, {
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: `OPEX ${label}`.trim(),
+          text: 'not deleted',
+          bad: reasonOf(e),
+          detail: errorText(e),
+          action: isTransient(e)
+            ? { label: 'retry', onClick: () => deleteLine(id, label) }
+            : undefined,
+        }),
       onSettled: () => setDeleting(undefined),
     });
+  const confirmDelete = () => {
+    if (!deleting?.id) return;
+    deleteLine(deleting.id, deleting.label ?? '');
   };
 
   const isToday = month === currentMonth();
@@ -453,7 +465,6 @@ function CopyPreviousModal({
   existing: OpexLine[];
   canRead: boolean;
 }) {
-  const { showMessage } = useSnackBarStore();
   const upsert = useUpsertOpexLines();
 
   const existingKeys = useMemo(
@@ -481,10 +492,8 @@ function CopyPreviousModal({
   const chosen = prevManual.filter((l) => l.id && selected.has(l.id) && !collides(l));
 
   const confirm = () => {
-    if (chosen.length === 0) {
-      showMessage('Select at least one line to copy', 'error');
-      return;
-    }
+    // The copy button is disabled with nothing picked.
+    if (chosen.length === 0) return;
     const clones: OpexLineInsert[] = chosen.map((l) => ({
       month: monthToApi(month),
       category: l.category ?? 'other',
@@ -500,9 +509,16 @@ function CopyPreviousModal({
       supplierVatId: l.supplierVatId || undefined,
       supplierName: l.supplierName || undefined,
     }));
+    // No receipt: the copied lines show in the month's table.
     upsert.mutate(clones, {
-      onSuccess: () => showMessage(`Copied ${clones.length} line(s) from ${prevMonth}`, 'success'),
-      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to copy', 'error'),
+      onError: (e) =>
+        notify({
+          sev: 'error',
+          subject: `OPEX ${month}`,
+          text: 'not copied',
+          bad: reasonOf(e),
+          detail: errorText(e),
+        }),
       onSettled: () => onOpenChange(false),
     });
   };

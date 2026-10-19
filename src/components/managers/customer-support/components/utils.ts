@@ -1,21 +1,13 @@
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import {
-  common_SupportTicketPriority,
-  common_SupportTicketStatus,
-} from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { common_SupportTicketPriority, common_SupportTicketStatus } from 'api/proto-http/admin';
+import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
+import { notify } from 'lib/stores/store';
 
 export const ticketKeys = {
   all: ['support-tickets'] as const,
   list: () => [...ticketKeys.all, 'list'] as const,
-  listFiltered: (filters: Record<string, unknown>) =>
-    [...ticketKeys.list(), filters] as const,
+  listFiltered: (filters: Record<string, unknown>) => [...ticketKeys.list(), filters] as const,
   detail: (id: number) => [...ticketKeys.all, 'detail', id] as const,
 };
 
@@ -69,9 +61,8 @@ export function useTicketById(id: number | null) {
 
 export function useUpdateTicketStatus() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
 
-  return useMutation({
+  const m = useMutation({
     mutationFn: async ({
       id,
       status,
@@ -83,22 +74,30 @@ export function useUpdateTicketStatus() {
     }) => {
       return await adminService.UpdateSupportTicketStatus({ id, status, internalNotes });
     },
+    // The status on the ticket is the receipt.
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ticketKeys.all });
-      showMessage('Ticket status updated', 'success');
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'Failed to update ticket status';
-      showMessage(msg, 'error');
+    onError: (error, vars) => {
+      notify({
+        sev: 'error',
+        subject: `TICKET ${vars.id}`,
+        text: 'status not saved',
+        detail: error instanceof Error ? error.message : undefined,
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => m.mutate(vars) }
+            : undefined,
+      });
     },
   });
+  return m;
 }
 
 export function useUpdateTicket() {
   const queryClient = useQueryClient();
-  const { showMessage } = useSnackBarStore();
 
-  return useMutation({
+  const m = useMutation({
     mutationFn: async ({
       id,
       priority,
@@ -112,15 +111,24 @@ export function useUpdateTicket() {
     }) => {
       return await adminService.UpdateSupportTicket({ id, priority, category, internalNotes });
     },
+    // The save button leaving with the edits is the receipt.
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ticketKeys.all });
-      showMessage('Ticket updated', 'success');
     },
-    onError: (error) => {
-      const msg = error instanceof Error ? error.message : 'Failed to update ticket';
-      showMessage(msg, 'error');
+    onError: (error, vars) => {
+      notify({
+        sev: 'error',
+        subject: `TICKET ${vars.id}`,
+        text: 'not saved',
+        detail: error instanceof Error ? error.message : undefined,
+        action:
+          failureClassOfError(error) === 'transient'
+            ? { label: 'retry', onClick: () => m.mutate(vars) }
+            : undefined,
+      });
     },
   });
+  return m;
 }
 
 export const STATUS_OPTIONS: { value: common_SupportTicketStatus; label: string }[] = [
@@ -142,9 +150,7 @@ export function formatStatusLabel(status: common_SupportTicketStatus | undefined
   return STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status ?? 'Unknown';
 }
 
-export function formatPriorityLabel(
-  priority: common_SupportTicketPriority | undefined,
-): string {
+export function formatPriorityLabel(priority: common_SupportTicketPriority | undefined): string {
   return PRIORITY_OPTIONS.find((o) => o.value === priority)?.label ?? priority ?? '-';
 }
 

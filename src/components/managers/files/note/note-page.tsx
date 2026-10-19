@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 // Адрес заметки НЕ собирается здесь: он живёт в `constants/routes` рядом с самим шаблоном
@@ -12,6 +13,7 @@ import {
   Button,
   CalloutBox,
   ConfirmationModal,
+  GenericPopover,
   Pill,
   Section,
   Text,
@@ -27,6 +29,7 @@ import { NoAccessState } from '../components/gallery-states';
 import { filesKeys, invalidateFileViews, useLibraryFile } from '../hooks/useFiles';
 import { formatBytes, formatWhenShort, stemOf } from '../utils/format';
 import { MarkdownView } from './markdown-view';
+import { NoteBlocksView } from './note-blocks-view';
 import { NoteDiff } from './note-diff';
 import { NoteEditor, type NoteCaret, type NoteEditorHandle } from './note-editor';
 import { readNoteDraft, useNoteDraft } from './use-note-draft';
@@ -130,6 +133,14 @@ export function NotePage() {
   /** Отпечаток версии, от которой произошёл буфер, — база сравнения при записи. */
   const [base, setBase] = useState('');
   const [editing, setEditing] = useState(false);
+  /**
+   * ТЕЛЕФОН: правка — по блокам (`note-blocks-view.tsx`), сырое поле — по «•••» → edit as text.
+   * Флаг живёт до выхода из правки: следующий «edit» снова открывает блоки.
+   */
+  const phone = useMediaQuery(PHONE_QUERY);
+  const [asText, setAsText] = useState(false);
+  /** Перенос строк — один переключатель на поле заметки и на лист блока. */
+  const [wrapLines, setWrapLines] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedLabel, setSavedLabel] = useState('');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -186,6 +197,7 @@ export function NotePage() {
 
     seededRef.current = id;
     caretRef.current = null;
+    setAsText(false);
     setValue(text);
     setServerContent(text);
     setBase(fresh);
@@ -270,18 +282,20 @@ export function NotePage() {
   /* ── сохранение ───────────────────────────────────────────────────────────────────────── */
 
   const save = useCallback(
-    async (force: boolean) => {
-      if (!file?.id || saving) return;
+    /** `true` — записано всё, что было грязным; `false` — отказ, конфликт или ошибка. По нему
+     * «save» в окне выхода из правки решает, уходить ли из правки. */
+    async (force: boolean): Promise<boolean> => {
+      if (!file?.id || saving) return false;
       // Право проверяется ЗДЕСЬ, а не только на кнопках. Баннер конфликта живёт и в чтении, и
       // переживает Esc: без этой строки «всё равно записать поверх» оставался бы нажимаемым
       // после того, как раздел переключили в режим чтения, — обход заморозки писателей.
-      if (!writable) return;
+      if (!writable) return false;
       if (tooBig) {
         showMessage(
           `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — the server won't take one like that`,
           'error',
         );
-        return;
+        return false;
       }
       setSaving(true);
       try {
@@ -300,7 +314,7 @@ export function NotePage() {
               by: res.lastEditedBy ?? '',
               at: res.lastEditedAt ?? '',
             });
-            return;
+            return false;
           }
           setServerContent(value);
           setBase(res.currentSha256 ?? '');
@@ -338,8 +352,10 @@ export function NotePage() {
         // задач, откуда рисуется плитка этой же заметки во вложениях карточки. `invalidateFileViews`
         // знает про оба корня и уже используется тремя другими мутациями раздела.
         invalidateFileViews(qc);
+        return true;
       } catch (e) {
         showMessage(failureText(e, "couldn't save the note"), 'error');
+        return false;
       } finally {
         setSaving(false);
       }
@@ -420,10 +436,45 @@ export function NotePage() {
 
   /** Выход из правки. Снимает каретку ДО размонтирования редактора — иначе снимать её будет не с
    * чего, и возврат по ⌘E ставил бы её в начало заметки. */
-  const leaveEdit = useCallback(() => {
+  const exitEdit = useCallback(() => {
     caretRef.current = editorRef.current?.caret() ?? caretRef.current;
     setEditing(false);
+    setAsText(false);
   }, []);
+
+  /**
+   * ВЫХОД С НЕСОХРАНЁННЫМ СПРАШИВАЕТ: save / discard / cancel. Сохранение ручное (решение
+   * владельца 2026-10-19), и раньше выход молча оставлял набранное висеть «not saved» в чтении —
+   * на телефоне «done» читается как «готово, записано», а не записано ничего. Без правок —
+   * выходим сразу. Один путь на все три двери: «done», «finish editing» и ⌘E.
+   */
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const leaveEdit = useCallback(() => {
+    if (dirty) setConfirmLeave(true);
+    else exitEdit();
+  }, [dirty, exitEdit]);
+
+  const saveAndLeave = useCallback(async () => {
+    const ok = await save(false);
+    setConfirmLeave(false);
+    // Конфликт или ошибка — остаёмся в правке: баннер конфликта стоит над полем.
+    if (ok) exitEdit();
+  }, [exitEdit, save]);
+
+  /** «discard»: буфер и имя — к тому, что лежит на сервере, и выход. Черновик снимет эффект
+   * черновика сам: буфер сравнялся с сервером. */
+  const discardAndLeave = useCallback(() => {
+    setValue(serverContent);
+    setName(file?.fileName ?? '');
+    if (conflict) {
+      // Спорить больше не о чем: своего текста нет, а чужой — перечитать.
+      setConflict(null);
+      setShowDiff(false);
+      void contentQuery.refetch();
+    }
+    setConfirmLeave(false);
+    exitEdit();
+  }, [conflict, contentQuery, exitEdit, file, serverContent]);
 
   /**
    * Подставить черновик в поле.
@@ -498,7 +549,7 @@ export function NotePage() {
       // подтверждение, — и это верно: записывать и выходить из правки в этот момент нечего.
       // Но «выделить всё» при открытом подтверждении остаётся законным жестом, и отданное
       // браузеру оно снова выделяло бы всю страницу — ровно ту жалобу, ради которой всё это.
-      if (confirmOverwrite || confirmRestore) return;
+      if (confirmOverwrite || confirmRestore || confirmLeave) return;
       const mod = e.metaKey || e.ctrlKey;
 
       // `code`, а не только `key`: на русской раскладке физическая S приходит как «ы», а E как
@@ -546,11 +597,26 @@ export function NotePage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canSave, confirmOverwrite, confirmRestore, editing, leaveEdit, save, saving, writable]);
+  }, [
+    canSave,
+    confirmLeave,
+    confirmOverwrite,
+    confirmRestore,
+    editing,
+    leaveEdit,
+    save,
+    saving,
+    writable,
+  ]);
 
   useEffect(() => {
     if (editing) editorRef.current?.focus(caretRef.current);
   }, [editing]);
+
+  // Из блоков в сырое поле — фокус в поле: человек пришёл туда писать.
+  useEffect(() => {
+    if (asText) editorRef.current?.focus();
+  }, [asText]);
 
   /* ── отказы ───────────────────────────────────────────────────────────────────────────── */
 
@@ -627,6 +693,10 @@ export function NotePage() {
           ? ` · ${formatWhenShort(file?.createdAt ?? undefined)}`
           : ''
       }`;
+  const mobileMetaWhen = editedBy ? editedAt : formatWhenShort(file?.createdAt ?? undefined);
+  const mobileMeta = `${editedBy || file?.uploadedBy || '—'}${
+    mobileMetaWhen ? ` · ${mobileMetaWhen}` : ''
+  }`;
 
   const sizeHint = tooBig
     ? `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — saving will refuse.`
@@ -795,25 +865,124 @@ export function NotePage() {
 
   return (
     <PageShell>
-      {editing ? (
-        <NoteEditor
-          handleRef={editorRef}
+      {editing && phone && !asText ? (
+        <NoteBlocksView
           name={name}
           onNameChange={setName}
           value={value}
           onChange={setValue}
           dirty={dirty}
           saving={saving}
-          savedLabel={savedLabel}
           canSave={canSave}
           onSave={() => void save(false)}
-          onLeaveEdit={leaveEdit}
+          onLeave={leaveEdit}
+          onEditAsText={() => setAsText(true)}
+          wrapLines={wrapLines}
+          onWrapLinesChange={setWrapLines}
           sizeHint={sizeHint}
           banners={banners}
         />
+      ) : editing ? (
+        // Тот же подъём, что у чтения: на телефоне правка начинается сразу под навигацией. На
+        // компьютере обёртка растворяется (`contents`) — раскладка прежняя.
+        <div className='-mt-10 flex flex-col gap-gutter md:contents'>
+          <NoteEditor
+            handleRef={editorRef}
+            name={name}
+            onNameChange={setName}
+            value={value}
+            onChange={setValue}
+            dirty={dirty}
+            saving={saving}
+            savedLabel={savedLabel}
+            canSave={canSave}
+            onSave={() => void save(false)}
+            onLeaveEdit={leaveEdit}
+            sizeHint={sizeHint}
+            banners={banners}
+            wrapLines={wrapLines}
+            onWrapLinesChange={setWrapLines}
+          />
+        </div>
       ) : (
-        <>
-          <Toolbar>
+        <div className='-mt-10 flex flex-col gap-gutter md:mt-0'>
+          <Toolbar className='grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-2 gap-y-1 md:hidden'>
+            {/* На телефоне имя — первая точка чтения, а действия не выталкивают его за экран.
+                Полное имя остаётся в `title`; видимая строка честно обрезается многоточием. */}
+            <Text
+              component='h1'
+              size='large'
+              title={name || file?.fileName || 'note'}
+              className='min-w-0 truncate font-bold'
+            >
+              {name || file?.fileName || 'note'}
+            </Text>
+            {writable && (
+              <Button size='sm' variant='main' onClick={() => setEditing(true)}>
+                edit
+              </Button>
+            )}
+            <GenericPopover
+              noTail
+              className='w-40'
+              contentProps={{ align: 'end' }}
+              triggerProps={{
+                'aria-label': 'note actions',
+                className:
+                  'flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              }}
+              openElement={
+                <Button asChild size='sm' variant='secondary'>
+                  <span aria-hidden>•••</span>
+                </Button>
+              }
+            >
+              <div role='menu' className='-mx-2 -my-1.5 flex flex-col divide-y divide-hairline'>
+                <Button asChild size='sm' className='w-full py-2 text-left hover:bg-pageBg'>
+                  <Link role='menuitem' to={`${ROUTES.files}/${id}`}>
+                    details
+                  </Link>
+                </Button>
+                {file?.downloadUrl && (
+                  <Button asChild size='sm' className='w-full py-2 text-left hover:bg-pageBg'>
+                    <a role='menuitem' href={file.downloadUrl}>
+                      download .md
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </GenericPopover>
+
+            <div className='col-span-3 flex min-w-0 items-center gap-2'>
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                title={mobileMeta}
+                className='min-w-0 flex-1 truncate'
+              >
+                {mobileMeta}
+              </Text>
+              {dirty && <Pill tone='attention'>not saved</Pill>}
+              {dirty && (
+                <Button
+                  size='sm'
+                  variant='secondary'
+                  disabled={!canSave || saving}
+                  onClick={() => void save(false)}
+                >
+                  {saving ? 'saving…' : 'save'}
+                </Button>
+              )}
+              {!writable && !dirty && (
+                <Text size='micro' variant='label' component='span' className='shrink-0'>
+                  read only
+                </Text>
+              )}
+            </div>
+          </Toolbar>
+
+          <Toolbar className='hidden md:flex'>
             {/* Имя берётся из ПОЛЯ, а не из файла: переименовали, вышли по Esc — в шапке
                 обязано стоять то, что сохранится, иначе pill «not saved» относился бы к
                 чему-то невидимому. */}
@@ -831,7 +1000,7 @@ export function NotePage() {
               </Button>
             )}
             <Button asChild size='sm' variant='secondary'>
-              <Link to={`${ROUTES.files}/${id}`}>file card</Link>
+              <Link to={`${ROUTES.files}/${id}`}>details</Link>
             </Button>
             {writable ? (
               <>
@@ -882,7 +1051,7 @@ export function NotePage() {
                   }
                 : undefined
             }
-            className='min-h-[50vh] border border-borderColor bg-bgColor p-block'
+            className='min-w-0 bg-bgColor p-block md:min-h-[50vh] md:border md:border-borderColor'
           >
             {/* Граница ⌘A — только документ, без пустой подсказки и рамки (см. обработчик). */}
             {value.trim() ? (
@@ -895,7 +1064,7 @@ export function NotePage() {
               </Text>
             )}
           </div>
-        </>
+        </div>
       )}
 
       <ConfirmationModal
@@ -912,6 +1081,37 @@ export function NotePage() {
           there will be nowhere to restore it from. if you need both — close this window and choose
           “save as a separate note”.
         </Text>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={confirmLeave}
+        onOpenChange={setConfirmLeave}
+        onConfirm={() => {}}
+        // Отмена вернула бы фокус в `body`; правка продолжается — фокус обратно в поле.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          editorRef.current?.focus();
+        }}
+        title='not saved'
+        hideActions
+        width='sm'
+      >
+        <div className='flex justify-end gap-1.5'>
+          <Button size='sm' variant='secondary' onClick={() => setConfirmLeave(false)}>
+            cancel
+          </Button>
+          <Button size='sm' variant='secondary' onClick={discardAndLeave}>
+            discard
+          </Button>
+          <Button
+            size='sm'
+            variant='main'
+            disabled={!canSave || saving}
+            onClick={() => void saveAndLeave()}
+          >
+            {saving ? 'saving…' : 'save'}
+          </Button>
+        </div>
       </ConfirmationModal>
 
       <ConfirmationModal

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_TechCardAnnotation } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useMemo } from 'react';
 
 import { designKeys } from '../use-design-band';
@@ -16,7 +16,6 @@ import { designKeys } from '../use-design-band';
  */
 export function useAssetWrites(techCardId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = designKeys.band(techCardId);
 
   /* RETURNED, NOT FIRED AND FORGOTTEN (Codex r2 of TF2/TF4): a write's `onSuccess` hands this
@@ -25,12 +24,14 @@ export function useAssetWrites(techCardId: number) {
      delete an asset that is already gone. */
   const invalidate = useCallback(() => qc.invalidateQueries({ queryKey: key }), [qc, key]);
 
-  const onError = useCallback(
-    (error: unknown) => {
-      showMessage((error as Error)?.message || 'the change did not go through', 'error');
-    },
-    [showMessage],
-  );
+  const onError = useCallback((error: unknown) => {
+    notify({
+      sev: 'error',
+      subject: 'ASSETS',
+      text: 'not saved',
+      detail: (error as Error)?.message || undefined,
+    });
+  }, []);
 
   /**
    * ОДИН ГЛАГОЛ НА ЗАВЕДЕНИЕ И НА ПРАВКУ, потому что жест один: плитку заполняют и сохраняют.
@@ -189,7 +190,6 @@ export function useAssetWrites(techCardId: number) {
  */
 export function useAssetBindingWrites(techCardId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
 
   const setBinding = useMutation({
     mutationFn: async (input: { colorwayId: number; bomItemId: number; assetId: number }) => {
@@ -205,7 +205,12 @@ export function useAssetBindingWrites(techCardId: number) {
     /* Returned for the same reason as `useAssetWrites.invalidate`: pending until the band lands. */
     onSuccess: (card: number) => qc.invalidateQueries({ queryKey: designKeys.band(card) }),
     onError: (error: unknown) => {
-      showMessage((error as Error)?.message || 'the fabric was not set for that slot', 'error');
+      notify({
+        sev: 'error',
+        subject: 'FABRIC',
+        text: 'not set',
+        detail: (error as Error)?.message || undefined,
+      });
     },
   });
 

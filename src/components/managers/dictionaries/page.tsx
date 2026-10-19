@@ -6,10 +6,18 @@ import {
 } from 'components/managers/tech-card/care-labels/phrases';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
-import { Button, CheckboxCommon, ConfirmationModal, Section, Text, EmptyCell } from 'ui';
+import {
+  Button,
+  CalloutBox,
+  CheckboxCommon,
+  ConfirmationModal,
+  Section,
+  Text,
+  EmptyCell,
+} from 'ui';
 import {
   archiveCollection,
   archiveColor,
@@ -66,8 +74,9 @@ const labelNamesOf = (f: FiberRow): LabelNames => {
 
 export const Dictionaries: FC = () => {
   const { dictionary, loading, refetch } = useDictionary();
-  const { showMessage } = useSnackBarStore();
   const { canWrite } = usePermissions();
+  // The open dialog's refusal (validation or server): stands in the dialog, which stays open.
+  const [modalError, setModalError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>('colors');
   const [busy, setBusy] = useState(false);
   const writable = canWrite(SECTION.settings);
@@ -75,15 +84,19 @@ export const Dictionaries: FC = () => {
   // Run an adapter mutation (returns the new dictionary revision, which we ignore here and just
   // refetch the whole dictionary to reconcile). Returns whether it succeeded so the create-form
   // modal can decide whether to close/reset (success) or stay open for correction (failure).
-  const run = async (fn: () => Promise<unknown>) => {
+  // No receipt: the dialog closing and the row changing are it.
+  const run = async (fn: () => Promise<unknown>, subject?: string) => {
     setBusy(true);
+    setModalError(null);
     try {
       await fn();
-      showMessage('Saved', 'success');
       await refetch();
       return true;
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'Action failed', 'error');
+      const msg = e instanceof Error ? e.message : 'Action failed';
+      // From a dialog: said in the dialog. From a row (country toggle): no place on the page.
+      if (subject) notify({ sev: 'error', subject, text: 'not saved', detail: msg });
+      else setModalError(msg);
       return false;
     } finally {
       setBusy(false);
@@ -110,6 +123,7 @@ export const Dictionaries: FC = () => {
     setEditState(null);
     setArchiveTarget(null);
     setLabelEdit(null);
+    setModalError(null);
     setCreateOpen(true);
   };
 
@@ -119,7 +133,7 @@ export const Dictionaries: FC = () => {
       const name = colorForm.name.trim();
       const hex = colorForm.hex.trim();
       if (!code || !name || !/^#[0-9a-fA-F]{6}$/.test(hex)) {
-        showMessage('Code, name and a valid #hex are required', 'error');
+        setModalError('code, name and a valid #hex are required');
         return;
       }
       if (await run(() => createColor({ code, name, hex }))) setCreateOpen(false);
@@ -128,7 +142,7 @@ export const Dictionaries: FC = () => {
     if (tab === 'collections') {
       const name = collectionForm.name.trim();
       if (!name) {
-        showMessage('Name is required', 'error');
+        setModalError('name is required');
         return;
       }
       if (await run(() => createCollection({ name }))) setCreateOpen(false);
@@ -137,7 +151,7 @@ export const Dictionaries: FC = () => {
     if (tab === 'tags') {
       const name = tagForm.name.trim();
       if (!name) {
-        showMessage('Name is required', 'error');
+        setModalError('name is required');
         return;
       }
       if (await run(() => createTag({ name }))) setCreateOpen(false);
@@ -147,7 +161,7 @@ export const Dictionaries: FC = () => {
       const code = fiberForm.code.trim();
       const name = fiberForm.name.trim();
       if (!code || !name) {
-        showMessage('Code and name are required', 'error');
+        setModalError('code and name are required');
         return;
       }
       if (await run(() => createFiber({ code, name }))) setCreateOpen(false);
@@ -175,6 +189,7 @@ export const Dictionaries: FC = () => {
     setCreateOpen(false);
     setArchiveTarget(null);
     setLabelEdit(null);
+    setModalError(null);
     setEditState({
       tab: 'colors',
       code: c.code ?? '',
@@ -186,12 +201,14 @@ export const Dictionaries: FC = () => {
     setCreateOpen(false);
     setArchiveTarget(null);
     setLabelEdit(null);
+    setModalError(null);
     setEditState({ tab: 'collections', id: c.id ?? 0, name: c.name ?? '' });
   };
   const openEditTag = (t: TagRow) => {
     setCreateOpen(false);
     setArchiveTarget(null);
     setLabelEdit(null);
+    setModalError(null);
     setEditState({ tab: 'tags', id: t.id ?? 0, name: t.name ?? '' });
   };
 
@@ -204,7 +221,7 @@ export const Dictionaries: FC = () => {
       const name = editState.name.trim();
       const hex = editState.hex.trim();
       if (!name || !/^#[0-9a-fA-F]{6}$/.test(hex)) {
-        showMessage('Name and a valid #hex are required', 'error');
+        setModalError('name and a valid #hex are required');
         return;
       }
       if (await run(() => updateColor({ code: editState.code, name, hex }))) setEditState(null);
@@ -213,7 +230,7 @@ export const Dictionaries: FC = () => {
     if (editState.tab === 'collections') {
       const name = editState.name.trim();
       if (!name) {
-        showMessage('Name is required', 'error');
+        setModalError('name is required');
         return;
       }
       if (await run(() => updateCollection({ id: editState.id, name }))) setEditState(null);
@@ -221,7 +238,7 @@ export const Dictionaries: FC = () => {
     }
     const name = editState.name.trim();
     if (!name) {
-      showMessage('Name is required', 'error');
+      setModalError('name is required');
       return;
     }
     if (await run(() => updateTag({ id: editState.id, name }))) setEditState(null);
@@ -242,6 +259,7 @@ export const Dictionaries: FC = () => {
     setCreateOpen(false);
     setEditState(null);
     setLabelEdit(null);
+    setModalError(null);
     setArchiveTarget(target);
   };
 
@@ -265,6 +283,7 @@ export const Dictionaries: FC = () => {
     setCreateOpen(false);
     setEditState(null);
     setArchiveTarget(null);
+    setModalError(null);
     setLabelEdit({
       code: f.code ?? '',
       label: f.name || f.code || '',
@@ -572,7 +591,12 @@ export const Dictionaries: FC = () => {
                   <RowAction
                     disabled={!writable || busy}
                     label={c.active ? 'deactivate' : 'activate'}
-                    onClick={() => run(() => setCountryActive(c.code ?? '', !c.active))}
+                    onClick={() =>
+                      run(
+                        () => setCountryActive(c.code ?? '', !c.active),
+                        `COUNTRY ${c.code ?? ''}`,
+                      )
+                    }
                   />
                 </RowActions>,
               ],
@@ -678,6 +702,13 @@ export const Dictionaries: FC = () => {
             </>
           )}
         </div>
+        {modalError && (
+          <CalloutBox tone='error' className='mt-3'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {modalError}
+            </Text>
+          </CalloutBox>
+        )}
       </ConfirmationModal>
 
       {/* #81 P0 — edit action for colors/collections/tags via the previously-unused Update{Color,
@@ -749,6 +780,13 @@ export const Dictionaries: FC = () => {
             </Field>
           )}
         </div>
+        {modalError && (
+          <CalloutBox tone='error' className='mt-3'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {modalError}
+            </Text>
+          </CalloutBox>
+        )}
       </ConfirmationModal>
 
       {/* Care-label names of a fibre: one input per label language (closed list), the animal
@@ -806,6 +844,13 @@ export const Dictionaries: FC = () => {
             </Text>
           </div>
         )}
+        {modalError && (
+          <CalloutBox tone='error' className='mt-3'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {modalError}
+            </Text>
+          </CalloutBox>
+        )}
       </ConfirmationModal>
 
       {/* #81 P0 — archive now requires an explicit confirm (previously a single, unconfirmed click).
@@ -827,6 +872,13 @@ export const Dictionaries: FC = () => {
           pickers for new use but is kept (never deleted) so existing references stay valid. There
           is no unarchive action — this cannot be undone from the UI.
         </Text>
+        {modalError && (
+          <CalloutBox tone='error' className='mt-3'>
+            <Text size='micro' component='span' role='alert'>
+              <b>not saved</b> · {modalError}
+            </Text>
+          </CalloutBox>
+        )}
       </ConfirmationModal>
     </div>
   );
