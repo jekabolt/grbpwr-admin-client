@@ -1200,6 +1200,7 @@ export default function FilesPage() {
             view={view}
             onView={(v) => patch({ view: v })}
             selecting={phone ? selection.selecting : undefined}
+            selectedCount={selection.selected.length}
             onToggleSelecting={
               phone
                 ? selection.selecting
