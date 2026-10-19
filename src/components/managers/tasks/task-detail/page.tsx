@@ -10,6 +10,7 @@ import {
   Button,
   CalloutBox,
   ConfirmationModal,
+  DatePicker,
   EmptyCell,
   Arrow,
   GenericPopover,
@@ -52,6 +53,7 @@ import { AssigneesPicker } from '../components/assignees-picker';
 import { TaskDescriptionView } from '../components/task-description';
 import { ParentPicker, TaskRelations } from '../components/task-relations';
 import { openBlockers } from '../utils/relations';
+import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { taskLinks } from '../utils/links';
 import {
   BOARD_LABEL,
@@ -96,6 +98,39 @@ const CHIP_BOX =
 const ASSIGNEE_IN_CHIP =
   'min-w-0 [&_[data-assignees-trigger]]:min-h-0 [&_[data-assignees-trigger]]:border-0 [&_[data-assignees-trigger]]:bg-transparent [&_[data-assignees-trigger]]:px-0 [&_[data-assignees-trigger]]:py-0 [&_[data-assignees-trigger]]:text-control [&_[data-assignees-trigger]]:uppercase [&_[data-assignees-popup]]:min-w-60';
 
+/** A select that is the value of a phone property row: no box, the row is the box. */
+const ROW_SELECT =
+  'min-h-11 w-auto gap-2 border-0 bg-transparent px-0 text-control uppercase leading-none tracking-label';
+
+/** Phone property row: label left, its control right; `danger` = overdue (word + red). */
+function PropRow({
+  label,
+  danger,
+  children,
+}: {
+  label: string;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-11 items-center justify-between gap-3 border-b border-hairline text-control uppercase leading-none tracking-label',
+        danger && 'text-error',
+      )}
+    >
+      <Text
+        size='control'
+        component='span'
+        className={cn('shrink-0 uppercase tracking-label', !danger && 'text-labelColor')}
+      >
+        {label}
+      </Text>
+      <div className='flex min-w-0 items-center justify-end gap-3'>{children}</div>
+    </div>
+  );
+}
+
 // Centered chrome shared by the loading / not-found states.
 function Centered({ children }: { children: React.ReactNode }) {
   return (
@@ -127,6 +162,7 @@ export function TaskDetail() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickingParent, setPickingParent] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const phone = useMediaQuery(PHONE_QUERY);
   const mediaTrigger = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
 
@@ -327,6 +363,136 @@ export function TaskDetail() {
     if (!editLocked) mediaTrigger.current?.click();
   };
 
+  const overdue = due.state === 'overdue';
+
+  // ОДНИ И ТЕ ЖЕ КОНТРОЛЫ на столе (чипы) и на телефоне (строки) — меняется только рамка.
+  /* Колонка — через `MoveTask`, которая содержимого не касается вовсе. */
+  const statusSelect = (className: string) => (
+    <Select
+      name='detail-status'
+      placeholder='status'
+      items={statusOptions}
+      value={task.status}
+      onValueChange={(v: string) => moveTo(task.board, v as TaskStatus)}
+      readOnly={!canWrite}
+      className={className}
+    />
+  );
+  const prioritySelect = (className: string) => (
+    <Select
+      name='detail-priority'
+      placeholder='priority'
+      items={priorityOptions}
+      value={t.priority}
+      onValueChange={(v: string) =>
+        canWrite &&
+        v !== t.priority &&
+        patchInline({ priority: v as TaskPriority }, { priority: t.priority })
+      }
+      readOnly={!canWrite}
+      disabled={inlinePatch.isPending}
+      className={className}
+    />
+  );
+  /* Доска — через `MoveTask`, как и колонка. */
+  const boardSelect = (className: string, labelled = false) => (
+    <Select
+      name='detail-board'
+      placeholder='board'
+      items={boardOptions}
+      value={task.board}
+      onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
+      readOnly={!canWrite}
+      className={className}
+      renderValue={
+        labelled
+          ? (_: unknown, item: { label: React.ReactNode } | undefined) => (
+              <span className='flex items-center gap-2'>
+                <span className='text-labelColor'>board</span>
+                {item?.label}
+              </span>
+            )
+          : undefined
+      }
+    />
+  );
+  const dateControl = (value: string | undefined, onChange: (next?: string) => void) =>
+    canWrite ? (
+      <DatePicker
+        compact
+        value={value ? new Date(value) : undefined}
+        disabled={inlinePatch.isPending}
+        placeholder='none'
+        onChange={(d) => onChange(d ? d.toISOString() : undefined)}
+      />
+    ) : (
+      <Text
+        size='control'
+        component='span'
+        className={cn('uppercase', !value && 'text-labelColor')}
+      >
+        {value ? format(new Date(value), 'd MMM yyyy') : 'none'}
+      </Text>
+    );
+  /* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). `seen` приходит ОТ ПИКЕРА, а не берётся из живого
+     `t.assignees`: пока пикер открыт, чужая правка доезжает в кэш незаметно. */
+  const assigneeControl = canWrite ? (
+    <div className={ASSIGNEE_IN_CHIP}>
+      <AssigneesPicker
+        value={t.assignees}
+        disabled={inlinePatch.isPending}
+        onChange={(next, seen) => patchInline({ assignees: next }, { assignees: seen })}
+      />
+    </div>
+  ) : (
+    <span className='flex items-center gap-1.5'>
+      <AvatarStack names={t.assignees} />
+      <Text
+        size='control'
+        component='span'
+        className={cn('uppercase', !t.assignees.length && 'text-labelColor')}
+      >
+        {t.assignees.join(', ') || 'unassigned'}
+      </Text>
+    </span>
+  );
+  /* Себе в один тап — без открытия пикера. */
+  const assignMeButton = canWrite && account?.username && !isMine && (
+    <Button
+      type='button'
+      variant='underline'
+      size='xs'
+      aria-label='assign to me'
+      disabled={inlinePatch.isPending}
+      onClick={() =>
+        patchInline({ assignees: [...t.assignees, account.username!] }, { assignees: t.assignees })
+      }
+      className='min-h-11 shrink-0 self-center text-labelColor hover:text-textColor sm:min-h-0'
+    >
+      + me
+    </Button>
+  );
+  const moreButton = (className: string) => (
+    <Button
+      type='button'
+      variant='default'
+      aria-expanded={moreOpen}
+      onClick={() => setMoreOpen((v) => !v)}
+      className={cn(className, 'text-control uppercase tracking-label text-labelColor')}
+    >
+      {moreOpen ? 'less' : 'more'}
+      <span
+        aria-hidden
+        className={cn(
+          'shrink-0 text-textColor transition-transform duration-150 ease-out motion-reduce:transition-none',
+          !moreOpen && 'rotate-180',
+        )}
+      >
+        <Arrow />
+      </span>
+    </Button>
+  );
+
   return (
     <div className='mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 overflow-x-clip pb-10'>
       {/* ── 1. Верхняя полоса: дорога назад и меню действий ─────────────────────────────── */}
@@ -410,154 +576,106 @@ export function TaskDetail() {
           onSave={(title, seenTitle) => patchInline({ title }, { title: seenTitle })}
         />
 
-        <div className='flex flex-wrap items-stretch gap-2'>
-          {/* Колонка — через `MoveTask`, которая содержимого не касается вовсе. */}
-          <Select
-            name='detail-status'
-            placeholder='status'
-            items={statusOptions}
-            value={task.status}
-            onValueChange={(v: string) => moveTo(task.board, v as TaskStatus)}
-            readOnly={!canWrite}
-            className={cn(CHIP, 'border-textColor')}
-          />
-          <Select
-            name='detail-priority'
-            placeholder='priority'
-            items={priorityOptions}
-            value={t.priority}
-            onValueChange={(v: string) =>
-              canWrite &&
-              v !== t.priority &&
-              patchInline({ priority: v as TaskPriority }, { priority: t.priority })
-            }
-            readOnly={!canWrite}
-            disabled={inlinePatch.isPending}
-            className={CHIP}
-          />
-          <DueField
-            label='due'
-            value={t.dueDate}
-            overdue={due.state === 'overdue'}
-            canWrite={canWrite}
-            disabled={inlinePatch.isPending}
-            onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
-          />
-          <DueField
-            label='start'
-            value={t.startDate}
-            canWrite={canWrite}
-            disabled={inlinePatch.isPending}
-            onChange={(startDate) => patchInline({ startDate }, { startDate: t.startDate })}
-          />
-          {/* Доска — через `MoveTask`, как и колонка. Подпись внутри чипа: «production» рядом со
-              статусом без неё читалось бы как ещё один статус. */}
-          <Select
-            name='detail-board'
-            placeholder='board'
-            items={boardOptions}
-            value={task.board}
-            onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
-            readOnly={!canWrite}
-            className={CHIP}
-            renderValue={(_, item) => (
-              <span className='flex items-center gap-2'>
-                <span className='text-labelColor'>board</span>
-                {item?.label}
-              </span>
-            )}
-          />
-          {/* ИСПОЛНИТЕЛЕЙ НЕСКОЛЬКО (п.2 волны). `seen` приходит ОТ ПИКЕРА, а не берётся из
-              живого `t.assignees`: пока пикер открыт, чужая правка доезжает в кэш незаметно. */}
-          <div className={CHIP_BOX}>
-            <Text size='control' component='span' className='shrink-0 uppercase text-labelColor'>
-              assignee
-            </Text>
-            {canWrite ? (
-              <div className={ASSIGNEE_IN_CHIP}>
-                <AssigneesPicker
-                  value={t.assignees}
-                  disabled={inlinePatch.isPending}
-                  onChange={(next, seen) => patchInline({ assignees: next }, { assignees: seen })}
-                />
-              </div>
-            ) : (
-              <span className='flex items-center gap-1.5'>
-                <AvatarStack names={t.assignees} />
+        {phone ? (
+          /* ТЕЛЕФОН (владелец 19.10: «блок перегружен»): статус и приоритет — двумя чипами в ряд,
+             остальное — строками одного белого блока; редкие start и board — под «more». */
+          <div className='flex flex-col gap-1.5'>
+            <div className='grid grid-cols-2 gap-1.5'>
+              {statusSelect(cn(CHIP, 'w-full justify-between border-textColor'))}
+              {prioritySelect(cn(CHIP, 'w-full justify-between'))}
+            </div>
+            <div className='flex flex-col border border-borderColor bg-bgColor px-3'>
+              <PropRow label={overdue ? 'overdue' : 'due'} danger={overdue}>
+                {dateControl(t.dueDate, (dueDate) =>
+                  patchInline({ dueDate }, { dueDate: t.dueDate }),
+                )}
+              </PropRow>
+              <PropRow label='assignee'>
+                {assignMeButton}
+                {assigneeControl}
+              </PropRow>
+              {moreButton('flex min-h-11 w-full items-center justify-between')}
+              {moreOpen && (
+                <>
+                  <PropRow label='start'>
+                    {dateControl(t.startDate, (startDate) =>
+                      patchInline({ startDate }, { startDate: t.startDate }),
+                    )}
+                  </PropRow>
+                  <PropRow label='board'>{boardSelect(ROW_SELECT)}</PropRow>
+                  <PropRow label='created'>
+                    <Text size='control' variant='label' component='span' className='uppercase'>
+                      {task.createdBy ? `${task.createdBy} · ` : ''}
+                      {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
+                    </Text>
+                  </PropRow>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className='flex flex-wrap items-stretch gap-2'>
+              {statusSelect(cn(CHIP, 'border-textColor'))}
+              {prioritySelect(CHIP)}
+              <DueField
+                label='due'
+                value={t.dueDate}
+                overdue={overdue}
+                canWrite={canWrite}
+                disabled={inlinePatch.isPending}
+                onChange={(dueDate) => patchInline({ dueDate }, { dueDate: t.dueDate })}
+              />
+              <DueField
+                label='start'
+                value={t.startDate}
+                canWrite={canWrite}
+                disabled={inlinePatch.isPending}
+                onChange={(startDate) => patchInline({ startDate }, { startDate: t.startDate })}
+              />
+              {/* Подпись внутри чипа: «production» рядом со статусом без неё читалось бы как ещё
+                  один статус. */}
+              {boardSelect(CHIP, true)}
+              <div className={CHIP_BOX}>
                 <Text
                   size='control'
                   component='span'
-                  className={cn('uppercase', !t.assignees.length && 'text-labelColor')}
+                  className='shrink-0 uppercase text-labelColor'
                 >
-                  {t.assignees.join(', ') || 'unassigned'}
+                  assignee
                 </Text>
-              </span>
+                {assigneeControl}
+              </div>
+              {assignMeButton}
+              {moreButton(cn(CHIP_BOX, 'text-labelColor hover:text-textColor'))}
+            </div>
+            {moreOpen && (
+              <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='uppercase tracking-label'
+                >
+                  started {task.startedAt ? format(new Date(task.startedAt), 'PP') : <EmptyCell />}
+                </Text>
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='uppercase tracking-label'
+                >
+                  created {task.createdBy ? `${task.createdBy} · ` : ''}
+                  {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
+                </Text>
+                {t.labels.map((l) => (
+                  <Pill key={l} tone='mut'>
+                    {l}
+                  </Pill>
+                ))}
+              </div>
             )}
-          </div>
-          {/* Себе в один тап — без открытия пикера. */}
-          {canWrite && account?.username && !isMine && (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              aria-label='assign to me'
-              disabled={inlinePatch.isPending}
-              onClick={() =>
-                patchInline(
-                  { assignees: [...t.assignees, account.username!] },
-                  { assignees: t.assignees },
-                )
-              }
-              className='min-h-11 shrink-0 self-center text-labelColor hover:text-textColor sm:min-h-0'
-            >
-              + me
-            </Button>
-          )}
-          <Button
-            type='button'
-            variant='default'
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((v) => !v)}
-            className={cn(CHIP_BOX, 'text-labelColor hover:text-textColor')}
-          >
-            {moreOpen ? 'less' : 'more'}
-            <span
-              aria-hidden
-              className={cn(
-                'shrink-0 text-textColor transition-transform duration-150 ease-out motion-reduce:transition-none',
-                !moreOpen && 'rotate-180',
-              )}
-            >
-              <Arrow />
-            </span>
-          </Button>
-        </div>
-
-        {moreOpen && (
-          <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              started {task.startedAt ? format(new Date(task.startedAt), 'PP') : <EmptyCell />}
-            </Text>
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='uppercase tracking-label'
-            >
-              created {task.createdBy ? `${task.createdBy} · ` : ''}
-              {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
-            </Text>
-            {t.labels.map((l) => (
-              <Pill key={l} tone='mut'>
-                {l}
-              </Pill>
-            ))}
-          </div>
+          </>
         )}
 
         {canWrite && pickingParent && (
