@@ -46,6 +46,7 @@ import {
   downloadMediaOriginals,
   useDeleteMedia,
   useInfiniteMedia,
+  useMediaFacets,
   useMediaMonths,
   useMediaUsage,
   useMediaWindow,
@@ -230,6 +231,9 @@ export function MediaManager({
     pendingFilesHook.addFiles,
   );
 
+  // Счётчики всей библиотеки — и странице, и пикеру. Без ответа `useFilter` считает по загруженному.
+  const libraryFacets = useMediaFacets();
+
   const handleUploadClick = () => fileInputRef.current?.click();
 
   /**
@@ -261,6 +265,7 @@ export function MediaManager({
     typeCounts,
     ratioCounts,
     usageCounts,
+    counted,
     isFiltered,
     setType,
     setOrder,
@@ -268,7 +273,14 @@ export function MediaManager({
     setRatio,
     setUsageShelf,
     reset,
-  } = useFilter(media, aspectRatio, videoSizes, showVideos === false ? 'image' : undefined, usage);
+  } = useFilter(
+    media,
+    aspectRatio,
+    videoSizes,
+    showVideos === false ? 'image' : undefined,
+    usage,
+    libraryFacets.data,
+  );
 
   const selection = useSelection({
     allowMultiple,
@@ -513,6 +525,12 @@ export function MediaManager({
     }
   };
   const libraryCount = virtual ? monthTotal : shown;
+  // ШАПКА СЧИТАЕТ ТАК ЖЕ, КАК РЕЛЬС: по кубу — всю библиотеку и то, что под отбором; без куба —
+  // загруженное, как раньше.
+  const headTotal = counted ? counted.total : virtual ? monthTotal : media.length;
+  const headShown = counted ? (virtual ? counted.total : counted.matching) : libraryCount;
+  const deskTotal = counted ? counted.total : media.length;
+  const deskShown = counted ? counted.matching : shown;
   // Выбранное показывается ЦЕЛИКОМ, мимо фильтров: набор переживает смену отбора.
   const gridMedia =
     selecting && selectView === 'selected' ? selection.selectedMedia : filteredMedia || [];
@@ -631,8 +649,8 @@ export function MediaManager({
             />
           ) : (
             <MobileLibraryHead
-              loaded={virtual ? monthTotal : media.length}
-              shown={libraryCount}
+              loaded={headTotal}
+              shown={headShown}
               search={search}
               order={order}
               facets={facets}
@@ -712,9 +730,9 @@ export function MediaManager({
             <Text variant='uppercase' size='large'>
               Media
             </Text>
-            {media.length > 0 && (
+            {deskTotal > 0 && (
               <Text variant='label'>
-                {shown === media.length ? media.length : `${shown} / ${media.length}`}
+                {deskShown === deskTotal ? deskTotal : `${deskShown} / ${deskTotal}`}
               </Text>
             )}
           </div>
@@ -796,7 +814,7 @@ export function MediaManager({
               usagePending={usagePending}
               usageFailed={usageFailed}
               isFiltered={isFiltered}
-              loaded={media.length}
+              loaded={counted ? null : media.length}
               onType={setType}
               onRatio={setRatio}
               onUsage={setUsageShelf}
