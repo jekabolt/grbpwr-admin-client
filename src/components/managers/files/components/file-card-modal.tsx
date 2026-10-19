@@ -533,8 +533,9 @@ export function FileCardModal({
               if (!losing.length) return null;
               return (
                 <Text size='micro'>
-                  not saved: {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} —
-                  this role will go along with the link the moment you press “save”
+                  not saved:{' '}
+                  {losing.map((p) => `“${p.name}” — “${p.role?.roleName}”`).join(', ')} — this role
+                  will go along with the link the moment you press “save”
                 </Text>
               );
             })()}

@@ -666,7 +666,7 @@ export function CreateRunModal({
                   {/* НЕ ПРОВЕРЕНО — своя группа, своё слово, и она НИКОГДА не сворачивается вместе
                       с пройденными: «не проверяли» и «проверили, всё хорошо» — разные ответы. */}
                   <FindingGroup
-                    title='not checked — the server has no instrument for it'
+                    title="not checked — the server has no instrument for it"
                     findings={uncheckedRows}
                     techCardId={d.techCardId}
                   />
