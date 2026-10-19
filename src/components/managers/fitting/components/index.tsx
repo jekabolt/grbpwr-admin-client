@@ -8,10 +8,12 @@ import {
 } from 'components/managers/fittings/components/useFittingQuery';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
-import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
 import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
 import { useSamples } from 'components/managers/tech-card/components/useSamples';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  useTechCard,
+  useTechCardFittings,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -19,7 +21,7 @@ import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, UseFormReturn, useWatch } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BackLink, Button, Form, Pill, Section, Text } from 'ui';
+import { BackLink, Button, Form, Section, Text } from 'ui';
 import { DetailsDrawer } from './details-drawer';
 import { EditsList } from './edits-list';
 import { FittingNote } from './fitting-note';
@@ -43,11 +45,6 @@ function useReturnTo(): string {
   const [searchParams] = useSearchParams();
   const raw = searchParams.get('returnTo') || '';
   return raw.startsWith('/') && !raw.startsWith('//') ? raw : '';
-}
-
-function formatDate(value?: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : '';
 }
 
 // A sample belongs to its tech card: drop a stale sample link whenever the style changes, and keep
@@ -260,8 +257,6 @@ function FittingWorkspaceScreen({
 
   const mediaIds = useWatch({ control: form.control, name: 'mediaIds' }) ?? [];
   const status = useWatch({ control: form.control, name: 'status' });
-  const modelId = useWatch({ control: form.control, name: 'modelId' }) || 0;
-  const fittingDate = useWatch({ control: form.control, name: 'fittingDate' });
 
   const [chosenMediaId, setCurrentMediaId] = useState(0);
   const currentMediaId = mediaIds.includes(chosenMediaId) ? chosenMediaId : mediaIds[0] ?? 0;
@@ -312,14 +307,32 @@ function FittingWorkspaceScreen({
     ],
   );
 
-  const statusPill =
-    status === 'FITTING_STATUS_DONE' ? (
-      <Pill tone='ok'>done</Pill>
-    ) : status === 'FITTING_STATUS_CANCELLED' ? (
-      <Pill>cancelled</Pill>
-    ) : (
-      <Pill>in progress</Pill>
+  // Title = the garment, its size and which fitting of this garment it is: more telling than the id.
+  const { data: techCard } = useTechCard(techCardId || undefined);
+  const { data: siblings } = useTechCardFittings(techCardId || undefined);
+  const garment = techCard?.techCard?.name || techCard?.techCard?.styleNumber || '';
+  const sizeName = sampleSizeId
+    ? String(findInDictionary(dictionary, sampleSizeId, 'size') || sampleSizeId)
+    : '';
+  const ordinal = useMemo(() => {
+    const sorted = [...(siblings ?? [])].sort(
+      (x, y) =>
+        String(x.fitting?.fittingDate ?? '').localeCompare(String(y.fitting?.fittingDate ?? '')) ||
+        (x.id ?? 0) - (y.id ?? 0),
     );
+    const i = sorted.findIndex((f) => f.id === fittingId);
+    return i >= 0 ? i + 1 : 0;
+  }, [siblings, fittingId]);
+  const title = garment
+    ? [garment, sizeName, ordinal ? `fitting ${ordinal}` : ''].filter(Boolean).join(' · ')
+    : `fitting ${fittingId}`;
+
+  const statusWord =
+    status === 'FITTING_STATUS_DONE'
+      ? 'done'
+      : status === 'FITTING_STATUS_CANCELLED'
+        ? 'cancelled'
+        : 'in progress';
 
   return (
     <Form {...form}>
@@ -331,12 +344,19 @@ function FittingWorkspaceScreen({
               <Text
                 component='h1'
                 variant='uppercase'
-                tracking='section'
-                className='font-bold md:text-lg'
+                tracking='label'
+                className='min-w-0 font-bold'
               >
-                {`Fitting ${String(fittingId).padStart(2, '0')}`}
+                {title}
               </Text>
-              {statusPill}
+              <Text
+                component='span'
+                variant='uppercase'
+                tracking='label'
+                className={status === 'FITTING_STATUS_DONE' ? 'text-success' : 'text-labelColor'}
+              >
+                {statusWord}
+              </Text>
               <span className='flex-1' />
               <Button
                 type='button'
