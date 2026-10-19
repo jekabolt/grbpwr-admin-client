@@ -271,18 +271,20 @@ export function NotePage() {
   /* ── сохранение ───────────────────────────────────────────────────────────────────────── */
 
   const save = useCallback(
-    async (force: boolean) => {
-      if (!file?.id || saving) return;
+    /** `true` — записано всё, что было грязным; `false` — отказ, конфликт или ошибка. По нему
+     * «save» в окне выхода из правки решает, уходить ли из правки. */
+    async (force: boolean): Promise<boolean> => {
+      if (!file?.id || saving) return false;
       // Право проверяется ЗДЕСЬ, а не только на кнопках. Баннер конфликта живёт и в чтении, и
       // переживает Esc: без этой строки «всё равно записать поверх» оставался бы нажимаемым
       // после того, как раздел переключили в режим чтения, — обход заморозки писателей.
-      if (!writable) return;
+      if (!writable) return false;
       if (tooBig) {
         showMessage(
           `the note weighs ${formatBytes(bytes)} against a limit of ${formatBytes(NOTE_MAX_BYTES)} — the server won't take one like that`,
           'error',
         );
-        return;
+        return false;
       }
       setSaving(true);
       try {
@@ -301,7 +303,7 @@ export function NotePage() {
               by: res.lastEditedBy ?? '',
               at: res.lastEditedAt ?? '',
             });
-            return;
+            return false;
           }
           setServerContent(value);
           setBase(res.currentSha256 ?? '');
@@ -339,8 +341,10 @@ export function NotePage() {
         // задач, откуда рисуется плитка этой же заметки во вложениях карточки. `invalidateFileViews`
         // знает про оба корня и уже используется тремя другими мутациями раздела.
         invalidateFileViews(qc);
+        return true;
       } catch (e) {
         showMessage(failureText(e, "couldn't save the note"), 'error');
+        return false;
       } finally {
         setSaving(false);
       }
@@ -421,10 +425,44 @@ export function NotePage() {
 
   /** Выход из правки. Снимает каретку ДО размонтирования редактора — иначе снимать её будет не с
    * чего, и возврат по ⌘E ставил бы её в начало заметки. */
-  const leaveEdit = useCallback(() => {
+  const exitEdit = useCallback(() => {
     caretRef.current = editorRef.current?.caret() ?? caretRef.current;
     setEditing(false);
   }, []);
+
+  /**
+   * ВЫХОД С НЕСОХРАНЁННЫМ СПРАШИВАЕТ: save / discard / cancel. Сохранение ручное (решение
+   * владельца 2026-10-19), и раньше выход молча оставлял набранное висеть «not saved» в чтении —
+   * на телефоне «done» читается как «готово, записано», а не записано ничего. Без правок —
+   * выходим сразу. Один путь на все три двери: «done», «finish editing» и ⌘E.
+   */
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const leaveEdit = useCallback(() => {
+    if (dirty) setConfirmLeave(true);
+    else exitEdit();
+  }, [dirty, exitEdit]);
+
+  const saveAndLeave = useCallback(async () => {
+    const ok = await save(false);
+    setConfirmLeave(false);
+    // Конфликт или ошибка — остаёмся в правке: баннер конфликта стоит над полем.
+    if (ok) exitEdit();
+  }, [exitEdit, save]);
+
+  /** «discard»: буфер и имя — к тому, что лежит на сервере, и выход. Черновик снимет эффект
+   * черновика сам: буфер сравнялся с сервером. */
+  const discardAndLeave = useCallback(() => {
+    setValue(serverContent);
+    setName(file?.fileName ?? '');
+    if (conflict) {
+      // Спорить больше не о чем: своего текста нет, а чужой — перечитать.
+      setConflict(null);
+      setShowDiff(false);
+      void contentQuery.refetch();
+    }
+    setConfirmLeave(false);
+    exitEdit();
+  }, [conflict, contentQuery, exitEdit, file, serverContent]);
 
   /**
    * Подставить черновик в поле.
@@ -499,7 +537,7 @@ export function NotePage() {
       // подтверждение, — и это верно: записывать и выходить из правки в этот момент нечего.
       // Но «выделить всё» при открытом подтверждении остаётся законным жестом, и отданное
       // браузеру оно снова выделяло бы всю страницу — ровно ту жалобу, ради которой всё это.
-      if (confirmOverwrite || confirmRestore) return;
+      if (confirmOverwrite || confirmRestore || confirmLeave) return;
       const mod = e.metaKey || e.ctrlKey;
 
       // `code`, а не только `key`: на русской раскладке физическая S приходит как «ы», а E как
@@ -547,7 +585,17 @@ export function NotePage() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canSave, confirmOverwrite, confirmRestore, editing, leaveEdit, save, saving, writable]);
+  }, [
+    canSave,
+    confirmLeave,
+    confirmOverwrite,
+    confirmRestore,
+    editing,
+    leaveEdit,
+    save,
+    saving,
+    writable,
+  ]);
 
   useEffect(() => {
     if (editing) editorRef.current?.focus(caretRef.current);
@@ -993,6 +1041,37 @@ export function NotePage() {
           there will be nowhere to restore it from. if you need both — close this window and choose
           “save as a separate note”.
         </Text>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={confirmLeave}
+        onOpenChange={setConfirmLeave}
+        onConfirm={() => {}}
+        // Отмена вернула бы фокус в `body`; правка продолжается — фокус обратно в поле.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          editorRef.current?.focus();
+        }}
+        title='not saved'
+        hideActions
+        width='sm'
+      >
+        <div className='flex justify-end gap-1.5'>
+          <Button size='sm' variant='secondary' onClick={() => setConfirmLeave(false)}>
+            cancel
+          </Button>
+          <Button size='sm' variant='secondary' onClick={discardAndLeave}>
+            discard
+          </Button>
+          <Button
+            size='sm'
+            variant='main'
+            disabled={!canSave || saving}
+            onClick={() => void saveAndLeave()}
+          >
+            {saving ? 'saving…' : 'save'}
+          </Button>
+        </div>
       </ConfirmationModal>
 
       <ConfirmationModal
