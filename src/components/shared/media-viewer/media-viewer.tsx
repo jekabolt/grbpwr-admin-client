@@ -831,7 +831,7 @@ export function MediaViewer({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className='media-viewer-overlay fixed inset-0 z-[var(--z-modal)] bg-black/95' />
+        <Dialog.Overlay className='media-viewer-overlay fixed inset-0 z-[var(--z-modal)] bg-black' />
         <Dialog.Content
           onKeyDown={handleKeyDown}
           // Esc inside a mode is `cancel`, not «close the viewer and lose the picture's place».
