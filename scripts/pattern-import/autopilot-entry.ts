@@ -1385,6 +1385,28 @@ export async function runCase(c: Case, mutate: string | null) {
           assumed: assumedOn(sd, ['fabric']) ?? assumedOn(null, ['fabric'], 'every piece'),
         });
     }
+    // BACK-VARIANT: a piece blocked on the operator's variant-notch question waits for its answer
+    // (the run stopped on it) — held, not missing: its truth piece is taken, never scored
+    for (const b of sem.blocked.filter((x) => x.reason === 'notch-variant')) {
+      if (bySeed.has(b.seed)) continue;
+      const o = outerOf(b.seed);
+      const l = pts.length ? null : byLabel(b.seed);
+      const t = pts.length
+        ? o
+          ? tps.find(
+              (x) =>
+                !taken.has(x) &&
+                pts.some((p) => norm(p.label) === norm(x.label) && insidePoly(p.at, o.outer)),
+            )
+          : undefined
+        : l && !taken.has(l)
+          ? l
+          : undefined;
+      if (t) {
+        taken.add(t);
+        matched++;
+      }
+    }
     // a truth piece the export misses: set aside by the autopilot (with or without a label), by
     // the reader, or never found
     const want = c.truth?.expect ?? tps.length;
