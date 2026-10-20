@@ -1362,7 +1362,10 @@ export function buildPieceSpecsDetailed(
       models: input.models ?? [],
       chosen: input.variant ?? null,
       texts: sheetWords,
-      answer: ov.notchVariant,
+      // a drawn twin carries its other hand's question: either hand's answer answers both
+      answer:
+        ov.notchVariant ??
+        (twinOf.has(seed) ? pieceOverrides[twinOf.get(seed)!]?.notchVariant : undefined),
     });
     if (nv.kind === 'apply') {
       let dropped = 0;
@@ -2455,6 +2458,12 @@ export function buildPieceSpecsDetailed(
         `its other hand ${s.pairOf} is blocked${why ? `: ${why.detail}` : ''}`,
         blockedNameOf(s),
       );
+      // BACK-VARIANT: the twin's variant question is this hand's too (answered for both)
+      const twinAsk =
+        why?.reason === 'notch-variant'
+          ? notchVariantAsks.find((q) => q.seed === why.seed)
+          : undefined;
+      if (twinAsk) notchVariantAsks.push({ ...twinAsk, seed: s.seed, identity: s.identity });
       unique.splice(i, 1);
       changed = true;
     }

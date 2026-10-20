@@ -5,11 +5,15 @@
 //   • the label NAMES a model («Style A notch», «View 2 notch», «Mod. 125»): that notch is that
 //     model's — proven by two evidences (D3): the printed label names the model, and the label is
 //     bound to the notch (it carries a notch word, it is the nearest such label, none other as near).
-//     The chosen model keeps it, any other model's is dropped (recorded, D5);
+//     The chosen model keeps it, any other model's is dropped (recorded, D5) — only when the label
+//     binds exactly one notch in every size; a label on more notches is asked (a shared notch is
+//     never dropped silently). Alternatives among the remaining labels are asked as below;
 //   • the labels of one piece are ALTERNATIVES — two or more labels the same but for one word
-//     («High back notch» / «Low back notch», «long / short sleeve notch»), or one label whose word
-//     the sheet ties to one model only: the word is ONE evidence at most (a sheet line such as
-//     «Cutting line Style A - High Waisted» shares the word, it never says which notch is whose),
+//     («High back notch» / «Low back notch», «long / short sleeve notch»: an alternative's word, or
+//     words the sheet ties to two different models — «front» / «back» is an ordinary pair), or one
+//     label whose alternative's word the sheet ties to another model: the word is ONE evidence at
+//     most (a sheet line such as «Cutting line Style A - High Waisted» shares the word, it never
+//     says which notch is whose),
 //     so the importer ASKS which one the chosen model keeps (`NotchVariantAsk`, blocked
 //     'notch-variant'); the word's model is shown as a hint, never applied. Never a silent pick.
 //
@@ -133,80 +137,109 @@ export function notchVariantOf(args: {
     }
   if (!opts.size) return { kind: 'none' };
   const chosenKey = modelKey(chosen);
-  // 1 · a label that names a model by itself: proven (named + bound to its notch)
-  for (const o of opts.values()) o.model = namedModel(o.label, models);
-  const named = [...opts.values()].filter((o) => o.model);
-  if (named.length) {
-    const drop = new Set(named.filter((o) => modelKey(o.model!) !== chosenKey).map((o) => o.key));
-    if (!drop.size) return { kind: 'none' };
+  const all = [...opts.values()];
+  // a label that names a model by itself («Style B notch»)
+  for (const o of all) o.model = namedModel(o.label, models);
+  const named = all.filter((o) => o.model);
+  // 1 · proven only when every left-out option is exactly one notch in every size (the label bound
+  //     to one notch); a label reaching more notches is asked — never a silent drop of a shared notch
+  const oneEach = (o: NotchVariantOption) =>
+    o.perSize.length === read.sizes.length && o.perSize.every((p) => p.at.length === 1);
+  const namedOut = named.filter((o) => modelKey(o.model!) !== chosenKey);
+  const proven = new Set<string>();
+  let namedAsk: NotchVariantOption[] = [];
+  if (namedOut.length) {
+    if (namedOut.every(oneEach)) namedOut.forEach((o) => proven.add(o.key));
+    else namedAsk = named;
+  }
+  // 2 · alternatives among the labels left: alike but for one word each, those words an
+  //     alternative's (high / low…), or each tied by the sheet to a model, ≥ 2 different models
+  //     («front» / «back» tied to one model only is an ordinary pair, not a variant)
+  const rest = all.filter((o) => !o.model);
+  const tie = (w: string) => wordModel(w, models, texts);
+  let alt: { list: NotchVariantOption[]; words: string[]; base: string } | null = null;
+  if (rest.length >= 2) {
+    const ws = rest.map((o) => words(o.key));
+    const common = ws.reduce((a, b) => a.filter((w) => b.includes(w)));
+    const own = ws.map((w) => w.filter((x) => !common.includes(x)));
+    if (own.every((o) => o.length === 1)) {
+      const vw = own.map((o) => o[0]);
+      const ties = vw.map(tie);
+      const distinct = new Set(ties.filter(Boolean).map((m) => modelKey(m!))).size;
+      const ok =
+        new Set(vw).size === vw.length &&
+        ((ties.every(Boolean) && distinct >= 2) || vw.every((w) => ALT_WORDS.has(w)));
+      if (ok) alt = { list: rest, words: vw, base: common.join(' ') };
+    }
+  } else if (rest.length === 1) {
+    // a lone label: only an alternative's word the sheet ties to another model («Low back notch»)
+    const w = words(rest[0].key).find(
+      (x) => ALT_WORDS.has(x) && tie(x) && modelKey(tie(x)!) !== chosenKey,
+    );
+    if (w) alt = { list: rest, words: [w], base: '' };
+  }
+  if (alt) alt.list.forEach((o, k) => (o.model = tie(alt!.words[k])));
+  const list = [...namedAsk, ...(alt?.list ?? [])];
+  const labelsOf = (ks: Iterable<string>) =>
+    [...ks].map((k) => `«${opts.get(k)!.label}»`).join(', ');
+  if (!list.length) {
+    if (!proven.size) return { kind: 'none' };
     return {
       kind: 'apply',
-      drop,
-      kept: named.filter((o) => !drop.has(o.key)).map((o) => o.key),
+      drop: proven,
+      kept: named.filter((o) => !proven.has(o.key)).map((o) => o.key),
       from: 'label',
-      why: `${[...drop].map((k) => `«${opts.get(k)!.label}»`).join(', ')} named for ${[
-        ...new Set(named.filter((o) => drop.has(o.key)).map((o) => o.model)),
-      ].join(
+      why: `${labelsOf(proven)} named for ${[...new Set(namedOut.map((o) => o.model))].join(
         ', ',
       )} on the sheet — left out of ${chosen} (the label names the model and is the notch's own)`,
     };
   }
-  // 2 · alternatives: labels alike but for one word each, that word an alternative's word or tied
-  //     by the sheet to one model; or a lone label whose word the sheet ties to one model
-  const list = [...opts.values()];
-  const ws = list.map((o) => words(o.key));
-  const common = ws.reduce((a, b) => a.filter((w) => b.includes(w)));
-  const own = ws.map((w) => w.filter((x) => !common.includes(x)));
-  const tie = (w: string) => wordModel(w, models, texts);
-  let variantWords: string[] | null = null;
-  if (list.length >= 2 && own.every((o) => o.length === 1)) {
-    const vw = own.map((o) => o[0]);
-    if (new Set(vw).size === vw.length && vw.every((w) => ALT_WORDS.has(w) || tie(w)))
-      variantWords = vw;
-  } else if (list.length === 1) {
-    const w = ws[0].find((x) => tie(x) && modelKey(tie(x)!) !== chosenKey);
-    if (w) variantWords = [w];
-  }
-  if (!variantWords) return { kind: 'none' };
-  list.forEach((o, k) => (o.model = tie(variantWords![k])));
   const key = `notchvar:${args.seed}:${list
     .map((o) => o.key)
     .sort()
     .join('|')}`;
-  // the operator's answer: keep that option (or every notch: 'all')
+  const provenWhy = proven.size ? ` · ${labelsOf(proven)} named for another model` : '';
+  // the operator's answer: keep that option (or every asked one: 'all'; none of them: 'none')
   if (answer === 'all')
     return {
       kind: 'apply',
-      drop: new Set(),
+      drop: proven,
       kept: list.map((o) => o.key),
       from: 'operator',
-      why: `every labelled notch kept for ${chosen} — the operator's answer`,
+      why: `every labelled notch kept for ${chosen} — the operator's answer${provenWhy}`,
       answer,
     };
-  if (answer === 'none' || (answer && opts.has(answer))) {
-    const drop = new Set(list.map((o) => o.key).filter((k) => k !== answer));
+  if (answer === 'none' || (answer && list.some((o) => o.key === answer))) {
+    const out = list.map((o) => o.key).filter((k) => k !== answer);
+    const drop = new Set([...proven, ...out]);
     return {
       kind: 'apply',
       drop,
       kept: answer === 'none' ? [] : [answer],
       from: 'operator',
-      why: `${[...drop].map((k) => `«${opts.get(k)!.label}»`).join(', ') || 'nothing'} left out of ${chosen} — the operator's answer${answer === 'none' ? ' (none of them)' : ` (keeps «${opts.get(answer)!.label}»)`}`,
+      why: `${labelsOf(out) || 'nothing'} left out of ${chosen} — the operator's answer${answer === 'none' ? ' (none of them)' : ` (keeps «${opts.get(answer)!.label}»)`}${provenWhy}`,
       answer,
     };
   }
-  const base = common.join(' ');
   const question =
     list.length >= 2
-      ? `which ${base || 'notch'}: ${variantWords.join(' / ')}?`
+      ? namedAsk.length || !alt
+        ? `which notch: ${list.map((o) => o.key).join(' / ')}?`
+        : `which ${alt.base || 'notch'}: ${alt.words.join(' / ')}?`
       : `«${list[0].label}» in ${chosen}?`;
   const hint = list.filter((o) => o.model);
   const mine = hint.filter((o) => modelKey(o.model!) === chosenKey);
   const evidence = [
     `${list.map((o) => `«${o.label}»`).join(' and ')} on one piece — ${list.length >= 2 ? 'alternatives of one notch' : 'a notch named for a variant'}`,
-    ...hint.map(
-      (o) =>
-        `the word «${variantWords![list.indexOf(o)]}» goes with ${o.model} elsewhere on the sheet — one evidence, not applied`,
+    ...namedAsk.map(
+      (o) => `«${o.label}» names ${o.model} but reaches more than one notch in a size — asked`,
     ),
+    ...(alt?.list ?? [])
+      .filter((o) => o.model)
+      .map(
+        (o) =>
+          `the word «${alt!.words[alt!.list.indexOf(o)]}» goes with ${o.model} elsewhere on the sheet — one evidence, not applied`,
+      ),
   ];
   return {
     kind: 'ask',
@@ -215,7 +248,9 @@ export function notchVariantOf(args: {
       question,
       model: chosen,
       options: list,
-      ...(mine.length === 1 && hint.length === list.length ? { suggested: mine[0].key } : {}),
+      ...(list.length >= 2 && mine.length === 1 && hint.length === list.length
+        ? { suggested: mine[0].key }
+        : {}),
       evidence,
     },
   };

@@ -10,6 +10,7 @@
 import type { PtMm, SemanticsOutput, Sheet } from 'lib/pattern-import/types';
 import { notchVariantOf, type NotchVariantRead } from 'lib/pattern-import/semantics/notch-variants';
 import { CASES, runCase } from './e2e-entry';
+import { bindLabels, type LabelBlock } from 'lib/pattern-import/pieces/notch-marks';
 
 const fails: string[] = [];
 const check = (ok: boolean, what: string) => {
@@ -120,6 +121,94 @@ function synthetic() {
     texts: ['Style B: low waist'],
   });
   check(lone.kind === 'ask', `a lone «Low back notch» tied to Style B: asks (${lone.kind})`);
+  const loneNo = notchVariantOf({
+    ...base,
+    read: readOf(['Low back notch']),
+    texts: ['Style B: low waist'],
+    answer: 'none',
+  });
+  check(
+    loneNo.kind === 'apply' && [...loneNo.drop].join() === 'low back',
+    "a lone label answered 'no': dropped",
+  );
+
+  // REVIEW M1b: a model-named label on more than one notch of a size is asked, never applied
+  const twoEach: NotchVariantRead = {
+    sizes: ['S', 'M'].map((size) => ({
+      size,
+      notches: [
+        { at: at(0, 0), label: 'Style B notch' },
+        { at: at(0, 30), label: 'Style B notch' },
+      ],
+    })),
+  };
+  const shared = notchVariantOf({ ...base, read: twoEach, texts: [] });
+  check(
+    shared.kind === 'ask',
+    `«Style B notch» on two notches per size: asks, not a silent drop (${shared.kind})`,
+  );
+  // REVIEW M2: «Front notch» / «Back notch» with both words tied to ONE model: an ordinary pair
+  const pair = notchVariantOf({
+    ...base,
+    chosen: 'Style B',
+    read: readOf(['Front notch', 'Back notch']),
+    texts: ['Style B front bodice', 'Style B back bodice', 'Style A trousers'],
+  });
+  check(pair.kind === 'none', `front / back tied to Style B only: not asked (${pair.kind})`);
+  // REVIEW borderline: a model-named label and high / low alternatives on one piece
+  const mixed = notchVariantOf({
+    ...base,
+    read: readOf(['Style B notch', 'High back notch', 'Low back notch']),
+    texts: [],
+  });
+  check(
+    mixed.kind === 'ask' && mixed.ask.question === 'which back: high / low?',
+    `«Style B notch» + «High/Low back notch»: high / low still asked (${mixed.kind === 'ask' ? mixed.ask.question : mixed.kind})`,
+  );
+  const mixedHi = notchVariantOf({
+    ...base,
+    read: readOf(['Style B notch', 'High back notch', 'Low back notch']),
+    texts: [],
+    answer: 'high back',
+  });
+  check(
+    mixedHi.kind === 'apply' && [...mixedHi.drop].sort().join() === 'low back,style b',
+    `…answered high: Style B's and the low notch dropped (${mixedHi.kind === 'apply' ? [...mixedHi.drop].join() : mixedHi.kind})`,
+  );
+
+  // REVIEW M1a: label binding — one label, its nearest notch only, on its own piece
+  const box = (x0: number, y0: number, x1: number, y1: number) => ({
+    minX: x0,
+    minY: y0,
+    maxX: x1,
+    maxY: y1,
+  });
+  const blk = (text: string, b: ReturnType<typeof box>) => ({ text, box: b }) as LabelBlock;
+  const outer = [at(500, 900), at(800, 900), at(800, 1400), at(500, 1400)];
+  const kombi = [at(582, 1271), at(582, 1026), at(582, 1070)];
+  const bl = bindLabels(
+    kombi,
+    [
+      blk('High back notch', box(591, 1266, 607, 1276)),
+      blk('Low back notch', box(591, 1024, 607, 1034)),
+    ],
+    outer,
+  );
+  check(
+    bl[0] === 'High back notch' && bl[1] === 'Low back notch' && bl[2] === null,
+    `kombinezon P03: the hip notch 37 mm from «Low back notch» stays unlabelled (${JSON.stringify(bl)})`,
+  );
+  const tie2 = bindLabels(
+    [at(600, 1000), at(600, 1020)],
+    [blk('Low back notch', box(605, 1008, 615, 1012))],
+    outer,
+  );
+  check(
+    tie2.every((l) => l === null),
+    `a label between two notches binds neither (${JSON.stringify(tie2)})`,
+  );
+  const off = bindLabels([at(500, 1000)], [blk('Low back notch', box(480, 995, 495, 1005))], outer);
+  check(off[0] === null, `a label off the piece (another piece's) binds nothing (${off[0]})`);
 }
 
 type Seen = {

@@ -209,10 +209,12 @@ type FilledGlyph = {
 const NOTCH_WORDS =
   /\bnotch(?:es)?\b|\bnicks?\b|nadsec|nadst|\u043d\u0430\u0434\u0441\u0435\u0447|knips|cran/iu;
 
-/** A notch label within this distance of the notch (its text box), mm. */
-const LABEL_REACH_MM = 60;
+/** A notch label within this distance of the notch (its text box), mm (kombinezon: ~9 mm). */
+const LABEL_REACH_MM = 25;
+/** A label binds its nearest notch only when the size's next notch is this much farther. */
+const LABEL_SOLE = 1.5;
 
-type LabelBlock = { text: string; box: ReturnType<typeof bboxOf> };
+export type LabelBlock = { text: string; box: ReturnType<typeof bboxOf> };
 
 /**
  * BACK-VARIANT: the printed notch labels near a family — a text carrying a notch word, with the
@@ -285,21 +287,43 @@ function notchLabelBlocks(
 const boxDist = (p: PtMm, b: ReturnType<typeof bboxOf>) =>
   Math.hypot(Math.max(b.minX - p.x, 0, p.x - b.maxX), Math.max(b.minY - p.y, 0, p.y - b.maxY));
 
-/** The label bound to a notch at `p`: the nearest block in reach, unless another with other words is as near (< 1.5×). */
-function labelOf(p: PtMm, blocks: readonly LabelBlock[]): string | null {
-  const ds = blocks
-    .map((b) => ({ b, d: boxDist(p, b.box) }))
-    .filter((x) => x.d <= LABEL_REACH_MM)
-    .sort((a, b) => a.d - b.d);
-  if (!ds.length) return null;
-  const words = (t: string) =>
+/**
+ * The labels bound to one size's notches (aligned with `notches`; null = none). A label block binds
+ * only when it lies on this piece (its centre inside the size's outline), its nearest notch is in
+ * reach and the size's next notch is ≥ LABEL_SOLE× farther — one label, one notch, never a
+ * neighbour's — and no block with other words is as near that notch (< LABEL_SOLE×).
+ */
+export function bindLabels(
+  notches: readonly PtMm[],
+  blocks: readonly LabelBlock[],
+  outer: readonly PtMm[],
+): (string | null)[] {
+  const out: (string | null)[] = notches.map(() => null);
+  const norm = (t: string) =>
     t
       .toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, ' ')
       .trim();
-  const rival = ds.find((x) => words(x.b.text) !== words(ds[0].b.text));
-  if (rival && rival.d < 1.5 * Math.max(ds[0].d, 1)) return null;
-  return ds[0].b.text;
+  const own = blocks.filter((b) =>
+    pointInPolygon({ x: (b.box.minX + b.box.maxX) / 2, y: (b.box.minY + b.box.maxY) / 2 }, outer),
+  );
+  for (const b of own) {
+    const ds = notches.map((p, i) => ({ i, d: boxDist(p, b.box) })).sort((x, y) => x.d - y.d);
+    if (!ds.length || ds[0].d > LABEL_REACH_MM) continue;
+    if (ds[1] && ds[1].d < LABEL_SOLE * Math.max(ds[0].d, 1)) continue;
+    const p = notches[ds[0].i];
+    const d0 = ds[0].d;
+    // a block with other words as near the same notch: the notch's label is not known
+    const rival = own.some(
+      (o) =>
+        o !== b &&
+        norm(o.text) !== norm(b.text) &&
+        boxDist(p, o.box) < LABEL_SOLE * Math.max(d0, 1),
+    );
+    if (rival) continue;
+    out[ds[0].i] = b.text;
+  }
+  return out;
 }
 
 /**
@@ -831,7 +855,15 @@ export function readNotchMarks(
       notches: acc.notches,
       tags: [...tags],
       refused: acc.refused,
-      ...(source ? { labels: acc.notches.map((n) => labelOf(n.at, blocks)) } : {}),
+      ...(source
+        ? {
+            labels: bindLabels(
+              acc.notches.map((n) => n.at),
+              blocks,
+              x.outer,
+            ),
+          }
+        : {}),
     });
   }
   return out;
