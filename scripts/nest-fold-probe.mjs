@@ -6,6 +6,7 @@
 // Usage:
 //   node scripts/nest-fold-probe.mjs                     # synthetic cases (asserts)
 //   node scripts/nest-fold-probe.mjs <file.dxf> <outDir> # real file: dump JSON + SVG per block
+//   node scripts/nest-fold-probe.mjs --continue <ulmus.dxf> # Ulmus markers continued (asserts)
 // Env (real file): FOLD_PROBE_BLOCKS (regex, default '.'), FOLD_PROBE_LAYER (contour layer,
 // default '1'), FOLD_PROBE_GRAIN (grain layer, default '7'), FOLD_PROBE_SA (cm, default 0),
 // FOLD_PROBE_BUDGET_MS (default 3000), FOLD_PROBE_WIDTH (cm, default 140), FOLD_PROBE_CROSS=1
@@ -17,6 +18,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const repo = resolve(here, '..');
 const outfile = resolve(tmpdir(), `nest-fold-probe-${process.pid}.mjs`);
 await build({
   entryPoints: [resolve(here, 'nest-fold-entry.ts')],
@@ -26,11 +28,31 @@ await build({
   target: 'node20',
   outfile,
   logLevel: 'warning',
+  absWorkingDir: repo,
+  alias: Object.fromEntries(
+    ['components', 'lib', 'api', 'utils', 'ui', 'constants'].map((a) => [
+      a,
+      resolve(repo, 'src', a),
+    ]),
+  ),
 });
 const mod = await import(pathToFileURL(outfile).href);
 
 const [file, outDir] = process.argv.slice(2);
 const env = process.env;
+
+if (file === '--continue') {
+  const buf = await readFile(outDir);
+  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  const runs = await mod.continueFile(bytes, basename(outDir));
+  let bad = 0;
+  for (const r of runs) {
+    if (!r.ok) bad++;
+    console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}\n      ${JSON.stringify(r.detail)}`);
+  }
+  console.log(`nest-fold continue: ${runs.length - bad}/${runs.length} pass`);
+  process.exit(bad ? 1 : 0);
+}
 
 if (file) {
   const buf = await readFile(file);

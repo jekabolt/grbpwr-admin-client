@@ -47,13 +47,12 @@ import {
   unionBox,
 } from './geom';
 
-/** Simplification tolerance for written polylines, mm (well under the 0.05 mm sagitta). */
-
 /** L14: the annotation of a half on fold — what the drawing is, and how many units it cuts. */
 export function halfOnFoldText(piecesPerGarment: number): string {
   return `HALF - CUT ${Math.max(1, Math.round(piecesPerGarment || 1))} ON FOLD`;
 }
 
+/** Simplification tolerance for written polylines, mm (well under the 0.05 mm sagitta). */
 export const WRITE_SIMPLIFY_MM = 0.01;
 export const DEFAULT_NOTCH_DEPTH_MM = 5;
 export const GRAIN_SHAFT_MM = 180;

@@ -15,6 +15,11 @@ import { foldUnitOf } from '../src/lib/nesting/geom/fold-unit';
 import { area, bounds, signedArea } from '../src/lib/nesting/geom/polygon';
 import { nest } from '../src/lib/nesting/nest';
 import { renderLayoutSvg } from '../src/lib/nesting/render/svg';
+import {
+  sizeAreasFromParsed,
+  type SizeAreasOutcome,
+} from 'components/managers/tech-card/components/nesting/size-areas-from-dxf';
+import type { common_TechCardMarker } from 'api/proto-http/admin';
 
 export { parseSheets, orientToGrain, applySeamAllowance, nest, renderLayoutSvg, placedPoly };
 
@@ -327,5 +332,197 @@ export async function synthetic(): Promise<Case[]> {
       res.warnings.some((w) => w.startsWith('half on fold, not placed: ') && w.includes(o.name)),
     { placedIds, want, unplaced: res.unplaced, warnings: res.warnings },
   );
+
+  // continuing a marker: a refused half outside its composition is that size's gap, not a stop
+  const SID: Record<string, number> = { xs: 1, m: 3 };
+  const ruf = (size: string, tip: number) => {
+    const p = mk(slot(tip), [foldS, seg('7', P(25, 15), P(25, 35))], { size });
+    return { ...p, name: `RUF_${size}`, blockName: `RUF_${size}` };
+  };
+  const fp = (size: string, w: number) => {
+    const p = mk([P(0, 0), P(w, 0), P(w, 40), P(0, 40)], [seg('7', P(5, 10), P(5, 30))], {
+      identity: 'FP',
+      cardName: 'FP',
+      size,
+      halfFold: false,
+    });
+    return { ...p, name: `FP_${size}`, blockName: `FP_${size}` };
+  };
+  const file = [ruf('XS', -1), ruf('M', 2), fp('XS', 18), fp('M', 20)];
+  const cutM = applySeamAllowance(file, 0).pieces;
+  const blob = (names: string[]) =>
+    cutM
+      .filter((p) => names.includes(p.blockName ?? ''))
+      .map((p) => ({
+        blockName: p.blockName ?? '',
+        area: p.areaCm2,
+        sizeId: SID[(p.manifest?.size ?? '').toLowerCase()],
+      }));
+  const cont = continueMarker(file, blob(['RUF_M', 'FP_M']), [SID.xs, SID.m], ['xs', 'm']);
+  const unitM = cutM[1].areaCm2;
+  ck(
+    'continuing an M marker: M from the unit, XS «half on fold» (no area), not a refusal',
+    cont.ok &&
+      near(cont.areas.areaBySize.get(SID.m) ?? 0, unitM + 800) &&
+      !cont.areas.areaBySize.has(SID.xs) &&
+      cont.areas.sizesWithoutPieces.includes(SID.xs) &&
+      cont.areas.sizesFoldRefused.length === 1 &&
+      cont.areas.sizesFoldRefused[0].sizeId === SID.xs &&
+      /RUF_XS \(the half crosses its fold line/.test(cont.areas.sizesFoldRefused[0].piece),
+    cont,
+  );
+  const noRuf = continueMarker(file, blob(['FP_M']), [SID.xs, SID.m], ['xs', 'm']);
+  ck(
+    'a marker without the ruffle: both sizes have areas, the refused half is not its business',
+    noRuf.ok &&
+      near(noRuf.areas.areaBySize.get(SID.xs) ?? 0, 720) &&
+      near(noRuf.areas.areaBySize.get(SID.m) ?? 0, 800) &&
+      noRuf.areas.sizesFoldRefused.length === 0,
+    noRuf,
+  );
+  const withXs = continueMarker(
+    file,
+    [
+      ...blob(['RUF_M', 'FP_M', 'FP_XS']),
+      { blockName: 'RUF_XS', area: file[0].areaCm2, sizeId: SID.xs },
+    ],
+    [SID.xs, SID.m],
+    ['xs', 'm'],
+  );
+  ck(
+    'a marker that cut the refused size itself → refused, named',
+    !withXs.ok && /half on fold that cannot be cut: RUF_XS/.test(withXs.reason),
+    withXs,
+  );
+  return out;
+}
+
+// ── continuing a marker (size-areas-from-dxf): the card's own function on a parsed file ────────
+
+type BlobRow = { blockName: string; area: number; sizeId?: number };
+
+function continueMarker(
+  parsed: PieceDTO[],
+  rows: BlobRow[],
+  sizeIds: number[],
+  tokens: string[],
+  conditions = { seamAllowanceMm: 0, contourLayer: '1', grainLayer: '7' },
+): SizeAreasOutcome {
+  const marker = {
+    summary: {
+      seamAllowanceMm: { value: String(conditions.seamAllowanceMm) },
+      contourLayer: conditions.contourLayer,
+      grainLayer: conditions.grainLayer,
+    },
+    layout: {
+      schemaVersion: 4,
+      pieces: rows.map((r, i) => ({
+        pieceId: i + 1,
+        name: r.blockName,
+        blockName: r.blockName,
+        source: 'probe.dxf',
+        sourceUrl: '',
+        quantity: 1,
+        poly: [],
+        bboxWCm: 0,
+        bboxHCm: 0,
+        areaCm2: r.area,
+        pieceLineKey: '',
+        sizeId: r.sizeId,
+      })),
+      placements: [],
+      warnings: [],
+    },
+  } as unknown as common_TechCardMarker;
+  return sizeAreasFromParsed({
+    marker,
+    parsed,
+    sizeIds,
+    tokensOfSize: (id) => [tokens[sizeIds.indexOf(id)] ?? ''],
+    isSizeToken: (t) => ['xs', 's', 'm', 'l', 'xl'].includes(t),
+  });
+}
+
+export type ContinueRun = {
+  name: string;
+  ok: boolean;
+  detail: unknown;
+};
+
+/**
+ * Real file (Ulmus): markers captured on M/L/XL continued to the whole run XS…XL. The blob is
+ * what a save of the card chain records (one row per INSERT copy, the cut area, size id).
+ */
+export async function continueFile(bytes: ArrayBuffer, name: string): Promise<ContinueRun[]> {
+  const parsed = (
+    await parseSheets([{ name, open: async () => bytes }], {
+      unit: 'auto',
+      tol: NEST_DEFAULTS.tol,
+      tolChain: NEST_DEFAULTS.tolChain,
+    })
+  ).pieces;
+  const tokens = ['xs', 's', 'm', 'l', 'xl'];
+  const sizeIds = [1, 2, 3, 4, 5];
+  const sizeOf = (p: PieceDTO) => tokens.indexOf((p.manifest?.size ?? '').toLowerCase()) + 1;
+  const cut = applySeamAllowance(
+    orientToGrain(
+      parsed.filter((p) => (p.layer ?? '') === '1'),
+      '7',
+    ).pieces,
+    0,
+  ).pieces;
+  const blobOf = (sizes: number[], keep: (p: PieceDTO) => boolean): BlobRow[] =>
+    cut
+      .filter((p) => sizes.includes(sizeOf(p)) && keep(p))
+      .map((p) => ({ blockName: p.blockName ?? '', area: p.areaCm2, sizeId: sizeOf(p) }));
+  const expected = (rows: BlobRow[], sizeId: number) =>
+    rows.filter((r) => r.sizeId === sizeId).reduce((a, r) => a + r.area, 0);
+  const isRuf = (p: PieceDTO) => /^RUF_/i.test(p.blockName ?? '');
+  const out: ContinueRun[] = [];
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, b);
+  const summary = (o: SizeAreasOutcome) =>
+    o.ok
+      ? {
+          areaBySize: Object.fromEntries(
+            [...o.areas.areaBySize].map(([k, v]) => [tokens[k - 1], Math.round(v)]),
+          ),
+          without: o.areas.sizesWithoutPieces.map((k) => tokens[k - 1]),
+          fold: o.areas.sizesFoldRefused.map((f) => `${tokens[f.sizeId - 1]}: ${f.piece}`),
+        }
+      : { reason: o.reason };
+
+  const mlxl = blobOf([3, 4, 5], () => true);
+  const a = continueMarker(parsed, mlxl, sizeIds, tokens);
+  out.push({
+    name: 'Ulmus M/L/XL marker → XS…XL: M/L/XL areas as recorded, XS/S «half on fold»',
+    ok:
+      a.ok &&
+      [3, 4, 5].every((s) => near(a.areas.areaBySize.get(s) ?? 0, expected(mlxl, s))) &&
+      !a.areas.areaBySize.has(1) &&
+      !a.areas.areaBySize.has(2) &&
+      a.areas.sizesFoldRefused.map((f) => f.sizeId).join(',') === '1,2' &&
+      a.areas.sizesFoldRefused.every((f) =>
+        /^RUF_X?S \(the half crosses its fold line/.test(f.piece),
+      ),
+    detail: summary(a),
+  });
+  const noRuf = blobOf([3, 4, 5], (p) => !isRuf(p));
+  const b = continueMarker(parsed, noRuf, sizeIds, tokens);
+  out.push({
+    name: 'Ulmus M/L/XL marker without RUF → all five sizes have areas',
+    ok:
+      b.ok &&
+      [1, 2, 3, 4, 5].every((s) => (b.areas.areaBySize.get(s) ?? 0) > 0) &&
+      [3, 4, 5].every((s) => near(b.areas.areaBySize.get(s) ?? 0, expected(noRuf, s))) &&
+      b.areas.sizesFoldRefused.length === 0,
+    detail: summary(b),
+  });
+  const withS = blobOf([2, 3], () => true);
+  const c = continueMarker(parsed, withS, sizeIds, tokens);
+  out.push({
+    name: 'Ulmus S/M marker (S is in the composition) → refused, names RUF_S',
+    ok: !c.ok && /half on fold that cannot be cut: RUF_S \(/.test(c.reason),
+    detail: summary(c),
+  });
   return out;
 }

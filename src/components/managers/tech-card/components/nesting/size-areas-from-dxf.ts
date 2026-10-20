@@ -73,6 +73,11 @@ export type SizeAreas = {
   gradedPieces: number;
   /** Размеры, для которых в сегодняшних выкройках нашлись не все детали. */
   sizesWithoutPieces: number[];
+  /**
+   * L14: those of `sizesWithoutPieces` whose piece is present but is a half on fold that cannot be
+   * cut (geom/fold-unit.ts) — «half on fold», not «missing». `piece` names it with the reason.
+   */
+  sizesFoldRefused: { sizeId: number; piece: string }[];
   warnings: string[];
 };
 
@@ -131,16 +136,6 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // и всплывает только счётом от поставщика.
   const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
-  // L14: a half on fold that cannot be cut has no area to continue with (geom/fold-unit.ts)
-  const foldRefused = candidates.filter((p) => p.fold?.kind === 'refused');
-  if (foldRefused.length > 0) {
-    return {
-      ok: false,
-      reason: `half on fold that cannot be cut: ${foldRefused
-        .map((p) => `${p.name} (${p.fold?.kind === 'refused' ? p.fold.reason : ''})`)
-        .join('; ')}`,
-    };
-  }
   const warnings: string[] = [];
   if (seam.hulled.length > 0) {
     warnings.push(`contour replaced by its convex hull: ${seam.hulled.join(', ')}`);
@@ -309,11 +304,42 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     }
   }
 
+  // ── L14: A HALF ON FOLD THAT CANNOT BE CUT (geom/fold-unit.ts) — judged per identity OF THIS
+  // MARKER, as dxf-consumption judges it per size. A piece the marker does not lay is not its
+  // business; a refused size outside the composition has no area (its half would be half of it)
+  // and goes to sizesWithoutPieces named «half on fold». Everything stops only when the refused
+  // piece is one the marker itself measured: an agnostic piece (its area is in every size) or a
+  // size of the composition (the recorded areas were taken on a geometry today's file refuses).
+  const foldRefusedAt = new Map<string, string>(); // `${identity}\u0000${sizeToken}` → «name (reason)»
+  {
+    const compositionSizes = new Set<string>();
+    for (const g of graded.values()) for (const t of g.sizes.keys()) compositionSizes.add(t);
+    const stop: string[] = [];
+    for (const c of candidates) {
+      if (c.fold?.kind !== 'refused') continue;
+      const raw = normBlock(c.blockName ?? '');
+      if (!raw) continue;
+      const { identity, size } = codeOf(raw);
+      const what = `${c.name} (${c.fold.reason})`;
+      if (!size) {
+        if (agnosticIdentities.has(identity)) stop.push(what);
+      } else if (graded.has(identity)) {
+        if (compositionSizes.has(size)) stop.push(what);
+        else foldRefusedAt.set(`${identity}\u0000${size}`, what);
+      }
+    }
+    if (stop.length > 0) {
+      return { ok: false, reason: `half on fold that cannot be cut: ${stop.join('; ')}` };
+    }
+  }
+
   // ── сторона ФАЙЛА: площадь каждой градуированной детали в каждом размере ───────────────
   const fileArea = new Map<string, number>(); // `${identity} ${sizeToken}` → см²
   const copySeen = new Set<string>();
   const ambiguous = new Set<string>();
   for (const c of candidates) {
+    // L14: a refused half has no area to give (see foldRefusedAt above)
+    if (c.fold?.kind === 'refused') continue;
     const raw = normBlock(c.blockName ?? '');
     if (!raw) continue;
     const { identity, size } = codeOf(raw);
@@ -348,6 +374,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // ── a_s по размерам ────────────────────────────────────────────────────────────────────
   const areaBySize = new Map<number, number>();
   const sizesWithoutPieces: number[] = [];
+  const sizesFoldRefused: SizeAreas['sizesFoldRefused'] = [];
   for (const sizeId of input.sizeIds) {
     const tokens = input.tokensOfSize(sizeId).map(bare).filter(Boolean);
     let sum = agnosticCm2;
@@ -358,6 +385,11 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
         // ЧАСТИЧНАЯ ПЛОЩАДЬ ХУЖЕ ОТСУТСТВУЮЩЕЙ: она меньше настоящей, а меньшая площадь даёт
         // меньшую норму — ошибка молчаливая и в дешёвую сторону, то есть замечают её на складе.
         complete = false;
+        const fold = tokens.map((t) => foldRefusedAt.get(`${g.identity}\u0000${t}`)).find(Boolean);
+        if (fold) {
+          sizesFoldRefused.push({ sizeId, piece: fold });
+          warnings.push(`half on fold, size has no area: ${fold}`);
+        }
         break;
       }
       if (ambiguous.has(`${g.identity} ${token}`)) {
@@ -382,6 +414,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
       agnosticCm2,
       gradedPieces: graded.size,
       sizesWithoutPieces,
+      sizesFoldRefused,
       warnings,
     },
   };
