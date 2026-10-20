@@ -66,6 +66,7 @@ import type {
   SizeRun,
   Unproven,
   GradeAsk,
+  NotchVariantAsk,
   GradeCountFeature,
   KinkRecord,
   ShapeFixRecord,
@@ -87,6 +88,7 @@ import { silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
+import { notchQualifier, notchVariantOf } from './notch-variants';
 import { classifyFeatures } from './features';
 import { gradeP1Off, gradeShape } from './grade-shape';
 import {
@@ -740,6 +742,8 @@ export function buildPieceSpecsDetailed(
   const unproven: Unproven[] = [];
   /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
   const gradeAsks: GradeAsk[] = [];
+  const notchVariantAsks: NotchVariantAsk[] = [];
+  const sheetWords = [...sheet.texts.map((t) => t.text), ...(input.docTexts ?? [])];
   const gradeRefusals: Record<string, string> = {};
   const refusedSeed = new Map<string, SeedId>();
   /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
@@ -1338,6 +1342,42 @@ export function buildPieceSpecsDetailed(
             undefined,
             { paths: sheet.paths, styles: sheet.styles, texts: sheet.texts, run },
           );
+    // BACK-VARIANT: a notch whose label names a model variant («Style B notch») is that model's;
+    // alternatives of one notch («High back» / «Low back») are asked, never picked (notch-variants.ts)
+    const nv = notchVariantOf({
+      seed,
+      read: {
+        sizes: p.cands.map(({ c, card }) => {
+          const mr = markReads.get(c.rank);
+          return {
+            size: card.token,
+            notches: (mr?.notches ?? []).map((n, k) => ({
+              at: n.at,
+              label: mr?.labels?.[k] ?? null,
+            })),
+          };
+        }),
+      },
+      models: input.models ?? [],
+      chosen: input.variant ?? null,
+      texts: sheetWords,
+      answer: ov.notchVariant,
+    });
+    if (nv.kind === 'apply') {
+      let dropped = 0;
+      for (const mr of markReads.values()) {
+        const keep = mr.notches.map((_, k) => {
+          const l = mr.labels?.[k];
+          return !l || !nv.drop.has(notchQualifier(l));
+        });
+        dropped += keep.filter((x) => !x).length;
+        mr.notches = mr.notches.filter((_, k) => keep[k]);
+        if (mr.labels) mr.labels = mr.labels.filter((_, k) => keep[k]);
+      }
+      pieceNotes.push(
+        `notch variant: ${nv.why}${dropped ? ` — ${dropped} notch(es) left out` : ''}`,
+      );
+    }
 
     // GRADE P1: a notch drawn AS the outline (a bump / dip of notch shape) at a grade-consistent
     // place in ≥ 2 sizes is a notch — each size's line crosses it by the chord (pieces/gfit/notch-bumps)
@@ -1977,6 +2017,11 @@ export function buildPieceSpecsDetailed(
         };
       }
     }
+    // BACK-VARIANT: asked last — any other question of the piece comes first (it asks again after)
+    if (!blockedHere && nv.kind === 'ask') {
+      blockedHere = { reason: 'notch-variant', detail: nv.ask.question };
+      notchVariantAsks.push({ seed, identity: null, ...nv.ask });
+    }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
       if (blockedHere.reason === 'fold-unresolved' && missHere)
@@ -2223,6 +2268,7 @@ export function buildPieceSpecsDetailed(
       ...(name.aiConfidence != null ? { aiConfidence: name.aiConfidence } : {}),
       seed,
       variant: null,
+      ...(nv.kind === 'apply' && nv.answer ? { notchVariant: nv.answer } : {}),
       unfoldedFold: anyFold,
       ...(halfSizes.length
         ? { halfFold: { evidence: ['answered: export the half with a fold line', ...halfSizes] } }
@@ -2654,6 +2700,7 @@ export function buildPieceSpecsDetailed(
           }
         : {}),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
+      ...(notchVariantAsks.length ? { notchVariantAsks } : {}),
       ...(foldMisses.some((m) =>
         blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
       )

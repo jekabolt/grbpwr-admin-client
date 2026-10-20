@@ -1568,6 +1568,11 @@ export type PieceSpec = {
   aiConfidence?: number;
   seed: SeedId;
   variant: string | null;
+  /**
+   * BACK-VARIANT: the operator's answer to the piece's `NotchVariantAsk` as applied (an option key,
+   * 'all' or 'none'); the notches left out are recorded in the piece's notes (D5). Absent = none.
+   */
+  notchVariant?: string;
   /** Owner decision 9: pairs are TWO blocks. `pairOf` names the sibling identity. */
   pairHand: PairHand | null;
   pairOf: PieceKey | null;
@@ -1708,6 +1713,13 @@ export type SemanticsInput = {
    */
   traced?: boolean;
   /**
+   * BACK-VARIANT: the model the pieces were filled for (the session's chosen model, null = none)
+   * and the models the sheet names — a notch labelled for a variant is kept by its model only
+   * (semantics/notch-variants). Set by the worker session, never by the wizard.
+   */
+  variant?: string | null;
+  models?: string[];
+  /**
    * Operator answers per seed. Names travel here (not only in the wizard) so `displayName`,
    * `nameOrigin` (incl. the 'ai-auto' flag) and `aiConfidence` reach PieceSpec → ManifestPiece;
    * `fused` comes from the fabrics step (interlining not in BOM, owner decision 14).
@@ -1730,6 +1742,8 @@ export type SemanticsInput = {
           | 'fused'
           // MOOD Ф5: the operator's word on one outline in every size (true: one piece for all)
           | 'ungraded'
+          // BACK-VARIANT: which labelled notch alternative the chosen model keeps
+          | 'notchVariant'
         >
       >
     >
@@ -1912,6 +1926,39 @@ export type GradeAsk =
       refused?: string;
     };
 export type GradeCountFeature = 'notches' | 'drills' | 'internal';
+/**
+ * BACK-VARIANT: one labelled alternative of a piece's notches — `key` = the label without its notch
+ * words, lower case («high back»), the answer's value; `perSize` = where it sits in each size (sheet
+ * mm, on that size's line) for the preview; `model` = the model the sheet's words tie its variant
+ * word to — a hint, never applied (one evidence).
+ */
+export type NotchVariantOption = {
+  key: string;
+  label: string;
+  model: string | null;
+  perSize: { size: string; at: PtMm[] }[];
+};
+/**
+ * BACK-VARIANT: which of a piece's labelled notch alternatives the chosen model keeps. Blocking
+ * (the piece is blocked 'notch-variant' while open): the answer is
+ * `SemanticsInput.pieceOverrides[seed].notchVariant` = an option's `key`, 'all' (every notch as
+ * drawn) or 'none' (none of the labelled ones). Never answered by the autopilot (D3/D5).
+ */
+export type NotchVariantAsk = {
+  seed: SeedId;
+  identity: PieceKey | null;
+  /** the question's content (piece + options): a changed drawing asks again */
+  key: string;
+  /** plain words: «which back: high / low?» */
+  question: string;
+  /** the chosen model the question is about */
+  model: string;
+  options: NotchVariantOption[];
+  /** the option the sheet's words tie to the chosen model (a hint, one evidence) */
+  suggested?: string;
+  evidence: string[];
+};
+
 /** GRADE P1: the operator's answer to a `GradeAsk` (by its key). */
 export type GradeAnswer = 'all' | 'none' | 'only' | 'intended';
 
@@ -1919,6 +1966,8 @@ export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** GRADE P1: questions of one shape across sizes (absent = none). Never blocking. */
   gradeAsks?: GradeAsk[];
+  /** BACK-VARIANT: open notch-variant questions, one per piece blocked 'notch-variant' (absent = none). */
+  notchVariantAsks?: NotchVariantAsk[];
   /**
    * GRADE P1: answers that could not be applied, by question key → why ("its graded place falls
    * past the corner of its edge in size 10"). The question stays open. Absent = none.
@@ -2023,7 +2072,13 @@ export type BlockReason =
    * MOOD Ф5: every size closes on one outline, but only one evidence says it is one piece for all
    * sizes (drawn once / by every pen in one place, a label naming no size): the operator says.
    */
-  | 'one-size-question';
+  | 'one-size-question'
+  /**
+   * BACK-VARIANT (semantics/notch-variants): the piece's notch labels are alternatives of one notch
+   * («High back notch» / «Low back notch») and nothing proves which one the chosen model keeps —
+   * answered by `pieceOverrides[seed].notchVariant` (`SemanticsOutput.notchVariantAsks`).
+   */
+  | 'notch-variant';
 
 export type DetectAllowanceFn = (sheet: Sheet, families: PieceFamily[]) => AllowanceDecision;
 export type BuildPieceSpecsFn = (input: SemanticsInput, progress?: Progress) => SemanticsOutput;

@@ -1825,6 +1825,9 @@ export class Session {
         fileAllowance,
         traced: this.traced(),
         docTexts: this.docTexts,
+        // BACK-VARIANT: the chosen model and the models the sheet names (labelled notch variants)
+        variant: this.pieceVariant,
+        models: variantLabels(sheet.texts.map((t) => t.text)),
         // the text label of each text seed: the cutting list binds its entries to them (S5)
         seedLabels: Object.fromEntries(
           (this.seeds ?? []).flatMap((sd) =>

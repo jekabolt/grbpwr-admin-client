@@ -94,6 +94,12 @@ export type MarkRead = {
   tags: ChainId[];
   /** Marks centred on this size's line refused for want of a second evidence. */
   refused: ChainId[];
+  /**
+   * BACK-VARIANT: the printed label bound to each notch (aligned with `notches`; null = none) —
+   * the text block carrying a notch word nearest to it within LABEL_REACH_MM, none other as near
+   * with other words («High back notch»). Absent when the read had no sheet texts.
+   */
+  labels?: (string | null)[];
 };
 
 type MarkSource = Pick<Sheet, 'paths' | 'styles' | 'texts'> & { run: SizeRun };
@@ -200,7 +206,101 @@ type FilledGlyph = {
   repeated: boolean;
 };
 
-const NOTCH_WORDS = /\bnotch(?:es)?\b|\bnicks?\b|nadsec|nadst|\u043d\u0430\u0434\u0441\u0435\u0447|knips|cran/iu;
+const NOTCH_WORDS =
+  /\bnotch(?:es)?\b|\bnicks?\b|nadsec|nadst|\u043d\u0430\u0434\u0441\u0435\u0447|knips|cran/iu;
+
+/** A notch label within this distance of the notch (its text box), mm. */
+const LABEL_REACH_MM = 60;
+
+type LabelBlock = { text: string; box: ReturnType<typeof bboxOf> };
+
+/**
+ * BACK-VARIANT: the printed notch labels near a family — a text carrying a notch word, with the
+ * lines of its paragraph (the same font size, left-aligned or overlapping, ≤ 0.6 em apart: «High
+ * back» over «notch»), read top line first.
+ */
+function notchLabelBlocks(
+  texts: Pick<Sheet, 'texts'>['texts'],
+  box: ReturnType<typeof bboxOf>,
+): LabelBlock[] {
+  const pad = LABEL_REACH_MM + 20;
+  const near = texts.filter(
+    (t) =>
+      !t.background &&
+      t.bbox.maxX >= box.minX - pad &&
+      t.bbox.minX <= box.maxX + pad &&
+      t.bbox.maxY >= box.minY - pad &&
+      t.bbox.minY <= box.maxY + pad,
+  );
+  const out: LabelBlock[] = [];
+  const seen = new Set<string>();
+  for (const t of near) {
+    if (!NOTCH_WORDS.test(t.text)) continue;
+    const lines = [t];
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const o of near) {
+        if (lines.includes(o) || !o.text.trim()) continue;
+        if (Math.abs(o.fontSizeMm - t.fontSizeMm) > 0.1 * t.fontSizeMm) continue;
+        if (Math.abs(o.rotationDeg - t.rotationDeg) > 1) continue;
+        const touches = lines.some((l) => {
+          const gap = Math.max(o.bbox.minY - l.bbox.maxY, l.bbox.minY - o.bbox.maxY);
+          const left = Math.abs(o.bbox.minX - l.bbox.minX) <= 1.5;
+          const overlap =
+            Math.min(o.bbox.maxX, l.bbox.maxX) - Math.max(o.bbox.minX, l.bbox.minX) > 0;
+          return gap <= 0.6 * t.fontSizeMm && gap >= -0.5 * t.fontSizeMm && (left || overlap);
+        });
+        if (touches && lines.length < 4) {
+          lines.push(o);
+          grew = true;
+        }
+      }
+    }
+    // one copy per printed place (a label repeated on every size layer prints once)
+    const uniq = lines.filter(
+      (l, k) =>
+        lines.findIndex(
+          (m) =>
+            m.text.trim() === l.text.trim() &&
+            Math.abs(m.bbox.minX - l.bbox.minX) < 0.5 &&
+            Math.abs(m.bbox.minY - l.bbox.minY) < 0.5,
+        ) === k,
+    );
+    uniq.sort((a, b) => b.bbox.maxY - a.bbox.maxY || a.bbox.minX - b.bbox.minX);
+    const text = uniq.map((l) => l.text.trim()).join(' ');
+    const bb = bboxOf(
+      uniq.flatMap((l) => [
+        { x: l.bbox.minX, y: l.bbox.minY },
+        { x: l.bbox.maxX, y: l.bbox.maxY },
+      ]),
+    );
+    const k = `${text}@${bb.minX.toFixed(1)},${bb.minY.toFixed(1)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ text, box: bb });
+  }
+  return out;
+}
+
+const boxDist = (p: PtMm, b: ReturnType<typeof bboxOf>) =>
+  Math.hypot(Math.max(b.minX - p.x, 0, p.x - b.maxX), Math.max(b.minY - p.y, 0, p.y - b.maxY));
+
+/** The label bound to a notch at `p`: the nearest block in reach, unless another with other words is as near (< 1.5×). */
+function labelOf(p: PtMm, blocks: readonly LabelBlock[]): string | null {
+  const ds = blocks
+    .map((b) => ({ b, d: boxDist(p, b.box) }))
+    .filter((x) => x.d <= LABEL_REACH_MM)
+    .sort((a, b) => a.d - b.d);
+  if (!ds.length) return null;
+  const words = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  const rival = ds.find((x) => words(x.b.text) !== words(ds[0].b.text));
+  if (rival && rival.d < 1.5 * Math.max(ds[0].d, 1)) return null;
+  return ds[0].b.text;
+}
 
 /**
  * Filled notch glyphs are intentionally absent from ChainSet: chains/primitives drops compact
@@ -240,9 +340,7 @@ function filledNotchGlyphs(source: MarkSource, box: ReturnType<typeof bboxOf>): 
     const ranks = new Set(
       raw
         .filter(
-          (o) =>
-            dist(o.centre, g.centre) <= 80 &&
-            Math.abs(o.across - g.across) <= 0.25 * g.across,
+          (o) => dist(o.centre, g.centre) <= 80 && Math.abs(o.across - g.across) <= 0.25 * g.across,
         )
         .map((o) => o.rank),
     );
@@ -724,6 +822,7 @@ export function readNotchMarks(
     n.confidence = g.labelled && g.repeated ? 0.98 : 0.95;
     acc.notches.push(n);
   }
+  const blocks = source ? notchLabelBlocks(source.texts, fb) : [];
   for (const x of clean) {
     const acc = accepted.get(x.c.rank)!;
     out.set(x.c.rank, {
@@ -732,6 +831,7 @@ export function readNotchMarks(
       notches: acc.notches,
       tags: [...tags],
       refused: acc.refused,
+      ...(source ? { labels: acc.notches.map((n) => labelOf(n.at, blocks)) } : {}),
     });
   }
   return out;
