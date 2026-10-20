@@ -63,7 +63,7 @@ export function FittingCardList() {
       size: sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '',
       ordinal: techCardId ? fittingOrdinal(siblingsOf.get(techCardId), id) : 0,
     });
-    return parts.garment ? <FittingTitle parts={parts} /> : `fitting ${id}`;
+    return parts.garment ? <FittingTitle parts={parts} stacked /> : `fitting ${id}`;
   };
 
   function confirmDelete() {
