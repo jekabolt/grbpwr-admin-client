@@ -1,18 +1,4 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ChatBubbleIcon,
-  ArrowRightIcon,
-  PlusIcon,
-  CopyIcon,
-  DotsHorizontalIcon,
-  DownloadIcon,
-  ExternalLinkIcon,
-  Half2Icon,
-  InfoCircledIcon,
-  Pencil1Icon,
-} from '@radix-ui/react-icons';
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
@@ -27,7 +13,27 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { BlurhashImage, Button, Close, Drawer, EmptyCell, FoldCaret, GenericPopover } from 'ui';
+import {
+  BlurhashImage,
+  Button,
+  Close,
+  Drawer,
+  EmptyCell,
+  FoldCaret,
+  GenericPopover,
+  ArrowRightIcon,
+  ChatBubbleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  DotsHorizontalIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  Half2Icon,
+  InfoCircledIcon,
+  Pencil1Icon,
+  PlusIcon,
+} from 'ui';
 import type { FrameEditorKind } from './frame-editor';
 import { FrameMode } from './media-viewer-frame';
 import {

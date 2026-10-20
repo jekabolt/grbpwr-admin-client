@@ -1,4 +1,3 @@
-import { CheckIcon } from '@radix-ui/react-icons';
 import { adminService } from 'api/api';
 import { common_Colorway } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -8,7 +7,7 @@ import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Close, Media, Tile } from 'ui';
+import { Button, Close, Media, Tile, CheckIcon } from 'ui';
 import {
   CatalogCommerceTags,
   CatalogStateBadge,

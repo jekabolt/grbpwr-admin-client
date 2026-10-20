@@ -1,7 +1,6 @@
-import { MinusIcon, PlusIcon } from '@radix-ui/react-icons';
 import { cn } from 'lib/utility';
 import type { ReactNode } from 'react';
-import { Button, Chip } from 'ui';
+import { Button, Chip, MinusIcon, PlusIcon } from 'ui';
 import {
   AdjustRange,
   adjustIsZero,
