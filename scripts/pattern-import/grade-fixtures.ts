@@ -243,7 +243,9 @@ function mixedSolve(): FixtureResult {
  * wide rule (≥ min(n, 5) lanes over a third of the lines) misses an unencoded piece that draws TWO
  * sizes (graded unevenly: 10 mm at the side, 3 mm at top and bottom) and one whose five sizes differ
  * only along a 40 mm tab; the pair rule sees both. A cut line with its sew line drawn alike at a
- * uniform 10 mm is no nest for either.
+ * uniform 10 mm is no nest for either, nor is a double marking line drawn once per size on top of
+ * itself (polupalto's lengthen/shorten lines). Lines drawn twice in place stay one lane each: five
+ * sizes drawn twice are still five sizes.
  */
 function mixedNarrow(): FixtureResult {
   let id = 0;
@@ -259,10 +261,19 @@ function mixedNarrow(): FixtureResult {
   for (let k = 0; k < 5; k++) tab.push(chain([{ x: W, y: 80 }, { x: W + 8 + 3 * k, y: 100 }, { x: W, y: 120 }]));
   const rect = (i: number) => [{ x: i, y: i }, { x: 300 - i, y: i }, { x: 300 - i, y: 200 - i }, { x: i, y: 200 - i }];
   const sew = [chain(rect(0), true), chain(rect(10), true)];
+  // a marking drawn once per size in one pen, stacked: the lengthen/shorten double line (1.95 mm
+  // apart, as measured on polupalto) six times over, each copy as long as its size
+  const stacked: Chain[] = [];
+  for (let k = 0; k < 6; k++)
+    for (const y of [0, 1.95]) stacked.push(chain([{ x: 0, y }, { x: 300 + 10 * k, y }]));
+  // five sizes nobody encoded, every line drawn twice on top of itself: still five lanes
+  const twice = gradedPiece(0, 0, 5, () => 0).draws.flatMap((d) => [chain(d.pts), chain(d.pts)]);
   const cases = [
     { name: 'two sizes', chains: two, wide: false, pair: true },
     { name: 'tab', chains: tab, wide: false, pair: true },
     { name: 'cut + sew line', chains: sew, wide: false, pair: false },
+    { name: 'double line x6', chains: stacked, wide: false, pair: false },
+    { name: 'five sizes drawn twice', chains: twice, wide: true, pair: true },
   ];
   let ok = true;
   const notes = cases.map((k) => {

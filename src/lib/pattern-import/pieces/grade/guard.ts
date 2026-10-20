@@ -23,6 +23,12 @@ export type GuardOpts = {
   reachMm: number;
   /** min neighbour distance (closer = the same line drawn twice), mm */
   minGapMm: number;
+  /**
+   * Neighbours this close to each other (signed offset, mm) are ONE lane: copies of a line drawn on
+   * top of each other — a sheet that draws each marking once per size in one pen — are one contour
+   * on the paper, not one size each.
+   */
+  laneMergeMm: number;
   angleDeg: number;
   /** share of the region's line length that must sit in such a nest */
   minShare: number;
@@ -41,6 +47,7 @@ export const GUARD_OPTS: GuardOpts = {
   minLanes: 2,
   reachMm: 30,
   minGapMm: 1,
+  laneMergeMm: 0.5,
   angleDeg: 20,
   minShare: 0.2,
   minLenMm: 150,
@@ -48,13 +55,15 @@ export const GUARD_OPTS: GuardOpts = {
   minChainMm: 10,
 };
 
-/** Uniform pair (an allowance): median distance range and spread, mm / share of the median. */
 /**
- * Uniform pair (a sew / cut line drawn alike at one allowance): median distance 2–20 mm, standard
- * deviation ≤ 0.5 mm, measured along ≥ 80 % of the shorter line. Grading is never uniform all
- * round (widths grow faster than lengths), so a pair measured that way is the allowance signature.
+ * Uniform pair (a sew / cut line drawn alike at one allowance, or a double marking line such as
+ * Burda's lengthen/shorten pair 2 mm apart): median distance 1.5–20 mm, standard deviation
+ * ≤ 0.5 mm, measured along ≥ 80 % of the shorter line. Grading is never uniform all round (widths
+ * grow faster than lengths), so a pair measured that way is not two sizes. The floor sits under
+ * 2 mm because a 2 mm double line measures 1.95–2.0 (polupalto), and above minGapMm (the same line
+ * drawn twice).
  */
-export const ALLOWANCE_PAIR = { minMm: 2, maxMm: 20, stdMm: 0.5, coverage: 0.8 };
+export const ALLOWANCE_PAIR = { minMm: 1.5, maxMm: 20, stdMm: 0.5, coverage: 0.8 };
 
 /** The allowance test on one directed list of offsets (mm) sampled every 4 mm along a line. */
 export function isAllowancePair(offsets: readonly number[], shorterMm: number): boolean {
@@ -268,7 +277,7 @@ export function gradingEvidence(
   const cosMin = Math.cos((o.angleDeg * Math.PI) / 180);
   let total = 0;
   // per sample: the same-look neighbours it sees; per (line, neighbour): the distances
-  const seen: { self: ChainId; hits: ChainId[] }[] = [];
+  const seen: { self: ChainId; hits: [ChainId, number][] }[] = [];
   const pairD = new Map<string, number[]>();
   for (const c of cand) {
     for (const s of resampleT(c.pts, 4)) {
@@ -295,21 +304,21 @@ export function gradingEvidence(
         if (tt < 0 || tt > 1 || uu < 0 || uu > 1) return;
         const sl = Math.hypot(sx, sy) || 1;
         if (Math.abs((sx * s.t.x + sy * s.t.y) / sl) < cosMin) return;
-        const off = Math.abs((tt - 0.5) * 2 * o.reachMm);
-        if (off < o.minGapMm) return;
-        hits.set(k, off);
+        const signed = (tt - 0.5) * 2 * o.reachMm;
+        if (Math.abs(signed) < o.minGapMm) return;
+        hits.set(k, signed);
       };
       const steps = Math.ceil((2 * o.reachMm) / grid.cell) + 1;
       for (let k = 0; k <= steps; k++)
         grid.near({ x: a.x + (rx * k) / steps, y: a.y + (ry * k) / steps }, grid.cell * 0.5, visit);
-      for (const [k, off] of hits) {
-        if (!o.skipUniformPairs) continue;
-        const key = `${c.id}:${k}`;
-        const list = pairD.get(key);
-        if (list) list.push(off);
-        else pairD.set(key, [off]);
-      }
-      seen.push({ self: c.id, hits: [...hits.keys()] });
+      if (o.skipUniformPairs)
+        for (const [k, signed] of hits) {
+          const key = `${c.id}:${k}`;
+          const list = pairD.get(key);
+          if (list) list.push(Math.abs(signed));
+          else pairD.set(key, [Math.abs(signed)]);
+        }
+      seen.push({ self: c.id, hits: [...hits] });
     }
   }
   const uniform = new Set<string>();
@@ -323,8 +332,14 @@ export function gradingEvidence(
   let nested = 0;
   const lanesMm: number[] = [];
   for (const { self, hits } of seen) {
+    // lanes = distinct places beside the line (signed offsets more than laneMergeMm apart), self 1
+    const offs = hits
+      .filter(([k]) => !uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`))
+      .map(([, v]) => v)
+      .sort((x, y) => x - y);
     let lanes = 1;
-    for (const k of hits) if (!uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`)) lanes++;
+    for (let i = 0; i < offs.length; i++)
+      if (i === 0 || offs[i] - offs[i - 1] > o.laneMergeMm) lanes++;
     if (lanes >= o.minLanes) nested += 4;
     lanesMm[lanes] = (lanesMm[lanes] ?? 0) + 4;
   }
