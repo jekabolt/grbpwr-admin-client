@@ -105,6 +105,9 @@ export enum ROUTES {
   // не съедается карточкой с id «import» (такого id и не бывает — id числовой).
   techCardImport = '/tech-cards/import',
   techCardPrint = '/tech-cards/:id/print',
+  // READ-ONLY saved marker viewer. Protected like the print surfaces, but without Layout chrome:
+  // the long fabric strip needs the full viewport and the printed marker QR opens this exact route.
+  techCardMarkerViewer = '/tech-cards/:id/markers/:markerId/view',
   // ПЕЧАТЬ СХЕМЫ СБОРКИ — свой голый маршрут рядом с тех-паком: другой лист (420 / 841 мм, свой
   // @page), другая бумага. Выбор формы и силуэтов — в query (?form=route|map&shapes=on|off).
   techCardAssemblyPrint = '/tech-cards/:id/assembly-print',
@@ -278,6 +281,12 @@ export const SIDE_BAR_ITEMS: NavItem[] = [...NAV_GROUPS, ADMIN_GROUP].flatMap(
  */
 export function notePath(id: number): string {
   return ROUTES.fileNote.replace(':id', String(id));
+}
+
+export function techCardMarkerViewerPath(techCardId: number, markerId: number): string {
+  return ROUTES.techCardMarkerViewer
+    .replace(':id', String(techCardId))
+    .replace(':markerId', String(markerId));
 }
 
 // True when `pathname` is at `route` or nested beneath it (e.g. /products/42 is under
