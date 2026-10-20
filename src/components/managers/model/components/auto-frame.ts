@@ -9,7 +9,11 @@
  *   head        = rows from the top until the mask width jumps > 1.6× (the shoulders);
  *   head width  = the widest mask row of the head, its centre x = the midpoint of that width;
  *   frame       = width headWidth / 0.43, height width × 4/3, top = headTop − 0.10 × height.
- * The frame may leave the picture; the caller pads that with white.
+ * The frame may leave the picture; the caller pads that with white — but NEVER across an edge the
+ * person is cut by. A selfie ends at the neck and its shoulders touch the sides: padding past those
+ * edges draws the torso as a rectangle floating in white (owner's beta screenshot, 20.10). So an
+ * edge the mask touches is a wall: the frame shrinks (the head gets bigger than 43%) and slides to
+ * stay inside it. The head-top 10% gives way only when the hair itself is cut by the top edge.
  *
  * Noise: a stray hair or a speck must not move the head top or widen a row, so
  *   - a pixel counts only above `ALPHA_MIN` (soft edges and halo are ignored);
@@ -24,7 +28,7 @@
  */
 
 export type AutoFrameRect = {
-  /** Frame in source pixels; may extend past the picture on any side. */
+  /** Frame in source pixels; may extend past the picture only on sides the person is not cut by. */
   x: number;
   y: number;
   w: number;
@@ -54,6 +58,8 @@ export const TOP_SHARE = 0.1;
 const NECK_NARROW = 0.92;
 /** With no neck, the head width stops growing this many head widths below the top. */
 const MAX_HEAD_TALL = 1.4;
+/** The mask is «cut by» an edge when this many rows (or columns) reach within the margin of it. */
+const EDGE_ROWS = 3;
 /** Anything narrower is segmentation noise, not a usable head. */
 const MIN_HEAD_WIDTH_SHARE = 0.04;
 /** A usable head needs a visible vertical span too. */
@@ -170,11 +176,36 @@ export function autoFrame(alpha: ArrayLike<number>, w: number, h: number): AutoF
   }
   const headCx = n > 0 ? sum / n : (left[maxRow] + right[maxRow] + 1) / 2;
 
-  const fw = headMax / HEAD_SHARE;
-  const fh = (fw * 4) / 3;
+  // Edges the person is cut by (a speck in a corner is not a cut: it takes EDGE_ROWS rows).
+  const margin = Math.max(2, Math.round(Math.min(w, h) * 0.003));
+  let leftRows = 0;
+  let rightRows = 0;
+  for (let y = 0; y < h; y++) {
+    if (left[y] < 0) continue;
+    if (left[y] <= margin) leftRows += 1;
+    if (right[y] >= w - 1 - margin) rightRows += 1;
+  }
+  const cutLeft = leftRows >= EDGE_ROWS;
+  const cutRight = rightRows >= EDGE_ROWS;
+  const cutTop = headTop <= margin;
+  const cutBottom = lastMaskRow >= h - 1 - margin;
+
+  let fh = ((headMax / HEAD_SHARE) * 4) / 3;
+  // Bottom wall: frame bottom = headTop + 0.9·fh (or fh from row 0 when the top is cut too).
+  if (cutBottom) fh = Math.min(fh, cutTop ? h : (h - headTop) / (1 - TOP_SHARE));
+  // Both side walls: the frame cannot be wider than the picture.
+  if (cutLeft && cutRight) fh = Math.min(fh, (w * 4) / 3);
+  const fw = (fh * 3) / 4;
   if (![headCx, fw, fh].every(Number.isFinite) || !(fw > 0 && fh > 0)) return null;
+
+  let x = headCx - fw / 2;
+  if (cutLeft) x = Math.max(x, 0);
+  if (cutRight) x = Math.min(x, w - fw);
+  let y = headTop - TOP_SHARE * fh;
+  if (cutTop) y = Math.max(y, 0);
+  if (cutBottom) y = Math.min(y, h - fh);
   return {
-    rect: { x: headCx - fw / 2, y: headTop - TOP_SHARE * fh, w: fw, h: fh },
+    rect: { x, y, w: fw, h: fh },
     headTop,
     headBottom,
     headWidth: headMax,
