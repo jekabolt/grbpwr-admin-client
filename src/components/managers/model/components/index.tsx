@@ -1,5 +1,7 @@
+import { cn } from 'lib/utility';
 import { useDockBottom } from 'hooks/useDockBottom';
-import { useRef } from 'react';
+import { useTypingOnPhone } from './use-typing-on-phone';
+import { useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { common_Model } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -12,7 +14,6 @@ import { genderOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import { failureClassOfError } from 'components/managers/tech-card/components/useTechCardAutosave';
 import { notify } from 'lib/stores/store';
-import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -29,7 +30,7 @@ import {
   useDoneFlash,
 } from 'ui';
 import { DefaultSizesField } from './default-sizes-field';
-import { MeasurementsFields } from './measurements-fields';
+import { MeasurementsFields, MeasurementsHeaderActions } from './measurements-fields';
 import { ModelMedia } from './model-media';
 import {
   mapFormToModelInsert,
@@ -38,6 +39,13 @@ import {
   modelDefaultData,
   modelSchema,
 } from './schema';
+import {
+  SheetMeasurementDiagram,
+  SheetMeasurementFocusProvider,
+  SheetMeasurementMobileStrip,
+} from './sheet-measurement-focus';
+import { MeasurementUnitProvider } from './units';
+import './sheet-model-form.css';
 
 export function ModelForm({
   isEditMode,
@@ -49,7 +57,10 @@ export function ModelForm({
   model?: common_Model;
 }) {
   const saveBarRef = useRef<HTMLDivElement>(null);
+  // A white-bg press is out on the photo: saving now would store the photo it is about to replace.
+  const [photoBusy, setPhotoBusy] = useState(false);
   useDockBottom(saveBarRef, []);
+  const typingOnPhone = useTypingOnPhone();
   const saved = useDoneFlash();
   // A refused save stands in the save bar until the next attempt.
   const [formError, setFormError] = useState<string | null>(null);
@@ -65,6 +76,7 @@ export function ModelForm({
   });
 
   async function handleSubmit(data: ModelFormData) {
+    if (photoBusy) return;
     const modelInsert = mapFormToModelInsert(data);
     setFormError(null);
     try {
@@ -94,93 +106,118 @@ export function ModelForm({
 
   return (
     <Form {...form}>
-      <form
-        className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
-        onSubmit={form.handleSubmit(handleSubmit)}
-      >
-        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
-          <div className='flex flex-wrap items-center gap-3'>
-            <BackLink to={ROUTES.models}>models</BackLink>
-            <Text variant='uppercase' size='large'>
-              {isEditMode ? 'edit model' : 'new model'}
-            </Text>
-          </div>
-        </div>
-
-        <SectionStack>
-          <SectionStack row>
-            <Section title='details' className='w-full lg:w-1/2'>
-              <InputField name='name' label='name' placeholder='enter model name' />
-              <SelectField
-                name='gender'
-                label='gender (optional)'
-                items={genderOptions}
-                placeholder='select gender'
-              />
-              <DefaultSizesField />
-              <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={1000} />
-              <div className='space-y-1'>
-                <Text variant='uppercase' size='small'>
-                  photos
-                </Text>
-                <ModelMedia model={model} />
-              </div>
-            </Section>
-
-            <Section title='measurements' className='w-full lg:w-1/2'>
-              <MeasurementsFields />
-            </Section>
-          </SectionStack>
-
-          {isEditMode && id && (
-            <Section title='fittings'>
-              <FittingsReadonlyList modelId={parseInt(id, 10)} />
-            </Section>
-          )}
-        </SectionStack>
-      </form>
-
-      <div
-        ref={saveBarRef}
-        className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2'
-      >
-        {formError ? (
-          <CalloutBox tone='error' className='min-w-0'>
-            <Text size='micro' component='span' role='alert'>
-              <b>not saved</b> · {formError}
-            </Text>
-          </CalloutBox>
-        ) : (
-          <Text variant='inactive' size='small'>
-            {form.formState.isDirty ? 'unsaved changes' : ' '}
-          </Text>
-        )}
-        <div className='flex items-center gap-2'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase cursor-pointer'
-            onClick={() => navigate(ROUTES.models)}
+      <MeasurementUnitProvider>
+        <SheetMeasurementFocusProvider>
+          <form
+            className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'
+            onSubmit={form.handleSubmit(handleSubmit)}
           >
-            cancel
-          </Button>
-          {canWrite(SECTION.models) && (
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              className='uppercase cursor-pointer'
-              disabled={(isEditMode && !form.formState.isDirty) || form.formState.isSubmitting}
-              loading={form.formState.isSubmitting}
-              done={saved.on}
-              onClick={() => form.handleSubmit(handleSubmit)()}
-            >
-              {isEditMode ? 'save' : 'add'}
-            </Button>
-          )}
-        </div>
-      </div>
+            <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
+              <div className='flex flex-wrap items-center gap-3'>
+                <BackLink to={ROUTES.models}>models</BackLink>
+                <Text variant='uppercase' size='large'>
+                  {isEditMode ? 'edit model' : 'new model'}
+                </Text>
+              </div>
+            </div>
+
+            <SheetMeasurementMobileStrip />
+
+            <SectionStack>
+              <Section>
+                <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
+                  <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
+                    <ModelMedia model={model} onBusyChange={setPhotoBusy} />
+                  </div>
+                  <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
+                    <SheetMeasurementDiagram className='w-full' />
+                  </div>
+                  <div className='flex min-w-0 flex-1 flex-col gap-3'>
+                    <div className='grid grid-cols-[minmax(0,1fr)_7.5rem] items-end gap-2'>
+                      <InputField name='name' label='name' />
+                      <SelectField
+                        name='gender'
+                        label='gender'
+                        items={genderOptions}
+                        placeholder='select'
+                      />
+                    </div>
+                    <DefaultSizesField />
+                    <div className='sheet-comment-fill flex min-h-20 flex-1 flex-col'>
+                      <TextareaField
+                        name='comment'
+                        label='comment'
+                        maxLength={1000}
+                        autoGrow={false}
+                        className='min-h-20 resize-none md:min-h-0'
+                      />
+                    </div>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title='measurements' action={<MeasurementsHeaderActions />}>
+                <MeasurementsFields />
+              </Section>
+
+              {isEditMode && id && (
+                <Section title='fittings'>
+                  <FittingsReadonlyList modelId={parseInt(id, 10)} />
+                </Section>
+              )}
+            </SectionStack>
+          </form>
+
+          <div
+            ref={saveBarRef}
+            className={cn(
+              'fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-borderColor bg-bgColor px-3 py-2',
+              typingOnPhone && 'hidden',
+            )}
+          >
+            {formError ? (
+              <CalloutBox tone='error' className='min-w-0'>
+                <Text size='micro' component='span' role='alert'>
+                  <b>not saved</b> · {formError}
+                </Text>
+              </CalloutBox>
+            ) : (
+              <Text variant='inactive' size='small'>
+                {form.formState.isDirty ? 'unsaved changes' : ' '}
+              </Text>
+            )}
+            <div className='flex items-center gap-2'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='cursor-pointer uppercase'
+                onClick={() => navigate(ROUTES.models)}
+              >
+                cancel
+              </Button>
+              {canWrite(SECTION.models) && (
+                <Button
+                  type='button'
+                  variant='main'
+                  size='lg'
+                  className='cursor-pointer uppercase'
+                  disabled={
+                    (isEditMode && !form.formState.isDirty) ||
+                    form.formState.isSubmitting ||
+                    photoBusy
+                  }
+                  loading={form.formState.isSubmitting}
+                  done={saved.on}
+                  onClick={() => form.handleSubmit(handleSubmit)()}
+                >
+                  {isEditMode ? 'save' : 'add'}
+                </Button>
+              )}
+            </div>
+          </div>
+        </SheetMeasurementFocusProvider>
+      </MeasurementUnitProvider>
     </Form>
   );
 }

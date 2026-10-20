@@ -118,11 +118,14 @@ export function RatioChips({
   selected,
   onSelect,
   disabled,
+  tone = 'dark',
 }: {
   options: RatioOption[];
   selected: string | undefined;
   onSelect: (option: RatioOption) => void;
   disabled?: boolean;
+  /** Crop sits on ink; expand sits on the white controls sheet. */
+  tone?: 'dark' | 'light';
 }) {
   return (
     <div
@@ -143,7 +146,13 @@ export function RatioChips({
             onClick={() => onSelect(o)}
             className={cn(
               'flex h-13 min-w-14 shrink-0 cursor-pointer flex-col items-center justify-center gap-1 border px-2 text-micro uppercase tracking-label',
-              on ? 'border-bgColor bg-bgColor text-textColor' : 'border-bgColor/30 text-bgColor/70',
+              tone === 'dark'
+                ? on
+                  ? 'border-bgColor bg-bgColor text-textColor'
+                  : 'border-bgColor/30 text-bgColor/70'
+                : on
+                  ? 'border-textColor bg-textColor text-bgColor'
+                  : 'border-borderColor text-labelColor hover:bg-pageBg hover:text-textColor',
             )}
           >
             <span className='flex h-5 items-center'>

@@ -302,10 +302,15 @@ export function MediaManager({
   useEffect(() => {
     const justEnteredView = inView && !prevInViewRef.current;
     prevInViewRef.current = inView;
-    if (justEnteredView && hasNextPage && !isFetchingNextPage) {
+    // ПОД ОТБОРОМ СТРАНИЦЫ ДОКАЧИВАЮТСЯ ДО КОНЦА. Счётчики рельса теперь по всей библиотеке
+    // («2:1 — 90»), а сетка отбирает из загруженного: в отфильтрованной сетке маячок не уходит с
+    // экрана, «вход в экран» больше не случается, и сетка застывала на двух кадрах из обещанных
+    // девяноста. Библиотека — тысяча с небольшим записей, это несколько страниц.
+    const wantsMore = justEnteredView || (hasClientFilter && !virtual);
+    if (wantsMore && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
     }
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage, hasClientFilter, virtual]);
 
   const handleVideoLoad = (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => {
     const video = event.target as HTMLVideoElement;

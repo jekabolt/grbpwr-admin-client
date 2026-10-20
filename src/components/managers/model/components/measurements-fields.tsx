@@ -1,97 +1,216 @@
+import { cn } from 'lib/utility';
+import { ChangeEvent, FocusEvent, KeyboardEvent, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { GroupLabel, Text, Tooltip, TooltipProvider } from 'ui';
-import { MeasurementPictogram } from './measurement-pictograms';
+import { Button, GroupLabel, Input, Text } from 'ui';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
+import { ModelFormData } from './schema';
+import {
+  measurementLabel,
+  MOBILE_STRIP_PX,
+  MODEL_MEASUREMENTS,
+  shortMeasurementGroup,
+  useSheetMeasurementFocus,
+} from './sheet-measurement-focus';
+import {
+  displayMeasurementValue,
+  measurementValueInMm,
+  MeasurementUnitSwitch,
+  useMeasurementUnit,
+} from './units';
 
-// One inline measurement row: label on the left, a plain (non-spinner) numeric
-// text field on the right. Tabbing moves straight down the list.
-//
-// The label doubles as a hover/focus tooltip trigger showing a small pictogram of where/how
-// the measurement is taken on a body (admin #63) — names like "high hip" vs "hip" or "across
-// front" vs "across back" aren't self-explanatory at a glance.
-function MeasurementInput({
-  name,
-  label,
-  measurementName,
-}: {
-  name: string;
-  label: string;
-  measurementName: string;
-}) {
-  const { control } = useFormContext();
-  const { field } = useController({ control, name });
+type MeasurementValues = Record<string, number | undefined>;
+
+function useMeasurements(): MeasurementValues {
+  const { control } = useFormContext<ModelFormData>();
+  return (useWatch({ control, name: 'measurements' }) ?? {}) as MeasurementValues;
+}
+
+function filledCount(values: MeasurementValues, names: string[]): number {
+  return names.filter((name) => Number(values[name]) > 0).length;
+}
+
+function measurementInputId(name: string): string {
+  return `model-measurement-${name}`;
+}
+
+function cleanMeasurementInput(value: string, unit: 'mm' | 'in'): string {
+  const normalized = value.replace(',', '.');
+  if (unit === 'mm') return normalized.replace(/[^0-9]/g, '');
+  return normalized.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+}
+
+function nextMeasurementInput(current: HTMLInputElement): HTMLInputElement | undefined {
+  const inputs = Array.from(
+    current.form?.querySelectorAll<HTMLInputElement>('[data-model-measurement]') ?? [],
+  );
+  return inputs[inputs.indexOf(current) + 1];
+}
+
+function MeasurementInput({ name }: { name: string }) {
+  const { control } = useFormContext<ModelFormData>();
+  const { field } = useController({ control, name: `measurements.${name}` });
+  const { setFocus, setFocused } = useSheetMeasurementFocus();
+  const { unit } = useMeasurementUnit();
+  const [draft, setDraft] = useState<string | null>(null);
+  const editStart = useRef<{ display: string; valueMm: number | undefined }>({
+    display: '',
+    valueMm: undefined,
+  });
+  const empty = !(Number(field.value) > 0);
+  const shown = draft ?? displayMeasurementValue(field.value, unit);
+
+  const writeEditedValue = (value: string) => {
+    const nextValue =
+      value === editStart.current.display
+        ? editStart.current.valueMm
+        : measurementValueInMm(value, unit);
+    if (nextValue !== field.value) field.onChange(nextValue);
+  };
+
   return (
-    <label className='flex items-center justify-between gap-2 py-1'>
-      <Tooltip
-        trigger={
-          <span
-            tabIndex={0}
-            className='w-fit cursor-help underline decoration-borderColor decoration-dotted underline-offset-4 focus:outline-none focus-visible:decoration-textColor'
-          >
-            <Text size='small' component='span'>
-              {label}
-            </Text>
-          </span>
+    <Input
+      {...field}
+      id={measurementInputId(name)}
+      data-model-measurement={name}
+      data-mm={field.value ?? ''}
+      data-unit={unit}
+      inputMode={unit === 'mm' ? 'numeric' : 'decimal'}
+      pattern={unit === 'mm' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
+      enterKeyHint='next'
+      autoComplete='off'
+      aria-label={measurementLabel(name)}
+      value={shown}
+      placeholder='—'
+      onFocus={(event: FocusEvent<HTMLInputElement>) => {
+        const display = displayMeasurementValue(field.value, unit);
+        editStart.current = { display, valueMm: field.value };
+        setFocus(name);
+        setFocused(name);
+        setDraft(display);
+        event.currentTarget.select();
+        keepClearOfMobileStrip(event.currentTarget);
+      }}
+      onBlur={() => {
+        setDraft(null);
+        setFocused(null);
+        field.onBlur();
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          setDraft(null);
+          nextMeasurementInput(event.currentTarget)?.focus();
+          return;
         }
-      >
-        <div className='flex w-24 flex-col items-center gap-1.5'>
-          <MeasurementPictogram measurementName={measurementName} label={label} />
-          <Text variant='inactive' size='small' className='text-center leading-tight'>
-            {label}
-          </Text>
-        </div>
-      </Tooltip>
-      <span className='flex shrink-0 items-center gap-1'>
-        <input
-          type='text'
-          inputMode='numeric'
-          value={field.value ?? ''}
-          onChange={(e) => {
-            const digits = e.target.value.replace(/[^0-9]/g, '');
-            field.onChange(digits === '' ? undefined : parseInt(digits, 10));
-          }}
-          placeholder='—'
-          className='w-20 border border-borderColor bg-bgColor px-2 py-1 text-right text-textBaseSize focus:outline-none'
-        />
-        <Text variant='inactive' size='small'>
-          mm
-        </Text>
-      </span>
+        if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+        if (/[0-9]/.test(event.key)) return;
+        if (unit === 'in' && /[.,]/.test(event.key) && !/[.,]/.test(event.currentTarget.value))
+          return;
+        event.preventDefault();
+      }}
+      onChange={(event: ChangeEvent<HTMLInputElement>) => {
+        const clean = cleanMeasurementInput(event.target.value, unit);
+        setDraft(clean);
+        writeEditedValue(clean);
+      }}
+      className={cn(
+        'h-8 w-full py-0 text-right text-stat tabular-nums',
+        empty && 'border-dashed border-highlightColor bg-bgColor',
+      )}
+    />
+  );
+}
+
+function MeasurementLabel({ name }: { name: string }) {
+  const measurements = useMeasurements();
+  const empty = !(Number(measurements[name]) > 0);
+  return (
+    <label htmlFor={measurementInputId(name)}>
+      <Text component='span' className={cn('leading-tight text-textColor', empty && 'font-bold')}>
+        {measurementLabel(name)}
+      </Text>
     </label>
   );
 }
 
-export function MeasurementsFields() {
-  const { control } = useFormContext();
-  const measurements = (useWatch({ control, name: 'measurements' }) ?? {}) as Record<
-    string,
-    number | undefined
-  >;
-  const filled = Object.values(measurements).filter((v) => v != null && Number(v) > 0).length;
-  const totalCount = BODY_MEASUREMENT_GROUPS.reduce((n, g) => n + g.measurements.length, 0);
+function MeasurementCell({ name }: { name: string }) {
+  const { setHover } = useSheetMeasurementFocus();
+  return (
+    <div
+      onMouseEnter={() => setHover(name)}
+      onMouseLeave={() => setHover(null)}
+      className='flex min-w-0 flex-col gap-1'
+    >
+      <MeasurementLabel name={name} />
+      <MeasurementInput name={name} />
+    </div>
+  );
+}
+
+function MeasurementGroup({
+  title,
+  measurements,
+}: {
+  title: string;
+  measurements: (typeof MODEL_MEASUREMENTS)[number][];
+}) {
+  const values = useMeasurements();
+  const { unit } = useMeasurementUnit();
+  const names = measurements.map((measurement) => measurement.name as string);
+  const filled = filledCount(values, names);
 
   return (
-    <TooltipProvider delayDuration={200} skipDelayDuration={150}>
-      <div className='space-y-8'>
-        <Text variant='inactive' size='small'>
-          all values in mm · {filled}/{totalCount} filled
-        </Text>
-        {BODY_MEASUREMENT_GROUPS.map((group) => (
-          <div key={group.title} className='space-y-2'>
-            <GroupLabel flush>{group.title}</GroupLabel>
-            <div className='grid grid-cols-1 gap-x-10 gap-y-1 sm:grid-cols-2'>
-              {group.measurements.map((m) => (
-                <MeasurementInput
-                  key={m.name}
-                  name={`measurements.${m.name}`}
-                  label={m.label}
-                  measurementName={m.name}
-                />
-              ))}
-            </div>
-          </div>
+    <div className='min-w-0'>
+      <GroupLabel
+        flush
+        action={
+          <Text size='micro' variant='label' component='span' className='tabular-nums'>
+            {filled < names.length ? (
+              <span className='text-highlightColor'>
+                {filled}/{names.length} ·{' '}
+              </span>
+            ) : null}
+            {unit}
+          </Text>
+        }
+      >
+        <span className='text-textColor'>{shortMeasurementGroup(title)}</span>
+      </GroupLabel>
+      <div className='flex flex-col gap-3 pt-3'>
+        {measurements.map((measurement) => (
+          <MeasurementCell key={measurement.name} name={measurement.name} />
         ))}
       </div>
-    </TooltipProvider>
+    </div>
   );
+}
+
+export function MeasurementsHeaderActions() {
+  return (
+    <div className='flex items-center gap-2'>
+      <MeasurementUnitSwitch />
+    </div>
+  );
+}
+
+export function MeasurementsFields() {
+  return (
+    <div className='grid grid-cols-2 gap-x-4 gap-y-4 md:grid-cols-3 xl:grid-cols-5'>
+      {BODY_MEASUREMENT_GROUPS.map((group) => (
+        <MeasurementGroup key={group.title} title={group.title} measurements={group.measurements} />
+      ))}
+    </div>
+  );
+}
+
+// On a phone the hint strip covers the top of the visible viewport; once the keyboard has settled,
+// move a field that ended up under it down into view.
+function keepClearOfMobileStrip(input: HTMLInputElement) {
+  const vv = window.visualViewport;
+  if (!vv || window.matchMedia('(min-width: 768px)').matches) return;
+  window.setTimeout(() => {
+    const top = input.getBoundingClientRect().top - vv.offsetTop;
+    const clear = MOBILE_STRIP_PX + 12;
+    if (top < clear) window.scrollBy({ top: top - clear });
+  }, 300);
 }

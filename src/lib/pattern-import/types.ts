@@ -652,6 +652,12 @@ export type ChainSet = {
   chains: Chain[];
   /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
   cornerWalls?: CornerWall[];
+  /**
+   * LABELFRAME (sizes/label-frame.ts): the closed lines drawn round a size label, put in the
+   * 'ignore' row. Out of every wall and feature; the H1 solver alone still reads them as drawn
+   * lines (pieces/grade/hook.ts). Absent = none found.
+   */
+  labelFrames?: ChainId[];
   classes: LineClass[];
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */
@@ -970,6 +976,23 @@ export type SetAside = {
   dart?: SetAsideDart;
 };
 
+/**
+ * KOMBI-AP (D3/D5): two or more independent facts that prove why a piece-sized set-aside is not
+ * another garment piece. The pieces stage exposes these to both the policy and the UI; absence
+ * means the outline is still a question. This never promotes or drops geometry by itself.
+ */
+export type SetAsideEvidence = {
+  id: number;
+  verdict: 'not-piece';
+  kind: 'family-shell' | 'grade-strip' | 'variant-band' | 'document-panel';
+  /** Human-readable independent facts. There are always at least two. */
+  evidence: string[];
+  /** The already-seeded family this evidence belongs to, when there is one. */
+  seed?: SeedId;
+  /** A proved parent panel / family shell, when the outline sits inside it. */
+  parent?: number;
+};
+
 export type SetAsideDart = {
   /** The dart word it prints («DART»). */
   label: string;
@@ -1192,9 +1215,9 @@ export type PieceCandidate = {
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
   /**
-   * SHAPE (pieces/notch-marks.ts): notch marks (small closed marks centred on the line) the outline
-   * ran around and now crosses on the size's own line — taken out of `walls`, read as notches by
-   * semantics. Absent = none.
+   * SHAPE / NOTCH (pieces/notch-marks.ts): compact closed marks the outline ran around and now
+   * crosses on the size's own line — taken out of `walls`, then classified by semantics. A mark
+   * containing a source-size word is a size tag and writes no layer-4 notch. Absent = none.
    */
   notchMarks?: ChainId[];
   /**
@@ -3039,6 +3062,8 @@ export type StageIO = {
       grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
       /** A2: closed outlines (and text seeds in junk) not seeded — shown, one click from a piece. */
       setAside?: SetAside[];
+      /** KOMBI-AP: safe, explainable non-piece verdicts for set-asides; missing ids stay a question. */
+      asideEvidence?: SetAsideEvidence[];
     };
   };
   semantics: {

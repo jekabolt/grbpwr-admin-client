@@ -1,135 +1,101 @@
-import { common_FittingChangeRequest } from 'api/proto-http/admin';
 import {
-  useAddFittingChangeRequest,
   useOpenFittingChangeRequests,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
 import { notify } from 'lib/stores/store';
-import { Button, CalloutBox, Text, EmptyCell } from 'ui';
+import { Button, CheckboxCommon, EmptyCell, GroupLabel, Text } from 'ui';
 import { fieldErrorSummary } from 'utils/field-errors';
-import { crPieceIds } from './schema';
-import { fittingZoneLabel, normalizeFittingZone } from './zone-options';
+import { categoryOf } from './edit-rows';
+import { EditNumber } from './edit-row';
+import { changeRequestInsert, useAddEdit } from './use-add-edit';
+import { useFittingWorkspace } from './workspace';
 
-// Carry-over (S26/E.15): the OPEN structured remarks from a style's earlier rounds, shown when opening
-// the next round. Each can be RESOLVED (marked done) or CARRIED into this round (a new item here with
-// carried_from_id → a visible continuation history). Only meaningful once the fitting links a style.
-export function FittingCarryOver({
-  techCardId,
-  roundNumber,
-  fittingId = 0,
-  onCarryToForm,
-}: {
-  techCardId?: number;
-  roundNumber: number;
-  fittingId?: number;
-  // CREATE mode (no fitting id yet): append the carried item to the form instead of an RPC.
-  onCarryToForm?: (source: common_FittingChangeRequest) => void;
-}) {
-  // beforeRound = this fitting's round (0 = auto/not-yet-assigned → show every open item).
-  const { data, isLoading } = useOpenFittingChangeRequests(techCardId, roundNumber, !!techCardId);
+// FITTING-WORKSPACE: the open edits of earlier rounds of the same tech card, inside the Edits
+// block — one quiet group per round. ✓ carries the edit into this round (a new numbered edit with
+// carried_from_id); the checkbox marks the old one resolved where it is. Either way it leaves.
+export function CarryOverRows({ carriedIds }: { carriedIds: Set<number> }) {
+  const { fittingId, techCardId, roundNumber, readOnly } = useFittingWorkspace();
+  const { data } = useOpenFittingChangeRequests(techCardId, roundNumber, !!techCardId && !readOnly);
   const resolve = useUpdateFittingChangeRequest(fittingId, techCardId);
-  const add = useAddFittingChangeRequest(fittingId, techCardId);
+  const addEdit = useAddEdit();
 
-  const items = data?.changeRequests ?? [];
-  if (!techCardId) return null;
-  if (isLoading)
-    return (
-      <Text variant='inactive' size='small'>
-        loading open items…
-      </Text>
-    );
-  if (items.length === 0)
-    return (
-      <Text variant='inactive' size='small'>
-        no open items from earlier rounds
-      </Text>
-    );
+  // Hide this fitting's own edits (round 0 = not assigned yet → the server lists every open one)
+  // and the ones already carried into it.
+  const items = (data?.changeRequests ?? []).filter(
+    (cr) => cr.id && cr.fittingId !== fittingId && !carriedIds.has(cr.id),
+  );
+  if (readOnly || items.length === 0) return null;
 
-  const asInsert = (cr: common_FittingChangeRequest, carry: boolean) => ({
-    fittingId: carry ? fittingId : cr.fittingId || 0,
-    target: cr.target || '',
-    note: cr.note || '',
-    calloutNumber: cr.calloutNumber || 0,
-    zone: normalizeFittingZone(cr.zone),
-    pieceIds: crPieceIds(cr),
-    pieceId: 0, // deprecated on the wire; pieceIds is authoritative
-    status: carry ? 'open' : 'resolved',
-    carriedFromId: carry ? cr.id || 0 : cr.carriedFromId || 0,
-  });
-
+  const rounds = [...new Set(items.map((cr) => cr.roundNumber ?? 0))].sort((a, b) => a - b);
   return (
-    <div className='flex flex-col gap-2'>
-      <Text variant='inactive' size='small'>
-        Open items from previous rounds — mark them resolved (done) or carry them into this round.
-      </Text>
-      {items.map((cr) => (
-        <CalloutBox
-          key={cr.id}
-          tone='warning'
-          className='flex flex-wrap items-center justify-between gap-2'
-        >
-          <div className='flex min-w-0 flex-col'>
-            <Text size='small' className='truncate'>
-              round {cr.roundNumber ?? '?'} · {cr.target?.trim() || 'change'}
-              {fittingZoneLabel(cr.zone) ? ` · ${fittingZoneLabel(cr.zone)}` : ''}
-            </Text>
-            <Text variant='inactive' size='small' className='truncate'>
-              {cr.note || <EmptyCell />}
-            </Text>
-          </div>
-          <div className='flex shrink-0 gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              className='uppercase'
-              disabled={resolve.isPending}
-              onClick={() =>
-                cr.id &&
-                resolve.mutate(
-                  { id: cr.id, changeRequest: asInsert(cr, false) },
-                  {
-                    // The item leaving the carry-over list is the receipt.
-                    onError: (e) =>
-                      notify({
-                        sev: 'error',
-                        subject: 'CHANGE REQUEST',
-                        text: 'not resolved',
-                        detail: fieldErrorSummary(e, 'Failed'),
-                      }),
-                  },
-                )
-              }
-            >
-              resolve
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              className='uppercase'
-              disabled={add.isPending}
-              title='continue this item in the current round'
-              onClick={() => {
-                if (onCarryToForm) {
-                  onCarryToForm(cr);
-                  return;
-                }
-                // The item showing up in this round is the receipt.
-                add.mutate(asInsert(cr, true), {
-                  onError: (e) =>
-                    notify({
-                      sev: 'error',
-                      subject: 'CHANGE REQUEST',
-                      text: 'not carried',
-                      detail: fieldErrorSummary(e, 'Failed'),
-                    }),
-                });
-              }}
-            >
-              carry over
-            </Button>
-          </div>
-        </CalloutBox>
+    <>
+      {rounds.map((r) => (
+        <div key={r}>
+          <GroupLabel>{r ? `from round ${r}` : 'from earlier'}</GroupLabel>
+          <ul>
+            {items
+              .filter((cr) => (cr.roundNumber ?? 0) === r)
+              .map((cr) => {
+                const cat = categoryOf(cr.target ?? '');
+                return (
+                  <li
+                    key={cr.id}
+                    className='flex items-start gap-2.5 border-b border-hairline py-2.5 last:border-b-0'
+                  >
+                    <EditNumber n='·' hasMark={false} />
+                    <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                      <span className='min-w-0 break-words pt-px text-labelColor'>
+                        {cr.note || <EmptyCell />}
+                      </span>
+                      {cat && (
+                        <Text size='micro' variant='label' className='uppercase tracking-label'>
+                          {cat}
+                        </Text>
+                      )}
+                    </div>
+                    <Button
+                      type='button'
+                      variant='main'
+                      size='xs'
+                      aria-label='carry'
+                      onClick={() =>
+                        addEdit({ note: cr.note ?? '', target: cr.target ?? '', carriedFrom: cr })
+                      }
+                    >
+                      ✓
+                    </Button>
+                    <CheckboxCommon
+                      name={`carry-${cr.id}-resolved`}
+                      aria-label='resolved'
+                      className='mt-0.5'
+                      checked={false}
+                      disabled={resolve.isPending}
+                      onChange={() =>
+                        resolve.mutate(
+                          {
+                            id: cr.id as number,
+                            changeRequest: changeRequestInsert(cr, cr.fittingId ?? 0, {
+                              status: 'resolved',
+                            }),
+                          },
+                          {
+                            onError: (e) =>
+                              notify({
+                                sev: 'error',
+                                subject: 'EDIT',
+                                text: 'not resolved',
+                                detail: fieldErrorSummary(e, 'Failed'),
+                              }),
+                          },
+                        )
+                      }
+                    />
+                  </li>
+                );
+              })}
+          </ul>
+        </div>
       ))}
-    </div>
+    </>
   );
 }

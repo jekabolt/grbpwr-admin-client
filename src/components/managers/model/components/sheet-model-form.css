@@ -1,0 +1,29 @@
+@media (min-width: 768px) {
+  .sheet-comment-fill > [data-field='comment'] {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  /* TextareaField's bordered wrapper grows with the column; the textarea must fill it to the
+     bottom (height:100% did not resolve and left an empty bordered "chin" under it). */
+  .sheet-comment-fill > [data-field='comment'] > div {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .sheet-comment-fill > [data-field='comment'] > div:focus-within:not([aria-invalid='true']) {
+    border-color: var(--color-textColor);
+  }
+
+  /* One border: the wrapper's. The textarea's own border would double it. */
+  .sheet-comment-fill textarea {
+    min-height: 0;
+    flex: 1;
+    height: auto;
+    border: 0;
+  }
+}

@@ -36,6 +36,8 @@ import { closeCorners, type CornerWall } from './corners';
 import { overlayShare, type OverlayLines } from './overlay';
 import { bridgeSameRank, landEnds, type Landing } from './land';
 import { legendIdentity, type LegendIdentity } from './legend-id';
+import { LABEL_FRAME_WHY, labelFrames } from './label-frame';
+import { textLabelLookOrder } from './look-order';
 import { ladderMarkMoves, ocgLookMoves, type OcgLookMove } from './ocg-ladder';
 import { parseSizeToken, runsInText, runsInTokens, type TextRun } from './tokens';
 
@@ -979,6 +981,55 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
         }
       });
     }
+    // SIZESEP (sizes/look-order.ts): every size in a look of its own — the looks are ranked as a
+    // whole where their order across the sheet, the inside vote and the labels beside the look
+    // lines agree; then each look's chains vote its rank in every section they cross (the inside
+    // guess of one section no longer decides alone). A line whose own label names another size
+    // than its look takes no look vote, and the sizes step asks about it.
+    if (!debugFlag('SIZESEP_OFF') && labels.length === n) {
+      const lo = textLabelLookOrder(
+        chains,
+        groups.map((g) => ({ units: g.group.units, from: g.x.from, at: g.x.at })),
+        unit,
+        nUnits,
+        n,
+        rankOfLabel,
+        allTexts,
+      );
+      diag.lookOrder = lo.why;
+      const lr = lo.rank;
+      if (lr) {
+        const lookRank = (c: number) => (unit[c] >= 0 ? lr[unit[c]] : -1);
+        const against = new Map<number, string>();
+        for (const h of hits) {
+          const r = lookRank(h.chain);
+          if (r >= 0 && rankOfLabel.get(h.label) !== r) against.set(h.chain, h.label);
+        }
+        const lookVote = (c: number, w: number) => {
+          const r = lookRank(c);
+          if (r >= 0 && !against.has(c)) vote(c, r, w);
+        };
+        for (const g of groups)
+          for (const k of g.lanes) for (const c of g.x.lanes[k]) lookVote(c, 1);
+        for (const c of [...votes.keys()]) lookVote(c, 4);
+        lr.forEach((r, u) => {
+          if (r < 0) return;
+          unitRank[u] = r;
+          unitPurity[u] = 1;
+        });
+        if (against.size) {
+          const [c0, l0] = [...against][0];
+          ambiguities.push({
+            kind: 'class-split',
+            message: `${against.size} line(s) drawn in the look of ${labels[lookRank(c0)]} carry the label of another size (${l0}): check the legend`,
+            classes: [],
+            chains: [...against.keys()].slice(0, 200),
+            at: hits.find((h) => h.chain === c0)?.text.anchor ?? null,
+          });
+          diag.lookAgainstLabel = against.size;
+        }
+      }
+    }
     for (const [c, ls] of hitByChain) for (const l of ls) vote(c, rankOfLabel.get(l)!, 3);
     settle(0.5);
     // propagate along the line work: a chain ranked anywhere ranks its neighbours in every group it
@@ -1632,6 +1683,31 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     diag.ocgDuplicates = dup.length;
   }
 
+  // ── LABELFRAME (sizes/label-frame.ts): a small closed line around one size label, hugging it,
+  // with no other line around it on every side, is that label's frame — no line of any size. Its
+  // label's votes stay as they were (the ranks of the lines do not move); only the frame leaves.
+  const frames = new Set<number>();
+  // the rank each frame had: the other lines keep reading it where they read a neighbour's rank
+  // (the outline pen, a lane beside a graded line, a notch on a size line) — only the frame leaves
+  const frameRank = new Map<number, number>();
+  if (!debugFlag('LABELFRAME_OFF')) {
+    const done = new Set([...ocgCommon, ...ocgDropped.map((d) => d.id)]);
+    for (const f of labelFrames(
+      chains,
+      N0,
+      chains.map((_, i) => i < N0 && cand[i]),
+      allTexts,
+      new Set(labels.filter((l): l is string => !!l)),
+    ))
+      if (!done.has(f.chain)) frames.add(f.chain);
+    for (const c of frames) {
+      const r = rankOf.get(c);
+      if (r !== undefined) frameRank.set(c, r);
+      rankOf.delete(c);
+    }
+    if (frames.size) diag.labelFrames = frames.size;
+  }
+
   // ── shared stretches of size lines → common ─────────────────────────────────────────────────
   const sharedFrom = new Map<number, number>();
   const joined = bridgeSameRank(chains, rankOf);
@@ -1669,7 +1745,8 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
     x.lanes.forEach((ln, k) => {
       for (const c of ln) widest.set(c, Math.max(widest.get(c) ?? 0, x.lanes.length));
       const nb = [x.lanes[k - 1], x.lanes[k + 1]].filter(Boolean).flat();
-      if (nb.some((c) => rankOf.has(c))) for (const c of ln) besideRanked.add(c);
+      if (nb.some((c) => rankOf.has(c) || frameRank.has(c)))
+        for (const c of ln) besideRanked.add(c);
     });
   }
   splitShared(chains, rankOf, sharedFrom, landings, sectioned, sepMm);
@@ -1686,10 +1763,20 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
   const ignore: { id: number; why: string }[] = [
     ...ocgDropped,
     ...[...joined].map(([id, host]) => ({ id, why: `joined into chain ${host}` })),
+    ...[...frames].map((id) => ({ id, why: LABEL_FRAME_WHY })),
   ];
   const orphans: number[] = [];
-  const decided = new Set([...ocgCommon, ...ocgDropped.map((d) => d.id), ...joined.keys()]);
-  const contourWidth = medianWidth(chains, rankOf, styles);
+  const decided = new Set([
+    ...ocgCommon,
+    ...ocgDropped.map((d) => d.id),
+    ...joined.keys(),
+    ...frames,
+  ]);
+  const contourWidth = medianWidth(
+    chains,
+    frameRank.size ? new Map([...rankOf, ...frameRank]) : rankOf,
+    styles,
+  );
   const touchGrid = new SegGrid(6);
   chains.forEach((c, i) => {
     if (!(i < N0 && furniture[i])) touchGrid.addPolyline(i, c.pts);
@@ -1711,7 +1798,7 @@ export function recoverSizes(inp: RecoverInput): RecoverOut {
       probes.push({ x: a.x + (b.x - a.x) * (t / L), y: a.y + (b.y - a.y) * (t / L) });
     for (const p of probes) {
       touchGrid.near(p, 1, (j, si) => {
-        if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j))) return;
+        if (steep || j === i || !(rankOf.has(j) || sharedFrom.has(j) || frameRank.has(j))) return;
         const q0 = chains[j].pts[si];
         const q1 = chains[j].pts[si + 1];
         if (!q0 || !q1 || segNearest(p, q0, q1).d > 1) return;
