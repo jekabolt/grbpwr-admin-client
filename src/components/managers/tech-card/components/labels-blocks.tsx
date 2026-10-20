@@ -1,9 +1,14 @@
 import { common_MediaFull, type common_TechCardMediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { GroupLabel, Section, ComboField, InputField } from 'ui';
-import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
+import {
+  MediaViewer,
+  type MediaViewerItem,
+  mediaFullToViewerItem,
+} from 'components/shared/media-viewer/media-viewer';
 import { labelMediaOf } from '../care-labels/label-media';
 import {
   removeGarmentLabel,
@@ -104,6 +109,7 @@ function KeyedCards({
   example,
   fields,
   mockupBlocking,
+  canEdit,
   writers,
   resolvedMedia,
 }: {
@@ -113,6 +119,7 @@ function KeyedCards({
   example: string;
   fields: CardField[];
   mockupBlocking: boolean;
+  canEdit: boolean;
   writers: Writers;
   /** The card's `resolvedLabelMedia` (M-02): every saved mockup id, resolved by the server. */
   resolvedMedia?: readonly common_TechCardMediaFull[];
@@ -123,8 +130,14 @@ function KeyedCards({
   // library map holds only the latest 500 files); a just-picked one is cached for the session, and
   // the library map stays the last fallback for media picked before a save / refetch.
   const libraryMap = useMediaMap();
+  const uploadMedia = useUploadMedia({ silent: true });
   const [cache, setCache] = useState<Map<number, common_MediaFull>>(new Map());
-  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    key: string;
+    ids: number[];
+    items: MediaViewerItem[];
+    index: number;
+  } | null>(null);
 
   const mediaOf = (id: number) => cache.get(id) ?? labelMediaOf(id, resolvedMedia, libraryMap);
   const urlOf = (id: number) => {
@@ -152,8 +165,10 @@ function KeyedCards({
   const removeMedia = (key: string, id: number) =>
     patch(key, { mediaIds: liveIds(key).filter((x) => x !== id) });
 
-  const openViewer = (index: number, ids: number[]) =>
+  const openViewer = (key: string, index: number, ids: number[]) =>
     setViewer({
+      key,
+      ids,
       index,
       items: ids.map((id) => {
         const m = mediaOf(id)?.media;
@@ -161,6 +176,36 @@ function KeyedCards({
         return { src: m?.fullSize?.mediaUrl || m?.compressed?.mediaUrl || thumb, thumbnail: thumb };
       }),
     });
+
+  const replaceMedia = async (dataUrl: string, item: MediaViewerItem) => {
+    if (!viewer) throw new Error('The label picture slot is no longer open.');
+    const targetIndex = viewer.items.indexOf(item);
+    const sourceId = viewer.ids[targetIndex];
+    const before = liveIds(viewer.key);
+    if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
+      throw new Error('The label picture slot changed before replacement.');
+
+    const uploaded = await uploadMedia.mutateAsync(dataUrl);
+    const newId = uploaded.id;
+    if (!newId) throw new Error('The replacement upload returned no media id.');
+
+    const latest = liveIds(viewer.key);
+    if (latest[targetIndex] !== sourceId)
+      throw new Error('The label picture slot changed before replacement.');
+
+    const nextIds = latest.slice();
+    nextIds[targetIndex] = newId;
+    patch(viewer.key, { mediaIds: nextIds });
+    setCache((prev) => new Map(prev).set(newId, uploaded));
+    setViewer((prev) => {
+      if (!prev || prev.key !== viewer.key || prev.ids[targetIndex] !== sourceId) return prev;
+      const items = prev.items.slice();
+      const ids = prev.ids.slice();
+      items[targetIndex] = mediaFullToViewerItem(uploaded);
+      ids[targetIndex] = newId;
+      return { ...prev, items, ids };
+    });
+  };
 
   return (
     <div data-keyed-cards={field}>
@@ -181,7 +226,7 @@ function KeyedCards({
             onRemove={() => writers.remove(getValues, setValue, key)}
             onAddMedia={(picked) => addMedia(key, picked)}
             onRemoveMedia={(id) => removeMedia(key, id)}
-            onOpenViewer={openViewer}
+            onOpenViewer={(index, ids) => openViewer(key, index, ids)}
           />
         );
       })}
@@ -199,6 +244,7 @@ function KeyedCards({
         open={!!viewer}
         onOpenChange={(open) => !open && setViewer(null)}
         onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
+        onReplace={canEdit ? replaceMedia : undefined}
       />
     </div>
   );
@@ -207,8 +253,10 @@ function KeyedCards({
 /** LABELS — every label on the garment but the composition one, each with its mockup (R-05..R-07). */
 export function LabelsBlock({
   resolvedMedia,
+  canEdit = true,
 }: {
   resolvedMedia?: readonly common_TechCardMediaFull[];
+  canEdit?: boolean;
 }): JSX.Element {
   return (
     <Section title='labels'>
@@ -219,6 +267,7 @@ export function LabelsBlock({
         example='tax stamp'
         fields={LABEL_FIELDS}
         mockupBlocking
+        canEdit={canEdit}
         writers={{ upsert: upsertGarmentLabel, remove: removeGarmentLabel }}
         resolvedMedia={resolvedMedia}
       />
@@ -233,8 +282,10 @@ export function LabelsBlock({
  */
 export function PackagingBlock({
   resolvedMedia,
+  canEdit = true,
 }: {
   resolvedMedia?: readonly common_TechCardMediaFull[];
+  canEdit?: boolean;
 }): JSX.Element {
   return (
     <Section title='packaging'>
@@ -287,6 +338,7 @@ export function PackagingBlock({
           example='thank-you card'
           fields={ITEM_FIELDS}
           mockupBlocking={false}
+          canEdit={canEdit}
           writers={{ upsert: upsertPackagingItem, remove: removePackagingItem }}
           resolvedMedia={resolvedMedia}
         />

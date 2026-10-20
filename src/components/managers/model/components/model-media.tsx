@@ -1,8 +1,10 @@
 import { common_MediaFull, common_Model } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { PictureBusy } from 'components/managers/tech-card/annotation/picture-busy';
 import {
   MediaViewer,
+  type MediaViewerItem,
   mediaFullToViewerItem,
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
@@ -50,9 +52,11 @@ function WhiteBgGlyph() {
  */
 export function ModelMedia({
   model,
+  canEdit,
   onBusyChange,
 }: {
   model?: common_Model;
+  canEdit: boolean;
   /** A white-bg press is out: the form must not save until it lands or fails. */
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -62,6 +66,7 @@ export function ModelMedia({
   // `model.media` until the model is saved and re-read.
   const [known, setKnown] = useState<common_MediaFull[]>([]);
   const viewer = useMediaViewer();
+  const uploadMedia = useUploadMedia({ silent: true });
 
   const ids = field.value ?? [];
   const photoId = ids[0] ?? 0;
@@ -105,6 +110,23 @@ export function ModelMedia({
     remember(m);
     // Picking one of the hidden ones moves it to the front instead of listing it twice.
     field.onChange([id, ...rest.filter((r) => r !== id)]);
+  };
+
+  const replacePhoto = async (dataUrl: string, item: MediaViewerItem) => {
+    const sourceId = item.meta?.id ?? 0;
+    const before = getValues('mediaIds') ?? [];
+    if (!sourceId || before[0] !== sourceId)
+      throw new Error('The model photo changed before replacement.');
+
+    const uploaded = await uploadMedia.mutateAsync(dataUrl);
+    const newId = uploaded.id;
+    if (!newId) throw new Error('The replacement upload returned no media id.');
+
+    const latest = getValues('mediaIds') ?? [];
+    if (latest[0] !== sourceId) throw new Error('The model photo changed before replacement.');
+
+    remember(uploaded);
+    field.onChange([newId, ...latest.slice(1).filter((id) => id !== newId)]);
   };
 
   return (
@@ -153,7 +175,11 @@ export function ModelMedia({
               {busy ? '…' : <WhiteBgGlyph />}
             </Button>
           )}
-          <MediaViewer items={[mediaFullToViewerItem(photo)]} {...viewer} />
+          <MediaViewer
+            items={[mediaFullToViewerItem(photo)]}
+            {...viewer}
+            onReplace={canEdit ? replacePhoto : undefined}
+          />
         </>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
@@ -46,6 +47,13 @@ export function MediaPreviewWithSelector({
   const sizeClass = heightClass ? cn('w-full sm:w-fit', heightClass) : undefined;
   const mediaIsVideo = isVideo(mediaUrl);
   const viewer = useMediaViewer();
+  const uploadMedia = useUploadMedia({ silent: true });
+
+  const replaceMedia = async (dataUrl: string) => {
+    const media = await uploadMedia.mutateAsync(dataUrl);
+    if (!media.id) throw new Error('The replacement upload returned no media id.');
+    onSaveMedia([media]);
+  };
 
   return (
     <>
@@ -74,6 +82,7 @@ export function MediaPreviewWithSelector({
         <MediaViewer
           items={[{ src: mediaUrl, type: mediaIsVideo ? 'video' : 'image', alt }]}
           {...viewer}
+          onReplace={editMode ? replaceMedia : undefined}
         />
       )}
     </>

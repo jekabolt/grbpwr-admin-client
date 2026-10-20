@@ -2,8 +2,10 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import {
   MediaViewer,
+  type MediaViewerItem,
   mediaFullToViewerItem,
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
@@ -385,6 +387,7 @@ export function PhotoStage() {
   const [frameSize, setFrameSize] = useState<FrameSize>({ width: 0, height: 0 });
   const [removeId, setRemoveId] = useState<number | null>(null);
   const viewer = useMediaViewer();
+  const uploadMedia = useUploadMedia({ silent: true });
 
   const viewerPhotos = useMemo(
     () =>
@@ -473,6 +476,36 @@ export function PhotoStage() {
     },
     [addPicked, getValues, selectPhoto, setValue],
   );
+
+  const replacePhoto = async (dataUrl: string, item: MediaViewerItem) => {
+    const sourceId = item.meta?.id ?? 0;
+    const before = getValues('mediaIds') ?? [];
+    const targetIndex = before.indexOf(sourceId);
+    if (!sourceId || targetIndex < 0)
+      throw new Error('The fitting photo slot changed before replacement.');
+
+    const uploaded = await uploadMedia.mutateAsync(dataUrl);
+    const newId = uploaded.id;
+    if (!newId) throw new Error('The replacement upload returned no media id.');
+
+    const latest = getValues('mediaIds') ?? [];
+    if (latest[targetIndex] !== sourceId)
+      throw new Error('The fitting photo slot changed before replacement.');
+
+    addPicked([uploaded]);
+    const nextIds = latest.slice();
+    nextIds[targetIndex] = newId;
+    setValue('mediaIds', nextIds, { shouldDirty: true });
+
+    const existingCallouts = (getValues('callouts') ?? []) as FormCallout[];
+    const nextCallouts = existingCallouts.map((callout) =>
+      callout.mediaId === sourceId ? { ...callout, mediaId: newId } : callout,
+    );
+    if (nextCallouts.some((callout, index) => callout !== existingCallouts[index]))
+      setValue('callouts', nextCallouts, { shouldDirty: true });
+    if (pendingMark?.mediaId === sourceId) setPendingMark({ ...pendingMark, mediaId: newId });
+    if (currentMediaId === sourceId) selectPhoto(newId);
+  };
 
   const pasteIntake = useMediaIntake({
     enabled: false,
@@ -806,7 +839,11 @@ export function PhotoStage() {
 
       {pasteIntake.dialog}
 
-      <MediaViewer items={viewerPhotos.map((photo) => photo.item)} {...viewer} />
+      <MediaViewer
+        items={viewerPhotos.map((photo) => photo.item)}
+        {...viewer}
+        onReplace={readOnly ? undefined : replacePhoto}
+      />
 
       <ConfirmationModal
         open={removeId != null}

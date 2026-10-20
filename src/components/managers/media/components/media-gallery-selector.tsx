@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Media, Text } from 'ui';
 import {
   MediaViewer,
@@ -10,6 +10,7 @@ import {
 } from 'components/shared/media-viewer/media-viewer';
 import { readSlotAspect } from '../utils/calculate-aspect';
 import { useMediaIntake } from '../utils/useMediaIntake';
+import { useUploadMedia } from '../utils/useUploadMedia';
 import {
   FrameLossNote,
   RemovedNotice,
@@ -68,6 +69,9 @@ export function MediaGallerySelector({
 }: MediaGallerySelectorProps) {
   const viewer = useMediaViewer();
   const viewerItems = media.map(mediaFullToViewerItem);
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
+  const uploadMedia = useUploadMedia({ silent: true });
   const slot = readSlotAspect(aspectRatio);
   /**
    * Последний убранный кадр — вместе с местом, на которое он вернётся, и со СНИМКОМ СПИСКА, из
@@ -179,6 +183,23 @@ export function MediaGallerySelector({
       onReorder(next);
     }
     setRemoved(null);
+  }
+
+  async function replaceMedia(dataUrl: string, item: (typeof viewerItems)[number]) {
+    const sourceId = item.meta?.id;
+    const index = media.findIndex((candidate) => candidate.id === sourceId);
+    if (index < 0 || !sourceId) throw new Error('This gallery slot changed before replacement.');
+
+    const uploaded = await uploadMedia.mutateAsync(dataUrl);
+    if (!uploaded.id) throw new Error('The replacement upload returned no media id.');
+    const latest = mediaRef.current;
+    const current = latest[index];
+    if (!current || current.id !== sourceId)
+      throw new Error('This gallery slot changed before replacement.');
+
+    const next = latest.slice();
+    next[index] = uploaded;
+    onReorder?.(next);
   }
 
   return (
@@ -300,7 +321,11 @@ export function MediaGallerySelector({
 
       {intake.dialog}
 
-      <MediaViewer items={viewerItems} {...viewer} />
+      <MediaViewer
+        items={viewerItems}
+        {...viewer}
+        onReplace={editMode && onReorder ? replaceMedia : undefined}
+      />
     </>
   );
 }
