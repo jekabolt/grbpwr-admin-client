@@ -1,10 +1,9 @@
-import { CopyIcon, EnterFullScreenIcon, TrashIcon } from '@radix-ui/react-icons';
 import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
-import { Button, Media, RatioGlyph, Text } from 'ui';
+import { Button, Media, RatioGlyph, Text, CopyIcon, EnterFullScreenIcon, TrashIcon } from 'ui';
 import { VideoSize } from '..';
 import { mediaAspectRatio, ratioLabel } from '../utils/calculate-aspect';
 import { usageRefLine, usageRefName, usageRefSlot } from '../utils/media-usage';

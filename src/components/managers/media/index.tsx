@@ -7,7 +7,15 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
-import { Button, DateScrubber, SideRailLayout, Text, useMonthIndex, type ScrubMonth } from 'ui';
+import {
+  Button,
+  DateScrubber,
+  SideRailLayout,
+  Text,
+  useMonthIndex,
+  type ScrubMonth,
+  TrashIcon,
+} from 'ui';
 import {
   CropGlyph,
   ExpandGlyph,
@@ -16,7 +24,6 @@ import {
   mediaFullViewerSrc,
   useMediaViewer,
 } from 'components/shared/media-viewer/media-viewer';
-import { TrashIcon } from '@radix-ui/react-icons';
 import { MediaSavedBar } from './components/media-saved-bar';
 import { Filter } from './components/filter';
 import { SkippedFilesNote } from './components/dragdrop-area';

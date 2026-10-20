@@ -6,7 +6,7 @@ import {
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
-} from '@radix-ui/react-icons';
+} from 'ui';
 import { urlToDataUrl } from 'lib/features/getCropped';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

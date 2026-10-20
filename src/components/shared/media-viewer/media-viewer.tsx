@@ -1,14 +1,4 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  DotsHorizontalIcon,
-  ExternalLinkIcon,
-  Half2Icon,
-  InfoCircledIcon,
-  Pencil1Icon,
-} from '@radix-ui/react-icons';
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
@@ -21,7 +11,22 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { BlurhashImage, Button, Close, Drawer, EmptyCell, FoldCaret } from 'ui';
+import {
+  BlurhashImage,
+  Button,
+  Close,
+  Drawer,
+  EmptyCell,
+  FoldCaret,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  DotsHorizontalIcon,
+  ExternalLinkIcon,
+  Half2Icon,
+  InfoCircledIcon,
+  Pencil1Icon,
+} from 'ui';
 import {
   useImageAdjust,
   useImageAnnotate,

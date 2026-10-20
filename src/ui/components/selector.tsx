@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronUpIcon } from '@radix-ui/react-icons';
+import { ChevronDownIcon, ChevronUpIcon } from '../icons';
 import * as Select from '@radix-ui/react-select';
 import Text from './text';
 
