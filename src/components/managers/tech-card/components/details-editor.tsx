@@ -2,6 +2,7 @@ import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { useResolvedMedia } from 'components/managers/media/utils/useMediaQuery';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'components/managers/tech-card/ai-enhance/ai-enhance';
@@ -18,7 +19,11 @@ import {
   Toolbar,
   Close,
 } from 'ui';
-import { MediaViewer, MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
+import {
+  MediaViewer,
+  type MediaViewerItem,
+  mediaFullToViewerItem,
+} from 'components/shared/media-viewer/media-viewer';
 import { InertDoor } from './design/bench-slot';
 import { cardFactsContext } from './design/core/card-facts';
 import { isBoardRow } from './design/core/mood-gate';
@@ -98,7 +103,13 @@ import { detailAspects, detailKeyLabel } from './tech-card-options';
 const GENERAL_KEYS = ['silhouette', 'fabric'];
 const STANDARD_KEYS = detailAspects.map((a) => a.key).filter((k) => !GENERAL_KEYS.includes(k));
 
-export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX.Element {
+export function DetailsEditor({
+  techCard,
+  canEdit = true,
+}: {
+  techCard?: common_TechCard;
+  canEdit?: boolean;
+}): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const details = (useWatch({ control, name: 'details' }) ?? []) as FormDetail[];
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
@@ -132,9 +143,15 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   const [newStandard, setNewStandard] = useState('');
   // session cache of just-picked media so thumbnails show before a reload
   const [cache, setCache] = useState<Map<number, string>>(new Map());
+  const uploadMedia = useUploadMedia({ silent: true });
   // the reference strip opened in the shared viewer (null = closed). Each aspect
   // browses its own images, so we stash the built item list alongside the index.
-  const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    key: string;
+    ids: number[];
+    items: MediaViewerItem[];
+    index: number;
+  } | null>(null);
 
   // Reveal a standard aspect the moment it has content (covers data arriving after mount, e.g. an
   // async form reset) — but only ever grow the set, never shrink it reactively, so clearing text
@@ -173,6 +190,8 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   // одного правила (первая — поля общих сведений), и черновик construction завёл бы третью.
   const upsert = (key: string, patch: Partial<FormDetail>) =>
     upsertDetail(getValues, setValue, key, patch);
+  const liveIds = (key: string) =>
+    ((getValues('details') ?? []) as FormDetail[]).find((d) => d.key === key)?.mediaIds ?? [];
 
   const addImages = (key: string, picked: common_MediaFull[]) => {
     const ids = picked.map((m) => m.id).filter((x): x is number => x != null);
@@ -186,14 +205,12 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     });
     // read the current ids from live form state (not the render snapshot) so two quick picks
     // don't clobber each other
-    const cur =
-      ((getValues('details') ?? []) as FormDetail[]).find((d) => d.key === key)?.mediaIds ?? [];
+    const cur = liveIds(key);
     upsert(key, { mediaIds: Array.from(new Set([...cur, ...ids])) });
   };
 
   const removeImage = (key: string, id: number) => {
-    const cur =
-      ((getValues('details') ?? []) as FormDetail[]).find((d) => d.key === key)?.mediaIds ?? [];
+    const cur = liveIds(key);
     upsert(key, { mediaIds: cur.filter((x) => x !== id) });
   };
 
@@ -220,6 +237,41 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
         thumbnail: thumb,
       };
     });
+
+  const replaceImage = async (dataUrl: string, item: MediaViewerItem) => {
+    if (!viewer) throw new Error('slot closed');
+    const targetIndex = viewer.items.indexOf(item);
+    const sourceId = viewer.ids[targetIndex];
+    const before = liveIds(viewer.key);
+    if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
+      throw new Error('slot changed');
+
+    const uploaded = await uploadMedia.mutateAsync(dataUrl);
+    const newId = uploaded.id;
+    if (!newId) throw new Error('upload failed');
+
+    const latest = liveIds(viewer.key);
+    if (latest[targetIndex] !== sourceId)
+      throw new Error('slot changed');
+
+    const nextIds = latest.slice();
+    nextIds[targetIndex] = newId;
+    upsert(viewer.key, { mediaIds: nextIds });
+    setCache((prev) =>
+      new Map(prev).set(
+        newId,
+        uploaded.media?.thumbnail?.mediaUrl || uploaded.media?.fullSize?.mediaUrl || '',
+      ),
+    );
+    setViewer((prev) => {
+      if (!prev || prev.key !== viewer.key || prev.ids[targetIndex] !== sourceId) return prev;
+      const items = prev.items.slice();
+      const ids = prev.ids.slice();
+      items[targetIndex] = mediaFullToViewerItem(uploaded);
+      ids[targetIndex] = newId;
+      return { ...prev, items, ids };
+    });
+  };
 
   // visible = standard aspects shown this session (filled, or explicitly added) + custom keys
   // present in data or added this session — never the full standard list by default.
@@ -301,7 +353,9 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
                 onAddImages={(picked) => addImages(key, picked)}
                 onRemoveImage={(id) => removeImage(key, id)}
                 onRemoveAspect={() => removeAspect(key)}
-                onOpenViewer={(index, ids) => setViewer({ items: viewerItemsFor(ids), index })}
+                onOpenViewer={(index, ids) =>
+                  setViewer({ key, ids, items: viewerItemsFor(ids), index })
+                }
               />
             );
           })}
@@ -404,6 +458,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
           open={!!viewer}
           onOpenChange={(open) => !open && setViewer(null)}
           onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
+          onReplace={canEdit ? replaceImage : undefined}
         />
       </div>
     </Section>

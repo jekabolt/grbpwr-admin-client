@@ -50,6 +50,8 @@ export function normaliseHex(input: string): string | undefined {
 }
 
 export type SourcePixels = {
+  /** Proxy-safe source used for both the on-screen preview and later canvas exports. */
+  dataUrl: string;
   width: number;
   height: number;
   /**
@@ -136,7 +138,7 @@ export async function loadSourcePixels(url: string): Promise<SourcePixels> {
     return out.toDataURL(format, format === 'image/webp' ? 1.0 : 0.95);
   };
 
-  return { width, height, sampleAt, expand };
+  return { dataUrl, width, height, sampleAt, expand };
 }
 
 /**

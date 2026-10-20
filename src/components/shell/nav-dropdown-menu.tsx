@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from '@radix-ui/react-icons';
+import { ChevronDownIcon } from 'ui';
 import * as NavigationMenu from '@radix-ui/react-navigation-menu';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { isActiveRoute, type NavGroup } from 'constants/routes';

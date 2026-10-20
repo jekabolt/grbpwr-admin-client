@@ -18,7 +18,6 @@ import {
   FILE_MISSING_TITLE,
   FILE_MISSING_WORDS,
   MediaViewer,
-  ViewerAction,
   type MediaViewerItem,
 } from 'components/shared/media-viewer/media-viewer';
 
@@ -511,21 +510,20 @@ export function PictureGalleryProvider({
         onSaveAsPicture={techCardId && band ? saveAsPicture : undefined}
         /* THE MASK OF THE FRAME ON STAGE (C-11) — only a frame whose tile offers one. The viewer
            closes first: the mask is its own full-screen surface, not a layer over this one. */
-        actions={(_item, index) => {
+        tools={(_item, index) => {
           const mask = row?.masks[index];
-          if (!mask) return null;
-          return (
-            <ViewerAction
-              title='paint a zone of this picture and say what should be there'
-              onClick={() => {
+          if (!mask) return [];
+          return [
+            {
+              key: 'mask',
+              label: 'mask',
+              onClick: () => {
                 onStage.current = null;
                 setRow(null);
                 mask();
-              }}
-            >
-              mask
-            </ViewerAction>
-          );
+              },
+            },
+          ];
         }}
       />
     </GalleryContext.Provider>

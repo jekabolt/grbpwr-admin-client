@@ -162,3 +162,31 @@ export { default as ToggleGroupField } from './form/fields/toggle-group-field';
 export { Arrow } from './icons/arrow';
 /** @primitive Brand mark logo */
 export { GrbpwrMark } from './icons/grbpwr-mark';
+/** @primitive Icon set */
+export {
+  ArchiveIcon,
+  ArrowRightIcon,
+  ChatBubbleIcon,
+  CheckCircledIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  ClipboardCopyIcon,
+  CopyIcon,
+  DotsHorizontalIcon,
+  DownloadIcon,
+  EnterFullScreenIcon,
+  ExternalLinkIcon,
+  EyeNoneIcon,
+  Half2Icon,
+  InfoCircledIcon,
+  MinusIcon,
+  Pencil1Icon,
+  PlusIcon,
+  RotateCounterClockwiseIcon,
+  TrashIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from './icons';
