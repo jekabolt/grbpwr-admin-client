@@ -3,6 +3,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChatBubbleIcon,
+  ArrowRightIcon,
+  PlusIcon,
   CopyIcon,
   DotsHorizontalIcon,
   DownloadIcon,
@@ -13,6 +15,7 @@ import {
 } from '@radix-ui/react-icons';
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
+import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
@@ -38,7 +41,6 @@ import {
   type ViewerLayout,
 } from './media-viewer-panels';
 import {
-  downloadHref,
   downloadOriginal,
   useImageAdjust,
   useImageAnnotate,
@@ -383,6 +385,14 @@ interface MediaViewerProps {
    * прежнее «скачать».
    */
   onSaveAsPicture?: (dataUrl: string, item: MediaViewerItem) => Promise<void>;
+  /**
+   * ЗАМЕНИТЬ СНИМОК В ЕГО МЕСТЕ (V3). Задаёт тот, у кого снимок стоит в слоте: тогда `save`
+   * спрашивает `replace here` / `save copy`. Absent — снимок ни в каком месте не стоит (библиотека),
+   * и `save` сразу кладёт копию.
+   */
+  onReplace?: (dataUrl: string, item: MediaViewerItem) => Promise<void>;
+  /** A copy landed in the library (no `onSaveAsPicture`): the new media, for the owner's «saved». */
+  onCopySaved?: (media: common_MediaFull, item: MediaViewerItem) => void;
   /** The picture's callouts (see `ViewerCallouts`); the viewer opens on them. */
   callouts?: ViewerCallouts;
   // РАНЬШЕ ЗДЕСЬ БЫЛ `renderOverlay` — крючок, которым галерея эскиза рисовала поверх снимка СВОЮ
@@ -441,6 +451,8 @@ export function MediaViewer({
   notice,
   onUsageNavigate,
   onSaveAsPicture,
+  onReplace,
+  onCopySaved,
   callouts,
 }: MediaViewerProps) {
   const [showMeta, setShowMeta] = useState(false);
@@ -620,51 +632,89 @@ export function MediaViewer({
   }, [adjust, annotate, home]);
 
   /**
-   * КУДА УХОДЯТ ЗАПЕЧЁННЫЕ БАЙТЫ. Есть дверь хозяина (`onSaveAsPicture`, полоса тех-карты) — туда;
-   * нет — файлом в «загрузки», как уходило и раньше. Просмотрщик отдаёт КАДР ЦЕЛИКОМ, а не адрес:
-   * по одному адресу хозяин не найдёт ни картинку полосы, ни её род — искать он будет по `meta.id`.
+   * ═══ КУДА УХОДЯТ ЗАПЕЧЁННЫЕ БАЙТЫ (viewer-unify V3) ═══════════════════════════════════════════
+   *
+   * `save` спрашивает ровно тогда, когда есть что спрашивать. Снимок стоит в МЕСТЕ (слот тех-карты,
+   * картинка полосы) — хозяин дал `onReplace`, и лист предлагает две строки: `replace here` (новые
+   * байты встают на место старых) и `save copy`. Места нет (библиотека) — вопроса нет, и `save`
+   * сразу кладёт копию.
+   *
+   * Копия — это ВСЕГДА новая вещь, а не файл в «загрузках»: у полосы она новая картинка рядом
+   * (`onSaveAsPicture`, её род наследуется), у всех остальных — новое медиа библиотеки. Скачать
+   * исходник по-прежнему можно, но это дверь `more`, а не исход правки.
    */
-  const deliver = useCallback(
-    async (dataUrl: string, item: MediaViewerItem, suffix: string) => {
+  const uploadMedia = useUploadMedia();
+  const [choice, setChoice] = useState<{ dataUrl: string; item: MediaViewerItem } | null>(null);
+  useEffect(() => setChoice(null), [resetKey]);
+
+  const saveCopy = useCallback(
+    async (dataUrl: string, item: MediaViewerItem) => {
       if (onSaveAsPicture) {
         await onSaveAsPicture(dataUrl, item);
         return;
       }
-      downloadHref(dataUrl, exportFileName(item.src, suffix));
+      const media = await uploadMedia.mutateAsync(dataUrl);
+      showMessage('saved as a copy', 'success');
+      onCopySaved?.(media, item);
     },
-    [onSaveAsPicture],
+    [onSaveAsPicture, uploadMedia, showMessage, onCopySaved],
   );
 
-  const runSave = useCallback(
-    async (bake: () => Promise<string | null>, suffix: string) => {
-      const item = items[safeIndex];
-      if (!item || saving) return;
+  /** One way out for every outcome: done → leave the mode; failed → stay, with the reason. */
+  const settle = useCallback(
+    async (run: () => Promise<void>) => {
       setSaving(true);
       try {
-        const dataUrl = await bake();
-        if (dataUrl) await deliver(dataUrl, item, suffix);
+        await run();
+        setChoice(null);
         leaveMode();
       } catch (e) {
         setSaving(false);
         showMessage(e instanceof Error ? e.message : 'could not save the picture', 'error');
       }
     },
-    [items, safeIndex, saving, deliver, leaveMode, showMessage],
+    [leaveMode, showMessage],
+  );
+
+  const runSave = useCallback(
+    async (bake: () => Promise<string | null>) => {
+      const item = items[safeIndex];
+      if (!item || saving) return;
+      setSaving(true);
+      let dataUrl: string | null = null;
+      try {
+        dataUrl = await bake();
+      } catch (e) {
+        setSaving(false);
+        showMessage(e instanceof Error ? e.message : 'could not read the picture', 'error');
+        return;
+      }
+      if (!dataUrl) {
+        leaveMode();
+        return;
+      }
+      if (onReplace) {
+        setSaving(false);
+        setChoice({ dataUrl, item });
+        return;
+      }
+      const baked = dataUrl;
+      await settle(() => saveCopy(baked, item));
+    },
+    [items, safeIndex, saving, onReplace, saveCopy, settle, leaveMode, showMessage],
   );
 
   /** adjust / draw: one baker for both (ink over the correction, see `bakePicture`). */
   const saveStage = useCallback(() => {
     const item = items[safeIndex];
     if (!item) return;
-    void runSave(
-      () =>
-        annotate.bakeDataUrl(item.src, {
-          params: adjust.values,
-          source: adjust.sourceRef.current,
-        }),
-      mode === 'draw' ? 'annotated' : 'adjusted',
+    void runSave(() =>
+      annotate.bakeDataUrl(item.src, {
+        params: adjust.values,
+        source: adjust.sourceRef.current,
+      }),
     );
-  }, [items, safeIndex, runSave, annotate, adjust.values, adjust.sourceRef, mode]);
+  }, [items, safeIndex, runSave, annotate, adjust.values, adjust.sourceRef]);
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe. Inside a mode the ground does nothing.
@@ -957,9 +1007,7 @@ export function MediaViewer({
               onKindChange={setFrameKind}
               saving={saving}
               onCancel={leaveMode}
-              onSave={(apply) =>
-                void runSave(apply, frameKind === 'expand' ? 'expanded' : 'cropped')
-              }
+              onSave={(apply) => void runSave(apply)}
             />
           ) : (
             <>
@@ -1304,6 +1352,38 @@ export function MediaViewer({
             </Drawer>
           )}
 
+          {/* `save` with a place to go back to: the two-row sheet of mockup frame 4. */}
+          <Drawer
+            side='bottom'
+            open={!!choice}
+            onOpenChange={(v) => !v && !saving && setChoice(null)}
+            title='save'
+          >
+            <SheetRow
+              primary
+              probe='viewer-replace'
+              icon={<ArrowRightIcon className='size-4' />}
+              disabled={saving}
+              onClick={() => {
+                const c = choice;
+                if (c && onReplace) void settle(() => onReplace(c.dataUrl, c.item));
+              }}
+            >
+              {saving ? 'saving…' : 'replace here'}
+            </SheetRow>
+            <SheetRow
+              probe='viewer-save-copy'
+              icon={<PlusIcon className='size-4' />}
+              disabled={saving}
+              onClick={() => {
+                const c = choice;
+                if (c) void settle(() => saveCopy(c.dataUrl, c.item));
+              }}
+            >
+              save copy
+            </SheetRow>
+          </Drawer>
+
           {isMobile && (
             <Drawer side='bottom' open={moreOpen} onOpenChange={setMoreOpen} title='more'>
               <MoreRows rows={moreRows} open={moreOpen} onDone={() => setMoreOpen(false)} />
@@ -1511,12 +1591,17 @@ function SheetRow({
   icon,
   children,
   danger,
+  primary,
+  probe,
   disabled,
   onClick,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   danger?: boolean;
+  /** The answer most people want, inverted (the save sheet's `replace here`). */
+  primary?: boolean;
+  probe?: string;
   disabled?: boolean;
   onClick: () => void;
 }) {
@@ -1524,9 +1609,11 @@ function SheetRow({
     <Button
       disabled={disabled}
       onClick={onClick}
+      data-probe={probe}
       className={cn(
         'flex min-h-11 w-full items-center gap-3 border-b border-hairline px-1 text-left',
         danger && 'text-error',
+        primary && 'bg-textColor px-2 text-bgColor',
       )}
     >
       <span className='flex size-5 shrink-0 items-center justify-center'>{icon}</span>

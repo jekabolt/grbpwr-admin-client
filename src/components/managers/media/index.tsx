@@ -31,8 +31,6 @@ import {
 } from './components/media-mobile';
 import { MediaRail } from './components/media-rail';
 import { MediaDeleteSheet } from './components/media-delete-sheet';
-import { MediaExpandDialog } from './components/media-expand-dialog';
-import { MediaRecropDialog } from './components/media-recrop-dialog';
 import { MediaSelectionBar } from './components/media-selection-bar';
 import { PendingMediaPlate } from './components/pending-media-plate';
 import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
@@ -394,10 +392,6 @@ export function MediaManager({
     foundAt >= 0 ? foundAt : Math.min(lastViewIndex.current, Math.max(viewable.length - 1, 0));
   lastViewIndex.current = viewIndex;
   const viewingMedia = viewable[viewIndex];
-  const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
-  // Обратный кроп — ОТДЕЛЬНОЕ состояние, а не флаг на кропе. Это два разных органа с разными
-  // рельсами и разным подвалом, и одно поле «что открыто» рано или поздно откроет их вместе.
-  const [expanding, setExpanding] = useState<common_MediaFull | undefined>(undefined);
   const [saved, setSaved] = useState<
     { original?: common_MediaFull; media: common_MediaFull } | undefined
   >(undefined);
@@ -419,15 +413,13 @@ export function MediaManager({
     }
   };
 
-  // After crop / expand: back to the viewer on the ORIGINAL, with the «saved» line above the strip.
+  // A copy saved from a viewer mode (crop, expand, adjust, draw): the viewer stays on the
+  // ORIGINAL, with the «saved» line above the strip.
   const handleSaved = (m: common_MediaFull) => {
-    const original = recropping ?? expanding ?? viewingMedia;
-    setRecropping(undefined);
-    setExpanding(undefined);
+    const original = viewingMedia;
     if (m.id != null) setNewIds((prev) => new Set(prev).add(m.id as number));
     setSaved({ original, media: m });
     if (original?.id != null) setViewId(original.id);
-    viewer.onOpenChange(true);
   };
   const dismissSaved = useCallback(() => setSaved(undefined), []);
 
@@ -848,9 +840,10 @@ export function MediaManager({
             viewer.onOpenChange(false);
             navigate(href);
           }}
-          // Обратный кроп стоит ВПЛОТНУЮ к кропу, потому что это одно решение с двумя знаками: кадр
-          // не той формы либо режут, либо обрамляют. Разведи их по разным углам — и второй не
-          // найдут, продолжая срезать подол.
+          // Копия из режима (crop, expand, adjust, draw) — новое медиа: «saved» над лентой.
+          onCopySaved={handleSaved}
+          // crop | expand — режим самого просмотрщика (viewer-unify V2), не дверь библиотеки:
+          // здесь остаются только её собственные мутации.
           tools={() => {
             if (!canUpload || !viewingMedia) return [];
             const refs = mediaUsageRefs(usage, viewingMedia.id);
@@ -897,20 +890,6 @@ export function MediaManager({
           }
         />
       )}
-
-      <MediaRecropDialog
-        media={recropping}
-        open={!!recropping}
-        onOpenChange={(next) => !next && setRecropping(undefined)}
-        onSaved={handleSaved}
-      />
-
-      <MediaExpandDialog
-        media={expanding}
-        open={!!expanding}
-        onOpenChange={(next) => !next && setExpanding(undefined)}
-        onSaved={handleSaved}
-      />
 
       {hasNextPage && !virtual && (
         <div ref={ref} className='flex justify-center p-4'>
