@@ -16,13 +16,13 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { findInDictionary } from 'lib/features/findInDictionary';
-import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, UseFormReturn, useWatch } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Form, Section, Text } from 'ui';
+import { fittingOrdinal, fittingTitleParts } from 'components/managers/fittings/components/utils';
 import { DetailsDrawer } from './details-drawer';
 import { EditsList } from './edits-list';
 import { FittingNote } from './fitting-note';
@@ -308,32 +308,23 @@ function FittingWorkspaceScreen({
     ],
   );
 
-  // Title = the garment, its size and which fitting of this garment it is: more telling than the id.
+  // Title = garment type, the garment, its size and which fitting of it this is.
   const { data: techCard } = useTechCard(techCardId || undefined);
   const { data: siblings } = useTechCardFittings(techCardId || undefined);
-  const garment = techCard?.techCard?.name || techCard?.techCard?.styleNumber || '';
+  const card = techCard?.techCard;
+  const garment = card?.name || card?.styleNumber || '';
+  const garmentType = card?.categoryId
+    ? String(findInDictionary(dictionary, card.categoryId, 'category') || '')
+    : '';
   const sizeName = sampleSizeId
     ? String(findInDictionary(dictionary, sampleSizeId, 'size') || sampleSizeId)
     : '';
-  const ordinal = useMemo(() => {
-    const sorted = [...(siblings ?? [])].sort(
-      (x, y) =>
-        String(x.fitting?.fittingDate ?? '').localeCompare(String(y.fitting?.fittingDate ?? '')) ||
-        (x.id ?? 0) - (y.id ?? 0),
-    );
-    const i = sorted.findIndex((f) => f.id === fittingId);
-    return i >= 0 ? i + 1 : 0;
-  }, [siblings, fittingId]);
-  const title = garment
-    ? [garment, sizeName, ordinal ? `fitting\u00a0${ordinal}` : ''].filter(Boolean).join('\u00a0· ')
-    : `fitting\u00a0${fittingId}`;
-
-  const statusWord =
-    status === 'FITTING_STATUS_DONE'
-      ? 'done'
-      : status === 'FITTING_STATUS_CANCELLED'
-        ? 'cancelled'
-        : 'in progress';
+  const title = fittingTitleParts({
+    type: garmentType,
+    garment,
+    size: sizeName,
+    ordinal: fittingOrdinal(siblings, fittingId),
+  });
 
   return (
     <Form {...form}>
@@ -345,24 +336,28 @@ function FittingWorkspaceScreen({
               <Text
                 component='h1'
                 variant='uppercase'
-                tracking='label'
-                className='min-w-0 font-bold'
+                tracking='section'
+                className='flex min-w-0 flex-1 font-bold whitespace-nowrap'
               >
-                {title}{' '}
-                <span
-                  className={cn(
-                    'ml-1 whitespace-nowrap font-normal',
-                    status === 'FITTING_STATUS_DONE' ? 'text-success' : 'text-labelColor',
-                  )}
-                >
-                  {statusWord}
-                </span>
+                {garment ? (
+                  <>
+                    {title.head && <span className='shrink-0'>{title.head}&nbsp;·&nbsp;</span>}
+                    <span className='min-w-0 truncate'>{title.garment}</span>
+                    {title.tail.map((t) => (
+                      <span key={t} className='shrink-0'>
+                        &nbsp;·&nbsp;{t}
+                      </span>
+                    ))}
+                  </>
+                ) : (
+                  `fitting\u00a0${fittingId}`
+                )}
               </Text>
-              <span className='flex-1' />
               <Button
                 type='button'
                 variant='underline'
-                className='shrink-0 uppercase tracking-label'
+                size='xs'
+                className='shrink-0 px-0 text-labelColor underline-offset-2 hover:text-textColor'
                 aria-expanded={detailsOpen}
                 onClick={() => setDetailsOpen(true)}
               >

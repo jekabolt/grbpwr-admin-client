@@ -289,8 +289,9 @@ export function useTechCardVatScenario(id: number | undefined, vatCountryCode: s
 
 // Fittings anchored to this tech card (ListFittings filtered by tech_card_id). Used for
 // the read-only "fittings" block and the POM actuals fitting picker.
-export function useTechCardFittings(techCardId?: number) {
-  return useQuery({
+// Every fitting of one tech card; shared by the fitting title and the fittings list (one cache entry).
+export function techCardFittingsQuery(techCardId?: number) {
+  return {
     queryKey: [...techCardKeys.detail(techCardId ?? 0), 'fittings'],
     queryFn: async () => {
       const response = await adminService.ListFittings({
@@ -305,7 +306,11 @@ export function useTechCardFittings(techCardId?: number) {
     },
     enabled: !!techCardId,
     staleTime: 5 * 60 * 1000,
-  });
+  };
+}
+
+export function useTechCardFittings(techCardId?: number) {
+  return useQuery(techCardFittingsQuery(techCardId));
 }
 
 // CreateTechCard's extras (0407): `clientRequestId` is a key minted once per create attempt — a
