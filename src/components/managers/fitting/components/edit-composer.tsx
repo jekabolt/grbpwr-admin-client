@@ -1,4 +1,5 @@
 import { kindDef } from 'components/managers/tech-card/annotation/kinds';
+import { cn } from 'lib/utility';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Button, Chip, ChipRow, Textarea } from 'ui';
 import { useAddEdit } from './use-add-edit';
@@ -7,7 +8,13 @@ import { useFittingWorkspace } from './workspace';
 // One line that grows with the text, capped; the field scrolls past the cap.
 const MAX_HEIGHT = 120;
 
-export function EditComposer({ nextNumber }: { nextNumber: number }) {
+export function EditComposer({
+  nextNumber,
+  className,
+}: {
+  nextNumber: number;
+  className?: string;
+}) {
   const { pendingMark, setPendingMark } = useFittingWorkspace();
   const addEdit = useAddEdit();
   const [text, setText] = useState('');
@@ -41,7 +48,7 @@ export function EditComposer({ nextNumber }: { nextNumber: number }) {
   };
 
   return (
-    <div className='mt-2.5 grid gap-1.5 border-t border-textColor pt-2.5'>
+    <div className={cn('mt-2.5 grid gap-1.5 border-t border-textColor pt-2.5', className)}>
       {pendingMark && (
         <ChipRow>
           <Chip tone='attention' onRemove={() => setPendingMark(null)}>
@@ -70,13 +77,13 @@ export function EditComposer({ nextNumber }: { nextNumber: number }) {
               setPendingMark(null);
             }
           }}
-          className='min-h-6 min-w-0 flex-1 resize-none overflow-y-auto leading-4'
+          className='min-w-0 flex-1 resize-none overflow-y-auto'
         />
         <Button
           type='button'
           variant='main'
           size='sm'
-          className='h-6 flex-none py-0'
+          className='h-11 flex-none px-4 py-0'
           disabled={!text.trim()}
           onClick={submit}
         >
