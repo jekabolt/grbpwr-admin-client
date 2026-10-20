@@ -128,8 +128,10 @@ export type DxfNormAreas = {
    *
    * Пустое имя — размер выпал во ВТОРОМ проходе (сумма площадей не положительна), где виновника по
    * построению нет: там не «детали не нашлось», там нашлось, но площадь нулевая.
+   * `fold` (L14): the piece was found, but it is a half on fold that cannot be cut
+   * (geom/fold-unit.ts) — present, not missing.
    */
-  sizesIncompleteWhy: { sizeId: number; piece: string }[];
+  sizesIncompleteWhy: { sizeId: number; piece: string; fold?: true }[];
   /** Σ (кол-во × площадь) деталей БЕЗ размерного хвоста — общая часть каждого размера. */
   sizelessCm2: number;
   /** Сколько видов деталей градуируется по размерам. 0 = у всех размеров вышло бы одно число. */
@@ -409,7 +411,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // сервера метит именно свою строку, поэтому пара запоминается тем же ключом, что и контур.
   const multiByKey = new Set<string>(); // `${sizeId}|${pieceIndex}`
 
-  const sizesIncompleteWhy: { sizeId: number; piece: string }[] = [];
+  const sizesIncompleteWhy: DxfNormAreas['sizesIncompleteWhy'] = [];
   for (const sizeId of input.sizeIds) {
     const tokens = input.tokensOfSize(sizeId).map(bare).filter(Boolean);
     let complete = true;
@@ -487,6 +489,12 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // кроить по линии кроя — расхождение ровно на припуск по всему периметру каждой детали.
   const perimeterOf = new Map<PieceDTO, number>();
   unique.forEach((p, i) => perimeterOf.set(p, perimeter(seam.pieces[i]?.poly ?? p.poly)));
+  // L14: a half on fold that cannot be cut (geom/fold-unit.ts) has no area to give — its half
+  // would be half the norm. Its size is incomplete, named by the piece.
+  const foldRefused = new Set<PieceDTO>();
+  unique.forEach((p, i) => {
+    if (seam.pieces[i]?.fold?.kind === 'refused') foldRefused.add(p);
+  });
 
   // ── площадь по размерам ──────────────────────────────────────────────────────────────────
   const rows: DxfNormSizeRow[] = [];
@@ -496,10 +504,16 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     if (incomplete.has(sizeId)) continue;
     let sum = 0;
     let ok = true;
+    let foldCulprit = '';
     for (let i = 0; i < resolved.length; i++) {
       const contour = contourByKey.get(`${sizeId}|${i}`);
       if (!contour) {
         ok = false;
+        break;
+      }
+      if (foldRefused.has(contour)) {
+        ok = false;
+        foldCulprit = resolved[i].piece.name;
         break;
       }
       sum += qtyOf(i) * (areaOf.get(contour) ?? contour.areaCm2);
@@ -507,8 +521,10 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     if (!ok || !(sum > 0)) {
       incomplete.add(sizeId);
       // Виновника здесь нет: детали нашлись, но сумма их площадей не положительна. Пустое имя —
-      // это и есть «сказать нечего», а не «забыли записать».
-      sizesIncompleteWhy.push({ sizeId, piece: '' });
+      // это и есть «сказать нечего», а не «забыли записать». (L14: a refused half on fold names it.)
+      sizesIncompleteWhy.push(
+        foldCulprit ? { sizeId, piece: foldCulprit, fold: true } : { sizeId, piece: '' },
+      );
       continue;
     }
     rows.push({ sizeId, areaCm2: sum });

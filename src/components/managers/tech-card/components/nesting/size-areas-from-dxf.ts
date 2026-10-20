@@ -131,6 +131,16 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // и всплывает только счётом от поставщика.
   const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
+  // L14: a half on fold that cannot be cut has no area to continue with (geom/fold-unit.ts)
+  const foldRefused = candidates.filter((p) => p.fold?.kind === 'refused');
+  if (foldRefused.length > 0) {
+    return {
+      ok: false,
+      reason: `half on fold that cannot be cut: ${foldRefused
+        .map((p) => `${p.name} (${p.fold?.kind === 'refused' ? p.fold.reason : ''})`)
+        .join('; ')}`,
+    };
+  }
   const warnings: string[] = [];
   if (seam.hulled.length > 0) {
     warnings.push(`contour replaced by its convex hull: ${seam.hulled.join(', ')}`);

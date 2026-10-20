@@ -20,6 +20,7 @@
 // лежит припуск, и может её проверить глазами, а не поверить числу в настройках.
 import type { PieceDTO } from '../types';
 
+import { foldUnitOf } from './fold-unit';
 import { offsetOutward } from './offset';
 import { area, bounds } from './polygon';
 
@@ -41,8 +42,11 @@ export type SeamResult = {
   hulled: string[];
 };
 
-export function applySeamAllowance(pieces: readonly PieceDTO[], allowanceCm: number): SeamResult {
-  if (!(allowanceCm > 0)) return { pieces: [...pieces], offsetCount: 0, hulled: [] };
+export function applySeamAllowance(input: readonly PieceDTO[], allowanceCm: number): SeamResult {
+  // L14: a half on fold becomes the unit folded fabric cuts (or is refused) BEFORE the offset and
+  // at allowance 0 too — this is the cut footprint every consumer reads (geom/fold-unit.ts).
+  const pieces = input.map(foldUnitOf);
+  if (!(allowanceCm > 0)) return { pieces, offsetCount: 0, hulled: [] };
   const out: PieceDTO[] = [];
   const hulled: string[] = [];
   let offsetCount = 0;

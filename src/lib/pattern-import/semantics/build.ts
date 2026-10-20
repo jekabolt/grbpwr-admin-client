@@ -1434,6 +1434,39 @@ export function buildPieceSpecsDetailed(
         }
     }
 
+    // L14: ONE cleaned outline per candidate — mark reads, notch-bump chords, kink repair, then
+    // spikes (drawn) or the traced cleaning — used by the size loop (the export, the half's check)
+    // AND by the half-on-fold offer below, so the two never judge different lines. Pure and
+    // memoized: the loop adds its notes / notches from `st` / `tr` itself.
+    type Cleaned = {
+      outer: PtMm[];
+      st: ReturnType<typeof stripSpikes> | null;
+      tr: ReturnType<typeof cleanTracedOutline> | null;
+    };
+    const cleanedByCand = new Map<(typeof p.cands)[number]['c'], Cleaned>();
+    const cleanedOf = (c: (typeof p.cands)[number]['c']): Cleaned => {
+      const had = cleanedByCand.get(c);
+      if (had) return had;
+      const mr = markReads.get(c.rank);
+      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      const nb = bumpsByRank.get(c.rank);
+      if (nb?.length) outer = chordAcross(outer, nb);
+      const kk = kinkByRank.get(c.rank);
+      if (kk) outer = kk.outer;
+      let st: Cleaned['st'] = null;
+      let tr: Cleaned['tr'] = null;
+      if (!traced) {
+        st = stripSpikes(outer);
+        if (st.spikes) outer = st.ring;
+      } else {
+        tr = cleanTracedOutline(outer);
+        outer = tr.pts;
+      }
+      const out = { outer, st, tr };
+      cleanedByCand.set(c, out);
+      return out;
+    };
+
     for (const { c, card } of p.cands) {
       // SHAPE-KINK: the operator's "drop this size" — the piece is exported without it (recorded)
       if (fixOf(card.token) === 'drop') {
@@ -1455,7 +1488,9 @@ export function buildPieceSpecsDetailed(
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
-      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      // the outline as cleaned below (cleanedOf: bump chords, kinks, spikes / traced cleaning)
+      const cleaned = cleanedOf(c);
+      let outer = cleaned.outer;
       // SHAPE-KINK (pieces/notch-marks.ts): a placement mark this size ran around, kept on its line
       const sizeKinks: KinkRecord[] = (c.placeMarks ?? []).map((m) => ({
         at: m.at,
@@ -1469,7 +1504,6 @@ export function buildPieceSpecsDetailed(
         );
       const nb = bumpsByRank.get(c.rank);
       if (nb?.length) {
-        outer = chordAcross(outer, nb);
         for (const b of nb) {
           const d = Math.min(
             PATIMPORT.notchMaxMm,
@@ -1515,7 +1549,6 @@ export function buildPieceSpecsDetailed(
         });
         const key = `${seed}:${c.rank}`;
         notchChords.set(key, [...(notchChords.get(key) ?? []), ...removed]);
-        outer = kk.outer;
         sizeKinks.push(...kk.kinks.map(({ chord: _c, removed: _r, ...k }) => k));
         pieceNotes.push(
           `${card.token}: outline straightened onto the family's shape at ${kk.kinks.length} place(s) (${kk.kinks.map((k) => `${k.rule} ${k.mm} mm over ${k.spanMm} mm`).join(', ')}; a strict majority of sizes does not turn there) — D5`,
@@ -1529,10 +1562,9 @@ export function buildPieceSpecsDetailed(
       // A stretch the DRAWING itself runs in and out along (its legs on this piece's own cut-line
       // chains, ≥ notchMinMm deep) is a slit notch drawn into the cut line: it leaves the ring and
       // comes back as a notch at that point (layer 4), never silently lost (Codex, r5a).
-      if (!traced) {
-        const st = stripSpikes(outer);
+      const st = cleaned.st;
+      if (st) {
         if (st.spikes) {
-          outer = st.ring;
           const sl = slitNotches(st.excursions, c, set, run);
           feats.push(...sl.notches);
           pieceNotes.push(
@@ -1546,9 +1578,8 @@ export function buildPieceSpecsDetailed(
       }
       // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
       // simple polygon first, or no offset of it is a parallel curve (offset.ts, E3).
-      if (traced) {
-        const t = cleanTracedOutline(outer);
-        outer = t.pts;
+      const t = cleaned.tr;
+      if (t) {
         const r = t.report;
         pieceNotes.push(
           r.cleaned
@@ -2005,7 +2036,11 @@ export function buildPieceSpecsDetailed(
         // offer the half with a fold line (auto when every size agrees, D3)
         const offer = claims.length
           ? halfOfferOf(
-              p.cands.map(({ c: x, card: k }) => ({ outer: x.outer, token: k.token })),
+              // L14: the outlines the size loop checks and exports (cleaned), over the sizes
+              // the operator kept — a dropped size never blocks or carries the offer
+              p.cands
+                .filter(({ card: k }) => fixOf(k.token) !== 'drop')
+                .map(({ c: x, card: k }) => ({ outer: cleanedOf(x).outer, token: k.token })),
               claims,
               brackets(),
               cofWords,

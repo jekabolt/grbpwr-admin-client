@@ -1094,6 +1094,23 @@ function buildJobConfig(args: {
   // поворотов: при запрещённом поперечном крое деталь, которая пролезает только на 90°, считалась
   // влезшей — задание уходило в прогон и сжигало весь бюджет, чтобы вернуть «уложил 39 из 40».
   // Берём ровно то, чем меряет движок (`allowedRotations` + `fittingRotations` + `crossSpanCm`).
+  // L14: the same for a half on fold that cannot be cut (geom/fold-unit.ts) — the engine would
+  // leave it unplaced and the job end as a draft; no fabric width or budget fixes it.
+  const foldRefused = pieces.filter(
+    (p) => p.fold?.kind === 'refused' && (unitsOfPiece.get(p.id) ?? 0) > 0,
+  );
+  if (foldRefused.length > 0) {
+    const named = foldRefused
+      .slice(0, 3)
+      .map((p) => `“${p.blockName || p.name}” (${p.fold?.kind === 'refused' ? p.fold.reason : ''})`)
+      .join(', ');
+    const more = foldRefused.length > 3 ? ` and ${foldRefused.length - 3} more` : '';
+    return {
+      ok: false,
+      reason: `half on fold that cannot be cut: ${named}${more}. the job does not start: the pattern needs a fix.`,
+    };
+  }
+
   const rotations = allowedRotations(scope.direction, NEST_DEFAULTS.allowCrossGrain);
   const usable = widthCm - 2 * NEST_DEFAULTS.edgeMarginCm;
   const tooWide = pieces.filter(
