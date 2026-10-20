@@ -143,6 +143,7 @@ const REASON: Record<string, string> = {
   'sizes-not-distinguished': 'sizes drawn alike',
   'size-count': 'size count open',
   'grade-ambiguous': 'two size layouts fit',
+  'notch-variant': 'which notch?',
 };
 
 /**
@@ -737,6 +738,26 @@ export function DetailsStep({
           </>
         );
         break;
+      // BACK-VARIANT: the labelled notch alternatives — the operator keeps the model's own
+      case 'notch-variant': {
+        const nv = sem.notchVariantAsks?.find((q) => q.seed === seed);
+        body = nv && (
+          <ChipRow>
+            {nv.options.map((o) => (
+              <Chip
+                key={o.key}
+                {...ask('details-blocked')}
+                tone={o.key === nv.suggested ? 'attention' : undefined}
+                title={o.label}
+                onClick={() => answer(override(seed, { notchVariant: o.key }))}
+              >
+                {o.key}
+              </Chip>
+            ))}
+          </ChipRow>
+        );
+        break;
+      }
       case 'grammar':
       case 'duplicate-identity':
         body = (
