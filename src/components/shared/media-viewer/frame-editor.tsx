@@ -447,14 +447,12 @@ export function useFrameEditor({
 
       const megapixels = (outWidth * outHeight) / 1_000_000;
       if (megapixels > MAX_IMAGE_MEGAPIXELS) {
-        throw new Error(
-          `expanded frame is ${megapixels.toFixed(1)} MP; maximum is ${MAX_IMAGE_MEGAPIXELS} MP`,
-        );
+        throw new Error(`too large · ${megapixels.toFixed(1)} / ${MAX_IMAGE_MEGAPIXELS} MP`);
       }
       const format = imageFormatOf(pixels.dataUrl) === 'image/webp' ? 'image/webp' : 'image/jpeg';
       return { dataUrl: pixels.expand(margins, background, format) };
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : 'the frame could not be exported';
+      const message = reason instanceof Error ? reason.message : 'export failed';
       setExportError(message);
       throw reason;
     } finally {

@@ -676,33 +676,30 @@ export function MediaViewer({
     [leaveMode, showMessage],
   );
 
-  const runSave = useCallback(
-    async (bake: () => Promise<string | null>) => {
-      const item = items[safeIndex];
-      if (!item || saving) return;
-      setSaving(true);
-      let dataUrl: string | null = null;
-      try {
-        dataUrl = await bake();
-      } catch (e) {
-        setSaving(false);
-        showMessage(e instanceof Error ? e.message : 'could not read the picture', 'error');
-        return;
-      }
-      if (!dataUrl) {
-        leaveMode();
-        return;
-      }
-      if (onReplace) {
-        setSaving(false);
-        setChoice({ dataUrl, item });
-        return;
-      }
-      const baked = dataUrl;
-      await settle(() => saveCopy(baked, item));
-    },
-    [items, safeIndex, saving, onReplace, saveCopy, settle, leaveMode, showMessage],
-  );
+  const runSave = async (bake: () => Promise<string | null>) => {
+    const item = items[safeIndex];
+    if (!item || saving) return;
+    setSaving(true);
+    let dataUrl: string | null = null;
+    try {
+      dataUrl = await bake();
+    } catch (e) {
+      setSaving(false);
+      showMessage(e instanceof Error ? e.message : 'could not read the picture', 'error');
+      return;
+    }
+    if (!dataUrl) {
+      leaveMode();
+      return;
+    }
+    if (onReplace) {
+      setSaving(false);
+      setChoice({ dataUrl, item });
+      return;
+    }
+    const baked = dataUrl;
+    await settle(() => saveCopy(baked, item));
+  };
 
   /** adjust / draw: one baker for both (ink over the correction, see `bakePicture`). */
   const saveStage = useCallback(() => {
