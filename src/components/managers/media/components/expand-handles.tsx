@@ -45,6 +45,10 @@ export type ExpandHandlesProps = {
   maxMegapixels?: number;
   /** 44px hit areas instead of 32px. */
   touch?: boolean;
+  /** Shared viewer frame editor only exposes the four corner handles. */
+  cornersOnly?: boolean;
+  /** Dark renders white bracket handles over the black viewer stage. */
+  tone?: 'default' | 'dark';
   /** Colour pick mode: the photo layer is removed so a click reaches the picture underneath. */
   pickMode?: boolean;
   disabled?: boolean;
@@ -80,6 +84,13 @@ const MARK: Record<HandleDir, string> = {
   nw: 'size-2.25',
   se: 'size-2.25',
   sw: 'size-2.25',
+};
+
+const DARK_CORNER: Partial<Record<HandleDir, string>> = {
+  nw: 'frame-editor-expand-handle-nw',
+  ne: 'frame-editor-expand-handle-ne',
+  se: 'frame-editor-expand-handle-se',
+  sw: 'frame-editor-expand-handle-sw',
 };
 
 /** Arrow key → (edge it moves, +1 outward / -1 inward) for an edge handle's own axis. */
@@ -121,6 +132,8 @@ export function ExpandHandles({
   presets,
   maxMegapixels,
   touch,
+  cornersOnly,
+  tone = 'default',
   pickMode,
   disabled,
   settling,
@@ -265,7 +278,7 @@ export function ExpandHandles({
           ) : null,
         )}
 
-      {HANDLES.map((h) => (
+      {HANDLES.filter((h) => !cornersOnly || h.dir.length === 2).map((h) => (
         <Button
           key={h.dir}
           type='button'
@@ -278,6 +291,7 @@ export function ExpandHandles({
             touch ? 'size-11' : 'size-8',
             h.at,
             h.cursor,
+            tone === 'dark' && 'focus-visible:outline-bgColor',
           )}
           onPointerDown={(e: PointerEvent<HTMLElement>) => down(e, h.dir)}
           onPointerMove={move}
@@ -288,9 +302,14 @@ export function ExpandHandles({
           <span
             aria-hidden
             className={cn(
-              'block border border-textColor',
-              MARK[h.dir],
-              active === h.dir ? 'bg-textColor' : 'bg-bgColor group-hover:bg-textColor',
+              'block',
+              tone === 'dark'
+                ? cn('size-3.5 bg-transparent', DARK_CORNER[h.dir])
+                : cn(
+                    'border border-textColor',
+                    MARK[h.dir],
+                    active === h.dir ? 'bg-textColor' : 'bg-bgColor group-hover:bg-textColor',
+                  ),
             )}
           />
         </Button>
