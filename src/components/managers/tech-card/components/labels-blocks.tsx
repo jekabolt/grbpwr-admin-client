@@ -178,20 +178,20 @@ function KeyedCards({
     });
 
   const replaceMedia = async (dataUrl: string, item: MediaViewerItem) => {
-    if (!viewer) throw new Error('The label picture slot is no longer open.');
+    if (!viewer) throw new Error('slot closed');
     const targetIndex = viewer.items.indexOf(item);
     const sourceId = viewer.ids[targetIndex];
     const before = liveIds(viewer.key);
     if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
-      throw new Error('The label picture slot changed before replacement.');
+      throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
-    if (!newId) throw new Error('The replacement upload returned no media id.');
+    if (!newId) throw new Error('upload failed');
 
     const latest = liveIds(viewer.key);
     if (latest[targetIndex] !== sourceId)
-      throw new Error('The label picture slot changed before replacement.');
+      throw new Error('slot changed');
 
     const nextIds = latest.slice();
     nextIds[targetIndex] = newId;

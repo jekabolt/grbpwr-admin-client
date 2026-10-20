@@ -178,7 +178,7 @@ export function AnnotationZoomDialog({
           selected={showCallouts}
           pressed={showCallouts}
           onClick={() => setShowCallouts((v) => !v)}
-          title='hide all the lines and look at the picture itself'
+          title='hide callouts'
         >
           callouts · {surface.callouts.length}
         </Chip>

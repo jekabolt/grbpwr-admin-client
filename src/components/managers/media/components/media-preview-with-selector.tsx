@@ -51,7 +51,7 @@ export function MediaPreviewWithSelector({
 
   const replaceMedia = async (dataUrl: string) => {
     const media = await uploadMedia.mutateAsync(dataUrl);
-    if (!media.id) throw new Error('The replacement upload returned no media id.');
+    if (!media.id) throw new Error('upload failed');
     onSaveMedia([media]);
   };
 

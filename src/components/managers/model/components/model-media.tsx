@@ -116,14 +116,14 @@ export function ModelMedia({
     const sourceId = item.meta?.id ?? 0;
     const before = getValues('mediaIds') ?? [];
     if (!sourceId || before[0] !== sourceId)
-      throw new Error('The model photo changed before replacement.');
+      throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
-    if (!newId) throw new Error('The replacement upload returned no media id.');
+    if (!newId) throw new Error('upload failed');
 
     const latest = getValues('mediaIds') ?? [];
-    if (latest[0] !== sourceId) throw new Error('The model photo changed before replacement.');
+    if (latest[0] !== sourceId) throw new Error('slot changed');
 
     remember(uploaded);
     field.onChange([newId, ...latest.slice(1).filter((id) => id !== newId)]);

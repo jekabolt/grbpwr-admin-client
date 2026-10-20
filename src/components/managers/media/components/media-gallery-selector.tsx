@@ -188,14 +188,14 @@ export function MediaGallerySelector({
   async function replaceMedia(dataUrl: string, item: (typeof viewerItems)[number]) {
     const sourceId = item.meta?.id;
     const index = media.findIndex((candidate) => candidate.id === sourceId);
-    if (index < 0 || !sourceId) throw new Error('This gallery slot changed before replacement.');
+    if (index < 0 || !sourceId) throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
-    if (!uploaded.id) throw new Error('The replacement upload returned no media id.');
+    if (!uploaded.id) throw new Error('upload failed');
     const latest = mediaRef.current;
     const current = latest[index];
     if (!current || current.id !== sourceId)
-      throw new Error('This gallery slot changed before replacement.');
+      throw new Error('slot changed');
 
     const next = latest.slice();
     next[index] = uploaded;

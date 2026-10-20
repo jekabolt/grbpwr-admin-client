@@ -482,15 +482,15 @@ export function PhotoStage() {
     const before = getValues('mediaIds') ?? [];
     const targetIndex = before.indexOf(sourceId);
     if (!sourceId || targetIndex < 0)
-      throw new Error('The fitting photo slot changed before replacement.');
+      throw new Error('slot changed');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;
-    if (!newId) throw new Error('The replacement upload returned no media id.');
+    if (!newId) throw new Error('upload failed');
 
     const latest = getValues('mediaIds') ?? [];
     if (latest[targetIndex] !== sourceId)
-      throw new Error('The fitting photo slot changed before replacement.');
+      throw new Error('slot changed');
 
     addPicked([uploaded]);
     const nextIds = latest.slice();
