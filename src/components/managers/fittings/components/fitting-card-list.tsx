@@ -1,6 +1,9 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { sampleLabel } from 'components/managers/tech-card/components/sample-picker';
+import { techCardFittingsQuery } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
+import { useQueries } from '@tanstack/react-query';
+import { findInDictionary } from 'lib/features/findInDictionary';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
@@ -8,7 +11,13 @@ import { useNavigate } from 'react-router-dom';
 import { Close, ConfirmationModal, Pill, Placeholder, Text, Tile, Tiles } from 'ui';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
 import { useModelsByIds, useSamplesByIds, useTechCardsByIds } from './useResolvers';
-import { formatFittingDate, statusLabel } from './utils';
+import {
+  fittingOrdinal,
+  fittingTitleParts,
+  fittingTitleText,
+  formatFittingDate,
+  statusLabel,
+} from './utils';
 
 const LIMIT = 24;
 
@@ -33,7 +42,6 @@ export function FittingCardList() {
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const fittings = data?.pages.flatMap((page) => page.fittings) ?? [];
-  const total = data?.pages[0]?.total ?? fittings.length;
 
   const modelMap = useModelsByIds(fittings.map((f) => f.fitting?.modelId ?? 0));
   const modelName = (id?: number) => (id ? modelMap.get(id)?.model?.name || `#${id}` : '—');
@@ -42,16 +50,27 @@ export function FittingCardList() {
   // same style/sample labels used elsewhere (tech-card-field.tsx, sample-picker.tsx).
   const techCardMap = useTechCardsByIds(fittings.map((f) => f.fitting?.techCardId ?? 0));
   const sampleMap = useSamplesByIds(fittings.map((f) => f.fitting?.sampleId ?? 0));
-  const techCardLabel = (id?: number) => {
-    if (!id) return null;
-    const tc = techCardMap.get(id)?.techCard;
-    const parts = [tc?.styleNumber, tc?.name].filter(Boolean);
-    return parts.length ? parts.join(' · ') : `tech card #${id}`;
-  };
-  const sampleName = (id?: number) => {
-    if (!id) return null;
-    const s = sampleMap.get(id);
-    return s ? sampleLabel(s) : `sample #${id}`;
+  // The card's title is the fitting screen's title: type · garment · size · fitting N.
+  const { dictionary } = useDictionary();
+  const techCardIds = Array.from(
+    new Set(fittings.map((f) => f.fitting?.techCardId ?? 0).filter((id) => id > 0)),
+  );
+  const siblingResults = useQueries({ queries: techCardIds.map(techCardFittingsQuery) });
+  const siblingsOf = new Map(techCardIds.map((id, i) => [id, siblingResults[i]?.data]));
+  const cardTitle = (id: number, techCardId?: number, sampleId?: number) => {
+    const tc = techCardId ? techCardMap.get(techCardId)?.techCard : undefined;
+    const sizeId = sampleId ? sampleMap.get(sampleId)?.sample?.sizeId : undefined;
+    const text = fittingTitleText(
+      fittingTitleParts({
+        type: tc?.categoryId
+          ? String(findInDictionary(dictionary, tc.categoryId, 'category') || '')
+          : '',
+        garment: tc?.name || tc?.styleNumber || '',
+        size: sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '',
+        ordinal: techCardId ? fittingOrdinal(siblingsOf.get(techCardId), id) : 0,
+      }),
+    );
+    return text || `fitting ${id}`;
   };
 
   function confirmDelete() {
@@ -72,15 +91,6 @@ export function FittingCardList() {
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <Text variant='uppercase' size='small'>
-          fittings
-        </Text>
-        <Text variant='inactive' size='small'>
-          {fittings.length} of {total}
-        </Text>
-      </div>
-
       {isLoading ? (
         <div className='flex justify-center py-20'>
           <Text variant='inactive' className='animate-pulse'>
@@ -101,9 +111,7 @@ export function FittingCardList() {
           {fittings.map((fitting) => {
             const id = fitting.id ?? 0;
             const insert = fitting.fitting;
-            const sample = sampleName(insert?.sampleId);
-            const title =
-              [techCardLabel(insert?.techCardId), sample].filter(Boolean).join(' · ') || '—';
+            const title = cardTitle(id, insert?.techCardId, insert?.sampleId);
             const photos = fitting.media?.length ?? 0;
             const openChanges = insert?.changeRequests?.filter((cr) => !cr.resolved).length ?? 0;
             const thumb = fitting.media?.[0]?.media?.thumbnail?.mediaUrl;
