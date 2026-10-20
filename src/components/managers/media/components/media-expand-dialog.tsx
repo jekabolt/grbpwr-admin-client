@@ -54,7 +54,7 @@ export function MediaExpandDialog({
 
   if (mobile) {
     return (
-      <EditorScreen open={open} onOpenChange={onOpenChange} title={`expand ${media.id}`}>
+      <EditorScreen open={open} onOpenChange={onOpenChange} title='expand'>
         <MediaExpander
           layout='mobile'
           title='expand'
@@ -73,7 +73,7 @@ export function MediaExpandDialog({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={() => undefined}
-      title={`expand ${media.id}`}
+      title='expand'
       width='lg'
       hideActions
     >

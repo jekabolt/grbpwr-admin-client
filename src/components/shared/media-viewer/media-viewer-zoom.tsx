@@ -56,8 +56,10 @@ export function useMediaStageGestures(params: {
   resetKey: unknown;
   hasMany: boolean;
   onSwipe: (dir: 1 | -1) => void;
+  /** Vertical touch swipe (up or down) on an unzoomed stage. */
+  onSwipeClose?: () => void;
 }) {
-  const { active, resetKey, hasMany, onSwipe } = params;
+  const { active, resetKey, hasMany, onSwipe, onSwipeClose } = params;
   const [scale, setScaleState] = useState(1);
   const [pos, setPosState] = useState<Point>({ x: 0, y: 0 });
   const scaleRef = useRef(1);
@@ -188,7 +190,9 @@ export function useMediaStageGestures(params: {
     startPosX: number;
     startPosY: number;
   } | null>(null);
-  const swipe = useRef<{ pointerId: number; startClientX: number } | null>(null);
+  const swipe = useRef<{ pointerId: number; startClientX: number; startClientY: number } | null>(
+    null,
+  );
   const justSwiped = useRef(false);
 
   const onPointerDown = useCallback(
@@ -217,11 +221,15 @@ export function useMediaStageGestures(params: {
           startPosX: posRef.current.x,
           startPosY: posRef.current.y,
         };
-      } else if (e.pointerType === 'touch' && hasMany) {
-        swipe.current = { pointerId: e.pointerId, startClientX: e.clientX };
+      } else if (e.pointerType === 'touch' && (hasMany || onSwipeClose)) {
+        swipe.current = {
+          pointerId: e.pointerId,
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+        };
       }
     },
-    [active, hasMany],
+    [active, hasMany, onSwipeClose],
   );
 
   const onPointerMove = useCallback(
@@ -266,14 +274,18 @@ export function useMediaStageGestures(params: {
       if (drag.current?.pointerId === e.pointerId) drag.current = null;
       if (swipe.current?.pointerId === e.pointerId) {
         const dx = e.clientX - swipe.current.startClientX;
+        const dy = e.clientY - swipe.current.startClientY;
         swipe.current = null;
-        if (Math.abs(dx) > SWIPE_THRESHOLD) {
+        if (onSwipeClose && Math.abs(dy) > SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx)) {
+          justSwiped.current = true;
+          onSwipeClose();
+        } else if (hasMany && Math.abs(dx) > SWIPE_THRESHOLD) {
           justSwiped.current = true;
           onSwipe(dx < 0 ? 1 : -1);
         }
       }
     },
-    [onSwipe],
+    [hasMany, onSwipe, onSwipeClose],
   );
 
   // The stage's onClick (close-on-background-click) calls this so the click
@@ -585,7 +597,12 @@ export function useImageAdjust(params: {
 
   /** Канвас стоит ТОЛЬКО пока коррекция не тождественна: ноль на всех ручках = обычный `<img>`. */
   const on =
-    open && enabled && status === 'ready' && !adjustIsZero(values) && baseSize.w > 0 && baseSize.h > 0;
+    open &&
+    enabled &&
+    status === 'ready' &&
+    !adjustIsZero(values) &&
+    baseSize.w > 0 &&
+    baseSize.h > 0;
 
   // Отрисовка в rAF: ползунок сыплет событиями пачками, а перерисовка нужна одна на кадр.
   // Буфер — размер ПОКАЗАННОГО кадра (≤ ~1.5 Мп), а не натуральный: тянуть 24 Мп на каждое
@@ -1185,7 +1202,11 @@ export function ZoomDrawToolbar({
           <>
             {/* Pen weight, shown as the dot it draws — a "2 / 4 / 9" label would make you
                 translate a number into a line thickness on every pick. */}
-            <div role='radiogroup' aria-label='Pen weight' className='ml-1 flex items-center gap-1'>
+              <div
+                role='radiogroup'
+                aria-label='Pen weight'
+                className='ml-1 flex items-center gap-1'
+              >
               {widths.map((w) => (
                 <button
                   key={w.value}
@@ -1216,7 +1237,11 @@ export function ZoomDrawToolbar({
               ))}
             </div>
 
-            <div role='radiogroup' aria-label='Pen color' className='mx-1 flex items-center gap-1'>
+              <div
+                role='radiogroup'
+                aria-label='Pen color'
+                className='mx-1 flex items-center gap-1'
+              >
               {colors.map((c) => (
                 <button
                   key={c.value}
@@ -1242,7 +1267,6 @@ export function ZoomDrawToolbar({
             </ToolbarIconButton>
           </>
         )}
-
       </div>
 
       {/* ДВЕРИ НАРУЖУ — СВОЯ ГРУППА, А НЕ ХВОСТ ГРУППЫ ПЕРА.

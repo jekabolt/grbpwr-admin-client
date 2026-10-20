@@ -89,7 +89,7 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
     src,
     thumbnail,
     type: isVideo(src) ? 'video' : 'image',
-    alt: m.id != null ? `media ${m.id}` : 'media',
+    alt: 'media',
     blurhash: media?.blurhash,
     meta: {
       id: m.id,
@@ -479,8 +479,20 @@ export function MediaViewer({
   // Reset zoom/pan/drawing whenever the viewer moves to a different item, or
   // closes — each image gets a fresh, session-only stage.
   const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
-  const gestures = useMediaStageGestures({ active: stageLive, resetKey, hasMany, onSwipe: go });
+  // Phone: a vertical swipe (up or down) closes, except while drawing (a stroke is not a swipe).
+  const drawModeRef = useRef(false);
+  const swipeClose = useCallback(() => {
+    if (!drawModeRef.current) onOpenChange(false);
+  }, [onOpenChange]);
+  const gestures = useMediaStageGestures({
+    active: stageLive,
+    resetKey,
+    hasMany,
+    onSwipe: go,
+    onSwipeClose: isMobile ? swipeClose : undefined,
+  });
   const annotate = useImageAnnotate({ resetKey, baseSize: gestures.baseSize });
+  drawModeRef.current = annotate.drawMode;
   // Коррекция подчиняется ТОМУ ЖЕ `resetKey`, что зум и чернила: смена кадра или закрытие снимают
   // её начисто. Пережившая закрытие коррекция была бы уже хранимой дельтой, а это другой договор
   // (поля на картинке полосы, прото, и каждый рендерер обязан её честно применять).
@@ -572,7 +584,7 @@ export function MediaViewer({
 
           {/* Top chrome. z-10 — ЛОКАЛЬНЫЙ СТЕК внутри просмотрщика (хром над сценой); слой самого
               просмотрщика задан выше через var(--z-modal). */}
-          {/* Phone top row: back · id · the caller's free-form actions. */}
+          {/* Phone top row: back · counter · the caller's free-form actions. */}
           <div
             className={cn(
               'relative z-10 flex shrink-0 items-center gap-2 px-2 py-1 lg:hidden',
@@ -588,7 +600,7 @@ export function MediaViewer({
               </ViewerAction>
             </Dialog.Close>
             <span className='min-w-0 flex-1 truncate text-center text-textBaseSize uppercase tabular-nums'>
-              {current.meta?.id ?? (hasMany ? label : '')}
+              {hasMany ? label : ''}
             </span>
             <span className='flex min-w-16 shrink-0 items-center justify-end gap-2'>
               {isMobile && actions?.(current, safeIndex)}
@@ -599,11 +611,6 @@ export function MediaViewer({
             <span className='text-textBaseSize uppercase tabular-nums'>
               {hasMany ? label : ' '}
             </span>
-            {current.meta?.id != null && (
-              <span className='text-micro uppercase tracking-label tabular-nums text-bgColor/70'>
-                id {current.meta.id}
-              </span>
-            )}
             <span className='ml-auto flex flex-wrap items-center gap-2'>
               {barTools.map((t) => (
                 <ViewerAction key={t.key} disabled={t.disabled} onClick={t.onClick}>
@@ -892,12 +899,7 @@ export function MediaViewer({
           </div>
 
           {isMobile && current.meta && (
-            <Drawer
-              side='bottom'
-              open={showMeta}
-              onOpenChange={setShowMeta}
-              title={current.meta.id != null ? String(current.meta.id) : 'info'}
-            >
+            <Drawer side='bottom' open={showMeta} onOpenChange={setShowMeta} title='info'>
               <MetaSheet meta={current.meta} size={currentSize} onUsageNavigate={onUsageNavigate} />
             </Drawer>
           )}
@@ -958,14 +960,12 @@ function MetaPanel({
         details
       </div>
       <dl className='mb-3'>
-        <MetaRow label='id' value={meta.id ?? '—'} />
         <MetaRow
           label='uploaded'
           value={
             created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString('en-US') : '—'
           }
         />
-        <MetaRow label='blurhash' value={meta.blurhash ? `${meta.blurhash.slice(0, 10)}…` : '—'} />
       </dl>
 
       {!!meta.renditions?.length && (
@@ -1333,10 +1333,6 @@ function MetaSheet({
           <FoldCaret open='details' />
         </summary>
         <dl>
-          <div className='flex justify-between gap-2 border-b border-hairline py-2'>
-            <dt className={label}>blurhash</dt>
-            <dd className='truncate'>{meta.blurhash || <EmptyCell />}</dd>
-          </div>
           {meta.renditions?.map((r) => (
             <div key={r.label} className='flex items-center gap-2 border-b border-hairline py-1'>
               <dt className={cn(label, 'w-24 shrink-0')}>{r.label}</dt>

@@ -100,7 +100,7 @@ export function MediaRecropDialog({
 
   if (mobile) {
     return (
-      <EditorScreen open={open} onOpenChange={onOpenChange} title={`crop ${media.id}`}>
+      <EditorScreen open={open} onOpenChange={onOpenChange} title='crop'>
         <MediaCropper
           layout='mobile'
           title='crop'
@@ -119,7 +119,7 @@ export function MediaRecropDialog({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={() => undefined}
-      title={`crop ${media.id}`}
+      title='crop'
       width='lg'
       hideActions
     >
