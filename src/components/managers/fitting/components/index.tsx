@@ -23,6 +23,7 @@ import { useForm, UseFormReturn, useWatch } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Form, Section, Text } from 'ui';
 import { fittingOrdinal, fittingTitleParts } from 'components/managers/fittings/components/utils';
+import { FittingTitle } from 'components/managers/fittings/components/fitting-title';
 import { DetailsDrawer } from './details-drawer';
 import { EditsList } from './edits-list';
 import { FittingNote } from './fitting-note';
@@ -337,21 +338,9 @@ function FittingWorkspaceScreen({
                 component='h1'
                 variant='uppercase'
                 tracking='section'
-                className='flex min-w-0 flex-1 font-bold whitespace-nowrap'
+                className='min-w-0 flex-1 font-bold'
               >
-                {garment ? (
-                  <>
-                    {title.head && <span className='shrink-0'>{title.head}&nbsp;·&nbsp;</span>}
-                    <span className='min-w-0 truncate'>{title.garment}</span>
-                    {title.tail.map((t) => (
-                      <span key={t} className='shrink-0'>
-                        &nbsp;·&nbsp;{t}
-                      </span>
-                    ))}
-                  </>
-                ) : (
-                  `fitting\u00a0${fittingId}`
-                )}
+                {garment ? <FittingTitle parts={title} /> : `fitting\u00a0${fittingId}`}
               </Text>
               <Button
                 type='button'
