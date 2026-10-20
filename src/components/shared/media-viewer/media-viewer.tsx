@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChatBubbleIcon,
   CopyIcon,
   DotsHorizontalIcon,
   DownloadIcon,
@@ -382,6 +383,8 @@ interface MediaViewerProps {
    * прежнее «скачать».
    */
   onSaveAsPicture?: (dataUrl: string, item: MediaViewerItem) => Promise<void>;
+  /** The picture's callouts (see `ViewerCallouts`); the viewer opens on them. */
+  callouts?: ViewerCallouts;
   // РАНЬШЕ ЗДЕСЬ БЫЛ `renderOverlay` — крючок, которым галерея эскиза рисовала поверх снимка СВОЮ
   // копию указаний: он умел показывать, но не править, и расходился с плиткой на каждой правке.
   // Теперь увеличенный вид указаний это `annotation/zoom-dialog` — та же поверхность, что и на
@@ -400,7 +403,32 @@ interface MediaViewerProps {
  * В режиме кадр не листается и не закрывается смахиванием: переход на соседа снял бы правку
  * молча, а штрих пером слишком похож на смахивание.
  */
-export type ViewerMode = 'adjust' | 'frame' | 'draw';
+export type ViewerMode = 'adjust' | 'frame' | 'draw' | 'callouts';
+
+/**
+ * ═══ УКАЗАНИЯ — РЕЖИМ ТОГО ЖЕ ПРОСМОТРЩИКА (viewer-unify V4) ══════════════════════════════════
+ *
+ * Раньше у снимка с выносками было своё окно (`AnnotationZoomDialog`): свой тёмный фон, своя шапка,
+ * свои стрелки — второй просмотрщик рядом с этим, с другим набором дверей. Теперь окно указаний —
+ * это ЭТОТ просмотрщик в режиме `callouts`: та же полоса, тот же `more`, тот же выход.
+ *
+ * Чем режим отличается от остальных: правка в нём ЖИВАЯ (каждая выноска уходит хозяину сразу, как
+ * и раньше), поэтому `cancel · save` у него нет — снимать нечего. Он же — режим ДОМА: кадр с
+ * указаниями открывают, чтобы их читать, и `cancel` любого другого режима возвращает сюда.
+ *
+ * Поверхность и инструменты рисует хозяин (`AnnotationSurface`, `AnnotationToolbar`): просмотрщик
+ * не знает, что такое выноска, и знать не должен — он даёт им место.
+ */
+export interface ViewerCallouts {
+  /** The annotation surface, in place of the picture (it zooms and pans by itself). */
+  stage: ReactNode;
+  /** The band under it: the show/hide chip, the toolbar or the read-only note. Light ground. */
+  tools: ReactNode;
+  /** Paging the owner does itself (a row the viewer only sees one frame of): `← 3 / 7 →`. */
+  nav?: ReactNode;
+  /** ← → on the keyboard for that paging. Absent — the keys do nothing here. */
+  onPage?: (dir: 1 | -1) => void;
+}
 
 export function MediaViewer({
   items,
@@ -413,13 +441,18 @@ export function MediaViewer({
   notice,
   onUsageNavigate,
   onSaveAsPicture,
+  callouts,
 }: MediaViewerProps) {
   const [showMeta, setShowMeta] = useState(false);
   const isMobile = useIsMobileViewer();
   /** Phone: a tap on the stage hides the chrome, so only the picture remains. */
   const [chromeHidden, setChromeHidden] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [mode, setMode] = useState<ViewerMode | null>(null);
+  /** Where `cancel` and a new frame land: the callouts, when the picture has them. */
+  const home: ViewerMode | null = callouts ? 'callouts' : null;
+  const [mode, setMode] = useState<ViewerMode | null>(home);
+  /** A mode with `cancel · save` — the chrome steps aside. The callouts are not one. */
+  const editing = mode !== null && mode !== 'callouts';
   const [frameKind, setFrameKind] = useState<FrameEditorKind>('crop');
   const [knob, setKnob] = useState<AdjustKnob>('brightness');
   const [saving, setSaving] = useState(false);
@@ -477,13 +510,16 @@ export function MediaViewer({
   // image gets a fresh, session-only stage.
   const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
   useEffect(() => {
-    setMode(null);
+    setMode(home);
     setSaving(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (!hasMany || mode) return;
+      if (editing) return;
+      const page = mode === 'callouts' ? callouts?.onPage : hasMany ? go : undefined;
+      if (!page) return;
       /**
        * СТРЕЛКИ ПРИНАДЛЕЖАТ СФОКУСИРОВАННОМУ ОРГАНУ, А НЕ ДИАЛОГУ.
        *
@@ -504,19 +540,19 @@ export function MediaViewer({
       }
       if (e.key === 'ArrowRight') {
         e.preventDefault();
-        go(1);
+        page(1);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        go(-1);
+        page(-1);
       }
     },
-    [hasMany, mode, go],
+    [hasMany, editing, go, mode, callouts],
   );
 
   // Phone: a vertical swipe (up or down) closes — but never inside a mode (a stroke is not a swipe).
   const swipeClose = useCallback(() => onOpenChange(false), [onOpenChange]);
   const gestures = useMediaStageGestures({
-    active: stageLive && mode !== 'frame',
+    active: stageLive && mode !== 'frame' && mode !== 'callouts',
     resetKey,
     hasMany: hasMany && !mode,
     onSwipe: go,
@@ -561,7 +597,7 @@ export function MediaViewer({
 
   const enterMode = useCallback(
     (next: ViewerMode, kind?: FrameEditorKind) => {
-      if (!stageLive) return;
+      if (!stageLive && next !== 'callouts') return;
       setShowMeta(false);
       setMoreOpen(false);
       setChromeHidden(false);
@@ -579,9 +615,9 @@ export function MediaViewer({
     adjust.setOpen(false);
     annotate.clear();
     annotate.setDrawMode(false);
-    setMode(null);
+    setMode(home);
     setSaving(false);
-  }, [adjust, annotate]);
+  }, [adjust, annotate, home]);
 
   /**
    * КУДА УХОДЯТ ЗАПЕЧЁННЫЕ БАЙТЫ. Есть дверь хозяина (`onSaveAsPicture`, полоса тех-карты) — туда;
@@ -636,7 +672,7 @@ export function MediaViewer({
   // waits a beat so a double tap (zoom) does not flash the chrome off and on.
   const handleStageClick = (e: React.MouseEvent) => {
     if (gestures.consumeJustSwiped()) return;
-    if (mode) return;
+    if (editing) return;
     if (isMobile) {
       clearTimeout(tapTimer.current);
       if (e.detail > 1) return;
@@ -731,7 +767,7 @@ export function MediaViewer({
         aria-pressed={active}
         selected={active}
         data-probe={`viewer-mode-${key}`}
-        disabled={!stageLive || (!!mode && !active && !sameMode)}
+        disabled={!stageLive || (editing && !active && !sameMode)}
         onClick={onClick}
       >
         {word}
@@ -747,7 +783,7 @@ export function MediaViewer({
           onKeyDown={handleKeyDown}
           // Esc inside a mode is `cancel`, not «close the viewer and lose the picture's place».
           onEscapeKeyDown={(e) => {
-            if (!mode) return;
+            if (!editing) return;
             e.preventDefault();
             leaveMode();
           }}
@@ -768,7 +804,7 @@ export function MediaViewer({
               просмотрщика задан выше через var(--z-modal). */}
           {/* Phone top row: back · counter · the caller's free-form actions — or, in a mode,
               cancel · mode · save (the frame mode draws its own, it owns its save). */}
-          {mode ? (
+          {editing ? (
             mode !== 'frame' && (
               <ModeHeader
                 title={modeTitle ?? ''}
@@ -797,6 +833,7 @@ export function MediaViewer({
                 {hasMany ? label : ''}
               </span>
               <span className='flex min-w-16 shrink-0 items-center justify-end gap-2'>
+                {isMobile && mode === 'callouts' && callouts?.nav}
                 {isMobile && actions?.(current, safeIndex)}
               </span>
             </div>
@@ -806,7 +843,8 @@ export function MediaViewer({
             <span className='text-textBaseSize uppercase tabular-nums'>
               {hasMany ? label : ' '}
             </span>
-            {stageLive && mode !== 'frame' && (
+            {mode === 'callouts' && callouts?.nav}
+            {stageLive && !mode && (
               <ZoomControls
                 scale={gestures.scale}
                 canZoomIn={gestures.canZoomIn}
@@ -838,18 +876,29 @@ export function MediaViewer({
               {modeButton('draw', 'draw', mode === 'draw', () =>
                 mode === 'draw' ? leaveMode() : enterMode('draw'),
               )}
+              {callouts && (
+                <ViewerAction
+                  aria-pressed={mode === 'callouts'}
+                  selected={mode === 'callouts'}
+                  data-probe='viewer-mode-callouts'
+                  disabled={editing}
+                  onClick={() => (mode === 'callouts' ? setMode(null) : enterMode('callouts'))}
+                >
+                  callouts
+                </ViewerAction>
+              )}
               {barTools.map((t) => (
-                <ViewerAction key={t.key} disabled={t.disabled || !!mode} onClick={t.onClick}>
+                <ViewerAction key={t.key} disabled={t.disabled || editing} onClick={t.onClick}>
                   {t.label}
                 </ViewerAction>
               ))}
               {/* One copy of the free-form actions: here on desktop, in the phone row above. */}
-              {!isMobile && !mode && actions?.(current, safeIndex)}
+              {!isMobile && !editing && actions?.(current, safeIndex)}
               {current.meta && (
                 <ViewerAction
                   aria-pressed={showMeta}
                   selected={showMeta}
-                  disabled={!!mode}
+                  disabled={editing}
                   onClick={() => setShowMeta((v) => !v)}
                 >
                   details
@@ -863,7 +912,7 @@ export function MediaViewer({
                   openElement='more'
                   triggerProps={{
                     className: viewerActionClass(moreOpen),
-                    disabled: !!mode,
+                    disabled: editing,
                     'aria-label': 'more',
                   }}
                   contentProps={{ align: 'end', sideOffset: 4 }}
@@ -881,7 +930,26 @@ export function MediaViewer({
             </span>
           </div>
 
-          {mode === 'frame' ? (
+          {mode === 'callouts' && callouts ? (
+            <>
+              <div className='flex min-h-0 flex-1'>
+                <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-2 pb-2'>
+                  {callouts.stage}
+                </div>
+                {showMeta && current.meta && !isMobile && (
+                  <MetaPanel meta={current.meta} onUsageNavigate={onUsageNavigate} />
+                )}
+              </div>
+              {/* Light band: the system's chips are drawn for a white ground, and a second,
+                  inverted set of their states is not worth having. */}
+              <div
+                data-probe='viewer-mode-panel'
+                className='flex shrink-0 flex-wrap items-center gap-2 border-t border-borderColor bg-bgColor px-2.5 py-1.5 text-textColor'
+              >
+                {callouts.tools}
+              </div>
+            </>
+          ) : mode === 'frame' ? (
             <FrameMode
               src={current.src}
               layout={layout}
@@ -1008,7 +1076,7 @@ export function MediaViewer({
                   )}
                 </div>
 
-                {mode && layout === 'desk' && (
+                {editing && layout === 'desk' && (
                   <ModeDock
                     layout='desk'
                     title={modeTitle ?? ''}
@@ -1055,12 +1123,12 @@ export function MediaViewer({
                   </ModeDock>
                 )}
 
-                {!mode && showMeta && current.meta && !isMobile && (
+                {!editing && showMeta && current.meta && !isMobile && (
                   <MetaPanel meta={current.meta} onUsageNavigate={onUsageNavigate} />
                 )}
               </div>
 
-              {mode && layout === 'phone' && (
+              {editing && layout === 'phone' && (
                 <ModeDock
                   layout='phone'
                   title={modeTitle ?? ''}
@@ -1098,7 +1166,7 @@ export function MediaViewer({
             </>
           )}
 
-          {!mode && (
+          {!editing && (
             <>
               {notice && <div className={cn('shrink-0', chromeClass)}>{notice}</div>}
 
@@ -1205,6 +1273,16 @@ export function MediaViewer({
                 <ToolColumn label='draw' disabled={!stageLive} onClick={() => enterMode('draw')}>
                   <Pencil1Icon className='size-5' />
                 </ToolColumn>
+                {/* Only where the picture has callouts — «next to draw», as the owner put it. */}
+                {callouts && (
+                  <ToolColumn
+                    label='callouts'
+                    selected={mode === 'callouts'}
+                    onClick={() => (mode === 'callouts' ? setMode(null) : enterMode('callouts'))}
+                  >
+                    <ChatBubbleIcon className='size-5' />
+                  </ToolColumn>
+                )}
                 <ToolColumn
                   label='info'
                   disabled={!current.meta}

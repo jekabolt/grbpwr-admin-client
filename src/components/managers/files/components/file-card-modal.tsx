@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { MediaViewer, useMediaViewer } from 'components/shared/media-viewer/media-viewer';
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -299,6 +300,13 @@ export function FileCardModal({
   const heldByTasks = (fileTasks?.tasks ?? []).length;
 
   const file = data?.file;
+  const viewer = useMediaViewer();
+  const viewerItems = useMemo(() => {
+    const preview = file?.previewUrl;
+    if (!preview) return [];
+    const inPlace = !!file?.url && !!file.contentType?.startsWith('image/');
+    return [{ src: inPlace ? file.url! : preview, thumbnail: preview, alt: file?.fileName ?? '' }];
+  }, [file?.previewUrl, file?.url, file?.contentType, file?.fileName]);
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
@@ -631,13 +639,19 @@ export function FileCardModal({
 
           <div className='flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain p-3'>
             {file.previewUrl ? (
-              <div className='flex max-h-[45dvh] min-h-40 justify-center border border-borderColor bg-bgColor'>
+              <Button
+                type='button'
+                variant='default'
+                aria-label='open the picture'
+                onClick={() => viewer.openAt(0)}
+                className='flex max-h-[45dvh] min-h-40 w-full justify-center border border-borderColor bg-bgColor'
+              >
                 <img
                   src={file.previewUrl}
                   alt=''
                   className='max-h-full max-w-full object-contain'
                 />
-              </div>
+              </Button>
             ) : note ? (
               <Button
                 type='button'
@@ -819,7 +833,15 @@ export function FileCardModal({
           <div className='flex flex-wrap gap-2.5'>
             <div className='flex size-40 flex-none items-center justify-center border border-borderColor bg-pageBg'>
               {file.previewUrl ? (
-                <img src={file.previewUrl} alt='' className='size-full object-contain' />
+                <Button
+                  type='button'
+                  variant='default'
+                  aria-label='open the picture'
+                  onClick={() => viewer.openAt(0)}
+                  className='size-full cursor-zoom-in'
+                >
+                  <img src={file.previewUrl} alt='' className='size-full object-contain' />
+                </Button>
               ) : (
                 <div className='flex flex-col items-center gap-0.5'>
                   {/* 12px, а не `size='stat'`: stat — это КЕГЛЬ СТАТ-ЯЧЕЙКИ (16px), и за
@@ -1296,6 +1318,18 @@ export function FileCardModal({
       )}
 
       {reading && <FileReaderModal id={id} onClose={() => setReading(false)} />}
+      {/* ТАП ПО КАРТИНКЕ — ОБЩИЙ ПРОСМОТРЩИК (viewer-unify V4): тот же зум, коррекция и `more`, что у
+          любого снимка. Крупный файл — сам файл, если он картинка и смотрится на месте; иначе
+          превью, которое браузер уже отрисовал (у pdf, видео и макетов другого нет). */}
+      {viewerItems.length > 0 && (
+        <MediaViewer
+          items={viewerItems}
+          index={viewer.index}
+          open={viewer.open}
+          onOpenChange={viewer.onOpenChange}
+          onIndexChange={viewer.onIndexChange}
+        />
+      )}
 
       <ConfirmationModal
         open={confirmClose}
