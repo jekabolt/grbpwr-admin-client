@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useNavigate } from 'react-router-dom';
 import {
   MediaViewer,
-  ViewerAction,
   useMediaViewer,
   type MediaViewerItem,
 } from 'components/shared/media-viewer/media-viewer';
@@ -113,19 +112,19 @@ export function NotePicturesProvider({
         {...viewer}
         // У снимка библиотеки остаётся дорога на его карточку: раньше она была самим нажатием на
         // картинку, и молча забрать её, заменив зумом, значило бы обменять одно на другое.
-        actions={(_item, index) => {
+        tools={(_item, index) => {
           const id = shown[index]?.picture.fileId;
-          if (id === undefined) return null;
-          return (
-            <ViewerAction
-              onClick={() => {
+          if (id === undefined) return [];
+          return [
+            {
+              key: 'file-card',
+              label: 'open the file card',
+              onClick: () => {
                 viewer.onOpenChange(false);
                 navigate(fileCardPath(id));
-              }}
-            >
-              open the file card
-            </ViewerAction>
-          );
+              },
+            },
+          ];
         }}
       />
     </NotePicturesContext.Provider>

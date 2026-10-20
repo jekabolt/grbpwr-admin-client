@@ -9,8 +9,6 @@ import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Button, DateScrubber, SideRailLayout, Text, useMonthIndex, type ScrubMonth } from 'ui';
 import {
-  CropGlyph,
-  ExpandGlyph,
   MediaViewer,
   mediaFullListToViewerItems,
   mediaFullViewerSrc,
@@ -861,29 +859,9 @@ export function MediaManager({
             const id = viewingMedia.id;
             return [
               {
-                key: 'crop',
-                label: 'crop',
-                icon: <CropGlyph />,
-                onClick: () => {
-                  setSaved(undefined);
-                  setRecropping(viewingMedia);
-                  viewer.onOpenChange(false);
-                },
-              },
-              {
-                key: 'expand',
-                label: 'expand',
-                icon: <ExpandGlyph />,
-                onClick: () => {
-                  setSaved(undefined);
-                  setExpanding(viewingMedia);
-                  viewer.onOpenChange(false);
-                },
-              },
-              {
                 key: 'delete',
                 label: 'delete',
-                confirm: `delete ${id}`,
+                confirm: 'tap again to delete',
                 icon: <TrashIcon className='size-4' />,
                 place: 'more',
                 tone: 'danger',
