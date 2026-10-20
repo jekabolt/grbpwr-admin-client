@@ -127,7 +127,11 @@ export function ModelForm({
               <Section>
                 <div className='flex flex-col gap-4 md:flex-row md:items-stretch'>
                   <div className='mx-auto w-full max-w-60 shrink-0 md:mx-0'>
-                    <ModelMedia model={model} onBusyChange={setPhotoBusy} />
+                    <ModelMedia
+                      model={model}
+                      canEdit={canWrite(SECTION.models)}
+                      onBusyChange={setPhotoBusy}
+                    />
                   </div>
                   <div className='hidden min-h-0 w-60 shrink-0 border border-hairline md:flex'>
                     <SheetMeasurementDiagram className='w-full' />

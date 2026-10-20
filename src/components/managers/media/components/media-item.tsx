@@ -1,10 +1,9 @@
-import { CopyIcon, EnterFullScreenIcon, TrashIcon } from '@radix-ui/react-icons';
 import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
-import { Button, Media, RatioGlyph, Text } from 'ui';
+import { Button, Media, RatioGlyph, Text, CopyIcon, EnterFullScreenIcon, TrashIcon } from 'ui';
 import { VideoSize } from '..';
 import { mediaAspectRatio, ratioLabel } from '../utils/calculate-aspect';
 import { usageRefLine, usageRefName, usageRefSlot } from '../utils/media-usage';
@@ -383,7 +382,7 @@ export function MediaItem({
       {armed ? (
         <div className='border-t border-textColor px-1.5 py-1'>
           <Text size='micro' variant='label' className='block'>
-            {inUse ? `${media.id} in use` : `delete ${media.id} for good?`}
+            {inUse ? 'in use' : 'delete for good?'}
           </Text>
           {/* ЗАНЯТОЕ НЕ УДАЛЯЕТСЯ. Сервер отказывает в удалении медиа, на которое есть ссылка
               (FailedPrecondition), поэтому кнопка гаснет заранее, а места названы — чтобы было
@@ -427,9 +426,6 @@ export function MediaItem({
         </div>
       ) : (
         <div className='flex items-center gap-1.5 border-t border-hairline px-1.5 py-0.5'>
-          <Text size='micro' component='span' className='flex-none tabular-nums'>
-            {media.id}
-          </Text>
           {/* ОТМЕТКА «ЗАНЯТО» — СЛОВОМ И ЧЕРНИЛАМИ, БЕЗ ЦВЕТА. Цвет в этой системе носит только
               состояние здоровья, а стоящий на витрине снимок — не поломка. Свободный кадр не
               подписывается ничем: подпись «free» на каждой второй плитке утопила бы подвал, а
@@ -443,7 +439,7 @@ export function MediaItem({
                 component='span'
                 className='flex-none tabular-nums'
               >
-                · {usage?.length} {usage?.length === 1 ? 'use' : 'uses'}
+                {usage?.length} {usage?.length === 1 ? 'use' : 'uses'}
               </Text>
             ) : (
               <Text

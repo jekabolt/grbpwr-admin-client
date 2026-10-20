@@ -1,11 +1,18 @@
-import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Chip, ChipRow, Close, Text } from 'ui';
-import { ViewerAction } from 'components/shared/media-viewer/media-viewer';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Chip, ChipRow, Text } from 'ui';
+import {
+  MediaViewer,
+  ViewerAction,
+  type MediaViewerItem,
+} from 'components/shared/media-viewer/media-viewer';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
 import { AnnotationToolbar } from './toolbar';
 
+// ОКНО УКАЗАНИЙ — ЭТО ОБЩИЙ ПРОСМОТРЩИК В РЕЖИМЕ `callouts` (viewer-unify V4). Своего диалога у
+// него больше нет: тёмный фон, выход, `more`, коррекция и перо — те же, что у любого снимка. Здесь
+// осталось только то, что знает про выноски: поверхность, панель видов и стрелки ряда.
+//
 // УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, А НЕ СМОТРЕЛКА.
 //
 // Снимок узла бывает мелким, а указание ставят по миллиметровой детали. Открывать увеличенную
@@ -95,167 +102,117 @@ export function AnnotationZoomDialog({
     onSelect?.(null);
   }, [surface.src, onSelect]);
 
-  return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) setTool(null);
-        onOpenChange(v);
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-black/90' />
-        <Dialog.Content
-          aria-label={title}
-          onKeyDown={(e) => {
-            if (!navigable) return;
-            // НЕ КОГДА КУРСОР В ПОЛЕ ВВОДА: в подписи выноски стрелки двигают каретку, и
-            // перехватить их значило бы уносить человека на соседний снимок посреди слова.
-            const t = e.target as HTMLElement | null;
-            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
-              return;
-            if (e.key === 'ArrowLeft' && onPrev) {
-              e.preventDefault();
-              onPrev();
-            } else if (e.key === 'ArrowRight' && onNext) {
-              e.preventDefault();
-              onNext();
-            }
-          }}
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-black/90 focus:outline-none'
+  // ОДИН КАДР В ПРОСМОТРЩИКЕ, ЛИСТАЕТ ХОЗЯИН. Ряд вложений знает соседей, а этот адаптер видит
+  // только текущий снимок — поэтому стрелки ← → живут в `nav`, а не в ленте просмотрщика.
+  const items = useMemo<MediaViewerItem[]>(
+    () => [{ src: surface.src, type: surface.media, alt: surface.alt || title }],
+    [surface.src, surface.media, surface.alt, title],
+  );
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) setTool(null);
+    onOpenChange(v);
+  };
+
+  const nav = (
+    <span className='flex min-w-0 items-center gap-1.5'>
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='group'
+        component='span'
+        className='min-w-0 truncate font-bold text-bgColor max-lg:hidden'
+      >
+        {title}
+      </Text>
+      {navigable && (
+        <ViewerAction aria-label='previous frame' disabled={!onPrev} onClick={onPrev}>
+          ←
+        </ViewerAction>
+      )}
+      {position && (
+        <Text
+          size='micro'
+          component='span'
+          className='tabular-nums text-bgColor'
+        >{`${position.index + 1} / ${position.total}`}</Text>
+      )}
+      {navigable && (
+        <ViewerAction aria-label='next frame' disabled={!onNext} onClick={onNext}>
+          →
+        </ViewerAction>
+      )}
+    </span>
+  );
+
+  const stage = (
+    <AnnotationSurface
+      // ПОВЕРХНОСТЬ ПЕРЕСОЗДАЁТСЯ ПОД КАЖДЫЙ КАДР. Её собственные состояния — выбор, набранные
+      // точки, масштаб и сдвиг — привязаны к КОНКРЕТНОЙ картинке и сами по смене `src` не
+      // сбрасываются. В КЛЮЧЕ ПОЗИЦИЯ, А НЕ ТОЛЬКО АДРЕС: один и тот же файл можно приложить к
+      // карточке дважды, и зум с недонабранной фигурой переехали бы на соседнее вложение.
+      key={`${position?.index ?? 0}:${surface.src}`}
+      {...surface}
+      zoom
+      tool={tool}
+      onToolDone={() => setTool(null)}
+      hideCallouts={!showCallouts}
+      maxCallouts={maxCallouts}
+      // КАРТИНКА ЗАНИМАЕТ ВСЁ МЕСТО, какое есть: кадр берёт собственные пропорции снимка и
+      // совпадает с ним пиксель в пиксель — а он и есть система координат указаний.
+      fit
+      className='min-h-0 flex-1'
+      frameClassName='border-0 bg-transparent'
+      // ВСЁ, ЧТО ПОД КАДРОМ, живёт на ТЁМНОМ фоне и получает подложку: без неё чернильный текст
+      // на чёрном не виден вовсе.
+      chromeClassName='bg-bgColor p-1.5 empty:hidden'
+    />
+  );
+
+  const tools = (
+    <>
+      <ChipRow>
+        <Chip
+          nonForm
+          dashed={!showCallouts}
+          selected={showCallouts}
+          pressed={showCallouts}
+          onClick={() => setShowCallouts((v) => !v)}
+          title='hide callouts'
         >
-          <Dialog.Title className='sr-only'>{title}</Dialog.Title>
-          <Dialog.Description className='sr-only'>
-            the wheel or a pinch changes the scale, dragging moves the picture. callouts are placed
-            and edited right here.
-            {navigable ? ' the ← → arrows page through the frames.' : ''}
-          </Dialog.Description>
+          callouts · {surface.callouts.length}
+        </Chip>
+      </ChipRow>
+      {editable && showCallouts && (
+        <AnnotationToolbar
+          tool={tool}
+          onTool={setTool}
+          kinds={toolKinds}
+          purposes={purposes}
+          remaining={maxCallouts != null ? maxCallouts - surface.callouts.length : undefined}
+        />
+      )}
+      {!editable && readOnlyNote && (
+        <Text size='micro' variant='label' component='span'>
+          {readOnlyNote}
+        </Text>
+      )}
+    </>
+  );
 
-          {/* ШАПКА — только имя, положение в ряду и выход. Всё, чем ДЕЙСТВУЮТ по снимку, живёт
-              внизу.
-              СТРЕЛКИ ЛИСТАНИЯ ТОЖЕ ЗДЕСЬ, А НЕ ПОВЕРХ КАДРА, как в обычном просмотрщике: кадр —
-              это поверхность, по которой ставят указания, и две кнопки, висящие над её левым и
-              правым краем, съедали бы клики ровно там, где чаще всего и приходится ставить
-              точку. */}
-          <div className='flex shrink-0 items-center justify-between gap-4 px-4 py-3 text-bgColor'>
-            <Text
-              size='micro'
-              variant='uppercase'
-              tracking='group'
-              component='span'
-              className='min-w-0 truncate font-bold'
-            >
-              {title}
-            </Text>
-            {(navigable || position) && (
-              <span className='flex shrink-0 items-center gap-1.5'>
-                {navigable && (
-                  <ViewerAction
-                    aria-label='previous frame'
-                    disabled={!onPrev}
-                    onClick={onPrev}
-                    className='disabled:opacity-40'
-                  >
-                    ←
-                  </ViewerAction>
-                )}
-                {position && (
-                  <Text
-                    size='micro'
-                    component='span'
-                    className='tabular-nums text-bgColor'
-                  >{`${position.index + 1} / ${position.total}`}</Text>
-                )}
-                {navigable && (
-                  <ViewerAction
-                    aria-label='next frame'
-                    disabled={!onNext}
-                    onClick={onNext}
-                    className='disabled:opacity-40'
-                  >
-                    →
-                  </ViewerAction>
-                )}
-              </span>
-            )}
-            <Dialog.Close asChild>
-              <Close
-                aria-label='close the zoomed view'
-                className='text-bgColor hover:bg-bgColor hover:text-textColor hover:no-underline focus-visible:outline-bgColor'
-              />
-            </Dialog.Close>
-          </div>
-
-          {/* КАРТИНКА ПО ЦЕНТРУ ОСТАВШЕГОСЯ МЕСТА — и по горизонтали, и по вертикали. Прижатая к
-              верху, она оставляла бы под собой полосу пустоты, которая читается как «дальше ещё
-              что-то есть».
-              ЦЕНТРИРУЕТ `m-auto` НА РЕБЁНКЕ, А НЕ `justify-center` НА КОНТЕЙНЕРЕ. У отцентрованного
-              flex-контента переполнение за НАЧАЛЬНОЙ кромкой не доскролливается: высокая колонка
-              (снимок плюс раскрытый редактор с пикером деталей) уезжала бы верхом за край, и
-              достать его было бы нечем. Внешние отступы такого не делают. */}
-          <div className='flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2'>
-            <AnnotationSurface
-              // ПОВЕРХНОСТЬ ПЕРЕСОЗДАЁТСЯ ПОД КАЖДЫЙ КАДР. Её собственные состояния — выбор,
-              // набранные точки, масштаб и сдвиг — привязаны к КОНКРЕТНОЙ картинке и сами по
-              // смене `src` не сбрасываются. Там, где кадр один, ключ постоянен и не значит
-              // ничего.
-              //
-              // В КЛЮЧЕ ПОЗИЦИЯ, А НЕ ТОЛЬКО АДРЕС: один и тот же файл можно приложить к карточке
-              // дважды, и по одному адресу переход между двумя такими кадрами поверхность не
-              // пересоздавал бы — зум, сдвиг и наполовину набранная фигура переехали бы на
-              // соседнее вложение, у которого свой набор указаний.
-              key={`${position?.index ?? 0}:${surface.src}`}
-              {...surface}
-              zoom
-              tool={tool}
-              onToolDone={() => setTool(null)}
-              hideCallouts={!showCallouts}
-              maxCallouts={maxCallouts}
-              // КАРТИНКА ЗАНИМАЕТ ВСЁ МЕСТО, какое есть, и упирается в ту сторону, которая
-              // кончится раньше: рамки и потолка высоты у неё здесь нет. Кадр берёт СОБСТВЕННЫЕ
-              // пропорции снимка, поэтому совпадает с ним пиксель в пиксель — а он и есть система
-              // координат указаний. Дальше её увеличивает зум, вплоть до ×6.
-              fit
-              className='min-h-0 flex-1'
-              frameClassName='border-0 bg-transparent'
-              // ВСЁ, ЧТО ПОД КАДРОМ, живёт на ТЁМНОМ фоне и получает подложку: редактор, легенда
-              // пинов, строка завершения жеста. Без неё чернильный текст на чёрном не виден вовсе.
-              chromeClassName='bg-bgColor p-1.5 empty:hidden'
-            />
-          </div>
-
-          {/* НИЖНИЙ БАР С ИНСТРУМЕНТАМИ. Светлая полоса на тёмном фоне: чипы системы рассчитаны на
-              белый фон, и красить их в инверсию значило бы завести им второй набор состояний. */}
-          <div className='flex shrink-0 flex-wrap items-center gap-2 border-t border-borderColor bg-bgColor px-2.5 py-1.5'>
-            <ChipRow>
-              <Chip
-                nonForm
-                dashed={!showCallouts}
-                selected={showCallouts}
-                pressed={showCallouts}
-                onClick={() => setShowCallouts((v) => !v)}
-                title='hide all the lines and look at the picture itself'
-              >
-                callouts · {surface.callouts.length}
-              </Chip>
-            </ChipRow>
-            {editable && showCallouts && (
-              <AnnotationToolbar
-                tool={tool}
-                onTool={setTool}
-                kinds={toolKinds}
-                purposes={purposes}
-                remaining={maxCallouts != null ? maxCallouts - surface.callouts.length : undefined}
-              />
-            )}
-            {!editable && readOnlyNote && (
-              <Text size='micro' variant='label' component='span'>
-                {readOnlyNote}
-              </Text>
-            )}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+  return (
+    <MediaViewer
+      items={items}
+      index={0}
+      open={open}
+      onOpenChange={handleOpenChange}
+      onIndexChange={() => {}}
+      callouts={{
+        stage,
+        tools,
+        nav,
+        onPage: navigable ? (dir) => (dir > 0 ? onNext : onPrev)?.() : undefined,
+      }}
+    />
   );
 }

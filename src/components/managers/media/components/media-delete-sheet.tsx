@@ -36,35 +36,45 @@ export const DANGER_BUTTON =
 export function KeptRow({ media, usage }: { media: common_MediaFull; usage: MediaUsageMap }) {
   const refs = mediaUsageRefs(usage, media.id);
   return (
-    <li className='border-t border-hairline px-2 py-1.5'>
-      <Text size='micro' component='span' className='block tabular-nums'>
-        {media.id}
-      </Text>
-      {refs === undefined ? (
-        <Text size='micro' variant='label' component='span'>
-          not checked
-        </Text>
-      ) : (
-        <ul>
-          {refs.map((ref, i) => {
-            const href = usageRefHref(ref);
-            const line = `${usageRefName(ref)} · ${usageRefSlot(ref)}`;
-            return (
-              <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`}>
-                {href ? (
-                  <Link to={href} className='text-micro text-labelColor underline'>
-                    {line}
-                  </Link>
-                ) : (
-                  <Text size='micro' variant='label' component='span'>
-                    {line}
-                  </Text>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <li className='flex gap-2 border-t border-hairline px-2 py-1.5'>
+      <div className='w-10 shrink-0 border border-borderColor bg-pageBg'>
+        <Media
+          src={media.media?.thumbnail?.mediaUrl || ''}
+          type={isVideo(media.media?.thumbnail?.mediaUrl) ? 'video' : 'image'}
+          alt='media'
+          aspectRatio='1/1'
+          fit='contain'
+          controls={false}
+          preload='metadata'
+        />
+      </div>
+      <div className='min-w-0 flex-1'>
+        {refs === undefined ? (
+          <Text size='micro' variant='label' component='span'>
+            not checked
+          </Text>
+        ) : (
+          <ul>
+            {refs.map((ref, i) => {
+              const href = usageRefHref(ref);
+              const line = `${usageRefName(ref)} · ${usageRefSlot(ref)}`;
+              return (
+                <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`}>
+                  {href ? (
+                    <Link to={href} className='text-micro text-labelColor underline'>
+                      {line}
+                    </Link>
+                  ) : (
+                    <Text size='micro' variant='label' component='span'>
+                      {line}
+                    </Text>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </li>
   );
 }
@@ -186,16 +196,13 @@ export function MediaDeleteSheet({
                     <Media
                       src={m.media?.thumbnail?.mediaUrl || ''}
                       type={isVideo(m.media?.thumbnail?.mediaUrl) ? 'video' : 'image'}
-                      alt={String(m.id)}
+                      alt='media'
                       aspectRatio='1/1'
                       fit='contain'
                       controls={false}
                       preload='metadata'
                     />
                   </div>
-                  <Text size='nano' variant='label' component='span' className='tabular-nums'>
-                    {m.id}
-                  </Text>
                 </div>
               ))}
             </div>

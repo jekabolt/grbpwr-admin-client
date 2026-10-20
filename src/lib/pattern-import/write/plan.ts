@@ -47,6 +47,11 @@ import {
   unionBox,
 } from './geom';
 
+/** L14: the annotation of a half on fold — what the drawing is, and how many units it cuts. */
+export function halfOnFoldText(piecesPerGarment: number): string {
+  return `HALF - CUT ${Math.max(1, Math.round(piecesPerGarment || 1))} ON FOLD`;
+}
+
 /** Simplification tolerance for written polylines, mm (well under the 0.05 mm sagitta). */
 export const WRITE_SIMPLIFY_MM = 0.01;
 export const DEFAULT_NOTCH_DEPTH_MM = 5;
@@ -399,7 +404,8 @@ export function planBlocks(
       const annotation: string[] = [];
       if (w.spec.fused) annotation.push('FUSED');
       if (w.spec.unfoldedFold) annotation.push('UNFOLDED');
-      if (foldIsMirror) annotation.push('CUT ON FOLD');
+      // L14: the drawing is the HALF — said in words, with the count (one unit per garment)
+      if (foldIsMirror) annotation.push(halfOnFoldText(w.spec.piecesPerGarment));
       const srcT = w.srcT.get(s0.rank) ?? IDENTITY;
       const size: PieceSizeSpec = {
         ...s,

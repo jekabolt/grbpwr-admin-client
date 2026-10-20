@@ -263,9 +263,6 @@
     "design/no-arbitrary-px": 1,
     "design/no-raw-control": 3
   },
-  "src/components/managers/files/components/files-toolbar.tsx": {
-    "design/no-arbitrary-px": 3
-  },
   "src/components/managers/files/components/gallery-states.tsx": {
     "design/no-arbitrary-px": 2
   },
@@ -298,9 +295,6 @@
     "design/no-arbitrary-px": 2,
     "design/no-raw-control": 1
   },
-  "src/components/managers/files/components/topic-chips.tsx": {
-    "design/no-arbitrary-px": 1
-  },
   "src/components/managers/files/components/upload-bar.tsx": {
     "design/no-arbitrary-px": 4
   },
@@ -326,15 +320,6 @@
   },
   "src/components/managers/files/topics/topics-page.tsx": {
     "design/no-arbitrary-px": 4
-  },
-  "src/components/managers/fitting/components/change-requests-fields.tsx": {
-    "design/no-raw-control": 5
-  },
-  "src/components/managers/fitting/components/fitting-callouts.tsx": {
-    "design/no-raw-control": 1
-  },
-  "src/components/managers/fitting/components/patterns-fields.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/fitting/components/tech-card-field.tsx": {
     "design/no-raw-control": 1
@@ -440,16 +425,11 @@
   "src/components/managers/materials/index.tsx": {
     "design/no-raw-control": 1
   },
-  "src/components/managers/media/components/cropper.tsx": {
-    "design/no-arbitrary-px": 1,
-    "design/no-raw-control": 1
-  },
   "src/components/managers/media/components/dragdrop-area.tsx": {
     "design/no-arbitrary-px": 1,
     "design/no-raw-control": 2
   },
   "src/components/managers/media/components/expander.tsx": {
-    "design/no-arbitrary-px": 3,
     "design/no-raw-control": 2
   },
   "src/components/managers/media/components/media-gallery-selector.tsx": {
@@ -468,7 +448,7 @@
     "design/no-raw-control": 2
   },
   "src/components/managers/media/components/pending-media-plate.tsx": {
-    "design/no-arbitrary-px": 3
+    "design/no-arbitrary-px": 2
   },
   "src/components/managers/media/index.tsx": {
     "design/no-arbitrary-px": 1
@@ -494,9 +474,6 @@
   },
   "src/components/managers/membership/tier-config/page.tsx": {
     "design/no-non-token-class": 3
-  },
-  "src/components/managers/model/components/measurements-fields.tsx": {
-    "design/no-raw-control": 1
   },
   "src/components/managers/model/components/size-picker-modal.tsx": {
     "design/no-arbitrary-px": 1
@@ -769,9 +746,6 @@
   },
   "src/components/managers/tasks/components/avatar-stack.tsx": {
     "design/no-radius-shadow": 1
-  },
-  "src/components/managers/tasks/components/description-editor.tsx": {
-    "design/no-arbitrary-px": 2
   },
   "src/components/managers/tasks/components/entity-picker.tsx": {
     "design/no-radius-shadow": 1
