@@ -9,15 +9,10 @@ import { useEffect, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Close, ConfirmationModal, Pill, Placeholder, Text, Tile, Tiles } from 'ui';
+import { FittingTitle } from './fitting-title';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
 import { useModelsByIds, useSamplesByIds, useTechCardsByIds } from './useResolvers';
-import {
-  fittingOrdinal,
-  fittingTitleParts,
-  fittingTitleText,
-  formatFittingDate,
-  statusLabel,
-} from './utils';
+import { fittingOrdinal, fittingTitleParts, formatFittingDate, statusLabel } from './utils';
 
 const LIMIT = 24;
 
@@ -60,17 +55,15 @@ export function FittingCardList() {
   const cardTitle = (id: number, techCardId?: number, sampleId?: number) => {
     const tc = techCardId ? techCardMap.get(techCardId)?.techCard : undefined;
     const sizeId = sampleId ? sampleMap.get(sampleId)?.sample?.sizeId : undefined;
-    const text = fittingTitleText(
-      fittingTitleParts({
-        type: tc?.categoryId
-          ? String(findInDictionary(dictionary, tc.categoryId, 'category') || '')
-          : '',
-        garment: tc?.name || tc?.styleNumber || '',
-        size: sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '',
-        ordinal: techCardId ? fittingOrdinal(siblingsOf.get(techCardId), id) : 0,
-      }),
-    );
-    return text || `fitting ${id}`;
+    const parts = fittingTitleParts({
+      type: tc?.categoryId
+        ? String(findInDictionary(dictionary, tc.categoryId, 'category') || '')
+        : '',
+      garment: tc?.name || tc?.styleNumber || '',
+      size: sizeId ? String(findInDictionary(dictionary, sizeId, 'size') || sizeId) : '',
+      ordinal: techCardId ? fittingOrdinal(siblingsOf.get(techCardId), id) : 0,
+    });
+    return parts.garment ? <FittingTitle parts={parts} /> : `fitting ${id}`;
   };
 
   function confirmDelete() {

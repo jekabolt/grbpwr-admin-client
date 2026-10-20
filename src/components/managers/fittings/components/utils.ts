@@ -52,7 +52,3 @@ export function fittingTitleParts(p: {
     tail: [p.size || '', p.ordinal ? `fitting\u00a0${p.ordinal}` : ''].filter(Boolean),
   };
 }
-
-export function fittingTitleText(parts: ReturnType<typeof fittingTitleParts>) {
-  return [parts.head, parts.garment, ...parts.tail].filter(Boolean).join(' · ');
-}
