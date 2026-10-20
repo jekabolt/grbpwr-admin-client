@@ -2017,11 +2017,6 @@ export function buildPieceSpecsDetailed(
         };
       }
     }
-    // BACK-VARIANT: asked last — any other question of the piece comes first (it asks again after)
-    if (!blockedHere && nv.kind === 'ask') {
-      blockedHere = { reason: 'notch-variant', detail: nv.ask.question };
-      notchVariantAsks.push({ seed, identity: null, ...nv.ask });
-    }
     if (blockedHere) {
       block(seed, blockedHere.reason, blockedHere.detail);
       if (blockedHere.reason === 'fold-unresolved' && missHere)
@@ -2368,6 +2363,14 @@ export function buildPieceSpecsDetailed(
         hand: mode === 'drawn' && twin != null ? hand : null,
         twin: mode === 'drawn' && twin != null ? twin : null,
       });
+      for (const s of out) walls.delete(s.identity);
+      continue;
+    }
+    // BACK-VARIANT: asked last — the piece's other questions (fold, grain, its name) come first,
+    // so one visit of the details step answers them together
+    if (nv.kind === 'ask') {
+      block(seed, 'notch-variant', nv.ask.question);
+      notchVariantAsks.push({ seed, identity: out[0]?.identity ?? null, ...nv.ask });
       for (const s of out) walls.delete(s.identity);
       continue;
     }
