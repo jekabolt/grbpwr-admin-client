@@ -30,6 +30,9 @@ const isBooklet = (s: string): s is BookletId => (ALL_BOOKLETS as string[]).incl
 const isProfile = (s: string): s is PrintProfile =>
   s === 'factory' || s === 'internal' || s === 'release';
 
+/** Ориентация листа: `port` — A4 книжная (прежнее поведение), `land` — A4 альбомная. */
+export type PrintOrient = 'port' | 'land';
+
 export type PrintQuery = {
   /** 0 — прогон не задан. */
   runId: number;
@@ -42,6 +45,8 @@ export type PrintQuery = {
   profile: PrintProfile;
   /** null — тетради не заданы: печатается весь документ, как раньше. */
   booklets: BookletId[] | null;
+  /** Ориентация листа; по умолчанию книжная. */
+  orient: PrintOrient;
 };
 
 export const EMPTY_QUERY: PrintQuery = {
@@ -51,6 +56,7 @@ export const EMPTY_QUERY: PrintQuery = {
   releaseId: 0,
   profile: 'internal',
   booklets: null,
+  orient: 'port',
 };
 
 const intParam = (sp: URLSearchParams, name: string): number => {
@@ -78,6 +84,7 @@ export function parsePrintQuery(sp: URLSearchParams): PrintQuery {
           .map((s) => s.trim())
           .filter(isBooklet)
       : null,
+    orient: (sp.get('orient') ?? '').trim() === 'land' ? 'land' : 'port',
   };
 }
 
@@ -90,6 +97,7 @@ export function buildPrintQuery(q: Partial<PrintQuery>): string {
   if (q.releaseId) sp.set('release', String(q.releaseId));
   if (q.profile && q.profile !== 'internal') sp.set('profile', q.profile);
   if (q.booklets?.length) sp.set('booklets', q.booklets.join(','));
+  if (q.orient === 'land') sp.set('orient', 'land');
   const s = sp.toString();
   return s ? `?${s}` : '';
 }

@@ -1766,10 +1766,16 @@ export function TechPackDocument({
   };
 
   return (
-    <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+    <div
+      // Ширина экрана = ширина листа: альбомный лист не зажимается в книжную колонку.
+      className={`mx-auto bg-white px-8 py-6 text-black ${
+        printScope.query.orient === 'land' ? 'max-w-[297mm]' : 'max-w-[210mm]'
+      }`}
+    >
       {/* Постраничный колонтитул: лист, вынутый из середины стопки, обязан называть свой стиль
           и версию. Один PageFurniture на документ — @page глобален (см. page-furniture.tsx). */}
       <PageFurniture
+        orient={printScope.query.orient}
         line={furnitureLine(
           tc.styleNumber ? `style ${tc.styleNumber}` : '',
           tc.name,
