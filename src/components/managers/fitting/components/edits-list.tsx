@@ -228,9 +228,9 @@ export function EditsList() {
         </span>
       }
     >
-      <div ref={listRef}>
+      <div ref={listRef} className='peer'>
         <DraftRows />
-        <ol>{open.map(item)}</ol>
+        {open.length > 0 && <ol>{open.map(item)}</ol>}
         <CarryOverRows carriedIds={carriedIds} />
         {done.length > 0 && (
           <>
@@ -251,7 +251,12 @@ export function EditsList() {
           </>
         )}
       </div>
-      {!readOnly && <EditComposer nextNumber={nextNumber} />}
+      {!readOnly && (
+        <EditComposer
+          nextNumber={nextNumber}
+          className='peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0'
+        />
+      )}
       <ConfirmationModal
         open={!!confirmDelete}
         onOpenChange={(o) => !o && setConfirmDelete(null)}
