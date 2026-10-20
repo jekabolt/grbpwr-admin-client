@@ -11,7 +11,12 @@ const RULE = '#cccccc';
 const TARGET = '#c22222';
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 // Local Douglas-Peucker (closed ring, iterative) — the live preview re-renders every
@@ -65,6 +70,15 @@ function simplifyPieceForLabels(p: PieceDTO): PieceDTO {
 }
 const LIVE_LABEL_EPS_CM = 0.05;
 
+export type LayoutSvgOptions = {
+  /** Adds focusable piece groups used by the read-only marker viewer. */
+  interactive?: boolean;
+  selectedPieceId?: number;
+  /** Shows the horizontal length in metres and adds the fabric-width ruler in centimetres. */
+  metricRulers?: boolean;
+  ariaLabel?: string;
+};
+
 export function renderLayoutSvg(
   result: NestResult,
   pieces: readonly PieceDTO[],
@@ -72,22 +86,44 @@ export function renderLayoutSvg(
   targetLengthCm?: number,
   // Live-preview mode: contours simplified to this tolerance (cm); 0 = exact (export).
   simplifyEpsCm = 0,
+  options: LayoutSvgOptions = {},
 ): string {
   const byId = new Map(pieces.map((p) => [p.id, p]));
+  const quantityByPieceId = new Map<number, number>();
+  for (const placement of result.placements) {
+    quantityByPieceId.set(placement.pieceId, (quantityByPieceId.get(placement.pieceId) ?? 0) + 1);
+  }
   const displayPoly = new Map<number, Pt[]>();
   for (const p of pieces) displayPoly.set(p.id, simplifyRing(p.poly, simplifyEpsCm));
   const W = fabricWidthCm;
   const L = Math.max(result.usedLengthCm, targetLengthCm ?? 0, 10);
   const pad = Math.max(4, W * 0.04);
+  const leftPad = options.metricRulers ? Math.max(15, W * 0.095) : pad;
+  const bottomPad = options.metricRulers ? Math.max(18, W * 0.115) : pad;
+  const rootLabel = options.ariaLabel ? ` aria-label="${esc(options.ariaLabel)}"` : '';
 
   const parts: string[] = [];
   parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${L + 2 * pad} ${W + 2 * pad}" font-family="monospace">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-leftPad} ${-pad} ${L + leftPad + pad} ${W + pad + bottomPad}" font-family="monospace"${rootLabel}>`,
   );
   // Fabric strip: selvedges as solid rules.
   parts.push(
     `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${RULE}" stroke-width="${W / 300}"/>`,
   );
+
+  if (options.metricRulers) {
+    // A quiet 10 cm grid keeps a phone-sized crop measurable without zooming the whole strip out.
+    for (let x = 10; x < L; x += 10) {
+      parts.push(
+        `<line class="marker-layout-grid" x1="${x}" y1="0" x2="${x}" y2="${W}" stroke="${RULE}" stroke-width="${W / 900}"/>`,
+      );
+    }
+    for (let y = 10; y < W; y += 10) {
+      parts.push(
+        `<line class="marker-layout-grid" x1="0" y1="${y}" x2="${L}" y2="${y}" stroke="${RULE}" stroke-width="${W / 900}"/>`,
+      );
+    }
+  }
 
   // cm ruler along X: tick every 10, label every 50.
   const tick = W / 60;
@@ -95,10 +131,32 @@ export function renderLayoutSvg(
     parts.push(
       `<line x1="${x}" y1="${W}" x2="${x}" y2="${W + tick}" stroke="${RULE}" stroke-width="${W / 500}"/>`,
     );
-    if (x % 50 === 0 && x > 0) {
+    if (x % 50 === 0 && (x > 0 || options.metricRulers)) {
+      const label = options.metricRulers ? (x === 0 ? '0' : (x / 100).toFixed(1)) : String(x);
       parts.push(
-        `<text x="${x}" y="${W + tick * 3}" font-size="${W / 30}" fill="${STROKE}" text-anchor="middle">${x}</text>`,
+        `<text x="${x}" y="${W + tick * 3}" font-size="${W / 30}" fill="${STROKE}" text-anchor="middle">${label}</text>`,
       );
+    }
+  }
+
+  if (options.metricRulers) {
+    const widthTicks = new Set<number>();
+    for (let y = 0; y <= W; y += 20) widthTicks.add(y);
+    widthTicks.add(W);
+    parts.push(
+      `<line x1="${-tick * 0.75}" y1="0" x2="${-tick * 0.75}" y2="${W}" stroke="${RULE}" stroke-width="${W / 500}"/>`,
+      `<text x="${-tick * 3.3}" y="${-tick}" font-size="${W / 30}" fill="${STROKE}" text-anchor="end">cm</text>`,
+    );
+    for (const y of [...widthTicks].sort((a, b) => a - b)) {
+      const major = y % 40 === 0 || y === W;
+      parts.push(
+        `<line x1="${-tick * 0.75}" y1="${y}" x2="${-tick * (major ? 2.6 : 1.9)}" y2="${y}" stroke="${RULE}" stroke-width="${W / 500}"/>`,
+      );
+      if (major) {
+        parts.push(
+          `<text x="${-tick * 3.3}" y="${y}" dy="0.35em" font-size="${W / 30}" fill="${STROKE}" text-anchor="end">${Number(y.toFixed(1))}</text>`,
+        );
+      }
     }
   }
 
@@ -110,6 +168,13 @@ export function renderLayoutSvg(
     // копия здесь означала бы деталь, отзеркаленную на картинке и не отзеркаленную в файле, по
     // которому режут, — и наоборот; сшить такое изделие нельзя, а увидеть расхождение не на чем.
     const pts = placedPoly(poly, pl).map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`);
+    if (options.interactive) {
+      const selected = dto.id === options.selectedPieceId;
+      const quantity = quantityByPieceId.get(dto.id) ?? 1;
+      parts.push(
+        `<g class="marker-layout-piece${selected ? ' is-selected' : ''}" data-marker-piece-id="${dto.id}" role="button" tabindex="0" aria-label="${esc(dto.name)}, ×${quantity}" aria-pressed="${selected}">`,
+      );
+    }
     parts.push(
       `<polygon points="${pts.join(' ')}" fill="${FILL}" stroke="${STROKE}" stroke-width="${W / 400}"/>`,
     );
@@ -124,6 +189,7 @@ export function renderLayoutSvg(
         `<${tag} points="${ip.join(' ')}" fill="none" stroke="${STROKE}" stroke-width="${W / 700}"/>`,
       );
     }
+    if (options.interactive) parts.push('</g>');
   }
 
   // Подписи — ПОСЛЕДНИМ проходом и по общему плану (см. render/label-fit.ts): имя обязано
@@ -138,6 +204,7 @@ export function renderLayoutSvg(
   const labelPieces = simplifyEpsCm > 0 ? pieces.map(simplifyPieceForLabels) : pieces;
   for (const lab of planLayoutLabels(result, labelPieces, fabricWidthCm)) {
     const { plan } = lab;
+    if (options.interactive) parts.push('<g class="marker-layout-label" pointer-events="none">');
     if (plan.leader) {
       parts.push(
         `<circle cx="${plan.leader.dotX.toFixed(2)}" cy="${plan.leader.dotY.toFixed(2)}" r="${(plan.fontCm * 0.22).toFixed(3)}" fill="${INK}"/>`,
@@ -153,12 +220,19 @@ export function renderLayoutSvg(
     parts.push(
       `<text transform="translate(${plan.x.toFixed(2)} ${plan.y.toFixed(2)})${rot}" dy="0.35em" font-size="${plan.fontCm.toFixed(3)}" fill="${INK}" text-anchor="middle"><title>${esc(plan.full)}</title>${esc(plan.text)}</text>`,
     );
+    if (options.interactive) parts.push('</g>');
   }
 
   // Used length: solid ink line. Target: dashed red — the verdict, drawn.
   parts.push(
     `<line x1="${result.usedLengthCm}" y1="0" x2="${result.usedLengthCm}" y2="${W}" stroke="${INK}" stroke-width="${W / 300}"/>`,
   );
+  if (options.metricRulers) {
+    parts.push(
+      `<text x="${result.usedLengthCm}" y="${W + tick * 3}" dx="${-tick * 0.25}" font-size="${W / 30}" fill="${INK}" font-weight="700" text-anchor="end">${(result.usedLengthCm / 100).toFixed(2)} m</text>`,
+      `<text x="${L + tick * 0.8}" y="${W + tick * 3}" font-size="${W / 30}" fill="${STROKE}">m</text>`,
+    );
+  }
   if (targetLengthCm && targetLengthCm > 0) {
     parts.push(
       `<line x1="${targetLengthCm}" y1="0" x2="${targetLengthCm}" y2="${W}" stroke="${TARGET}" stroke-width="${W / 300}" stroke-dasharray="${W / 60} ${W / 90}"/>`,

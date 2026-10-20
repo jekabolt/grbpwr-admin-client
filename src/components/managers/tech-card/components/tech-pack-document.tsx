@@ -136,6 +136,7 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
 import { detailKeyLabel } from './tech-card-options';
+import { techCardMarkerViewerPath } from 'constants/routes';
 import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
 import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
@@ -2294,18 +2295,31 @@ export function TechPackDocument({
                 return (
                   <tr key={mk.id ?? i} className='break-inside-avoid'>
                     <td className={TD}>
-                      <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
-                      {draft && (
-                        <div className='font-bold uppercase'>
-                          ⚠ draft — partial layout, do not cut
-                          {wireInt(mk.totalCount) > wireInt(mk.placedCount)
-                            ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
-                            : ''}
+                      <div className='flex items-start gap-2'>
+                        {wireInt(mk.id) > 0 && (
+                          <PatternQR
+                            size={52}
+                            value={`${window.location.origin}${techCardMarkerViewerPath(
+                              wireInt(techCard.id),
+                              wireInt(mk.id),
+                            )}`}
+                          />
+                        )}
+                        <div>
+                          <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
+                          {draft && (
+                            <div className='font-bold uppercase'>
+                              ⚠ draft — partial layout, do not cut
+                              {wireInt(mk.totalCount) > wireInt(mk.placedCount)
+                                ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
+                                : ''}
+                            </div>
+                          )}
+                          {mk.normConflict && (
+                            <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
+                          )}
                         </div>
-                      )}
-                      {mk.normConflict && (
-                        <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
-                      )}
+                      </div>
                     </td>
                     <td className={TD}>{mk.bomItemName || '—'}</td>
                     <td className={`${TD} text-right`}>{dec(mk.fabricWidthCm) || '—'}</td>
