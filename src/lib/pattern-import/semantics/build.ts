@@ -743,6 +743,7 @@ export function buildPieceSpecsDetailed(
   /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
   const gradeAsks: GradeAsk[] = [];
   const notchVariantAsks: NotchVariantAsk[] = [];
+  const nvAskOf = new Map<SeedId, Omit<NotchVariantAsk, 'seed' | 'identity'>>();
   const sheetWords = [...sheet.texts.map((t) => t.text), ...(input.docTexts ?? [])];
   const gradeRefusals: Record<string, string> = {};
   const refusedSeed = new Map<string, SeedId>();
@@ -2366,14 +2367,9 @@ export function buildPieceSpecsDetailed(
       for (const s of out) walls.delete(s.identity);
       continue;
     }
-    // BACK-VARIANT: asked last — the piece's other questions (fold, grain, its name) come first,
-    // so one visit of the details step answers them together
-    if (nv.kind === 'ask') {
-      block(seed, 'notch-variant', nv.ask.question);
-      notchVariantAsks.push({ seed, identity: out[0]?.identity ?? null, ...nv.ask });
-      for (const s of out) walls.delete(s.identity);
-      continue;
-    }
+    // BACK-VARIANT: asked last — after the piece's other questions and the file's name clashes
+    // (below), so one visit of the details step answers them together
+    if (nv.kind === 'ask') nvAskOf.set(seed, nv.ask);
     for (const s of out) {
       notes[s.identity] = pieceNotes;
       pieces.push(s);
@@ -2430,7 +2426,21 @@ export function buildPieceSpecsDetailed(
     }
     seen.set(k, s.seed);
   }
-  for (const s of pieces) if (!dupSeeds.has(s.seed)) unique.push(s);
+  for (const s of pieces) {
+    if (dupSeeds.has(s.seed)) continue;
+    const ask = nvAskOf.get(s.seed);
+    if (!ask) {
+      unique.push(s);
+      continue;
+    }
+    // BACK-VARIANT: a named, unclashing piece still waits for its variant notch answer
+    if (!blocked.some((b) => b.seed === s.seed)) {
+      block(s.seed, 'notch-variant', ask.question, blockedNameOf(s));
+      notchVariantAsks.push({ seed: s.seed, identity: s.identity, ...ask });
+    }
+    walls.delete(s.identity);
+    delete notes[s.identity];
+  }
   // a drawn hand whose twin was blocked must not be written alone (G12: sibling not in the file)
   for (let changed = true; changed; ) {
     changed = false;
