@@ -332,13 +332,13 @@ function FittingWorkspaceScreen({
       <FittingWorkspaceContext.Provider value={workspace}>
         <div className='mx-auto flex w-full max-w-screen-2xl flex-col gap-gutter md:px-4 pt-6 pb-32'>
           <div className='flex flex-col gap-2'>
-            <div className='flex items-baseline gap-3'>
+            <div className='flex flex-wrap items-baseline gap-x-3 gap-y-2 md:flex-nowrap'>
               <BackLink to={returnTo || ROUTES.fittings} className='shrink-0' />
               <Text
                 component='h1'
                 variant='uppercase'
                 tracking='section'
-                className='min-w-0 flex-1 font-bold'
+                className='order-last min-w-0 basis-full font-bold md:order-none md:flex-1 md:basis-auto'
               >
                 {garment ? <FittingTitle parts={title} /> : `fitting\u00a0${fittingId}`}
               </Text>
@@ -346,7 +346,7 @@ function FittingWorkspaceScreen({
                 type='button'
                 variant='underline'
                 size='xs'
-                className='shrink-0 px-0 text-labelColor underline-offset-2 hover:text-textColor'
+                className='ml-auto shrink-0 px-0 text-labelColor underline-offset-2 hover:text-textColor'
                 aria-expanded={detailsOpen}
                 onClick={() => setDetailsOpen(true)}
               >
