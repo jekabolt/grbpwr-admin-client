@@ -3,7 +3,7 @@ import type { LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useCallback, useRef } from 'react';
 import { AddDoor, Button, Media, Pill, Text, Tiles } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
@@ -63,7 +63,6 @@ export function AttachmentTiles({
   const qc = useQueryClient();
   const { canRead } = usePermissions();
   const mayOpenLibrary = canRead(SECTION.files);
-  const { showMessage } = useSnackBarStore();
 
   // ПРОТУХШАЯ ПОДПИСЬ — НЕ ПОЛОМКА. Превью файла библиотеки приезжает подписанной ссылкой на
   // 6–12 часов, а вкладку с задачей держат открытой дольше. Первый же сорвавшийся `<img>`
@@ -108,7 +107,12 @@ export function AttachmentTiles({
     // Ни адреса просмотра, ни адреса скачивания — сервер не выдал ни одного. Молчащий щелчок
     // человек читает как «сломалась мышь» и жмёт ещё десять раз. Сказать «попробуйте в разделе
     // файлов» нельзя: сюда попадают ровно те, у кого этого раздела нет.
-    showMessage('this file came without a link — nothing to open', 'error');
+    notify({
+      sev: 'error',
+      subject: `FILE${f.id ? ` ${f.id}` : ''}`,
+      text: 'not opened',
+      detail: 'this file came without a link — nothing to open',
+    });
   };
 
   return (
