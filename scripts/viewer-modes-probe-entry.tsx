@@ -1,13 +1,16 @@
 // Стенд «один просмотрщик» (viewer-unify): НАСТОЯЩИЙ `MediaViewer` с тремя снимками и дверью
-// `onReplace`, и НАСТОЯЩЕЕ окно указаний вложений задачи (`useTaskMediaViewer` → AnnotationZoomDialog
-// → тот же просмотрщик в режиме `callouts`). Сеть — заглушка пробы; снимки отдаёт маршрут Playwright.
+// `onReplace`, и НАСТОЯЩЕЕ окно указаний тех-карты (AnnotationZoomDialog → тот же просмотрщик
+// в режиме `callouts`). Сеть — заглушка пробы; снимки отдаёт маршрут Playwright.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-import { useTaskMediaViewer } from 'components/managers/tasks/components/task-media-viewer';
-import type { TaskMediaAnnotations } from 'components/managers/tasks/api/types';
+import {
+  useAnnotationSurface,
+  type AnnotationValue,
+} from 'components/managers/tech-card/annotation/canvas';
+import { AnnotationZoomDialog } from 'components/managers/tech-card/annotation/zoom-dialog';
 import { MediaViewer, type MediaViewerItem } from 'components/shared/media-viewer/media-viewer';
 import { SnackBar } from 'components/shell/snackbar';
 
@@ -64,32 +67,16 @@ function ViewerStand({ slot }: { slot: boolean }) {
 }
 
 function CalloutsStand() {
-  const [annotations, setAnnotations] = useState<TaskMediaAnnotations[]>([]);
-  const viewer = useTaskMediaViewer({
-    media: [
-      {
-        id: 7,
-        fullSize: 'https://cdn.example/7-full.png',
-        thumbnail: 'https://cdn.example/7-thumb.png',
-      },
-      {
-        id: 8,
-        fullSize: 'https://cdn.example/8-full.png',
-        thumbnail: 'https://cdn.example/8-thumb.png',
-      },
-    ],
+  const [annotations, setAnnotations] = useState<AnnotationValue[]>([]);
+  const [open, setOpen] = useState(true);
+  const { surface } = useAnnotationSurface({
+    src: 'https://cdn.example/7-full.png',
+    alt: 'sketch',
+    media: 'image',
     annotations,
     onChange: setAnnotations,
-    canWrite: true,
   });
-  const [opened, setOpened] = useState(false);
-  if (!opened) {
-    queueMicrotask(() => {
-      setOpened(true);
-      viewer.openIndex(0);
-    });
-  }
-  return <>{viewer.node}</>;
+  return <AnnotationZoomDialog {...surface} open={open} onOpenChange={setOpen} title='sketch' />;
 }
 
 const root = createRoot(document.getElementById('root')!);

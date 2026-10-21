@@ -9,7 +9,7 @@
 //   П4 — `save` при двери `onReplace` спрашивает replace here / save copy, и `replace here` отдаёт
 //        хозяину запечённые байты;
 //   П5 — десктоп: режимы — кнопки наверху, панель режима справа от снимка, как details;
-//   П6 — окно указаний вложений задачи — тот же просмотрщик в режиме `callouts`.
+//   П6 — окно указаний тех-карты — тот же просмотрщик в режиме `callouts`.
 //
 //   node scripts/viewer-modes-probe.mjs                 (нужен `yarn build` — берётся его CSS)
 //   node scripts/viewer-modes-probe.mjs --shots=<dir>   ещё и снимки экрана в каталог
@@ -330,21 +330,15 @@ for (const [name, vp, mobile] of [
   ['phone', { width: 390, height: 844 }, true],
   ['desk', { width: 1400, height: 900 }, false],
 ]) {
-  head(`указания вложений задачи · ${name}`);
+  head(`указания тех-карты · ${name}`);
   const { page, errors } = await stand(vp, mobile);
   await page.evaluate(() => window.__viewer.mountCallouts());
   await page.waitForSelector('[data-media-viewer]');
   await page.waitForTimeout(500);
   await shot(page, `${name}-6-callouts`);
   ck((await mode(page)) === 'callouts', 'П6 открылся в режиме callouts');
-  const all = await words(page, '[data-media-viewer] button');
   const chip = await page.evaluate(() => /callouts\s·\s\d/i.test(document.body.innerText));
   ck(chip, 'П6 чип «callouts · N»');
-  ck(
-    all.some((w) => w.includes('1 / 2')) ||
-      (await page.$eval('[data-media-viewer]', (e) => e.textContent.includes('1 / 2'))),
-    'П6 положение в ряду 1 / 2',
-  );
   ck(errors.length === 0, 'нет ошибок страницы', errors.join(' | '));
   await page.close();
 }

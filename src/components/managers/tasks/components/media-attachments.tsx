@@ -48,15 +48,9 @@ export function MediaAttachments({
 }) {
   const resolved = resolveMedia(value);
 
-  // ПЛИТКА ОТКРЫВАЕТ ПОВЕРХНОСТЬ УКАЗАНИЙ, а не лайтбокс: смотреть на снимок, о котором идёт
-  // спор, и не мочь ткнуть в него стрелкой — и была исходная жалоба. Дверь та же, что у ссылок
-  // `[[media:…]]` в тексте (`task-media-viewer`), поэтому открывается везде одинаково.
+  // Дверь та же, что у ссылок `[[media:…]]` в тексте (`task-media-viewer`).
   const viewer = useTaskMediaViewer({
     media: value.map((id) => resolved.find((x) => x.id === id) ?? { id }),
-    annotations,
-    onChange: onAnnotationsChange,
-    // В форме сохраняет общая кнопка модалки — своей записи у ряда вложений нет и быть не должно.
-    canWrite: !!onAnnotationsChange,
   });
 
   function handleAdd(picked: common_MediaFull[]) {

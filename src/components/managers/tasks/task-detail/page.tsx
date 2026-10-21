@@ -245,14 +245,7 @@ export function TaskDetail() {
 
   // Единственная дверь к вложению на этом экране: ею открывают и плитку в галерее, и ссылку
   // посреди описания, и ссылку из комментария.
-  // Указания здесь ТОЛЬКО ЧИТАЮТСЯ (см. довод у `canWrite` в хуке) — и об этом сказано прямо на
-  // месте панели видов. Пустое место там читалось как «на вложении карточки указаний не рисуют»,
-  // хотя вся палитра доступна в правке. Подсказка только тому, у кого кнопка «edit» есть.
-  const attachments = useTaskMediaViewer({
-    media,
-    annotations,
-    readOnlyNote: canWrite ? 'edit to draw' : undefined,
-  });
+  const attachments = useTaskMediaViewer({ media });
 
   function confirmDelete() {
     if (!task) return;
