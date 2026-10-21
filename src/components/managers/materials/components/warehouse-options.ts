@@ -1,27 +1,26 @@
 import { common_MaterialMovementType } from 'api/proto-http/admin';
 
-// Human labels for the movement ledger. The arrow encodes direction so the type reads at a glance
-// (issue → out to a run/sample, return ← back into stock).
-export const movementTypeLabel = (t?: common_MaterialMovementType | string): string => {
+// The ledger's REASON word. Direction is the row's signed Δ, so the word carries no arrow and both
+// returns read `return`; the ref after it (PR-n, #n) says where from.
+export const movementKind = (t?: common_MaterialMovementType | string): string => {
   switch (t) {
     case 'MATERIAL_MOVEMENT_TYPE_RECEIPT':
       return 'receipt';
     case 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION':
-      return 'receipt (production)';
+      return 'production receipt';
     case 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION':
-      return 'issue → production';
+      return 'production';
     case 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE':
-      return 'issue → sample';
+      return 'sample';
     case 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION':
-      return 'return ← production';
     case 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE':
-      return 'return ← sample';
+      return 'return';
     case 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT':
       return 'adjustment';
     case 'MATERIAL_MOVEMENT_TYPE_WRITEOFF':
       return 'write-off';
     default:
-      return '—';
+      return '';
   }
 };
 
@@ -29,11 +28,11 @@ export const movementTypeLabel = (t?: common_MaterialMovementType | string): str
 export const movementTypeFilterOptions: { value: common_MaterialMovementType; label: string }[] = [
   { value: 'MATERIAL_MOVEMENT_TYPE_UNKNOWN', label: 'all types' },
   { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT', label: 'receipt' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION', label: 'receipt (production)' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION', label: 'issue → production' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE', label: 'issue → sample' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION', label: 'return ← production' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE', label: 'return ← sample' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION', label: 'production receipt' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION', label: 'production' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE', label: 'sample' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION', label: 'production return' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE', label: 'sample return' },
   { value: 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT', label: 'adjustment' },
   { value: 'MATERIAL_MOVEMENT_TYPE_WRITEOFF', label: 'write-off' },
 ];
