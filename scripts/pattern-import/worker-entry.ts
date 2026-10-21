@@ -298,6 +298,7 @@ export async function main(): Promise<number> {
   if (process.env.PI_E3_ONLY) {
     await dxfNamesCase();
     await tracedOutlineCase();
+    await zhaketExtensionCase();
     const failed = rows.filter((r) => !r.ok).length;
     console.log(`\n${rows.length - failed}/${rows.length} PASS`);
     return failed ? 1 : 0;
@@ -624,6 +625,7 @@ export async function main(): Promise<number> {
   await roundTripCase();
   await dxfNamesCase();
   await tracedOutlineCase();
+  await zhaketExtensionCase();
   check(
     'garbage plt',
     'refused at open',
@@ -2862,9 +2864,10 @@ async function tracedOutlineCase() {
   );
   // POLUPALTO lane M 21.10: 36 no longer merges the strip (outline 3578 → 2934 mm, inside 40: a
   // copy of another size's line walls 36 only where 36 coincides with it), so its "cut" offset no
-  // longer splits. What is still wrong in 36 is a ~9.5 mm step onto 40's line for ~14 mm at the
-  // knee (runs/polupalto/pics/e3/all.png, z-notch.png). Written with the other sizes, the gate
-  // must hold 36 by name (G5 one-shape names 36's extra turn; before lane M, G4 named 36).
+  // longer splits. What is still wrong in 36 is a stretch at the knee where it runs ~1.7 mm off
+  // its own line (onto 40's) for ~14.5 mm (runs/polupalto/pics/e3/all.png, z-notch.png). Written
+  // with the other sizes, the gate must hold 36 by name (G5 one-shape names 36's extra turn;
+  // before lane M, G4 named 36).
   const seam36 = await run('semantics', ofSeam('seam'));
   const w36 = await writeCase(`${C} · 36–46`, run, seam36, sz.map, { mustPass: false });
   const h36 = (w36.gate[MAIN.scopeKey]?.checks ?? []).filter(
@@ -2919,6 +2922,47 @@ async function tracedOutlineCase() {
       `${g6?.value} · ${g6?.note}`,
     );
   }
+  s.close();
+}
+
+/**
+ * zhaket (burda Mod. 126) review case 21.10: the piece at the "2" label (auto seed 8) carries a
+ * hem extension whose left edge 42 does not draw in its own pen; there only 38's, 40's and 44's
+ * lines run, stacked. 36's rescued edge was cut where 40's line sits 0.4 mm inside it, so 42 leaked
+ * into the extension and closed on its hem-fold line (1203 cm², below 40's 1253; only G8 held it,
+ * and only on a run of 3+ sizes). Now a line on the copy's far side within 1 mm (the same edge
+ * drawn twice) does not cut it, and where a smaller and a larger size's lines run on each other
+ * without 42's own line, 42 is walled there too.
+ * 42 must close on its extension edge: area on the 38→40 trend, bottom edge 6 mm below 40's.
+ */
+async function zhaketExtensionCase() {
+  const C = 'zhaket 42 extension';
+  const s = new Session(1, [fileOf('pdf/zhaket.pdf')]);
+  const run: Run = (st, input) => s.runStage(st, input, ctx());
+  const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  await run('scale', {
+    decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
+  });
+  const sheets = [...new Set(ex.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet))];
+  await run('assemble', { sheet: sheets[0] ?? 0 });
+  await run('chains', { opts: CHAIN_OPTS });
+  await run('sizes', { card: card(['36', '38', '40', '42', '44']) });
+  const seed: Seed = { id: 1, at: { x: 215.4, y: 905.5 }, origin: 'click', variant: null };
+  const pc = await run('pieces', { seeds: [seed], edits: [], opts: { ...FILL, variant: null } });
+  const cs = pc.families[0]?.candidates ?? [];
+  const at = (r: number) => cs.find((c) => c.rank === r);
+  const area = (r: number) => (at(r)?.outcome === 'closed' ? at(r)!.areaMm2 / 100 : NaN);
+  const bottom = (r: number) => Math.max(...(at(r)?.outer ?? []).map((p) => p.y));
+  const want = 2 * area(2) - area(1);
+  const step = bottom(3) - bottom(2);
+  check(
+    C,
+    "42 closes on its extension edge, not the hem fold (area on trend, edge 6 mm below 40's)",
+    at(3)?.outcome === 'closed' &&
+      Math.abs(area(3) - want) / want <= 0.01 &&
+      Math.abs(step - (bottom(2) - bottom(1))) <= 1,
+    `${cs.map((c) => `${c.rank}:${c.outcome}${c.outcome === 'closed' ? ` ${Math.round(c.areaMm2 / 100)}` : ''}`).join(' ')} cm² · trend ${Math.round(want)} · step ${step.toFixed(1)} mm`,
+  );
   s.close();
 }
 
