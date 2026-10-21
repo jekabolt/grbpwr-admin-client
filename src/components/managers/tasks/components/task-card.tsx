@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
-import { Chip, Media, Pill, Select, Text } from 'ui';
+import { Chip, ClockIcon, Media, Pill, Select, Text } from 'ui';
 import { Task, TaskPriority, TaskStatus } from '../api/types';
 import { dueMeta, PRIORITY_LABEL, STATUS_LABEL, STATUSES, toOptions } from '../utils/meta';
 import { openBlockers } from '../utils/relations';
@@ -29,6 +29,21 @@ export function PriorityTag({ priority }: { priority: TaskPriority }) {
 }
 
 const STATUS_OPTIONS = toOptions(STATUSES, STATUS_LABEL);
+const SLOW_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SLOW_STATUSES: TaskStatus[] = [
+  'TASK_STATUS_TODO',
+  'TASK_STATUS_IN_PROGRESS',
+  'TASK_STATUS_REVIEW',
+];
+
+function slowDaysInColumn(task: Task): number | null {
+  if (!SLOW_STATUSES.includes(task.status)) return null;
+  const statusSince = Date.parse(task.statusSince);
+  if (!Number.isFinite(statusSince)) return null;
+  const days = Math.floor((Date.now() - statusSince) / DAY_MS);
+  return days >= SLOW_DAYS ? days : null;
+}
 
 /**
  * СТАТУС С КАРТОЧКИ — путь переезда без драга (на телефоне драга нет вовсе). Обёртка глушит
@@ -80,6 +95,7 @@ export function TaskCardBody({
   const cover = task.media[0];
   const coverUrl = cover?.thumbnail || cover?.fullSize;
   const isArchived = !!task.archivedAt;
+  const slowDays = slowDaysInColumn(task);
   // Заархивированный блокер считается ОТКРЫТЫМ, пока не done (довод — в `utils/relations.ts`).
   const blockers = openBlockers(task.relations);
   const urgent = t.priority === 'TASK_PRIORITY_URGENT';
@@ -129,6 +145,19 @@ export function TaskCardBody({
                 )}
               >
                 {due.label}
+              </Text>
+            )}
+            {slowDays !== null && (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                aria-label={`in column ${slowDays} days`}
+                title={`${slowDays} days in this column`}
+                className='flex shrink-0 items-center gap-1 tabular-nums'
+              >
+                <ClockIcon aria-hidden='true' className='size-3' />
+                {slowDays}d
               </Text>
             )}
             {isArchived && <Pill tone='ink'>archived</Pill>}

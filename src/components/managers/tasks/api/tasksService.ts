@@ -274,6 +274,8 @@ export function mapTask(t: common_Task): Task {
     task: mapInsert(t.task),
     boardId: t.boardId ?? 0,
     status: t.status ?? 'TASK_STATUS_UNKNOWN',
+    statusSince: '',
+    statusSinceApprox: false,
     position: t.position ?? 0,
     media,
     // Resolved only by GetTask; a list row knows the ids and nothing else.
@@ -357,7 +359,21 @@ export const tasksService: TasksService = {
         closedFrom: undefined,
         closedTo: undefined,
       })
-      .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
+      .then((r) => {
+        const timingByTaskId = new Map((r.timing ?? []).map((t) => [t.taskId ?? 0, t]));
+        return {
+          tasks: (r.tasks ?? []).map((wireTask) => {
+            const task = mapTask(wireTask);
+            const timing = timingByTaskId.get(task.id);
+            return {
+              ...task,
+              statusSince: timing?.statusSince ?? '',
+              statusSinceApprox: !!timing?.approximate,
+            };
+          }),
+          total: r.total ?? 0,
+        };
+      }),
 
   listClosedTasks: (from, to) =>
     adminService

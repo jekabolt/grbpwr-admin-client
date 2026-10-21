@@ -197,6 +197,9 @@ export interface Task {
   task: TaskInsert;
   boardId: number;
   status: TaskStatus;
+  // List-only age of the current status. Empty on detail reads or when timing is unavailable.
+  statusSince: string;
+  statusSinceApprox: boolean;
   position: number;
   media: TaskMedia[];
   // Resolved library attachments, present only on GetTask (the list response carries
