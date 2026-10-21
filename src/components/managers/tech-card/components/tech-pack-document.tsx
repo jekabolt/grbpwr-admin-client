@@ -136,6 +136,7 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import { GrbpwrMark } from 'ui';
 import { detailKeyLabel } from './tech-card-options';
+import { techCardMarkerViewerPath } from 'constants/routes';
 import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
 import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
@@ -1766,10 +1767,16 @@ export function TechPackDocument({
   };
 
   return (
-    <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+    <div
+      // Ширина экрана = ширина листа: альбомный лист не зажимается в книжную колонку.
+      className={`mx-auto bg-white px-8 py-6 text-black ${
+        printScope.query.orient === 'land' ? 'max-w-[297mm]' : 'max-w-[210mm]'
+      }`}
+    >
       {/* Постраничный колонтитул: лист, вынутый из середины стопки, обязан называть свой стиль
           и версию. Один PageFurniture на документ — @page глобален (см. page-furniture.tsx). */}
       <PageFurniture
+        orient={printScope.query.orient}
         line={furnitureLine(
           tc.styleNumber ? `style ${tc.styleNumber}` : '',
           tc.name,
@@ -2288,18 +2295,31 @@ export function TechPackDocument({
                 return (
                   <tr key={mk.id ?? i} className='break-inside-avoid'>
                     <td className={TD}>
-                      <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
-                      {draft && (
-                        <div className='font-bold uppercase'>
-                          ⚠ draft — partial layout, do not cut
-                          {wireInt(mk.totalCount) > wireInt(mk.placedCount)
-                            ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
-                            : ''}
+                      <div className='flex items-start gap-2'>
+                        {wireInt(mk.id) > 0 && (
+                          <PatternQR
+                            size={52}
+                            value={`${viewerOrigin()}${techCardMarkerViewerPath(
+                              wireInt(techCard.id),
+                              wireInt(mk.id),
+                            )}`}
+                          />
+                        )}
+                        <div>
+                          <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
+                          {draft && (
+                            <div className='font-bold uppercase'>
+                              ⚠ draft · do not cut
+                              {wireInt(mk.totalCount) > wireInt(mk.placedCount)
+                                ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
+                                : ''}
+                            </div>
+                          )}
+                          {mk.normConflict && (
+                            <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
+                          )}
                         </div>
-                      )}
-                      {mk.normConflict && (
-                        <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
-                      )}
+                      </div>
                     </td>
                     <td className={TD}>{mk.bomItemName || '—'}</td>
                     <td className={`${TD} text-right`}>{dec(mk.fabricWidthCm) || '—'}</td>
