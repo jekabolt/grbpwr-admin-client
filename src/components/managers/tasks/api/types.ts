@@ -170,6 +170,8 @@ export interface TaskRelation {
   status: TaskStatus;
   boardId: number;
   archived: boolean;
+  /** Исполнители второго конца; пусто, пока сервер не прислал поле. */
+  assignees: string[];
 }
 
 // One status move; fromStatus UNKNOWN = creation (toStatus UNKNOWN too when it predates history),
