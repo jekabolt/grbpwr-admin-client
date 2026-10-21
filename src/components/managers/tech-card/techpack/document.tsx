@@ -111,12 +111,15 @@ function sharedSheetOverflows(root: HTMLElement): boolean {
 export function TechpackDocument({
   techCard,
   orient,
+  release = false,
   revision,
   patternViewerToken,
   onDataStatus,
 }: {
   techCard: common_TechCard;
   orient: PrintOrient;
+  /** True when `techCard` is a frozen release snapshot. */
+  release?: boolean;
   /** «rev.N» of a printed release snapshot; the live card prints its lock version. */
   revision?: string;
   /** The public pattern viewer token behind the pattern QR codes. */
@@ -140,8 +143,12 @@ export function TechpackDocument({
     ins?.status,
   );
 
+  // one-way: once the two sections outgrow one sheet they stay on two
+  const [split, setSplit] = useState(false);
   const sizing = useTechpackMeasurements(techCard);
-  const markers = useTechpackMarkerLayouts(techCard);
+  // Detail layouts are live RPC data and expensive to turn into SVG. Fetch them only after the
+  // section has actually moved to its own sheet, and never mix them into a frozen release pack.
+  const markers = useTechpackMarkerLayouts(techCard, split && !release);
   const measurementRows = useMemo(
     () =>
       deriveMeasurementsPage({
@@ -188,8 +195,6 @@ export function TechpackDocument({
   }, [model]);
 
   const [laidOut, setLaidOut] = useState(false);
-  // one-way: once the two sections outgrow one sheet they stay on two
-  const [split, setSplit] = useState(false);
   const { label: geoLabel, status: geoStatus } = geometry.dep;
   const layoutStatus = model && laidOut ? 'ok' : 'pending';
   const sizingStatus = depStatus(sizing.isLoading, sizing.isError);
@@ -253,7 +258,7 @@ export function TechpackDocument({
         {split ? (
           <>
             <ColourwaysPage {...page} n='03' />
-            <PatternsMarkerPage {...patterns} docline={docline} />
+            <PatternsMarkerPage {...patterns} docline={docline} layouts={!release} />
           </>
         ) : (
           <TechpackSheet orient={orient} docline={docline}>
@@ -272,6 +277,7 @@ export function TechpackDocument({
           measurements={sizing.measurements}
           sizeChart={sizing.sizeChart}
           sizeNames={sizing.sizeNames}
+          release={release}
         />
         <QcSignoffPage
           {...page}

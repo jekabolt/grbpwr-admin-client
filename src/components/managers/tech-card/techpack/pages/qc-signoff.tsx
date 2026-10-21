@@ -3,8 +3,8 @@ import type { PrintOrient } from 'components/managers/print/scope';
 import { DataTable, EmptyCell, GroupLabel, HeaderNote, Pill, SectionHeader } from 'ui';
 import { cardStatus } from '../derive-cover';
 import type { MeasurementRow } from '../derive-measurements';
-import { deriveQcSignoffPage, type QcSeamDelta } from '../derive-qc';
-import { TechpackSheet } from '../sheet';
+import { deriveQcSignoffPage, type QcCheck, type QcSeamDelta } from '../derive-qc';
+import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
 import { statusTone } from './bits';
 
 type Props = {
@@ -54,9 +54,9 @@ export function QcSignoffPage({
   });
   const hasRevisions = model.revisions.length > 0;
   const status = cardStatus(techCard);
-  const qc = (
+  const qc = (checks: readonly QcCheck[]) => (
     <div>
-      <GroupLabel flush action={<HeaderNote>{model.checks.length} checks</HeaderNote>}>
+      <GroupLabel flush action={<HeaderNote>{checks.length} checks</HeaderNote>}>
         qc checklist
       </GroupLabel>
       <DataTable>
@@ -72,7 +72,7 @@ export function QcSignoffPage({
           </tr>
         </thead>
         <tbody>
-          {model.checks.map((check) => (
+          {checks.map((check) => (
             <tr key={check.key}>
               <td
                 data-align='left'
@@ -98,11 +98,11 @@ export function QcSignoffPage({
       </DataTable>
     </div>
   );
-  const signoff = (
+  const signoff = (signoffs = model.signoffs, showRevision = true) => (
     <div className='flex min-h-0 flex-1 flex-col justify-between gap-6'>
       <div>
         <GroupLabel flush>sign-off</GroupLabel>
-        {model.signoffs.length > 0 ? (
+        {signoffs.length > 0 ? (
           <DataTable variant='grid'>
             <thead>
               <tr>
@@ -114,7 +114,7 @@ export function QcSignoffPage({
               </tr>
             </thead>
             <tbody>
-              {model.signoffs.map((row) => (
+              {signoffs.map((row) => (
                 <tr key={row.key}>
                   <td
                     className='uppercase text-labelColor'
@@ -159,7 +159,7 @@ export function QcSignoffPage({
           </DataTable>
         )}
       </div>
-      {hasRevisions ? (
+      {showRevision && hasRevisions ? (
         <div>
           <GroupLabel flush>revision</GroupLabel>
           <DataTable>
@@ -183,7 +183,7 @@ export function QcSignoffPage({
             </tbody>
           </DataTable>
         </div>
-      ) : (
+      ) : showRevision ? (
         (revisionLabel || status) && (
           <div>
             <GroupLabel flush>revision</GroupLabel>
@@ -207,28 +207,62 @@ export function QcSignoffPage({
             </DataTable>
           </div>
         )
-      )}
+      ) : null}
     </div>
   );
 
+  const header = (continued = false) => (
+    <SectionHeader
+      title={continuedTitle(n, 'qc & sign-off', continued)}
+      action={
+        model.sampleSize ? <HeaderNote>{`sample ${model.sampleSize}`}</HeaderNote> : undefined
+      }
+    />
+  );
+  const paginationKey = `${techCard.id ?? 0}:${orient}:${model.checks.length}:${model.signoffs.length}:${model.revisions.length}`;
+  const { contentRef, overflow } = useTechpackOverflow(paginationKey);
+
+  if (!overflow) {
+    return (
+      <TechpackSheet orient={orient} docline={docline}>
+        <div ref={contentRef} className='contents'>
+          {header()}
+          <div
+            className={
+              land
+                ? 'grid min-h-0 flex-1 grid-cols-2 gap-x-8'
+                : 'flex min-h-0 flex-1 flex-col justify-between gap-6'
+            }
+          >
+            {qc(model.checks)}
+            {signoff()}
+          </div>
+        </div>
+      </TechpackSheet>
+    );
+  }
+
+  const checkPages = chunksOf(model.checks, land ? 18 : 24);
+  const signoffPages = model.signoffs.length
+    ? chunksOf(model.signoffs, land ? 6 : 8)
+    : [[] as typeof model.signoffs];
   return (
-    <TechpackSheet orient={orient} docline={docline}>
-      <SectionHeader
-        title={`${n} qc & sign-off`}
-        action={
-          model.sampleSize ? <HeaderNote>{`sample ${model.sampleSize}`}</HeaderNote> : undefined
-        }
-      />
-      <div
-        className={
-          land
-            ? 'grid min-h-0 flex-1 grid-cols-2 gap-x-8'
-            : 'flex min-h-0 flex-1 flex-col justify-between gap-6'
-        }
-      >
-        {qc}
-        {signoff}
-      </div>
-    </TechpackSheet>
+    <>
+      {checkPages.map((checks, index) => (
+        <TechpackSheet key={`checks-${index}`} orient={orient} docline={docline}>
+          {header(index > 0)}
+          {qc(checks)}
+        </TechpackSheet>
+      ))}
+      {signoffPages.map((signoffs, index) => {
+        const pageIndex = checkPages.length + index;
+        return (
+          <TechpackSheet key={`signoff-${index}`} orient={orient} docline={docline}>
+            {header(pageIndex > 0)}
+            {signoff(signoffs, index === signoffPages.length - 1)}
+          </TechpackSheet>
+        );
+      })}
+    </>
   );
 }

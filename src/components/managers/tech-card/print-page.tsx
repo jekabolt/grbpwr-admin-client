@@ -52,10 +52,13 @@ export function TechCardPrint() {
   // внутренний тех-пак обо всём сразу остаётся валидным документом.
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
-  // The v6 document (techpack/) is the default. The previous one stays reachable with
-  // ?layout=classic and is the only one that knows a production run (cut list, run scope), so a
-  // ?run= print uses it automatically.
-  const classic = searchParams.get('layout') === 'classic' || query.runId > 0;
+  // The v6 document only implements paper orientation and release snapshots. Any URL carrying a
+  // narrower print scope must stay on the classic document until v6 can apply that scope to every
+  // section; silently ignoring even an empty/invalid filter would print a broader pack than asked.
+  const hasClassicOnlyScope = ['profile', 'colorway', 'sizes', 'booklets', 'run'].some((name) =>
+    searchParams.has(name),
+  );
+  const classic = searchParams.get('layout') === 'classic' || hasClassicOnlyScope;
   // Ориентация живёт в адресе (?orient=land), как и весь скоуп: ссылка на печать воспроизводит
   // лист целиком. Книжная — умолчание, параметр для неё снимается.
   const setOrient = useCallback(
@@ -318,6 +321,7 @@ export function TechCardPrint() {
             <TechpackDocument
               techCard={snapshot ?? techCard}
               orient={query.orient}
+              release={!!snapshot}
               revision={
                 snapshot ? `rev.${wireInt(releaseData?.release?.releaseNumber) || '—'}` : undefined
               }

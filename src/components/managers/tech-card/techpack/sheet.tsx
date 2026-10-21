@@ -1,7 +1,7 @@
 // One A4 sheet of the tech pack. On screen it is the paper with the @page margin boxes
 // (print/page-furniture.tsx) drawn in; in print the sheet IS the page body: the browser's own
 // margin boxes print the running head and the counter, so the drawn copies hide.
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
@@ -19,6 +19,31 @@ export const BODY_PX = {
   land: { w: 1123 - 90, h: 794 - 106 },
   port: { w: 794 - 90, h: 1123 - 106 },
 } as const;
+
+/** Split only after the unsplit section proves it cannot fit, preserving today's one-page packs. */
+export function useTechpackOverflow(key: string) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [overflowKey, setOverflowKey] = useState('');
+  const overflow = overflowKey === key;
+
+  useLayoutEffect(() => {
+    if (overflow) return;
+    const body = contentRef.current?.closest<HTMLElement>('.tp-body');
+    if (body && body.scrollHeight > body.clientHeight + 1) setOverflowKey(key);
+  });
+
+  return { contentRef, overflow };
+}
+
+export function chunksOf<T>(items: readonly T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let at = 0; at < items.length; at += size) chunks.push(items.slice(at, at + size));
+  return chunks;
+}
+
+export const continuedTitle = (n: string, title: string, continued: boolean) =>
+  `${n} ${title}${continued ? ' · cont.' : ''}`;
 
 export const TECHPACK_SHEET_CSS = String.raw`
 .tp-doc { display: flex; flex-direction: column; align-items: center; gap: 24px; }

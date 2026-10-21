@@ -2299,7 +2299,7 @@ export function TechPackDocument({
                         {wireInt(mk.id) > 0 && (
                           <PatternQR
                             size={52}
-                            value={`${window.location.origin}${techCardMarkerViewerPath(
+                            value={`${viewerOrigin()}${techCardMarkerViewerPath(
                               wireInt(techCard.id),
                               wireInt(mk.id),
                             )}`}

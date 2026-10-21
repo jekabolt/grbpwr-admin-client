@@ -68,6 +68,8 @@ type PatternInput = {
   sizeNames?: Readonly<Record<number, string>>;
   /** Net cut area per garment by BOM line, from the DXF pieces: the row a marker does not cover. */
   netM2ByLine?: Readonly<Record<string, number>>;
+  /** Fetch/render detail layouts only on pages that actually print the SVG previews. */
+  includeLayouts?: boolean;
 };
 
 type PatternScope = ReturnType<typeof fabricScopes>[number];
@@ -261,8 +263,13 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
         id && techCard.id && markerOrigin
           ? `${markerOrigin}/tech-cards/${techCard.id}/markers/${id}/view`
           : undefined,
-      layoutSvg: layout ? markerLayoutSvg(layout) : undefined,
-      missing: !id || !techCard.id || !markerOrigin ? 'link' : layout ? undefined : 'layout',
+      layoutSvg: input.includeLayouts && layout ? markerLayoutSvg(layout) : undefined,
+      missing:
+        !id || !techCard.id || !markerOrigin
+          ? 'link'
+          : input.includeLayouts && !layout
+            ? 'layout'
+            : undefined,
     };
   });
 
