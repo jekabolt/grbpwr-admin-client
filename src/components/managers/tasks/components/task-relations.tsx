@@ -233,6 +233,9 @@ export function TaskRelations({
 
   /** Какой пикер открыт; `null` — ни одного. Дверь открывает пикер сразу, без промежуточной формы. */
   const [picker, setPicker] = useState<TaskPickMode | null>(null);
+  // Последний режим живёт дольше открытия: закрывающийся Drawer не должен мигнуть чужим заголовком.
+  const [lastMode, setLastMode] = useState<TaskPickMode>('blocker');
+  if (picker && picker !== lastMode) setLastMode(picker);
 
   // РОДИТЕЛЬ. Единственное место, где приходится сходить за вторым концом: на проводе у него
   // только номер. `useTask` сам не стреляет при нуле.
@@ -267,7 +270,7 @@ export function TaskRelations({
   const pickerEl = canWrite && (
     <TaskBoardPicker
       open={picker !== null}
-      mode={picker ?? 'blocker'}
+      mode={picker ?? lastMode}
       task={task}
       onClose={() => setPicker(null)}
       onPick={onPick}
