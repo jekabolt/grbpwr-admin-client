@@ -263,6 +263,7 @@ export function mapTask(t: common_Task): Task {
     media,
     // Resolved only by GetTask; a list row knows the ids and nothing else.
     files: [],
+    statusHistory: [],
     checklist: (t.checklist ?? []).map(mapChecklistItem).sort((a, b) => a.position - b.position),
     createdBy: t.createdBy ?? '',
     createdAt: t.createdAt ?? '',
@@ -338,6 +339,12 @@ export const tasksService: TasksService = {
             // в разделе «файлы», и ей нужны тема, загрузивший и тип содержимого, а не три
             // ссылки. Подписанные ссылки внутри живут ровно столько, сколько этот ответ.
             files: r.files ?? [],
+            statusHistory: (r.statusHistory ?? []).map((h) => ({
+              fromStatus: h.fromStatus ?? 'TASK_STATUS_UNKNOWN',
+              toStatus: h.toStatus ?? 'TASK_STATUS_UNKNOWN',
+              changedBy: h.changedBy ?? '',
+              changedAt: h.changedAt ?? '',
+            })),
           }
         : undefined,
     ),

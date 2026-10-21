@@ -161,6 +161,14 @@ export interface TaskRelation {
   archived: boolean;
 }
 
+// One status move; fromStatus UNKNOWN = creation (toStatus UNKNOWN too when it predates history).
+export interface TaskStatusChange {
+  fromStatus: TaskStatus;
+  toStatus: TaskStatus;
+  changedBy: string;
+  changedAt: string;
+}
+
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
@@ -173,6 +181,8 @@ export interface Task {
   // ids alone). They hold presigned urls with a short life, so they are never cached
   // beyond the response that minted them.
   files: LibraryFile[];
+  // Status moves, newest first; present only on GetTask (lists carry []).
+  statusHistory: TaskStatusChange[];
   checklist: TaskChecklistItem[];
   createdBy: string; // AdminAccount.username
   createdAt: string;

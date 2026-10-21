@@ -26,6 +26,7 @@ import {
   TaskMediaAnnotations,
   TaskPriority,
   TaskStatus,
+  TaskStatusChange,
 } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
@@ -101,6 +102,14 @@ const ASSIGNEE_IN_CHIP =
 /** A select that is the value of a phone property row: no box, the row is the box. */
 const ROW_SELECT =
   'min-h-11 w-auto gap-2 border-0 bg-transparent px-0 text-control uppercase leading-none tracking-label';
+
+function statusChangeLabel(h: TaskStatusChange): string {
+  const unknown = 'TASK_STATUS_UNKNOWN';
+  if (h.fromStatus === unknown) {
+    return h.toStatus === unknown ? 'created' : `created · ${STATUS_LABEL[h.toStatus]}`;
+  }
+  return `${STATUS_LABEL[h.fromStatus]} → ${STATUS_LABEL[h.toStatus]}`;
+}
 
 /** Phone property row: label left, its control right; `danger` = overdue (word + red). */
 function PropRow({
@@ -606,7 +615,11 @@ export function TaskDetail() {
                   <PropRow label='created'>
                     <Text size='control' variant='label' component='span' className='uppercase'>
                       {task.createdBy ? `${task.createdBy} · ` : ''}
-                      {task.createdAt ? format(new Date(task.createdAt), 'PP, HH:mm') : <EmptyCell />}
+                      {task.createdAt ? (
+                        format(new Date(task.createdAt), 'PP, HH:mm')
+                      ) : (
+                        <EmptyCell />
+                      )}
                     </Text>
                   </PropRow>
                 </>
@@ -785,6 +798,31 @@ export function TaskDetail() {
             </div>
           )}
         </Section>
+
+        {/* ── 5. История статусов: новые сверху; строка без from — создание. */}
+        {task.statusHistory.length > 0 && (
+          <Section title='history' className='min-w-0'>
+            {task.statusHistory.map((h, i) => (
+              <div
+                key={`${h.changedAt}-${i}`}
+                className='flex min-h-11 items-center justify-between gap-3 border-b border-hairline'
+              >
+                <Text size='control' component='span' className='uppercase tracking-label'>
+                  {statusChangeLabel(h)}
+                </Text>
+                <Text
+                  size='control'
+                  variant='label'
+                  component='span'
+                  className='shrink-0 uppercase tracking-label'
+                >
+                  {h.changedBy ? `${h.changedBy} · ` : ''}
+                  {h.changedAt ? format(new Date(h.changedAt), 'PP, HH:mm') : <EmptyCell />}
+                </Text>
+              </div>
+            ))}
+          </Section>
+        )}
 
         {/* ── 6. Чеклист ──────────────────────────────────────────────────────────────── */}
         <TaskChecklist

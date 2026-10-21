@@ -8988,6 +8988,16 @@ export type TaskLinkKind =
   | "TASK_LINK_KIND_BLOCKS"
   | "TASK_LINK_KIND_BLOCKED_BY"
   | "TASK_LINK_KIND_RELATES";
+// TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation. For tasks
+// created before status history existed, GetTask appends a synthetic creation event whose
+// to_status is also UNKNOWN because the initial status cannot be recovered.
+export type TaskStatusChange = {
+  fromStatus: TaskStatus | undefined;
+  toStatus: TaskStatus | undefined;
+  changedBy: string | undefined;
+  changedAt: wellKnownTimestamp | undefined;
+};
+
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
 // board — board, status, position — is deliberately NOT here: it is set at
 // AddTask and changed only via MoveTask, so a content edit can never silently

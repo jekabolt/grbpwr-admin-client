@@ -5422,6 +5422,9 @@ export type GetTaskResponse = {
   // common.Task itself only carries their ids: it is reused in contexts that get
   // persisted, and a url with a 6-12h life must never be written down anywhere.
   files: LibraryFile[] | undefined;
+  // Detail-only status audit trail, ordered by changed_at DESC, id DESC. Kept off common.Task
+  // because that message is reused in heavy lists and durable snapshots.
+  statusHistory: common_TaskStatusChange[] | undefined;
 };
 
 // Task is a stored kanban card: its content (TaskInsert), its placement on the
@@ -5636,6 +5639,16 @@ export type LibraryFileRole = {
   projectTopicName: string | undefined;
   roleId: number | undefined;
   roleName: string | undefined;
+};
+
+// TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation. For tasks
+// created before status history existed, GetTask appends a synthetic creation event whose
+// to_status is also UNKNOWN because the initial status cannot be recovered.
+export type common_TaskStatusChange = {
+  fromStatus: common_TaskStatus | undefined;
+  toStatus: common_TaskStatus | undefined;
+  changedBy: string | undefined;
+  changedAt: wellKnownTimestamp | undefined;
 };
 
 // FileRole is one entry of the closed role vocabulary OF ONE PROJECT.
