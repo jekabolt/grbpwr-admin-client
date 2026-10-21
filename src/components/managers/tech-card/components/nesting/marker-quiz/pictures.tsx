@@ -1,8 +1,10 @@
 import type { CSSProperties, JSX, ReactNode } from 'react';
 
-import { Text } from 'ui';
+import { ACCENT_FILL_OPACITY, LINE, LINE_EMPHASIS, LINE_HAIRLINE, Text } from 'ui';
 
-const INK = 'var(--color-textColor)';
+// The svg sets `text-textColor`, so ink strokes are `currentColor` (LINE) and the host owns the colour.
+const INK = 'currentColor';
+const TEXT = 'var(--color-textColor)';
 const LABEL = 'var(--color-labelColor)';
 const ERROR = 'var(--color-error)';
 
@@ -32,6 +34,11 @@ const toneColour: Record<Tone, string> = {
   label: LABEL,
   error: ERROR,
 };
+
+// Dimension lines and ticks are secondary (hairline); an error dimension is the one thing to see.
+const toneWeight = (tone: Tone) => (tone === 'error' ? LINE_EMPHASIS : LINE_HAIRLINE);
+
+const HAIRLINE = { ...LINE, strokeWidth: LINE_HAIRLINE };
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -86,7 +93,7 @@ function SketchFrame({
     <div className='relative mx-auto max-w-full' data-marker-picture='' style={frameStyle}>
       <svg
         aria-hidden='true'
-        className='absolute inset-0 size-full overflow-visible'
+        className='absolute inset-0 size-full overflow-visible text-textColor'
         preserveAspectRatio='xMidYMid meet'
         viewBox={viewBox.join(' ')}
       >
@@ -100,7 +107,7 @@ function SketchFrame({
               ? '-translate-x-full'
               : '-translate-x-1/2';
         const overlayStyle: CSSProperties = {
-          color: toneColour[overlay.tone ?? 'ink'],
+          color: overlay.tone && overlay.tone !== 'ink' ? toneColour[overlay.tone] : TEXT,
           left: `${pointInViewBox(overlay.x, viewBox[0], viewBox[2])}%`,
           top: `${pointInViewBox(overlay.y, viewBox[1], viewBox[3])}%`,
         };
@@ -138,24 +145,18 @@ function TableSketch({
   const rightLeg = x + length - Math.min(12, length / 4);
 
   return (
-    <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
-      <line x1={x - 6} y1={y} x2={x + length + 6} y2={y} vectorEffect='non-scaling-stroke' />
-      <line
-        x1={x - 6}
-        y1={y + 4}
-        x2={x + length + 6}
-        y2={y + 4}
-        vectorEffect='non-scaling-stroke'
-      />
-      <line x1={leftLeg} y1={y + 4} x2={leftLeg} y2={groundY} vectorEffect='non-scaling-stroke' />
-      <line x1={rightLeg} y1={y + 4} x2={rightLeg} y2={groundY} vectorEffect='non-scaling-stroke' />
+    <g {...LINE}>
+      <line x1={x - 6} y1={y} x2={x + length + 6} y2={y} {...LINE} />
+      <line x1={x - 6} y1={y + 4} x2={x + length + 6} y2={y + 4} {...LINE} />
+      <line x1={leftLeg} y1={y + 4} x2={leftLeg} y2={groundY} {...LINE} />
+      <line x1={rightLeg} y1={y + 4} x2={rightLeg} y2={groundY} {...LINE} />
       <line
         x1={x - 20}
         y1={groundY}
         x2={x + length + 20}
         y2={groundY}
+        {...HAIRLINE}
         stroke={LABEL}
-        vectorEffect='non-scaling-stroke'
       />
     </g>
   );
@@ -168,9 +169,9 @@ function SlashTick({ x, y, tone = 'ink' }: { x: number; y: number; tone?: Tone }
       y1={y + 4}
       x2={x + 4}
       y2={y - 4}
+      {...LINE}
       stroke={toneColour[tone]}
-      strokeWidth={1}
-      vectorEffect='non-scaling-stroke'
+      strokeWidth={toneWeight(tone)}
     />
   );
 }
@@ -191,7 +192,7 @@ function HorizontalDimension({
   const colour = toneColour[tone];
 
   return (
-    <g fill='none' stroke={colour} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+    <g {...LINE} stroke={colour} strokeWidth={toneWeight(tone)}>
       {extensionY != null && (
         <>
           <line
@@ -199,20 +200,30 @@ function HorizontalDimension({
             y1={y + 5}
             x2={x1}
             y2={extensionY}
-            strokeDasharray='3 3'
-            vectorEffect='non-scaling-stroke'
+            {...LINE}
+            stroke={colour}
+            strokeWidth={LINE_HAIRLINE}
           />
           <line
             x1={x2}
             y1={y + 5}
             x2={x2}
             y2={extensionY}
-            strokeDasharray='3 3'
-            vectorEffect='non-scaling-stroke'
+            {...LINE}
+            stroke={colour}
+            strokeWidth={LINE_HAIRLINE}
           />
         </>
       )}
-      <line x1={x1} y1={y} x2={x2} y2={y} vectorEffect='non-scaling-stroke' />
+      <line
+        x1={x1}
+        y1={y}
+        x2={x2}
+        y2={y}
+        {...LINE}
+        stroke={colour}
+        strokeWidth={toneWeight(tone)}
+      />
       <SlashTick x={x1} y={y} tone={tone} />
       <SlashTick x={x2} y={y} tone={tone} />
     </g>
@@ -235,7 +246,7 @@ function VerticalDimension({
   const colour = toneColour[tone];
 
   return (
-    <g fill='none' stroke={colour} strokeWidth={1} vectorEffect='non-scaling-stroke'>
+    <g {...LINE} stroke={colour} strokeWidth={toneWeight(tone)}>
       {extensionX != null && (
         <>
           <line
@@ -243,20 +254,30 @@ function VerticalDimension({
             y1={y1}
             x2={x - 5}
             y2={y1}
-            strokeDasharray='3 3'
-            vectorEffect='non-scaling-stroke'
+            {...LINE}
+            stroke={colour}
+            strokeWidth={LINE_HAIRLINE}
           />
           <line
             x1={extensionX}
             y1={y2}
             x2={x - 5}
             y2={y2}
-            strokeDasharray='3 3'
-            vectorEffect='non-scaling-stroke'
+            {...LINE}
+            stroke={colour}
+            strokeWidth={LINE_HAIRLINE}
           />
         </>
       )}
-      <line x1={x} y1={y1} x2={x} y2={y2} vectorEffect='non-scaling-stroke' />
+      <line
+        x1={x}
+        y1={y1}
+        x2={x}
+        y2={y2}
+        {...LINE}
+        stroke={colour}
+        strokeWidth={toneWeight(tone)}
+      />
       <SlashTick x={x} y={y1} tone={tone} />
       <SlashTick x={x} y={y2} tone={tone} />
     </g>
@@ -286,21 +307,14 @@ function StackLines({
   const safeEnd = errorFrom == null ? end : clamp(errorFrom, x, end);
 
   return (
-    <g fill='none' strokeWidth={1} vectorEffect='non-scaling-stroke'>
+    <g {...LINE}>
       {Array.from({ length: shown }, (_, index) => {
         const lineY = y - 1 - index * gap;
         const colour = faceToFace && index % 2 === 1 ? LABEL : INK;
         return (
           <g key={index}>
             {safeEnd > x && (
-              <line
-                x1={x}
-                y1={lineY}
-                x2={safeEnd}
-                y2={lineY}
-                stroke={colour}
-                vectorEffect='non-scaling-stroke'
-              />
+              <line x1={x} y1={lineY} x2={safeEnd} y2={lineY} {...LINE} stroke={colour} />
             )}
             {errorFrom != null && end > safeEnd && (
               <line
@@ -308,8 +322,9 @@ function StackLines({
                 y1={lineY}
                 x2={end}
                 y2={lineY}
+                {...LINE}
                 stroke={ERROR}
-                vectorEffect='non-scaling-stroke'
+                strokeWidth={LINE_EMPHASIS}
               />
             )}
           </g>
@@ -440,35 +455,11 @@ export function KnifePicture(p: { maxStackCm: number; stackCm?: number }): JSX.E
     >
       <TableSketch x={x} y={TABLE_Y} length={TABLE_LENGTH} groundY={GROUND_Y} />
       <StackLines x={stackX} y={TABLE_Y} length={stackLength} count={8} height={shownStackHeight} />
-      <g fill='none' stroke={INK} strokeWidth={1} vectorEffect='non-scaling-stroke'>
-        <rect
-          x={knifeX - 7}
-          y={limitY - 18}
-          width={14}
-          height={18}
-          vectorEffect='non-scaling-stroke'
-        />
-        <line
-          x1={knifeX - 12}
-          y1={limitY - 18}
-          x2={knifeX + 12}
-          y2={limitY - 18}
-          vectorEffect='non-scaling-stroke'
-        />
-        <line
-          x1={knifeX - 1}
-          y1={limitY}
-          x2={knifeX - 1}
-          y2={TABLE_Y}
-          vectorEffect='non-scaling-stroke'
-        />
-        <line
-          x1={knifeX + 1}
-          y1={limitY}
-          x2={knifeX + 1}
-          y2={TABLE_Y}
-          vectorEffect='non-scaling-stroke'
-        />
+      <g {...LINE}>
+        <rect x={knifeX - 7} y={limitY - 18} width={14} height={18} {...LINE} />
+        <line x1={knifeX - 12} y1={limitY - 18} x2={knifeX + 12} y2={limitY - 18} {...LINE} />
+        <line x1={knifeX - 1} y1={limitY} x2={knifeX - 1} y2={TABLE_Y} {...LINE} />
+        <line x1={knifeX + 1} y1={limitY} x2={knifeX + 1} y2={TABLE_Y} {...LINE} />
       </g>
       <VerticalDimension x={dimensionX} y1={limitY} y2={TABLE_Y} extensionX={knifeX + 10} />
     </SketchFrame>
@@ -605,16 +596,22 @@ export function EndsPicture(p: {
             y={stackTop}
             width={endWidth}
             height={height + 1}
+            {...LINE}
+            stroke={ERROR}
+            strokeWidth={LINE_EMPHASIS}
             fill={ERROR}
-            fillOpacity={0.85}
+            fillOpacity={ACCENT_FILL_OPACITY}
           />
           <rect
             x={stackX + length - endWidth}
             y={stackTop}
             width={endWidth}
             height={height + 1}
+            {...LINE}
+            stroke={ERROR}
+            strokeWidth={LINE_EMPHASIS}
             fill={ERROR}
-            fillOpacity={0.85}
+            fillOpacity={ACCENT_FILL_OPACITY}
           />
           <HorizontalDimension
             x1={stackX}

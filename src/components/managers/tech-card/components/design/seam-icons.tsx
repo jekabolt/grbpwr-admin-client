@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import type { common_TechCardSeamClass } from 'api/proto-http/admin';
 import { findPantone } from 'components/managers/tech-card/components/pantone-swatches';
+import { ACCENT_FILL_OPACITY, LINE, LINE_EMPHASIS } from 'ui';
 
 /** Open-edge finish keys added by 90-EDGES; their decision lines use `edge:` instead of `seam:`. */
 export const EDGE_KINDS = [
@@ -298,44 +299,138 @@ export function isPaletteKey(part: string): boolean {
   return part === 'col_palette';
 }
 
-const plyStyle = {
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 7,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-};
-const threadStyle = {
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 3,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-};
-const threadDot = { fill: 'currentColor', stroke: 'none' };
-const sleeveStyle = {
-  fill: 'currentColor',
-  fillOpacity: 0.25,
-  stroke: 'currentColor',
-  strokeWidth: 3,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-};
+// ── Drawing ─────────────────────────────────────────────────────────────────────────────────────
+// A seam is drawn as a cross-section in a 120-unit space (scaled into the 64 tile below). A ply of
+// fabric is an outlined band (GRBPWR line rule 5): its centreline is written by hand, the band
+// outline is offset from it here. Stacked plies sit exactly one band apart, so plies pressed
+// together share one edge line.
 
-function Ply1({ d }: { d: string }): JSX.Element {
-  return <path {...plyStyle} d={d} />;
+type Pt = readonly [number, number];
+
+/** Band width of one ply, in seam units (120 space). */
+const PLY = 10;
+const HALF = PLY / 2;
+const CURVE_STEPS = 12;
+
+/** Centreline `d` (absolute M/L/H/V/Q, one subpath) → polyline. */
+function flatten(d: string): Pt[] {
+  const tok = d.match(/[MLHVQ]|-?\d*\.?\d+/g) ?? [];
+  const pts: Pt[] = [];
+  let at = 0;
+  let cmd = '';
+  let x = 0;
+  let y = 0;
+  const num = (): number => Number(tok[at++]);
+  while (at < tok.length) {
+    if (/[MLHVQ]/.test(tok[at])) cmd = tok[at++];
+    if (cmd === 'M' || cmd === 'L') {
+      x = num();
+      y = num();
+    } else if (cmd === 'H') x = num();
+    else if (cmd === 'V') y = num();
+    else if (cmd === 'Q') {
+      const cx = num();
+      const cy = num();
+      const ex = num();
+      const ey = num();
+      for (let k = 1; k < CURVE_STEPS; k++) {
+        const t = k / CURVE_STEPS;
+        const u = 1 - t;
+        pts.push([
+          u * u * x + 2 * u * t * cx + t * t * ex,
+          u * u * y + 2 * u * t * cy + t * t * ey,
+        ]);
+      }
+      x = ex;
+      y = ey;
+    } else break;
+    pts.push([x, y]);
+  }
+  return pts.filter(
+    (p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 1e-6,
+  );
 }
 
-function Ply2({ d }: { d: string }): JSX.Element {
-  return <path {...plyStyle} d={d} strokeOpacity={0.65} />;
+/** One side of the band: the polyline moved `s` units along its left normal (mitred, capped). */
+function offsetSide(pts: Pt[], s: number): Pt[] {
+  const normals = pts.slice(1).map((p, i): Pt => {
+    const dx = p[0] - pts[i][0];
+    const dy = p[1] - pts[i][1];
+    const len = Math.hypot(dx, dy);
+    return [-dy / len, dx / len];
+  });
+  return pts.map((p, i): Pt => {
+    const a = normals[Math.max(0, i - 1)];
+    const b = normals[Math.min(normals.length - 1, i)];
+    let mx = a[0] + b[0];
+    let my = a[1] + b[1];
+    const len = Math.hypot(mx, my);
+    if (len < 1e-6) [mx, my] = b;
+    else [mx, my] = [mx / len, my / len];
+    const k = s / Math.max(mx * a[0] + my * a[1], 0.5);
+    return [p[0] + mx * k, p[1] + my * k];
+  });
+}
+
+function crossing(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
+  const rx = b[0] - a[0];
+  const ry = b[1] - a[1];
+  const sx = d[0] - c[0];
+  const sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den;
+  const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+  return t > 0 && t < 1 && u > 0 && u < 1 ? [a[0] + t * rx, a[1] + t * ry] : null;
+}
+
+/** Cut the little loops an inner side makes where a fold is tighter than half a band. */
+function untangle(poly: Pt[]): Pt[] {
+  let out = poly;
+  for (let i = 0; i < out.length - 1; i++) {
+    for (let j = out.length - 2; j > i + 1; j--) {
+      const x = crossing(out[i], out[i + 1], out[j], out[j + 1]);
+      if (x) {
+        out = [...out.slice(0, i + 1), x, ...out.slice(j + 1)];
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+const bandCache = new Map<string, string>();
+
+/** Closed outline of a ply band around centreline `d`; ends are cut square (a cut fabric edge). */
+function bandOf(d: string): string {
+  const hit = bandCache.get(d);
+  if (hit) return hit;
+  const pts = flatten(d);
+  const left = untangle(offsetSide(pts, HALF));
+  const right = untangle(offsetSide(pts, -HALF)).reverse();
+  const fmt = (p: Pt) => `${+p[0].toFixed(2)} ${+p[1].toFixed(2)}`;
+  const band = `M${[...left, ...right].map(fmt).join(' L')} Z`;
+  bandCache.set(d, band);
+  return band;
+}
+
+const area = { ...LINE, fill: 'currentColor', fillOpacity: ACCENT_FILL_OPACITY };
+const thread = { ...LINE, strokeWidth: LINE_EMPHASIS };
+const threadDot = { fill: 'currentColor', stroke: 'none' };
+/** Thread end where the needle went through; ≤ 1.5 tile units once scaled. */
+const DOT_R = 2.5;
+
+/** One ply of fabric along a centreline. */
+function Ply({ d }: { d: string }): JSX.Element {
+  return <path {...area} d={bandOf(d)} />;
 }
 
 function NeedleV({ x, y1, y2 }: { x: number; y1: number; y2: number }): JSX.Element {
   return (
     <>
-      <path {...threadStyle} d={`M${x} ${y1} V${y2}`} />
-      <circle {...threadDot} cx={x} cy={y1} r={2} />
-      <circle {...threadDot} cx={x} cy={y2} r={2} />
+      <path {...thread} d={`M${x} ${y1} V${y2}`} />
+      <circle {...threadDot} cx={x} cy={y1} r={DOT_R} />
+      <circle {...threadDot} cx={x} cy={y2} r={DOT_R} />
     </>
   );
 }
@@ -343,25 +438,26 @@ function NeedleV({ x, y1, y2 }: { x: number; y1: number; y2: number }): JSX.Elem
 function NeedleH({ y, x1, x2 }: { y: number; x1: number; x2: number }): JSX.Element {
   return (
     <>
-      <path {...threadStyle} d={`M${x1} ${y} H${x2}`} />
-      <circle {...threadDot} cx={x1} cy={y} r={2} />
-      <circle {...threadDot} cx={x2} cy={y} r={2} />
+      <path {...thread} d={`M${x1} ${y} H${x2}`} />
+      <circle {...threadDot} cx={x1} cy={y} r={DOT_R} />
+      <circle {...threadDot} cx={x2} cy={y} r={DOT_R} />
     </>
   );
 }
 
+/** Overlock zigzag wrapping a raw edge at (x, y); `amp` must clear the plies it wraps. */
 function Overlock({
   x,
   y,
   dir,
-  amp = 6,
+  amp,
   step = 6,
   teeth = 3,
 }: {
   x: number;
   y: number;
   dir: 'left' | 'right' | 'up';
-  amp?: number;
+  amp: number;
   step?: number;
   teeth?: number;
 }): JSX.Element {
@@ -380,77 +476,68 @@ function Overlock({
     }
     d += ` Q${x - sign * 5} ${y - amp} ${x - sign * 5} ${y} Q${x - sign * 5} ${y + amp} ${x} ${y + amp}`;
   }
-  return <path {...threadStyle} d={d} />;
+  return <path {...thread} d={d} />;
 }
 
-function Sleeve({
+/** Binding folded round a raw edge ending at (x, y): a ply band whose two legs touch the edge's
+ *  faces and whose fold clears the cut. `dir` is the side the binding legs run to. */
+function Binding({
   x,
   y,
   dir,
-  width = 14,
-  height = 12,
-  d,
-}: {
-  x?: number;
-  y?: number;
-  dir?: 'left' | 'right';
-  width?: number;
-  height?: number;
-  d?: string;
-}): JSX.Element {
-  if (d) return <path {...sleeveStyle} d={d} />;
-  const edgeX = x ?? 0;
-  const edgeY = y ?? 0;
-  const sign = dir === 'right' ? 1 : -1;
-  const turnX = edgeX - sign * 5;
-  const openX = edgeX + sign * width;
-  const path = `M${openX} ${edgeY - height / 2} H${turnX + sign * 4} Q${turnX} ${edgeY - height / 2} ${turnX} ${edgeY} Q${turnX} ${edgeY + height / 2} ${turnX + sign * 4} ${edgeY + height / 2} H${openX}`;
-  return <path {...sleeveStyle} d={path} />;
-}
-
-function Bar({
-  x,
-  y,
   width,
-  height = 8,
 }: {
   x: number;
   y: number;
+  dir: 'left' | 'right';
   width: number;
-  height?: number;
-}) {
-  return <rect x={x} y={y} width={width} height={height} rx={1} fill='currentColor' />;
-}
-
-function Cord({ x, y, radius = 7 }: { x: number; y: number; radius?: number }): JSX.Element {
+}): JSX.Element {
+  const sign = dir === 'right' ? 1 : -1;
+  const r = PLY;
+  const open = x + sign * width;
+  const turn = x - sign * r;
   return (
-    <circle
-      cx={x}
-      cy={y}
-      r={radius}
-      fill='currentColor'
-      fillOpacity={0.25}
-      stroke='currentColor'
-      strokeWidth={3}
+    <Ply
+      d={`M${open} ${y - r} H${x} Q${turn} ${y - r} ${turn} ${y} Q${turn} ${y + r} ${x} ${y + r} H${open}`}
     />
   );
 }
 
-function Thread({ d }: { d: string }): JSX.Element {
-  return <path {...threadStyle} d={d} />;
+/** Tape, glue film or elastic: a flat strip, outlined with the accent tint. */
+function Strip({
+  x,
+  y,
+  width,
+  height,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): JSX.Element {
+  return <rect {...area} x={x} y={y} width={width} height={height} rx={1} />;
 }
 
+function Cord({ x, y, radius = 7 }: { x: number; y: number; radius?: number }): JSX.Element {
+  return <circle {...area} cx={x} cy={y} r={radius} />;
+}
+
+function Thread({ d }: { d: string }): JSX.Element {
+  return <path {...thread} d={d} />;
+}
+
+// Plies: ply 1 comes from the left, ply 2 from the right; the seam line between them is x = 60.
 function SeamGlyph({ kind }: { kind: SeamKind }): JSX.Element {
   const plainOpen = (
     <>
-      <Ply1 d='M4 16 H55 Q58 16 58 19 V39 Q58 42 55 42 H26' />
-      <Ply2 d='M116 16 H65 Q62 16 62 19 V39 Q62 42 65 42 H94' />
+      <Ply d='M4 16 H49 Q55 16 55 22 V36 Q55 42 49 42 H26' />
+      <Ply d='M116 16 H71 Q65 16 65 22 V36 Q65 42 71 42 H94' />
     </>
   );
-  const plainStanding = (
+  const standing = (bottom: number, top = 18) => (
     <>
-      <Ply1 d='M4 18 H54 Q58 18 58 22 V58' />
-      <Ply2 d='M116 18 H66 Q62 18 62 22 V58' />
+      <Ply d={`M4 ${top} H49 Q55 ${top} 55 ${top + 6} V${bottom}`} />
+      <Ply d={`M116 ${top} H71 Q65 ${top} 65 ${top + 6} V${bottom}`} />
     </>
   );
 
@@ -459,230 +546,225 @@ function SeamGlyph({ kind }: { kind: SeamKind }): JSX.Element {
       return (
         <>
           {plainOpen}
-          <Overlock x={26} y={42} dir='right' amp={4} step={4} teeth={2} />
-          <Overlock x={94} y={42} dir='left' amp={4} step={4} teeth={2} />
-          <NeedleH y={28} x1={50} x2={70} />
+          <Overlock x={26} y={42} dir='right' amp={8} step={4} teeth={2} />
+          <Overlock x={94} y={42} dir='left' amp={8} step={4} teeth={2} />
+          <NeedleH y={28} x1={44} x2={76} />
         </>
       );
     case 'sm_plain_overlock':
       return (
         <>
-          {plainStanding}
-          <NeedleH y={32} x1={48} x2={72} />
-          <Overlock x={60} y={58} dir='up' amp={7} step={6} teeth={3} />
+          {standing(60)}
+          <NeedleH y={32} x1={42} x2={78} />
+          <Overlock x={60} y={60} dir='up' amp={13} step={5} teeth={3} />
         </>
       );
     case 'sm_safety':
       return (
         <>
-          {plainStanding}
-          <NeedleH y={32} x1={48} x2={72} />
-          <NeedleH y={44} x1={50} x2={70} />
-          <Overlock x={60} y={58} dir='up' amp={7} step={6} teeth={3} />
+          {standing(62)}
+          <NeedleH y={30} x1={42} x2={78} />
+          <NeedleH y={40} x1={42} x2={78} />
+          <Overlock x={60} y={62} dir='up' amp={13} step={5} teeth={3} />
         </>
       );
     case 'sm_french':
       return (
         <>
-          <Ply1 d='M4 18 H48 Q52 18 52 22 V56 Q52 62 57 60 V42' />
-          <Ply2 d='M116 18 H72 Q68 18 68 22 V56 Q68 62 63 60 V42' />
-          <NeedleH y={30} x1={44} x2={76} />
-          <NeedleH y={54} x1={46} x2={74} />
+          <Ply d='M4 18 H39 Q45 18 45 24 V60 Q45 65 50 65 Q55 65 55 60 V38' />
+          <Ply d='M116 18 H81 Q75 18 75 24 V60 Q75 65 70 65 Q65 65 65 60 V38' />
+          <NeedleH y={30} x1={36} x2={84} />
+          <NeedleH y={52} x1={36} x2={84} />
         </>
       );
     case 'sm_flat_felled':
       return (
         <>
-          <Ply1 d='M4 20 H64 Q69 20 69 26 Q69 32 64 32 H46' />
-          <Ply2 d='M116 20 H74 Q69 20 69 26 V38 Q69 44 63 44 H42 Q36 44 36 38 Q36 26 42 26 H58' />
-          <NeedleV x={50} y1={12} y2={50} />
-          <NeedleV x={62} y1={12} y2={50} />
+          <Ply d='M4 20 H70 Q80 20 80 30 Q80 40 70 40 H44' />
+          <Ply d='M116 20 H96 Q90 20 90 26 V44 Q90 50 84 50 H38 Q28 50 28 40 Q28 30 38 30 H66' />
+          <NeedleV x={52} y1={8} y2={62} />
+          <NeedleV x={64} y1={8} y2={62} />
         </>
       );
     case 'sm_mock_felled':
       return (
         <>
-          <Ply1 d='M4 18 H54 Q58 18 58 22 V34 Q58 38 62 38 H90' />
-          <Ply2 d='M116 18 H66 Q62 18 62 22 V38 Q62 42 66 42 H90' />
-          <NeedleH y={28} x1={50} x2={70} />
-          <NeedleV x={78} y1={12} y2={46} />
-          <Overlock x={90} y={40} dir='left' amp={5} step={5} teeth={2} />
+          <Ply d='M4 16 H49 Q55 16 55 22 V30 Q55 36 61 36 H96' />
+          <Ply d='M116 16 H70 Q65 16 65 21 Q65 26 70 26 H96' />
+          <NeedleH y={24} x1={46} x2={74} />
+          <NeedleV x={82} y1={4} y2={48} />
+          <Overlock x={96} y={31} dir='left' amp={10} step={5} teeth={2} />
         </>
       );
     case 'sm_lapped':
       return (
         <>
-          <Ply1 d='M4 20 H70' />
-          <Ply2 d='M116 18 H44' />
-          <NeedleV x={52} y1={10} y2={30} />
-          <NeedleV x={64} y1={10} y2={30} />
+          <Ply d='M4 30 H72' />
+          <Ply d='M116 20 H44' />
+          <NeedleV x={52} y1={8} y2={42} />
+          <NeedleV x={64} y1={8} y2={42} />
         </>
       );
     case 'sm_hong_kong':
       return (
         <>
           {plainOpen}
-          <Sleeve x={26} y={42} dir='right' width={14} height={12} />
-          <Sleeve x={94} y={42} dir='left' width={14} height={12} />
-          <NeedleV x={34} y1={32} y2={52} />
-          <NeedleV x={86} y1={32} y2={52} />
-          <NeedleH y={28} x1={50} x2={70} />
+          <Binding x={26} y={42} dir='right' width={16} />
+          <Binding x={94} y={42} dir='left' width={16} />
+          <NeedleV x={35} y1={25} y2={59} />
+          <NeedleV x={85} y1={25} y2={59} />
+          <NeedleH y={28} x1={44} x2={76} />
         </>
       );
     case 'sm_bound':
       return (
         <>
-          <Ply1 d='M4 18 H54 Q58 18 58 22 V50' />
-          <Ply2 d='M116 18 H66 Q62 18 62 22 V50' />
-          <NeedleH y={32} x1={48} x2={72} />
-          <Sleeve d='M48 40 V56 Q48 62 60 62 Q72 62 72 56 V40' />
-          <NeedleH y={50} x1={44} x2={76} />
+          {standing(52)}
+          <NeedleH y={28} x1={44} x2={76} />
+          <Ply d='M45 36 V52 Q45 67 60 67 Q75 67 75 52 V36' />
+          <NeedleH y={46} x1={36} x2={84} />
         </>
       );
     case 'sm_taped':
       return (
         <>
-          <Ply1 d='M4 16 H55 Q58 16 58 19 V35 Q58 38 62 38 H94' />
-          <Ply2 d='M116 16 H65 Q62 16 62 19 V40 Q62 44 66 44 H94' />
-          <NeedleH y={28} x1={50} x2={70} />
-          <Bar x={34} y={49} width={68} />
+          <Ply d='M4 16 H49 Q55 16 55 22 V30 Q55 36 61 36 H96' />
+          <Ply d='M116 16 H70 Q65 16 65 21 Q65 26 70 26 H96' />
+          <NeedleH y={24} x1={46} x2={74} />
+          <Strip x={30} y={41} width={74} height={8} />
         </>
       );
     case 'sm_bonded':
       return (
         <>
-          <Ply1 d='M4 20 H70' />
-          <Ply2 d='M116 20 H44' />
-          <Bar x={44} y={26} width={26} />
+          <Ply d='M4 36 H72' />
+          <Ply d='M116 20 H44' />
+          <Strip x={44} y={25} width={28} height={6} />
         </>
       );
     case 'sm_flatlock':
       return (
         <>
-          <Ply1 d='M4 20 H58' />
-          <Ply2 d='M116 20 H62' />
-          <NeedleV x={54} y1={12} y2={30} />
-          <NeedleV x={66} y1={12} y2={30} />
-          <Thread d='M48 20 L54 15 L60 25 L66 15 L72 20' />
+          <Ply d='M4 30 H57' />
+          <Ply d='M116 30 H63' />
+          <NeedleV x={50} y1={18} y2={42} />
+          <NeedleV x={70} y1={18} y2={42} />
+          <Thread d='M44 30 L50 22 L60 38 L70 22 L76 30' />
         </>
       );
     case 'sm_hem_turned':
       return (
         <>
-          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40 Q36 34 36 30 V28 Q36 26 40 26 H84' />
-          <NeedleV x={46} y1={10} y2={40} />
+          <Ply d='M4 18 H88 Q98 18 98 28 Q98 38 88 38 H44 Q39 38 39 33 Q39 28 44 28 H84' />
+          <NeedleV x={52} y1={6} y2={50} />
         </>
       );
     case 'sm_hem_blind':
       return (
         <>
-          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40' />
-          <Thread d='M46 34 L52 24 L58 34 L64 24' />
-          <circle {...threadDot} cx={52} cy={18} r={2} />
+          <Ply d='M4 18 H88 Q98 18 98 28 Q98 38 88 38 H40' />
+          <Thread d='M46 38 L52 24 L58 38 L64 24 L70 38' />
+          <circle {...threadDot} cx={52} cy={20} r={DOT_R} />
         </>
       );
     case 'sm_hem_cover':
       return (
         <>
-          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40' />
-          <NeedleV x={48} y1={10} y2={40} />
-          <NeedleV x={58} y1={10} y2={40} />
-          <Thread d='M44 40 L53 46 L62 40' />
+          <Ply d='M4 18 H90 Q95 18 95 23 Q95 28 90 28 H40' />
+          <NeedleV x={50} y1={6} y2={38} />
+          <NeedleV x={60} y1={6} y2={38} />
+          <Thread d='M46 38 L55 44 L64 38' />
         </>
       );
     case 'sm_hem_raw':
       return (
         <>
-          <Ply1 d='M4 20 H84' />
-          <Ply1 d='M84 16 L88 20 L84 24' />
+          <Ply d='M4 26 H84' />
+          <path {...LINE} d='M88 21 L92 26 L88 31' />
         </>
       );
     case 'sm_hem_bound':
       return (
         <>
-          <Ply1 d='M4 20 H84' />
-          <Sleeve x={84} y={20} dir='left' width={16} height={14} />
-          <NeedleV x={76} y1={10} y2={30} />
+          <Ply d='M4 26 H84' />
+          <Binding x={84} y={26} dir='left' width={18} />
+          <NeedleV x={72} y1={8} y2={44} />
         </>
       );
     case 'sm_hem_faced':
       return (
         <>
-          <Ply1 d='M4 18 H90 Q96 18 96 24 Q96 30 90 30 H52' />
-          <Ply2 d='M52 30 H38' />
-          <NeedleV x={80} y1={24} y2={36} />
+          <Ply d='M4 18 H88 Q98 18 98 28 Q98 38 88 38 H54' />
+          <Ply d='M54 38 H30' />
+          <NeedleV x={82} y1={30} y2={46} />
         </>
       );
     case 'sm_hem_rolled':
       return (
         <>
-          <Ply1 d='M4 18 H88 Q98 18 98 28 Q98 38 88 38 H76 Q68 38 68 30 Q68 22 76 22 H86 Q92 22 92 28 Q92 34 86 34 H78' />
-          <NeedleV x={80} y1={10} y2={46} />
+          <Ply d='M4 14 H88 Q103 14 103 29 Q103 44 88 44 H70 Q60 44 60 34 Q60 24 70 24 H86 Q91 24 91 29 Q91 34 86 34 H78' />
+          <NeedleV x={80} y1={4} y2={54} />
         </>
       );
     case 'sm_piping':
       return (
         <>
-          <Ply1 d='M4 18 H84 Q98 18 98 30 Q98 42 84 42 H52' />
-          <Ply2 d='M52 36 H82 Q90 36 90 30 Q90 24 82 24 H70' />
-          <Cord x={90} y={30} radius={6} />
-          <NeedleV x={70} y1={10} y2={50} />
+          <Ply d='M4 13 H88 Q109 13 109 34 Q109 55 88 55 H44' />
+          <Ply d='M56 45 H88 Q99 45 99 34 Q99 23 88 23 H56' />
+          <Cord x={88} y={34} radius={6} />
+          <NeedleV x={70} y1={3} y2={65} />
         </>
       );
     case 'sm_rib_band':
       return (
         <>
-          <Ply1 d='M4 20 H56 Q60 20 60 24 V54' />
-          <Ply2 d='M74 54 V22 Q74 14 82 14 H108 Q116 14 116 22 Q116 30 108 30 H86 Q78 30 78 38 V54' />
-          <NeedleH y={38} x1={52} x2={84} />
-          <Overlock x={69} y={54} dir='up' amp={7} step={6} teeth={2} />
+          <Ply d='M4 20 H49 Q55 20 55 26 V60' />
+          <Ply d='M65 60 V24 Q65 10 79 10 H104 Q114 10 114 15 Q114 20 104 20 H85 Q75 20 75 30 V60' />
+          <NeedleH y={40} x1={46} x2={84} />
+          <Overlock x={65} y={60} dir='up' amp={18} step={5} teeth={2} />
         </>
       );
     case 'sm_self_band':
       return (
         <>
-          <Ply1 d='M4 18 H56 Q62 18 62 24 V36 Q62 42 56 42 H30' />
-          <Ply2 d='M116 14 H78 Q70 14 70 22 V38 Q70 46 78 46 H104' />
-          <NeedleH y={30} x1={54} x2={78} />
-          <NeedleV x={88} y1={8} y2={52} />
+          <Ply d='M4 18 H49 Q55 18 55 24 V38 Q55 44 49 44 H30' />
+          <Ply d='M116 12 H73 Q65 12 65 20 V42 Q65 50 73 50 H104' />
+          <NeedleH y={31} x1={46} x2={74} />
+          <NeedleV x={90} y1={2} y2={60} />
         </>
       );
     case 'sm_casing_elastic':
       return (
         <>
-          <Ply1 d='M4 16 H92 Q100 16 100 24 V40 Q100 48 92 48 H42' />
-          <Bar x={60} y={27} width={28} height={10} />
-          <NeedleV x={50} y1={8} y2={54} />
+          <Ply d='M4 14 H90 Q102 14 102 26 V36 Q102 48 90 48 H42' />
+          <Strip x={58} y={24} width={32} height={14} />
+          <NeedleV x={50} y1={4} y2={58} />
         </>
       );
     case 'sm_casing_drawcord':
       return (
         <>
-          <Ply1 d='M4 16 H92 Q100 16 100 24 V40 Q100 48 92 48 H42' />
-          <Cord x={76} y={32} />
-          <NeedleV x={50} y1={8} y2={54} />
+          <Ply d='M4 14 H90 Q102 14 102 26 V36 Q102 48 90 48 H42' />
+          <Cord x={76} y={31} radius={8} />
+          <NeedleV x={50} y1={4} y2={58} />
         </>
       );
     case 'sm_edge_overlocked':
       return (
         <>
-          <Ply1 d='M4 20 H88' />
-          <Overlock x={88} y={20} dir='left' amp={8} step={7} teeth={3} />
+          <Ply d='M4 26 H86' />
+          <Overlock x={86} y={26} dir='left' amp={9} step={6} teeth={3} />
         </>
       );
     case 'sm_hem_lettuce':
       return (
         <>
-          <Ply1 d='M4 20 H68 Q74 8 80 20 Q86 32 92 20 Q98 8 106 20' />
-          <Overlock x={106} y={20} dir='left' amp={6} step={5} teeth={2} />
+          <Ply d='M4 26 H60 Q68 8 76 26 Q84 44 92 26 Q96 18 102 26' />
+          <Overlock x={102} y={26} dir='left' amp={9} step={5} teeth={2} />
         </>
       );
   }
 }
-
-const stroke = { vectorEffect: 'non-scaling-stroke' as const };
-const accent = { ...stroke, fill: 'currentColor', fillOpacity: 0.14 };
-const stitchDot = { ...stroke, fill: 'currentColor', stroke: 'none' };
 
 export function SeamIcon({
   kind,
@@ -705,11 +787,7 @@ export function SeamIcon({
       viewBox={band ? '0 12 64 40' : '0 0 64 64'}
       width={size}
       height={band ? Math.round((size * 40) / 64) : size}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={1.25}
-      strokeLinecap='round'
-      strokeLinejoin='round'
+      {...LINE}
       className={className}
     >
       <g transform='translate(0 12) scale(.5333333333)'>
@@ -718,6 +796,8 @@ export function SeamIcon({
     </svg>
   );
 }
+
+const stitchDot = { fill: 'currentColor', stroke: 'none' };
 
 export function PaletteIcon({
   className,
@@ -734,20 +814,16 @@ export function PaletteIcon({
       viewBox='0 0 64 64'
       width={size}
       height={size}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={1.25}
-      strokeLinecap='round'
-      strokeLinejoin='round'
+      {...LINE}
       className={className}
     >
-      <path {...stroke} d='M8 19 L37 10 L47 43 L18 52 Z' />
-      <circle {...stitchDot} cx='14' cy='23' r='2' />
-      <path {...stroke} d='M18 14 L49 14 L49 48 L18 48 Z' />
-      <circle {...stitchDot} cx='24' cy='20' r='2' />
-      <path {...accent} d='M26 20 L57 27 L50 57 L19 50 Z' />
-      <circle {...stitchDot} cx='31' cy='26' r='2' />
-      <path {...stroke} d='M31 43 L45 46 M33 37 L48 40' />
+      <path {...LINE} d='M8 19 L37 10 L47 43 L18 52 Z' />
+      <circle {...stitchDot} cx='14' cy='23' r='1.5' />
+      <path {...LINE} d='M18 14 L49 14 L49 48 L18 48 Z' />
+      <circle {...stitchDot} cx='24' cy='20' r='1.5' />
+      <path {...area} d='M26 20 L57 27 L50 57 L19 50 Z' />
+      <circle {...stitchDot} cx='31' cy='26' r='1.5' />
+      <path {...LINE} d='M31 43 L45 46 M33 37 L48 40' />
     </svg>
   );
 }

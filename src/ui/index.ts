@@ -191,3 +191,17 @@ export {
   ZoomInIcon,
   ZoomOutIcon,
 } from './icons';
+/** @primitive Empty-slot placeholder glyph */
+export { Glyph, type GlyphName } from './icons/glyph';
+/** @primitive «GRBPWR line» icon style constants */
+export {
+  ACCENT_FILL_OPACITY,
+  BACKDROP_OPACITY,
+  DASH,
+  GHOST_OPACITY,
+  GRID,
+  LINE,
+  LINE_BOLD,
+  LINE_EMPHASIS,
+  LINE_HAIRLINE,
+} from './icons/line';

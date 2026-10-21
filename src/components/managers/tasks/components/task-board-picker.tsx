@@ -32,6 +32,8 @@ export interface TaskBoardPickerProps {
   task: Task;
   onClose: () => void;
   onPick: (picked: Task) => Promise<void>;
+  /** Set = the search text can become a new task (subtask mode). Throws on failure. */
+  onCreate?: (title: string) => Promise<void>;
 }
 
 const PICKER_FILTER: ListTasksFilter = { includeArchived: true };
@@ -192,6 +194,7 @@ export function TaskBoardPicker({
   task,
   onClose,
   onPick,
+  onCreate,
 }: TaskBoardPickerProps): JSX.Element {
   const phone = useMediaQuery(PHONE_QUERY);
   const tasksQuery = useTasks(PICKER_FILTER, open);
@@ -258,6 +261,21 @@ export function TaskBoardPicker({
 
   const cardBoardName = (candidate: Task) =>
     searching && candidate.boardId !== boardId ? boardNameOf(boards, candidate.boardId) : undefined;
+
+  const [creating, setCreating] = useState(false);
+  async function create() {
+    const title = query.trim();
+    if (!onCreate || !title || creating) return;
+    setCreating(true);
+    try {
+      await onCreate(title);
+      onClose();
+    } catch {
+      // onCreate's mutation already shows the failure; stay open with the text kept.
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function pick(candidate: Task) {
     if (pickingId !== null || pickStateOf(candidate, task, mode, allTasks) !== 'ok') return;
@@ -340,23 +358,40 @@ export function TaskBoardPicker({
           ))}
         </ChipRow>
 
-        <Input
-          name='task-board-picker-search'
-          type='text'
-          value={query}
-          autoComplete='off'
-          autoFocus
-          placeholder='title or #id'
-          aria-label='search tasks'
-          onChange={(event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-          onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
-            if (event.key !== 'Escape' || !query) return;
-            event.preventDefault();
-            event.stopPropagation();
-            setQuery('');
-          }}
-          className='min-h-11 max-sm:text-reading sm:min-h-0'
-        />
+        <div className='flex items-center gap-3'>
+          <Input
+            name='task-board-picker-search'
+            type='text'
+            value={query}
+            autoComplete='off'
+            autoFocus
+            placeholder='title or #id'
+            aria-label='search tasks'
+            onChange={(event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+            onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+              if (event.key === 'Enter' && onCreate && searching) {
+                event.preventDefault();
+                void create();
+                return;
+              }
+              if (event.key !== 'Escape' || !query) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setQuery('');
+            }}
+            className='min-h-11 max-sm:text-reading sm:min-h-0'
+          />
+          {onCreate && searching && (
+            <Button
+              variant='underline'
+              loading={creating}
+              onClick={() => void create()}
+              className='min-h-11 shrink-0 sm:min-h-0'
+            >
+              + create
+            </Button>
+          )}
+        </div>
 
         {failed ? (
           <CalloutBox tone='error' className='flex items-center gap-2'>

@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { AddDoor, Button, Close, Combobox, type ComboboxGroup, Pill, Section, Text } from 'ui';
 import type { Task, TaskRelation, TaskRelationKind } from '../api/types';
+import { emptyTaskInsert } from '../api/types';
 import {
   useAddTaskRelation,
+  useCreateTask,
   useDeleteTaskRelation,
   useSetTaskParent,
   useTask,
@@ -245,6 +247,17 @@ export function TaskRelations({
   // идти под тем же правом на раздел, что и доска.
   const children = useChildren(task.id);
 
+  const createTask = useCreateTask();
+  async function onCreate(title: string) {
+    await createTask.mutateAsync({
+      // Сабтаска рождается на доске родителя, в первой рабочей колонке.
+      content: { ...emptyTaskInsert(), title },
+      boardId: task.boardId,
+      status: 'TASK_STATUS_TODO',
+      parentTaskId: task.id,
+    });
+  }
+
   async function onPick(picked: Task) {
     if (picker === 'subtask') {
       await setParent.mutateAsync({ id: picked.id, parentTaskId: task.id });
@@ -274,6 +287,7 @@ export function TaskRelations({
       task={task}
       onClose={() => setPicker(null)}
       onPick={onPick}
+      onCreate={(picker ?? lastMode) === 'subtask' ? onCreate : undefined}
     />
   );
 
