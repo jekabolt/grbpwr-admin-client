@@ -620,7 +620,6 @@ export function TaskDetail() {
                 {assigneeControl}
               </div>
               {assignMeButton(true)}
-              {moreButton(cn(CHIP_BOX, 'text-labelColor hover:text-textColor'))}
               {createdAt && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip
@@ -640,16 +639,18 @@ export function TaskDetail() {
                 </TooltipProvider>
               )}
             </div>
-            {moreOpen && (
+            {(task.startedAt || t.labels.length > 0) && (
               <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                >
-                  started {task.startedAt ? format(new Date(task.startedAt), 'PP') : <EmptyCell />}
-                </Text>
+                {task.startedAt && (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='uppercase tracking-label'
+                  >
+                    started {format(new Date(task.startedAt), 'PP')}
+                  </Text>
+                )}
                 {t.labels.map((l) => (
                   <Pill key={l} tone='mut'>
                     {l}
