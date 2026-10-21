@@ -33,13 +33,12 @@ import {
   Close,
   HeaderWarnings,
   type HeaderWarning,
-  GenericPopover,
   Pill,
   Placeholder,
   Section,
   SectionStack,
-  HEADER_TEXT,
   HeaderNote,
+  HEADER_TEXT,
   Text,
   Tile,
   Tiles,
@@ -49,8 +48,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } f
 import { colorwayLabel } from './design/colorway-picker';
 import { useAddDevExpense, useDeleteDevExpense, useDevExpenses } from './dev-expenses-field';
 import { MaterialSwatch, MaterialTile } from './material-tile';
-import { useDeleteUnfitted } from './use-delete-sample';
-import { SAMPLE_STAGING_PREFIX, samplePurposeLabel, sampleStatusLabel } from './sample-options';
+import { SAMPLE_STAGING_PREFIX, samplePurposeLabel } from './sample-options';
 import {
   fittingsNewestFirst,
   lineMaterialId,
@@ -68,7 +66,6 @@ import { PURPOSE_ORDER } from './use-auto-create-sample';
 import {
   saveSampleErrorMessage,
   usePatchSampleNow,
-  useSample,
   useSampleFittings,
   useSamples,
   useSampleSubstitutions,
@@ -183,9 +180,6 @@ function FactRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-const menuItem =
-  'block w-full py-1 text-left text-micro uppercase tracking-label hover:underline disabled:text-borderColor';
-
 export function SampleScreen({
   sample,
   techCardId,
@@ -214,9 +208,6 @@ export function SampleScreen({
   const stagedSnapshot = useStagedSnapshot();
   const stagingKey = stagingKeyFor(sampleId);
 
-  // GetSample resolves the composed cost (never present on list rows).
-  const { data: full } = useSample(sampleId, !!sampleId && canReadCosting);
-  const cost = full?.sample?.cost;
   const { data: releasesData } = useTechCardReleases(techCardId);
   const { data: siblingsData } = useSamples(techCardId);
   const { bySample } = useSampleFittings(techCardId);
@@ -372,18 +363,6 @@ export function SampleScreen({
     touched,
   ]);
 
-  const discardEdits = () => {
-    staging?.unstage(stagingKey);
-    setTouched(new Set());
-    setDirty(false);
-  };
-  const { deleteUnfitted, deletingId } = useDeleteUnfitted(techCardId);
-  const [deleteArmed, setDeleteArmed] = useState(false);
-  const afterDelete = () => {
-    staging?.unstage(stagingKey);
-    onClose();
-  };
-
   // ── auto status: done at the first fitting, finished = the oldest fitting's date ─────────────
   const autoFired = useRef(false);
   useEffect(() => {
@@ -497,61 +476,7 @@ export function SampleScreen({
           </Text>
           <div className='ml-auto flex flex-wrap items-baseline gap-2.5'>
             {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
-            <HeaderNote tone={d.status === 'scrapped' ? 'warn' : 'ink'}>
-              {sampleStatusLabel(d.status)}
-            </HeaderNote>
-            {canReadCosting && cost?.totalBase?.value ? (
-              <HeaderNote
-                title={`materials ${decimalToInput(cost.materialsBase) || '0'} + R&D ${
-                  decimalToInput(cost.manualBase) || '0'
-                }`}
-              >
-                cost {decimalToInput(cost.totalBase)}
-              </HeaderNote>
-            ) : null}
             <HeaderWarnings items={sampleWarnings} />
-            {canEdit && (
-              <GenericPopover
-                openElement={<span className={cn(HEADER_TEXT, 'text-textColor')}>⋯</span>}
-                triggerProps={{ 'aria-label': 'sample actions' }}
-              >
-                <div className='flex flex-col'>
-                  {staged && (
-                    <button type='button' className={menuItem} onClick={discardEdits}>
-                      discard staged edits
-                    </button>
-                  )}
-                  <button
-                    type='button'
-                    className={menuItem}
-                    onClick={() =>
-                      set({ status: d.status === 'scrapped' ? unscrapTo : 'scrapped' })
-                    }
-                  >
-                    {d.status === 'scrapped' ? 'unscrap' : 'scrap'}
-                  </button>
-                  {fittings.length === 0 && (
-                    <button
-                      type='button'
-                      className={cn(menuItem, 'text-error')}
-                      disabled={!!deletingId}
-                      onClick={() => {
-                        if (!deleteArmed) return setDeleteArmed(true);
-                        setDeleteArmed(false);
-                        void deleteUnfitted(
-                          sampleId,
-                          fittings.length,
-                          `#${sample.number ?? sampleId}`,
-                        ).then((ok) => ok && afterDelete());
-                      }}
-                      onBlur={() => setDeleteArmed(false)}
-                    >
-                      {deletingId ? 'deleting…' : deleteArmed ? 'delete — sure' : 'delete'}
-                    </button>
-                  )}
-                </div>
-              </GenericPopover>
-            )}
           </div>
         </div>
 
