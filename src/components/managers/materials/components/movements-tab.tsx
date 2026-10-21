@@ -8,11 +8,20 @@ import { format } from 'date-fns';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, EmptyCell, Section, Select, SkeletonRows, Text } from 'ui';
+import {
+  Button,
+  DataTable,
+  DateRangePicker,
+  EmptyCell,
+  GroupLabel,
+  Section,
+  Select,
+  SkeletonRows,
+  Text,
+} from 'ui';
 import { decimalToInput } from 'utils/decimal';
 import { MaterialPicker } from './material-picker';
 import { MaterialThumb } from './material-thumb';
-import { DataTable, DateRangePicker, GroupLabel } from './movements-kit-shim';
 import { useMaterials } from './useMaterials';
 import { MovementFilter, useMaterialMovements } from './useWarehouse';
 import { movementDelta, movementKind, movementTypeFilterOptions } from './warehouse-options';
