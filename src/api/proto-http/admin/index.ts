@@ -10178,6 +10178,10 @@ export type common_TechCardPatternRevision = {
   sha256: string | undefined;
   fileName: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // The tech_card_snapshot frozen by the save that replaced or removed this file: the whole card as
+  // it was while this file was the current sheet. Admin.RestoreTechCardSnapshot takes it to bring the
+  // card back to that state (operations, pieces, aliases, sheets). 0 = no snapshot, not restorable.
+  snapshotId: number | undefined;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
@@ -11274,6 +11278,16 @@ export type UpdateTechCardRequest = {
 };
 
 export type UpdateTechCardResponse = {
+};
+
+export type RestoreTechCardSnapshotRequest = {
+  techCardId: number | undefined;
+  snapshotId: number | undefined;
+  expectedLockVersion: number | undefined;
+};
+
+export type RestoreTechCardSnapshotResponse = {
+  techCard: common_TechCard | undefined;
 };
 
 // GetTechCardConstructionAuditRequest — which saved card to audit. Nothing else: the machine layer
@@ -19854,6 +19868,14 @@ export interface AdminService {
   GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
   // UpdateTechCard updates a tech card, replacing its nested sections.
   UpdateTechCard(request: UpdateTechCardRequest): Promise<UpdateTechCardResponse>;
+  // RestoreTechCardSnapshot brings a card back to one of its own snapshots
+  // (TechCardPatternRevision.snapshot_id). One transaction: the current card is snapshotted first
+  // (reason «restore:<snapshot_id>»), then rewritten through the UpdateTechCard write path. Approval,
+  // sign-offs, stage, style number, category and measurement unit stay as they are now. Errors:
+  // NotFound (no such snapshot on this card), Aborted (expected_lock_version is stale),
+  // FailedPrecondition (released or system card, unreadable snapshot, narrower size range),
+  // PermissionDenied (the snapshot's costing differs from the card's and the caller lacks costing:write).
+  RestoreTechCardSnapshot(request: RestoreTechCardSnapshotRequest): Promise<RestoreTechCardSnapshotResponse>;
   // DeleteTechCard deletes a tech card by id (nested sections cascade).
   DeleteTechCard(request: DeleteTechCardRequest): Promise<DeleteTechCardResponse>;
   // ListTechCards lists tech cards (paged, optional filters). Declared AFTER
@@ -25505,6 +25527,29 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateTechCard",
       }) as Promise<UpdateTechCardResponse>;
+    },
+    RestoreTechCardSnapshot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.snapshotId) {
+        throw new Error("missing required field request.snapshot_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/snapshot/${request.snapshotId}/restore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RestoreTechCardSnapshot",
+      }) as Promise<RestoreTechCardSnapshotResponse>;
     },
     DeleteTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
