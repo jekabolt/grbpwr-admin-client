@@ -28,6 +28,19 @@ const pct = (value: number | null): number => {
   return Math.max(0, Math.min(100, Math.abs(value) <= 1 ? value * 100 : value));
 };
 
+export type Spot = {
+  key: string;
+  pin: string;
+  where: string;
+  operationNumbers: number[];
+  source: string;
+  qty: number | null;
+  x: number;
+  y: number;
+  hasPosition: boolean;
+  onFront: boolean;
+};
+
 export type MaterialsModel = ReturnType<typeof deriveMaterials>;
 
 export function deriveMaterials(techCard: common_TechCard) {
@@ -94,32 +107,42 @@ export function deriveMaterials(techCard: common_TechCard) {
       const linkedOperations = operations.filter((operation) =>
         (operation.bomLineKeys ?? []).includes(clean(ref.item.lineKey)),
       );
-      const spots = linkedOperations.map((operation, index) => {
+      // one row per place: ops that put this line on the same pin and zone share it
+      const spots: Spot[] = [];
+      for (const operation of linkedOperations) {
         const callout = callouts.find((item) => item.number === operation.calloutNumber);
+        const pin = operation.calloutNumber == null ? '' : String(operation.calloutNumber);
+        const where = enumLabel(operation.zone) || clean(callout?.part);
+        const quantity = decimal(
+          operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
+            ?.qtyPerGarment,
+        );
+        const same = spots.find((spot) => spot.pin === pin && spot.where === where);
+        if (same) {
+          if (operation.operationNumber != null)
+            same.operationNumbers.push(operation.operationNumber);
+          if (quantity != null) same.qty = (same.qty ?? 0) + quantity;
+          continue;
+        }
         const x = decimal(callout?.posX);
         const y = decimal(callout?.posY);
-        const quantity = operation.bomQuantities?.find(
-          (item) => clean(item.lineKey) === clean(ref.item.lineKey),
-        );
-        return {
-          key: `${operation.operationNumber ?? index}-${ref.key}`,
-          pin: operation.calloutNumber == null ? '' : String(operation.calloutNumber),
-          where:
-            enumLabel(operation.zone) ||
-            clean(operation.work) ||
-            clean(callout?.part) ||
-            clean(ref.item.spec),
-          operationNumber: operation.operationNumber,
-          source:
-            clean(operation.work) || clean(operation.note) || enumLabel(operation.operationType),
-          qty: decimal(quantity?.qtyPerGarment),
+        spots.push({
+          key: `${operation.operationNumber ?? spots.length}-${ref.key}`,
+          pin,
+          where,
+          operationNumbers: operation.operationNumber == null ? [] : [operation.operationNumber],
+          source: 'op link',
+          qty: quantity,
           x: pct(x),
           y: pct(y),
           hasPosition: x != null && y != null,
           onFront:
             !wireInt(callout?.mediaId) || !front?.id || wireInt(callout?.mediaId) === front.id,
-        };
-      });
+        });
+      }
+      const lineQty = decimal(ref.item.qtyPerGarment);
+      // a line placed in one spot puts all of its quantity there
+      if (spots.length === 1 && spots[0].qty == null) spots[0].qty = lineQty;
       const spotQty = spots.reduce((sum, spot) => sum + (spot.qty ?? 0), 0);
       return {
         key: ref.key,
@@ -127,7 +150,7 @@ export function deriveMaterials(techCard: common_TechCard) {
         detail: clean(ref.item.composition) || clean(ref.item.spec),
         kind: enumLabel(ref.item.kind) || enumLabel(ref.item.section),
         spots,
-        qty: decimal(ref.item.qtyPerGarment) ?? (spotQty || null),
+        qty: lineQty ?? (spotQty || null),
       };
     });
 

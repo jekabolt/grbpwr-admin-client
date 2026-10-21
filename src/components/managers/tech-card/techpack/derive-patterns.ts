@@ -14,7 +14,15 @@ import {
 import { markerToView } from 'components/managers/tech-card/components/nesting/marker-io';
 import { wireFabricPurpose } from 'components/managers/tech-card/components/pattern-size-index';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
-import { alphaLabel, decimalNumber } from './derive-shared';
+import {
+  alphaKey,
+  alphaLabel,
+  bomRefs,
+  decimalNumber,
+  materialForPiece,
+  materialRole,
+  rollGoods as isRollGoods,
+} from './derive-shared';
 
 export type TechpackPatternGroup = {
   key: string;
@@ -31,6 +39,8 @@ export type TechpackMarkerRow = {
   key: string;
   id?: number;
   label: string;
+  /** The BOM letter of the fabric («A»), when the marker is bound to a BOM roll-goods line. */
+  code?: string;
   fabric: string;
   widthCm?: number;
   pieceCount?: number;
@@ -56,6 +66,8 @@ type PatternInput = {
   patternOrigin?: string;
   markerOrigin?: string;
   sizeNames?: Readonly<Record<number, string>>;
+  /** Net cut area per garment by BOM line, from the DXF pieces: the row a marker does not cover. */
+  netM2ByLine?: Readonly<Record<string, number>>;
 };
 
 type PatternScope = ReturnType<typeof fabricScopes>[number];
@@ -221,18 +233,27 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
     const id = marker.summary?.id;
     if (id) layoutsById.set(id, marker);
   }
+  // fabrics as the BOM letters them (A main, B pocketing): every one gets a consumption row
+  const refs = bomRefs(techCard);
+  const fabrics = refs.filter(isRollGoods).map((ref, index) => ({ ref, code: alphaKey(index) }));
+  const fabricOf = (lineKey?: string) =>
+    lineKey ? fabrics.find((fabric) => fabric.ref.key === lineKey.trim()) : undefined;
   const markers: TechpackMarkerRow[] = (techCard.markers ?? []).map((summary, index) => {
     const id = summary.id || undefined;
     const layout = id ? layoutsById.get(id) : undefined;
     const usedLengthCm = decimalNumber(summary.usedLengthCm);
+    const fabric = fabricOf(summary.bomLineKey);
     return {
       key: id ? String(id) : `marker-${index}`,
       id,
       label: summary.name?.trim() || (id ? `marker ${id}` : 'marker'),
-      fabric: summary.bomItemName?.trim() || 'unbound',
+      code: fabric?.code,
+      fabric: fabric ? materialRole(fabric.ref) : summary.bomItemName?.trim() || 'unbound',
       widthCm: decimalNumber(summary.fabricWidthCm),
       pieceCount: summary.totalCount || undefined,
-      netM2: layout ? markerNetM2(layout) : undefined,
+      netM2:
+        (layout ? markerNetM2(layout) : undefined) ??
+        (fabric ? input.netM2ByLine?.[fabric.ref.key] : undefined),
       markerM: usedLengthCm == null ? undefined : usedLengthCm / 100,
       utilizationPct: decimalNumber(summary.efficiencyPct),
       perGarment: markerPerGarment(summary, sizeNames),
@@ -245,24 +266,25 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
     };
   });
 
-  for (const pattern of patterns) {
-    const scope = scopes.find((candidate) => {
-      const key = candidate.byPurpose ? wireFabricPurpose(candidate.key) : candidate.key;
-      return key === pattern.key;
-    });
-    const lineKeys = new Set(scope?.lines.map((line) => line.lineKey) ?? []);
-    const hasMarker = (techCard.markers ?? []).some(
-      (marker) => marker.bomLineKey && lineKeys.has(marker.bomLineKey),
+  const primary = techCard.colorways?.[0];
+  const pieces = tc?.pieces ?? [];
+  for (const fabric of fabrics) {
+    if ((techCard.markers ?? []).some((marker) => fabricOf(marker.bomLineKey) === fabric)) continue;
+    const cut = pieces.filter(
+      (piece, index) => materialForPiece(refs, primary, piece, index)?.key === fabric.ref.key,
     );
-    if (!hasMarker) {
-      markers.push({
-        key: `missing-${pattern.key}`,
-        label: `${pattern.code} ${pattern.label}`,
-        fabric: pattern.label,
-        perGarment: [],
-        missing: 'marker',
-      });
-    }
+    markers.push({
+      key: `missing-${fabric.ref.key}`,
+      label: `${fabric.code} ${materialRole(fabric.ref)}`,
+      code: fabric.code,
+      fabric: materialRole(fabric.ref),
+      widthCm: decimalNumber(fabric.ref.item.fabricWidth),
+      pieceCount:
+        cut.reduce((sum, piece) => sum + Math.max(1, piece.piecesPerGarment ?? 1), 0) || undefined,
+      netM2: input.netM2ByLine?.[fabric.ref.key],
+      perGarment: [],
+      missing: 'marker',
+    });
   }
 
   const missing = [

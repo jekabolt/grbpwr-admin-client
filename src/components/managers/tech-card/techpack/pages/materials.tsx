@@ -1,14 +1,14 @@
 import { DataTable, GroupLabel, HeaderNote, SectionHeader, TotalRow } from 'ui';
 import { formatNumber } from '../derive-shared';
-import { deriveMaterials } from '../derive-materials';
+import { deriveMaterials, type Spot } from '../derive-materials';
 import { Missing, Swatch, TechpackDrawing } from './bits';
-import { TechpackPaper, type TechpackPageProps } from './paper';
+import { TechpackSheet, type TechpackPageProps } from '../sheet';
 
 export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProps) {
   const model = deriveMaterials(techCard);
   const land = orient === 'land';
   return (
-    <TechpackPaper orient={orient} docline={docline}>
+    <TechpackSheet orient={orient} docline={docline}>
       <SectionHeader
         title={`${n} materials & trims`}
         action={
@@ -19,7 +19,7 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
         }
       />
       <div className={land ? 'flex min-h-0 flex-1 gap-8' : 'flex min-h-0 flex-1 flex-col gap-4'}>
-        <div className={land ? 'flex w-3/5 flex-col gap-4' : 'flex flex-col gap-4'}>
+        <div className={land ? 'flex w-3/5 shrink-0 flex-col gap-4' : 'flex flex-col gap-4'}>
           <div>
             <GroupLabel flush>fabrics</GroupLabel>
             <DataTable>
@@ -137,14 +137,14 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
           ))}
 
           {model.hardware.map((item) => {
-            const rows = item.spots.length
+            const rows: Spot[] = item.spots.length
               ? item.spots
               : [
                   {
                     key: `${item.key}-missing`,
                     pin: '',
                     where: '',
-                    operationNumber: undefined,
+                    operationNumbers: [],
                     source: '',
                     qty: item.qty,
                     x: 50,
@@ -184,7 +184,13 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
                           )}
                         </td>
                         <td data-align='left'>{spot.where || <Missing name='placement' />}</td>
-                        <td>{spot.operationNumber ?? <Missing name='operation' />}</td>
+                        <td>
+                          {spot.operationNumbers.length ? (
+                            spot.operationNumbers.join(' · ')
+                          ) : (
+                            <Missing name='operation' />
+                          )}
+                        </td>
                         <td data-align='left' className='text-labelColor'>
                           {spot.source}
                         </td>
@@ -208,7 +214,7 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
             );
           })}
         </div>
-        <div className='flex min-h-0 flex-1 items-center justify-center border border-borderColor'>
+        <div className='flex min-h-0 min-w-0 flex-1 items-center justify-center border border-borderColor'>
           <TechpackDrawing
             media={model.front}
             name='front'
@@ -221,6 +227,6 @@ export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProp
           />
         </div>
       </div>
-    </TechpackPaper>
+    </TechpackSheet>
   );
 }

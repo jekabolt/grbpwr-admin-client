@@ -83,6 +83,16 @@ export function colorwayColour(colorway?: common_AdminColorwayRef): string {
   );
 }
 
+/**
+ * The colourway a card without colourways prints: its BOM colours, named after the main fabric's
+ * colour. Empty when no BOM line has a colour either.
+ */
+export function bomColourwayName(card: common_TechCard): string {
+  const refs = bomRefs(card);
+  const coloured = (list: BomRef[]) => list.find((ref) => clean(ref.item.color));
+  return clean((coloured(refs.filter(rollGoods)) ?? coloured(refs))?.item.color);
+}
+
 export function mediaFromResolved(item?: common_TechCardMediaFull): ResolvedTechMedia | null {
   const full = item?.media?.media?.fullSize;
   const compressed = item?.media?.media?.compressed;
@@ -237,7 +247,9 @@ export function decimalText(value: DecimalLike): string {
 }
 
 export function decimalNumber(value: DecimalLike): number | undefined {
-  const parsed = Number(decimalText(value));
+  // an unset decimal is absent, not zero
+  const text = decimalText(value);
+  const parsed = text ? Number(text) : NaN;
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 

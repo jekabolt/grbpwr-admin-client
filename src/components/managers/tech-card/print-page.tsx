@@ -321,6 +321,7 @@ export function TechCardPrint() {
               revision={
                 snapshot ? `rev.${wireInt(releaseData?.release?.releaseNumber) || '—'}` : undefined
               }
+              patternViewerToken={printData?.patternViewerToken ?? ''}
               onDataStatus={setDocDeps}
             />
           )}

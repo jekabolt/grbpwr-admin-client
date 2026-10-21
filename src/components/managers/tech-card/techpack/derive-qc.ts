@@ -1,6 +1,7 @@
-import type { common_TechCard, common_TechCardSeamSide } from 'api/proto-http/admin';
+import type { common_TechCard, common_TechCardBomItem } from 'api/proto-http/admin';
+import { fmtDelta } from './derive-assembly';
 import type { MeasurementRow } from './derive-measurements';
-import { enumLabel, shortDate } from './derive-shared';
+import { bomRefs, clean, decimalNumber, enumLabel, shortDate, type BomRef } from './derive-shared';
 
 export type QcCheck = {
   key: string;
@@ -37,31 +38,59 @@ export type QcSignoffModel = {
   missing: string[];
 };
 
+/** A join the assembly stops on: its op and the signed length difference, mm. */
+export type QcSeamDelta = { op: number; delta: number };
+
 type QcInput = {
   techCard: common_TechCard;
   measurementRows?: readonly MeasurementRow[];
   sizeNames?: Readonly<Record<number, string>>;
+  /** From the assembly model, so the checklist and the assembly page name the same joins. */
+  seamDeltas?: readonly QcSeamDelta[];
+  /** The label placement the labels page prints; empty = missing. */
+  labelPlacement?: string;
 };
 
-const seamLength = (side: common_TechCardSeamSide | undefined): number =>
-  (side?.parts ?? []).reduce((sum, part) => sum + (part.lenMm ?? 0), 0);
+const BUTTON = 'TECH_CARD_BOM_KIND_BUTTON';
+const THREAD = 'TECH_CARD_BOM_SECTION_THREAD';
+const TRIMS = new Set([
+  'TECH_CARD_BOM_SECTION_HARDWARE',
+  'TECH_CARD_BOM_SECTION_TRIM',
+  'TECH_CARD_BOM_SECTION_DECORATION',
+]);
+
+const opList = (ops: Iterable<number>): string =>
+  Array.from(new Set(ops))
+    .sort((a, b) => a - b)
+    .join(' · ');
+
+const itemName = (item: common_TechCardBomItem): string =>
+  clean(item.name) || enumLabel(item.kind) || enumLabel(item.section) || 'trim';
+
+/** «button 11 mm» → «11 mm» next to the word «buttons». */
+const sizeOf = (item: common_TechCardBomItem): string =>
+  itemName(item).replace(/^buttons?\s+/i, '');
 
 export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
   const { techCard } = input;
   const tc = techCard.techCard;
   const checks: QcCheck[] = [];
+  const ops = (tc?.operations ?? []).filter((op) => op.operationNumber);
+  const opsUsing = (ref: BomRef) =>
+    ops
+      .filter((op) => (op.bomLineKeys ?? []).some((key) => clean(key) === ref.key))
+      .map((op) => op.operationNumber ?? 0);
+  const opsOf = (machine: string, work: string) =>
+    ops
+      .filter((op) => op.machineType === machine || clean(op.work) === work)
+      .map((op) => op.operationNumber ?? 0);
 
-  for (const seam of techCard.seams ?? []) {
-    const a = seamLength(seam.sideA);
-    const b = seamLength(seam.sideB);
-    if (!a || !b) continue;
-    const delta = Math.abs(a - b);
-    if (delta <= 5) continue;
+  for (const seam of input.seamDeltas ?? []) {
     checks.push({
-      key: seam.seamKey || `seam-${checks.length}`,
-      what: 'seam delta',
-      note: `Δ ${delta.toFixed(1)} mm`,
-      missing: true,
+      key: `seam-${seam.op}`,
+      what: 'seam Δ resolved',
+      op: String(seam.op),
+      note: `Δ ${fmtDelta(seam.delta)} mm`,
     });
   }
   for (const [index, issue] of (tc?.issues ?? []).entries()) {
@@ -75,20 +104,83 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
     });
   }
 
-  const missingMeasurements = (input.measurementRows ?? []).filter((row) => row.missing).length;
-  if (missingMeasurements > 0) {
+  const holes = opsOf('TECH_CARD_MACHINE_TYPE_BUTTONHOLE', 'buttonhole');
+  if (holes.length) checks.push({ key: 'buttonholes', what: 'buttonholes', op: opList(holes) });
+
+  // a trim no operation consumes is not sewn on: red, like every other missing fact
+  const refs = bomRefs(techCard);
+  const unlinked: BomRef[] = [];
+  const buttons = refs.filter((ref) => ref.item.kind === BUTTON);
+  if (buttons.length) {
+    const qty = buttons.map((ref) => decimalNumber(ref.item.qtyPerGarment) ?? 0);
+    const total = qty.reduce((sum, value) => sum + value, 0);
     checks.push({
-      key: 'measurements',
-      what: 'measurements',
-      note: `${missingMeasurements} missing`,
+      key: 'buttons',
+      what: total ? `buttons · ${total}` : 'buttons',
+      op: opList([
+        ...opsOf('TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH', 'button_attach'),
+        ...buttons.flatMap(opsUsing),
+      ]),
+      note: buttons
+        .map((ref, i) => (qty[i] ? `${qty[i]} × ${sizeOf(ref.item)}` : sizeOf(ref.item)))
+        .join(' · '),
+    });
+    unlinked.push(...buttons.filter((ref) => opsUsing(ref).length === 0));
+  }
+  for (const ref of refs.filter((r) => r.item.section === THREAD)) {
+    const used = opsUsing(ref);
+    if (!used.length) {
+      unlinked.push(ref);
+      continue;
+    }
+    checks.push({
+      key: `thread-${ref.key}`,
+      what: `thread ${clean(ref.item.color) || itemName(ref.item)}`,
+      op: opList(used),
+      note: `${used.length} ops`,
+    });
+  }
+  for (const ref of refs.filter((r) => TRIMS.has(r.item.section ?? '') && r.item.kind !== BUTTON)) {
+    const used = opsUsing(ref);
+    if (!used.length) {
+      unlinked.push(ref);
+      continue;
+    }
+    const qty = decimalNumber(ref.item.qtyPerGarment);
+    checks.push({
+      key: `trim-${ref.key}`,
+      what: qty ? `${itemName(ref.item)} · ${qty}` : itemName(ref.item),
+      op: opList(used),
+    });
+  }
+  for (const ref of unlinked) {
+    const qty = decimalNumber(ref.item.qtyPerGarment);
+    checks.push({
+      key: `unlinked-${ref.key}`,
+      what: itemName(ref.item),
+      note: qty ? `${qty} pcs · no op` : 'no op',
       missing: true,
     });
-  } else if ((input.measurementRows ?? []).length > 0) {
+  }
+
+  const placement = clean(input.labelPlacement);
+  checks.push(
+    placement
+      ? { key: 'label', what: `label ${placement}` }
+      : { key: 'label', what: 'label placement', missing: true },
+  );
+
+  const rows = input.measurementRows ?? [];
+  const missingMeasurements = rows.filter((row) => row.missing).length;
+  if (!rows.length || missingMeasurements) {
     checks.push({
       key: 'measurements',
       what: 'measurements',
-      note: `${input.measurementRows!.length} points`,
+      note: rows.length ? `${missingMeasurements} missing` : undefined,
+      missing: true,
     });
+  } else {
+    checks.push({ key: 'measurements', what: 'measurements', note: `${rows.length} points` });
   }
 
   if (!(tc?.patterns ?? []).some((pattern) => pattern.url?.trim())) {
@@ -117,9 +209,6 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
       stale: !!signed && !!live && signed !== live,
     };
   });
-  if (signoffs.length === 0) {
-    checks.push({ key: 'signoff', what: 'sign-off', missing: true });
-  }
 
   const revisions: RevisionRow[] = [...(techCard.revisions ?? [])]
     .reverse()

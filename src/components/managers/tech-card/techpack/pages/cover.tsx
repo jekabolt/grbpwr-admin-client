@@ -1,10 +1,11 @@
 import { GrbpwrMark, GroupLabel, Pill, Row } from 'ui';
 import { KV } from 'components/managers/print/sheet';
 import { deriveCover, type CoverDeriveOptions } from '../derive-cover';
-import { TechpackDrawing, Missing } from './bits';
-import { TechpackPaper, type TechpackPageProps } from './paper';
+import { Missing, statusTone, TechpackDrawing } from './bits';
+import { TechpackSheet, type TechpackPageProps } from '../sheet';
 
-export type TechpackTocItem = { n: string; title: string; page: number };
+/** A section in the contents; its page number is filled in from the laid-out sheets. */
+export type TechpackTocItem = { n: string; title: string };
 
 type CoverPageProps = TechpackPageProps &
   CoverDeriveOptions & {
@@ -19,23 +20,25 @@ const glossary: Array<[string, string]> = [
   ['m/c', 'machine'],
   ['GSM', 'grams / m²'],
   ['DXF', 'pattern file'],
+  ['PAIR', '2 pcs L+R'],
   ['P', 'perimeter'],
+  ['Turn out', 'right side out'],
+  ['Δ', 'length difference'],
   ['RS / WS', 'right / wrong side'],
 ];
 
-const approvalTone = (approval: string): 'ok' | 'warn' | 'attention' | 'mut' => {
-  const value = approval.toLowerCase();
-  if (value.includes('released') || value.includes('approved')) return 'ok';
-  if (value.includes('obsolete')) return 'warn';
-  if (value.includes('review')) return 'attention';
-  return 'mut';
-};
+/** «a · b · b» → «a · b»: a collection named after its season prints once. */
+const uniqueLine = (parts: string[]) =>
+  parts
+    .filter(
+      (part, i) => part && parts.findIndex((p) => p.toLowerCase() === part.toLowerCase()) === i,
+    )
+    .join(' · ');
 
 export function CoverPage({
   techCard,
   orient,
   docline,
-  n,
   toc,
   sampleSizeName,
   revisionLabel,
@@ -47,7 +50,12 @@ export function CoverPage({
     .filter(Boolean)
     .join(' + ');
   const buttonFacts = model.buttons
-    .map((button) => [button.qty, button.spec].filter(Boolean).join(' × '))
+    // «button 11 mm» without a spec still names its size
+    .map((button) =>
+      [button.qty, button.spec || button.name.replace(/^buttons?\s*/i, '')]
+        .filter(Boolean)
+        .join(' × '),
+    )
     .filter(Boolean)
     .join(' · ');
   const summary = (
@@ -56,20 +64,36 @@ export function CoverPage({
         k='status'
         v={
           model.approval ? (
-            <Pill tone={approvalTone(model.approval)}>{model.approval}</Pill>
+            <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
           ) : (
             <Missing name='status' />
           )
         }
       />
-      <KV k='sample size' v={model.sampleSize || <Missing name='sample size' />} />
+      <KV
+        k='sample size'
+        v={
+          model.sampleSize ? (
+            <span className='uppercase'>{model.sampleSize}</span>
+          ) : (
+            <Missing name='sample size' />
+          )
+        }
+      />
       <KV
         k='cut pieces'
         v={
           model.pieceCount ? (
             <>
-              {model.panelCount} panels
-              <span className='text-labelColor'> · {model.pieceCount} pieces</span>
+              {model.panelCount}
+              {model.fabrics
+                .filter((fabric) => fabric.pieces)
+                .map((fabric) => (
+                  <span key={fabric.role} className='text-labelColor'>
+                    {' '}
+                    · {fabric.pieces} {fabric.role}
+                  </span>
+                ))}
             </>
           ) : (
             <Missing name='pieces' />
@@ -102,9 +126,10 @@ export function CoverPage({
         />
       ) : null}
       <KV k='colourways' v={model.colorways.length || <Missing name='colourways' />} />
-      {model.requiredMissing.length ? (
-        <KV k='missing' v={<Missing name={model.requiredMissing.join(' · ')} />} />
-      ) : null}
+      {/* «! 12 · p2 p5 p15»: the red marks of the other sheets, counted once they are laid out */}
+      <div data-missing-row='' hidden>
+        <KV k='missing' v={<span className='font-bold text-error' data-missing-summary='' />} />
+      </div>
       {model.revision && <KV k='revision' v={model.revision} />}
     </div>
   );
@@ -113,14 +138,14 @@ export function CoverPage({
       <GroupLabel flush>contents</GroupLabel>
       {toc.map((item) => (
         <Row
-          key={`${item.n}-${item.page}`}
+          key={item.n}
           label={
             <span>
               <span className='mr-3 tabular-nums text-labelColor'>{item.n}</span>
               {item.title}
             </span>
           }
-          value={item.page}
+          value={<span className='tabular-nums' data-toc-page={item.n} />}
         />
       ))}
     </div>
@@ -137,35 +162,42 @@ export function CoverPage({
   );
 
   return (
-    <TechpackPaper orient={orient} docline={docline}>
+    <TechpackSheet orient={orient} docline={docline}>
       <header className='mb-4 border-b-2 border-textColor pb-3'>
         <div className='flex items-start justify-between gap-4'>
           <div className='flex min-w-0 items-start gap-3'>
             <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
             <div className='min-w-0'>
               <div className='text-micro uppercase tracking-section text-labelColor'>
-                {model.brand} · tech pack · {n}
+                {model.brand} · tech pack
               </div>
               <h1 className='text-statBig font-bold uppercase leading-tight'>
                 {model.name || <Missing name='name' />}
               </h1>
               <div className='text-control'>
-                {[model.gender, model.collection, model.season].filter(Boolean).join(' · ')}
+                {uniqueLine([model.gender, model.collection, model.season])}
               </div>
-              <div className='text-micro uppercase tracking-label text-labelColor'>
-                {model.styleNumber || <Missing name='style' />}
-              </div>
+              {model.styleNumber && (
+                <div className='text-micro uppercase tracking-label text-labelColor'>
+                  {model.styleNumber}
+                </div>
+              )}
             </div>
           </div>
           <div className='flex flex-col items-end gap-1 text-right text-control leading-tight'>
             {model.approval ? (
-              <Pill tone={approvalTone(model.approval)}>{model.approval}</Pill>
+              <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
             ) : (
               <Missing name='status' />
             )}
             {model.revision && <div className='font-semibold'>{model.revision}</div>}
             <div className='text-labelColor'>
-              sample {model.sampleSize || <Missing name='size' />}
+              sample{' '}
+              {model.sampleSize ? (
+                <span className='uppercase'>{model.sampleSize}</span>
+              ) : (
+                <Missing name='size' />
+              )}
             </div>
           </div>
         </div>
@@ -198,6 +230,6 @@ export function CoverPage({
           {key}
         </div>
       )}
-    </TechpackPaper>
+    </TechpackSheet>
   );
 }

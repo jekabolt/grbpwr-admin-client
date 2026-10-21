@@ -2,7 +2,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import { DataTable, GroupLabel, HeaderNote, SectionHeader } from 'ui';
 import { deriveColourways } from '../derive-colourways';
 import { Missing, Swatch } from './bits';
-import { TechpackPaper, type TechpackPageProps } from './paper';
+import { TechpackSheet, type TechpackPageProps } from '../sheet';
 
 export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; n: string }) {
   const model = deriveColourways(techCard);
@@ -10,7 +10,11 @@ export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; 
     <div>
       <SectionHeader
         title={`${n} colourways`}
-        action={<HeaderNote>{model.rows.length} · material recipe</HeaderNote>}
+        action={
+          <HeaderNote>
+            {model.rows.length} · {model.fromBom ? 'from bom colours' : 'material recipe'}
+          </HeaderNote>
+        }
       />
       {model.rows.length ? (
         <>
@@ -47,41 +51,57 @@ export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; 
               ))}
             </tbody>
           </DataTable>
-          <GroupLabel flush className='mt-4'>
-            pieces × colourway
-          </GroupLabel>
-          <DataTable variant='grid'>
-            <thead>
-              <tr>
-                <th>bom</th>
-                <th data-align='left'>role</th>
-                {model.rows.map((row) => (
-                  <th key={row.key}>{row.name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {model.fabricRows.map((fabric) => (
-                <tr key={fabric.key}>
-                  <td className='whitespace-nowrap'>
-                    <b>{fabric.label}</b>
-                  </td>
-                  <td data-align='left'>{fabric.role}</td>
-                  {fabric.cells.map((cell) => (
-                    <td key={cell.key}>
-                      <div className='whitespace-nowrap'>
-                        <Swatch colour={cell.swatch} /> {cell.material}
-                        {cell.colour && ` · ${cell.colour}`}
-                      </div>
-                      <div className='text-micro text-labelColor'>
-                        {cell.pieces.length ? cell.pieces.join(' · ') : <Missing name='pieces' />}
-                      </div>
-                    </td>
+          {model.fabricRows.length > 0 && (
+            <>
+              <GroupLabel flush className='mt-4'>
+                pieces × colourway
+              </GroupLabel>
+              <DataTable variant='grid'>
+                <thead>
+                  <tr>
+                    <th>bom</th>
+                    <th data-align='left'>pieces</th>
+                    {model.rows.map((row) => (
+                      <th key={row.key}>{row.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {model.fabricRows.map((fabric) => (
+                    <tr key={fabric.key}>
+                      <td className='whitespace-nowrap'>
+                        <b>{fabric.label}</b> {fabric.role}
+                      </td>
+                      <td data-align='left'>
+                        {fabric.pieces.length ? (
+                          fabric.pieces.join(' · ')
+                        ) : (
+                          <Missing name='pieces' />
+                        )}
+                      </td>
+                      {fabric.cells.map((cell) => (
+                        <td key={cell.key}>
+                          <div className='whitespace-nowrap'>
+                            <Swatch colour={cell.swatch} /> {cell.material}
+                            {cell.colour && ` · ${cell.colour}`}
+                          </div>
+                          {cell.differs && (
+                            <div className='text-micro text-labelColor'>
+                              {cell.pieces.length ? (
+                                cell.pieces.join(' · ')
+                              ) : (
+                                <Missing name='pieces' />
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
+                </tbody>
+              </DataTable>
+            </>
+          )}
         </>
       ) : (
         <Missing name='colourways' />
@@ -92,8 +112,8 @@ export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; 
 
 export function ColourwaysPage({ techCard, orient, docline, n }: TechpackPageProps) {
   return (
-    <TechpackPaper orient={orient} docline={docline}>
+    <TechpackSheet orient={orient} docline={docline}>
       <ColourwaysContent techCard={techCard} n={n} />
-    </TechpackPaper>
+    </TechpackSheet>
   );
 }

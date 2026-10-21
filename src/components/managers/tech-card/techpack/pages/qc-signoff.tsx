@@ -1,9 +1,11 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
-import { DataTable, GroupLabel, HeaderNote, Pill, SectionHeader } from 'ui';
+import { DataTable, EmptyCell, GroupLabel, HeaderNote, Pill, SectionHeader } from 'ui';
+import { cardStatus } from '../derive-cover';
 import type { MeasurementRow } from '../derive-measurements';
-import { deriveQcSignoffPage } from '../derive-qc';
-import { Paper } from './paper';
+import { deriveQcSignoffPage, type QcSeamDelta } from '../derive-qc';
+import { TechpackSheet } from '../sheet';
+import { statusTone } from './bits';
 
 type Props = {
   techCard: common_TechCard;
@@ -12,7 +14,13 @@ type Props = {
   n: string;
   measurementRows?: readonly MeasurementRow[];
   sizeNames?: Readonly<Record<number, string>>;
+  seamDeltas?: readonly QcSeamDelta[];
+  labelPlacement?: string;
+  revisionLabel?: string;
 };
+
+/** Who signs a sample off, when the card holds no sign-offs yet: a blank form. */
+const ROLES = ['designer', 'pattern maker', 'technologist', 'sample'];
 
 const CheckBox = () => (
   <span className='inline-block size-3 border border-textColor align-middle' />
@@ -25,10 +33,27 @@ const signoffTone = (state: string): 'ok' | 'warn' | 'attention' | 'gap' => {
   return 'attention';
 };
 
-export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, sizeNames }: Props) {
+export function QcSignoffPage({
+  techCard,
+  orient,
+  docline,
+  n,
+  measurementRows,
+  sizeNames,
+  seamDeltas,
+  labelPlacement,
+  revisionLabel,
+}: Props) {
   const land = orient === 'land';
-  const model = deriveQcSignoffPage({ techCard, measurementRows, sizeNames });
+  const model = deriveQcSignoffPage({
+    techCard,
+    measurementRows,
+    sizeNames,
+    seamDeltas,
+    labelPlacement,
+  });
   const hasRevisions = model.revisions.length > 0;
+  const status = cardStatus(techCard);
   const qc = (
     <div>
       <GroupLabel flush action={<HeaderNote>{model.checks.length} checks</HeaderNote>}>
@@ -37,7 +62,9 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
       <DataTable>
         <thead>
           <tr>
-            <th data-align='left'>check</th>
+            <th data-align='left' className='w-1/3'>
+              check
+            </th>
             <th>op</th>
             <th>pass</th>
             <th>fail</th>
@@ -47,11 +74,15 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
         <tbody>
           {model.checks.map((check) => (
             <tr key={check.key}>
-              <td data-align='left' className={check.missing ? 'font-bold text-error' : undefined}>
+              <td
+                data-align='left'
+                className={check.missing ? 'font-bold text-error' : undefined}
+                data-missing={check.missing ? '' : undefined}
+              >
                 {check.missing && '! '}
                 {check.what}
               </td>
-              <td className='tabular-nums text-labelColor'>{check.op}</td>
+              <td className='tabular-nums text-labelColor'>{check.op || <EmptyCell />}</td>
               <td>
                 <CheckBox />
               </td>
@@ -71,19 +102,19 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
     <div className='flex min-h-0 flex-1 flex-col justify-between gap-6'>
       <div>
         <GroupLabel flush>sign-off</GroupLabel>
-        <DataTable variant='grid'>
-          <thead>
-            <tr>
-              <th>role</th>
-              <th>state</th>
-              <th>name</th>
-              <th>date</th>
-              <th>note</th>
-            </tr>
-          </thead>
-          <tbody>
-            {model.signoffs.length > 0 ? (
-              model.signoffs.map((row) => (
+        {model.signoffs.length > 0 ? (
+          <DataTable variant='grid'>
+            <thead>
+              <tr>
+                <th>role</th>
+                <th>state</th>
+                <th>name</th>
+                <th>date</th>
+                <th>note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {model.signoffs.map((row) => (
                 <tr key={row.key}>
                   <td
                     className='uppercase text-labelColor'
@@ -100,22 +131,35 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
                   <td>{row.signedAt}</td>
                   <td>{row.note}</td>
                 </tr>
-              ))
-            ) : (
+              ))}
+            </tbody>
+          </DataTable>
+        ) : (
+          <DataTable variant='grid'>
+            <thead>
               <tr>
-                <td className='font-bold uppercase text-error' style={{ height: land ? 88 : 72 }}>
-                  ! sign-off
-                </td>
-                <td />
-                <td />
-                <td />
-                <td />
+                <th>role</th>
+                <th>name</th>
+                <th>date</th>
+                <th>signature</th>
               </tr>
-            )}
-          </tbody>
-        </DataTable>
+            </thead>
+            <tbody>
+              {ROLES.map((role) => (
+                <tr key={role}>
+                  <td className='uppercase text-labelColor' style={{ height: land ? 102 : 88 }}>
+                    {role}
+                  </td>
+                  <td style={{ width: '28%' }} />
+                  <td style={{ width: '18%' }} />
+                  <td style={{ width: '30%' }} />
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        )}
       </div>
-      {hasRevisions && (
+      {hasRevisions ? (
         <div>
           <GroupLabel flush>revision</GroupLabel>
           <DataTable>
@@ -139,12 +183,36 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
             </tbody>
           </DataTable>
         </div>
+      ) : (
+        (revisionLabel || status) && (
+          <div>
+            <GroupLabel flush>revision</GroupLabel>
+            <DataTable>
+              <thead>
+                <tr>
+                  <th>rev</th>
+                  <th data-align='left'>state</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className='font-bold' style={{ height: 54 }}>
+                    {revisionLabel}
+                  </td>
+                  <td data-align='left'>
+                    {status && <Pill tone={statusTone(status)}>{status}</Pill>}
+                  </td>
+                </tr>
+              </tbody>
+            </DataTable>
+          </div>
+        )
       )}
     </div>
   );
 
   return (
-    <Paper orient={orient} docline={docline}>
+    <TechpackSheet orient={orient} docline={docline}>
       <SectionHeader
         title={`${n} qc & sign-off`}
         action={
@@ -161,6 +229,6 @@ export function QcSignoffPage({ techCard, orient, docline, n, measurementRows, s
         {qc}
         {signoff}
       </div>
-    </Paper>
+    </TechpackSheet>
   );
 }

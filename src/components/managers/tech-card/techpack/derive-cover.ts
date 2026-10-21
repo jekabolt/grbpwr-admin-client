@@ -2,6 +2,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import { skuToSeasonLabel } from 'components/managers/tech-card/components/season-util';
 import { approvalStateLabel, stageLabel } from 'components/managers/tech-cards/components/utils';
 import {
+  bomColourwayName,
   bomRefs,
   clean,
   colorwayName,
@@ -21,6 +22,14 @@ export type CoverDeriveOptions = {
 
 export type CoverModel = ReturnType<typeof deriveCover>;
 
+/** The one status word the document prints: the card status, else its approval, else its stage. */
+export function cardStatus(techCard: common_TechCard): string {
+  const card = techCard.techCard;
+  const stage = stageLabel(card?.stage);
+  const approval = approvalStateLabel(card?.approvalState);
+  return clean(card?.status) || (approval === '—' ? '' : approval) || (stage === '—' ? '' : stage);
+}
+
 export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptions = {}) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
@@ -29,10 +38,10 @@ export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptio
   const operations = card?.operations ?? [];
   const colorways = techCard.colorways ?? [];
   const primary = colorways[0];
+  // a card without colourways still prints one: its BOM colours (pages/colourways.tsx)
+  const bomColourway = colorways.length ? '' : bomColourwayName(techCard);
   const stage = stageLabel(card?.stage);
-  const approval = approvalStateLabel(card?.approvalState);
-  const status =
-    clean(card?.status) || (approval === '—' ? '' : approval) || (stage === '—' ? '' : stage);
+  const status = cardStatus(techCard);
   const panelCount = pieces.reduce((sum, piece) => sum + (piece.piecesPerGarment ?? 0), 0);
   const assemblies = new Set(
     operations.map((operation) => clean(operation.outputUnitKey)).filter(Boolean),
@@ -53,18 +62,6 @@ export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptio
       spec: clean(ref.item.spec),
     };
   });
-  const requiredMissing = [
-    !clean(card?.name) && 'name',
-    !clean(card?.styleNumber) && 'style',
-    !status && 'status',
-    !options.sampleSizeName && !card?.baseSampleSizeId && 'sample size',
-    !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_FRONT') && 'front flat',
-    !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK') && 'back flat',
-    !fabrics.length && 'fabrics',
-    !pieces.length && 'pieces',
-    !operations.length && 'operations',
-    !colorways.length && 'colourways',
-  ].filter((value): value is string => Boolean(value));
 
   return {
     brand: clean(card?.brand) || 'GRBPWR',
@@ -94,7 +91,6 @@ export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptio
     })),
     buttons: buttonFacts,
     buttonTotal: buttonFacts.reduce((sum, button) => sum + (button.qty ?? 0), 0),
-    colorways: colorways.map(colorwayName),
-    requiredMissing,
+    colorways: colorways.length ? colorways.map(colorwayName) : bomColourway ? [bomColourway] : [],
   };
 }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
 import { deriveLabels, type LabelsDeriveOptions } from '../derive-labels';
 import { Missing, TechpackDrawing } from './bits';
-import { TechpackPaper, type TechpackPageProps } from './paper';
+import { TechpackSheet, type TechpackPageProps } from '../sheet';
 
 type LabelsPageProps = TechpackPageProps & LabelsDeriveOptions;
 
@@ -106,7 +106,7 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
   );
 
   return (
-    <TechpackPaper orient={orient} docline={docline}>
+    <TechpackSheet orient={orient} docline={docline}>
       <SectionHeader
         title={`${n} labels`}
         action={<HeaderNote>identity · composition · placement</HeaderNote>}
@@ -122,6 +122,6 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
           {placement}
         </div>
       )}
-    </TechpackPaper>
+    </TechpackSheet>
   );
 }

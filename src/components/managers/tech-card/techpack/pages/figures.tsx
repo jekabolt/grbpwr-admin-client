@@ -36,10 +36,21 @@ export function QrFigure({
   );
 }
 
+/** Width / height from a CSS «w / h» ratio; a square when unknown. */
+function ratioOf(aspect?: string): number {
+  const [w, h] = (aspect ?? '').split('/').map((part) => Number(part.trim()));
+  return w > 0 && h > 0 ? w / h : 1;
+}
+
+/** The flat at `height`, narrower when its column is; the box keeps the ratio the lines live in. */
 export function TechnicalDrawing({ view, height }: { view: MeasurementView; height: number }) {
+  const ratio = ratioOf(view.aspectRatio);
   return (
-    <figure className='flex min-w-0 flex-col items-center'>
-      <div className='relative' style={{ height, aspectRatio: view.aspectRatio }}>
+    <figure className='flex min-w-0 max-w-full flex-col items-center'>
+      <div
+        className='relative max-w-full'
+        style={{ width: Math.round(height * ratio), aspectRatio: String(ratio) }}
+      >
         <img src={view.src} alt={view.side} className='h-full w-full object-contain' />
         {view.lines.length > 0 && (
           <svg

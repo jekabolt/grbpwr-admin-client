@@ -3,7 +3,16 @@
 // margin boxes print the running head and the counter, so the drawn copies hide.
 import type { ReactNode } from 'react';
 
+import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
+
+/** What every section page gets from the document: the card, the paper, the running head, «NN». */
+export type TechpackPageProps = {
+  techCard: common_TechCard;
+  orient: PrintOrient;
+  docline: string;
+  n: string;
+};
 
 /** The body box inside the @page margins (14 mm top / bottom, 12 mm sides), screen px. */
 export const BODY_PX = {
@@ -21,7 +30,10 @@ export const TECHPACK_SHEET_CSS = String.raw`
 .tp-docline { top: 22px; left: 45px; right: 45px; text-align: center; text-transform: uppercase; overflow: hidden; }
 .tp-count { bottom: 22px; right: 45px; width: 8ch; text-align: right; overflow: visible; }
 .tp-sheet .truncate { overflow: visible !important; text-overflow: clip !important; white-space: normal !important; }
-.tp-sheet td, .tp-sheet th, .tp-sheet figcaption { overflow-wrap: anywhere; word-break: normal; }
+.tp-sheet td, .tp-sheet th, .tp-sheet figcaption { overflow-wrap: break-word; word-break: normal; }
+/* cut pieces share one scale, so their ink must not: 1px outline, .5px inner lines at any size */
+.tp-piece svg > polygon[fill] { fill: var(--color-bgColor); stroke: var(--color-textColor); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.tp-piece svg g > :is(polygon, polyline) { stroke-width: .5px; vector-effect: non-scaling-stroke; }
 @media print {
   .tp-doc { gap: 0; display: block; }
   .tp-sheet { border: 0 !important; break-after: page; }

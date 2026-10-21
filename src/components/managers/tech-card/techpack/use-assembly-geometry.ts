@@ -26,6 +26,7 @@ import { grainRotation } from 'lib/pom/upright';
 import { isDxfUrl } from 'utils/pattern';
 
 import type { AsmPiece, Pt } from './derive-assembly';
+import type { TechpackPieceGeometry } from './derive-pieces';
 
 type Ins = NonNullable<common_TechCard['techCard']>;
 
@@ -182,6 +183,8 @@ export function buildAssemblyPieces(
 export type AssemblyGeometry = {
   pieces: Map<string, AsmPiece>;
   grainDeg: Map<string, number>;
+  /** Each card piece's DXF block, for the cut-pieces sheet (null while the DXF is unread). */
+  shapes: TechpackPieceGeometry;
   dep: PrintDep;
 };
 
@@ -208,12 +211,17 @@ export function useAssemblyGeometry(techCard: common_TechCard): AssemblyGeometry
   const index = useDxfIndex(query.data);
   const built = useMemo(() => {
     const found = new Map<string, FoundPiece>();
+    const shapeByKey = index ? new Map<string, FoundPiece | null>() : null;
     for (const p of ins?.pieces ?? []) {
       const key = p.lineKey ?? '';
       const f = key ? findPiece(index, refs.get(pieceRefKey(key)) ?? []) : null;
       if (f) found.set(key, f);
+      if (key) shapeByKey?.set(pieceRefKey(key), f);
     }
-    return buildAssemblyPieces(techCard, found);
+    return {
+      ...buildAssemblyPieces(techCard, found),
+      shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' },
+    };
   }, [techCard, ins?.pieces, index, refs]);
   const status = files.length ? depStatus(query.isLoading, query.isError) : 'ok';
   return {

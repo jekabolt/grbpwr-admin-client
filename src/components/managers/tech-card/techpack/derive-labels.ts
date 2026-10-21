@@ -7,6 +7,7 @@ import {
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import {
+  bomColourwayName,
   bomRefs,
   clean,
   colorwayColour,
@@ -84,7 +85,9 @@ export function deriveLabels(techCard: common_TechCard, options: LabelsDeriveOpt
   return {
     identity: {
       name: clean(card?.name),
-      colour: clean(careOverride?.colourName) || (primary ? colorwayName(primary, 0) : ''),
+      colour:
+        clean(careOverride?.colourName) ||
+        (primary ? colorwayName(primary, 0) : bomColourwayName(techCard)),
       colourFact: colorwayColour(primary),
       size:
         clean(options.sampleSizeName) ||
@@ -103,7 +106,7 @@ export function deriveLabels(techCard: common_TechCard, options: LabelsDeriveOpt
     back: technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK'),
     missing: [
       !clean(card?.name) && 'name',
-      !primary && 'colourway',
+      !primary && !bomColourwayName(techCard) && 'colourway',
       !fallbackComposition.length && 'composition',
       !clean(placementLabel?.placement) && 'placement',
       !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK') && 'back flat',
