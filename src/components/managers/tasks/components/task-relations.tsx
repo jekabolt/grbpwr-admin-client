@@ -252,7 +252,7 @@ export function TaskRelations({
       await addRelation.mutateAsync({
         taskId: task.id,
         otherTaskId: picked.id,
-        kind: picker === 'blocker' ? 'TASK_LINK_KIND_BLOCKED_BY' : 'TASK_LINK_KIND_RELATES',
+        kind: 'TASK_LINK_KIND_BLOCKED_BY',
       });
     }
     setPicker(null);
@@ -285,9 +285,6 @@ export function TaskRelations({
       </AddDoor>
       <AddDoor shape='inline' className={doorClass} onClick={() => setPicker('blocker')}>
         blocker
-      </AddDoor>
-      <AddDoor shape='inline' className={doorClass} onClick={() => setPicker('link')}>
-        link
       </AddDoor>
       {doors}
     </div>
