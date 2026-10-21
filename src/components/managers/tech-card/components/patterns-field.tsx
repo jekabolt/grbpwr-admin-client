@@ -8,7 +8,13 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  techCardKeys,
+  useTechCard,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useQueryClient } from '@tanstack/react-query';
+import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-http/admin';
+import { adminService } from 'api/api';
 import type { PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import {
@@ -118,7 +124,8 @@ import { TechCardFormData } from './schema';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
-import { PatternExportMenu } from './pattern-export/export-menu';
+import { PatternExportItems } from './pattern-export/export-menu';
+import { SheetVersionsModal, sheetVersions, type SheetVersion } from './sheet-versions';
 import { useTechCardStaging } from './useTechCardStaging';
 import {
   RECONCILE_PARSE,
@@ -132,6 +139,7 @@ import {
 import {
   armReuploadSnapshot,
   provideSheetRestorer,
+  restoreSheetVersion,
   type RestoreOutcome,
   type SheetRevisionRef,
 } from './nesting/reupload-session';
@@ -487,6 +495,16 @@ export function PatternsField({
   // сохранили. Сейв инвалидирует этот запрос, отметка меняется — и попытка повторяется ровно
   // один раз, без кнопки «ещё раз» и без цикла на каждый рендер формы.
   const { data: cardRead, dataUpdatedAt: cardReadAt } = useTechCard(techCardId);
+  const queryClient = useQueryClient();
+  // Superseded files of each sheet (TechCardSizePattern.history, output-only), by row lineKey.
+  const historyByLine = useMemo(() => {
+    const m = new Map<string, common_TechCardPatternRevision[]>();
+    for (const p of cardRead?.techCard?.patterns ?? [])
+      if (p.lineKey && p.history?.length) m.set(p.lineKey, p.history);
+    return m;
+  }, [cardRead]);
+  // «⋯» of a sheet row: the lineKey whose versions are open.
+  const [versionsOf, setVersionsOf] = useState<string | null>(null);
   const { data: materialsData } = useMaterials('', true, !!techCardId);
   const materialById = useMemo(() => {
     const byId = new Map<number, common_Material>();
@@ -1318,7 +1336,31 @@ export function PatternsField({
   const restoreRef = useRef<(rev: SheetRevisionRef) => Promise<RestoreOutcome>>(
     async () => 'unavailable',
   );
+  // RESTORE THE CARD SNAPSHOT of that version: the card comes back whole (pieces, steps, sheet), no
+  // marks, no jump. The card is then re-read through GetTechCard (the restore answer has no
+  // pattern_viewer_token); index.tsx judges that read — a pristine form is rebased onto it, unsaved
+  // body work stops at its conflict dialog.
+  async function restoreSnapshot(snapshotId: number): Promise<RestoreOutcome> {
+    if (!techCardId) return 'unavailable';
+    const stored =
+      queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
+    try {
+      await adminService.RestoreTechCardSnapshot({
+        techCardId,
+        snapshotId,
+        expectedLockVersion: stored?.lockVersion ?? 0,
+      });
+    } catch (e) {
+      console.error('snapshot restore failed', e);
+      const said = e instanceof Error ? e.message.trim() : '';
+      useSnackBarStore.getState().showMessage(said || 'not restored', 'error');
+      return 'refused';
+    }
+    await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+    return 'applied';
+  }
   restoreRef.current = async (rev) => {
+    if ((rev.snapshotId ?? 0) > 0) return restoreSnapshot(rev.snapshotId ?? 0);
     const row = ((getValues('patterns') ?? []) as PatternRow[]).find(
       (r) => (r.lineKey ?? '') === rev.sheetLineKey,
     );
@@ -1357,7 +1399,7 @@ export function PatternsField({
     }
   }
 
-  // The file router: tile drop, tile click and «add files» all land here.
+  // The file router: tile drop, tile click and a sheet row's «upload» all land here.
   //   1 DXF → direct upload → pieces; ≥2 DXF → size merge → upload → pieces;
   //   anything else → import wizard → apply → pieces.
   function routeFiles(scopeKey: string, list: FileList | File[] | null) {
@@ -1684,6 +1726,73 @@ export function PatternsField({
     setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
   }
 
+  // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion (snapshot or re-apply).
+  function renderVersions() {
+    if (!versionsOf) return null;
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    const row = rows.find((r) => (r.lineKey || r.url) === versionsOf);
+    if (!row) return null;
+    const versions = sheetVersions(row, (row.lineKey && historyByLine.get(row.lineKey)) || []);
+    const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    const canRestore = (v: SheetVersion) =>
+      canEdit &&
+      !isSubmitting &&
+      ((v.snapshotId > 0 && !!techCardId) ||
+        (!!rowScope && slotHasSheet(rowScope) && isDxfUrl(v.url)));
+    const url = row.url ?? '';
+    const label = labelOf(row);
+    const download =
+      url && isDxfUrl(url) ? (
+        <PatternExportItems
+          original={async () => ({
+            blob: await fetchMediaBlob(url),
+            fileName: row.filename || `${label}.dxf`,
+          })}
+          drawing={async () =>
+            drawingFromDxf(await (await fetchMediaBlob(url)).arrayBuffer(), label)
+          }
+          plot={async () => {
+            const [{ plotFromDxfBytes }, blob] = await Promise.all([
+              import('lib/pattern-export/plot-dxf'),
+              fetchMediaBlob(url),
+            ]);
+            return {
+              plot: await plotFromDxfBytes(await blob.arrayBuffer(), label, dxfIndex?.contourLayer),
+              title: label,
+            };
+          }}
+        />
+      ) : url ? (
+        <Button asChild variant='underline' size='xs'>
+          <a href={url} target='_blank' rel='noopener noreferrer'>
+            open
+          </a>
+        </Button>
+      ) : null;
+    return (
+      <SheetVersionsModal
+        open
+        versions={versions}
+        canRestore={canRestore}
+        download={download}
+        onClose={() => setVersionsOf(null)}
+        onRestore={async (v) => {
+          const out = await restoreSheetVersion({
+            sheetLineKey: row.lineKey ?? '',
+            url: v.url,
+            fileName: v.fileName || undefined,
+            revision: v.revision ?? undefined,
+            sha256: v.sha256 || undefined,
+            snapshotId: v.snapshotId || undefined,
+          });
+          if (out === 'unavailable')
+            useSnackBarStore.getState().showMessage('not restored', 'error');
+          if (out === 'applied' || out === 'noop') setVersionsOf(null);
+        }}
+      />
+    );
+  }
+
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
     const rev = revisionOf(row);
@@ -1699,13 +1808,33 @@ export function PatternsField({
     const nameTitle =
       [row.filename, converted ? convertedTitle(converted) : ''].filter(Boolean).join('\n') ||
       undefined;
-    const meta = [rev != null ? `v${rev}` : '', row.sizeBytes ? formatBytes(row.sizeBytes) : '']
-      .filter(Boolean)
-      .join(' · ');
+    // v{N}: the active row's own revision (a restored sheet keeps its old number).
+    const shownRev = rev;
+    // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
+    const replaceable = !!rowGroup && canDrop;
+    const thumb =
+      rowGroup && dxfIndex && countBlocks(dxfIndex, rowGroup.scope.key) > 0 ? (
+        <SheetThumb index={dxfIndex} scopeKey={rowGroup.scope.key} className='h-full w-full' />
+      ) : null;
 
     return (
-      <li key={row.lineKey || `row-${index}`} className='py-1'>
+      <li key={row.lineKey || `row-${index}`} className='group/sheet py-1'>
         <div className='flex items-center gap-1.5'>
+          {rowGroup &&
+            (replaceable ? (
+              <Button
+                type='button'
+                aria-label={`replace ${labelOf(row)}`}
+                onClick={() => openPicker(rowGroup.scope.key)}
+                className='flex h-14 w-14 shrink-0 items-center justify-center border border-borderColor bg-pageBg p-0.5 hover:border-textColor'
+              >
+                {thumb}
+              </Button>
+            ) : (
+              <div className='flex h-14 w-14 shrink-0 items-center justify-center border border-borderColor bg-pageBg p-0.5'>
+                {thumb}
+              </div>
+            ))}
           <div className='min-w-0 flex-1'>
             {editing?.index === index ? (
               <Input
@@ -1765,12 +1894,12 @@ export function PatternsField({
               </span>
             )}
           </div>
-          {meta && (
+          {shownRev != null && (
             <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
-              {meta}
+              v{shownRev}
             </Text>
           )}
-          <span className='inline-flex shrink-0 gap-1'>
+          <span className='inline-flex shrink-0 items-center gap-1'>
             {stray && canEdit && storageSizeId > 0 && (
               <Button
                 type='button'
@@ -1784,6 +1913,32 @@ export function PatternsField({
                 re-file
               </Button>
             )}
+            {replaceable && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className={door}
+                onClick={() => openPicker(rowGroup.scope.key)}
+              >
+                upload
+              </Button>
+            )}
+            {row.url && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className={door}
+                aria-label='versions'
+                onClick={() => setVersionsOf(row.lineKey || row.url || null)}
+              >
+                ⋯
+              </Button>
+            )}
+          </span>
+          {/* ⇄ ✎ × on row hover only; always on touch */}
+          <span className='inline-flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/sheet:opacity-100 [@media(hover:none)]:opacity-100'>
             {dxf && uploadScopes.length > 0 && canEdit && (
               <Button
                 type='button'
@@ -1794,37 +1949,6 @@ export function PatternsField({
               >
                 ⇄
               </Button>
-            )}
-            {/* «download as»: the sheet at 1:1 as PDF (one sheet / tiles) or as PLT for a
-                plotter, cut line on the card's contour layer (a converter manifest overrides). */}
-            {dxf && row.url && (
-              <PatternExportMenu
-                label={labelOf(row)}
-                original={async () => ({
-                  blob: await fetchMediaBlob(row.url as string),
-                  fileName: row.filename || `${labelOf(row)}.dxf`,
-                })}
-                drawing={async () =>
-                  drawingFromDxf(
-                    await (await fetchMediaBlob(row.url as string)).arrayBuffer(),
-                    labelOf(row),
-                  )
-                }
-                plot={async () => {
-                  const [{ plotFromDxfBytes }, blob] = await Promise.all([
-                    import('lib/pattern-export/plot-dxf'),
-                    fetchMediaBlob(row.url as string),
-                  ]);
-                  return {
-                    plot: await plotFromDxfBytes(
-                      await blob.arrayBuffer(),
-                      labelOf(row),
-                      dxfIndex?.contourLayer,
-                    ),
-                    title: labelOf(row),
-                  };
-                }}
-              />
             )}
             <Button
               type='button'
@@ -2039,7 +2163,7 @@ export function PatternsField({
 
   const door = 'text-labelColor hover:text-textColor';
 
-  // Панель выбранного слота: файлы и две двери (pieces, marker) + add files.
+  // Панель выбранного слота: файлы и две двери (pieces, marker); `upload` — в строке листа.
   function renderSelected() {
     if (selectedKey === LOOSE_KEY) {
       return (
@@ -2110,17 +2234,6 @@ export function PatternsField({
               >
                 marker
               </Button>
-              {canDrop && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className={door}
-                  onClick={() => openPicker(g.scope.key)}
-                >
-                  add files
-                </Button>
-              )}
             </div>
           }
         >
@@ -2587,6 +2700,8 @@ export function PatternsField({
           />
         </Suspense>
       )}
+
+      {renderVersions()}
 
       {/* In-app PDF viewer, kept for the legacy rows. */}
       <ConfirmationModal

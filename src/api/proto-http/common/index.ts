@@ -2845,6 +2845,10 @@ export type TechCardPatternRevision = {
   sha256: string | undefined;
   fileName: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // The tech_card_snapshot frozen by the save that replaced or removed this file: the whole card as
+  // it was while this file was the current sheet. Admin.RestoreTechCardSnapshot takes it to bring the
+  // card back to that state (operations, pieces, aliases, sheets). 0 = no snapshot, not restorable.
+  snapshotId: number | undefined;
 };
 
 // TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
