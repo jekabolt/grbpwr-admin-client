@@ -66,6 +66,38 @@ function DataTableDemo() {
           </tr>
         </tbody>
       </DataTable>
+      <KitLabel>sticky header + hover rows</KitLabel>
+      <div className='max-h-28 overflow-y-auto'>
+        <DataTable stickyHeader hoverRows>
+          <thead>
+            <tr>
+              <th data-align='left'>date</th>
+              <th data-align='left'>reason</th>
+              <th>qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-group>
+              <td data-align='left' colSpan={3}>
+                wool 420
+              </td>
+            </tr>
+            {[
+              ['21 Oct', 'receipt', '+80 m'],
+              ['17 Oct', 'sample', '−3 m'],
+              ['12 Oct', 'production', '−14 m'],
+              ['02 Oct', 'receipt', '+50 m'],
+              ['29 Sep', 'adjustment', '−1 m'],
+            ].map(([date, reason, qty]) => (
+              <tr key={`${date}-${reason}`}>
+                <td data-align='left'>{date}</td>
+                <td data-align='left'>{reason}</td>
+                <td>{qty}</td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      </div>
     </div>
   );
 }

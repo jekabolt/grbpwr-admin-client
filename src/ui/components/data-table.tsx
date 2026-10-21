@@ -38,14 +38,18 @@ import { cn } from 'lib/utility';
 export function DataTable({
   children,
   variant = 'list',
+  stickyHeader = false,
+  hoverRows = false,
   className,
 }: {
   children: React.ReactNode;
   variant?: 'list' | 'grid';
+  stickyHeader?: boolean;
+  hoverRows?: boolean;
   className?: string;
 }) {
   return (
-    <div className='relative w-full overflow-x-auto'>
+    <div className={cn('relative w-full', stickyHeader ? 'overflow-x-clip' : 'overflow-x-auto')}>
       <table
         data-variant={variant}
         className={cn(
@@ -82,6 +86,10 @@ export function DataTable({
           // (a pill, a badge, a `<details>`) sits at the left — the label ends up over nothing.
           // Right alignment is for digits; a column of words needs the other edge.
           '[&_th[data-align=left]]:text-left [&_td[data-align=left]]:text-left',
+          stickyHeader &&
+            '[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[var(--z-sticky)] [&_thead]:border-b [&_thead]:border-borderColor [&_thead]:bg-bgColor [&_thead_th]:bg-bgColor',
+          hoverRows &&
+            '[&_tbody>tr:not([data-group])]:transition-[background-color] [&_tbody>tr:not([data-group])]:duration-150 [&_tbody>tr:not([data-group])]:ease-out [&_tbody>tr:not([data-group])]:hover:bg-borderColor/40 motion-reduce:[&_tbody>tr:not([data-group])]:transition-none',
           variant === 'grid' &&
             '[&_th]:border [&_th]:border-hairline [&_td]:border [&_td]:border-hairline [&_th]:text-center [&_td]:text-center [&_th:first-child]:bg-bgColor [&_td:first-child]:bg-bgColor',
           className,

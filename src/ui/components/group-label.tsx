@@ -10,6 +10,9 @@ export function GroupLabel({
   lead,
   action,
   flush,
+  swatch,
+  rule = 'below',
+  plain,
   className,
 }: {
   children: React.ReactNode;
@@ -23,6 +26,12 @@ export function GroupLabel({
   action?: React.ReactNode;
   /** Drop the top margin — for a label that opens a box rather than divides one. */
   flush?: boolean;
+  /** Visual identity that sits before the one-line label. */
+  swatch?: React.ReactNode;
+  /** Put the group rule above in ink, or retain the default grey rule below. */
+  rule?: 'below' | 'above';
+  /** Body-size ink label; children may supply their own emphasis and secondary tone. */
+  plain?: boolean;
   className?: string;
 }) {
   return (
@@ -31,17 +40,25 @@ export function GroupLabel({
       // (`Row`, O-48 review); this mark is how it knows.
       data-group-label=''
       className={cn(
-        'mb-1 flex items-baseline gap-2 border-b border-borderColor pb-0.5',
+        'flex gap-2',
+        swatch ? 'items-center' : 'items-baseline',
+        rule === 'above'
+          ? 'border-t border-textColor py-2'
+          : 'mb-1 border-b border-borderColor pb-0.5',
         flush ? 'mt-0' : 'mt-3',
         className,
       )}
     >
+      {swatch ? <span className='flex shrink-0 items-center'>{swatch}</span> : null}
       <Text
-        size='micro'
-        variant='label'
-        tracking='group'
+        size={plain ? 'default' : 'micro'}
+        variant={plain ? 'default' : 'label'}
+        tracking={plain ? 'none' : 'group'}
         component='span'
-        className='font-bold uppercase'
+        className={cn(
+          !plain && 'font-bold uppercase',
+          swatch && 'min-w-0 truncate whitespace-nowrap',
+        )}
       >
         {children}
       </Text>
