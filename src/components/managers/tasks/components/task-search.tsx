@@ -93,7 +93,7 @@ export function TaskSearchScope({
 }
 
 /** Match in the brand highlight: #311eee ground, white type. */
-function Marked({ text, query }: { text: string; query: string }) {
+export function Marked({ text, query }: { text: string; query: string }) {
   return (
     <>
       {highlightParts(text, query).map((p, i) =>

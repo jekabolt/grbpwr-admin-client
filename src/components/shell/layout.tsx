@@ -1,8 +1,9 @@
 import { ADMIN_GROUP, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
-import { FC, ReactNode, useState } from 'react';
+import { FC, ReactNode, useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui';
+import { CommandPalette, PALETTE_KEY_HINT, useCommandPaletteShortcut } from './command-palette';
 import { LeftSideNavMenu } from './left-side-nav-menu';
 import { NavDropdownMenu } from './nav-dropdown-menu';
 import { SnackBar } from './snackbar';
@@ -14,6 +15,8 @@ interface LayoutProps {
 export const Layout: FC<LayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useCommandPaletteShortcut(useCallback(() => setPaletteOpen(true), []));
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
@@ -48,6 +51,13 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
         </div>
 
         <div className='flex grow basis-0 items-center justify-end gap-1'>
+          <Button
+            className='flex items-center gap-1.5 px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70'
+            onClick={() => setPaletteOpen(true)}
+          >
+            search
+            <span className='hidden text-labelColor lg:inline'>{PALETTE_KEY_HINT}</span>
+          </Button>
           <div className='hidden lg:block'>
             <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' onOpenChange={setIsNavOpen} />
           </div>
@@ -79,6 +89,7 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
       </div>
       <div className='h-full print:h-full print:pt-0 pt-26 px-2.5'>{children}</div>
       <SnackBar />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </>
   );
 };
