@@ -112,11 +112,17 @@ export function TaskCardBody({
   task,
   dragging,
   onMove,
+  compact = false,
+  framed = true,
 }: {
   task: Task;
   dragging?: boolean;
   /** Set = the phone status pill can move the card. */
   onMove?: (task: Task, status: TaskStatus) => void;
+  /** Horizontal card used by compact task lists; its optional cover is exactly 44px. */
+  compact?: boolean;
+  /** The parent owns the outline when the body is composed inside another clickable card. */
+  framed?: boolean;
 }) {
   const t = task.task;
   // Решённая карточка не краснеет: done и архив показывают срок нейтральной датой.
@@ -133,23 +139,44 @@ export function TaskCardBody({
   return (
     <div
       className={cn(
-        'flex flex-col border bg-bgColor transition-[border-color,transform] duration-150',
-        dragging
-          ? 'border-textColor'
-          : 'border-borderColor hover:-translate-y-0.5 hover:border-textColor motion-reduce:hover:translate-y-0',
+        'flex bg-bgColor transition-[border-color,transform] duration-150',
+        compact ? 'min-h-16 flex-row' : 'flex-col',
+        framed && 'border',
+        framed &&
+          (dragging
+            ? 'border-textColor'
+            : 'border-borderColor hover:-translate-y-0.5 hover:border-textColor motion-reduce:hover:translate-y-0'),
         isArchived && 'opacity-60',
       )}
     >
       {coverUrl && (
-        <div className='border-b border-borderColor'>
-          <Media src={coverUrl} alt='' aspectRatio='4/3' fit='cover' />
+        <div
+          className={cn(
+            compact
+              ? 'm-2.5 mr-0 size-11 shrink-0 self-center overflow-hidden border border-borderColor'
+              : 'border-b border-borderColor',
+          )}
+        >
+          <Media src={coverUrl} alt='' aspectRatio={compact ? 'auto' : '4/3'} fit='cover' />
         </div>
       )}
 
-      <div className='flex flex-col gap-2 p-2.5'>
-        <Text className='line-clamp-2 break-words font-bold leading-snug'>{t.title}</Text>
+      <div className={cn('flex flex-col gap-2 p-2.5', compact && 'min-w-0 flex-1 justify-center')}>
+        <Text
+          className={cn(
+            'break-words font-bold leading-snug',
+            compact ? 'truncate' : 'line-clamp-2',
+          )}
+        >
+          {t.title}
+        </Text>
 
-        <div className='flex min-h-11 items-center justify-between gap-2 sm:min-h-0'>
+        <div
+          className={cn(
+            'flex items-center justify-between gap-2',
+            compact ? 'min-h-0' : 'min-h-11 sm:min-h-0',
+          )}
+        >
           <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
             {/* Приоритет — знак, а не слово: заливка = urgent, контур = high, ниже — ничего. */}
             {(urgent || high) && (
