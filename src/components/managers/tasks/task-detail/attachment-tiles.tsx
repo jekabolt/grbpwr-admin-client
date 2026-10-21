@@ -5,7 +5,7 @@ import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
 import { useCallback, useRef } from 'react';
-import { AddDoor, Button, Media, Pill, Text, Tiles } from 'ui';
+import { AddDoor, Button, Media, Text, Tiles } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark } from '../components/task-media-viewer';
 import { tasksKeys } from '../hooks/useTasks';
@@ -140,11 +140,10 @@ export function AttachmentTiles({
                 type='button'
                 variant='default'
                 disabled={!openable}
-                title='site media · public'
                 aria-label={
                   notes
-                    ? `media ${i + 1} of ${media.length} · public · ${notes} notes`
-                    : `media ${i + 1} of ${media.length} · public`
+                    ? `media ${i + 1} of ${media.length} · ${notes} notes`
+                    : `media ${i + 1} of ${media.length}`
                 }
                 onClick={() => openable && onOpenMedia(i)}
                 className='relative block w-full cursor-zoom-in bg-pageBg focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
@@ -158,39 +157,21 @@ export function AttachmentTiles({
                     </Text>
                   </span>
                 )}
-                {/* Отметка указаний — В ЛЕВОМ углу, потому что правый занят ответом на вопрос
-                    «что это за штука», и он один на оба ряда. Ставится ТОЛЬКО когда есть что
+                {/* Отметка указаний — в левом нижнем углу. Бейджа «media» и пилюли «public»
+                    больше нет: владелец счёл их шумом (21.10). Ставится ТОЛЬКО когда есть что
                     отмечать: пустая отметка на каждой плитке перестаёт что-либо значить.
 
                     ПОДЛОЖКА ОБЯЗАТЕЛЬНА. Отметка чернильная и лежит ПОВЕРХ снимка, а GRBPWR
                     снимает много чёрного: без заливки «notes 3» пропадает на кадре целиком.
                     В галерее, откуда отметку сюда перенесли, она стояла на белой полосе у
                     нижней кромки плитки — и полоса была не украшением, а этим самым фоном.
-                    Белая плашка, а не чёрная как у бейджа: два одинаково чёрных
-                    прямоугольника в одной полосе читались бы как один разорванный. */}
+                    Белая плашка — чтобы читалась и на тёмном кадре. */}
                 {notes > 0 && (
                   <span className='absolute bottom-1 left-1 bg-bgColor px-1'>
                     <NotesMark count={notes} />
                   </span>
                 )}
-                {/* Бейдж в том же углу, что расширение у файла: угол отвечает на один вопрос —
-                    «что это за штука», — и ответ должен стоять на одном месте в обоих рядах. */}
-                <Text
-                  size='nano'
-                  component='span'
-                  className='absolute bottom-1 right-1 bg-textColor px-1 uppercase text-bgColor'
-                >
-                  media
-                </Text>
               </Button>
-              <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
-                {/* «Публичное» — не украшение, а разница «увидит покупатель» / «не увидит»:
-                    медиа уезжает на CDN сайта, файл библиотеки лежит в приватном бакете.
-                    Пилюля чёрная, а не цветная: это факт, а не состояние. */}
-                <Pill tone='ink' className='self-start'>
-                  public
-                </Pill>
-              </div>
             </div>
           );
         })}
