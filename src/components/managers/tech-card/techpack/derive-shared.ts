@@ -31,21 +31,29 @@ export function decimal(value?: { value?: string } | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function enumLabel(value?: string): string {
+/**
+ * A proto enum as a lower-case word: `prefix` strips a known prefix, otherwise the part after the
+ * enum's family marker (`_PURPOSE_`, `_KIND_`, …). Unset and `*_UNKNOWN` print nothing.
+ */
+export function enumLabel(value?: string, prefix?: string): string {
   let label = clean(value);
-  for (const marker of [
-    '_SECTION_',
-    '_KIND_',
-    '_PURPOSE_',
-    '_ZONE_',
-    '_TYPE_',
-    '_ENUM_',
-    '_STATE_',
-  ]) {
-    const index = label.indexOf(marker);
-    if (index >= 0) {
-      label = label.slice(index + marker.length);
-      break;
+  if (!label || label.endsWith('_UNKNOWN')) return '';
+  if (prefix && label.startsWith(prefix)) label = label.slice(prefix.length);
+  else {
+    for (const marker of [
+      '_SECTION_',
+      '_KIND_',
+      '_PURPOSE_',
+      '_ZONE_',
+      '_TYPE_',
+      '_ENUM_',
+      '_STATE_',
+    ]) {
+      const index = label.indexOf(marker);
+      if (index >= 0) {
+        label = label.slice(index + marker.length);
+        break;
+      }
     }
   }
   return label.replaceAll('_', ' ').toLowerCase();
@@ -220,4 +228,32 @@ export function materialColour(
 export function formatNumber(value: number | null, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return '';
   return value.toFixed(digits).replace(/\.0+$/, '');
+}
+
+type DecimalLike = { value?: string } | null | undefined;
+
+export function decimalText(value: DecimalLike): string {
+  return value?.value?.trim() ?? '';
+}
+
+export function decimalNumber(value: DecimalLike): number | undefined {
+  const parsed = Number(decimalText(value));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function shortDate(value: string | undefined): string {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
+}
+
+export function alphaLabel(index: number): string {
+  let current = index;
+  let out = '';
+  do {
+    out = String.fromCharCode(65 + (current % 26)) + out;
+    current = Math.floor(current / 26) - 1;
+  } while (current >= 0);
+  return out;
 }
