@@ -491,7 +491,12 @@ export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
  * largest size's rhythm). Such a stretch is a wall for every rank. "Beside" = a different-rank (or
  * unranked) size line within `sideMm`, roughly parallel, whose perpendicular foot lands inside it —
  * not on its end: just before a fork the diverging lines start at the fork point, so the shared
- * stretch up to the fork stays lone and the walls close there.
+ * stretch up to the fork stays lone and the walls close there. "Parallel" = the single segments
+ * are, OR the lines' chords over ±2.5 mm are: a size drawn as a motif polyline (polupalto's 44
+ * crosses) turns every few tenths of a mm, and a tooth's direction made the line lone beside the
+ * other sizes, so it walled them all (region 10's neckline). The chord only ADDS "beside": a
+ * stretch lone here was lone by segments too (a chord alone cuts a corner and parted a line from
+ * the parallel size beside it — leonie's junk face seeds).
  */
 export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem[] {
   if (m.mode === 'single') return [];
@@ -503,6 +508,8 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const answered = answeredLines(set).all;
   const out: WallItem[] = [];
   const step = 2;
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
   for (const id of ids) {
     const c = set.chains[id];
     const rc = rank.get(id) ?? -1;
@@ -530,6 +537,7 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
       const p = { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
       const tx = (b.x - a.x) / l;
       const ty = (b.y - a.y) / l;
+      const t = chordDir(pts, cum, s, chordMm);
       // the nearest point of every other size line within reach (global per chain, not per segment)
       const best = new Map<number, { d: number; i: number; u: number }>();
       grid.near(p, sideMm, (o, i) => {
@@ -552,8 +560,12 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;
-        const cos = Math.abs((tx * (q1.x - q0.x) + ty * (q1.y - q0.y)) / ol);
-        if (cos < 0.8) continue;
+        if (Math.abs((tx * (q1.x - q0.x) + ty * (q1.y - q0.y)) / ol) < 0.8) {
+          let oc = cums.get(o);
+          if (!oc) cums.set(o, (oc = cumOf(op)));
+          const q = chordDir(op, oc, oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u, chordMm);
+          if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+        }
         beside = true;
         break;
       }
@@ -576,6 +588,32 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
     }
   }
   return out;
+}
+
+/** The point at arc length `s` along a polyline (`cum` its cumulative lengths), clamped to it. */
+function arcPt(pts: readonly PtMm[], cum: readonly number[], s: number): PtMm {
+  let lo = 0;
+  let hi = cum.length - 2;
+  while (lo < hi) {
+    const k = (lo + hi + 1) >> 1;
+    if (cum[k] <= s) lo = k;
+    else hi = k - 1;
+  }
+  const l = cum[lo + 1] - cum[lo] || 1;
+  const t = Math.max(0, Math.min(1, (s - cum[lo]) / l));
+  return {
+    x: pts[lo].x + (pts[lo + 1].x - pts[lo].x) * t,
+    y: pts[lo].y + (pts[lo + 1].y - pts[lo].y) * t,
+  };
+}
+
+/** Unit direction of a polyline at arc `s`: the chord over ±`h` mm of arc (clamped to its ends). */
+function chordDir(pts: readonly PtMm[], cum: readonly number[], s: number, h: number): PtMm {
+  const L = cum[cum.length - 1];
+  const a = arcPt(pts, cum, Math.max(0, s - h));
+  const b = arcPt(pts, cum, Math.min(L, s + h));
+  const l = dist(a, b) || 1;
+  return { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
 }
 
 function sub(pts: PtMm[], cum: number[], a: number, b: number): PtMm[] {
@@ -771,39 +809,11 @@ export function rescuedIgnored(
   // faces: there it walled Mood's bead rows into blobs read as background (whole pieces' labels
   // held). Only for the faces (`holdSizeLine`): the fill's continuity closures keep it as before
   // (palto 25·80 closes through such a line; the merged-strip seam fixture is refused through it)
-  const ranked = new SegGrid(4);
-  for (const id of m.byRank.flat()) {
-    const c = set.chains[id];
-    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
-  }
+  const ranked = rankedGrid(set, m);
   // ALL of it — every vertex and every 0.5 mm between, ends included — within 0.3 mm of ONE ranked
   // line (Codex: a line that leaves the size's line anywhere, even for a short excursion, draws
   // something of its own there and stays rescuable)
-  const onOneSizeLine = (c: { pts: PtMm[] }) => {
-    let live: Set<ChainId> | null = null;
-    const probe = (p: PtMm) => {
-      const here = new Set<ChainId>();
-      ranked.near(p, 0.3, (rid, i) => {
-        if (here.has(rid) || (live && !live.has(rid))) return;
-        const q = set.chains[rid].pts;
-        const q1 = i + 1 < q.length ? q[i + 1] : q[0];
-        if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
-      });
-      live = here;
-      return here.size > 0;
-    };
-    for (let i = 0; i < c.pts.length; i++) {
-      if (!probe(c.pts[i])) return false;
-      if (i + 1 >= c.pts.length) break;
-      const a = c.pts[i];
-      const b = c.pts[i + 1];
-      const k = Math.ceil(dist(a, b) / 0.5);
-      for (let j = 1; j < k; j++)
-        if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k }))
-          return false;
-    }
-    return true;
-  };
+  const onOneSizeLine = (c: { pts: PtMm[] }) => wholeOnRanked(set, ranked, c) !== null;
   const cand: ChainId[] = [];
   for (const id of ignore) {
     const c = set.chains[id];
@@ -830,6 +840,183 @@ export function rescuedIgnored(
     if (twins.length >= 4) grid2.add(id);
   }
   return cand.filter((id) => !grid2.has(id));
+}
+
+/** The ranked (size) lines of a model on a segment grid. */
+function rankedGrid(set: ChainSet, m: WallModel): SegGrid {
+  const ranked = new SegGrid(4);
+  for (const id of m.byRank.flat()) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  return ranked;
+}
+
+/**
+ * The ranked lines a line lies WHOLLY on — every vertex and every 0.5 mm between within 0.3 mm of
+ * each of them — or null when it leaves them anywhere.
+ */
+function wholeOnRanked(set: ChainSet, ranked: SegGrid, c: { pts: PtMm[] }): Set<ChainId> | null {
+  let live: Set<ChainId> | null = null;
+  const probe = (p: PtMm) => {
+    const here = new Set<ChainId>();
+    ranked.near(p, 0.3, (rid, i) => {
+      if (here.has(rid) || (live && !live.has(rid))) return;
+      const q = set.chains[rid].pts;
+      const q1 = i + 1 < q.length ? q[i + 1] : q[0];
+      if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
+    });
+    live = here;
+    return here.size > 0;
+  };
+  for (let i = 0; i < c.pts.length; i++) {
+    if (!probe(c.pts[i])) return null;
+    if (i + 1 >= c.pts.length) break;
+    const a = c.pts[i];
+    const b = c.pts[i + 1];
+    const k = Math.ceil(dist(a, b) / 0.5);
+    for (let j = 1; j < k; j++)
+      if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k })) return null;
+  }
+  return live;
+}
+
+/**
+ * COPY RANKS (polupalto): a rescued line lying wholly on the line(s) of ONE size rank is that
+ * size's line drawn twice (a tile fragment's copy) — id → that rank. Other lines are absent.
+ */
+export function copyRanks(
+  set: ChainSet,
+  m: WallModel,
+  ids: readonly ChainId[],
+): Map<ChainId, number> {
+  const out = new Map<ChainId, number>();
+  if (m.mode !== 'graded' || probeOff('M_COPY_RANK_OFF')) return out;
+  const rank = new Map<ChainId, number>();
+  m.byRank.forEach((rids, r) => rids.forEach((id) => rank.set(id, r)));
+  const ranked = rankedGrid(set, m);
+  for (const id of ids) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    const on = wholeOnRanked(set, ranked, c);
+    if (!on?.size) continue;
+    const rs = new Set([...on].map((rid) => rank.get(rid)));
+    const r = [...rs][0];
+    if (rs.size === 1 && r !== undefined) out.set(id, r);
+  }
+  return out;
+}
+
+/**
+ * Rank r's walls of a copy of rank s's line (`copyRanks`). Where a line of r — or of a size between
+ * r and s — runs beside the copy, r is drawn apart from s there (sizes grade in order: r cannot
+ * coincide with s where a size between them does not), so the copy is s's line, no wall of r. As a
+ * wall it closed the strip between r's own line and s's into r's piece (polupalto: 44 on 46's
+ * copies, 52 on 54's — each piece a strip too wide, read as right). Where no such line is beside,
+ * r coincides with s and the copy stays r's wall (the shared edge drawn once, as s). "Beside" as
+ * for the lone stretches: within `sideMm`, roughly parallel (chords over ±2.5 mm: a motif pen is
+ * a zigzag), foot not within 3 mm of that line's end — and not ON the copy (> `onMm`, the
+ * tolerance a copy lies on its line with): a size drawn apart by any amount is apart (polupalto's
+ * back facing grades its neckline ~0.7 mm per size).
+ */
+export function copyWallsOf(
+  set: ChainSet,
+  m: WallModel,
+  copies: ReadonlyMap<ChainId, number>,
+  ids: readonly ChainId[],
+  r: number,
+  sideMm = 20,
+  onMm = 0.3,
+): WallItem[] {
+  const out: WallItem[] = [];
+  const grids = new Map<number, SegGrid>();
+  const gridFor = (s: number) => {
+    let g = grids.get(s);
+    if (g) return g;
+    g = new SegGrid(8);
+    const lo = Math.min(r, s);
+    const hi = Math.max(r, s);
+    for (let t = lo; t <= hi; t++) {
+      if (t === s) continue;
+      for (const id of m.byRank[t] ?? []) {
+        const c = set.chains[id];
+        if (c && c.pts.length >= 2) g.addPolyline(id, c.pts);
+      }
+    }
+    grids.set(s, g);
+    return g;
+  };
+  const step = 1;
+  // Directions are chords over ±2.5 mm of arc, not one segment's: a motif pen (crosses) is a
+  // zigzag polyline whose segments cross the line's run.
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
+  for (const id of ids) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    const s = copies.get(id);
+    if (s === undefined || s === r) {
+      out.push(...itemsOf(set, [id]));
+      continue;
+    }
+    const grid = gridFor(s);
+    const pts = c.pts;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    const L = cum[cum.length - 1];
+    const keep: boolean[] = [];
+    const at: number[] = [];
+    let seg = 0;
+    for (let a = 0; a <= L + 1e-9; a += step) {
+      while (seg + 2 < pts.length && cum[seg + 1] < a) seg++;
+      const p0 = pts[seg];
+      const p1 = pts[seg + 1];
+      const l = cum[seg + 1] - cum[seg] || 1;
+      const u = (a - cum[seg]) / l;
+      const p = { x: p0.x + (p1.x - p0.x) * u, y: p0.y + (p1.y - p0.y) * u };
+      const t = chordDir(pts, cum, a, chordMm);
+      const best = new Map<number, { d: number; i: number; u: number }>();
+      grid.near(p, sideMm, (o, i) => {
+        const op = set.chains[o].pts;
+        const q = segNearest(p, op[i], op[i + 1]);
+        const b = best.get(o);
+        if (!b || q.d < b.d) best.set(o, { d: q.d, i, u: q.u });
+      });
+      let beside = false;
+      for (const [o, b] of best) {
+        if (b.d > sideMm || b.d <= onMm) continue;
+        const op = set.chains[o].pts;
+        let oc = cums.get(o);
+        if (!oc) cums.set(o, (oc = cumOf(op)));
+        const foot = oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u;
+        if (Math.min(foot, oc[oc.length - 1] - foot) < 3) continue;
+        const q = chordDir(op, oc, foot, chordMm);
+        if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+        beside = true;
+        break;
+      }
+      keep.push(!beside);
+      at.push(a);
+    }
+    if (keep.every(Boolean)) {
+      out.push(...itemsOf(set, [id]));
+      continue;
+    }
+    let i = 0;
+    while (i < keep.length) {
+      if (!keep[i]) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j + 1 < keep.length && keep[j + 1]) j++;
+      const a = Math.max(0, at[i] - step / 2);
+      const b = j === keep.length - 1 ? L : Math.min(L, at[j] + step / 2);
+      if (b - a >= 1) out.push({ chain: id, pts: sub(pts, cum, a, b) });
+      i = j + 1;
+    }
+  }
+  return out;
 }
 
 /**
