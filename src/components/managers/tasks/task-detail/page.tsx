@@ -20,18 +20,11 @@ import {
   Select,
   Text,
 } from 'ui';
-import {
-  TaskFormValues,
-  TaskMediaAnnotations,
-  TaskPriority,
-  TaskStatus,
-  TaskStatusChange,
-} from '../api/types';
+import { TaskMediaAnnotations, TaskPriority, TaskStatus, TaskStatusChange } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
 import { LinkChip } from '../components/link-chip';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
-import { TaskFormModal } from '../components/task-form-modal';
 import { orderedMedia } from '../api/tasksService';
 import { useTaskMediaViewer } from '../components/task-media-viewer';
 
@@ -44,7 +37,6 @@ import {
   useTask,
   useTaskBoards,
   useUnarchiveTask,
-  useUpdateTask,
   type InlinePatch,
 } from '../hooks/useTasks';
 import { AttachmentTiles } from './attachment-tiles';
@@ -158,7 +150,6 @@ export function TaskDetail() {
 
   const { data: task, isLoading, isError } = useTask(numId ?? null);
 
-  const updateTask = useUpdateTask();
   const inlinePatch = useInlineTaskPatch(numId ?? 0);
   const deleteTask = useDeleteTask();
   const archiveTask = useArchiveTask();
@@ -170,10 +161,10 @@ export function TaskDetail() {
     [boards],
   );
 
-  const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pickingParent, setPickingParent] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const phone = useMediaQuery(PHONE_QUERY);
@@ -261,41 +252,6 @@ export function TaskDetail() {
     readOnlyNote: canWrite ? 'edit to draw' : undefined,
   });
 
-  /**
-   * СЧИТАЕТСЯ ПО СОДЕРЖИМОМУ ФОРМЫ, А НЕ ПО ВСЕМУ ОТВЕТУ. Открытая модалка делает
-   * `reset(initial)` на каждую смену ссылки — и по `[task]` это значило «на каждое фоновое
-   * перечитывание».
-   *
-   * Структурное разделение react-query держит ссылку стабильной, пока данные не изменились, но
-   * `GetTask` несёт ещё и файлы библиотеки, а их подписанные ссылки МИНТУЮТСЯ НА КАЖДЫЙ ОТВЕТ:
-   * ответ никогда не равен предыдущему, и `task` меняется, хотя ни одно поле формы не менялось.
-   * Перечитывание при этом запускает сама страница — сорвавшееся превью зовёт
-   * `invalidateQueries` (attachment-tiles.tsx), а подпись живёт 6–12 часов при вкладке, открытой
-   * дольше. Итог был такой: человек печатает описание, у него на глазах срывается превью, и
-   * заголовок с описанием откатываются к серверным — без единого слова и без отмены по ⌘Z.
-   *
-   * Зависимости — ровно те три куска, из которых собирается `initial`. `task.task` (содержимое
-   * карточки) структурно разделяется и переживает ротацию подписей; доска и колонка — скаляры.
-   */
-  const initial: TaskFormValues | null = useMemo(
-    () => (task ? { ...task.task, boardId: task.boardId, status: task.status } : null),
-    [task?.task, task?.boardId, task?.status],
-  );
-
-  async function handleSubmit(values: TaskFormValues) {
-    if (!task) return;
-    const { boardId, status, ...content } = values;
-    try {
-      await updateTask.mutateAsync({ id: task.id, content });
-      if (boardId !== task.boardId || status !== task.status) {
-        await move.mutateAsync({ id: task.id, boardId, status, position: 0 });
-      }
-      setEditing(false);
-    } catch {
-      /* snackbar shown by the mutation; keep the modal open */
-    }
-  }
-
   function confirmDelete() {
     if (!task) return;
     deleteTask.mutate(task.id, { onSuccess: () => navigate(ROUTES.tasks) });
@@ -334,34 +290,15 @@ export function TaskDetail() {
   // «Моя» — если я В СПИСКЕ, а не первый: витрина не решает, чья это работа.
   const isMine = !!account?.username && t.assignees.includes(account.username);
   const isArchived = !!task.archivedAt;
+  const hasHistory = task.statusHistory.length > 0;
   // Заархивированный блокер считается ОТКРЫТЫМ, пока не done: архив прячет карточку с доски, но
   // не отменяет «сначала то, потом это» (довод — в `utils/relations.ts`).
   const blockers = openBlockers(task.relations);
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
   const attachmentCount = media.length + task.files.length;
 
-  /**
-   * МОДАЛКА НЕ ОТКРЫВАЕТСЯ ПОВЕРХ ЛЕТЯЩЕЙ ИНЛАЙН-ЗАПИСИ. Она — ВТОРАЯ дверь полной замены
-   * содержимого: форма засеивается при открытии и намеренно не пересеивается, поэтому открытая
-   * до того, как долетел инлайн, она сохранила бы снимок БЕЗ него и молча откатила бы только что
-   * поставленный приоритет. Засов в `useInlineTaskPatch` сюда не достаёт: модалка пишет своим
-   * `useUpdateTask`, а не инлайновой дверью, — значит удержать её может только замок на входе.
-   *
-   * РАБОТАЕТ ЭТО РОВНО ПОТОМУ, ЧТО `isPending` ВЗЯТ ИЗ КЭША ЗАПИСЕЙ, а не у наблюдателя:
-   * наблюдатель после возврата на страницу говорит «свободно», пока запись ещё летит, и дверь
-   * открылась бы ровно в том окне, где модалка опаснее всего.
-   *
-   * ЧЕГО ЭТОТ ЗАМОК НЕ ЗАКРЫВАЕТ: модалку, открытую ДО начала инлайн-записи. Её снимок стареет
-   * по общему правилу формы, и это отдельный разговор — про вторую дверь, а не про гонку двух
-   * инлайнов.
-   *
-   * Дверь к модалке на странице одна — «edit all fields» в меню «⋯»; тот же замок стоит и на
-   * «+ media», которая пишет инлайновой дверью.
-   */
+  /** Пока летит инлайн-запись, «+ media» (тоже инлайновая дверь) ждёт: `isPending` из кэша записей. */
   const editLocked = inlinePatch.isPending;
-  const openEditor = () => {
-    if (!editLocked) setEditing(true);
-  };
 
   const moveTo = (boardId: number, status: TaskStatus) =>
     canWrite &&
@@ -472,21 +409,32 @@ export function TaskDetail() {
     </span>
   );
   /* Себе в один тап — без открытия пикера. */
-  const assignMeButton = canWrite && account?.username && !isMine && (
-    <Button
-      type='button'
-      variant='underline'
-      size='xs'
-      aria-label='assign to me'
-      disabled={inlinePatch.isPending}
-      onClick={() =>
-        patchInline({ assignees: [...t.assignees, account.username!] }, { assignees: t.assignees })
-      }
-      className='min-h-11 shrink-0 self-center text-labelColor hover:text-textColor sm:min-h-0'
-    >
-      + me
-    </Button>
-  );
+  /* Desktop: the same chip box as «more»; phone: a word inside the assignee row. */
+  const assignMeButton = (chip: boolean) =>
+    canWrite &&
+    account?.username &&
+    !isMine && (
+      <Button
+        type='button'
+        variant={chip ? 'default' : 'underline'}
+        size={chip ? undefined : 'xs'}
+        aria-label='assign to me'
+        disabled={inlinePatch.isPending}
+        onClick={() =>
+          patchInline(
+            { assignees: [...t.assignees, account.username!] },
+            { assignees: t.assignees },
+          )
+        }
+        className={
+          chip
+            ? cn(CHIP_BOX, 'shrink-0 text-labelColor hover:text-textColor')
+            : 'min-h-11 shrink-0 self-center text-labelColor hover:text-textColor sm:min-h-0'
+        }
+      >
+        + me
+      </Button>
+    );
   const moreButton = (className: string) => (
     <Button
       type='button'
@@ -515,7 +463,7 @@ export function TaskDetail() {
         <BackLink className='inline-flex min-h-11 items-center sm:min-h-8' to={ROUTES.tasks}>
           {boardNameOf(boards, task.boardId) || 'tasks'}
         </BackLink>
-        {canWrite && (
+        {(canWrite || hasHistory) && (
           <GenericPopover
             open={menuOpen}
             onOpenChange={setMenuOpen}
@@ -530,53 +478,58 @@ export function TaskDetail() {
             openElement={<span aria-hidden>⋯</span>}
           >
             <div role='menu' className='flex flex-col'>
-              <Button
-                type='button'
-                role='menuitem'
-                className={MENU_ITEM}
-                disabled={editLocked}
-                onClick={() => {
-                  setMenuOpen(false);
-                  openEditor();
-                }}
-              >
-                edit all fields
-              </Button>
-              <Button
-                type='button'
-                role='menuitem'
-                className={MENU_ITEM}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setPickingParent(true);
-                }}
-              >
-                make subtask of…
-              </Button>
-              <Button
-                type='button'
-                role='menuitem'
-                className={cn(MENU_ITEM, 'border-b-textColor')}
-                loading={archiveBusy}
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (isArchived) unarchiveTask.mutate(task.id);
-                  else archiveTask.mutate(task.id);
-                }}
-              >
-                {isArchived ? 'restore' : 'archive'}
-              </Button>
-              <Button
-                type='button'
-                role='menuitem'
-                className={cn(MENU_ITEM, 'border-b-0 text-error')}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setDeleting(true);
-                }}
-              >
-                delete
-              </Button>
+              {hasHistory && (
+                <Button
+                  type='button'
+                  role='menuitem'
+                  className={cn(MENU_ITEM, !canWrite && 'border-b-0')}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setHistoryOpen(true);
+                  }}
+                >
+                  history
+                </Button>
+              )}
+              {canWrite && (
+                <>
+                  <Button
+                    type='button'
+                    role='menuitem'
+                    className={MENU_ITEM}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setPickingParent(true);
+                    }}
+                  >
+                    make subtask of…
+                  </Button>
+                  <Button
+                    type='button'
+                    role='menuitem'
+                    className={cn(MENU_ITEM, 'border-b-textColor')}
+                    loading={archiveBusy}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (isArchived) unarchiveTask.mutate(task.id);
+                      else archiveTask.mutate(task.id);
+                    }}
+                  >
+                    {isArchived ? 'restore' : 'archive'}
+                  </Button>
+                  <Button
+                    type='button'
+                    role='menuitem'
+                    className={cn(MENU_ITEM, 'border-b-0 text-error')}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setDeleting(true);
+                    }}
+                  >
+                    delete
+                  </Button>
+                </>
+              )}
             </div>
           </GenericPopover>
         )}
@@ -606,7 +559,7 @@ export function TaskDetail() {
                 )}
               </PropRow>
               <PropRow label='assignee'>
-                {assignMeButton}
+                {assignMeButton(false)}
                 {assigneeControl}
               </PropRow>
               {moreButton('flex min-h-11 w-full items-center justify-between')}
@@ -665,7 +618,7 @@ export function TaskDetail() {
                 </Text>
                 {assigneeControl}
               </div>
-              {assignMeButton}
+              {assignMeButton(true)}
               {moreButton(cn(CHIP_BOX, 'text-labelColor hover:text-textColor'))}
             </div>
             {moreOpen && (
@@ -754,9 +707,6 @@ export function TaskDetail() {
                 variant='underline'
                 size='xs'
                 className='min-h-11 sm:min-h-0'
-                /* Имя РАЗЛИЧИМОЕ: на этой странице есть и «edit all fields» в меню, открывающий
-                     модалку. Два одинаковых имени на одном экране — это загадка для читалки с
-                     экрана и ловушка для стенда. */
                 aria-label='edit description'
                 onClick={() => setEditingDescription(true)}
               >
@@ -804,31 +754,6 @@ export function TaskDetail() {
             </div>
           )}
         </Section>
-
-        {/* ── 5. История статусов: новые сверху; строка без from — создание. */}
-        {task.statusHistory.length > 0 && (
-          <Section title='history' className='min-w-0'>
-            {task.statusHistory.map((h, i) => (
-              <div
-                key={`${h.changedAt}-${i}`}
-                className='flex min-h-11 items-center justify-between gap-3 border-b border-hairline'
-              >
-                <Text size='control' component='span' className='uppercase tracking-label'>
-                  {statusChangeLabel(h)}
-                </Text>
-                <Text
-                  size='control'
-                  variant='label'
-                  component='span'
-                  className='shrink-0 uppercase tracking-label'
-                >
-                  {h.changedBy ? `${h.changedBy} · ` : ''}
-                  {h.changedAt ? format(new Date(h.changedAt), 'PP, HH:mm') : <EmptyCell />}
-                </Text>
-              </div>
-            ))}
-          </Section>
-        )}
 
         {/* ── 6. Чеклист ──────────────────────────────────────────────────────────────── */}
         <TaskChecklist
@@ -925,16 +850,37 @@ export function TaskDetail() {
         />
       )}
 
-      {initial && (
-        <TaskFormModal
-          open={editing}
-          onOpenChange={setEditing}
-          mode='edit'
-          initial={initial}
-          saving={updateTask.isPending || move.isPending}
-          onSubmit={handleSubmit}
-        />
-      )}
+      {/* История статусов — из меню «⋯», модалкой: новые сверху; строка без from — создание. */}
+      <ConfirmationModal
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onConfirm={() => setHistoryOpen(false)}
+        title={`history · ${task.statusHistory.length}`}
+        width='md'
+        hideActions
+      >
+        <div className='flex min-w-0 flex-col'>
+          {task.statusHistory.map((h, i) => (
+            <div
+              key={`${h.changedAt}-${i}`}
+              className='flex min-h-11 items-center justify-between gap-3 border-b border-hairline'
+            >
+              <Text size='control' component='span' className='uppercase tracking-label'>
+                {statusChangeLabel(h)}
+              </Text>
+              <Text
+                size='control'
+                variant='label'
+                component='span'
+                className='shrink-0 uppercase tracking-label'
+              >
+                {h.changedBy ? `${h.changedBy} · ` : ''}
+                {h.changedAt ? format(new Date(h.changedAt), 'PP, HH:mm') : <EmptyCell />}
+              </Text>
+            </div>
+          ))}
+        </div>
+      </ConfirmationModal>
 
       <ConfirmationModal
         open={deleting}
