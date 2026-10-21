@@ -1,12 +1,99 @@
-// Placeholder: lane L2 writes this page. Same props contract as every tech pack page.
 import type { common_TechCard } from 'api/proto-http/admin';
-import type { PrintOrient } from 'components/managers/print/scope';
+import { DataTable, GroupLabel, HeaderNote, SectionHeader } from 'ui';
+import { deriveColourways } from '../derive-colourways';
+import { Missing, Swatch } from './bits';
+import { TechpackPaper, type TechpackPageProps } from './paper';
 
-export function ColourwaysPage(_props: {
-  techCard: common_TechCard;
-  orient: PrintOrient;
-  docline: string;
-  n: string;
-}) {
-  return null;
+export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; n: string }) {
+  const model = deriveColourways(techCard);
+  return (
+    <div>
+      <SectionHeader
+        title={`${n} colourways`}
+        action={<HeaderNote>{model.rows.length} · material recipe</HeaderNote>}
+      />
+      {model.rows.length ? (
+        <>
+          <DataTable variant='grid'>
+            <thead>
+              <tr>
+                <th>colourway</th>
+                {model.columns.map((column) => (
+                  <th key={column.key}>{column.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {model.rows.map((row) => (
+                <tr key={row.key}>
+                  <td className='whitespace-nowrap'>
+                    <Swatch colour={row.swatch} size={14} /> <b>{row.name}</b>
+                  </td>
+                  {row.cells.map((cell) => (
+                    <td key={cell.key}>
+                      <span className='inline-flex items-center gap-1.5'>
+                        <Swatch colour={cell.swatch} />
+                        <span>{cell.value}</span>
+                      </span>
+                      {cell.sub && <div className='text-micro text-labelColor'>{cell.sub}</div>}
+                      {cell.missing && (
+                        <div>
+                          <Missing name='recipe' />
+                        </div>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+          <GroupLabel flush className='mt-4'>
+            pieces × colourway
+          </GroupLabel>
+          <DataTable variant='grid'>
+            <thead>
+              <tr>
+                <th>bom</th>
+                <th data-align='left'>role</th>
+                {model.rows.map((row) => (
+                  <th key={row.key}>{row.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {model.fabricRows.map((fabric) => (
+                <tr key={fabric.key}>
+                  <td className='whitespace-nowrap'>
+                    <b>{fabric.label}</b>
+                  </td>
+                  <td data-align='left'>{fabric.role}</td>
+                  {fabric.cells.map((cell) => (
+                    <td key={cell.key}>
+                      <div className='whitespace-nowrap'>
+                        <Swatch colour={cell.swatch} /> {cell.material}
+                        {cell.colour && ` · ${cell.colour}`}
+                      </div>
+                      <div className='text-micro text-labelColor'>
+                        {cell.pieces.length ? cell.pieces.join(' · ') : <Missing name='pieces' />}
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </DataTable>
+        </>
+      ) : (
+        <Missing name='colourways' />
+      )}
+    </div>
+  );
+}
+
+export function ColourwaysPage({ techCard, orient, docline, n }: TechpackPageProps) {
+  return (
+    <TechpackPaper orient={orient} docline={docline}>
+      <ColourwaysContent techCard={techCard} n={n} />
+    </TechpackPaper>
+  );
 }
