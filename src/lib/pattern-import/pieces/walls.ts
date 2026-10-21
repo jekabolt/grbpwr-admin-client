@@ -907,6 +907,16 @@ export function copyRanks(
   return out;
 }
 
+/** How far beside a copy its two sides are probed in s's raster, mm (a wall pixel is 0.5 mm). */
+const SIDE_PROBE_MM = 1;
+/**
+ * A line on the copy's far side (inside s's piece for a larger r, outside it for a smaller one)
+ * this close is the same edge drawn twice, mm: stacked strokes drift 0.1–0.5 mm.
+ */
+const FAR_SIDE_MM = 1;
+/** How far beside a copy r's own edge (its own line or a common one) shows r's side, mm. */
+const EDGE_SIDE_MM = 3;
+
 /**
  * Rank r's walls of a copy of rank s's line (`copyRanks`). Where a line of r — or of a size between
  * r and s — runs beside the copy, r is drawn apart from s there (sizes grade in order: r cannot
@@ -918,6 +928,20 @@ export function copyRanks(
  * a zigzag), foot not within 3 mm of that line's end — and not ON the copy (> `onMm`, the
  * tolerance a copy lies on its line with): a size drawn apart by any amount is apart (polupalto's
  * back facing grades its neckline ~0.7 mm per size).
+ * Which side: `outsideOf(s)` tells a point outside every closed piece of s (null on a wall).
+ * r's side of the copy is outside s's piece when r is larger, inside when smaller. A line there
+ * counts. A line on the far side counts only past FAR_SIDE_MM: closer, it is this edge drawn twice
+ * (zhaket's sleeve extension has 40's line 0.4 mm inside 36's side edge; counted, it took the edge
+ * from 42, and 42 closed on its hem fold); further, sizes cross there (reef's side seam fans out:
+ * 3XL and 4XL run 1.4–3.4 mm outside 5XL's edge copy; not counted, the copy walled them and they
+ * took 5XL's piece). Nor where r's own edge (its own line or a common one) runs on the far side
+ * within EDGE_SIDE_MM: the grading turns inward there, the far side is r's. zhaket's cuff corner
+ * has 44's own line 0.7–1.1 mm inside 36's copy (skipped, the copy walled 44 and it took the strip
+ * between); palto's front shoulder has 76 and 80 0.3–1 mm inside 72's copy with the common
+ * shoulder line beyond them (skipped, 72's copy walled 84 and 88 and they ran on 72's line).
+ * Either way the line must belong to the copy's own piece: the way over keeps to that side of s's
+ * outline (no other piece of s between). Where the side cannot be told (s's piece not closed
+ * there), every line counts.
  */
 export function copyWallsOf(
   set: ChainSet,
@@ -925,10 +949,17 @@ export function copyWallsOf(
   copies: ReadonlyMap<ChainId, number>,
   ids: readonly ChainId[],
   r: number,
+  outsideOf?: (s: number) => ((p: PtMm) => boolean | null) | null,
   sideMm = 20,
   onMm = 0.3,
 ): WallItem[] {
   const out: WallItem[] = [];
+  // r's own edge: its own lines and the common ones (walls of every rank)
+  const edgeGrid = new SegGrid(8);
+  for (const id of [...(m.byRank[r] ?? []), ...m.common]) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) edgeGrid.addPolyline(id, c.pts);
+  }
   const grids = new Map<number, SegGrid>();
   const gridFor = (s: number) => {
     let g = grids.get(s);
@@ -960,6 +991,7 @@ export function copyWallsOf(
       continue;
     }
     const grid = gridFor(s);
+    const outS = outsideOf?.(s) ?? null;
     const pts = c.pts;
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
@@ -982,6 +1014,50 @@ export function copyWallsOf(
         const b = best.get(o);
         if (!b || q.d < b.d) best.set(o, { d: q.d, i, u: q.u });
       });
+      // r's side of the copy here: +1 the normal's, −1 the other, 0 unknown (every line counts)
+      const n = { x: -t.y, y: t.x };
+      let want = 0;
+      if (outS && best.size) {
+        const sideAt = (k: number) => {
+          for (let e = SIDE_PROBE_MM; e <= SIDE_PROBE_MM + 1.5; e += 0.5) {
+            const v = outS({ x: p.x + k * n.x * e, y: p.y + k * n.y * e });
+            if (v !== null) return v;
+          }
+          return null;
+        };
+        const a = sideAt(1);
+        const b = sideAt(-1);
+        if (a !== null && b !== null && a !== b) want = (a ? 1 : -1) * (r > s ? 1 : -1);
+      }
+      // r's own edge beside on the far side (as "beside" above, within EDGE_SIDE_MM)
+      let edgeFar: boolean | undefined;
+      const farEdge = () => {
+        if (edgeFar !== undefined) return edgeFar;
+        edgeFar = false;
+        const near = new Map<number, { d: number; i: number; u: number }>();
+        edgeGrid.near(p, EDGE_SIDE_MM, (o, i) => {
+          const op = set.chains[o].pts;
+          const q = segNearest(p, op[i], op[i + 1]);
+          const b = near.get(o);
+          if (!b || q.d < b.d) near.set(o, { d: q.d, i, u: q.u });
+        });
+        for (const [o, b] of near) {
+          if (b.d > EDGE_SIDE_MM || b.d <= onMm) continue;
+          const op = set.chains[o].pts;
+          let oc = cums.get(o);
+          if (!oc) cums.set(o, (oc = cumOf(op)));
+          const foot = oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u;
+          if (Math.min(foot, oc[oc.length - 1] - foot) < 3) continue;
+          const q = chordDir(op, oc, foot, chordMm);
+          if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+          const f = {
+            x: op[b.i].x + (op[b.i + 1].x - op[b.i].x) * b.u,
+            y: op[b.i].y + (op[b.i + 1].y - op[b.i].y) * b.u,
+          };
+          if (Math.sign((f.x - p.x) * n.x + (f.y - p.y) * n.y) === -want) return (edgeFar = true);
+        }
+        return edgeFar;
+      };
       let beside = false;
       for (const [o, b] of best) {
         if (b.d > sideMm || b.d <= onMm) continue;
@@ -992,6 +1068,23 @@ export function copyWallsOf(
         if (Math.min(foot, oc[oc.length - 1] - foot) < 3) continue;
         const q = chordDir(op, oc, foot, chordMm);
         if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+        if (want && outS) {
+          const f = {
+            x: op[b.i].x + (op[b.i + 1].x - op[b.i].x) * b.u,
+            y: op[b.i].y + (op[b.i + 1].y - op[b.i].y) * b.u,
+          };
+          const v = { x: f.x - p.x, y: f.y - p.y };
+          const own = Math.sign(v.x * n.x + v.y * n.y) === want; // on r's side
+          if (!own && b.d <= FAR_SIDE_MM && !farEdge()) continue; // the same edge drawn twice
+          // the same piece: the way over stays on that side of s's outline
+          const outside = own === r > s;
+          let same = true;
+          for (let e = SIDE_PROBE_MM; e <= b.d - 0.5 && same; e += 0.5) {
+            const w = outS({ x: p.x + (v.x * e) / b.d, y: p.y + (v.y * e) / b.d });
+            if (w !== null && w !== outside) same = false;
+          }
+          if (!same) continue;
+        }
         beside = true;
         break;
       }
@@ -1016,6 +1109,128 @@ export function copyWallsOf(
       i = j + 1;
     }
   }
+  return out;
+}
+
+/**
+ * SANDWICH (zhaket): where a smaller size's line and a larger size's line run ON each other, every
+ * size between runs there too — sizes nest, and a point on both outlines is on every outline
+ * between them — so that stretch is a wall of r, drawn in r's pen or not. zhaket's sleeve
+ * extension draws each size's side edge from its own hem fold down, stacked on one place; 42's is
+ * drawn only by 40's and 44's, and 42 closed on its hem fold. "On" = within `onMm` (stacked
+ * strokes measure 0.1–0.5 mm apart there), chords over ±2.5 mm parallel (cos ≥ 0.95: a crossing
+ * is no shared edge), over ≥ 3 mm. Only where no line of a size between the two, nor a line of
+ * no known size (an orphan of `m.graded`, or a rescued line: `rescued` id → its size, null
+ * unknown), runs BESIDE the stretch (off it, within `sideMm`, parallel, foot not at that line's
+ * end): there sizes do not nest — reef's hem has XS's and 2XL's lines on each other with S's own
+ * 2.2 mm inside, viola's 38 and 48 lines meet with 40's (an orphan) 1.1 mm inside — and a wall
+ * outside r's line would hand r the strip between. Nor where r's own line runs there, on the
+ * stack or beside: r has its edge, and the wall (b's line, up to `onMm` off it) only moved r's
+ * outline off its own line (kombinezon P01 8 and FP 10: 60–90 mm runs, G3 held them). Returned as
+ * stretches of the larger size's line.
+ */
+export function sandwichWalls(
+  set: ChainSet,
+  m: WallModel,
+  r: number,
+  rescued: ReadonlyMap<ChainId, number | null> = new Map(),
+  onMm = 0.6,
+  sideMm = 20,
+): WallItem[] {
+  const out: WallItem[] = [];
+  if (m.mode !== 'graded' || r <= 0 || r >= m.byRank.length - 1 || probeOff('M_SANDWICH_OFF'))
+    return out;
+  // every size line (and rescued line) with its size; null = a size not known
+  const rankOf = new Map<ChainId, number | null>();
+  m.byRank.forEach((ids, k) => ids?.forEach((id) => rankOf.set(id, k)));
+  for (const [id, k] of rescued) if (!rankOf.has(id)) rankOf.set(id, k);
+  for (const id of m.graded) if (!rankOf.has(id)) rankOf.set(id, null);
+  const all = new SegGrid(8);
+  let lowerAny = false;
+  for (const [id, k] of rankOf) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    all.addPolyline(id, c.pts);
+    if (k != null && k < r) lowerAny = true;
+  }
+  if (!lowerAny) return out;
+  const step = 1;
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
+  const cumFor = (o: ChainId) => {
+    let oc = cums.get(o);
+    if (!oc) cums.set(o, (oc = cumOf(set.chains[o].pts)));
+    return oc;
+  };
+  const dirAt = (o: ChainId, i: number, u: number) => {
+    const op = set.chains[o].pts;
+    const oc = cumFor(o);
+    const foot = oc[i] + (oc[i + 1] - oc[i]) * u;
+    return { foot, len: oc[oc.length - 1], d: chordDir(op, oc, foot, chordMm) };
+  };
+  // the largest size below r whose line runs on p (−1: none)
+  const lowerOn = (p: PtMm, t: PtMm) => {
+    let s = -1;
+    all.near(p, onMm, (o, i) => {
+      const k = rankOf.get(o);
+      if (k == null || k >= r || k <= s) return;
+      const op = set.chains[o].pts;
+      const q = segNearest(p, op[i], op[i + 1]);
+      if (q.d > onMm) return;
+      const { d } = dirAt(o, i, q.u);
+      if (Math.abs(t.x * d.x + t.y * d.y) >= 0.95) s = k;
+    });
+    return s;
+  };
+  // a line of a size strictly between s and b (or of no known size) beside p, off the stack; or
+  // r's own line anywhere near, on the stack included
+  const between = (p: PtMm, t: PtMm, s: number, b: number) => {
+    let found = false;
+    all.near(p, sideMm, (o, i) => {
+      if (found) return;
+      const k = rankOf.get(o);
+      if (k != null && (k <= s || k >= b)) return;
+      const op = set.chains[o].pts;
+      const q = segNearest(p, op[i], op[i + 1]);
+      // r's own line on the stretch too: r has its edge there, the wall would only move it
+      if (q.d > sideMm || (q.d <= onMm && k !== r)) return;
+      const { foot, len, d } = dirAt(o, i, q.u);
+      if (Math.min(foot, len - foot) < 3) return;
+      if (Math.abs(t.x * d.x + t.y * d.y) >= 0.8) found = true;
+    });
+    return found;
+  };
+  for (let b = r + 1; b < m.byRank.length; b++)
+    for (const id of m.byRank[b] ?? []) {
+      const c = set.chains[id];
+      if (!c || c.pts.length < 2) continue;
+      const pts = c.pts;
+      const cum = cumOf(pts);
+      const L = cum[cum.length - 1];
+      if (L < 3) continue;
+      const on: boolean[] = [];
+      const at: number[] = [];
+      for (let a = 0; a <= L + 1e-9; a += step) {
+        const p = arcPt(pts, cum, a);
+        const t = chordDir(pts, cum, a, chordMm);
+        const s = lowerOn(p, t);
+        on.push(s >= 0 && !between(p, t, s, b));
+        at.push(a);
+      }
+      let i = 0;
+      while (i < on.length) {
+        if (!on[i]) {
+          i++;
+          continue;
+        }
+        let j = i;
+        while (j + 1 < on.length && on[j + 1]) j++;
+        const a0 = Math.max(0, at[i] - step / 2);
+        const b0 = Math.min(L, at[j] + step / 2);
+        if (b0 - a0 >= 3) out.push({ chain: id, pts: sub(pts, cum, a0, b0) });
+        i = j + 1;
+      }
+    }
   return out;
 }
 

@@ -69,6 +69,7 @@ import {
   copyRanks,
   copyWallsOf,
   cornerSources,
+  sandwichWalls,
   sheetModule,
   wallModel,
   type WallModel,
@@ -614,14 +615,46 @@ function fillOneSheet(
   // COPY RANKS: a rescued copy of one size's line walls the other sizes only where they coincide
   // with it (walls.ts copyWallsOf); per rank, built on first use
   const copies = copyRanks(set, model, rescued);
+  // which side of a copy of s's line is outside s's pieces: s's own walls (its copies whole, no
+  // other size's) on the raster, exterior flooded; built on first use, per s
+  const outsideRaster = new Map<number, ((p: PtMm) => boolean | null) | null>();
+  const outsideOf = (s: number) => {
+    if (outsideRaster.has(s)) return outsideRaster.get(s) ?? null;
+    const own = rescued.filter((id) => (copies.get(id) ?? s) === s);
+    const ctx = buildRank(box, cell, [
+      ...itemsOf(set, [...model.common, ...(model.byRank[s] ?? []), ...own]),
+      ...lone,
+      ...cornerItems(s),
+    ]);
+    const { g, ext, wall } = ctx;
+    // true outside, false inside, null on a wall pixel (no side)
+    const f = (p: PtMm) => {
+      const x = g.ix(p.x);
+      const y = g.iy(p.y);
+      if (!g.inside(x, y)) return true;
+      return wall[y * g.W + x] ? null : ext[y * g.W + x] === 1;
+    };
+    outsideRaster.set(s, f);
+    return f;
+  };
   const rescuedOf = new Map<number, WallItem[]>();
   const rescuedItems = (r: number): WallItem[] => {
     let v = rescuedOf.get(r);
     if (!v)
       rescuedOf.set(
         r,
-        (v = copies.size ? copyWallsOf(set, model, copies, rescued, r) : itemsOf(set, rescued)),
+        (v = copies.size
+          ? copyWallsOf(set, model, copies, rescued, r, outsideOf)
+          : itemsOf(set, rescued)),
       );
+    return v;
+  };
+  // SANDWICH: rank r's edge where a smaller and a larger size's lines run on each other (walls.ts)
+  const rescuedRank = new Map(rescued.map((id) => [id, copies.get(id) ?? null] as const));
+  const sandwichOf = new Map<number, WallItem[]>();
+  const sandwichItems = (r: number): WallItem[] => {
+    let v = sandwichOf.get(r);
+    if (!v) sandwichOf.set(r, (v = sandwichWalls(set, model, r, rescuedRank)));
     return v;
   };
   // MARKING TAILS: a marking drawn once per size runs past a smaller size's outline; where its
@@ -812,7 +845,11 @@ function fillOneSheet(
     return [
       ...(graded?.walls
         ? graded.walls(r)
-        : [...itemsOf(set, [...model.common, ...ownIds, ...extraOf(r)]), ...rescuedItems(r)]),
+        : [
+            ...itemsOf(set, [...model.common, ...ownIds, ...extraOf(r)]),
+            ...rescuedItems(r),
+            ...sandwichItems(r),
+          ]),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
       ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),

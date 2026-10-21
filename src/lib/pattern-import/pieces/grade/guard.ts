@@ -65,13 +65,40 @@ export const GUARD_OPTS: GuardOpts = {
  */
 export const ALLOWANCE_PAIR = { minMm: 1.5, maxMm: 20, stdMm: 0.5, coverage: 0.8 };
 
-/** The allowance test on one directed list of offsets (mm) sampled every 4 mm along a line. */
-export function isAllowancePair(offsets: readonly number[], shorterMm: number): boolean {
+/**
+ * Under 2 mm a uniform pair is a double marking line only when it is drawn as one: lengths within
+ * 1 mm and the ends facing each other (each end within the gap + 1 mm of an end of the other).
+ * Neighbouring sizes also measure a uniform 1.5–2 mm (robe, viola, reef, leonie), but graded copies
+ * differ in length (robe: 6–7 mm).
+ */
+export const DOUBLE_LINE = { belowMm: 2, lengthMm: 1, endSlackMm: 1 };
+
+/** Two open lines drawn as one double line `gapMm` apart (DOUBLE_LINE). */
+export function isDoubleLine(a: Chain, b: Chain, gapMm: number): boolean {
+  if (a.closed || b.closed || Math.abs(a.lengthMm - b.lengthMm) > DOUBLE_LINE.lengthMm)
+    return false;
+  const d = (p: PtMm, q: PtMm) => Math.hypot(p.x - q.x, p.y - q.y);
+  const [a0, a1] = [a.pts[0], a.pts[a.pts.length - 1]];
+  const [b0, b1] = [b.pts[0], b.pts[b.pts.length - 1]];
+  const lim = gapMm + DOUBLE_LINE.endSlackMm;
+  return Math.max(d(a0, b0), d(a1, b1)) <= lim || Math.max(d(a0, b1), d(a1, b0)) <= lim;
+}
+
+/**
+ * The allowance test on one directed list of offsets (mm) sampled every 4 mm along a line. Under
+ * DOUBLE_LINE.belowMm the pair must also be one double line (`pair`; without it, refused).
+ */
+export function isAllowancePair(
+  offsets: readonly number[],
+  shorterMm: number,
+  pair?: readonly [Chain, Chain],
+): boolean {
   const P = ALLOWANCE_PAIR;
   if (offsets.length < 3 || offsets.length * 4 < P.coverage * shorterMm) return false;
   const q = [...offsets].sort((x, y) => x - y);
   const med = q[q.length >> 1];
   if (med < P.minMm || med > P.maxMm) return false;
+  if (med < DOUBLE_LINE.belowMm && !(pair && isDoubleLine(pair[0], pair[1], med))) return false;
   const mean = q.reduce((a, b) => a + b, 0) / q.length;
   const sd = Math.sqrt(q.reduce((a, b) => a + (b - mean) ** 2, 0) / q.length);
   return sd <= P.stdMm;
@@ -322,19 +349,33 @@ export function gradingEvidence(
     }
   }
   const uniform = new Set<string>();
+  const doubles = new Set<string>(); // uniform pairs under DOUBLE_LINE.belowMm: one double line
   if (o.skipUniformPairs)
     for (const [key, ds] of pairD) {
       const [a, b] = key.split(':').map(Number);
-      const la = byId.get(a)?.lengthMm ?? 0;
-      const lb = byId.get(b)?.lengthMm ?? 0;
-      if (isAllowancePair(ds, Math.min(la, lb))) uniform.add(key);
+      const ca = byId.get(a);
+      const cb = byId.get(b);
+      const la = ca?.lengthMm ?? 0;
+      const lb = cb?.lengthMm ?? 0;
+      if (!isAllowancePair(ds, Math.min(la, lb), ca && cb ? [ca, cb] : undefined)) continue;
+      uniform.add(key);
+      const q = [...ds].sort((x, y) => x - y);
+      if (q[q.length >> 1] < DOUBLE_LINE.belowMm) doubles.add(key);
     }
   let nested = 0;
   const lanesMm: number[] = [];
+  const has = (s: Set<string>, self: ChainId, k: ChainId) =>
+    s.has(`${self}:${k}`) || s.has(`${k}:${self}`);
+  const isUniform = (self: ChainId, k: ChainId) => has(uniform, self, k);
   for (const { self, hits } of seen) {
-    // lanes = distinct places beside the line (signed offsets more than laneMergeMm apart), self 1
+    // lanes = distinct places beside the line (signed offsets more than laneMergeMm apart), self 1.
+    // A place where the line's double-line partner is drawn is no lane, whatever else is stacked
+    // there (a marking drawn once per size: each size's copy pairs only with its own partner).
+    const pairAt = hits.filter(([k]) => has(doubles, self, k)).map(([, v]) => v);
     const offs = hits
-      .filter(([k]) => !uniform.has(`${self}:${k}`) && !uniform.has(`${k}:${self}`))
+      .filter(
+        ([k, v]) => !isUniform(self, k) && !pairAt.some((u) => Math.abs(u - v) <= o.laneMergeMm),
+      )
       .map(([, v]) => v)
       .sort((x, y) => x - y);
     let lanes = 1;
