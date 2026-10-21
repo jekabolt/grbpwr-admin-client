@@ -2836,6 +2836,17 @@ export type TechCardSizeQuantity = {
   orderQty: number | undefined;
 };
 
+// TechCardPatternRevision is one superseded file of a pattern sheet. The active file stays on
+// TechCardSizePattern; this read-only history lets a client restore an older file by sending its url
+// back through the ordinary UpdateTechCard flow.
+export type TechCardPatternRevision = {
+  revision: number | undefined;
+  url: string | undefined;
+  sha256: string | undefined;
+  fileName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 // TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
 // tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
 // split across sheets). The file is a PDF or a DXF, uploaded via Admin.UploadPattern,
@@ -2909,6 +2920,9 @@ export type TechCardSizePattern = {
   // the stored digest only while the URL is unchanged; a replacement without a digest clears it,
   // as does a present empty string. Used to stop an identical DXF re-upload before minting a revision.
   sha256?: string;
+  // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
+  // UpdateTechCard; restoring one means putting its url into the active fields above.
+  history: TechCardPatternRevision[] | undefined;
 };
 
 // TechCardMachineProfile is one row of CARD DEFAULTS: «this card is sewn on such a machine, set up

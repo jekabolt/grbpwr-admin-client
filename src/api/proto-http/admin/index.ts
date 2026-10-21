@@ -10164,6 +10164,20 @@ export type common_TechCardSizePattern = {
   // the stored digest only while the URL is unchanged; a replacement without a digest clears it,
   // as does a present empty string. Used to stop an identical DXF re-upload before minting a revision.
   sha256?: string;
+  // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
+  // UpdateTechCard; restoring one means putting its url into the active fields above.
+  history: common_TechCardPatternRevision[] | undefined;
+};
+
+// TechCardPatternRevision is one superseded file of a pattern sheet. The active file stays on
+// TechCardSizePattern; this read-only history lets a client restore an older file by sending its url
+// back through the ordinary UpdateTechCard flow.
+export type common_TechCardPatternRevision = {
+  revision: number | undefined;
+  url: string | undefined;
+  sha256: string | undefined;
+  fileName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
