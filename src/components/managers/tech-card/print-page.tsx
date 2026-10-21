@@ -18,6 +18,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { BackLink, Button, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
+import { TechpackDocument } from './techpack/document';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -33,6 +34,7 @@ const PRINT_CSS = `
   .techpack-toolbar { display: none !important; }
   .techpack-doc { border: 0 !important; box-shadow: none !important; }
   .techpack-doc > * { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+  .techpack-page { max-width: none !important; padding: 0 !important; gap: 0 !important; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 `;
@@ -50,6 +52,10 @@ export function TechCardPrint() {
   // внутренний тех-пак обо всём сразу остаётся валидным документом.
   const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
+  // The v6 document (techpack/) is the default. The previous one stays reachable with
+  // ?layout=classic and is the only one that knows a production run (cut list, run scope), so a
+  // ?run= print uses it automatically.
+  const classic = searchParams.get('layout') === 'classic' || query.runId > 0;
   // Ориентация живёт в адресе (?orient=land), как и весь скоуп: ссылка на печать воспроизводит
   // лист целиком. Книжная — умолчание, параметр для неё снимается.
   const setOrient = useCallback(
@@ -204,7 +210,7 @@ export function TechCardPrint() {
     <div
       className={`mx-auto flex flex-col gap-4 p-4 pb-10 ${
         query.orient === 'land' ? 'max-w-[317mm]' : 'max-w-[230mm]'
-      }`}
+      }${classic ? '' : ' techpack-page'}`}
     >
       <style>{PRINT_CSS}</style>
 
@@ -266,7 +272,9 @@ export function TechCardPrint() {
           <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
-        <div className='techpack-doc border border-borderColor shadow-sm'>
+        <div
+          className={classic ? 'techpack-doc border border-borderColor shadow-sm' : 'techpack-doc'}
+        >
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
               плашка без неё напечаталась бы текстом впритык к рамке. */}
           <div className='px-8 pt-6'>
@@ -296,15 +304,26 @@ export function TechCardPrint() {
               </p>
             </div>
           )}
-          <TechPackDocument
-            techCard={snapshot ?? techCard}
-            scope={scope}
-            assembly={assemblyData?.items ?? []}
-            packagingRecipe={packagingRecipeData?.items ?? []}
-            patternViewerToken={printData?.patternViewerToken ?? ''}
-            onDataStatus={setDocDeps}
-            cutPlan={cutPlanError ? undefined : cutPlan}
-          />
+          {classic ? (
+            <TechPackDocument
+              techCard={snapshot ?? techCard}
+              scope={scope}
+              assembly={assemblyData?.items ?? []}
+              packagingRecipe={packagingRecipeData?.items ?? []}
+              patternViewerToken={printData?.patternViewerToken ?? ''}
+              onDataStatus={setDocDeps}
+              cutPlan={cutPlanError ? undefined : cutPlan}
+            />
+          ) : (
+            <TechpackDocument
+              techCard={snapshot ?? techCard}
+              orient={query.orient}
+              revision={
+                snapshot ? `rev.${wireInt(releaseData?.release?.releaseNumber) || '—'}` : undefined
+              }
+              onDataStatus={setDocDeps}
+            />
+          )}
         </div>
       )}
     </div>
