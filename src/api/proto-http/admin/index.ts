@@ -6605,6 +6605,14 @@ export type common_TaskBoardEntry = {
   createdAt: wellKnownTimestamp | undefined;
 };
 
+export type ReorderTaskBoardsRequest = {
+  ids: number[] | undefined;
+};
+
+export type ReorderTaskBoardsResponse = {
+  boards: common_TaskBoardEntry[] | undefined;
+};
+
 export type AddTaskBoardRequest = {
   name: string | undefined;
 };
@@ -6674,6 +6682,7 @@ export type ListTasksResponse = {
   total: number | undefined;
   closed: common_TaskClosed[] | undefined;
   timing: common_TaskTiming[] | undefined;
+  matches: common_TaskMatch[] | undefined;
 };
 
 // TaskClosed is list-only closing metadata. It deliberately does not live on Task: Task is
@@ -6693,6 +6702,15 @@ export type common_TaskTiming = {
   taskId: number | undefined;
   statusSince: wellKnownTimestamp | undefined;
   approximate: boolean | undefined;
+};
+
+// TaskMatch is list-only search metadata. One row accompanies every task returned by a non-empty
+// ListTasks query. field is one of title|description|id|comment|checklist; title/id need no snippet
+// because the task row already shows the title (and its id).
+export type common_TaskMatch = {
+  taskId: number | undefined;
+  field: string | undefined;
+  snippet: string | undefined;
 };
 
 export type AddTaskCommentRequest = {
@@ -19477,6 +19495,9 @@ export interface AdminService {
   ListTasks(request: ListTasksRequest): Promise<ListTasksResponse>;
   // ListTaskBoards returns every board in rail order with its task counts. rd(tasks).
   ListTaskBoards(request: ListTaskBoardsRequest): Promise<ListTaskBoardsResponse>;
+  // ReorderTaskBoards replaces the whole board rail order. ids must contain every current board
+  // exactly once; accepting a partial list would silently hide concurrent/new boards at the end.
+  ReorderTaskBoards(request: ReorderTaskBoardsRequest): Promise<ReorderTaskBoardsResponse>;
   // AddTaskBoard creates a board at the end of the rail. A name already taken (case-insensitive)
   // is ALREADY_EXISTS.
   AddTaskBoard(request: AddTaskBoardRequest): Promise<AddTaskBoardResponse>;
@@ -24073,6 +24094,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTaskBoards",
       }) as Promise<ListTaskBoardsResponse>;
+    },
+    ReorderTaskBoards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/board/reorder`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReorderTaskBoards",
+      }) as Promise<ReorderTaskBoardsResponse>;
     },
     AddTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/board/add`; // eslint-disable-line quotes

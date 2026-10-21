@@ -34,6 +34,7 @@ import {
   TaskRelation,
   TaskRelationKind,
   TaskClosed,
+  TaskMatch,
   TaskStatus,
 } from './types';
 
@@ -43,7 +44,10 @@ import {
 // components) stays backend-shape-agnostic. It maps the all-optional generated
 // types to the required, defaulted UI view model in ./types.
 export interface TasksService {
-  listTasks(filter: ListTasksFilter): Promise<{ tasks: Task[]; total: number }>;
+  /** `matches` — one per card when `filter.query` is set: where the query hit it. */
+  listTasks(
+    filter: ListTasksFilter,
+  ): Promise<{ tasks: Task[]; total: number; matches: TaskMatch[] }>;
   /**
    * Cards CURRENTLY DONE whose closing falls in [from, to), every board, archive included (the
    * auto-archive takes done cards away after 14 days, and the summary must still find them).
@@ -67,6 +71,8 @@ export interface TasksService {
   updateTask(id: number, content: TaskInsert): Promise<void>;
   moveTask(id: number, boardId: number, status: TaskStatus, position: number): Promise<void>;
   listBoards(): Promise<TaskBoardEntry[]>;
+  /** The whole rail order: every board id exactly once. Answers the boards in the new order. */
+  reorderBoards(ids: number[]): Promise<TaskBoardEntry[]>;
   addBoard(name: string): Promise<TaskBoardEntry>;
   renameBoard(id: number, name: string): Promise<TaskBoardEntry>;
   /** `moveToId` receives the board's tasks; required by the server when it has any. */
@@ -372,6 +378,11 @@ export const tasksService: TasksService = {
             };
           }),
           total: r.total ?? 0,
+          matches: (r.matches ?? []).map((m) => ({
+            taskId: m.taskId ?? 0,
+            field: m.field ?? '',
+            snippet: m.snippet ?? '',
+          })),
         };
       }),
 
@@ -455,6 +466,11 @@ export const tasksService: TasksService = {
   listBoards: () =>
     adminService
       .ListTaskBoards({})
+      .then((r) => (r.boards ?? []).map(mapBoard).filter((b) => b.id > 0)),
+
+  reorderBoards: (ids) =>
+    adminService
+      .ReorderTaskBoards({ ids })
       .then((r) => (r.boards ?? []).map(mapBoard).filter((b) => b.id > 0)),
 
   addBoard: (name) => adminService.AddTaskBoard({ name }).then((r) => mapBoard(r.board)),

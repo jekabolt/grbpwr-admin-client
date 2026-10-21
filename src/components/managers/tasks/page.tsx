@@ -7,13 +7,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AddDoor,
+  Arrow,
   Button,
   CalloutBox,
   Chip,
   ChipRow,
   Section,
   SectionHeader,
-  Select,
   SideRail,
   SideRailGroup,
   SideRailItem,
@@ -27,6 +27,7 @@ import { TASKS_PAGE_LIMIT } from './api/tasksService';
 import { emptyFormValues, Task, TaskBoardEntry, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardNameField } from './components/board-name-field';
+import { SortableBoardRow, SortableBoards } from './components/board-order';
 import { BoardSkeleton } from './components/board-skeleton';
 import { ClosedSummary } from './components/closed-summary';
 import {
@@ -44,6 +45,7 @@ import {
 import { TAP } from './components/filters-bar';
 import { DeleteBoardModal } from './components/delete-board-modal';
 import { TaskFormModal } from './components/task-form-modal';
+import { OptionRow, PickerSheet } from './components/task-form-shell';
 import { TaskSearchField, TaskSearchResults, TaskSearchScope } from './components/task-search';
 import { useSearchQuery } from './hooks/useSearchQuery';
 import { useMediaQuery } from './hooks/useMediaQuery';
@@ -52,6 +54,7 @@ import {
   useCreateTask,
   useDeleteTaskBoard,
   useRenameTaskBoard,
+  useReorderTaskBoards,
   useTaskBoards,
   useTaskSearch,
   useTasks,
@@ -180,6 +183,8 @@ export function Tasks() {
   const addBoard = useAddTaskBoard();
   const renameBoard = useRenameTaskBoard();
   const deleteBoard = useDeleteTaskBoard();
+  const reorderBoards = useReorderTaskBoards();
+  const boardIds = useMemo(() => boards.map((b) => b.id), [boards]);
   const canDeleteBoard = boards.length > 1;
   const stopEditingBoard = () => {
     setAddingBoard(false);
@@ -299,14 +304,19 @@ export function Tasks() {
         ),
     [projectCounts, projectCountsData, projectId, projectTopics],
   );
-  const boardOptions = [
-    ...boards.map((b) => ({
-      value: String(b.id),
-      label: `${b.name} · ${counts.get(b.id) ?? 0}`,
-    })),
-    ...(writable ? [{ value: ADD_BOARD, label: '+ board' }] : []),
-    { value: CLOSED_VIEW, label: CLOSED_VIEW },
-  ];
+  // Phone: the board list is a sheet (it also carries the drag grips).
+  const [boardSheetOpen, setBoardSheetOpen] = useState(false);
+  const phoneBoardLabel = closedView
+    ? CLOSED_VIEW
+    : activeEntry
+      ? `${activeEntry.name} · ${counts.get(activeEntry.id) ?? 0}`
+      : 'board';
+  const pickPhoneBoard = (value: number | typeof CLOSED_VIEW | typeof ADD_BOARD) => {
+    setBoardSheetOpen(false);
+    if (value === ADD_BOARD) startAdding();
+    else if (value === CLOSED_VIEW) setClosedView(true);
+    else setActiveBoard(value);
+  };
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   //
@@ -350,7 +360,7 @@ export function Tasks() {
   const [allBoards, setAllBoards] = useState(true);
   const found = useTaskSearch(search.query);
   const hits = useMemo(() => {
-    const all = searchTasks(found.data?.tasks ?? [], search.query);
+    const all = searchTasks(found.data?.tasks ?? [], search.query, found.data?.matches);
     return allBoards ? all : all.filter((h) => h.task.boardId === activeBoard);
   }, [found.data, search.query, allBoards, activeBoard]);
   // A hit opens the way a card does: search cleared, its board selected, then the task.
@@ -438,29 +448,37 @@ export function Tasks() {
 
       <SideRailLayout
         rail={
-          <SideRail className='hidden lg:block'>
+          <SideRail className='hidden lg:block' width={170}>
             <SideRailGroup flush>boards</SideRailGroup>
-            {boards.map((board) =>
-              renamingBoard && railShown && board.id === activeBoard ? (
-                <BoardNameField
-                  key={board.id}
-                  name='task-board-rename'
-                  initial={board.name}
-                  busy={renameBoard.isPending}
-                  onSubmit={submitRename}
-                  onCancel={stopEditingBoard}
-                  className='my-0.5'
-                />
-              ) : (
-                <SideRailItem
-                  key={board.id}
-                  label={board.name}
-                  count={counts.get(board.id) ?? 0}
-                  selected={!closedView && board.id === activeBoard}
-                  onClick={() => setActiveBoard(board.id)}
-                />
-              ),
-            )}
+            <SortableBoards ids={boardIds} onReorder={reorderBoards.mutate}>
+              {boards.map((board) =>
+                renamingBoard && railShown && board.id === activeBoard ? (
+                  <BoardNameField
+                    key={board.id}
+                    name='task-board-rename'
+                    initial={board.name}
+                    busy={renameBoard.isPending}
+                    onSubmit={submitRename}
+                    onCancel={stopEditingBoard}
+                    className='my-0.5'
+                  />
+                ) : (
+                  <SortableBoardRow
+                    key={board.id}
+                    id={board.id}
+                    name={board.name}
+                    handle={writable && boards.length > 1}
+                  >
+                    <SideRailItem
+                      label={board.name}
+                      count={counts.get(board.id) ?? 0}
+                      selected={!closedView && board.id === activeBoard}
+                      onClick={() => setActiveBoard(board.id)}
+                    />
+                  </SortableBoardRow>
+                ),
+              )}
+            </SortableBoards>
             {writable &&
               (addingBoard && railShown ? (
                 <BoardNameField
@@ -547,22 +565,73 @@ export function Tasks() {
               </div>
             ) : (
               <div className='flex items-center gap-2'>
-                <Select
-                  name='task-board-phone'
-                  value={closedView ? CLOSED_VIEW : activeBoard ? String(activeBoard) : undefined}
-                  items={boardOptions}
-                  fullWidth
-                  itemClassName='min-h-11'
-                  className='min-h-11 uppercase tracking-label'
-                  placeholder='board'
-                  onValueChange={(value: string) =>
-                    value === ADD_BOARD
-                      ? startAdding()
-                      : value === CLOSED_VIEW
-                        ? setClosedView(true)
-                        : setActiveBoard(Number(value))
+                <PickerSheet
+                  phone
+                  open={boardSheetOpen}
+                  onOpenChange={setBoardSheetOpen}
+                  title='boards'
+                  trigger={
+                    <Button
+                      type='button'
+                      aria-label='board'
+                      className='flex min-h-11 w-full min-w-0 items-center justify-between gap-2 border border-borderColor bg-bgColor px-2 text-left uppercase tracking-label'
+                    >
+                      <span className='min-w-0 truncate'>{phoneBoardLabel}</span>
+                      <span aria-hidden className='shrink-0 rotate-180 text-textColor'>
+                        <Arrow />
+                      </span>
+                    </Button>
                   }
-                />
+                >
+                  <SortableBoards ids={boardIds} onReorder={reorderBoards.mutate}>
+                    {boards.map((board) => (
+                      <SortableBoardRow
+                        key={board.id}
+                        id={board.id}
+                        name={board.name}
+                        handle={writable && boards.length > 1}
+                        phone
+                      >
+                        <OptionRow
+                          selected={!closedView && board.id === activeBoard}
+                          onClick={() => pickPhoneBoard(board.id)}
+                          className={
+                            writable && boards.length > 1 ? 'border-b-0 pl-1' : 'border-b-0'
+                          }
+                        >
+                          <span className='min-w-0 truncate uppercase tracking-label'>
+                            {board.name}
+                          </span>
+                          <Text
+                            size='micro'
+                            variant='label'
+                            component='span'
+                            className='ml-auto tabular-nums'
+                          >
+                            {counts.get(board.id) ?? 0}
+                          </Text>
+                        </OptionRow>
+                      </SortableBoardRow>
+                    ))}
+                  </SortableBoards>
+                  <OptionRow
+                    selected={closedView}
+                    onClick={() => pickPhoneBoard(CLOSED_VIEW)}
+                    className='border-t border-hairline uppercase tracking-label'
+                  >
+                    {CLOSED_VIEW}
+                  </OptionRow>
+                  {writable && (
+                    <div className='px-4 pt-2'>
+                      <AddDoor
+                        onClick={() => pickPhoneBoard(ADD_BOARD)}
+                        className='min-h-11 w-full'
+                      >
+                        board
+                      </AddDoor>
+                    </div>
+                  )}
+                </PickerSheet>
                 {writable && !closedView && (
                   <Button variant='underline' size='xs' onClick={startRenaming}>
                     edit

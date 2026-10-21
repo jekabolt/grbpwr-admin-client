@@ -1,4 +1,4 @@
-import type { Task } from '../api/types';
+import type { Task, TaskMatch } from '../api/types';
 
 /**
  * TASK SEARCH — matching, snippet and highlight helpers (pure, no React).
@@ -68,18 +68,31 @@ export function matchTask(task: Task, query: string): Omit<TaskHit, 'task'> | nu
   }
   const item = task.checklist.find((c) => c.content.toLowerCase().includes(needle));
   if (item) return { field: 'checklist', snippet: clip(flat(item.content), q) };
-  // TODO(T2): comment bodies are not in the ListTasks payload, so a comment-only hit has no
-  // snippet here. Needs `match_field` / `match_snippet` per ListTasks item (or comment text).
+  // Comment bodies are not in the list payload: a comment-only hit comes from the server match.
   return null;
 }
 
-/** Hits in display order: active before archived, then id → title → body hits, newest first. */
-export function searchTasks(tasks: Task[], query: string): TaskHit[] {
+const FIELDS = new Set<string>(Object.keys(FIELD_RANK));
+
+/** The server's match (ListTasks `matches`); title / id show no fragment. */
+function serverMatch(m: TaskMatch | undefined): Omit<TaskHit, 'task'> | null {
+  if (!m || !FIELDS.has(m.field)) return null;
+  const field = m.field as MatchField;
+  const snippet = field === 'title' || field === 'id' ? '' : flat(m.snippet);
+  return { field, snippet };
+}
+
+/**
+ * Hits in display order: active before archived, then id → title → body hits, newest first.
+ * `matches` (from the server) wins over the client guess: it also sees comments.
+ */
+export function searchTasks(tasks: Task[], query: string, matches?: TaskMatch[]): TaskHit[] {
   const q = normalizeQuery(query);
   if (!q) return [];
+  const byTask = new Map((matches ?? []).map((m) => [m.taskId, m]));
   const hits: TaskHit[] = [];
   for (const task of tasks) {
-    const m = matchTask(task, q);
+    const m = serverMatch(byTask.get(task.id)) ?? matchTask(task, q);
     if (m) hits.push({ task, ...m });
     else if (SERVER_FILTERS_QUERY) hits.push({ task, field: null, snippet: '' });
   }

@@ -97,6 +97,36 @@ export function useAddTaskBoard() {
   });
 }
 
+/**
+ * The rail order, optimistic: the boards cache takes the new order at once and goes back to the
+ * old one if the server refuses (e.g. a board was added meanwhile and the list is no longer whole).
+ */
+export function useReorderTaskBoards() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (ids: number[]) => tasksService.reorderBoards(ids),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: tasksKeys.boards() });
+      const previous = qc.getQueryData<TaskBoardEntry[]>(tasksKeys.boards());
+      if (previous) {
+        const byId = new Map(previous.map((b) => [b.id, b]));
+        const next = ids.flatMap((id) => byId.get(id) ?? []);
+        qc.setQueryData<TaskBoardEntry[]>(tasksKeys.boards(), next);
+      }
+      return { previous };
+    },
+    onError: (e, _ids, ctx) => {
+      if (ctx?.previous) qc.setQueryData(tasksKeys.boards(), ctx.previous);
+      showMessage(e instanceof Error ? e.message : 'Failed to reorder boards', 'error');
+    },
+    onSuccess: (boards) => {
+      if (boards.length) qc.setQueryData(tasksKeys.boards(), boards);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+  });
+}
+
 export function useRenameTaskBoard() {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();

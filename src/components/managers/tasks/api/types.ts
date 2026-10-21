@@ -191,6 +191,13 @@ export interface TaskClosed {
   approximate: boolean;
 }
 
+// Where a ListTasks query hit a card (common.TaskMatch). `snippet` is empty for title / id.
+export interface TaskMatch {
+  taskId: number;
+  field: string;
+  snippet: string;
+}
+
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
