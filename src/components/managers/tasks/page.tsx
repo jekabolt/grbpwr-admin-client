@@ -28,6 +28,7 @@ import { emptyFormValues, Task, TaskBoardEntry, TaskFormValues, TaskStatus } fro
 import { Board } from './components/board';
 import { BoardNameField } from './components/board-name-field';
 import { BoardSkeleton } from './components/board-skeleton';
+import { ClosedSummary } from './components/closed-summary';
 import {
   applyFilters,
   assigneePiles,
@@ -59,6 +60,9 @@ import { searchTasks } from './utils/search';
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 const FILTERS_KEY = 'grbpwr.kanban.filters';
 const ARCHIVED_KEY = 'grbpwr.kanban.archived';
+const CLOSED_VIEW_KEY = 'grbpwr.kanban.closedView';
+/** Rail entry that is not a board: the summary of cards closed in a period, every board. */
+const CLOSED_VIEW = 'closed';
 /** The phone select's last line opens the new-board field instead of choosing a board. */
 const ADD_BOARD = 'add-board';
 const RAIL_QUERY = '(min-width: 1024px)';
@@ -139,7 +143,26 @@ export function Tasks() {
   const boards = useMemo(() => boardsQuery.data ?? [], [boardsQuery.data]);
   const [storedBoard, setStoredBoard] = useState(readStoredBoard);
   const activeBoard = useMemo(() => resolveBoard(storedBoard, boards), [storedBoard, boards]);
-  const setActiveBoard = (id: number) => setStoredBoard(String(id));
+  // «closed» sits in the rail after the boards; the last board stays chosen underneath it, and
+  // choosing any board (rail, chip, select, a new board, a search hit) leaves the summary.
+  const [closedView, setClosedView] = useState(() => {
+    try {
+      return localStorage.getItem(CLOSED_VIEW_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLOSED_VIEW_KEY, closedView ? '1' : '0');
+    } catch {
+      /* storage blocked: the view just is not remembered */
+    }
+  }, [closedView]);
+  const setActiveBoard = (id: number) => {
+    setClosedView(false);
+    setStoredBoard(String(id));
+  };
   useEffect(() => {
     if (!activeBoard) return;
     try {
@@ -196,6 +219,8 @@ export function Tasks() {
     }
   }
   const startAdding = () => {
+    // The new-board field lives in the board header off the rail; the summary hides it.
+    setClosedView(false);
     setRenamingBoard(false);
     setAddingBoard(true);
   };
@@ -249,6 +274,7 @@ export function Tasks() {
       label: `${b.name} · ${counts.get(b.id) ?? 0}`,
     })),
     ...(writable ? [{ value: ADD_BOARD, label: '+ board' }] : []),
+    { value: CLOSED_VIEW, label: CLOSED_VIEW },
   ];
 
   // Persist filters across navigation (opening a task detail unmounts the board).
@@ -289,7 +315,7 @@ export function Tasks() {
 
   // SEARCH — `?q=` in the address; a non-empty query swaps the board for the results list.
   const search = useSearchQuery();
-  const searching = search.query.length > 0;
+  const searching = search.query.length > 0 && !closedView;
   const [allBoards, setAllBoards] = useState(true);
   const found = useTaskSearch(search.query);
   const hits = useMemo(() => {
@@ -399,7 +425,7 @@ export function Tasks() {
                   key={board.id}
                   label={board.name}
                   count={counts.get(board.id) ?? 0}
-                  selected={board.id === activeBoard}
+                  selected={!closedView && board.id === activeBoard}
                   onClick={() => setActiveBoard(board.id)}
                 />
               ),
@@ -418,6 +444,13 @@ export function Tasks() {
                   board
                 </AddDoor>
               ))}
+            <div className='mt-3 border-t border-hairline pt-2'>
+              <SideRailItem
+                label={CLOSED_VIEW}
+                selected={closedView}
+                onClick={() => setClosedView(true)}
+              />
+            </div>
           </SideRail>
         }
       >
@@ -426,30 +459,32 @@ export function Tasks() {
             title='tasks'
             className='sm:hidden'
             action={
-              <>
-                {!!account?.username && (
+              !closedView && (
+                <>
+                  {!!account?.username && (
+                    <Chip
+                      selected={filters.mine}
+                      pressed={filters.mine}
+                      onClick={() =>
+                        setFilters((current) => setFilter(current, { mine: !current.mine }))
+                      }
+                      className='min-h-9'
+                    >
+                      mine
+                    </Chip>
+                  )}
                   <Chip
-                    selected={filters.mine}
-                    pressed={filters.mine}
-                    onClick={() =>
-                      setFilters((current) => setFilter(current, { mine: !current.mine }))
-                    }
+                    selected={phoneFilterCount > 0}
+                    pressed={filtersOpen}
+                    onClick={() => setFiltersOpen((open) => !open)}
+                    aria-expanded={filtersOpen}
+                    aria-controls='task-phone-filters'
                     className='min-h-9'
                   >
-                    mine
+                    {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
                   </Chip>
-                )}
-                <Chip
-                  selected={phoneFilterCount > 0}
-                  pressed={filtersOpen}
-                  onClick={() => setFiltersOpen((open) => !open)}
-                  aria-expanded={filtersOpen}
-                  aria-controls='task-phone-filters'
-                  className='min-h-9'
-                >
-                  {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
-                </Chip>
-              </>
+                </>
+              )
             }
           >
             {phoneScreen && (addingBoard || renamingBoard) ? (
@@ -483,26 +518,30 @@ export function Tasks() {
               <div className='flex items-center gap-2'>
                 <Select
                   name='task-board-phone'
-                  value={activeBoard ? String(activeBoard) : undefined}
+                  value={closedView ? CLOSED_VIEW : activeBoard ? String(activeBoard) : undefined}
                   items={boardOptions}
                   fullWidth
                   itemClassName='min-h-11'
                   className='min-h-11 uppercase tracking-label'
                   placeholder='board'
                   onValueChange={(value: string) =>
-                    value === ADD_BOARD ? startAdding() : setActiveBoard(Number(value))
+                    value === ADD_BOARD
+                      ? startAdding()
+                      : value === CLOSED_VIEW
+                        ? setClosedView(true)
+                        : setActiveBoard(Number(value))
                   }
                 />
-                {writable && (
+                {writable && !closedView && (
                   <Button variant='underline' size='xs' onClick={startRenaming}>
                     edit
                   </Button>
                 )}
               </div>
             )}
-            {phoneSearchField}
+            {!closedView && phoneSearchField}
             {searchScope}
-            {filtersOpen && (
+            {!closedView && filtersOpen && (
               <div id='task-phone-filters'>
                 <PhoneFilterGroups
                   filters={filters}
@@ -524,8 +563,8 @@ export function Tasks() {
               {boards.map((board) => (
                 <Chip
                   key={board.id}
-                  selected={board.id === activeBoard}
-                  pressed={board.id === activeBoard}
+                  selected={!closedView && board.id === activeBoard}
+                  pressed={!closedView && board.id === activeBoard}
                   onClick={() => setActiveBoard(board.id)}
                   className={TAP}
                 >
@@ -537,9 +576,17 @@ export function Tasks() {
                   board
                 </AddDoor>
               )}
+              <Chip
+                selected={closedView}
+                pressed={closedView}
+                onClick={() => setClosedView(true)}
+                className={TAP}
+              >
+                {CLOSED_VIEW}
+              </Chip>
             </ChipRow>
           </div>
-          {!!activeEntry && (
+          {!!activeEntry && !closedView && (
             <div className='hidden items-center gap-3.5 sm:flex'>
               {(renamingBoard || addingBoard) && !railShown && !phoneScreen ? (
                 <BoardNameField
@@ -577,33 +624,40 @@ export function Tasks() {
               )}
             </div>
           )}
-          <Toolbar className='hidden sm:flex'>
-            <FiltersBar
-              filters={filters}
-              onChange={setFilters}
-              showMine={!!account?.username}
-              people={people}
-              showArchived={showArchived}
-              onToggleArchived={() => setShowArchived((v) => !v)}
-              onClear={clearFilters}
-              projectLabel={projectLabel}
-              onClearProject={dropProject}
-              search={
-                <>
-                  {/* Phone gets its own copy in the header block above. */}
-                  <TaskSearchField
-                    value={search.draft}
-                    onChange={search.setDraft}
-                    onClear={search.clear}
-                    className='w-60 xl:w-90'
-                  />
-                  {searchScope}
-                </>
-              }
-            />
-          </Toolbar>
+          {!closedView && (
+            <Toolbar className='hidden sm:flex'>
+              <FiltersBar
+                filters={filters}
+                onChange={setFilters}
+                showMine={!!account?.username}
+                people={people}
+                showArchived={showArchived}
+                onToggleArchived={() => setShowArchived((v) => !v)}
+                onClear={clearFilters}
+                projectLabel={projectLabel}
+                onClearProject={dropProject}
+                search={
+                  <>
+                    {/* Phone gets its own copy in the header block above. */}
+                    <TaskSearchField
+                      value={search.draft}
+                      onChange={search.setDraft}
+                      onClear={search.clear}
+                      className='w-60 xl:w-90'
+                    />
+                    {searchScope}
+                  </>
+                }
+              />
+            </Toolbar>
+          )}
 
-          {searching ? (
+          {closedView ? (
+            <ClosedSummary
+              boards={boards}
+              onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
+            />
+          ) : searching ? (
             found.isError && !found.data ? (
               <div className='flex items-center gap-3'>
                 <Text size='micro' variant='error' tracking='label' component='span'>

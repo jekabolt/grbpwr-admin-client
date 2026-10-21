@@ -28,6 +28,8 @@ export const tasksKeys = {
   comments: (taskId: number) => [...tasksKeys.all, 'comments', taskId] as const,
   // Under `all`, so every task write that invalidates `all` refreshes the rail counts too.
   boards: () => [...tasksKeys.all, 'boards'] as const,
+  // Not under 'list': its answer carries `closed[]`, and list writers assume the board shape.
+  closed: (from: string, to: string) => [...tasksKeys.all, 'closed', from, to] as const,
 };
 
 type ListResult = { tasks: Task[]; total: number };
@@ -123,6 +125,16 @@ export function useTaskSearch(query: string) {
     queryKey: tasksKeys.list(filter),
     queryFn: () => tasksService.listTasks(filter),
     enabled: query.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+/** Cards closed in [from, to), every board, archive included. */
+export function useClosedTasks(from: Date, to: Date) {
+  return useQuery({
+    queryKey: tasksKeys.closed(from.toISOString(), to.toISOString()),
+    queryFn: () => tasksService.listClosedTasks(from, to),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });

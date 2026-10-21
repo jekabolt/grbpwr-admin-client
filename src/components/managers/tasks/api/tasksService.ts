@@ -33,6 +33,7 @@ import {
   TaskMediaAnnotations,
   TaskRelation,
   TaskRelationKind,
+  TaskClosed,
   TaskStatus,
 } from './types';
 
@@ -43,6 +44,14 @@ import {
 // types to the required, defaulted UI view model in ./types.
 export interface TasksService {
   listTasks(filter: ListTasksFilter): Promise<{ tasks: Task[]; total: number }>;
+  /**
+   * Cards CURRENTLY DONE whose closing falls in [from, to), every board, archive included (the
+   * auto-archive takes done cards away after 14 days, and the summary must still find them).
+   */
+  listClosedTasks(
+    from: Date,
+    to: Date,
+  ): Promise<{ tasks: Task[]; total: number; closed: TaskClosed[] }>;
   getTask(id: number): Promise<Task | undefined>;
   /**
    * `parentTaskId` — РОДИТЕЛЬ СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где
@@ -350,6 +359,42 @@ export const tasksService: TasksService = {
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
+  listClosedTasks: (from, to) =>
+    adminService
+      .ListTasks({
+        board: undefined,
+        // Every board: 0 = no board filter.
+        boardId: 0,
+        status: undefined,
+        assignee: undefined,
+        parentTaskId: 0,
+        limit: TASKS_PAGE_LIMIT,
+        offset: undefined,
+        orderFactor: undefined,
+        techCardId: undefined,
+        productId: undefined,
+        orderUuid: '',
+        archiveId: 0,
+        fittingId: 0,
+        productionRunId: 0,
+        sampleId: 0,
+        projectTopicId: 0,
+        includeArchived: true,
+        query: '',
+        closedFrom: from.toISOString(),
+        closedTo: to.toISOString(),
+      })
+      .then((r) => ({
+        tasks: (r.tasks ?? []).map(mapTask),
+        total: r.total ?? 0,
+        closed: (r.closed ?? []).map((c) => ({
+          taskId: c.taskId ?? 0,
+          closedAt: c.closedAt ?? '',
+          closedBy: c.closedBy ?? '',
+          approximate: !!c.approximate,
+        })),
+      })),
+
   getTask: (id) =>
     adminService.GetTask({ id }).then((r) =>
       r.task
@@ -364,6 +409,7 @@ export const tasksService: TasksService = {
               toStatus: h.toStatus ?? 'TASK_STATUS_UNKNOWN',
               changedBy: h.changedBy ?? '',
               changedAt: h.changedAt ?? '',
+              approximate: !!h.approximate,
             })),
           }
         : undefined,

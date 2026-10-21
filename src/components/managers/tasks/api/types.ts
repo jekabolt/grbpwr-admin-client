@@ -172,12 +172,23 @@ export interface TaskRelation {
   archived: boolean;
 }
 
-// One status move; fromStatus UNKNOWN = creation (toStatus UNKNOWN too when it predates history).
+// One status move; fromStatus UNKNOWN = creation (toStatus UNKNOWN too when it predates history),
+// except an `approximate` row: a legacy DONE backfill dated by the card's last edit, not a creation.
 export interface TaskStatusChange {
   fromStatus: TaskStatus;
   toStatus: TaskStatus;
   changedBy: string;
   changedAt: string;
+  approximate: boolean;
+}
+
+// Closing fact of a card that is DONE now (ListTasks with a closed_from/closed_to window).
+// `approximate` = closed before status history existed; `closedAt` is then its last edit.
+export interface TaskClosed {
+  taskId: number;
+  closedAt: string;
+  closedBy: string;
+  approximate: boolean;
 }
 
 // Stored card (common.Task): id + content + placement + resolved media + identity.

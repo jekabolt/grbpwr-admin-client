@@ -103,6 +103,8 @@ const ROW_SELECT =
 
 function statusChangeLabel(h: TaskStatusChange): string {
   const unknown = 'TASK_STATUS_UNKNOWN';
+  // A legacy DONE backfill also has no from-status, but it is a closing, not the creation.
+  if (h.approximate) return `≈ ${STATUS_LABEL[h.toStatus]}`;
   if (h.fromStatus === unknown) {
     return h.toStatus === unknown ? 'created' : `created · ${STATUS_LABEL[h.toStatus]}`;
   }
