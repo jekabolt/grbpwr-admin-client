@@ -42,6 +42,7 @@ import {
 } from 'utils/field-errors';
 import { notify, updateNotify } from 'lib/stores/store';
 import type { NotifyInput, NotifySev } from 'lib/stores/store-types';
+import { firstMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
@@ -186,7 +187,7 @@ const TABS = [
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
-  { id: 'construction', label: 'construction' },
+  { id: 'construction', label: 'assembly' },
   { id: 'sizes', label: 'sizes' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
@@ -977,6 +978,9 @@ export function TechCardForm({
   // keystroke (the inline rename holds its draft in the panel's own state).
   const patternsW = useWatch({ control: form.control, name: 'patterns' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
+  const markedOperationCount = ((operationsW ?? []) as CardOperation[]).filter((operation) =>
+    (operation.review ?? '').trim(),
+  ).length;
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
@@ -3577,7 +3581,16 @@ export function TechCardForm({
                       <button
                         key={tab.id}
                         type='button'
-                        onClick={() => setActiveTab(tab.id)}
+                        onClick={() => {
+                          if (tab.id === 'construction' && markedOperationCount > 0) {
+                            const first = firstMarkedOperation(
+                              (operationsW ?? []) as CardOperation[],
+                            );
+                            navTo(tab.id, { opi: String(first) });
+                            return;
+                          }
+                          setActiveTab(tab.id);
+                        }}
                         aria-current={active ? 'page' : undefined}
                         data-next-tab={isNext ? '' : undefined}
                         title={isNext ? `next: ${nextStep?.label}` : undefined}
@@ -3599,6 +3612,11 @@ export function TechCardForm({
                         </span>
                         {isNext && <span className='sr-only'>(next step)</span>}
                         <span className='min-w-0 flex-1 truncate'>{tab.label}</span>
+                        {tab.id === 'construction' && markedOperationCount > 0 && (
+                          <span className='shrink-0 font-bold text-error'>
+                            ! {markedOperationCount}
+                          </span>
+                        )}
                         {tab.id === 'issues' && openIssues > 0 && (
                           <Pill tone='mut'>{openIssues}</Pill>
                         )}

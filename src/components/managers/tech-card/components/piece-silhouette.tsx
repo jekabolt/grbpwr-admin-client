@@ -48,6 +48,73 @@ export const TILE_BOX = { w: 56, h: 56 };
 const TILE_PAD_X = 8;
 const TILE_PAD_Y = 18;
 
+type ReconcileTileMode = 'reshaped' | 'orphan';
+
+/**
+ * Контуры ДО и ПОСЛЕ перезалива живут в одном viewBox. Два обычных `PieceShape` рядом для этого
+ * не годятся: каждый сам вписывает свою bbox в квадрат, и разница ширины исчезает ровно в тот
+ * момент, когда её надо показать. Геометрия всё равно приходит из общего DXF parse/index/find
+ * пути; здесь меняется только малый 56px показ.
+ */
+function ReconcileContour({
+  found,
+  previous,
+  mode,
+}: {
+  found: FoundPiece | null;
+  previous: FoundPiece;
+  mode: ReconcileTileMode;
+}) {
+  const pieces = [previous.piece, ...(found ? [found.piece] : [])];
+  const w = Math.max(...pieces.map((p) => p.bboxW), 1);
+  const h = Math.max(...pieces.map((p) => p.bboxH), 1);
+  const pad = Math.max(w, h) * 0.06;
+  const points = (p: FoundPiece['piece']) => p.poly.map((pt) => `${pt.x},${-pt.y}`).join(' ');
+  return (
+    <svg
+      xmlns='http://www.w3.org/2000/svg'
+      viewBox={`${-pad} ${-h - pad} ${w + 2 * pad} ${h + 2 * pad}`}
+      className='block size-full text-textColor'
+      role='img'
+      aria-label={mode === 'orphan' ? 'previous piece contour' : 'previous and current contours'}
+    >
+      {mode === 'reshaped' ? (
+        <polygon points={points(previous.piece)} className='fill-current opacity-[0.34]' />
+      ) : (
+        <polygon
+          points={points(previous.piece)}
+          fill='none'
+          stroke='currentColor'
+          strokeWidth='1'
+          vectorEffect='non-scaling-stroke'
+          strokeLinejoin='round'
+          className='text-labelColor'
+        />
+      )}
+      {mode === 'reshaped' && found ? (
+        <polygon
+          points={points(found.piece)}
+          fill='none'
+          stroke='currentColor'
+          strokeWidth='1'
+          vectorEffect='non-scaling-stroke'
+          strokeLinejoin='round'
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+function sameContour(a: FoundPiece, b: FoundPiece): boolean {
+  const ap = a.piece;
+  const bp = b.piece;
+  if (ap.poly.length !== bp.poly.length) return false;
+  const scale = Math.max(ap.bboxW, ap.bboxH, bp.bboxW, bp.bboxH, 1);
+  const close = (x: number, y: number) => Math.abs(x - y) <= scale * 0.001;
+  if (!close(ap.bboxW, bp.bboxW) || !close(ap.bboxH, bp.bboxH)) return false;
+  return ap.poly.every((pt, i) => close(pt.x, bp.poly[i].x) && close(pt.y, bp.poly[i].y));
+}
+
 /**
  * Ткань детали словами — хвост подписи плитки. Три не-роли называются фразами, а не терминами
  * рампы: «unsorted» и «unbound» в одном ряду с ролями читались бы как ещё две ткани, тогда как это
@@ -130,12 +197,18 @@ export function PieceSilhouette({
  */
 export function PieceTile({
   found,
+  previousFound,
+  reviewMode,
   name,
   className,
   cloth,
   pxBox = TILE_BOX,
 }: {
   found: FoundPiece | null;
+  /** Контур с предыдущего листа, только для шага с меткой перезалива. */
+  previousFound?: FoundPiece | null;
+  /** `reshaped` рисует старую заливку под новой линией; `orphan` — только старую линию. */
+  reviewMode?: ReconcileTileMode;
   name: string;
   className?: string;
   /** Из чего деталь кроят (`pieceClothMap`). null/undefined — вопрос не задавали: плитка как была. */
@@ -143,6 +216,10 @@ export function PieceTile({
   /** ВНЕШНИЙ бокс плитки в CSS-пикселях: тот, что дала раскладка. Паддинги вычитаются здесь. */
   pxBox?: { w: number; h: number };
 }) {
+  const showReconcile =
+    !!previousFound &&
+    (reviewMode === 'orphan' ||
+      (reviewMode === 'reshaped' && !!found && !sameContour(found, previousFound)));
   const base = found ? `${name} · ${pieceShapeTitle(found)}` : name;
   const title = cloth ? `${base} — ${clothWords(cloth)}` : base;
   // `unbound` — не роль, а её отсутствие: знака у неё нет, и плитка обязана остаться байт-в-байт
@@ -153,13 +230,17 @@ export function PieceTile({
       title={title}
       className={cn(
         'relative flex size-14 shrink-0 items-center justify-center overflow-hidden bg-pageBg',
-        SILHOUETTE_INK,
+        !showReconcile && SILHOUETTE_INK,
         className,
       )}
     >
       {/* Поле снизу — под саму подпись: контур ужимается ДО неё, а не прячет под ней свой низ.
           Паддинг живёт на обёртке, а не на <svg>: у svg он режет область просмотра, а не поле. */}
-      {found ? (
+      {showReconcile ? (
+        <span className='flex size-full items-center justify-center p-1 pb-3.5'>
+          <ReconcileContour found={found} previous={previousFound} mode={reviewMode!} />
+        </span>
+      ) : found ? (
         <span className='flex size-full items-center justify-center p-1 pb-3.5'>
           <PieceShape
             piece={found.piece}
