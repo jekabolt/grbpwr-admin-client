@@ -23,34 +23,33 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { notify } from 'lib/stores/store';
 import { failureClassOfError } from './useTechCardAutosave';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BackLink,
   addDoorClass,
-  Chip,
-  ChipRow,
   Close,
+  EmptyCell,
   HeaderWarnings,
   type HeaderWarning,
-  GenericPopover,
   Pill,
   Placeholder,
   Section,
   SectionStack,
-  HEADER_TEXT,
   HeaderNote,
+  HEADER_TEXT,
   Text,
   Tile,
   Tiles,
-  EmptyCell,
+  ViewSwitch,
 } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { colorwayLabel } from './design/colorway-picker';
 import { useAddDevExpense, useDeleteDevExpense, useDevExpenses } from './dev-expenses-field';
 import { MaterialSwatch, MaterialTile } from './material-tile';
-import { useDeleteUnfitted } from './use-delete-sample';
-import { SAMPLE_STAGING_PREFIX, samplePurposeLabel, sampleStatusLabel } from './sample-options';
+import { pantoneVersion, subscribePantone } from './pantone-swatches';
+import { ColourwayDot } from './sample-quiz';
+import { SAMPLE_STAGING_PREFIX } from './sample-options';
 import {
   fittingsNewestFirst,
   lineMaterialId,
@@ -62,25 +61,21 @@ import {
   useStockIndex,
   verdictTone,
 } from './sample-panels';
-import { ColourwayDot } from './sample-quiz';
 import type { CreateFailure, CreateStep } from './use-auto-create-sample';
 import { PURPOSE_ORDER } from './use-auto-create-sample';
 import {
   saveSampleErrorMessage,
   usePatchSampleNow,
-  useSample,
   useSampleFittings,
-  useSamples,
   useSampleSubstitutions,
   useSaveSample,
-  useTechCardReleases,
 } from './useSamples';
 import { COMMIT_ORDER, useStagedSnapshot, useTechCardStaging } from './useTechCardStaging';
 import { wireInt } from './wire-int';
 
 // The sample screen (samples-lite, owner mockup v4): four blocks read top to bottom in the order a
 // sample lives — sewn (SAMPLE), tried on (FITTINGS), what it ate (MATERIALS), what it cost (R&D).
-// Every fact is a chip row, one click stages it into the card's one save (phase 19); the ledgers
+// Every fact is a direct selector, one click stages it into the card's one save (phase 19); the ledgers
 // (materials, R&D) and the automatic status stay instant writes.
 
 export { SAMPLE_STAGING_PREFIX };
@@ -171,20 +166,18 @@ const STEP_WORD: Record<CreateStep, string> = {
   rnd: 'sewing R&D',
 };
 
-// The same row grammar for every fact: tiny label, one row of chips.
-function FactRow({ label, children }: { label: string; children: React.ReactNode }) {
+const SEGMENT_CLASS = 'flex w-full [&>*]:h-10 [&>*]:min-w-0 [&>*]:flex-1 [&>*]:justify-center';
+
+function SelectorField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className='grid grid-cols-1 items-center gap-1 sm:grid-cols-[84px_minmax(0,1fr)] sm:gap-2'>
+    <div className='flex min-w-0 flex-col gap-1.5'>
       <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>
-      <ChipRow>{children}</ChipRow>
+      {children}
     </div>
   );
 }
-
-const menuItem =
-  'block w-full py-1 text-left text-micro uppercase tracking-label hover:underline disabled:text-borderColor';
 
 export function SampleScreen({
   sample,
@@ -214,11 +207,6 @@ export function SampleScreen({
   const stagedSnapshot = useStagedSnapshot();
   const stagingKey = stagingKeyFor(sampleId);
 
-  // GetSample resolves the composed cost (never present on list rows).
-  const { data: full } = useSample(sampleId, !!sampleId && canReadCosting);
-  const cost = full?.sample?.cost;
-  const { data: releasesData } = useTechCardReleases(techCardId);
-  const { data: siblingsData } = useSamples(techCardId);
   const { bySample } = useSampleFittings(techCardId);
   const fittings = useMemo(
     () => fittingsNewestFirst(bySample.get(sampleId) ?? []),
@@ -372,18 +360,6 @@ export function SampleScreen({
     touched,
   ]);
 
-  const discardEdits = () => {
-    staging?.unstage(stagingKey);
-    setTouched(new Set());
-    setDirty(false);
-  };
-  const { deleteUnfitted, deletingId } = useDeleteUnfitted(techCardId);
-  const [deleteArmed, setDeleteArmed] = useState(false);
-  const afterDelete = () => {
-    staging?.unstage(stagingKey);
-    onClose();
-  };
-
   // ── auto status: done at the first fitting, finished = the oldest fitting's date ─────────────
   const autoFired = useRef(false);
   useEffect(() => {
@@ -407,21 +383,10 @@ export function SampleScreen({
       (c.status !== 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED' || c.colorwayId === d.colorwayId),
   );
   const sizeName = (id: number) => String(findInDictionary(dictionary, id, 'size') || id);
-
-  const siblings = siblingsData?.samples ?? [];
-  const prevSample = d.previousSampleId
-    ? siblings.find((s) => s.id === d.previousSampleId)
-    : undefined;
-  const release = (releasesData?.releases ?? []).find((r) => r.id === d.specReleaseId);
-  const titleTip = [
-    d.startedAt && `started ${ddmm(d.startedAt)}`,
-    prevSample &&
-      `after #${prevSample.number ?? '?'} ${samplePurposeLabel(prevSample.sample?.purpose)}`,
-    release && `Rev.${release.releaseNumber ?? '—'}`,
-    sample.createdBy && `added by ${sample.createdBy}`,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  useSyncExternalStore(subscribePantone, pantoneVersion, pantoneVersion);
+  const selectedColorway = colorways.find((c) => c.colorwayId === d.colorwayId);
+  const colourwayName = d.colorwayId ? colorwayLabel(selectedColorway) : 'sample';
+  const started = ddmm(d.startedAt);
 
   const issued = useSampleIssued(sampleId);
   const unscrapTo = fittings.length ? 'done' : issued.count > 0 ? 'in_sewing' : 'planned';
@@ -484,79 +449,35 @@ export function SampleScreen({
   return (
     <SectionStack>
       <Section>
-        <div className='mb-2.5 flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1'>
-          <BackLink onClick={onClose}>samples</BackLink>
-          <Text
-            component='h3'
-            variant='uppercase'
-            tracking='section'
-            className='font-bold'
-            title={titleTip || undefined}
-          >
-            #{sample.number ?? '?'} · round {sample.sample?.roundNumber || <EmptyCell />}
-          </Text>
+        <div className='mb-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b-2 border-textColor pb-1'>
+          <div className='flex min-w-0 max-w-full items-baseline gap-2'>
+            <BackLink onClick={onClose} className='shrink-0 no-underline hover:underline'>
+              samples
+            </BackLink>
+            <span aria-hidden className='text-micro text-borderColor'>
+              /
+            </span>
+            <Text
+              component='h3'
+              variant='uppercase'
+              tracking='section'
+              className='min-w-0 break-words font-bold'
+            >
+              {d.purpose} · {d.sizeId ? sizeName(d.sizeId) : <EmptyCell />} · {colourwayName}
+            </Text>
+          </div>
           <div className='ml-auto flex flex-wrap items-baseline gap-2.5'>
-            {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
-            <HeaderNote tone={d.status === 'scrapped' ? 'warn' : 'ink'}>
-              {sampleStatusLabel(d.status)}
+            <HeaderNote>
+              round {d.roundNumber || <EmptyCell />}
+              {started ? ` · started ${started}` : ''}
             </HeaderNote>
-            {canReadCosting && cost?.totalBase?.value ? (
-              <HeaderNote
-                title={`materials ${decimalToInput(cost.materialsBase) || '0'} + R&D ${
-                  decimalToInput(cost.manualBase) || '0'
-                }`}
-              >
-                cost {decimalToInput(cost.totalBase)}
-              </HeaderNote>
-            ) : null}
+            {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
             <HeaderWarnings items={sampleWarnings} />
-            {canEdit && (
-              <GenericPopover
-                openElement={<span className={cn(HEADER_TEXT, 'text-textColor')}>⋯</span>}
-                triggerProps={{ 'aria-label': 'sample actions' }}
-              >
-                <div className='flex flex-col'>
-                  {staged && (
-                    <button type='button' className={menuItem} onClick={discardEdits}>
-                      discard staged edits
-                    </button>
-                  )}
-                  <button
-                    type='button'
-                    className={menuItem}
-                    onClick={() =>
-                      set({ status: d.status === 'scrapped' ? unscrapTo : 'scrapped' })
-                    }
-                  >
-                    {d.status === 'scrapped' ? 'unscrap' : 'scrap'}
-                  </button>
-                  {fittings.length === 0 && (
-                    <button
-                      type='button'
-                      className={cn(menuItem, 'text-error')}
-                      disabled={!!deletingId}
-                      onClick={() => {
-                        if (!deleteArmed) return setDeleteArmed(true);
-                        setDeleteArmed(false);
-                        void deleteUnfitted(
-                          sampleId,
-                          fittings.length,
-                          `#${sample.number ?? sampleId}`,
-                        ).then((ok) => ok && afterDelete());
-                      }}
-                      onBlur={() => setDeleteArmed(false)}
-                    >
-                      {deletingId ? 'deleting…' : deleteArmed ? 'delete — sure' : 'delete'}
-                    </button>
-                  )}
-                </div>
-              </GenericPopover>
-            )}
           </div>
         </div>
 
-        <div className='grid grid-cols-[72px_minmax(0,1fr)] items-stretch gap-4 sm:grid-cols-[96px_minmax(0,1fr)]'>
-          <div className='group relative self-start'>
+        <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
+          <div className='group relative w-[96px] shrink-0 sm:w-[120px]'>
             {canEdit ? (
               <MediaSelector
                 label='+ photo'
@@ -588,57 +509,60 @@ export function SampleScreen({
             )}
           </div>
 
-          <div className='flex flex-col justify-between gap-1.5'>
-            <FactRow label='purpose'>
-              {PURPOSE_ORDER.map((p) => (
-                <Chip
-                  key={p}
-                  selected={d.purpose === p}
-                  pressed={d.purpose === p}
-                  onClick={canEdit ? () => set({ purpose: p }) : undefined}
-                >
-                  {p}
-                </Chip>
-              ))}
-            </FactRow>
-            <FactRow label='size'>
-              {sizeIds.map((id) => (
-                <Chip
-                  key={id}
-                  selected={d.sizeId === id}
-                  pressed={d.sizeId === id}
-                  onClick={canEdit ? () => set({ sizeId: id }) : undefined}
-                >
-                  {sizeName(id)}
-                </Chip>
-              ))}
-            </FactRow>
-            <FactRow label='colourway'>
-              <Chip
-                selected={!d.colorwayId}
-                pressed={!d.colorwayId}
-                // The colourway says the fabric: `sample` = cut from stand-ins, a real one = the final fabric.
-                onClick={canEdit ? () => set({ colorwayId: 0, fabricSource: 'sample' }) : undefined}
-              >
-                <ColourwayDot />
-                sample
-              </Chip>
-              {colorways.map((c) => (
-                <Chip
-                  key={c.colorwayId}
-                  selected={d.colorwayId === c.colorwayId}
-                  pressed={d.colorwayId === c.colorwayId}
+          <div className='flex min-w-0 flex-1 flex-col gap-3'>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+              <SelectorField label='purpose'>
+                <ViewSwitch
+                  label='purpose'
+                  value={d.purpose}
+                  options={PURPOSE_ORDER.map((purpose) => ({ value: purpose, label: purpose }))}
+                  onChange={(purpose) => set({ purpose })}
+                  disabled={!canEdit}
+                  className={SEGMENT_CLASS}
+                />
+              </SelectorField>
+              <SelectorField label='size'>
+                <ViewSwitch
+                  label='size'
+                  value={String(d.sizeId)}
+                  options={sizeIds.map((id) => ({ value: String(id), label: sizeName(id) }))}
+                  onChange={(sizeId) => set({ sizeId: Number(sizeId) })}
+                  disabled={!canEdit}
+                  className={SEGMENT_CLASS}
+                />
+              </SelectorField>
+            </div>
+            <SelectorField label='colourway'>
+              <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                <Tile
+                  selected={!d.colorwayId}
+                  pressed={canEdit ? !d.colorwayId : undefined}
                   onClick={
-                    canEdit
-                      ? () => set({ colorwayId: c.colorwayId ?? 0, fabricSource: 'production' })
-                      : undefined
+                    canEdit ? () => set({ colorwayId: 0, fabricSource: 'sample' }) : undefined
                   }
-                >
-                  <ColourwayDot colorway={c} />
-                  {colorwayLabel(c)}
-                </Chip>
-              ))}
-            </FactRow>
+                  media={<Placeholder className='h-8' />}
+                  name='sample'
+                />
+                {colorways.map((c) => {
+                  const id = c.colorwayId ?? 0;
+                  const selected = d.colorwayId === id;
+                  return (
+                    <Tile
+                      key={id}
+                      selected={selected}
+                      pressed={canEdit ? selected : undefined}
+                      onClick={
+                        canEdit
+                          ? () => set({ colorwayId: id, fabricSource: 'production' })
+                          : undefined
+                      }
+                      media={<ColourwayDot colorway={c} className='block h-8 w-full' />}
+                      name={colorwayLabel(c)}
+                    />
+                  );
+                })}
+              </div>
+            </SelectorField>
           </div>
         </div>
       </Section>
@@ -655,7 +579,6 @@ export function SampleScreen({
         techCard={techCard}
         colorwayId={d.colorwayId}
         sizeId={d.sizeId}
-        sizeLabel={d.sizeId ? sizeName(d.sizeId) : ''}
         canEdit={canEdit}
         canReadCosting={canReadCosting}
         scrapped={sample.sample?.status === 'scrapped'}
@@ -768,12 +691,20 @@ type MaterialRow = {
   onHand: number;
 };
 
+type MaterialSlot =
+  | { state: 'material'; row: MaterialRow }
+  | {
+      state: 'no-material' | 'no-norm';
+      key: string;
+      lineKey: string;
+      label: string;
+    };
+
 function MaterialsBlock({
   sampleId,
   techCard,
   colorwayId,
   sizeId,
-  sizeLabel,
   canEdit,
   canReadCosting,
   scrapped,
@@ -783,7 +714,6 @@ function MaterialsBlock({
   techCard?: common_TechCard;
   colorwayId: number;
   sizeId: number;
-  sizeLabel: string;
   canEdit: boolean;
   canReadCosting: boolean;
   scrapped: boolean;
@@ -814,7 +744,7 @@ function MaterialsBlock({
     if (ok) setPicking(true);
   };
 
-  const { rows, unlinked, noNorm } = useMemo(() => {
+  const { slots, extras } = useMemo(() => {
     const subByLine = new Map<number, number>();
     for (const s of subsData?.substitutions ?? [])
       if (wireInt(s.substitutedMaterialId))
@@ -832,44 +762,55 @@ function MaterialsBlock({
       return { qty, cost };
     };
 
-    const out: MaterialRow[] = [];
-    let unlinkedN = 0;
-    const noNormLines: { label: string; lineKey: string }[] = [];
-    for (const b of techCard?.techCard?.bomItems ?? []) {
+    const bomSlots: MaterialSlot[] = [];
+    for (const [index, b] of (techCard?.techCard?.bomItems ?? []).entries()) {
       const bid = wireInt(b.id);
+      const lineKey = b.lineKey ?? '';
+      const key = `bom-${bid || lineKey || index}`;
       const materialId = subByLine.get(bid) || lineMaterialId(techCard, b, colorwayId);
       if (!materialId) {
-        unlinkedN += 1;
+        bomSlots.push({
+          state: 'no-material',
+          key,
+          lineKey,
+          label: b.name?.trim() || `line ${index + 1}`,
+        });
         continue;
       }
       const spec = parseDecimalNumber(specQuantity(techCard, bid, colorwayId, sizeId));
       const row = stock.rowByMaterial.get(materialId);
-      const got = take(materialId, spec > 0 ? spec : NaN);
-      if (!(spec > 0) && got.qty <= 0) {
-        noNormLines.push({
+      if (!(spec > 0)) {
+        bomSlots.push({
+          state: 'no-norm',
+          key,
+          lineKey,
           label: b.name?.trim() || row?.material?.name || 'line',
-          lineKey: b.lineKey ?? '',
         });
         continue;
       }
-      out.push({
-        key: `bom-${bid || b.lineKey}`,
-        lineKey: b.lineKey ?? '',
-        label: b.name?.trim() || row?.material?.name || `#${materialId}`,
-        materialId,
-        material: row?.material,
-        unit: b.unit?.trim() || row?.material?.unit || '',
-        spec: spec > 0 ? spec : NaN,
-        issued: got.qty,
-        cost: got.cost,
-        onHand: stockOnHand(row),
+      const got = take(materialId, spec);
+      bomSlots.push({
+        state: 'material',
+        row: {
+          key,
+          lineKey,
+          label: b.name?.trim() || row?.material?.name || `#${materialId}`,
+          materialId,
+          material: row?.material,
+          unit: b.unit?.trim() || row?.material?.unit || '',
+          spec,
+          issued: got.qty,
+          cost: got.cost,
+          onHand: stockOnHand(row),
+        },
       });
     }
     // Whatever was issued beyond the BOM lines (a one-off, a leftover) still moved — still shown.
+    const extraRows: MaterialRow[] = [];
     for (const [id, seat] of left) {
       if (seat.qty <= 1e-9) continue;
       const row = stock.rowByMaterial.get(id);
-      out.push({
+      extraRows.push({
         key: `mat-${id}`,
         lineKey: '',
         label: row?.material?.name || `#${id}`,
@@ -882,12 +823,19 @@ function MaterialsBlock({
         onHand: stockOnHand(row),
       });
     }
-    return { rows: out, unlinked: unlinkedN, noNorm: noNormLines };
+    return { slots: bomSlots, extras: extraRows };
   }, [techCard, colorwayId, sizeId, stock.rowByMaterial, issued.byMaterial, subsData]);
 
   const fmt = (n: number) => String(Number(n.toFixed(3)));
   const isShort = (r: MaterialRow) => Number.isFinite(r.spec) && r.issued < r.spec - 1e-9;
-  const totalCost = rows.reduce((s, r) => s + (Number.isFinite(r.cost) ? r.cost : 0), 0);
+  const materialRows = [
+    ...slots.flatMap((slot) => (slot.state === 'material' ? [slot.row] : [])),
+    ...extras,
+  ];
+  const totalCost = materialRows.reduce(
+    (sum, row) => sum + (Number.isFinite(row.cost) ? row.cost : 0),
+    0,
+  );
 
   const openBom = (lineKey?: string) =>
     setParams(
@@ -935,24 +883,12 @@ function MaterialsBlock({
     if (!writable || pendingKey || !(want > 0)) return;
     void issueQty(r.key, r.materialId, want);
   };
-
-  const warnings: Array<HeaderWarning | null | false> = [
-    unlinked > 0 && {
-      text: `${unlinked} BOM ${unlinked === 1 ? 'line' : 'lines'} without material`,
-      action: { label: 'open BOM', onClick: () => openBom() },
+  // Slot problems live on their tiles. Only block-level problems belong in this list.
+  const warnings: Array<HeaderWarning | false> = [
+    stock.isError && {
+      text: 'stock unavailable',
+      action: { label: 'retry', onClick: () => void stock.refetch() },
     },
-    ...noNorm.map((l) => ({
-      text: `${l.label}: no norm${sizeLabel ? ` for size ${sizeLabel}` : ''}`,
-      action: { label: 'open the line', onClick: () => openBom(l.lineKey) },
-    })),
-    ...rows.filter(isShort).map((r) => ({
-      text: `${r.label}: ${fmt(r.issued)} of ${fmt(r.spec)}${r.unit ? ` ${r.unit}` : ''}`,
-      error: true,
-      action:
-        writable && r.onHand > 0
-          ? { label: 'write off the rest', onClick: () => issueRest(r) }
-          : undefined,
-    })),
   ];
 
   const submitAdd = async () => {
@@ -963,15 +899,57 @@ function MaterialsBlock({
     setAddQty('');
   };
 
-  // Nothing issued and nobody can add: no block at all rather than an empty one.
-  if (!canEdit && rows.length === 0) return null;
+  // No BOM and nothing issued: no block at all rather than an empty one.
+  if (!canEdit && slots.length === 0 && extras.length === 0) return null;
+
+  const renderMaterial = (r: MaterialRow) => {
+    if (Number.isFinite(r.spec) && r.issued <= 1e-9) {
+      const specLine = `${fmt(r.spec)}${r.unit ? ` ${r.unit}` : ''}`;
+      return (
+        <Tile
+          key={r.key}
+          dashed
+          title={r.material?.name}
+          media={<Placeholder dashed aspect='square' />}
+          name={r.label}
+          onClick={writable && r.onHand > 0 ? () => issueRest(r) : undefined}
+        >
+          <span className='truncate text-micro uppercase text-labelColor'>
+            {r.material?.name ?? `#${r.materialId}`}
+          </span>
+          <span className='truncate text-micro uppercase text-labelColor'>
+            {pendingKey === r.key ? 'writing off…' : specLine}
+          </span>
+        </Tile>
+      );
+    }
+
+    const short = isShort(r);
+    const qtyLine = `${fmt(r.issued)}${short ? ` of ${fmt(r.spec)}` : ''}${
+      r.unit ? ` ${r.unit}` : ''
+    }${canReadCosting && r.cost > 0 ? ` · ${money(r.cost)}` : ''}`;
+    return (
+      <MaterialTile
+        key={r.key}
+        material={r.material}
+        name={r.label}
+        problem={short}
+        onClick={short && writable && r.onHand > 0 ? () => issueRest(r) : undefined}
+        lines={[
+          r.material?.name ?? '',
+          <span key='q' className={short ? 'text-error' : 'text-textColor'}>
+            {pendingKey === r.key ? 'writing off…' : qtyLine}
+          </span>,
+        ]}
+      />
+    );
+  };
 
   return (
     <Section
       title='materials'
       action={
         <>
-          {issued.firstAt && <HeaderNote>written off {ddmm(issued.firstAt)}</HeaderNote>}
           {canReadCosting && totalCost > 0 && <HeaderNote>{money(totalCost)}</HeaderNote>}
           {issued.count > 0 && (
             <button
@@ -986,67 +964,71 @@ function MaterialsBlock({
         </>
       }
     >
-      <Tiles min={128}>
-        {rows.map((r) => {
-          const short = isShort(r);
-          const qtyLine = `${fmt(r.issued)}${short ? ` of ${fmt(r.spec)}` : ''}${
-            r.unit ? ` ${r.unit}` : ''
-          }${canReadCosting && r.cost > 0 ? ` · ${money(r.cost)}` : ''}`;
-          return (
-            <MaterialTile
-              key={r.key}
-              material={r.material}
-              name={r.label}
-              problem={short}
-              onClick={short && writable && r.onHand > 0 ? () => issueRest(r) : undefined}
-              lines={[
-                r.material?.name ?? '',
-                <span key='q' className={short ? 'text-error' : 'text-textColor'}>
-                  {pendingKey === r.key ? 'writing off…' : qtyLine}
-                </span>,
-              ]}
-            />
-          );
-        })}
-        {canEdit &&
-          (adding ? (
-            <Tile selected media={<MaterialSwatch material={adding} />} name={adding.name ?? '—'}>
-              <input
-                autoFocus
-                inputMode='decimal'
-                aria-label={`quantity of ${adding.name ?? 'material'}`}
-                placeholder={`${adding.unit?.trim() || 'qty'} ↵`}
-                value={addQty}
-                disabled={pendingKey === 'add'}
-                onChange={(e) => setAddQty(sanitizeDecimal(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void submitAdd();
-                  }
-                  if (e.key === 'Escape') {
-                    setAdding(null);
-                    setAddQty('');
-                  }
-                }}
-                className='mt-1 block min-h-[22px] w-full border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
-              />
-            </Tile>
-          ) : (
-            <div onMouseLeave={() => setUnscrapArmed(false)}>
-              <Tile dashed onClick={unscrapping ? undefined : () => void onAddTile()}>
-                <span
-                  className={cn(
-                    'flex min-h-[128px] items-center justify-center text-center text-micro uppercase tracking-label',
-                    unscrapArmed && 'text-error',
-                  )}
-                >
-                  {unscrapping ? 'unscrapping…' : unscrapArmed ? 'unscrap and add?' : '+ material'}
-                </span>
+      <div className='overflow-x-auto pb-1'>
+        <Tiles
+          min={112}
+          className='max-sm:grid-flow-col max-sm:auto-cols-[112px] max-sm:[grid-template-columns:none]!'
+        >
+          {slots.map((slot) => {
+            if (slot.state === 'material') return renderMaterial(slot.row);
+            const note = slot.state === 'no-material' ? 'no material' : 'no norm';
+            return (
+              <Tile
+                key={slot.key}
+                dashed
+                media={<Placeholder dashed aspect='square' tone='error' />}
+                name={slot.label}
+                onClick={() => openBom(slot.lineKey)}
+              >
+                <span className='truncate text-micro uppercase text-error'>{note}</span>
               </Tile>
-            </div>
-          ))}
-      </Tiles>
+            );
+          })}
+          {extras.map(renderMaterial)}
+          {canEdit &&
+            (adding ? (
+              <Tile selected media={<MaterialSwatch material={adding} />} name={adding.name ?? '—'}>
+                <input
+                  autoFocus
+                  inputMode='decimal'
+                  aria-label={`quantity of ${adding.name ?? 'material'}`}
+                  placeholder={`${adding.unit?.trim() || 'qty'} ↵`}
+                  value={addQty}
+                  disabled={pendingKey === 'add'}
+                  onChange={(e) => setAddQty(sanitizeDecimal(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void submitAdd();
+                    }
+                    if (e.key === 'Escape') {
+                      setAdding(null);
+                      setAddQty('');
+                    }
+                  }}
+                  className='mt-1 block min-h-[22px] w-full border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+                />
+              </Tile>
+            ) : (
+              <div onMouseLeave={() => setUnscrapArmed(false)}>
+                <Tile dashed onClick={unscrapping ? undefined : () => void onAddTile()}>
+                  <span
+                    className={cn(
+                      'flex min-h-[128px] items-center justify-center text-center text-micro uppercase tracking-label',
+                      unscrapArmed && 'text-error',
+                    )}
+                  >
+                    {unscrapping
+                      ? 'unscrapping…'
+                      : unscrapArmed
+                        ? 'unscrap and add?'
+                        : '+ material'}
+                  </span>
+                </Tile>
+              </div>
+            ))}
+        </Tiles>
+      </div>
 
       <MaterialPickerDialog
         open={picking}

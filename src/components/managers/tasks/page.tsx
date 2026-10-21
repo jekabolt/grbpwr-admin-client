@@ -511,27 +511,28 @@ export function Tasks() {
               !closedView && (
                 <>
                   {!!account?.username && (
-                    <Chip
-                      selected={filters.mine}
-                      pressed={filters.mine}
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      aria-pressed={filters.mine}
                       onClick={() =>
                         setFilters((current) => setFilter(current, { mine: !current.mine }))
                       }
                       className='min-h-9'
                     >
-                      mine
-                    </Chip>
+                      {filters.mine ? '✓ mine' : 'mine'}
+                    </Button>
                   )}
-                  <Chip
-                    selected={phoneFilterCount > 0}
-                    pressed={filtersOpen}
+                  <Button
+                    variant='underline'
+                    size='xs'
                     onClick={() => setFiltersOpen((open) => !open)}
                     aria-expanded={filtersOpen}
                     aria-controls='task-phone-filters'
                     className='min-h-9'
                   >
                     {phoneFilterCount > 0 ? `filters · ${phoneFilterCount}` : 'filters'}
-                  </Chip>
+                  </Button>
                 </>
               )
             }
