@@ -3544,7 +3544,7 @@ export function TechCardForm({
           aria-label='Tech card sections'
           className='top-16 min-w-0 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'
         >
-          <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
+          <div className='relative flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
             {TAB_GROUPS.map((group, gi) => {
               const groupTabs = group.tabs
                 .map((id) => TABS.find((t) => t.id === id)!)
