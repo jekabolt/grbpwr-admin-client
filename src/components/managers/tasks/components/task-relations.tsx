@@ -1,29 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
-import {
-  AddDoor,
-  Button,
-  Close,
-  Combobox,
-  type ComboboxGroup,
-  Input,
-  Pill,
-  Section,
-  Select,
-  Text,
-} from 'ui';
+import { AddDoor, Button, Close, Combobox, type ComboboxGroup, Pill, Section, Text } from 'ui';
 import type { Task, TaskRelation, TaskRelationKind } from '../api/types';
 import {
   useAddTaskRelation,
-  useCreateTask,
   useDeleteTaskRelation,
   useSetTaskParent,
   useTask,
   useTasks,
 } from '../hooks/useTasks';
-import { emptyTaskInsert } from '../api/types';
 import { RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relations';
+import { TaskBoardPicker, type TaskPickMode } from './task-board-picker';
 
 /**
  * САБТАСКИ, БЛОКЕРЫ И СВЯЗИ — ОДИН БЛОК НА ДЕТАЛЬНОЙ СТРАНИЦЕ.
@@ -49,8 +37,6 @@ import { RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relati
  * drag-and-drop, и отказ посреди жеста хуже бейджа; заархивированный недоделанный блокер
  * замуровал бы карточку навсегда. Блокер — совет, а не замок.
  */
-
-const kindOptions = RELATION_KINDS.map((k) => ({ value: k as string, label: RELATION_LABEL[k] }));
 
 /** Пустой фильтр — ВСЕ задачи, для пикера второго конца. Литерал вынесен, чтобы ключ запроса не менялся на каждый рендер. */
 const ALL_TASKS = {} as const;
@@ -220,8 +206,6 @@ export function ParentPicker({ task, onDone }: { task: Task; onDone: () => void 
   );
 }
 
-type Editor = 'subtask' | 'relation' | null;
-
 /** Подпись группы внутри блока — тот же микро-капс, что у соседних групп. */
 function GroupWord({ children }: { children: React.ReactNode }) {
   return (
@@ -246,16 +230,9 @@ export function TaskRelations({
   const setParent = useSetTaskParent();
   const addRelation = useAddTaskRelation();
   const deleteRelation = useDeleteTaskRelation();
-  const createTask = useCreateTask();
 
-  const [kind, setKind] = useState<TaskRelationKind>('TASK_LINK_KIND_BLOCKED_BY');
-  const [subtitle, setSubtitle] = useState('');
-  /**
-   * ФОРМЫ ОТКРЫВАЮТСЯ ДВЕРЬЮ (detail v2). Пустая группа не рисует свою форму — вместо неё один
-   * ряд «+ subtask / + blocker / + link»; нажатие открывает ту самую форму, что стояла здесь
-   * всегда открытой.
-   */
-  const [editor, setEditor] = useState<Editor>(null);
+  /** Какой пикер открыт; `null` — ни одного. Дверь открывает пикер сразу, без промежуточной формы. */
+  const [picker, setPicker] = useState<TaskPickMode | null>(null);
 
   // РОДИТЕЛЬ. Единственное место, где приходится сходить за вторым концом: на проводе у него
   // только номер. `useTask` сам не стреляет при нуле.
@@ -265,70 +242,48 @@ export function TaskRelations({
   // идти под тем же правом на раздел, что и доска.
   const children = useChildren(task.id);
 
-  // Кого нельзя предложить: себя (петля) и уже связанных ЭТИМ видом (повтор — no-op, то есть
-  // щелчок без последствий).
-  const excludeForKind = useMemo(() => {
-    const s = new Set<number>([task.id]);
-    for (const r of relationsOfKind(task.relations, kind)) s.add(r.taskId);
-    return s;
-  }, [task.id, task.relations, kind]);
-
-  async function addSubtask() {
-    const title = subtitle.trim();
-    if (!title || createTask.isPending) return;
-    try {
-      await createTask.mutateAsync({
-        // Сабтаска РОЖДАЕТСЯ НА ТОЙ ЖЕ ДОСКЕ, что родитель, и в первой рабочей колонке.
-        // Наследовать статус родителя было бы неправдой: у только что заведённой работы нет
-        // причин быть «в ревью» только потому, что там её родитель.
-        content: { ...emptyTaskInsert(), title },
-        boardId: task.boardId,
-        status: 'TASK_STATUS_TODO',
-        parentTaskId: task.id,
+  async function onPick(picked: Task) {
+    if (picker === 'subtask') {
+      await setParent.mutateAsync({ id: picked.id, parentTaskId: task.id });
+    } else {
+      await addRelation.mutateAsync({
+        taskId: task.id,
+        otherTaskId: picked.id,
+        kind: picker === 'blocker' ? 'TASK_LINK_KIND_BLOCKED_BY' : 'TASK_LINK_KIND_RELATES',
       });
-      setSubtitle('');
-    } catch {
-      /* снекбар показан мутацией */
     }
-  }
-
-  function closeEditor() {
-    setEditor(null);
-    setSubtitle('');
-  }
-
-  function openRelation(k: TaskRelationKind) {
-    setKind(k);
-    setEditor('relation');
+    setPicker(null);
   }
 
   const busy = addRelation.isPending || deleteRelation.isPending || setParent.isPending;
 
   const hasParent = task.parentTaskId > 0;
-  const showSubtasks = children.length > 0 || editor === 'subtask';
-  const showRelations = task.relations.length > 0 || editor === 'relation';
+  const showSubtasks = children.length > 0;
+  const showRelations = task.relations.length > 0;
   const hasContent = hasParent || showSubtasks || showRelations;
 
   if (!hasContent && !canWrite) return null;
 
+  const pickerEl = canWrite && (
+    <TaskBoardPicker
+      open={picker !== null}
+      mode={picker ?? 'blocker'}
+      task={task}
+      onClose={() => setPicker(null)}
+      onPick={onPick}
+    />
+  );
+
   const doorClass = 'min-h-11 sm:min-h-0';
   const doorRow = canWrite && (
     <div className='flex flex-wrap gap-2'>
-      <AddDoor shape='inline' className={doorClass} onClick={() => setEditor('subtask')}>
+      <AddDoor shape='inline' className={doorClass} onClick={() => setPicker('subtask')}>
         subtask
       </AddDoor>
-      <AddDoor
-        shape='inline'
-        className={doorClass}
-        onClick={() => openRelation('TASK_LINK_KIND_BLOCKED_BY')}
-      >
+      <AddDoor shape='inline' className={doorClass} onClick={() => setPicker('blocker')}>
         blocker
       </AddDoor>
-      <AddDoor
-        shape='inline'
-        className={doorClass}
-        onClick={() => openRelation('TASK_LINK_KIND_RELATES')}
-      >
+      <AddDoor shape='inline' className={doorClass} onClick={() => setPicker('link')}>
         link
       </AddDoor>
       {doors}
@@ -336,7 +291,13 @@ export function TaskRelations({
   );
 
   // Пусто: блок — один ряд дверей, без заголовка над пустотой.
-  if (!hasContent) return <Section className={className}>{doorRow}</Section>;
+  if (!hasContent)
+    return (
+      <Section className={className}>
+        {doorRow}
+        {pickerEl}
+      </Section>
+    );
 
   return (
     <Section title='subtasks & links' className={className}>
@@ -382,54 +343,6 @@ export function TaskRelations({
               ))}
             </div>
           )}
-          {canWrite && editor === 'subtask' && (
-            <div className='flex flex-col items-stretch gap-2 pt-1 sm:flex-row sm:items-center'>
-              <Input
-                name='new-subtask'
-                aria-label='new subtask title'
-                placeholder='add a subtask…'
-                value={subtitle}
-                disabled={createTask.isPending}
-                autoFocus
-                className='min-h-11 sm:min-h-0'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtitle(e.target.value)}
-                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                  // Enter и Escape сравниваются по `e.key` сознательно: они не буквы и на любой
-                  // раскладке приезжают одними и теми же именами.
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addSubtask();
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    closeEditor();
-                  }
-                }}
-              />
-              <div className='flex items-center gap-2'>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  className='min-h-11 sm:min-h-0'
-                  loading={createTask.isPending}
-                  disabled={!subtitle.trim()}
-                  onClick={addSubtask}
-                >
-                  add
-                </Button>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='min-h-11 sm:min-h-0'
-                  onClick={closeEditor}
-                >
-                  cancel
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -469,44 +382,11 @@ export function TaskRelations({
               </div>
             );
           })}
-
-          {canWrite && editor === 'relation' && (
-            <div className='flex flex-col items-stretch gap-2 sm:flex-row sm:items-center'>
-              {/* Три пункта, все три ВСЕГДА среди items: значение, которого нет в списке, скрытый
-                  нативный select у Radix стирает — а стирать здесь нечего, потому что стартовое
-                  значение тоже из этого списка. */}
-              <Select
-                name='relation-kind'
-                items={kindOptions}
-                value={kind}
-                onValueChange={(v: string) => setKind(v as TaskRelationKind)}
-                className='min-h-11 w-full shrink-0 sm:min-h-0 sm:w-36'
-              />
-              <TaskCombobox
-                placeholder='link a task…'
-                exclude={excludeForKind}
-                onPick={(id) =>
-                  addRelation.mutate(
-                    { taskId: task.id, otherTaskId: id, kind },
-                    { onSuccess: () => setEditor(null) },
-                  )
-                }
-              />
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                className='min-h-11 sm:min-h-0'
-                onClick={closeEditor}
-              >
-                cancel
-              </Button>
-            </div>
-          )}
         </div>
       )}
 
       {doorRow}
+      {pickerEl}
     </Section>
   );
 }
