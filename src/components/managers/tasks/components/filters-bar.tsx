@@ -39,6 +39,12 @@ export interface TaskFilters {
   assignee?: string;
 }
 
+export interface TaskProjectFilter {
+  id: number;
+  label: string;
+  count?: number;
+}
+
 export const emptyFilters: TaskFilters = { priority: '', mine: false, assignee: undefined };
 
 export function filtersActive(f: TaskFilters): boolean {
@@ -244,27 +250,54 @@ export function PhoneFilterGroups({
   filters,
   onChange,
   people,
+  projects,
+  projectId,
+  onProjectChange,
   showArchived,
   onToggleArchived,
   onClear,
-  projectLabel,
-  onClearProject,
 }: {
   filters: TaskFilters;
   onChange: (f: TaskFilters) => void;
   people?: { name: string; count: number }[];
+  projects: TaskProjectFilter[];
+  projectId: number;
+  onProjectChange: (id: number) => void;
   showArchived: boolean;
   onToggleArchived: () => void;
   onClear: () => void;
-  projectLabel?: string;
-  onClearProject?: () => void;
 }) {
   const set = (patch: Partial<TaskFilters>) => onChange(setFilter(filters, patch));
-  const dirty = filtersActive(filters) || showArchived || !!projectLabel;
+  const dirty = filtersActive(filters) || showArchived || projectId > 0;
 
   return (
     <div className='border-t border-hairline pt-stack'>
-      <GroupLabel flush>priority</GroupLabel>
+      <GroupLabel flush>project</GroupLabel>
+      {projects.length > 0 ? (
+        <ChipRow className='gap-1.5'>
+          {projects.map((project) => {
+            const selected = project.id === projectId;
+            return (
+              <Chip
+                key={project.id}
+                selected={selected}
+                pressed={selected}
+                onClick={() => onProjectChange(selected ? 0 : project.id)}
+                className='min-h-9'
+              >
+                {project.label}
+                {project.count === undefined ? '' : ` ${project.count}`}
+              </Chip>
+            );
+          })}
+        </ChipRow>
+      ) : (
+        <Text size='micro' variant='label' component='span'>
+          none
+        </Text>
+      )}
+
+      <GroupLabel>priority</GroupLabel>
       <ChipRow className='gap-1.5'>
         {PRIORITIES.map((priority) => {
           const selected = filters.priority === priority;
@@ -297,17 +330,6 @@ export function PhoneFilterGroups({
 
       <GroupLabel>scope</GroupLabel>
       <div className='flex flex-wrap items-center gap-1.5'>
-        {projectLabel && (
-          <Chip
-            selected
-            pressed
-            aria-label={`project: ${projectLabel}`}
-            onClick={onClearProject}
-            className='min-h-9 min-w-0 max-w-full whitespace-normal break-words text-left'
-          >
-            project: {projectLabel}
-          </Chip>
-        )}
         <Chip
           selected={showArchived}
           pressed={showArchived}

@@ -1,8 +1,7 @@
 import { useDockBottom } from 'hooks/useDockBottom';
-import { useQuery } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { filesService } from 'components/managers/files/api/filesService';
 import { ARCHIVED_WORD } from 'components/managers/files/components/topic-chips';
+import { isProjectTopic, useFileTopics } from 'components/managers/files/hooks/useFiles';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -40,6 +39,7 @@ import {
   setFilter,
   taskFilterCount,
   TaskFilters,
+  TaskProjectFilter,
 } from './components/filters-bar';
 import { TAP } from './components/filters-bar';
 import { DeleteBoardModal } from './components/delete-board-modal';
@@ -94,6 +94,7 @@ function resolveBoard(stored: string, boards: TaskBoardEntry[]): number {
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
   const navigate = useNavigate();
+  const canView = !resolved || canRead(SECTION.tasks);
   /**
    * СУЖЕНИЕ ПРОЕКТОМ ЖИВЁТ В АДРЕСЕ, а не в сессионных фильтрах: сюда приходят ссылкой со
    * страницы проекта («open board»), и такая ссылка обязана пережить перезагрузку и уехать
@@ -109,22 +110,18 @@ export function Tasks() {
    */
   const rawProject = Math.trunc(Number(params.get('project') ?? 0));
   const projectId = Number.isFinite(rawProject) && rawProject > 0 ? rawProject : 0;
-  const dropProject = () => {
+  const setProject = (id: number) => {
     const next = new URLSearchParams(params);
-    next.delete('project');
+    if (id > 0) next.set('project', String(id));
+    else next.delete('project');
     setParams(next, { replace: true });
   };
-  // Имя проекта — ИЗ СЛОВАРЯ С АРХИВОМ: доска законно сужается и по заархивированной съёмке
-  // (хвост задач по законченной работе нормален), и «project #17» вместо имени читалось бы
-  // как поломка. Запрос уходит только когда сужение есть.
-  const { data: projectTopics } = useQuery({
-    queryKey: ['tasks', 'project-scope', projectId],
-    enabled: projectId > 0,
-    staleTime: 5 * 60_000,
-    retry: false,
-    queryFn: () => filesService.listTopics(true),
-  });
-  const projectTopic = (projectTopics?.topics ?? []).find((t) => Number(t.id) === projectId);
+  const dropProject = () => setProject(0);
+  // Проекты — ИЗ СЛОВАРЯ С АРХИВОМ: телефон строит отсюда первый ряд фильтров, а выбранный
+  // архивный проект обязан сохранить имя (хвост задач по законченной работе нормален).
+  const projectTopicsQuery = useFileTopics(true, canView);
+  const projectTopics = projectTopicsQuery.data?.topics ?? [];
+  const projectTopic = projectTopics.find((t) => Number(t.id) === projectId);
   const projectLabel = projectId
     ? projectTopic?.name
       ? projectTopic.archived
@@ -133,7 +130,6 @@ export function Tasks() {
       : `#${projectId}`
     : undefined;
 
-  const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
   const saveBarRef = useRef<HTMLDivElement>(null);
   useDockBottom(saveBarRef, [writable]);
@@ -253,8 +249,16 @@ export function Tasks() {
 
   // Per-board open-task counts for the rail — one all-boards, active-only read. Сужение
   // проектом входит и сюда: иначе число в рельсе противоречило бы колонкам под ним.
-  const countsFilter = useMemo(() => ({ projectTopicId: projectId }), [projectId]);
+  const countsFilter = useMemo(
+    () => ({ projectTopicId: projectId, includeArchived: false }),
+    [projectId],
+  );
   const { data: countsData } = useTasks(countsFilter);
+  const projectCountsFilter = useMemo(
+    () => ({ projectTopicId: 0, includeArchived: showArchived }),
+    [showArchived],
+  );
+  const { data: projectCountsData } = useTasks(projectCountsFilter, canView);
 
   // ListTasks is a single page capped at TASKS_PAGE_LIMIT. Past that the board silently drops
   // cards and the rail counts undercount, which is indistinguishable from a deleted task — so
@@ -269,6 +273,32 @@ export function Tasks() {
     }
     return m;
   }, [countsData]);
+  const projectCounts = useMemo(() => {
+    const result = new Map<number, number>();
+    for (const task of projectCountsData?.tasks ?? []) {
+      if (task.task.projectTopicId <= 0) continue;
+      result.set(task.task.projectTopicId, (result.get(task.task.projectTopicId) ?? 0) + 1);
+    }
+    return result;
+  }, [projectCountsData]);
+  const projectFilters = useMemo<TaskProjectFilter[]>(
+    () =>
+      projectTopics
+        .filter(isProjectTopic)
+        .filter((topic) => !topic.archived || Number(topic.id) === projectId)
+        .map((topic) => ({
+          id: Number(topic.id),
+          label: topic.archived ? `${topic.name} · ${ARCHIVED_WORD}` : topic.name || '',
+          count: projectCountsData ? projectCounts.get(Number(topic.id)) ?? 0 : undefined,
+        }))
+        .filter(
+          (project) =>
+            project.id > 0 &&
+            !!project.label &&
+            (project.id === projectId || project.count === undefined || project.count > 0),
+        ),
+    [projectCounts, projectCountsData, projectId, projectTopics],
+  );
   const boardOptions = [
     ...boards.map((b) => ({
       value: String(b.id),
@@ -548,11 +578,12 @@ export function Tasks() {
                   filters={filters}
                   onChange={setFilters}
                   people={people}
+                  projects={projectFilters}
+                  projectId={projectId}
+                  onProjectChange={setProject}
                   showArchived={showArchived}
                   onToggleArchived={() => setShowArchived((value) => !value)}
                   onClear={clearFilters}
-                  projectLabel={projectLabel}
-                  onClearProject={dropProject}
                 />
               </div>
             )}

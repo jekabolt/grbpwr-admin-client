@@ -1,5 +1,9 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import {
+  FilePicker,
+  type NoteFileInsert,
+} from 'components/managers/tasks/components/file-attachments';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { mediaFromClipboard } from 'components/managers/media/utils/usePasteFiles';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -7,7 +11,6 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, buttonVariants, GenericPopover, Text } from 'ui';
-import { NoteFilePicker, type NoteFileInsert } from './file-picker';
 import {
   codeEdit,
   emphasisEdit,
@@ -890,7 +893,7 @@ export function FormatBar({
       )}
 
       {picker && (
-        <NoteFilePicker
+        <FilePicker
           insert={picker}
           onPick={(f) => apply((t, s, e) => fileEdit(t, s, e, f, picker))}
           onClose={() => setPicker(null)}
