@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { common_TaskBoard, common_TaskStatus, LibraryFile } from 'api/proto-http/admin';
+import type { common_TaskStatus, LibraryFile } from 'api/proto-http/admin';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { tasksService } from 'components/managers/tasks/api/tasksService';
-import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
+import { boardNameOf, tasksKeys, useTaskBoards } from 'components/managers/tasks/hooks/useTasks';
 import { SECTION } from 'constants/routes';
 import { Avatar, Button, CalloutBox, ConfirmationModal, GroupLabel, Input, Pill, Text } from 'ui';
 import { fileTasksService } from '../api/fileTasksService';
@@ -43,8 +43,8 @@ export function useFileTasks(fileId: number, enabled = true) {
   });
 }
 
-/** Статусы и доски СВОИМ СПИСКОМ — те же слова, что у доски задач (`STATUS_LABEL`, `BOARD_LABEL`
- *  в `tasks/utils/meta.ts`): один и тот же статус обязан называться одинаково на обоих экранах. */
+/** Статусы СВОИМ СПИСКОМ — те же слова, что у доски задач (`STATUS_LABEL` в `tasks/utils/meta.ts`):
+ *  один и тот же статус обязан называться одинаково на обоих экранах. Доска — имя из ListTaskBoards. */
 const STATUS_RU: Record<common_TaskStatus, string> = {
   TASK_STATUS_UNKNOWN: 'unknown',
   TASK_STATUS_BACKLOG: 'backlog',
@@ -52,16 +52,6 @@ const STATUS_RU: Record<common_TaskStatus, string> = {
   TASK_STATUS_IN_PROGRESS: 'in progress',
   TASK_STATUS_REVIEW: 'review',
   TASK_STATUS_DONE: 'done',
-};
-
-const BOARD_RU: Record<common_TaskBoard, string> = {
-  TASK_BOARD_UNKNOWN: '',
-  TASK_BOARD_DEVELOPMENT: 'development',
-  TASK_BOARD_DESIGN: 'design',
-  TASK_BOARD_MARKETING: 'marketing',
-  TASK_BOARD_PRODUCTION: 'production',
-  TASK_BOARD_SOURCING: 'sourcing',
-  TASK_BOARD_CONTENT: 'content',
 };
 
 /** Зелёный = сделана, синий = в полёте, серый = ещё не начиналась. Цвет здесь всегда при слове. */
@@ -105,6 +95,7 @@ export function FileTasksSection({
 
   const { data, isLoading, error, isError } = useFileTasks(fileId, mayRead);
   const tasks = useMemo(() => data?.tasks ?? [], [data]);
+  const { data: boards } = useTaskBoards(mayRead);
   const attachedIds = useMemo(
     () => new Set(tasks.map((t) => Number(t.taskId ?? 0)).filter((n) => n > 0)),
     [tasks],
@@ -261,14 +252,14 @@ export function FileTasksSection({
                 <Pill tone={statusTone(t.status)} className='flex-none'>
                   {STATUS_RU[t.status ?? 'TASK_STATUS_UNKNOWN']}
                 </Pill>
-                {!!BOARD_RU[t.board ?? 'TASK_BOARD_UNKNOWN'] && (
+                {!!boardNameOf(boards, t.boardId ?? 0) && (
                   <Text
                     size='nano'
                     variant='label'
                     component='span'
                     className='hidden flex-none uppercase sm:inline'
                   >
-                    {BOARD_RU[t.board ?? 'TASK_BOARD_UNKNOWN']}
+                    {boardNameOf(boards, t.boardId ?? 0)}
                   </Text>
                 )}
                 {/* Пустой `assignee` — это «никто не взял», и `Avatar` рисует ровно это

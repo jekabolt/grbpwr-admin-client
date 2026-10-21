@@ -1,4 +1,4 @@
-import type { Task, TaskBoard } from '../api/types';
+import type { Task } from '../api/types';
 
 /**
  * TASK SEARCH — matching, snippet and highlight helpers (pure, no React).
@@ -93,14 +93,14 @@ export function searchTasks(tasks: Task[], query: string): TaskHit[] {
 }
 
 /** Groups in order of their best hit; rows keep the `searchTasks` order inside a group. */
-export function groupByBoard(hits: TaskHit[]): { board: TaskBoard; hits: TaskHit[] }[] {
-  const groups = new Map<TaskBoard, TaskHit[]>();
+export function groupByBoard(hits: TaskHit[]): { boardId: number; hits: TaskHit[] }[] {
+  const groups = new Map<number, TaskHit[]>();
   for (const h of hits) {
-    const g = groups.get(h.task.board);
+    const g = groups.get(h.task.boardId);
     if (g) g.push(h);
-    else groups.set(h.task.board, [h]);
+    else groups.set(h.task.boardId, [h]);
   }
-  return [...groups.entries()].map(([board, hits]) => ({ board, hits }));
+  return [...groups.entries()].map(([boardId, hits]) => ({ boardId, hits }));
 }
 
 /** Every case-insensitive occurrence of `q` in `text`, as alternating plain / hit parts. */

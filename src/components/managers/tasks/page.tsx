@@ -7,6 +7,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  AddDoor,
   Button,
   CalloutBox,
   Chip,
@@ -23,8 +24,9 @@ import {
   Toolbar,
 } from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
-import { emptyFormValues, Task, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
+import { emptyFormValues, Task, TaskBoardEntry, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
+import { BoardNameField } from './components/board-name-field';
 import { BoardSkeleton } from './components/board-skeleton';
 import {
   applyFilters,
@@ -38,16 +40,51 @@ import {
   TaskFilters,
 } from './components/filters-bar';
 import { TAP } from './components/filters-bar';
+import { DeleteBoardModal } from './components/delete-board-modal';
 import { TaskFormModal } from './components/task-form-modal';
 import { TaskSearchField, TaskSearchResults, TaskSearchScope } from './components/task-search';
 import { useSearchQuery } from './hooks/useSearchQuery';
-import { useCreateTask, useTaskSearch, useTasks } from './hooks/useTasks';
-import { BOARD_LABEL, BOARDS } from './utils/meta';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import {
+  useAddTaskBoard,
+  useCreateTask,
+  useDeleteTaskBoard,
+  useRenameTaskBoard,
+  useTaskBoards,
+  useTaskSearch,
+  useTasks,
+} from './hooks/useTasks';
 import { searchTasks } from './utils/search';
 
 const ACTIVE_BOARD_KEY = 'grbpwr.kanban.activeBoard';
 const FILTERS_KEY = 'grbpwr.kanban.filters';
 const ARCHIVED_KEY = 'grbpwr.kanban.archived';
+/** The phone select's last line opens the new-board field instead of choosing a board. */
+const ADD_BOARD = 'add-board';
+const RAIL_QUERY = '(min-width: 1024px)';
+const PHONE_SCREEN_QUERY = '(max-width: 639px)';
+
+function readStoredBoard(): string {
+  try {
+    return localStorage.getItem(ACTIVE_BOARD_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The stored board is an id since custom boards; before, it was the enum string
+ * (`TASK_BOARD_MARKETING`). An enum is translated through `legacyBoard`, an unknown or deleted id
+ * falls back to the first board.
+ */
+function resolveBoard(stored: string, boards: TaskBoardEntry[]): number {
+  if (!boards.length) return 0;
+  const asId = Number(stored);
+  const hit =
+    (Number.isInteger(asId) && asId > 0 && boards.find((b) => b.id === asId)) ||
+    (stored.startsWith('TASK_BOARD_') && boards.find((b) => b.legacyBoard === stored));
+  return hit ? hit.id : boards[0].id;
+}
 
 export function Tasks() {
   const { account, canRead, canWrite, resolved } = usePermissions();
@@ -96,11 +133,76 @@ export function Tasks() {
   const saveBarRef = useRef<HTMLDivElement>(null);
   useDockBottom(saveBarRef, [writable]);
 
-  // tskTabs v2 — the board is chosen from a left rail, persisted as before.
-  const [activeBoard, setActiveBoard] = useState<TaskBoard>(
-    () => (localStorage.getItem(ACTIVE_BOARD_KEY) as TaskBoard) || BOARDS[0],
-  );
-  useEffect(() => localStorage.setItem(ACTIVE_BOARD_KEY, activeBoard), [activeBoard]);
+  // tskTabs v2 — the board is chosen from a left rail, persisted as before. Boards come from
+  // ListTaskBoards; the stored value is migrated from the old enum to the id on first read.
+  const boardsQuery = useTaskBoards(canView);
+  const boards = useMemo(() => boardsQuery.data ?? [], [boardsQuery.data]);
+  const [storedBoard, setStoredBoard] = useState(readStoredBoard);
+  const activeBoard = useMemo(() => resolveBoard(storedBoard, boards), [storedBoard, boards]);
+  const setActiveBoard = (id: number) => setStoredBoard(String(id));
+  useEffect(() => {
+    if (!activeBoard) return;
+    try {
+      localStorage.setItem(ACTIVE_BOARD_KEY, String(activeBoard));
+    } catch {
+      /* storage blocked: the board just is not remembered */
+    }
+  }, [activeBoard]);
+  const activeEntry = boards.find((b) => b.id === activeBoard);
+  const activeName = activeEntry?.name ?? '';
+
+  // CUSTOM-BOARDS: add / rename in place, delete asks where the tasks go.
+  const railShown = useMediaQuery(RAIL_QUERY);
+  const phoneScreen = useMediaQuery(PHONE_SCREEN_QUERY);
+  const [addingBoard, setAddingBoard] = useState(false);
+  const [renamingBoard, setRenamingBoard] = useState(false);
+  const [deletingBoard, setDeletingBoard] = useState<TaskBoardEntry | null>(null);
+  const addBoard = useAddTaskBoard();
+  const renameBoard = useRenameTaskBoard();
+  const deleteBoard = useDeleteTaskBoard();
+  const canDeleteBoard = boards.length > 1;
+  const stopEditingBoard = () => {
+    setAddingBoard(false);
+    setRenamingBoard(false);
+  };
+  async function submitNewBoard(name: string) {
+    try {
+      const created = await addBoard.mutateAsync(name);
+      setAddingBoard(false);
+      if (created.id) setActiveBoard(created.id);
+    } catch {
+      /* snackbar shown by the mutation; keep the field open */
+    }
+  }
+  async function submitRename(name: string) {
+    if (!activeBoard) return;
+    try {
+      await renameBoard.mutateAsync({ id: activeBoard, name });
+      setRenamingBoard(false);
+    } catch {
+      /* snackbar shown by the mutation; keep the field open */
+    }
+  }
+  async function confirmDeleteBoard(moveToId: number) {
+    if (!deletingBoard) return;
+    try {
+      await deleteBoard.mutateAsync({ id: deletingBoard.id, moveToId });
+      setDeletingBoard(null);
+      setRenamingBoard(false);
+      const next = moveToId || boards.find((b) => b.id !== deletingBoard.id)?.id;
+      if (next) setActiveBoard(next);
+    } catch {
+      /* snackbar shown by the mutation; keep the dialog open */
+    }
+  }
+  const startAdding = () => {
+    setRenamingBoard(false);
+    setAddingBoard(true);
+  };
+  const startRenaming = () => {
+    setAddingBoard(false);
+    setRenamingBoard(true);
+  };
 
   // tskArchive v3 — archived is a filter, not a mode. On = include_archived so the
   // board shows active + archived (the cards dim themselves); off = active only.
@@ -110,10 +212,17 @@ export function Tasks() {
   useEffect(() => sessionStorage.setItem(ARCHIVED_KEY, showArchived ? '1' : '0'), [showArchived]);
 
   const filter = useMemo(
-    () => ({ board: activeBoard, includeArchived: showArchived, projectTopicId: projectId }),
+    () => ({ boardId: activeBoard, includeArchived: showArchived, projectTopicId: projectId }),
     [activeBoard, showArchived, projectId],
   );
-  const { data, isLoading, isError, error, refetch } = useTasks(filter);
+  // No board id yet = the board list is still loading; a read without it would span every board.
+  const tasksQuery = useTasks(filter, activeBoard > 0);
+  const { data } = tasksQuery;
+  const isError = tasksQuery.isError || boardsQuery.isError;
+  const error = tasksQuery.error ?? boardsQuery.error;
+  const refetch = () => (boardsQuery.isError ? boardsQuery.refetch() : tasksQuery.refetch());
+  const isLoading =
+    tasksQuery.isLoading || boardsQuery.isLoading || (!activeBoard && !boardsQuery.isError);
   const tasks = data?.tasks ?? [];
 
   // Per-board open-task counts for the rail — one all-boards, active-only read. Сужение
@@ -127,18 +236,20 @@ export function Tasks() {
   const boardTruncated = (data?.total ?? 0) > tasks.length;
   const countsTruncated = (countsData?.total ?? 0) > (countsData?.tasks.length ?? 0);
   const counts = useMemo(() => {
-    const m = new Map<TaskBoard, number>();
-    for (const b of BOARDS) m.set(b, 0);
+    const m = new Map<number, number>();
     for (const t of countsData?.tasks ?? []) {
       if (t.archivedAt) continue;
-      m.set(t.board, (m.get(t.board) ?? 0) + 1);
+      m.set(t.boardId, (m.get(t.boardId) ?? 0) + 1);
     }
     return m;
   }, [countsData]);
-  const boardOptions = BOARDS.map((board) => ({
-    value: board,
-    label: `${BOARD_LABEL[board]} · ${counts.get(board) ?? 0}`,
-  }));
+  const boardOptions = [
+    ...boards.map((b) => ({
+      value: String(b.id),
+      label: `${b.name} · ${counts.get(b.id) ?? 0}`,
+    })),
+    ...(writable ? [{ value: ADD_BOARD, label: '+ board' }] : []),
+  ];
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   //
@@ -183,12 +294,12 @@ export function Tasks() {
   const found = useTaskSearch(search.query);
   const hits = useMemo(() => {
     const all = searchTasks(found.data?.tasks ?? [], search.query);
-    return allBoards ? all : all.filter((h) => h.task.board === activeBoard);
+    return allBoards ? all : all.filter((h) => h.task.boardId === activeBoard);
   }, [found.data, search.query, allBoards, activeBoard]);
   // A hit opens the way a card does: search cleared, its board selected, then the task.
   function openHit(task: Task) {
     search.clear();
-    setActiveBoard(task.board);
+    setActiveBoard(task.boardId);
     navigate(`${ROUTES.tasks}/${task.id}`);
   }
   const phoneSearchField = (
@@ -203,7 +314,7 @@ export function Tasks() {
     <TaskSearchScope
       allBoards={allBoards}
       onScope={setAllBoards}
-      board={activeBoard}
+      boardName={activeName}
       count={found.data ? hits.length : undefined}
     />
   );
@@ -223,9 +334,9 @@ export function Tasks() {
   );
 
   async function handleCreate(values: TaskFormValues) {
-    const { board, status, ...content } = values;
+    const { boardId, status, ...content } = values;
     try {
-      await createTask.mutateAsync({ content, board, status });
+      await createTask.mutateAsync({ content, boardId: boardId || activeBoard, status });
       setCreating(null);
     } catch {
       /* snackbar shown by the mutation; keep the modal open */
@@ -272,15 +383,41 @@ export function Tasks() {
         rail={
           <SideRail className='hidden lg:block'>
             <SideRailGroup flush>boards</SideRailGroup>
-            {BOARDS.map((board) => (
-              <SideRailItem
-                key={board}
-                label={BOARD_LABEL[board]}
-                count={counts.get(board) ?? 0}
-                selected={board === activeBoard}
-                onClick={() => setActiveBoard(board)}
-              />
-            ))}
+            {boards.map((board) =>
+              renamingBoard && railShown && board.id === activeBoard ? (
+                <BoardNameField
+                  key={board.id}
+                  name='task-board-rename'
+                  initial={board.name}
+                  busy={renameBoard.isPending}
+                  onSubmit={submitRename}
+                  onCancel={stopEditingBoard}
+                  className='my-0.5'
+                />
+              ) : (
+                <SideRailItem
+                  key={board.id}
+                  label={board.name}
+                  count={counts.get(board.id) ?? 0}
+                  selected={board.id === activeBoard}
+                  onClick={() => setActiveBoard(board.id)}
+                />
+              ),
+            )}
+            {writable &&
+              (addingBoard && railShown ? (
+                <BoardNameField
+                  name='task-board-new'
+                  busy={addBoard.isPending}
+                  onSubmit={submitNewBoard}
+                  onCancel={stopEditingBoard}
+                  className='mt-1.5'
+                />
+              ) : (
+                <AddDoor onClick={startAdding} className='mt-1.5 w-full'>
+                  board
+                </AddDoor>
+              ))}
           </SideRail>
         }
       >
@@ -315,16 +452,54 @@ export function Tasks() {
               </>
             }
           >
-            <Select
-              name='task-board-phone'
-              value={activeBoard}
-              items={boardOptions}
-              fullWidth
-              itemClassName='min-h-11'
-              className='min-h-11 uppercase tracking-label'
-              placeholder='board'
-              onValueChange={(value: string) => setActiveBoard(value as TaskBoard)}
-            />
+            {phoneScreen && (addingBoard || renamingBoard) ? (
+              <div className='flex flex-col gap-2'>
+                <BoardNameField
+                  key={addingBoard ? 'new' : `rename-${activeBoard}`}
+                  name='task-board-name-phone'
+                  initial={addingBoard ? '' : activeName}
+                  busy={addBoard.isPending || renameBoard.isPending}
+                  onSubmit={addingBoard ? submitNewBoard : submitRename}
+                  onCancel={stopEditingBoard}
+                  className='min-h-11'
+                  inputClassName='uppercase tracking-label'
+                />
+                <div className='flex justify-end gap-4'>
+                  <Button variant='underline' size='xs' onClick={stopEditingBoard}>
+                    cancel
+                  </Button>
+                  {renamingBoard && canDeleteBoard && activeEntry && (
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      onClick={() => setDeletingBoard(activeEntry)}
+                    >
+                      delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className='flex items-center gap-2'>
+                <Select
+                  name='task-board-phone'
+                  value={activeBoard ? String(activeBoard) : undefined}
+                  items={boardOptions}
+                  fullWidth
+                  itemClassName='min-h-11'
+                  className='min-h-11 uppercase tracking-label'
+                  placeholder='board'
+                  onValueChange={(value: string) =>
+                    value === ADD_BOARD ? startAdding() : setActiveBoard(Number(value))
+                  }
+                />
+                {writable && (
+                  <Button variant='underline' size='xs' onClick={startRenaming}>
+                    edit
+                  </Button>
+                )}
+              </div>
+            )}
             {phoneSearchField}
             {searchScope}
             {filtersOpen && (
@@ -346,19 +521,62 @@ export function Tasks() {
           {/* Между sm и lg рельса нет: доски остаются строкой чипов из v1. */}
           <div className='hidden sm:block lg:hidden'>
             <ChipRow className='gap-1.5 overflow-x-auto flex-nowrap'>
-              {BOARDS.map((board) => (
+              {boards.map((board) => (
                 <Chip
-                  key={board}
-                  selected={board === activeBoard}
-                  pressed={board === activeBoard}
-                  onClick={() => setActiveBoard(board)}
+                  key={board.id}
+                  selected={board.id === activeBoard}
+                  pressed={board.id === activeBoard}
+                  onClick={() => setActiveBoard(board.id)}
                   className={TAP}
                 >
-                  {BOARD_LABEL[board]} {counts.get(board) ?? 0}
+                  {board.name} {counts.get(board.id) ?? 0}
                 </Chip>
               ))}
+              {writable && !addingBoard && (
+                <AddDoor onClick={startAdding} shape='inline' className={TAP}>
+                  board
+                </AddDoor>
+              )}
             </ChipRow>
           </div>
+          {!!activeEntry && (
+            <div className='hidden items-center gap-3.5 sm:flex'>
+              {(renamingBoard || addingBoard) && !railShown && !phoneScreen ? (
+                <BoardNameField
+                  key={addingBoard ? 'new' : `rename-${activeBoard}`}
+                  name='task-board-name-header'
+                  initial={addingBoard ? '' : activeName}
+                  busy={addBoard.isPending || renameBoard.isPending}
+                  onSubmit={addingBoard ? submitNewBoard : submitRename}
+                  onCancel={stopEditingBoard}
+                  className='w-60'
+                />
+              ) : (
+                <Text variant='uppercase' component='h2' className='font-bold tracking-label'>
+                  {activeName}
+                </Text>
+              )}
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                {counts.get(activeBoard) ?? 0} tasks
+              </Text>
+              {writable && (
+                <span className='ml-auto flex items-center gap-3.5'>
+                  <Button variant='underline' size='xs' onClick={startRenaming}>
+                    rename
+                  </Button>
+                  {canDeleteBoard && (
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      onClick={() => setDeletingBoard(activeEntry)}
+                    >
+                      delete
+                    </Button>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
           <Toolbar className='hidden sm:flex'>
             <FiltersBar
               filters={filters}
@@ -482,6 +700,14 @@ export function Tasks() {
         </div>
       )}
 
+      <DeleteBoardModal
+        board={deletingBoard}
+        boards={boards}
+        busy={deleteBoard.isPending}
+        onOpenChange={(o) => !o && setDeletingBoard(null)}
+        onConfirm={confirmDeleteBoard}
+      />
+
       <TaskFormModal
         open={creating !== null}
         onOpenChange={(o) => !o && setCreating(null)}
@@ -489,7 +715,7 @@ export function Tasks() {
         initial={initial}
         saving={createTask.isPending}
         onSubmit={handleCreate}
-        draftKey={projectId ? `${activeBoard}.project-${projectId}` : activeBoard}
+        draftKey={projectId ? `board-${activeBoard}.project-${projectId}` : `board-${activeBoard}`}
       />
     </div>
   );

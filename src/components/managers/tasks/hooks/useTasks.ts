@@ -10,7 +10,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import {
   ListTasksFilter,
   Task,
-  TaskBoard,
+  TaskBoardEntry,
   TaskComment,
   TaskInsert,
   TaskRelationKind,
@@ -26,6 +26,8 @@ export const tasksKeys = {
   list: (filter: ListTasksFilter) => [...tasksKeys.all, 'list', filter] as const,
   detail: (id: number) => [...tasksKeys.all, 'detail', id] as const,
   comments: (taskId: number) => [...tasksKeys.all, 'comments', taskId] as const,
+  // Under `all`, so every task write that invalidates `all` refreshes the rail counts too.
+  boards: () => [...tasksKeys.all, 'boards'] as const,
 };
 
 type ListResult = { tasks: Task[]; total: number };
@@ -57,6 +59,64 @@ export function useTasks(filter: ListTasksFilter, enabled = true) {
  * Search across every board, archive included. The previous answer stays on screen while the
  * next query loads, so the list does not blink empty on every keystroke.
  */
+/** Every board in rail order (ListTaskBoards). */
+export function useTaskBoards(enabled = true) {
+  return useQuery({
+    queryKey: tasksKeys.boards(),
+    queryFn: () => tasksService.listBoards(),
+    staleTime: 60_000,
+    enabled,
+  });
+}
+
+/** Board name by id; '' while the list loads or for an id the list does not know. */
+export function boardNameOf(boards: TaskBoardEntry[] | undefined, id: number): string {
+  return boards?.find((b) => b.id === id)?.name ?? '';
+}
+
+/**
+ * The id of a seeded board by its old enum, falling back to the first board — for callers that
+ * used to hard-code a department (tech card → development, project → content).
+ */
+export function boardIdForLegacy(
+  boards: TaskBoardEntry[] | undefined,
+  legacy: TaskBoardEntry['legacyBoard'],
+): number {
+  return boards?.find((b) => b.legacyBoard === legacy)?.id ?? boards?.[0]?.id ?? 0;
+}
+
+export function useAddTaskBoard() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (name: string) => tasksService.addBoard(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to add board', 'error'),
+  });
+}
+
+export function useRenameTaskBoard() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number; name: string }) =>
+      tasksService.renameBoard(vars.id, vars.name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to rename board', 'error'),
+  });
+}
+
+export function useDeleteTaskBoard() {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number; moveToId: number }) =>
+      tasksService.deleteBoard(vars.id, vars.moveToId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to delete board', 'error'),
+  });
+}
+
 export function useTaskSearch(query: string) {
   const filter: ListTasksFilter = { includeArchived: true, query };
   return useQuery({
@@ -105,7 +165,7 @@ export function useCreateTask() {
   return useMutation({
     mutationFn: (vars: {
       content: TaskInsert;
-      board: TaskBoard;
+      boardId: number;
       status: TaskStatus;
       /**
        * Родитель СОЗДАВАЕМОЙ карточки; 0/undefined = верхний уровень. Едет тем же вызовом, а не
@@ -113,7 +173,7 @@ export function useCreateTask() {
        * никто бы не узнал — искать её пошли бы в детях.
        */
       parentTaskId?: number;
-    }) => tasksService.addTask(vars.content, vars.board, vars.status, vars.parentTaskId),
+    }) => tasksService.addTask(vars.content, vars.boardId, vars.status, vars.parentTaskId),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: tasksKeys.all });
       showMessage(vars.parentTaskId ? 'Subtask created' : 'Task created', 'success');
@@ -423,8 +483,8 @@ export function useMoveTask(filter: ListTasksFilter) {
   const { showMessage } = useSnackBarStore();
   const key = tasksKeys.list(filter);
   return useMutation({
-    mutationFn: (vars: { id: number; board: TaskBoard; status: TaskStatus; position: number }) =>
-      tasksService.moveTask(vars.id, vars.board, vars.status, vars.position),
+    mutationFn: (vars: { id: number; boardId: number; status: TaskStatus; position: number }) =>
+      tasksService.moveTask(vars.id, vars.boardId, vars.status, vars.position),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<ListResult>(key);

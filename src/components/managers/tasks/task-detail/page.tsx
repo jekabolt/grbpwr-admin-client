@@ -21,7 +21,6 @@ import {
   Text,
 } from 'ui';
 import {
-  TaskBoard,
   TaskFormValues,
   TaskMediaAnnotations,
   TaskPriority,
@@ -40,8 +39,10 @@ import {
   useArchiveTask,
   useDeleteTask,
   useInlineTaskPatch,
+  boardNameOf,
   useMoveTask,
   useTask,
+  useTaskBoards,
   useUnarchiveTask,
   useUpdateTask,
   type InlinePatch,
@@ -57,8 +58,6 @@ import { openBlockers } from '../utils/relations';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { taskLinks } from '../utils/links';
 import {
-  BOARD_LABEL,
-  BOARDS,
   dueMeta,
   PRIORITIES,
   PRIORITY_LABEL,
@@ -75,7 +74,6 @@ import {
  * Every field stays inline-editable through the same doors as before.
  */
 
-const boardOptions = toOptions(BOARDS, BOARD_LABEL);
 const statusOptions = toOptions(STATUSES, STATUS_LABEL);
 const priorityOptions = [
   { value: 'TASK_PRIORITY_UNKNOWN', label: 'no priority' },
@@ -163,7 +161,12 @@ export function TaskDetail() {
   const deleteTask = useDeleteTask();
   const archiveTask = useArchiveTask();
   const unarchiveTask = useUnarchiveTask();
-  const move = useMoveTask(useMemo(() => ({ board: task?.board }), [task?.board]));
+  const move = useMoveTask(useMemo(() => ({ boardId: task?.boardId }), [task?.boardId]));
+  const { data: boards } = useTaskBoards();
+  const boardOptions = useMemo(
+    () => (boards ?? []).map((b) => ({ value: String(b.id), label: b.name })),
+    [boards],
+  );
 
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -273,17 +276,17 @@ export function TaskDetail() {
    * карточки) структурно разделяется и переживает ротацию подписей; доска и колонка — скаляры.
    */
   const initial: TaskFormValues | null = useMemo(
-    () => (task ? { ...task.task, board: task.board, status: task.status } : null),
-    [task?.task, task?.board, task?.status],
+    () => (task ? { ...task.task, boardId: task.boardId, status: task.status } : null),
+    [task?.task, task?.boardId, task?.status],
   );
 
   async function handleSubmit(values: TaskFormValues) {
     if (!task) return;
-    const { board, status, ...content } = values;
+    const { boardId, status, ...content } = values;
     try {
       await updateTask.mutateAsync({ id: task.id, content });
-      if (board !== task.board || status !== task.status) {
-        await move.mutateAsync({ id: task.id, board, status, position: 0 });
+      if (boardId !== task.boardId || status !== task.status) {
+        await move.mutateAsync({ id: task.id, boardId, status, position: 0 });
       }
       setEditing(false);
     } catch {
@@ -358,10 +361,11 @@ export function TaskDetail() {
     if (!editLocked) setEditing(true);
   };
 
-  const moveTo = (board: TaskBoard, status: TaskStatus) =>
+  const moveTo = (boardId: number, status: TaskStatus) =>
     canWrite &&
-    (board !== task.board || status !== task.status) &&
-    move.mutate({ id: task.id, board, status, position: 0 });
+    boardId > 0 &&
+    (boardId !== task.boardId || status !== task.status) &&
+    move.mutate({ id: task.id, boardId, status, position: 0 });
 
   /**
    * «+ MEDIA» ОТКРЫВАЕТ МЕДИАТЕКУ, А НЕ МОДАЛКУ ПРАВКИ (владелец 19.10: «+ file открывает не
@@ -382,7 +386,7 @@ export function TaskDetail() {
       placeholder='status'
       items={statusOptions}
       value={task.status}
-      onValueChange={(v: string) => moveTo(task.board, v as TaskStatus)}
+      onValueChange={(v: string) => moveTo(task.boardId, v as TaskStatus)}
       readOnly={!canWrite}
       className={className}
     />
@@ -409,8 +413,8 @@ export function TaskDetail() {
       name='detail-board'
       placeholder='board'
       items={boardOptions}
-      value={task.board}
-      onValueChange={(v: string) => moveTo(v as TaskBoard, task.status)}
+      value={String(task.boardId)}
+      onValueChange={(v: string) => moveTo(Number(v), task.status)}
       readOnly={!canWrite}
       className={className}
       renderValue={
@@ -507,7 +511,7 @@ export function TaskDetail() {
       {/* ── 1. Верхняя полоса: дорога назад и меню действий ─────────────────────────────── */}
       <div className='flex items-center justify-between gap-3 border-b border-borderColor'>
         <BackLink className='inline-flex min-h-11 items-center sm:min-h-8' to={ROUTES.tasks}>
-          {BOARD_LABEL[task.board]}
+          {boardNameOf(boards, task.boardId) || 'tasks'}
         </BackLink>
         {canWrite && (
           <GenericPopover

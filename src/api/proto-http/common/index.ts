@@ -8952,9 +8952,11 @@ export type SupportTicket = {
   internalNotes: string | undefined;
 };
 
-// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
-// task belongs to exactly one board. Extend by appending members (never reuse
-// numbers) — 0 stays UNKNOWN per proto3 convention.
+// TaskBoard is the LEGACY department-lane enum. Since custom boards (migration 0420) a board is a
+// TaskBoardEntry row addressed by id, and the six members below are the six seeded boards (their
+// ids equal these numbers, and TaskBoardEntry.legacy_board maps back). Kept only so clients built
+// before board ids keep working: requests accept either the enum or a board_id (board_id wins);
+// responses fill the enum for a seeded board and UNKNOWN for a custom one. Do not extend.
 export type TaskBoard =
   | "TASK_BOARD_UNKNOWN"
   | "TASK_BOARD_DEVELOPMENT"
@@ -8988,14 +8990,35 @@ export type TaskLinkKind =
   | "TASK_LINK_KIND_BLOCKS"
   | "TASK_LINK_KIND_BLOCKED_BY"
   | "TASK_LINK_KIND_RELATES";
-// TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation. For tasks
-// created before status history existed, GetTask appends a synthetic creation event whose
-// to_status is also UNKNOWN because the initial status cannot be recovered.
+// TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation and for an
+// approximate legacy DONE backfill (distinguished by approximate=true). For tasks created before
+// status history existed, GetTask appends a synthetic creation event whose to_status is also
+// UNKNOWN because the initial status cannot be recovered.
 export type TaskStatusChange = {
   fromStatus: TaskStatus | undefined;
   toStatus: TaskStatus | undefined;
   changedBy: string | undefined;
   changedAt: wellKnownTimestamp | undefined;
+  approximate: boolean | undefined;
+};
+
+// TaskClosed is list-only closing metadata. It deliberately does not live on Task: Task is
+// persisted in snapshots, while a closing fact is meaningful only while the card is currently
+// DONE. ListTasksResponse carries one row for each returned DONE task.
+export type TaskClosed = {
+  taskId: number | undefined;
+  closedAt: wellKnownTimestamp | undefined;
+  closedBy: string | undefined;
+  approximate: boolean | undefined;
+};
+
+// TaskTiming is list-only status-age metadata. status_since is the latest transition into the
+// card's current status. approximate is copied from that transition, or true when legacy data has
+// no matching transition and the server falls back to the task's own timestamps.
+export type TaskTiming = {
+  taskId: number | undefined;
+  statusSince: wellKnownTimestamp | undefined;
+  approximate: boolean | undefined;
 };
 
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
@@ -9106,6 +9129,7 @@ export type TaskLink = {
   status: TaskStatus | undefined;
   board: TaskBoard | undefined;
   archived: boolean | undefined;
+  boardId: number | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -9127,6 +9151,7 @@ export type TaskChecklistItem = {
 export type Task = {
   id: number | undefined;
   task: TaskInsert | undefined;
+  // Legacy enum of the board (UNKNOWN for a custom board); the placement is board_id.
   board: TaskBoard | undefined;
   status: TaskStatus | undefined;
   position: number | undefined;
@@ -9168,6 +9193,22 @@ export type Task = {
   // берёт их фильтром ListTasks(parent_task_id).
   subtaskTotal: number | undefined;
   subtaskDone: number | undefined;
+  // Placement: TaskBoardEntry.id of the board; set by AddTask, changed by MoveTask.
+  boardId: number | undefined;
+};
+
+// TaskBoardEntry is one kanban board (department lane) as the board rail draws it.
+export type TaskBoardEntry = {
+  id: number | undefined;
+  name: string | undefined;
+  // The enum this board had before custom boards; UNKNOWN for a board created in the admin.
+  // Lets a client translate an enum it stored earlier (e.g. the last open board) into an id.
+  legacyBoard: TaskBoard | undefined;
+  position: number | undefined;
+  taskCount: number | undefined;
+  archivedTaskCount: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // TaskCommentInsert is the writable payload for a comment. author is set

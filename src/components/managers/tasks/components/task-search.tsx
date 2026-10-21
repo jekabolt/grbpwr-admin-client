@@ -1,8 +1,9 @@
 import { cn } from 'lib/utility';
 import { Fragment } from 'react';
 import { Button, Chip, ChipRow, Input, Pill, Text } from 'ui';
-import type { Task, TaskBoard } from '../api/types';
-import { BOARD_LABEL, STATUS_LABEL } from '../utils/meta';
+import type { Task } from '../api/types';
+import { boardNameOf, useTaskBoards } from '../hooks/useTasks';
+import { STATUS_LABEL } from '../utils/meta';
 import { groupByBoard, highlightParts, idQuery, TaskHit } from '../utils/search';
 
 /**
@@ -54,13 +55,13 @@ export function TaskSearchField({
 export function TaskSearchScope({
   allBoards,
   onScope,
-  board,
+  boardName,
   count,
   className,
 }: {
   allBoards: boolean;
   onScope: (allBoards: boolean) => void;
-  board: TaskBoard;
+  boardName: string;
   count: number | undefined;
   className?: string;
 }) {
@@ -80,7 +81,7 @@ export function TaskSearchScope({
         onClick={() => onScope(false)}
         className='min-h-11 sm:min-h-0'
       >
-        {BOARD_LABEL[board]}
+        {boardName}
       </Chip>
       {count !== undefined && (
         <Text size='micro' variant='label' component='span' className='tabular-nums'>
@@ -111,12 +112,13 @@ function Marked({ text, query }: { text: string; query: string }) {
 function ResultRow({
   hit,
   query,
-  showBoard,
+  boardName,
   onOpen,
 }: {
   hit: TaskHit;
   query: string;
-  showBoard: boolean;
+  /** Set = the row names its board (a flat list); grouped results leave it out. */
+  boardName?: string;
   onOpen: (task: Task) => void;
 }) {
   const { task, field, snippet } = hit;
@@ -153,7 +155,7 @@ function ResultRow({
         )}
       </span>
       <span className='ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1'>
-        {showBoard && <Pill>{BOARD_LABEL[task.board]}</Pill>}
+        {!!boardName && <Pill>{boardName}</Pill>}
         {archived ? <Pill tone='ink'>archived</Pill> : <Pill>{STATUS_LABEL[task.status]}</Pill>}
       </span>
     </Button>
@@ -170,6 +172,7 @@ export function TaskSearchResults({
   query: string;
   onOpen: (task: Task) => void;
 }) {
+  const { data: boards } = useTaskBoards();
   if (hits.length === 0) {
     return (
       <div className='border border-borderColor bg-bgColor px-2.5 py-6 text-center max-sm:border-x-0'>
@@ -182,7 +185,7 @@ export function TaskSearchResults({
   return (
     <div className='border border-borderColor bg-pageBg max-sm:border-x-0'>
       {groupByBoard(hits).map((g) => (
-        <section key={g.board} aria-label={BOARD_LABEL[g.board]}>
+        <section key={g.boardId} aria-label={boardNameOf(boards, g.boardId)}>
           <div className='flex justify-between px-4 pb-1 pt-3 sm:px-2.5 sm:pt-2.5'>
             <Text
               size='nano'
@@ -191,14 +194,14 @@ export function TaskSearchResults({
               component='span'
               className='text-labelColor'
             >
-              {BOARD_LABEL[g.board]}
+              {boardNameOf(boards, g.boardId)}
             </Text>
             <Text size='nano' variant='label' component='span' className='tabular-nums'>
               {g.hits.length}
             </Text>
           </div>
           {g.hits.map((h) => (
-            <ResultRow key={h.task.id} hit={h} query={query} showBoard={false} onOpen={onOpen} />
+            <ResultRow key={h.task.id} hit={h} query={query} onOpen={onOpen} />
           ))}
         </section>
       ))}

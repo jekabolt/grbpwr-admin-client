@@ -15,11 +15,11 @@ export function applyMove(
   const moving = tasks.find((t) => t.id === id);
   if (!moving) return tasks;
 
-  const board = moving.board;
+  const board = moving.boardId;
   const sourceStatus = moving.status;
 
-  const otherBoards = tasks.filter((t) => t.board !== board);
-  const boardTasks = tasks.filter((t) => t.board === board && t.id !== id);
+  const otherBoards = tasks.filter((t) => t.boardId !== board);
+  const boardTasks = tasks.filter((t) => t.boardId === board && t.id !== id);
 
   // Rebuild the target column with the moving card inserted at the clamped index.
   const targetCol = boardTasks

@@ -20,6 +20,17 @@ export type TaskBoard =
   | 'TASK_BOARD_SOURCING'
   | 'TASK_BOARD_CONTENT';
 
+// A board as the rail draws it (common.TaskBoardEntry). Boards are rows now, addressed by id;
+// `legacyBoard` maps one of the six seeded boards back to the old enum (UNKNOWN for a new one).
+export interface TaskBoardEntry {
+  id: number;
+  name: string;
+  legacyBoard: TaskBoard;
+  position: number;
+  taskCount: number;
+  archivedTaskCount: number;
+}
+
 export type TaskStatus =
   | 'TASK_STATUS_UNKNOWN'
   | 'TASK_STATUS_BACKLOG'
@@ -157,7 +168,7 @@ export interface TaskRelation {
   kind: TaskRelationKind;
   title: string;
   status: TaskStatus;
-  board: TaskBoard;
+  boardId: number;
   archived: boolean;
 }
 
@@ -173,7 +184,7 @@ export interface TaskStatusChange {
 export interface Task {
   id: number;
   task: TaskInsert;
-  board: TaskBoard;
+  boardId: number;
   status: TaskStatus;
   position: number;
   media: TaskMedia[];
@@ -236,7 +247,7 @@ export interface TaskComment {
 
 // Filters for ListTasks (all optional; empty/0 = no filter).
 export interface ListTasksFilter {
-  board?: TaskBoard;
+  boardId?: number;
   status?: TaskStatus;
   assignee?: string;
   techCardId?: number;
@@ -262,7 +273,7 @@ export interface ListTasksFilter {
   includeArchived?: boolean; // false/undefined = active only; true = include archived
   /**
    * Free-text search across title, description, comments and checklist (backend T2). Empty =
-   * no search. With no `board` it spans every board.
+   * no search. With no `boardId` it spans every board.
    */
   query?: string;
 }
@@ -270,7 +281,7 @@ export interface ListTasksFilter {
 // Form values = content + its (initial or edited) placement. The modal edits
 // board/column inline; on submit the page splits this back into content +
 // placement (AddTask sets both; edits go through UpdateTask + MoveTask).
-export type TaskFormValues = TaskInsert & { board: TaskBoard; status: TaskStatus };
+export type TaskFormValues = TaskInsert & { boardId: number; status: TaskStatus };
 
 // A blank writable payload (content only).
 export function emptyTaskInsert(): TaskInsert {
@@ -298,6 +309,6 @@ export function emptyTaskInsert(): TaskInsert {
 }
 
 // A blank form seeded with the create target's placement.
-export function emptyFormValues(board: TaskBoard, status: TaskStatus): TaskFormValues {
-  return { ...emptyTaskInsert(), board, status };
+export function emptyFormValues(boardId: number, status: TaskStatus): TaskFormValues {
+  return { ...emptyTaskInsert(), boardId, status };
 }

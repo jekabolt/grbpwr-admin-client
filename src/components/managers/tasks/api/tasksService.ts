@@ -5,6 +5,7 @@ import type {
   common_TaskChecklistItem,
   common_TaskComment,
   common_TaskInsert,
+  common_TaskBoardEntry,
   common_TaskLink,
   common_TaskMediaAnnotations,
   common_TechCardAnnotation,
@@ -24,7 +25,7 @@ import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import {
   ListTasksFilter,
   Task,
-  TaskBoard,
+  TaskBoardEntry,
   TaskChecklistItem,
   TaskComment,
   TaskInsert,
@@ -50,12 +51,17 @@ export interface TasksService {
    */
   addTask(
     content: TaskInsert,
-    board: TaskBoard,
+    boardId: number,
     status: TaskStatus,
     parentTaskId?: number,
   ): Promise<{ id: number }>;
   updateTask(id: number, content: TaskInsert): Promise<void>;
-  moveTask(id: number, board: TaskBoard, status: TaskStatus, position: number): Promise<void>;
+  moveTask(id: number, boardId: number, status: TaskStatus, position: number): Promise<void>;
+  listBoards(): Promise<TaskBoardEntry[]>;
+  addBoard(name: string): Promise<TaskBoardEntry>;
+  renameBoard(id: number, name: string): Promise<TaskBoardEntry>;
+  /** `moveToId` receives the board's tasks; required by the server when it has any. */
+  deleteBoard(id: number, moveToId: number): Promise<void>;
   deleteTask(id: number): Promise<void>;
   archiveTask(id: number): Promise<void>;
   unarchiveTask(id: number): Promise<void>;
@@ -232,7 +238,7 @@ function mapRelation(l: common_TaskLink): TaskRelation {
     kind: (l.kind ?? 'TASK_LINK_KIND_UNKNOWN') as TaskRelationKind,
     title: l.title ?? '',
     status: l.status ?? 'TASK_STATUS_UNKNOWN',
-    board: l.board ?? 'TASK_BOARD_UNKNOWN',
+    boardId: l.boardId ?? 0,
     archived: !!l.archived,
   };
 }
@@ -257,7 +263,7 @@ export function mapTask(t: common_Task): Task {
   return {
     id: t.id ?? 0,
     task: mapInsert(t.task),
-    board: t.board ?? 'TASK_BOARD_UNKNOWN',
+    boardId: t.boardId ?? 0,
     status: t.status ?? 'TASK_STATUS_UNKNOWN',
     position: t.position ?? 0,
     media,
@@ -276,6 +282,17 @@ export function mapTask(t: common_Task): Task {
     relations: (t.links ?? []).map(mapRelation).filter((l) => l.taskId > 0),
     subtaskTotal: t.subtaskTotal ?? 0,
     subtaskDone: t.subtaskDone ?? 0,
+  };
+}
+
+export function mapBoard(b: common_TaskBoardEntry | undefined): TaskBoardEntry {
+  return {
+    id: b?.id ?? 0,
+    name: b?.name ?? '',
+    legacyBoard: b?.legacyBoard ?? 'TASK_BOARD_UNKNOWN',
+    position: b?.position ?? 0,
+    taskCount: b?.taskCount ?? 0,
+    archivedTaskCount: b?.archivedTaskCount ?? 0,
   };
 }
 
@@ -309,7 +326,8 @@ export const tasksService: TasksService = {
   listTasks: (filter) =>
     adminService
       .ListTasks({
-        board: filter.board,
+        board: undefined,
+        boardId: filter.boardId ?? 0,
         status: filter.status,
         assignee: filter.assignee,
         // Дети берутся ФИЛЬТРОМ ЭТОГО ЖЕ СПИСКА, а не отдельным RPC: тот же ответ, просто суженный.
@@ -327,6 +345,8 @@ export const tasksService: TasksService = {
         projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
         query: filter.query ?? '',
+        closedFrom: undefined,
+        closedTo: undefined,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
@@ -349,11 +369,12 @@ export const tasksService: TasksService = {
         : undefined,
     ),
 
-  addTask: (content, board, status, parentTaskId) =>
+  addTask: (content, boardId, status, parentTaskId) =>
     adminService
       .AddTask({
         task: taskInsertToWire(content),
-        board,
+        board: undefined,
+        boardId,
         status,
         // «Создать сабтаску» — ОДИН вызов, а не AddTask + SetTaskParent: провал второго оставил бы
         // карточку на верхнем уровне, и о ней никто бы не узнал, потому что искали её в детях.
@@ -364,8 +385,23 @@ export const tasksService: TasksService = {
   updateTask: (id, content) =>
     adminService.UpdateTask({ id, task: taskInsertToWire(content) }).then(() => undefined),
 
-  moveTask: (id, board, status, position) =>
-    adminService.MoveTask({ id, board, status, position }).then(() => undefined),
+  moveTask: (id, boardId, status, position) =>
+    adminService
+      .MoveTask({ id, board: undefined, boardId, status, position })
+      .then(() => undefined),
+
+  listBoards: () =>
+    adminService
+      .ListTaskBoards({})
+      .then((r) => (r.boards ?? []).map(mapBoard).filter((b) => b.id > 0)),
+
+  addBoard: (name) => adminService.AddTaskBoard({ name }).then((r) => mapBoard(r.board)),
+
+  renameBoard: (id, name) =>
+    adminService.UpdateTaskBoard({ id, name }).then((r) => mapBoard(r.board)),
+
+  deleteBoard: (id, moveToId) =>
+    adminService.DeleteTaskBoard({ id, moveToId }).then(() => undefined),
 
   deleteTask: (id) => adminService.DeleteTask({ id }).then(() => undefined),
 

@@ -210,7 +210,7 @@ export function Board({
 
     move.mutate({
       id: activeIdNum,
-      board: dragged.board,
+      boardId: dragged.boardId,
       status: targetStatus,
       position: targetIndex,
     });
@@ -231,7 +231,7 @@ export function Board({
     );
     const position = fullByStatus[status].filter((t) => t.id !== task.id).length;
     move.mutate(
-      { id: task.id, board: task.board, status, position },
+      { id: task.id, boardId: task.boardId, status, position },
       {
         onSuccess: () =>
           showMessage(`moved to ${STATUS_LABEL[status]}`, 'success', {
@@ -239,7 +239,7 @@ export function Board({
             onClick: () =>
               move.mutate({
                 id: task.id,
-                board: task.board,
+                boardId: task.boardId,
                 status: prevStatus,
                 position: prevIndex,
               }),

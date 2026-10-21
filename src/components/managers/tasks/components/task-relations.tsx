@@ -21,9 +21,11 @@ import {
   useSetTaskParent,
   useTask,
   useTasks,
+  boardNameOf,
+  useTaskBoards,
 } from '../hooks/useTasks';
 import { emptyTaskInsert } from '../api/types';
-import { BOARD_LABEL, STATUS_LABEL } from '../utils/meta';
+import { STATUS_LABEL } from '../utils/meta';
 import { RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relations';
 
 /**
@@ -242,6 +244,7 @@ export function TaskRelations({
   const addRelation = useAddTaskRelation();
   const deleteRelation = useDeleteTaskRelation();
   const createTask = useCreateTask();
+  const { data: boards } = useTaskBoards();
 
   const [kind, setKind] = useState<TaskRelationKind>('TASK_LINK_KIND_BLOCKED_BY');
   const [subtitle, setSubtitle] = useState('');
@@ -277,7 +280,7 @@ export function TaskRelations({
         // Наследовать статус родителя было бы неправдой: у только что заведённой работы нет
         // причин быть «в ревью» только потому, что там её родитель.
         content: { ...emptyTaskInsert(), title },
-        board: task.board,
+        boardId: task.boardId,
         status: 'TASK_STATUS_TODO',
         parentTaskId: task.id,
       });
@@ -343,7 +346,7 @@ export function TaskRelations({
             id={task.parentTaskId}
             title={parent?.task.title ?? `#${task.parentTaskId}`}
             status={parent ? STATUS_LABEL[parent.status] : ''}
-            board={parent ? BOARD_LABEL[parent.board] : undefined}
+            board={parent ? boardNameOf(boards, parent.boardId) : undefined}
             archived={!!parent?.archivedAt}
             onRemove={
               canWrite ? () => setParent.mutate({ id: task.id, parentTaskId: 0 }) : undefined
@@ -446,7 +449,7 @@ export function TaskRelations({
                       id={r.taskId}
                       title={r.title}
                       status={STATUS_LABEL[r.status]}
-                      board={BOARD_LABEL[r.board]}
+                      board={boardNameOf(boards, r.boardId)}
                       archived={r.archived}
                       muted={r.status === 'TASK_STATUS_DONE'}
                       onRemove={
