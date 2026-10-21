@@ -90,12 +90,7 @@ export function MeasurementsPage({
               </HeaderNote>
             }
           />
-          {release && (
-            <p className='mb-1 text-nano uppercase text-labelColor'>
-              live data — the size chart is not part of the revision snapshot and is printed as of
-              today
-            </p>
-          )}
+          {release && <p className='mb-1 text-nano uppercase text-labelColor'>live · not in rev</p>}
           <div
             className='flex items-center justify-center gap-6 border border-borderColor px-4'
             style={{ height: figureHeight }}

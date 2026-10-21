@@ -2309,7 +2309,7 @@ export function TechPackDocument({
                           <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
                           {draft && (
                             <div className='font-bold uppercase'>
-                              ⚠ draft — partial layout, do not cut
+                              ⚠ draft · do not cut
                               {wireInt(mk.totalCount) > wireInt(mk.placedCount)
                                 ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
                                 : ''}
