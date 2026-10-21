@@ -60,6 +60,14 @@ const drawBox = (found: FoundPiece | null): { w: number; h: number } | null => {
 };
 
 const PAIR = /^(left|right)\s+(.+)$/i;
+const INTERNAL_PIECE_ID =
+  /^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i;
+
+/** A line key is useful as identity, but only a human-authored key is useful as a printed code. */
+const pieceCode = (lineKey?: string): string => {
+  const value = clean(lineKey);
+  return INTERNAL_PIECE_ID.test(value) ? '' : value.toUpperCase();
+};
 
 /**
  * «Left flap» + «Right flap» of one fabric print as one tile «flap · 2 pcs · L+R»: the workshop
@@ -112,7 +120,7 @@ export function derivePieces(techCard: common_TechCard, geometry?: TechpackPiece
           {
             key: pieceKey(piece, index),
             name: clean(piece.name),
-            code: clean(piece.lineKey).toUpperCase(),
+            code: pieceCode(piece.lineKey),
             qty,
             grainline: grainlineText(piece.grainline),
             symmetry: cutSymmetryPrintCaption(piece.cutSymmetry, piece.piecesPerGarment),
