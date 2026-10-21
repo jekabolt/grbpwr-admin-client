@@ -1,8 +1,7 @@
 // «⋯» of a sheet row: the versions of one pattern sheet. The active file first (it carries the
 // download), then TechCardSizePattern.history newest first (each with `restore` when restorable).
 // Restore itself goes through restoreSheetVersion (nesting/reupload-session.ts).
-import { adminService } from 'api/api';
-import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-http/admin';
+import type { common_TechCardPatternRevision } from 'api/proto-http/admin';
 import { useState, type ReactNode } from 'react';
 import { Button, ConfirmationModal, GenericPopover, Text } from 'ui';
 
@@ -40,15 +39,15 @@ export function sheetVersions(
       url: h.url ?? '',
       fileName: h.fileName ?? '',
       sha256: h.sha256 ?? '',
-      // Not on the generated type yet (TechCardPatternRevision.snapshot_id): read when present.
-      snapshotId: Number((h as { snapshotId?: number | string }).snapshotId ?? 0) || 0,
+      snapshotId: Number(h.snapshotId ?? 0) || 0,
       current: false,
     }));
   const rev = active.version && active.version > 0 ? active.version : null;
   return [
     {
       key: 'current',
-      revision: rev ?? (older.length > 0 ? (older[0].revision ?? older.length) + 1 : null),
+      // A restored sheet keeps its old number: the active row's own revision, never a count.
+      revision: rev,
       at: active.uploadedAt ?? '',
       url: active.url ?? '',
       fileName: active.filename ?? '',
@@ -64,20 +63,6 @@ function ddmm(at: string): string {
   const d = at ? new Date(at) : null;
   if (!d || Number.isNaN(d.getTime()) || d.getTime() <= 0) return '';
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-// ─── SWITCH POINT: the snapshot restore RPC ─────────────────────────────────────────────────
-// RestoreTechCardSnapshot may not be in the generated client yet. Looked up at run time so this
-// compiles before and after the proto regeneration; null = not there, restore re-applies the file.
-export type SnapshotRestoreRpc = (req: {
-  techCardId: number;
-  snapshotId: number;
-  expectedLockVersion: number;
-}) => Promise<{ techCard?: common_TechCard }>;
-
-export function snapshotRestoreRpc(): SnapshotRestoreRpc | null {
-  const fn: unknown = (adminService as unknown as Record<string, unknown>).RestoreTechCardSnapshot;
-  return typeof fn === 'function' ? (fn.bind(adminService) as SnapshotRestoreRpc) : null;
 }
 
 export function SheetVersionsModal({

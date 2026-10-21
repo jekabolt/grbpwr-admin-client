@@ -14,6 +14,7 @@ import {
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_TechCard, common_TechCardPatternRevision } from 'api/proto-http/admin';
+import { adminService } from 'api/api';
 import type { PieceDTO } from 'lib/nesting/types';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import {
@@ -124,12 +125,7 @@ import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
 import { PatternExportItems } from './pattern-export/export-menu';
-import {
-  SheetVersionsModal,
-  sheetVersions,
-  snapshotRestoreRpc,
-  type SheetVersion,
-} from './sheet-versions';
+import { SheetVersionsModal, sheetVersions, type SheetVersion } from './sheet-versions';
 import { useTechCardStaging } from './useTechCardStaging';
 import {
   RECONCILE_PARSE,
@@ -1340,34 +1336,31 @@ export function PatternsField({
   const restoreRef = useRef<(rev: SheetRevisionRef) => Promise<RestoreOutcome>>(
     async () => 'unavailable',
   );
-  // RESTORE THE CARD SNAPSHOT of that version when it has one and the client has the RPC: the card
-  // comes back whole (pieces, steps, sheet), no marks, no jump. The page's read judge (index.tsx)
-  // takes the returned card from the query cache and rebases the form onto it.
-  async function restoreSnapshot(snapshotId: number): Promise<RestoreOutcome | null> {
-    const rpc = snapshotRestoreRpc();
-    if (!rpc || !techCardId) return null;
+  // RESTORE THE CARD SNAPSHOT of that version: the card comes back whole (pieces, steps, sheet), no
+  // marks, no jump. The card is then re-read through GetTechCard (the restore answer has no
+  // pattern_viewer_token); index.tsx judges that read — a pristine form is rebased onto it, unsaved
+  // body work stops at its conflict dialog.
+  async function restoreSnapshot(snapshotId: number): Promise<RestoreOutcome> {
+    if (!techCardId) return 'unavailable';
     const stored =
       queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
     try {
-      const res = await rpc({
+      await adminService.RestoreTechCardSnapshot({
         techCardId,
         snapshotId,
         expectedLockVersion: stored?.lockVersion ?? 0,
       });
-      if (!res?.techCard) throw new Error('no card');
-      queryClient.setQueryData(techCardKeys.detail(techCardId), res.techCard);
-      return 'applied';
     } catch (e) {
       console.error('snapshot restore failed', e);
-      useSnackBarStore.getState().showMessage('not restored', 'error');
+      const said = e instanceof Error ? e.message.trim() : '';
+      useSnackBarStore.getState().showMessage(said || 'not restored', 'error');
       return 'refused';
     }
+    await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+    return 'applied';
   }
   restoreRef.current = async (rev) => {
-    if ((rev.snapshotId ?? 0) > 0) {
-      const done = await restoreSnapshot(rev.snapshotId ?? 0);
-      if (done) return done;
-    }
+    if ((rev.snapshotId ?? 0) > 0) return restoreSnapshot(rev.snapshotId ?? 0);
     const row = ((getValues('patterns') ?? []) as PatternRow[]).find(
       (r) => (r.lineKey ?? '') === rev.sheetLineKey,
     );
@@ -1741,11 +1734,10 @@ export function PatternsField({
     if (!row) return null;
     const versions = sheetVersions(row, (row.lineKey && historyByLine.get(row.lineKey)) || []);
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
-    const canSnapshot = !!techCardId && snapshotRestoreRpc() != null;
     const canRestore = (v: SheetVersion) =>
       canEdit &&
       !isSubmitting &&
-      ((v.snapshotId > 0 && canSnapshot) ||
+      ((v.snapshotId > 0 && !!techCardId) ||
         (!!rowScope && slotHasSheet(rowScope) && isDxfUrl(v.url)));
     const url = row.url ?? '';
     const label = labelOf(row);
@@ -1816,9 +1808,8 @@ export function PatternsField({
     const nameTitle =
       [row.filename, converted ? convertedTitle(converted) : ''].filter(Boolean).join('\n') ||
       undefined;
-    const history = (row.lineKey && historyByLine.get(row.lineKey)) || [];
-    // v{N}: the row's own revision; a legacy row without one counts its history.
-    const shownRev = rev ?? (history.length > 0 ? history.length + 1 : null);
+    // v{N}: the active row's own revision (a restored sheet keeps its old number).
+    const shownRev = rev;
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
     const replaceable = !!rowGroup && canDrop;
     const thumb =
