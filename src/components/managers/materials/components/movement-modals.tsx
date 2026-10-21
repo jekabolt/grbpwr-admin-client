@@ -91,7 +91,7 @@ function MovementDialog({
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[440px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>{title}</DialogPrimitives.Title>
+            <DialogPrimitives.Title className='text-lg'>{title}</DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Close />
             </DialogPrimitives.Close>
@@ -228,7 +228,7 @@ export function ReceiveStockModal({
       posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      failed(target, 'not received', e, setFail);
+      failed(target, 'not moved in', e, setFail);
     }
   };
 
@@ -236,12 +236,12 @@ export function ReceiveStockModal({
     <MovementDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`receive · ${target.materialLabel}`}
+      title={`in · ${target.materialLabel}`}
       busy={receive.isPending}
       onSubmit={submit}
-      submitLabel='receive'
+      submitLabel='in'
       fail={fail}
-      failVerb='not received'
+      failVerb='not moved in'
     >
       <Field label={`quantity (${target.unit || 'unit'})`}>
         <input
@@ -372,7 +372,7 @@ export function ReceiveStockModal({
       ) : (
         <button
           type='button'
-          className='self-start text-small uppercase underline text-borderColor'
+          className='self-start text-small underline text-borderColor'
           onClick={() => setShowLot(true)}
         >
           + record lot / roll (optional)
@@ -502,7 +502,7 @@ export function IssueStockModal({
       posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      failed(target, isReturn ? 'not returned' : 'not issued', e, setFail);
+      failed(target, isReturn ? 'not returned' : 'not moved out', e, setFail);
     }
   };
 
@@ -510,12 +510,12 @@ export function IssueStockModal({
     <MovementDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`${isReturn ? 'return' : 'issue'} · ${target.materialLabel}`}
+      title={`${isReturn ? 'return' : 'out'} · ${target.materialLabel}`}
       busy={issue.isPending}
       onSubmit={submit}
-      submitLabel={isReturn ? 'return' : 'issue'}
+      submitLabel={isReturn ? 'return' : 'out'}
       fail={fail}
-      failVerb={isReturn ? 'not returned' : 'not issued'}
+      failVerb={isReturn ? 'not returned' : 'not moved out'}
     >
       {target.onHand != null ? (
         <Text variant='inactive' size='small'>
@@ -717,7 +717,7 @@ export function AdjustStockModal({
       posted(target, res.movement);
       onOpenChange(false);
     } catch (e) {
-      failed(target, 'not posted', e, setFail);
+      failed(target, 'not counted', e, setFail);
     }
   };
 
@@ -725,12 +725,12 @@ export function AdjustStockModal({
     <MovementDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`adjust · ${target.materialLabel}`}
+      title={`count · ${target.materialLabel}`}
       busy={adjust.isPending}
       onSubmit={submit}
-      submitLabel='post'
+      submitLabel='count'
       fail={fail}
-      failVerb='not posted'
+      failVerb='not counted'
     >
       {target.onHand != null ? (
         <Text variant='inactive' size='small'>
