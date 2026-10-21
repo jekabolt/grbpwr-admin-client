@@ -1,6 +1,6 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { format } from 'date-fns';
+import { differenceInCalendarDays, format } from 'date-fns';
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
@@ -19,6 +19,8 @@ import {
   SectionStack,
   Select,
   Text,
+  Tooltip,
+  TooltipProvider,
 } from 'ui';
 import { TaskMediaAnnotations, TaskPriority, TaskStatus, TaskStatusChange } from '../api/types';
 import { AvatarStack } from '../components/avatar-stack';
@@ -285,6 +287,10 @@ export function TaskDetail() {
   }
 
   const t = task.task;
+  const createdAt = task.createdAt ? new Date(task.createdAt) : undefined;
+  const createdDays = createdAt ? differenceInCalendarDays(new Date(), createdAt) : 0;
+  const createdAgo =
+    createdDays <= 0 ? 'today' : createdDays === 1 ? '1 day ago' : `${createdDays} days ago`;
   const due = dueMeta(t.dueDate, task.status === 'TASK_STATUS_DONE' || !!task.archivedAt);
   const links = taskLinks(t);
   // «Моя» — если я В СПИСКЕ, а не первый: витрина не решает, чья это работа.
@@ -562,6 +568,11 @@ export function TaskDetail() {
                 {assignMeButton(false)}
                 {assigneeControl}
               </PropRow>
+              <PropRow label='created'>
+                <Text size='control' variant='label' component='span' className='uppercase'>
+                  {createdAt ? `${format(createdAt, 'PP')} · ${createdAgo}` : <EmptyCell />}
+                </Text>
+              </PropRow>
               {moreButton('flex min-h-11 w-full items-center justify-between')}
               {moreOpen && (
                 <>
@@ -571,16 +582,6 @@ export function TaskDetail() {
                     )}
                   </PropRow>
                   <PropRow label='board'>{boardSelect(ROW_SELECT)}</PropRow>
-                  <PropRow label='created'>
-                    <Text size='control' variant='label' component='span' className='uppercase'>
-                      {task.createdBy ? `${task.createdBy} · ` : ''}
-                      {task.createdAt ? (
-                        format(new Date(task.createdAt), 'PP, HH:mm')
-                      ) : (
-                        <EmptyCell />
-                      )}
-                    </Text>
-                  </PropRow>
                 </>
               )}
             </div>
@@ -620,6 +621,24 @@ export function TaskDetail() {
               </div>
               {assignMeButton(true)}
               {moreButton(cn(CHIP_BOX, 'text-labelColor hover:text-textColor'))}
+              {createdAt && (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip
+                    trigger={
+                      <span tabIndex={0} className={cn(CHIP_BOX, 'cursor-default')}>
+                        <Text size='control' component='span' className='uppercase text-labelColor'>
+                          created
+                        </Text>
+                        <Text size='control' component='span' className='uppercase'>
+                          {format(createdAt, 'PP')}
+                        </Text>
+                      </span>
+                    }
+                  >
+                    {task.createdBy ? `${createdAgo} · ${task.createdBy}` : createdAgo}
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             {moreOpen && (
               <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
@@ -630,15 +649,6 @@ export function TaskDetail() {
                   className='uppercase tracking-label'
                 >
                   started {task.startedAt ? format(new Date(task.startedAt), 'PP') : <EmptyCell />}
-                </Text>
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                >
-                  created {task.createdBy ? `${task.createdBy} · ` : ''}
-                  {task.createdAt ? format(new Date(task.createdAt), 'PP, HH:mm') : <EmptyCell />}
                 </Text>
                 {t.labels.map((l) => (
                   <Pill key={l} tone='mut'>
