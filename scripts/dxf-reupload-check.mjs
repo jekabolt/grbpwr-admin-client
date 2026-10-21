@@ -79,7 +79,7 @@ function card69(M, base) {
   return c;
 }
 
-const formCard = (c, patterns) => ({
+const formCard = (c, patterns, extra = {}) => ({
   patterns,
   pieces: c.pieces,
   aliases: c.aliases,
@@ -90,6 +90,7 @@ const formCard = (c, patterns) => ({
   isDxf: (u) => /\.dxf$/i.test(u),
   sizeTokens: SIZES,
   externalRefs: {},
+  ...extra,
 });
 
 // Зависимости, как у panels: download/upload — память, parse — parseSheets на RECONCILE_PARSE.
@@ -127,7 +128,10 @@ function makeDeps(M, store, log, faults = {}) {
         sha256: await M.sha256Hex(file.bytes),
       };
     },
-    otherSheets: async () => [],
+    otherSheets: async () => {
+      if (faults.other) throw new Error('other sheet offline');
+      return [];
+    },
     mintKey: () => `new-${++minted}`,
     makePiece: (s) => ({
       lineKey: s.lineKey,
@@ -224,17 +228,18 @@ async function main() {
 
   // Строка листа без записанного дайджеста (до 0423) — sha считается по скачанным байтам.
   const sheetRow = (sha256 = '') => ({
+    lineKey: 'sheet-main',
     url: BASE_URL,
     filename: 'allsizes-merged.dxf',
     sha256,
     ...MAIN,
   });
   const run = async (file, opts = {}) => {
-    const store = new Map([[BASE_URL, B.base]]);
+    const store = new Map([[BASE_URL, B.base], ...(opts.store ?? [])]);
     const log = freshLog();
     const c = opts.card ?? card;
     const out = await M.reuploadSheet(
-      formCard(c, opts.patterns ?? [sheetRow(opts.sha ?? '')]),
+      formCard(c, opts.patterns ?? [sheetRow(opts.sha ?? '')], opts.extra),
       file,
       makeDeps(M, store, log, opts.faults),
     );
@@ -426,33 +431,11 @@ async function main() {
         'правка: reshaped снят, orphan стоит',
       );
 
-      // восстановление прошлой версии = та же заливка старого файла (одна точка входа)
-      const after = { pieces: out.pieces, aliases: out.aliases, operations: out.operations };
-      const store = new Map([[out.row.url, B.gCombo]]);
-      store.set(BASE_URL, B.base);
-      const rlog = freshLog();
-      const deps = makeDeps(M, store, rlog);
+      // восстановление версии: одна точка входа, только снимок (snapshotId > 0), без перезаливки
+      const calls = [];
       const unsubscribe = M.provideSheetRestorer(async (rev) => {
-        const res = await M.reuploadSheet(
-          formCard(after, [
-            { url: out.row.url, filename: 'g-combo.dxf', sha256: out.row.sha256, ...MAIN },
-          ]),
-          { name: rev.fileName ?? 'restored.dxf', bytes: store.get(rev.url) },
-          deps,
-        );
-        if (res.kind === 'applied') table('restore v6 · g-combo → base (re-apply today)', res);
-        if (res.kind === 'applied') {
-          // Известная дыра перезаливки как восстановления (L3R делает это RPC снимка): призрак не
-          // оживает — блок CLR_3 становится НОВОЙ деталью, шаги остаются на старой, метки едут.
-          const dup = res.result.addedPieceKeys.map(
-            (k) => res.pieces.find((p) => p.lineKey === k)?.name,
-          );
-          const stuck = M.unaliasedPieceKeys(res.pieces, res.aliases);
-          console.log(
-            `restore gap: new pieces [${dup.join(', ')}], unaliased still in steps [${stuck.join(', ')}], marks carried ! ${res.operations.filter((o) => o.review).length}`,
-          );
-        }
-        return res.kind === 'applied' ? 'applied' : res.kind === 'noop' ? 'noop' : 'refused';
+        calls.push(rev.snapshotId ?? 0);
+        return (rev.snapshotId ?? 0) > 0 ? 'applied' : 'unavailable';
       });
       const restored = await M.restoreSheetVersion({
         sheetLineKey: 'sheet-main',
@@ -460,9 +443,16 @@ async function main() {
         fileName: 'allsizes-merged.dxf',
         revision: 6,
         sha256: baseSha,
+        snapshotId: 41,
       });
+      const bare = await M.restoreSheetVersion({ sheetLineKey: 'sheet-main', url: BASE_URL });
       unsubscribe();
-      is(tag, restored, 'applied', 'restoreSheetVersion → applied');
+      is(
+        tag,
+        [restored, bare, calls],
+        ['applied', 'unavailable', [41, 0]],
+        'restore: только снимок',
+      );
       is(
         tag,
         await M.restoreSheetVersion({ sheetLineKey: 'sheet-main', url: BASE_URL }),
@@ -475,7 +465,10 @@ async function main() {
   // ── g4-split: BP → BP_U + BP_D; один join перед «back», метка только на нём ──────────────
   {
     const tag = 'g4-split';
-    const { out } = await run({ name: 'g4-split.dxf', bytes: B.g4split });
+    // дефекты: 50 («back») и 60 едут за join, 15 — не позиционный, стоит
+    const issues = [{ operationNumber: 50 }, { operationNumber: 60 }, { operationNumber: 15 }];
+    const { out } = await run({ name: 'g4-split.dxf', bytes: B.g4split }, { extra: { issues } });
+    if (out.kind === 'applied') is(tag, out.issueNumbers, [60, 70, 15], 'issues за join');
     is(tag, out.kind, 'applied', 'исход');
     if (out.kind === 'applied') {
       table('g4-split · base → g4-split.dxf (card 69 shape)', out);
@@ -500,6 +493,7 @@ async function main() {
         '4',
         'переход на join',
       );
+      is(tag, out.result.opIndexOf, [0, 1, 2, 3, 5, 6, 7, 8, 9], 'старый индекс → новый');
       yes(
         tag,
         M.sweepOf({ pieces: out.pieces, operations: out.operations }).length === 0,
@@ -559,22 +553,144 @@ async function main() {
     is(tag, [u.out.kind, u.out.why], ['refused', 'upload'], 'загрузка');
     const empty = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { patterns: [] });
     is(tag, empty.out.kind, 'first', 'пустой слот — первая заливка');
+    const o = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { faults: { other: true } });
+    is(
+      tag,
+      [o.out.kind, o.out.why, o.log.uploads.length],
+      ['refused', 'parse', 0],
+      'листы других слотов не прочитаны',
+    );
   }
 
-  // ── причина снимка: только первое сохранение после перезалива ─────────────────────────────
+  // ── занятый слот: строка явная, никогда не «первая заливка» (L4c) ─────────────────────────
+  {
+    const tag = 'target';
+    // тот же лист с переименованными блоками: ни одного общего с base
+    const renamed = (prefix) => {
+      let text = M.bytesToLatin1(B.base);
+      for (const b of [...new Set(baseParse.blockNames)].sort((x, y) => y.length - x.length))
+        text = text.replace(
+          new RegExp(`(\\n)${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\r?\\n)`, 'g'),
+          `$1${prefix}${b}$2`,
+        );
+      return Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+    };
+    const zz = renamed('ZZ');
+    const qq = renamed('QQ');
+    const zzParse = await M.parseSheets([{ name: 'zz.dxf', open: async () => zz.slice().buffer }], {
+      ...M.RECONCILE_PARSE,
+    });
+    const shared = zzParse.blockNames.filter((b) => baseParse.blockNames.includes(b));
+    yes(tag, zzParse.pieces.length > 0 && shared.length === 0, 'фикстура: лист без общих блоков');
+    const ZZ_URL = 'mem://v2/zz.dxf';
+    const two = [
+      { lineKey: 'sheet-zz', url: ZZ_URL, filename: 'zz.dxf', sha256: '', ...MAIN },
+      sheetRow(),
+    ];
+    const store = [[ZZ_URL, zz]];
+    const none = await run({ name: 'qq.dxf', bytes: qq }, { patterns: two, store });
+    is(
+      tag,
+      [none.out.kind, none.out.why, none.log.uploads.length],
+      ['refused', 'target', 0],
+      'два листа, общих блоков нет — отказ, не first',
+    );
+    const ghost = await run(
+      { name: 'g-combo.dxf', bytes: B.gCombo },
+      { extra: { target: 'sheet-gone' } },
+    );
+    is(tag, [ghost.out.kind, ghost.out.why], ['refused', 'target'], 'строки нет в слоте');
+    const pinned = await run(
+      { name: 'g-combo.dxf', bytes: B.gCombo },
+      { patterns: two, store, extra: { target: 'sheet-zz' } },
+    );
+    is(
+      tag,
+      pinned.out.kind === 'applied'
+        ? [pinned.out.rowIndex, pinned.out.rowId, pinned.out.replacedUrl]
+        : pinned.out.kind,
+      [0, 'sheet-zz', ZZ_URL],
+      'явная строка побеждает совпадение блоков',
+    );
+    const byBlocks = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { patterns: two, store });
+    is(
+      tag,
+      byBlocks.out.kind === 'applied'
+        ? [byBlocks.out.rowIndex, byBlocks.out.rowId]
+        : byBlocks.out.kind,
+      [1, 'sheet-main'],
+      'без явной — лист с общими блоками',
+    );
+    is(tag, M.sheetRowId({ url: 'mem://x.dxf' }), 'mem://x.dxf', 'строка без lineKey — по url');
+  }
+
+  // ── якорь шва держит деталь: призрак, не удаление (L4c) ───────────────────────────────────
+  {
+    const tag = 'seam-ref';
+    const inputs = ['BP', 'BP_1', 'BP_2', 'CLR_4', 'FP_L', 'FP_R', 'SL_L', 'SL_R'];
+    const c = M.cardFromSheet(
+      { pieces: baseParse.pieces, blockNames: baseParse.blockNames },
+      { scope: MAIN, sizeTokens: SIZES, inputs },
+    );
+    const refs = (seams) => M.externalPieceRefs(c.pieces, [], [], M.seamAnchorKeys(seams));
+    const bare = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { card: c });
+    const saved = await run(
+      { name: 'g-combo.dxf', bytes: B.gCombo },
+      {
+        card: c,
+        extra: {
+          externalRefs: refs([{ sideA: { parts: [{ pieceLineKey: K('CLR_3') }] }, sideB: {} }]),
+        },
+      },
+    );
+    const live = await run(
+      { name: 'g-combo.dxf', bytes: B.gCombo },
+      { card: c, extra: { externalRefs: refs([{ sideA: [{ piece: K('CLR_3') }], sideB: [] }]) } },
+    );
+    const fate = (r) =>
+      r.out.kind !== 'applied'
+        ? r.out.kind
+        : r.out.result.removedPieceKeys.includes(K('CLR_3'))
+          ? 'removed'
+          : r.out.result.ghostPieceKeys.includes(K('CLR_3'))
+            ? 'ghost'
+            : 'kept';
+    is(tag, [fate(bare), fate(saved), fate(live)], ['removed', 'ghost', 'ghost'], 'CLR_3 под швом');
+  }
+
+  // ── метки не слабеют: стоящая тяжелее плана остаётся (L4c) ────────────────────────────────
+  {
+    const tag = 'marks';
+    const c = card69(M, { pieces: baseParse.pieces, blockNames: baseParse.blockNames });
+    c.operations = c.operations.map((o, i) =>
+      i === 0 ? { ...o, review: 'orphan' } : i === 1 ? { ...o, review: 'split' } : o,
+    );
+    const { out } = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { card: c });
+    is(
+      tag,
+      out.kind === 'applied' ? reviewsOf(out.operations) : out.kind,
+      ['orphan', 'split', 'orphan', 'orphan', '', '', '', '', ''],
+      'orphan и split поверх reshaped стоят',
+    );
+  }
+
+  // ── причина снимка: привязана к пейлоаду с новым листом, снимается его успешным сейвом ────
   {
     const tag = 'snapshot';
-    M.armReuploadSnapshot(69);
-    const first = M.peekReuploadSnapshot(69);
-    M.armReuploadSnapshot(69); // второй перезалив до того, как первый сейв вернулся
+    const [u1, u2] = ['mem://up-a/g.dxf', 'mem://up-b/g.dxf'];
+    const early = M.peekReuploadSnapshot(69, [BASE_URL]); // сейв начат до перезалива
+    M.armReuploadSnapshot(69, u1, BASE_URL);
+    const stale = M.peekReuploadSnapshot(69, [BASE_URL]); // его пейлоад — старый лист
+    const first = M.peekReuploadSnapshot(69, [u1]);
+    M.armReuploadSnapshot(69, u2, u1); // второй перезалив той же строки до ответа сейва 1
     M.consumeReuploadSnapshot(69, first);
-    const second = M.peekReuploadSnapshot(69);
+    const second = M.peekReuploadSnapshot(69, [u2]);
     M.consumeReuploadSnapshot(69, second);
     is(
       tag,
-      [first?.reason, second?.reason, M.peekReuploadSnapshot(69)],
-      [M.REUPLOAD_SNAPSHOT_REASON, 'dxf-reupload', null],
-      'сейв 1 не снимает причину сейва 2; после сейва 2 — пусто',
+      [early, stale, first?.reason, second?.reason, M.peekReuploadSnapshot(69, [u1, u2])],
+      [null, null, M.REUPLOAD_SNAPSHOT_REASON, 'dxf-reupload', null],
+      'сейв без нового листа не берёт причину; сейв 1 не снимает причину сейва 2',
     );
   }
 

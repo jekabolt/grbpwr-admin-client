@@ -7,6 +7,9 @@
 //     существующая строка алиаса сохраняется, если её связь не поменялась;
 //   · шаги не удаляются, аннотации не переписываются — метка review на шаг, где задетая деталь
 //     стоит входом или участником аннотации (тяжелейшая побеждает);
+//   · метки не слабеют (L4c): новая сливается с той, что уже стоит на шаге, по REVIEW_RANK, а шаг,
+//     который ссылается на призрак (этой заливки или прошлой, пока у него нет блока), — всегда
+//     'orphan';
 //   · единственное исключение — разрез (круг 2, 21.10): перед первым шагом, где разрезанная деталь
 //     стоит входом, встаёт ОДИН обычный шаг join [деталь, части…] → узел под старым именем детали,
 //     метка 'split' только на нём; входы шагов с этой деталью (с этого места) берут узел вместо
@@ -105,6 +108,7 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
     operations: [...input.operations],
     reviews: [],
     violations,
+    opIndexOf: input.operations.map((_, i) => i),
     addedPieceKeys: [],
     joins: [],
     reshapedPieceKeys: [],
@@ -246,21 +250,47 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
       }
     }
   }
+  // Призраки ПОСЛЕ применения: этой заливки и прошлых. Прошлый призрак — деталь без единого
+  // алиаса, на которую ссылается шаг, уже помеченный 'orphan' (так его пометила прошлая заливка, и
+  // reviewAfterEdit не снимает orphan, пока призрак в шаге). Деталь, которой блок вернули, —
+  // больше не призрак.
+  const bound = new Set(aliases.map((a) => (a.pieceLineKey ?? '').trim()).filter(Boolean));
+  const unbound = (k: string) => !!k && !bound.has(k) && !deleted.has(k);
+  const ghostsAfter = new Set([...ghosts].map((k) => k.trim()).filter(unbound));
+  const hadAlias = new Set(input.aliases.map((a) => (a.pieceLineKey ?? '').trim()));
+  for (const op of input.operations) {
+    if ((op.review ?? '').trim() !== 'orphan') continue;
+    const { inputs, annotations } = opPieceRefs(op);
+    for (const k of [...inputs, ...annotations].map((x) => x.trim()))
+      if (byKey.has(k) && !hadAlias.has(k) && unbound(k)) ghostsAfter.add(k);
+  }
+  const rankOf = (r: string | undefined) => REVIEW_RANK[(r ?? '').trim() as Review] ?? 0;
+  const byOrder = (a: string, b: string) =>
+    (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || (a < b ? -1 : a > b ? 1 : 0);
+
   const reviews: ReviewMark[] = [];
   const operations: O[] = input.operations.map((op, opIndex) => {
     const { inputs, annotations } = opPieceRefs(op);
-    const hit = [...new Set([...inputs.map((k) => k.trim()), ...annotations])].filter((k) =>
-      marks.has(k),
-    );
-    if (!hit.length) return op;
-    let review = marks.get(hit[0])!;
-    for (const k of hit)
-      if (REVIEW_RANK[marks.get(k)!] > REVIEW_RANK[review]) review = marks.get(k)!;
-    const pieceKeys = hit
-      .filter((k) => marks.get(k) === review)
-      .sort(
-        (a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || (a < b ? -1 : a > b ? 1 : 0),
-      );
+    const refs = [...new Set([...inputs.map((k) => k.trim()), ...annotations])];
+    const hit = refs.filter((k) => marks.has(k));
+    const ghostHit = refs.filter((k) => ghostsAfter.has(k));
+    if (!hit.length && !ghostHit.length) return op;
+    let review: Review = 'reshaped';
+    let pieceKeys: string[] = [];
+    if (hit.length) {
+      review = marks.get(hit[0])!;
+      for (const k of hit)
+        if (REVIEW_RANK[marks.get(k)!] > REVIEW_RANK[review]) review = marks.get(k)!;
+      pieceKeys = hit.filter((k) => marks.get(k) === review).sort(byOrder);
+    }
+    // Шаг со ссылкой на призрак — всегда orphan, какой бы ни была метка строки плана.
+    if (ghostHit.length && review !== 'orphan') {
+      review = 'orphan';
+      pieceKeys = ghostHit.sort(byOrder);
+    }
+    // Метки не слабеют: стоящая тяжелее — остаётся.
+    const had = (op.review ?? '').trim();
+    if (rankOf(had) > REVIEW_RANK[review]) review = had as Review;
     reviews.push({ opIndex, review, pieceKeys });
     return deps.setReview ? deps.setReview(op, review) : op;
   });
@@ -353,6 +383,7 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
     operations: result,
     reviews,
     violations: [],
+    opIndexOf: input.operations.map((_, i) => resultIndexOf.get(i) ?? i),
     addedPieceKeys: added,
     joins,
     reshapedPieceKeys: reshaped,

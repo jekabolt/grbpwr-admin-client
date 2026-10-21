@@ -319,6 +319,12 @@ export type ApplyResult<P extends CardPiece, A extends CardAlias, O extends Card
   /** нарушения assemblySweep ПОСЛЕ, которых не было ДО (непусто ⇒ refused.reason === 'sweep') */
   violations: AssemblyViolation[];
   /**
+   * индекс шага входа → индекс в результате (join разреза сдвигает следующие). По нему форма
+   * переносит ссылки дефектов на номера шагов (issues[].operationNumber) тем же правилом, что и
+   * OperationsField.remapIssues.
+   */
+  opIndexOf: number[];
+  /**
    * все новые детали этой заливки. Части разреза сразу стоят входом join — чип «+N в сборку»
    * считает по факту (unplacedPieceKeys в marks.ts), а не по этому списку.
    */

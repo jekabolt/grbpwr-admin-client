@@ -13,7 +13,7 @@ export type SheetVersion = {
   url: string;
   fileName: string;
   sha256: string;
-  /** card snapshot taken with this version; 0 = none (restore re-applies the file) */
+  /** card snapshot taken with this version; 0 = none, not restorable */
   snapshotId: number;
   current: boolean;
 };

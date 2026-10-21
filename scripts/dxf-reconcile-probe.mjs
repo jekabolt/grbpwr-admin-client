@@ -204,6 +204,23 @@ const MUTANTS = [
     kills: ['review-rank'],
   },
   {
+    id: 'marks-weaken',
+    file: 'rewrite.ts',
+    edits: [
+      [
+        'if (rankOf(had) > REVIEW_RANK[review]) review = had as Review;',
+        'if (false) review = had as Review;',
+      ],
+    ],
+    kills: ['marks-never-weaken'],
+  },
+  {
+    id: 'ghost-step-not-orphan',
+    file: 'rewrite.ts',
+    edits: [["if (ghostHit.length && review !== 'orphan') {", 'if (false) {']],
+    kills: ['g4-merge', 'g-pair-LR', 'marks-never-weaken'],
+  },
+  {
     id: 'no-sweep-guard',
     file: 'rewrite.ts',
     edits: [['if (fresh.length) return untouched', 'if (false) return untouched']],
@@ -518,6 +535,7 @@ const GATES = [
   'delete-unreferenced',
   'keep-other-scope',
   'review-rank',
+  'marks-never-weaken',
   'moved',
   'sweep-guard',
   'split-join',
@@ -849,13 +867,16 @@ function gates(M, data) {
     is(g, r.res.operations[1].inputKeys, ['BP', K('BP_1')], 'первый шаг берёт ▣ BP');
   });
 
-  // ── g4-merge: BP_U + BP_D → BP; поглощённая остаётся призраком, обе — remapped ────────────
+  // ── g4-merge: BP_U + BP_D → BP; поглощённая остаётся призраком ────────────────────────────
+  // Выжившая — remapped; шаг поглощённой ссылается на призрак, а такой шаг всегда orphan (L4c).
   guard('g4-merge', () => {
     const g = 'g4-merge';
     const r = runCase(M, { old: S.g4split, neu: S.g4merge });
     invariants(g, r);
     manifestTiers(g, r.plan, manifests[g]);
-    is(g, markOf(r), { [K('BP_D')]: 'remapped', [K('BP_U')]: 'remapped' }, 'метки');
+    const ghost = r.res.ghostPieceKeys[0];
+    const alive = [K('BP_D'), K('BP_U')].find((k) => k !== ghost);
+    is(g, markOf(r), sorted({ [alive]: 'remapped', [ghost]: 'orphan' }), 'метки');
     const row = rowBy(r.plan, 'BP_U');
     is(g, row.old.map((o) => o.fate).sort(), ['ghost', 'keep'], 'судьбы: выжившая и призрак');
     is(
@@ -925,10 +946,11 @@ function gates(M, data) {
       ['FP', 2, M.MIRRORED],
       'две детали: FP_L → FP ×2 зеркально',
     );
-    // (в) на FP_R есть шаг — призрак, шаг помечен remapped (его вход теперь внутри FP ×2)
+    // (в) на FP_R есть шаг — призрак (его вход теперь внутри FP ×2); шаг со ссылкой на призрак —
+    // orphan (L4c), а не remapped: remapped снимался первой правкой при призраке в шаге
     const c = runCase(M, { old: S.pairLR, neu: S.gPairLR });
     invariants(`${g} FP_R в шаге`, c);
-    is(g, markOf(c), { [K('FP_R')]: 'remapped' }, 'FP_R в шаге: метка');
+    is(g, markOf(c), { [K('FP_R')]: 'orphan' }, 'FP_R в шаге: метка');
     is(g, c.res.ghostPieceKeys, [K('FP_R')], 'FP_R в шаге: призрак');
     // (г) реальная зеркальная пара (allsizes-merged: FP_R = зеркало FP_L): FP_L → FP, FP_R пропала
     let neu = renameIdentity(M, S.base, 'FP_L', 'FP');
@@ -1212,6 +1234,64 @@ function gates(M, data) {
     is(g, last && [last.review, last.pieceKeys], ['orphan', [K('CLR_3')]], 'шаг FP_R + CLR_3');
     is(g, r.res.operations.at(-1).review, 'orphan', 'setReview получил тяжелейшую');
     is(g, M.REVIEW_RANK, { orphan: 4, split: 3, remapped: 2, reshaped: 1 }, 'порядок меток');
+    // без призрака в шаге: FP_R (reshaped) + выноска CLR_4 (remapped) → remapped
+    const inputs2 = ['BP', 'BP_1', 'BP_2', 'CLR_3', 'CLR_4', 'FP_L', 'SL_L', 'SL_R', 'FP_R'];
+    const r2 = runCase(M, {
+      old: S.base,
+      neu: S.gCombo,
+      spec: { inputs: inputs2, annotate: ['CLR_4'] },
+    });
+    const last2 = r2.res.reviews.find((x) => x.opIndex === r2.input.operations.length - 1);
+    is(g, last2 && last2.review, 'remapped', 'шаг FP_R + CLR_4');
+  });
+
+  // ── метки не слабеют: стоящая тяжелее остаётся, ссылка на призрак (и прошлый) — orphan ─────
+  guard('marks-never-weaken', () => {
+    const g = 'marks-never-weaken';
+    const inputs = ['BP', 'BP_1', 'BP_2', 'CLR_3', 'CLR_4', 'FP_L', 'FP_R', 'SL_L', 'SL_R'];
+    const card = M.cardFromSheet(S.base, {
+      scope: MAIN,
+      sizeTokens: SIZES,
+      inputs,
+      extra: ['GH'],
+    });
+    // GH — призрак прошлой заливки: без алиаса, шаг с ним уже orphan.
+    card.aliases = card.aliases.filter((a) => a.pieceLineKey !== K('GH'));
+    const ops = card.operations;
+    ops[1].review = 'orphan'; // BP_2: план даст reshaped
+    ops[4].inputKeys = [...ops[4].inputKeys, K('GH')];
+    ops[4].review = 'orphan'; // прошлый призрак во входе
+    ops[5].review = 'split'; // FP_R: план даст reshaped
+    ops[6].media = [{ annotations: [{ pieceLineKey: K('GH') }] }]; // прошлый призрак в выноске
+    ops[7].review = 'reshaped'; // SL_R: план не трогает
+    yes(g, M.sweepOf(card).length === 0, 'фикстура чистая');
+    const r = runCase(M, { old: S.base, neu: S.gCombo, card });
+    invariants(g, r);
+    is(
+      g,
+      r.res.operations.map((o) => o.review ?? ''),
+      // BP_2 orphan>reshaped · CLR_3 призрак · CLR_4 remapped · FP_L прошлый призрак ·
+      // FP_R split>reshaped · SL_L выноска на прошлый призрак · SL_R стоящая метка
+      ['', 'orphan', 'orphan', 'remapped', 'orphan', 'split', 'orphan', 'reshaped'],
+      'метки после заливки',
+    );
+    is(g, r.res.ghostPieceKeys, [K('CLR_3')], 'призрак этой заливки');
+    // повторная заливка поверх результата: ни одна метка не ослабла
+    const again = runCase(M, {
+      old: S.gCombo,
+      neu: S.base,
+      card: { pieces: r.res.pieces, aliases: r.res.aliases, operations: r.res.operations },
+    });
+    yes(
+      g,
+      again.res.refused != null ||
+        again.res.operations.every(
+          (o, i) =>
+            (M.REVIEW_RANK[o.review ?? ''] ?? 0) >=
+            (M.REVIEW_RANK[r.res.operations[i]?.review ?? ''] ?? 0),
+        ),
+      'вторая заливка: метки не слабеют',
+    );
   });
 
   // ── T7 moved: блок пришёл из листа другого scope — та же деталь, новая не заводится ───────

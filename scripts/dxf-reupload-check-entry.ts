@@ -5,7 +5,10 @@ export {
   REUPLOAD_SNAPSHOT_REASON,
   externalPieceRefs,
   markJumpParams,
+  remapIssueNumbers,
   reuploadSheet,
+  seamAnchorKeys,
+  sheetRowId,
 } from 'components/managers/tech-card/components/nesting/dxf-reupload';
 export {
   armReuploadSnapshot,

@@ -30,7 +30,13 @@ import {
 import { notify, updateNotify, useSnackBarStore } from 'lib/stores/store';
 import { sha256Hex } from 'lib/features/sha256';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import type { NewAliasSeed, NewJoinSeed, NewPieceSeed, ReconcileScope } from 'lib/dxf-reconcile';
+import type {
+  NewAliasSeed,
+  NewJoinSeed,
+  NewPieceSeed,
+  ParsedSheetLite,
+  ReconcileScope,
+} from 'lib/dxf-reconcile';
 import type { NotifyInput } from 'lib/stores/store-types';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -87,6 +93,7 @@ import {
 import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
   applySizeMap,
@@ -130,6 +137,8 @@ import { useTechCardStaging } from './useTechCardStaging';
 import {
   RECONCILE_PARSE,
   externalPieceRefs,
+  seamAnchorKeys,
+  sheetRowId,
   markJumpParams,
   reuploadSheet,
   type ReuploadDeps,
@@ -326,6 +335,7 @@ const REFUSAL_WORDS: Record<ReuploadRefusal, string> = {
   parse: 'unreadable file',
   sweep: 'not applied',
   upload: 'upload failed',
+  target: 'pick a sheet',
 };
 
 // Подпись набора листов — по url, а не по материалу: перезалили файл, и подпись сменилась сама,
@@ -522,7 +532,11 @@ export function PatternsField({
   // Материал, над которым сейчас висит перетаскиваемый файл ('' = ничей).
   const [dragKey, setDragKey] = useState<string | null>(null);
   // Several DXFs dropped on one slot: the size merge, then a direct upload into that slot.
-  const [merging, setMerging] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  const [merging, setMerging] = useState<{
+    scopeKey: string;
+    files: File[];
+    target?: string;
+  } | null>(null);
   // Non-DXF files dropped on a slot: the import wizard, starting from those files.
   const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
   // Direct uploads in flight, per slot.
@@ -532,6 +546,8 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
+  // The sheet row the picked file replaces (sheetRowId); '' = the slot (a tile drop or click).
+  const pickRow = useRef('');
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -966,9 +982,10 @@ export function PatternsField({
   const canDrop = canUpload && sizeIds.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string) {
+  function openPicker(scopeKey: string, rowId = '') {
     if (!canDrop) return;
     pickFor.current = scopeKey;
+    pickRow.current = rowId;
     fileInputRef.current?.click();
   }
 
@@ -1108,10 +1125,15 @@ export function PatternsField({
 
   // One DXF into one slot: no naming modal (the slot is the material, the name is the card's).
   // `batch` = the pick it belongs to, which reports once; alone (the merge output) it reports itself.
-  async function directUpload(scopeKey: string, picked: File, batch?: FileFault[]): Promise<void> {
+  async function directUpload(
+    scopeKey: string,
+    picked: File,
+    batch?: FileFault[],
+    target?: string,
+  ): Promise<void> {
     const faults = batch ?? [];
     try {
-      await uploadOne(scopeKey, picked, faults);
+      await uploadOne(scopeKey, picked, faults, target);
     } finally {
       if (!batch) settleFileBatch(null, 1, faults);
     }
@@ -1144,49 +1166,55 @@ export function PatternsField({
       defaultSeamClass: getValues('construction.defaultSeamClass') ?? '',
       bomLines: getValues('bomItems') ?? [],
     };
+    const parse: ReuploadDeps<FormPiece, FormAlias, FormOp>['parse'] = async (files) => {
+      const client = new NestingWorkerClient();
+      try {
+        const out = await client.parse(
+          files.map((f) => new File([f.bytes as BlobPart], f.name)),
+          { ...RECONCILE_PARSE },
+        );
+        return { pieces: out.pieces, blockNames: out.blockNames, failedFiles: out.failedFiles };
+      } finally {
+        client.terminate();
+      }
+    };
     return {
       download: async (url) => new Uint8Array(await (await fetchMediaBlob(url)).arrayBuffer()),
-      parse: async (files) => {
-        const client = new NestingWorkerClient();
-        try {
-          const out = await client.parse(
-            files.map((f) => new File([f.bytes as BlobPart], f.name)),
-            { ...RECONCILE_PARSE },
-          );
-          return { pieces: out.pieces, blockNames: out.blockNames, failedFiles: out.failedFiles };
-        } finally {
-          client.terminate();
-        }
-      },
+      parse,
       sha256: (bytes) => sha256Hex(bytes),
       upload: async (f) => {
         const up = await uploadPatternFile(new File([f.bytes as BlobPart], f.name, { type }));
         return { url: up.url, filename: up.filename, sizeBytes: up.sizeBytes, sha256: up.sha256 };
       },
-      // The other slots' sheets as the card's parse already holds them (no second download).
+      // The other slots' sheets, downloaded and parsed on the reconcile options. Not the card's
+      // shared parse: it may still be loading, or have dropped a file, and «no other sheets» then
+      // makes a piece moved from another material look new. Any failure refuses the re-upload.
       otherSheets: async () => {
-        const b = bundle;
-        if (!b) return [];
-        const by = new Map<string, PieceDTO[]>();
-        for (const p of b.pieces) {
-          const k = b.scopeByFile.get(p.fileIndex ?? -1) ?? '';
+        const by = new Map<string, PatternRow[]>();
+        for (const r of (getValues('patterns') ?? []) as PatternRow[]) {
+          if (!r.url || !isDxfUrl(r.url)) continue;
+          const k = scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes);
           if (!k || k === scopeKey) continue;
-          by.set(k, [...(by.get(k) ?? []), p]);
+          by.set(k, [...(by.get(k) ?? []), r]);
         }
-        return [...by].flatMap(([k, list]) => {
+        const out: { scope: ReconcileScope; parse: ParsedSheetLite }[] = [];
+        for (const [k, rows] of by) {
           const sc = scopeOfKey(k);
-          return sc
-            ? [
-                {
-                  scope: bindingForScope(sc) as ReconcileScope,
-                  parse: {
-                    pieces: list,
-                    blockNames: [...new Set(list.map((p) => p.blockName ?? '').filter(Boolean))],
-                  },
-                },
-              ]
-            : [];
-        });
+          if (!sc) continue;
+          const files = await Promise.all(
+            rows.map(async (r, i) => ({
+              name: patternSheetName(r) || `sheet ${i + 1}`,
+              bytes: new Uint8Array(await (await fetchMediaBlob(r.url!)).arrayBuffer()),
+            })),
+          );
+          const parsed = await parse(files);
+          if (parsed.failedFiles > 0) throw new Error(`unreadable sheet in ${k}`);
+          out.push({
+            scope: bindingForScope(sc) as ReconcileScope,
+            parse: { pieces: parsed.pieces, blockNames: parsed.blockNames },
+          });
+        }
+        return out;
       },
       mintKey: () => ulid(),
       makePiece: (seed: NewPieceSeed): FormPiece => ({
@@ -1230,25 +1258,57 @@ export function PatternsField({
 
   // RE-UPLOAD INTO A SLOT THAT ALREADY HOLDS A SHEET (L4a): reconcile and apply at once. No units or
   // sizes questions (both come from the replaced sheet), no pieces viewer. Marks on steps send the
-  // operator to the first marked step; without marks the operator stays here. 'first' = not a
-  // re-upload: the caller goes on with the first-upload path.
+  // operator to the first marked step; without marks the operator stays here. 'first' = an empty
+  // slot: the caller goes on with the first-upload path. `target` = the sheet row (sheetRowId) the
+  // file replaces; without it the slot's only sheet, or the one sharing most blocks.
   async function replaceSheet(
     scopeKey: string,
     picked: File,
+    target?: string,
   ): Promise<ReuploadOutcome<FormPiece, FormAlias, FormOp>['kind']> {
     const sc = scopeOfKey(scopeKey);
     if (!sc || !slotHasSheet(scopeKey)) return 'first';
     const say = useSnackBarStore.getState().showMessage;
-    const cardRows = () =>
-      JSON.stringify([
+    const piecesNow = (): FormPiece[] =>
+      ((getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>).map((p) => ({
+        ...p,
+        lineKey: p.lineKey ?? '',
+        name: p.name ?? '',
+      }));
+    // Seam anchors hold a piece too: the card's saved rows and the optimistic ones in the store.
+    const seamKeys = () => [
+      ...seamAnchorKeys(cardRead?.seams),
+      ...seamAnchorKeys(rowsOf(useSeamsStore.getState())),
+    ];
+    const refsNow = () =>
+      externalPieceRefs(piecesNow(), cardRead?.colorways, cardRead?.pieceAreaScopes, seamKeys());
+    // EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
+    // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step or a
+    // piece edited), the plan belongs to another card and is not applied.
+    const inputsSig = () => {
+      const rows = (getValues('patterns') ?? []) as PatternRow[];
+      return JSON.stringify([
         getValues('pieces') ?? [],
         getValues('pieceDxfAliases') ?? [],
         getValues('operations') ?? [],
+        (getValues('issues') ?? []).map((i) => i.operationNumber ?? 0),
+        rows.map((r) => [
+          sheetRowId(r),
+          r.url ?? '',
+          r.fabricPurpose ?? '',
+          r.bomLineKey ?? '',
+          r.sha256 ?? '',
+        ]),
+        (getValues('bomItems') ?? []).map((b) => [
+          b.lineKey ?? '',
+          b.purpose ?? '',
+          b.section ?? '',
+        ]),
+        refsNow(),
       ]);
-    const before = cardRows();
-    const pieces: FormPiece[] = (
-      (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>
-    ).map((p) => ({ ...p, lineKey: p.lineKey ?? '', name: p.name ?? '' }));
+    };
+    const before = inputsSig();
+    const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
     bumpUploading(scopeKey, 1);
     try {
@@ -1258,12 +1318,14 @@ export function PatternsField({
           pieces,
           aliases: (getValues('pieceDxfAliases') ?? []) as FormAlias[],
           operations: (getValues('operations') ?? []) as FormOp[],
+          issues: getValues('issues') ?? [],
           scopeKey,
           scope: bindingForScope(sc),
           scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes),
           isDxf: (url) => isDxfUrl(url),
           sizeTokens: [...dictTokens.keys()],
-          externalRefs: externalPieceRefs(pieces, cardRead?.colorways, cardRead?.pieceAreaScopes),
+          externalRefs: refsNow(),
+          target,
         },
         { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
         reuploadDeps(scopeKey, picked.type),
@@ -1283,17 +1345,30 @@ export function PatternsField({
       say(REFUSAL_WORDS[out.why], 'error');
       return 'refused';
     }
-    // The card moved while the files were read: the plan was made for another card.
-    const i = ((getValues('patterns') ?? []) as PatternRow[]).findIndex(
-      (r) => r.url === out.replacedUrl,
-    );
-    if (i < 0 || cardRows() !== before) {
+    // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
+    const live = (getValues('patterns') ?? []) as PatternRow[];
+    const rowId = out.rowId;
+    const i = live.findIndex((r) => sheetRowId(r) === rowId);
+    const row = i >= 0 ? live[i] : undefined;
+    if (
+      !row ||
+      row.url !== out.replacedUrl ||
+      scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) !== scopeKey ||
+      inputsSig() !== before
+    ) {
       say('not applied', 'error');
       return 'refused';
     }
     setValue('pieces', out.pieces, { shouldDirty: true });
     setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
     setValue('operations', out.operations, { shouldDirty: true });
+    // A split's join renumbers the steps after it: issues follow their step (remapIssues' rule).
+    const issueNumbers = out.issueNumbers;
+    (getValues('issues') ?? []).forEach((iss, ii) => {
+      const next = issueNumbers[ii];
+      if (next != null && next !== (iss.operationNumber ?? 0))
+        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
+    });
     setValue(`patterns.${i}.url`, out.row.url, { shouldDirty: true });
     setValue(`patterns.${i}.filename`, out.row.filename, { shouldDirty: true });
     setValue(`patterns.${i}.sizeBytes`, out.row.sizeBytes, { shouldDirty: true });
@@ -1301,45 +1376,22 @@ export function PatternsField({
     // 0 = "assign one": the server numbers a url it has not seen on this card.
     setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
     setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
-    // The first save after this one carries the snapshot reason (index.tsx).
-    armReuploadSnapshot(techCardId);
+    // The save whose payload carries this new sheet url carries the snapshot reason (index.tsx).
+    armReuploadSnapshot(techCardId, out.row.url, out.replacedUrl);
     autosave.request('dxf-reupload');
     const ops = out.operations;
     setParams((prev) => markJumpParams(prev, ops) ?? prev, { replace: true });
     return 'applied';
   }
 
-  // RESTORE (logic only): re-apply an old file of a slot through the same path as an upload — it
-  // becomes a new revision, with its own marks. The UI reaches it through restoreSheetVersion.
-  async function reapplySheet(
-    scopeKey: string,
-    url: string,
-    fileName = 'pattern.dxf',
-  ): Promise<RestoreOutcome> {
-    let blob: Blob;
-    try {
-      blob = await fetchMediaBlob(url);
-    } catch {
-      useSnackBarStore.getState().showMessage('download failed', 'error');
-      return 'refused';
-    }
-    const kind = await replaceSheet(
-      scopeKey,
-      new File([blob], fileName, { type: 'image/vnd.dxf' }),
-    );
-    return kind === 'applied' || kind === 'noop'
-      ? kind
-      : kind === 'first'
-        ? 'unavailable'
-        : 'refused';
-  }
   const restoreRef = useRef<(rev: SheetRevisionRef) => Promise<RestoreOutcome>>(
     async () => 'unavailable',
   );
   // RESTORE THE CARD SNAPSHOT of that version: the card comes back whole (pieces, steps, sheet), no
   // marks, no jump. The card is then re-read through GetTechCard (the restore answer has no
   // pattern_viewer_token); index.tsx judges that read — a pristine form is rebased onto it, unsaved
-  // body work stops at its conflict dialog.
+  // body work stops at its conflict dialog. A version without a snapshot is not restorable (L4c):
+  // re-applying its file brought ghosts back as new pieces.
   async function restoreSnapshot(snapshotId: number): Promise<RestoreOutcome> {
     if (!techCardId) return 'unavailable';
     const stored =
@@ -1359,20 +1411,13 @@ export function PatternsField({
     await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
     return 'applied';
   }
-  restoreRef.current = async (rev) => {
-    if ((rev.snapshotId ?? 0) > 0) return restoreSnapshot(rev.snapshotId ?? 0);
-    const row = ((getValues('patterns') ?? []) as PatternRow[]).find(
-      (r) => (r.lineKey ?? '') === rev.sheetLineKey,
-    );
-    const scopeKey = row ? scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) : '';
-    if (!scopeKey || !rev.url) return 'unavailable';
-    return reapplySheet(scopeKey, rev.url, rev.fileName || row?.filename || undefined);
-  };
+  restoreRef.current = async (rev) =>
+    (rev.snapshotId ?? 0) > 0 ? restoreSnapshot(rev.snapshotId ?? 0) : 'unavailable';
   useEffect(() => provideSheetRestorer((rev) => restoreRef.current(rev)), []);
 
-  async function uploadOne(scopeKey: string, picked: File, faults: FileFault[]) {
+  async function uploadOne(scopeKey: string, picked: File, faults: FileFault[], target?: string) {
     // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
-    if ((await replaceSheet(scopeKey, picked)) !== 'first') return;
+    if ((await replaceSheet(scopeKey, picked, target)) !== 'first') return;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
     if (!fixed) return;
@@ -1402,7 +1447,7 @@ export function PatternsField({
   // The file router: tile drop, tile click and a sheet row's «upload» all land here.
   //   1 DXF → direct upload → pieces; ≥2 DXF → size merge → upload → pieces;
   //   anything else → import wizard → apply → pieces.
-  function routeFiles(scopeKey: string, list: FileList | File[] | null) {
+  function routeFiles(scopeKey: string, list: FileList | File[] | null, target?: string) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
     if (files.length === 0 || !canDrop) return;
@@ -1428,18 +1473,18 @@ export function PatternsField({
         // One DXF into a slot that already holds a sheet: a re-upload, asked nothing (units and
         // sizes come from the sheet it replaces).
         if (good.length === 1 && slotHasSheet(scopeKey)) {
-          await directUpload(scopeKey, good[0], faults);
+          await directUpload(scopeKey, good[0], faults, target);
           settleFileBatch(null, files.length, faults);
           return;
         }
         const ready = await withUnits(good, faults);
         if (ready && ready.length === 1) {
-          await directUpload(scopeKey, ready[0], faults);
+          await directUpload(scopeKey, ready[0], faults, target);
           settleFileBatch(null, files.length, faults);
           return;
         }
         handOff();
-        if (ready) setMerging({ scopeKey, files: ready });
+        if (ready) setMerging({ scopeKey, files: ready, target });
       })();
       return;
     }
@@ -1726,19 +1771,16 @@ export function PatternsField({
     setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
   }
 
-  // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion (snapshot or re-apply).
+  // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of that
+  // version only — a version without one has no `restore`.
   function renderVersions() {
     if (!versionsOf) return null;
     const rows = (getValues('patterns') ?? []) as PatternRow[];
     const row = rows.find((r) => (r.lineKey || r.url) === versionsOf);
     if (!row) return null;
     const versions = sheetVersions(row, (row.lineKey && historyByLine.get(row.lineKey)) || []);
-    const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
     const canRestore = (v: SheetVersion) =>
-      canEdit &&
-      !isSubmitting &&
-      ((v.snapshotId > 0 && !!techCardId) ||
-        (!!rowScope && slotHasSheet(rowScope) && isDxfUrl(v.url)));
+      canEdit && !isSubmitting && v.snapshotId > 0 && !!techCardId;
     const url = row.url ?? '';
     const label = labelOf(row);
     const download =
@@ -1825,7 +1867,7 @@ export function PatternsField({
               <Button
                 type='button'
                 aria-label={`replace ${labelOf(row)}`}
-                onClick={() => openPicker(rowGroup.scope.key)}
+                onClick={() => openPicker(rowGroup.scope.key, sheetRowId(row))}
                 className='flex h-14 w-14 shrink-0 items-center justify-center border border-borderColor bg-pageBg p-0.5 hover:border-textColor'
               >
                 {thumb}
@@ -1919,7 +1961,7 @@ export function PatternsField({
                 variant='underline'
                 size='xs'
                 className={door}
-                onClick={() => openPicker(rowGroup.scope.key)}
+                onClick={() => openPicker(rowGroup.scope.key, sheetRowId(row))}
               >
                 upload
               </Button>
@@ -2646,7 +2688,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files);
+          routeFiles(pickFor.current, e.target.files, pickRow.current || undefined);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}
@@ -2695,7 +2737,12 @@ export function PatternsField({
             onClose={() => setMerging(null)}
             onReady={(file, scopeKey) => {
               setMerging(null);
-              void directUpload(scopeKey ?? merging.scopeKey, file);
+              void directUpload(
+                scopeKey ?? merging.scopeKey,
+                file,
+                undefined,
+                !scopeKey || scopeKey === merging.scopeKey ? merging.target : undefined,
+              );
             }}
           />
         </Suspense>
