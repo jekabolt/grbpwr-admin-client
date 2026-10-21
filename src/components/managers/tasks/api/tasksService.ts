@@ -256,7 +256,7 @@ function mapRelation(l: common_TaskLink): TaskRelation {
     boardId: l.boardId ?? 0,
     archived: !!l.archived,
     // Поле приезжает с бэкенда отдельной волной: до регенерации типа читаем защитно.
-    assignees: ((l as { assignees?: string[] }).assignees ?? []).filter((n) => !!n),
+    assignees: (l.assignees ?? []).filter((n) => !!n),
   };
 }
 

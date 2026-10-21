@@ -5514,6 +5514,7 @@ export type common_TaskLink = {
   board: common_TaskBoard | undefined;
   archived: boolean | undefined;
   boardId: number | undefined;
+  assignees: string[] | undefined;
 };
 
 // TaskLinkKind — ВИД СВЯЗИ С ТОЧКИ ЗРЕНИЯ ВЛАДЕЛЬЦА СПИСКА, а не вид строки в хранилище.
