@@ -21,7 +21,10 @@ import {
   writeInsunits,
   type DxfLinearUnit,
 } from 'lib/nesting/dxf/insunits';
-import { notify, updateNotify } from 'lib/stores/store';
+import { notify, updateNotify, useSnackBarStore } from 'lib/stores/store';
+import { sha256Hex } from 'lib/features/sha256';
+import { NestingWorkerClient } from 'lib/nesting/worker/client';
+import type { NewAliasSeed, NewJoinSeed, NewPieceSeed, ReconcileScope } from 'lib/dxf-reconcile';
 import type { NotifyInput } from 'lib/stores/store-types';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -117,6 +120,22 @@ import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
 import { PatternExportMenu } from './pattern-export/export-menu';
 import { useTechCardStaging } from './useTechCardStaging';
+import {
+  RECONCILE_PARSE,
+  externalPieceRefs,
+  markJumpParams,
+  reuploadSheet,
+  type ReuploadDeps,
+  type ReuploadOutcome,
+  type ReuploadRefusal,
+} from './nesting/dxf-reupload';
+import {
+  armReuploadSnapshot,
+  provideSheetRestorer,
+  type RestoreOutcome,
+  type SheetRevisionRef,
+} from './nesting/reupload-session';
+import { rowFromStep } from './operations-field';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -279,8 +298,27 @@ type PatternRow = {
   // НАЗНАЧЕНИЕ this sheet is cut from (0267). Resolved BEFORE bomLineKey everywhere — see
   // bom-purpose.ts for why both exist and why neither may be read alone.
   fabricPurpose?: string;
+  // sha256 of the file (0423): a re-upload of the same file is a noop.
+  sha256?: string;
 };
 type Entry = { row: PatternRow; index: number };
+
+// Rows of the card as the DXF re-upload reads and writes them (nesting/dxf-reupload.ts).
+type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
+  lineKey: string;
+  name: string;
+};
+type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
+type FormOp = NonNullable<TechCardFormData['operations']>[number];
+
+// A refused re-upload keeps the old sheet and says why in 1–2 words.
+const REFUSAL_WORDS: Record<ReuploadRefusal, string> = {
+  file: 'unreadable file',
+  download: 'download failed',
+  parse: 'unreadable file',
+  sweep: 'not applied',
+  upload: 'upload failed',
+};
 
 // Подпись набора листов — по url, а не по материалу: перезалили файл, и подпись сменилась сама,
 // вместо того чтобы отвечать про файл, которого уже нет. Модульная функция, потому что её читают
@@ -1061,19 +1099,245 @@ export function PatternsField({
     }
   }
 
+  const bumpUploading = (scopeKey: string, d: number) =>
+    setUploading((u) => {
+      const n = (u[scopeKey] ?? 0) + d;
+      const { [scopeKey]: _gone, ...rest } = u;
+      return n > 0 ? { ...rest, [scopeKey]: n } : rest;
+    });
+
+  // Does this slot already hold a DXF? Then a new DXF REPLACES it (L4a) instead of joining it.
+  const slotHasSheet = (scopeKey: string) =>
+    ((getValues('patterns') ?? []) as PatternRow[]).some(
+      (r) =>
+        isDxfUrl(r.url) && scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey,
+    );
+
+  // What the re-upload needs from the outside world: the files, the worker, the server, and the
+  // writers of new rows (the same writers as everywhere else on the card).
+  function reuploadDeps(
+    scopeKey: string,
+    type: string,
+  ): ReuploadDeps<FormPiece, FormAlias, FormOp> {
+    const park = getValues('construction.equipmentDefaults');
+    const ctx = {
+      machines: park?.machines ?? [],
+      presses: park?.presses ?? [],
+      defaultSeamClass: getValues('construction.defaultSeamClass') ?? '',
+      bomLines: getValues('bomItems') ?? [],
+    };
+    return {
+      download: async (url) => new Uint8Array(await (await fetchMediaBlob(url)).arrayBuffer()),
+      parse: async (files) => {
+        const client = new NestingWorkerClient();
+        try {
+          const out = await client.parse(
+            files.map((f) => new File([f.bytes as BlobPart], f.name)),
+            { ...RECONCILE_PARSE },
+          );
+          return { pieces: out.pieces, blockNames: out.blockNames, failedFiles: out.failedFiles };
+        } finally {
+          client.terminate();
+        }
+      },
+      sha256: (bytes) => sha256Hex(bytes),
+      upload: async (f) => {
+        const up = await uploadPatternFile(new File([f.bytes as BlobPart], f.name, { type }));
+        return { url: up.url, filename: up.filename, sizeBytes: up.sizeBytes, sha256: up.sha256 };
+      },
+      // The other slots' sheets as the card's parse already holds them (no second download).
+      otherSheets: async () => {
+        const b = bundle;
+        if (!b) return [];
+        const by = new Map<string, PieceDTO[]>();
+        for (const p of b.pieces) {
+          const k = b.scopeByFile.get(p.fileIndex ?? -1) ?? '';
+          if (!k || k === scopeKey) continue;
+          by.set(k, [...(by.get(k) ?? []), p]);
+        }
+        return [...by].flatMap(([k, list]) => {
+          const sc = scopeOfKey(k);
+          return sc
+            ? [
+                {
+                  scope: bindingForScope(sc) as ReconcileScope,
+                  parse: {
+                    pieces: list,
+                    blockNames: [...new Set(list.map((p) => p.blockName ?? '').filter(Boolean))],
+                  },
+                },
+              ]
+            : [];
+        });
+      },
+      mintKey: () => ulid(),
+      makePiece: (seed: NewPieceSeed): FormPiece => ({
+        lineKey: seed.lineKey,
+        name: seed.name,
+        piecesPerGarment: seed.piecesPerGarment,
+        cutSymmetry: seed.cutSymmetry,
+        grainline: '',
+        fused: false,
+        calloutNumber: 0,
+        note: '',
+        materials: [],
+      }),
+      makeAlias: (seed: NewAliasSeed): FormAlias => ({
+        bomLineKey: seed.bomLineKey,
+        fabricPurpose: seed.fabricPurpose,
+        blockName: seed.blockName,
+        pieceLineKey: seed.pieceLineKey,
+      }),
+      // The split's join: an ordinary machine join, written by the same writer as a skeleton step.
+      makeJoin: (seed: NewJoinSeed<FormOp>): FormOp => ({
+        ...rowFromStep(
+          {
+            inputs: seed.inputKeys,
+            outputUnitKey: seed.outputUnitKey,
+            outputUnitName: seed.outputUnitName,
+            operationType: 'MACHINE',
+            zone: seed.before.zone ?? '',
+            seams: [],
+            confidence: 1,
+            reason: '',
+            source: 'geometry',
+          },
+          ctx,
+        ),
+        draft: false,
+        review: '',
+      }),
+    };
+  }
+
+  // RE-UPLOAD INTO A SLOT THAT ALREADY HOLDS A SHEET (L4a): reconcile and apply at once. No units or
+  // sizes questions (both come from the replaced sheet), no pieces viewer. Marks on steps send the
+  // operator to the first marked step; without marks the operator stays here. 'first' = not a
+  // re-upload: the caller goes on with the first-upload path.
+  async function replaceSheet(
+    scopeKey: string,
+    picked: File,
+  ): Promise<ReuploadOutcome<FormPiece, FormAlias, FormOp>['kind']> {
+    const sc = scopeOfKey(scopeKey);
+    if (!sc || !slotHasSheet(scopeKey)) return 'first';
+    const say = useSnackBarStore.getState().showMessage;
+    const cardRows = () =>
+      JSON.stringify([
+        getValues('pieces') ?? [],
+        getValues('pieceDxfAliases') ?? [],
+        getValues('operations') ?? [],
+      ]);
+    const before = cardRows();
+    const pieces: FormPiece[] = (
+      (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>
+    ).map((p) => ({ ...p, lineKey: p.lineKey ?? '', name: p.name ?? '' }));
+    let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
+    bumpUploading(scopeKey, 1);
+    try {
+      out = await reuploadSheet(
+        {
+          patterns: (getValues('patterns') ?? []) as PatternRow[],
+          pieces,
+          aliases: (getValues('pieceDxfAliases') ?? []) as FormAlias[],
+          operations: (getValues('operations') ?? []) as FormOp[],
+          scopeKey,
+          scope: bindingForScope(sc),
+          scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes),
+          isDxf: (url) => isDxfUrl(url),
+          sizeTokens: [...dictTokens.keys()],
+          externalRefs: externalPieceRefs(pieces, cardRead?.colorways, cardRead?.pieceAreaScopes),
+        },
+        { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
+        reuploadDeps(scopeKey, picked.type),
+      );
+    } catch (e) {
+      console.error('DXF re-upload failed', e);
+      out = { kind: 'refused', why: 'parse' };
+    } finally {
+      bumpUploading(scopeKey, -1);
+    }
+    if (out.kind === 'first') return 'first';
+    if (out.kind === 'noop') {
+      say('same file', 'success');
+      return 'noop';
+    }
+    if (out.kind === 'refused') {
+      say(REFUSAL_WORDS[out.why], 'error');
+      return 'refused';
+    }
+    // The card moved while the files were read: the plan was made for another card.
+    const i = ((getValues('patterns') ?? []) as PatternRow[]).findIndex(
+      (r) => r.url === out.replacedUrl,
+    );
+    if (i < 0 || cardRows() !== before) {
+      say('not applied', 'error');
+      return 'refused';
+    }
+    setValue('pieces', out.pieces, { shouldDirty: true });
+    setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
+    setValue('operations', out.operations, { shouldDirty: true });
+    setValue(`patterns.${i}.url`, out.row.url, { shouldDirty: true });
+    setValue(`patterns.${i}.filename`, out.row.filename, { shouldDirty: true });
+    setValue(`patterns.${i}.sizeBytes`, out.row.sizeBytes, { shouldDirty: true });
+    setValue(`patterns.${i}.sha256`, out.row.sha256, { shouldDirty: true });
+    // 0 = "assign one": the server numbers a url it has not seen on this card.
+    setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
+    setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
+    // The first save after this one carries the snapshot reason (index.tsx).
+    armReuploadSnapshot(techCardId);
+    autosave.request('dxf-reupload');
+    const ops = out.operations;
+    setParams((prev) => markJumpParams(prev, ops) ?? prev, { replace: true });
+    return 'applied';
+  }
+
+  // RESTORE (logic only): re-apply an old file of a slot through the same path as an upload — it
+  // becomes a new revision, with its own marks. The UI reaches it through restoreSheetVersion.
+  async function reapplySheet(
+    scopeKey: string,
+    url: string,
+    fileName = 'pattern.dxf',
+  ): Promise<RestoreOutcome> {
+    let blob: Blob;
+    try {
+      blob = await fetchMediaBlob(url);
+    } catch {
+      useSnackBarStore.getState().showMessage('download failed', 'error');
+      return 'refused';
+    }
+    const kind = await replaceSheet(
+      scopeKey,
+      new File([blob], fileName, { type: 'image/vnd.dxf' }),
+    );
+    return kind === 'applied' || kind === 'noop'
+      ? kind
+      : kind === 'first'
+        ? 'unavailable'
+        : 'refused';
+  }
+  const restoreRef = useRef<(rev: SheetRevisionRef) => Promise<RestoreOutcome>>(
+    async () => 'unavailable',
+  );
+  restoreRef.current = async (rev) => {
+    const row = ((getValues('patterns') ?? []) as PatternRow[]).find(
+      (r) => (r.lineKey ?? '') === rev.sheetLineKey,
+    );
+    const scopeKey = row ? scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) : '';
+    if (!scopeKey || !rev.url) return 'unavailable';
+    return reapplySheet(scopeKey, rev.url, rev.fileName || row?.filename || undefined);
+  };
+  useEffect(() => provideSheetRestorer((rev) => restoreRef.current(rev)), []);
+
   async function uploadOne(scopeKey: string, picked: File, faults: FileFault[]) {
+    // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
+    if ((await replaceSheet(scopeKey, picked)) !== 'first') return;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
     if (!fixed) return;
     const sized = await withSizes(fixed[0], faults);
     if (!sized) return;
     const file = sized.file;
-    const bump = (d: number) =>
-      setUploading((u) => {
-        const n = (u[scopeKey] ?? 0) + d;
-        const { [scopeKey]: _gone, ...rest } = u;
-        return n > 0 ? { ...rest, [scopeKey]: n } : rest;
-      });
+    const bump = (d: number) => bumpUploading(scopeKey, d);
     bump(1);
     try {
       const up = await uploadPatternFile(file);
@@ -1119,6 +1383,13 @@ export function PatternsField({
     setSelectedKey(scopeKey);
     if (good.every(isDxfFile)) {
       void (async () => {
+        // One DXF into a slot that already holds a sheet: a re-upload, asked nothing (units and
+        // sizes come from the sheet it replaces).
+        if (good.length === 1 && slotHasSheet(scopeKey)) {
+          await directUpload(scopeKey, good[0], faults);
+          settleFileBatch(null, files.length, faults);
+          return;
+        }
         const ready = await withUnits(good, faults);
         if (ready && ready.length === 1) {
           await directUpload(scopeKey, ready[0], faults);
@@ -1213,6 +1484,8 @@ export function PatternsField({
             setValue(`patterns.${i}.url`, up.url, { shouldDirty: true });
             setValue(`patterns.${i}.filename`, up.filename, { shouldDirty: true });
             setValue(`patterns.${i}.sizeBytes`, up.sizeBytes, { shouldDirty: true });
+            // The new file's digest, never the old one's (0423).
+            setValue(`patterns.${i}.sha256`, up.sha256, { shouldDirty: true });
             // 0 = "assign one": the server numbers a url it has not seen on this card.
             setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
             setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });

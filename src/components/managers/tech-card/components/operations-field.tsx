@@ -237,6 +237,7 @@ import { PieceTile, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { SkeletonStep } from 'lib/assembly-skeleton/types';
+import { reviewAfterEdit, unaliasedPieceKeys, type CardOperation } from 'lib/dxf-reconcile';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 
@@ -667,6 +668,9 @@ export const emptyOperation = {
   smv: '',
   // A hand-made step is never a draft; only the assembly skeleton writes `true` (rowFromStep).
   draft: false,
+  // Nor does it carry a re-upload mark (0422): only a DXF re-upload writes one (lib/dxf-reconcile).
+  // «+ to assembly» and every created step start clean.
+  review: '',
   seamClass: NONE_SEAM_CLASS,
   stitchesPerCm: '',
   seamAllowanceMm: '',
@@ -6466,9 +6470,16 @@ export function OperationsField({
   //
   // ЗАПИСЬ — НЕ КАСАНИЕ. Если отпечаток разошёлся, а строка совпадает с сохранённой базой формы на
   // том же месте, — это лёг автосейв (сервер мог канонизировать поле), и отпечаток берётся заново.
+  //
+  // МЕТКА ПЕРЕЗАЛИВА (0422) ЕДЕТ ТЕМ ЖЕ ДЕТЕКТОРОМ: правка шага с `review` снимает её
+  // (`reviewAfterEdit`), кроме 'orphan' — тот живёт, пока шаг ссылается на призрак (деталь без
+  // единого алиаса), и уходит только заменой призрака или удалением его из шага.
   const [draftIds, setDraftIds] = useState<ReadonlySet<string>>(() => new Set());
   const draftRef = useRef(draftIds);
   draftRef.current = draftIds;
+  // Есть ли сейчас шаги с меткой перезалива — без них и без черновиков сверку будит только смена
+  // самих меток (или всей формы).
+  const reviewRowsRef = useRef(false);
   const draftBase = useRef(new Map<string, { print: string; row: Record<string, unknown> }>());
   // ТОЧНЫЕ ЗАПИСИ ПОДСТАНОВКИ (ревью Codex P2): строка → поле → значение, а у нитки — цепочка
   // дельт { remove?, add? } над списком связей. От «касания» освобождается только то, что
@@ -6495,8 +6506,17 @@ export function OperationsField({
         return;
       }
       if (name && !name.startsWith('operations')) return;
-      // Без черновиков будить сверку стоит только сменой самой метки (или всей формы — reset).
-      if (draftRef.current.size === 0 && name && !name.endsWith('.draft')) return;
+      // Без черновиков и меток перезалива будить сверку стоит только сменой самой метки, всего
+      // массива шагов (перезалив пишет его целиком) или всей формы — reset.
+      if (
+        draftRef.current.size === 0 &&
+        !reviewRowsRef.current &&
+        name &&
+        name !== 'operations' &&
+        !name.endsWith('.draft') &&
+        !name.endsWith('.review')
+      )
+        return;
       setTouchTick((t) => t + 1);
     });
     return () => sub.unsubscribe();
@@ -6511,10 +6531,13 @@ export function OperationsField({
     const next = new Set<string>();
     const touched: number[] = [];
     const live = new Set<string>();
+    let anyReview = false;
     fields.forEach((f, i) => {
       live.add(f.id);
       const row = ops[i];
-      if (!row?.draft) {
+      const marked = typeof row?.review === 'string' && row.review !== '';
+      if (marked) anyReview = true;
+      if (!row?.draft && !marked) {
         base.delete(f.id);
         return;
       }
@@ -6522,7 +6545,7 @@ export function OperationsField({
       const was = base.get(f.id);
       const keep = () => {
         base.set(f.id, { print, row: structuredClone(row) });
-        next.add(f.id);
+        if (row.draft) next.add(f.id);
       };
       if (was?.print === print) return keep();
       // С чем сверять подстановку: прежний вид строки, а при первом взгляде — то, что положила
@@ -6569,10 +6592,24 @@ export function OperationsField({
         redo: history.current.redo,
       });
     }
-    if (!frozen)
-      for (const index of touched)
-        setValue(`operations.${index}.draft`, false, { shouldDirty: true });
-    else for (const index of touched) next.add(fields[index].id);
+    reviewRowsRef.current = anyReview;
+    if (!frozen) {
+      // Призраки карты — только если правка задела помеченный шаг (иначе считать нечего).
+      const ghosts = touched.some((index) => ops[index]?.review)
+        ? unaliasedPieceKeys(
+            (getValues('pieces') ?? []).map((p) => ({ lineKey: p?.lineKey ?? '' })),
+            getValues('pieceDxfAliases') ?? [],
+          )
+        : [];
+      for (const index of touched) {
+        const row = ops[index];
+        if (row?.draft) setValue(`operations.${index}.draft`, false, { shouldDirty: true });
+        const review = typeof row?.review === 'string' ? row.review : '';
+        if (!review) continue;
+        const after = reviewAfterEdit(row as CardOperation, ghosts);
+        if (after !== review) setValue(`operations.${index}.review`, after, { shouldDirty: true });
+      }
+    } else for (const index of touched) if (ops[index]?.draft) next.add(fields[index].id);
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
@@ -7557,16 +7594,24 @@ export function OperationsField({
   // из старого отчёта может указывать в никуда; выбор «ближайшего» шага показал бы не тот, о
   // котором находка, а прокрутка наверх выглядела бы как поломка. Ничего не происходит — это
   // честнее обоих.
+  //
+  // `opi` — ИНДЕКС шага в форме (0-based), не номер: его ставит перезалив DXF, когда метки легли
+  // на шаги, у которых номера ещё нет (join разреза, шаги до первого сохранения).
   const opParam = params.get('op');
   const unitParam = params.get('unit');
+  const opiParam = params.get('opi');
   useEffect(() => {
-    if (opParam == null && unitParam == null) return;
+    if (opParam == null && unitParam == null && opiParam == null) return;
     const ops = (getValues('operations') ?? []) as Array<{
       operationNumber?: number;
       outputUnitKey?: string;
     }>;
     let idx = -1;
-    if (opParam != null) {
+    if (opiParam != null) {
+      const n = Number(opiParam);
+      if (Number.isInteger(n) && n >= 0 && n < ops.length) idx = n;
+    }
+    if (idx < 0 && opParam != null) {
       const n = parseInt(opParam, 10);
       // Сверка по СОХРАНЁННОМУ номеру, без «а вдруг это кратное десяти» — та же граница, что у
       // `remapIssues`: подставленный номер увёл бы к чужому шагу молча.
@@ -7583,6 +7628,7 @@ export function OperationsField({
         const p = new URLSearchParams(prev);
         p.delete('op');
         p.delete('unit');
+        p.delete('opi');
         return p;
       },
       { replace: true },
@@ -7592,7 +7638,7 @@ export function OperationsField({
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
     );
-  }, [opParam, unitParam, getValues, setParams]);
+  }, [opParam, unitParam, opiParam, getValues, setParams]);
 
   // --- фулскрин: ТРЕТИЙ ВИД ---------------------------------------------------------------------
   //

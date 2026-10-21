@@ -14,9 +14,13 @@
 //   · то же имя, форма поменялась → новая форма принята, шаги с деталью (входом или аннотацией)
 //     получают review 'reshaped', «Конструкция» по детали протухает (reshapedPieceKeys);
 //   · деталь пропала и на неё есть ссылки → остаётся призраком (алиас снят), её шаги — 'orphan';
-//     без ссылок — удаляется молча. Шаг не удаляется НИКОГДА, входы шагов не переписываются;
-//   · разрез → деталь идёт за большей частью, остальные части — новые детали, шаги — 'split'
-//     (join не вставляется); слияние → то же без автоматики: деталь идёт за новым блоком,
+//     без ссылок — удаляется молча. Шаг не удаляется НИКОГДА;
+//   · разрез → деталь идёт за большей частью, остальные части — новые детали; перед первым шагом,
+//     где деталь стоит входом, вставляется ОДИН обычный шаг join (вход: деталь + части, выход —
+//     узел ▣ под старым именем детали), метка 'split' только на нём; шаги, где была деталь, берут
+//     этот узел вместо неё и остаются без метки (круг 2, 21.10). Единственный случай, когда
+//     applyPlan добавляет шаг и переписывает входы. Деталь не стоит ни в одном входе — join нет,
+//     метки нет, части — просто новые детали; слияние → без автоматики: деталь идёт за новым блоком,
 //     поглощённая остаётся призраком/удаляется по правилу выше, шаги обеих — 'remapped';
 //   · перепривязка по форме с неполной уверенностью (две одинаковые формы, заметная разница) →
 //     'remapped';
@@ -60,6 +64,8 @@ export type CardOperation = {
   outputUnitKey?: string;
   outputUnitName?: string;
   media?: CardMedia[];
+  /** метка «проверить» (Review) или '' — читают хелперы marks.ts / candidates.ts */
+  review?: string;
 };
 
 /** Разобранный лист scope — ровно то, что отдаёт `parseSheets` (все файлы scope одной пачкой). */
@@ -256,7 +262,7 @@ export type Review = 'reshaped' | 'remapped' | 'split' | 'orphan';
  * orphan > split > remapped > reshaped (REVIEW_RANK в defaults.ts).
  */
 export type ReviewMark = {
-  /** индекс шага в operations (шаги не добавляются и не удаляются — индексы те же) */
+  /** индекс шага в РЕЗУЛЬТАТЕ (operations после вставки join разреза; без разреза = входной) */
   opIndex: number;
   review: Review;
   /** детали, из-за которых метка, в порядке деталей карточки */
@@ -277,11 +283,25 @@ export type NewAliasSeed = ReconcileScope & {
   pieceLineKey: string;
 };
 
+/** Шаг join разреза: собирает деталь и её части обратно в узел под старым именем детали. */
+export type NewJoinSeed<O extends CardOperation = CardOperation> = {
+  /** [деталь, части…] — деталь первой, части в порядке строки плана */
+  inputKeys: string[];
+  /** ключ узла: из старого имени, не совпадает ни с деталью, ни с выходом другого шага */
+  outputUnitKey: string;
+  /** старое имя детали (до переименования за большей частью) */
+  outputUnitName: string;
+  /** шаг, перед которым встаёт join (первый, где деталь стоит входом) — откуда взять зону и т.п. */
+  before: O;
+};
+
 export type ApplyDeps<P extends CardPiece, A extends CardAlias, O extends CardOperation> = {
   mintKey: () => string;
   makePiece: (seed: NewPieceSeed) => P;
   makeAlias: (seed: NewAliasSeed) => A;
-  /** Ставит review на шаг (поле появится с L3). Без неё метки только в списке `reviews`. */
+  /** Строка шага join разреза (без метки — метку ставит setReview). */
+  makeJoin: (seed: NewJoinSeed<O>) => O;
+  /** Ставит review на шаг. Без неё метки только в списке `reviews`. */
   setReview?: (op: O, review: Review) => O;
 };
 
@@ -298,8 +318,13 @@ export type ApplyResult<P extends CardPiece, A extends CardAlias, O extends Card
   reviews: ReviewMark[];
   /** нарушения assemblySweep ПОСЛЕ, которых не было ДО (непусто ⇒ refused.reason === 'sweep') */
   violations: AssemblyViolation[];
-  /** новые детали — чип «+N в сборку» (в шаги не вставлены) */
+  /**
+   * все новые детали этой заливки. Части разреза сразу стоят входом join — чип «+N в сборку»
+   * считает по факту (unplacedPieceKeys в marks.ts), а не по этому списку.
+   */
   addedPieceKeys: string[];
+  /** вставленные join разреза: индекс в результате, деталь, части, узел */
+  joins: SplitJoin[];
   /** форма изменилась — «Конструкция» по этим деталям протухла */
   reshapedPieceKeys: string[];
   /** остались на карте без блока (алиас снят) */
@@ -308,6 +333,14 @@ export type ApplyResult<P extends CardPiece, A extends CardAlias, O extends Card
   renamed: { pieceLineKey: string; from: string; to: string }[];
   /** строка для tech_card_revision / snapshot_reason */
   revisionNote: string;
+};
+
+export type SplitJoin = {
+  opIndex: number;
+  parentKey: string;
+  partKeys: string[];
+  unitKey: string;
+  unitName: string;
 };
 
 export type ApplyPlan = <P extends CardPiece, A extends CardAlias, O extends CardOperation>(

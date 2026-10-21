@@ -1,0 +1,588 @@
+#!/usr/bin/env node
+// Проверка перезалива DXF (L4a): ВЕСЬ путь загрузки — `reuploadSheet` из панели выкроек
+// (nesting/dxf-reupload.ts: скачать старый лист → разобрать → reconcile → applyPlan → загрузить) —
+// в node, на golden-листах против карточки формы card 69 (шаги 10/20 — перекрой BP_2 и FP_R,
+// 30/40 — призрак CLR_3, разрез BP — join перед «back»). Печатает таблицу шагов с метками.
+//
+//   node scripts/dxf-reupload-check.mjs
+//
+// Сеть, форма и React не участвуют: download/upload — память, parse — тот же parseSheets, что у
+// воркера, sha256 — WebCrypto (node 20+). Листы лежат в рабочем каталоге над репозиторием.
+
+import { build } from 'esbuild';
+import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '..');
+const workspace = resolve(root, '..');
+
+const GOLDEN = 'tmp/plans/dxf-reupload-reconcile/golden';
+const FILES = {
+  base: 'tmp/plans/pdf-to-dxf/corpus/dxf-clo/allsizes-merged.dxf',
+  gCombo: `${GOLDEN}/g-combo.dxf`,
+  g4split: `${GOLDEN}/g4-split.dxf`,
+  gSame: `${GOLDEN}/g-same.dxf`,
+};
+const SIZES = ['xs', 's', 'm', 'l', 'xl'];
+const MAIN = { bomLineKey: 'bom-main', fabricPurpose: 'MAIN' };
+const SCOPE_KEY = 'bom-main';
+const BASE_URL = 'mem://v6/allsizes-merged.dxf';
+
+// ─── сборка и данные ─────────────────────────────────────────────────────────────────────────
+
+async function bundle() {
+  const outfile = resolve(tmpdir(), `dxf-reupload-check-${process.pid}.mjs`);
+  await build({
+    entryPoints: [resolve(here, 'dxf-reupload-check-entry.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    outfile,
+    logLevel: 'silent',
+    absWorkingDir: root,
+  });
+  return import(pathToFileURL(outfile).href);
+}
+
+function bytesOf(rel) {
+  const abs = resolve(workspace, rel);
+  if (!existsSync(abs)) throw new Error(`нет листа: ${rel}`);
+  return new Uint8Array(readFileSync(abs));
+}
+
+// ─── карточка формы card 69 ──────────────────────────────────────────────────────────────────
+
+function card69(M, base) {
+  const K = M.pieceKey;
+  const c = M.cardFromSheet(base, { scope: MAIN, sizeTokens: SIZES });
+  const step = (title, inputKeys, unit = '') => ({
+    title,
+    inputKeys,
+    outputUnitKey: unit,
+    outputUnitName: unit,
+    review: '',
+  });
+  c.operations = [
+    step('yoke', [K('BP_1'), K('BP_2')], 'YOKE'), // 10 — перекрой BP_2
+    step('front', [K('FP_L'), K('FP_R')], 'FRONT'), // 20 — перекрой FP_R
+    step('edge collar', [K('CLR_3')]), // 30 — призрак CLR_3 (обработка, без выхода)
+    step('collar', [K('CLR_3'), K('CLR_4')], 'COLLAR'), // 40 — призрак CLR_3
+    step('back', [K('BP'), 'YOKE'], 'BACK'), // 50 — BP: разрез ставит join перед ним
+    step('shoulders', ['BACK', 'FRONT'], 'BODY'),
+    step('sleeve L', ['BODY', K('SL_L')], 'BODY_L'),
+    step('sleeve R', ['BODY_L', K('SL_R')], 'BODY_LR'),
+    step('attach collar', ['BODY_LR', 'COLLAR'], 'SHIRT'),
+  ];
+  return c;
+}
+
+const formCard = (c, patterns) => ({
+  patterns,
+  pieces: c.pieces,
+  aliases: c.aliases,
+  operations: c.operations,
+  scopeKey: SCOPE_KEY,
+  scope: MAIN,
+  scopeOf: (b) => (b.bomLineKey ?? '').trim(),
+  isDxf: (u) => /\.dxf$/i.test(u),
+  sizeTokens: SIZES,
+  externalRefs: {},
+});
+
+// Зависимости, как у panels: download/upload — память, parse — parseSheets на RECONCILE_PARSE.
+let minted = 0; // общий на все прогоны: ключ новой детали уникален, как ulid в форме
+let uploaded = 0;
+function makeDeps(M, store, log, faults = {}) {
+  const ab = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+  return {
+    download: async (url) => {
+      log.downloads++;
+      if (faults.download) throw new Error('offline');
+      const b = store.get(url);
+      if (!b) throw new Error(`404 ${url}`);
+      return b;
+    },
+    parse: async (files) => {
+      const r = await M.parseSheets(
+        files.map((f) => ({ name: f.name, open: async () => ab(f.bytes) })),
+        { ...M.RECONCILE_PARSE },
+      );
+      const out = { pieces: r.pieces, blockNames: r.blockNames, failedFiles: r.failedFiles };
+      log.parses.push(out);
+      return out;
+    },
+    sha256: (bytes) => M.sha256Hex(bytes),
+    upload: async (file) => {
+      if (faults.upload) throw new Error('503');
+      const url = `mem://up-${++uploaded}/${file.name}`;
+      store.set(url, file.bytes);
+      log.uploads.push({ url, bytes: file.bytes });
+      return {
+        url,
+        filename: file.name,
+        sizeBytes: file.bytes.byteLength,
+        sha256: await M.sha256Hex(file.bytes),
+      };
+    },
+    otherSheets: async () => [],
+    mintKey: () => `new-${++minted}`,
+    makePiece: (s) => ({
+      lineKey: s.lineKey,
+      name: s.name,
+      piecesPerGarment: s.piecesPerGarment,
+      cutSymmetry: s.cutSymmetry,
+    }),
+    makeAlias: (s) => ({
+      id: `al-new-${s.blockName}`,
+      bomLineKey: s.bomLineKey,
+      fabricPurpose: s.fabricPurpose,
+      blockName: s.blockName,
+      pieceLineKey: s.pieceLineKey,
+    }),
+    makeJoin: (s) => ({
+      title: `join ${s.outputUnitName}`,
+      inputKeys: s.inputKeys,
+      outputUnitKey: s.outputUnitKey,
+      outputUnitName: s.outputUnitName,
+      review: '',
+    }),
+  };
+}
+
+const freshLog = () => ({ downloads: 0, parses: [], uploads: [] });
+
+// ─── проверки ────────────────────────────────────────────────────────────────────────────────
+
+let failed = 0;
+let total = 0;
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function is(tag, got, want, what) {
+  total++;
+  if (eq(got, want)) return;
+  failed++;
+  console.log(
+    `  ✗ ${tag}: ${what}\n      got  ${JSON.stringify(got)}\n      want ${JSON.stringify(want)}`,
+  );
+}
+function yes(tag, ok, what) {
+  total++;
+  if (ok) return;
+  failed++;
+  console.log(`  ✗ ${tag}: ${what}`);
+}
+
+// ─── таблица ─────────────────────────────────────────────────────────────────────────────────
+
+function table(title, res) {
+  const pieceName = new Map(res.pieces.map((p) => [p.lineKey, p.name]));
+  const ghosts = new Set(res.result.ghostPieceKeys);
+  const units = new Set(res.operations.map((o) => o.outputUnitKey).filter(Boolean));
+  const label = (k) =>
+    units.has(k) && !pieceName.has(k)
+      ? `▣ ${k}`
+      : `${pieceName.get(k) ?? k}${ghosts.has(k) ? ' (ghost)' : ''}`;
+  const rows = res.operations.map((o, i) => [
+    String((i + 1) * 10),
+    o.title,
+    (o.inputKeys ?? []).map(label).join(' + '),
+    o.outputUnitKey ? `▣ ${o.outputUnitName || o.outputUnitKey}` : '',
+    o.review || '',
+  ]);
+  const head = ['step', 'op', 'inputs', 'out', 'review'];
+  const w = head.map((h, c) => Math.max(h.length, ...rows.map((r) => r[c].length)));
+  const line = (r) =>
+    r
+      .map((v, c) => v.padEnd(w[c]))
+      .join('  ')
+      .trimEnd();
+  console.log(`\n${title}`);
+  console.log(line(head));
+  for (const r of rows) console.log(line(r));
+  const marks = res.operations.filter((o) => o.review).length;
+  console.log(`marks: ! ${marks}`);
+}
+
+const reviewsOf = (ops) => ops.map((o) => o.review || '');
+
+// ─── прогон ──────────────────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const M = await bundle();
+  const B = Object.fromEntries(Object.entries(FILES).map(([k, rel]) => [k, bytesOf(rel)]));
+  const K = M.pieceKey;
+  const baseSha = await M.sha256Hex(B.base);
+
+  const baseParse = await M.parseSheets(
+    [{ name: 'allsizes-merged.dxf', open: async () => B.base.slice().buffer }],
+    { ...M.RECONCILE_PARSE },
+  );
+  const card = card69(M, { pieces: baseParse.pieces, blockNames: baseParse.blockNames });
+  is('fixture', M.sweepOf(card), [], 'карточка card 69 собирается без нарушений');
+
+  // Строка листа без записанного дайджеста (до 0423) — sha считается по скачанным байтам.
+  const sheetRow = (sha256 = '') => ({
+    url: BASE_URL,
+    filename: 'allsizes-merged.dxf',
+    sha256,
+    ...MAIN,
+  });
+  const run = async (file, opts = {}) => {
+    const store = new Map([[BASE_URL, B.base]]);
+    const log = freshLog();
+    const c = opts.card ?? card;
+    const out = await M.reuploadSheet(
+      formCard(c, opts.patterns ?? [sheetRow(opts.sha ?? '')]),
+      file,
+      makeDeps(M, store, log, opts.faults),
+    );
+    return { out, log, store };
+  };
+
+  // ── g-combo: 2 перекроя, призрак на двух шагах, переименования молчат, PKT — новая ─────────
+  {
+    const tag = 'g-combo';
+    const { out, log } = await run({ name: 'g-combo.dxf', bytes: B.gCombo });
+    is(tag, out.kind, 'applied', 'исход');
+    if (out.kind === 'applied') {
+      table('g-combo · base → g-combo.dxf (card 69 shape)', out);
+      is(
+        tag,
+        reviewsOf(out.operations),
+        ['reshaped', 'reshaped', 'orphan', 'orphan', '', '', '', '', ''],
+        'метки по шагам',
+      );
+      is(tag, out.result.reshapedPieceKeys, [K('BP_2'), K('FP_R')], 'перекрой');
+      is(tag, out.result.ghostPieceKeys, [K('CLR_3')], 'призрак');
+      is(
+        tag,
+        out.result.renamed.map((x) => `${x.from}>${x.to}`),
+        ['CLR_4>COLLAR_UNDER', 'FP_L>FRONT_L'],
+        'переименования (без меток)',
+      );
+      const pkt = out.pieces.find((p) => out.result.addedPieceKeys.includes(p.lineKey));
+      is(tag, [out.result.addedPieceKeys.length, pkt?.name], [1, 'PKT'], 'новая PKT');
+      is(
+        tag,
+        M.unplacedPieceKeys(out.result.addedPieceKeys, out.operations),
+        out.result.addedPieceKeys,
+        'PKT ни в одном шаге: дверь «+ to assembly»',
+      );
+      is(tag, [log.downloads, log.uploads.length], [1, 1], 'скачан 1, загружен 1');
+      is(tag, [out.rowIndex, out.replacedUrl], [0, BASE_URL], 'заменяется строка 0');
+      is(
+        tag,
+        [out.row.sha256, out.row.version, out.row.uploadedAt],
+        [await M.sha256Hex(B.gCombo), 0, ''],
+        'строка листа: sha256, версия от сервера',
+      );
+      yes(
+        tag,
+        M.sweepOf({ pieces: out.pieces, operations: out.operations }).length === 0,
+        'сборка чистая',
+      );
+
+      // переход: вкладка сборки, первый помеченный шаг; без меток — остаёмся
+      const jump = M.markJumpParams(
+        new URLSearchParams('tab=patterns&op=3&unit=x'),
+        out.operations,
+      );
+      is(
+        tag,
+        jump && [jump.get('tab'), jump.get('opi'), jump.has('op'), jump.has('unit')],
+        ['construction', '0', false, false],
+        'переход на сборку, opi=0',
+      );
+      is(tag, M.markJumpParams(new URLSearchParams(), card.operations), null, 'без меток — null');
+
+      // ok → метка снята, открывается следующая
+      const okd = out.operations.map((o, i) => (i === 0 ? M.clearReview(o) : o));
+      is(tag, [okd[0].review, M.nextMarkedOperation(okd, 0)], ['', 1], 'ok на 10 → открыть 20');
+
+      // кандидаты призрака: только детали карточки, ближе — раньше, ≤ 3
+      const [oldParse, newParse] = [log.parses[0], log.parses.at(-1)];
+      const ghostShapes = M.shapesOfIdentity(oldParse, 'CLR_3', SIZES);
+      const shaped = M.shapesByPiece(
+        newParse,
+        out.aliases,
+        SIZES,
+        (a) => a.bomLineKey === SCOPE_KEY,
+      );
+      const nameOf = new Map(out.pieces.map((p) => [p.lineKey, p.name]));
+      const assembly = { pieces: out.pieces, operations: out.operations };
+      const pick = (i, withAssembly = true) =>
+        M.ghostCandidates(
+          {
+            pieceLineKey: K('CLR_3'),
+            shapes: ghostShapes,
+            step: out.operations[i],
+            ...(withAssembly ? { assembly } : {}),
+          },
+          shaped,
+          3,
+          SIZES,
+        );
+      const raw30 = pick(2, false);
+      const c30 = pick(2);
+      const c40 = pick(3);
+      const show = (cs) =>
+        cs.map((c) => `${nameOf.get(c.pieceLineKey)} ${c.cost.toFixed(3)}`).join(', ') || '—';
+      console.log(`ghost CLR_3 · step 30 by shape only:  ${show(raw30)}`);
+      console.log(`ghost CLR_3 · step 30 offered:        ${show(c30)}`);
+      console.log(`ghost CLR_3 · step 40 offered:        ${show(c40)}`);
+      yes(tag, ghostShapes.length > 0, 'контур призрака со старого листа');
+      is(
+        tag,
+        nameOf.get(raw30[0]?.pieceLineKey),
+        'COLLAR_UNDER',
+        'по форме ближе всех к CLR_3 — COLLAR_UNDER',
+      );
+      for (const [at, cs] of [
+        [30, c30],
+        [40, c40],
+      ]) {
+        yes(
+          tag,
+          cs.length > 0 && cs.length <= 3 && cs.every((c) => nameOf.has(c.pieceLineKey)),
+          `кандидаты ${at}: 1..3, только детали карточки`,
+        );
+        yes(
+          tag,
+          cs.every((c, i) => i === 0 || cs[i - 1].cost <= c.cost),
+          `кандидаты ${at}: ближе — раньше`,
+        );
+        yes(
+          tag,
+          cs.every(
+            (c) =>
+              !M.ghostSwapBreaksAssembly(out.pieces, out.operations, K('CLR_3'), c.pieceLineKey),
+          ),
+          `кандидаты ${at}: замена не ломает сборку`,
+        );
+      }
+      // COLLAR_UNDER стоит с CLR_3 в джойне 40: замена по всей карте свела бы его к одному входу
+      yes(
+        tag,
+        M.ghostSwapBreaksAssembly(out.pieces, out.operations, K('CLR_3'), K('CLR_4')) &&
+          !c30.some((c) => c.pieceLineKey === K('CLR_4')),
+        'COLLAR_UNDER не предлагается: ломает джойн 40',
+      );
+
+      // выбор кандидата: CLR_3 меняется по всей карте, 30 и 40 чистые, открывается следующий
+      if (c30[0]) {
+        const swapped = M.replaceGhost(out.operations, K('CLR_3'), c30[0].pieceLineKey, {
+          ghosts: out.result.ghostPieceKeys,
+        });
+        console.log(
+          `pick ${nameOf.get(c30[0].pieceLineKey)}: steps 30/40 → ${swapped
+            .slice(2, 4)
+            .map(
+              (o) =>
+                `[${o.inputKeys.map((k) => nameOf.get(k) ?? k).join(' + ')}] ${o.review || 'clean'}`,
+            )
+            .join(
+              ', ',
+            )}; ! ${out.operations.filter((o) => o.review).length} → ! ${swapped.filter((o) => o.review).length}`,
+        );
+        is(
+          tag,
+          reviewsOf(swapped),
+          ['reshaped', 'reshaped', '', '', '', '', '', '', ''],
+          'замена призрака снимает 30 и 40',
+        );
+        yes(
+          tag,
+          !swapped.some((o) => (o.inputKeys ?? []).includes(K('CLR_3'))),
+          'CLR_3 не осталось ни в одном шаге',
+        );
+        is(
+          tag,
+          M.sweepOf({ pieces: out.pieces, operations: swapped }),
+          [],
+          'сборка после выбора чистая',
+        );
+        is(tag, M.nextMarkedOperation(swapped, 2), 0, 'после выбора → следующий помеченный (10)');
+      }
+      // × на призраке в шаге 30: только этот шаг
+      const dropped = out.operations.map((o, i) =>
+        i === 2 ? M.removeGhostFromStep(o, K('CLR_3'), { ghosts: out.result.ghostPieceKeys }) : o,
+      );
+      is(
+        tag,
+        [dropped[2].inputKeys, dropped[2].review, dropped[3].review],
+        [[], '', 'orphan'],
+        '× снимает призрак только с 30',
+      );
+      // правка шага снимает метку, кроме orphan, пока призрак в шаге
+      is(
+        tag,
+        [
+          M.reviewAfterEdit(out.operations[0], out.result.ghostPieceKeys),
+          M.reviewAfterEdit(out.operations[3], out.result.ghostPieceKeys),
+        ],
+        ['', 'orphan'],
+        'правка: reshaped снят, orphan стоит',
+      );
+
+      // восстановление прошлой версии = та же заливка старого файла (одна точка входа)
+      const after = { pieces: out.pieces, aliases: out.aliases, operations: out.operations };
+      const store = new Map([[out.row.url, B.gCombo]]);
+      store.set(BASE_URL, B.base);
+      const rlog = freshLog();
+      const deps = makeDeps(M, store, rlog);
+      const unsubscribe = M.provideSheetRestorer(async (rev) => {
+        const res = await M.reuploadSheet(
+          formCard(after, [
+            { url: out.row.url, filename: 'g-combo.dxf', sha256: out.row.sha256, ...MAIN },
+          ]),
+          { name: rev.fileName ?? 'restored.dxf', bytes: store.get(rev.url) },
+          deps,
+        );
+        if (res.kind === 'applied') table('restore v6 · g-combo → base (re-apply today)', res);
+        if (res.kind === 'applied') {
+          // Известная дыра перезаливки как восстановления (L3R делает это RPC снимка): призрак не
+          // оживает — блок CLR_3 становится НОВОЙ деталью, шаги остаются на старой, метки едут.
+          const dup = res.result.addedPieceKeys.map(
+            (k) => res.pieces.find((p) => p.lineKey === k)?.name,
+          );
+          const stuck = M.unaliasedPieceKeys(res.pieces, res.aliases);
+          console.log(
+            `restore gap: new pieces [${dup.join(', ')}], unaliased still in steps [${stuck.join(', ')}], marks carried ! ${res.operations.filter((o) => o.review).length}`,
+          );
+        }
+        return res.kind === 'applied' ? 'applied' : res.kind === 'noop' ? 'noop' : 'refused';
+      });
+      const restored = await M.restoreSheetVersion({
+        sheetLineKey: 'sheet-main',
+        url: BASE_URL,
+        fileName: 'allsizes-merged.dxf',
+        revision: 6,
+        sha256: baseSha,
+      });
+      unsubscribe();
+      is(tag, restored, 'applied', 'restoreSheetVersion → applied');
+      is(
+        tag,
+        await M.restoreSheetVersion({ sheetLineKey: 'sheet-main', url: BASE_URL }),
+        'unavailable',
+        'без панели выкроек — unavailable',
+      );
+    }
+  }
+
+  // ── g4-split: BP → BP_U + BP_D; один join перед «back», метка только на нём ──────────────
+  {
+    const tag = 'g4-split';
+    const { out } = await run({ name: 'g4-split.dxf', bytes: B.g4split });
+    is(tag, out.kind, 'applied', 'исход');
+    if (out.kind === 'applied') {
+      table('g4-split · base → g4-split.dxf (card 69 shape)', out);
+      is(tag, out.operations.length, card.operations.length + 1, 'шагов +1');
+      is(
+        tag,
+        out.result.joins.map((j) => [j.opIndex, j.parentKey, j.unitName]),
+        [[4, K('BP'), 'BP']],
+        'join перед «back» (50), ▣ BP',
+      );
+      is(
+        tag,
+        reviewsOf(out.operations),
+        ['', '', '', '', 'split', '', '', '', '', ''],
+        'метка только на join',
+      );
+      const j = out.result.joins[0];
+      is(tag, out.operations[5].inputKeys, [j?.unitKey, 'YOKE'], '«back» берёт ▣ BP');
+      is(
+        tag,
+        M.markJumpParams(new URLSearchParams(), out.operations)?.get('opi'),
+        '4',
+        'переход на join',
+      );
+      yes(
+        tag,
+        M.sweepOf({ pieces: out.pieces, operations: out.operations }).length === 0,
+        'сборка чистая',
+      );
+    }
+  }
+
+  // ── тот же файл: noop без скачивания (записанный sha) и со скачиванием (без sha) ────────────
+  {
+    const tag = 'noop';
+    const a = await run({ name: 'copy.dxf', bytes: B.gSame }, { sha: baseSha });
+    is(tag, [a.out.kind, a.log.downloads, a.log.uploads.length], ['noop', 0, 0], 'записанный sha');
+    const b = await run({ name: 'copy.dxf', bytes: B.gSame });
+    is(tag, [b.out.kind, b.log.downloads, b.log.uploads.length], ['noop', 1, 0], 'sha по байтам');
+  }
+
+  // ── файл без $INSUNITS получает единицы заменяемого листа, без вопроса ─────────────────────
+  {
+    const tag = 'units';
+    const text = M.bytesToLatin1(B.gCombo).replace(/\$INSUNITS\r?\n\s*70\r?\n\s*4/, (m) =>
+      m.replace(/4$/, '0'),
+    );
+    const bytes = Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+    is(tag, M.readInsunits(M.bytesToLatin1(bytes)), 0, 'фикстура без единиц');
+    const { out, log } = await run({ name: 'g-combo-nounits.dxf', bytes });
+    is(tag, out.kind, 'applied', 'исход');
+    is(
+      tag,
+      M.readInsunits(M.bytesToLatin1(log.uploads[0]?.bytes ?? new Uint8Array())),
+      4,
+      'загружен с мм',
+    );
+    if (out.kind === 'applied')
+      is(
+        tag,
+        reviewsOf(out.operations),
+        ['reshaped', 'reshaped', 'orphan', 'orphan', '', '', '', '', ''],
+        'метки как у g-combo',
+      );
+  }
+
+  // ── отказ — старый лист остаётся, на сервер ничего не ушло ──────────────────────────────────
+  {
+    const tag = 'refused';
+    const utf16 = new Uint8Array([0xff, 0xfe, 0x30, 0x00]);
+    const f = await run({ name: 'u16.dxf', bytes: utf16 });
+    is(tag, [f.out.kind, f.out.why, f.log.uploads.length], ['refused', 'file', 0], 'UTF-16');
+    const d = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { faults: { download: true } });
+    is(
+      tag,
+      [d.out.kind, d.out.why, d.log.uploads.length],
+      ['refused', 'download', 0],
+      'скачивание',
+    );
+    const u = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { faults: { upload: true } });
+    is(tag, [u.out.kind, u.out.why], ['refused', 'upload'], 'загрузка');
+    const empty = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { patterns: [] });
+    is(tag, empty.out.kind, 'first', 'пустой слот — первая заливка');
+  }
+
+  // ── причина снимка: только первое сохранение после перезалива ─────────────────────────────
+  {
+    const tag = 'snapshot';
+    M.armReuploadSnapshot(69);
+    const first = M.peekReuploadSnapshot(69);
+    M.armReuploadSnapshot(69); // второй перезалив до того, как первый сейв вернулся
+    M.consumeReuploadSnapshot(69, first);
+    const second = M.peekReuploadSnapshot(69);
+    M.consumeReuploadSnapshot(69, second);
+    is(
+      tag,
+      [first?.reason, second?.reason, M.peekReuploadSnapshot(69)],
+      [M.REUPLOAD_SNAPSHOT_REASON, 'dxf-reupload', null],
+      'сейв 1 не снимает причину сейва 2; после сейва 2 — пусто',
+    );
+  }
+
+  console.log(`\n${total - failed}/${total} checks ${failed ? `· ${failed} FAILED` : 'green'}`);
+  process.exit(failed ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

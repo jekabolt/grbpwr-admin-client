@@ -218,6 +218,10 @@ const patternSchema = z.object({
   // The НАЗНАЧЕНИЕ this sheet is cut from (0267) — the honest statement at card level, where no
   // article is in play. '' = not purpose-bound; the row falls back to bomLineKey.
   fabricPurpose: z.string().optional().default(''),
+  // Lowercase hex SHA-256 of the file's bytes (0423), computed at upload. '' = unknown (a sheet
+  // stored before the column, or a PDF). A re-upload with the same digest is a no-op; a replaced
+  // row must carry its new digest or '' — never the old file's.
+  sha256: z.string().optional().default(''),
 });
 
 // Exported: an issue is now also minted OUTSIDE the issues editor — the CONSTRUCTION audit files
@@ -1269,6 +1273,11 @@ const operationSchema = z
     // not an instruction: the server keeps it out of the card digest. The first meaningful edit of the
     // row, or a click on its «draft» chip in the rail, sets it false.
     draft: z.boolean().optional().default(false),
+    // REVIEW (0422): «check this step» after a DXF re-upload changed its pieces — 'reshaped',
+    // 'remapped', 'split', 'orphan' or ''. Blocks release server-side. Cleared by «ok» on the step or
+    // by any edit of it, except 'orphan', which goes only when the ghost piece leaves the step
+    // (reviewAfterEdit, lib/dxf-reconcile).
+    review: z.string().optional().default(''),
 
     // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
     // inherited value. That is exactly what the old operation-type preset did, and it made «the
@@ -2556,6 +2565,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // The server always states presence on read, so UNSET arrives as a real value — normalise it
       // to '' here so every reader can test the field with a plain truthiness check.
       fabricPurpose: p.fabricPurpose && p.fabricPurpose !== UNSET_PURPOSE ? p.fabricPurpose : '',
+      sha256: (p.sha256 ?? '').trim().toLowerCase(),
     })),
     // The wrapper is always present on read, so `items` is the authoritative stored set.
     pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
@@ -2716,6 +2726,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       work: (o.work ?? '').trim(),
       smv: decimalToInput(o.smv),
       draft: !!o.draft,
+      review: (o.review ?? '').trim(),
       calloutNumber: o.calloutNumber || 0,
       // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
       // empty control, not as 0 — 0 is the separate, real setting «cut on the line as drawn».
@@ -3254,6 +3265,10 @@ export function mapFormToTechCardInsert(
         // unbind. Omitting it would put this client in the stale-client lane and make an unbind
         // silently impossible.
         fabricPurpose: (p.fabricPurpose?.trim() || UNSET_PURPOSE) as common_TechCardBomPurpose,
+        // Digest of the file as held (0423). Omitted when unknown: the server then keeps the stored
+        // one for an unchanged url and clears it for a replaced one — exactly right for a row whose
+        // file this client could not hash.
+        ...(p.sha256?.trim() ? { sha256: p.sha256.trim().toLowerCase() } : {}),
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -3576,6 +3591,9 @@ export function mapFormToTechCardInsert(
     // `false` здесь — «проверено», а не «не знаю про поле». Без флага сервер отказывает записи
     // поверх карточки с draft-шагами (старая вкладка стёрла бы метки полной заменой).
     operationDraftAware: true,
+    // СЕДЬМОЙ — метка «проверить» после перезалива DXF (0422). Ставится ВСЕГДА, как draft: этот
+    // бандл везёт `review` каждого шага, и '' здесь — «проверено», а не «не знаю про поле».
+    operationReviewAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3778,6 +3796,8 @@ export function mapFormToTechCardInsert(
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
         // DRAFT rides every write as it stands: a reviewed step must reach the server as false.
         draft: !!o.draft,
+        // REVIEW rides every write as it stands, like draft: a checked step goes out as ''.
+        review: (o.review ?? '').trim(),
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,

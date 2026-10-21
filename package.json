@@ -19,6 +19,7 @@
     "doll:corpus": "node scripts/doll/corpus.mjs",
     "nest:probe": "node scripts/nest-probe.mjs",
     "reconcile:probe": "node scripts/dxf-reconcile-probe.mjs",
+    "reupload:check": "node scripts/dxf-reupload-check.mjs",
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
     "patimport:dxf": "node scripts/pattern-import/dxf.mjs",
     "patimport:raster": "node scripts/pattern-import/raster.mjs",

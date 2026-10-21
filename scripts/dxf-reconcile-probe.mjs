@@ -239,6 +239,42 @@ const MUTANTS = [
     kills: ['apply-invariants'],
   },
   {
+    id: 'split-marks-steps',
+    file: 'rewrite.ts',
+    edits: [["if (rv.review === 'split') {", "if (rv.review === 'split' && false) {"]],
+    kills: ['g4-split', 'split-join'],
+  },
+  {
+    id: 'join-after-first-use',
+    file: 'rewrite.ts',
+    edits: [
+      [
+        'slots.splice(at, 0, { op: join, src: -1 });',
+        'slots.splice(at + 1, 0, { op: join, src: -1 });',
+      ],
+    ],
+    kills: ['g4-split', 'split-join'],
+  },
+  {
+    id: 'join-no-downstream-swap',
+    file: 'rewrite.ts',
+    edits: [
+      ['slots = slots.map((x, i) => (i < at ? x :', 'slots = slots.map((x, i) => (true ? x :'],
+    ],
+    kills: ['g4-split', 'split-join'],
+  },
+  {
+    id: 'join-shifts-old-violations',
+    file: 'rewrite.ts',
+    edits: [
+      [
+        '(i) => (slots[i] && slots[i].src >= 0 ? String(slots[i].src) : `join${i}`)',
+        '(i) => String(i)',
+      ],
+    ],
+    kills: ['split-join'],
+  },
+  {
     id: 'step-dropped',
     file: 'rewrite.ts',
     edits: [
@@ -432,6 +468,13 @@ function deps() {
       cutSymmetry: s.cutSymmetry,
     }),
     makeAlias: (s) => ({ id: `al-new-${s.blockName}`, ...s }),
+    makeJoin: (s) => ({
+      title: `join ${s.outputUnitName}`,
+      inputKeys: s.inputKeys,
+      outputUnitKey: s.outputUnitKey,
+      outputUnitName: s.outputUnitName,
+      zoneOf: s.before.title,
+    }),
     setReview: (op, review) => ({ ...op, review }),
   };
 }
@@ -477,6 +520,7 @@ const GATES = [
   'review-rank',
   'moved',
   'sweep-guard',
+  'split-join',
   'apply-invariants',
 ];
 
@@ -517,15 +561,47 @@ function gates(M, data) {
     const g = 'apply-invariants';
     const { input, res } = r;
     is(g, res.refused?.reason ?? null, refused, `${name}: отказ`);
+    // Шаги не теряются; добавляются только join разреза — ровно перед первым шагом с деталью.
+    const joins = res.joins ?? [];
     yes(
       g,
-      res.operations.length === input.operations.length,
-      `${name}: шагов ${res.operations.length} из ${input.operations.length}`,
+      res.operations.length === input.operations.length + joins.length,
+      `${name}: шагов ${res.operations.length} из ${input.operations.length} + join ${joins.length}`,
     );
+    const joinAt = new Set(joins.map((j) => j.opIndex));
+    const pieceKeys = new Set(res.pieces.map((p) => p.lineKey));
+    for (const j of joins) {
+      const op = res.operations[j.opIndex];
+      is(g, op?.inputKeys, [j.parentKey, ...j.partKeys], `${name}: входы join ${j.unitName}`);
+      is(
+        g,
+        [op?.outputUnitKey, op?.outputUnitName],
+        [j.unitKey, j.unitName],
+        `${name}: выход join`,
+      );
+      is(g, op?.review, 'split', `${name}: метка join`);
+      yes(g, !pieceKeys.has(j.unitKey), `${name}: узел join ${j.unitKey} — ключ детали`);
+      const next = res.operations[j.opIndex + 1];
+      yes(
+        g,
+        !!next && (next.inputKeys ?? []).includes(j.unitKey),
+        `${name}: join ${j.unitName} не прямо перед первым шагом с деталью`,
+      );
+      yes(
+        g,
+        res.operations.slice(0, j.opIndex).every((o) => !(o.inputKeys ?? []).includes(j.parentKey)),
+        `${name}: деталь ${j.parentKey} входом раньше join`,
+      );
+    }
+    let src = 0;
     res.operations.forEach((op, i) => {
-      const was = input.operations[i];
+      if (joinAt.has(i)) return;
+      const was = input.operations[src++];
       if (!was) return;
-      is(g, op.inputKeys, was.inputKeys, `${name}: входы шага ${i}`);
+      let want = was.inputKeys;
+      for (const j of joins)
+        if (j.opIndex < i) want = want.map((k) => (k === j.parentKey ? j.unitKey : k));
+      is(g, op.inputKeys, want, `${name}: входы шага ${i}`);
       is(g, op.media ?? null, was.media ?? null, `${name}: аннотации шага ${i}`);
       is(g, op.outputUnitKey, was.outputUnitKey, `${name}: выход шага ${i}`);
     });
@@ -551,10 +627,12 @@ function gates(M, data) {
         `${name}: алиас ${a.blockName} → нет детали ${a.pieceLineKey}`,
       );
     const before = new Set(input.pieces.map((p) => p.lineKey));
+    const swapped = new Set(joins.map((j) => j.parentKey));
     for (const op of input.operations) {
       for (const k of op.inputKeys ?? [])
         if (before.has(k)) yes(g, keys.has(k), `${name}: деталь-вход ${k} исчезла`);
     }
+    for (const k of swapped) yes(g, keys.has(k), `${name}: разрезанная деталь ${k} исчезла`);
     if (!res.refused)
       is(
         g,
@@ -719,7 +797,7 @@ function gates(M, data) {
     );
   });
 
-  // ── g4-split: BP → BP_U + BP_D, без join; деталь — за большей частью ─────────────────────
+  // ── g4-split: BP → BP_U + BP_D; деталь — за большей частью, join ▣ BP перед первым шагом ──
   guard('g4-split', () => {
     const g = 'g4-split';
     const r = runCase(M, {
@@ -754,7 +832,21 @@ function gates(M, data) {
       'часть наследует ×2 зеркально',
     );
     is(g, r.res.reshapedPieceKeys, [K('BP')], '«Конструкция» BP протухла');
-    is(g, r.res.operations.length, r.input.operations.length, 'join не вставлен');
+    // круг 2: ОДИН join [BP, часть] → ▣ BP перед первым шагом с BP; метка только на нём
+    is(
+      g,
+      r.res.joins.map((j) => [j.opIndex, j.parentKey, j.partKeys, j.unitKey, j.unitName]),
+      [[0, K('BP'), [r.res.addedPieceKeys[0]], 'BP', 'BP']],
+      'join разреза',
+    );
+    is(g, r.res.operations.length, r.input.operations.length + 1, 'шагов +1');
+    is(
+      g,
+      r.res.operations.map((o) => o.review ?? ''),
+      r.res.operations.map((_, i) => (i === 0 ? 'split' : '')),
+      'метка только на join',
+    );
+    is(g, r.res.operations[1].inputKeys, ['BP', K('BP_1')], 'первый шаг берёт ▣ BP');
   });
 
   // ── g4-merge: BP_U + BP_D → BP; поглощённая остаётся призраком, обе — remapped ────────────
@@ -1193,6 +1285,99 @@ function gates(M, data) {
       'шаги как были',
     );
     is(g, r.res.reviews, [], 'меток нет');
+  });
+
+  // ── разрез посреди цепочки: join встаёт ровно перед первым шагом с деталью ────────────────
+  guard('split-join', () => {
+    const g = 'split-join';
+    const spec = {
+      inputs: ['BP_1', 'BP_2', 'BP', 'CLR_3', 'CLR_4', 'FP_L', 'FP_R', 'SL_L', 'SL_R'],
+      overrides: { BP: { piecesPerGarment: 2, cutSymmetry: M.MIRRORED } },
+    };
+    const card = M.cardFromSheet(S.base, { scope: MAIN, sizeTokens: SIZES, ...spec });
+    // шаг 1 — обработка BP (без выхода, не поглощает), шаг 2 — джойн [U1, BP] с выноской на BP
+    card.operations.splice(1, 0, {
+      title: 'overlock BP',
+      inputKeys: [K('BP')],
+      outputUnitKey: '',
+      outputUnitName: '',
+    });
+    card.operations[2].media = [{ annotations: [{ pieceLineKey: K('BP') }] }];
+    yes(g, M.sweepOf(card).length === 0, 'фикстура чистая');
+    const r = runCase(M, { old: S.base, neu: S.g4split, card });
+    invariants(g, r);
+    const part = r.res.addedPieceKeys[0];
+    is(
+      g,
+      r.res.joins.map((j) => [j.opIndex, j.parentKey, j.partKeys, j.unitKey, j.unitName]),
+      [[1, K('BP'), [part], 'BP', 'BP']],
+      'join перед обработкой BP',
+    );
+    is(
+      g,
+      r.res.operations.map((o) => [o.title, o.inputKeys, o.review ?? '']),
+      [
+        ['join 1', [K('BP_1'), K('BP_2')], ''],
+        ['join BP', [K('BP'), part], 'split'],
+        ['overlock BP', ['BP'], ''],
+        ['join 2', ['u1', 'BP'], ''],
+        ...r.input.operations.slice(3).map((o) => [o.title, o.inputKeys, '']),
+      ],
+      'шаги после разреза',
+    );
+    is(g, r.res.operations[1].zoneOf, 'overlock BP', 'join знает шаг, перед которым встал');
+    is(
+      g,
+      r.res.operations[3].media,
+      [{ annotations: [{ pieceLineKey: K('BP') }] }],
+      'выноска осталась на детали',
+    );
+    is(g, r.res.reviews, [{ opIndex: 1, review: 'split', pieceKeys: [K('BP')] }], 'метки');
+    is(
+      g,
+      r.res.pieces.find((p) => p.lineKey === K('BP'))?.name,
+      rowBy(r.plan, 'BP')?.links.find((l) => l.pieceLineKey === K('BP'))?.identity,
+      'деталь BP переименована за большей частью, узел держит старое имя',
+    );
+
+    // имя узла занято выходом другого шага → код с суффиксом
+    const taken = structuredClone(card);
+    taken.operations = taken.operations.map((o) =>
+      o.outputUnitKey === 'u8' ? { ...o, outputUnitKey: 'BP' } : o,
+    );
+    const r2 = runCase(M, { old: S.base, neu: S.g4split, card: taken });
+    is(
+      g,
+      r2.res.joins.map((j) => j.unitKey),
+      ['BP-2'],
+      'код узла уникален',
+    );
+
+    // старое нарушение ПОСЛЕ join (повтор входа в последнем шаге) — не новое, не отказ
+    const dirty = structuredClone(card);
+    const last = dirty.operations.at(-1);
+    last.inputKeys = [...last.inputKeys, last.inputKeys.at(-1)];
+    yes(g, M.sweepOf(dirty).length > 0, 'грязная фикстура грязная');
+    const r3 = runCase(M, { old: S.base, neu: S.g4split, card: dirty });
+    is(g, r3.res.refused?.reason ?? null, null, 'старое нарушение после join — не отказ');
+    is(g, r3.res.joins.length, 1, 'join при старом нарушении');
+
+    // BP ни в одном входе (только выноска) — join нет, меток нет, часть — новая деталь
+    const loose = runCase(M, {
+      old: S.base,
+      neu: S.g4split,
+      spec: {
+        inputs: ['BP_1', 'BP_2', 'CLR_3', 'CLR_4', 'FP_L', 'FP_R', 'SL_L', 'SL_R'],
+        annotate: ['BP'],
+      },
+    });
+    invariants(`${g} без входа`, loose);
+    is(
+      g,
+      [loose.res.joins.length, loose.res.reviews.length, loose.res.addedPieceKeys.length],
+      [0, 0, 1],
+      'без входа: join/метки/новые',
+    );
   });
 
   // Фикстуры чистые — иначе сторож сборки ловил бы мусор пробы, а не сверку.

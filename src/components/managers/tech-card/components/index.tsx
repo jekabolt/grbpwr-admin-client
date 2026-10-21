@@ -160,6 +160,7 @@ import {
 } from './save-history';
 import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
+import { consumeReuploadSnapshot, peekReuploadSnapshot } from './nesting/reupload-session';
 import {
   decideAutoStage,
   resolveNextStep,
@@ -1719,11 +1720,16 @@ export function TechCardForm({
           // The version this form stands on (M-3); after «keep mine & overwrite» the version read back
           // from the server, so that choice actually overwrites (see keepMineAndOverwrite).
           const expected = claimVersion();
+          // The first save after a DXF re-upload carries the snapshot reason — only that save.
+          const cardId = parseInt(id || '0', 10);
+          const snapshot = peekReuploadSnapshot(cardId);
           await updateTechCard.mutateAsync({
-            id: parseInt(id || '0', 10),
+            id: cardId,
             techCard: techCardInsert,
             expectedLockVersion: expected,
+            ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
           });
+          consumeReuploadSnapshot(cardId, snapshot);
           // The body is committed server-side from here on — anything that fails below leaves the
           // card carrying the values this PUT just wrote (see the return type's comment).
           bodySaved = true;
@@ -1893,13 +1899,16 @@ export function TechCardForm({
           mapFormToTechCardInsert(data, current.techCard?.techCard, canWriteCosting),
           { serverSpeaksDesign: designBandSpeaks },
         );
+        const snapshot = peekReuploadSnapshot(newId);
         await updateTechCard.mutateAsync({
           id: newId,
           techCard: payload,
           // The version read a moment ago. This card is seconds old and only this page knows it; a
           // version remembered from the create would 409 against the panels written since.
           expectedLockVersion: current.techCard?.lockVersion ?? 0,
+          ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
         });
+        consumeReuploadSnapshot(newId, snapshot);
         bodySaved = true;
       } else {
         const created = await createTechCard.mutateAsync({ techCard: techCardInsert });

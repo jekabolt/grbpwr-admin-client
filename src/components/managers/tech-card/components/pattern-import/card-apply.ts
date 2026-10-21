@@ -2,6 +2,7 @@
 // `buildDraft` / `applyDraft` (lib/pattern-import/fabrics) wired to the upload RPC, the tech-card
 // form and the card's autosave. The wizard itself never touches the form (Codex C5).
 import { adminService } from 'api/api';
+import { sha256Hex } from 'lib/features/sha256';
 import { applyDraft } from 'lib/pattern-import/fabrics/apply';
 import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
 import { buildDraft } from 'lib/pattern-import/fabrics/draft';
@@ -15,6 +16,12 @@ export const cardBuildDraft: DraftBuilder = (write, { card }) => buildDraft(writ
  * ASCII DXF (the writer guarantees it, write/format.ts) → base64 as UploadPattern takes it. `btoa`
  * per chunk stays valid because every chunk is a multiple of 3 bytes long.
  */
+function latin1Bytes(text: string): Uint8Array {
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i) & 0xff;
+  return out;
+}
+
 function toBase64(text: string): string {
   const CHUNK = 3 * 0x2000;
   let out = '';
@@ -44,6 +51,8 @@ export function createCardApply(deps: {
               filename: res.filename ?? name,
               // int64 arrives as a string over grpc-gateway (pattern-upload-button.tsx)
               sizeBytes: Number(res.sizeBytes ?? text.length) || text.length,
+              // the bytes btoa sent: one byte per char (0423)
+              sha256: await sha256Hex(latin1Bytes(text)),
             };
           } catch (e) {
             throw new Error(patternUploadErrorMessage(e));
