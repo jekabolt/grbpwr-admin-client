@@ -606,7 +606,7 @@ export function TaskDetail() {
                   <PropRow label='created'>
                     <Text size='control' variant='label' component='span' className='uppercase'>
                       {task.createdBy ? `${task.createdBy} · ` : ''}
-                      {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
+                      {task.createdAt ? format(new Date(task.createdAt), 'PP, HH:mm') : <EmptyCell />}
                     </Text>
                   </PropRow>
                 </>
@@ -666,7 +666,7 @@ export function TaskDetail() {
                   className='uppercase tracking-label'
                 >
                   created {task.createdBy ? `${task.createdBy} · ` : ''}
-                  {task.createdAt ? format(new Date(task.createdAt), 'PP') : <EmptyCell />}
+                  {task.createdAt ? format(new Date(task.createdAt), 'PP, HH:mm') : <EmptyCell />}
                 </Text>
                 {t.labels.map((l) => (
                   <Pill key={l} tone='mut'>
