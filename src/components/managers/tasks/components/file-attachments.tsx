@@ -441,15 +441,6 @@ export function FilePicker(props: FilePickerProps) {
 
   const browserContent = (
     <div className='flex flex-col gap-2.5'>
-      {notePicker && (
-        <Text size='micro' variant='label'>
-          {insert === 'preview'
-            ? 'the file will stand shown right inside the text: a picture as itself, a pdf or a drawing as its rendered thumbnail. a file marked “no preview” has nothing to show and will stand as a link.'
-            : 'a picture will stand shown right inside the text; everything else links to the file card.'}{' '}
-          what goes into the note is the file NUMBER, not a signed address. a signature lives hours;
-          a note lives years.
-        </Text>
-      )}
       <div className='flex items-stretch gap-2'>
         <Input
           name={notePicker ? 'noteFileSearch' : 'pickerSearch'}
@@ -822,8 +813,8 @@ export function FilePicker(props: FilePickerProps) {
       title={
         notePicker
           ? insert === 'preview'
-            ? 'insert a file preview'
-            : 'insert a file into the text'
+            ? 'insert preview'
+            : 'insert file'
           : 'attach a file'
       }
       width='lg'
