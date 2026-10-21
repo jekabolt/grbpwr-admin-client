@@ -111,7 +111,7 @@ export function AttachmentTiles({
       sev: 'error',
       subject: `FILE${f.id ? ` ${f.id}` : ''}`,
       text: 'not opened',
-      detail: 'this file came without a link — nothing to open',
+      detail: 'no link',
     });
   };
 
