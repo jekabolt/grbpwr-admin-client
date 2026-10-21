@@ -102,6 +102,13 @@ function GroupLabelDemo() {
       >
         trims
       </GroupLabel>
+      <GroupLabel
+        rule='above'
+        plain
+        swatch={<span aria-hidden className='size-5 border border-borderColor bg-pageBg' />}
+      >
+        shell fabric <span className='text-labelColor'>· m · FAB-1785514792</span>
+      </GroupLabel>
     </div>
   );
 }

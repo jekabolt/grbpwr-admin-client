@@ -38,7 +38,7 @@ export { CopyToClipboard } from './components/copyToClipboard';
 /** @primitive Table grammar wrapper */
 export { DataTable, EmptyCell, TotalRow } from './components/data-table';
 /** @primitive Portalled date field */
-export { DatePicker } from './components/date-picker';
+export { DatePicker, DateRangePicker } from './components/date-picker';
 /** @primitive Date pill scroll handle (touch) */
 export { DateScrubber, scrubLabel, type DateScrubberProps } from './components/date-scrubber';
 /** @primitive Month to list offset index */

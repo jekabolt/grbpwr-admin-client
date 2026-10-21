@@ -57,7 +57,7 @@ function readPhoneStatus(): TaskStatus {
   return 'TASK_STATUS_TODO';
 }
 
-function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
+export function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   const map: Record<TaskStatus, Task[]> = {
     TASK_STATUS_UNKNOWN: [],
     TASK_STATUS_BACKLOG: [],

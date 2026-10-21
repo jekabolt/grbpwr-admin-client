@@ -7,6 +7,7 @@ import { cn } from 'lib/utility';
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  Arrow,
   Button,
   Chip,
   ChipRow,
@@ -349,21 +350,21 @@ export function MaterialPicker({
           'disabled:cursor-not-allowed disabled:bg-pageBg disabled:text-labelColor',
         )}
       >
-        {selected ? <MaterialThumb material={selected} size='sm' className='h-5 w-5' /> : null}
+        {selected ? <MaterialThumb material={selected} size='sm' className='size-4.5' /> : null}
         <span className='min-w-0 flex-1 truncate'>
           {selected ? (
             <Text component='span' className='truncate'>
               {materialLabel(selected)}
             </Text>
           ) : (
-            <Text component='span' variant='label' className='truncate'>
+            <Text component='span' variant='label' className='truncate uppercase'>
               {isLoading ? 'loading…' : placeholder}
             </Text>
           )}
         </span>
-        <Text component='span' variant='inactive' className='shrink-0'>
-          {open ? '▴' : '▾'}
-        </Text>
+        <span aria-hidden className={cn('shrink-0 rotate-180 text-textColor', open && 'rotate-0')}>
+          <Arrow />
+        </span>
       </button>
 
       {!isLoading && materials.length === 0 ? (
