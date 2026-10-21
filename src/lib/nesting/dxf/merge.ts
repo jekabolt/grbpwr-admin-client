@@ -106,11 +106,15 @@ function parseTags(text: string, where: string): Tag[] {
     // молчаливая порча вместо честного отказа.
     if (raw === '') {
       if (lines.slice(i).every((l) => l.trim() === '')) break;
-      throw new Error(`${where}: an empty code line at position ${i + 1} — the stream of pairs is out of step`);
+      throw new Error(
+        `${where}: an empty code line at position ${i + 1} — the stream of pairs is out of step`,
+      );
     }
     const code = Number(raw);
     if (!Number.isInteger(code)) {
-      throw new Error(`${where}: not an ASCII DXF — line ${i + 1} carries “${raw}” instead of a code`);
+      throw new Error(
+        `${where}: not an ASCII DXF — line ${i + 1} carries “${raw}” instead of a code`,
+      );
     }
     out.push({ code, value: lines[i + 1].replace(/\r$/, '') });
   }
@@ -220,12 +224,18 @@ export function mergeDxfSheets(
 
   // ВЕРСИЯ — ПЕРВОЙ. У R12 нет ни хендлов, ни $INSUNITS, поэтому проверка единиц отвергла бы его
   // раньше, назвав чужую причину: оператор пошёл бы искать миллиметры там, где дело в формате.
-  for (const p of parsed) {
-    const ver = headerValue(p.tags, '$ACADVER') ?? '';
+  const versions = parsed.map((p) => headerValue(p.tags, '$ACADVER') ?? '');
+  // R12 — своя, более простая склейка (см. `mergeR12`). Но только если R12 ВСЕ: шаблон задаёт
+  // каркас, и блок R12 внутри файла R2000 был бы незаконным без тех самых выдуманных подклассов.
+  if (versions.every((v) => v === R12)) return mergeR12(parsed, offsets);
+  for (let i = 0; i < parsed.length; i++) {
+    const ver = versions[i];
     if (!R2000_PLUS.has(ver)) {
       throw new Error(
-        `${p.name}: DXF version ${ver || 'not specified'} — the merge takes AAMA R2000+ exports ` +
-          `(AC1015 and newer), the ones CLO gives out per size`,
+        ver === R12
+          ? `${parsed[i].name}: DXF R12 (AC1009) next to R2000+ files — export every size in the same DXF version`
+          : `${parsed[i].name}: DXF version ${ver || 'not specified'} — the merge takes AAMA exports ` +
+            `in R12 (AC1009) or R2000+ (AC1015 and newer)`,
       );
     }
   }
@@ -236,7 +246,9 @@ export function mergeDxfSheets(
   const distinct = new Set(units.map((u) => u.u ?? ''));
   if (distinct.size > 1) {
     const list = units.map((u) => `${u.name}: ${u.u ?? '—'}`).join(', ');
-    throw new Error(`different drawing units ($INSUNITS) — the merge would distort the dimensions (${list})`);
+    throw new Error(
+      `different drawing units ($INSUNITS) — the merge would distort the dimensions (${list})`,
+    );
   }
 
   const template = parsed[0];
@@ -252,7 +264,9 @@ export function mergeDxfSheets(
   // она встанет. Без неё вставки было бы некуда положить, и файл вышел бы с блоками, но пустым на
   // экране: пятьсот килобайт геометрии, которых не видно.
   if (!sectionRange(template.tags, 'ENTITIES')) {
-    throw new Error(`${template.name}: the file has no ENTITIES section — there is nowhere to put the inserts`);
+    throw new Error(
+      `${template.name}: the file has no ENTITIES section — there is nowhere to put the inserts`,
+    );
   }
 
   let nextHandle = firstFreeHandle(template.tags);
@@ -272,7 +286,9 @@ export function mergeDxfSheets(
     (b) => !b.name.startsWith('*'),
   );
   if (templateBlocks.length === 0) {
-    throw new Error(`${template.name}: the file has no blocks — this is not a per-piece AAMA export`);
+    throw new Error(
+      `${template.name}: the file has no blocks — this is not a per-piece AAMA export`,
+    );
   }
   for (const b of templateBlocks) {
     ownerOf.set(b.name, template.name);
@@ -383,7 +399,7 @@ export function mergeDxfSheets(
       blockRecords: newRecords,
       blockRecordCount: brTable.names.length + newRecords.filter((t) => t.code === 0).length,
       importedBlocks: importedChunks,
-      entities: [...keptEntities, ...inserts],
+      entities: keptEntities.concat(inserts),
     }),
   );
 
@@ -396,6 +412,122 @@ export function mergeDxfSheets(
     warnings,
     insunits: Number.isFinite(insunits) ? insunits : null,
   };
+}
+
+// ── R12 ───────────────────────────────────────────────────────────────────────────────────────
+//
+// AAMA-выгрузка CLO в R12 — это HEADER с одной $ACADVER, BLOCKS и ENTITIES (вставки и подпись
+// AUTHOR / UNITS / SAMPLE SIZE). Ни хендлов, ни BLOCK_RECORD, ни таблицы слоёв: слои R12 заводит
+// сам по первому упоминанию. Поэтому склейка здесь — чистая конкатенация блоков, дословно, и
+// своя секция ENTITIES со вставками R12-формы (без 5/330/100). Если экспортёр всё же писал
+// хендлы ($HANDLING 1), импортируемым раздаются свежие — дубль хендла законен ни в одной версии.
+const R12 = 'AC1009';
+
+function mergeR12(parsed: { name: string; tags: Tag[] }[], offsets?: MergeOffsets): MergeResult {
+  const template = parsed[0];
+  if (!sectionRange(template.tags, 'ENTITIES')) {
+    throw new Error(
+      `${template.name}: the file has no ENTITIES section — there is nowhere to put the inserts`,
+    );
+  }
+  const templateBlocks = blockChunks(template.tags, template.name).filter(
+    (b) => !b.name.startsWith('*'),
+  );
+  if (templateBlocks.length === 0) {
+    throw new Error(
+      `${template.name}: the file has no blocks — this is not a per-piece AAMA export`,
+    );
+  }
+
+  let nextHandle = firstFreeHandle(template.tags);
+  const handle = () => (nextHandle++).toString(16).toUpperCase();
+
+  const warnings: string[] = [];
+  const blocks: MergedBlock[] = [];
+  const skipped: SkippedBlock[] = [];
+  const ownerOf = new Map<string, string>();
+  const importedChunks: Tag[] = [];
+
+  for (const b of templateBlocks) {
+    ownerOf.set(b.name, template.name);
+    blocks.push({ block: b.name, from: template.name, ...offsetOf(offsets, b.name) });
+  }
+  for (const src of parsed.slice(1)) {
+    const chunks = blockChunks(src.tags, src.name).filter((b) => !b.name.startsWith('*'));
+    if (chunks.length === 0) {
+      warnings.push(`${src.name}: no blocks — the file is skipped`);
+      continue;
+    }
+    if (nonInsertEntities(src.tags).some((t) => t.code === 0 && t.value !== 'TEXT')) {
+      warnings.push(
+        `${src.name}: model space carries geometry outside the blocks — it didn't make it in`,
+      );
+    }
+    for (const chunk of chunks) {
+      const keptFrom = ownerOf.get(chunk.name);
+      if (keptFrom) {
+        skipped.push({ block: chunk.name, from: src.name, keptFrom });
+        continue;
+      }
+      for (const t of chunk.tags) {
+        importedChunks.push(t.code === 5 ? { code: 5, value: handle() } : t);
+      }
+      ownerOf.set(chunk.name, src.name);
+      blocks.push({ block: chunk.name, from: src.name, ...offsetOf(offsets, chunk.name) });
+    }
+  }
+
+  const templateInserts = new Map<string, string>(); // блок → слой его вставки в шаблоне
+  {
+    const range = sectionRange(template.tags, 'ENTITIES')!;
+    let name: string | null = null;
+    let layer = '0';
+    let inInsert = false;
+    const flush = () => {
+      if (inInsert && name) templateInserts.set(name, layer);
+    };
+    for (let i = range[0]; i < range[1]; i++) {
+      const t = template.tags[i];
+      if (t.code === 0) {
+        flush();
+        inInsert = t.value === 'INSERT';
+        name = null;
+        layer = '0';
+        continue;
+      }
+      if (inInsert && t.code === 2) name = t.value;
+      if (inInsert && t.code === 8) layer = t.value;
+    }
+    flush();
+  }
+  // Слой вставок — как у шаблона (CLO кладёт их на «1»), чтобы склейка не отличалась от исходника.
+  const insertLayer = templateInserts.values().next().value ?? '0';
+
+  const inserts: Tag[] = [];
+  for (const b of blocks) {
+    inserts.push(
+      { code: 0, value: 'INSERT' },
+      { code: 8, value: templateInserts.get(b.block) ?? insertLayer },
+      { code: 2, value: b.block },
+      { code: 10, value: fmt(b.dx) },
+      { code: 20, value: fmt(b.dy) },
+      { code: 30, value: '0.0' },
+    );
+  }
+
+  const text = emitTags(
+    rebuild(template.tags, {
+      handleSeed: nextHandle,
+      layerRecords: [],
+      layerCount: -1,
+      blockRecords: [],
+      blockRecordCount: -1,
+      importedBlocks: importedChunks,
+      entities: nonInsertEntities(template.tags).concat(inserts),
+    }),
+  );
+
+  return { text, blocks, skipped, warnings, insunits: null };
 }
 
 function offsetOf(offsets: MergeOffsets | undefined, block: string): { dx: number; dy: number } {
@@ -462,9 +594,16 @@ function nonInsertEntities(tags: readonly Tag[]): Tag[] {
   return out;
 }
 
+// `out.push(...big)` кладёт каждый элемент аргументом на стек: на склейке размеров это сотни
+// тысяч тегов и RangeError. Цикл.
+function pushAll(out: Tag[], src: readonly Tag[]): void {
+  for (const t of src) out.push(t);
+}
+
 type Rebuild = {
   handleSeed: number;
   layerRecords: Tag[];
+  /** -1 — не трогать счётчик (R12: таблиц может не быть, а записей мы не добавляем). */
   layerCount: number;
   blockRecords: Tag[];
   blockRecordCount: number;
@@ -492,7 +631,8 @@ function rebuild(tags: readonly Tag[], parts: Rebuild): Tag[] {
       section = tags[i + 1]?.code === 2 ? tags[i + 1].value : null;
       if (section === 'ENTITIES') {
         // Своя секция целиком.
-        out.push({ code: 0, value: 'SECTION' }, { code: 2, value: 'ENTITIES' }, ...parts.entities);
+        out.push({ code: 0, value: 'SECTION' }, { code: 2, value: 'ENTITIES' });
+        pushAll(out, parts.entities);
         skipEntities = true;
         continue;
       }
@@ -514,12 +654,12 @@ function rebuild(tags: readonly Tag[], parts: Rebuild): Tag[] {
       if (t.code === 0 && (t.value === table || t.value === 'ENDTAB')) inTableHeader = false;
       // Счётчик записей в шапке таблицы — подсказка о ёмкости; оставить старую значит соврать.
       if (inTableHeader && t.code === 70) {
-        if (table === 'LAYER') {
+        if (table === 'LAYER' && parts.layerCount >= 0) {
           out.push({ code: 70, value: String(parts.layerCount) });
           prev = t;
           continue;
         }
-        if (table === 'BLOCK_RECORD') {
+        if (table === 'BLOCK_RECORD' && parts.blockRecordCount >= 0) {
           out.push({ code: 70, value: String(parts.blockRecordCount) });
           prev = t;
           continue;
@@ -533,7 +673,7 @@ function rebuild(tags: readonly Tag[], parts: Rebuild): Tag[] {
     }
 
     if (section === 'BLOCKS' && t.code === 0 && t.value === 'ENDSEC') {
-      out.push(...parts.importedBlocks);
+      pushAll(out, parts.importedBlocks);
     }
 
     // $HANDSEED обязан быть выше любого выданного хендла, иначе следующий редактор выдаст дубль.

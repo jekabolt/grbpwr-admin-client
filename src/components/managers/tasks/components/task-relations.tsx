@@ -21,11 +21,8 @@ import {
   useSetTaskParent,
   useTask,
   useTasks,
-  boardNameOf,
-  useTaskBoards,
 } from '../hooks/useTasks';
 import { emptyTaskInsert } from '../api/types';
-import { STATUS_LABEL } from '../utils/meta';
 import { RELATION_KINDS, RELATION_LABEL, relationsOfKind } from '../utils/relations';
 
 /**
@@ -58,53 +55,59 @@ const kindOptions = RELATION_KINDS.map((k) => ({ value: k as string, label: RELA
 /** Пустой фильтр — ВСЕ задачи, для пикера второго конца. Литерал вынесен, чтобы ключ запроса не менялся на каждый рендер. */
 const ALL_TASKS = {} as const;
 
-/** Одна строка «другой карточки»: куда ведёт, чем стала, и чем её снять. */
+/**
+ * Одна строка «другой карточки», ОДНА линия: [OPEN] заголовок · исполнитель ... ×.
+ * Слева кластер, вправо уходит только ×. Решённая строка гаснет цветом, без зачёркивания.
+ */
 function TaskRow({
   id,
   title,
-  status,
-  board,
-  archived,
-  muted,
+  assignees = [],
+  open,
+  done,
   onRemove,
   removeLabel,
   removing,
 }: {
   id: number;
   title: string;
-  status: string;
-  board?: string;
-  archived?: boolean;
-  /** Решённая или заархивированная строка гаснет: она есть, но она уже не работа. */
-  muted?: boolean;
+  assignees?: string[];
+  /** Только открытый блокер получает плашку. */
+  open?: boolean;
+  /** Решённая строка: заголовок в labelColor. */
+  done?: boolean;
   onRemove?: () => void;
   removeLabel?: string;
   removing?: boolean;
 }) {
+  const who = assignees.filter((n) => !!n.trim()).join(', ');
   return (
     <div className='flex items-center gap-2 border-b border-hairline py-1 last:border-b-0'>
-      <Link
-        to={`/tasks/${id}`}
-        className={cn(
-          'inline-flex min-h-11 min-w-0 flex-1 items-center truncate underline decoration-transparent underline-offset-2 hover:decoration-borderColor sm:min-h-0',
-          muted && 'text-labelColor',
+      <div className='flex min-w-0 flex-1 items-center gap-2'>
+        {open && <Pill tone='warn'>open</Pill>}
+        <Link
+          to={`/tasks/${id}`}
+          className={cn(
+            'inline-flex min-h-11 min-w-0 items-center underline underline-offset-2 sm:min-h-0 sm:truncate',
+            done && 'text-labelColor',
+          )}
+          title={title}
+        >
+          <Text size='micro' component='span' className='sm:truncate'>
+            {title || `#${id}`}
+          </Text>
+        </Link>
+        {who && (
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='hidden shrink-0 text-labelColor sm:inline'
+          >
+            {who}
+          </Text>
         )}
-        title={title}
-      >
-        <Text size='micro' component='span'>
-          {title || `#${id}`}
-        </Text>
-      </Link>
-      {archived && <Pill tone='ink'>archived</Pill>}
-      <Text
-        size='nano'
-        variant='label'
-        component='span'
-        className='shrink-0 uppercase tracking-label'
-      >
-        {status}
-        {board ? ` · ${board}` : ''}
-      </Text>
+      </div>
       {onRemove && (
         <Close size='sm' aria-label={removeLabel} disabled={removing} onClick={onRemove} />
       )}
@@ -244,7 +247,6 @@ export function TaskRelations({
   const addRelation = useAddTaskRelation();
   const deleteRelation = useDeleteTaskRelation();
   const createTask = useCreateTask();
-  const { data: boards } = useTaskBoards();
 
   const [kind, setKind] = useState<TaskRelationKind>('TASK_LINK_KIND_BLOCKED_BY');
   const [subtitle, setSubtitle] = useState('');
@@ -345,9 +347,8 @@ export function TaskRelations({
           <TaskRow
             id={task.parentTaskId}
             title={parent?.task.title ?? `#${task.parentTaskId}`}
-            status={parent ? STATUS_LABEL[parent.status] : ''}
-            board={parent ? boardNameOf(boards, parent.boardId) : undefined}
-            archived={!!parent?.archivedAt}
+            assignees={parent?.task.assignees}
+            done={parent?.status === 'TASK_STATUS_DONE'}
             onRemove={
               canWrite ? () => setParent.mutate({ id: task.id, parentTaskId: 0 }) : undefined
             }
@@ -370,9 +371,8 @@ export function TaskRelations({
                   key={c.id}
                   id={c.id}
                   title={c.task.title}
-                  status={STATUS_LABEL[c.status]}
-                  archived={!!c.archivedAt}
-                  muted={c.status === 'TASK_STATUS_DONE' || !!c.archivedAt}
+                  assignees={c.task.assignees}
+                  done={c.status === 'TASK_STATUS_DONE'}
                   onRemove={
                     canWrite ? () => setParent.mutate({ id: c.id, parentTaskId: 0 }) : undefined
                   }
@@ -448,10 +448,9 @@ export function TaskRelations({
                       key={`${k}-${r.taskId}`}
                       id={r.taskId}
                       title={r.title}
-                      status={STATUS_LABEL[r.status]}
-                      board={boardNameOf(boards, r.boardId)}
-                      archived={r.archived}
-                      muted={r.status === 'TASK_STATUS_DONE'}
+                      assignees={r.assignees}
+                      open={k === 'TASK_LINK_KIND_BLOCKED_BY' && r.status !== 'TASK_STATUS_DONE'}
+                      done={r.status === 'TASK_STATUS_DONE'}
                       onRemove={
                         canWrite
                           ? () =>
