@@ -413,27 +413,55 @@ export function foldShapeProblem(
   axis: readonly [PtMm, PtMm],
   half?: readonly PtMm[] | null,
 ): string | null {
+  return foldShapeIssue(whole, axis, half)?.detail ?? null;
+}
+
+/** Which `foldShapeProblem` signature failed (L13 tells an overlap or a slot from the rest). */
+export type FoldShapeKind =
+  | 'degenerate'
+  | 'self-cross'
+  | 'area'
+  | 'size'
+  | 'asymmetric'
+  | 'slot'
+  | 'run';
+
+/** `foldShapeProblem` with the kind of the failure, or null. */
+export function foldShapeIssue(
+  whole: readonly PtMm[],
+  axis: readonly [PtMm, PtMm],
+  half?: readonly PtMm[] | null,
+): { kind: FoldShapeKind; detail: string } | null {
   const f = { a: axis[0], b: axis[1] };
   const L = dist(f.a, f.b);
-  if (!(L > 0)) return 'the fold line has no length';
+  if (!(L > 0)) return { kind: 'degenerate', detail: 'the fold line has no length' };
   // a half that already crosses itself is the fill's defect (the offset blocks it), not the fold's
   if (selfIntersects(whole) && !(half && selfIntersects(half)))
-    return 'the unfolded outline crosses itself';
+    return { kind: 'self-cross', detail: 'the unfolded outline crosses itself' };
   if (half && half.length >= 3) {
     const e = unfoldAreaError(half, whole);
     if (!(e <= 0.01))
-      return `the unfolded area is not twice the half (${(e * 100).toFixed(1)} % off)`;
+      return {
+        kind: 'area',
+        detail: `the unfolded area is not twice the half (${(e * 100).toFixed(1)} % off)`,
+      };
   }
   const b = bboxOf(whole);
   if (b.maxX - b.minX > FOLD_MAX_SIDE_MM || b.maxY - b.minY > FOLD_MAX_SIDE_MM)
-    return `the unfolded piece is ${(b.maxX - b.minX).toFixed(0)} × ${(b.maxY - b.minY).toFixed(0)} mm`;
+    return {
+      kind: 'size',
+      detail: `the unfolded piece is ${(b.maxX - b.minX).toFixed(0)} × ${(b.maxY - b.minY).toFixed(0)} mm`,
+    };
   const samples = sampleAlong(whole, true, 5);
   const M = reflection(f.a, f.b);
   const idx = new SegIndex([{ pts: whole, closed: true }], 10);
   let asym = 0;
   for (const p of samples) asym = Math.max(asym, idx.nearest(applyAffine(M, p), 50));
   if (asym > 1)
-    return `the unfolded outline is not symmetric about the fold (${asym === Infinity ? '> 50' : asym.toFixed(1)} mm)`;
+    return {
+      kind: 'asymmetric',
+      detail: `the unfolded outline is not symmetric about the fold (${asym === Infinity ? '> 50' : asym.toFixed(1)} mm)`,
+    };
   // Past the fold line's ends the outline must turn away from the axis. Two signatures of a half
   // unfolded across the wrong edge: a narrow slot (deeper than 4 × its width), or a stretch running
   // PARALLEL to the axis (≤ 15°) close to it (< ½ the fold length) for > max(100 mm, 0.3 × fold) —
@@ -466,9 +494,15 @@ export function foldShapeProblem(
     prev = cur;
   }
   if (slot)
-    return `a ${(2 * slot.h).toFixed(0)} mm slot runs ${slot.o.toFixed(0)} mm along the fold line — not a fold edge`;
+    return {
+      kind: 'slot',
+      detail: `a ${(2 * slot.h).toFixed(0)} mm slot runs ${slot.o.toFixed(0)} mm along the fold line — not a fold edge`,
+    };
   if (worstRun > Math.max(100, 0.3 * L))
-    return `the outline runs ${worstRun.toFixed(0)} mm along the fold line past its end — not a fold edge`;
+    return {
+      kind: 'run',
+      detail: `the outline runs ${worstRun.toFixed(0)} mm along the fold line past its end — not a fold edge`,
+    };
   return null;
 }
 
@@ -779,6 +813,8 @@ export type OtherLines = {
     p: PtMm,
     maxD: number,
   ) => { pts: PtMm[]; closed: boolean; d: number; dirDeg: number } | null;
+  /** L13: every such line passing within r of p (a fold bracket and its ticks). */
+  within?: (p: PtMm, r: number) => { pts: PtMm[]; closed: boolean }[];
 };
 
 /**
@@ -820,4 +856,296 @@ export function foldWordRole(
       if (fits) return { kind: 'edge', edge: e, d: Math.abs(sideOf(e, t.at)), how: 'symbol' };
     }
   return { kind: 'label' };
+}
+
+// ── L13 half on fold (owner decision 19.10 a) ───────────────────────────────────────────────────
+//
+// A piece printed «cut on fold» whose half cannot be unfolded into a believable whole — mirrored,
+// the half overlaps itself (ulmus LOWER SKIRT RUFFLE XS/S: the tapered tips cross the fold line) or
+// leaves a slot along the fold (M/L/XL) — is exported as the HALF, as drawn, its fold edge written
+// as the AAMA mirror line (layer 6, «CUT ON FOLD»): the cutter folds the fabric (the owner's SK_2).
+// The edge is the one the sheet points at: a fold bracket (a line with end ticks turned the same
+// way) beside a «cut on fold» text, or that text itself (`bindFoldText`), aiming at exactly one
+// straight run of each size's outline. No convex-hull filter here: the ruffle's XS end is no hull
+// edge (its tips cross the line).
+
+/** «cut on fold» as printed — the cutting-list phrase (`CUT_ON_FOLD`), never the bare verb. */
+export const saysCutOnFold = (t: string) => CUT_ON_FOLD.test(t);
+
+/** A bracket tick leaves the body by at least this, mm… */
+export const BRACKET_TICK_MIN_MM = 2;
+/** …is at most this long (a leg drawn down to the edge included), mm… */
+export const BRACKET_TICK_MAX_MM = 150;
+/** …and turns from the body by at least this, degrees. */
+export const BRACKET_TICK_MIN_DEG = 45;
+/** The edge a bracket aims at lies within this of its body, on its ticks' side, mm. */
+export const BRACKET_REACH_MM = 150;
+
+/**
+ * The straight runs of a closed outline: maximal stretches of consecutive vertices within
+ * FOLD_TOL_MM of their chord, at least `minMm` long, a→b in ccw order. Longest first. Unlike
+ * `foldEdges` the outline may lie on both sides of the run's line.
+ */
+export function straightRuns(outline: readonly PtMm[], minMm = FOLD_EDGE_MIN_MM): FoldEdge[] {
+  const pts = ccw([...outline]);
+  const n = pts.length;
+  if (n < 3) return [];
+  // start at the sharpest turn: no run wraps past the start
+  let s0 = 0;
+  let worst = -1;
+  for (let i = 0; i < n; i++) {
+    const p = pts[(i - 1 + n) % n];
+    const q = pts[i];
+    const r = pts[(i + 1) % n];
+    let t = Math.abs(Math.atan2(r.y - q.y, r.x - q.x) - Math.atan2(q.y - p.y, q.x - p.x));
+    if (t > Math.PI) t = 2 * Math.PI - t;
+    if (t > worst) {
+      worst = t;
+      s0 = i;
+    }
+  }
+  const at = (k: number) => pts[(s0 + k) % n];
+  return openRuns(
+    Array.from({ length: n + 1 }, (_, k) => at(k)),
+    minMm,
+  )
+    .map((r) => r.edge)
+    .sort((x, y) => y.lenMm - x.lenMm);
+}
+
+/** Straight runs of an open polyline (indices into it), at least `minMm` long. */
+function openRuns(P: readonly PtMm[], minMm: number): { edge: FoldEdge; i: number; j: number }[] {
+  const out: { edge: FoldEdge; i: number; j: number }[] = [];
+  let i = 0;
+  while (i < P.length - 1) {
+    let j = i + 1;
+    while (j + 1 < P.length) {
+      const line = { a: P[i], b: P[j + 1] };
+      if (!(dist(line.a, line.b) > 0)) break;
+      let ok = true;
+      for (let k = i + 1; k <= j && ok; k++) ok = Math.abs(sideOf(line, P[k])) <= FOLD_TOL_MM;
+      if (!ok) break;
+      j++;
+    }
+    const len = dist(P[i], P[j]);
+    if (len >= minMm) out.push({ edge: { a: P[i], b: P[j], lenMm: len }, i, j });
+    i = j;
+  }
+  return out;
+}
+
+/** A fold bracket read beside a «cut on fold» text: its body a→b and the side its ticks turn to. */
+export type FoldBracket = {
+  a: PtMm;
+  b: PtMm;
+  /** +1: the ticks turn to the left of a→b; −1: to the right. */
+  side: 1 | -1;
+  /** The text it was read beside, as printed. */
+  text: string;
+  /** Text centre → body line, mm. */
+  d: number;
+};
+
+/**
+ * The fold bracket a «cut on fold» text labels, or null: a straight run (≥ 30 mm) of another drawn
+ * line, parallel to the text (≤ 20°), within max(40 mm, 4 × font) of its centre and under it
+ * (±10 %), whose BOTH ends carry a tick — a stroke from that end (the same polyline going on, or
+ * another line starting there, ≤ 1 mm), ≥ 45° to the body, ≥ 2 mm off it — turned to the same side.
+ * The nearest such body wins. Arrowheads at a leg's far end are not needed.
+ */
+export function foldBracket(t: FoldText, lines: OtherLines): FoldBracket | null {
+  if (!lines.within || !saysCutOnFold(t.text)) return null;
+  const within = lines.within;
+  const maxD = Math.max(FOLD_TEXT_MAX_MM, 4 * t.sizeMm);
+  // a body passes within maxD of the text (it lies under it); its ticks are looked up at its ends
+  const near = within(t.at, maxD);
+  /** The far ends of the strokes leaving E (other than along the body). */
+  const strokes = (E: PtMm, own: readonly PtMm[], k: number, dir: 1 | -1): PtMm[] => {
+    const out: PtMm[] = [];
+    // a stroke's first few vertices (a densified tick, a leg ending in an arrowhead)
+    const walk = (P: readonly PtMm[], from: number, step: 1 | -1) => {
+      for (let m = from, c = 0; m >= 0 && m < P.length && c < 4; m += step, c++) {
+        if (dist(E, P[m]) > BRACKET_TICK_MAX_MM) break;
+        out.push(P[m]);
+      }
+    };
+    walk(own, k + dir, dir);
+    for (const L of within(E, 1)) {
+      if (L.pts === own || L.closed || L.pts.length < 2) continue;
+      const P = L.pts;
+      if (dist(P[0], E) <= 1) walk(P, 1, 1);
+      if (dist(P[P.length - 1], E) <= 1) walk(P, P.length - 2, -1);
+    }
+    return out;
+  };
+  const tickSide = (E: PtMm, body: FoldLine, far: readonly PtMm[]): 1 | -1 | 0 => {
+    let side: 1 | -1 | 0 = 0;
+    for (const q of far) {
+      const len = dist(E, q);
+      if (len < BRACKET_TICK_MIN_MM || len > BRACKET_TICK_MAX_MM) continue;
+      if (lineAngle(dirDeg({ a: E, b: q }), dirDeg(body)) < BRACKET_TICK_MIN_DEG) continue;
+      const h = sideOf(body, q);
+      if (Math.abs(h) < BRACKET_TICK_MIN_MM) continue;
+      const sg: 1 | -1 = h > 0 ? 1 : -1;
+      if (side && side !== sg) return 0; // ticks both ways at one end: no bracket
+      side = sg;
+    }
+    return side;
+  };
+  let best: FoldBracket | null = null;
+  for (const L of near) {
+    if (L.closed || L.pts.length < 2) continue;
+    for (const r of openRuns(L.pts, FOLD_EDGE_MIN_MM)) {
+      const body = { a: r.edge.a, b: r.edge.b };
+      const len = r.edge.lenMm;
+      if (lineAngle(dirDeg(body), t.dirDeg) > FOLD_TEXT_ANGLE_DEG) continue;
+      const s = along(body, t.at);
+      if (s < -0.1 * len || s > 1.1 * len) continue;
+      const d = Math.abs(sideOf(body, t.at));
+      if (d > maxD || (best && d >= best.d)) continue;
+      const sa = tickSide(body.a, body, strokes(body.a, L.pts, r.i, -1));
+      const sb = tickSide(body.b, body, strokes(body.b, L.pts, r.j, 1));
+      if (!sa || sa !== sb) continue;
+      best = { a: body.a, b: body.b, side: sa, text: t.text, d };
+    }
+  }
+  return best;
+}
+
+/**
+ * The straight runs of `outer` a bracket aims at: parallel to its body (≤ 3°), on its ticks' side
+ * within BRACKET_REACH_MM, under ≥ 90 % of the body, the body at least half the run's length, and
+ * the first outline hit of rays cast from the body (5 / 50 / 95 %) toward the ticks' side.
+ */
+export function bracketEdges(
+  br: FoldBracket,
+  outer: readonly PtMm[],
+  runs: readonly FoldEdge[],
+): FoldEdge[] {
+  const body = { a: br.a, b: br.b };
+  const L = dist(br.a, br.b);
+  if (!(L > 0)) return [];
+  const u = unit(body);
+  const n = { x: -u.y * br.side, y: u.x * br.side };
+  const out: FoldEdge[] = [];
+  for (const e of runs) {
+    if (lineAngle(dirDeg(e), dirDeg(body)) > FOLD_MATCH_ANGLE_DEG) continue;
+    if (L < 0.5 * e.lenMm) continue;
+    const mid = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 };
+    const off = sideOf(body, mid) * br.side;
+    if (off <= 0 || off > BRACKET_REACH_MM) continue;
+    const t0 = along(body, e.a);
+    const t1 = along(body, e.b);
+    if (Math.min(L, Math.max(t0, t1)) - Math.max(0, Math.min(t0, t1)) < 0.9 * L) continue;
+    const hitsRun = (f: number) => {
+      const o = { x: br.a.x + (br.b.x - br.a.x) * f, y: br.a.y + (br.b.y - br.a.y) * f };
+      const ts = lineHits(o, n, outer).filter((x) => x > 1e-6);
+      if (!ts.length) return false;
+      const q = { x: o.x + n.x * ts[0], y: o.y + n.y * ts[0] };
+      const s = along(e, q);
+      return Math.abs(sideOf(e, q)) <= 1 && s >= -1 && s <= e.lenMm + 1;
+    };
+    if ([0.05, 0.5, 0.95].every(hitsRun)) out.push(e);
+  }
+  return out;
+}
+
+/**
+ * Why the half cannot be unfolded across `edge` (one of its straight runs), in L13's terms:
+ *   overlap — mirrored, the half overlaps itself: it crosses the fold line away from the edge (the
+ *             ruffle's tips), or the unfolded outline crosses itself;
+ *   slot    — the unfold opens a narrow slot along the fold line (foldShapeIssue 'slot');
+ *   unfolds — the unfold is a believable whole (no half: the ordinary unfold applies);
+ *   other   — anything else (the edge is not where the outline runs, the area or the symmetry
+ *             fails, the outline crosses the edge itself, a wide run along the fold line past its
+ *             end — the wrong-edge signature): never a half on its own.
+ */
+export function halfFoldReason(
+  outer: readonly PtMm[],
+  edge: FoldEdge,
+):
+  | { kind: 'overlap' | 'slot'; detail: string }
+  | { kind: 'unfolds' }
+  | { kind: 'other'; detail: string } {
+  const pts = ccw([...outer]);
+  const f = { a: edge.a, b: edge.b };
+  const L = dist(f.a, f.b);
+  if (pts.length < 3 || !(L > 0)) return { kind: 'other', detail: 'no outline' };
+  let mass = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    mass += sideOf(f, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }) * dist(p, q);
+  }
+  const sg = Math.sign(mass) || 1;
+  let depth = 0;
+  let atEdge = false;
+  for (const p of pts) {
+    const h = -sg * sideOf(f, p);
+    if (h <= FOLD_TOL_MM) continue;
+    depth = Math.max(depth, h);
+    const t = along(f, p);
+    if (t > -5 && t < L + 5) atEdge = true;
+  }
+  if (depth > 0)
+    return atEdge
+      ? { kind: 'other', detail: 'the outline crosses the fold edge itself' }
+      : {
+          kind: 'overlap',
+          detail: `the half crosses the fold line by ${depth.toFixed(1)} mm — unfolded it overlaps itself`,
+        };
+  const u = unfold(pts, f);
+  if (!u) return { kind: 'other', detail: 'the fold line is not an edge of the outline' };
+  const run = dist(u.edge[0], u.edge[1]);
+  if (run < 0.8 * L)
+    return {
+      kind: 'other',
+      detail: `the outline follows only ${run.toFixed(0)} of the ${L.toFixed(0)} mm edge`,
+    };
+  const iss = foldShapeIssue(u.pts, u.edge, pts);
+  if (!iss) return { kind: 'unfolds' };
+  if (iss.kind === 'self-cross') return { kind: 'overlap', detail: iss.detail };
+  if (iss.kind === 'slot') return { kind: 'slot', detail: iss.detail };
+  return { kind: 'other', detail: iss.detail };
+}
+
+/**
+ * The fold line of a half as written: the cut line's own run along the fold edge's line (vertices
+ * within `tol` of it) that covers the edge — its two ends. Null when the cut does not run along
+ * ≥ 90 % of the edge.
+ */
+export function halfFoldLine(
+  edge: FoldLine,
+  cut: readonly PtMm[],
+  tol = FOLD_TOL_MM,
+): [PtMm, PtMm] | null {
+  const n = cut.length;
+  const L = dist(edge.a, edge.b);
+  if (n < 3 || !(L > 0)) return null;
+  const on = cut.map((p) => Math.abs(sideOf(edge, p)) <= tol);
+  const start = on.findIndex((v) => !v);
+  if (start < 0) return null;
+  let best: [number, number] | null = null;
+  let bestOv = 0;
+  for (let k = 1; k <= n; k++) {
+    const i = (start + k) % n;
+    if (!on[i] || on[(i - 1 + n) % n]) continue;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let m = i; on[m]; m = (m + 1) % n) {
+      const t = along(edge, cut[m]);
+      lo = Math.min(lo, t);
+      hi = Math.max(hi, t);
+      if ((m + 1) % n === i) break;
+    }
+    const ov = Math.min(hi, L) - Math.max(lo, 0);
+    if (ov > bestOv) {
+      bestOv = ov;
+      best = [lo, hi];
+    }
+  }
+  if (!best || bestOv < 0.9 * L) return null;
+  const u = unit(edge);
+  const P = (t: number) => ({ x: edge.a.x + u.x * t, y: edge.a.y + u.y * t });
+  return [P(best[0]), P(best[1])];
 }

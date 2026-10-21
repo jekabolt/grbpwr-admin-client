@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as blockCode from 'components/managers/tech-card/components/nesting/block-code';
+import { decide } from 'components/managers/tech-card/components/pattern-import/autopilot/policy';
 import { readDxf, segmentDxf, dxfFastPath } from 'lib/pattern-import/adapters/dxf';
 import type { DxfPieceCandidate } from 'lib/pattern-import/adapters/dxf';
 import { extractPdf, DEFAULT_EXTRACT_OPTS, setPdfjsLoader } from 'lib/pattern-import/adapters/pdf';
@@ -49,6 +50,7 @@ import {
 } from 'lib/pattern-import/sizes/map';
 import type {
   AllowanceDecision,
+  BoxMm,
   CardSize,
   Chain,
   ChainSet,
@@ -147,6 +149,28 @@ function backHalf(k = 1): PtMm[] {
     { x: 60, y: 600 },
     ...arc(0, 600, 60, 60, 0, -90, 30).slice(1),
   ].map(s);
+}
+
+/**
+ * L13: a tapering spiral band (the ulmus LOWER SKIRT RUFFLE), CCW, its 570 mm foot on y = 0 from
+ * x = 0 to 570: the band winds up and over to its narrow tip at `endDeg`, which crosses the foot's
+ * line (> 180°: the half overlaps itself once unfolded) or stops short of it (< 180°: a slot).
+ */
+function ruffleHalf(k: number, endDeg: number): PtMm[] {
+  const ro = (d: number) => 870 - (540 * d) / 180;
+  const n = 120;
+  const outer: PtMm[] = [];
+  const inner: PtMm[] = [];
+  for (let i = 0; i <= n; i++) {
+    const d = (endDeg * i) / n;
+    const a = (d * Math.PI) / 180;
+    outer.push({ x: -300 + ro(d) * Math.cos(a), y: ro(d) * Math.sin(a) });
+    inner.push({ x: -300 + 300 * Math.cos(a), y: 300 * Math.sin(a) });
+  }
+  return [{ x: 0, y: 0 }, ...outer, ...inner.slice(1).reverse()].map((p) => ({
+    x: p.x * k,
+    y: p.y * k,
+  }));
 }
 
 // ── a tiny synthetic sheet + chain set builder ──────────────────────────────────────────────
@@ -1296,8 +1320,9 @@ export async function main(): Promise<number> {
       for (const c of G.families[0].candidates) c.textsInside.push(id);
       const dn = buildPieceSpecsDetailed(input(G, CUT10));
       ck(
-        !dn.output.pieces.some((x) => x.unfoldedFold),
-        'fold word labelling an internal line → not unfolded',
+        !dn.output.pieces.some((x) => x.unfoldedFold || x.halfFold) &&
+          !(dn.output.folds ?? []).some((q) => q.half),
+        'fold word labelling an internal line → not unfolded, no half offered',
         `${JSON.stringify(dn.output.blocked)} ${dn.output.pieces.map((x) => x.unfoldedFold)}`,
       );
     }
@@ -1364,6 +1389,278 @@ export async function main(): Promise<number> {
       gate: g.report.checks.map((c) => [c.id, c.ok, c.value]),
       seamGate: g2.report.passed,
     };
+  }
+
+  head('D2h half on fold: printed «cut on fold», a bracket, the unfold fails (L13, owner 19.10 a)');
+  {
+    // the ulmus ruffle: S overlaps itself once unfolded, M and L leave a slot; a fold bracket (a
+    // line with end ticks toward the foot) 45 mm above the foot — beyond the fold word's 40 mm
+    const build = (
+      o: {
+        ticks?: boolean;
+        endDeg?: (k: number) => number;
+        meaning?: AllowanceDecision;
+        shape?: (k: number) => PtMm[];
+        bodyRole?: 'ignore' | 'common';
+      } = {},
+      extra: Partial<SemanticsInput> = {},
+    ) => {
+      const G = fx();
+      const ticks = o.ticks ?? true;
+      const endDeg = o.endDeg ?? ((k: number) => (k < 0.99 ? 182 : 178));
+      const bracket = [
+        {
+          pts: [
+            { x: 40, y: 45 },
+            { x: 530, y: 45 },
+          ],
+          closed: false,
+          role: o.bodyRole ?? ('ignore' as const),
+        },
+        ...(ticks
+          ? [40, 530].map((x) => ({
+              pts: [
+                { x, y: 45 },
+                { x, y: 38 },
+              ],
+              closed: false,
+              role: 'ignore' as const,
+            }))
+          : []),
+      ];
+      addFamily(
+        G,
+        1,
+        (k) => (o.shape ? o.shape(k) : ruffleHalf(k, endDeg(k))),
+        0,
+        [{ pts: grainLine(285, 60, 300), closed: false, role: 'grain' }, ...bracket],
+        ['LOWER SKIRT RUFFLE'],
+      );
+      const say = (t: string, b: BoxMm, rot: number) => {
+        const id = G.text(t, { x: b.minX, y: b.minY });
+        G.texts[id] = { ...G.texts[id], rotationDeg: rot, bbox: b };
+        for (const c of G.families[0].candidates) c.textsInside.push(id);
+      };
+      say('CUT ON FOLD OF FABRIC', { minX: 245, minY: 50, maxX: 325, maxY: 54 }, 0);
+      say('CUT 1 ON FOLD', { minX: 380, minY: 120, maxX: 385, maxY: 170 }, 90);
+      return input(G, o.meaning ?? CUT10, extra);
+    };
+    const inp = build();
+    const d0 = buildPieceSpecsDetailed(inp);
+    const ask = d0.output.folds?.[0];
+    const h = ask?.half;
+    ck(
+      !d0.output.pieces.length &&
+        d0.output.blocked[0]?.reason === 'fold-question' &&
+        !!h?.auto &&
+        Math.abs(h.edge.lenMm - 570 * 1.04) < 1 &&
+        Math.abs(h.edge.a.y) < 1e-6 &&
+        Math.abs(h.edge.b.y) < 1e-6 &&
+        h.problems.map((x) => `${x.size}:${x.kind}`).join(' ') === 'S:overlap M:slot L:slot',
+      'claim + bracket + unfold fails (overlap/slot) in every size → the half is offered, auto',
+      JSON.stringify({
+        blocked: d0.output.blocked,
+        half: h && { ...h, edge: h.edge.lenMm.toFixed(1) },
+      }),
+    );
+    // the autopilot's answer: half: true on the offered edge
+    const half = h ? { 1: { a: h.edge.a, b: h.edge.b, half: true as const } } : {};
+    const d = buildPieceSpecsDetailed({ ...inp, operatorFold: half });
+    const p = d.output.pieces[0];
+    ck(
+      !!p && !!p.halfFold && !p.unfoldedFold && p.piecesPerGarment === 1 && !p.pairOf,
+      'answered «half»: exported as the half, ×1, not unfolded',
+      JSON.stringify({
+        blocked: d.output.blocked,
+        p: p && [p.identity, p.unfoldedFold, p.halfFold, p.piecesPerGarment],
+      }),
+    );
+    for (const z of p?.sizes ?? []) {
+      const k = SCALE3[z.rank];
+      const drawn = ruffleHalf(k, k < 0.99 ? 182 : 178);
+      const f = z.fold;
+      const len = f ? Math.hypot(f.b.x - f.a.x, f.b.y - f.a.y) : 0;
+      ck(
+        !!f &&
+          Math.abs(f.a.y) < 1e-6 &&
+          Math.abs(f.b.y) < 1e-6 &&
+          Math.abs(len - 570 * k) < 0.5 &&
+          Math.abs(areaOf(z.cut) / areaOf(drawn) - 1) < 1e-3 &&
+          /half/.test(f.label ?? ''),
+        `${z.sizeToken}: the half as drawn (area ×1), fold line on the 570×k mm foot`,
+        `fold ${f ? `${len.toFixed(1)} mm y ${f.a.y.toFixed(3)}` : 'none'} area ${(areaOf(z.cut) / areaOf(drawn)).toFixed(4)}`,
+      );
+      // no allowance across the fold: the seam line runs ON the fold line, inset at its ends
+      const onLine = (z.seam ?? []).filter((q) => Math.abs(q.y) < 0.01);
+      const xs = onLine.map((q) => q.x);
+      ck(
+        onLine.length >= 2 &&
+          Math.abs(Math.min(...xs) - 10) < 0.5 &&
+          Math.abs(Math.max(...xs) - (570 * k - 10)) < 0.5,
+        `${z.sizeToken}: seam = cut − 10 except across the fold (it runs on the fold line)`,
+        `seam on the fold x ${Math.min(...xs).toFixed(2)}..${Math.max(...xs).toFixed(2)}`,
+      );
+    }
+    const g = await gate(d.output.pieces, inp.sizeMap, d.wallsOf);
+    ck(
+      g.report.passed,
+      'gate passes (the fold line = the mirror line on layer 6)',
+      gateLine(g.report),
+    );
+    const r12 = await gate(d.output.pieces, inp.sizeMap, d.wallsOf, SOURCE, 'r12');
+    ck(
+      r12.report.passed,
+      'gate passes on AAMA R12 (one mirror line on layer 6)',
+      gateLine(r12.report),
+    );
+    // negative control: the fold line moved 20 mm into the piece
+    const moved = d.output.pieces.map((x) => ({
+      ...x,
+      sizes: x.sizes.map((z) => ({
+        ...z,
+        fold: z.fold && {
+          ...z.fold,
+          a: { x: z.fold.a.x, y: z.fold.a.y + 20 },
+          b: { x: z.fold.b.x, y: z.fold.b.y + 20 },
+        },
+      })),
+    }));
+    const gm = await gate(moved, inp.sizeMap, d.wallsOf);
+    ck(
+      failing(gm.report).includes('G6-offset'),
+      "negative control: the half's fold line off its cut edge → G6 blocks",
+      checkOf(gm.report, 'G6-offset')?.note.slice(0, 140) ?? '',
+    );
+    // seam meaning: cut = seam + 10, none across the fold — the cut's fold run is 20 mm longer
+    const ds = buildPieceSpecsDetailed(build({ meaning: SEAM10 }, { operatorFold: half }));
+    const ps = ds.output.pieces[0];
+    const zs = ps?.sizes[1];
+    const fl = zs?.fold ? Math.hypot(zs.fold.b.x - zs.fold.a.x, zs.fold.b.y - zs.fold.a.y) : 0;
+    ck(
+      !!ps?.halfFold && Math.abs(fl - 590) < 0.5 && Math.abs(bboxOf(zs!.cut).minY) < 1e-3,
+      'seam meaning: cut = seam + 10, no allowance across the fold (fold run 590 mm on y = 0)',
+      `${fl.toFixed(2)} mm, cut minY ${zs ? bboxOf(zs.cut).minY.toFixed(3) : '-'} ${JSON.stringify(ds.output.blocked)}`,
+    );
+    const gs = await gate(ds.output.pieces, inp.sizeMap, ds.wallsOf);
+    ck(gs.report.passed, 'gate passes (seam meaning, half on fold)', gateLine(gs.report));
+    // ulmus draws the bracket's body in the shared ('common') class: it is the fold mark, never an
+    // internal line of the half
+    const dbc = buildPieceSpecsDetailed(build({ bodyRole: 'common' }, { operatorFold: half }));
+    const pbc = dbc.output.pieces[0];
+    const onBody = (pbc?.sizes ?? []).flatMap((z) =>
+      z.internal.filter((f) => f.pts.every((q) => Math.abs(q.y - 45) < 1)),
+    );
+    ck(
+      !!pbc?.halfFold && !onBody.length && pbc.sizes.length === 3,
+      'the bracket body (a common line) is the fold mark: no internal line on the half',
+      JSON.stringify({ blocked: dbc.output.blocked, onBody: onBody.length }),
+    );
+    // mutation: the bracket's ticks removed — nothing points at the foot (the word is 52 mm off):
+    // the question stays, no auto
+    const dn = buildPieceSpecsDetailed(build({ ticks: false }));
+    const an = dn.output.folds?.[0];
+    ck(
+      dn.output.blocked[0]?.reason === 'fold-question' && !an?.half?.auto,
+      'mutation: no bracket → still asked, never auto',
+      JSON.stringify({ blocked: dn.output.blocked, half: an?.half ?? null }),
+    );
+    // mutation: a quarter band unfolds cleanly — the ordinary unfold, no half offered
+    const du = buildPieceSpecsDetailed(build({ endDeg: () => 90 }));
+    const au = du.output.folds?.[0];
+    const su = au && au.suggested != null ? au.edges[au.suggested] : null;
+    const duu = su
+      ? buildPieceSpecsDetailed(
+          build({ endDeg: () => 90 }, { operatorFold: { 1: { a: su.a, b: su.b } } }),
+        )
+      : null;
+    ck(
+      !au?.half && !!duu?.output.pieces[0]?.unfoldedFold && !duu.output.pieces[0].halfFold,
+      'mutation: the unfold succeeds → no half offered, the ordinary unfold',
+      JSON.stringify({ blocked: du.output.blocked, half: au?.half ?? null, sug: su && su.lenMm }),
+    );
+    // mutation: the foot overlaps (a lobe crosses its line past the end), but the 400 mm side
+    // unfolds cleanly — the pointer and the geometry disagree: offered, never auto (D3)
+    const lobe = (k: number) =>
+      [
+        { x: 0, y: 0 },
+        { x: 570, y: 0 },
+        { x: 570, y: 400 },
+        { x: -100, y: 400 },
+        { x: -100, y: -50 },
+        { x: -20, y: -50 },
+      ].map((q) => ({ x: q.x * k, y: q.y * k }));
+    const dc = buildPieceSpecsDetailed(build({ shape: lobe }));
+    const ac = dc.output.folds?.[0];
+    ck(
+      dc.output.blocked[0]?.reason === 'fold-question' &&
+        !!ac?.half &&
+        !ac.half.auto &&
+        /unfolds cleanly/.test(ac.half.missing ?? '') &&
+        ac.suggested != null,
+      'mutation: another edge unfolds cleanly → the half offered, never auto',
+      JSON.stringify({
+        blocked: dc.output.blocked,
+        half: ac?.half
+          ? {
+              auto: ac.half.auto,
+              missing: ac.half.missing,
+              problems: ac.half.problems.map((x) => x.kind),
+            }
+          : null,
+      }),
+    );
+    // the autopilot on these questions (review R1 #3): the auto half is answered with its fold
+    // line; another edge unfolding cleanly is a stop — never an unfold across that edge
+    const pilot = (sem: typeof d0.output) =>
+      decide({
+        session: {
+          step: 'meaning',
+          busy: null,
+          error: null,
+          files: [],
+          semantics: sem,
+          names: [],
+          pieces: { seeds: [], families: [] },
+        } as never,
+        inputs: {
+          overrides: {},
+          operatorGrain: {},
+          operatorFold: {},
+          sheetIndex: 0,
+          gridOverride: null,
+          cleanEdits: [],
+          legend: [],
+          legendConfirmed: [],
+        } as never,
+        card: { sizes: [] } as never,
+        question: 'q',
+      });
+    const pa = pilot(d0.output);
+    const pc = pilot(dc.output);
+    ck(
+      !pa.stop &&
+        JSON.stringify(pa.actions).includes('"half":true') &&
+        pa.assumptions.some((a) => a.kind === 'fold-edge') &&
+        !!pc.stop &&
+        /export the half with a fold line\?/.test(pc.stop.reason) &&
+        !pc.actions.length,
+      'autopilot: the auto half is answered; another edge unfolds cleanly → a stop, no unfold',
+      JSON.stringify({
+        auto: pa.stop ?? pa.actions.map((x) => x.kind),
+        conflict: pc.stop ?? pc.actions,
+      }),
+    );
+    // a «half» answer whose edge no longer is the cut's straight run: refused, never forced
+    const bad = buildPieceSpecsDetailed({
+      ...inp,
+      operatorFold: { 1: { a: { x: 285, y: 60 }, b: { x: 285, y: 300 }, half: true } },
+    });
+    ck(
+      !bad.output.pieces.length && bad.output.blocked[0]?.reason === 'fold-unresolved',
+      'a «half» on an edge the outline has not → fold-unresolved',
+      JSON.stringify(bad.output.blocked),
+    );
+    json.d2h = { gate: g.report.passed, seamGate: gs.report.passed };
   }
 
   head('D2l cutting list binds each "cut on fold" entry to ITS piece (Codex S5)');
@@ -1969,6 +2266,16 @@ export async function main(): Promise<number> {
       isTitleLabel(t, all, box);
     const front = [T('FRONT', 150, 300, 14)];
     ck(title(front[0], front), 'D3: «FRONT» alone in the piece → its title');
+    const flounce = [T('FLOUNCE', 150, 300, 8), T('RIC AND LINING', 150, 280, 5)];
+    ck(
+      title(flounce[0], flounce) && !title(flounce[1], flounce),
+      'D3: «FLOUNCE» is the title; tile-clipped «FABRIC AND LINING» is cut material, not LIN',
+    );
+    const dualMaterial = [flounce[1]];
+    ck(
+      !title(dualMaterial[0], dualMaterial),
+      'D3: tile-clipped «FABRIC AND LINING» is a cut-material instruction, not piece LIN',
+    );
     const palto = [
       T('Tascheneingriff', 50, 200),
       T('Besatz', 250, 100),

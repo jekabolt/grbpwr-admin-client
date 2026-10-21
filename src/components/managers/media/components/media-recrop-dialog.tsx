@@ -2,7 +2,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { ConfirmationModal, Text } from 'ui';
+import { ConfirmationModal } from 'ui';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 import { EditorScreen, useIsMobileEditor } from './editor-mobile';
@@ -100,7 +100,7 @@ export function MediaRecropDialog({
 
   if (mobile) {
     return (
-      <EditorScreen open={open} onOpenChange={onOpenChange} title={`crop ${media.id}`}>
+      <EditorScreen open={open} onOpenChange={onOpenChange} title='crop'>
         <MediaCropper
           layout='mobile'
           title='crop'
@@ -119,24 +119,18 @@ export function MediaRecropDialog({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={() => undefined}
-      title={`crop ${media.id}`}
+      title='crop'
       width='lg'
       hideActions
     >
-      <div className='space-y-2.5'>
-        <Text variant='label' component='p'>
-          The source stays in the bucket untouched: cropping puts a NEW object with a new id beside
-          it. Three tries at finding the frame leave three files in the library.
-        </Text>
-        <MediaCropper
-          selectedFile={source}
-          busy={busy}
-          hideHeader
-          saveLabel='create cropped copy'
-          saveCroppedImage={handleSave}
-          onCancel={() => onOpenChange(false)}
-        />
-      </div>
+      <MediaCropper
+        selectedFile={source}
+        busy={busy}
+        hideHeader
+        saveLabel='save copy'
+        saveCroppedImage={handleSave}
+        onCancel={() => onOpenChange(false)}
+      />
     </ConfirmationModal>
   );
 }

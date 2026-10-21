@@ -25,7 +25,10 @@
 
 import type { ApplyResult, ApplyUploaded, CardDraft, DraftPiece } from '../types';
 import { FUSING_FULL, FUSING_UNKNOWN, IDENTICAL, aliasKey, mintLineKey } from './draft';
-import { importedCutSymmetry } from 'components/managers/tech-card/components/piece-codes';
+import {
+  FOLD_CUT_SYMMETRY,
+  importedCutSymmetry,
+} from 'components/managers/tech-card/components/piece-codes';
 
 /** 40 MiB — `MAX_PATTERN_BYTES` (utils/pattern.ts), the server's hard limit. */
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
@@ -222,7 +225,8 @@ export function planFormWrites(
         lineKey: p.lineKey,
         name: p.name,
         piecesPerGarment: p.piecesPerGarment,
-        cutSymmetry: IDENTICAL,
+        // L13: a half on fold is cut on the fold (the draft says so); every other new piece IDENTICAL
+        cutSymmetry: p.symmetryForce === 'half' ? FOLD_CUT_SYMMETRY : IDENTICAL,
         ungraded: !!p.ungraded,
         grainline: p.grainline,
         fused: p.fused,

@@ -6,7 +6,7 @@ import {
   serializeTable,
   type TableModel,
 } from 'components/shared/markdown/table';
-import type { NoteFileInsert } from './file-picker';
+import type { NoteFileInsert } from 'components/managers/tasks/components/file-attachments';
 import { fileCardPath } from './file-refs';
 
 /**

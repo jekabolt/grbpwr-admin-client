@@ -8,7 +8,7 @@
 // against the grainlines the sheets DO draw (A1 'detected').
 //   node scripts/pattern-import/autopilot.mjs [case…] [--mutate=qty|size]
 //   (yarn patimport:autopilot · yarn patimport:e2e --autopilot)
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { readManifest } from 'lib/pattern-import/manifest';
@@ -781,6 +781,27 @@ const fabricOf = (f: unknown): string => {
 
 type Wrong = { kind: string; subject: string; got: string; want: string; assumed: string | null };
 
+type GoldenAnswers = {
+  pages?: boolean;
+  asides?: boolean;
+  outline?: 'cut' | 'seam';
+  sizes?: Record<string, string>;
+  /**
+   * L13: the fold question of a seed (`fold:<seed>=half|no|edge:<n>` in cases.tsv) — export the
+   * half with a fold line, not a fold, or unfold across the question's edge n.
+   */
+  folds?: Record<string, string>;
+  /** The count of a piece drawn once with nothing said (`qty:<seed>=<n>` in cases.tsv). */
+  qty?: Record<string, number>;
+  /**
+   * BACK-VARIANT: the variant notch the chosen model keeps (`notch:<word>` in cases.tsv) — the
+   * option of every open «which …: a / b?» question that carries the word.
+   */
+  notch?: string;
+};
+const golden = (): GoldenAnswers | null =>
+  process.env.GOLDEN_ANSWERS ? (JSON.parse(process.env.GOLDEN_ANSWERS) as GoldenAnswers) : null;
+
 // ── one case ────────────────────────────────────────────────────────────────────────────────────
 
 export async function runCase(c: Case, mutate: string | null) {
@@ -841,6 +862,129 @@ export async function runCase(c: Case, mutate: string | null) {
     ) {
       operatorAnswers++;
       return { proceed: true, assumptions: [] };
+    }
+    // golden Pass B (env GOLDEN_ANSWERS, JSON): the answers a real operator gives, recorded per
+    // case in golden/cases.tsv — never in the suite's numbers
+    const ga = golden();
+    if (ga && a.stop && a.reason) {
+      const { step, reason } = a.reason;
+      if (ga.pages && step === 'files' && /is it a pattern page\?/.test(reason)) {
+        operatorAnswers++;
+        return { proceed: true, assumptions: [] };
+      }
+      if (ga.asides && step === 'pieces' && /set aside on a guess/.test(reason)) {
+        operatorAnswers++;
+        return { proceed: true, assumptions: [] };
+      }
+      if (ga.outline && step === 'meaning' && /the cut line .* or the seam line\?/.test(reason)) {
+        operatorAnswers++;
+        return {
+          patch: {
+            fileAllowance: {
+              meaning: ga.outline,
+              allowanceMm: PATIMPORT.defaultAllowanceMm,
+              origin: 'operator',
+              evidence: [],
+            },
+          },
+          events: [{ type: 'names', decisions: snap.session.names }],
+          assumptions: [],
+        };
+      }
+      const sem = snap.session.semantics;
+      if (ga.folds && step === 'meaning' && /cut on fold/.test(reason) && sem) {
+        const b = sem.blocked.find(
+          (x) => x.reason === 'fold-question' && ga.folds![String(x.seed)] != null,
+        );
+        const want = b ? ga.folds[String(b.seed)] : null;
+        const ask = b ? sem.folds?.find((f) => f.seed === b.seed) : undefined;
+        const n = /^edge:(\d+)$/.exec(want ?? '')?.[1];
+        const sug = ask && ask.suggested != null ? ask.edges[ask.suggested] : null;
+        const e =
+          want === 'half' ? ask?.half?.edge ?? sug : n != null ? ask?.edges[+n] ?? null : null;
+        const patch =
+          b && want === 'no'
+            ? {
+                overrides: {
+                  ...snap.inputs.overrides,
+                  [b.seed]: { ...(snap.inputs.overrides[b.seed] ?? {}), unfoldedFold: false },
+                },
+              }
+            : b && e
+              ? {
+                  operatorFold: {
+                    ...snap.inputs.operatorFold,
+                    [b.seed]: {
+                      a: e.a,
+                      b: e.b,
+                      ...(want === 'half' ? { half: true as const } : {}),
+                    },
+                  },
+                }
+              : null;
+        if (patch) {
+          operatorAnswers++;
+          return {
+            patch,
+            events: [{ type: 'names', decisions: snap.session.names }],
+            assumptions: [],
+          };
+        }
+      }
+      const nvAsks = (sem?.notchVariantAsks ?? []).filter(
+        (q) => snap.inputs.overrides[q.seed]?.notchVariant === undefined,
+      );
+      if (ga.notch && step === 'meaning' && nvAsks.length) {
+        const w = ga.notch.toLowerCase();
+        const overrides = { ...snap.inputs.overrides };
+        for (const q of nvAsks) {
+          const o = q.options.find((x) => x.key.split(' ').includes(w));
+          if (o) overrides[q.seed] = { ...(overrides[q.seed] ?? {}), notchVariant: o.key };
+        }
+        if (nvAsks.some((q) => overrides[q.seed]?.notchVariant !== undefined)) {
+          operatorAnswers++;
+          return {
+            patch: { overrides },
+            events: [{ type: 'names', decisions: snap.session.names }],
+            assumptions: [],
+          };
+        }
+      }
+      const qs = /\(seed (\d+)\) is drawn once and nothing on the sheet says how many/.exec(
+        reason,
+      )?.[1];
+      if (ga.qty && step === 'meaning' && qs != null && ga.qty[qs] != null) {
+        const sd = +qs as SeedId;
+        operatorAnswers++;
+        return {
+          patch: {
+            overrides: {
+              ...snap.inputs.overrides,
+              [sd]: { ...(snap.inputs.overrides[sd] ?? {}), piecesPerGarment: ga.qty[qs] },
+            },
+          },
+          events: [{ type: 'names', decisions: snap.session.names }],
+          assumptions: [],
+        };
+      }
+      const entries = snap.session.sizes?.map.entries;
+      if (ga.sizes && step === 'sizes' && entries) {
+        operatorAnswers++;
+        const sizes = api.runCard?.sizes ?? card.sizes;
+        return {
+          events: [
+            {
+              type: 'size-map',
+              entries: entries.map((e) => ({
+                ...e,
+                card: sizes.find((z) => z.token === ga.sizes![e.source.label]) ?? null,
+                origin: 'operator' as const,
+              })),
+            },
+          ],
+          assumptions: [],
+        };
+      }
     }
     // --mutate=card: a pick injected at the control's own question — the control must catch it
     if (
@@ -1073,6 +1217,12 @@ export async function runCase(c: Case, mutate: string | null) {
 
   // the written files: gate, manifest round trip (the assumptions ride in every manifest)
   const wr = outs.write as StageIO['write']['out'] | undefined;
+  // golden harness: env AUTOPILOT_DXF_OUT = keep every written scope's DXF on disk (one per scope)
+  if (wr && process.env.AUTOPILOT_DXF_OUT) {
+    mkdirSync(process.env.AUTOPILOT_DXF_OUT, { recursive: true });
+    for (const sc of wr.scopes)
+      writeFileSync(resolve(process.env.AUTOPILOT_DXF_OUT, `${sc.target.label}.dxf`), sc.dxfText);
+  }
   if (wr && s.step !== 'fabrics') {
     const want = autopilotRecordOf(as, new Set((s.semantics?.pieces ?? []).map((p) => p.seed)))
       .assumptions.length;
@@ -1207,12 +1357,15 @@ export async function runCase(c: Case, mutate: string | null) {
           assumed: assumedOn(sd, ['quantity', 'fold-edge', 'not-a-fold']),
         });
       // the fold, both ways: a fold piece not unfolded, a piece unfolded that is not cut on fold
-      const unfolded = ps.some((p) => p.unfoldedFold);
+      // L13: a half exported on fold with its fold line marked (owner decision 19.10 a) IS the
+      // piece cut on fold
+      const half = ps.some((p) => !!p.halfFold);
+      const unfolded = half || ps.some((p) => p.unfoldedFold);
       if ((t.fold === true) !== unfolded && (t.fold === true || t.fold === false))
         wrong.push({
           kind: 'fold',
           subject,
-          got: unfolded ? 'unfolded' : 'not unfolded',
+          got: half ? 'half on fold' : unfolded ? 'unfolded' : 'not unfolded',
           want: t.fold === true ? 'unfolded' : 'as drawn',
           assumed:
             assumedOn(sd, ['fold-edge', 'not-a-fold', 'cutting-list']) ??
@@ -1231,6 +1384,28 @@ export async function runCase(c: Case, mutate: string | null) {
           want: fab.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase(),
           assumed: assumedOn(sd, ['fabric']) ?? assumedOn(null, ['fabric'], 'every piece'),
         });
+    }
+    // BACK-VARIANT: a piece blocked on the operator's variant-notch question waits for its answer
+    // (the run stopped on it) — held, not missing: its truth piece is taken, never scored
+    for (const b of sem.blocked.filter((x) => x.reason === 'notch-variant')) {
+      if (bySeed.has(b.seed)) continue;
+      const o = outerOf(b.seed);
+      const l = pts.length ? null : byLabel(b.seed);
+      const t = pts.length
+        ? o
+          ? tps.find(
+              (x) =>
+                !taken.has(x) &&
+                pts.some((p) => norm(p.label) === norm(x.label) && insidePoly(p.at, o.outer)),
+            )
+          : undefined
+        : l && !taken.has(l)
+          ? l
+          : undefined;
+      if (t) {
+        taken.add(t);
+        matched++;
+      }
     }
     // a truth piece the export misses: set aside by the autopilot (with or without a label), by
     // the reader, or never found

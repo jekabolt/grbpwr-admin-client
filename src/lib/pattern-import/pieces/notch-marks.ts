@@ -1,8 +1,8 @@
-// SHAPE (owner 16.10, card 49 = kombinezon): a notch drawn as a small closed MARK centred on the
-// size line — a circle (Ø ≈ 8 mm, kombinezon), a triangle, a square — is a notch, never outline
-// geometry. The fill takes such a mark as a wall of the size whose pen it is drawn in, and the
-// outline then runs around half of it: a dip or a bump in the cut line that the offset makes worse,
-// in some sizes only (the ones the mark's pen belongs to).
+// SHAPE / NOTCH (owner 16–19.10, card 49 = kombinezon): a compact closed mark on a size line is
+// not automatically a notch. Kombinezon's outlined circles contain the printed size number and
+// are SIZE TAGS: the line stays straight through them and layer 4 gets nothing. Its real notches
+// are small filled triangles. The fill can still take either closed mark as a wall and make the
+// outline run around half of it, so cleaning geometry and reading semantics are separate decisions.
 //
 // Two passes:
 //   1. clean (pieces stage, `cleanNotchMarks`, every fill / refill / edit) — each size's outline
@@ -11,7 +11,8 @@
 //      the corner the two edges meet at; the mark leaves the size's walls (`notchMarks` keeps it).
 //      Everything after — offset (seam / cut), the gate's walls (G3/G4), the preview — sees the
 //      clean line;
-//   2. read (semantics, `readNotchMarks`, per family) — a mark whose centre lies ON a size's clean outline is that size's notch (layer 4) when a
+//   2. read (semantics, `readNotchMarks`, per family) — a non-tag mark whose centre lies ON a
+//      size's clean outline is that size's notch (layer 4) when a
 //      second, independent evidence says it belongs to that size (D3):
 //        • pen    — the mark's class is one of this size's wall classes, or a common / notch class;
 //        • wall   — the fill used the mark as this size's wall (its outline ran along it);
@@ -20,15 +21,30 @@
 //                   nearby — the graded copies of one notch.
 //      A series mark drawn a little off its size's line (it crosses exactly one size's line, and
 //      that size has no notch at that spot) is that size's copy (series + crossing).
-//      A size whose line carries no mark of its own gets none here: nothing is invented. The family
+//      Filled glyphs that chain recovery deliberately ignores (triangles / chevrons) are read from
+//      the source paths when their size layer + contact with the size line + a repeated graded
+//      series or nearby notch label agree. A size whose line carries no mark of its own gets none
+//      here: nothing is invented. The family
 //      gate (gate/shape.ts, in G5) then holds the export when the sizes differ.
 //
 // This module is deliberately narrow: the GRADE phase (auto/GRADE-BRIEF.md) may replace it with a
 // grading-aware transfer.
 
-import type { ChainId, ChainSet, NotchFeature, PieceCandidate, PieceFamily, PtMm } from '../types';
+import type {
+  ChainId,
+  ChainSet,
+  IRPath,
+  NotchFeature,
+  PathRange,
+  PieceCandidate,
+  PieceFamily,
+  PtMm,
+  Sheet,
+  SizeRun,
+} from '../types';
 import { PATIMPORT } from '../types';
 import { areaOf, bboxOf, closestOnPolyline, dist, pointInPolygon } from '../semantics/geom';
+import { parseSizeToken } from '../sizes/tokens';
 
 /** A mark is at most this big across (its bbox's longer side), mm — a notch circle (kombinezon:
  * 11.3 mm), not a buttonhole. */
@@ -54,6 +70,8 @@ const SERIES_REACH_MM = 60;
 /** …and graded copies when they sit on at least this many sizes' lines (one size each). */
 const SERIES_MIN_RANKS = 3;
 const SERIES_SIZE_TOL = 0.3;
+/** Size balloons grade in a tight ladder; do not let the tag inference roam to another symbol. */
+const TAG_SERIES_REACH_MM = 35;
 
 /** One stretch an outline ran around a mark and now runs on the line under it. */
 type CleanDetail = { id: ChainId; at: PtMm; mm: number; spanMm: number };
@@ -72,9 +90,19 @@ export type MarkRead = {
   /** Marks the outline ran around and now crosses straight. */
   cleaned: ChainId[];
   notches: NotchFeature[];
+  /** Closed marks identified as printed size tags, explicitly excluded from layer 4. */
+  tags: ChainId[];
   /** Marks centred on this size's line refused for want of a second evidence. */
   refused: ChainId[];
+  /**
+   * BACK-VARIANT: the printed label bound to each notch (aligned with `notches`; null = none) —
+   * the text block carrying a notch word nearest to it within LABEL_REACH_MM, none other as near
+   * with other words («High back notch»). Absent when the read had no sheet texts.
+   */
+  labels?: (string | null)[];
 };
+
+type MarkSource = Pick<Sheet, 'paths' | 'styles' | 'texts'> & { run: SizeRun };
 
 function marksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
   const out: Mark[] = [];
@@ -95,6 +123,253 @@ function marksOf(set: ChainSet, box: ReturnType<typeof bboxOf>): Mark[] {
     });
   }
   return out;
+}
+
+const centreOfBox = (b: ReturnType<typeof bboxOf>): PtMm => ({
+  x: (b.minX + b.maxX) / 2,
+  y: (b.minY + b.maxY) / 2,
+});
+
+const sameSize = (a: string, b: string) => {
+  const x = parseSizeToken(a);
+  const y = parseSizeToken(b);
+  return !!x && !!y && x.kind === y.kind && x.value === y.value && !!x.paired === !!y.paired;
+};
+
+const roundMark = (m: Mark) => {
+  const boxArea = (m.box.maxX - m.box.minX) * (m.box.maxY - m.box.minY);
+  const fill = boxArea > 0 ? Math.abs(areaOf(m.pts)) / boxArea : 0;
+  return fill >= 0.65 && fill <= 0.9;
+};
+
+/**
+ * Printed size balloons among the compact closed marks. Direct evidence is a source-size word
+ * whose centre is inside the mark. A clipped / missing word may follow only an alike round-mark
+ * cluster containing at least three different directly read sizes (the same balloon repeated over
+ * the graded size run). A triangle / square never inherits this classification.
+ */
+function sizeTagMarks(marks: readonly Mark[], source?: MarkSource): Set<ChainId> {
+  const out = new Set<ChainId>();
+  if (!source) return out;
+  const direct = new Map<ChainId, string>();
+  for (const m of marks) {
+    if (!roundMark(m)) continue;
+    for (const t of source.texts) {
+      const word = t.text.trim();
+      if (!source.run.sizes.some((s) => sameSize(word, s.label))) continue;
+      const c = centreOfBox(t.bbox);
+      if (
+        c.x < m.box.minX - 0.5 ||
+        c.x > m.box.maxX + 0.5 ||
+        c.y < m.box.minY - 0.5 ||
+        c.y > m.box.maxY + 0.5 ||
+        !pointInPolygon(c, m.pts)
+      )
+        continue;
+      direct.set(m.id, word);
+      out.add(m.id);
+      break;
+    }
+  }
+  const seen = new Set<ChainId>();
+  for (const first of marks) {
+    if (seen.has(first.id) || !roundMark(first)) continue;
+    const component: Mark[] = [];
+    const todo = [first];
+    seen.add(first.id);
+    while (todo.length) {
+      const m = todo.pop()!;
+      component.push(m);
+      for (const o of marks) {
+        if (seen.has(o.id) || !roundMark(o)) continue;
+        if (
+          dist(o.centre, m.centre) <= TAG_SERIES_REACH_MM &&
+          Math.abs(o.across - m.across) <= 0.15 * m.across
+        ) {
+          seen.add(o.id);
+          todo.push(o);
+        }
+      }
+    }
+    const labels = new Set(component.flatMap((m) => (direct.has(m.id) ? [direct.get(m.id)!] : [])));
+    if (labels.size >= SERIES_MIN_RANKS) for (const m of component) out.add(m.id);
+  }
+  return out;
+}
+
+type FilledGlyph = {
+  path: IRPath;
+  centre: PtMm;
+  across: number;
+  rank: number;
+  labelled: boolean;
+  repeated: boolean;
+};
+
+const NOTCH_WORDS =
+  /\bnotch(?:es)?\b|\bnicks?\b|nadsec|nadst|\u043d\u0430\u0434\u0441\u0435\u0447|knips|cran/iu;
+
+/** A notch label within this distance of the notch (its text box), mm (kombinezon: ~9 mm). */
+const LABEL_REACH_MM = 25;
+/** A label binds its nearest notch only when the size's next notch is this much farther. */
+const LABEL_SOLE = 1.5;
+
+export type LabelBlock = { text: string; box: ReturnType<typeof bboxOf> };
+
+/**
+ * BACK-VARIANT: the printed notch labels near a family — a text carrying a notch word, with the
+ * lines of its paragraph (the same font size, left-aligned or overlapping, ≤ 0.6 em apart: «High
+ * back» over «notch»), read top line first.
+ */
+function notchLabelBlocks(
+  texts: Pick<Sheet, 'texts'>['texts'],
+  box: ReturnType<typeof bboxOf>,
+): LabelBlock[] {
+  const pad = LABEL_REACH_MM + 20;
+  const near = texts.filter(
+    (t) =>
+      !t.background &&
+      t.bbox.maxX >= box.minX - pad &&
+      t.bbox.minX <= box.maxX + pad &&
+      t.bbox.maxY >= box.minY - pad &&
+      t.bbox.minY <= box.maxY + pad,
+  );
+  const out: LabelBlock[] = [];
+  const seen = new Set<string>();
+  for (const t of near) {
+    if (!NOTCH_WORDS.test(t.text)) continue;
+    const lines = [t];
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const o of near) {
+        if (lines.includes(o) || !o.text.trim()) continue;
+        if (Math.abs(o.fontSizeMm - t.fontSizeMm) > 0.1 * t.fontSizeMm) continue;
+        if (Math.abs(o.rotationDeg - t.rotationDeg) > 1) continue;
+        const touches = lines.some((l) => {
+          const gap = Math.max(o.bbox.minY - l.bbox.maxY, l.bbox.minY - o.bbox.maxY);
+          const left = Math.abs(o.bbox.minX - l.bbox.minX) <= 1.5;
+          const overlap =
+            Math.min(o.bbox.maxX, l.bbox.maxX) - Math.max(o.bbox.minX, l.bbox.minX) > 0;
+          return gap <= 0.6 * t.fontSizeMm && gap >= -0.5 * t.fontSizeMm && (left || overlap);
+        });
+        if (touches && lines.length < 4) {
+          lines.push(o);
+          grew = true;
+        }
+      }
+    }
+    // one copy per printed place (a label repeated on every size layer prints once)
+    const uniq = lines.filter(
+      (l, k) =>
+        lines.findIndex(
+          (m) =>
+            m.text.trim() === l.text.trim() &&
+            Math.abs(m.bbox.minX - l.bbox.minX) < 0.5 &&
+            Math.abs(m.bbox.minY - l.bbox.minY) < 0.5,
+        ) === k,
+    );
+    uniq.sort((a, b) => b.bbox.maxY - a.bbox.maxY || a.bbox.minX - b.bbox.minX);
+    const text = uniq.map((l) => l.text.trim()).join(' ');
+    const bb = bboxOf(
+      uniq.flatMap((l) => [
+        { x: l.bbox.minX, y: l.bbox.minY },
+        { x: l.bbox.maxX, y: l.bbox.maxY },
+      ]),
+    );
+    const k = `${text}@${bb.minX.toFixed(1)},${bb.minY.toFixed(1)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ text, box: bb });
+  }
+  return out;
+}
+
+const boxDist = (p: PtMm, b: ReturnType<typeof bboxOf>) =>
+  Math.hypot(Math.max(b.minX - p.x, 0, p.x - b.maxX), Math.max(b.minY - p.y, 0, p.y - b.maxY));
+
+/**
+ * The labels bound to one size's notches (aligned with `notches`; null = none). A label block binds
+ * only when it lies on this piece (its centre inside the size's outline), its nearest notch is in
+ * reach and the size's next notch is ≥ LABEL_SOLE× farther — one label, one notch, never a
+ * neighbour's — and no block with other words is as near that notch (< LABEL_SOLE×).
+ */
+export function bindLabels(
+  notches: readonly PtMm[],
+  blocks: readonly LabelBlock[],
+  outer: readonly PtMm[],
+): (string | null)[] {
+  const out: (string | null)[] = notches.map(() => null);
+  const norm = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  const own = blocks.filter((b) =>
+    pointInPolygon({ x: (b.box.minX + b.box.maxX) / 2, y: (b.box.minY + b.box.maxY) / 2 }, outer),
+  );
+  for (const b of own) {
+    const ds = notches.map((p, i) => ({ i, d: boxDist(p, b.box) })).sort((x, y) => x.d - y.d);
+    if (!ds.length || ds[0].d > LABEL_REACH_MM) continue;
+    if (ds[1] && ds[1].d < LABEL_SOLE * Math.max(ds[0].d, 1)) continue;
+    const p = notches[ds[0].i];
+    const d0 = ds[0].d;
+    // a block with other words as near the same notch: the notch's label is not known
+    const rival = own.some(
+      (o) =>
+        o !== b &&
+        norm(o.text) !== norm(b.text) &&
+        boxDist(p, o.box) < LABEL_SOLE * Math.max(d0, 1),
+    );
+    if (rival) continue;
+    out[ds[0].i] = b.text;
+  }
+  return out;
+}
+
+/**
+ * Filled notch glyphs are intentionally absent from ChainSet: chains/primitives drops compact
+ * fills larger than line-decoration beads so logos and lettering never become walls. Read only a
+ * narrow glyph class here. The size layer is evidence 1; touching that size's line is evidence 2;
+ * a nearby notch label or alike copies on >= 3 size layers is the independent semantic evidence.
+ */
+function filledNotchGlyphs(source: MarkSource, box: ReturnType<typeof bboxOf>): FilledGlyph[] {
+  const styles = new Map(source.styles.map((s) => [s.id, s]));
+  const raw: Omit<FilledGlyph, 'labelled' | 'repeated'>[] = [];
+  for (const p of source.paths) {
+    const st = styles.get(p.style);
+    if (!st?.fill || !p.closed || p.pts.length < 3 || !st.layer) continue;
+    const b = bboxOf(p.pts);
+    if (b.maxX < box.minX || b.minX > box.maxX || b.maxY < box.minY || b.minY > box.maxY) continue;
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    const across = Math.max(w, h);
+    const short = Math.min(w, h);
+    // The PDF's printed words are outlines too, and therefore arrive as thousands of filled
+    // paths. Its actual arrow notch is the compact six-vertex 3.1 x 3.6 mm polygon. Keep this
+    // source-path fallback deliberately exact; circles / squares and other closed notch symbols
+    // still go through the mark reader above, where wall / pen / series evidence is available.
+    if (p.pts.length !== 6 || across < 2.5 || across > 4.5 || short < 2.5 || short > 4.5) continue;
+    const boxArea = w * h;
+    const fillShare = boxArea > 0 ? Math.abs(areaOf(p.pts)) / boxArea : 0;
+    // A triangle occupies half its bounding box. Reject solid dots / squares and outlined words.
+    if (fillShare < 0.4 || fillShare > 0.6) continue;
+    const size = source.run.sizes.find((s) => sameSize(st.layer!, s.label));
+    if (!size) continue;
+    raw.push({ path: p, centre: centreOfBox(b), across, rank: size.rank });
+  }
+  return raw.map((g) => {
+    const labelled = source.texts.some(
+      (t) => NOTCH_WORDS.test(t.text) && dist(centreOfBox(t.bbox), g.centre) <= 60,
+    );
+    const ranks = new Set(
+      raw
+        .filter(
+          (o) => dist(o.centre, g.centre) <= 80 && Math.abs(o.across - g.across) <= 0.25 * g.across,
+        )
+        .map((o) => o.rank),
+    );
+    return { ...g, labelled, repeated: ranks.size >= SERIES_MIN_RANKS };
+  });
 }
 
 /**
@@ -394,7 +669,12 @@ export function cleanAroundMarks(
 }
 
 /** A notch at the point of `outer` nearest to `p`, pointing inward, depth from the mark. */
-function notchAt(outer: readonly PtMm[], p: PtMm, across: number): NotchFeature {
+function notchAt(
+  outer: readonly PtMm[],
+  p: PtMm,
+  across: number,
+  ranges: PathRange[] = [],
+): NotchFeature {
   const f = closestOnPolyline(p, outer, true);
   const a = outer[f.seg];
   const b = outer[(f.seg + 1) % outer.length];
@@ -412,7 +692,7 @@ function notchAt(outer: readonly PtMm[], p: PtMm, across: number): NotchFeature 
     seg: [f.q, { x: f.q.x + nx * depth, y: f.q.y + ny * depth }],
     depthMm: depth,
     origin: 'detected',
-    ranges: [],
+    ranges,
     confidence: 0.85,
   };
 }
@@ -425,6 +705,7 @@ export function readNotchMarks(
   cands: readonly PieceCandidate[],
   set: ChainSet,
   log?: string[],
+  source?: MarkSource,
 ): Map<number, MarkRead> {
   const out = new Map<number, MarkRead>();
   const live = cands.filter((c) => c.outer.length >= 3);
@@ -437,7 +718,9 @@ export function readNotchMarks(
     ]),
   );
   const marks = marksOf(set, fb);
-  if (!marks.length) return out;
+  const glyphs = source ? filledNotchGlyphs(source, fb) : [];
+  if (!marks.length && !glyphs.length) return out;
+  const tags = sizeTagMarks(marks, source);
   const clsOf = new Map<number, { id: number; role: string }>();
   for (const k of set.classes) for (const ch of k.chains) clsOf.set(ch, { id: k.id, role: k.role });
   // 1 · clean every size (a no-op after the pieces stage's cleanNotchMarks, kept for the DXF-less
@@ -490,6 +773,7 @@ export function readNotchMarks(
     const notches: NotchFeature[] = [];
     const refused: ChainId[] = [];
     marks.forEach((m, i) => {
+      if (tags.has(m.id)) return;
       const rs = onRanks.get(m.id)!;
       if (!rs.has(r)) return;
       const k = clsOf.get(m.id);
@@ -514,6 +798,7 @@ export function readNotchMarks(
     // a mark the size's own outline ran around (its wall) that straddles its line off centre: the
     // size's notch (wall + straddle), unless another size's line passes its centre
     marks.forEach((m, i) => {
+      if (tags.has(m.id)) return;
       const rs = onRanks.get(m.id)!;
       if (rs.size) return;
       const wall = walls.has(m.id) || x.cleaned.includes(m.id) || !!x.c.notchMarks?.includes(m.id);
@@ -529,6 +814,7 @@ export function readNotchMarks(
   // crosses exactly one size's line, no size's line passes its centre, and that size has no mark of
   // this series yet — the size's copy of the graded notch (series + crossing: two evidences)
   marks.forEach((m, i) => {
+    if (tags.has(m.id)) return;
     if (onRanks.get(m.id)!.size) return;
     const ds = [...dOf.get(m.id)!].sort((a, b) => a[1] - b[1]);
     const [r, d] = ds[0] ?? [-1, Infinity];
@@ -543,13 +829,41 @@ export function readNotchMarks(
     if (acc.notches.some((o) => dist(o.at, n.at) < m.across)) return;
     acc.notches.push(n);
   });
+  // 4 · filled triangle / chevron glyphs: their source size layer and repeated series / label
+  // are read directly from Sheet.paths (they are intentionally not line-work chains). The glyph
+  // must physically touch this size's line; proximity of its centre alone is not enough.
+  for (const g of glyphs) {
+    if (!g.labelled && !g.repeated) continue;
+    const x = clean.find((c) => c.c.rank === g.rank);
+    const acc = accepted.get(g.rank);
+    if (!x || !acc) continue;
+    const touch = Math.min(...g.path.pts.map((q) => closestOnPolyline(q, x.outer, true).d));
+    if (touch > 1) continue;
+    const n = notchAt(x.outer, g.centre, g.across, [
+      { path: g.path.id, from: 0, to: g.path.closed ? g.path.pts.length : g.path.pts.length - 1 },
+    ]);
+    if (acc.notches.some((o) => dist(o.at, n.at) < 1)) continue;
+    n.confidence = g.labelled && g.repeated ? 0.98 : 0.95;
+    acc.notches.push(n);
+  }
+  const blocks = source ? notchLabelBlocks(source.texts, fb) : [];
   for (const x of clean) {
     const acc = accepted.get(x.c.rank)!;
     out.set(x.c.rank, {
       outer: x.outer,
       cleaned: x.cleaned,
       notches: acc.notches,
+      tags: [...tags],
       refused: acc.refused,
+      ...(source
+        ? {
+            labels: bindLabels(
+              acc.notches.map((n) => n.at),
+              blocks,
+              x.outer,
+            ),
+          }
+        : {}),
     });
   }
   return out;

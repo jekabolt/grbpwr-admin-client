@@ -309,6 +309,7 @@ export function chainView(set: ChainSet, parts: readonly SheetPart[], sheet: num
     }),
     bundles: set.bundles.filter((b) => b.chains.every((id) => keep.has(id))),
     orphans: set.orphans.filter((id) => keep.has(id)),
+    ...(set.labelFrames ? { labelFrames: set.labelFrames.filter((id) => keep.has(id)) } : {}),
     ...(set.ambiguities
       ? { ambiguities: set.ambiguities.filter((a) => a.chains.every((id) => keep.has(id))) }
       : {}),
@@ -333,6 +334,7 @@ export function joinSheetChains(
   const classes: LineClass[] = [];
   const bundles: ChainSet['bundles'] = [];
   const orphans: number[] = [];
+  const labelFrames: number[] = [];
   const ambiguities: ChainAmbiguity[] = [];
   const warnings: string[] = [];
   const sizeRow = new Map<string, number>();
@@ -378,6 +380,7 @@ export function joinSheetChains(
         ],
       });
     orphans.push(...set.orphans.map(ch));
+    labelFrames.push(...(set.labelFrames ?? []).map(ch));
     for (const a of set.ambiguities ?? [])
       ambiguities.push({
         ...a,
@@ -387,7 +390,15 @@ export function joinSheetChains(
       });
     warnings.push(...set.warnings.map((w) => `sheet ${sheet + 1}: ${w}`));
   }
-  return { chains, classes, bundles, orphans, ambiguities, warnings };
+  return {
+    chains,
+    classes,
+    bundles,
+    orphans,
+    ambiguities,
+    warnings,
+    ...(labelFrames.length ? { labelFrames } : {}),
+  };
 }
 
 /** A size row's identity across tile sheets: its label, else its pen and nesting rank. */

@@ -143,6 +143,7 @@ const REASON: Record<string, string> = {
   'sizes-not-distinguished': 'sizes drawn alike',
   'size-count': 'size count open',
   'grade-ambiguous': 'two size layouts fit',
+  'notch-variant': 'which notch?',
 };
 
 /**
@@ -737,6 +738,45 @@ export function DetailsStep({
           </>
         );
         break;
+      // BACK-VARIANT: the labelled notch alternatives — the operator keeps the model's own
+      case 'notch-variant': {
+        const nv = sem.notchVariantAsks?.find((q) => q.seed === seed);
+        const pick = (v: string) => () => answer(override(seed, { notchVariant: v }));
+        // one labelled notch: keep it or not; alternatives: one chip each, or both as drawn
+        const lone = nv?.options.length === 1 ? nv.options[0] : undefined;
+        body = nv && (
+          <ChipRow>
+            {lone ? (
+              <>
+                <Chip {...ask('details-blocked')} title={lone.label} onClick={pick(lone.key)}>
+                  yes
+                </Chip>
+                <Chip {...ask('details-blocked')} onClick={pick('none')}>
+                  no
+                </Chip>
+              </>
+            ) : (
+              <>
+                {nv.options.map((o) => (
+                  <Chip
+                    key={o.key}
+                    {...ask('details-blocked')}
+                    tone={o.key === nv.suggested ? 'attention' : undefined}
+                    title={o.label}
+                    onClick={pick(o.key)}
+                  >
+                    {o.key}
+                  </Chip>
+                ))}
+                <Chip {...ask('details-blocked')} onClick={pick('all')}>
+                  {nv.options.length === 2 ? 'both' : 'all'}
+                </Chip>
+              </>
+            )}
+          </ChipRow>
+        );
+        break;
+      }
       case 'grammar':
       case 'duplicate-identity':
         body = (

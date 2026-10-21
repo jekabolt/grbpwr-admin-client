@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { FileRole, LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
+import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
@@ -129,6 +130,7 @@ export default function FilesPage() {
   // и без чужого «read» он стоит в «write» — значит здесь `writable` и право совпадают.
   const writable = mayWrite;
   const { showMessage } = useSnackBarStore();
+  const phone = useMediaQuery(PHONE_QUERY);
 
   // ФИЛЬТР ЖИВЁТ В URL. Ссылку на пересечение кидают в чат («вот всё, что и packaging, и
   // atelier»), и состояние, которого нет в адресе, такой ссылкой не передашь.
@@ -853,51 +855,58 @@ export default function FilesPage() {
    * написаны один раз. Копия плитки внутри секции разошлась бы с оригиналом на первой правке —
    * и разошлась бы молча, потому что обе выглядят одинаково.
    */
-  // СТРОКА ИЛИ ПЛИТКА — ОДИН ВЫБОР НА ВСЕ МЕСТА: пропсы у них одинаковые, поэтому всё, что
-  // написано ниже (выбор, карточка, просмотр, перевыдача ссылки), общее для обоих видов.
-  const FileItem = view === 'grid' ? FileTile : FileRow;
-  const tile = (f: LibraryFile) => (
-    <FileItem
-      key={f.id}
-      file={f}
-      selectable
-      selected={selection.isSelected(Number(f.id))}
-      onToggleSelect={() => selection.toggle(f)}
-      onDetails={() => openCard(Number(f.id))}
-      /**
-       * ВТОРОЙ ПУТЬ — САМ ФАЙЛ. Зовётся только там, где плитка нашла путь просмотра
-       * (`hasViewPath`), поэтому обе ветки здесь — ровно два слагаемых того же условия и
-       * разойтись с ним не могут.
-       *
-       * ⚠ «ОДНО ПРАВИЛО» ВЕРНО НА ТРИ ЧЕТВЕРТИ, и это надо знать заранее. Функция
-       * `hasViewPath` решает, ЕСТЬ ЛИ путь; эти две ветки пере-излагают те же два слагаемых,
-       * чтобы по нему пойти; а подвал карточки файла несёт свою пару органов («open» /
-       * «open the note») с той же развилкой в третий раз. Любой НОВЫЙ путь просмотра —
-       * например, вьюер выкроек — обязан менять функцию И обе эти ветки И подвал карточки
-       * ВМЕСТЕ: разойдясь, они дадут плитку, которая обещает «view» и открывает карточку.
-       *
-       * Заметку показывает её экран: `text/markdown` сервер в inline-аллоулист не берёт, и
-       * `url` у неё пуст. Остальным — новая вкладка тем же способом, что кнопка «open»
-       * карточки: уход по маршруту размонтировал бы холст вместе с выделением и позицией
-       * прокрутки, а на файл смотрят В ХОДЕ разбора сетки.
-       */
-      onView={() => {
-        if (isMarkdownNote(f.fileName ?? '', f.contentType ?? undefined)) {
-          navigate(notePath(Number(f.id)));
-          return;
-        }
-        if (f.url) window.open(f.url, '_blank', 'noopener,noreferrer');
-      }}
-      onPreviewError={onPreviewError}
-    >
-      {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она обещала бы
-          невозможное. В режиме чтения она ВЫКЛЮЧЕНА, а не спрятана — то же правило, что и у
-          остальных писателей раздела. */}
-      {!f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
+  const tile = (f: LibraryFile) => {
+    /**
+     * ВТОРОЙ ПУТЬ — САМ ФАЙЛ. Зовётся только там, где плитка нашла путь просмотра
+     * (`hasViewPath`), поэтому обе ветки здесь — ровно два слагаемых того же условия и
+     * разойтись с ним не могут.
+     *
+     * ⚠ «ОДНО ПРАВИЛО» ВЕРНО НА ТРИ ЧЕТВЕРТИ, и это надо знать заранее. Функция
+     * `hasViewPath` решает, ЕСТЬ ЛИ путь; эти две ветки пере-излагают те же два слагаемых,
+     * чтобы по нему пойти; а подвал карточки файла несёт свою пару органов («open» /
+     * «open the note») с той же развилкой в третий раз. Любой НОВЫЙ путь просмотра —
+     * например, вьюер выкроек — обязан менять функцию И обе эти ветки И подвал карточки
+     * ВМЕСТЕ: разойдясь, они дадут плитку, которая обещает «view» и открывает карточку.
+     *
+     * Заметку показывает её экран: `text/markdown` сервер в inline-аллоулист не берёт, и
+     * `url` у неё пуст. Остальным — новая вкладка тем же способом, что кнопка «open»
+     * карточки: уход по маршруту размонтировал бы холст вместе с выделением и позицией
+     * прокрутки, а на файл смотрят В ХОДЕ разбора сетки.
+     */
+    const onView = () => {
+      if (isMarkdownNote(f.fileName ?? '', f.contentType ?? undefined)) {
+        navigate(notePath(Number(f.id)));
+        return;
+      }
+      if (f.url) window.open(f.url, '_blank', 'noopener,noreferrer');
+    };
+    const itemProps = {
+      file: f,
+      selectable: !phone || selection.selecting,
+      selected: selection.isSelected(Number(f.id)),
+      onToggleSelect: () => selection.toggle(f),
+      onDetails: () => openCard(Number(f.id)),
+      onView,
+      onPreviewError,
+    };
+    // Кнопка есть только там, где превью ОБЯЗАНО было получиться: на .zip она обещала бы
+    // невозможное. В режиме чтения она ВЫКЛЮЧЕНА, а не спрятана — то же правило, что и у
+    // остальных писателей раздела.
+    const after =
+      !f.previewUrl && previewExpected(f.contentType ?? undefined, f.fileName ?? '') ? (
         <RebuildPreview file={f} writable={writable} />
-      )}
-    </FileItem>
-  );
+      ) : null;
+
+    return view === 'grid' ? (
+      <FileTile key={f.id} {...itemProps}>
+        {after}
+      </FileTile>
+    ) : (
+      <FileRow key={f.id} {...itemProps} selectOnClick={phone && selection.selecting}>
+        {after}
+      </FileRow>
+    );
+  };
 
   /**
    * КОНТЕЙНЕР ВЫДАЧИ — ОДИН НА ОБА РЕЖИМА. Плоская выдача и секции проекта получают ровно эту
@@ -1190,6 +1199,15 @@ export default function FilesPage() {
             onSort={(v) => patch({ sort: v })}
             view={view}
             onView={(v) => patch({ view: v })}
+            selecting={phone ? selection.selecting : undefined}
+            selectedCount={selection.selected.length}
+            onToggleSelecting={
+              phone
+                ? selection.selecting
+                  ? selection.finishSelecting
+                  : selection.startSelecting
+                : undefined
+            }
           />
           {/* ОПИСАНИЕ ОБЫЧНОГО ЯРЛЫКА — у него нет своей страницы, и эта строка единственное
               место, где его вообще видно. Описание проекта живёт на странице проекта. */}

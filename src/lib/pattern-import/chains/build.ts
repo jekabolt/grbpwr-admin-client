@@ -19,6 +19,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 
+import { LABEL_FRAME_WHY } from '../sizes/label-frame';
 import { recoverSizes, type RecoverOut } from '../sizes/recover';
 import { furniture, GREY_COLOUR_ONLY, overprintLines } from './classify';
 import { rolesByFaces, type FaceRoleOpts, type FaceSizeCtx } from './face-role';
@@ -251,6 +252,7 @@ function toChainSet(
     ambiguities: noSizes ? rec.ambiguities.filter((a) => !sizeQs.has(a.kind)) : rec.ambiguities,
     warnings,
     ...(rec.cornerWalls?.length && !noSizes ? { cornerWalls: rec.cornerWalls } : {}),
+    ...(byWhy.get(LABEL_FRAME_WHY)?.length ? { labelFrames: byWhy.get(LABEL_FRAME_WHY) } : {}),
   };
 }
 

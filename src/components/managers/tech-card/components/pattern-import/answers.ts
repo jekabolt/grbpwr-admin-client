@@ -29,7 +29,9 @@ import type {
 export type AnswerCtx = { scope: string; revs: Partial<Record<SeedId, string>> };
 
 type Overrides = StageIO['semantics']['in']['pieceOverrides'];
-type Edges = Partial<Record<SeedId, { a: { x: number; y: number }; b: { x: number; y: number } }>>;
+type Edges = Partial<
+  Record<SeedId, { a: { x: number; y: number }; b: { x: number; y: number }; half?: true }>
+>;
 
 /** The operator inputs that answer a question (a subset of the wizard's `Inputs`). */
 export type Answers = {

@@ -6,11 +6,12 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notifyFailure } from 'components/shared/notify-failure';
+import { notify } from 'lib/stores/store';
 import {
   ListTasksFilter,
   Task,
-  TaskBoard,
+  TaskBoardEntry,
   TaskComment,
   TaskInsert,
   TaskRelationKind,
@@ -21,11 +22,17 @@ import { applyMove } from '../utils/order';
 
 type MaybeTask = Task | undefined;
 
+const taskSubject = (id?: number) => `TASK${id ? ` ${id}` : ''}`;
+
 export const tasksKeys = {
   all: ['tasks'] as const,
   list: (filter: ListTasksFilter) => [...tasksKeys.all, 'list', filter] as const,
   detail: (id: number) => [...tasksKeys.all, 'detail', id] as const,
   comments: (taskId: number) => [...tasksKeys.all, 'comments', taskId] as const,
+  // Under `all`, so every task write that invalidates `all` refreshes the rail counts too.
+  boards: () => [...tasksKeys.all, 'boards'] as const,
+  // Not under 'list': its answer carries `closed[]`, and list writers assume the board shape.
+  closed: (from: string, to: string) => [...tasksKeys.all, 'closed', from, to] as const,
 };
 
 type ListResult = { tasks: Task[]; total: number };
@@ -57,12 +64,106 @@ export function useTasks(filter: ListTasksFilter, enabled = true) {
  * Search across every board, archive included. The previous answer stays on screen while the
  * next query loads, so the list does not blink empty on every keystroke.
  */
+/** Every board in rail order (ListTaskBoards). */
+export function useTaskBoards(enabled = true) {
+  return useQuery({
+    queryKey: tasksKeys.boards(),
+    queryFn: () => tasksService.listBoards(),
+    staleTime: 60_000,
+    enabled,
+  });
+}
+
+/** Board name by id; '' while the list loads or for an id the list does not know. */
+export function boardNameOf(boards: TaskBoardEntry[] | undefined, id: number): string {
+  return boards?.find((b) => b.id === id)?.name ?? '';
+}
+
+/**
+ * The id of a seeded board by its old enum, falling back to the first board — for callers that
+ * used to hard-code a department (tech card → development, project → content).
+ */
+export function boardIdForLegacy(
+  boards: TaskBoardEntry[] | undefined,
+  legacy: TaskBoardEntry['legacyBoard'],
+): number {
+  return boards?.find((b) => b.legacyBoard === legacy)?.id ?? boards?.[0]?.id ?? 0;
+}
+
+export function useAddTaskBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => tasksService.addBoard(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+    onError: (e) => notifyFailure('BOARD', 'not added', e),
+  });
+}
+
+/**
+ * The rail order, optimistic: the boards cache takes the new order at once and goes back to the
+ * old one if the server refuses (e.g. a board was added meanwhile and the list is no longer whole).
+ */
+export function useReorderTaskBoards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => tasksService.reorderBoards(ids),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: tasksKeys.boards() });
+      const previous = qc.getQueryData<TaskBoardEntry[]>(tasksKeys.boards());
+      if (previous) {
+        const byId = new Map(previous.map((b) => [b.id, b]));
+        const next = ids.flatMap((id) => byId.get(id) ?? []);
+        qc.setQueryData<TaskBoardEntry[]>(tasksKeys.boards(), next);
+      }
+      return { previous };
+    },
+    onError: (e, _ids, ctx) => {
+      if (ctx?.previous) qc.setQueryData(tasksKeys.boards(), ctx.previous);
+      notifyFailure('BOARDS', 'not reordered', e);
+    },
+    onSuccess: (boards) => {
+      if (boards.length) qc.setQueryData(tasksKeys.boards(), boards);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+  });
+}
+
+export function useRenameTaskBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; name: string }) =>
+      tasksService.renameBoard(vars.id, vars.name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.boards() }),
+    onError: (e, vars) => notifyFailure(`BOARD ${vars.id}`, 'not renamed', e),
+  });
+}
+
+export function useDeleteTaskBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; moveToId: number }) =>
+      tasksService.deleteBoard(vars.id, vars.moveToId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, vars) => notifyFailure(`BOARD ${vars.id}`, 'not deleted', e),
+  });
+}
+
 export function useTaskSearch(query: string) {
   const filter: ListTasksFilter = { includeArchived: true, query };
   return useQuery({
     queryKey: tasksKeys.list(filter),
     queryFn: () => tasksService.listTasks(filter),
     enabled: query.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+/** Cards closed in [from, to), every board, archive included. */
+export function useClosedTasks(from: Date, to: Date) {
+  return useQuery({
+    queryKey: tasksKeys.closed(from.toISOString(), to.toISOString()),
+    queryFn: () => tasksService.listClosedTasks(from, to),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -101,11 +202,10 @@ export function useTaskComments(taskId: number | null) {
 
 export function useCreateTask() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: {
       content: TaskInsert;
-      board: TaskBoard;
+      boardId: number;
       status: TaskStatus;
       /**
        * Родитель СОЗДАВАЕМОЙ карточки; 0/undefined = верхний уровень. Едет тем же вызовом, а не
@@ -113,26 +213,21 @@ export function useCreateTask() {
        * никто бы не узнал — искать её пошли бы в детях.
        */
       parentTaskId?: number;
-    }) => tasksService.addTask(vars.content, vars.board, vars.status, vars.parentTaskId),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage(vars.parentTaskId ? 'Subtask created' : 'Task created', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to create task', 'error'),
+    }) => tasksService.addTask(vars.content, vars.boardId, vars.status, vars.parentTaskId),
+    // The new card on the board (or under its parent) is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e) => notifyFailure('TASK', 'not created', e),
   });
 }
 
 export function useUpdateTask() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { id: number; content: TaskInsert }) =>
       tasksService.updateTask(vars.id, vars.content),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Task saved', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save task', 'error'),
+    // The updated card/detail is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, vars) => notifyFailure(taskSubject(vars.id), 'not saved', e),
   });
 }
 
@@ -209,7 +304,6 @@ export function mergeInlinePatch(
  */
 export function useInlineTaskPatch(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const mutation = useMutation({
     mutationKey: inlinePatchKey(taskId),
     mutationFn: async (vars: { patch: InlinePatch; base: TaskInsert }) => {
@@ -226,7 +320,7 @@ export function useInlineTaskPatch(taskId: number) {
       }
       await tasksService.updateTask(taskId, merged.content);
     },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save', 'error'),
+    onError: (e) => notifyFailure(taskSubject(taskId), 'not saved', e),
     onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
   });
 
@@ -279,12 +373,17 @@ export function useInlineTaskPatch(taskId: number) {
   const guarded = useCallback(
     async (vars: { patch: InlinePatch; base: TaskInsert }) => {
       if (qc.isMutating({ mutationKey: inlinePatchKey(taskId) }) > 0) {
-        showMessage(INLINE_BUSY_MESSAGE, 'error');
+        notify({
+          sev: 'error',
+          subject: taskSubject(taskId),
+          text: 'not saved',
+          detail: INLINE_BUSY_MESSAGE,
+        });
         throw new Error(INLINE_BUSY_MESSAGE);
       }
       return mutateAsync(vars);
     },
-    [qc, taskId, mutateAsync, showMessage],
+    [qc, taskId, mutateAsync],
   );
 
   /**
@@ -309,40 +408,31 @@ export function useInlineTaskPatch(taskId: number) {
 
 export function useDeleteTask() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (id: number) => tasksService.deleteTask(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Task deleted', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to delete task', 'error'),
+    // The card disappearing (or navigation from its detail) is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, id) => notifyFailure(taskSubject(id), 'not deleted', e),
   });
 }
 
 export function useArchiveTask() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (id: number) => tasksService.archiveTask(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Task archived', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to archive task', 'error'),
+    // The archive state on the card/detail is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, id) => notifyFailure(taskSubject(id), 'not archived', e),
   });
 }
 
 export function useUnarchiveTask() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (id: number) => tasksService.unarchiveTask(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Task restored', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to restore task', 'error'),
+    // The restored card/detail is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, id) => notifyFailure(taskSubject(id), 'not restored', e),
   });
 }
 
@@ -353,18 +443,15 @@ export function useUnarchiveTask() {
 
 export function useAddChecklistItem(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (content: string) => tasksService.addChecklistItem(taskId, content),
     onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
-    onError: (e) =>
-      showMessage(e instanceof Error ? e.message : 'Failed to add checklist item', 'error'),
+    onError: (e) => notifyFailure(taskSubject(taskId), 'item not added', e),
   });
 }
 
 export function useSetChecklistItemDone(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = tasksKeys.detail(taskId);
   return useMutation({
     mutationFn: (vars: { id: number; isDone: boolean }) =>
@@ -384,7 +471,7 @@ export function useSetChecklistItemDone(taskId: number) {
     },
     onError: (e, _vars, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to update checklist', 'error');
+      notifyFailure(taskSubject(taskId), 'item not updated', e);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
   });
@@ -392,7 +479,6 @@ export function useSetChecklistItemDone(taskId: number) {
 
 export function useDeleteChecklistItem(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = tasksKeys.detail(taskId);
   return useMutation({
     mutationFn: (id: number) => tasksService.deleteChecklistItem(id),
@@ -409,7 +495,7 @@ export function useDeleteChecklistItem(taskId: number) {
     },
     onError: (e, _id, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to remove checklist item', 'error');
+      notifyFailure(taskSubject(taskId), 'item not removed', e);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
   });
@@ -420,11 +506,10 @@ export function useDeleteChecklistItem(taskId: number) {
 // new column with no flicker; a failure rolls back and re-syncs.
 export function useMoveTask(filter: ListTasksFilter) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = tasksKeys.list(filter);
   return useMutation({
-    mutationFn: (vars: { id: number; board: TaskBoard; status: TaskStatus; position: number }) =>
-      tasksService.moveTask(vars.id, vars.board, vars.status, vars.position),
+    mutationFn: (vars: { id: number; boardId: number; status: TaskStatus; position: number }) =>
+      tasksService.moveTask(vars.id, vars.boardId, vars.status, vars.position),
     onMutate: async (vars) => {
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<ListResult>(key);
@@ -434,9 +519,9 @@ export function useMoveTask(filter: ListTasksFilter) {
       }
       return { previous };
     },
-    onError: (e, _vars, ctx) => {
+    onError: (e, vars, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to move task', 'error');
+      notifyFailure(taskSubject(vars.id), 'not moved', e);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
   });
@@ -444,11 +529,10 @@ export function useMoveTask(filter: ListTasksFilter) {
 
 export function useAddComment(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (body: string) => tasksService.addComment(taskId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.comments(taskId) }),
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to add comment', 'error'),
+    onError: (e) => notifyFailure(taskSubject(taskId), 'comment not added', e),
   });
 }
 
@@ -464,43 +548,34 @@ export function useAddComment(taskId: number) {
 
 export function useSetTaskParent() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { id: number; parentTaskId: number }) =>
       tasksService.setTaskParent(vars.id, vars.parentTaskId),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage(vars.parentTaskId ? 'Parent set' : 'Moved to top level', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to set parent', 'error'),
+    // The relation tree is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, vars) => notifyFailure(taskSubject(vars.id), 'parent not set', e),
   });
 }
 
 export function useAddTaskRelation() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { taskId: number; otherTaskId: number; kind: TaskRelationKind }) =>
       tasksService.addRelation(vars.taskId, vars.otherTaskId, vars.kind),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Linked', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to link tasks', 'error'),
+    // The relation row is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, vars) => notifyFailure(taskSubject(vars.taskId), 'not linked', e),
   });
 }
 
 export function useDeleteTaskRelation() {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   return useMutation({
     mutationFn: (vars: { taskId: number; otherTaskId: number; kind: TaskRelationKind }) =>
       tasksService.deleteRelation(vars.taskId, vars.otherTaskId, vars.kind),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tasksKeys.all });
-      showMessage('Link removed', 'success');
-    },
-    onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to remove link', 'error'),
+    // The relation row disappearing is the receipt.
+    onSuccess: () => qc.invalidateQueries({ queryKey: tasksKeys.all }),
+    onError: (e, vars) => notifyFailure(taskSubject(vars.taskId), 'link not removed', e),
   });
 }
 
@@ -515,7 +590,6 @@ export function useDeleteTaskRelation() {
  */
 export function useDeleteComment(taskId: number) {
   const qc = useQueryClient();
-  const { showMessage } = useSnackBarStore();
   const key = tasksKeys.comments(taskId);
   return useMutation({
     mutationFn: (id: number) => tasksService.deleteComment(id),
@@ -531,7 +605,7 @@ export function useDeleteComment(taskId: number) {
     },
     onError: (e, _id, ctx) => {
       if (ctx?.previous) qc.setQueryData(key, ctx.previous);
-      showMessage(e instanceof Error ? e.message : 'Failed to delete comment', 'error');
+      notifyFailure(taskSubject(taskId), 'comment not deleted', e);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });

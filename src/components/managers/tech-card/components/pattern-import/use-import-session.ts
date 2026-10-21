@@ -207,8 +207,11 @@ export type Inputs = {
   overrides: StageIO['semantics']['in']['pieceOverrides'];
   /** Two clicks, or an accepted proposal (A1: `accepted` = the proposal's evidence). */
   operatorGrain: StageIO['semantics']['in']['operatorGrain'];
-  /** Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`. */
-  operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  /**
+   * Fold edges the operator picked (E1a); "not a fold" lives in `overrides[seed].unfoldedFold`.
+   * `half`: export the half as drawn with the fold line marked (L13, owner decision 19.10 a).
+   */
+  operatorFold: Partial<Record<SeedId, { a: PtMm; b: PtMm; half?: true }>>;
   /** The unbound cutting-list entries the operator has seen named and checked (S5). */
   foldListChecked: string[];
   /** Names the operator confirmed or typed (AI suggestions below the threshold need one of the two). */

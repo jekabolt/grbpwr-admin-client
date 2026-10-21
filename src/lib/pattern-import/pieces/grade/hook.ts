@@ -260,7 +260,25 @@ export function gradeHook(
   const exp = opts.expectedSizes ?? null;
   const cell = opts.cellMm || 0.5;
   const byId = new Map(seeds.map((s) => [s.id, s]));
-  const blocked = new Set<ChainId>([...notEvidence(set.classes, set.chains), ...exclude]);
+  // LABELFRAME: a size label's frame left every wall and feature, not the solver's reading. Its
+  // band count and its own frame pass (markFrames / dropFramesAround) were measured with the frames
+  // drawn; read without them, polupalto's band count turns 6 and the D4 solve of 12 seeds runs for
+  // > 15 min. Only the row as built: once the operator confirms it, moves a frame out of it (LINEFIX
+  // ignore) or a layer re-rows it, the usual rules block it again.
+  const lf = new Set(set.labelFrames ?? []);
+  const frames = new Set<ChainId>();
+  for (const c of set.classes)
+    if (
+      c.role === 'ignore' &&
+      c.confidence < 0.9 &&
+      c.chains.length &&
+      c.chains.every((id) => lf.has(id))
+    )
+      for (const id of c.chains) frames.add(id);
+  const blocked = new Set<ChainId>([
+    ...[...notEvidence(set.classes, set.chains)].filter((id) => !frames.has(id)),
+    ...exclude,
+  ]);
 
   /** Every listed seed refused at every one of n ranks; F4 fills the rest with its own walls. */
   const refuseSeeds = (

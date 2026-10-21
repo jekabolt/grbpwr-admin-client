@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { ConfirmationModal, Text } from 'ui';
+import { ConfirmationModal } from 'ui';
 
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { EditorScreen, useIsMobileEditor } from './editor-mobile';
@@ -54,7 +54,7 @@ export function MediaExpandDialog({
 
   if (mobile) {
     return (
-      <EditorScreen open={open} onOpenChange={onOpenChange} title={`expand ${media.id}`}>
+      <EditorScreen open={open} onOpenChange={onOpenChange} title='expand'>
         <MediaExpander
           layout='mobile'
           title='expand'
@@ -73,24 +73,18 @@ export function MediaExpandDialog({
       open={open}
       onOpenChange={onOpenChange}
       onConfirm={() => undefined}
-      title={`expand ${media.id}`}
+      title='expand'
       width='lg'
       hideActions
     >
-      <div className='space-y-2.5'>
-        <Text variant='label' component='p'>
-          The reverse of a crop: the frame grows and the new area is filled with a colour. The
-          source stays in the bucket untouched — expanding puts a NEW object with a new id beside
-          it.
-        </Text>
-        <MediaExpander
-          selectedFile={open ? original : undefined}
-          busy={busy}
-          hideHeader
-          saveExpandedImage={handleSave}
-          onCancel={() => onOpenChange(false)}
-        />
-      </div>
+      <MediaExpander
+        selectedFile={open ? original : undefined}
+        busy={busy}
+        hideHeader
+        saveLabel='save copy'
+        saveExpandedImage={handleSave}
+        onCancel={() => onOpenChange(false)}
+      />
     </ConfirmationModal>
   );
 }

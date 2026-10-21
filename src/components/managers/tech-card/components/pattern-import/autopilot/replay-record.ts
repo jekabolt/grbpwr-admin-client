@@ -611,7 +611,13 @@ export function answerRecordOf(
     const q = live.confirmedQuantities[sd];
     if (q) v.qty = q.split(REV_SEP)[0];
     const keep: Record<string, unknown> = {};
-    for (const k of ['pairHand', 'unfoldedFold', 'piecesPerGarment', 'allowance'] as const)
+    for (const k of [
+      'pairHand',
+      'unfoldedFold',
+      'piecesPerGarment',
+      'allowance',
+      'notchVariant',
+    ] as const)
       if (ov && ov[k] !== undefined) keep[k] = JSON.parse(JSON.stringify(ov[k]));
     if (Object.keys(keep).length) v.ov = keep;
     const g = live.operatorGrain[sd];
@@ -622,7 +628,12 @@ export function answerRecordOf(
         ...(g.accepted ? { acc: [...g.accepted] } : {}),
       };
     const fo = live.operatorFold[sd];
-    if (fo) v.fold = { a: { x: fo.a.x, y: fo.a.y }, b: { x: fo.b.x, y: fo.b.y } };
+    if (fo)
+      v.fold = {
+        a: { x: fo.a.x, y: fo.a.y },
+        b: { x: fo.b.x, y: fo.b.y },
+        ...(fo.half ? { half: true as const } : {}),
+      };
     if (s.fabrics && fabSeeds.has(sd))
       v.fab = Object.entries(s.fabrics.byPurpose)
         .filter(([, xs]) => xs.includes(sd))

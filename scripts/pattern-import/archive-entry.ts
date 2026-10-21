@@ -61,6 +61,7 @@ import type { SetAside, Seed, PtMm } from 'lib/pattern-import/types';
 import { seedLabel } from 'lib/pattern-import/pieces/seeds';
 import { leakDiag } from './leak-diag';
 import { famRender, leaks2Diag } from './leaks2-diag';
+import { sizesepDump } from './sizesep-dump';
 import { gfitArchive } from './gfit-archive';
 import { classifyFeatures } from 'lib/pattern-import/semantics/features';
 import { provenDarts } from 'lib/pattern-import/pieces/darts';
@@ -555,6 +556,11 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
     const ids = new Set<string>();
     for (const sc of wr.scopes)
       for (const b of sc.manifest.blocks) ids.add(b.identity.replace(/^LIN_/, ''));
+    const notchBlocks = wr.scopes.flatMap((sc) =>
+      sc.manifest.blocks
+        .filter((b) => b.notches > 0)
+        .map((b) => ({ scope: sc.target.label, block: b.block, notches: b.notches })),
+    );
     rec.write = {
       scopes: wr.scopes.map((sc) => {
         const g = wr.gate[sc.target.scopeKey];
@@ -564,8 +570,11 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
           blocks: sc.manifest.blocks.length,
           pieces: new Set(sc.manifest.blocks.map((b) => b.identity)).size,
           sizes: sc.manifest.sizes.map((z) => `${z.sourceLabel ?? ''}→${z.token}`),
+          notches: sc.manifest.blocks.reduce((n, b) => n + b.notches, 0),
         };
       }),
+      notches: notchBlocks.reduce((n, b) => n + b.notches, 0),
+      notchBlocks,
       piecesWritten: ids.size,
       gateBlocks: [
         ...new Set(
@@ -845,6 +854,19 @@ export async function runFile(rel: string): Promise<Record<string, unknown>> {
       );
     } catch (e) {
       rec.leaks2Error = String((e as Error)?.stack ?? e).slice(0, 400);
+    }
+  }
+  // ARCHIVE_SIZESEP=<dir> (SIZESEP): the sheet's paths, chains, rows and candidates for the
+  // engine-vs-key size pictures (scripts/pattern-import/sizesep-dump.ts)
+  if (process.env.ARCHIVE_SIZESEP && S) {
+    try {
+      rec.sizesep = sizesepDump(
+        rel,
+        { ...S, run: (box.s as unknown as { run: SizeRun | null }).run },
+        process.env.ARCHIVE_SIZESEP,
+      );
+    } catch (e) {
+      rec.sizesepError = String((e as Error)?.stack ?? e).slice(0, 400);
     }
   }
   if (process.env.ARCHIVE_PNG && S) {

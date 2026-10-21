@@ -144,7 +144,7 @@ export function Chip({
             e.stopPropagation();
             onRemove();
           }}
-          className='cursor-pointer'
+          className={cn('cursor-pointer', selected && !quiet && 'text-bgColor')}
         />
       )}
     </Component>

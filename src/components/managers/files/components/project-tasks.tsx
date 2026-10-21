@@ -3,7 +3,11 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { TASKS_PAGE_LIMIT, tasksService } from 'components/managers/tasks/api/tasksService';
 import { emptyFormValues, TaskFormValues } from 'components/managers/tasks/api/types';
 import { TaskFormModal } from 'components/managers/tasks/components/task-form-modal';
-import { useCreateTask } from 'components/managers/tasks/hooks/useTasks';
+import {
+  boardIdForLegacy,
+  useCreateTask,
+  useTaskBoards,
+} from 'components/managers/tasks/hooks/useTasks';
 import { STATUS_LABEL, STATUSES } from 'components/managers/tasks/utils/meta';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useMemo, useState } from 'react';
@@ -38,6 +42,8 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
 
   const [creating, setCreating] = useState(false);
   const createTask = useCreateTask();
+  const { data: boards } = useTaskBoards();
+  const seedBoardId = boardIdForLegacy(boards, 'TASK_BOARD_CONTENT');
 
   const tasks = data?.tasks ?? [];
   /**
@@ -56,16 +62,16 @@ export function ProjectTasks({ projectId }: { projectId: number }) {
 
   const initial: TaskFormValues = useMemo(
     () => ({
-      ...emptyFormValues('TASK_BOARD_CONTENT', 'TASK_STATUS_TODO'),
+      ...emptyFormValues(seedBoardId, 'TASK_STATUS_TODO'),
       projectTopicId: projectId,
     }),
-    [projectId],
+    [projectId, seedBoardId],
   );
 
   async function handleCreate(values: TaskFormValues) {
-    const { board, status, ...content } = values;
+    const { boardId, status, ...content } = values;
     try {
-      await createTask.mutateAsync({ content, board, status });
+      await createTask.mutateAsync({ content, boardId: boardId || seedBoardId, status });
       setCreating(false);
     } catch {
       /* тост показывает мутация; форма остаётся открытой */

@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { MediaUsage, common_MediaFull } from 'api/proto-http/admin';
+import { ListMediaFacetsResponse, MediaUsage, common_MediaFull } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useMemo, useState } from 'react';
@@ -21,6 +21,8 @@ export const mediaKeys = {
   // Under `lists`: every list invalidation (upload, delete, recrop) re-counts the months too,
   // otherwise the scrubber's offsets would index a list that has moved.
   months: () => [...mediaKeys.lists(), 'months'] as const,
+  // Under `lists` for the same reason: an upload or a delete changes the library's counts.
+  facets: () => [...mediaKeys.lists(), 'facets'] as const,
   usage: (bucket: number) => [...mediaKeys.all, 'usage', bucket] as const,
 };
 
@@ -80,6 +82,24 @@ export function useMediaMonths(enabled = true) {
     },
     enabled,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Счётчики ВСЕЙ библиотеки одним маленьким кубом (тип × размер × занятость), а не по
+ * подгруженным страницам: рельс знает настоящие числа до первой прокрутки. Дёшево — строк столько,
+ * сколько разных размеров, поэтому спрашивается и страницей, и каждым пикером.
+ *
+ * Провал не держит экран: `useFilter` без ответа считает по загруженному, как раньше, поэтому
+ * повтор один — ждать три ретрая ради цифр, которые и так уже стоят, незачем.
+ */
+export function useMediaFacets(enabled = true) {
+  return useQuery({
+    queryKey: mediaKeys.facets(),
+    queryFn: (): Promise<ListMediaFacetsResponse> => adminService.ListMediaFacets({}),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 }
 

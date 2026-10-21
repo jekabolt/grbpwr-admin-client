@@ -40,6 +40,7 @@ import type {
   Feature,
   FoldAsk,
   FoldFeature,
+  FoldHalfOffer,
   FoldMiss,
   GrainFeature,
   IdentityGeometry,
@@ -65,6 +66,7 @@ import type {
   SizeRun,
   Unproven,
   GradeAsk,
+  NotchVariantAsk,
   GradeCountFeature,
   KinkRecord,
   ShapeFixRecord,
@@ -86,6 +88,7 @@ import { silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
+import { notchQualifier, notchVariantOf } from './notch-variants';
 import { classifyFeatures } from './features';
 import { gradeP1Off, gradeShape } from './grade-shape';
 import {
@@ -115,9 +118,18 @@ import {
   normFoldLine,
   foldShapeProblem,
   FOLD_LOOSE_TOL_MM,
+  FOLD_MATCH_ANGLE_DEG,
+  type FoldBracket,
+  bindFoldText,
+  bracketEdges,
+  foldBracket,
+  halfFoldLine,
+  halfFoldReason,
   looseFoldEdge,
   matchFoldEdge,
+  saysCutOnFold,
   sideOf,
+  straightRuns,
   unfold,
 } from './fold';
 import {
@@ -133,7 +145,13 @@ import {
   reflection,
 } from './geom';
 import { identityCheck, isTitleLabel, readName } from './names';
-import { cleanTracedOutline, familyCornerKinds, offsetContour } from './offset';
+import {
+  cleanTracedOutline,
+  familyCornerKinds,
+  offsetAcrossFold,
+  offsetContour,
+  snapOntoFold,
+} from './offset';
 import { repairMinorityKinks, kinkRepairOff, ownLineOn, type KinkDone } from './kink-repair';
 import { PAIR_WORDS, mirrorSizeAcrossGrain, planPair } from './pairs';
 
@@ -444,6 +462,113 @@ function otherLinesNear(fam: PieceFamily, set: ChainSet): OtherLines {
       }
       return best;
     },
+    within: (p, r) =>
+      lines
+        .filter(
+          ({ ch, b }) =>
+            !(b.minX > p.x + r || b.maxX < p.x - r || b.minY > p.y + r || b.maxY < p.y - r) &&
+            closestOnPolyline(p, ch.pts, ch.closed).d <= r,
+        )
+        .map(({ ch }) => ({ pts: ch.pts, closed: ch.closed })),
+  };
+}
+
+/**
+ * L13: the straight edge(s) of one size's outline the sheet points at for a half on fold — the
+ * runs a fold bracket aims at (`bracketEdges`), else the runs a «cut on fold» text lies along
+ * (`bindFoldText`, over every straight run: no convex-hull filter). Null when nothing points.
+ */
+function halfPointerOf(
+  outer: readonly PtMm[],
+  brackets: readonly FoldBracket[],
+  words: readonly FoldText[],
+  lines: OtherLines,
+): { edges: FoldEdge[]; how: 'bracket' | 'text'; by: string[] } | null {
+  const runs = straightRuns(outer);
+  const uniq = (es: FoldEdge[]) =>
+    es.filter((e, i) => es.findIndex((x) => x.a === e.a && x.b === e.b) === i);
+  const fromBr = brackets
+    .map((br) => ({ br, es: bracketEdges(br, outer, runs) }))
+    .filter((x) => x.es.length);
+  if (fromBr.length)
+    return {
+      edges: uniq(fromBr.flatMap((x) => x.es)),
+      how: 'bracket',
+      by: [...new Set(fromBr.map((x) => x.br.text))],
+    };
+  const fromText = words
+    .map((t) => ({ t, e: bindFoldText(t, runs, lines.nearer)?.edge ?? null }))
+    .filter((x): x is { t: FoldText; e: FoldEdge } => !!x.e);
+  if (fromText.length)
+    return {
+      edges: uniq(fromText.map((x) => x.e)),
+      how: 'text',
+      by: [...new Set(fromText.map((x) => x.t.text))],
+    };
+  return null;
+}
+
+const lineDeg = (a: PtMm, b: PtMm) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+/** Smallest angle between two undirected lines, degrees. */
+const lineAngleOf = (e: FoldLine, f: FoldLine) => {
+  const x = (((lineDeg(e.a, e.b) - lineDeg(f.a, f.b)) % 180) + 180) % 180;
+  return Math.min(x, 180 - x);
+};
+
+/**
+ * L13 (owner decision 19.10 a): the «export the half with a fold line» offer of a fold question,
+ * or null. Offered when the sheet prints «cut on fold» for the piece (`claims`, never an AI hint)
+ * and, on the question's size (the last of `sizes`), the sheet points at one straight edge across
+ * which the unfold fails for an overlap or a slot. `auto` (D3) when, in EVERY size, a bracket or
+ * the claim text points at exactly one straight edge, parallel to the question's, and the unfold
+ * across it fails for an overlap or a slot — anything else is named in `missing`.
+ */
+function halfOfferOf(
+  sizes: readonly { outer: PtMm[]; token: string }[],
+  claims: readonly string[],
+  brackets: readonly FoldBracket[],
+  words: readonly FoldText[],
+  lines: OtherLines | null,
+): FoldHalfOffer | null {
+  if (!claims.length || !sizes.length || !lines) return null;
+  const per = sizes.map((z) => {
+    const ptr = halfPointerOf(z.outer, brackets, words, lines);
+    const edge = ptr && ptr.edges.length === 1 ? ptr.edges[0] : null;
+    return { z, ptr, edge, why: edge ? halfFoldReason(z.outer, edge) : null };
+  });
+  const big = per[per.length - 1];
+  const isHalf = (w: (typeof per)[number]['why']) =>
+    !!w && (w.kind === 'overlap' || w.kind === 'slot');
+  if (!big.edge || !isHalf(big.why)) return null;
+  const problems: FoldHalfOffer['problems'] = [];
+  for (const x of per)
+    if (x.why && (x.why.kind === 'overlap' || x.why.kind === 'slot'))
+      problems.push({ size: x.z.token, kind: x.why.kind, detail: x.why.detail });
+  let missing: string | undefined;
+  for (const x of per) {
+    const tok = x.z.token;
+    if (!x.ptr) missing = `size ${tok}: no bracket or fold text points at a straight edge`;
+    else if (!x.edge)
+      missing = `size ${tok}: the ${x.ptr.how === 'bracket' ? 'bracket' : 'fold text'} points at ${x.ptr.edges.length} edges`;
+    else if (lineAngleOf(x.edge, big.edge) > FOLD_MATCH_ANGLE_DEG)
+      missing = `size ${tok}: the edge pointed at is not the same edge`;
+    else if (x.why?.kind === 'unfolds') missing = `size ${tok}: it unfolds across that edge`;
+    else if (x.why?.kind === 'other') missing = `size ${tok}: ${x.why.detail}`;
+    if (missing) break;
+  }
+  const by = [...new Set(per.flatMap((x) => x.ptr?.by ?? []))];
+  const how = per.every((x) => x.ptr?.how === 'bracket') ? 'a fold bracket beside' : 'the text';
+  const evidence = [
+    ...claims.map((c) => `printed «${c.slice(0, 60)}»`),
+    `${how} ${by.map((t) => `«${t.slice(0, 40)}»`).join(', ')} points at the ${big.edge.lenMm.toFixed(0)} mm straight edge${missing ? '' : ' in every size'}`,
+    `unfolding there fails: ${problems.map((x) => `${x.size} ${x.kind}`).join(', ')}`,
+  ];
+  return {
+    edge: { a: big.edge.a, b: big.edge.b, lenMm: big.edge.lenMm },
+    problems,
+    evidence,
+    auto: !missing,
+    ...(missing ? { missing } : {}),
   };
 }
 
@@ -617,6 +742,9 @@ export function buildPieceSpecsDetailed(
   const unproven: Unproven[] = [];
   /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
   const gradeAsks: GradeAsk[] = [];
+  const notchVariantAsks: NotchVariantAsk[] = [];
+  const nvAskOf = new Map<SeedId, Omit<NotchVariantAsk, 'seed' | 'identity'>>();
+  const sheetWords = [...sheet.texts.map((t) => t.text), ...(input.docTexts ?? [])];
   const gradeRefusals: Record<string, string> = {};
   const refusedSeed = new Map<string, SeedId>();
   /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
@@ -1082,8 +1210,10 @@ export function buildPieceSpecsDetailed(
     const refBox: BoxMm | null = opFold ? largest.bbox : null;
     let refWhy: string | null = opFold ? 'picked by you' : null;
     const internalWords = new Set<string>();
+    let famLinesMemo: OtherLines | null = null;
+    const famLines = () => (famLinesMemo ??= otherLinesNear(p.fam, set));
     if (!refEdge && foldWords.length) {
-      const lines = otherLinesNear(p.fam, set);
+      const lines = famLines();
       for (const { c } of [...p.cands].reverse()) {
         const edges = foldEdges(c.outer);
         let best: { edge: FoldEdge; d: number; text: string; how: string } | null = null;
@@ -1111,6 +1241,27 @@ export function buildPieceSpecsDetailed(
       ),
       ...(foldHints.has(seed) ? ['AI: cut on fold'] : []),
     ];
+    // L13 (owner decision 19.10 a): a half the sheet says is cut on fold but that cannot be
+    // unfolded is exported as drawn with its fold line marked. The printed claims (never the AI's
+    // hint), the «cut on fold» words that may point at the edge, and the brackets beside them.
+    const halfPick = opFold?.half ? opFold : null;
+    const cofWords = foldWords
+      .filter((w) => saysCutOnFold(w.t.text) && !internalWords.has(w.t.text))
+      .map((w) => w.t);
+    const claims = [
+      ...listBound.filter((l) => l.seed === seed).map((l) => l.entry),
+      ...new Set(
+        foldWords
+          .filter((w) => w.inside && saysCutOnFold(w.t.text) && !internalWords.has(w.t.text))
+          .map((w) => w.t.text),
+      ),
+    ];
+    let bracketsMemo: FoldBracket[] | null = null;
+    const brackets = () =>
+      (bracketsMemo ??= cofWords
+        .map((t) => foldBracket(t, famLines()))
+        .filter((b): b is FoldBracket => !!b));
+    if (halfPick) refWhy = 'a half on fold (answered)';
     // MOOD Ф3.3 (R11): a facing fold line across the piece (semantics/facing.ts) — every size
     // shows it, or none does; an outline that stops at it while the size goes on beyond it has lost
     // its facing. Never either silently. "Not a fold" (the operator's) exports the outline as drawn.
@@ -1162,6 +1313,8 @@ export function buildPieceSpecsDetailed(
     /** 'fold-unresolved': where the answered fold fails (the details step asks again from it). */
     let missHere: Pick<FoldMiss, 'size' | 'kind' | 'problem' | 'picked'> | null = null;
     let anyFold = false;
+    /** L13: the sizes exported as a half on fold, each with why it cannot be unfolded. */
+    const halfSizes: string[] = [];
     let lastGrain: GrainFeature | null = null;
     const opGrain = operatorGrain[seed];
     // A1: the family's box (the ungraded-line test looks for the size copies inside it)
@@ -1178,15 +1331,57 @@ export function buildPieceSpecsDetailed(
       region: famBox,
       ...(darts.length ? { darts } : {}),
     };
-    // SHAPE: notch marks (small closed marks centred on the line) are notches, never outline —
-    // read over every size of the family at once (semantics/notch-marks.ts)
+    // NOTCH: compact closed marks are cleaned off the outline, then classified across the family:
+    // numeric balloons are size tags (never layer 4); proven filled triangles / other marks are
+    // notches. Read every size at once so repeated graded copies are independent evidence.
     const markReads =
       traced || p.all.some(({ c }) => featuresOf(c).length)
         ? new Map<number, MarkRead>()
         : readNotchMarks(
             p.all.map(({ c }) => c),
             set,
+            undefined,
+            { paths: sheet.paths, styles: sheet.styles, texts: sheet.texts, run },
           );
+    // BACK-VARIANT: a notch whose label names a model variant («Style B notch») is that model's;
+    // alternatives of one notch («High back» / «Low back») are asked, never picked (notch-variants.ts)
+    const nv = notchVariantOf({
+      seed,
+      read: {
+        sizes: p.cands.map(({ c, card }) => {
+          const mr = markReads.get(c.rank);
+          return {
+            size: card.token,
+            notches: (mr?.notches ?? []).map((n, k) => ({
+              at: n.at,
+              label: mr?.labels?.[k] ?? null,
+            })),
+          };
+        }),
+      },
+      models: input.models ?? [],
+      chosen: input.variant ?? null,
+      texts: sheetWords,
+      // a drawn twin carries its other hand's question: either hand's answer answers both
+      answer:
+        ov.notchVariant ??
+        (twinOf.has(seed) ? pieceOverrides[twinOf.get(seed)!]?.notchVariant : undefined),
+    });
+    if (nv.kind === 'apply') {
+      let dropped = 0;
+      for (const mr of markReads.values()) {
+        const keep = mr.notches.map((_, k) => {
+          const l = mr.labels?.[k];
+          return !l || !nv.drop.has(notchQualifier(l));
+        });
+        dropped += keep.filter((x) => !x).length;
+        mr.notches = mr.notches.filter((_, k) => keep[k]);
+        if (mr.labels) mr.labels = mr.labels.filter((_, k) => keep[k]);
+      }
+      pieceNotes.push(
+        `notch variant: ${nv.why}${dropped ? ` — ${dropped} notch(es) left out` : ''}`,
+      );
+    }
 
     // GRADE P1: a notch drawn AS the outline (a bump / dip of notch shape) at a grade-consistent
     // place in ≥ 2 sizes is a notch — each size's line crosses it by the chord (pieces/gfit/notch-bumps)
@@ -1283,6 +1478,39 @@ export function buildPieceSpecsDetailed(
         }
     }
 
+    // L14: ONE cleaned outline per candidate — mark reads, notch-bump chords, kink repair, then
+    // spikes (drawn) or the traced cleaning — used by the size loop (the export, the half's check)
+    // AND by the half-on-fold offer below, so the two never judge different lines. Pure and
+    // memoized: the loop adds its notes / notches from `st` / `tr` itself.
+    type Cleaned = {
+      outer: PtMm[];
+      st: ReturnType<typeof stripSpikes> | null;
+      tr: ReturnType<typeof cleanTracedOutline> | null;
+    };
+    const cleanedByCand = new Map<(typeof p.cands)[number]['c'], Cleaned>();
+    const cleanedOf = (c: (typeof p.cands)[number]['c']): Cleaned => {
+      const had = cleanedByCand.get(c);
+      if (had) return had;
+      const mr = markReads.get(c.rank);
+      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      const nb = bumpsByRank.get(c.rank);
+      if (nb?.length) outer = chordAcross(outer, nb);
+      const kk = kinkByRank.get(c.rank);
+      if (kk) outer = kk.outer;
+      let st: Cleaned['st'] = null;
+      let tr: Cleaned['tr'] = null;
+      if (!traced) {
+        st = stripSpikes(outer);
+        if (st.spikes) outer = st.ring;
+      } else {
+        tr = cleanTracedOutline(outer);
+        outer = tr.pts;
+      }
+      const out = { outer, st, tr };
+      cleanedByCand.set(c, out);
+      return out;
+    };
+
     for (const { c, card } of p.cands) {
       // SHAPE-KINK: the operator's "drop this size" — the piece is exported without it (recorded)
       if (fixOf(card.token) === 'drop') {
@@ -1304,7 +1532,9 @@ export function buildPieceSpecsDetailed(
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
-      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      // the outline as cleaned below (cleanedOf: bump chords, kinks, spikes / traced cleaning)
+      const cleaned = cleanedOf(c);
+      let outer = cleaned.outer;
       // SHAPE-KINK (pieces/notch-marks.ts): a placement mark this size ran around, kept on its line
       const sizeKinks: KinkRecord[] = (c.placeMarks ?? []).map((m) => ({
         at: m.at,
@@ -1318,7 +1548,6 @@ export function buildPieceSpecsDetailed(
         );
       const nb = bumpsByRank.get(c.rank);
       if (nb?.length) {
-        outer = chordAcross(outer, nb);
         for (const b of nb) {
           const d = Math.min(
             PATIMPORT.notchMaxMm,
@@ -1364,7 +1593,6 @@ export function buildPieceSpecsDetailed(
         });
         const key = `${seed}:${c.rank}`;
         notchChords.set(key, [...(notchChords.get(key) ?? []), ...removed]);
-        outer = kk.outer;
         sizeKinks.push(...kk.kinks.map(({ chord: _c, removed: _r, ...k }) => k));
         pieceNotes.push(
           `${card.token}: outline straightened onto the family's shape at ${kk.kinks.length} place(s) (${kk.kinks.map((k) => `${k.rule} ${k.mm} mm over ${k.spanMm} mm`).join(', ')}; a strict majority of sizes does not turn there) — D5`,
@@ -1378,10 +1606,9 @@ export function buildPieceSpecsDetailed(
       // A stretch the DRAWING itself runs in and out along (its legs on this piece's own cut-line
       // chains, ≥ notchMinMm deep) is a slit notch drawn into the cut line: it leaves the ring and
       // comes back as a notch at that point (layer 4), never silently lost (Codex, r5a).
-      if (!traced) {
-        const st = stripSpikes(outer);
+      const st = cleaned.st;
+      if (st) {
         if (st.spikes) {
-          outer = st.ring;
           const sl = slitNotches(st.excursions, c, set, run);
           feats.push(...sl.notches);
           pieceNotes.push(
@@ -1395,9 +1622,8 @@ export function buildPieceSpecsDetailed(
       }
       // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
       // simple polygon first, or no offset of it is a parallel curve (offset.ts, E3).
-      if (traced) {
-        const t = cleanTracedOutline(outer);
-        outer = t.pts;
+      const t = cleaned.tr;
+      if (t) {
         const r = t.report;
         pieceNotes.push(
           r.cleaned
@@ -1410,10 +1636,51 @@ export function buildPieceSpecsDetailed(
       let foldFeat: FoldFeature | null = null;
       let edgeLen: number | null = null;
       let foldTol: number | undefined;
+      /** L13: the half's fold edge (exported as drawn, the fold line marked), or null. */
+      let halfEdge: FoldEdge | null = null;
       if (wantFold !== false) {
         foldFeat = (feats.find((f) => f.kind === 'fold') as FoldFeature | undefined) ?? null;
         if (foldFeat) fold = { a: foldFeat.a, b: foldFeat.b };
-        else if (refEdge) {
+        else if (halfPick) {
+          // L13: the edge the sheet points at in THIS size (parallel to the answer), else the
+          // straight run matching the answered edge — no convex-hull filter (a half whose tips
+          // cross the fold line has no hull edge there)
+          const ptr = halfPointerOf(outer, brackets(), cofWords, famLines());
+          const along = (ptr?.edges ?? []).filter(
+            (e) => lineAngleOf(e, halfPick) <= FOLD_MATCH_ANGLE_DEG,
+          );
+          const e =
+            along.length === 1
+              ? along[0]
+              : matchFoldEdge(straightRuns(outer), halfPick, refBox, c.bbox);
+          if (!e) {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: no straight edge of this size matches the fold edge you picked`,
+            };
+            missHere = { size: card.token, kind: 'no-edge', problem: null, picked: halfPick };
+            break;
+          }
+          const why = halfFoldReason(outer, e);
+          if (why.kind === 'other') {
+            blockedHere = {
+              reason: 'fold-unresolved',
+              detail: `${card.token}: cannot export the half on fold — ${why.detail}`,
+            };
+            missHere = { size: card.token, kind: 'unfold', problem: why.detail, picked: halfPick };
+            break;
+          }
+          halfEdge = e;
+          // its fold edge exactly straight (a drawn wobble ≤ 0.5 mm), as an unfold's fold line is
+          outer = snapOntoFold(outer, e, FOLD_TOL_MM);
+          if (c === p.cands[p.cands.length - 1].c)
+            pieceNotes.push(
+              `half on fold: the ${e.lenMm.toFixed(0)} mm straight edge — exported as drawn, its fold line on the mirror layer (the cutter folds the fabric)`,
+            );
+          halfSizes.push(
+            why.kind === 'unfolds' ? `${card.token} would unfold` : `${card.token} ${why.kind}`,
+          );
+        } else if (refEdge) {
           let e = matchFoldEdge(foldEdges(outer), refEdge, refBox, c.bbox);
           // E4: no clean straight edge in this size (a notch bump, a drift): the loose match
           if (!e && refBox) {
@@ -1461,6 +1728,16 @@ export function buildPieceSpecsDetailed(
       let notches = feats.filter((f): f is NotchFeature => f.kind === 'notch');
       let drills = feats.filter((f): f is DrillFeature => f.kind === 'drill');
       let internal = feats.filter((f): f is InternalFeature => f.kind === 'internal');
+      // L13: the fold bracket the half was read by is the sheet's «cut on fold» mark, not an
+      // internal line of the piece (its ticks are another class, already left out)
+      if (halfEdge && brackets().length) {
+        const brs = brackets();
+        internal = internal.filter(
+          (f) =>
+            f.closed ||
+            !brs.some((br) => f.pts.every((q) => closestOnPolyline(q, [br.a, br.b], false).d <= 1)),
+        );
+      }
       // A1: a proposed line the operator did not take as the grain stays an internal line
       if (proposedLine && opGrain && !sameLine(proposedLine, opGrain))
         internal.push({
@@ -1546,7 +1823,10 @@ export function buildPieceSpecsDetailed(
       let derived: { base: PtMm[]; mm: number } | null = null;
       if (meaning === 'seam') {
         seam = outer;
-        const r = offsetContour(seam, allowMm);
+        // L13: a half on fold keeps no allowance across its fold line
+        const r = halfEdge
+          ? offsetAcrossFold(seam, allowMm, halfEdge)
+          : offsetContour(seam, allowMm);
         cut = r.pts;
         offset = r.report;
         derived = { base: seam, mm: allowMm };
@@ -1564,7 +1844,9 @@ export function buildPieceSpecsDetailed(
         cut = outer;
         if (drawnSeam) seam = drawnSeam;
         else {
-          const r = offsetContour(cut, -allowMm);
+          const r = halfEdge
+            ? offsetAcrossFold(cut, -allowMm, halfEdge)
+            : offsetContour(cut, -allowMm);
           seam = r.pts;
           offset = r.report;
           derived = { base: cut, mm: -allowMm };
@@ -1650,17 +1932,42 @@ export function buildPieceSpecsDetailed(
       }
       lastGrain = grain;
 
-      const fold2 = foldEdge
+      // L13: the half's fold line — the cut line's own run along the fold edge
+      const halfLine = halfEdge ? halfFoldLine(halfEdge, cut) : null;
+      if (halfEdge && !halfLine) {
+        blockedHere = {
+          reason: 'fold-unresolved',
+          detail: `${card.token}: the cut line does not run along the ${halfEdge.lenMm.toFixed(0)} mm fold edge`,
+        };
+        missHere = {
+          size: card.token,
+          kind: 'unfold',
+          problem: 'the cut line does not run along the fold edge',
+          picked: halfPick,
+        };
+        break;
+      }
+      const fold2 = halfLine
         ? ({
             kind: 'fold',
-            a: foldLineOnCut(foldEdge, cut)[0],
-            b: foldLineOnCut(foldEdge, cut)[1],
-            label: foldFeat?.label ?? 'fold (unfolded)',
-            origin: foldFeat ? foldFeat.origin : 'derived',
-            ranges: foldFeat?.ranges ?? [],
-            confidence: foldFeat ? foldFeat.confidence : 0.6,
+            a: halfLine[0],
+            b: halfLine[1],
+            label: 'cut on fold — half shown',
+            origin: 'derived',
+            ranges: [],
+            confidence: 0.6,
           } satisfies FoldFeature)
-        : null;
+        : foldEdge
+          ? ({
+              kind: 'fold',
+              a: foldLineOnCut(foldEdge, cut)[0],
+              b: foldLineOnCut(foldEdge, cut)[1],
+              label: foldFeat?.label ?? 'fold (unfolded)',
+              origin: foldFeat ? foldFeat.origin : 'derived',
+              ranges: foldFeat?.ranges ?? [],
+              confidence: foldFeat ? foldFeat.confidence : 0.6,
+            } satisfies FoldFeature)
+          : null;
       const spec: PieceSizeSpec = {
         // SOURCE rank (SizeRun.sizes[rank]): the write stage looks walls up by candidate rank
         rank: c.rank,
@@ -1756,21 +2063,57 @@ export function buildPieceSpecsDetailed(
           picked: missHere.picked ? { a: missHere.picked.a, b: missHere.picked.b } : null,
           edges: foldEdges(ccw(largest.outer)).map((e) => ({ a: e.a, b: e.b, lenMm: e.lenMm })),
         });
-      if (blockedHere.reason === 'fold-question')
-        foldAsks.push(
-          foldAskOf(
-            seed,
-            largest,
-            foldWords,
-            foldEvidence,
-            askWhy ?? blockedHere.detail,
-            opGrain ??
-              (classifyFeatures(largest, set, sheet).find((f) => f.kind === 'grain') as
-                | GrainFeature
-                | undefined) ??
-              null,
-          ),
+      if (blockedHere.reason === 'fold-question') {
+        const ask = foldAskOf(
+          seed,
+          largest,
+          foldWords,
+          foldEvidence,
+          askWhy ?? blockedHere.detail,
+          opGrain ??
+            (classifyFeatures(largest, set, sheet).find((f) => f.kind === 'grain') as
+              | GrainFeature
+              | undefined) ??
+            null,
         );
+        // L13: printed «cut on fold» and the sheet points at an edge the unfold fails across —
+        // offer the half with a fold line (auto when every size agrees, D3)
+        const offer = claims.length
+          ? halfOfferOf(
+              // L14: the outlines the size loop checks and exports (cleaned), over the sizes
+              // the operator kept — a dropped size never blocks or carries the offer
+              p.cands
+                .filter(({ card: k }) => fixOf(k.token) !== 'drop')
+                .map(({ c: x, card: k }) => ({ outer: cleanedOf(x).outer, token: k.token })),
+              claims,
+              brackets(),
+              cofWords,
+              famLines(),
+            )
+          : null;
+        // another edge unfolds cleanly (the question's suggestion): the sheet's pointer and the
+        // geometry disagree — offered, never auto (D3)
+        const sug = ask.suggested != null ? ask.edges[ask.suggested] : null;
+        // the sheet points along the very line that unfolds cleanly (a stretch of it): the
+        // ordinary unfold across that line, no half (review R1 #3)
+        const sameLine =
+          !!offer &&
+          !!sug &&
+          lineAngleOf(offer.edge, sug) <= FOLD_MATCH_ANGLE_DEG &&
+          [offer.edge.a, offer.edge.b].every(
+            (q) => closestOnPolyline(q, [sug.a, sug.b], false).d <= 2 * FOLD_TOL_MM,
+          );
+        const half = sameLine
+          ? null
+          : offer?.auto && sug
+            ? {
+                ...offer,
+                auto: false,
+                missing: `the ${sug.lenMm.toFixed(0)} mm edge unfolds cleanly`,
+              }
+            : offer;
+        foldAsks.push(half ? { ...ask, half } : ask);
+      }
       continue;
     }
     // SILENT-TAIL: one corner, one treatment in every size — the derived lines are cut again with
@@ -1877,7 +2220,8 @@ export function buildPieceSpecsDetailed(
             qty,
             saysPair: saysPair || !!aiQ?.pair,
             symmetric,
-            onFold: anyFold,
+            // L13: a half on fold is cut once, on the fold — one whole piece, never a pair
+            onFold: anyFold || halfSizes.length > 0,
             namedHand: !!name.hand,
           });
     if (lq && !listAsk && qtyText == null) pp.why = `cutting list «${lq.entry}»: ${pp.why}`;
@@ -1925,7 +2269,12 @@ export function buildPieceSpecsDetailed(
     // long straight edge (≥ 30 % of the perimeter) would unfold it into a believable whole — the
     // same outline may be the half of a piece cut on fold. Offered as the alternative, never applied.
     const foldAlt =
-      !qtyProven && mode === 'derived' && !anyFold && wantFold !== false && !saysPair
+      !qtyProven &&
+      mode === 'derived' &&
+      !anyFold &&
+      !halfSizes.length &&
+      wantFold !== false &&
+      !saysPair
         ? foldAlternative(largest.outer)
         : null;
     if (!qtyProven)
@@ -1953,7 +2302,11 @@ export function buildPieceSpecsDetailed(
       ...(name.aiConfidence != null ? { aiConfidence: name.aiConfidence } : {}),
       seed,
       variant: null,
+      ...(nv.kind === 'apply' && nv.answer ? { notchVariant: nv.answer } : {}),
       unfoldedFold: anyFold,
+      ...(halfSizes.length
+        ? { halfFold: { evidence: ['answered: export the half with a fold line', ...halfSizes] } }
+        : {}),
       // per WRITTEN identity: both hands of a pair count for one hand each (contract §3)
       piecesPerGarment: ppg,
       allowance: { ...A, allowanceMm: allowMm },
@@ -2052,6 +2405,9 @@ export function buildPieceSpecsDetailed(
       for (const s of out) walls.delete(s.identity);
       continue;
     }
+    // BACK-VARIANT: asked last — after the piece's other questions and the file's name clashes
+    // (below), so one visit of the details step answers them together
+    if (nv.kind === 'ask') nvAskOf.set(seed, nv.ask);
     for (const s of out) {
       notes[s.identity] = pieceNotes;
       pieces.push(s);
@@ -2108,7 +2464,21 @@ export function buildPieceSpecsDetailed(
     }
     seen.set(k, s.seed);
   }
-  for (const s of pieces) if (!dupSeeds.has(s.seed)) unique.push(s);
+  for (const s of pieces) {
+    if (dupSeeds.has(s.seed)) continue;
+    const ask = nvAskOf.get(s.seed);
+    if (!ask) {
+      unique.push(s);
+      continue;
+    }
+    // BACK-VARIANT: a named, unclashing piece still waits for its variant notch answer
+    if (!blocked.some((b) => b.seed === s.seed)) {
+      block(s.seed, 'notch-variant', ask.question, blockedNameOf(s));
+      notchVariantAsks.push({ seed: s.seed, identity: s.identity, ...ask });
+    }
+    walls.delete(s.identity);
+    delete notes[s.identity];
+  }
   // a drawn hand whose twin was blocked must not be written alone (G12: sibling not in the file)
   for (let changed = true; changed; ) {
     changed = false;
@@ -2123,6 +2493,12 @@ export function buildPieceSpecsDetailed(
         `its other hand ${s.pairOf} is blocked${why ? `: ${why.detail}` : ''}`,
         blockedNameOf(s),
       );
+      // BACK-VARIANT: the twin's variant question is this hand's too (answered for both)
+      const twinAsk =
+        why?.reason === 'notch-variant'
+          ? notchVariantAsks.find((q) => q.seed === why.seed)
+          : undefined;
+      if (twinAsk) notchVariantAsks.push({ ...twinAsk, seed: s.seed, identity: s.identity });
       unique.splice(i, 1);
       changed = true;
     }
@@ -2381,6 +2757,7 @@ export function buildPieceSpecsDetailed(
           }
         : {}),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
+      ...(notchVariantAsks.length ? { notchVariantAsks } : {}),
       ...(foldMisses.some((m) =>
         blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
       )

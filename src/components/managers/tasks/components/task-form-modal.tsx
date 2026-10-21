@@ -232,7 +232,7 @@ export function TaskFormModal({
   const board = (
     <Controller
       control={control}
-      name='board'
+      name='boardId'
       render={({ field }) => (
         <BoardPick phone={phone} value={field.value} onChange={field.onChange} />
       )}
@@ -270,7 +270,6 @@ export function TaskFormModal({
         name='description'
         render={({ field }) => (
           <DescriptionEditor
-            compactTools
             ariaLabel='task description'
             placeholder='details'
             media={attachments}

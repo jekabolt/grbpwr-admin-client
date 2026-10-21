@@ -132,6 +132,8 @@ export const UNSET_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
 export const IDENTICAL_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
   'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 const MIRRORED: common_TechCardPieceCutSymmetry = 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED';
+export const FOLD_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
+  'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD';
 
 // СЕЛЕКТА «как кроится» БОЛЬШЕ НЕТ, и словарь его опций удалён вместе с ним: деталь приходит из
 // чертежа, ответ ставит модалка сопоставления блоков, спрашивать человека не о чем. Оставленный
@@ -183,14 +185,16 @@ export function cutSymmetryCountInvalid(
  *   · `force` (from the conversion manifest only: both hands drawn / the fold unfolded) → IDENTICAL;
  *   · not marked (empty / `_UNKNOWN`) → IDENTICAL: the drawing carries every contour;
  *   · a MIRRORED pair the new count makes impossible (odd / < 2) → IDENTICAL (the DB CHECK);
- *   · any other explicit mark (MIRRORED, FOLD) stays: a person stated it and nothing contradicts it.
+ *   · any other explicit mark (MIRRORED, FOLD) stays: a person stated it and nothing contradicts it;
+ *   · L13 `half` (the manifest: only the half is drawn, its fold line the mirror line) → FOLD.
  */
 export function importedCutSymmetry(
   current: string | undefined,
   piecesPerGarment: number,
-  force?: 'pair' | 'unfolded',
+  force?: 'pair' | 'unfolded' | 'half',
 ): string | undefined {
   const v = (current ?? '').trim();
+  if (force === 'half') return v === FOLD_CUT_SYMMETRY ? undefined : FOLD_CUT_SYMMETRY;
   if (v === IDENTICAL_CUT_SYMMETRY) return undefined;
   if (force || !isCutSymmetryMarked(v) || cutSymmetryCountInvalid(v, piecesPerGarment))
     return IDENTICAL_CUT_SYMMETRY;

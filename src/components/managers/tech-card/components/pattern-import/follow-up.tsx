@@ -238,9 +238,11 @@ export function ImportFollowUpRunner({
       return {
         ok: false,
         reason: `the set did not come together for every card size: ${outcome.areas.sizesIncompleteWhy
-          .map(
-            (s) => `${name(s.sizeId)} — ${s.piece ? `piece “${s.piece}” is missing` : 'zero area'}`,
-          )
+          .map((s) => {
+            // L14: a half on fold that cannot be cut is present, not missing
+            const why = s.fold ? 'half on fold' : s.piece ? 'is missing' : '';
+            return `${name(s.sizeId)} — ${s.piece ? `piece “${s.piece}” ${why}` : 'zero area'}`;
+          })
           .join('; ')}`,
       };
     const sheets = L.sheetsOfScope(scope.key);

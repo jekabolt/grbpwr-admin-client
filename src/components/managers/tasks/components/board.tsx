@@ -11,7 +11,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { useSnackBarStore } from 'lib/stores/store';
+import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Board as BoardRow, Button, Text } from 'ui';
 import { ListTasksFilter, Task, TaskStatus } from '../api/types';
@@ -33,8 +33,8 @@ const PHONE_STATUS_LABEL: Record<TaskStatus, string> = {
 /**
  * ДРАГ — ТОЛЬКО МЫШЬЮ/ПЕРОМ. На телефоне палец, начавший жест на карточке, обязан листать
  * страницу, а не поднимать карточку: TouchSensor снят, а PointerSensor (он ловит и касания —
- * pointer events общие) отсекает `pointerType === 'touch'`. Переезд на телефоне — через select
- * статуса на самой карточке.
+ * pointer events общие) отсекает `pointerType === 'touch'`. Переезд на телефоне — через pill
+ * статуса или горизонтальный жест на самой карточке.
  */
 class MousePointerSensor extends PointerSensor {
   static activators = [
@@ -146,7 +146,6 @@ export function Board({
   filtered?: boolean;
 }) {
   const move = useMoveTask(filter);
-  const { showMessage } = useSnackBarStore();
   const [activeId, setActiveId] = useState<number | null>(null);
   // Телефон (< sm) показывает ОДНУ колонку; какая — помнит вкладка.
   const [phoneStatus, setPhoneStatus] = useState<TaskStatus>(readPhoneStatus);
@@ -210,17 +209,17 @@ export function Board({
 
     move.mutate({
       id: activeIdNum,
-      board: dragged.board,
+      boardId: dragged.boardId,
       status: targetStatus,
       position: targetIndex,
     });
   }
 
   /**
-   * ПЕРЕЕЗД ИЗ SELECT'А НА КАРТОЧКЕ. Та же мутация, что у драга, и позиция — КОНЕЦ целевой
-   * колонки, посчитанный по ПОЛНОЙ колонке (довод — в handleDragEnd). Undo возвращает карточку
-   * в её прежний слот: индекс снят с полной исходной колонки ДО переезда, а после переезда в
-   * ней ровно на одну карточку меньше — вставка по тому же индексу ставит её на место.
+   * ПЕРЕЕЗД С КАРТОЧКИ. Та же мутация, что у драга, и позиция — КОНЕЦ целевой
+   * колонки, посчитанный по ПОЛНОЙ колонке (довод — в handleDragEnd). На телефоне карточка уходит
+   * из видимой колонки, поэтому квитанция с undo: индекс снят с полной исходной колонки ДО
+   * переезда — вставка по тому же индексу ставит её на место.
    */
   function moveTo(task: Task, status: TaskStatus) {
     if (task.status === status) return;
@@ -231,18 +230,23 @@ export function Board({
     );
     const position = fullByStatus[status].filter((t) => t.id !== task.id).length;
     move.mutate(
-      { id: task.id, board: task.board, status, position },
+      { id: task.id, boardId: task.boardId, status, position },
       {
         onSuccess: () =>
-          showMessage(`moved to ${STATUS_LABEL[status]}`, 'success', {
-            label: 'undo',
-            onClick: () =>
-              move.mutate({
-                id: task.id,
-                board: task.board,
-                status: prevStatus,
-                position: prevIndex,
-              }),
+          notify({
+            sev: 'ok',
+            subject: `TASK ${task.id}`,
+            text: `moved to ${STATUS_LABEL[status]}`,
+            action: {
+              label: 'undo',
+              onClick: () =>
+                move.mutate({
+                  id: task.id,
+                  boardId: task.boardId,
+                  status: prevStatus,
+                  position: prevIndex,
+                }),
+            },
           }),
       },
     );

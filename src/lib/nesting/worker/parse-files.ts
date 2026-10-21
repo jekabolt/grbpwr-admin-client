@@ -144,6 +144,7 @@ function manifestFactsByBlock(
       pairHand: hand,
       pairOf: piece.pairOf ? piece.pairOf.trim() : null,
       unfolded: piece.unfoldedFold,
+      halfFold: piece.halfFold === true,
       cutLayer: m.layers.cut,
       seamLayer: m.layers.seam,
       grainLayer: m.layers.grain,

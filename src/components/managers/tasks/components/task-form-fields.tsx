@@ -11,16 +11,9 @@ import { useMemo, useRef, useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { AddDoor, Button, Chip, ChipRow, Close, Input, Text } from 'ui';
-import type { Task, TaskBoard, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
-import { tasksKeys } from '../hooks/useTasks';
-import {
-  BOARD_LABEL,
-  BOARDS,
-  PRIORITIES,
-  PRIORITY_LABEL,
-  STATUS_LABEL,
-  STATUSES,
-} from '../utils/meta';
+import type { Task, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
+import { boardNameOf, tasksKeys, useTaskBoards } from '../hooks/useTasks';
+import { PRIORITIES, PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '../utils/meta';
 import { AvatarStack } from './avatar-stack';
 import { EntityPicker } from './entity-picker';
 import { FilePicker } from './file-attachments';
@@ -41,10 +34,11 @@ export function BoardPick({
   onChange,
 }: {
   phone: boolean;
-  value: TaskBoard;
-  onChange: (b: TaskBoard) => void;
+  value: number;
+  onChange: (id: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const { data: boards } = useTaskBoards();
   return (
     <PickerSheet
       phone={phone}
@@ -53,20 +47,20 @@ export function BoardPick({
       title='board'
       trigger={
         <Chip onClick={() => {}} className={cn(PROP, SET, 'md:min-h-6')} aria-label='board'>
-          {BOARD_LABEL[value]} ▾
+          {boardNameOf(boards, value) || 'board'} ▾
         </Chip>
       }
     >
-      {BOARDS.map((b) => (
+      {(boards ?? []).map((b) => (
         <OptionRow
-          key={b}
-          selected={b === value}
+          key={b.id}
+          selected={b.id === value}
           onClick={() => {
-            onChange(b);
+            onChange(b.id);
             setOpen(false);
           }}
         >
-          {BOARD_LABEL[b]}
+          {b.name}
         </OptionRow>
       ))}
     </PickerSheet>

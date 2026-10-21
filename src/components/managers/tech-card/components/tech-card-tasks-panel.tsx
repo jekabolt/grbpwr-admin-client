@@ -8,7 +8,12 @@ import {
   TaskStatus,
 } from 'components/managers/tasks/api/types';
 import { TaskFormModal } from 'components/managers/tasks/components/task-form-modal';
-import { useCreateTask, useTasks } from 'components/managers/tasks/hooks/useTasks';
+import {
+  boardIdForLegacy,
+  useCreateTask,
+  useTaskBoards,
+  useTasks,
+} from 'components/managers/tasks/hooks/useTasks';
 import { dueMeta, PRIORITY_LABEL, STATUS_LABEL } from 'components/managers/tasks/utils/meta';
 import { ROUTES, SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
@@ -121,21 +126,23 @@ export function TechCardTasksPanel({ techCardId }: { techCardId: number }) {
 
   const [creating, setCreating] = useState(false);
   const createTask = useCreateTask();
+  const { data: boards } = useTaskBoards();
+  const seedBoardId = boardIdForLegacy(boards, 'TASK_BOARD_DEVELOPMENT');
   // Pre-linked create: techCardId is baked into the initial values, so a task opened from this
   // panel is scoped to this style from the start (the modal's own "links" section still lets the
   // user add further links or change it, same as any other task).
   const initial: TaskFormValues = useMemo(
     () => ({
-      ...emptyFormValues('TASK_BOARD_DEVELOPMENT', 'TASK_STATUS_TODO'),
+      ...emptyFormValues(seedBoardId, 'TASK_STATUS_TODO'),
       techCardId,
     }),
-    [techCardId],
+    [techCardId, seedBoardId],
   );
 
   async function handleCreate(values: TaskFormValues) {
-    const { board, status, ...content } = values;
+    const { boardId, status, ...content } = values;
     try {
-      await createTask.mutateAsync({ content, board, status });
+      await createTask.mutateAsync({ content, boardId: boardId || seedBoardId, status });
       setCreating(false);
     } catch {
       /* snackbar shown by the mutation; keep the modal open */

@@ -1,4 +1,4 @@
-import { CheckIcon } from '@radix-ui/react-icons';
+import { CheckIcon } from 'ui';
 import { LANGUAGES } from 'constants/constants';
 import { cn } from 'lib/utility';
 

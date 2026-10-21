@@ -31,10 +31,12 @@ import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import type { OffsetReport, PtMm } from '../types';
 import {
   SegIndex,
+  applyAffine,
   areaOf,
   ccw,
   dedupe,
   hullRatio,
+  reflection,
   sampleAlong,
   selfIntersects,
   signedArea,
@@ -453,11 +455,21 @@ export function parallelDeviation(
   result: readonly PtMm[],
   src: readonly PtMm[],
   d: number,
-  opts: { limit?: number; join?: OffsetJoin; lenient?: boolean } = {},
+  opts: {
+    limit?: number;
+    join?: OffsetJoin;
+    lenient?: boolean;
+    /**
+     * L13: a half on fold — no allowance across the fold line a..b: the result's samples ON it and
+     * the source's segments along it are left out (the derived line runs on the fold there).
+     */
+    fold?: { a: PtMm; b: PtMm; tolMm?: number } | null;
+  } = {},
 ): number {
   const limit = opts.limit ?? MITER_LIMIT;
   const ad = Math.abs(d);
-  const idx = new SegIndex([{ pts: src, closed: true }], 5);
+  const onFold = foldTest(opts.fold ?? null);
+  const idx = new SegIndex(onFold ? openOffFold(src, onFold) : [{ pts: src, closed: true }], 5);
   const reach = opts.join === 'round' ? [] : joinWedges(src, d, limit, !!opts.lenient);
   // every wedge within ±1 cell of any point it covers: the cell is at least the largest reach
   const cell = Math.max(5, ad * limit, ...reach.map((v) => v.r + 1));
@@ -486,6 +498,7 @@ export function parallelDeviation(
   const far = ad * limit * 1.5 + 10;
   let dev = 0;
   for (const q of sampleAlong(result, true, 0.5)) {
+    if (onFold && onFold(q)) continue;
     const e = idx.nearest(q, far);
     if (!Number.isFinite(e)) {
       dev = Math.max(dev, far);
@@ -495,6 +508,47 @@ export function parallelDeviation(
     else if (e > ad) dev = Math.max(dev, pastJoins(q, e));
   }
   return dev;
+}
+
+/** L13: "p lies on the fold segment" (within tol across, ±tol past its ends), or null. */
+function foldTest(
+  fold: { a: PtMm; b: PtMm; tolMm?: number } | null,
+): ((p: PtMm) => boolean) | null {
+  if (!fold) return null;
+  const L = Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y);
+  if (!(L > 0)) return null;
+  const u = { x: (fold.b.x - fold.a.x) / L, y: (fold.b.y - fold.a.y) / L };
+  const tol = fold.tolMm ?? 0.25;
+  return (p) => {
+    const h = u.x * (p.y - fold.a.y) - u.y * (p.x - fold.a.x);
+    const t = (p.x - fold.a.x) * u.x + (p.y - fold.a.y) * u.y;
+    return Math.abs(h) <= tol && t >= -tol && t <= L + tol;
+  };
+}
+
+/** A closed outline as open polylines, without its segments that lie on the fold. */
+function openOffFold(
+  src: readonly PtMm[],
+  onFold: (p: PtMm) => boolean,
+): { pts: PtMm[]; closed: boolean }[] {
+  const n = src.length;
+  const off = (i: number) => !(onFold(src[i]) && onFold(src[(i + 1) % n]));
+  const start = Array.from({ length: n }, (_, i) => i).find((i) => !off(i));
+  if (start === undefined) return [{ pts: [...src], closed: true }];
+  const out: { pts: PtMm[]; closed: boolean }[] = [];
+  let cur: PtMm[] = [];
+  for (let k = 1; k <= n; k++) {
+    const i = (start + k) % n;
+    if (off(i)) {
+      if (!cur.length) cur.push(src[i]);
+      cur.push(src[(i + 1) % n]);
+    } else if (cur.length) {
+      out.push({ pts: cur, closed: false });
+      cur = [];
+    }
+  }
+  if (cur.length) out.push({ pts: cur, closed: false });
+  return out;
 }
 
 export type OffsetResult = { pts: PtMm[]; report: OffsetReport; sourceHullRatio: number };
@@ -734,6 +788,135 @@ export function offsetContour(
   const dev = best.length ? parallelDeviation(best, src, mm, { limit, join }) : Infinity;
   if (!(dev <= MAX_DEVIATION_MM))
     reasons.push(`deviation ${dev.toFixed(3)} mm from a true parallel`);
+  return {
+    pts: best,
+    sourceHullRatio: srcHull,
+    report: {
+      ok: reasons.length === 0,
+      loops: loops.length + holes,
+      selfIntersects: si,
+      hullRatio: hr,
+      maxDeviationMm: dev,
+      ...(reasons.length ? { reason: reasons.join('; ') } : {}),
+    },
+  };
+}
+
+/**
+ * L13: `pts` with every vertex within `tol` of the fold SEGMENT a..b (± tol past its ends) laid
+ * onto its line — a drawn fold edge that wobbles ≤ tol becomes exactly straight, as an unfold's
+ * fold line is. Vertices elsewhere (a tip crossing the line far from the edge) are kept.
+ */
+export function snapOntoFold(pts: readonly PtMm[], fold: { a: PtMm; b: PtMm }, tol = 0.5): PtMm[] {
+  const L = Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y);
+  if (!(L > 0)) return [...pts];
+  const u = { x: (fold.b.x - fold.a.x) / L, y: (fold.b.y - fold.a.y) / L };
+  return pts.map((p) => {
+    const t = (p.x - fold.a.x) * u.x + (p.y - fold.a.y) * u.y;
+    const h = u.x * (p.y - fold.a.y) - u.y * (p.x - fold.a.x);
+    if (Math.abs(h) > tol || t < -tol || t > L + tol || h === 0) return p;
+    return { x: fold.a.x + u.x * t, y: fold.a.y + u.y * t };
+  });
+}
+
+/**
+ * L13 (owner decision 19.10 a): the parallel curve of a HALF exported on fold — `mm` everywhere
+ * except across its fold edge a..b, which keeps no allowance: there the derived line runs ON the
+ * fold line, as if the piece were unfolded, offset and cut back to the half. Built so: the band of
+ * the half next to the fold, mirrored across it, is joined to the half (the unfolded piece near the
+ * fold), that is offset as usual, and the other side of the fold line next to the edge is cut off.
+ * Not ok when the half reaches across the fold line next to its edge, or the result is not one
+ * loop. The report's deviation leaves the fold line out (`parallelDeviation` fold).
+ */
+export function offsetAcrossFold(
+  pts: readonly PtMm[],
+  mm: number,
+  fold: { a: PtMm; b: PtMm },
+): OffsetResult {
+  const src = ccw(dedupe(snapOntoFold(pts, fold), true, 1e-4));
+  const srcHull = hullRatio(src);
+  const fail = (reason: string): OffsetResult => ({
+    pts: [...src],
+    sourceHullRatio: srcHull,
+    report: {
+      ok: false,
+      loops: 0,
+      selfIntersects: false,
+      hullRatio: 1,
+      maxDeviationMm: Infinity,
+      reason,
+    },
+  });
+  const L = Math.hypot(fold.b.x - fold.a.x, fold.b.y - fold.a.y);
+  if (src.length < 3 || areaOf(src) <= 0 || !(L > 0)) return fail('degenerate half or fold edge');
+  const u = { x: (fold.b.x - fold.a.x) / L, y: (fold.b.y - fold.a.y) / L };
+  const nl = { x: -u.y, y: u.x };
+  const side = (p: PtMm) => (p.x - fold.a.x) * nl.x + (p.y - fold.a.y) * nl.y;
+  let mass = 0;
+  for (let i = 0; i < src.length; i++) {
+    const p = src[i];
+    const q = src[(i + 1) % src.length];
+    mass += side({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }) * Math.hypot(q.x - p.x, q.y - p.y);
+  }
+  const sg = Math.sign(mass) || 1;
+  const ad = Math.abs(mm);
+  const reach = ad * (MITER_LIMIT + 1) + 5;
+  const w = reach + 10;
+  /** t along the fold from a, h toward the half (h < 0: the other side). */
+  const P = (t: number, h: number) => ({
+    x: fold.a.x + u.x * t + nl.x * h * sg,
+    y: fold.a.y + u.y * t + nl.y * h * sg,
+  });
+  const box = (t0: number, t1: number, h0: number, h1: number) =>
+    toPath(ccw([P(t0, h0), P(t1, h0), P(t1, h1), P(t0, h1)]));
+  const band = box(-w, L + w, 0, w);
+  const other = box(-(w + reach), L + w + reach, -(w + reach), 0);
+  const area = (ps: Paths64) => ps.reduce((a, p) => a + Clipper.area(p), 0) / OFFSET_SCALE ** 2;
+  if (Math.abs(area(Clipper.Intersect([toPath(src)], [other], FillRule.NonZero))) > 1)
+    return fail('the half reaches across the fold line next to its fold edge');
+  const M = reflection(fold.a, fold.b);
+  const mirrored = Clipper.Intersect([toPath(src)], [band], FillRule.NonZero).map((p) =>
+    toPath(ccw(fromPath(p).map((q) => applyAffine(M, q)))),
+  );
+  // a hair-thin strip over the fold edge: the half and its mirror image meet on the fold line, and
+  // the integer grid can leave a 1 µm gap between them (two outlines instead of one)
+  const seam = box(0, L, -0.005, 0.005);
+  const joined = Clipper.Union([toPath(src), ...mirrored, seam], undefined, FillRule.NonZero)
+    .map((p) => dedupe(fromPath(p), true, 1e-9))
+    .filter((q) => q.length >= 3);
+  if (joined.length !== 1 || signedArea(joined[0]) <= 0)
+    return fail(`the half and its mirrored fold band give ${joined.length} outlines`);
+  const r = offsetContour(joined[0], mm);
+  if (!r.report.ok) return { ...r, pts: r.pts, sourceHullRatio: srcHull };
+  const cutBack = Clipper.Difference([toPath(r.pts)], [other], FillRule.NonZero);
+  const loops: PtMm[][] = [];
+  let holes = 0;
+  for (const p of cutBack) {
+    const q = dedupe(fromPath(p), true, 1e-9);
+    if (q.length < 3) continue;
+    if (signedArea(q) > 0) loops.push(q);
+    else holes++;
+  }
+  loops.sort((a, b) => areaOf(b) - areaOf(a));
+  const best = loops[0] ?? [];
+  const reasons: string[] = [];
+  if (loops.length !== 1)
+    reasons.push(loops.length ? `${loops.length} loops (the outline splits)` : 'offset vanished');
+  if (holes) reasons.push(`${holes} hole(s) appeared`);
+  const si = best.length ? selfIntersects(best) : false;
+  if (si) reasons.push('self-intersection');
+  const hr = best.length ? hullRatio(best) : 1;
+  if (srcHull < HULL_SOURCE_CONCAVE_MAX && hr >= HULL_RATIO_MAX)
+    reasons.push(`collapsed to the convex hull (${hr.toFixed(4)} vs source ${srcHull.toFixed(4)})`);
+  // the derived line's own run on the fold line reaches past the edge's ends (a seam-meaning cut
+  // line by the allowance, a slanted side's by its mitre): the whole reach is left out
+  const dev = best.length
+    ? parallelDeviation(best, src, mm, {
+        fold: { a: P(-reach, 0), b: P(L + reach, 0), tolMm: 0.05 },
+      })
+    : Infinity;
+  if (!(dev <= MAX_DEVIATION_MM))
+    reasons.push(`deviation ${dev.toFixed(3)} mm from a true parallel (no allowance at the fold)`);
   return {
     pts: best,
     sourceHullRatio: srcHull,

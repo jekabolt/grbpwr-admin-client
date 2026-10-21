@@ -5,6 +5,7 @@ import type {
   common_TaskChecklistItem,
   common_TaskComment,
   common_TaskInsert,
+  common_TaskBoardEntry,
   common_TaskLink,
   common_TaskMediaAnnotations,
   common_TechCardAnnotation,
@@ -24,7 +25,7 @@ import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import {
   ListTasksFilter,
   Task,
-  TaskBoard,
+  TaskBoardEntry,
   TaskChecklistItem,
   TaskComment,
   TaskInsert,
@@ -32,6 +33,8 @@ import {
   TaskMediaAnnotations,
   TaskRelation,
   TaskRelationKind,
+  TaskClosed,
+  TaskMatch,
   TaskStatus,
 } from './types';
 
@@ -41,7 +44,18 @@ import {
 // components) stays backend-shape-agnostic. It maps the all-optional generated
 // types to the required, defaulted UI view model in ./types.
 export interface TasksService {
-  listTasks(filter: ListTasksFilter): Promise<{ tasks: Task[]; total: number }>;
+  /** `matches` — one per card when `filter.query` is set: where the query hit it. */
+  listTasks(
+    filter: ListTasksFilter,
+  ): Promise<{ tasks: Task[]; total: number; matches: TaskMatch[] }>;
+  /**
+   * Cards CURRENTLY DONE whose closing falls in [from, to), every board, archive included (the
+   * auto-archive takes done cards away after 14 days, and the summary must still find them).
+   */
+  listClosedTasks(
+    from: Date,
+    to: Date,
+  ): Promise<{ tasks: Task[]; total: number; closed: TaskClosed[] }>;
   getTask(id: number): Promise<Task | undefined>;
   /**
    * `parentTaskId` — РОДИТЕЛЬ СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где
@@ -50,12 +64,19 @@ export interface TasksService {
    */
   addTask(
     content: TaskInsert,
-    board: TaskBoard,
+    boardId: number,
     status: TaskStatus,
     parentTaskId?: number,
   ): Promise<{ id: number }>;
   updateTask(id: number, content: TaskInsert): Promise<void>;
-  moveTask(id: number, board: TaskBoard, status: TaskStatus, position: number): Promise<void>;
+  moveTask(id: number, boardId: number, status: TaskStatus, position: number): Promise<void>;
+  listBoards(): Promise<TaskBoardEntry[]>;
+  /** The whole rail order: every board id exactly once. Answers the boards in the new order. */
+  reorderBoards(ids: number[]): Promise<TaskBoardEntry[]>;
+  addBoard(name: string): Promise<TaskBoardEntry>;
+  renameBoard(id: number, name: string): Promise<TaskBoardEntry>;
+  /** `moveToId` receives the board's tasks; required by the server when it has any. */
+  deleteBoard(id: number, moveToId: number): Promise<void>;
   deleteTask(id: number): Promise<void>;
   archiveTask(id: number): Promise<void>;
   unarchiveTask(id: number): Promise<void>;
@@ -232,7 +253,7 @@ function mapRelation(l: common_TaskLink): TaskRelation {
     kind: (l.kind ?? 'TASK_LINK_KIND_UNKNOWN') as TaskRelationKind,
     title: l.title ?? '',
     status: l.status ?? 'TASK_STATUS_UNKNOWN',
-    board: l.board ?? 'TASK_BOARD_UNKNOWN',
+    boardId: l.boardId ?? 0,
     archived: !!l.archived,
   };
 }
@@ -257,12 +278,15 @@ export function mapTask(t: common_Task): Task {
   return {
     id: t.id ?? 0,
     task: mapInsert(t.task),
-    board: t.board ?? 'TASK_BOARD_UNKNOWN',
+    boardId: t.boardId ?? 0,
     status: t.status ?? 'TASK_STATUS_UNKNOWN',
+    statusSince: '',
+    statusSinceApprox: false,
     position: t.position ?? 0,
     media,
     // Resolved only by GetTask; a list row knows the ids and nothing else.
     files: [],
+    statusHistory: [],
     checklist: (t.checklist ?? []).map(mapChecklistItem).sort((a, b) => a.position - b.position),
     createdBy: t.createdBy ?? '',
     createdAt: t.createdAt ?? '',
@@ -275,6 +299,17 @@ export function mapTask(t: common_Task): Task {
     relations: (t.links ?? []).map(mapRelation).filter((l) => l.taskId > 0),
     subtaskTotal: t.subtaskTotal ?? 0,
     subtaskDone: t.subtaskDone ?? 0,
+  };
+}
+
+export function mapBoard(b: common_TaskBoardEntry | undefined): TaskBoardEntry {
+  return {
+    id: b?.id ?? 0,
+    name: b?.name ?? '',
+    legacyBoard: b?.legacyBoard ?? 'TASK_BOARD_UNKNOWN',
+    position: b?.position ?? 0,
+    taskCount: b?.taskCount ?? 0,
+    archivedTaskCount: b?.archivedTaskCount ?? 0,
   };
 }
 
@@ -308,7 +343,8 @@ export const tasksService: TasksService = {
   listTasks: (filter) =>
     adminService
       .ListTasks({
-        board: filter.board,
+        board: undefined,
+        boardId: filter.boardId ?? 0,
         status: filter.status,
         assignee: filter.assignee,
         // Дети берутся ФИЛЬТРОМ ЭТОГО ЖЕ СПИСКА, а не отдельным RPC: тот же ответ, просто суженный.
@@ -326,8 +362,65 @@ export const tasksService: TasksService = {
         projectTopicId: filter.projectTopicId ?? 0,
         includeArchived: filter.includeArchived,
         query: filter.query ?? '',
+        closedFrom: undefined,
+        closedTo: undefined,
       })
-      .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
+      .then((r) => {
+        const timingByTaskId = new Map((r.timing ?? []).map((t) => [t.taskId ?? 0, t]));
+        return {
+          tasks: (r.tasks ?? []).map((wireTask) => {
+            const task = mapTask(wireTask);
+            const timing = timingByTaskId.get(task.id);
+            return {
+              ...task,
+              statusSince: timing?.statusSince ?? '',
+              statusSinceApprox: !!timing?.approximate,
+            };
+          }),
+          total: r.total ?? 0,
+          matches: (r.matches ?? []).map((m) => ({
+            taskId: m.taskId ?? 0,
+            field: m.field ?? '',
+            snippet: m.snippet ?? '',
+          })),
+        };
+      }),
+
+  listClosedTasks: (from, to) =>
+    adminService
+      .ListTasks({
+        board: undefined,
+        // Every board: 0 = no board filter.
+        boardId: 0,
+        status: undefined,
+        assignee: undefined,
+        parentTaskId: 0,
+        limit: TASKS_PAGE_LIMIT,
+        offset: undefined,
+        orderFactor: undefined,
+        techCardId: undefined,
+        productId: undefined,
+        orderUuid: '',
+        archiveId: 0,
+        fittingId: 0,
+        productionRunId: 0,
+        sampleId: 0,
+        projectTopicId: 0,
+        includeArchived: true,
+        query: '',
+        closedFrom: from.toISOString(),
+        closedTo: to.toISOString(),
+      })
+      .then((r) => ({
+        tasks: (r.tasks ?? []).map(mapTask),
+        total: r.total ?? 0,
+        closed: (r.closed ?? []).map((c) => ({
+          taskId: c.taskId ?? 0,
+          closedAt: c.closedAt ?? '',
+          closedBy: c.closedBy ?? '',
+          approximate: !!c.approximate,
+        })),
+      })),
 
   getTask: (id) =>
     adminService.GetTask({ id }).then((r) =>
@@ -338,15 +431,23 @@ export const tasksService: TasksService = {
             // в разделе «файлы», и ей нужны тема, загрузивший и тип содержимого, а не три
             // ссылки. Подписанные ссылки внутри живут ровно столько, сколько этот ответ.
             files: r.files ?? [],
+            statusHistory: (r.statusHistory ?? []).map((h) => ({
+              fromStatus: h.fromStatus ?? 'TASK_STATUS_UNKNOWN',
+              toStatus: h.toStatus ?? 'TASK_STATUS_UNKNOWN',
+              changedBy: h.changedBy ?? '',
+              changedAt: h.changedAt ?? '',
+              approximate: !!h.approximate,
+            })),
           }
         : undefined,
     ),
 
-  addTask: (content, board, status, parentTaskId) =>
+  addTask: (content, boardId, status, parentTaskId) =>
     adminService
       .AddTask({
         task: taskInsertToWire(content),
-        board,
+        board: undefined,
+        boardId,
         status,
         // «Создать сабтаску» — ОДИН вызов, а не AddTask + SetTaskParent: провал второго оставил бы
         // карточку на верхнем уровне, и о ней никто бы не узнал, потому что искали её в детях.
@@ -357,8 +458,28 @@ export const tasksService: TasksService = {
   updateTask: (id, content) =>
     adminService.UpdateTask({ id, task: taskInsertToWire(content) }).then(() => undefined),
 
-  moveTask: (id, board, status, position) =>
-    adminService.MoveTask({ id, board, status, position }).then(() => undefined),
+  moveTask: (id, boardId, status, position) =>
+    adminService
+      .MoveTask({ id, board: undefined, boardId, status, position })
+      .then(() => undefined),
+
+  listBoards: () =>
+    adminService
+      .ListTaskBoards({})
+      .then((r) => (r.boards ?? []).map(mapBoard).filter((b) => b.id > 0)),
+
+  reorderBoards: (ids) =>
+    adminService
+      .ReorderTaskBoards({ ids })
+      .then((r) => (r.boards ?? []).map(mapBoard).filter((b) => b.id > 0)),
+
+  addBoard: (name) => adminService.AddTaskBoard({ name }).then((r) => mapBoard(r.board)),
+
+  renameBoard: (id, name) =>
+    adminService.UpdateTaskBoard({ id, name }).then((r) => mapBoard(r.board)),
+
+  deleteBoard: (id, moveToId) =>
+    adminService.DeleteTaskBoard({ id, moveToId }).then(() => undefined),
 
   deleteTask: (id) => adminService.DeleteTask({ id }).then(() => undefined),
 

@@ -158,6 +158,7 @@ import { tileSheetIds } from '../assemble';
 import { chainView, joinSheetChains, partAt, sheetView } from '../assemble/composite';
 import { acceptMissing, missingEvidence } from '../assemble/holes';
 import { holeChainEnds, holeGuard } from '../pieces/holes';
+import { setAsideEvidenceOf } from '../pieces/aside-evidence';
 import {
   allowanceFromTexts,
   pieceOnlyEvidence,
@@ -1656,9 +1657,6 @@ export class Session {
     this.seeds = shown;
     this.families = families;
     this.setAside = setAside;
-    // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
-    this.sheetAnswers = input.sheetAnswers ?? {};
-    this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
     // A10 (Codex #1): the models THIS drawing prints (D6: every tile sheet of it) — never the text
     // of an instruction or overview page naming every model of the magazine
     const variants = models;
@@ -1678,6 +1676,20 @@ export class Session {
           new Set(this.modelClaims.keys()),
         )
       : undefined;
+    // KOMBI-AP (D3): explain only set-asides backed by at least two independent facts. The policy
+    // records these as assumptions; an id absent here remains one operator question.
+    const asideEvidence = setAsideEvidenceOf(
+      sheet,
+      fm,
+      setAside,
+      families,
+      shown,
+      variantMarks ?? [],
+      run,
+    );
+    // D6: the pieces read across the tile sheets (copies, alternatives, splits) — the wizard asks
+    this.sheetAnswers = input.sheetAnswers ?? {};
+    this.sheetRead = sheetPieces(sheet.parts, families, shown, sheet.texts, setAside);
     // H1: what the size solver could not decide reaches the wizard (a refill keeps the last full
     // fill's answer: the solver reads the whole sheet either way)
     if (!appended) this.gradeAmbiguities = ps.diag?.grade?.ambiguities ?? [];
@@ -1690,6 +1702,7 @@ export class Session {
       ...(variantMarks ? { variantMarks } : {}),
       grade: { expected: expected ?? null, ambiguities: this.gradeAmbiguities },
       setAside,
+      asideEvidence,
     };
   }
 
@@ -1812,6 +1825,9 @@ export class Session {
         fileAllowance,
         traced: this.traced(),
         docTexts: this.docTexts,
+        // BACK-VARIANT: the chosen model and the models the sheet names (labelled notch variants)
+        variant: this.pieceVariant,
+        models: variantLabels(sheet.texts.map((t) => t.text)),
         // the text label of each text seed: the cutting list binds its entries to them (S5)
         seedLabels: Object.fromEntries(
           (this.seeds ?? []).flatMap((sd) =>

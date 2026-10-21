@@ -191,28 +191,30 @@ export function ConfirmationModal({
             </DialogPrimitives.Title>
           )}
 
-          <div
-            className={
-              fullScreen && hideHeader
-                ? 'min-h-0 flex-1 overflow-hidden'
-                : 'min-h-0 flex-1 overflow-y-auto p-2.5'
-            }
-          >
-            {children}
-            {typeToConfirm && (
-              <div className='mt-2.5'>
-                <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                  type {typeToConfirm} to confirm
-                </Text>
-                <Input
-                  name='confirm-guard'
-                  value={typed}
-                  autoComplete='off'
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTyped(e.target.value)}
-                />
-              </div>
-            )}
-          </div>
+          {(children != null || typeToConfirm) && (
+            <div
+              className={
+                fullScreen && hideHeader
+                  ? 'min-h-0 flex-1 overflow-hidden'
+                  : 'min-h-0 flex-1 overflow-y-auto p-2.5'
+              }
+            >
+              {children}
+              {typeToConfirm && (
+                <div className='mt-2.5'>
+                  <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                    type {typeToConfirm} to confirm
+                  </Text>
+                  <Input
+                    name='confirm-guard'
+                    value={typed}
+                    autoComplete='off'
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTyped(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ПОДВАЛ ЖИВЁТ И БЕЗ КНОПОК, ЕСЛИ ЕМУ ЕСТЬ ЧТО СКАЗАТЬ.
               Диалог, который НИЧЕГО не решает, а только показывает (инвентарь прогона, просмотр

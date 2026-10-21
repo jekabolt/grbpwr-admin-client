@@ -764,6 +764,10 @@ export function validateManifest(x: unknown): ConversionManifest {
       )
     )
       fail(`${p}.shapeFixes`, 'not a list of { size, action: straighten | drop, mm? }');
+    // L13: optional, the half on fold — never with an unfolded fold
+    if (pc.halfFold !== undefined && pc.halfFold !== true) fail(`${p}.halfFold`, 'not true');
+    if (pc.halfFold === true && pc.unfoldedFold === true)
+      fail(p, 'halfFold and unfoldedFold cannot both be set');
     const ci = pc.identity.trim().toLowerCase();
     if (pieceByIdentity.has(ci)) fail(`${p}.identity`, `duplicate "${pc.identity}"`);
     pieceByIdentity.set(ci, pc);
@@ -791,6 +795,7 @@ export function validateManifest(x: unknown): ConversionManifest {
         action: f.action,
         ...(f.mm !== undefined ? { mm: f.mm } : {}),
       }));
+    if (pc.halfFold === true) out.halfFold = true;
     return out;
   });
   // A pair is two identities naming each other, one per hand. Anything else is not a pair the card

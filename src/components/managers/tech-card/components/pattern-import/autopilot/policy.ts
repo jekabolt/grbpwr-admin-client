@@ -65,7 +65,14 @@ import {
   type Inputs,
   type LegendEdit,
 } from '../use-import-session';
-import { PAGE_SURE, dartOf, defaultedFabrics, openAsides, sizeFlags, weakAsides } from '../auto-advance';
+import {
+  PAGE_SURE,
+  dartOf,
+  defaultedFabrics,
+  openAsides,
+  sizeFlags,
+  weakAsides,
+} from '../auto-advance';
 import { heldCells, holeAutoEvidence } from 'lib/pattern-import/assemble/holes';
 import { fallbackGrain } from './grain';
 import { fitGrainInside } from 'lib/pattern-import/semantics/grain-inside';
@@ -525,7 +532,7 @@ function valueOf(a: Assumption, act: AutopilotAction | undefined, snap: Snap): A
     }
     case 'fold-edge': {
       const f = act?.kind === 'semantics' && sd != null ? act.patch.operatorFold?.[sd] : undefined;
-      return f ? { seed: sd!, a: pt(f.a), b: pt(f.b) } : null;
+      return f ? { seed: sd!, a: pt(f.a), b: pt(f.b), ...(f.half ? { half: true } : {}) } : null;
     }
     case 'outline': {
       const f = act?.kind === 'semantics' ? act.patch.fileAllowance : undefined;
@@ -1452,6 +1459,15 @@ function piecesStep(snap: Snap): AutopilotDecision {
       ),
     );
   const why = weak.map((a) => {
+    // KOMBI-AP: the pieces stage exposes only verdicts backed by two independent facts. They are
+    // data for the UI as well as the policy; an absent id stays in the one operator question.
+    const decided = s.pieces?.asideEvidence?.find((x) => x.id === a.id);
+    if (decided)
+      return {
+        a,
+        ev: decided.evidence,
+        kind: decided.kind,
+      };
     // P2: a closed loop on the internal layer inside a cut piece (layers proved their meaning)
     if (a.layerLoop) return { a, ev: a.layerLoop };
     // DARTS: a dart word and a wedge whose mouth is on its seeded piece's outline (dartOf)
@@ -1475,20 +1491,22 @@ function piecesStep(snap: Snap): AutopilotDecision {
     );
   return {
     actions: [{ kind: 'proceed' }],
-    assumptions: why.map(({ a, ev }) =>
-      A(
+    assumptions: why.map((w) => {
+      const { a, ev } = w;
+      const kind = 'kind' in w ? w.kind : undefined;
+      return A(
         'pieces',
         'set-aside',
         `outline ${a.id} at ${mm(a.at)} (${Math.round(a.areaMm2 / 100)} cm²${a.seed?.text ? ` · «${a.seed.text.text.slice(0, 24)}»` : ''})`,
         'not a piece',
-        'a piece-sized outline is kept aside only on positive evidence that it is not a piece',
-        [a.reason, ev!],
+        `a piece-sized outline is kept aside only on positive evidence that it is not a piece${kind ? ` (${kind})` : ''}`,
+        [a.reason, ...(Array.isArray(ev) ? ev : [ev!])],
         0.5,
         true,
         undefined,
         `aside:${a.id}`,
-      ),
-    ),
+      );
+    }),
   };
 }
 
@@ -1529,7 +1547,7 @@ function meaningStep(snap: Snap): AutopilotDecision {
 
   // 1 · a piece that cannot be built (offset, leak, merged, sizes not told apart …) is a stop:
   //     a geometry failure is never answered by dropping the piece (Codex #3)
-  const fail = sem.blocked.filter((b) => !ANSWERED.has(b.reason));
+  const fail = sem.blocked.filter((b) => !ANSWERED.has(b.reason) && b.reason !== 'notch-variant');
   if (fail.length)
     return stopAt(
       'meaning',
@@ -1538,6 +1556,17 @@ function meaningStep(snap: Snap): AutopilotDecision {
         .map((b) => `${subj(b.seed)} ${b.reason}`)
         .join('; ')}`,
     );
+  // BACK-VARIANT: which of a piece's variant notches the chosen model keeps — the operator's
+  // answer, never the autopilot's (the sheet's word is one evidence at most, D3)
+  const nv = sem.blocked.filter((b) => b.reason === 'notch-variant');
+  if (nv.length) {
+    const byQ = new Map<string, string[]>();
+    for (const b of nv) byQ.set(b.detail, [...(byQ.get(b.detail) ?? []), subj(b.seed)]);
+    return stopAt(
+      'meaning',
+      [...byQ].map(([q, ps]) => `${[...new Set(ps)].join(', ')}: ${q}`).join('; '),
+    );
+  }
   void presegmented;
 
   // 2 · names, grainlines, folds: one semantics answer for every blocked piece
@@ -1678,12 +1707,42 @@ function meaningStep(snap: Snap): AutopilotDecision {
       );
     }
     const q = sem.folds?.find((f) => f.seed === b.seed);
+    // L13 (owner decision 19.10 a): printed «cut on fold», the sheet points at ONE straight edge
+    // in every size and unfolding across it fails for an overlap or a slot in every size — the
+    // half is exported as drawn with its fold line marked (D3: the claim, the pointer, the
+    // failure; the engine sets `auto` only when all hold)
+    if (q?.half?.auto) {
+      const h = q.half;
+      operatorFold[b.seed] = { a: h.edge.a, b: h.edge.b, half: true };
+      out.push(
+        A(
+          'meaning',
+          'fold-edge',
+          subj(b.seed),
+          `half on fold: exported as drawn, the fold line along the ${h.edge.lenMm.toFixed(0)} mm edge`,
+          'printed cut on fold, the sheet points at one straight edge in every size, and unfolding across it fails (overlap/slot) — the half is cut on the folded fabric',
+          h.evidence,
+          0.7,
+          false,
+          b.seed,
+        ),
+      );
+      touched = true;
+      continue;
+    }
     const e = q && q.suggested != null ? q.edges[q.suggested] : null;
     const second = [
       ...(q?.evidence.length ? [`the sheet says «${q.evidence[0].slice(0, 40)}»`] : []),
       ...(listed.has(b.seed) ? ['the cutting list'] : []),
       ...(hinted.has(b.seed) ? ['the AI read "on fold"'] : []),
     ];
+    // a half offered but not auto: the sheet's pointer and the geometry disagree, or a size does
+    // not hold — never unfold across another edge on the text alone (D3, review R1 #3)
+    if (q?.half)
+      return stopAt(
+        'meaning',
+        `${subj(b.seed)}: printed cut on fold, but unfolding fails (overlap/slot) — export the half with a fold line?${q.half.missing ? ` (${q.half.missing})` : ''}`,
+      );
     if (!e || !second.length)
       return stopAt(
         'meaning',

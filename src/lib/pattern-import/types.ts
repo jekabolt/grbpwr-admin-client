@@ -652,6 +652,12 @@ export type ChainSet = {
   chains: Chain[];
   /** MOOD Ф2: derived corner walls (sizes/corners.ts); absent on sets joined from several sheets. */
   cornerWalls?: CornerWall[];
+  /**
+   * LABELFRAME (sizes/label-frame.ts): the closed lines drawn round a size label, put in the
+   * 'ignore' row. Out of every wall and feature; the H1 solver alone still reads them as drawn
+   * lines (pieces/grade/hook.ts). Absent = none found.
+   */
+  labelFrames?: ChainId[];
   classes: LineClass[];
   bundles: Bundle[];
   /** Chains that belong to no bundle and no 'common' class — shown as a diagnostic. */
@@ -970,6 +976,23 @@ export type SetAside = {
   dart?: SetAsideDart;
 };
 
+/**
+ * KOMBI-AP (D3/D5): two or more independent facts that prove why a piece-sized set-aside is not
+ * another garment piece. The pieces stage exposes these to both the policy and the UI; absence
+ * means the outline is still a question. This never promotes or drops geometry by itself.
+ */
+export type SetAsideEvidence = {
+  id: number;
+  verdict: 'not-piece';
+  kind: 'family-shell' | 'grade-strip' | 'variant-band' | 'document-panel';
+  /** Human-readable independent facts. There are always at least two. */
+  evidence: string[];
+  /** The already-seeded family this evidence belongs to, when there is one. */
+  seed?: SeedId;
+  /** A proved parent panel / family shell, when the outline sits inside it. */
+  parent?: number;
+};
+
 export type SetAsideDart = {
   /** The dart word it prints («DART»). */
   label: string;
@@ -1192,9 +1215,9 @@ export type PieceCandidate = {
    */
   derived?: { kind: DerivedEdgeKind | 'shared-rank'; pts: PtMm[]; chains?: ChainId[] }[];
   /**
-   * SHAPE (pieces/notch-marks.ts): notch marks (small closed marks centred on the line) the outline
-   * ran around and now crosses on the size's own line — taken out of `walls`, read as notches by
-   * semantics. Absent = none.
+   * SHAPE / NOTCH (pieces/notch-marks.ts): compact closed marks the outline ran around and now
+   * crosses on the size's own line — taken out of `walls`, then classified by semantics. A mark
+   * containing a source-size word is a size tag and writes no layer-4 notch. Absent = none.
    */
   notchMarks?: ChainId[];
   /**
@@ -1545,11 +1568,24 @@ export type PieceSpec = {
   aiConfidence?: number;
   seed: SeedId;
   variant: string | null;
+  /**
+   * BACK-VARIANT: the operator's answer to the piece's `NotchVariantAsk` as applied (an option key,
+   * 'all' or 'none'); the notches left out are recorded in the piece's notes (D5). Absent = none.
+   */
+  notchVariant?: string;
   /** Owner decision 9: pairs are TWO blocks. `pairOf` names the sibling identity. */
   pairHand: PairHand | null;
   pairOf: PieceKey | null;
   /** Owner decision 8: fold pieces are unfolded; the fold line goes to layer 8. */
   unfoldedFold: boolean;
+  /**
+   * L13 (owner decision 19.10 a): printed «cut on fold» but no believable unfold (the half overlaps
+   * itself or leaves a slot when mirrored): the HALF is exported as drawn, its fold edge written as
+   * the AAMA mirror line (layer 6, «CUT ON FOLD») with no allowance across it; the cutter folds
+   * the fabric. `evidence` = why (the printed claim, the bracket, each size's unfold failure).
+   * Never set with `unfoldedFold`. In the manifest as `halfFold: true` (the card cuts it on the fold).
+   */
+  halfFold?: { evidence: string[] };
   /** Number of this identity in one garment (both hands of a pair count 1 each). */
   piecesPerGarment: number;
   allowance: AllowanceDecision;
@@ -1677,6 +1713,13 @@ export type SemanticsInput = {
    */
   traced?: boolean;
   /**
+   * BACK-VARIANT: the model the pieces were filled for (the session's chosen model, null = none)
+   * and the models the sheet names — a notch labelled for a variant is kept by its model only
+   * (semantics/notch-variants). Set by the worker session, never by the wizard.
+   */
+  variant?: string | null;
+  models?: string[];
+  /**
    * Operator answers per seed. Names travel here (not only in the wizard) so `displayName`,
    * `nameOrigin` (incl. the 'ai-auto' flag) and `aiConfidence` reach PieceSpec → ManifestPiece;
    * `fused` comes from the fabrics step (interlining not in BOM, owner decision 14).
@@ -1699,6 +1742,8 @@ export type SemanticsInput = {
           | 'fused'
           // MOOD Ф5: the operator's word on one outline in every size (true: one piece for all)
           | 'ungraded'
+          // BACK-VARIANT: which labelled notch alternative the chosen model keeps
+          | 'notchVariant'
         >
       >
     >
@@ -1717,9 +1762,11 @@ export type SemanticsInput = {
   /**
    * The fold edge the operator picked per seed (E1a): a straight edge of the outline in the rank of
    * that seed's `FoldAsk`; every size unfolds across its own matching edge. "Not a fold" is
-   * `pieceOverrides[seed].unfoldedFold = false`.
+   * `pieceOverrides[seed].unfoldedFold = false`. `half: true` (L13, answer «half» to
+   * `FoldAsk.half`): no unfold — the half is exported as drawn with its fold edge (the edge matching
+   * a..b in each size) as the mirror line.
    */
-  operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm }>>;
+  operatorFold?: Partial<Record<SeedId, { a: PtMm; b: PtMm; half?: true }>>;
   /**
    * Seeds the AI, reading the drawing, says are cut on fold (F10 `suggestion.onFold`) — the sheet's
    * words may be curves. Asked, never unfolded on that alone (E1a, D3).
@@ -1794,6 +1841,31 @@ export type FoldAsk = {
   suggested: number | null;
   /** One line for the operator. */
   why: string;
+  /**
+   * L13 (owner decision 19.10 a): the sheet prints «cut on fold» but unfolding fails for an
+   * overlap or a slot — the answer «export the half with a fold line» is offered:
+   * `operatorFold[seed] = { ...edge, half: true }`. Absent when there is no such edge.
+   */
+  half?: FoldHalfOffer;
+};
+
+/**
+ * L13: the half-with-fold-line offer of a fold question. `auto` = the rule holds (D3, ≥ 2
+ * independent evidences): a printed claim on the piece, a bracket / arrow (or the claim text)
+ * aiming at exactly one straight edge in every size, and the unfold across that edge failing in
+ * every size for an overlap or a slot. The autopilot then answers «half» and records a 'fold-edge'
+ * assumption with `evidence`; else it stops with the plain question.
+ */
+export type FoldHalfOffer = {
+  /** The fold edge on the question's size (rank of the FoldAsk): a straight run of the outline. */
+  edge: { a: PtMm; b: PtMm; lenMm: number };
+  /** Each size's unfold failure across its own matching edge, smallest size first. */
+  problems: { size: string; kind: 'overlap' | 'slot'; detail: string }[];
+  /** The printed claims, the pointer and the failures, as the assumption records them. */
+  evidence: string[];
+  auto: boolean;
+  /** Why not auto (one line), when `auto` is false. */
+  missing?: string;
 };
 
 /**
@@ -1854,6 +1926,39 @@ export type GradeAsk =
       refused?: string;
     };
 export type GradeCountFeature = 'notches' | 'drills' | 'internal';
+/**
+ * BACK-VARIANT: one labelled alternative of a piece's notches — `key` = the label without its notch
+ * words, lower case («high back»), the answer's value; `perSize` = where it sits in each size (sheet
+ * mm, on that size's line) for the preview; `model` = the model the sheet's words tie its variant
+ * word to — a hint, never applied (one evidence).
+ */
+export type NotchVariantOption = {
+  key: string;
+  label: string;
+  model: string | null;
+  perSize: { size: string; at: PtMm[] }[];
+};
+/**
+ * BACK-VARIANT: which of a piece's labelled notch alternatives the chosen model keeps. Blocking
+ * (the piece is blocked 'notch-variant' while open): the answer is
+ * `SemanticsInput.pieceOverrides[seed].notchVariant` = an option's `key`, 'all' (every notch as
+ * drawn) or 'none' (none of the labelled ones). Never answered by the autopilot (D3/D5).
+ */
+export type NotchVariantAsk = {
+  seed: SeedId;
+  identity: PieceKey | null;
+  /** the question's content (piece + options): a changed drawing asks again */
+  key: string;
+  /** plain words: «which back: high / low?» */
+  question: string;
+  /** the chosen model the question is about */
+  model: string;
+  options: NotchVariantOption[];
+  /** the option the sheet's words tie to the chosen model (a hint, one evidence) */
+  suggested?: string;
+  evidence: string[];
+};
+
 /** GRADE P1: the operator's answer to a `GradeAsk` (by its key). */
 export type GradeAnswer = 'all' | 'none' | 'only' | 'intended';
 
@@ -1861,6 +1966,8 @@ export type SemanticsOutput = {
   pieces: PieceSpec[];
   /** GRADE P1: questions of one shape across sizes (absent = none). Never blocking. */
   gradeAsks?: GradeAsk[];
+  /** BACK-VARIANT: open notch-variant questions, one per piece blocked 'notch-variant' (absent = none). */
+  notchVariantAsks?: NotchVariantAsk[];
   /**
    * GRADE P1: answers that could not be applied, by question key → why ("its graded place falls
    * past the corner of its edge in size 10"). The question stays open. Absent = none.
@@ -1965,7 +2072,13 @@ export type BlockReason =
    * MOOD Ф5: every size closes on one outline, but only one evidence says it is one piece for all
    * sizes (drawn once / by every pen in one place, a label naming no size): the operator says.
    */
-  | 'one-size-question';
+  | 'one-size-question'
+  /**
+   * BACK-VARIANT (semantics/notch-variants): the piece's notch labels are alternatives of one notch
+   * («High back notch» / «Low back notch») and nothing proves which one the chosen model keeps —
+   * answered by `pieceOverrides[seed].notchVariant` (`SemanticsOutput.notchVariantAsks`).
+   */
+  | 'notch-variant';
 
 export type DetectAllowanceFn = (sheet: Sheet, families: PieceFamily[]) => AllowanceDecision;
 export type BuildPieceSpecsFn = (input: SemanticsInput, progress?: Progress) => SemanticsOutput;
@@ -2134,8 +2247,11 @@ export type DraftPiece = {
    * impossible pair; an explicit MIRRORED/FOLD is kept otherwise (F14 MAJOR 2).
    */
   cutSymmetry: string;
-  /** F14: the manifest's proof that every contour is drawn — both hands of a pair / unfolded fold. */
-  symmetryForce?: 'pair' | 'unfolded';
+  /**
+   * F14: the manifest's proof that every contour is drawn — both hands of a pair / unfolded fold;
+   * L13 'half': the manifest's proof that only the half is drawn — cut on the fold (FOLD).
+   */
+  symmetryForce?: 'pair' | 'unfolded' | 'half';
   grainline: string;
   fused: boolean;
   /** Reuse of an existing card piece instead of creating one. */
@@ -2239,6 +2355,8 @@ export type ManifestPiece = {
   gradeIntended?: GradeCountFeature[];
   /** SHAPE-KINK: the operator's one-shape moves (fixShape / dropSize) on this piece. */
   shapeFixes?: ShapeFixRecord[];
+  /** L13: the half is drawn, its fold line the block's mirror line — the card cuts it on the fold. */
+  halfFold?: true;
 };
 
 export type ManifestBlock = {
@@ -2999,6 +3117,8 @@ export type StageIO = {
       grade?: { expected: ExpectedSizes | null; ambiguities: ChainAmbiguity[] };
       /** A2: closed outlines (and text seeds in junk) not seeded — shown, one click from a piece. */
       setAside?: SetAside[];
+      /** KOMBI-AP: safe, explainable non-piece verdicts for set-asides; missing ids stay a question. */
+      asideEvidence?: SetAsideEvidence[];
     };
   };
   semantics: {
