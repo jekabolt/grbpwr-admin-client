@@ -1415,9 +1415,23 @@ export function PatternsField({
     (rev.snapshotId ?? 0) > 0 ? restoreSnapshot(rev.snapshotId ?? 0) : 'unavailable';
   useEffect(() => provideSheetRestorer((rev) => restoreRef.current(rev)), []);
 
+  // The target row is a non-DXF sheet (a legacy PDF) of this slot: its file is swapped in place —
+  // no reconcile, no marks; the DXF then takes the first-upload path (units, sizes, pieces).
+  const plainSwapIndex = (scopeKey: string, target?: string) => {
+    const want = (target ?? '').trim();
+    if (!want) return -1;
+    return ((getValues('patterns') ?? []) as PatternRow[]).findIndex(
+      (r) =>
+        sheetRowId(r) === want &&
+        !isDxfUrl(r.url) &&
+        scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey,
+    );
+  };
+
   async function uploadOne(scopeKey: string, picked: File, faults: FileFault[], target?: string) {
+    const swap = plainSwapIndex(scopeKey, target) >= 0;
     // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
-    if ((await replaceSheet(scopeKey, picked, target)) !== 'first') return;
+    if (!swap && (await replaceSheet(scopeKey, picked, target)) !== 'first') return;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
     if (!fixed) return;
@@ -1428,13 +1442,26 @@ export function PatternsField({
     bump(1);
     try {
       const up = await uploadPatternFile(file);
-      append({
-        sizeId: sized.sizeId ?? storageSizeId,
-        lineKey: ulid(),
-        ...up,
-        name: autoName(scopeKey, file),
-        ...bindingOf(scopeKey),
-      });
+      // Re-found after the upload: the rows may have moved while the file was in flight.
+      const at = swap ? plainSwapIndex(scopeKey, target) : -1;
+      if (at >= 0) {
+        const keep = { shouldDirty: true };
+        setValue(`patterns.${at}.url`, up.url, keep);
+        setValue(`patterns.${at}.filename`, up.filename, keep);
+        setValue(`patterns.${at}.sizeBytes`, up.sizeBytes, keep);
+        setValue(`patterns.${at}.sha256`, up.sha256, keep);
+        setValue(`patterns.${at}.sizeId`, sized.sizeId ?? storageSizeId, keep);
+        // 0 = "assign one": the server numbers a url it has not seen on this card.
+        setValue(`patterns.${at}.version`, 0, keep);
+        setValue(`patterns.${at}.uploadedAt`, '', keep);
+      } else
+        append({
+          sizeId: sized.sizeId ?? storageSizeId,
+          lineKey: ulid(),
+          ...up,
+          name: autoName(scopeKey, file),
+          ...bindingOf(scopeKey),
+        });
       setPendingView({ scopeKey, urls: [up.url] });
     } catch (e) {
       console.error('UploadPattern failed', e);
@@ -1843,8 +1870,8 @@ export function PatternsField({
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
     // A DXF name opens the pieces viewer of its slot; a sheet without a material has none.
-    const rowGroup =
-      dxf && rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
+    const slotGroup = rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
+    const rowGroup = dxf ? slotGroup : undefined;
     const converted = (row.url && bundle?.manifestByUrl?.get(row.url)) || null;
     const distrust = (row.url && bundle?.manifestDistrustByUrl?.get(row.url)) || null;
     const nameTitle =
@@ -1853,7 +1880,8 @@ export function PatternsField({
     // v{N}: the active row's own revision (a restored sheet keeps its old number).
     const shownRev = rev;
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
-    const replaceable = !!rowGroup && canDrop;
+    // A non-DXF row is replaceable too: a plain file swap (uploadOne), no reconcile, no marks.
+    const replaceable = !!slotGroup && canDrop;
     const thumb =
       rowGroup && dxfIndex && countBlocks(dxfIndex, rowGroup.scope.key) > 0 ? (
         <SheetThumb index={dxfIndex} scopeKey={rowGroup.scope.key} className='h-full w-full' />
@@ -1863,7 +1891,7 @@ export function PatternsField({
       <li key={row.lineKey || `row-${index}`} className='group/sheet py-1'>
         <div className='flex items-center gap-1.5'>
           {rowGroup &&
-            (replaceable ? (
+            (canDrop ? (
               <Button
                 type='button'
                 aria-label={`replace ${labelOf(row)}`}
@@ -1961,7 +1989,7 @@ export function PatternsField({
                 variant='underline'
                 size='xs'
                 className={door}
-                onClick={() => openPicker(rowGroup.scope.key, sheetRowId(row))}
+                onClick={() => openPicker(slotGroup.scope.key, sheetRowId(row))}
               >
                 upload
               </Button>

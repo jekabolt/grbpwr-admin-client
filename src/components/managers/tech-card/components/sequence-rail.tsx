@@ -155,6 +155,8 @@ function RailStep({
   const frozen =
     useWatch({ control, name: 'approvalState' }) === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   const marked = review.trim() !== '';
+  // orphan снимается только заменой призрака или ×, не общим «ok»
+  const acceptable = marked && review.trim() !== 'orphan';
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
@@ -354,7 +356,7 @@ function RailStep({
               (открыть шаг), и вложенный орган был бы кнопкой в кнопке. Нативная кнопка, как ручка
               перетаскивания: «проверено» — правка, и в `<fieldset disabled>` выпущенной карточки
               она молчит. */}
-          {marked && selected ? (
+          {acceptable && selected ? (
             <Button
               onClick={onReviewAccepted}
               disabled={frozen}
@@ -452,7 +454,9 @@ export function SequenceRail({
     if (getValues('approvalState') === 'TECH_CARD_APPROVAL_STATE_RELEASED') return;
     const operations = (getValues('operations') ?? []) as CardOperation[];
     const row = operations[index];
-    if (!row?.review?.trim()) return;
+    // orphan: призрак ещё в шаге — метку снимает замена призрака или ×, не «ok»
+    const mark = row?.review?.trim() ?? '';
+    if (!mark || mark === 'orphan') return;
     const nextOperations = operations.map((op, i) => (i === index ? clearReview(op) : op));
     setValue(`operations.${index}.review`, '', { shouldDirty: true, shouldTouch: true });
     const next = nextMarkedOperation(nextOperations, index);
