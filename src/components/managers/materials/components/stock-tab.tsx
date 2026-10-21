@@ -331,7 +331,7 @@ function ExpandedDetails({
             className='flex h-11 min-h-11 shrink-0 items-center justify-center md:h-9 md:min-h-9'
             onClick={applyReceive}
           >
-            receive
+            in
           </Button>
           <Button
             size='xs'
@@ -339,7 +339,7 @@ function ExpandedDetails({
             className='flex h-11 min-h-11 shrink-0 items-center justify-center md:h-9 md:min-h-9'
             onClick={applyIssue}
           >
-            issue
+            out
           </Button>
         </div>
       ) : null}
