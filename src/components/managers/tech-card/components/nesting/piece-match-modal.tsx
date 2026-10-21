@@ -90,6 +90,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
+import { planOldPieceOps } from './old-pieces-ops';
 import {
   hasOldPieceLoss,
   OldPiecesDecision,
@@ -1551,13 +1552,13 @@ export function PieceMatchModal({
         all.map((p) => p.lineKey ?? '').filter((k) => k && dropped.has(k.trim().toLowerCase())),
       );
       if (goneKeys.size > 0) {
-        const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
-        (operations ?? []).forEach((o, oi) => {
-          const keys = (o.inputKeys ?? []).filter(Boolean);
-          const kept = keys.filter((k) => !goneKeys.has(k));
-          if (kept.length === keys.length) return;
-          setValue(`operations.${oi}.inputKeys`, kept, { shouldDirty: true });
-        });
+        // Шов, оставшийся меньше чем с двумя входами, растворяется или уходит (old-pieces-ops):
+        // иначе карточка не сохраняется по join-arity в шаге, которого оператор не трогал.
+        const operations = (getValues('operations') ?? []) as NonNullable<
+          TechCardFormData['operations']
+        >;
+        const plan = planOldPieceOps(operations, goneKeys);
+        if (plan.changed) setValue('operations', plan.operations, { shouldDirty: true });
       }
       // Two pieces sharing a name make every reference to «полочка» ambiguous on the factory
       // sheet, and the server rejects the save for it — and since this dialog became the only
