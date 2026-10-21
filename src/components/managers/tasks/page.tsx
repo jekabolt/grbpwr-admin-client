@@ -21,6 +21,7 @@ import {
   SideRailLayout,
   SkeletonLine,
   Text,
+  TILE_QUIET,
   Toolbar,
 } from 'ui';
 import { TASKS_PAGE_LIMIT } from './api/tasksService';
@@ -587,7 +588,7 @@ export function Tasks() {
             </ChipRow>
           </div>
           {!!activeEntry && !closedView && (
-            <div className='hidden items-center gap-3.5 sm:flex'>
+            <div className='group hidden items-center gap-3.5 sm:flex'>
               {(renamingBoard || addingBoard) && !railShown && !phoneScreen ? (
                 <BoardNameField
                   key={addingBoard ? 'new' : `rename-${activeBoard}`}
@@ -607,7 +608,7 @@ export function Tasks() {
                 {counts.get(activeBoard) ?? 0} tasks
               </Text>
               {writable && (
-                <span className='ml-auto flex items-center gap-3.5'>
+                <span className={`ml-auto flex items-center gap-3.5 ${TILE_QUIET}`}>
                   <Button variant='underline' size='xs' onClick={startRenaming}>
                     rename
                   </Button>
