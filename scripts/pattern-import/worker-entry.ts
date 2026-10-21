@@ -853,8 +853,16 @@ async function operatorBridgeGateCase() {
   const opts = { ...FILL, variant: 'Mod. 125' };
   const pc0 = await run('pieces', { edits: [], opts });
   const open0 = pc0.families.filter((f) => f.candidates.some((c) => c.outcome !== 'closed'));
+  // POLUPALTO lane M 21.10: the 76 no longer leaks at the underarm tip. A copy of the 72 line walls
+  // the 76 only where the 76 coincides with it, and at the tip it does: the 76 closes on the same
+  // 4.6 mm the operator's bridge draws (996.6,1194.0 → 997.7,1189.5, within 0.35 mm), its cap on
+  // its own line (auto/POLUPALTO-DIAG.md; runs/polupalto/pics/palto/sl-corner.png, sl-cap.png).
+  // So the corner piece is found by place; the bridge must keep it closed and be audited on it.
+  const nearCorner = (p: { x: number; y: number }) => Math.hypot(p.x - 997.5, p.y - 1190.5) < 5;
   const corner = pc0.families.find((f) =>
-    f.candidates.some((c) => c.leakAt && Math.hypot(c.leakAt.x - 997.5, c.leakAt.y - 1190.5) < 5),
+    f.candidates.some(
+      (c) => (c.leakAt && nearCorner(c.leakAt)) || (c.rank === 1 && c.outer?.some(nearCorner)),
+    ),
   );
   const edits: PieceEdit[] = [
     {
@@ -869,11 +877,13 @@ async function operatorBridgeGateCase() {
   const fixed = pc1.families.find((f) => f.seed === corner?.seed);
   check(
     name,
-    'one bridge "all sizes" closes the corner piece in every size (refill of the seeds it reaches)',
+    'one bridge "all sizes" leaves the corner piece closed in every size and on its outline (refill of the seeds it reaches)',
     !!fixed &&
       fixed.candidates.every((c) => c.outcome === 'closed') &&
       fixed.candidates.some((c) => c.derived?.some((d) => d.kind === 'operator-bridge')),
-    fixed?.candidates.map((c) => c.outcome[0]).join('') ?? 'no corner leak found',
+    corner && fixed
+      ? `${corner.candidates.map((c) => c.outcome[0]).join('')} → ${fixed.candidates.map((c) => c.outcome[0]).join('')}`
+      : 'no corner piece found',
   );
   const drop = pc1.families
     .filter((f) => f.candidates.some((c) => c.outcome !== 'closed'))
@@ -920,10 +930,17 @@ async function operatorBridgeGateCase() {
   // armhole of 76/80/84 ends in a horizontal step onto the common side line (≈ 10 / 8 / 4 mm, 80
   // with a small loop), 88 runs straight — a real outline difference, not the allowance
   // (auto/silent-tail/palto-FP_L-armhole-step.png). The bridge itself must not block.
+  // POLUPALTO lane M 21.10: the 76 runs its own cap now (the 72 cap run G22 held is gone: a copy
+  // of the 72 line no longer walls the 76 where the 76's own cap runs beside it;
+  // runs/polupalto/pics/palto/sl-cap.png). G22 holds nothing, and the 76 grades between 72 and 80:
+  // area within 0.5 % of their mean (574 vs 573.5 cm²; on the 72 cap it was 580, 1.1 %).
   const w = await writeCase(name, run, sem, sz.map, { mustPass: false });
   const g = w.gate[MAIN.scopeKey];
   const holds = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   const g22 = holds.find((c) => c.id === 'G22-identity');
+  const sl = pc.families.find((f) => f.seed === corner?.seed);
+  const areaOf = (r: number) => sl?.candidates.find((c) => c.rank === r)?.areaMm2 ?? NaN;
+  const slGrade = Math.abs(areaOf(1) - (areaOf(0) + areaOf(2)) / 2) / areaOf(1);
   const g8h = holds.find((c) => c.id === 'G8-monotone');
   const shapeOnlyHold = (c: (typeof holds)[number]) =>
     c.id === 'G5-features' &&
@@ -933,18 +950,15 @@ async function operatorBridgeGateCase() {
       .every((x) => x.includes('one piece, one shape across sizes'));
   check(
     name,
-    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and the one-shape rule on FP only",
+    'held by the one-shape rule on FP only; SL 76 on its own cap (no G22, grades between 72 and 80)',
     holds.every(
       (c) =>
-        c.id === 'G22-identity' ||
-        c.id === 'G8-monotone' ||
-        (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
+        c.id === 'G8-monotone' || (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
     ) &&
-      !!g22 &&
-      g22.blocks.length > 0 &&
-      g22.blocks.every((b) => /^SL_[LR]_76$/.test(b)) &&
+      !g22 &&
+      slGrade <= 0.005 &&
       (!g8h || g8h.blocks.every((b) => b.startsWith('SL_'))),
-    holds.map((c) => `${c.id}[${c.blocks.join(',')}]`).join(' | ') || 'no hold',
+    `${holds.map((c) => `${c.id}[${c.blocks.join(',')}]`).join(' | ') || 'no hold'} · SL 76 ${(slGrade * 100).toFixed(2)} % off the 72/80 mean`,
   );
   const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
   const g15 = g?.checks.find((c) => c.id === 'G15-derived');
@@ -1248,11 +1262,15 @@ async function pipelineCase(
     // M7: with the denominator from source topology the two size-72 pieces whose outline leaves
     // its wall for 5–10 mm (the raster necks F13c saw at 72/76) block; BP_3_84's earlier block
     // came from the sheet frame line counted as its wall and is gone.
+    // POLUPALTO lane M 21.10: those 72 necks were the 72 closed on a copy of the 76 line (5 / 10
+    // mm out, onto the 76); a copy now walls only the size it coincides with, the 72s run their
+    // own lines (runs/polupalto/pics/palto/s0-z.png, s2-z.png) and G3 passes, rightly. G3's
+    // blocking side keeps its negative control on robe (BP_L_2_42).
     const g3 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G3-coverage');
     check(
       name,
-      'M7: G3 blocks only size-72 blocks (outline leaves its wall there)',
-      !!g3 && !g3.ok && g3.blocks.length > 0 && g3.blocks.every((b) => b.endsWith('_72')),
+      'M7: G3 passes — the size-72 outlines run their own walls',
+      !!g3 && g3.ok,
       `${g3?.value} [${g3?.blocks.join(',')}]`,
     );
   }
@@ -2842,12 +2860,25 @@ async function tracedOutlineCase() {
       ? seam.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ')
       : `${seam.pieces[0].sizes.length} sizes · dev ≤ ${Math.max(...devs).toFixed(3)} mm`,
   );
-  const cut = await run('semantics', ofSeam('cut'));
+  // POLUPALTO lane M 21.10: 36 no longer merges the strip (outline 3578 → 2934 mm, inside 40: a
+  // copy of another size's line walls 36 only where 36 coincides with it), so its "cut" offset no
+  // longer splits. What is still wrong in 36 is a ~9.5 mm step onto 40's line for ~14 mm at the
+  // knee (runs/polupalto/pics/e3/all.png, z-notch.png). Written with the other sizes, the gate
+  // must hold 36 by name (G5 one-shape names 36's extra turn; before lane M, G4 named 36).
+  const seam36 = await run('semantics', ofSeam('seam'));
+  const w36 = await writeCase(`${C} · 36–46`, run, seam36, sz.map, { mustPass: false });
+  const h36 = (w36.gate[MAIN.scopeKey]?.checks ?? []).filter(
+    (c) =>
+      !c.ok &&
+      c.severity === 'block' &&
+      c.blocks.some((b) => /_36$/.test(b)) &&
+      /\b36's\b|_36\b/.test(c.note ?? ''),
+  );
   check(
     C,
-    '"cut line": the inward seam line of 36 splits at the merged strip (G6 refuses it, rightly)',
-    cut.blocked.some((b) => b.reason === 'offset-topology' && /^36:/.test(b.detail)),
-    cut.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ') || 'not blocked',
+    "36 (a step onto 40's line at the knee) is held at the gate by name",
+    h36.length > 0,
+    h36.map((c) => `${c.id}: ${(c.note ?? '').slice(0, 140)}`).join(' | ') || 'not held',
   );
   // negative control: the same outlines NOT cleaned (as before E3) — the offset breaks
   const inner = s as unknown as { traced: () => boolean };
