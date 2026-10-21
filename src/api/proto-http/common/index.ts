@@ -9021,6 +9021,15 @@ export type TaskTiming = {
   approximate: boolean | undefined;
 };
 
+// TaskMatch is list-only search metadata. One row accompanies every task returned by a non-empty
+// ListTasks query. field is one of title|description|id|comment|checklist; title/id need no snippet
+// because the task row already shows the title (and its id).
+export type TaskMatch = {
+  taskId: number | undefined;
+  field: string | undefined;
+  snippet: string | undefined;
+};
+
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
 // board — board, status, position — is deliberately NOT here: it is set at
 // AddTask and changed only via MoveTask, so a content edit can never silently
