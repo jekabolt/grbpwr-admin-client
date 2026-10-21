@@ -21,7 +21,7 @@ const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBas
 type Step = 'fibres' | 'percent' | 'review';
 const STEPS: { key: Step; label: string }[] = [
   { key: 'fibres', label: 'fibres' },
-  { key: 'percent', label: 'percentages' },
+  { key: 'percent', label: 'percent' },
   { key: 'review', label: 'review' },
 ];
 
@@ -55,6 +55,7 @@ export function CompositionWizard({
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -65,6 +66,7 @@ export function CompositionWizard({
     setStep('fibres');
     setNewCode('');
     setNewName('');
+    setCreateOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -124,7 +126,7 @@ export function CompositionWizard({
     const name = newName.trim();
     setFail(null);
     if (!code || !name) {
-      setFail('fibre code and name are required');
+      setFail('code and name');
       return;
     }
     // Already in the dictionary (possibly typed by mistake) — just select it, no duplicate create.
@@ -172,7 +174,7 @@ export function CompositionWizard({
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-borderColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>
+            <DialogPrimitives.Title className='text-lg normal-case'>
               composition
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
@@ -183,42 +185,33 @@ export function CompositionWizard({
             build a material's fibre blend and set each fibre's percentage
           </DialogPrimitives.Description>
 
-          {/* step indicator (mirrors the opex wizard chrome) */}
-          <div className='flex items-center gap-1 border-b border-borderColor px-4 py-2'>
+          <div className='flex items-center gap-2 border-b border-borderColor px-4 py-2'>
             {STEPS.map((s, i) => (
-              <div key={s.key} className='flex items-center gap-1'>
-                <span
-                  className={cn(
-                    'text-small uppercase',
-                    i === stepIndex
-                      ? 'text-textColor'
-                      : i < stepIndex
-                        ? 'text-textColor/60'
-                        : 'text-borderColor',
-                  )}
+              <span key={s.key} className='contents'>
+                <Text
+                  component='span'
+                  size='small'
+                  variant={i === stepIndex ? 'default' : 'label'}
+                  className='normal-case'
                 >
-                  {i + 1}. {s.label}
-                </span>
-                {i < STEPS.length - 1 && <span className='text-borderColor'>›</span>}
-              </div>
+                  {s.label}
+                </Text>
+                {i < STEPS.length - 1 && (
+                  <Text component='span' size='small' variant='label'>
+                    ·
+                  </Text>
+                )}
+              </span>
             ))}
           </div>
 
           <div className='flex flex-col gap-3 p-4'>
             {step === 'fibres' && (
               <>
-                <Text size='small' variant='inactive'>
-                  Which fibres are in this material? Pick one or more.
-                </Text>
-
                 {displayFibers.length === 0 ? (
-                  <div className='flex flex-col gap-1 border border-borderColor p-3'>
-                    <Text size='small'>no fibres in the dictionary yet</Text>
-                    <Text size='small' variant='inactive'>
-                      create your first fibre below — it is added to the shared dictionary and
-                      selected into this blend.
-                    </Text>
-                  </div>
+                  <Text size='small' variant='inactive' className='normal-case'>
+                    no fibres
+                  </Text>
                 ) : (
                   <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
                     {displayFibers.map((f) => {
@@ -227,6 +220,7 @@ export function CompositionWizard({
                         <button
                           key={f.code}
                           type='button'
+                          aria-pressed={selected}
                           onClick={() => toggle(f.code!)}
                           className={cn(
                             'flex items-center justify-between gap-2 border px-3 py-2 text-left transition-colors',
@@ -247,73 +241,70 @@ export function CompositionWizard({
                               </Text>
                             )}
                           </span>
-                          <span
-                            className={cn(
-                              'shrink-0 text-small uppercase',
-                              selected ? 'text-textColor' : 'text-borderColor',
-                            )}
-                          >
-                            {selected ? '✓' : 'add'}
-                          </span>
+                          {selected && (
+                            <Text component='span' size='small' className='shrink-0'>
+                              ✓
+                            </Text>
+                          )}
                         </button>
                       );
                     })}
                   </div>
                 )}
 
-                {rows.length === 0 && displayFibers.length > 0 && (
-                  <Text size='small' variant='inactive'>
-                    select at least one fibre to set percentages.
-                  </Text>
-                )}
-
-                {/* inline create fibre — always available so an empty/short dictionary never blocks. */}
-                <div className='flex flex-col gap-2 border border-borderColor p-3'>
-                  <Text size='small' variant='uppercase'>
-                    create a new fibre
-                  </Text>
-                  <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                    <label className='flex flex-col gap-1'>
-                      <Text size='small'>code</Text>
+                {!createOpen ? (
+                  <Button
+                    type='button'
+                    variant='default'
+                    className='self-start px-0 text-left normal-case underline'
+                    onClick={() => setCreateOpen(true)}
+                  >
+                    + fibre
+                  </Button>
+                ) : (
+                  <div className='grid grid-cols-2 gap-2'>
+                    <label className='flex min-w-0 flex-col gap-1'>
+                      <Text size='small' variant='inactive' className='normal-case'>
+                        code
+                      </Text>
                       <input
+                        aria-label='fibre code'
                         className={cell}
-                        placeholder='e.g. CO'
                         value={newCode}
                         onChange={(e) => setNewCode(e.target.value)}
                       />
                     </label>
-                    <label className='flex flex-col gap-1'>
-                      <Text size='small'>name</Text>
+                    <label className='flex min-w-0 flex-col gap-1'>
+                      <Text size='small' variant='inactive' className='normal-case'>
+                        name
+                      </Text>
                       <input
+                        aria-label='fibre name'
                         className={cell}
-                        placeholder='e.g. cotton'
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
                       />
                     </label>
-                  </div>
-                  <div>
                     <Button
                       type='button'
                       variant='secondary'
-                      className='uppercase'
+                      className='col-span-2 normal-case sm:col-span-1'
                       disabled={creating || !newCode.trim() || !newName.trim()}
                       done={added.on && 'added'}
                       onClick={createAndSelect}
                     >
-                      {creating ? 'creating…' : '＋ create fibre'}
+                      {creating ? 'creating…' : 'create'}
                     </Button>
+                    <div className='col-span-2'>
+                      <FailNote verb='not created' text={fail} />
+                    </div>
                   </div>
-                  <FailNote verb='not created' text={fail} />
-                </div>
+                )}
               </>
             )}
 
             {step === 'percent' && (
               <>
-                <Text size='small' variant='inactive'>
-                  Set each fibre's share — they must total 100%.
-                </Text>
                 <div className='flex flex-col gap-2'>
                   {rows.map((r) => (
                     <div key={r.fiberCode} className='flex items-center gap-2'>
@@ -340,12 +331,12 @@ export function CompositionWizard({
                   <Button
                     type='button'
                     variant='secondary'
-                    className='uppercase'
+                    className='normal-case'
                     onClick={distributeEvenly}
                   >
-                    distribute evenly
+                    split evenly
                   </Button>
-                  <Text variant={valid ? 'label' : 'error'} size='small'>
+                  <Text variant={valid ? 'label' : 'errorLabel'} size='small'>
                     total {Number(total.toFixed(2))}%{valid ? ' ✓' : ' / 100'}
                   </Text>
                 </div>
@@ -361,8 +352,8 @@ export function CompositionWizard({
             {step === 'review' && (
               <>
                 {rows.length === 0 ? (
-                  <Text size='small' variant='inactive'>
-                    No fibres selected — composition will be left unset.
+                  <Text size='small' variant='inactive' className='normal-case'>
+                    unset
                   </Text>
                 ) : (
                   <div className='border border-borderColor'>
@@ -378,10 +369,8 @@ export function CompositionWizard({
                       </div>
                     ))}
                     <div className='flex items-center justify-between gap-3 px-3 py-1.5'>
-                      <Text size='small' variant='uppercase'>
-                        total
-                      </Text>
-                      <Text size='small' variant={valid ? 'label' : 'error'}>
+                      <Text size='small'>total</Text>
+                      <Text size='small' variant={valid ? 'label' : 'errorLabel'}>
                         {Number(total.toFixed(2))}%{valid ? ' ✓' : ' / 100'}
                       </Text>
                     </div>
@@ -389,12 +378,8 @@ export function CompositionWizard({
                 )}
 
                 {!valid && rows.length > 0 && (
-                  <Text variant='error' size='small'>
-                    {!complete
-                      ? 'every fibre needs a percent greater than 0'
-                      : !unique
-                        ? 'a fibre is listed twice — remove the duplicate'
-                        : `must sum to 100% (now ${Number(total.toFixed(2))}%)`}
+                  <Text variant='errorLabel' size='small'>
+                    {!complete ? 'percent missing' : !unique ? 'duplicate fibre' : `not 100%`}
                   </Text>
                 )}
               </>
@@ -409,6 +394,7 @@ export function CompositionWizard({
                   type='button'
                   variant='secondary'
                   size='lg'
+                  className='normal-case'
                   onClick={() =>
                     setStep(step === 'review' ? (rows.length > 0 ? 'percent' : 'fibres') : 'fibres')
                   }
@@ -423,19 +409,33 @@ export function CompositionWizard({
                   type='button'
                   variant='main'
                   size='lg'
+                  className='normal-case'
                   onClick={() => setStep(rows.length > 0 ? 'percent' : 'review')}
                 >
                   next
                 </Button>
               )}
               {step === 'percent' && (
-                <Button type='button' variant='main' size='lg' onClick={() => setStep('review')}>
-                  review
+                <Button
+                  type='button'
+                  variant='main'
+                  size='lg'
+                  className='normal-case'
+                  onClick={() => setStep('review')}
+                >
+                  next
                 </Button>
               )}
               {step === 'review' && (
-                <Button type='button' variant='main' size='lg' disabled={!valid} onClick={finish}>
-                  {rows.length === 0 ? 'leave unset' : 'save composition'}
+                <Button
+                  type='button'
+                  variant='main'
+                  size='lg'
+                  className='normal-case'
+                  disabled={!valid}
+                  onClick={finish}
+                >
+                  save
                 </Button>
               )}
             </div>

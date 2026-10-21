@@ -97,6 +97,11 @@ const WEIGHT: Partial<Record<common_MaterialClass, Measure>> = {
 };
 const UNITS = ['m', 'pcs', 'kg'];
 const MOVES: Move[] = ['receive', 'issue', 'adjust'];
+const MOVE_LABELS: Record<Move, string> = {
+  receive: 'in',
+  issue: 'out',
+  adjust: 'count',
+};
 
 // Legacy rows without typed attrs keep width/weight in the flat fields (same rule as the modal).
 function widthOf(m: common_Material, cls: common_MaterialClass): string {
@@ -681,7 +686,7 @@ export function MaterialExpand({
                   setMove(k);
                 }}
               >
-                {k}
+                {MOVE_LABELS[k]}
               </Button>
             ))}
           </GenericPopover>

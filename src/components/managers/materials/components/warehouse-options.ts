@@ -5,18 +5,18 @@ import { common_MaterialMovementType } from 'api/proto-http/admin';
 export const movementKind = (t?: common_MaterialMovementType | string): string => {
   switch (t) {
     case 'MATERIAL_MOVEMENT_TYPE_RECEIPT':
-      return 'receipt';
+      return 'in';
     case 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION':
-      return 'production receipt';
+      return 'production in';
     case 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION':
-      return 'production';
+      return 'production out';
     case 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE':
-      return 'sample';
+      return 'sample out';
     case 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION':
     case 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE':
       return 'return';
     case 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT':
-      return 'adjustment';
+      return 'count';
     case 'MATERIAL_MOVEMENT_TYPE_WRITEOFF':
       return 'write-off';
     default:
@@ -27,13 +27,13 @@ export const movementKind = (t?: common_MaterialMovementType | string): string =
 // Movement-type filter options for the ledger (UNKNOWN = any).
 export const movementTypeFilterOptions: { value: common_MaterialMovementType; label: string }[] = [
   { value: 'MATERIAL_MOVEMENT_TYPE_UNKNOWN', label: 'all types' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT', label: 'receipt' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION', label: 'production receipt' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION', label: 'production' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE', label: 'sample' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT', label: 'in' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION', label: 'production in' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION', label: 'production out' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE', label: 'sample out' },
   { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION', label: 'production return' },
   { value: 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE', label: 'sample return' },
-  { value: 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT', label: 'adjustment' },
+  { value: 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT', label: 'count' },
   { value: 'MATERIAL_MOVEMENT_TYPE_WRITEOFF', label: 'write-off' },
 ];
 
