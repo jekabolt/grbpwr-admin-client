@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { nextFusingAliases, pickFusingBinding, sameAliasSet } from './aliases';
+import { nextFusingAliases, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -353,16 +353,25 @@ export async function main() {
     { bomLineKey: 'IL-4', fabricPurpose: UNSET, blockName: 'PAD', pieceLineKey: 'P4' },
   ]);
   assert.deepEqual(plan.shared.sort(), ['IL-3', 'other']);
-  assert.deepEqual(pickFusingBinding('IL-1', INTERFACING, []), {
-    bomLineKey: 'IL-1',
-    fabricPurpose: INTERFACING,
+  // A line whose effective scope an uploaded sheet holds is not generated (no fallback to the line
+  // scope: the server folds it back into the purpose); a solo purpose binds and links; a purpose
+  // shared by several lines stays line-bound and unlinked.
+  const lineplan = planFusingLines({
+    lines: [
+      { bomLineKey: 'IL-1', effectiveScope: INTERFACING, soloPurpose: INTERFACING },
+      { bomLineKey: 'IL-4', effectiveScope: OTHER, soloPurpose: OTHER },
+      { bomLineKey: 'IL-5', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
+      { bomLineKey: 'IL-6', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
+    ],
+    uploadedScopes: [OTHER, 'MAIN-LINE', ''],
   });
-  assert.deepEqual(
-    pickFusingBinding('IL-1', INTERFACING, [{ bomLineKey: 'X', fabricPurpose: INTERFACING }]),
-    { bomLineKey: 'IL-1', fabricPurpose: UNSET },
-    'a purpose scope an uploaded sheet holds falls back to the line scope',
-  );
-  assert.deepEqual(pickFusingBinding('IL-2', '', []), { bomLineKey: 'IL-2', fabricPurpose: UNSET });
+  assert.deepEqual([...lineplan.blocked], ['IL-4']);
+  assert.deepEqual([...lineplan.linked], ['IL-1']);
+  assert.deepEqual(Object.fromEntries(lineplan.bindings), {
+    'IL-1': { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
+    'IL-5': { bomLineKey: 'IL-5', fabricPurpose: UNSET },
+    'IL-6': { bomLineKey: 'IL-6', fabricPurpose: UNSET },
+  });
   assert.ok(sameAliasSet(plan.rows, [...plan.rows].reverse()), 'alias sets compare without order');
   assert.ok(
     sameAliasSet(

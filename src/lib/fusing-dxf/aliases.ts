@@ -38,21 +38,40 @@ export function fusingScopeKey(row: { fabricPurpose?: string; bomLineKey?: strin
 }
 
 /**
- * The binding of one generated sheet: `soloPurpose` (the purpose when it owns this line alone) unless
- * an uploaded sheet already holds that purpose scope — then the line scope, which is the generated
- * sheet's alone, so its rows can never be confused with the owner's.
+ * Which interlining lines get a generated sheet, and under what binding.
+ *
+ * `effectiveScope` is the line's scope as today's BOM resolves it (its purpose, or the line itself);
+ * `uploadedScopes` the same resolution of every uploaded sheet. The server folds a line scope back
+ * into its purpose, so a generated sheet beside an uploaded one in the same effective scope would
+ * merge their links. Such a line is BLOCKED: nothing generated, the uploaded sheet wins.
+ * Otherwise the binding is the purpose when it owns this line alone (`soloPurpose`), else the line.
+ *
+ * Only a purpose-bound line is LINKED (gets block→piece rows). A line-bound sheet of a purpose with
+ * several lines is folded into that purpose by the server beside its siblings and any legacy rows,
+ * and its areas are refused as «bound inconsistently» anyway: its links are left untouched, as
+ * before the rebuild wrote any.
  */
-export function pickFusingBinding(
-  bomLineKey: string,
-  soloPurpose: string,
-  otherSheets: readonly { fabricPurpose?: string; bomLineKey?: string }[],
-): FusingBinding {
-  const purpose = { fabricPurpose: purposeOf(soloPurpose), bomLineKey };
-  if (purpose.fabricPurpose) {
-    const key = fusingScopeKey(purpose);
-    if (!otherSheets.some((sheet) => fusingScopeKey(sheet) === key)) return purpose;
+export function planFusingLines(input: {
+  lines: readonly { bomLineKey: string; effectiveScope: string; soloPurpose: string }[];
+  uploadedScopes: readonly string[];
+}): { bindings: Map<string, FusingBinding>; blocked: Set<string>; linked: Set<string> } {
+  const uploaded = new Set(input.uploadedScopes.map((key) => key.trim()).filter(Boolean));
+  const bindings = new Map<string, FusingBinding>();
+  const blocked = new Set<string>();
+  const linked = new Set<string>();
+  for (const line of input.lines) {
+    if (uploaded.has(line.effectiveScope.trim())) {
+      blocked.add(line.bomLineKey);
+      continue;
+    }
+    const purpose = purposeOf(line.soloPurpose);
+    if (purpose) linked.add(line.bomLineKey);
+    bindings.set(line.bomLineKey, {
+      fabricPurpose: purpose || UNSET,
+      bomLineKey: line.bomLineKey,
+    });
   }
-  return { fabricPurpose: UNSET, bomLineKey };
+  return { bindings, blocked, linked };
 }
 
 const rowKey = (row: FusingAliasRow) =>

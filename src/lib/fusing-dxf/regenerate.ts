@@ -24,6 +24,7 @@ import {
   defaultGrainLayer,
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
+import { scopeKeyOfBinding } from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { sha256Hex } from 'lib/features/sha256';
@@ -42,7 +43,7 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { nextFusingAliases, pickFusingBinding, sameAliasSet, type FusingBinding } from './aliases';
+import { nextFusingAliases, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -301,28 +302,6 @@ function sourcePieces(
   };
 }
 
-/**
- * The binding a generated sheet (and its alias rows) is written under: the line's purpose when that
- * purpose owns exactly ONE roll-goods line — the slot reads areas under the purpose, and a sheet
- * bound only to the line would be refused as «bound inconsistently» — else the line alone. Several
- * interlinings sharing a purpose stay line-bound: under the purpose they would collapse into one scope.
- * A purpose scope an uploaded sheet already holds is refused too (pickFusingBinding).
- */
-function bindingOfLine(
-  bomLineKey: string,
-  bom: readonly common_TechCardBomItem[],
-  otherSheets: readonly common_TechCardSizePattern[],
-): FusingBinding {
-  const scope = rollGoodsScopes(bom).find((candidate) =>
-    candidate.lines.some((line) => line.lineKey.trim() === bomLineKey),
-  );
-  return pickFusingBinding(
-    bomLineKey,
-    scope?.byPurpose && scope.lines.length === 1 ? scope.key : '',
-    otherSheets,
-  );
-}
-
 function bytesToBase64(bytes: Uint8Array): string {
   const chunk = 3 * 0x2000;
   let binary = '';
@@ -471,13 +450,38 @@ export async function regenerateFusingSheets(
   let uploaded = 0;
   let reused = 0;
   const uploadedSheets = oldPatterns.filter((pattern) => !isGenerated(pattern));
-  const bindings = new Map(
-    built.sheets.map((sheet) => [
-      sheet.bomLineKey,
-      bindingOfLine(sheet.bomLineKey, bom, uploadedSheets),
-    ]),
-  );
-  for (const sheet of built.sheets) {
+  const scopes = rollGoodsScopes(bom);
+  const { bindings, blocked, linked } = planFusingLines({
+    lines: lines.map((line) => {
+      const scope = scopes.find((candidate) =>
+        candidate.lines.some((l) => l.lineKey.trim() === line.bomLineKey),
+      );
+      return {
+        bomLineKey: line.bomLineKey,
+        effectiveScope: scope?.key ?? line.bomLineKey,
+        soloPurpose: scope?.byPurpose && scope.lines.length === 1 ? scope.key : '',
+      };
+    }),
+    uploadedScopes: uploadedSheets.map((sheet) =>
+      scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes),
+    ),
+  });
+  // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins. Nothing is
+  // generated, and a generated sheet it already has is kept exactly as it is (binding and links).
+  const keptBlocked: common_TechCardSizePattern[] = [];
+  for (const key of blocked) {
+    const old = oldByLine.get(key);
+    if (old) {
+      replacements.set(key, old);
+      keptBlocked.push(old);
+    }
+    if (old || built.sheets.some((sheet) => sheet.bomLineKey === key))
+      warnings.push(
+        `${lines.find((line) => line.bomLineKey === key)?.label ?? key}: an uploaded sheet holds this interlining, not generated`,
+      );
+  }
+  const activeSheets = built.sheets.filter((sheet) => !blocked.has(sheet.bomLineKey));
+  for (const sheet of activeSheets) {
     const binding = bindings.get(sheet.bomLineKey)!;
     const fabricPurpose = binding.fabricPurpose as common_TechCardBomPurpose;
     const bytes = new TextEncoder().encode(sheet.dxfText);
@@ -513,8 +517,8 @@ export async function regenerateFusingSheets(
       downloadUrl: undefined,
       lineKey: old?.lineKey?.trim() || ulid(),
       bomLineKey: binding.bomLineKey,
-      // Purpose only when it names this line alone (bindingOfLine): several interlinings under one
-      // purpose would collapse into one scope.
+      // Purpose only when it names this line alone (planFusingLines): several interlinings under
+      // one purpose would collapse into one scope.
       fabricPurpose,
       sha256: digest,
       history: undefined,
@@ -536,15 +540,31 @@ export async function regenerateFusingSheets(
   const oldAliases = card.pieceDxfAliases?.items ?? [];
   const aliasPlan = nextFusingAliases({
     current: oldAliases,
-    previousGenerated: oldGenerated,
-    otherSheets: uploadedSheets,
-    sheets: built.sheets.map((sheet) => ({
-      binding: bindings.get(sheet.bomLineKey)!,
-      links: sheet.aliases.flatMap((alias) => {
-        const pieceLineKey = pieceLineKeyByIdentity.get(normBlock(alias.identity).toLowerCase());
-        return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
-      }),
-    })),
+    // Ours to clean: the old sheet of a linked line, or one the rebuild bound to a purpose itself.
+    previousGenerated: oldGenerated.filter((pattern) => {
+      const key = pattern.bomLineKey?.trim() ?? '';
+      if (blocked.has(key)) return false;
+      const purpose = (pattern.fabricPurpose ?? '').trim();
+      return linked.has(key) || (!!purpose && purpose !== unsetPurpose);
+    }),
+    // A kept blocked sheet and an unlinked (line-bound) sheet occupy their scopes like uploaded
+    // ones: their links are not touched.
+    otherSheets: [
+      ...uploadedSheets,
+      ...keptBlocked,
+      ...activeSheets
+        .filter((sheet) => !linked.has(sheet.bomLineKey))
+        .map((sheet) => bindings.get(sheet.bomLineKey)!),
+    ],
+    sheets: activeSheets
+      .filter((sheet) => linked.has(sheet.bomLineKey))
+      .map((sheet) => ({
+        binding: bindings.get(sheet.bomLineKey)!,
+        links: sheet.aliases.flatMap((alias) => {
+          const pieceLineKey = pieceLineKeyByIdentity.get(normBlock(alias.identity).toLowerCase());
+          return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
+        }),
+      })),
   });
   for (const key of aliasPlan.shared)
     warnings.push(`piece links of scope ${key} left as they are: an uploaded sheet shares it`);
@@ -576,7 +596,7 @@ export async function regenerateFusingSheets(
     });
   }
   return {
-    generated: built.sheets.length,
+    generated: activeSheets.length,
     uploaded,
     reused,
     removed: oldGenerated.filter((pattern) => !replacements.has(pattern.bomLineKey?.trim() ?? ''))
