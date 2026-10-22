@@ -7,10 +7,12 @@ export {
   inheritedCut,
   isForeignPlan,
   markJumpParams,
+  planForeignChoice,
   remapIssueNumbers,
   reuploadSheet,
   seamAnchorKeys,
   sheetRowId,
+  uploadForeignSheet,
 } from 'components/managers/tech-card/components/nesting/dxf-reupload';
 export {
   DELETE_SNAPSHOT_REASON,
@@ -23,7 +25,9 @@ export {
   peekReuploadSnapshot,
   provideSheetRestorer,
   restoreSheetVersion,
+  swapSheetFile,
 } from 'components/managers/tech-card/components/nesting/reupload-session';
+export { applyDraft } from 'lib/pattern-import/fabrics/apply';
 export {
   clearReview,
   firstMarkedOperation,

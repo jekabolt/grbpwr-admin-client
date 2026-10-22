@@ -84,6 +84,8 @@ interface Props {
   onOpenAutoFocus?: (event: Event) => void;
   /** The cancel button disabled — for a dialog whose cancel is a second answer, not a way out. */
   cancelDisabled?: boolean;
+  /** Optional focus target for a guarded dialog whose safest answer must receive initial focus. */
+  cancelRef?: React.Ref<HTMLButtonElement>;
   /**
    * Rendered in the head strip right after the title (needs `title`). The place for the modal's
    * warnings: a `HeaderWarnings` with doors, never a paragraph in the body.
@@ -123,6 +125,7 @@ export function ConfirmationModal({
   onCloseAutoFocus,
   onOpenAutoFocus,
   cancelDisabled,
+  cancelRef,
   headerActions,
   hideCancel,
   fullScreen,
@@ -247,6 +250,7 @@ export function ConfirmationModal({
                 <>
                   {!hideCancel && (
                     <Button
+                      ref={cancelRef}
                       type='button'
                       onClick={handleCancel}
                       variant='secondary'

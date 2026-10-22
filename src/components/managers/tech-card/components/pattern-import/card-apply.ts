@@ -4,7 +4,7 @@
 import { adminService } from 'api/api';
 import { sha256Hex } from 'lib/features/sha256';
 import { applyDraft } from 'lib/pattern-import/fabrics/apply';
-import type { LiveCard } from 'lib/pattern-import/fabrics/apply';
+import type { ApplyDeps, LiveCard, ScopeOf } from 'lib/pattern-import/fabrics/apply';
 import { buildDraft } from 'lib/pattern-import/fabrics/draft';
 import { MAX_PATTERN_FILENAME, clampUtf8Bytes, patternUploadErrorMessage } from 'utils/pattern';
 import type { ApplyDraftFn, DraftBuilder } from './client';
@@ -33,8 +33,12 @@ export function createCardApply(deps: {
   read: () => LiveCard;
   write: (path: string, value: unknown) => void;
   storageSizeId: number;
+  /** The card scope of a live sheet / link — the key the draft's targets carry. */
+  scopeOf: ScopeOf;
   /** The card's autosave `flush` (the one save path the page has). */
   save?: (reason: string) => Promise<string>;
+  /** Sheets replaced in place, told after the form writes and before the save. */
+  onReplaced?: ApplyDeps['onReplaced'];
   /** Rows a try wrote whose save was not confirmed — held by the card across the wizard's tries. */
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
 }): ApplyDraftFn {
@@ -61,7 +65,9 @@ export function createCardApply(deps: {
         read: deps.read,
         write: deps.write,
         storageSizeId: deps.storageSizeId,
+        scopeOf: deps.scopeOf,
         save: deps.save,
+        onReplaced: deps.onReplaced,
         unsaved: deps.unsaved,
       },
       onProgress,

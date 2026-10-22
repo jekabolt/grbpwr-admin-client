@@ -64,6 +64,7 @@ import { Button, CalloutBox, CheckboxCommon, Chip, ChipRow, GroupLabel, Pill, Ro
 import { extractFieldViolations } from 'utils/field-errors';
 import {
   aliasInScope,
+  bindingScopes,
   fabricScopes,
   isRollGoodsSection,
   markerScopeDirection,
@@ -546,6 +547,7 @@ export function BatchMarkerQueue({
     // тем, какими они стали, пока качались файлы.
     const signature = prepSignature;
     const out: PlanScope[] = [];
+    const links = bindingScopes(scopeDefs, pieceDxfAliases);
     try {
       for (const scope of scopeDefs) {
         const sheets = sheetsByScope.get(scope.key) ?? [];
@@ -567,7 +569,7 @@ export function BatchMarkerQueue({
           failedSheets: [],
           // Алиасы ЭТОЙ ткани — тем же резолвером скоупа, каким их фильтрует панель выкроек: алиас,
           // записанный до разбора BOM, лежит на СТРОКЕ, а его ткань уже могла стать назначением.
-          aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scope)),
+          aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scope, links)),
           pieces: [],
           detectedUnit: 'mm',
           parseWarnings: [],

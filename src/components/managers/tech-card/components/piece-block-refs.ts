@@ -9,6 +9,7 @@
 import {
   fabricScopes,
   isRollGoodsSection,
+  bindingScopes,
   scopeKeyOfBinding,
   type FabricScope,
   type RollGoodsLine,
@@ -64,11 +65,12 @@ export function pieceBlockRefs(
   scopes: FabricScope<RollGoodsLine>[],
 ): Map<string, PieceBlockRef[]> {
   const m = new Map<string, PieceBlockRef[]>();
+  const links = bindingScopes(scopes, aliases);
   for (const a of aliases) {
     const key = pieceRefKey(a.pieceLineKey ?? '');
     const block = (a.blockName ?? '').trim();
     if (!key || !block) continue;
-    const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
+    const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, links);
     const list = m.get(key) ?? [];
     if (!list.some((r) => r.scopeKey === scopeKey && r.block === block)) {
       list.push({ scopeKey, block });

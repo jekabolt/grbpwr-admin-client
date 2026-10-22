@@ -1,6 +1,10 @@
 import { useFormContext, useWatch } from 'react-hook-form';
 import { FormLabel } from 'ui';
+import { sectionShort } from './bom-purpose-labels';
 import { TechCardFormData } from './schema';
+
+// Lives in the pure labels module so bom-purpose.ts stays free of UI imports.
+export { sectionShort } from './bom-purpose-labels';
 
 // Shared BOM-line chooser keyed by the stable line_key (§2.3). Operations, cut-piece fabric maps and
 // colourway recipes reference BOM lines through this, so adding/removing/reordering a BOM line never
@@ -11,19 +15,6 @@ import { TechCardFormData } from './schema';
 const cell =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-pageBg disabled:text-labelColor';
 
-const SECTION_SHORT: Record<string, string> = {
-  TECH_CARD_BOM_SECTION_FABRIC: 'fabric',
-  TECH_CARD_BOM_SECTION_LINING: 'lining',
-  TECH_CARD_BOM_SECTION_INTERLINING: 'interlining',
-  TECH_CARD_BOM_SECTION_INSULATION: 'insulation',
-  TECH_CARD_BOM_SECTION_HARDWARE: 'hardware',
-  TECH_CARD_BOM_SECTION_THREAD: 'thread',
-  TECH_CARD_BOM_SECTION_LABEL: 'label',
-  TECH_CARD_BOM_SECTION_PACKAGING: 'packaging',
-  TECH_CARD_BOM_SECTION_TRIM: 'trim',
-  TECH_CARD_BOM_SECTION_DECORATION: 'decoration',
-};
-
 type BomLineLite = {
   lineKey?: string;
   name?: string;
@@ -33,13 +24,6 @@ type BomLineLite = {
   id?: number;
 };
 
-// The one-word section name. `techCardBomSectionOptions` carries operator-facing labels with
-// parentheticals ("hardware (пуговицы / молнии / кнопки)") that don't fit a Pill, so the BOM tile
-// and the catalog plate badge read from here instead.
-export function sectionShort(section?: string): string {
-  if (!section) return '';
-  return SECTION_SHORT[section] ?? section.replace('TECH_CARD_BOM_SECTION_', '').toLowerCase();
-}
 function bomLineLabel(b: BomLineLite, i: number): string {
   const s = b.section ? ` · ${sectionShort(b.section)}` : '';
   // The supplier's article, when the line has one: two lines can share a role name ("подкладка")

@@ -32,7 +32,7 @@
 // шаг дотягивается сегодня. Расхождение с проходом невозможно сделать дефектом — они отвечают на
 // разные вопросы; общее у них только направление обхода.
 
-import { UNSET_PURPOSE, scopeKeyOfBinding } from './bom-purpose';
+import { UNSET_PURPOSE, bindingScopes, scopeKeyOfBinding } from './bom-purpose';
 // СКОУПЫ ТКАНЕЙ — ТОЙ ЖЕ СБОРКОЙ, ЧТО У ВКЛАДКИ ДЕТАЛЕЙ И РЕЦЕПТА. Фильтр «роллгудс и со
 // стабильным ключом» — часть контракта, а не подробность: пропусти его один читатель, и привязка
 // зарезолвится у него в скоуп, которого у соседа нет. `pieceRefKey` — вторая половина того же
@@ -423,7 +423,7 @@ function indexCard(card: InferenceCard): CardIndex {
     if (k) bomByKey.set(k, b);
   }
 
-  const scopes = rollGoodsScopes(card.bomLines);
+  const links = bindingScopes(rollGoodsScopes(card.bomLines), card.aliases);
 
   // Ключ — pieceRefKey, ПО КОНТРАКТУ СВЯЗОК: связка хранит ключ детали свёрнутым (trim + нижний
   // регистр), и сырое сравнение промахивалось мимо живого назначения — а промах открывал резервный
@@ -432,7 +432,7 @@ function indexCard(card: InferenceCard): CardIndex {
   for (const a of card.aliases) {
     const piece = pieceRefKey(a.pieceLineKey ?? '');
     if (!piece || !(a.blockName ?? '').trim()) continue;
-    const key = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
+    const key = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, links);
     if (!key || !key.startsWith('TECH_CARD_BOM_PURPOSE_') || key === UNSET_PURPOSE) continue;
     const already = purposeOfPiece.get(piece);
     // Деталь, нарисованная блоками из ДВУХ полос (верх и подклад одним именем), назначения не

@@ -250,8 +250,9 @@ export type PatternPickOptions = {
   // лист, привязанный к назначению «основной материал», обслуживает ВСЕ строки этого назначения и
   // никакого `bomLineKey` не несёт. Фильтр по одному `bomLineKey` такие листы теряет — и выдаёт
   // «выкройки не загружены» там, где они загружены. Резолвер обязан прийти от вызывающего: он
-  // строится из строк BOM карточки, которых у этого модуля нет.
-  purposeOwnsLine?: (fabricPurpose: string) => boolean;
+  // строится из строк BOM карточки, которых у этого модуля нет. Строка листа едет вторым
+  // аргументом: лист, НАЗВАВШИЙ строку интерлининга, принадлежит ей при любом назначении (L11).
+  purposeOwnsLine?: (fabricPurpose: string, bomLineKey: string) => boolean;
 };
 
 export function patternSourcesForMarker(
@@ -274,7 +275,7 @@ export function patternSourcesForMarker(
     const purpose = raw === 'TECH_CARD_BOM_PURPOSE_UNSET' ? '' : raw;
     const bound =
       purpose && opts.purposeOwnsLine
-        ? opts.purposeOwnsLine(purpose)
+        ? opts.purposeOwnsLine(purpose, (row.bomLineKey ?? '').trim())
         : !!key && (row.bomLineKey ?? '').trim() === key;
     if (!bound) continue;
     if (seen.has(url)) continue;

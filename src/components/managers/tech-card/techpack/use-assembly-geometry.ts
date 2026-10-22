@@ -5,7 +5,10 @@ import { useMemo } from 'react';
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
-import { scopeKeyOfBinding } from 'components/managers/tech-card/components/bom-purpose';
+import {
+  bindingScopes,
+  scopeKeyOfBinding,
+} from 'components/managers/tech-card/components/bom-purpose';
 import {
   findPiece,
   useDxfGeometry,
@@ -192,17 +195,16 @@ export type AssemblyGeometry = {
 export function useAssemblyGeometry(techCard: common_TechCard): AssemblyGeometry {
   const ins = techCard.techCard;
   const scopes = useMemo(() => rollGoodsScopes((ins?.bomItems ?? []) as never), [ins?.bomItems]);
-  const files = useMemo(
-    () =>
-      (ins?.patterns ?? [])
-        .filter((p) => p.url && isDxfUrl(p.url))
-        .map((p) => ({
-          scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
-          name: patternSheetName(p),
-          url: p.url ?? '',
-        })),
-    [ins?.patterns, scopes],
-  );
+  const files = useMemo(() => {
+    const sheets = bindingScopes(scopes, ins?.patterns ?? []);
+    return (ins?.patterns ?? [])
+      .filter((p) => p.url && isDxfUrl(p.url))
+      .map((p) => ({
+        scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheets),
+        name: patternSheetName(p),
+        url: p.url ?? '',
+      }));
+  }, [ins?.patterns, scopes]);
   const refs = useMemo(
     () => pieceBlockRefs((ins?.pieceDxfAliases?.items ?? []) as never, scopes),
     [ins?.pieceDxfAliases, scopes],

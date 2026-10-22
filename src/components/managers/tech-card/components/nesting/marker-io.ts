@@ -41,6 +41,8 @@ export type MarkerBomLine = {
   // показывала направление, посчитанное ОДИН РАЗ на старте по группе DXF, — тогда как сохранить
   // оператор может на любую тканевую строку карточки, и скоуп у неё другой.
   purpose?: string;
+  // BOM section (L11): an interlining line is its own direction scope, never its purpose group's.
+  section: string | undefined;
   fabricDirection?: string;
   isSample?: boolean;
   // Толщина слоя артикула этой строки, мм (Material.fabricThicknessMm) — для настила под

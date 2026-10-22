@@ -48,6 +48,31 @@ export function armReuploadSnapshot(
 }
 
 /**
+ * Swap the file of sheet row `at` in place (set units, a legacy PDF row → DXF): the new file's
+ * url/filename/size/digest, version 0 ("assign one"), and the snapshot reason armed for the save
+ * whose payload carries the new url — the replaced file is archived with a restorable card snapshot.
+ */
+export function swapSheetFile(
+  cardId: number | undefined,
+  set: (path: string, value: unknown) => void,
+  at: number,
+  replacedUrl: string | undefined,
+  up: { url: string; filename: string; sizeBytes: number; sha256?: string },
+  extra: Record<string, unknown> = {},
+): void {
+  set(`patterns.${at}.url`, up.url);
+  set(`patterns.${at}.filename`, up.filename);
+  set(`patterns.${at}.sizeBytes`, up.sizeBytes);
+  // The new file's digest, never the old one's (0423).
+  set(`patterns.${at}.sha256`, up.sha256 ?? '');
+  for (const [k, v] of Object.entries(extra)) set(`patterns.${at}.${k}`, v);
+  // 0 = "assign one": the server numbers a url it has not seen on this card.
+  set(`patterns.${at}.version`, 0);
+  set(`patterns.${at}.uploadedAt`, '');
+  armReuploadSnapshot(cardId, up.url, replacedUrl);
+}
+
+/**
  * Лист `removedUrl` удалён из формы карточки `cardId`. Перезалив этой строки, взведённый до сейва,
  * поглощается: его url в форме больше нет.
  */

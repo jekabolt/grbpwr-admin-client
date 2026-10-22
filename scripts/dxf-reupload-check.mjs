@@ -243,11 +243,27 @@ async function main() {
     const store = new Map([[BASE_URL, B.base], ...(opts.store ?? [])]);
     const log = freshLog();
     const c = opts.card ?? card;
-    const out = await M.reuploadSheet(
-      formCard(c, opts.patterns ?? [sheetRow(opts.sha ?? '')], opts.extra),
-      file,
-      makeDeps(M, store, log, opts.faults),
-    );
+    const patterns = opts.patterns ?? [sheetRow(opts.sha ?? '')];
+    const input = formCard(c, patterns, opts.extra);
+    input.planDelete = (rowId, knownBlocks) => {
+      const plan = M.planSheetDelete(
+        {
+          patterns,
+          pieces: input.pieces,
+          aliases: input.aliases,
+          operations: input.operations,
+          issues: input.issues,
+          seams: input.seams,
+          scopeOf: input.scopeOf,
+          isDxf: (u) => input.isDxf(u ?? ''),
+          sizeTokens: input.sizeTokens,
+          blockNamesOf: (url) => knownBlocks.get(url) ?? null,
+        },
+        rowId,
+      );
+      return plan.kind === 'cascade' ? plan : null;
+    };
+    const out = await M.reuploadSheet(input, file, makeDeps(M, store, log, opts.faults));
     return { out, log, store };
   };
 
@@ -592,7 +608,7 @@ async function main() {
       );
   }
 
-  // ── чужой файл: признак плана 'foreign' (L5a) → лист ДОПОЛНИТЕЛЬНЫЙ, карточка не меняется ────
+  // ── чужой файл: до ответа нет загрузки/мутации; replace = каскад + та же строка + first path ─
   {
     const tag = 'foreign';
     is(
@@ -607,10 +623,73 @@ async function main() {
       [true, true, true, false, false],
       'признак читается структурно',
     );
-    const { out, log } = await run({ name: 'g-other.dxf', bytes: B.gOther });
+    const before = {
+      patterns: [sheetRow()],
+      pieces: card.pieces,
+      aliases: card.aliases,
+      operations: card.operations,
+    };
+    const { out, log, store } = await run(
+      { name: 'g-other.dxf', bytes: B.gOther },
+      {
+        patterns: before.patterns,
+        extra: {
+          seams: [
+            {
+              seamKey: 's-old',
+              sideA: { parts: [{ pieceLineKey: K('BP') }] },
+              sideB: { parts: [{ pieceLineKey: K('FP_R') }] },
+            },
+          ],
+        },
+      },
+    );
     if (out.kind === 'foreign') {
-      is(tag, [out.rowIndex, log.uploads.length], [0, 1], 'загружен один файл, размер от строки 0');
-      is(tag, out.row.filename, 'g-other.dxf', 'это сам файл');
+      is(
+        tag,
+        [out.rowIndex, out.pieceCount, out.loss, log.uploads.length],
+        [0, 4, { pieces: 9, steps: 9, seams: 1 }, 0],
+        'исход несёт новые детали и точные потери, файл ещё не загружен',
+      );
+      is(
+        tag,
+        [before.patterns[0].url, before.pieces.length, before.operations.length],
+        [BASE_URL, card.pieces.length, card.operations.length],
+        'до выбора строка, детали и шаги не менялись',
+      );
+
+      const upload = makeDeps(M, store, log).upload;
+      const row = await M.uploadForeignSheet(out, upload);
+      const replace = M.planForeignChoice(out, 'replace', row);
+      if (replace.kind === 'replace') {
+        const patterns = before.patterns.map((r, i) =>
+          i === replace.rowIndex ? { ...r, ...replace.row } : r,
+        );
+        const first = M.cardFromSheet(replace.parsed, { scope: MAIN, sizeTokens: SIZES });
+        const nextPieces = [...replace.pieces, ...first.pieces];
+        is(
+          tag,
+          [
+            patterns[0].lineKey,
+            patterns[0].version,
+            patterns[0].url === BASE_URL,
+            replace.removedSeamIds,
+          ],
+          ['sheet-main', 0, false, ['s-old']],
+          'replace держит id строки, пишет version 0, новый url и снимает старый шов',
+        );
+        yes(
+          tag,
+          card.pieces.every((p) => !replace.pieces.some((n) => n.lineKey === p.lineKey)),
+          'старые детали ушли каскадом',
+        );
+        is(
+          tag,
+          nextPieces.slice(replace.pieces.length).map((p) => p.name),
+          ['PCK_L_#_UNI_1_M', 'PCK_L_#_UNI_2_M', 'PCK_L_UNI_1_M', 'PCK_L_UNI_M'],
+          'новые детали входят через данные первой заливки',
+        );
+      } else yes(tag, false, `replace: исход ${replace.kind}`);
     } else {
       // До L5a сверка «другой файл» только выключает матч по форме — исход ещё не 'foreign'.
       console.log(`  · g-other: ${out.kind} (foreign arrives with L5a)`);
@@ -915,6 +994,88 @@ async function main() {
       [early, stale, first?.reason, second?.reason, M.peekReuploadSnapshot(69, [u1, u2])],
       [null, null, M.REUPLOAD_SNAPSHOT_REASON, 'dxf-reupload', null],
       'сейв без нового листа не берёт причину; сейв 1 не снимает причину сейва 2',
+    );
+  }
+
+  // ── L13: замена файла на месте (set units, PDF → DXF, импорт) взводит причину снимка ─────────
+  {
+    const tag = 'swap-arms';
+    // set units / plain swap: строка та же, файл новый — сейв с новым url несёт причину
+    const form = {};
+    const OLD = 'mem://v4/unitless.dxf';
+    const NEW = 'mem://v5/unitless-mm.dxf';
+    const early = M.peekReuploadSnapshot(71, [OLD]);
+    M.swapSheetFile(71, (p, v) => (form[p] = v), 0, OLD, {
+      url: NEW,
+      filename: 'unitless.dxf',
+      sizeBytes: 29,
+      sha256: 'ab',
+    });
+    const stale = M.peekReuploadSnapshot(71, [OLD]);
+    const taken = M.peekReuploadSnapshot(71, [NEW]);
+    M.consumeReuploadSnapshot(71, taken);
+    is(
+      tag,
+      [
+        early,
+        stale,
+        taken?.reason,
+        form['patterns.0.url'],
+        form['patterns.0.version'],
+        form['patterns.0.sha256'],
+        M.peekReuploadSnapshot(71, [NEW]),
+      ],
+      [null, null, M.REUPLOAD_SNAPSHOT_REASON, NEW, 0, 'ab', null],
+      'set units: сейв с новым url несёт dxf-reupload, старый пейлоад — нет',
+    );
+
+    // импорт: строка заменена на месте (новое имя файла — иначе «уже на карточке»), причина взведена
+    // ДО сейва импорта
+    const live = {
+      patterns: [
+        { sizeId: 1, lineKey: 'line-a', url: OLD, filename: 'a.dxf', ...MAIN, version: 4 },
+      ],
+      pieces: [],
+      aliases: [],
+    };
+    const writes = {};
+    let atSave = 'not saved';
+    const res = await M.applyDraft(
+      {
+        scopes: [
+          {
+            target: { scopeKey: SCOPE_KEY, label: 'main', ...MAIN },
+            replaces: { lineKey: 'line-a' },
+            sheetMode: 'replace',
+            filename: 'a-v5.dxf',
+            dxfText: '0\nEOF\n',
+            name: 'a',
+          },
+        ],
+        aliases: [],
+        pieces: [],
+      },
+      {
+        upload: async () => ({ url: NEW, filename: 'a-v5.dxf', sizeBytes: 6, sha256: 'cd' }),
+        read: () => live,
+        write: (p, v) => (writes[p] = v),
+        storageSizeId: 1,
+        scopeOf: () => SCOPE_KEY,
+        onReplaced: (list) => list.forEach((r) => M.armReuploadSnapshot(71, r.newUrl, r.oldUrl)),
+        save: async () => {
+          atSave = M.peekReuploadSnapshot(
+            71,
+            (writes.patterns ?? live.patterns).map((p) => p.url),
+          )?.reason;
+          return 'ok';
+        },
+      },
+    );
+    is(
+      tag,
+      [res.ok, res.replaced?.length, atSave],
+      [true, 1, M.REUPLOAD_SNAPSHOT_REASON],
+      'импорт: сейв с заменённой строкой несёт dxf-reupload',
     );
   }
 

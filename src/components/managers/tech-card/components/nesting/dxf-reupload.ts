@@ -8,7 +8,9 @@
 // листа сохраняет свой size_id. Просмотр деталей после замены не открывается.
 //
 // Отказ — старый лист остаётся как был. Загрузка файла — только после удачного плана, так что отказ
-// не оставляет на сервере ничьих файлов. Тот же sha256, что у заменяемого листа, — ничего не делать.
+// не оставляет на сервере ничьих файлов. Чужой файл тоже возвращается ДО загрузки: приложение
+// сначала спрашивает, заменить лист или добавить ещё один. Тот же sha256, что у заменяемого
+// листа, — ничего не делать.
 //
 // Чистый модуль: ни React, ни формы, ни сети — всё приходит зависимостями, поэтому весь путь
 // гоняется в node (scripts/dxf-reupload-check.mjs) на тех же функциях, что и в браузере.
@@ -37,6 +39,7 @@ import {
   writeInsunits,
 } from 'lib/nesting/dxf/insunits';
 import type { TechCardSeamWire } from 'lib/seams';
+import { splitBlockSize } from './block-code';
 
 /** Причина снимка карточки при первом сохранении после перезалива (UpdateTechCardRequest). */
 export const REUPLOAD_SNAPSHOT_REASON = 'dxf-reupload';
@@ -99,8 +102,11 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
   scopeKey: string;
   /** привязка слота (bindingForScope) — её получают новые алиасы */
   scope: ReconcileScope;
-  /** разрешённый слот привязки по сегодняшнему BOM (scopeKeyOfBinding); '' — ни к чему живому */
-  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }) => string;
+  /**
+   * разрешённый слот привязки по сегодняшнему BOM (scopeKeyOfBinding над набором своего вида —
+   * листы или связи); '' — ни к чему живому
+   */
+  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') => string;
   isDxf: (url: string) => boolean;
   sizeTokens: readonly string[];
   /** ссылки на деталь вне шагов (рецепт, площади, материалы детали, швы): деталь станет призраком */
@@ -118,6 +124,15 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
    * сверка перемеряет швы перекроенной детали (L5a п.1). Необязательно.
    */
   seams?: readonly TechCardSeamWire[];
+  /**
+   * Тот же planSheetDelete, которым форма удаляет строку. На чужом файле план снимается сейчас,
+   * пока карточка совпадает со входом сверки, и едет в исходе как точные потери + готовый каскад.
+   * knownBlocks — уже разобранные этим прогоном листы слота; форма подмешивает их к общему pack.
+   */
+  planDelete: (
+    rowId: string,
+    knownBlocks: ReadonlyMap<string, readonly string[]>,
+  ) => ReuploadDeletePlan<P, A, O> | null;
 };
 
 /** Идентичность строки листа: lineKey, у строк без него — url. */
@@ -127,6 +142,42 @@ export const sheetRowId = (r: ReuploadSheetRow) => (r.lineKey ?? '').trim() || (
 export type SheetPatch = UploadedSheet & { version: 0; uploadedAt: '' };
 
 export type ReuploadRefusal = 'file' | 'download' | 'parse' | 'sweep' | 'upload' | 'target';
+
+/** Каскад целевого листа, снятый тем же planSheetDelete, что использует × в строке файла. */
+export type ReuploadDeletePlan<
+  P extends CardPiece,
+  A extends CardAlias,
+  O extends CardOperation,
+> = {
+  rowIndex: number;
+  rowUrl: string;
+  pieces: P[];
+  aliases: A[];
+  operations: O[];
+  issueNumbers: number[];
+  removedSeamIds: string[];
+  counts: { pieces: number; steps: number };
+};
+
+export type ForeignReuploadOutcome<
+  P extends CardPiece,
+  A extends CardAlias,
+  O extends CardOperation,
+> = {
+  kind: 'foreign';
+  rowIndex: number;
+  replacedUrl: string;
+  rowId: string;
+  replacedName: string;
+  /** Файл с унаследованными единицами; его ещё нет на сервере. */
+  file: ReuploadFile;
+  sha256: string;
+  /** Разбор только нового файла, для подписи и первой заливки после подтверждения. */
+  parsed: ParsedSheetLite;
+  pieceCount: number;
+  loss: { pieces: number; steps: number; seams: number };
+  deletion: ReuploadDeletePlan<P, A, O>;
+};
 
 export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends CardOperation> =
   /** в слоте нет DXF — сегодняшний путь первой заливки (занятый слот сюда не попадает никогда) */
@@ -151,11 +202,71 @@ export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends 
       plan: ReconcilePlan;
       result: ApplyResult<P, A, O>;
     }
-  /**
-   * чужой файл (план `refused: 'foreign'`, L5a п.5): карточка не меняется, файл загружен и ложится
-   * ДОПОЛНИТЕЛЬНЫМ листом слота; `rowIndex` — строка, от которой он берёт размер.
-   */
-  | { kind: 'foreign'; rowIndex: number; row: UploadedSheet };
+  /** чужой файл: разобран, но не загружен и ничего на карточке ещё не изменил. */
+  | ForeignReuploadOutcome<P, A, O>;
+
+export type ForeignChoice = 'add' | 'replace';
+
+export type ForeignChoicePlan<P extends CardPiece, A extends CardAlias, O extends CardOperation> =
+  | { kind: 'add'; row: SheetPatch }
+  | {
+      kind: 'replace';
+      rowIndex: number;
+      replacedUrl: string;
+      rowId: string;
+      row: SheetPatch;
+      pieces: P[];
+      aliases: A[];
+      operations: O[];
+      issueNumbers: number[];
+      removedSeamIds: string[];
+      /** Новый лист отдаётся существующему пути первой заливки (pieces viewer). */
+      parsed: ParsedSheetLite;
+    };
+
+/** Загрузка отложенного чужого файла. До этого вызова на сервере и в форме ничего нового нет. */
+export async function uploadForeignSheet<
+  P extends CardPiece,
+  A extends CardAlias,
+  O extends CardOperation,
+>(
+  out: ForeignReuploadOutcome<P, A, O>,
+  upload: ReuploadDeps<P, A, O>['upload'],
+): Promise<SheetPatch> {
+  const row = await upload(out.file);
+  return {
+    ...row,
+    sha256: lower(row.sha256) || out.sha256,
+    version: 0,
+    uploadedAt: '',
+  };
+}
+
+/** Чистый план выбора: строка добавляется либо меняется на месте; применение остаётся за формой. */
+export function planForeignChoice<
+  P extends CardPiece,
+  A extends CardAlias,
+  O extends CardOperation,
+>(
+  out: ForeignReuploadOutcome<P, A, O>,
+  choice: ForeignChoice,
+  row: SheetPatch,
+): ForeignChoicePlan<P, A, O> {
+  if (choice === 'add') return { kind: 'add', row };
+  return {
+    kind: 'replace',
+    rowIndex: out.rowIndex,
+    replacedUrl: out.replacedUrl,
+    rowId: out.rowId,
+    row,
+    pieces: out.deletion.pieces,
+    aliases: out.deletion.aliases,
+    operations: out.deletion.operations,
+    issueNumbers: out.deletion.issueNumbers,
+    removedSeamIds: out.deletion.removedSeamIds,
+    parsed: out.parsed,
+  };
+}
 
 /**
  * План «чужой файл». До L5a в типах плана этого нет — признак читается структурно: строка
@@ -260,7 +371,7 @@ export async function reuploadSheet<
   deps: ReuploadDeps<P, A, O>,
 ): Promise<ReuploadOutcome<P, A, O>> {
   const rows = card.patterns.flatMap((r, i) =>
-    r.url && card.isDxf(r.url) && card.scopeOf(r) === card.scopeKey ? [{ r, i }] : [],
+    r.url && card.isDxf(r.url) && card.scopeOf(r, 'sheet') === card.scopeKey ? [{ r, i }] : [],
   );
   if (rows.length === 0) return { kind: 'first' };
   // Явная строка: только она. Её нет среди листов слота — отказ, не первая заливка.
@@ -314,27 +425,64 @@ export async function reuploadSheet<
   const sha = bytes === file.bytes ? rawSha : lower(await deps.sha256(bytes));
   if (sha && sha === oldShas[t]) return { kind: 'noop', rowIndex: rows[t].i };
 
-  const foreign = async (): Promise<ReuploadOutcome<P, A, O>> => {
-    try {
-      return {
-        kind: 'foreign',
-        rowIndex: rows[t].i,
-        row: await deps.upload({ name: file.name, bytes }),
-      };
-    } catch (e) {
-      return { kind: 'refused', why: 'upload', detail: e instanceof Error ? e.message : String(e) };
+  // Нетронутый сосед может нести те же блоки: решаем «замена или чужой» только по двум файлам.
+  // Для одного листа старый разбор уже ровно целевой; новый разбирается здесь один раз и ниже
+  // переиспользуется как общий разбор слота.
+  const [targetOld, targetNew] = await Promise.all([
+    rows.length === 1 ? Promise.resolve(oldParse) : deps.parse([oldFiles[t]]),
+    deps.parse([{ name: file.name, bytes }]),
+  ]);
+  if (targetOld.failedFiles > 0) return { kind: 'refused', why: 'parse', detail: 'old sheet' };
+  if (targetNew.failedFiles > 0 || targetNew.pieces.length === 0)
+    return { kind: 'refused', why: 'parse', detail: 'new file' };
+
+  const foreign = (): ReuploadOutcome<P, A, O> => {
+    const knownBlocks = new Map<string, readonly string[]>();
+    for (let k = 0; k < rows.length; k++) {
+      const names =
+        k === t
+          ? [...targetOld.blockNames]
+          : [
+              ...new Set(
+                oldParse.pieces
+                  .filter((p) => (p.fileIndex ?? -1) === k)
+                  .map((p) => (p.blockName ?? '').trim())
+                  .filter(Boolean),
+              ),
+            ];
+      knownBlocks.set(rows[k].r.url!, names);
     }
+    const rowId = sheetRowId(rows[t].r);
+    const deletion = card.planDelete(rowId, knownBlocks);
+    if (!deletion || deletion.rowUrl !== rows[t].r.url)
+      return { kind: 'refused', why: 'sweep', detail: 'delete plan' };
+    const sizeTokens = new Set(card.sizeTokens);
+    return {
+      kind: 'foreign',
+      rowIndex: rows[t].i,
+      replacedUrl: rows[t].r.url!,
+      rowId,
+      replacedName: sheetName(rows[t].r, t),
+      file: { name: file.name, bytes },
+      sha256: sha,
+      parsed: { pieces: targetNew.pieces, blockNames: targetNew.blockNames },
+      // The parser emits every size and contour separately. The panel counts sizeless identities,
+      // which is what the operator calls pieces (and what the existing slot thumbnail counts).
+      pieceCount: new Set(
+        targetNew.blockNames
+          .map((name) => lower(splitBlockSize(name, sizeTokens).identity))
+          .filter(Boolean),
+      ).size,
+      loss: {
+        pieces: deletion.counts.pieces,
+        steps: deletion.counts.steps,
+        seams: deletion.removedSeamIds.length,
+      },
+      deletion,
+    };
   };
 
   if (rows.length > 1) {
-    // Нетронутый сосед может нести те же блоки: решаем «замена или чужой» только по двум файлам.
-    const [targetOld, targetNew] = await Promise.all([
-      deps.parse([oldFiles[t]]),
-      deps.parse([{ name: file.name, bytes }]),
-    ]);
-    if (targetOld.failedFiles > 0) return { kind: 'refused', why: 'parse', detail: 'old sheet' };
-    if (targetNew.failedFiles > 0 || targetNew.pieces.length === 0)
-      return { kind: 'refused', why: 'parse', detail: 'new file' };
     const targetPlan = reconcile({
       scope: card.scope,
       pieces: card.pieces,
@@ -344,7 +492,7 @@ export async function reuploadSheet<
       newSheet: { parse: targetNew, sha256: sha },
       sizeTokens: card.sizeTokens,
       externalRefs: card.externalRefs,
-      aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+      aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
       targetFileIndex: 0,
       ...(card.seams ? { seams: card.seams } : {}),
     });
@@ -352,7 +500,7 @@ export async function reuploadSheet<
   }
 
   const newFiles = oldFiles.map((f, k) => (k === t ? { name: file.name, bytes } : f));
-  const newParse = await deps.parse(newFiles);
+  const newParse = rows.length === 1 ? targetNew : await deps.parse(newFiles);
   if (newParse.failedFiles > 0 || newParse.pieces.length === 0)
     return { kind: 'refused', why: 'parse', detail: 'new file' };
 
@@ -381,7 +529,7 @@ export async function reuploadSheet<
     sizeTokens: card.sizeTokens,
     externalRefs: card.externalRefs,
     otherSheets,
-    aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+    aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
     // Несколько листов в слоте: «чужой файл» решается по заменяемому листу, не по всему слоту.
     ...(rows.length > 1 ? { targetFileIndex: t } : {}),
     ...(card.seams ? { seams: card.seams } : {}),
