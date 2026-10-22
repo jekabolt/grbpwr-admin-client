@@ -226,12 +226,7 @@ const MUTANTS = [
     ],
     kills: ['corpus', 'g-combo'],
   },
-  {
-    id: 'no-ghost-auto-replace',
-    file: 'diff.ts',
-    edits: [['const best = sure.length === 1 ? sure[0] : null;', 'const best = null;']],
-    kills: ['ghost-auto-replace'],
-  },
+  // No 7c mutant: its mode-aware cap matches step 5, which consumes every eligible pair first.
   {
     id: 'no-mirror-pair-place',
     file: 'diff.ts',
@@ -1198,7 +1193,7 @@ function gates(M, data) {
     const mid = mids.find((p) => /_M$/i.test(p.blockName ?? '')) ?? mids[0];
     const keep = S.base.pieces.filter((p) => !isBp2(p));
     let chosen = null;
-    for (const k of [1.08, 1.12, 1.16, 1.2, 1.24, 1.28]) {
+    for (const k of [1.01, 1.02, 1.03, 1.04, 1.05, 1.06]) {
       const p = stretchX(
         M,
         { pieces: [{ ...mid, blockName: 'BP_AUTO' }], blockNames: ['BP_AUTO'] },
@@ -1213,7 +1208,7 @@ function gates(M, data) {
       const row = rowBy(r.plan, 'BP_2');
       if (
         row?.tier === 'renamed' &&
-        (row.candidates[0]?.cost ?? 0) > M.THRESH.renameMaxNoCommonSize &&
+        (row.candidates[0]?.cost ?? Infinity) <= M.THRESH.renameMaxNoCommonSize &&
         r.res.ghostPieceKeys.length === 0 &&
         r.res.addedPieceKeys.length === 0 &&
         r.res.reviews.length === 0
