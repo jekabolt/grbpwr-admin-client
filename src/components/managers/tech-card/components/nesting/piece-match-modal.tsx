@@ -90,6 +90,7 @@ import { createZoneBus, isDrawnZone } from './fuse-zone';
 import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
   blankFuse,
+  fuseLineOf,
   readFuseSpec,
   writeFuseFields,
   type PieceFuseFields,
@@ -174,7 +175,7 @@ type BlockRow = {
   basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'same-name-elsewhere' | 'none';
   // Слот, с которого пришла подсказка 'other-fabric'. '' для остальных оснований.
   fromSlot?: string;
-  choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
+  choice: string; // piece lineKey, '' = unresolved, SKIP = explicit skip, NEW = create a piece
   // ИМЯ ДЕТАЛИ КАРТОЧКИ ИЗ МАНИФЕСТА КОНВЕРТАЦИИ (F6b). У пары — без руки: FP_L и FP_R предлагают
   // одно имя «FP», и вторая строка по общему правилу привязывается к детали, которую заводит первая —
   // одна деталь, ×2 по perGarmentFromBlocks. Нет ключа — манифеста нет, имя по умолчанию прежнее.
@@ -213,6 +214,12 @@ const defaultPieceName = (row: { block: string; uniBase: string; manifestName?: 
 // (It used to be a string containing a raw NUL byte — invisible in every editor, and enough to
 // make grep treat this whole file as binary.)
 const CREATE = '+create';
+const SKIP = '+skip';
+
+function interliningInitialChoice(pieceLineKey: string | undefined, wasSkipped: boolean): string {
+  if (wasSkipped) return SKIP;
+  return pieceLineKey?.trim() ?? '';
+}
 
 // tech_card_piece.name is VARCHAR(255) and the server counts UTF-8 BYTES (Go len()), so a
 // 255-character Cyrillic name is twice over the limit and would fail the whole card save.
@@ -581,7 +588,7 @@ function plannedScopeBinding(
   const createdNames = new Set<string>();
   let reused = 0;
   for (const r of rows) {
-    if (!r.choice) continue;
+    if (!r.choice || r.choice === SKIP) continue;
     const ci = r.block.toLowerCase();
     if (r.choice !== CREATE) {
       bound.set(ci, r.choice);
@@ -1229,13 +1236,13 @@ export function PieceMatchModal({
           const wasSkipped = interlining.skippedIdentityKeys.has(
             interliningIdentityKey(match.identity),
           );
-          const pieceLineKey = wasSkipped ? '' : (match.pieceLineKey ?? '').trim();
+          const pieceLineKey = (match.pieceLineKey ?? '').trim();
           return [
             {
               ...counted,
               suggested: pieceLineKey,
               basis: pieceLineKey ? ('exact' as const) : ('none' as const),
-              choice: pieceLineKey,
+              choice: interliningInitialChoice(pieceLineKey, wasSkipped),
             },
           ];
         }),
@@ -1379,7 +1386,9 @@ export function PieceMatchModal({
     // запишет алиас на деталь, которой в `pieces` уже нет, а сервер ответит not_found и откажет
     // в сохранении ВСЕЙ карты.
     const staged = new Set(
-      rows.filter((r) => r.choice && r.choice !== CREATE).map((r) => r.choice.toLowerCase()),
+      rows
+        .filter((r) => r.choice && r.choice !== CREATE && r.choice !== SKIP)
+        .map((r) => r.choice.toLowerCase()),
     );
     const out: DeleteCandidate[] = [];
     for (const p of pieceOptions) {
@@ -1648,7 +1657,8 @@ export function PieceMatchModal({
     if (stored && !off) return { kind: 'existing', key: stored, stored: true };
     const row = rowByCi.get(ci);
     if (row?.choice === CREATE) return { kind: 'new', row };
-    if (row?.choice) return { kind: 'existing', key: row.choice, stored: false };
+    if (row?.choice && row.choice !== SKIP)
+      return { kind: 'existing', key: row.choice, stored: false };
     return { kind: 'none', stored: !!stored };
   };
   const newNameOf = (row: BlockRow): string =>
@@ -1944,7 +1954,7 @@ export function PieceMatchModal({
         // под «B1|bp_1_xs» и переживал сохранение — кнопка отчитывалась об удалении, которого
         // не было. Хуже того, следующее сопоставление того же блока добавляло ВТОРОЙ алиас на
         // ту же физическую деталь, невидимый и неудаляемый ничем, кроме удаления самой детали.
-        const ident = identityOf(a.blockName ?? '');
+        const ident = aliasIdentity(a.blockName ?? '', split);
         byKey.set(aliasKey(aliasScopeKey(a), ident), {
           bomLineKey: a.bomLineKey ?? '',
           fabricPurpose: a.fabricPurpose ?? '',
@@ -1979,7 +1989,7 @@ export function PieceMatchModal({
       // ПОЛНОМ наборе — см. perGarmentFromBlocks и находку 4.
       const createdBlocks = new Map<string, { identity: string; instances: number }[]>();
       for (const r of rows) {
-        if (!r.choice) continue;
+        if (!r.choice || r.choice === SKIP) continue;
         let pieceLineKey = r.choice;
         if (r.choice === CREATE) {
           const typed = (draftNames[r.block.toLowerCase()] ?? '').trim();
@@ -2038,6 +2048,25 @@ export function PieceMatchModal({
           pieceLineKey,
         });
       }
+      const interliningLineKeys = nextBom
+        .filter((item) => item.section === INTERLINING_SECTION && item.lineKey?.trim())
+        .map((item) => item.lineKey!.trim());
+      // A mapped piece can explicitly leave this owner drawing by choosing «no» or another
+      // interlining slot. Remove every current-file alias to that piece before fuse fields are
+      // written, so the generic editor write below is not suppressed by a mapping that just left.
+      if (interlining) {
+        for (const [ci, pieceLineKey] of [...boundHere]) {
+          if (!blockCounts.has(ci)) continue;
+          const edited = committedPieceEdits[pieceLineKey.trim().toLowerCase()]?.fuse;
+          if (
+            !edited ||
+            (edited.mode && fuseLineOf(edited, interliningLineKeys) === interlining.slotLineKey)
+          )
+            continue;
+          boundHere.delete(ci);
+          byKey.delete(aliasKey(scope.key, ci));
+        }
+      }
       // ЧИСЛО НА ИЗДЕЛИЕ У ЗАВОДИМЫХ ДЕТАЛЕЙ — на полном наборе их блоков и ТЕМ ЖЕ правилом, что
       // и пересчёт ниже (находка 4). Две РАЗЛИЧНЫЕ детали чертежа под одним именем («PLANKA_L» и
       // «PLANKA_R») дают ×2, две копии ОДНОЙ (`PCK_L_UNI_M` и `PCK_L_UNI_S` из склеенных
@@ -2086,12 +2115,27 @@ export function PieceMatchModal({
       }
       // An owner interlining drawing does not create or recount cut pieces. Mapping a contour is
       // the one explicit act that binds its existing garment piece to this slot. Keep an authored
-      // strip/zone/full spec only when it already belongs to this slot; every other mapping is a
-      // deliberate rebind and starts as full fusing.
+      // strip/zone/full spec when it already belongs here; only a mapping made or changed in this
+      // session is force-rebound to full fusing.
+      const sessionMappedBlockKeys = new Set(
+        rows
+          .filter((row) => row.choice && row.choice !== SKIP)
+          .map((row) => row.block.toLowerCase()),
+      );
+      for (const [ci, pieceLineKey] of Object.entries(collapseChoice)) {
+        if (pieceLineKey) sessionMappedBlockKeys.add(ci);
+      }
+      const currentFileBindings = interlining
+        ? [...boundHere].filter(([ci]) => blockCounts.has(ci))
+        : [];
       const interliningMappedPieceKeys = new Set(
-        interlining
-          ? [...boundHere.values()].map((lineKey) => lineKey.trim().toLowerCase()).filter(Boolean)
-          : [],
+        currentFileBindings.map(([, lineKey]) => lineKey.trim().toLowerCase()).filter(Boolean),
+      );
+      const reboundPieceKeys = new Set(
+        currentFileBindings
+          .filter(([ci]) => sessionMappedBlockKeys.has(ci))
+          .map(([, lineKey]) => lineKey.trim().toLowerCase())
+          .filter(Boolean),
       );
       if (interlining) {
         live.forEach((piece, index) => {
@@ -2099,11 +2143,14 @@ export function PieceMatchModal({
           if (!interliningMappedPieceKeys.has(pieceKey)) return;
           const current = readFuseSpec(storedFuseOf(piece));
           const edited = committedPieceEdits[pieceKey]?.fuse;
-          const desired = edited?.mode
-            ? { ...edited, bomLineKey: interlining.slotLineKey }
-            : current.mode && current.bomLineKey === interlining.slotLineKey
+          const desired = edited
+            ? edited
+            : current.mode && fuseLineOf(current, interliningLineKeys) === interlining.slotLineKey
               ? current
-              : { ...blankFuse('whole'), bomLineKey: interlining.slotLineKey };
+              : reboundPieceKeys.has(pieceKey)
+                ? { ...blankFuse('whole'), bomLineKey: interlining.slotLineKey }
+                : null;
+          if (!desired) return;
           const fields = writeFuseFields(desired);
           for (const field of FUSE_KEYS) {
             if (sameField(fields[field], piece[field])) continue;
@@ -2151,9 +2198,7 @@ export function PieceMatchModal({
       if ((fuseTouched || !!interlining) && staging && techCardId)
         staging.stage(fusingSheetsChange(techCardId));
       if (interlining) {
-        const skipped = new Set(
-          [...blockCounts].filter(([ci]) => !boundHere.has(ci)).map(([, counted]) => counted.block),
-        );
+        const skipped = new Set(rows.filter((row) => row.choice === SKIP).map((row) => row.block));
         interlining.onReview(skipped);
       }
       onClose();
@@ -2479,7 +2524,14 @@ export function PieceMatchModal({
     }
     const ci = focus.ci;
     const st = stateOf(ci);
-    const value = st.kind === 'existing' ? optionKeyOf(st.key) : st.kind === 'new' ? CREATE : '';
+    const value =
+      st.kind === 'existing'
+        ? optionKeyOf(st.key)
+        : st.kind === 'new'
+          ? CREATE
+          : rowByCi.get(ci)?.choice === SKIP
+            ? SKIP
+            : '';
     const io = ioOf(ci);
     const { index, vals, patch } = io;
     const title = io.title || focus.block;
@@ -2498,7 +2550,14 @@ export function PieceMatchModal({
           onChange={(e) => choose(ci, e.target.value)}
         >
           {!interlining && <option value={CREATE}>+ new piece</option>}
-          <option value=''>{interlining ? 'skip' : 'not a piece'}</option>
+          {interlining ? (
+            <>
+              <option value=''>review</option>
+              <option value={SKIP}>skip</option>
+            </>
+          ) : (
+            <option value=''>not a piece</option>
+          )}
           {pieceOptions.map((p) => (
             <option key={p.lineKey} value={p.lineKey}>
               {pieceName(p.lineKey) || p.name}

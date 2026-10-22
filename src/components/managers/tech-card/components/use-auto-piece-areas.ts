@@ -32,6 +32,7 @@ import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
 import { aliasInScope, bindingScopes } from './bom-purpose';
 import { interliningBlockCodes } from 'lib/fusing-dxf/interlining-import';
+import { GENERATED_FUSING_NAME_PREFIX } from 'lib/fusing-dxf/regenerate';
 import type { PieceDTO } from 'lib/nesting/types';
 import { mmToEngineCm } from './nesting/allowance-units';
 import { sizeTokensOf } from './nesting/block-code';
@@ -57,6 +58,7 @@ import { isDxfUrl } from 'utils/pattern';
 
 type SheetRow = {
   url?: string;
+  name?: string;
   lineKey?: string;
   fabricPurpose?: string;
   bomLineKey?: string;
@@ -291,7 +293,10 @@ export function useAutoPieceAreas(args: {
         continue;
       }
       const isInterlining = scope.lines.some((line) => line.section === INTERLINING_SECTION);
-      const idx = isInterlining
+      const hasInterliningOwner =
+        isInterlining &&
+        dxfSheets.some((sheet) => !(sheet.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX));
+      const idx = hasInterliningOwner
         ? interliningAreaIndex({
             index,
             bundle: geometry.data,
@@ -320,7 +325,7 @@ export function useAutoPieceAreas(args: {
         id,
         scope.key,
         serverKey,
-        isInterlining ? 'interlining-owner-v1' : '',
+        hasInterliningOwner ? 'interlining-owner-v1' : '',
         sheets.map((s) => [s.lineKey, s.url, s.fabricPurpose, s.bomLineKey]),
         pieces.map((p) => [p.lineKey, p.ungraded, p.refs.map((r) => r.block)]),
         [...sizeIds].sort((a, b) => a - b),

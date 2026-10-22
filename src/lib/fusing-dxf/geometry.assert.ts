@@ -23,6 +23,7 @@ import {
   withCorners,
   type ZonePoint,
 } from 'components/managers/tech-card/components/nesting/fuse-zone';
+import { fuseLineOf } from 'components/managers/tech-card/components/nesting/fuse-spec';
 import {
   areaReadKeysOfScope,
   scopeAreaState,
@@ -164,6 +165,7 @@ export async function main() {
   assert.equal(canonical.length, 1, JSON.stringify(canonical.map((match) => match.identity)));
   assert.equal(canonical[0].identity, 'BP_U');
   assert.equal(canonical[0].pieceLineKey, 'piece-bp');
+  assert.equal(canonical[0].previouslyBound, false, 'an automatic main-sheet match stays pending');
 
   const carried = matchInterliningImport({
     blocks: [dxfPiece(1014, 'bp-u-fuse-xs', 70)],
@@ -178,6 +180,7 @@ export async function main() {
   });
   assert.equal(carried[0].identity, 'BP_U');
   assert.equal(carried[0].pieceLineKey, 'piece-old', 'the previous identity wins on a new file');
+  assert.equal(carried[0].previouslyBound, true, 'a stored owner alias is already reviewed');
 
   assert.equal(
     canonicalInterliningIdentity({
@@ -196,6 +199,47 @@ export async function main() {
     }).identity,
     'BP_U',
     'a short fusing token is stripped when its stem exists on the main sheet',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'POCKET_INT',
+      sizeTokens,
+      mainIdentities: new Set(['pocket', 'pocketint']),
+    }).identity,
+    'POCKET_INT',
+    'a complete main identity wins over its interlining-looking suffix',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(['collar']),
+    }).identity,
+    'COLLAR',
+    'a fusing suffix is stripped when its stem exists and the full identity does not',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(['collarfuse']),
+    }).identity,
+    'COLLAR_FUSE',
+    'a complete main identity is not stripped to a missing stem',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(),
+    }).identity,
+    'COLLAR_FUSE',
+    'a fusing suffix is not stripped when its stem is absent',
+  );
+  assert.equal(
+    fuseLineOf(spec({ bomLineKey: '' }), ['IL-ONLY']),
+    'IL-ONLY',
+    'a legacy empty fuse line belongs to the only interlining line',
   );
 
   const ambiguous = matchInterliningImport({

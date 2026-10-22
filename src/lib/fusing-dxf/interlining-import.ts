@@ -16,6 +16,7 @@ export type InterliningImportMatch = {
   identity: string;
   blocks: PieceDTO[];
   pieceLineKey?: string;
+  previouslyBound?: boolean;
   reason?: InterliningImportReason;
 };
 
@@ -47,13 +48,18 @@ const terminalToken = (value: string): { stem: string; token: string } | null =>
   return { stem: normBlock(match[1]), token: match[2].toUpperCase() };
 };
 
-function stripFusingToken(value: string, mainIdentities: ReadonlySet<string>): string {
+function stripFusingToken(
+  value: string,
+  mainIdentities: ReadonlySet<string>,
+  sizeTokens: SizeTokens,
+): string {
   const terminal = terminalToken(value);
   if (!terminal) return normBlock(value);
-  if (terminal.token === 'F' || terminal.token === 'IN') {
-    return mainIdentities.has(loose(terminal.stem)) ? terminal.stem : normBlock(value);
-  }
-  return terminal.stem;
+  const sizedStem = splitBlockSize(terminal.stem, sizeTokens);
+  return mainIdentities.has(loose(terminal.stem)) ||
+    (sizedStem.size && mainIdentities.has(loose(sizedStem.identity)))
+    ? terminal.stem
+    : normBlock(value);
 }
 
 function mainIdentitySet(split: BlockSplit): Set<string> {
@@ -82,17 +88,22 @@ export function canonicalInterliningIdentity(args: {
 }): InterliningBlockCode {
   const { blockName, splitIdentity, splitSize, sizeTokens, mainIdentities } = args;
   const raw = normBlock(blockName);
-  let identity = stripFusingToken(splitIdentity || raw, mainIdentities);
+  const splitRaw = normBlock(splitIdentity || raw);
   let size = splitSize ?? '';
 
+  // A suffix such as INT can be part of the garment piece's real name. The size-split identity is
+  // already the main sheet's answer, so it wins before any fusing-token heuristic is attempted.
+  if (mainIdentities.has(loose(splitRaw))) return { identity: splitRaw, size };
+
+  let identity = stripFusingToken(splitRaw, mainIdentities, sizeTokens);
+
   // `BP_U_FUSE_XS`: the tag sits immediately before the size, so neither token is terminal until
-  // the tag is removed. Accept the short tags only after the exposed identity is confirmed on the
-  // main sheet, exactly like the terminal-tag branch above.
+  // the tag is removed. Accept every tag only after the exposed identity is confirmed on the main
+  // sheet, exactly like the terminal-tag branch above.
   const beforeSize = raw.match(/^(.*?)[\s_-]+(FUSING|FUSE|FUS|INT|IN|F)[\s_-]+([^\s_-]+)$/iu);
   if (beforeSize && sizeTokens.has(bareToken(beforeSize[3]))) {
     const stem = normBlock(beforeSize[1]);
-    const token = beforeSize[2].toUpperCase();
-    if ((token !== 'F' && token !== 'IN') || mainIdentities.has(loose(stem))) {
+    if (mainIdentities.has(loose(stem))) {
       identity = stem;
       size = beforeSize[3];
     }
@@ -100,10 +111,10 @@ export function canonicalInterliningIdentity(args: {
 
   // `BP_U_XS_FUSE`: the fusing tag hides the size from the normal terminal-size parser. Remove
   // the tag first, then ask the same parser used by split-pieces about the exposed suffix.
-  const withoutRawTag = stripFusingToken(raw, mainIdentities);
+  const withoutRawTag = stripFusingToken(raw, mainIdentities, sizeTokens);
   if (withoutRawTag !== raw) {
     const exposed = splitBlockSize(withoutRawTag, sizeTokens);
-    const exposedIdentity = stripFusingToken(exposed.identity, mainIdentities);
+    const exposedIdentity = stripFusingToken(exposed.identity, mainIdentities, sizeTokens);
     if (exposed.size || loose(exposedIdentity) !== loose(identity)) {
       identity = exposedIdentity;
       if (exposed.size) size = exposed.size;
@@ -266,7 +277,11 @@ export function matchInterliningImport(args: {
     out.push(
       oversize
         ? { ...group, reason: 'oversize' }
-        : { ...group, pieceLineKey: piecesByKey.get(pieceLineKey)?.lineKey ?? pieceLineKey },
+        : {
+            ...group,
+            pieceLineKey: piecesByKey.get(pieceLineKey)?.lineKey ?? pieceLineKey,
+            previouslyBound: priorKeys.size === 1,
+          },
     );
   }
   return out;

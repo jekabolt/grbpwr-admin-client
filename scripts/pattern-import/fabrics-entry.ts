@@ -1727,8 +1727,14 @@ export async function main(): Promise<number> {
         counted: ReadonlyMap<string, unknown>,
         complete: boolean,
       ) => { updates: { index: number; piecesPerGarment?: number; cutSymmetry?: string }[] };
+      interliningInitialChoice: (pieceLineKey: string | undefined, wasSkipped: boolean) => string;
     };
     const MI = pieceMatchModal as unknown as ModalInternals;
+    ck(
+      MI.interliningInitialChoice(undefined, false) === '' &&
+        MI.interliningInitialChoice(undefined, true) !== '',
+      'G unmatched interlining starts unresolved, not skipped',
+    );
     // BP_1 is a single symmetric piece printed «cut 2»; CLR_3 single ×1; FP_L/FP_R a pair
     const rG = await runImport(fp, sizeMap, V1, {
       instr: INSTR,

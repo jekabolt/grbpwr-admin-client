@@ -1100,7 +1100,9 @@ export function PatternsField({
       out.set(group.scope.key, {
         matches,
         unmatched: matches.filter(
-          (match) => !match.pieceLineKey && !skipped.has(interliningIdentityKey(match.identity)),
+          (match) =>
+            (!match.pieceLineKey || !match.previouslyBound) &&
+            !skipped.has(interliningIdentityKey(match.identity)),
         ),
       });
     }
