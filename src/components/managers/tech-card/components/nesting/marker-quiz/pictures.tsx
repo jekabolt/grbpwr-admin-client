@@ -625,3 +625,46 @@ export function EndsPicture(p: {
     </SketchFrame>
   );
 }
+
+// The same four pattern pieces in every paper picture: bodice front (shoulder slope + armhole),
+// sleeve (cap curve), a narrow panel, a pocket.
+const PAPER_PIECES = [
+  'M44 27l6-3 6 3 0 3c-2 3-2 7 0 10v18H44z',
+  'M63 31c4-6 14-6 18 0l-2 29H65z',
+  'M88 27l5 2 5-2v4c-1 3-1 6 0 9v12H88z',
+  'M101 54h10v5h-10z',
+];
+const PAPER_VIEW = withMargin({ left: 24, top: 6, right: 126, bottom: 80 }, 6);
+
+/**
+ * Paper for a 1:1 print, front view: a plotter roll (the bar on top with its axle stubs, the sheet
+ * hanging from it, its width dimensioned underneath), or office tiles (A4 3×2, A3 two tall sheets).
+ */
+export function PaperChoicePicture(p: { kind: 'roll' | 'A4' | 'A3' }): JSX.Element {
+  const sheets =
+    p.kind === 'A4'
+      ? [0, 1, 2].flatMap((c) =>
+          [0, 1].map((r) => ({ x: 38 + c * 26, y: 12 + r * 31, w: 24, h: 29 })),
+        )
+      : p.kind === 'A3'
+        ? [0, 1].map((c) => ({ x: 38 + c * 38, y: 12, w: 36, h: 58 }))
+        : [];
+  return (
+    <SketchFrame viewBox={PAPER_VIEW}>
+      {p.kind === 'roll' && (
+        <>
+          <rect x={30} y={8} width={90} height={10} {...LINE} />
+          <path d='M30 13h-4M120 13h4' {...LINE} />
+          <path d='M34 18v54h82V18' {...LINE} />
+          <path d='M34 76H116M34 74v4M116 74v4' {...HAIRLINE} />
+        </>
+      )}
+      {sheets.map((s) => (
+        <rect key={`${s.x}-${s.y}`} x={s.x} y={s.y} width={s.w} height={s.h} {...LINE} />
+      ))}
+      {PAPER_PIECES.map((d) => (
+        <path key={d} d={d} {...HAIRLINE} />
+      ))}
+    </SketchFrame>
+  );
+}
