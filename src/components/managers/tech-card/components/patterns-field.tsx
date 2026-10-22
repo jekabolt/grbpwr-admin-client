@@ -2678,7 +2678,7 @@ export function PatternsField({
           type='button'
           variant='default'
           className={emptyClassName}
-        onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+          onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             openPicker(key);
           }}
@@ -2750,6 +2750,11 @@ export function PatternsField({
     const activeMedia = (
       <div className='relative'>
         {media}
+        {has && blocks > 0 && (
+          <span className='pointer-events-none absolute left-px top-px bg-bgColor px-1 py-0.5 text-micro text-labelColor'>
+            {blocks} {plural(blocks, 'piece')}
+          </span>
+        )}
         {canEdit && (
           <div
             className='absolute right-px top-px bg-bgColor'
@@ -2820,6 +2825,7 @@ export function PatternsField({
               items={purposeItems}
               value={scopePurpose}
               placeholder='purpose'
+              size='sm'
               fullWidth
               readOnly={!canEdit || isSubmitting}
               onValueChange={(value) => {
@@ -2835,14 +2841,10 @@ export function PatternsField({
                 aria-label={namedLines.length === 1 ? 'name' : `name ${lineIndex + 1}`}
                 autoComplete='off'
                 readOnly={!canEdit || isSubmitting}
+                className='h-[22px] py-0 text-micro'
               />
             ))}
           </div>
-          {has && blocks > 0 && (
-            <Text size='micro' variant='label' className='truncate'>
-              {blocks} {plural(blocks, 'piece')}
-            </Text>
-          )}
           {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
         </Tile>
       </div>
