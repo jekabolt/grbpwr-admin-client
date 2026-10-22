@@ -56,6 +56,8 @@ export type DxfBundle = {
   // выпадают, и индексы после них сдвигаются — сопоставлять их с исходным списком напрямую
   // значит приписать деталям чужую ткань, то есть ровно ту ошибку, от которой скоуп и спасает.
   scopeByFile: Map<number, string>;
+  /** Индекс файла в РАЗОБРАННОЙ пачке → url листа (удаление листа читает его блоки, L6b). */
+  urlByFile?: Map<number, string>;
   warnings: string[];
   /**
    * Манифест конвертации по url листа (MF-C): только у листов, которые написал наш импорт
@@ -140,6 +142,7 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
         return {
           pieces: out.pieces,
           scopeByFile,
+          urlByFile,
           warnings: [...warnings, ...out.warnings],
           manifestByUrl,
           manifestDistrustByUrl,

@@ -93,7 +93,7 @@ import {
 import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { hydrateSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
@@ -147,7 +147,9 @@ import {
   type ReuploadOutcome,
   type ReuploadRefusal,
 } from './nesting/dxf-reupload';
+import { planSheetDelete } from './nesting/dxf-delete';
 import {
+  armDeleteSnapshot,
   armReuploadSnapshot,
   provideSheetRestorer,
   restoreSheetVersion,
@@ -575,6 +577,11 @@ export function PatternsField({
   // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
   // её селект открытым у каждой строки значило печатать ответ под заголовком, который его уже дал.
   const [rebinding, setRebinding] = useState<number | null>(null);
+  // × on a DXF sheet: the cascade's counts, asked before anything leaves the form (L6b).
+  const [deleting, setDeleting] = useState<{
+    rowId: string;
+    counts: { pieces: number; steps: number };
+  } | null>(null);
   // Разбор включён. ЛАТЧ, а не зеркало `active`: уход на соседнюю вкладку не имеет права отменить
   // уже идущее скачивание (React Query бросил бы запрос на полпути и следующий заход начал бы его
   // заново), а вернувшись, оператор должен увидеть готовый ответ, а не второй разбор.
@@ -1843,6 +1850,111 @@ export function PatternsField({
 
   // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of that
   // version only — a version without one has no `restore`.
+  // DELETE A SHEET (L6b). A DXF row takes its pieces, the steps that hold them and every step
+  // downstream with it (removeSheetCascade); issues on removed steps go to 0, as when a step is
+  // deleted in the editor. Colourway / area refs are left as they are — the server says its words.
+  // The save without this sheet's url carries snapshot reason 'dxf-delete': restore undoes it.
+  const blockNamesByUrl = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    if (!bundle?.urlByFile) return m;
+    for (const p of bundle.pieces) {
+      const url = bundle.urlByFile.get(p.fileIndex ?? -1);
+      const name = (p.blockName ?? '').trim();
+      if (!url || !name) continue;
+      const set = m.get(url) ?? new Set<string>();
+      set.add(name);
+      m.set(url, set);
+    }
+    return m;
+  }, [bundle]);
+
+  const deletePlan = (rowId: string) => {
+    const pieces = ((getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>).map(
+      (p) => ({ ...p, lineKey: p.lineKey ?? '', name: p.name ?? '' }),
+    ) as FormPiece[];
+    const st = useSeamsStore.getState();
+    const seams =
+      techCardId && st.cardId === techCardId
+        ? rowsOf(st).map(toWire)
+        : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
+    const refs = [
+      ...(cardRead?.colorways ?? []).flatMap((c) =>
+        (c.usages ?? []).map((u) => ({ kind: 'colourway', pieceLineKey: u.pieceLineKey })),
+      ),
+      ...(cardRead?.pieceAreaScopes ?? []).flatMap((sc) =>
+        (sc.areas ?? []).map((a) => ({ kind: 'area', pieceLineKey: a.pieceLineKey })),
+      ),
+    ];
+    return planSheetDelete(
+      {
+        patterns: (getValues('patterns') ?? []) as PatternRow[],
+        pieces,
+        aliases: (getValues('pieceDxfAliases') ?? []) as FormAlias[],
+        operations: (getValues('operations') ?? []) as FormOp[],
+        issues: getValues('issues') ?? [],
+        seams,
+        refs,
+        scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes),
+        isDxf: (url) => isDxfUrl(url),
+        sizeTokens: [...dictTokens.keys()],
+        blockNamesOf: (url) => {
+          const set = blockNamesByUrl.get(url);
+          return set ? [...set] : null;
+        },
+      },
+      rowId,
+    );
+  };
+
+  // × on a row: a non-DXF sheet goes as before; a DXF sheet asks first.
+  function askRemove(row: PatternRow, index: number) {
+    if (!isDxfUrl(row.url)) {
+      remove(index);
+      return;
+    }
+    const rowId = sheetRowId(row);
+    const plan = deletePlan(rowId);
+    if (plan.kind === 'plain') remove(plan.rowIndex);
+    else if (plan.kind === 'cascade') setDeleting({ rowId, counts: plan.counts });
+  }
+
+  async function confirmDelete(rowId: string) {
+    const plan = deletePlan(rowId);
+    if (plan.kind === 'missing') return;
+    if (plan.kind === 'plain') {
+      remove(plan.rowIndex);
+      return;
+    }
+    setValue('pieces', plan.pieces, { shouldDirty: true });
+    setValue('pieceDxfAliases', plan.aliases, { shouldDirty: true });
+    setValue('operations', plan.operations, { shouldDirty: true });
+    (getValues('issues') ?? []).forEach((iss, ii) => {
+      const next = plan.issueNumbers[ii];
+      if (next != null && next !== (iss.operationNumber ?? 0))
+        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
+    });
+    remove(plan.rowIndex);
+    armDeleteSnapshot(techCardId, plan.rowUrl);
+    if (!techCardId || plan.removedSeamIds.length === 0) {
+      autosave.request('dxf-delete');
+      return;
+    }
+    // Seams live outside the card body: they go once the card without their pieces is saved.
+    const saved = await autosave.flush('dxf-delete');
+    if (saved !== 'ok' && saved !== 'nothing') return;
+    try {
+      const res = await adminService.DeleteTechCardSeams({
+        techCardId,
+        seamKeys: plan.removedSeamIds,
+      });
+      if (useSeamsStore.getState().cardId === techCardId)
+        hydrateSeams(techCardId, (res.seams ?? []) as TechCardSeamWire[]);
+      await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+    } catch (e) {
+      console.error('seams of a deleted sheet not removed', e);
+    }
+  }
+
   function renderVersions() {
     if (!versionsOf) return null;
     const rows = (getValues('patterns') ?? []) as PatternRow[];
@@ -2073,7 +2185,7 @@ export function PatternsField({
             >
               ✎
             </Button>
-            <Close size='sm' aria-label='remove pattern' onClick={() => remove(index)} />
+            <Close size='sm' aria-label='remove pattern' onClick={() => askRemove(row, index)} />
           </span>
         </div>
         {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в
@@ -2820,6 +2932,25 @@ export function PatternsField({
       )}
 
       {renderVersions()}
+
+      <ConfirmationModal
+        open={deleting != null}
+        onOpenChange={(o) => {
+          if (!o) setDeleting(null);
+        }}
+        onConfirm={() => {
+          const rowId = deleting?.rowId;
+          setDeleting(null);
+          if (rowId) void confirmDelete(rowId);
+        }}
+        title='delete pattern'
+        confirmLabel='delete'
+        width='sm'
+      >
+        <Text className='tabular-nums'>
+          {deleting?.counts.pieces ?? 0} pieces · {deleting?.counts.steps ?? 0} steps
+        </Text>
+      </ConfirmationModal>
 
       {/* In-app PDF viewer, kept for the legacy rows. */}
       <ConfirmationModal

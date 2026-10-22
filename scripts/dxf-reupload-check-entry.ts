@@ -13,6 +13,11 @@ export {
   sheetRowId,
 } from 'components/managers/tech-card/components/nesting/dxf-reupload';
 export {
+  DELETE_SNAPSHOT_REASON,
+  planSheetDelete,
+} from 'components/managers/tech-card/components/nesting/dxf-delete';
+export {
+  armDeleteSnapshot,
   armReuploadSnapshot,
   consumeReuploadSnapshot,
   peekReuploadSnapshot,

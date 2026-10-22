@@ -918,6 +918,124 @@ async function main() {
     );
   }
 
+  // ── удаление листа (L6b): путь формы — план, счётчики, дефекты ушедших шагов → 0, причина ─────
+  {
+    const tag = 'delete';
+    const c = { ...card, issues: [] };
+    const issues = [
+      { operationNumber: 10 },
+      { operationNumber: 30 },
+      { operationNumber: 50 },
+      { operationNumber: 90 },
+      { operationNumber: 15 }, // уже висит — не трогается
+      { operationNumber: 0 }, // карточка целиком
+    ];
+    const COLLAR = ['CLR_3', 'CLR_4'];
+    const mainBlocks = c.aliases.map((a) => a.blockName).filter((b) => !COLLAR.includes(b));
+    const COLLAR_URL = 'mem://v2/collar.dxf';
+    const rows = [
+      { lineKey: 'sheet-main', url: BASE_URL, ...MAIN },
+      { lineKey: 'sheet-collar', url: COLLAR_URL, ...MAIN },
+      { lineKey: 'sheet-pdf', url: 'mem://v1/spec.pdf', ...MAIN },
+    ];
+    const blocks = { [BASE_URL]: mainBlocks, [COLLAR_URL]: COLLAR };
+    const formDel = (patterns, rowId, names = blocks) =>
+      M.planSheetDelete(
+        {
+          patterns,
+          pieces: c.pieces,
+          aliases: c.aliases,
+          operations: c.operations,
+          issues,
+          seams: [
+            {
+              seamKey: 's-collar',
+              sideA: { parts: [{ pieceLineKey: K('CLR_3') }] },
+              sideB: { parts: [{ pieceLineKey: K('CLR_4') }] },
+            },
+            {
+              seamKey: 's-front',
+              sideA: { parts: [{ pieceLineKey: K('FP_L') }] },
+              sideB: { parts: [{ pieceLineKey: K('FP_R') }] },
+            },
+          ],
+          refs: [{ kind: 'colourway', pieceLineKey: K('CLR_4') }],
+          scopeOf: (b) => (b.bomLineKey ?? '').trim(),
+          isDxf: (u) => /\.dxf$/i.test(u ?? ''),
+          sizeTokens: SIZES,
+          blockNamesOf: (u) => names[u] ?? null,
+        },
+        rowId,
+      );
+
+    // лист воротника: CLR_3/CLR_4, шаги 30/40 и ниже по течению «attach collar» (▣ COLLAR)
+    const collar = formDel(rows, 'sheet-collar');
+    is(tag, collar.kind, 'cascade', 'DXF-строка идёт каскадом');
+    if (collar.kind === 'cascade') {
+      is(tag, collar.counts, { pieces: 2, steps: 3 }, 'счётчики модалки: 2 pieces · 3 steps');
+      is(
+        tag,
+        collar.operations.map((o) => o.title),
+        ['yoke', 'front', 'back', 'shoulders', 'sleeve L', 'sleeve R'],
+        'остались шаги без воротника',
+      );
+      is(
+        tag,
+        collar.issueNumbers,
+        [10, 0, 30, 0, 15, 0],
+        'дефекты ушедших шагов → 0, прочие сдвинуты',
+      );
+      is(tag, collar.removedSeamIds, ['s-collar'], 'шов воротника уходит');
+      is(
+        tag,
+        collar.blockedBy.map((b) => b.kind),
+        ['colourway'],
+        'колорвей назван, не тронут',
+      );
+      is(tag, collar.rowIndex, 1, 'строка листа');
+      is(
+        tag,
+        M.sweepOf({ ...c, pieces: collar.pieces, operations: collar.operations }),
+        [],
+        'сборка без висящих ссылок',
+      );
+    }
+
+    // единственный лист scope: уходит всё, все дефекты шагов → 0
+    const whole = formDel([rows[0]], 'sheet-main', {
+      [BASE_URL]: c.aliases.map((a) => a.blockName),
+    });
+    if (whole.kind === 'cascade') {
+      is(
+        tag,
+        [whole.counts.steps, whole.operations.length, whole.issueNumbers],
+        [c.operations.length, 0, [0, 0, 0, 0, 15, 0]],
+        'единственный лист: все шаги ушли',
+      );
+    } else yes(tag, false, `единственный лист: исход ${whole.kind}`);
+
+    // PDF-строка — как раньше; чужой ключ — ничего
+    is(
+      tag,
+      [formDel(rows, 'sheet-pdf'), formDel(rows, 'nope')],
+      [{ kind: 'plain', rowIndex: 2 }, { kind: 'missing' }],
+      'PDF — простое удаление',
+    );
+
+    // причина снимка: сейв, собранный до удаления (несёт url листа), её не берёт
+    M.armReuploadSnapshot(70, COLLAR_URL, 'mem://v1/collar.dxf'); // перезалив той же строки до сейва
+    M.armDeleteSnapshot(70, COLLAR_URL);
+    const early = M.peekReuploadSnapshot(70, [BASE_URL, COLLAR_URL]);
+    const taken = M.peekReuploadSnapshot(70, [BASE_URL]);
+    M.consumeReuploadSnapshot(70, taken);
+    is(
+      tag,
+      [early, taken?.reason, taken?.generations.length, M.peekReuploadSnapshot(70, [BASE_URL])],
+      [null, M.DELETE_SNAPSHOT_REASON, 1, null],
+      'dxf-delete едет с сейвом без листа; перезалив удалённой строки поглощён',
+    );
+  }
+
   console.log(`\n${total - failed}/${total} checks ${failed ? `· ${failed} FAILED` : 'green'}`);
   process.exit(failed ? 1 : 0);
 }

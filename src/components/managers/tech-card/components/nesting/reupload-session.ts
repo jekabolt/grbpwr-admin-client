@@ -1,5 +1,6 @@
 // Две ручки перезалива DXF, которые живут дольше одного вызова: причина снимка для сохранения,
 // несущего перезалив, и восстановление прошлой версии листа.
+import { DELETE_SNAPSHOT_REASON } from './dxf-delete';
 import { REUPLOAD_SNAPSHOT_REASON } from './dxf-reupload';
 
 // ─── причина снимка: одна, на сохранение С ЭТИМ перезаливом ───────────────────────────────────
@@ -10,7 +11,18 @@ import { REUPLOAD_SNAPSHOT_REASON } from './dxf-reupload';
 // и дошёл до провода после (валидация, очередь), url не несёт — причину не берёт и не снимает.
 // Снимается причина только удачным сейвом именно этого пейлоада (L4c).
 
-type Armed = { generation: number; sheetUrl: string };
+// Удаление листа (L6b) взводится тем же механизмом, но наоборот: причина `dxf-delete` едет с
+// сохранением, чей пейлоад УЖЕ НЕ несёт url удалённого листа. Сейв, собранный до удаления, этот url
+// ещё несёт — причину не берёт. Сейв, несущий и перезалив, и удаление, едет с `dxf-delete`: снимок
+// один (до сейва), и restore отменяет оба.
+
+type Armed = {
+  generation: number;
+  reason: string;
+  sheetUrl: string;
+  /** true — сейв должен нести sheetUrl (перезалив); false — не должен (удаление) */
+  carried: boolean;
+};
 const armed = new Map<number, Armed[]>();
 let generation = 0;
 
@@ -25,14 +37,35 @@ export function armReuploadSnapshot(
   replacedUrl?: string,
 ): void {
   if (!cardId || !sheetUrl) return;
-  const list = (armed.get(cardId) ?? []).filter((a) => a.sheetUrl !== replacedUrl);
-  list.push({ generation: ++generation, sheetUrl });
+  const list = (armed.get(cardId) ?? []).filter((a) => !a.carried || a.sheetUrl !== replacedUrl);
+  list.push({
+    generation: ++generation,
+    reason: REUPLOAD_SNAPSHOT_REASON,
+    sheetUrl,
+    carried: true,
+  });
+  armed.set(cardId, list);
+}
+
+/**
+ * Лист `removedUrl` удалён из формы карточки `cardId`. Перезалив этой строки, взведённый до сейва,
+ * поглощается: его url в форме больше нет.
+ */
+export function armDeleteSnapshot(cardId: number | undefined, removedUrl: string): void {
+  if (!cardId || !removedUrl) return;
+  const list = (armed.get(cardId) ?? []).filter((a) => a.sheetUrl !== removedUrl);
+  list.push({
+    generation: ++generation,
+    reason: DELETE_SNAPSHOT_REASON,
+    sheetUrl: removedUrl,
+    carried: false,
+  });
   armed.set(cardId, list);
 }
 
 /**
  * Причина для сохранения с этим пейлоадом (`payloadUrls` — url листов, которые оно отправит);
- * null — пейлоад не несёт ни одного взведённого перезалива.
+ * null — пейлоад не несёт ни одного взведённого перезалива или удаления.
  */
 export function peekReuploadSnapshot(
   cardId: number | undefined,
@@ -41,10 +74,12 @@ export function peekReuploadSnapshot(
   const list = cardId ? armed.get(cardId) : undefined;
   if (!list?.length) return null;
   const urls = new Set([...payloadUrls].filter(Boolean));
-  const hits = list.filter((a) => urls.has(a.sheetUrl));
-  return hits.length
-    ? { reason: REUPLOAD_SNAPSHOT_REASON, generations: hits.map((a) => a.generation) }
-    : null;
+  const hits = list.filter((a) => urls.has(a.sheetUrl) === a.carried);
+  if (!hits.length) return null;
+  const reason = hits.some((a) => a.reason === DELETE_SNAPSHOT_REASON)
+    ? DELETE_SNAPSHOT_REASON
+    : REUPLOAD_SNAPSHOT_REASON;
+  return { reason, generations: hits.map((a) => a.generation) };
 }
 
 /** Сохранение с этой причиной прошло — снять взведённое ровно для его пейлоада. */
