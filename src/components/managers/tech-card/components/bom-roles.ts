@@ -50,6 +50,15 @@ export function normalizeRole(name?: string): string {
   return (name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** The first free numbered role, counting only exact normalized names. */
+export function nextNumberedRole(base: string, items: readonly { name?: string }[]): string {
+  const normalizedBase = normalizeRole(base);
+  const used = new Set(items.map((item) => normalizeRole(item.name)));
+  let number = 1;
+  while (used.has(`${normalizedBase} ${number}`)) number += 1;
+  return `${base.trim()} ${number}`;
+}
+
 // Card-global (NOT per-section) duplicate check: SlotSelect, BomLineSelect and the production
 // material plan all render the role without a section qualifier, so two same-named roles are
 // indistinguishable everywhere it matters. Advisory only — never a save rule: a hard uniqueness

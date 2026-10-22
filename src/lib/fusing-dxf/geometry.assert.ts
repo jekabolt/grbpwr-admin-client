@@ -10,6 +10,7 @@ import {
   markerScopeLines,
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
+import { nextNumberedRole } from 'components/managers/tech-card/components/bom-roles';
 import {
   pieceAreaSheetsRefusal,
   scopeAreaPieces,
@@ -125,6 +126,17 @@ function svgOf(polygons: readonly FusePolygon[], title: string): string {
 
 export async function main() {
   const outline = rectangle(100, 80);
+
+  assert.equal(nextNumberedRole('interlining', []), 'interlining 1');
+  assert.equal(
+    nextNumberedRole('interlining', [
+      { name: 'Interlining 1' },
+      { name: 'collar interlining' },
+      { name: ' interlining 3 ' },
+    ]),
+    'interlining 2',
+    'a new interlining slot takes the first free exact numbered role',
+  );
 
   assert.equal(EDGE_CORNER_TURN_DEG, 30);
   const rectangleRuns = edgeRunsOf(outline);

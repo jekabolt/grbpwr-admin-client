@@ -36,17 +36,11 @@
 // piece created here resolves for the alias that references it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import type {
-  common_AdminColorwayRef,
-  common_Material,
-  common_TechCardPieceAreaScope,
-} from 'api/proto-http/admin';
+import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
-import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   Chip,
   ChipRow,
@@ -60,10 +54,9 @@ import {
 } from 'ui';
 import { ulid } from 'utils/ulid';
 import { parseDecimalNumber } from 'utils/decimal';
-import { bornMaterialBomLine } from '../bom-material-line';
+import { nextNumberedRole } from '../bom-roles';
 import { bornBomLine } from '../form-writers';
 import { useTechCardStaging } from '../useTechCardStaging';
-import { wireInt } from '../wire-int';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
@@ -805,13 +798,17 @@ export function PieceMatchModal({
   // arrays untouched. The ref is the same-tick source of truth: two fast fuse gestures must see the
   // first placeholder before React has rendered it, or each gesture would mint its own slot.
   const pendingBomItemsRef = useRef<BomLine[]>([]);
+  // Only the automatic zero-line fallback may resolve to a real line added concurrently. An
+  // explicit `+ slot` is always a new role, even if another panel adds an interlining meanwhile.
+  const provisionalBomLineKeysRef = useRef(new Set<string>());
   const [pendingBomItems, setPendingBomItems] = useState<BomLine[]>([]);
-  const queueBomItem = (line: BomLine) => {
+  const queueBomItem = (line: BomLine, provisional = false) => {
     const key = line.lineKey?.trim() ?? '';
     const current = pendingBomItemsRef.current;
     if (key && current.some((item) => item.lineKey?.trim() === key)) return line;
     const next = [...current, line];
     pendingBomItemsRef.current = next;
+    if (provisional && key) provisionalBomLineKeysRef.current.add(key);
     setPendingBomItems(next);
     return line;
   };
@@ -820,6 +817,7 @@ export function PieceMatchModal({
     const next = pendingBomItemsRef.current.filter((item) => item.lineKey?.trim() !== key);
     if (next.length === pendingBomItemsRef.current.length) return;
     pendingBomItemsRef.current = next;
+    provisionalBomLineKeysRef.current.delete(key);
     setPendingBomItems(next);
   };
   const interliningBomItems = useMemo(
@@ -840,7 +838,7 @@ export function PieceMatchModal({
     () =>
       interliningBomItems.map((b) => ({
         key: b.lineKey!.trim(),
-        label: [b.supplierRef?.trim(), b.name?.trim()].filter(Boolean).join(' · ') || 'interlining',
+        label: b.name?.trim() || 'interlining',
         color: b.color ?? '',
       })),
     [interliningBomItems],
@@ -1013,12 +1011,6 @@ export function PieceMatchModal({
   // The block under the cursor's last click, ci key — shared by the sheet and the list so the
   // two are one selection, not two.
   const [selected, setSelected] = useState<string | null>(null);
-  // The piece whose `+ material` door owns the catalog dialog. Kept separately from `selected` so
-  // a sheet focus change cannot attach the picked article to another piece.
-  const [pickingFuseOf, setPickingFuseOf] = useState<string | null>(null);
-  // The `+ create` door of that dialog: the piece it was opened for survives the dialog closing.
-  const createFuseFor = useRef<string | null>(null);
-  const [createFuseOpen, setCreateFuseOpen] = useState(false);
   // Name typed for a block that is about to become a NEW piece, by ci key. The block name is
   // only a default: «PERED_S» is what the exporter called it, «полочка правая» is what the
   // garment calls it, and the second one is the one that has to reach the factory.
@@ -1705,10 +1697,9 @@ export function PieceMatchModal({
         ...live.map((p) => pieceEdits[(p.lineKey ?? '').trim().toLowerCase()]),
         ...[...createdEditKeys].map((key) => newEdits[key]),
       ].filter((edit): edit is PieceFields => edit !== undefined);
-      // Only slots still selected by a fused edit are committed. This drops the provisional
-      // material-less slot when the same piece picked a catalog material before SAVE, while keeping
-      // it when another fused piece still uses it. The root write is deliberate: the BOM tab owns
-      // the sole useFieldArray for this name and receives array-root setValue broadcasts.
+      // Only slots still selected by a fused edit are committed. This drops a queued slot when its
+      // last piece moves elsewhere before SAVE. The root write is deliberate: the BOM tab owns the
+      // sole useFieldArray for this name and receives array-root setValue broadcasts.
       const referencedPendingKeys = new Set(
         committedEdits
           .map((edit) => (edit.fuse?.mode ? edit.fuse.bomLineKey.trim() : ''))
@@ -1720,35 +1711,21 @@ export function PieceMatchModal({
       const currentBom = (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>;
       const nextBom = [...currentBom];
       const currentKeys = new Set(currentBom.map((line) => line.lineKey?.trim()).filter(Boolean));
-      const byMaterialId = new Map<number, BomLine>();
-      for (const line of currentBom) {
-        const materialId = wireInt(line.materialId);
-        if (line.section === INTERLINING_SECTION && materialId && !byMaterialId.has(materialId)) {
-          byMaterialId.set(materialId, line);
-        }
-      }
       const replacementKeys = new Map<string, string>();
       for (const line of pendingLines) {
         const key = line.lineKey?.trim() ?? '';
         if (!key || currentKeys.has(key)) continue;
-        const materialId = wireInt(line.materialId);
-        const sameMaterial = materialId ? byMaterialId.get(materialId) : undefined;
-        if (sameMaterial?.lineKey?.trim()) {
-          replacementKeys.set(key, sameMaterial.lineKey.trim());
-          continue;
-        }
         const currentInterlinings = nextBom.filter(
           (item) => item.section === INTERLINING_SECTION && item.lineKey?.trim(),
         );
         // If a sole real line appeared while this modal was open, the provisional placeholder now
-        // means that line. With several lines there is no safe winner, so its own slot remains.
-        if (!materialId && currentInterlinings.length === 1) {
+        // means that line. An explicit `+ slot` is never provisional and always remains its own.
+        if (provisionalBomLineKeysRef.current.has(key) && currentInterlinings.length === 1) {
           replacementKeys.set(key, currentInterlinings[0].lineKey!.trim());
           continue;
         }
         nextBom.push(line);
         currentKeys.add(key);
-        if (materialId) byMaterialId.set(materialId, line);
       }
       if (nextBom.length !== currentBom.length) {
         setValue('bomItems', nextBom, { shouldDirty: true });
@@ -2279,6 +2256,7 @@ export function PieceMatchModal({
             purpose: INTERFACING_PURPOSE,
             name: 'interlining',
           }) as BomLine,
+          true,
         );
         resolved = { ...next, bomLineKey: placeholder.lineKey!.trim() };
       }
@@ -2294,6 +2272,19 @@ export function PieceMatchModal({
     }
     if (resolved.mode !== prev.mode) setZoomOut(null);
     patch({ fuse: resolved, ...writeFuseFields(resolved) });
+  };
+  const addFuseSlot = (ci: string) => {
+    const spec = fuseOfCi(ci);
+    if (!spec?.mode) return;
+    const lines = currentInterliningBomItems();
+    const line = queueBomItem(
+      bornBomLine({
+        section: INTERLINING_SECTION,
+        purpose: INTERFACING_PURPOSE,
+        name: nextNumberedRole('interlining', lines),
+      }) as BomLine,
+    );
+    setFuse(ci, { ...spec, bomLineKey: line.lineKey!.trim() });
   };
   // Zoomed onto the selected piece: it is fused with a mode and the zoom was not left.
   const zoomed = (() => {
@@ -2390,7 +2381,7 @@ export function PieceMatchModal({
         readOnly={readOnly}
         toggleBox={TOGGLE_BOX}
         onChange={(next) => setFuse(ci, next)}
-        onAddMaterial={() => setPickingFuseOf(ci)}
+        onAddSlot={() => addFuseSlot(ci)}
         ci={ci}
         zoneBus={zoneBus}
       />
@@ -2465,28 +2456,6 @@ export function PieceMatchModal({
       </div>
     );
   })();
-
-  const pickingFuse = pickingFuseOf ? fuseOfCi(pickingFuseOf) : undefined;
-  const pickingFuseLine = pickingFuse?.bomLineKey
-    ? interliningBomItems.find((line) => line.lineKey?.trim() === pickingFuse.bomLineKey.trim())
-    : undefined;
-  const pickingMaterialId = wireInt(pickingFuseLine?.materialId);
-  const pickFuseMaterial = (material: common_Material, ci = pickingFuseOf) => {
-    const spec = ci ? fuseOfCi(ci) : undefined;
-    const materialId = wireInt(material.id);
-    if (!ci || !spec?.mode || !materialId) return;
-    let line = currentInterliningBomItems().find((item) => wireInt(item.materialId) === materialId);
-    if (!line) {
-      line = queueBomItem(
-        bornMaterialBomLine(material, {
-          section: INTERLINING_SECTION,
-          purpose: INTERFACING_PURPOSE,
-          name: material.name?.trim() || 'interlining',
-        }) as BomLine,
-      );
-    }
-    setFuse(ci, { ...spec, bomLineKey: line.lineKey!.trim() });
-  };
 
   return (
     <ConfirmationModal
@@ -2651,30 +2620,6 @@ export function PieceMatchModal({
         {/* No sheet to sit beside (nothing drew): the gone-pieces question stands on its own. */}
         {parse.phase === 'ready' && !sheet && goneQuestion}
       </div>
-      <MaterialPickerDialog
-        open={!!pickingFuseOf && !readOnly}
-        section={INTERLINING_SECTION}
-        value={pickingMaterialId}
-        clearable={false}
-        title='interlining material'
-        confirmLabel='select'
-        onPick={(material) => {
-          if (material) pickFuseMaterial(material);
-          setPickingFuseOf(null);
-        }}
-        onClose={() => setPickingFuseOf(null)}
-        onCreate={() => {
-          createFuseFor.current = pickingFuseOf;
-          setPickingFuseOf(null);
-          setCreateFuseOpen(true);
-        }}
-      />
-      <MaterialModal
-        open={createFuseOpen}
-        onOpenChange={setCreateFuseOpen}
-        defaultSection={INTERLINING_SECTION}
-        onCreated={(_id, m) => pickFuseMaterial(m, createFuseFor.current)}
-      />
     </ConfirmationModal>
   );
 }

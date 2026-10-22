@@ -41,7 +41,7 @@ const MODES: [FuseMode, string][] = [
   ['strip', 'strip'],
   ['zone', 'zone'],
 ];
-const ADD_MATERIAL = '+material';
+const ADD_SLOT = '+slot';
 
 /** Label row (micro uppercase, red when the answer is missing) over one control. */
 export function FuseField({
@@ -107,7 +107,7 @@ export function FuseFields({
   readOnly,
   toggleBox,
   onChange,
-  onAddMaterial,
+  onAddSlot,
   ci,
   zoneBus,
 }: {
@@ -119,7 +119,7 @@ export function FuseFields({
   /** The panel's toggle box class (one height for every control in the panel). */
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
-  onAddMaterial: () => void;
+  onAddSlot: () => void;
   /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
   ci?: string;
   zoneBus?: ZoneBus;
@@ -192,14 +192,12 @@ export function FuseFields({
                     </span>
                   ),
                 })),
-                { value: ADD_MATERIAL, label: '+ material' },
+                { value: ADD_SLOT, label: '+ slot' },
               ]}
               value={line}
               readOnly={readOnly}
               invalid={!line}
-              onValueChange={(x: string) =>
-                x === ADD_MATERIAL ? onAddMaterial() : set({ bomLineKey: x })
-              }
+              onValueChange={(x: string) => (x === ADD_SLOT ? onAddSlot() : set({ bomLineKey: x }))}
             />
           </FuseField>
           {spec.mode === 'strip' && (
