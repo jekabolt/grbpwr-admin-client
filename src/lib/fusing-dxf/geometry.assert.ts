@@ -10,8 +10,14 @@ import {
   markerScopeLines,
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
-import { pieceAreaSheetsRefusal } from 'components/managers/tech-card/components/piece-areas';
-import { areaReadKeysOfScope } from 'components/managers/tech-card/components/piece-areas-state';
+import {
+  pieceAreaSheetsRefusal,
+  scopeAreaPieces,
+} from 'components/managers/tech-card/components/piece-areas';
+import {
+  areaReadKeysOfScope,
+  scopeAreaState,
+} from 'components/managers/tech-card/components/piece-areas-state';
 import {
   linesHeldByLegacyLinks,
   nextFusingAliases,
@@ -558,6 +564,74 @@ export async function main() {
   assert.deepEqual(areaReadKeysOfScope(scopeOf('F-2'), scopes, [], [areaScope('interfacing')]), [
     'F-2',
   ]);
+  // beta TC 59: generated sheets, links and measured areas are all line-scoped with purpose NULL.
+  // Seven Fusible interlining pieces and the one-piece G785 / Felt pad slots must each resolve their
+  // own saved aliases, and an existing non-stale line-key area set is fresh (row existence alone is
+  // not freshness; `stale` remains the server's sheet+link fingerprint verdict).
+  const tc59Groups = [
+    {
+      key: '01MFZSNG00000000000000000A',
+      purpose: INTERFACING,
+      names: [
+        'clr_main',
+        'FLP_R',
+        'FLP_R_MAIN',
+        'CLR_SECOND',
+        'FLP_L',
+        'CLR_SECOND_1',
+        'FLP_L_MAIN',
+      ],
+    },
+    { key: '01M5J6Y8GQETGB0KMME07ZVM5P', purpose: INTERFACING, names: ['PLCK_L'] },
+    { key: '01M5J72DSJ3NZNT81A1V68EAW9', purpose: OTHER, names: ['PLCK_R'] },
+  ];
+  const tc59Scopes = fabricScopes(
+    tc59Groups.map((g) => ({ lineKey: g.key, purpose: g.purpose, section: IL_SECTION })),
+  );
+  const tc59Aliases = tc59Groups.flatMap((g) =>
+    g.names.map((name, i) => ({
+      fabricPurpose: undefined,
+      bomLineKey: g.key,
+      blockName: name,
+      pieceLineKey: `${g.key}-piece-${i}`,
+    })),
+  );
+  const tc59Pieces = tc59Aliases.map((a) => ({
+    lineKey: a.pieceLineKey,
+    name: a.blockName,
+    piecesPerGarment: 1,
+    ungraded: false,
+  }));
+  const tc59Areas = tc59Groups.map((g) => ({
+    scopeKey: g.key,
+    areas: tc59Aliases
+      .filter((a) => a.bomLineKey === g.key)
+      .flatMap((a) =>
+        [1, 2, 3, 4, 5].map((sizeId) => ({
+          pieceLineKey: a.pieceLineKey,
+          sizeId,
+          areaCm2: { value: '1' },
+          perimeterCm: { value: '1' },
+          hulled: false,
+          ambiguousPick: false,
+        })),
+      ),
+    stale: false,
+    contourLayer: 'CUT',
+    seamAllowanceMm: { value: '0' },
+    parsedBy: 'assert',
+    parsedAt: undefined,
+  }));
+  const tc59Links = bindingScopes(tc59Scopes, tc59Aliases);
+  for (const [i, group] of tc59Groups.entries()) {
+    const scope = tc59Scopes.find((s) => s.key === group.key)!;
+    const aliases = tc59Aliases.filter((a) => aliasInScope(a, scope, tc59Links));
+    assert.equal(scopeAreaPieces(aliases, tc59Pieces, scope.key).length, group.names.length);
+    assert.equal(tc59Areas[i].areas.length, [35, 5, 5][i]);
+    const keys = areaReadKeysOfScope(scope, tc59Scopes, [], tc59Areas);
+    assert.deepEqual(keys, [group.key]);
+    assert.equal(scopeAreaState(keys, tc59Areas).phase, 'fresh', `TC 59 scope ${i + 1}`);
+  }
   assert.deepEqual(
     areaReadKeysOfScope(scopeOf(MAIN), scopes, [{ fabricPurpose: UNSET, bomLineKey: 'M-1' }], []),
     ['M-1'],

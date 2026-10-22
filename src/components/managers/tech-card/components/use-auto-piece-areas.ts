@@ -166,7 +166,18 @@ export function useAutoPieceAreas(args: {
       sizeIds.every((s) => saved.has(s));
     if (!sameRange) return { refusals, jobs };
 
-    const links = bindingScopes(scopes, aliases);
+    // The write below is checked against the SERVER'S link set. Normally it is byte-for-byte the
+    // form's, but generated fusing rebuilds through its own UpdateTechCard and can refresh cardRead
+    // before RHF has adopted the returned aliases. Using the form snapshot in that gap produced the
+    // impossible warning «no piece linked» while the saved line-scoped links (and the slot) existed.
+    // sourceDirty already keeps genuinely unsaved form edits out, so prefer the saved inputs whenever
+    // the current server speaks the alias wrapper; this is also the exact set its fingerprint covers.
+    const savedBody = cardRead.techCard;
+    const areaAliases = savedBody?.pieceDxfAliases
+      ? ((savedBody.pieceDxfAliases.items ?? []) as PieceAliasRow[])
+      : aliases;
+    const areaPieceRows = savedBody ? ((savedBody.pieces ?? []) as PieceRow[]) : pieceRows;
+    const links = bindingScopes(scopes, areaAliases);
     for (const scope of scopes) {
       const sheets = sheetsByScope.get(scope.key) ?? [];
       const dxfSheets = sheets.filter((s) => !!s.url && isDxfUrl(s.url));
@@ -175,8 +186,8 @@ export function useAutoPieceAreas(args: {
       const state = scopeAreaState(areaKeys, cardRead.pieceAreaScopes);
       if (state.phase === 'fresh') continue;
 
-      const scopeAliases = aliases.filter((a) => aliasInScope(a, scope, links));
-      const pieces = scopeAreaPieces(scopeAliases, pieceRows, scope.key);
+      const scopeAliases = areaAliases.filter((a) => aliasInScope(a, scope, links));
+      const pieces = scopeAreaPieces(scopeAliases, areaPieceRows, scope.key);
       if (pieces.length === 0) {
         refusals[scope.key] = `${PREFIX}no piece linked to the drawing`;
         continue;
@@ -277,8 +288,10 @@ export function useAutoPieceAreas(args: {
             nameOfPiece: (k) => pieces.find((p) => (p.lineKey ?? '').trim() === k)?.name ?? k,
           });
           if (!res.ok) {
-            if (res.reason.includes('zero or smaller')) return { ok: false, reason: 'zero-area piece' };
-            if (res.reason.includes('no areas at all')) return { ok: false, reason: 'no areas found' };
+            if (res.reason.includes('zero or smaller'))
+              return { ok: false, reason: 'zero-area piece' };
+            if (res.reason.includes('no areas at all'))
+              return { ok: false, reason: 'no areas found' };
             return { ok: false, reason: 'server refused the measurement' };
           }
           return { ok: true };
