@@ -283,6 +283,7 @@ function ExpandedDetails({
         expectedAt: '',
         measuredWidthCm: undefined,
         shadeCode: undefined,
+        invoiceFileId: undefined,
       });
       onAmount('');
     } catch (error) {

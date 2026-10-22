@@ -3,6 +3,7 @@ import { adminService } from 'api/api';
 import {
   AdjustMaterialStockRequest,
   IssueMaterialStockRequest,
+  ReceiveMaterialStockBatchRequest,
   ReceiveMaterialStockRequest,
   common_MaterialMovementType,
 } from 'api/proto-http/admin';
@@ -116,6 +117,13 @@ export function useMaterialLots(materialId: number, includeArchived: boolean, en
 export function useReceiveMaterialStock() {
   return useMovementMutation((req: ReceiveMaterialStockRequest) =>
     adminService.ReceiveMaterialStock(req),
+  );
+}
+
+// One supplier invoice, several materials, one transaction (delivery + VAT allocated server-side).
+export function useReceiveMaterialStockBatch() {
+  return useMovementMutation((req: ReceiveMaterialStockBatchRequest) =>
+    adminService.ReceiveMaterialStockBatch(req),
   );
 }
 

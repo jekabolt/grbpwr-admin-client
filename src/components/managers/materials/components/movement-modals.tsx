@@ -1,5 +1,5 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_MaterialMovement } from 'api/proto-http/admin';
+import { common_Material, common_MaterialMovement } from 'api/proto-http/admin';
 import { useSuppliers } from 'components/managers/accounting/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { EntityPicker } from 'components/managers/tasks/components/entity-picker';
@@ -11,14 +11,17 @@ import {
   notifyFailure,
 } from 'components/managers/production-runs/components/feedback';
 import { notify } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { ReactNode, useEffect, useState } from 'react';
-import { Button, Close, Text } from 'ui';
+import { AddDoor, Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { InvoiceDrop, useInvoiceUpload } from './invoice-drop';
+import { MaterialPickerDialog } from './material-picker';
 import {
   useAdjustMaterialStock,
   useIssueMaterialStock,
   useMaterialLots,
-  useReceiveMaterialStock,
+  useReceiveMaterialStockBatch,
 } from './useWarehouse';
 
 const cell = 'w-full border border-borderColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -68,6 +71,7 @@ function MovementDialog({
   onOpenChange,
   title,
   busy,
+  blocked = false,
   onSubmit,
   submitLabel,
   fail,
@@ -78,6 +82,8 @@ function MovementDialog({
   onOpenChange: (v: boolean) => void;
   title: string;
   busy: boolean;
+  /** Submit is held (e.g. an attachment still uploading) without reading as `saving…`. */
+  blocked?: boolean;
   onSubmit: () => void;
   submitLabel: string;
   /** A failed check or the server's refusal: one line above the footer. */
@@ -105,7 +111,13 @@ function MovementDialog({
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>
-            <Button type='button' variant='main' size='lg' disabled={busy} onClick={onSubmit}>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              disabled={busy || blocked}
+              onClick={onSubmit}
+            >
               {busy ? 'saving…' : submitLabel}
             </Button>
           </div>
@@ -135,6 +147,42 @@ const vatRegimeOptions = [
   { value: 'domestic_uk', label: 'domestic UK' },
 ];
 
+// One material of the invoice. `key` is local (React identity), never sent.
+type ReceiveLine = {
+  key: number;
+  materialId: number;
+  label: string;
+  unit: string;
+  quantity: string;
+  unitCost: string;
+  lot: string;
+  showLot: boolean;
+};
+
+let lineKey = 0;
+const newLine = (materialId: number, label: string, unit: string): ReceiveLine => ({
+  key: ++lineKey,
+  materialId,
+  label,
+  unit,
+  quantity: '',
+  unitCost: '',
+  lot: '',
+  showLot: false,
+});
+
+const pickedLabel = (m: common_Material) =>
+  `${m.code ? `${m.code} · ` : ''}${m.name || `#${m.id}`}`;
+
+// A positive finite number from a decimal input, else NaN.
+const positive = (v: string) => {
+  const n = parseDecimalNumber(v);
+  return Number.isFinite(n) && n > 0 ? n : NaN;
+};
+
+// One supplier invoice → several materials, posted in ONE transaction (ReceiveMaterialStockBatch,
+// even for a single line). Delivery and input VAT are invoice totals; the server allocates both
+// across the lines in proportion to each line's net.
 export function ReceiveStockModal({
   open,
   onOpenChange,
@@ -146,91 +194,146 @@ export function ReceiveStockModal({
 }) {
   const [fail, setFail] = useState<string | null>(null);
   const { canWriteCosting } = usePermissions();
-  const receive = useReceiveMaterialStock();
+  const receive = useReceiveMaterialStockBatch();
   // Supplier catalog for the AP-by-supplier tag (phase 2, wave 4): a costed receipt accrues 2010
   // Accounts Payable, and tagging it here groups that payable under the counterparty on the AP/AR
   // screen. Optional — 0 = untagged. Only fetched while the modal is mounted (it opens conditionally).
   const { data: suppliersData } = useSuppliers();
   const suppliers = suppliersData?.suppliers ?? [];
-  const [quantity, setQuantity] = useState('');
-  const [unitCost, setUnitCost] = useState('');
+  const [lines, setLines] = useState<ReceiveLine[]>([]);
+  const [picking, setPicking] = useState(false);
   const [currency, setCurrency] = useState('EUR');
-  // Recoverable input VAT for this receipt (base currency EUR) + its regime — kept separate from
-  // the NET unit cost so the two aren't double-counted. Both optional; when set, both should be set.
+  const [delivery, setDelivery] = useState('');
+  // Recoverable input VAT for the whole invoice (base currency EUR) + its regime — kept separate
+  // from the NET unit costs so the two aren't double-counted. Both optional; both or neither.
   const [inputVat, setInputVat] = useState('');
   const [inputVatRegime, setInputVatRegime] = useState('');
   const [supplierId, setSupplierId] = useState(0);
-  const [lot, setLot] = useState('');
-  // #48: "lot / roll" read as unexplained jargon ("не понимаю что это, для малого производства
-  // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
-  const [showLot, setShowLot] = useState(false);
   const [supplierDoc, setSupplierDoc] = useState('');
   const [expectedAt, setExpectedAt] = useState('');
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
+  // The supplier's invoice, uploaded to the files library first; the receipt carries its id.
+  const invoice = useInvoiceUpload();
+  const clearInvoice = invoice.clear;
 
   useEffect(() => {
     if (!open) return;
     setFail(null);
-    setQuantity('');
-    setUnitCost('');
+    clearInvoice();
+    // Line 1 is the material the dialog was opened from.
+    setLines([newLine(target.materialId, target.materialLabel, target.unit)]);
     setCurrency('EUR');
+    setDelivery('');
     setInputVat('');
     setInputVatRegime('');
     setSupplierId(0);
-    setLot('');
-    setShowLot(false);
     setSupplierDoc('');
+    setExpectedAt('');
     setOccurredAt(todayISO());
     setComment('');
-  }, [open]);
+  }, [open, clearInvoice, target.materialId, target.materialLabel, target.unit]);
+
+  const patchLine = (key: number, patch: Partial<ReceiveLine>) =>
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const removeLine = (key: number) => setLines((ls) => ls.filter((l) => l.key !== key));
+  const addMaterial = (m?: common_Material) => {
+    setPicking(false);
+    const id = Number(m?.id) || 0;
+    if (!m || !id) return;
+    // A material appears once per invoice (the server refuses duplicates).
+    setLines((ls) =>
+      ls.some((l) => l.materialId === id) ? ls : [...ls, newLine(id, pickedLabel(m), m.unit ?? '')],
+    );
+  };
+
+  // Invoice cross-check: Σ line net + delivery, + VAT = the invoice's gross total. Only computable
+  // in EUR (input VAT is always base-EUR); it catches a GROSS price typed into net / u.
+  const totals = (() => {
+    if (!canWriteCosting || currency !== 'EUR') return null;
+    let net = 0;
+    for (const l of lines) {
+      const q = positive(l.quantity);
+      const c = positive(l.unitCost);
+      if (Number.isNaN(q) || Number.isNaN(c)) return null;
+      net += q * c;
+    }
+    const d = parseDecimalNumber(delivery);
+    if (Number.isFinite(d) && d > 0) net += d;
+    const v = parseDecimalNumber(inputVat);
+    const vat = Number.isFinite(v) && v > 0 ? v : 0;
+    return net > 0 ? { net, vat } : null;
+  })();
 
   const submit = async () => {
+    if (invoice.uploading) return;
     setFail(null);
-    const qty = parseDecimalNumber(quantity);
-    if (!Number.isFinite(qty) || qty <= 0) {
+    if (lines.length === 0) {
+      setFail('add a material');
+      return;
+    }
+    if (lines.some((l) => Number.isNaN(positive(l.quantity)))) {
       setFail('quantity must be greater than zero');
       return;
     }
-    // Input VAT is all-or-nothing (the backend rejects one without the other); catch it here to save a
-    // round-trip.
+    // Input VAT is all-or-nothing (the backend rejects one without the other).
     const hasInputVat = inputVat.trim() !== '';
-    const hasInputVatRegime = inputVatRegime !== '';
-    if (hasInputVat !== hasInputVatRegime) {
+    if (canWriteCosting && hasInputVat !== (inputVatRegime !== '')) {
       setFail('input VAT needs both an amount and a regime, or neither');
       return;
     }
-    // Setting a cost is a costing write; omit it (uncosted receipt, average unchanged) otherwise.
-    const cost = canWriteCosting ? inputToDecimal(unitCost) : undefined;
+    // Delivery and VAT are split by line net — an unpriced line has no weight.
+    const hasDelivery = parseDecimalNumber(delivery) > 0;
+    if (
+      canWriteCosting &&
+      (hasDelivery || hasInputVat) &&
+      lines.some((l) => Number.isNaN(positive(l.unitCost)))
+    ) {
+      setFail('every line needs a price');
+      return;
+    }
+    // Any cost / VAT / delivery is a costing write; omitted otherwise (uncosted receipt).
+    const costed = canWriteCosting && lines.some((l) => l.unitCost.trim() !== '');
     try {
       const res = await receive.mutateAsync({
-        materialId: target.materialId,
-        quantity: inputToDecimal(quantity),
-        unitCost: cost,
-        currency: cost ? currency : '',
-        lot: lot.trim(),
-        supplierDoc: supplierDoc.trim(),
+        lines: lines.map((l) => ({
+          materialId: l.materialId,
+          quantity: inputToDecimal(l.quantity),
+          unitCost: canWriteCosting ? inputToDecimal(l.unitCost) : undefined,
+          lot: l.showLot ? l.lot.trim() : '',
+        })),
+        currency: costed || (canWriteCosting && hasDelivery) ? currency : '',
         supplierId: supplierId || undefined, // AP-by-supplier tag (phase 2, wave 4); 0 = untagged
+        supplierDoc: supplierDoc.trim(),
+        invoiceFileId: invoice.file?.id || undefined, // library_file id; 0/unset = none
+        occurredAt,
         // When the delivery was promised (Phase 9) — lateness becomes a fact, no PO needed.
         expectedAt: expectedAt || '',
-        occurredAt,
         comment: comment.trim(),
-        // Recording input VAT is a costing write; both fields optional, sent only when set.
         inputVatAmount: canWriteCosting ? inputToDecimal(inputVat) : undefined,
         inputVatRegime: canWriteCosting && inputVatRegime ? inputVatRegime : undefined,
-        // ФАКТЫ РУЛОНА НА ПРИЁМКЕ (Ф5а.1): измеренная ширина и оттенок красильной партии. Полей
-        // ввода для них ещё нет — это отдельная работа, — а пропуск безопасен по контракту: они
-        // пишутся на ЛОТ, и опущенное значение никогда не стирает то, что записала предыдущая
-        // приёмка в тот же лот. Ключи объявлены только потому, что генератор требует их наличия.
-        measuredWidthCm: undefined,
-        shadeCode: undefined,
+        deliveryCost: canWriteCosting ? inputToDecimal(delivery) : undefined,
       });
-      posted(target, res.movement);
+      const movements = res.movements ?? [];
+      // One line keeps the before → after receipt; several get one toast, not one per line.
+      if (lines.length === 1) {
+        posted({ ...target, materialLabel: lines[0].label }, movements[0]);
+      } else {
+        notify({
+          sev: 'ok',
+          subject: (supplierDoc.trim() || 'IN').toUpperCase(),
+          text: `${movements.length || lines.length} lines posted`,
+        });
+      }
       onOpenChange(false);
     } catch (e) {
       failed(target, 'not moved in', e, setFail);
     }
   };
+
+  const lineCols = canWriteCosting
+    ? 'sm:grid-cols-[minmax(0,1fr)_6rem_5.5rem_auto]'
+    : 'sm:grid-cols-[minmax(0,1fr)_6rem_auto]';
 
   return (
     <MovementDialog
@@ -238,28 +341,121 @@ export function ReceiveStockModal({
       onOpenChange={onOpenChange}
       title={`in · ${target.materialLabel}`}
       busy={receive.isPending}
+      blocked={invoice.uploading}
       onSubmit={submit}
       submitLabel='in'
       fail={fail}
       failVerb='not moved in'
     >
-      <Field label={`quantity (${target.unit || 'unit'})`}>
+      <InvoiceDrop invoice={invoice} />
+      {suppliers.length > 0 ? (
+        <Field label='supplier'>
+          <select
+            className={cell}
+            value={supplierId || 0}
+            onChange={(e) => setSupplierId(Number(e.target.value) || 0)}
+          >
+            <option value={0}>— none —</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id ?? 0}>
+                {s.name || `supplier #${s.id}`}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      <Field label='supplier doc'>
         <input
           className={cell}
-          inputMode='decimal'
-          value={quantity}
-          onChange={(e) => setQuantity(sanitizeDecimal(e.target.value))}
+          value={supplierDoc}
+          onChange={(e) => setSupplierDoc(e.target.value)}
         />
       </Field>
+      <div className='flex flex-col gap-1.5'>
+        <div className={cn('hidden gap-1.5 sm:grid', lineCols)}>
+          <Text size='small'>material</Text>
+          <Text size='small'>qty</Text>
+          {canWriteCosting ? <Text size='small'>net / u</Text> : null}
+          <span className='w-4' />
+        </div>
+        {lines.map((l) => (
+          <div key={l.key} className='flex flex-col gap-1'>
+            {/* Phone: material + × on one row, qty and price under it. sm+: one grid row. */}
+            <div className={cn('grid grid-cols-2 gap-1.5 sm:items-center', lineCols)}>
+              <div className='col-span-2 flex items-center gap-1.5 sm:contents'>
+                <div className={cn(cell, 'min-w-0 flex-1 truncate')} title={l.label}>
+                  {l.label}
+                </div>
+                <Close
+                  size='sm'
+                  className='sm:order-last'
+                  aria-label='remove line'
+                  disabled={lines.length === 1}
+                  onClick={() => removeLine(l.key)}
+                />
+              </div>
+              <label
+                className={cn(
+                  cell,
+                  'flex items-baseline gap-1 focus-within:border-textColor',
+                  !canWriteCosting && 'col-span-2 sm:col-span-1',
+                )}
+              >
+                <input
+                  className='w-full min-w-0 bg-transparent outline-none'
+                  inputMode='decimal'
+                  placeholder='qty'
+                  aria-label={`quantity · ${l.label}`}
+                  value={l.quantity}
+                  onChange={(e) => patchLine(l.key, { quantity: sanitizeDecimal(e.target.value) })}
+                />
+                <span className='text-labelColor'>{l.unit}</span>
+              </label>
+              {canWriteCosting ? (
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  placeholder='net / u'
+                  aria-label={`net per unit · ${l.label}`}
+                  value={l.unitCost}
+                  onChange={(e) => patchLine(l.key, { unitCost: sanitizeDecimal(e.target.value) })}
+                />
+              ) : null}
+            </div>
+            {l.showLot ? (
+              <input
+                className={cell}
+                placeholder='lot / roll'
+                aria-label={`lot · ${l.label}`}
+                value={l.lot}
+                onChange={(e) => patchLine(l.key, { lot: e.target.value })}
+              />
+            ) : (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className='self-start px-0'
+                onClick={() => patchLine(l.key, { showLot: true })}
+              >
+                + lot
+              </Button>
+            )}
+          </div>
+        ))}
+        <AddDoor shape='inline' onClick={() => setPicking(true)}>
+          material
+        </AddDoor>
+      </div>
       {canWriteCosting ? (
         <>
           <div className='grid grid-cols-[1fr_auto] gap-2'>
-            <Field label='unit cost (net)'>
+            <Field label='delivery (net)'>
               <input
                 className={cell}
                 inputMode='decimal'
-                value={unitCost}
-                onChange={(e) => setUnitCost(sanitizeDecimal(e.target.value))}
+                value={delivery}
+                onChange={(e) => setDelivery(sanitizeDecimal(e.target.value))}
               />
             </Field>
             <Field label='currency'>
@@ -300,71 +496,18 @@ export function ReceiveStockModal({
               </select>
             </Field>
           </div>
-          {/* Invoice cross-check: net line + VAT should equal the invoice's gross total. Only
-              computable when the cost is in EUR (input VAT is always base-EUR); it exists to catch
-              the classic slip of typing the GROSS into unit cost and then adding VAT on top. */}
-          {(() => {
-            const qty = parseDecimalNumber(quantity);
-            const cost = parseDecimalNumber(unitCost);
-            const vat = parseDecimalNumber(inputVat);
-            if (
-              currency !== 'EUR' ||
-              !Number.isFinite(qty) ||
-              !Number.isFinite(cost) ||
-              !Number.isFinite(vat) ||
-              qty <= 0 ||
-              cost <= 0 ||
-              vat <= 0
-            ) {
-              return null;
-            }
-            const net = qty * cost;
-            return (
-              <Text variant='inactive' size='small'>
-                net {net.toFixed(2)} + vat {vat.toFixed(2)} = {(net + vat).toFixed(2)} eur
+          {totals ? (
+            <div className='flex items-baseline justify-between gap-2 border-t border-hairline pt-2'>
+              <Text size='small' component='span'>
+                net {totals.net.toFixed(2)} + vat {totals.vat.toFixed(2)}
               </Text>
-            );
-          })()}
+              <Text size='small' component='span'>
+                {(totals.net + totals.vat).toFixed(2)} eur
+              </Text>
+            </div>
+          ) : null}
         </>
       ) : null}
-      {suppliers.length > 0 ? (
-        <Field label='supplier'>
-          <select
-            className={cell}
-            value={supplierId || 0}
-            onChange={(e) => setSupplierId(Number(e.target.value) || 0)}
-          >
-            <option value={0}>— none —</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id ?? 0}>
-                {s.name || `supplier #${s.id}`}
-              </option>
-            ))}
-          </select>
-        </Field>
-      ) : null}
-      <Field label='supplier doc'>
-        <input
-          className={cell}
-          value={supplierDoc}
-          onChange={(e) => setSupplierDoc(e.target.value)}
-        />
-      </Field>
-      {showLot ? (
-        <div className='flex flex-col gap-1'>
-          <Field label='lot / roll'>
-            <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
-          </Field>
-        </div>
-      ) : (
-        <button
-          type='button'
-          className='self-start text-small underline text-borderColor'
-          onClick={() => setShowLot(true)}
-        >
-          + lot
-        </button>
-      )}
       <Field label='date'>
         <input
           className={cell}
@@ -384,6 +527,14 @@ export function ReceiveStockModal({
       <Field label='comment'>
         <input className={cell} value={comment} onChange={(e) => setComment(e.target.value)} />
       </Field>
+      <MaterialPickerDialog
+        open={picking}
+        clearable={false}
+        title='add material'
+        confirmLabel='add'
+        onPick={addMaterial}
+        onClose={() => setPicking(false)}
+      />
     </MovementDialog>
   );
 }
