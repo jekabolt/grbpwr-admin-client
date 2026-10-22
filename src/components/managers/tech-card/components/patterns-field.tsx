@@ -1439,8 +1439,7 @@ export function PatternsField({
 
   function beginReupload(scopeKey: string, target?: string): ReuploadFlight {
     const rows = ((getValues('patterns') ?? []) as PatternRow[]).filter(
-      (row) =>
-        isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey,
+      (row) => isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey,
     );
     const exact = target
       ? rows.find((row) => sheetRowId(row) === target)
