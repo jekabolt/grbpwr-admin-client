@@ -14,6 +14,7 @@ import { notify } from 'lib/stores/store';
 import { ReactNode, useEffect, useState } from 'react';
 import { Button, Close, Text } from 'ui';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { InvoiceDrop, useInvoiceUpload } from './invoice-drop';
 import {
   useAdjustMaterialStock,
   useIssueMaterialStock,
@@ -68,6 +69,7 @@ function MovementDialog({
   onOpenChange,
   title,
   busy,
+  blocked = false,
   onSubmit,
   submitLabel,
   fail,
@@ -78,6 +80,8 @@ function MovementDialog({
   onOpenChange: (v: boolean) => void;
   title: string;
   busy: boolean;
+  /** Submit is held (e.g. an attachment still uploading) without reading as `saving…`. */
+  blocked?: boolean;
   onSubmit: () => void;
   submitLabel: string;
   /** A failed check or the server's refusal: one line above the footer. */
@@ -105,7 +109,13 @@ function MovementDialog({
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               cancel
             </Button>
-            <Button type='button' variant='main' size='lg' disabled={busy} onClick={onSubmit}>
+            <Button
+              type='button'
+              variant='main'
+              size='lg'
+              disabled={busy || blocked}
+              onClick={onSubmit}
+            >
               {busy ? 'saving…' : submitLabel}
             </Button>
           </div>
@@ -168,10 +178,14 @@ export function ReceiveStockModal({
   const [expectedAt, setExpectedAt] = useState('');
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
+  // The supplier's invoice, uploaded to the files library first; the receipt carries its id.
+  const invoice = useInvoiceUpload();
+  const clearInvoice = invoice.clear;
 
   useEffect(() => {
     if (!open) return;
     setFail(null);
+    clearInvoice();
     setQuantity('');
     setUnitCost('');
     setCurrency('EUR');
@@ -183,9 +197,10 @@ export function ReceiveStockModal({
     setSupplierDoc('');
     setOccurredAt(todayISO());
     setComment('');
-  }, [open]);
+  }, [open, clearInvoice]);
 
   const submit = async () => {
+    if (invoice.uploading) return;
     setFail(null);
     const qty = parseDecimalNumber(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -224,6 +239,7 @@ export function ReceiveStockModal({
         // приёмка в тот же лот. Ключи объявлены только потому, что генератор требует их наличия.
         measuredWidthCm: undefined,
         shadeCode: undefined,
+        invoiceFileId: invoice.file?.id || undefined, // library_file id; 0/unset = none
       });
       posted(target, res.movement);
       onOpenChange(false);
@@ -238,11 +254,13 @@ export function ReceiveStockModal({
       onOpenChange={onOpenChange}
       title={`in · ${target.materialLabel}`}
       busy={receive.isPending}
+      blocked={invoice.uploading}
       onSubmit={submit}
       submitLabel='in'
       fail={fail}
       failVerb='not moved in'
     >
+      <InvoiceDrop invoice={invoice} />
       <Field label={`quantity (${target.unit || 'unit'})`}>
         <input
           className={cell}

@@ -14029,6 +14029,9 @@ export type ReceiveMaterialStockRequest = {
   // Measured LENGTH has no field: `quantity` already is it.
   measuredWidthCm: googletype_Decimal | undefined;
   shadeCode: string | undefined;
+  // invoice_file_id links the supplier's invoice (a library_file uploaded through the files
+  // library) to this receipt; 0 = none.
+  invoiceFileId: number | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -14061,6 +14064,9 @@ export type common_MaterialMovement = {
   // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
   // occurred_at vs expected_at, no PO entity needed.
   expectedAt: wellKnownTimestamp | undefined;
+  // The supplier's invoice attached on receipt (library_file id + its name); 0/"" = none.
+  invoiceFileId: number | undefined;
+  invoiceFileName: string | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is

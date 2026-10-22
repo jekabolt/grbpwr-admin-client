@@ -20,6 +20,7 @@ import {
   Text,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
+import { InvoiceMark } from './invoice-drop';
 import { MaterialPicker } from './material-picker';
 import { MaterialThumb } from './material-thumb';
 import { useMaterials } from './useMaterials';
@@ -74,6 +75,17 @@ function Reason({ m }: { m: common_MaterialMovement }) {
       break;
     case 'MATERIAL_MOVEMENT_TYPE_RECEIPT':
       ref = m.lot || m.supplierDoc || null;
+      // ⎘ after the doc (alone when there is none): the invoice attached on receipt.
+      if (m.invoiceFileId) {
+        const mark = <InvoiceMark fileId={m.invoiceFileId} name={m.invoiceFileName} />;
+        ref = ref ? (
+          <>
+            {ref} {mark}
+          </>
+        ) : (
+          mark
+        );
+      }
       break;
     case 'MATERIAL_MOVEMENT_TYPE_WRITEOFF':
       ref = m.reason || null;
