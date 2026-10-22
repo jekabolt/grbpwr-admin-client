@@ -22,9 +22,10 @@ import {
   type RollSpec,
   type SizeCopies,
 } from 'lib/pattern-export/roll-print';
+import { type RollPrintPaper, zipRollPrintPdfs } from 'lib/pattern-export/roll-print-zip';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ConfirmationModal, EmptyCell, Input, Text } from 'ui';
+import { useEffect, useMemo, useState } from 'react';
+import { CheckboxCommon, ConfirmationModal, EmptyCell, GroupLabel, Input, Text } from 'ui';
 
 import {
   PictureChoice,
@@ -49,6 +50,16 @@ export type RollPrintTarget = {
   title: string;
   /** Key of the remembered picks. */
   cardKey: string;
+  /** Material slots for one batch print. Omitted for the existing per-file action. */
+  slots?: RollPrintSlot[];
+};
+
+export type RollPrintSlot = {
+  key: string;
+  label: string;
+  material: string;
+  url: string;
+  fileName: string;
 };
 
 type Step = 1 | 2 | 3;
@@ -121,6 +132,27 @@ type Laid =
   | { kind: 'roll'; plan: RollPrintPlan }
   | { kind: 'tiles'; plan: RollPrintPlan; drawing: PatternDrawing; pdf: PdfPlan };
 
+type LoadedSlot = {
+  slot: RollPrintSlot;
+  bytes: ArrayBuffer | null;
+  source: RollPrintSource | null;
+  error: string | null;
+};
+
+type SlotResult = {
+  slot: RollPrintSlot;
+  laid: Laid | null;
+  error: string | null;
+};
+
+const oneSlot = (target: RollPrintTarget): RollPrintSlot => ({
+  key: '__single',
+  label: target.material || target.fileName,
+  material: target.material,
+  url: target.url,
+  fileName: target.fileName,
+});
+
 export function RollPrintDialog({
   target,
   onClose,
@@ -129,62 +161,97 @@ export function RollPrintDialog({
   onClose: () => void;
 }) {
   const phone = useMediaQuery(PHONE_QUERY);
+  const targets = useMemo(
+    () => (target ? (target.slots?.length ? target.slots : [oneSlot(target)]) : []),
+    [target],
+  );
+  const multiple = targets.length > 1;
   const [step, setStep] = useState<Step>(1);
-  const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
-  const [source, setSource] = useState<RollPrintSource | null>(null);
-  const [readError, setReadError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<LoadedSlot[]>([]);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(false);
   const [copies, setCopies] = useState<SizeCopies>({});
   const [paper, setPaper] = useState<Paper>('roll');
   // Typed by hand; prefilled only with the width the user typed last time.
   const [widthText, setWidthText] = useState('');
-  const [laid, setLaid] = useState<Laid | null>(null);
-  const [planError, setPlanError] = useState<string | null>(null);
+  const [results, setResults] = useState<SlotResult[]>([]);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Open: read the file once, prefill from memory (last width, this card's last picks).
+  // Open: read every selected material's current file once. A bad slot stays in the batch as its
+  // own error; it never prevents another slot from being planned or downloaded.
   useEffect(() => {
     if (!target) return;
     let dead = false;
     const mem = readPrintRoll();
     setStep(1);
-    setBytes(null);
-    setSource(null);
-    setReadError(null);
-    setLaid(null);
-    setPlanError(null);
+    setLoaded([]);
+    setSelected(Object.fromEntries(targets.map((slot) => [slot.key, true])));
+    setLoading(true);
+    setCopies({});
+    setResults([]);
     setPaper('roll');
     setWidthText(mem.last ? String(mem.last.widthCm) : '');
     void (async () => {
-      try {
-        const buf = await (await fetchMediaBlob(target.url)).arrayBuffer();
-        if (dead) return;
-        setBytes(buf);
-        const src = readRollPrintSource(buf, target.fileName);
-        if (dead) return;
-        const last = mem.picks[target.cardKey] ?? {};
-        const known = src.sizes.some((s) => s.size in last);
-        setCopies(
-          Object.fromEntries(src.sizes.map((s) => [s.size, known ? last[s.size] ?? 0 : 1])),
-        );
-        setSource(src);
-      } catch (e) {
-        if (!dead) setReadError(errText(e));
-      }
+      const next = await Promise.all(
+        targets.map(async (slot): Promise<LoadedSlot> => {
+          try {
+            const bytes = await (await fetchMediaBlob(slot.url)).arrayBuffer();
+            return {
+              slot,
+              bytes,
+              source: readRollPrintSource(bytes, slot.fileName),
+              error: null,
+            };
+          } catch (error) {
+            return { slot, bytes: null, source: null, error: errText(error) };
+          }
+        }),
+      );
+      if (dead) return;
+      const allSizes: string[] = [];
+      for (const item of next)
+        for (const size of item.source?.sizes ?? [])
+          if (!allSizes.includes(size.size)) allSizes.push(size.size);
+      const last = mem.picks[target.cardKey] ?? {};
+      const known = allSizes.some((size) => size in last);
+      setCopies(Object.fromEntries(allSizes.map((size) => [size, known ? last[size] ?? 0 : 1])));
+      setLoaded(next);
+      setLoading(false);
     })();
     return () => {
       dead = true;
     };
-  }, [target]);
+  }, [target, targets]);
 
-  const order = useMemo(() => source?.sizes.map((s) => s.size) ?? [], [source]);
+  const selectedSlots = useMemo(
+    () => targets.filter((slot) => selected[slot.key]),
+    [selected, targets],
+  );
+  const selectedLoaded = useMemo(
+    () => loaded.filter((item) => selected[item.slot.key]),
+    [loaded, selected],
+  );
+  // The first checked file establishes the grade order; later files append only new sizes.
+  const order = useMemo(() => {
+    const out: string[] = [];
+    for (const item of selectedLoaded)
+      for (const size of item.source?.sizes ?? [])
+        if (!out.includes(size.size)) out.push(size.size);
+    return out;
+  }, [selectedLoaded]);
   const total = order.reduce((n, s) => n + (copies[s] ?? 0), 0);
-  const title = target?.title || source?.title || 'pattern';
+  const title = target?.title || loaded.find((item) => item.source)?.source?.title || 'pattern';
   const widthCm = parseNum(widthText, true) ?? 0;
   const roll = rollOf(widthCm);
   const minCm = useMemo(
-    () => (bytes && target ? minRollWidthCm(bytes, target.fileName, copies, ROLL_EDGE_MM) : null),
-    [bytes, target, copies],
+    () =>
+      selectedLoaded.reduce<number | null>((max, item) => {
+        if (!item.bytes) return max;
+        const next = minRollWidthCm(item.bytes, item.slot.fileName, copies, ROLL_EDGE_MM);
+        return max == null ? next : Math.max(max, next);
+      }, null),
+    [selectedLoaded, copies],
   );
   const widthBad: string | null =
     widthCm <= 0
@@ -195,48 +262,103 @@ export function RollPrintDialog({
           ? `max ${f1(MAX_ROLL_CM)} cm`
           : null;
 
-  // Step 3: lay out on entry; a stale run (the user went back and changed a number) is aborted.
+  // Step 3: each slot gets the same copies and paper. Sizes absent from a file are skipped by the
+  // engine. A stale batch (the user went back or changed a selection) aborts every live worker.
   useEffect(() => {
-    if (step !== 3 || !bytes || !target) return;
+    if (step !== 3 || !target) return;
     const ac = new AbortController();
     setRunning(true);
-    setLaid(null);
-    setPlanError(null);
+    setResults(selectedLoaded.map((item) => ({ slot: item.slot, laid: null, error: item.error })));
     const spec = paper === 'roll' ? rollOf(widthCm) : TILE_ROLL;
-    planRollPrint(bytes, target.fileName, copies, spec, ac.signal)
-      .then((plan) => {
-        if (ac.signal.aborted) return;
-        if (paper === 'roll') {
-          setLaid({ kind: 'roll', plan });
-          return;
+    Promise.all(
+      selectedLoaded.map(async (item): Promise<SlotResult> => {
+        if (!item.bytes || !item.source)
+          return { slot: item.slot, laid: null, error: item.error ?? 'file not read' };
+        try {
+          const plan = await planRollPrint(item.bytes, item.slot.fileName, copies, spec, ac.signal);
+          if (paper === 'roll')
+            return { slot: item.slot, laid: { kind: 'roll', plan }, error: null };
+          const drawing = stackSheets(plan, title);
+          return {
+            slot: item.slot,
+            laid: { kind: 'tiles', plan, drawing, pdf: planPdf(drawing, { kind: 'tiles', paper }) },
+            error: null,
+          };
+        } catch (error) {
+          if (ac.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+            throw error;
+          return { slot: item.slot, laid: null, error: errText(error) };
         }
-        const drawing = stackSheets(plan, title);
-        setLaid({ kind: 'tiles', plan, drawing, pdf: planPdf(drawing, { kind: 'tiles', paper }) });
+      }),
+    )
+      .then((next) => {
+        if (!ac.signal.aborted) setResults(next);
       })
       .catch((e) => {
-        if (ac.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')) return;
-        setPlanError(errText(e));
+        if (ac.signal.aborted || (e instanceof Error && e.name === 'AbortError')) return;
+        setResults(
+          selectedLoaded.map((item) => ({ slot: item.slot, laid: null, error: errText(e) })),
+        );
       })
       .finally(() => {
         if (!ac.signal.aborted) setRunning(false);
       });
     return () => ac.abort();
-  }, [step, bytes, target, copies, paper, widthCm, title]);
+  }, [step, selectedLoaded, target, copies, paper, widthCm, title]);
 
   const download = async () => {
-    if (!laid || !target) return;
+    if (!target) return;
+    const printable = results.filter((result) => result.laid && result.laid.plan.placed > 0);
+    if (printable.length === 0) return;
     setSaving(true);
     try {
       const deps = await pdfDeps();
-      const res =
+      const exportOne = (laid: Laid) =>
         laid.kind === 'roll'
           ? exportRollPrint(laid.plan, title, roll, deps)
           : exportDrawing(laid.drawing, paper === 'A3' ? 'pdf-a3' : 'pdf-a4', deps);
-      downloadFile(res.blob, res.fileName);
-      const n = laid.kind === 'roll' ? laid.plan.sheets.length : laid.pdf.pages.length;
-      const tail =
-        laid.kind === 'roll' ? (n > 1 ? ` · ${n} sheets` : '') : ` · ${plural(n, 'page')}`;
-      useSnackBarStore.getState().showMessage(`saved · ${res.fileName}${tail}`, 'success');
+      if (selectedSlots.length === 1) {
+        const laid = printable[0].laid!;
+        const res = exportOne(laid);
+        downloadFile(res.blob, res.fileName);
+        const n = laid.kind === 'roll' ? laid.plan.sheets.length : laid.pdf.pages.length;
+        const tail =
+          laid.kind === 'roll' ? (n > 1 ? ` · ${n} sheets` : '') : ` · ${plural(n, 'page')}`;
+        useSnackBarStore.getState().showMessage(`saved · ${res.fileName}${tail}`, 'success');
+        return;
+      }
+
+      const failed = new Map<string, string>();
+      const files: { slotLabel: string; bytes: Uint8Array }[] = [];
+      for (const result of printable) {
+        try {
+          const res = exportOne(result.laid!);
+          files.push({
+            slotLabel: result.slot.label,
+            bytes: new Uint8Array(await res.blob.arrayBuffer()),
+          });
+        } catch (error) {
+          failed.set(result.slot.key, errText(error));
+        }
+      }
+      if (failed.size > 0)
+        setResults((current) =>
+          current.map((result) => ({
+            ...result,
+            error: failed.get(result.slot.key) ?? result.error,
+          })),
+        );
+      const printPaper: RollPrintPaper =
+        paper === 'roll' ? { kind: 'roll', widthCm } : { kind: 'tiles', paper };
+      const zip = zipRollPrintPdfs(title, printPaper, files);
+      downloadFile(zip.bytes, zip.name, 'application/zip');
+      const failedTail = failed.size > 0 ? ` · ${failed.size} failed` : '';
+      useSnackBarStore
+        .getState()
+        .showMessage(
+          `saved · ${zip.name} · ${plural(files.length, 'PDF')}${failedTail}`,
+          'success',
+        );
     } catch (e) {
       useSnackBarStore.getState().showMessage(`not saved · ${errText(e)}`, 'error');
     } finally {
@@ -252,18 +374,26 @@ export function RollPrintDialog({
     setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
   };
 
+  const printable = results.filter((result) => result.laid && result.laid.plan.placed > 0).length;
+  const downloadZip = selectedSlots.length > 1;
   const main: QuizMain =
     step === 3
       ? {
-          label: saving ? 'Download PDF…' : 'Download PDF',
-          disabled: running || saving || !laid || laid.plan.placed === 0,
+          label: saving
+            ? downloadZip
+              ? 'Download ZIP…'
+              : 'Download PDF…'
+            : downloadZip
+              ? 'Download ZIP'
+              : 'Download PDF',
+          disabled: running || saving || printable === 0,
           onClick: () => void download(),
         }
       : {
           label: 'Next',
           disabled:
             step === 1
-              ? !source || total === 0
+              ? loading || selectedSlots.length === 0 || total === 0
               : paper === 'roll' && (!(widthCm > 0) || widthBad != null),
           onClick: goNext,
         };
@@ -271,15 +401,25 @@ export function RollPrintDialog({
 
   const body = (() => {
     if (step === 1) {
-      if (readError) return <Problem text='file not read' title={readError} />;
-      if (!source) return <Wait />;
+      if (loading) return <Wait />;
+      if (!multiple && loaded[0]?.error)
+        return <Problem text='file not read' title={loaded[0].error} />;
       return (
-        <div className='flex w-full max-w-md flex-col gap-4'>
+        <div className={`flex w-full flex-col gap-4 ${multiple ? 'max-w-3xl' : 'max-w-md'}`}>
+          {multiple && (
+            <SlotRows
+              slots={loaded}
+              selected={selected}
+              onSelect={(key, checked) =>
+                setSelected((current) => ({ ...current, [key]: checked }))
+              }
+            />
+          )}
           <QtyRows
-            rows={source.sizes.map((s) => ({
-              key: s.size,
-              label: s.size,
-              qty: copies[s.size] ?? 0,
+            rows={order.map((size) => ({
+              key: size,
+              label: size,
+              qty: copies[size] ?? 0,
               bad: false,
               min: 0,
             }))}
@@ -300,14 +440,23 @@ export function RollPrintDialog({
           bad={widthBad}
         />
       );
-    return (
+    return multiple ? (
+      <BatchResultStep
+        sizes={sizesText(order, copies)}
+        paper={paper}
+        widthCm={widthCm}
+        results={results}
+        running={running}
+        onGo={setStep}
+      />
+    ) : (
       <ResultStep
         sizes={sizesText(order, copies)}
         paper={paper}
         widthCm={widthCm}
-        laid={laid}
+        laid={results[0]?.laid ?? null}
         running={running}
-        error={planError}
+        error={results[0]?.error ?? null}
         onGo={setStep}
       />
     );
@@ -320,7 +469,9 @@ export function RollPrintDialog({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title={['print', target?.material].filter(Boolean).join(' · ')}
+      title={
+        multiple ? 'print · all slots' : ['print', target?.material].filter(Boolean).join(' · ')
+      }
       width='lg'
       hideActions
       fullScreen={phone}
@@ -361,6 +512,65 @@ function Wait() {
     <Text size='micro' variant='label' component='p'>
       reading…
     </Text>
+  );
+}
+
+function SlotRows({
+  slots,
+  selected,
+  onSelect,
+}: {
+  slots: readonly LoadedSlot[];
+  selected: Readonly<Record<string, boolean>>;
+  onSelect: (key: string, checked: boolean) => void;
+}) {
+  return (
+    <div className='w-full border-y border-hairline divide-y divide-hairline'>
+      {slots.map((item, index) => {
+        const id = `print-slot-${index}`;
+        const checked = selected[item.slot.key] === true;
+        return (
+          <div key={item.slot.key} className='flex min-h-10 items-center gap-2 py-1.5'>
+            <CheckboxCommon
+              name={id}
+              checked={checked}
+              aria-label={`print ${item.slot.label}`}
+              onChange={(next) => onSelect(item.slot.key, next)}
+            />
+            <label
+              htmlFor={id}
+              className='grid min-w-0 flex-1 cursor-pointer grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-3 sm:items-center'
+            >
+              <Text
+                size='micro'
+                tracking='label'
+                component='span'
+                className={checked ? 'truncate uppercase' : 'truncate uppercase text-labelColor'}
+                title={item.slot.label}
+              >
+                {item.slot.label}
+              </Text>
+              <Text
+                component='span'
+                variant='label'
+                className='truncate'
+                title={item.slot.material}
+              >
+                {item.slot.material}
+              </Text>
+              <Text
+                component='span'
+                variant={item.error ? undefined : 'label'}
+                className={`truncate ${item.error ? 'text-error' : ''}`}
+                title={item.error ?? item.slot.fileName}
+              >
+                {item.error ? `! ${item.slot.fileName}` : item.slot.fileName}
+              </Text>
+            </label>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -501,6 +711,87 @@ function ResultStep({
         </ul>
       )}
       <PaperCanvas laid={laid} running={running} />
+    </div>
+  );
+}
+
+function batchProblem(result: SlotResult, paper: Paper): string | null {
+  if (result.error) return result.error;
+  const plan = result.laid?.plan;
+  if (!plan) return null;
+  if (plan.placed === 0) return plan.total === 0 ? 'no matching sizes' : 'no pieces fit paper';
+  const parts: string[] = [];
+  if (plan.tooWide.length)
+    parts.push(
+      `${plural(plan.tooWide.length, 'piece')} wider than ${paper === 'roll' ? 'roll' : 'paper'}`,
+    );
+  if (plan.tooLong.length) parts.push(`${plural(plan.tooLong.length, 'piece')} longer than sheet`);
+  return parts.join(' · ') || null;
+}
+
+function BatchResultStep({
+  sizes,
+  paper,
+  widthCm,
+  results,
+  running,
+  onGo,
+}: {
+  sizes: string;
+  paper: Paper;
+  widthCm: number;
+  results: readonly SlotResult[];
+  running: boolean;
+  onGo: (s: Step) => void;
+}) {
+  const successful = results.filter((result) => result.laid && result.laid.plan.placed > 0);
+  const lengthMm = successful.reduce((sum, result) => sum + (result.laid?.plan.lengthMm ?? 0), 0);
+  return (
+    <div className='flex w-full min-w-0 flex-col items-center gap-4'>
+      <FactList className='max-w-xl'>
+        <Fact label='sizes' onClick={() => onGo(1)}>
+          {sizes || <EmptyCell />}
+        </Fact>
+        <Fact label={paper === 'roll' ? 'roll' : 'paper'} onClick={() => onGo(2)}>
+          {paper === 'roll' ? `${f1(widthCm)} cm` : `${paper} tiles`}
+        </Fact>
+        <Fact label='length' onClick={() => onGo(2)}>
+          {paper === 'roll' ? `${(lengthMm / 1000).toFixed(1)} m` : <EmptyCell />}
+        </Fact>
+        <Fact label='files' onClick={() => onGo(1)}>
+          {successful.length} PDF
+        </Fact>
+      </FactList>
+      <div className='flex w-full min-w-0 flex-col gap-4'>
+        {results.map((result) => {
+          const problem = batchProblem(result, paper);
+          const measure = result.laid
+            ? result.laid.kind === 'roll'
+              ? `${(result.laid.plan.lengthMm / 1000).toFixed(1)} m`
+              : plural(result.laid.pdf.pages.length, 'page')
+            : null;
+          return (
+            <div key={result.slot.key} className='min-w-0'>
+              <GroupLabel
+                flush
+                action={
+                  problem ? (
+                    <Text component='span' size='micro' className='text-right text-error'>
+                      ! {problem}
+                    </Text>
+                  ) : undefined
+                }
+              >
+                {result.slot.label}
+                {measure ? ` · ${measure}` : ''}
+              </GroupLabel>
+              {((result.laid?.plan.placed ?? 0) > 0 || (!problem && !result.laid)) && (
+                <PaperCanvas laid={result.laid} running={running} />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

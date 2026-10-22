@@ -146,7 +146,7 @@ import {
   ROW_ICON_BTN,
   UploadGlyph,
 } from './pattern-export/export-menu';
-import type { RollPrintTarget } from './pattern-export/roll-print-dialog';
+import type { RollPrintSlot, RollPrintTarget } from './pattern-export/roll-print-dialog';
 import {
   ddmm,
   removedSheets,
@@ -353,6 +353,19 @@ type PatternRow = {
   sha256?: string;
 };
 type Entry = { row: PatternRow; index: number };
+
+/** The current DXF row with the newest revision in one material slot. */
+function latestDxfEntry(list: readonly Entry[]): Entry | undefined {
+  return list.reduce<Entry | undefined>((latest, entry) => {
+    if (!entry.row.url || !isDxfUrl(entry.row.url)) return latest;
+    if (!latest) return entry;
+    const revision = Number(entry.row.version ?? 0);
+    const latestRevision = Number(latest.row.version ?? 0);
+    return revision > latestRevision || (revision === latestRevision && entry.index > latest.index)
+      ? entry
+      : latest;
+  }, undefined);
+}
 
 type ReuploadFlight = { rowId: string; version: number };
 type ReuploadFeedback =
@@ -918,6 +931,25 @@ export function PatternsField({
     () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
     [scopes, dxfByScopeMap],
   );
+  // Header print = one current DXF per material slot. A slot can retain several present rows
+  // while files are being consolidated; the newest revision is the same row its download menu
+  // presents as current, while superseded revisions remain in `historyByLine` and never enter here.
+  const printSlots: RollPrintSlot[] = scopeGroups.flatMap((group) => {
+    const current = latestDxfEntry(group.entries);
+    if (!current?.row.url) return [];
+    const full = scopeLabel(group.scope);
+    const label = group.scope.byPurpose ? bomPurposeLabel(group.scope.key) : full;
+    const material = once(group.scope.lines.map((line) => line.name)).join(', ') || full;
+    return [
+      {
+        key: group.scope.key,
+        label,
+        material,
+        url: current.row.url,
+        fileName: current.row.filename || `${labelOf(current.row)}.dxf`,
+      },
+    ];
+  });
   // DXF без живой привязки: залитые до 0260 (ключа нет вовсе) и те, чью строку BOM удалили или
   // переклассифицировали. Раскладка для них — догадка, поэтому они собраны отдельно и с ошибкой.
   const looseDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
@@ -3364,6 +3396,27 @@ export function PatternsField({
               >
                 marker
               </Button>
+              {printSlots.length > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  className={door}
+                  onClick={() => {
+                    const first = printSlots[0];
+                    setPrinting({
+                      url: first.url,
+                      fileName: first.fileName,
+                      material: first.material,
+                      title: styleNumber.trim(),
+                      cardKey: techCardId ? String(techCardId) : '',
+                      ...(printSlots.length > 1 ? { slots: printSlots } : {}),
+                    });
+                  }}
+                >
+                  print
+                </Button>
+              )}
             </div>
           }
         >

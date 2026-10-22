@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { jsPDF } from 'jspdf';
+import { unzipSync } from 'fflate';
 
 import { DRAWING_PEN_MM, type PdfFont } from 'lib/pattern-export/dxf-pdf';
 import type { DrawingLabel, DrawingStroke } from 'lib/pattern-export/drawing';
@@ -16,6 +17,7 @@ import {
   type RollPrintPlan,
   type RollSpec,
 } from 'lib/pattern-export/roll-print';
+import { zipRollPrintPdfs } from 'lib/pattern-export/roll-print-zip';
 
 const REPO = process.env.ROLL_PRINT_REPO ?? process.cwd();
 const parserNoise = (values: unknown[]) =>
@@ -268,6 +270,38 @@ function assertPlan(
   return { piecePairs, minEdgeMm };
 }
 
+export function assertRollPrintZip(
+  pdfs: Uint8Array[] = [
+    new TextEncoder().encode('%PDF first slot'),
+    new TextEncoder().encode('%PDF second slot'),
+  ],
+) {
+  const archive = zipRollPrintPdfs('FW28-001', { kind: 'roll', widthCm: 91.4 }, [
+    { slotLabel: 'Main Material', bytes: pdfs[0] },
+    { slotLabel: 'Lining', bytes: pdfs[1] },
+  ]);
+  const expectedZipPaths = ['FW28-001_main-material_roll91.4.pdf', 'FW28-001_lining_roll91.4.pdf'];
+  const unzipped = unzipSync(archive.bytes);
+  if (archive.name !== 'FW28-001_print_roll91.4.zip')
+    throw new Error(`print zip name ${archive.name} is wrong`);
+  if (JSON.stringify(Object.keys(unzipped)) !== JSON.stringify(expectedZipPaths))
+    throw new Error(`print zip paths ${JSON.stringify(Object.keys(unzipped))} are wrong`);
+  for (const path of expectedZipPaths)
+    if (new TextDecoder().decode(unzipped[path].subarray(0, 4)) !== '%PDF')
+      throw new Error(`${path} is not a PDF`);
+  const tiles = zipRollPrintPdfs('FW28-001', { kind: 'tiles', paper: 'A4' }, [
+    { slotLabel: 'Main Material', bytes: pdfs[0] },
+    { slotLabel: 'Lining', bytes: pdfs[1] },
+  ]);
+  const expectedTilePaths = ['FW28-001_main-material_a4.pdf', 'FW28-001_lining_a4.pdf'];
+  if (
+    tiles.name !== 'FW28-001_print_a4.zip' ||
+    JSON.stringify(tiles.paths) !== JSON.stringify(expectedTilePaths)
+  )
+    throw new Error(`tile print zip names are wrong: ${tiles.name} ${JSON.stringify(tiles.paths)}`);
+  console.log(`assert print zip: ${archive.name} · ${expectedZipPaths.length} PDFs`);
+}
+
 export async function main(args: string[]) {
   const [dxfPath, outDir] = args;
   if (!dxfPath || !outDir) throw new Error('usage: roll-print-probe <file.dxf> <out-dir>');
@@ -287,6 +321,7 @@ export async function main(args: string[]) {
 
   const min = minRollWidthCm(bytes, name, copies);
   const renders: Array<{ pdf: string; pages: number; stem: string; suffix: string }> = [];
+  const zipPdfs: Uint8Array[] = [];
   const metrics: Array<{
     key: string;
     widthCm: number;
@@ -316,9 +351,11 @@ export async function main(args: string[]) {
         `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * ROLL_FURNITURE_MM} mm`,
       );
     const exported = exportRollPrint(plan, run.title, roll, { jsPDF, font });
+    const exportedBytes = new Uint8Array(await exported.blob.arrayBuffer());
+    if (zipPdfs.length < 2) zipPdfs.push(exportedBytes);
     const base = `${run.title}-roll${widthCm}`;
     const pdfPath = resolve(outDir, `${base}-after.pdf`);
-    writeFileSync(pdfPath, Buffer.from(await exported.blob.arrayBuffer()));
+    writeFileSync(pdfPath, Buffer.from(exportedBytes));
     const tooWide = plan.tooWide.length;
     const tooLong = plan.tooLong.length;
     if (!plan.search) throw new Error(`${run.key}: plan carries no search report`);
@@ -351,6 +388,7 @@ export async function main(args: string[]) {
       runtimeMs: elapsedMs,
     });
   }
+  assertRollPrintZip(zipPdfs);
   const abortController = new AbortController();
   const abortRun = planRollPrint(
     bytes,

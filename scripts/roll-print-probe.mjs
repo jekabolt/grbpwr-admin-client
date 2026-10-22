@@ -4,7 +4,7 @@
 // Usage: node scripts/roll-print-probe.mjs [file.dxf] [out-dir]
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,14 @@ await build({
     utils: resolve(REPO, 'src/utils'),
   },
 });
+
+const afterProbe = await import(pathToFileURL(afterBundle).href);
+if (!existsSync(dxf)) {
+  afterProbe.assertRollPrintZip();
+  console.log(`skip roll layouts: fixture not found at ${dxf}`);
+  unlinkSync(afterBundle);
+  process.exit(0);
+}
 
 await build({
   entryPoints: [resolve(HERE, 'roll-print-before-entry.ts')],
@@ -80,7 +88,6 @@ await build({
 process.env.ROLL_PRINT_REPO = REPO;
 const beforeProbe = await import(pathToFileURL(beforeBundle).href);
 const before = await beforeProbe.main([dxf, outDir]);
-const afterProbe = await import(pathToFileURL(afterBundle).href);
 const after = await afterProbe.main([dxf, outDir]);
 console.log(`minimum roll width after straightening: ${after.min} cm`);
 let failed = false;
