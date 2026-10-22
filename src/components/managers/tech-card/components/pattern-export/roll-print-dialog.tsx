@@ -9,11 +9,13 @@ import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useM
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { downloadFile } from 'lib/pattern-export/download';
 import type { PatternDrawing } from 'lib/pattern-export/drawing';
-import { PDF_PAGE_LIMIT_MM, planPdf, type PdfPlan } from 'lib/pattern-export/dxf-pdf';
+import { planPdf, type PdfPlan } from 'lib/pattern-export/dxf-pdf';
 import { exportDrawing } from 'lib/pattern-export/formats';
 import {
   exportRollPrint,
+  minRollWidthCm,
   planRollPrint,
+  ROLL_MAX_WIDTH_CM,
   readRollPrintSource,
   type RollPrintPlan,
   type RollPrintSource,
@@ -36,7 +38,6 @@ import {
 } from '../nesting/marker-quiz/marker-quiz';
 import { PaperChoicePicture } from '../nesting/marker-quiz/pictures';
 import { pdfDeps } from './download';
-import { minRollWidthCm } from './roll-min-width';
 import { readPrintRoll, rememberPrintRoll } from './roll-print-memory';
 
 export type RollPrintTarget = {
@@ -77,7 +78,7 @@ const rollOf = (widthCm: number): RollSpec => ({
 const TILE_ROLL: RollSpec = { widthCm: 100, maxSheetM: ROLL_SHEET_M, edgeMm: 0 };
 const TILE_GAP_MM = 20;
 // The widest roll a single PDF page can carry.
-const MAX_ROLL_CM = PDF_PAGE_LIMIT_MM / 10;
+const MAX_ROLL_CM = ROLL_MAX_WIDTH_CM;
 
 const f1 = (n: number) => String(Math.round(n * 10) / 10);
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
