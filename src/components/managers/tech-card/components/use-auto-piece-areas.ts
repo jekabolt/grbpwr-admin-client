@@ -30,7 +30,7 @@ import { useSizeNames } from 'components/managers/model/components/use-size-syst
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
-import { aliasInScope } from './bom-purpose';
+import { aliasInScope, bindingScopes } from './bom-purpose';
 import { mmToEngineCm } from './nesting/allowance-units';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
@@ -166,6 +166,7 @@ export function useAutoPieceAreas(args: {
       sizeIds.every((s) => saved.has(s));
     if (!sameRange) return { refusals, jobs };
 
+    const links = bindingScopes(scopes, aliases);
     for (const scope of scopes) {
       const sheets = sheetsByScope.get(scope.key) ?? [];
       const dxfSheets = sheets.filter((s) => !!s.url && isDxfUrl(s.url));
@@ -173,7 +174,7 @@ export function useAutoPieceAreas(args: {
       const state = scopeAreaState(serverScopeKeysOfSheets(sheets), cardRead.pieceAreaScopes);
       if (state.phase === 'fresh') continue;
 
-      const scopeAliases = aliases.filter((a) => aliasInScope(a, scope, scopes));
+      const scopeAliases = aliases.filter((a) => aliasInScope(a, scope, links));
       const pieces = scopeAreaPieces(scopeAliases, pieceRows, scope.key);
       if (pieces.length === 0) {
         refusals[scope.key] = `${PREFIX}no piece linked to the drawing`;

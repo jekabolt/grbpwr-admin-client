@@ -13,7 +13,7 @@
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { isDxfUrl } from 'utils/pattern';
-import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from '../bom-purpose';
+import { bindingScopes, fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from '../bom-purpose';
 import type { TechCardFormData } from '../schema';
 import type { ScopedDxfFile } from './dxf-geometry';
 import { patternSheetName } from './sheet-name';
@@ -56,15 +56,14 @@ export function useCardDxfPack(): ScopedDxfFile[] {
     [bomItems],
   );
 
-  return useMemo(
-    () =>
-      patterns
-        .filter((p) => !!p.url && isDxfUrl(p.url))
-        .map((p) => ({
-          scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
-          name: patternSheetName(p),
-          url: p.url!,
-        })),
-    [patterns, scopes],
-  );
+  return useMemo(() => {
+    const sheets = bindingScopes(scopes, patterns);
+    return patterns
+      .filter((p) => !!p.url && isDxfUrl(p.url))
+      .map((p) => ({
+        scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheets),
+        name: patternSheetName(p),
+        url: p.url!,
+      }));
+  }, [patterns, scopes]);
 }

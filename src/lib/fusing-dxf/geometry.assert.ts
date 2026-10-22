@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   aliasInScope,
   bindingForScope,
+  bindingScopes,
   fabricScopes,
   markerScopeLines,
   scopeKeyOfBinding,
@@ -394,23 +395,21 @@ export async function main() {
     ],
   );
   const scopeOf = (key: string) => scopes.find((scope) => scope.key === key)!;
+  // Row-level cases: an empty artifact set, so nothing supersedes a legacy row.
+  const none = bindingScopes(scopes, []);
   // a named interlining line wins over the purpose riding along
-  assert.equal(scopeKeyOfBinding(INTERFACING, 'F-2', scopes), 'F-2');
-  assert.equal(scopeKeyOfBinding(UNSET, 'F-3', scopes), 'F-3');
+  assert.equal(scopeKeyOfBinding(INTERFACING, 'F-2', none), 'F-2');
+  assert.equal(scopeKeyOfBinding(UNSET, 'F-3', none), 'F-3');
   // legacy purpose-only binding: the single line of that purpose, never a guess among three
-  assert.equal(scopeKeyOfBinding(OTHER, '', scopes), 'S-1');
-  assert.equal(scopeKeyOfBinding(INTERFACING, '', scopes), '');
+  assert.equal(scopeKeyOfBinding(OTHER, '', none), 'S-1');
+  assert.equal(scopeKeyOfBinding(INTERFACING, '', none), '');
   // main fabric unchanged: purpose, or a line sorted into it
-  assert.equal(scopeKeyOfBinding(MAIN, '', scopes), MAIN);
-  assert.equal(scopeKeyOfBinding(UNSET, 'M-2', scopes), MAIN);
-  assert.ok(
-    aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-1'), scopes),
-  );
-  assert.ok(
-    !aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-2'), scopes),
-  );
-  assert.ok(!aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: '' }, scopeOf('F-1'), scopes));
-  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, scopeOf('S-1'), scopes));
+  assert.equal(scopeKeyOfBinding(MAIN, '', none), MAIN);
+  assert.equal(scopeKeyOfBinding(UNSET, 'M-2', none), MAIN);
+  assert.ok(aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-1'), none));
+  assert.ok(!aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-2'), none));
+  assert.ok(!aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: '' }, scopeOf('F-1'), none));
+  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, scopeOf('S-1'), none));
   assert.deepEqual(bindingForScope(scopeOf('F-2')), { fabricPurpose: '', bomLineKey: 'F-2' });
   assert.deepEqual(
     markerScopeLines('F-2', bom).map((l) => l.lineKey),
@@ -436,11 +435,12 @@ export async function main() {
     ],
   );
   const ribScopeOf = (key: string) => ribScopes.find((scope) => scope.key === key)!;
-  assert.equal(scopeKeyOfBinding(OTHER, '', ribScopes), OTHER);
-  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', ribScopes), 'S-1');
-  assert.equal(scopeKeyOfBinding(OTHER, 'R-1', ribScopes), OTHER);
-  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf(OTHER), ribScopes));
-  assert.ok(!aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf('S-1'), ribScopes));
+  const ribNone = bindingScopes(ribScopes, []);
+  assert.equal(scopeKeyOfBinding(OTHER, '', ribNone), OTHER);
+  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', ribNone), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, 'R-1', ribNone), OTHER);
+  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf(OTHER), ribNone));
+  assert.ok(!aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf('S-1'), ribNone));
   assert.deepEqual(
     markerScopeLines('R-1', withRib).map((l) => l.lineKey),
     ['R-1'],
@@ -449,6 +449,42 @@ export async function main() {
     markerScopeLines('S-1', withRib).map((l) => l.lineKey),
     ['S-1'],
   );
+
+  // SET LEVEL (L11, backend PreferredFabricArtifactsByScope): a legacy purpose-only row is the felt's
+  // only while the felt has no row of that kind bound to it. Once it has one, the line set is read
+  // whole and the legacy row resolves to nothing — never merged into the line's set.
+  const legacyFelt = { fabricPurpose: OTHER, bomLineKey: '' };
+  const boundFelt = { fabricPurpose: UNSET, bomLineKey: 'S-1' };
+  const legacyOnly = bindingScopes(scopes, [legacyFelt]);
+  const lineAndLegacy = bindingScopes(scopes, [legacyFelt, boundFelt]);
+  assert.equal(scopeKeyOfBinding(OTHER, '', legacyOnly), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, '', lineAndLegacy), '');
+  assert.equal(scopeKeyOfBinding(UNSET, 'S-1', lineAndLegacy), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', lineAndLegacy), 'S-1');
+  assert.ok(aliasInScope(legacyFelt, scopeOf('S-1'), legacyOnly));
+  assert.ok(!aliasInScope(legacyFelt, scopeOf('S-1'), lineAndLegacy));
+  assert.deepEqual(
+    [legacyFelt, boundFelt].filter((a) => aliasInScope(a, scopeOf('S-1'), lineAndLegacy)),
+    [boundFelt],
+    'the line set wins whole',
+  );
+  // a row that names a line (here a deleted one) is not legacy: it is the felt's own row
+  const goneLine = bindingScopes(scopes, [
+    legacyFelt,
+    { fabricPurpose: OTHER, bomLineKey: 'GONE' },
+  ]);
+  assert.equal(scopeKeyOfBinding(OTHER, 'GONE', goneLine), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, '', goneLine), '');
+  // per artifact kind: the links' line set does not suppress a legacy SHEET, and vice versa
+  const sheetsLegacy = bindingScopes(scopes, [legacyFelt]);
+  const linksBound = bindingScopes(scopes, [boundFelt, legacyFelt]);
+  assert.equal(scopeKeyOfBinding(OTHER, '', sheetsLegacy), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, '', linksBound), '');
+  // rib + felt: a purpose-only «other» is the rib's group, never a legacy felt row — the felt's
+  // own rows do not suppress it
+  const ribWithFelt = bindingScopes(ribScopes, [legacyFelt, boundFelt]);
+  assert.equal(scopeKeyOfBinding(OTHER, '', ribWithFelt), OTHER);
+  assert.ok(aliasInScope(legacyFelt, ribScopeOf(OTHER), ribWithFelt));
 
   // Every generated sheet binds to its LINE and links; a line is blocked only when an uploaded
   // sheet resolves to that very line (an old-client sheet bound {interfacing, F-2}). A legacy
@@ -463,7 +499,7 @@ export async function main() {
       { fabricPurpose: INTERFACING, bomLineKey: 'F-2' },
       { fabricPurpose: INTERFACING, bomLineKey: '' },
       { fabricPurpose: MAIN, bomLineKey: '' },
-    ].map((sheet) => scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes)),
+    ].map((sheet) => scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, none)),
   });
   assert.deepEqual([...lineplan.blocked], ['F-2']);
   assert.deepEqual(Object.fromEntries(lineplan.bindings), {
@@ -471,6 +507,18 @@ export async function main() {
     'F-3': { bomLineKey: 'F-3', fabricPurpose: UNSET },
     'S-1': { bomLineKey: 'S-1', fabricPurpose: UNSET },
   });
+  // Regenerate resolves uploads over the WHOLE sheet set, generated included: a legacy felt upload
+  // holds the felt while it is the felt's only sheet, and stops blocking once a generated sheet is
+  // bound to the line (that one is what the card reads for the felt).
+  const feltPlan = (sheetSet: { fabricPurpose: string; bomLineKey: string }[]) =>
+    planFusingLines({
+      lines: [{ bomLineKey: 'S-1', effectiveScope: 'S-1' }],
+      uploadedScopes: [legacyFelt].map((sheet) =>
+        scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, bindingScopes(scopes, sheetSet)),
+      ),
+    });
+  assert.deepEqual([...feltPlan([legacyFelt]).blocked], ['S-1']);
+  assert.deepEqual([...feltPlan([legacyFelt, boundFelt]).blocked], []);
   // A blocked line's generated sheet is removed, not kept beside the uploaded sheet that holds the
   // line; a generated line's row is replaced; uploaded rows ride through.
   const uploadedOther = { name: 'felt.dxf', bomLineKey: 'IL-4', fabricPurpose: OTHER };

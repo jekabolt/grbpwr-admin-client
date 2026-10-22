@@ -53,6 +53,7 @@ import {
   fabricScopes,
   isRollGoodsSection,
   markerScopeDirection,
+  bindingScopes,
   scopeKeyOfBinding,
   type ScopeDirection,
 } from '../bom-purpose';
@@ -317,9 +318,10 @@ export function MarkersSection({
     // съёмки, и сравнение сырых ключей потеряло бы листы ровно в тот момент, когда оператор
     // навёл порядок в BOM (то же правило, что scopeKeyOfBinding на панели выкроек).
     const scope = key ? scopes.find((s) => s.lines.some((l) => l.lineKey === key)) : undefined;
+    const sheets = bindingScopes(scopes, patternRows);
     return patternSourcesForMarker(patternRows, {
       bomLineKey: key,
-      purposeOwnsLine: (p, line) => !!scope && scopeKeyOfBinding(p, line, scopes) === scope.key,
+      purposeOwnsLine: (p, line) => !!scope && scopeKeyOfBinding(p, line, sheets) === scope.key,
     });
   }, [view, scopes, patternRows]);
   // ЗАВИСИМОСТЬ ПО СОДЕРЖИМОМУ, А НЕ ПО ССЫЛКЕ. useWatch отдаёт свежий клон массива при ЛЮБОМ

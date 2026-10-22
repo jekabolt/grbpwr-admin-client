@@ -77,7 +77,10 @@ import { seamSheetOf } from '../../src/components/managers/tech-card/assembly-pr
 import { typesetSeams } from '../../src/components/managers/tech-card/assembly-print/paper';
 import { seamWords } from '../../src/components/managers/tech-card/components/assembly-skeleton-panel';
 import { replayExisting } from '../../src/lib/assembly-skeleton/skeleton/existing';
-import { scopeKeyOfBinding } from '../../src/components/managers/tech-card/components/bom-purpose';
+import {
+  bindingScopes,
+  scopeKeyOfBinding,
+} from '../../src/components/managers/tech-card/components/bom-purpose';
 import {
   normBlock,
   sizeTokensOf,
@@ -193,10 +196,11 @@ async function quiet<T>(f: () => Promise<T>): Promise<T> {
 /** useCardDxfPack + the queryFn of dxfGeometryQuery (download → parseSheets) + index + findPiece. */
 async function pieceShapes(form: TechCardFormData, input: CardInput) {
   const scopes = rollGoodsScopes((form.bomItems ?? []) as never);
+  const sheets = bindingScopes(scopes, form.patterns ?? []);
   const pack = (form.patterns ?? [])
     .filter((p) => !!p.url && isDxfUrl(p.url))
     .map((p) => ({
-      scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
+      scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheets),
       name: p.filename || 'pattern.dxf',
       url: p.url!,
     }));

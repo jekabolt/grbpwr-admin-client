@@ -471,7 +471,7 @@ export function MarkerApplyHint({
       const [
         { sizeAreasForMarker },
         { patternSourcesForMarker },
-        { fabricScopes, isRollGoodsSection, scopeKeyOfBinding },
+        { bindingScopes, fabricScopes, isRollGoodsSection, scopeKeyOfBinding },
       ] = await Promise.all([
         import('./nesting/size-areas-from-dxf'),
         import('./nesting/marker-rebuild'),
@@ -490,9 +490,10 @@ export function MarkerApplyHint({
         }));
       const scopes = fabricScopes(rollGoods);
       const scope = key ? scopes.find((s) => s.lines.some((l) => l.lineKey === key)) : undefined;
+      const sheets = bindingScopes(scopes, patternRows);
       const sources = patternSourcesForMarker(patternRows, {
         bomLineKey: key,
-        purposeOwnsLine: (p, line) => !!scope && scopeKeyOfBinding(p, line, scopes) === scope.key,
+        purposeOwnsLine: (p, line) => !!scope && scopeKeyOfBinding(p, line, sheets) === scope.key,
       });
       if (sources.length === 0) {
         setAreas(null);

@@ -11,7 +11,7 @@
 // BOM будила бы каждую лишнюю подписку.
 import { useMemo } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
-import { fabricScopes, isRollGoodsSection } from './bom-purpose';
+import { bindingScopes, fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
 import type { DxfNormPiece } from './nesting/dxf-consumption';
 import type { TechCardFormData } from './schema';
 
@@ -96,15 +96,15 @@ export function useFabricDxfPieces(
   return useMemo(() => {
     if (!scopeKey) return { pieces: [] as DxfNormPiece[], unaliasedPieces: [] as string[] };
     const byPiece = new Map<string, { block: string; scopeKey: string }[]>();
+    // The card's resolver over its whole link set (L11): a link naming an interlining line belongs
+    // to it whatever purpose rides along, and a legacy purpose-only one only while the line has
+    // no links of its own.
+    const links = bindingScopes(scopes, aliasRows);
     for (const a of aliasRows) {
       const key = (a.pieceLineKey ?? '').trim().toLowerCase();
       const block = (a.blockName ?? '').trim();
       if (!key || !block) continue;
-      const purpose = (a.fabricPurpose ?? '').trim();
-      const own = purpose
-        ? scopes.find((s) => s.byPurpose && s.key === purpose)
-        : scopes.find((s) => s.lines.some((l) => l.lineKey === (a.bomLineKey ?? '').trim()));
-      if ((own?.key ?? '') !== scopeKey) continue;
+      if (scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, links) !== scopeKey) continue;
       const list = byPiece.get(key) ?? [];
       if (!list.some((r) => r.block === block)) list.push({ block, scopeKey });
       byPiece.set(key, list);

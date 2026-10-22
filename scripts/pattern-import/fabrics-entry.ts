@@ -59,6 +59,7 @@ import {
   planFormWrites,
   scopeKeyOf,
   type LiveCard,
+  type LivePattern,
 } from 'lib/pattern-import/fabrics/apply';
 import type {
   CardDraft,
@@ -1348,6 +1349,42 @@ export async function main(): Promise<number> {
       res.ok && res.replaced?.length === 1 && res.replaced[0].oldUrl === mainRow0.url,
       'F2 result lists the replaced row (old → new url)',
     );
+    // F2b the replaced row is re-filed under the scope's binding (L11): a legacy row the card
+    // resolves to this scope (a purpose-only sheet of an interlining line) leaves purpose-only
+    {
+      const legacy: LiveCard = {
+        ...afterFirst,
+        patterns: afterFirst.patterns.map((p) =>
+          p.lineKey === mainRow0.lineKey ? { ...p, fabricPurpose: 'LEGACY', bomLineKey: '' } : p,
+        ),
+      };
+      const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }) =>
+        b.fabricPurpose === 'LEGACY' ? MAIN.scopeKey : scopeKeyOf(b);
+      const z = planFormWrites(
+        d2,
+        legacy,
+        [
+          {
+            scopeKey: MAIN.scopeKey,
+            url: 'https://cdn.test/x.dxf',
+            filename: m2.filename,
+            sizeBytes: 1,
+          },
+        ],
+        { storageSizeId: 501, mintKey: mint, scopeOf },
+      );
+      const rows = (z.writes.find((w) => w.path === 'patterns')?.value ?? []) as LivePattern[];
+      const r = rows.find((p) => p.lineKey === mainRow0.lineKey);
+      ck(
+        z.replaced.length === 1 &&
+          rows.length === legacy.patterns.length &&
+          r?.url === 'https://cdn.test/x.dxf' &&
+          r?.fabricPurpose === m2.target.fabricPurpose &&
+          r?.bomLineKey === m2.target.bomLineKey,
+        'F2b replace re-binds the row to the scope target, not the legacy binding',
+        `${r?.fabricPurpose}/${r?.bomLineKey}`,
+      );
+    }
     ck(
       st.aliases.some((a) => scopeKeyOf(a) === MAIN.scopeKey && a.blockName === 'CLR_3') &&
         st.pieces.length === afterFirst.pieces.length,

@@ -24,7 +24,10 @@ import {
   defaultGrainLayer,
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
-import { scopeKeyOfBinding } from 'components/managers/tech-card/components/bom-purpose';
+import {
+  bindingScopes,
+  scopeKeyOfBinding,
+} from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { sha256Hex } from 'lib/features/sha256';
@@ -453,6 +456,10 @@ export async function regenerateFusingSheets(
   let reused = 0;
   const uploadedSheets = oldPatterns.filter((pattern) => !isGenerated(pattern));
   const scopes = rollGoodsScopes(bom);
+  // Resolved against the WHOLE sheet set, generated included (L11 set rule): a legacy
+  // purpose-only upload is that interlining line's sheet only while the line has no sheet bound
+  // to it — once a generated one is there, the legacy file is not read for it and blocks nothing.
+  const sheetSet = bindingScopes(scopes, oldPatterns);
   const { bindings, blocked } = planFusingLines({
     lines: lines.map((line) => ({
       bomLineKey: line.bomLineKey,
@@ -462,7 +469,7 @@ export async function regenerateFusingSheets(
         )?.key ?? line.bomLineKey,
     })),
     uploadedScopes: uploadedSheets.map((sheet) =>
-      scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes),
+      scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, sheetSet),
     ),
   });
   // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins fully. Nothing is

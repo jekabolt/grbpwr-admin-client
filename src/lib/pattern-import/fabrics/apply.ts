@@ -91,14 +91,18 @@ export type ApplyDeps = {
   mintKey?: () => string;
   /**
    * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
-   * scopes) — the same key the draft's targets carry. Without it the raw stored key is used, which
+   * scopes and the live set of that kind: a legacy purpose-only row is read for an interlining line
+   * only while the line has no rows of that kind bound to it) — the same key the draft's targets carry. Without it the raw stored key is used, which
    * misses rows whose stored key is not the scope's (a line sorted into a purpose, an interlining
    * line bound with its purpose, a generated sheet bound to UNSET).
    */
   scopeOf?: ScopeOf;
 };
 
-export type ScopeOf = (a: { fabricPurpose?: string; bomLineKey?: string }) => string;
+export type ScopeOf = (
+  a: { fabricPurpose?: string; bomLineKey?: string },
+  kind: 'sheet' | 'link',
+) => string;
 
 /** fabricScopeKey (bom-purpose.ts): purpose first, else the legacy line. */
 export const scopeKeyOf = (a: { fabricPurpose?: string; bomLineKey?: string }) => {
@@ -125,7 +129,9 @@ export function onCard(
   const sc = draft.scopes.find((s) => s.target.scopeKey === scopeKey);
   if (!sc) return null;
   return (
-    live.patterns.find((p) => scopeOf(p) === scopeKey && (p.filename ?? '') === sc.filename) ?? null
+    live.patterns.find(
+      (p) => scopeOf(p, 'sheet') === scopeKey && (p.filename ?? '') === sc.filename,
+    ) ?? null
   );
 }
 
@@ -158,7 +164,7 @@ export function planFormWrites(
     if (sc.replaces && sc.sheetMode !== 'add') {
       const key = sc.replaces.lineKey.toLowerCase();
       const i = nextPatterns.findIndex(
-        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeOf(p) === u.scopeKey,
+        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeOf(p, 'sheet') === u.scopeKey,
       );
       if (i >= 0 && !replaced.some((r) => r.lineKey.toLowerCase() === key)) {
         const old = nextPatterns[i];
@@ -170,6 +176,10 @@ export function planFormWrites(
         });
         nextPatterns[i] = {
           ...old,
+          // the row is re-filed under the scope's binding: a legacy purpose-only sheet of an
+          // interlining line becomes line-bound here, instead of staying a purpose row (L11)
+          fabricPurpose: sc.target.fabricPurpose,
+          bomLineKey: sc.target.bomLineKey,
           url: u.url,
           filename: u.filename,
           sizeBytes: u.sizeBytes,
@@ -209,7 +219,7 @@ export function planFormWrites(
   for (const a of live.aliases) {
     const k = (a.pieceLineKey ?? '').trim();
     if (k && liveIdx.has(k.toLowerCase()))
-      liveAliasOwner.set(aliasKey(scopeOf(a), a.blockName ?? ''), k);
+      liveAliasOwner.set(aliasKey(scopeOf(a, 'link'), a.blockName ?? ''), k);
   }
   const liveByName = new Map<string, number>();
   live.pieces.forEach((p, i) => {
@@ -280,7 +290,7 @@ export function planFormWrites(
   // 4. aliases — full set, ours replace same-key rows in place, others ride through
   const next: LiveAlias[] = live.aliases.map((a) => ({ ...a }));
   const at = new Map<string, number>();
-  next.forEach((a, i) => at.set(aliasKey(scopeOf(a), a.blockName ?? ''), i));
+  next.forEach((a, i) => at.set(aliasKey(scopeOf(a, 'link'), a.blockName ?? ''), i));
   for (const a of draft.aliases) {
     const row = {
       bomLineKey: a.bomLineKey,
