@@ -45,6 +45,11 @@ import {
   unitsOfPieces,
 } from 'components/managers/tech-card/components/nesting/piece-selection';
 import * as pieceMatchModal from 'components/managers/tech-card/components/nesting/piece-match-modal';
+import {
+  bindingScopes,
+  fabricScopes,
+  scopeKeyOfBinding,
+} from 'components/managers/tech-card/components/bom-purpose';
 import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
 import type { DxfIndex } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import {
@@ -59,6 +64,7 @@ import {
   planFormWrites,
   scopeKeyOf,
   type LiveCard,
+  type LivePattern,
 } from 'lib/pattern-import/fabrics/apply';
 import type {
   CardDraft,
@@ -1215,6 +1221,34 @@ export async function main(): Promise<number> {
       `created ${z.created}`,
     );
   }
+  // D5 — live links are matched by the scope they RESOLVE to (L11): a link stored under a binding
+  // whose raw key is not the scope's (a purpose+interlining line, a line sorted into a purpose) is
+  // replaced in place, not left beside the new one
+  {
+    const live = initial();
+    const draft = buildDraft({ scopes: r1.scopes }, cardOf(live), { mintKey: mint });
+    const a0 = draft.aliases[0];
+    live.aliases.push({
+      bomLineKey: 'LEGACY-LINE',
+      fabricPurpose: '',
+      blockName: a0.blockName,
+      pieceLineKey: a0.pieceLineKey,
+    });
+    const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }) =>
+      b.bomLineKey === 'LEGACY-LINE' ? a0.scopeKey : scopeKeyOf(b);
+    const z = planFormWrites(draft, live, [], { storageSizeId: 501, mintKey: mint, scopeOf });
+    const next = (z.writes.find((w) => w.path === 'pieceDxfAliases')?.value ?? []) as {
+      fabricPurpose?: string;
+      bomLineKey?: string;
+      blockName?: string;
+    }[];
+    ck(
+      next.filter((a) => a.blockName === a0.blockName && scopeOf(a) === a0.scopeKey).length === 1 &&
+        !next.some((a) => a.bomLineKey === 'LEGACY-LINE'),
+      'apply matches live links by the resolved scope: a legacy-bound link is replaced in place',
+      a0.blockName,
+    );
+  }
 
   // ── F ───────────────────────────────────────────────────────────────────────────────────
   head('F  re-import (replace / add / vanished / zero-diff) + the follow-up after the save (MF-C)');
@@ -1320,6 +1354,193 @@ export async function main(): Promise<number> {
       res.ok && res.replaced?.length === 1 && res.replaced[0].oldUrl === mainRow0.url,
       'F2 result lists the replaced row (old → new url)',
     );
+    // F2b the replaced row is re-filed under the scope's binding (L11): a legacy row the card
+    // resolves to this scope (a purpose-only sheet of an interlining line) leaves purpose-only
+    {
+      const legacy: LiveCard = {
+        ...afterFirst,
+        patterns: afterFirst.patterns.map((p) =>
+          p.lineKey === mainRow0.lineKey ? { ...p, fabricPurpose: 'LEGACY', bomLineKey: '' } : p,
+        ),
+      };
+      const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }) =>
+        b.fabricPurpose === 'LEGACY' ? MAIN.scopeKey : scopeKeyOf(b);
+      const z = planFormWrites(
+        d2,
+        legacy,
+        [
+          {
+            scopeKey: MAIN.scopeKey,
+            url: 'https://cdn.test/x.dxf',
+            filename: m2.filename,
+            sizeBytes: 1,
+          },
+        ],
+        { storageSizeId: 501, mintKey: mint, scopeOf },
+      );
+      const rows = (z.writes.find((w) => w.path === 'patterns')?.value ?? []) as LivePattern[];
+      const r = rows.find((p) => p.lineKey === mainRow0.lineKey);
+      ck(
+        z.replaced.length === 1 &&
+          rows.length === legacy.patterns.length &&
+          r?.url === 'https://cdn.test/x.dxf' &&
+          r?.fabricPurpose === m2.target.fabricPurpose &&
+          r?.bomLineKey === m2.target.bomLineKey,
+        'F2b replace re-binds the row to the scope target, not the legacy binding',
+        `${r?.fabricPurpose}/${r?.bomLineKey}`,
+      );
+    }
+    // F2c L11 whole-set migration: a felt whose live sheets and links are the legacy purpose-first
+    // set (purpose-only and purpose + echoed line) moves to its line WHOLE when the import writes into
+    // it — the sheet it does not replace and the link it does not redraw are re-filed too, links
+    // deduplicated by scope + block; ordinary rows and an already line-bound set are untouched.
+    {
+      const OTHER_P = 'TECH_CARD_BOM_PURPOSE_OTHER';
+      const MAIN_P = 'TECH_CARD_BOM_PURPOSE_MAIN';
+      const IL = 'TECH_CARD_BOM_SECTION_INTERLINING';
+      const feltScopes = fabricScopes([
+        { lineKey: 'MF-1', purpose: MAIN_P, section: 'TECH_CARD_BOM_SECTION_FABRIC' },
+        { lineKey: 'S-1', purpose: OTHER_P, section: IL },
+      ]);
+      const feltScopeOf =
+        (card: LiveCard) =>
+        (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') =>
+          scopeKeyOfBinding(
+            b.fabricPurpose,
+            b.bomLineKey,
+            bindingScopes(feltScopes, kind === 'sheet' ? card.patterns : card.aliases),
+          );
+      const legacyCard: LiveCard = {
+        patterns: [
+          {
+            lineKey: 'L1',
+            url: 'u1',
+            filename: 'felt-a.dxf',
+            fabricPurpose: OTHER_P,
+            bomLineKey: '',
+          },
+          {
+            lineKey: 'L2',
+            url: 'u2',
+            filename: 'felt-b.dxf',
+            fabricPurpose: OTHER_P,
+            bomLineKey: 'S-1',
+          },
+          { lineKey: 'L3', url: 'u3', filename: 'main.dxf', fabricPurpose: MAIN_P, bomLineKey: '' },
+        ],
+        pieces: [],
+        aliases: [
+          { fabricPurpose: OTHER_P, bomLineKey: '', blockName: 'A', pieceLineKey: 'P1' },
+          { fabricPurpose: OTHER_P, bomLineKey: 'S-1', blockName: 'B', pieceLineKey: 'P2' },
+          { fabricPurpose: OTHER_P, bomLineKey: '', blockName: 'b', pieceLineKey: 'P2' },
+          { fabricPurpose: MAIN_P, bomLineKey: '', blockName: 'M', pieceLineKey: 'P9' },
+        ],
+      };
+      const felt: DraftScopeTarget = {
+        scopeKey: 'S-1',
+        fabricPurpose: '',
+        bomLineKey: 'S-1',
+        label: 'felt',
+        isInterlining: true,
+      };
+      const feltDraft = (replaces: boolean) =>
+        ({
+          techCardId: 1,
+          scopes: [
+            {
+              target: felt,
+              filename: 'felt-new.dxf',
+              name: 'felt',
+              sheetMode: replaces ? 'replace' : 'add',
+              replaces: replaces
+                ? {
+                    lineKey: 'L1',
+                    url: 'u1',
+                    filename: 'felt-a.dxf',
+                    name: 'felt',
+                    matchedBy: 'scope',
+                    convertedAt: '',
+                  }
+                : null,
+            },
+          ],
+          pieces: [],
+          aliases: [
+            {
+              scopeKey: 'S-1',
+              fabricPurpose: '',
+              bomLineKey: 'S-1',
+              blockName: 'A',
+              pieceLineKey: 'P1',
+            },
+          ],
+          pieceUpdates: [],
+          downloads: [],
+        }) as unknown as CardDraft;
+      const up = [{ scopeKey: 'S-1', url: 'u-new', filename: 'felt-new.dxf', sizeBytes: 1 }];
+      const after = (card: LiveCard, z: ReturnType<typeof planFormWrites>): LiveCard => ({
+        patterns: (z.writes.find((w) => w.path === 'patterns')?.value ??
+          card.patterns) as LivePattern[],
+        pieces: card.pieces,
+        aliases: (z.writes.find((w) => w.path === 'pieceDxfAliases')?.value ??
+          card.aliases) as LiveCard['aliases'],
+      });
+      const feltOf = (card: LiveCard) => ({
+        sheets: card.patterns
+          .filter((p) => feltScopeOf(card)(p, 'sheet') === 'S-1')
+          .map((p) => p.url)
+          .sort(),
+        links: card.aliases
+          .filter((a) => feltScopeOf(card)(a, 'link') === 'S-1')
+          .map((a) => (a.blockName ?? '').toLowerCase())
+          .sort(),
+      });
+      const opts = { storageSizeId: 501, mintKey: mint, scopeOf: feltScopeOf(legacyCard) };
+      const rep = after(legacyCard, planFormWrites(feltDraft(true), legacyCard, up, opts));
+      const repFelt = feltOf(rep);
+      ck(
+        JSON.stringify(repFelt) ===
+          JSON.stringify({ sheets: ['u-new', 'u2'], links: ['a', 'b'] }) &&
+          rep.aliases.length === 3 &&
+          rep.patterns.filter((p) => p.bomLineKey === 'S-1').every((p) => !p.fabricPurpose) &&
+          rep.patterns.some((p) => p.lineKey === 'L3' && p.fabricPurpose === MAIN_P) &&
+          rep.aliases.some((a) => a.blockName === 'M' && a.fabricPurpose === MAIN_P),
+        'F2c replace into a legacy felt set moves the whole sheet + link set to the line',
+        JSON.stringify(repFelt),
+      );
+      const add = after(legacyCard, planFormWrites(feltDraft(false), legacyCard, up, opts));
+      ck(
+        JSON.stringify(feltOf(add)) ===
+          JSON.stringify({ sheets: ['u-new', 'u1', 'u2'], links: ['a', 'b'] }),
+        'F2c add into a legacy felt set keeps the old sheets in the felt',
+        JSON.stringify(feltOf(add)),
+      );
+      const again = planFormWrites(feltDraft(false), rep, [], {
+        ...opts,
+        scopeOf: feltScopeOf(rep),
+      });
+      ck(
+        again.writes.length === 0,
+        'F2c migrated set: re-writing its links = zero writes',
+        `${again.writes.length}`,
+      );
+      const lineBound: LiveCard = {
+        ...legacyCard,
+        patterns: [
+          ...legacyCard.patterns,
+          { lineKey: 'L4', url: 'u4', fabricPurpose: '', bomLineKey: 'S-1' },
+        ],
+      };
+      const lb = planFormWrites(feltDraft(false), lineBound, up, {
+        ...opts,
+        scopeOf: feltScopeOf(lineBound),
+      });
+      const lbRows = (lb.writes.find((w) => w.path === 'patterns')?.value ?? []) as LivePattern[];
+      ck(
+        lbRows.filter((p) => p.fabricPurpose === OTHER_P).length === 2,
+        'F2c a felt already holding a line-bound sheet: its superseded legacy sheets are not re-filed',
+      );
+    }
     ck(
       st.aliases.some((a) => scopeKeyOf(a) === MAIN.scopeKey && a.blockName === 'CLR_3') &&
         st.pieces.length === afterFirst.pieces.length,

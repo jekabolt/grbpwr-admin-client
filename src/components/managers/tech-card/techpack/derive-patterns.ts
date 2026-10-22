@@ -5,10 +5,12 @@ import type {
   common_TechCardSizePattern,
 } from 'api/proto-http/admin';
 import {
+  bindingScopes,
   bomPurposeLabel,
   fabricScopes,
   isRollGoodsSection,
   scopeKeyOfBinding,
+  type BindingScopes,
   type RollGoodsLine,
 } from 'components/managers/tech-card/components/bom-purpose';
 import { markerToView } from 'components/managers/tech-card/components/nesting/marker-io';
@@ -81,13 +83,17 @@ const patternExt = (pattern: common_TechCardSizePattern): string => {
   return source.split(/[?#]/)[0].split('.').pop()?.toLowerCase() ?? '';
 };
 
-function scopePieceCount(techCard: common_TechCard, scope: PatternScope): number | undefined {
+/** `links` — the card's whole link set over its whole partition: a link resolves against the card. */
+function scopePieceCount(
+  techCard: common_TechCard,
+  scope: PatternScope,
+  links: BindingScopes,
+): number | undefined {
   const tc = techCard.techCard;
-  const scopes = [scope];
   const keys = new Set(
     (tc?.pieceDxfAliases?.items ?? [])
       .filter(
-        (alias) => scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, scopes) === scope.key,
+        (alias) => scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, links) === scope.key,
       )
       .map((alias) => alias.pieceLineKey?.trim())
       .filter((key): key is string => !!key),
@@ -191,9 +197,11 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
       section: item.section ?? '',
     }));
   const scopes = fabricScopes(rollGoods);
+  const sheetSet = bindingScopes(scopes, tc?.patterns ?? []);
+  const links = bindingScopes(scopes, tc?.pieceDxfAliases?.items ?? []);
   const sheetsByScope = new Map<string, common_TechCardSizePattern[]>();
   for (const sheet of patternSheets) {
-    const key = scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes);
+    const key = scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, sheetSet);
     sheetsByScope.set(key, [...(sheetsByScope.get(key) ?? []), sheet]);
   }
 
@@ -218,7 +226,7 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
       code: alphaLabel(index),
       label,
       sheetCount: sheets.length,
-      pieceCount: scope ? scopePieceCount(techCard, scope) : undefined,
+      pieceCount: scope ? scopePieceCount(techCard, scope, links) : undefined,
       version: maxVersion || undefined,
       sizes: groupSizeLine(sheets, tc?.sizeIds ?? [], sizeNames),
       qrValue:

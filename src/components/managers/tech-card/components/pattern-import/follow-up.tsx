@@ -247,7 +247,7 @@ export function ImportFollowUpRunner({
       };
     const sheets = L.sheetsOfScope(scope.key);
     const scopeKey = serverKeyOfScope(scope);
-    const sheetsWhy = pieceAreaSheetsRefusal(sheets, scopeKey);
+    const sheetsWhy = pieceAreaSheetsRefusal(sheets, scopeKey, L.scopes);
     if (sheetsWhy) return { ok: false, reason: sheetsWhy };
     const rangeWhy = pieceAreaSizeRangeRefusal(
       L.sizeIds,
@@ -260,6 +260,7 @@ export function ImportFollowUpRunner({
     const res = await publishPieceAreas({
       techCardId,
       scopeKey,
+      scopes: L.scopes,
       sheets,
       areas: outcome.areas.pieceRows,
       contourLayer: c.layer,

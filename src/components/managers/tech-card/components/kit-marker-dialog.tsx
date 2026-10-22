@@ -54,7 +54,7 @@ import {
   Text,
 } from 'ui';
 import { extractFieldViolations } from 'utils/field-errors';
-import { aliasInScope, fabricScopes, isRollGoodsSection } from './bom-purpose';
+import { aliasInScope, bindingScopes, fabricScopes, isRollGoodsSection } from './bom-purpose';
 import type { MarkerJob, PlanRefusal } from './nesting/batch-marker-plan';
 import { sizeTokensOf } from './nesting/block-code';
 import type { MarkerColorway } from './nesting/colorway-widths';
@@ -215,15 +215,16 @@ export default function KitMarkerDialog({
 
   const skeleton = useMemo(() => {
     if (!scopeDef) return null;
+    const links = bindingScopes(scopeDefs, pieceDxfAliases);
     return kitScopeSkeleton({
       scope: scopeDef,
       rollLines,
       sheets: sheetsByScope.get(scopeDef.key) ?? [],
-      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scopeDef)),
+      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scopeDef, links)),
       // Имя артикула СЛОТА — только для текста отказа о ширине; ширину даёт `colorwayPins`.
       slotArticleName: '',
     });
-  }, [scopeDef, rollLines, sheetsByScope, pieceDxfAliases]);
+  }, [scopeDef, scopeDefs, rollLines, sheetsByScope, pieceDxfAliases]);
 
   const sizeLabelOf = (id: number) => formatSizeName(sizeNameById.get(id) ?? `#${id}`);
 

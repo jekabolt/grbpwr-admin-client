@@ -42,8 +42,8 @@ import { revealField } from 'utils/field-errors';
 import { mmToEngineCm } from './nesting/allowance-units';
 import { notify } from 'lib/stores/store';
 import { publishPieceAreas, useUnsavedAreaSource } from './piece-areas';
-import { serverScopeKeyOfSheet } from './pattern-size-index';
-import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
+import { serverKeyOfScope } from './piece-areas-state';
+import { bindingScopes, fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
 import {
   DxfMeasureConditionsFields,
@@ -161,17 +161,35 @@ export default function DxfApplyDialog({
     name?: string;
     section?: string;
   }[];
-  // Скоуп ЭТОЙ строки словами сервера: назначение, иначе её собственный line_key.
-  const lineScopeKey = useMemo(() => {
-    const row = bomRows.find((b) => (b.lineKey ?? '') === lineKey);
-    return serverScopeKeyOfSheet({ fabricPurpose: row?.purpose, bomLineKey: row?.lineKey });
-  }, [bomRows, lineKey]);
+  // Скоуп ЭТОЙ строки — РАЗРЕШЁННЫЙ по разбиению карточки, а не прочитанный с самой строки:
+  // прокладка — свой скоуп при любом назначении (L11), и её ключ на сервере — line_key, а не
+  // назначение. Остальные — назначение, иначе собственный line_key.
+  const scopes = useMemo(
+    () =>
+      fabricScopes(
+        bomRows
+          .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
+          .map((b) => ({
+            lineKey: b.lineKey as string,
+            purpose: b.purpose,
+            name: b.name,
+            section: b.section,
+          })),
+      ),
+    [bomRows],
+  );
+  const lineScope = useMemo(
+    () => scopes.find((s) => s.lines.some((l) => l.lineKey === lineKey)),
+    [scopes, lineKey],
+  );
+  // ...словами сервера.
+  const lineScopeKey = lineScope ? serverKeyOfScope(lineScope) : '';
 
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
 
   // КУДА ПУБЛИКОВАТЬ ПЛОЩАДИ, И ПО КАКИМ ЛИСТАМ ОТВЕЧАТЬ.
   //
-  // Скоуп называется ТЕМ ЖЕ словом, что на сервере (`serverScopeKeyOfSheet`), а не ключом строки
+  // Скоуп называется ТЕМ ЖЕ словом, что на сервере (`serverKeyOfScope`), а не ключом строки
   // BOM: сервер собирает состав скоупа по СВОИМ строкам, и ключ, написанный не тем словом, не
   // найдёт ни одного листа. Карточка без id (ещё не сохранена) публиковать не может.
   //
@@ -189,20 +207,16 @@ export default function DxfApplyDialog({
   const sourceDirty = useUnsavedAreaSource(control);
   const publishTarget = useMemo(() => {
     const id = Number(techCardId) || 0;
-    if (id <= 0 || !lineScopeKey) return null;
-    const scopes = fabricScopes(
-      bomRows
-        .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
-        .map((b) => ({ lineKey: b.lineKey as string, purpose: b.purpose, name: b.name })),
-    );
-    const resolvedKey = scopes.find((s) => s.lines.some((l) => l.lineKey === lineKey))?.key ?? '';
-    if (!resolvedKey) return null;
+    if (id <= 0 || !lineScope || !lineScopeKey) return null;
+    // Over the card's WHOLE sheet set: an interlining line with sheets of its own does not read
+    // its legacy purpose-only ones (bindingScopes) — never both into one measurement.
+    const sheets = bindingScopes(scopes, patternRows ?? []);
     const mine = (patternRows ?? []).filter(
-      (sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, scopes) === resolvedKey,
+      (sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, sheets) === lineScope.key,
     );
     if (mine.length === 0) return null;
-    return { techCardId: id, scopeKey: lineScopeKey, sheets: mine };
-  }, [techCardId, patternRows, bomRows, lineKey, lineScopeKey]);
+    return { techCardId: id, scopeKey: lineScopeKey, scopes, sheets: mine };
+  }, [techCardId, patternRows, scopes, lineScope, lineScopeKey]);
 
   const apply = () => {
     if (!applicable) return;
@@ -240,6 +254,7 @@ export default function DxfApplyDialog({
       void publishPieceAreas({
         techCardId: publishTarget.techCardId,
         scopeKey: publishTarget.scopeKey,
+        scopes: publishTarget.scopes,
         sheets: publishTarget.sheets,
         areas: outcome.areas.pieceRows,
         contourLayer: chosenLayer,

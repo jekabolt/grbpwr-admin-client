@@ -53,6 +53,8 @@ import {
   fabricScopes,
   isRollGoodsSection,
   markerScopeDirection,
+  bindingScopes,
+  scopeKeyOfBinding,
   type ScopeDirection,
 } from '../bom-purpose';
 import type { TechCardFormData } from '../schema';
@@ -233,6 +235,7 @@ export function MarkersSection({
         .map((b) => ({
           lineKey: b.lineKey as string,
           purpose: b.purpose ?? '',
+          section: b.section,
           fabricDirection: b.fabricDirection ?? '',
           isSample: !!b.isSample,
         })),
@@ -315,9 +318,10 @@ export function MarkersSection({
     // съёмки, и сравнение сырых ключей потеряло бы листы ровно в тот момент, когда оператор
     // навёл порядок в BOM (то же правило, что scopeKeyOfBinding на панели выкроек).
     const scope = key ? scopes.find((s) => s.lines.some((l) => l.lineKey === key)) : undefined;
+    const sheets = bindingScopes(scopes, patternRows);
     return patternSourcesForMarker(patternRows, {
       bomLineKey: key,
-      purposeOwnsLine: (p) => !!scope?.byPurpose && scope.key === p,
+      purposeOwnsLine: (p, line) => !!scope && scopeKeyOfBinding(p, line, sheets) === scope.key,
     });
   }, [view, scopes, patternRows]);
   // ЗАВИСИМОСТЬ ПО СОДЕРЖИМОМУ, А НЕ ПО ССЫЛКЕ. useWatch отдаёт свежий клон массива при ЛЮБОМ

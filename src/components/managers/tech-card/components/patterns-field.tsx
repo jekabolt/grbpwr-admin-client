@@ -82,14 +82,15 @@ import {
   type FabricScope,
   type ScopeDirection,
   aliasInScope,
-  aliasScopeKey,
   bindingForScope,
+  bindingScopes,
   bomPurposeOrder,
   bomPurposeLabel,
-  fabricScopeKey,
   fabricScopes,
   purposeEditorOptions,
   scopeKeyOfBinding,
+  type ArtifactKind,
+  type BindingRow,
   strictestDirection,
   UNSET_PURPOSE,
 } from './bom-purpose';
@@ -846,6 +847,24 @@ export function PatternsField({
     const first = (s: { lines: { order: number }[] }) => Math.min(...s.lines.map((l) => l.order));
     return fabricScopes(fabricBomLines).sort((a, b) => first(a) - first(b));
   }, [fabricBomLines]);
+  // The import's commit resolves live rows against the scopes AT THAT MOMENT, not at the render
+  // that built its callback.
+  const scopesRef = useRef(scopes);
+  scopesRef.current = scopes;
+  // The card's sheet set and link set against its scopes (L11 set rule: a legacy purpose-only row
+  // is read for an interlining line only while that line has no rows of the same kind of its own).
+  const sheetSet = useMemo(() => bindingScopes(scopes, liveRows), [scopes, liveRows]);
+  const linkSet = useMemo(() => bindingScopes(scopes, pieceDxfAliases), [scopes, pieceDxfAliases]);
+  // Imperative paths resolve a row against the LIVE form and scopes at call time, not the render's.
+  const liveScopeOf = (b: BindingRow, kind: ArtifactKind): string =>
+    scopeKeyOfBinding(
+      b.fabricPurpose,
+      b.bomLineKey,
+      bindingScopes(
+        scopesRef.current,
+        (kind === 'sheet' ? getValues('patterns') : getValues('pieceDxfAliases')) ?? [],
+      ),
+    );
   // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
   // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
   // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
@@ -915,8 +934,8 @@ export function PatternsField({
   // ткани») задаёт очередь раскроя партии на вкладке костинга, и вторая копия резолвера разъехалась
   // бы с этой молча — расхождение видно только на полуразобранной карточке.
   const dxfByScopeMap = useMemo(
-    () => dxfByScope(dxfEntries, scopes, (e) => e.row),
-    [dxfEntries, scopes],
+    () => dxfByScope(dxfEntries, scopes, (e) => e.row, liveRows),
+    [dxfEntries, scopes, liveRows],
   );
   // ВСЕ листы скоупа, включая наследие в PDF. Отдельно от `dxfByScopeMap`, потому что вопросы
   // разные: раскладке и разбору нужны файлы, которые можно прочитать, а замеру площадей — СОСТАВ
@@ -1090,16 +1109,21 @@ export function PatternsField({
     const nextFabricLines = fabricBomLines.map((line) =>
       lineKeys.has(line.lineKey) ? { ...line, purpose } : line,
     );
-    const nextKey = fabricScopeKey(purpose, firstLineKey);
-    const nextScope = fabricScopes(nextFabricLines).find((candidate) => candidate.key === nextKey);
+    // The slot the line lands in, found by the LINE: an interlining line stays its own slot
+    // whatever purpose it gets (L11), so the purpose alone does not name the next key.
+    const nextScope = fabricScopes(nextFabricLines).find((candidate) =>
+      candidate.lines.some((line) => line.lineKey === firstLineKey),
+    );
     if (!nextScope) return;
+    const nextKey = nextScope.key;
 
     // Purpose-bound sheets and aliases must move with the slot. Leaving their old raw purpose
     // behind would put them under "without a material" as soon as the BOM rerendered.
     const binding = bindingForScope(nextScope);
     const patternRows = (getValues('patterns') ?? []) as PatternRow[];
+    const sheetsNow = bindingScopes(scopes, patternRows);
     patternRows.forEach((row, index) => {
-      if (scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) !== scope.key) return;
+      if (scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, sheetsNow) !== scope.key) return;
       setValue(`patterns.${index}.fabricPurpose`, binding.fabricPurpose, { shouldDirty: true });
       setValue(`patterns.${index}.bomLineKey`, binding.bomLineKey, { shouldDirty: true });
     });
@@ -1107,8 +1131,9 @@ export function PatternsField({
       fabricPurpose?: string;
       bomLineKey?: string;
     }>;
+    const linksNow = bindingScopes(scopes, aliases);
     aliases.forEach((alias, index) => {
-      if (scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, scopes) !== scope.key) return;
+      if (scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, linksNow) !== scope.key) return;
       setValue(`pieceDxfAliases.${index}.fabricPurpose`, binding.fabricPurpose, {
         shouldDirty: true,
       });
@@ -1393,7 +1418,7 @@ export function PatternsField({
     if (!base) return patternNameOfFile(file);
     const taken = new Set(
       ((getValues('patterns') ?? []) as PatternRow[])
-        .filter((r) => scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey)
+        .filter((r) => liveScopeOf(r, 'sheet') === scopeKey)
         .map((r) => (r.name ?? '').trim()),
     );
     // The suffix gets its bytes BEFORE the base is clamped: a base already at the 255-byte cap
@@ -1446,9 +1471,7 @@ export function PatternsField({
 
   function beginReupload(scopeKey: string, target?: string): ReuploadFlight {
     const rows = ((getValues('patterns') ?? []) as PatternRow[]).filter(
-      (row) =>
-        isDxfUrl(row.url) &&
-        scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) === scopeKey,
+      (row) => isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey,
     );
     const exact = target
       ? rows.find((row) => sheetRowId(row) === target)
@@ -1473,8 +1496,7 @@ export function PatternsField({
   // Does this slot already hold a DXF? Then a new DXF REPLACES it (L4a) instead of joining it.
   const slotHasSheet = (scopeKey: string) =>
     ((getValues('patterns') ?? []) as PatternRow[]).some(
-      (r) =>
-        isDxfUrl(r.url) && scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey,
+      (r) => isDxfUrl(r.url) && liveScopeOf(r, 'sheet') === scopeKey,
     );
 
   // What the re-upload needs from the outside world: the files, the worker, the server, and the
@@ -1517,7 +1539,7 @@ export function PatternsField({
         const by = new Map<string, PatternRow[]>();
         for (const r of (getValues('patterns') ?? []) as PatternRow[]) {
           if (!r.url || !isDxfUrl(r.url)) continue;
-          const k = scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes);
+          const k = liveScopeOf(r, 'sheet');
           if (!k || k === scopeKey) continue;
           by.set(k, [...(by.get(k) ?? []), r]);
         }
@@ -1671,7 +1693,7 @@ export function PatternsField({
           issues: getValues('issues') ?? [],
           scopeKey,
           scope: bindingForScope(sc),
-          scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes),
+          scopeOf: liveScopeOf,
           isDxf: (url) => isDxfUrl(url),
           sizeTokens: [...dictTokens.keys()],
           externalRefs: refsNow(),
@@ -1736,7 +1758,7 @@ export function PatternsField({
     if (
       !row ||
       row.url !== out.replacedUrl ||
-      scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) !== scopeKey ||
+      liveScopeOf(row, 'sheet') !== scopeKey ||
       inputsSig() !== before
     ) {
       say('not applied', 'error');
@@ -1820,10 +1842,7 @@ export function PatternsField({
     const want = (target ?? '').trim();
     if (!want) return -1;
     return ((getValues('patterns') ?? []) as PatternRow[]).findIndex(
-      (r) =>
-        sheetRowId(r) === want &&
-        !isDxfUrl(r.url) &&
-        scopeKeyOfBinding(r.fabricPurpose, r.bomLineKey, scopes) === scopeKey,
+      (r) => sheetRowId(r) === want && !isDxfUrl(r.url) && liveScopeOf(r, 'sheet') === scopeKey,
     );
   };
 
@@ -2259,7 +2278,7 @@ export function PatternsField({
         issues: getValues('issues') ?? [],
         seams,
         refs,
-        scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes),
+        scopeOf: liveScopeOf,
         isDxf: (url) => isDxfUrl(url),
         sizeTokens: [...dictTokens.keys()],
         blockNamesOf: (url) => {
@@ -2360,7 +2379,7 @@ export function PatternsField({
     if (
       !target ||
       target.url !== ask.outcome.replacedUrl ||
-      scopeKeyOfBinding(target.fabricPurpose, target.bomLineKey, scopes) !== ask.scopeKey
+      liveScopeOf(target, 'sheet') !== ask.scopeKey
     ) {
       say('not applied', 'error');
       return;
@@ -2644,7 +2663,7 @@ export function PatternsField({
     // Лист БЕЗ размера (0281) — не «размер вне ряда»: сервер его с рядом не сверяет.
     const stray = !!row.sizeId && !inRange.has(row.sizeId);
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
-    const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
+    const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, sheetSet);
     // A DXF name opens the pieces viewer of its slot; a sheet without a material has none.
     const slotGroup = rowScope ? scopeGroups.find((g) => g.scope.key === rowScope) : undefined;
     const rowGroup = dxf ? slotGroup : undefined;
@@ -3383,7 +3402,7 @@ export function PatternsField({
                     files: filesOf(g.entries),
                     bomLineKey: soleLine,
                     // Алиасы ЭТОГО скоупа: одно имя блока на верхе и на подкладе — разные детали.
-                    aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+                    aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope, linkSet)),
                     // Строгое направление скоупа; семпловые строки не голосуют, если есть
                     // производственные (0265).
                     fabricDirection: strictestDirection(
@@ -3449,13 +3468,15 @@ export function PatternsField({
               sections: sc.lines.map((l) => l.section),
             })),
             pieces: cardPieces,
+            // Live links and sheets under the scope they RESOLVE to — the key the targets carry
+            // (a line sorted into a purpose, an interlining line bound with its purpose, L11).
             aliases: pieceDxfAliases.map((a) => ({
-              scopeKey: aliasScopeKey(a),
+              scopeKey: scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, linkSet),
               blockName: a.blockName,
               pieceLineKey: a.pieceLineKey,
             })),
             patterns: liveRows.map((p) => ({
-              scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+              scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheetSet),
               filename: p.filename,
               url: p.url,
               lineKey: p.lineKey,
@@ -3479,6 +3500,8 @@ export function PatternsField({
                   shouldDirty: true,
                 }),
               storageSizeId,
+              // read at commit time: the BOM may have been sorted while the wizard was open
+              scopeOf: liveScopeOf,
               save: (reason) => autosave.flush(reason),
               unsaved: {
                 get: () => importUnsaved.current,
@@ -3558,7 +3581,7 @@ export function PatternsField({
         sizeId: g.entries[0]?.row.sizeId || storageSizeId,
         files: filesOf(g.entries),
         bomLineKey: deepMarker,
-        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope, linkSet)),
         fabricDirection: strictestDirection(
           g.scope.lines.some((l) => !l.isSample)
             ? g.scope.lines.filter((l) => !l.isSample)
@@ -3623,7 +3646,7 @@ export function PatternsField({
       ? pieceDxfAliases.find((a) => a.pieceLineKey === piece.lineKey)
       : undefined;
     const slot = linked
-      ? scopeKeyOfBinding(linked.fabricPurpose, linked.bomLineKey, scopes)
+      ? scopeKeyOfBinding(linked.fabricPurpose, linked.bomLineKey, linkSet)
       : undefined;
     for (const m of messagesOf(v))
       pieceErrors.push({
@@ -3637,7 +3660,7 @@ export function PatternsField({
     const alias = Number.isInteger(i) ? pieceDxfAliases[i] : undefined;
     const who = Number.isInteger(i) ? alias?.blockName?.trim() || `#${i + 1}` : '';
     const slot = alias
-      ? scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, scopes)
+      ? scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, linkSet)
       : undefined;
     for (const m of messagesOf(v))
       pieceErrors.push({
@@ -3814,7 +3837,7 @@ export function PatternsField({
             techCardId={techCardId}
             scopes={scopes}
             sheetsOfScope={sheetsOfScope}
-            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc))}
+            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc, linkSet))}
             sizeIds={sizeIds}
             savedSizeIds={savedSizeIds}
             sizeNameById={sizeById}
@@ -4046,6 +4069,7 @@ export function PatternsField({
           <PieceMatchModal
             files={matching.files}
             scope={matching.scope}
+            scopes={scopes}
             fabricName={matching.fabricName}
             scopeLabelByKey={scopeLabelByKey}
             sizeLabel=''
