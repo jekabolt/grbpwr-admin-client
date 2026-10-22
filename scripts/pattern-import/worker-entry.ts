@@ -1275,6 +1275,30 @@ async function pipelineCase(
       !!g3 && g3.ok,
       `${g3?.value} [${g3?.blocks.join(',')}]`,
     );
+    // POLUPALTO Review 2 (chains/link.ts): pass 1 bridged two undrawn jumps inside one pen
+    // operation of «23» (auto seed 3). markJump: the 7 mm «Mod. 125» marker was linked 23.8 mm on
+    // to 76's hem, and 76 ran a 1.9 mm wedge along that jump (apex (483.28, 968.11)). cornerJump:
+    // 88's hem was linked 17 mm on at its corner into 80's armhole (one chain, 80's pen), and 88
+    // closed along 80's armhole (through (72.81, 963.78), 10 mm off its own, which passes
+    // (84.68, 964.69)). sw/pics/j57.png, p3-hook-on11.png.
+    const f23 = pc.families.find((f) => pc.seeds.find((x) => x.id === f.seed)?.text?.text === '23');
+    const ring = (r: number) =>
+      f23?.candidates.find((c) => c.rank === r && c.outcome === 'closed')?.outer ?? [];
+    const wedge = ringOff({ x: 483.28, y: 968.11 }, ring(1));
+    check(
+      name,
+      '«23» 76: the hem runs straight past the «Mod. 125» marker, no wedge along the jump',
+      wedge >= 1,
+      `${wedge.toFixed(2)} mm from the old wedge apex`,
+    );
+    const on80 = ringOff({ x: 72.81, y: 963.78 }, ring(4));
+    const own88 = ringOff({ x: 84.68, y: 964.69 }, ring(4));
+    check(
+      name,
+      "«23» 88: closes on its own armhole, not on 80's across the corner jump",
+      on80 >= 5 && own88 <= 0.5,
+      `${on80.toFixed(2)} mm off 80's armhole · ${own88.toFixed(2)} mm off its own`,
+    );
   }
   console.log(`      ${name}: pipeline ${Date.now() - t0} ms`);
   s.close();
@@ -2963,7 +2987,77 @@ async function zhaketExtensionCase() {
       Math.abs(step - (bottom(2) - bottom(1))) <= 1,
     `${cs.map((c) => `${c.rank}:${c.outcome}${c.outcome === 'closed' ? ` ${Math.round(c.areaMm2 / 100)}` : ''}`).join(' ')} cm² · trend ${Math.round(want)} · step ${step.toFixed(1)} mm`,
   );
+  // Review 2 (22.10): the back at the "3" label (auto seed 5) ends in a V whose tip the sizes
+  // grade INWARD — 36's lowest (992.77), 38 991.48, 40 990.73, 44 988.69; 42's own pen ends on
+  // 44's tip. 38's and 40's lines run 0.1–0.7 mm inside 36's rescued copy along both arms and 1–2
+  // mm inside its tip. Skipped as "the same edge drawn twice", the copy walled 42 down to 36's
+  // tip, cut off at 991.48 — below 40's, sizes out of order, and no size gate saw it; the copy's
+  // end exclusion also moved 44 there. A line drawn twice follows the copy around its turns, a
+  // graded one cuts inside them (walls.ts copyWallsOf).
+  const V = 'zhaket V tip';
+  const vSeed: Seed = { id: 2, at: { x: 764.87, y: 875.94 }, origin: 'click', variant: null };
+  const pv = await run('pieces', { seeds: [vSeed], edits: [], opts: { ...FILL, variant: null } });
+  const vs = pv.families[0]?.candidates ?? [];
+  const tip = (r: number) => {
+    const c = vs.find((x) => x.rank === r && x.outcome === 'closed');
+    const ys = (c?.outer ?? []).filter((p) => p.x > 745 && p.x < 765).map((p) => p.y);
+    return ys.length ? Math.max(...ys) : NaN;
+  };
+  const tips = [0, 1, 2, 3, 4].map(tip);
+  // the sizes grade inward on both arms: each closed size lies inside the one before it there
+  const ringOf = (r: number) => vs.find((x) => x.rank === r && x.outcome === 'closed')?.outer ?? [];
+  const inRing = (p: { x: number; y: number }, ring: readonly { x: number; y: number }[]) => {
+    let ins = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i];
+      const b = ring[j];
+      if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
+        ins = !ins;
+    }
+    return ins;
+  };
+  const pokes = [1, 2, 3, 4].map((r) => {
+    const inner = ringOf(r);
+    const outer = ringOf(r - 1);
+    if (!inner.length || !outer.length) return 0;
+    let m = 0;
+    for (let i = 0; i < inner.length; i++) {
+      const a = inner[i];
+      const b = inner[(i + 1) % inner.length];
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.5));
+      for (let k = 0; k < n; k++) {
+        const p = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n };
+        if (p.x < 735 || p.x > 805 || p.y < 905 || p.y > 995 || inRing(p, outer)) continue;
+        m = Math.max(m, ringOff(p, outer));
+      }
+    }
+    return m;
+  });
+  check(
+    V,
+    "44 closes on its own tip (988.69); 42 on its own pen's tip or not at all, never below 40's",
+    Math.abs(tips[4] - 988.69) <= 0.1 &&
+      (Number.isNaN(tips[3]) || (tips[3] <= tips[2] + 0.05 && tips[3] >= tips[4] - 0.05)) &&
+      pokes.every((d) => d <= 0.3),
+    `tips ${tips.map((y, r) => `${r}:${Number.isNaN(y) ? vs.find((c) => c.rank === r)?.outcome : y.toFixed(2)}`).join(' ')} · out of the size before on the arms ${pokes.map((d) => d.toFixed(2)).join(' ')} mm`,
+  );
   s.close();
+}
+
+/** Distance from p to a closed ring, mm (NaN for no ring). */
+function ringOff(p: { x: number; y: number }, ring: readonly { x: number; y: number }[]): number {
+  let m = NaN;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l = dx * dx + dy * dy || 1;
+    const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l));
+    const d = Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy);
+    if (!(d >= m)) m = d;
+  }
+  return m;
 }
 
 /** A one-page PDF (595 × 842 pt) with `content` as its only content stream. */

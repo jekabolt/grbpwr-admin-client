@@ -205,12 +205,9 @@ export function rankLooks(
 
 /**
  * R3 guard for continuity ranking: may chain `id` take rank `r`? Not when both looks are known and
- * differ — the pen says it is another size. Nor when r's pen is not known (its key sample matched
- * no line) but the chain's look is exactly one OTHER size's pen: that is that size's line (palto
- * P03: chain 338 — 88's hem, an undrawn 18 mm jump inside one operation, then 80's armhole, in
- * 80's pen — was voted into 88 by length, and 88 closed along 80's armhole). A chain look not
- * known (too short or irregular for a rhythm), or on no / several pens, proves nothing: continuity
- * stays as it was, and gate G22 holds a rank of unknown pen. Null when the run is no identity run.
+ * differ — the pen says it is another size. A look not known (a rank whose key sample matched no
+ * line, a chain too short or irregular for a rhythm) proves nothing either way: continuity stays
+ * as it was, and gate G22 holds a rank of unknown pen. Null when the run is no identity run.
  */
 export type RankGuard = {
   ok: (id: ChainId, r: number) => boolean;
@@ -250,10 +247,7 @@ export function rankGuard(
       if (p) return pinned(p, r);
       const rl = looks[r];
       const cl = lookOf(id);
-      if (!cl) return true;
-      if (rl?.length) return onPen(cl, rl);
-      // r's pen not known: a chain on exactly one OTHER size's pen is that size's line
-      return looks.filter((pen, k) => k !== r && pen.length > 0 && onPen(cl, pen)).length !== 1;
+      return !rl?.length || !cl || onPen(cl, rl);
     },
     lookless: (id) => !lookOf(id),
   };

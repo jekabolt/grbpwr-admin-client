@@ -98,7 +98,7 @@ import {
 import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
-import { fitGrainInside, vetProposal } from './grain-inside';
+import { fitGrainInside, grainOutsideMm, vetProposal } from './grain-inside';
 import {
   FOLD_TEXT_MAX_MM,
   FOLD_TOL_MM,
@@ -214,6 +214,9 @@ export type SemanticsDetail = {
 
 /** A1: per-size grains closer than this agree, degrees. */
 const GRAIN_AGREE_DEG = 2;
+/** A size borrows the family's grain only if the drawn line lies within this of its outline, mm
+ *  (palto «23»: the arrow ends 0.3–1.9 mm outside 72–84). */
+const FAMILY_GRAIN_MM = 2;
 /** Smallest angle between two line directions, degrees, 0..90. */
 const lineAngleDiff = (a: number, b: number) => {
   const d = (((a - b) % 180) + 180) % 180;
@@ -1387,7 +1390,8 @@ export function buildPieceSpecsDetailed(
     // armhole, 0.3–1.9 mm out of 72–84, so only 88 holds it inside and the piece asked for a
     // click). A size with no grain of its own borrows the line another size of the family
     // detected, fitted onto every size's outline as a proposal is; a grain found per size wins.
-    const familyGrain = ((): GrainFeature | null => {
+    // Only a size whose outline the drawn line lies on, within FAMILY_GRAIN_MM, borrows it.
+    const familyGrain = ((): { g: GrainFeature; a: PtMm; b: PtMm } | null => {
       if (opGrain) return null;
       let g: GrainFeature | null = null;
       for (const { c } of kept) {
@@ -1405,7 +1409,7 @@ export function buildPieceSpecsDetailed(
             kept.map(({ c }) => c.outer),
           )
         : null;
-      return g && fit ? { ...g, a: fit[0], b: fit[1] } : null;
+      return g && fit ? { g: { ...g, a: fit[0], b: fit[1] }, a: g.a, b: g.b } : null;
     })();
     if (
       !traced &&
@@ -1849,7 +1853,12 @@ export function buildPieceSpecsDetailed(
             : ['operator'],
         };
       grain ??= found && !proposedLine ? found : null;
-      const borrowed = (lastGrain ?? familyGrain) as GrainFeature | null;
+      const familyHere =
+        familyGrain &&
+        grainOutsideMm(familyGrain.a, familyGrain.b, [c.outer], FAMILY_GRAIN_MM) === 0
+          ? familyGrain.g
+          : null;
+      const borrowed = (lastGrain ?? familyHere) as GrainFeature | null;
       if (!grain && borrowed)
         grain = {
           ...borrowed,

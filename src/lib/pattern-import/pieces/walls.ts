@@ -916,6 +916,9 @@ const SIDE_PROBE_MM = 1;
 const FAR_SIDE_MM = 1;
 /** How far beside a copy r's own edge (its own line or a common one) shows r's side, mm. */
 const EDGE_SIDE_MM = 3;
+/** Samples (1 mm) a far line may miss between two stretches of one run: a turn of the copy, where
+ *  ±2.5 mm chords are not parallel. */
+const TURN_GAP = 7;
 
 /**
  * Rank r's walls of a copy of rank s's line (`copyRanks`). Where a line of r — or of a size between
@@ -939,6 +942,13 @@ const EDGE_SIDE_MM = 3;
  * has 44's own line 0.7–1.1 mm inside 36's copy (skipped, the copy walled 44 and it took the strip
  * between); palto's front shoulder has 76 and 80 0.3–1 mm inside 72's copy with the common
  * shoulder line beyond them (skipped, 72's copy walled 84 and 88 and they ran on 72's line).
+ * Nor where that line leaves the copy by more than FAR_SIDE_MM between two such stretches (gap up
+ * to TURN_GAP): a line drawn twice follows the copy around its turns, a size graded inward cuts
+ * inside them. zhaket's cuff corner has 38's and 40's lines 0.1–0.7 mm inside 36's copy along both
+ * arms and 1–2 mm inside its tip (skipped, the copy walled 42 down to 36's tip, cut off below
+ * 40's); the line is then beside over that whole run, the turn included, and over the stretches
+ * where it touches the copy (40's line lies on it for 11 mm of the arm; cut there, the copy kept
+ * walling 42 outside 40's line along that arm).
  * Either way the line must belong to the copy's own piece: the way over keeps to that side of s's
  * outline (no other piece of s between). Where the side cannot be told (s's piece not closed
  * there), every line counts.
@@ -998,6 +1008,9 @@ export function copyWallsOf(
     const L = cum[cum.length - 1];
     const keep: boolean[] = [];
     const at: number[] = [];
+    const ps: PtMm[] = [];
+    // far lines skipped as this edge drawn twice, per sample
+    const skipAt: (Set<number> | null)[] = [];
     let seg = 0;
     for (let a = 0; a <= L + 1e-9; a += step) {
       while (seg + 2 < pts.length && cum[seg + 1] < a) seg++;
@@ -1047,7 +1060,6 @@ export function copyWallsOf(
           let oc = cums.get(o);
           if (!oc) cums.set(o, (oc = cumOf(op)));
           const foot = oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u;
-          if (Math.min(foot, oc[oc.length - 1] - foot) < 3) continue;
           const q = chordDir(op, oc, foot, chordMm);
           if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
           const f = {
@@ -1059,6 +1071,7 @@ export function copyWallsOf(
         return edgeFar;
       };
       let beside = false;
+      let skips: Set<number> | null = null;
       for (const [o, b] of best) {
         if (b.d > sideMm || b.d <= onMm) continue;
         const op = set.chains[o].pts;
@@ -1075,7 +1088,10 @@ export function copyWallsOf(
           };
           const v = { x: f.x - p.x, y: f.y - p.y };
           const own = Math.sign(v.x * n.x + v.y * n.y) === want; // on r's side
-          if (!own && b.d <= FAR_SIDE_MM && !farEdge()) continue; // the same edge drawn twice
+          if (!own && b.d <= FAR_SIDE_MM && !farEdge()) {
+            (skips ??= new Set()).add(o); // the same edge drawn twice (unless it opens: below)
+            continue;
+          }
           // the same piece: the way over stays on that side of s's outline
           const outside = own === r > s;
           let same = true;
@@ -1090,6 +1106,41 @@ export function copyWallsOf(
       }
       keep.push(!beside);
       at.push(a);
+      ps.push(p);
+      skipAt.push(skips);
+    }
+    // A line drawn twice follows the copy around its turns. One that leaves it by more than
+    // FAR_SIDE_MM between two stretches it runs on the far side is a size graded inward there,
+    // drawn apart: beside over that whole run, the copy's turn included. A run goes on where the
+    // line lies on the copy between two stretches; it ends where the line leaves for longer.
+    const far = new Set<number>();
+    for (const k of skipAt) if (k) for (const o of k) far.add(o);
+    for (const o of far) {
+      const idx: number[] = [];
+      skipAt.forEach((k, i) => k?.has(o) && idx.push(i));
+      const op = set.chains[o].pts;
+      const off = (q: PtMm) => {
+        let m = Infinity;
+        grid.near(q, FAR_SIDE_MM, (o2, i) => {
+          if (o2 === o) m = Math.min(m, segNearest(q, op[i], op[i + 1]).d);
+        });
+        return m > FAR_SIDE_MM;
+      };
+      let k = 0;
+      while (k < idx.length) {
+        let e = k;
+        let open = false;
+        while (e + 1 < idx.length) {
+          // between two stretches the line either lies on the copy (≤ onMm: one run) or leaves it
+          let left = false;
+          for (let i = idx[e] + 1; i < idx[e + 1] && !left; i++) left = off(ps[i]);
+          if (left && idx[e + 1] - idx[e] > TURN_GAP) break;
+          if (left) open = true;
+          e++;
+        }
+        if (open) for (let i = idx[k]; i <= idx[e]; i++) keep[i] = false;
+        k = e + 1;
+      }
     }
     if (keep.every(Boolean)) {
       out.push(...itemsOf(set, [id]));
