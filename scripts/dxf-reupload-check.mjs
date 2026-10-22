@@ -997,6 +997,88 @@ async function main() {
     );
   }
 
+  // ── L13: замена файла на месте (set units, PDF → DXF, импорт) взводит причину снимка ─────────
+  {
+    const tag = 'swap-arms';
+    // set units / plain swap: строка та же, файл новый — сейв с новым url несёт причину
+    const form = {};
+    const OLD = 'mem://v4/unitless.dxf';
+    const NEW = 'mem://v5/unitless-mm.dxf';
+    const early = M.peekReuploadSnapshot(71, [OLD]);
+    M.swapSheetFile(71, (p, v) => (form[p] = v), 0, OLD, {
+      url: NEW,
+      filename: 'unitless.dxf',
+      sizeBytes: 29,
+      sha256: 'ab',
+    });
+    const stale = M.peekReuploadSnapshot(71, [OLD]);
+    const taken = M.peekReuploadSnapshot(71, [NEW]);
+    M.consumeReuploadSnapshot(71, taken);
+    is(
+      tag,
+      [
+        early,
+        stale,
+        taken?.reason,
+        form['patterns.0.url'],
+        form['patterns.0.version'],
+        form['patterns.0.sha256'],
+        M.peekReuploadSnapshot(71, [NEW]),
+      ],
+      [null, null, M.REUPLOAD_SNAPSHOT_REASON, NEW, 0, 'ab', null],
+      'set units: сейв с новым url несёт dxf-reupload, старый пейлоад — нет',
+    );
+
+    // импорт: строка заменена на месте (новое имя файла — иначе «уже на карточке»), причина взведена
+    // ДО сейва импорта
+    const live = {
+      patterns: [
+        { sizeId: 1, lineKey: 'line-a', url: OLD, filename: 'a.dxf', ...MAIN, version: 4 },
+      ],
+      pieces: [],
+      aliases: [],
+    };
+    const writes = {};
+    let atSave = 'not saved';
+    const res = await M.applyDraft(
+      {
+        scopes: [
+          {
+            target: { scopeKey: SCOPE_KEY, label: 'main', ...MAIN },
+            replaces: { lineKey: 'line-a' },
+            sheetMode: 'replace',
+            filename: 'a-v5.dxf',
+            dxfText: '0\nEOF\n',
+            name: 'a',
+          },
+        ],
+        aliases: [],
+        pieces: [],
+      },
+      {
+        upload: async () => ({ url: NEW, filename: 'a-v5.dxf', sizeBytes: 6, sha256: 'cd' }),
+        read: () => live,
+        write: (p, v) => (writes[p] = v),
+        storageSizeId: 1,
+        scopeOf: () => SCOPE_KEY,
+        onReplaced: (list) => list.forEach((r) => M.armReuploadSnapshot(71, r.newUrl, r.oldUrl)),
+        save: async () => {
+          atSave = M.peekReuploadSnapshot(
+            71,
+            (writes.patterns ?? live.patterns).map((p) => p.url),
+          )?.reason;
+          return 'ok';
+        },
+      },
+    );
+    is(
+      tag,
+      [res.ok, res.replaced?.length, atSave],
+      [true, 1, M.REUPLOAD_SNAPSHOT_REASON],
+      'импорт: сейв с заменённой строкой несёт dxf-reupload',
+    );
+  }
+
   // ── удаление листа (L6b): путь формы — план, счётчики, дефекты ушедших шагов → 0, причина ─────
   {
     const tag = 'delete';

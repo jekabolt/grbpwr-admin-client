@@ -65,6 +65,8 @@ export type LiveAlias = {
 };
 export type LiveCard = { patterns: LivePattern[]; pieces: LivePiece[]; aliases: LiveAlias[] };
 
+export type ApplyReplaced = { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string };
+
 export type FormWrite = { path: string; value: unknown };
 
 export type ApplyProgressEvent = { scopeKey: string; state: 'uploading' | 'uploaded' | 'failed' };
@@ -83,6 +85,11 @@ export type ApplyDeps = {
   storageSizeId: number;
   /** The card's save (autosave `flush`); its answer is returned as `save`. */
   save?: (reason: string) => Promise<string>;
+  /**
+   * Rows replaced in place (old url → new url), told after the form writes and BEFORE the save, so
+   * the caller can arm the snapshot reason the save carries (nesting/reupload-session.ts).
+   */
+  onReplaced?: (replaced: ApplyReplaced[]) => void;
   /**
    * Codex r5 #3: rows an earlier try wrote into the form whose save was not confirmed ('ok') — a
    * retry finds them there (nothing to write) and must still save. Kept by the caller across tries.
@@ -202,7 +209,7 @@ export function planFormWrites(
   //    row appended. The replaced row is re-found in the LIVE form by its lineKey and must still be
   //    bound to the same scope; if the operator removed or rebound it meanwhile, the file is added.
   const nextPatterns = live.patterns.map((p) => ({ ...p }));
-  const replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[] = [];
+  const replaced: ApplyReplaced[] = [];
   const rows = uploaded.flatMap((u) => {
     const sc = draft.scopes.find((s) => s.target.scopeKey === u.scopeKey);
     if (!sc) return [];
@@ -448,6 +455,7 @@ export async function applyDraft(
     scopeOf: deps.scopeOf,
   });
   for (const w of plan.writes) deps.write(w.path, w.value);
+  if (plan.replaced.length) deps.onReplaced?.(plan.replaced);
   const retry = !plan.writes.length && !!deps.unsaved?.get();
   if (plan.writes.length) deps.unsaved?.set(true);
 
