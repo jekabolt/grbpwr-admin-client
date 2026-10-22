@@ -2,6 +2,13 @@ import { adminService } from 'api/api';
 import { useFormState, type Control } from 'react-hook-form';
 import { extractFieldViolations } from 'utils/field-errors';
 import type { DxfNormPiece, DxfPieceAreaRow } from './nesting/dxf-consumption';
+import {
+  bindingScopes,
+  isInterliningScope,
+  scopeKeyOfBinding,
+  type FabricScope,
+  type RollGoodsLine,
+} from './bom-purpose';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
 import type { TechCardFormData } from './schema';
 
@@ -141,14 +148,34 @@ export type PieceAreaSheet = { lineKey?: string; fabricPurpose?: string; bomLine
  *
  * Поэтому правило одно на оба входа в замер: все листы этой ткани обязаны сырьём указывать на тот
  * же скоуп, под которым мы пишем; иначе отказ с адресом починки.
+ *
+ * ИСКЛЮЧЕНИЕ — ДУБЛЕРИН (L11). Сервер раскладывает его листы не по сырому ключу, а по личности
+ * строки (PreferredFabricArtifactsByScope): листы, привязанные к строке, ИЛИ — если таких нет —
+ * целиком наследный набор «по назначению», у которого строка единственный носитель. Площади он
+ * пишет под ключом строки и принимает именно этот набор. Поэтому для скоупа дублерина (`scopes`
+ * карточки называют его) каждый лист обязан РАЗРЕШАТЬСЯ в эту строку по тому же правилу набора;
+ * сырой ключ наследного листа («interfacing») здесь не отказ.
  */
 export function pieceAreaSheetsRefusal(
   sheets: readonly PieceAreaSheet[],
   scopeKey: string,
+  /** The card's fabric scopes — needed to recognise an interlining scope; omitted → raw guard. */
+  scopes?: readonly FabricScope<RollGoodsLine>[],
 ): string | null {
   const key = scopeKey.trim();
   if (!key) return 'the fabric scope is undetermined';
   if (sheets.length === 0) return 'this fabric has no pattern sheets';
+  const interlining = scopes?.find((s) => s.key === key && isInterliningScope(s));
+  if (interlining && scopes) {
+    const set = bindingScopes(scopes, sheets);
+    if (sheets.some((sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, set) !== key)) {
+      return 'the sheets of this interlining are bound differently: some to its BOM line, some to a purpose only. the server reads only the line-bound ones, and the measurement would answer for files that are not in its scope. re-bind the purpose-only sheets to the line (the “⇄” button on the sheet row)';
+    }
+    if (sheets.some((sh) => !(sh.lineKey ?? '').trim())) {
+      return 'some sheets have no identifier yet — retry the measurement once the card has saved';
+    }
+    return null;
+  }
   const keys = new Set(sheets.map(serverScopeKeyOfSheet));
   if (keys.size > 1) {
     return 'the sheets of this fabric are bound differently: some to a purpose, some to a BOM line. the server keeps them in DIFFERENT scopes, and the measurement would answer for files that are not in its scope. bind the sheets to a purpose as well (the “⇄” button on the sheet row)';
@@ -262,6 +289,8 @@ const MIN_WIRE_AREA_CM2 = 0.005;
 export async function publishPieceAreas(args: {
   techCardId: number;
   scopeKey: string;
+  /** The card's fabric scopes: an interlining scope's sheets are checked set-aware (L11). */
+  scopes?: readonly FabricScope<RollGoodsLine>[];
   /**
    * ВСЕ листы этой ткани (любого формата, включая наследие в PDF): именно из них сервер считает
    * отпечаток скоупа, и прислать подмножество значит подписаться под чужим набором.
@@ -280,7 +309,7 @@ export async function publishPieceAreas(args: {
   nameOfPiece?: (pieceLineKey: string) => string;
 }): Promise<PublishPieceAreasResult> {
   const scopeKey = args.scopeKey.trim();
-  const sheetsRefusal = pieceAreaSheetsRefusal(args.sheets, scopeKey);
+  const sheetsRefusal = pieceAreaSheetsRefusal(args.sheets, scopeKey, args.scopes);
   if (sheetsRefusal) return { ok: false, reason: sheetsRefusal };
   const rows = args.areas;
   if (rows.length === 0) {

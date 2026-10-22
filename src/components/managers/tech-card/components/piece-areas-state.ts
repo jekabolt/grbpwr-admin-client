@@ -15,7 +15,12 @@ import type {
   common_TechCardSizePattern,
 } from 'api/proto-http/admin';
 import { isDxfUrl } from 'utils/pattern';
-import type { FabricScope, RollGoodsLine } from './bom-purpose';
+import {
+  isInterliningScope,
+  legacyPurposeOfScope,
+  type FabricScope,
+  type RollGoodsLine,
+} from './bom-purpose';
 import { serverScopeKeyOfSheet, wireFabricPurpose } from './pattern-size-index';
 
 type Measured = { pieces: number; contourLayer: string; seamMm: string };
@@ -96,6 +101,29 @@ export function serverScopeKeysOfSheets(
  */
 export function serverKeyOfScope(scope: FabricScope<RollGoodsLine>): string {
   return scope.byPurpose ? wireFabricPurpose(scope.key) : scope.key.trim();
+}
+
+/**
+ * Серверные ключи, под которыми читать замер ОДНОЙ группы.
+ *
+ * Обычная ткань — ключи её листов (serverScopeKeysOfSheets), как и прежде. Дублерин (L11) — ключ
+ * его строки; а если под ним замера нет, то наследный ключ назначения, у которого строка
+ * единственный носитель (замер, сделанный до L11). Один из двух, никогда оба: сервер прячет
+ * наследный набор, как только есть набор строки (FabricScopeReadKeys + preferLineScopedAreaSets).
+ */
+export function areaReadKeysOfScope(
+  scope: FabricScope<RollGoodsLine>,
+  scopes: readonly FabricScope<RollGoodsLine>[],
+  sheets: readonly { fabricPurpose?: string; bomLineKey?: string }[],
+  areaScopes: readonly Pick<common_TechCardPieceAreaScope, 'scopeKey'>[] | undefined,
+): string[] {
+  if (!isInterliningScope(scope)) return serverScopeKeysOfSheets(sheets);
+  const line = serverKeyOfScope(scope);
+  const has = (k: string) => (areaScopes ?? []).some((s) => (s.scopeKey ?? '').trim() === k);
+  if (has(line)) return [line];
+  const legacy = legacyPurposeOfScope(scope, scopes);
+  const legacyKey = legacy ? wireFabricPurpose(legacy) : '';
+  return legacyKey && has(legacyKey) ? [legacyKey] : [line];
 }
 
 /**

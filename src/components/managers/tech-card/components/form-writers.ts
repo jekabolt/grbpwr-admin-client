@@ -7,14 +7,9 @@ import { wireInt } from './wire-int';
 import { UNSET_KIND } from './bom-kind';
 import {
   clothLines,
-  fabricScopes,
   impactEmpty,
   isRollGoodsSection,
-  lineExitImpact,
-  moveScope,
-  releaseLineKey,
-  scopeKeyOfBinding,
-  scopeOfLine,
+  planLineChange,
   type AliasRow,
   type BindingRow,
   type MarkerRef,
@@ -441,10 +436,13 @@ export function releaseBomLineRefs(
 //
 // The form half of bom-purpose.ts's one writer: read the arrays, ask the pure rule, write back
 // only the fields that changed — field by field, never the whole array, so the PATTERNS field
-// array keeps its row ids.
+// array keeps its row ids. The one whole-array write is dropping generated sheets.
 
 type BomItems = NonNullable<TechCardFormData['bomItems']>;
 type BindingPath = 'patterns' | 'pieceDxfAliases';
+type SheetRow = BindingRow & { name?: string; filename?: string };
+type NamedMarker = MarkerRef & { name?: string };
+export type LineHold = ScopeImpact<SheetRow, AliasRow, NamedMarker>;
 
 /** Write the binding fields a move changed. */
 export function writeBindings(
@@ -469,57 +467,8 @@ export function writeBindings(
   });
 }
 
-/**
- * A line leaves a purpose that stays live: its key comes off the sheets and links of that purpose.
- * The fusing rebuild's generated sheets bound to it leave with it (dropStrandedGenerated).
- */
-export function releaseLineBindings(
-  getValues: UseFormGetValues<TechCardFormData>,
-  setValue: UseFormSetValue<TechCardFormData>,
-  lineKey: string,
-  nextItems: BomItems,
-): void {
-  const next = clothLines(nextItems);
-  for (const path of ['patterns', 'pieceDxfAliases'] as const) {
-    const rows = (getValues(path) ?? []) as BindingRow[];
-    releaseLineKey(rows, lineKey, next).forEach(({ index, bomLineKey }) =>
-      setValue(`${path}.${index}.bomLineKey` as never, bomLineKey as never, { shouldDirty: true }),
-    );
-  }
-  dropStrandedGenerated(getValues, setValue, nextItems);
-}
-
 /** An interlining sheet the fusing rebuild generated (lib/fusing-dxf): not the operator's work. */
 const generatedSheet = (s: { name?: string }) => isGenerated(s as common_TechCardSizePattern);
-
-/**
- * GENERATED SHEETS LEAVE WITH THEIR LINE. The BOM is about to become `nextItems` (call BEFORE it
- * does): the fusing rebuild's sheets that would be bound to nothing live are removed, and with them
- * every piece link left bound to nothing — they are that sheet's, and the save refuses both. The
- * rebuild makes them again from whatever interlining stays.
- */
-export function dropStrandedGenerated(
-  getValues: UseFormGetValues<TechCardFormData>,
-  setValue: UseFormSetValue<TechCardFormData>,
-  nextItems: BomItems,
-): void {
-  const before = fabricScopes(clothLines((getValues('bomItems') ?? []) as BomItems));
-  const after = fabricScopes(clothLines(nextItems));
-  const strands = (b: BindingRow) =>
-    scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, before) !== '' &&
-    scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, after) === '';
-  const patterns = (getValues('patterns') ?? []) as SheetRow[];
-  if (!patterns.some((p) => generatedSheet(p) && strands(p))) return;
-  setValue('patterns', patterns.filter((p) => !(generatedSheet(p) && strands(p))) as never, {
-    shouldDirty: true,
-  });
-  const aliases = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
-  if (aliases.some(strands)) {
-    setValue('pieceDxfAliases', aliases.filter((a) => !strands(a)) as never, {
-      shouldDirty: true,
-    });
-  }
-}
 
 /**
  * A hold without the fusing rebuild's generated sheets: they are not the operator's work and leave
@@ -531,29 +480,6 @@ export function withoutGenerated<P extends SheetRow, A, M>(
   const sheets = hold.sheets.filter((s) => !generatedSheet(s));
   const onlyGenerated = sheets.length === 0 && hold.sheets.length > 0;
   return { sheets, aliases: onlyGenerated ? [] : hold.aliases, markers: hold.markers };
-}
-
-type SheetRow = BindingRow & { name?: string; filename?: string };
-type NamedMarker = MarkerRef & { name?: string };
-export type LineHold = ScopeImpact<SheetRow, AliasRow, NamedMarker>;
-
-/**
- * What keeps a line in the cloth: the sheets, piece links and markers that would be left without a
- * material if it went (deleted, moved out of the roll-goods sections, undone). Empty = free to go.
- */
-export function lineExitHold(
-  getValues: UseFormGetValues<TechCardFormData>,
-  lineKey: string,
-  markers?: readonly NamedMarker[],
-): LineHold {
-  return withoutGenerated(
-    lineExitImpact(lineKey, {
-      lines: clothLines((getValues('bomItems') ?? []) as BomItems),
-      patterns: (getValues('patterns') ?? []) as SheetRow[],
-      aliases: (getValues('pieceDxfAliases') ?? []) as AliasRow[],
-      markers: markers ?? [],
-    }),
-  );
 }
 
 /** The hold, said: sheet names first, then markers; links only when no sheet names them. */
@@ -569,11 +495,91 @@ export function holdNames(hold: LineHold): string[] {
 export type BindingChange = { kind: 'done' } | { kind: 'clash'; blocks: string[] } | LineHeld;
 type LineHeld = { kind: 'held'; names: string[] };
 
+function planOf(
+  getValues: UseFormGetValues<TechCardFormData>,
+  nextItems: BomItems,
+  lines: Iterable<string>,
+  markers?: readonly NamedMarker[],
+) {
+  return planLineChange({
+    patterns: (getValues('patterns') ?? []) as SheetRow[],
+    aliases: (getValues('pieceDxfAliases') ?? []) as AliasRow[],
+    markers: markers ?? [],
+    before: clothLines((getValues('bomItems') ?? []) as BomItems),
+    after: clothLines(nextItems),
+    lines,
+  });
+}
+
+/**
+ * What keeps a line in the cloth: the sheets, piece links and markers that would be left without a
+ * material if it went (deleted, moved out of the roll-goods sections, undone). Empty = free to go.
+ * The fusing rebuild's generated sheets never hold (withoutGenerated).
+ */
+export function lineExitHold(
+  getValues: UseFormGetValues<TechCardFormData>,
+  lineKey: string,
+  markers?: readonly NamedMarker[],
+): LineHold {
+  const key = lineKey.trim();
+  const items = (getValues('bomItems') ?? []) as BomItems;
+  const rest = items.filter((b) => b.lineKey?.trim() !== key) as BomItems;
+  return withoutGenerated(planOf(getValues, rest, [key], markers).impact);
+}
+
+/**
+ * THE BOM IS ABOUT TO BECOME `nextItems` — `lines` changed (purpose, section) or went. Call BEFORE
+ * the BOM is written. Held while the operator's sheets, links or markers would end without a
+ * material; refused on a block clash; otherwise the bindings are written (bom-purpose
+ * planLineChange) and the fusing rebuild's generated sheets that strand leave in the same change,
+ * with their links — the save refuses a sheet without a live scope, and the rebuild makes them
+ * again from whatever interlining stays.
+ */
+export function applyLineChange(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  nextItems: BomItems,
+  lines: Iterable<string>,
+  markers?: readonly NamedMarker[],
+): BindingChange {
+  const patterns = (getValues('patterns') ?? []) as SheetRow[];
+  const aliases = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
+  const plan = planOf(getValues, nextItems, lines, markers);
+  const hold = withoutGenerated(plan.impact);
+  if (!impactEmpty(hold)) return { kind: 'held', names: holdNames(hold) };
+  if (plan.clash.length > 0) return { kind: 'clash', blocks: plan.clash };
+  writeBindings(setValue, 'patterns', patterns, plan.patterns);
+  writeBindings(setValue, 'pieceDxfAliases', aliases, plan.aliases);
+  const gone = new Set(plan.stranded.sheets);
+  if (gone.size > 0) {
+    const links = new Set(plan.stranded.aliases);
+    const rows = (getValues('patterns') ?? []) as SheetRow[];
+    setValue('patterns', rows.filter((_, i) => !gone.has(i)) as never, { shouldDirty: true });
+    if (links.size > 0) {
+      const all = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
+      setValue('pieceDxfAliases', all.filter((_, i) => !links.has(i)) as never, {
+        shouldDirty: true,
+      });
+    }
+  }
+  return { kind: 'done' };
+}
+
+/** A line is about to go (delete, undo): its bindings settle, its generated sheets go with it. */
+export function releaseLineBindings(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  lineKey: string,
+  nextItems: BomItems,
+): void {
+  applyLineChange(getValues, setValue, nextItems, [lineKey]);
+}
+
 /**
  * PURPOSE OF ONE BOM LINE — the BOM tab's and MATERIALS' select. The only line of its scope takes
- * the scope's sheets and piece links to its new scope (moveScope); a merge whose blocks clash is
- * refused and nothing is written. A line that leaves others behind moves nothing, and its key comes
- * off the purpose it left.
+ * the scope's sheets and piece links to its new scope; a merge whose blocks clash is refused and
+ * nothing is written. A line that leaves others behind moves nothing. An interlining line stays its
+ * own scope (L11): its rows stay, and its legacy purpose-only rows are pinned to it.
  */
 export function changeLinePurpose(
   getValues: UseFormGetValues<TechCardFormData>,
@@ -585,25 +591,10 @@ export function changeLinePurpose(
   const line = items[index];
   if (!line) return { kind: 'done' };
   const key = line.lineKey?.trim() ?? '';
-  const next = items.map((b, i) => (i === index ? { ...b, purpose } : b)) as BomItems;
   if (key && isRollGoodsSection(line.section)) {
-    const before = fabricScopes(clothLines(items));
-    const own = scopeOfLine(before, key);
-    const to = scopeOfLine(fabricScopes(clothLines(next)), key);
-    if (own && to && own.key !== to.key) {
-      if (own.lines.length === 1) {
-        const patterns = (getValues('patterns') ?? []) as BindingRow[];
-        const aliases = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
-        const move = moveScope({ patterns, aliases, scopes: before, from: own.key, to });
-        if (move.kind === 'clash') return move;
-        if (move.kind === 'moved') {
-          writeBindings(setValue, 'patterns', patterns, move.patterns);
-          writeBindings(setValue, 'pieceDxfAliases', aliases, move.aliases);
-        }
-      } else {
-        releaseLineBindings(getValues, setValue, key, next);
-      }
-    }
+    const next = items.map((b, i) => (i === index ? { ...b, purpose } : b)) as BomItems;
+    const out = applyLineChange(getValues, setValue, next, [key]);
+    if (out.kind !== 'done') return out;
   }
   setValue(`bomItems.${index}.purpose`, purpose as never, {
     shouldDirty: true,
@@ -613,8 +604,9 @@ export function changeLinePurpose(
 }
 
 /**
- * SECTION OF ONE BOM LINE. Leaving the four roll-goods sections takes the line out of every fabric
- * scope: refused while that would leave sheets, links or markers without a material.
+ * SECTION OF ONE BOM LINE. Any move of a cloth line — out of the four roll-goods sections, or
+ * between them (INTERLINING is its own scope, L11) — goes through the same writer: held while it
+ * would leave sheets, links or markers without a material, refused on a block clash.
  */
 export function changeLineSection(
   getValues: UseFormGetValues<TechCardFormData>,
@@ -627,11 +619,10 @@ export function changeLineSection(
   const line = items[index];
   if (!line) return { kind: 'done' };
   const key = line.lineKey?.trim() ?? '';
-  if (key && isRollGoodsSection(line.section) && !isRollGoodsSection(section)) {
-    const hold = lineExitHold(getValues, key, markers);
-    if (!impactEmpty(hold)) return { kind: 'held', names: holdNames(hold) };
+  if (key && (isRollGoodsSection(line.section) || isRollGoodsSection(section))) {
     const next = items.map((b, i) => (i === index ? { ...b, section } : b)) as BomItems;
-    releaseLineBindings(getValues, setValue, key, next);
+    const out = applyLineChange(getValues, setValue, next, [key], markers);
+    if (out.kind !== 'done') return out;
   }
   setValue(`bomItems.${index}.section`, section as never, {
     shouldDirty: true,

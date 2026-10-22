@@ -102,8 +102,11 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
   scopeKey: string;
   /** привязка слота (bindingForScope) — её получают новые алиасы */
   scope: ReconcileScope;
-  /** разрешённый слот привязки по сегодняшнему BOM (scopeKeyOfBinding); '' — ни к чему живому */
-  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }) => string;
+  /**
+   * разрешённый слот привязки по сегодняшнему BOM (scopeKeyOfBinding над набором своего вида —
+   * листы или связи); '' — ни к чему живому
+   */
+  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') => string;
   isDxf: (url: string) => boolean;
   sizeTokens: readonly string[];
   /** ссылки на деталь вне шагов (рецепт, площади, материалы детали, швы): деталь станет призраком */
@@ -368,7 +371,7 @@ export async function reuploadSheet<
   deps: ReuploadDeps<P, A, O>,
 ): Promise<ReuploadOutcome<P, A, O>> {
   const rows = card.patterns.flatMap((r, i) =>
-    r.url && card.isDxf(r.url) && card.scopeOf(r) === card.scopeKey ? [{ r, i }] : [],
+    r.url && card.isDxf(r.url) && card.scopeOf(r, 'sheet') === card.scopeKey ? [{ r, i }] : [],
   );
   if (rows.length === 0) return { kind: 'first' };
   // Явная строка: только она. Её нет среди листов слота — отказ, не первая заливка.
@@ -489,7 +492,7 @@ export async function reuploadSheet<
       newSheet: { parse: targetNew, sha256: sha },
       sizeTokens: card.sizeTokens,
       externalRefs: card.externalRefs,
-      aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+      aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
       targetFileIndex: 0,
       ...(card.seams ? { seams: card.seams } : {}),
     });
@@ -526,7 +529,7 @@ export async function reuploadSheet<
     sizeTokens: card.sizeTokens,
     externalRefs: card.externalRefs,
     otherSheets,
-    aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+    aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
     // Несколько листов в слоте: «чужой файл» решается по заменяемому листу, не по всему слоту.
     ...(rows.length > 1 ? { targetFileIndex: t } : {}),
     ...(card.seams ? { seams: card.seams } : {}),

@@ -73,7 +73,10 @@ export type CascadeInput<
    * Ключ scope привязки (алиаса или листа). По умолчанию — назначение, иначе строка BOM; форма
    * передаёт scopeKeyOfBinding. '' — падаем на сырой ключ.
    */
-  scopeKeyOf?: (b: { fabricPurpose?: string; bomLineKey?: string }) => string;
+  scopeKeyOf?: (
+    b: { fabricPurpose?: string; bomLineKey?: string },
+    kind: 'sheet' | 'link',
+  ) => string;
 };
 
 export type CascadeBlock = { kind: string; pieceLineKey: string; count: number };
@@ -174,9 +177,9 @@ export function removeSheetCascade<
   }
 
   // ── алиасы листа ─────────────────────────────────────────────────────────────────────────
-  const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }) =>
-    trim(input.scopeKeyOf?.(b)) || aliasScopeKey(b);
-  const scope = scopeOf(target.scope);
+  const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') =>
+    trim(input.scopeKeyOf?.(b, kind)) || aliasScopeKey(b);
+  const scope = scopeOf(target.scope, 'sheet');
   const sizes = new Set((input.sizeTokens ?? []).map((t) => t.toLowerCase()));
   const blocksOf = (s: CascadeSheet) => {
     if (s.blockNames == null) return null;
@@ -191,13 +194,13 @@ export function removeSheetCascade<
   };
   const own = blocksOf(target);
   const siblings = input.sheets
-    .filter((s) => s !== target && scope !== '' && scopeOf(s.scope) === scope)
+    .filter((s) => s !== target && scope !== '' && scopeOf(s.scope, 'sheet') === scope)
     .map(blocksOf);
   const heldElsewhere = (block: string) => siblings.some((b) => b == null || b.has(block));
 
   const removedAliasIndexes: number[] = [];
   input.aliases.forEach((a, i) => {
-    if (!scope || scopeOf(a) !== scope) return;
+    if (!scope || scopeOf(a, 'link') !== scope) return;
     const b = lower(a.blockName);
     if (own && !own.has(b)) return;
     if (heldElsewhere(b)) return;

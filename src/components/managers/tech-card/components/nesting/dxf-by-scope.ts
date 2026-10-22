@@ -15,7 +15,12 @@
 // Модуль НАМЕРЕННО лёгкий: из тяжёлого графа раскладки (dxf-parser, clipper, воркер) он не тянет
 // ничего, поэтому его свободно импортируют и главный бандл, и ленивый чанк.
 import { isDxfUrl } from 'utils/pattern';
-import { scopeKeyOfBinding, type FabricScope, type RollGoodsLine } from '../bom-purpose';
+import {
+  bindingScopes,
+  scopeKeyOfBinding,
+  type FabricScope,
+  type RollGoodsLine,
+} from '../bom-purpose';
 import { patternSheetName } from './sheet-name';
 
 /** Сырая привязка листа, как она лежит в строке формы. */
@@ -31,17 +36,22 @@ export type ScopedSheet = { name: string; url: string };
  * или лист, чью строку BOM удалили. Такие не выбрасываются, а собираются под пустым ключом —
  * панель показывает их в «без материала», а очередь раскроя по ним отказывает НАЗЫВАЯ причину.
  * Молча потерянный лист — это молча потерянная деталь кроя.
+ *
+ * `set` — ВЕСЬ набор листов карточки (по умолчанию `items`): наследный лист с одним назначением
+ * читается за прокладку, только пока у её строки нет своих листов (bindingScopes, L11) — а это
+ * вопрос про все листы, не только про отобранные (DXF).
  */
 export function dxfByScope<T>(
   items: readonly T[],
   scopes: readonly FabricScope<RollGoodsLine>[],
   bindingOf: (item: T) => ScopeBinding,
+  set: readonly ScopeBinding[] = items.map(bindingOf),
 ): Map<string, T[]> {
   const out = new Map<string, T[]>();
-  const list = scopes as FabricScope<RollGoodsLine>[];
+  const ctx = bindingScopes(scopes, set);
   for (const item of items) {
     const b = bindingOf(item);
-    const key = scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, list);
+    const key = scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, ctx);
     const bucket = out.get(key) ?? [];
     bucket.push(item);
     out.set(key, bucket);
@@ -68,7 +78,7 @@ export function dxfSheetsByScope(
   scopes: readonly FabricScope<RollGoodsLine>[],
 ): Map<string, ScopedSheet[]> {
   const dxf = rows.filter((r) => !!r.url && isDxfUrl(r.url));
-  const grouped = dxfByScope(dxf, scopes, (r) => r);
+  const grouped = dxfByScope(dxf, scopes, (r) => r, rows);
   const out = new Map<string, ScopedSheet[]>();
   for (const [key, list] of grouped) {
     out.set(

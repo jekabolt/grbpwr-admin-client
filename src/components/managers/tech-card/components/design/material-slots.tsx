@@ -685,10 +685,15 @@ function SlotRow({
                 // One writer with the BOM tab: the scope's only line takes its sheets along.
                 onValueChange={(value: string | undefined) => {
                   const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
-                  if (out.kind === 'clash') {
+                  if (out.kind !== 'done') {
                     useSnackBarStore
                       .getState()
-                      .showMessage(`blocks clash: ${out.blocks.join(', ')}`, 'error');
+                      .showMessage(
+                        out.kind === 'clash'
+                          ? `blocks clash: ${out.blocks.join(', ')}`
+                          : `used by ${out.names.join(', ')}`,
+                        'error',
+                      );
                   }
                 }}
                 items={[

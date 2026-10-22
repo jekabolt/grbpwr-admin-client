@@ -77,6 +77,7 @@ import {
   aliasInScope,
   aliasScopeKey,
   bindingForScope,
+  bindingScopes,
 } from '../bom-purpose';
 import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
@@ -724,6 +725,7 @@ function planPieceUpdates(
 export function PieceMatchModal({
   files,
   scope,
+  scopes,
   fabricName,
   scopeLabelByKey,
   sizeLabel,
@@ -738,6 +740,8 @@ export function PieceMatchModal({
   // nobody has sorted yet. Both halves matter — the KEY is what gets written, the LINES are what
   // decides which stored aliases already belong here.
   scope: FabricScope<RollGoodsLine>;
+  // The card's whole partition (`scope` among them): a stored alias resolves against all of it.
+  scopes: readonly FabricScope<RollGoodsLine>[];
   fabricName: string;
   // Подпись скоупа по его ключу — чтобы подсказка «по другой ткани» могла сказать, ПО КАКОЙ.
   // Ключи строк тоже есть в карте: подсказка может прийти с алиаса, лежащего ещё на строке.
@@ -780,6 +784,9 @@ export function PieceMatchModal({
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as TechCardFormData['pieces'];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
+  // The card's whole LINK set against its scopes: a legacy purpose-only link is read for an
+  // interlining line only while that line has no links of its own (bindingScopes).
+  const links = useMemo(() => bindingScopes(scopes, aliases ?? []), [scopes, aliases]);
   // The fusibles a piece can be fused with: the INTERLINING lines of the BOM.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as TechCardFormData['bomItems'];
   // Like piece edits, lines born inside this modal wait for its SAVE. Cancel therefore leaves both
@@ -1059,7 +1066,7 @@ export function PieceMatchModal({
     const spelling = new Map<string, string>();
     const conflict = new Map<string, { block: string; pieceKeys: string[] }>();
     for (const a of aliases ?? []) {
-      if (!aliasInScope(a, scope)) continue;
+      if (!aliasInScope(a, scope, links)) continue;
       const pk = (a.pieceLineKey ?? '').trim();
       if (!livePieceKeys.has(pk.toLowerCase())) continue;
       const block = identityOf(a.blockName ?? '');
@@ -1076,7 +1083,7 @@ export function PieceMatchModal({
       conflict.set(ci, c);
     }
     return { first, spelling, collapses: conflict };
-  }, [aliases, scope, livePieceKeys, split]);
+  }, [aliases, scope, links, livePieceKeys, split]);
   const mineSpelling = stored.spelling;
   const collapses = stored.collapses;
   // A resolved conflict answers as its winner everywhere — sheet, list and write — so the dialog
@@ -1099,7 +1106,7 @@ export function PieceMatchModal({
   const otherFabricByBlock = useMemo(() => {
     const m = new Map<string, { pieceKey: string; fromSlot: string }>();
     for (const a of aliases ?? []) {
-      if (aliasInScope(a, scope)) continue;
+      if (aliasInScope(a, scope, links)) continue;
       // The SOURCE key as the alias itself carries it — a назначение when it has one, its line
       // otherwise. That is what scopeLabelByKey is keyed on both ways, so a hint coming off a
       // not-yet-sorted line can still name where it came from instead of degrading to «по другой
@@ -1109,7 +1116,7 @@ export function PieceMatchModal({
       if (!m.has(k)) m.set(k, { pieceKey: a.pieceLineKey ?? '', fromSlot: from });
     }
     return m;
-  }, [aliases, scope, split]);
+  }, [aliases, scope, links, split]);
 
   // F6b: детали, привязанные к ДРУГИМ тканям и ни разу к этой, — lineKey (ci) → ключ первой такой
   // ткани. Читается только строками файла с манифестом (см. proposeRows, 'same-name-elsewhere').
@@ -1119,12 +1126,12 @@ export function PieceMatchModal({
     for (const a of aliases ?? []) {
       const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
       if (!pk || !livePieceKeys.has(pk)) continue;
-      if (aliasInScope(a, scope)) here.add(pk);
+      if (aliasInScope(a, scope, links)) here.add(pk);
       else if (!there.has(pk)) there.set(pk, aliasScopeKey(a));
     }
     for (const pk of here) there.delete(pk);
     return there;
-  }, [aliases, scope, livePieceKeys]);
+  }, [aliases, scope, links, livePieceKeys]);
 
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
@@ -1240,7 +1247,7 @@ export function PieceMatchModal({
     for (const a of aliases ?? []) {
       const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
       if (!pk) continue;
-      if (!aliasInScope(a, scope)) {
+      if (!aliasInScope(a, scope, links)) {
         elsewhere.add(pk);
         continue;
       }
@@ -1278,7 +1285,18 @@ export function PieceMatchModal({
     }
     out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     return out;
-  }, [parse, parseComplete, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
+  }, [
+    parse,
+    parseComplete,
+    aliases,
+    scope,
+    links,
+    split,
+    pieceOptions,
+    parsedPresence,
+    rows,
+    dictTokens,
+  ]);
 
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
   // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
@@ -1405,12 +1423,12 @@ export function PieceMatchModal({
   const scopeBoundPieces = useMemo(() => {
     const s = new Set<string>();
     for (const a of aliases ?? []) {
-      if (!aliasInScope(a, scope)) continue;
+      if (!aliasInScope(a, scope, links)) continue;
       const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
       if (pk && livePieceKeys.has(pk)) s.add(pk);
     }
     return s.size;
-  }, [aliases, scope, livePieceKeys]);
+  }, [aliases, scope, links, livePieceKeys]);
   // Исчезла половина ткани и больше. Правка лекала так не выглядит — так выглядит файл, залитый не
   // в тот слот. Случай НЕ ДОКАЧАВШЕГОСЯ листа этим порогом больше не прикрывается и прикрываться не
   // должен: по неполному разбору кандидатов не бывает вовсе (находка 1), а половина — слишком
@@ -1781,7 +1799,7 @@ export function PieceMatchModal({
         // dangling alias is excluded from `mineByBlock` so its block can be mapped again). The
         // full-set write makes dropping it the repair.
         if (!liveKeys.has((a.pieceLineKey ?? '').trim().toLowerCase())) continue;
-        if (aliasInScope(a, scope)) continue;
+        if (aliasInScope(a, scope, links)) continue;
         // Свёрнуто к ИДЕНТИЧНОСТИ и на записи тоже. Читающая сторона (mineByBlock, mappedRows,
         // ciOf, unmapped) вся работает по идентичности, и пока эта петля переносила сырое имя,
         // ключи двух сторон не совпадали: «снять связь» удаляла ключ «B1|bp_1», а алиас лежал

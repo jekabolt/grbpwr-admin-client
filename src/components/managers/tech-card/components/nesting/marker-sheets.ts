@@ -11,7 +11,7 @@
 // дополнительного (L5 fix 5).
 import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { isDxfUrl } from 'utils/pattern';
-import { scopeKeyOfBinding } from '../bom-purpose';
+import { bindingScopes, scopeKeyOfBinding } from '../bom-purpose';
 import { rollGoodsScopes } from '../piece-block-refs';
 import { lastSheetRestoreAt } from './reupload-session';
 
@@ -31,7 +31,7 @@ export function markersBehindSheets(card: common_TechCard | undefined): Set<numb
   const body = card?.techCard;
   if (!body) return out;
   const restoredAt = lastSheetRestoreAt(card?.id);
-  const scopes = rollGoodsScopes(body.bomItems ?? []);
+  const scopes = bindingScopes(rollGoodsScopes(body.bomItems ?? []), body.patterns ?? []);
   // Время двигает только лист, чья геометрия стоит за деталями слота: заменённый (перезалив,
   // восстановление — у строки есть история) или первый DXF-лист слота. Чужой файл, отказанный
   // сверкой, ложится в слот ДОПОЛНИТЕЛЬНЫМ листом без истории — деталей карточки он не менял и

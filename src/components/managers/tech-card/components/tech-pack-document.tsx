@@ -59,6 +59,7 @@ import { CARE_ARTWORK } from 'components/managers/product/components/care/care-a
 import {
   fabricScopes,
   isRollGoodsSection,
+  bindingScopes,
   scopeKeyOfBinding,
   bomPurposeLabel,
   type RollGoodsLine,
@@ -1683,12 +1684,14 @@ export function TechPackDocument({
       section: b.section ?? '',
     }));
   const patternScopes = fabricScopes(rollGoodsLines);
+  const sheetSet = bindingScopes(patternScopes, tc.patterns ?? []);
+  const linkSet = bindingScopes(patternScopes, tc?.pieceDxfAliases?.items ?? []);
   // scopeKeyOfBinding resolves the MID-SORT case the same way the panel and the server do: a
   // sheet bound to line L, where L has since been sorted into назначение P, files under P's
   // group. '' = resolves to nothing → «листы без привязки».
   const sheetsByScope = new Map<string, common_TechCardSizePattern[]>();
   for (const p of patternSheets) {
-    const k = scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, patternScopes);
+    const k = scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheetSet);
     sheetsByScope.set(k, [...(sheetsByScope.get(k) ?? []), p]);
   }
   // THE WIRE KEY IS THE SERVER'S SPELLING — the whole correctness risk of this section. The
@@ -1711,7 +1714,7 @@ export function TechPackDocument({
   const uniScopeKeys = new Set<string>();
   for (const a of tc?.pieceDxfAliases?.items ?? []) {
     if (!uniOf((a.blockName ?? '').trim())) continue;
-    uniScopeKeys.add(scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, patternScopes));
+    uniScopeKeys.add(scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, linkSet));
   }
   const seenScopeKeys = new Set<string>();
   for (const s of patternScopes) {

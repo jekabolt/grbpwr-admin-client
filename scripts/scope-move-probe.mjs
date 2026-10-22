@@ -71,10 +71,14 @@ const BEFORE = scopesOf(ITEMS);
 eq(lines(ITEMS).map((l) => l.lineKey), ['L1', 'L2', 'L3', 'L4'], 'clothLines keeps the four roll sections only');
 eq(BEFORE.map((s) => s.key), [MAIN, POCKET, 'L4'], 'scopes: purposes in owner order, then unsorted lines');
 
-// ── 1. moveScope: the only line of its scope carries its sheets and links ──────────────────
+// planLineChange over the probe's card: `next` is the BOM after the change, `keys` the lines changed.
+const plan = (next, keys, patterns, aliases, markers) =>
+  m.planLineChange({ patterns, aliases, markers, before: lines(ITEMS), after: lines(next), lines: keys });
+const clean = (out) => out.clash.length === 0 && m.impactEmpty(out.impact);
+
+// ── 1. the only line of its scope carries its sheets and links ─────────────────────────────
 {
   const next = withPurpose('L3', LINING);
-  const to = scopeOf(next, 'L3');
   const patterns = [
     { name: 'pocket', fabricPurpose: POCKET, bomLineKey: 'L3' },
     { name: 'shell', fabricPurpose: MAIN, bomLineKey: '' },
@@ -83,55 +87,53 @@ eq(BEFORE.map((s) => s.key), [MAIN, POCKET, 'L4'], 'scopes: purposes in owner or
     { fabricPurpose: POCKET, bomLineKey: 'L3', blockName: 'pocket bag', pieceLineKey: 'p1' },
     { fabricPurpose: MAIN, bomLineKey: '', blockName: 'front', pieceLineKey: 'p2' },
   ];
-  const out = m.moveScope({ patterns, aliases, scopes: BEFORE, from: POCKET, to });
-  eq(out.kind, 'moved', 'only line → new purpose: moved');
-  eq(out.patterns?.[0], { name: 'pocket', fabricPurpose: LINING, bomLineKey: 'L3' }, 'its sheet takes the new purpose + its line');
-  eq(out.patterns?.[1], patterns[1], 'another scope\'s sheet stays');
-  eq(out.aliases?.[0].fabricPurpose, LINING, 'its piece link moves too');
-  eq(out.aliases?.[1], aliases[1], 'another scope\'s link stays');
+  const out = plan(next, ['L3'], patterns, aliases);
+  ck(clean(out), 'only line → new purpose: nothing held, no clash');
+  eq(out.patterns[0], { name: 'pocket', fabricPurpose: LINING, bomLineKey: 'L3' }, 'its sheet takes the new purpose + its line');
+  eq(out.patterns[1], patterns[1], 'another scope\'s sheet stays');
+  eq(out.aliases[0].fabricPurpose, LINING, 'its piece link moves too');
+  eq(out.aliases[1], aliases[1], 'another scope\'s link stays');
   eq([out.sheets, out.links], [1, 1], 'counts');
 }
 
 // ── 1b. card-11 path: an unsorted line gets a purpose, its line-bound sheet follows ────────
 {
-  const next = withPurpose('L4', CONTRAST);
-  const to = scopeOf(next, 'L4');
-  const patterns = [{ name: 'c', fabricPurpose: '', bomLineKey: 'L4' }];
-  const out = m.moveScope({ patterns, aliases: [], scopes: BEFORE, from: 'L4', to });
-  eq(out.patterns?.[0], { name: 'c', fabricPurpose: CONTRAST, bomLineKey: 'L4' }, 'unsorted → purpose: sheet bound to the purpose + line');
+  const out = plan(withPurpose('L4', CONTRAST), ['L4'], [{ name: 'c', fabricPurpose: '', bomLineKey: 'L4' }], []);
+  eq(out.patterns[0], { name: 'c', fabricPurpose: CONTRAST, bomLineKey: 'L4' }, 'unsorted → purpose: sheet bound to the purpose + line');
 }
 
 // ── 1c. purpose → unset: the line's own scope again ─────────────────────────────────────────
 {
-  const next = withPurpose('L3', UNSET);
-  const to = scopeOf(next, 'L3');
-  const out = m.moveScope({
-    patterns: [{ fabricPurpose: POCKET, bomLineKey: '' }],
-    aliases: [],
-    scopes: BEFORE,
-    from: POCKET,
-    to,
-  });
-  eq(out.patterns?.[0], { fabricPurpose: '', bomLineKey: 'L3' }, 'purpose → unset: sheet bound to the line, no purpose');
+  const out = plan(withPurpose('L3', UNSET), ['L3'], [{ fabricPurpose: POCKET, bomLineKey: '' }], []);
+  eq(out.patterns[0], { fabricPurpose: '', bomLineKey: 'L3' }, 'purpose → unset: sheet bound to the line, no purpose');
+}
+
+// ── 1d. a line that leaves others behind: the scope keeps its rows ─────────────────────────
+{
+  const patterns = [
+    { name: 'a', fabricPurpose: MAIN, bomLineKey: '' },
+    { name: 'b', fabricPurpose: '', bomLineKey: 'L1' },
+  ];
+  const out = plan(withPurpose('L1', POCKET), ['L1'], patterns, []);
+  ck(clean(out), 'one of two MAIN lines → POCKETING: nothing held');
+  eq(m.resolveSet(out.patterns, scopesOf(withPurpose('L1', POCKET))), [MAIN, MAIN], 'both sheets stay in MAIN (a line-bound one is pinned, not dragged along)');
 }
 
 // ── 2. merge into an existing scope: a block linked to another piece blocks the move ──────
 {
   const next = withPurpose('L3', MAIN);
-  const to = scopeOf(next, 'L3');
-  eq(to?.lines.length, 3, 'merge target holds three lines');
+  eq(scopeOf(next, 'L3')?.lines.length, 3, 'merge target holds three lines');
   const aliases = [
     { fabricPurpose: POCKET, bomLineKey: 'L3', blockName: 'Front', pieceLineKey: 'p1' },
     { fabricPurpose: MAIN, bomLineKey: '', blockName: 'front', pieceLineKey: 'p2' },
   ];
-  const out = m.moveScope({ patterns: [{ fabricPurpose: POCKET, bomLineKey: 'L3' }], aliases, scopes: BEFORE, from: POCKET, to });
-  eq(out.kind, 'clash', 'same block, other piece: clash');
-  eq((out.blocks ?? []).map((b) => b.toLowerCase()), ['front'], 'clash names the block');
+  const out = plan(next, ['L3'], [{ fabricPurpose: POCKET, bomLineKey: 'L3' }], aliases);
+  eq(out.clash.map((b) => b.toLowerCase()), ['front'], 'same block, other piece: clash names the block');
 
   const same = aliases.map((a) => ({ ...a, pieceLineKey: 'p1' }));
-  const ok = m.moveScope({ patterns: [], aliases: same, scopes: BEFORE, from: POCKET, to });
-  eq(ok.kind, 'moved', 'same block, same piece: merges');
-  eq(ok.aliases?.[0], { ...same[0], fabricPurpose: MAIN, bomLineKey: '' }, 'merged link: purpose, no line (three lines)');
+  const ok = plan(next, ['L3'], [], same);
+  ck(clean(ok), 'same block, same piece: merges');
+  eq(ok.aliases[0], { ...same[0], fabricPurpose: MAIN, bomLineKey: '' }, 'merged link: purpose, no line (three lines)');
 
   // An old clash inside MAIN is not this move's doing.
   const old = [
@@ -139,8 +141,8 @@ eq(BEFORE.map((s) => s.key), [MAIN, POCKET, 'L4'], 'scopes: purposes in owner or
     { fabricPurpose: MAIN, bomLineKey: '', blockName: 'x', pieceLineKey: 'p3' },
     { fabricPurpose: POCKET, bomLineKey: 'L3', blockName: 'y', pieceLineKey: 'p4' },
   ];
-  eq(m.moveScope({ patterns: [], aliases: old, scopes: BEFORE, from: POCKET, to }).kind, 'moved', 'an untouched old clash does not block');
-  eq(m.moveScope({ patterns: [], aliases: [], scopes: BEFORE, from: POCKET, to }).kind, 'noop', 'nothing bound: noop');
+  ck(clean(plan(next, ['L3'], [], old)), 'an untouched old clash does not block');
+  eq([plan(next, ['L3'], [], []).sheets, plan(next, ['L3'], [], []).links], [0, 0], 'nothing bound: nothing written');
 }
 
 // ── 3. moveSheet: one sheet, plus the links only its DXF still needs ──────────────────────
@@ -234,26 +236,29 @@ eq(BEFORE.map((s) => s.key), [MAIN, POCKET, 'L4'], 'scopes: purposes in owner or
   const aliases = [{ fabricPurpose: POCKET, bomLineKey: 'L3', blockName: 'x', pieceLineKey: 'p' }];
   const markers = [{ name: 'm1', bomLineKey: 'L1' }, { name: 'm3', bomLineKey: 'L3' }];
   const nonLast = m.lineExitImpact('L1', { lines: L, patterns, aliases, markers });
-  eq(nonLast.sheets.map((s) => s.name), ['b'], 'non-last line: only a sheet bound to that very line strands');
-  eq(nonLast.markers, [], 'non-last line: its purpose still holds the markers');
+  ck(m.impactEmpty(nonLast), 'non-last line: its scope keeps every sheet and marker');
+  const kept = m.planLineChange({ patterns, aliases, before: L, after: L.filter((l) => l.lineKey !== 'L1'), lines: ['L1'] });
+  eq(kept.patterns[1], { name: 'b', fabricPurpose: MAIN, bomLineKey: 'L2' }, 'non-last line: a sheet bound to it rebinds to its purpose');
   const last = m.lineExitImpact('L3', { lines: L, patterns, aliases, markers });
   eq([last.sheets.map((s) => s.name), last.aliases.length, last.markers.map((x) => x.name)], [['c'], 1, ['m3']], 'last line: the whole scope holds it');
   ck(m.impactEmpty(m.lineExitImpact('L2', { lines: L, patterns, aliases, markers })), 'a free line: nothing holds it');
   ck(m.impactEmpty(m.lineExitImpact('T1', { lines: L, patterns, aliases, markers })), 'not cloth: nothing holds it');
 }
 
-// ── 6. releaseLineKey: a deleted line\'s key comes off rows whose purpose stays live ─────
+// ── 6. a deleted line's key comes off rows whose purpose stays live ──────────────────────
 {
   const rows = [
     { fabricPurpose: MAIN, bomLineKey: 'L1' },
-    { fabricPurpose: '', bomLineKey: 'L1' },
     { fabricPurpose: POCKET, bomLineKey: 'L3' },
   ];
-  const rest = lines(ITEMS.filter((b) => b.lineKey !== 'L1'));
-  eq(m.releaseLineKey(rows, 'L1', rest), [{ index: 0, bomLineKey: 'L2' }], 'MAIN keeps one line: its key replaces the gone one');
-  const two = [...rest, { lineKey: 'L5', section: FABRIC, purpose: MAIN, name: '' }];
-  eq(m.releaseLineKey(rows, 'L1', two), [{ index: 0, bomLineKey: '' }], 'MAIN keeps two lines: no key');
-  eq(m.releaseLineKey(rows, 'L3', lines(ITEMS.filter((b) => b.lineKey !== 'L3'))), [], 'a purpose that dies is not released (the hold blocks it)');
+  const drop = (items, key) => m.planLineChange({
+    patterns: rows, aliases: [], before: lines(items), after: lines(items.filter((b) => b.lineKey !== key)), lines: [key],
+  });
+  eq(drop(ITEMS, 'L1').patterns[0], { fabricPurpose: MAIN, bomLineKey: 'L2' }, 'MAIN keeps one line: its key replaces the gone one');
+  const two = [...ITEMS, { lineKey: 'L5', section: FABRIC, purpose: MAIN, name: '' }];
+  eq(drop(two, 'L1').patterns[0], { fabricPurpose: MAIN, bomLineKey: '' }, 'MAIN keeps two lines: no key');
+  const dies = drop(ITEMS, 'L3');
+  eq([dies.patterns[1], dies.stranded.sheets], [rows[1], [1]], 'a purpose that dies is not released: it strands (the hold blocks it)');
 }
 
 // ── 7. aliasCollisions on its own ─────────────────────────────────────────────────────────
@@ -280,23 +285,23 @@ const fakeForm = (values) => {
   };
   return { v, getValues, setValue };
 };
+const FUSE = 'TECH_CARD_BOM_SECTION_INTERLINING';
+const FUSING = P('INTERFACING');
+const OTHER = P('OTHER');
+const GEN = 'Fusing · generated · ';
+const F1 = { lineKey: 'F1', section: FUSE, purpose: FUSING, name: 'fusing' };
+const F2 = { lineKey: 'F2', section: FUSE, purpose: FUSING, name: 'fusing 2' };
 {
-  const FUSE = 'TECH_CARD_BOM_SECTION_INTERLINING';
-  const FUSING = P('INTERFACING');
-  const GEN = 'Fusing · generated · ';
-  const items = [
-    ...ITEMS,
-    { lineKey: 'F1', section: FUSE, purpose: FUSING, name: 'fusing' },
-  ];
+  const items = [...ITEMS, F1];
   const values = {
     bomItems: items,
     patterns: [
       { name: 'main sheet', fabricPurpose: MAIN, bomLineKey: '' },
-      { name: `${GEN}F1`, fabricPurpose: FUSING, bomLineKey: 'F1' },
+      { name: `${GEN}F1`, fabricPurpose: '', bomLineKey: 'F1' },
     ],
     pieceDxfAliases: [
       { fabricPurpose: MAIN, bomLineKey: '', blockName: 'front', pieceLineKey: 'p1' },
-      { fabricPurpose: FUSING, bomLineKey: 'F1', blockName: 'front', pieceLineKey: 'p1' },
+      { fabricPurpose: '', bomLineKey: 'F1', blockName: 'front', pieceLineKey: 'p1' },
     ],
   };
   const f = fakeForm(values);
@@ -311,21 +316,106 @@ const fakeForm = (values) => {
   eq(f.v.pieceDxfAliases.map((a) => a.fabricPurpose), [MAIN], 'line deleted: the links of that sheet go with it');
 
   // A user sheet in the same slot still holds — the generated one does not hide it.
-  const g = fakeForm({ ...values, patterns: [...values.patterns, { name: 'own fuse', fabricPurpose: FUSING, bomLineKey: 'F1' }] });
+  const g = fakeForm({ ...values, patterns: [...values.patterns, { name: 'own fuse', fabricPurpose: '', bomLineKey: 'F1' }] });
   eq(m.lineExitHold(g.getValues, 'F1').sheets.map((s) => s.name), ['own fuse'], 'a user sheet beside it still holds, named alone');
 
   // Leaving the cloth (section change) strands the same way.
   const h = fakeForm(values);
-  m.dropStrandedGenerated(h.getValues, h.setValue, items.map((b) => (b.lineKey === 'F1' ? { ...b, section: TRIM } : b)));
-  eq(h.v.patterns.length, 1, 'section out of the cloth: generated sheet dropped');
-  // A live slot keeps it.
-  const k = fakeForm(values);
-  m.dropStrandedGenerated(k.getValues, k.setValue, [...items, { lineKey: 'F2', section: FUSE, purpose: FUSING, name: 'fusing 2' }]);
-  eq(k.v.patterns.length, 2, 'slot stays live: generated sheet kept');
-  // A legacy sheet with no binding is not "stranded" by any change.
+  const outH = m.changeLineSection(h.getValues, h.setValue, items.length - 1, TRIM);
+  eq([outH.kind, h.v.patterns.length, h.v.bomItems.at(-1).section], ['done', 1, TRIM], 'section out of the cloth: generated sheet dropped, section written');
+  // An unbound legacy sheet is not "stranded" by any change.
   const o = fakeForm({ ...values, patterns: [...values.patterns, { name: `${GEN}old`, fabricPurpose: '', bomLineKey: '' }] });
-  m.dropStrandedGenerated(o.getValues, o.setValue, rest);
+  m.releaseLineBindings(o.getValues, o.setValue, 'F1', rest);
   eq(o.v.patterns.map((p) => p.name), ['main sheet', `${GEN}old`], 'unbound legacy sheet left alone');
+}
+
+// ── 9. interlining (L11): every interlining line is its own scope ──────────────────────────
+{
+  const two = [...ITEMS, F1, F2];
+  eq(scopesOf(two).map((s) => s.key), [MAIN, POCKET, 'L4', 'F1', 'F2'], 'two interlining lines, one purpose: two scopes, no purpose group');
+
+  // Purpose change on an interlining line: its scope stays; legacy purpose-only rows are pinned.
+  const one = [...ITEMS, F1];
+  const legacySheet = { name: 'collar fuse', fabricPurpose: FUSING, bomLineKey: '' };
+  const legacyLink = { fabricPurpose: FUSING, bomLineKey: '', blockName: 'collar', pieceLineKey: 'p7' };
+  eq(m.resolveSet([legacySheet], scopesOf(one)), ['F1'], 'legacy purpose-only sheet reads as its sole interlining carrier');
+  const toOther = one.map((b) => (b.lineKey === 'F1' ? { ...b, purpose: OTHER } : b));
+  const pp = m.planLineChange({ patterns: [legacySheet], aliases: [legacyLink], before: lines(one), after: lines(toOther), lines: ['F1'] });
+  ck(clean(pp), 'interlining purpose change: nothing held');
+  eq([pp.patterns[0], pp.aliases[0]], [{ ...legacySheet, fabricPurpose: '', bomLineKey: 'F1' }, { ...legacyLink, fabricPurpose: '', bomLineKey: 'F1' }], 'its legacy rows are pinned to the line');
+  eq([m.resolveSet(pp.patterns, scopesOf(toOther)), m.resolveSet(pp.aliases, scopesOf(toOther))], [['F1'], ['F1']], 'and still read as the line');
+  const bound = m.planLineChange({ patterns: [{ fabricPurpose: '', bomLineKey: 'F1' }], aliases: [], before: lines(one), after: lines(toOther), lines: ['F1'] });
+  eq([bound.sheets, bound.patterns[0]], [0, { fabricPurpose: '', bomLineKey: 'F1' }], 'a line-bound row is not rewritten');
+  // The same through the BOM select.
+  const ff = fakeForm({ bomItems: one, patterns: [legacySheet], pieceDxfAliases: [legacyLink] });
+  const outP = m.changeLinePurpose(ff.getValues, ff.setValue, one.length - 1, OTHER);
+  eq([outP.kind, ff.v.bomItems.at(-1).purpose, ff.v.patterns[0].bomLineKey, ff.v.pieceDxfAliases[0].bomLineKey], ['done', OTHER, 'F1', 'F1'], 'BOM select: purpose written, legacy rows pinned');
+
+  // Deleting one of two same-purpose interlining lines: no silent shift onto the other.
+  const preL11 = { name: 'own fuse', fabricPurpose: FUSING, bomLineKey: 'F1' };
+  const restF2 = two.filter((b) => b.lineKey !== 'F1');
+  eq(m.resolveSet([preL11], scopesOf(restF2)), ['F2'], 'trap: unwritten, a pre-L11 F1 row would read as F2 once F1 is gone');
+  const del = m.planLineChange({ patterns: [preL11], aliases: [], before: lines(two), after: lines(restF2), lines: ['F1'] });
+  eq([del.stranded.sheets, del.patterns[0]], [[0], preL11], 'the writer strands it instead (held, nothing written)');
+  const dv = {
+    bomItems: two,
+    patterns: [preL11, { name: `${GEN}F1`, fabricPurpose: '', bomLineKey: 'F1' }, { name: `${GEN}F2`, fabricPurpose: '', bomLineKey: 'F2' }],
+    pieceDxfAliases: [
+      { fabricPurpose: '', bomLineKey: 'F1', blockName: 'front', pieceLineKey: 'p1' },
+      { fabricPurpose: '', bomLineKey: 'F2', blockName: 'front', pieceLineKey: 'p1' },
+    ],
+  };
+  const d1 = fakeForm(dv);
+  eq(m.lineExitHold(d1.getValues, 'F1').sheets.map((s) => s.name), ['own fuse'], 'F1 delete: the user sheet holds');
+  const d2 = fakeForm({ ...dv, patterns: dv.patterns.slice(1) });
+  m.releaseLineBindings(d2.getValues, d2.setValue, 'F1', restF2);
+  eq([d2.v.patterns.map((p) => p.name), d2.v.pieceDxfAliases.map((a) => a.bomLineKey)], [[`${GEN}F2`], ['F2']], 'F1 delete: its generated sheet + links go, F2\'s stay');
+
+  // A legacy row whose carrier count changes (a fabric line takes the purpose) stays pinned.
+  const gain = one.map((b) => (b.lineKey === 'L4' ? { ...b, purpose: FUSING } : b));
+  eq(m.resolveSet([legacySheet], scopesOf(gain)), [FUSING], 'trap: unwritten, it would read as the fabric group');
+  const cg = m.planLineChange({
+    patterns: [legacySheet, { name: 'loose', fabricPurpose: '', bomLineKey: 'L4' }], aliases: [], before: lines(one), after: lines(gain), lines: ['L4'],
+  });
+  eq(m.resolveSet(cg.patterns, scopesOf(gain)), ['F1', FUSING], 'pinned to F1; the line\'s own sheet follows it');
+
+  // Section change between INTERLINING and FABRIC, the only line of its scope: the rows follow.
+  const toFabric = one.map((b) => (b.lineKey === 'F1' ? { ...b, section: FABRIC } : b));
+  const sf = m.planLineChange({
+    patterns: [{ fabricPurpose: '', bomLineKey: 'F1' }], aliases: [], before: lines(one), after: lines(toFabric), lines: ['F1'],
+  });
+  eq([sf.patterns[0], m.resolveSet(sf.patterns, scopesOf(toFabric))], [{ fabricPurpose: FUSING, bomLineKey: 'F1' }, [FUSING]], 'INTERLINING → FABRIC: the sheet follows into the purpose group');
+  const toFuse = ITEMS.map((b) => (b.lineKey === 'L3' ? { ...b, section: FUSE } : b));
+  const fs = plan(toFuse, ['L3'], [{ fabricPurpose: POCKET, bomLineKey: '' }], []);
+  eq([fs.patterns[0], m.resolveSet(fs.patterns, scopesOf(toFuse))], [{ fabricPurpose: '', bomLineKey: 'L3' }, ['L3']], 'FABRIC → INTERLINING: the sheet follows onto the line');
+
+  // Merge clash: an interlining line moved into MAIN brings a block another piece holds there.
+  const mv = {
+    bomItems: one.map((b) => (b.lineKey === 'F1' ? { ...b, purpose: MAIN } : b)),
+    patterns: [],
+    pieceDxfAliases: [
+      { fabricPurpose: MAIN, bomLineKey: '', blockName: 'front', pieceLineKey: 'p1' },
+      { fabricPurpose: '', bomLineKey: 'F1', blockName: 'Front', pieceLineKey: 'p9' },
+    ],
+  };
+  const cf = fakeForm(mv);
+  const outC = m.changeLineSection(cf.getValues, cf.setValue, one.length - 1, FABRIC);
+  eq([outC.kind, (outC.blocks ?? []).map((b) => b.toLowerCase()), cf.v.bomItems.at(-1).section, cf.v.pieceDxfAliases[1].bomLineKey], ['clash', ['front'], FUSE, 'F1'], 'merge clash: refused, nothing written');
+
+  // moveSheet into an interlining scope that holds only legacy rows: they are pinned, not hidden.
+  const sc = scopesOf(one);
+  const mainSheet = { name: 'shell', fabricPurpose: MAIN, bomLineKey: '' };
+  const ms = m.moveSheet({
+    patterns: [mainSheet, legacySheet],
+    aliases: [{ fabricPurpose: MAIN, bomLineKey: '', blockName: 'front', pieceLineKey: 'p2' }, legacyLink],
+    scopes: sc,
+    sheet: 0,
+    to: m.scopeOfLine(sc, 'F1'),
+    blocksOf: () => new Set(['front']),
+  });
+  eq(ms.kind, 'moved', 'onto the interlining line: moved');
+  eq([m.resolveSet(ms.patterns ?? [], sc), m.resolveSet(ms.aliases ?? [], sc)], [['F1', 'F1'], ['F1', 'F1']], 'the legacy sheet and link stay read as the line');
+  eq([ms.patterns?.[1].bomLineKey, ms.aliases?.[1].bomLineKey], ['F1', 'F1'], 'they are written to the line');
 }
 
 console.log(bad === 0 ? '\nscope-move: all ok' : `\nscope-move: ${bad} FAIL`);

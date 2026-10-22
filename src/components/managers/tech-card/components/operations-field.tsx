@@ -183,7 +183,7 @@ import {
   type FoundPiece,
   type ScopedDxfFile,
 } from './nesting/dxf-geometry';
-import { scopeKeyOfBinding } from './bom-purpose';
+import { bindingScopes, scopeKeyOfBinding } from './bom-purpose';
 import {
   pieceBlockRefs,
   pieceRefKey,
@@ -317,10 +317,11 @@ function reviewDxfPack(
   rows: readonly ReviewPatternRow[],
   scopes: ReturnType<typeof rollGoodsScopes>,
 ): ScopedDxfFile[] {
+  const sheets = bindingScopes(scopes, rows);
   return rows
     .filter((row): row is ReviewPatternRow & { url: string } => !!row.url && isDxfUrl(row.url))
     .map((row) => ({
-      scopeKey: scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes),
+      scopeKey: scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, sheets),
       name: (row.name ?? '').trim() || (row.filename ?? '').trim() || 'pattern.dxf',
       url: row.url,
     }));

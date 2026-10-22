@@ -24,7 +24,11 @@ import {
   defaultGrainLayer,
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
-import { scopeKeyOfBinding } from 'components/managers/tech-card/components/bom-purpose';
+import {
+  activeLegacyScopeOf,
+  bindingScopes,
+  scopeKeyOfBinding,
+} from 'components/managers/tech-card/components/bom-purpose';
 import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { sha256Hex } from 'lib/features/sha256';
@@ -43,7 +47,13 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
+import {
+  linesHeldByLegacyLinks,
+  nextFusingAliases,
+  nextGeneratedPatterns,
+  planFusingLines,
+  sameAliasSet,
+} from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -72,12 +82,14 @@ const unsetPurpose = 'TECH_CARD_BOM_PURPOSE_UNSET' as const;
 function scopeOfBom(item: common_TechCardBomItem): DraftScopeTarget {
   const key = item.lineKey?.trim() ?? '';
   const purpose = item.purpose ?? unsetPurpose;
+  const isInterlining = item.section === SECTION.interlining;
   return {
-    scopeKey: purpose !== unsetPurpose ? purpose : key,
+    // An interlining line is its own scope whatever its purpose (L11, bom-purpose.fabricScopes).
+    scopeKey: !isInterlining && purpose !== unsetPurpose ? purpose : key,
     fabricPurpose: purpose,
     bomLineKey: key,
     label: item.name?.trim() || item.supplierRef?.trim() || key,
-    isInterlining: item.section === SECTION.interlining,
+    isInterlining,
     sections: item.section ? [item.section] : [],
   };
 }
@@ -451,21 +463,50 @@ export async function regenerateFusingSheets(
   let reused = 0;
   const uploadedSheets = oldPatterns.filter((pattern) => !isGenerated(pattern));
   const scopes = rollGoodsScopes(bom);
-  const { bindings, blocked, linked } = planFusingLines({
-    lines: lines.map((line) => {
-      const scope = scopes.find((candidate) =>
-        candidate.lines.some((l) => l.lineKey.trim() === line.bomLineKey),
-      );
-      return {
-        bomLineKey: line.bomLineKey,
-        effectiveScope: scope?.key ?? line.bomLineKey,
-        soloPurpose: scope?.byPurpose && scope.lines.length === 1 ? scope.key : '',
-      };
-    }),
+  // Resolved against the WHOLE sheet set, generated included (L11 set rule): a legacy
+  // purpose-only upload is that interlining line's sheet only while the line has no sheet bound
+  // to it — once a generated one is there, the legacy file is not read for it and blocks nothing.
+  const sheetSet = bindingScopes(scopes, oldPatterns);
+  const { bindings, blocked } = planFusingLines({
+    lines: lines.map((line) => ({
+      bomLineKey: line.bomLineKey,
+      effectiveScope:
+        scopes.find((candidate) =>
+          candidate.lines.some((l) => l.lineKey.trim() === line.bomLineKey),
+        )?.key ?? line.bomLineKey,
+    })),
     uploadedScopes: uploadedSheets.map((sheet) =>
-      scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes),
+      scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, sheetSet),
     ),
   });
+  const oldAliases = card.pieceDxfAliases?.items ?? [];
+  // A line whose LINKS are the owner's legacy purpose-first set (no link bound to the line yet, and
+  // not a generated sheet's): its first line-bound link would hide them all (L11 set rule), and the
+  // rebuild never rebinds an owner's rows. The line is left exactly as it is — nothing generated,
+  // its generated sheet (if any) kept, its links untouched — and a warning says so.
+  const linkSet = bindingScopes(scopes, oldAliases);
+  const heldByLinks = linesHeldByLegacyLinks({
+    current: oldAliases,
+    legacyScopeOf: (alias) => activeLegacyScopeOf(alias.fabricPurpose, alias.bomLineKey, linkSet),
+    previousGenerated: oldGenerated.filter((p) => !blocked.has(p.bomLineKey?.trim() ?? '')),
+    otherSheets: [
+      ...uploadedSheets,
+      ...oldGenerated.filter((p) => blocked.has(p.bomLineKey?.trim() ?? '')),
+    ],
+  });
+  const held = new Set(
+    lines.map((line) => line.bomLineKey).filter((k) => !blocked.has(k) && heldByLinks.has(k)),
+  );
+  const keptHeld: common_TechCardSizePattern[] = [];
+  for (const key of held) {
+    const old = oldByLine.get(key);
+    if (old) {
+      replacements.set(key, old);
+      keptHeld.push(old);
+    }
+    const label = lines.find((line) => line.bomLineKey === key)?.label ?? key;
+    warnings.push(`${label}: legacy piece links hold this interlining, not regenerated`);
+  }
   // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins fully. Nothing is
   // generated and a generated sheet it already has is REMOVED (nextGeneratedPatterns). Its links
   // cannot be told from the owner's, so they stay as they are and a warning says so.
@@ -481,7 +522,9 @@ export async function regenerateFusingSheets(
     else if (built.sheets.some((sheet) => sheet.bomLineKey === key))
       warnings.push(`${label}: an uploaded sheet holds this interlining, not generated`);
   }
-  const activeSheets = built.sheets.filter((sheet) => !blocked.has(sheet.bomLineKey));
+  const activeSheets = built.sheets.filter(
+    (sheet) => !blocked.has(sheet.bomLineKey) && !held.has(sheet.bomLineKey),
+  );
   for (const sheet of activeSheets) {
     const binding = bindings.get(sheet.bomLineKey)!;
     const fabricPurpose = binding.fabricPurpose as common_TechCardBomPurpose;
@@ -518,8 +561,7 @@ export async function regenerateFusingSheets(
       downloadUrl: undefined,
       lineKey: old?.lineKey?.trim() || ulid(),
       bomLineKey: binding.bomLineKey,
-      // Purpose only when it names this line alone (planFusingLines): several interlinings under
-      // one purpose would collapse into one scope.
+      // Always the line, never the purpose (planFusingLines): each interlining is its own scope.
       fabricPurpose,
       sha256: digest,
       history: undefined,
@@ -527,34 +569,24 @@ export async function regenerateFusingSheets(
   }
 
   const nextPatterns = nextGeneratedPatterns(oldPatterns, isGenerated, replacements);
-  const oldAliases = card.pieceDxfAliases?.items ?? [];
   const aliasPlan = nextFusingAliases({
     current: oldAliases,
-    // Ours to clean: the old sheet of a linked line, or one the rebuild bound to a purpose itself.
+    // Ours to clean: every old generated sheet of a line that is not blocked — also a legacy one
+    // bound to a purpose, whose purpose scope stays untouched while an uploaded sheet shares it.
     previousGenerated: oldGenerated.filter((pattern) => {
       const key = pattern.bomLineKey?.trim() ?? '';
-      if (blocked.has(key)) return false;
-      const purpose = (pattern.fabricPurpose ?? '').trim();
-      return linked.has(key) || (!!purpose && purpose !== unsetPurpose);
+      return !blocked.has(key) && !held.has(key);
     }),
-    // A removed blocked sheet and an unlinked (line-bound) sheet occupy their scopes like uploaded
-    // ones: their links are not touched.
-    otherSheets: [
-      ...uploadedSheets,
-      ...removedBlocked,
-      ...activeSheets
-        .filter((sheet) => !linked.has(sheet.bomLineKey))
-        .map((sheet) => bindings.get(sheet.bomLineKey)!),
-    ],
-    sheets: activeSheets
-      .filter((sheet) => linked.has(sheet.bomLineKey))
-      .map((sheet) => ({
-        binding: bindings.get(sheet.bomLineKey)!,
-        links: sheet.aliases.flatMap((alias) => {
-          const pieceLineKey = pieceLineKeyByIdentity.get(normBlock(alias.identity).toLowerCase());
-          return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
-        }),
-      })),
+    // A removed blocked sheet (and a held line's kept one) occupies its scope like an uploaded one:
+    // its links are not touched.
+    otherSheets: [...uploadedSheets, ...removedBlocked, ...keptHeld],
+    sheets: activeSheets.map((sheet) => ({
+      binding: bindings.get(sheet.bomLineKey)!,
+      links: sheet.aliases.flatMap((alias) => {
+        const pieceLineKey = pieceLineKeyByIdentity.get(normBlock(alias.identity).toLowerCase());
+        return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
+      }),
+    })),
   });
   for (const key of aliasPlan.shared)
     warnings.push(`piece links of scope ${key} left as they are: an uploaded sheet shares it`);

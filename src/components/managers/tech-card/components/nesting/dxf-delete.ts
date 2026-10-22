@@ -34,8 +34,8 @@ export type DeleteSheetCard<
   seams?: readonly S[];
   /** ссылки на детали вне сборки (строки рецепта колорвеев, площади) — только называются */
   refs?: readonly CascadeRef[];
-  /** ключ scope привязки листа/алиаса (scopeKeyOfBinding формы) */
-  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }) => string;
+  /** ключ scope привязки листа/алиаса (scopeKeyOfBinding формы над набором своего вида) */
+  scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') => string;
   isDxf: (url: string | undefined) => boolean;
   sizeTokens?: readonly string[];
   /** имена блоков листа по url (разбор панели); null/undefined — не известны */

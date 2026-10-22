@@ -40,38 +40,30 @@ export function fusingScopeKey(row: { fabricPurpose?: string; bomLineKey?: strin
 /**
  * Which interlining lines get a generated sheet, and under what binding.
  *
- * `effectiveScope` is the line's scope as today's BOM resolves it (its purpose, or the line itself);
- * `uploadedScopes` the same resolution of every uploaded sheet. The server folds a line scope back
- * into its purpose, so a generated sheet beside an uploaded one in the same effective scope would
- * merge their links. Such a line is BLOCKED: nothing generated, the uploaded sheet wins.
- * Otherwise the binding is the purpose when it owns this line alone (`soloPurpose`), else the line.
+ * An interlining line is its own fabric scope whatever its purpose (L11: three fusibles all marked
+ * «interfacing» are three materials, three sheets, three consumptions), so every generated sheet is
+ * bound to its LINE — `{purpose UNSET, bomLineKey}` — and every one gets block→piece rows: the
+ * rebuild owns the links of the line scopes only generated sheets hold (nextFusingAliases).
  *
- * Only a purpose-bound line is LINKED (gets block→piece rows). A line-bound sheet of a purpose with
- * several lines is folded into that purpose by the server beside its siblings and any legacy rows,
- * and its areas are refused as «bound inconsistently» anyway: its links are left untouched, as
- * before the rebuild wrote any.
+ * `effectiveScope` is the line's scope as the BOM resolves it (its own line for interlining);
+ * `uploadedScopes` the same resolution of every uploaded sheet. A line whose scope an uploaded sheet
+ * already holds is BLOCKED: nothing generated, the uploaded sheet wins.
  */
 export function planFusingLines(input: {
-  lines: readonly { bomLineKey: string; effectiveScope: string; soloPurpose: string }[];
+  lines: readonly { bomLineKey: string; effectiveScope: string }[];
   uploadedScopes: readonly string[];
-}): { bindings: Map<string, FusingBinding>; blocked: Set<string>; linked: Set<string> } {
+}): { bindings: Map<string, FusingBinding>; blocked: Set<string> } {
   const uploaded = new Set(input.uploadedScopes.map((key) => key.trim()).filter(Boolean));
   const bindings = new Map<string, FusingBinding>();
   const blocked = new Set<string>();
-  const linked = new Set<string>();
   for (const line of input.lines) {
     if (uploaded.has(line.effectiveScope.trim())) {
       blocked.add(line.bomLineKey);
       continue;
     }
-    const purpose = purposeOf(line.soloPurpose);
-    if (purpose) linked.add(line.bomLineKey);
-    bindings.set(line.bomLineKey, {
-      fabricPurpose: purpose || UNSET,
-      bomLineKey: line.bomLineKey,
-    });
+    bindings.set(line.bomLineKey, { fabricPurpose: UNSET, bomLineKey: line.bomLineKey });
   }
-  return { bindings, blocked, linked };
+  return { bindings, blocked };
 }
 
 /**
@@ -146,6 +138,32 @@ export function nextFusingAliases<A extends FusingAliasRow>(input: {
   }
   const kept = input.current.filter((row) => !owned.has(fusingScopeKey(row)));
   return { rows: [...kept, ...ours], shared };
+}
+
+/**
+ * L11 WHOLE-SET RULE FOR LINKS. A line whose links are still the legacy purpose-first set (read for
+ * it only while no link is bound to the line) would lose every one of them to the first line-bound
+ * link the rebuild wrote. The rebuild rebuilds only rows it owns — of a scope only generated sheets
+ * hold (nextFusingAliases) — and never rebinds an owner's rows, so a line with such owner rows is
+ * HELD, like a line an uploaded sheet holds. `legacyScopeOf(row)` — the line a row is an ACTIVE
+ * legacy link of (bom-purpose activeLegacyScopeOf), else ''.
+ */
+export function linesHeldByLegacyLinks<A extends FusingAliasRow>(input: {
+  current: readonly A[];
+  legacyScopeOf: (row: A) => string;
+  previousGenerated: readonly { fabricPurpose?: string; bomLineKey?: string }[];
+  otherSheets: readonly { fabricPurpose?: string; bomLineKey?: string }[];
+}): Set<string> {
+  const occupied = new Set(input.otherSheets.map(fusingScopeKey).filter(Boolean));
+  const ours = new Set(
+    input.previousGenerated.map(fusingScopeKey).filter((key) => key && !occupied.has(key)),
+  );
+  const held = new Set<string>();
+  for (const row of input.current) {
+    const line = input.legacyScopeOf(row).trim();
+    if (line && !ours.has(fusingScopeKey(row))) held.add(line);
+  }
+  return held;
 }
 
 /** Same rows regardless of order (the server may read them back sorted differently). */

@@ -67,6 +67,7 @@ import { resolveBomPrice } from './bom-price';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { defaultRoleFor, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
 import {
+  type BindingChange,
   changeLinePurpose,
   changeLineSection,
   emptyBomItem,
@@ -159,6 +160,14 @@ type BomIdentityField = {
   // Чем стирает [clear]: у словарной оси — её собственный UNSET, у примечания — пустая строка.
   none: string;
 };
+
+/** A refused section or purpose change, said under the row. */
+const refusalOf = (out: BindingChange): { title: string; items: string[] } | null =>
+  out.kind === 'held'
+    ? { title: 'used in patterns', items: out.names }
+    : out.kind === 'clash'
+      ? { title: 'blocks clash', items: out.blocks }
+      : null;
 
 // The slot's identity — its ROLE in the garment and its section — editable on EVERY line, linked
 // or not. The role is the one field a linked line used to render nowhere, which made a wrong or
@@ -353,9 +362,7 @@ export function SlotIdentityFields({
           // Leaving the cloth strands the sheets of a scope's last line: one writer decides.
           onValueChange={(value: string | undefined) => {
             const out = changeLineSection(getValues, setValue, index, value ?? '', markers);
-            setRefusal(
-              out.kind === 'held' ? { title: 'used in patterns', items: out.names } : null,
-            );
+            setRefusal(refusalOf(out));
           }}
         />
         {rollGoods && (
@@ -365,9 +372,7 @@ export function SlotIdentityFields({
             // The scope's only line takes its sheets and piece links along (bom-purpose moveScope).
             onValueChange={(value: string | undefined) => {
               const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
-              setRefusal(
-                out.kind === 'clash' ? { title: 'blocks clash', items: out.blocks } : null,
-              );
+              setRefusal(refusalOf(out));
             }}
             items={[
               ...purposeEditorOptions,
