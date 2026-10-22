@@ -73,7 +73,14 @@ import {
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
-import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
+import {
+  UNSET_PURPOSE,
+  defaultRoleForPurpose,
+  fabricScopeKey,
+  isOtherPurpose,
+  isRollGoodsSection,
+} from './bom-purpose';
+import { sectionShort } from './bom-line-picker';
 import { LABEL_PART_UNSPECIFIED } from '../care-labels/label-parts';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { AGE_GROUP_NEW_CARD, AGE_GROUP_UNSET, AGE_GROUP_VALUES } from './tech-card-options';
@@ -457,7 +464,9 @@ const bomItemSchema = z
     // та же, что у `estUsage`/`wastageSource`. `undefined` = «эта форма не знает» → ключ не едет.
     labelPart: z.string().optional(),
     isSample: z.boolean().optional().default(false),
-    name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
+    // Empty is a legal draft state. The write mapper fills it from purpose, then section, so a
+    // placeholder BOM line can never block saving unrelated work on the card.
+    name: z.string().optional().default(''),
     supplier: z.string().optional().default(''),
     supplierRef: z.string().optional().default(''),
     color: z.string().optional().default(''), // base/reference colour (per-colourway colour is on the usage)
@@ -534,23 +543,6 @@ const bomItemSchema = z
     lineKey: z.string().optional().default(''),
   })
   .superRefine((item, ctx) => {
-    // `name` is required only on an UNLINKED line — server parity, mirroring parseTechCardBomItems,
-    // which requires a name only when material_id == 0. A LINKED line takes its identity from the
-    // catalog material: the server resolves the name by link on the read path rather than storing a
-    // copy, so requiring a form-level name here would demand a value the operator cannot edit and
-    // that the wire does not want. (A released card is unaffected either way — tech_card_release
-    // snapshots the whole enriched read model as JSON, so a frozen spec keeps the name it shipped.)
-    //
-    // It stays a superRefine rather than a plain .min(1) precisely because the rule is conditional;
-    // the issue is emitted on path ['name'] so it addresses as `bomItems.3.name` and the editor's
-    // deep-link can walk the operator straight to the offending input.
-    if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'set a role (a name) — a line without an article has nowhere to take a name from',
-        path: ['name'],
-      });
-    }
     // Server parity (parseTechCardBomItems + upsertTechCardBom) — и с отменой mount-эффектов
     // редактора это уже НЕ страховка от невозможного, а ОСНОВНОЙ голос правила.
     //
@@ -3144,20 +3136,6 @@ export function mapFormToTechCardInsert(
       .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
       .map((p) => p.lineKey!.trim().toLowerCase()),
   );
-  // The fabrics a DXF alias may be bound to (store: FabricScope.Live). A slot deleted on the BOM
-  // tab leaves its aliases behind; sending one is a field violation that blocks the WHOLE save
-  // («piece BP: not_found (used by interfacing)…», owner 17.10) over a material that is gone —
-  // so, like an alias whose piece left the card, it is dropped, not sent.
-  const rollLines = bomLines.filter((b) => isRollGoodsSection(b.section));
-  const livePurposes = new Set(
-    rollLines.map((b) => b.purpose?.trim()).filter((p): p is string => !!p && p !== UNSET_PURPOSE),
-  );
-  const liveRollKeys = new Set(rollLines.map((b) => b.lineKey.toLowerCase()));
-  const aliasLive = (a: { fabricPurpose?: string; bomLineKey?: string }) => {
-    const p = a.fabricPurpose?.trim();
-    if (p && p !== UNSET_PURPOSE) return livePurposes.has(p);
-    return liveRollKeys.has((a.bomLineKey ?? '').trim().toLowerCase());
-  };
   // K-3 · номера выносок, занятые ссылками детали / операции / дефекта. Считается ОДИН раз на
   // сохранение: предикат пустоты спрашивает его для каждого ряда, а сами списки за время одного
   // маппинга не меняются.
@@ -3449,10 +3427,10 @@ export function mapFormToTechCardInsert(
           }),
       })),
     // DXF block → piece aliases (0262). ALWAYS sent as a wrapper — the wrapper IS the presence
-    // signal, and a client that owns the mapping must be able to empty it. Aliases whose piece
-    // left the card are dropped rather than sent: the store answers an unresolvable
-    // piece_line_key with a field violation, which would block the whole save over a row the
-    // operator deleted on the pieces tab and never connected to a DXF in their head.
+    // signal, and a client that owns the mapping must be able to empty it. A dead material scope is
+    // deliberately NOT filtered: the store grandfathers an existing (scope, block) pair, while this
+    // full-replace wrapper would delete any omitted pair. Aliases whose piece left the card are still
+    // dropped because the referenced cut piece itself is gone from this same payload.
     pieceDxfAliases: {
       items: (data.pieceDxfAliases ?? [])
         .filter(
@@ -3462,8 +3440,7 @@ export function mapFormToTechCardInsert(
             (!!a.bomLineKey?.trim() || !!a.fabricPurpose?.trim()) &&
             !!a.blockName?.trim() &&
             !!a.pieceLineKey?.trim() &&
-            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()) &&
-            aliasLive(a),
+            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
         )
         .map((a) => ({
           bomLineKey: a.bomLineKey?.trim() || '',
@@ -3496,7 +3473,15 @@ export function mapFormToTechCardInsert(
       // Присутствие решает форма (довод у `labelPart` в bomItemSchema): не знает — ключа нет.
       labelPart: b.labelPart ? (b.labelPart as common_TechCardBomLabelPart) : undefined,
       isSample: !!b.isSample,
-      name: b.name?.trim() || '',
+      // A blank role is a legal draft state and must never block the card save. Prefer the purpose,
+      // which already states what roll goods are for; an unset/OTHER purpose falls back to the
+      // section's generic name so the server never receives an empty unlinked-line name. A linked line
+      // takes its name from the catalog material, so it stays empty on the wire.
+      name:
+        b.name?.trim() ||
+        ((b.materialId || 0) === 0
+          ? defaultRoleForPurpose(b.purpose) || sectionShort(b.section)
+          : ''),
       supplier: b.supplier?.trim() || '',
       supplierRef: b.supplierRef?.trim() || '',
       color: b.color?.trim() || '',
