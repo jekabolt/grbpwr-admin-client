@@ -89,7 +89,16 @@ export type ApplyDeps = {
    */
   unsaved?: { get: () => boolean; set: (v: boolean) => void };
   mintKey?: () => string;
+  /**
+   * The card scope a live sheet or link belongs to (bom-purpose `scopeKeyOfBinding` over the card's
+   * scopes) — the same key the draft's targets carry. Without it the raw stored key is used, which
+   * misses rows whose stored key is not the scope's (a line sorted into a purpose, an interlining
+   * line bound with its purpose, a generated sheet bound to UNSET).
+   */
+  scopeOf?: ScopeOf;
 };
+
+export type ScopeOf = (a: { fabricPurpose?: string; bomLineKey?: string }) => string;
 
 /** fabricScopeKey (bom-purpose.ts): purpose first, else the legacy line. */
 export const scopeKeyOf = (a: { fabricPurpose?: string; bomLineKey?: string }) => {
@@ -107,12 +116,16 @@ function clampBytes(s: string, max: number): string {
 }
 
 /** The scope's identical file is already a pattern row of that scope (same fingerprinted name). */
-export function onCard(draft: CardDraft, live: LiveCard, scopeKey: string): LivePattern | null {
+export function onCard(
+  draft: CardDraft,
+  live: LiveCard,
+  scopeKey: string,
+  scopeOf: ScopeOf = scopeKeyOf,
+): LivePattern | null {
   const sc = draft.scopes.find((s) => s.target.scopeKey === scopeKey);
   if (!sc) return null;
   return (
-    live.patterns.find((p) => scopeKeyOf(p) === scopeKey && (p.filename ?? '') === sc.filename) ??
-    null
+    live.patterns.find((p) => scopeOf(p) === scopeKey && (p.filename ?? '') === sc.filename) ?? null
   );
 }
 
@@ -124,7 +137,7 @@ export function planFormWrites(
   draft: CardDraft,
   live: LiveCard,
   uploaded: readonly ApplyUploaded[],
-  opts: { storageSizeId: number; mintKey: () => string },
+  opts: { storageSizeId: number; mintKey: () => string; scopeOf?: ScopeOf },
 ): {
   writes: FormWrite[];
   created: number;
@@ -132,6 +145,7 @@ export function planFormWrites(
   replaced: { scopeKey: string; lineKey: string; oldUrl: string; newUrl: string }[];
 } {
   const writes: FormWrite[] = [];
+  const scopeOf = opts.scopeOf ?? scopeKeyOf;
 
   // 1. patterns — one row per uploaded scope: the previous import's row replaced in place, or a new
   //    row appended. The replaced row is re-found in the LIVE form by its lineKey and must still be
@@ -144,7 +158,7 @@ export function planFormWrites(
     if (sc.replaces && sc.sheetMode !== 'add') {
       const key = sc.replaces.lineKey.toLowerCase();
       const i = nextPatterns.findIndex(
-        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeKeyOf(p) === u.scopeKey,
+        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeOf(p) === u.scopeKey,
       );
       if (i >= 0 && !replaced.some((r) => r.lineKey.toLowerCase() === key)) {
         const old = nextPatterns[i];
@@ -195,7 +209,7 @@ export function planFormWrites(
   for (const a of live.aliases) {
     const k = (a.pieceLineKey ?? '').trim();
     if (k && liveIdx.has(k.toLowerCase()))
-      liveAliasOwner.set(aliasKey(scopeKeyOf(a), a.blockName ?? ''), k);
+      liveAliasOwner.set(aliasKey(scopeOf(a), a.blockName ?? ''), k);
   }
   const liveByName = new Map<string, number>();
   live.pieces.forEach((p, i) => {
@@ -266,7 +280,7 @@ export function planFormWrites(
   // 4. aliases — full set, ours replace same-key rows in place, others ride through
   const next: LiveAlias[] = live.aliases.map((a) => ({ ...a }));
   const at = new Map<string, number>();
-  next.forEach((a, i) => at.set(aliasKey(scopeKeyOf(a), a.blockName ?? ''), i));
+  next.forEach((a, i) => at.set(aliasKey(scopeOf(a), a.blockName ?? ''), i));
   for (const a of draft.aliases) {
     const row = {
       bomLineKey: a.bomLineKey,
@@ -318,7 +332,7 @@ export async function applyDraft(
   // 1. uploads — all of them, or the form is not touched
   for (const s of draft.scopes) {
     const scopeKey = s.target.scopeKey;
-    if (onCard(draft, deps.read(), scopeKey)) {
+    if (onCard(draft, deps.read(), scopeKey, deps.scopeOf)) {
       reused.push(scopeKey);
       onProgress?.({ scopeKey, state: 'uploaded' });
       continue;
@@ -349,6 +363,7 @@ export async function applyDraft(
   const plan = planFormWrites(draft, deps.read(), uploaded, {
     storageSizeId: deps.storageSizeId,
     mintKey,
+    scopeOf: deps.scopeOf,
   });
   for (const w of plan.writes) deps.write(w.path, w.value);
   const retry = !plan.writes.length && !!deps.unsaved?.get();

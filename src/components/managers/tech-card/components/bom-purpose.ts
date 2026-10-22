@@ -305,7 +305,8 @@ export function markerScopeLines<L extends RollGoodsLine & { isSample?: boolean 
   const named = lines.find((l) => (l.lineKey ?? '').trim().toLowerCase() === key);
   if (!named) return [];
   // Интерлининг — своя ткань (L11): его раскладку судит только он сам, и в чужую группу
-  // назначения он тоже не входит.
+  // назначения он тоже не входит — даже когда он единственный интерлининг этого назначения
+  // (рибана «other» судит только рибана, войлок «other» — только войлок).
   if (isInterliningLine(named)) return [named];
   const sample = !!named.isSample;
   const purpose = (named.purpose ?? '').trim();
@@ -383,22 +384,21 @@ function interliningScopeOf(
 
 /**
  * LEGACY READ FALLBACK (L11). A binding written before L11 may name an interlining cloth only by
- * its purpose. It still belongs to a line when EXACTLY ONE interlining line carries that purpose
- * (and no other cloth sorted into it answers first). With two or more there is no honest answer:
- * the binding is left unresolved («без материала») rather than handed to one of them by a guess.
+ * its purpose. It belongs to that line only when EXACTLY ONE roll-goods line on the card carries
+ * the purpose AND that line is an interlining one. Any other cloth sharing the purpose (a rib
+ * «other» beside a felt «other») makes the purpose-only binding mean that purpose group, as
+ * before; two interlining lines leave it unresolved («без материала») rather than guessed.
+ * Mirrors the backend's LegacyInterliningPurposeScope.
  */
 function legacyInterliningScope(
   purpose: string,
   scopes: readonly FabricScope<RollGoodsLine>[],
 ): FabricScope<RollGoodsLine> | undefined {
-  const hits = scopes.filter(
-    (s) =>
-      !s.byPurpose &&
-      s.lines.length === 1 &&
-      isInterliningLine(s.lines[0]) &&
-      purposeOfLine(s.lines[0].purpose) === purpose,
-  );
-  return hits.length === 1 ? hits[0] : undefined;
+  const carriers = scopes
+    .flatMap((s) => s.lines)
+    .filter((l) => purposeOfLine(l.purpose) === purpose);
+  if (carriers.length !== 1 || !isInterliningLine(carriers[0])) return undefined;
+  return interliningScopeOf(carriers[0].lineKey, scopes);
 }
 
 /**
@@ -425,8 +425,9 @@ export function scopeKeyOfBinding(
   if (own) return own.key;
   const p = purposeOfLine(purpose);
   if (p) {
-    if (scopes.some((s) => s.byPurpose && s.key === p)) return p;
-    return legacyInterliningScope(p, scopes)?.key ?? '';
+    const legacy = legacyInterliningScope(p, scopes);
+    if (legacy) return legacy.key;
+    return scopes.some((s) => s.byPurpose && s.key === p) ? p : '';
   }
   if (!line) return '';
   return scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '';

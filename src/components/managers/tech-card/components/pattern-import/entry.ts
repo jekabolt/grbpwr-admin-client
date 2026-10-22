@@ -35,9 +35,9 @@ export function buildCardContext(args: {
     fused?: boolean;
     fusingMode?: string;
   }[];
-  /** Live block → piece links, scope key already resolved (bom-purpose `aliasScopeKey`). */
+  /** Live block → piece links, scope key already resolved (bom-purpose `scopeKeyOfBinding`). */
   aliases?: { scopeKey: string; blockName?: string; pieceLineKey?: string }[];
-  /** Live pattern rows, scope key already resolved (`fabricScopeKey`). */
+  /** Live pattern rows, scope key already resolved (bom-purpose `scopeKeyOfBinding`). */
   patterns?: {
     scopeKey: string;
     filename?: string;

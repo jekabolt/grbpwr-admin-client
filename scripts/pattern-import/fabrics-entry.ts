@@ -1215,6 +1215,34 @@ export async function main(): Promise<number> {
       `created ${z.created}`,
     );
   }
+  // D5 — live links are matched by the scope they RESOLVE to (L11): a link stored under a binding
+  // whose raw key is not the scope's (a purpose+interlining line, a line sorted into a purpose) is
+  // replaced in place, not left beside the new one
+  {
+    const live = initial();
+    const draft = buildDraft({ scopes: r1.scopes }, cardOf(live), { mintKey: mint });
+    const a0 = draft.aliases[0];
+    live.aliases.push({
+      bomLineKey: 'LEGACY-LINE',
+      fabricPurpose: '',
+      blockName: a0.blockName,
+      pieceLineKey: a0.pieceLineKey,
+    });
+    const scopeOf = (b: { fabricPurpose?: string; bomLineKey?: string }) =>
+      b.bomLineKey === 'LEGACY-LINE' ? a0.scopeKey : scopeKeyOf(b);
+    const z = planFormWrites(draft, live, [], { storageSizeId: 501, mintKey: mint, scopeOf });
+    const next = (z.writes.find((w) => w.path === 'pieceDxfAliases')?.value ?? []) as {
+      fabricPurpose?: string;
+      bomLineKey?: string;
+      blockName?: string;
+    }[];
+    ck(
+      next.filter((a) => a.blockName === a0.blockName && scopeOf(a) === a0.scopeKey).length === 1 &&
+        !next.some((a) => a.bomLineKey === 'LEGACY-LINE'),
+      'apply matches live links by the resolved scope: a legacy-bound link is replaced in place',
+      a0.blockName,
+    );
+  }
 
   // ── F ───────────────────────────────────────────────────────────────────────────────────
   head('F  re-import (replace / add / vanished / zero-diff) + the follow-up after the save (MF-C)');

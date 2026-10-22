@@ -82,11 +82,9 @@ import {
   type FabricScope,
   type ScopeDirection,
   aliasInScope,
-  aliasScopeKey,
   bindingForScope,
   bomPurposeOrder,
   bomPurposeLabel,
-  fabricScopeKey,
   fabricScopes,
   purposeEditorOptions,
   scopeKeyOfBinding,
@@ -833,6 +831,10 @@ export function PatternsField({
     const first = (s: { lines: { order: number }[] }) => Math.min(...s.lines.map((l) => l.order));
     return fabricScopes(fabricBomLines).sort((a, b) => first(a) - first(b));
   }, [fabricBomLines]);
+  // The import's commit resolves live rows against the scopes AT THAT MOMENT, not at the render
+  // that built its callback.
+  const scopesRef = useRef(scopes);
+  scopesRef.current = scopes;
   // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
   // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
   // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
@@ -3400,13 +3402,15 @@ export function PatternsField({
               sections: sc.lines.map((l) => l.section),
             })),
             pieces: cardPieces,
+            // Live links and sheets under the scope they RESOLVE to — the key the targets carry
+            // (a line sorted into a purpose, an interlining line bound with its purpose, L11).
             aliases: pieceDxfAliases.map((a) => ({
-              scopeKey: aliasScopeKey(a),
+              scopeKey: scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes),
               blockName: a.blockName,
               pieceLineKey: a.pieceLineKey,
             })),
             patterns: liveRows.map((p) => ({
-              scopeKey: fabricScopeKey(p.fabricPurpose, p.bomLineKey),
+              scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
               filename: p.filename,
               url: p.url,
               lineKey: p.lineKey,
@@ -3430,6 +3434,8 @@ export function PatternsField({
                   shouldDirty: true,
                 }),
               storageSizeId,
+              // read at commit time: the BOM may have been sorted while the wizard was open
+              scopeOf: (b) => scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopesRef.current),
               save: (reason) => autosave.flush(reason),
               unsaved: {
                 get: () => importUnsaved.current,

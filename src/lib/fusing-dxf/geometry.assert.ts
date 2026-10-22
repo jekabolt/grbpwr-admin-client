@@ -420,15 +420,34 @@ export async function main() {
     markerScopeLines('M-1', bom).map((l) => l.lineKey),
     ['M-1', 'M-2'],
   );
-  // a cloth sorted into the purpose answers a purpose-only binding first; the interlining line of
-  // the same purpose stays out of that cloth's marker scope
+  // rib «other» + felt «other»: the purpose has TWO carriers, so a purpose-only binding means the
+  // purpose group (the rib), as before; the felt keeps its own scope, and each judges its own marker
   const withRib = [...bom, { lineKey: 'R-1', purpose: OTHER, section: FABRIC_SECTION }];
   const ribScopes = fabricScopes(withRib);
+  assert.deepEqual(
+    ribScopes.map((scope) => [scope.key, scope.lines.map((l) => l.lineKey)]),
+    [
+      [MAIN, ['M-1', 'M-2']],
+      [OTHER, ['R-1']],
+      ['F-1', ['F-1']],
+      ['F-2', ['F-2']],
+      ['F-3', ['F-3']],
+      ['S-1', ['S-1']],
+    ],
+  );
+  const ribScopeOf = (key: string) => ribScopes.find((scope) => scope.key === key)!;
   assert.equal(scopeKeyOfBinding(OTHER, '', ribScopes), OTHER);
   assert.equal(scopeKeyOfBinding(OTHER, 'S-1', ribScopes), 'S-1');
+  assert.equal(scopeKeyOfBinding(OTHER, 'R-1', ribScopes), OTHER);
+  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf(OTHER), ribScopes));
+  assert.ok(!aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, ribScopeOf('S-1'), ribScopes));
   assert.deepEqual(
     markerScopeLines('R-1', withRib).map((l) => l.lineKey),
     ['R-1'],
+  );
+  assert.deepEqual(
+    markerScopeLines('S-1', withRib).map((l) => l.lineKey),
+    ['S-1'],
   );
 
   // Every generated sheet binds to its LINE and links; a line is blocked only when an uploaded
