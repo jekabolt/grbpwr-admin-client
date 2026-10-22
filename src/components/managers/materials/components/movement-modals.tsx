@@ -254,12 +254,10 @@ export function ReceiveStockModal({
       {canWriteCosting ? (
         <>
           <div className='grid grid-cols-[1fr_auto] gap-2'>
-            <Field label='unit cost — NET, ex-VAT'>
+            <Field label='unit cost (net)'>
               <input
                 className={cell}
                 inputMode='decimal'
-                placeholder='blank = uncosted'
-                title='net unit cost, WITHOUT VAT — the VAT goes in the input-VAT field below; entering the gross double-counts the tax into stock value and COGS'
                 value={unitCost}
                 onChange={(e) => setUnitCost(sanitizeDecimal(e.target.value))}
               />
@@ -279,16 +277,15 @@ export function ReceiveStockModal({
             </Field>
           </div>
           <div className='grid grid-cols-[1fr_auto] gap-2'>
-            <Field label='input VAT (EUR)'>
+            <Field label='vat (eur)'>
               <input
                 className={cell}
                 inputMode='decimal'
-                placeholder='optional — VAT-exclusive of unit cost'
                 value={inputVat}
                 onChange={(e) => setInputVat(sanitizeDecimal(e.target.value))}
               />
             </Field>
-            <Field label='VAT regime'>
+            <Field label='vat regime'>
               <select
                 className={cell}
                 value={inputVatRegime}
@@ -324,20 +321,14 @@ export function ReceiveStockModal({
             const net = qty * cost;
             return (
               <Text variant='inactive' size='small'>
-                check: net {net.toFixed(2)} + VAT {vat.toFixed(2)} = {(net + vat).toFixed(2)} EUR —
-                this should equal the invoice&apos;s GROSS total. if it overshoots, the unit cost
-                probably includes VAT already.
+                net {net.toFixed(2)} + vat {vat.toFixed(2)} = {(net + vat).toFixed(2)} eur
               </Text>
             );
           })()}
         </>
-      ) : (
-        <Text variant='inactive' size='small'>
-          Uncosted receipt — moving average unchanged.
-        </Text>
-      )}
+      ) : null}
       {suppliers.length > 0 ? (
-        <Field label='supplier (optional — tags the payable)'>
+        <Field label='supplier'>
           <select
             className={cell}
             value={supplierId || 0}
@@ -364,10 +355,6 @@ export function ReceiveStockModal({
           <Field label='lot / roll'>
             <input className={cell} value={lot} onChange={(e) => setLot(e.target.value)} />
           </Field>
-          <Text variant='inactive' size='small'>
-            Lots = incoming stock batches / receipts. Optional traceability — skip it for a small
-            run.
-          </Text>
         </div>
       ) : (
         <button
@@ -375,7 +362,7 @@ export function ReceiveStockModal({
           className='self-start text-small underline text-borderColor'
           onClick={() => setShowLot(true)}
         >
-          + record lot / roll (optional)
+          + lot
         </button>
       )}
       <Field label='date'>
@@ -386,7 +373,7 @@ export function ReceiveStockModal({
           onChange={(e) => setOccurredAt(e.target.value)}
         />
       </Field>
-      <Field label='expected by (promised date)'>
+      <Field label='expected'>
         <input
           className={cell}
           type='date'
@@ -573,7 +560,7 @@ export function IssueStockModal({
       )}
 
       {targetKind === 'run' && colorways && colorways.length > 0 ? (
-        <Field label='colourway (optional — attributes cost)'>
+        <Field label='colourway'>
           <select
             className={cell}
             value={productId || 0}
@@ -591,7 +578,7 @@ export function IssueStockModal({
 
       <label className='flex items-center gap-2'>
         <input type='checkbox' checked={isReturn} onChange={(e) => setIsReturn(e.target.checked)} />
-        <Text size='small'>this is a return (leftover back to stock)</Text>
+        <Text size='small'>return</Text>
       </label>
       <Field label='date'>
         <input
@@ -603,7 +590,7 @@ export function IssueStockModal({
       </Field>
       {lots.length > 0 ? (
         <div className='flex flex-col gap-1'>
-          <Field label='lot (optional)'>
+          <Field label='lot'>
             <select
               className={cell}
               value={lotId || 0}
