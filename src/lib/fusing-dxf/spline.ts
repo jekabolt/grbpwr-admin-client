@@ -69,31 +69,79 @@ export function flattenSpline(
   return out;
 }
 
-const cross = (o: PtMm, a: PtMm, b: PtMm) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+const INTERSECTION_EPSILON = 1e-12;
+
+function normalizedRing(ring: readonly PtMm[]): PtMm[] | null {
+  if (!ring.length) return null;
+  let minX = ring[0].x;
+  let maxX = ring[0].x;
+  let minY = ring[0].y;
+  let maxY = ring[0].y;
+  for (const point of ring.slice(1)) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  const scale = Math.max(maxX - minX, maxY - minY);
+  if (scale === 0 || !Number.isFinite(scale)) return null;
+  return ring.map((point) => ({ x: (point.x - minX) / scale, y: (point.y - minY) / scale }));
+}
+
+const orientation = (a: PtMm, b: PtMm, c: PtMm) =>
+  (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+function pointOnSegment(a: PtMm, b: PtMm, point: PtMm): boolean {
+  return (
+    Math.abs(orientation(a, b, point)) <= INTERSECTION_EPSILON &&
+    point.x >= Math.min(a.x, b.x) - INTERSECTION_EPSILON &&
+    point.x <= Math.max(a.x, b.x) + INTERSECTION_EPSILON &&
+    point.y >= Math.min(a.y, b.y) - INTERSECTION_EPSILON &&
+    point.y <= Math.max(a.y, b.y) + INTERSECTION_EPSILON
+  );
+}
+
+function segmentsIntersect(a: PtMm, b: PtMm, c: PtMm, d: PtMm): boolean {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+  if (
+    ((o1 > INTERSECTION_EPSILON && o2 < -INTERSECTION_EPSILON) ||
+      (o1 < -INTERSECTION_EPSILON && o2 > INTERSECTION_EPSILON)) &&
+    ((o3 > INTERSECTION_EPSILON && o4 < -INTERSECTION_EPSILON) ||
+      (o3 < -INTERSECTION_EPSILON && o4 > INTERSECTION_EPSILON))
+  )
+    return true;
+  return (
+    (Math.abs(o1) <= INTERSECTION_EPSILON && pointOnSegment(a, b, c)) ||
+    (Math.abs(o2) <= INTERSECTION_EPSILON && pointOnSegment(a, b, d)) ||
+    (Math.abs(o3) <= INTERSECTION_EPSILON && pointOnSegment(c, d, a)) ||
+    (Math.abs(o4) <= INTERSECTION_EPSILON && pointOnSegment(c, d, b))
+  );
+}
 
 /** Two closed-ring edges that are not neighbours cross or touch. */
 export function ringSelfIntersects(ring: readonly PtMm[]): boolean {
-  const n = ring.length;
+  const points = normalizedRing(ring);
+  if (!points || points.length < 3) return false;
+  const n = points.length;
   for (let i = 0; i < n; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % n];
-    for (let j = i + 2; j < n; j++) {
-      if (i === 0 && j === n - 1) continue;
-      const c = ring[j];
-      const d = ring[(j + 1) % n];
-      if (
-        Math.max(a.x, b.x) < Math.min(c.x, d.x) ||
-        Math.max(c.x, d.x) < Math.min(a.x, b.x) ||
-        Math.max(a.y, b.y) < Math.min(c.y, d.y) ||
-        Math.max(c.y, d.y) < Math.min(a.y, b.y)
-      )
-        continue;
-      const d1 = cross(c, d, a);
-      const d2 = cross(c, d, b);
-      const d3 = cross(a, b, c);
-      const d4 = cross(a, b, d);
-      if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)))
-        return true;
+    const a = points[i];
+    const b = points[(i + 1) % n];
+    if (Math.hypot(b.x - a.x, b.y - a.y) <= INTERSECTION_EPSILON) return true;
+    // Adjacent edges may share only their vertex; a reversal overlaps the preceding edge.
+    const previous = points[(i - 1 + n) % n];
+    if (
+      Math.abs(orientation(previous, a, b)) <= INTERSECTION_EPSILON &&
+      (previous.x - a.x) * (b.x - a.x) + (previous.y - a.y) * (b.y - a.y) > INTERSECTION_EPSILON
+    )
+      return true;
+    for (let j = i + 1; j < n; j++) {
+      if (j === i + 1 || (i === 0 && j === n - 1)) continue;
+      const c = points[j];
+      const d = points[(j + 1) % n];
+      if (segmentsIntersect(a, b, c, d)) return true;
     }
   }
   return false;

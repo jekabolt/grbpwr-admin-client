@@ -42,6 +42,8 @@ import type {
   common_TechCardPieceAreaScope,
 } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
+import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
+import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
@@ -57,6 +59,7 @@ import {
   Text,
 } from 'ui';
 import { ulid } from 'utils/ulid';
+import { parseDecimalNumber } from 'utils/decimal';
 import { bornMaterialBomLine } from '../bom-material-line';
 import { bornBomLine } from '../form-writers';
 import { useTechCardStaging } from '../useTechCardStaging';
@@ -85,7 +88,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { createZoneBus } from './fuse-zone';
+import { createZoneBus, isDrawnZone } from './fuse-zone';
 import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
   readFuseSpec,
@@ -765,6 +768,14 @@ export function PieceMatchModal({
   const { data: cardRead } = useTechCard(techCardId);
   const staging = useTechCardStaging();
   const readOnly = !!readOnlyProp || cardRead?.techCard?.approvalState === RELEASED_STATE;
+  const requiredSeamAllowanceRaw = (useWatch({
+    control,
+    name: 'requiredSeamAllowanceMm',
+  }) ?? '') as string;
+  const parsedSeamAllowanceMm = parseDecimalNumber(requiredSeamAllowanceRaw);
+  const requiredSeamAllowanceMm = Number.isFinite(parsedSeamAllowanceMm)
+    ? parsedSeamAllowanceMm
+    : null;
   // Pieces are written by setValue on the ARRAY ROOT, not through a second useFieldArray.
   //
   // This looks like the thing pieces-tab.tsx warns against, and it is the opposite. Measured
@@ -1553,6 +1564,32 @@ export function PieceMatchModal({
     return k ? { kind: 'piece', key: k } : { kind: 'new', key: n };
   };
 
+  const editedFuseOf = (ci: string): PieceFuseSpec | undefined => {
+    const state = stateOf(ci);
+    if (state.kind === 'existing') return pieceEdits[state.key.toLowerCase()]?.fuse;
+    if (state.kind !== 'new') return undefined;
+    const target = newTargetOf(state.row);
+    return target.kind === 'piece' ? pieceEdits[target.key]?.fuse : newEdits[target.key]?.fuse;
+  };
+  // Regeneration evaluates the same stored zone against every size. Refuse this dialog's apply if
+  // any contour that will receive an edited drawn zone clips to no positive area; otherwise the
+  // generator catches the error later by silently skipping only that size.
+  const invalidEditedZone = contourPieces.some((piece) => {
+    const editedFuse = editedFuseOf(ciOf(piece));
+    if (editedFuse?.mode !== 'zone' || !isDrawnZone(editedFuse.zone)) return false;
+    try {
+      const polygons = generateFuseGeometry({
+        outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
+        spec: editedFuse,
+        seamAllowanceMm: requiredSeamAllowanceMm,
+        darts: fusingDartPolygons(piece),
+      });
+      return !(fuseAreaMm2(polygons) > 0);
+    } catch {
+      return true;
+    }
+  });
+
   const markOf = (p: PieceDTO): PieceMark => {
     const ci = ciOf(p);
     if (!ci) return 'unnamed';
@@ -1638,6 +1675,7 @@ export function PieceMatchModal({
   }, [selected, blockCounts, rowByCi, mineByBlock]);
 
   function apply() {
+    if (invalidEditedZone) return;
     setSaving(true);
     try {
       // Read at commit time, not from the render-time snapshot: the operator can have added or
@@ -2111,7 +2149,7 @@ export function PieceMatchModal({
   const canSave = changed && !readOnly;
   // Until every dispute is settled there is nothing valid to save: the server would reject the
   // whole card.
-  const blocked = unresolvedCollapses.length > 0;
+  const blocked = unresolvedCollapses.length > 0 || invalidEditedZone;
 
   // ── the editor ────────────────────────────────────────────────────────────────────────
   const optionKeyOf = (key: string) =>
@@ -2537,6 +2575,7 @@ export function PieceMatchModal({
                     fuseOf={fuseOfCi}
                     onChange={setFuse}
                     zoneBus={zoneBus}
+                    requiredSeamAllowanceMm={requiredSeamAllowanceMm}
                   />
                 )}
                 tall

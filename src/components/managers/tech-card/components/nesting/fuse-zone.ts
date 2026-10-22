@@ -1,9 +1,9 @@
 // The drawn fusing zone as the Rect+ editor holds it (L13, owner OK 22.10, variant 3): ordered
-// control points, piece-local mm, Y up. A rectangle opens as 4 sharp corners + 4 straight mids
-// (even slots = corners, odd = mids); a mid that sits on its corners' midpoint is «straight» and
-// follows them. An untouched axis-aligned rectangle is stored as `rect`; anything bent, rotated or
-// rounded is stored as `spline`. Plus the per-dialog bus the canvas and the panel share: the
-// clipped area and the undo stack.
+// control points, piece-local mm, Y up. A rectangle opens as exactly 4 sharp corners + 4 straight
+// mids (even slots = corners, odd = mids); a mid that sits on its corners' midpoint is «straight»
+// and follows them. Other spline rings keep every point's own corner semantics. An untouched
+// axis-aligned rectangle is stored as `rect`; anything bent, rotated or rounded is stored as
+// `spline`. Plus the per-dialog bus the canvas and the panel share: the clipped area and undo stack.
 import type { FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
 export type ZonePoint = { x: number; y: number; corner: boolean };
@@ -11,29 +11,32 @@ type DrawnZone = Exclude<FuseZone, { dxfPieceKey: string }>;
 
 // Stored points are rounded to 0.1 mm: a straight mid can sit up to ~0.07 mm off its midpoint.
 const STRAIGHT_MM = 0.08;
+const RING_EPSILON = 1e-9;
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const midOf = (a: ZonePoint, b: ZonePoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 export const isDrawnZone = (z: FuseZone | null | undefined): z is DrawnZone =>
   !!z && !('dxfPieceKey' in z);
 
+/** Rect+ structure: exactly the editor's eight slots, with mid slots never marked as corners. */
+export const isRectPlus = (pts: readonly ZonePoint[]) =>
+  pts.length === 8 && pts.every((point, i) => i % 2 === 0 || !point.corner);
+
 /** A slot that toggles sharp / round: the even ones of a Rect+ ring, every one otherwise. */
-export const cornerSlot = (i: number, n: number) => n % 2 === 1 || i % 2 === 0;
-/** Rect+ structure: an even ring, mids at odd slots. */
-const rectPlus = (n: number) => n >= 4 && n % 2 === 0;
+export const cornerSlot = (i: number, pts: readonly ZonePoint[]) => !isRectPlus(pts) || i % 2 === 0;
 
 /** A mid that sits on its corners' midpoint (it follows them while they move). */
 export function straightMid(pts: readonly ZonePoint[], i: number): boolean {
   const n = pts.length;
-  if (!rectPlus(n) || i % 2 === 0) return false;
+  if (!isRectPlus(pts) || i % 2 === 0) return false;
   const m = midOf(pts[i - 1], pts[(i + 1) % n]);
   return Math.hypot(pts[i].x - m.x, pts[i].y - m.y) <= STRAIGHT_MM;
 }
 
 /** Re-centres every straight mid onto its corners (after corners moved). */
 export function followMids(pts: ZonePoint[], straight: readonly boolean[]): ZonePoint[] {
+  if (!isRectPlus(pts)) return pts;
   const n = pts.length;
-  if (!rectPlus(n)) return pts;
   return pts.map((p, i) =>
     i % 2 === 1 && straight[i] ? { ...p, ...midOf(pts[i - 1], pts[(i + 1) % n]) } : p,
   );
@@ -58,8 +61,7 @@ export function zonePoints(z: FuseZone | null | undefined): ZonePoint[] {
 
 /** Editor points → the stored zone: an untouched rectangle stays `rect`, the rest is a spline. */
 export function storedZone(pts: readonly ZonePoint[]): DrawnZone {
-  const n = pts.length;
-  if (n === 8 && pts.every((p, i) => (i % 2 === 0 ? p.corner : !p.corner && straightMid(pts, i)))) {
+  if (isRectPlus(pts) && pts.every((p, i) => (i % 2 === 0 ? p.corner : straightMid(pts, i)))) {
     const [a, , b, , c, , d] = pts;
     const xs = [a.x, b.x, c.x, d.x];
     const ys = [a.y, b.y, c.y, d.y];
@@ -87,12 +89,67 @@ export function storedZone(pts: readonly ZonePoint[]): DrawnZone {
 export function withCorners(z: FuseZone | null | undefined, sharp: boolean): DrawnZone | null {
   const pts = zonePoints(z);
   if (!pts.length) return null;
-  return storedZone(pts.map((p, i) => ({ ...p, corner: sharp && cornerSlot(i, pts.length) })));
+  return storedZone(pts.map((p, i) => ({ ...p, corner: sharp && cornerSlot(i, pts) })));
 }
 export const allCorners = (z: FuseZone | null | undefined, sharp: boolean) => {
   const pts = zonePoints(z);
-  return pts.length > 0 && pts.every((p, i) => p.corner === (sharp && cornerSlot(i, pts.length)));
+  return pts.length > 0 && pts.every((p, i) => p.corner === (sharp && cornerSlot(i, pts)));
 };
+
+type XY = { x: number; y: number };
+
+const orientation = (a: XY, b: XY, c: XY) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+function pointOnSegment(point: XY, a: XY, b: XY): boolean {
+  return (
+    Math.abs(orientation(a, b, point)) <= RING_EPSILON &&
+    point.x >= Math.min(a.x, b.x) - RING_EPSILON &&
+    point.x <= Math.max(a.x, b.x) + RING_EPSILON &&
+    point.y >= Math.min(a.y, b.y) - RING_EPSILON &&
+    point.y <= Math.max(a.y, b.y) + RING_EPSILON
+  );
+}
+
+function pointInOrOnRing(point: XY, ring: readonly XY[]): boolean {
+  if (ring.some((a, i) => pointOnSegment(point, a, ring[(i + 1) % ring.length]))) return true;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (
+      a.y > point.y !== b.y > point.y &&
+      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
+    )
+      inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Keeps a whole move/rotation rigid: if its final position crosses the inset ring, reduce the
+ * transform amount until every control point is on or inside it.
+ */
+export function clampZoneTransform<T extends XY>(
+  points: readonly T[],
+  ring: readonly XY[],
+  transform: (point: T, amount: number) => T,
+): T[] {
+  if (ring.length < 3 || !points.length) return points.map((point) => transform(point, 1));
+  const fits = (amount: number) =>
+    points.every((point) => pointInOrOnRing(transform(point, amount), ring));
+  if (fits(1)) return points.map((point) => transform(point, 1));
+  // A historical zone can already overhang its inset contour. A group gesture must not make that
+  // geometry less recoverable, so leave it in place for its handles to repair.
+  if (!fits(0)) return points.map((point) => ({ ...point }));
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 32; i++) {
+    const middle = (low + high) / 2;
+    if (fits(middle)) low = middle;
+    else high = middle;
+  }
+  return points.map((point) => transform(point, low));
+}
 
 /** Back to the axis rectangle around the control points. */
 export function resetZone(z: FuseZone | null | undefined): DrawnZone | null {

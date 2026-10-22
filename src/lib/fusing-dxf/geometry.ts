@@ -193,9 +193,9 @@ export function zoneRingMm(zone: Exclude<FuseZone, { dxfPieceKey: string }>): Pt
     );
   if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
     throw new FuseGeometryError('zone spline has a non-finite point');
-  const ring = cleanRing(flattenSpline(points));
-  if (ringSelfIntersects(ring)) throw new FuseGeometryError('zone spline crosses itself');
-  return ring;
+  const flattened = flattenSpline(points);
+  if (ringSelfIntersects(flattened)) throw new FuseGeometryError('zone spline crosses itself');
+  return cleanRing(flattened);
 }
 
 /** Pure fuse geometry in piece-local millimetres. */

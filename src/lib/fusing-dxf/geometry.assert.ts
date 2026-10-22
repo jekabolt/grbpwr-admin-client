@@ -15,6 +15,14 @@ import {
   scopeAreaPieces,
 } from 'components/managers/tech-card/components/piece-areas';
 import {
+  clampZoneTransform,
+  cornerSlot,
+  followMids,
+  straightMid,
+  withCorners,
+  type ZonePoint,
+} from 'components/managers/tech-card/components/nesting/fuse-zone';
+import {
   areaReadKeysOfScope,
   scopeAreaState,
 } from 'components/managers/tech-card/components/piece-areas-state';
@@ -25,6 +33,7 @@ import {
   planFusingLines,
   sameAliasSet,
 } from './aliases';
+import { fusingDartPolygons } from './darts';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -41,8 +50,9 @@ import {
   signedArea,
   zoneRingMm,
 } from './geometry';
-import { flattenSpline } from './spline';
+import { flattenSpline, ringSelfIntersects } from './spline';
 import type { FusePolygon, PieceFuseSpec } from './types';
+import type { PieceDTO } from 'lib/nesting/types';
 import {
   fuseFieldsFromWire,
   fuseFieldsToWire,
@@ -206,12 +216,77 @@ export async function main() {
     seamAllowanceMm: 10,
   });
   near(fuseAreaMm2(net), 80 * 60);
+  const netTwenty = generateFuseGeometry({
+    outline: rectangle(100, 100),
+    spec: spec({ insetNet: true }),
+    seamAllowanceMm: 20,
+  });
+  near(fuseAreaMm2(netTwenty) / 100, 36, 0.001);
+  assert.throws(
+    () =>
+      generateFuseGeometry({
+        outline: rectangle(100, 100),
+        spec: spec({ insetNet: true }),
+        seamAllowanceMm: null,
+      }),
+    /net inset requires a seam allowance/,
+  );
 
   const dart = [
     { x: 43, y: 25 },
     { x: 57, y: 25 },
     { x: 50, y: 58 },
   ];
+  const dartSource = {
+    id: 1,
+    name: 'front',
+    source: 'front.dxf',
+    poly: rectangle(10, 10),
+    bboxW: 10,
+    bboxH: 10,
+    areaCm2: 100,
+    inner: [
+      {
+        layer: 'DART',
+        closed: false,
+        pts: [
+          { x: 0, y: 0 },
+          { x: 2, y: 3 },
+          { x: 4, y: 0 },
+        ],
+      },
+      {
+        layer: 'DART',
+        closed: true,
+        pts: [
+          { x: 2, y: 2 },
+          { x: 4, y: 2 },
+          { x: 3, y: 5 },
+        ],
+      },
+      {
+        layer: 'DRILL',
+        closed: true,
+        pts: [
+          { x: 6, y: 6 },
+          { x: 7, y: 6 },
+          { x: 7, y: 7 },
+          { x: 6, y: 7 },
+        ],
+      },
+    ],
+  } satisfies PieceDTO;
+  assert.deepEqual(
+    fusingDartPolygons(dartSource),
+    [
+      [
+        { x: 20, y: 20 },
+        { x: 40, y: 20 },
+        { x: 30, y: 50 },
+      ],
+    ],
+    'preview and regeneration share the closed-polygon dart rule',
+  );
   const wholeDart = generateFuseGeometry({ outline, spec: spec(), darts: [dart] });
   assert.equal(wholeDart[0].holes.length, 1, 'cut dart becomes a hole');
   assert.ok(signedArea(wholeDart[0].holes[0]) < 0, 'hole loop is CW');
@@ -304,6 +379,33 @@ export async function main() {
     });
   const splineZone = (points: { x: number; y: number; corner?: boolean }[]) =>
     spec({ mode: 'zone', zone: { spline: { points } } });
+  const rectPlusPoints = withMids(corners(10, 10, 40, 40));
+  assert.equal(cornerSlot(1, rectPlusPoints), false, 'Rect+ keeps its odd slots as mids');
+  const genericEven: ZonePoint[] = [
+    { x: 0, y: 0, corner: true },
+    { x: 20, y: 0, corner: true },
+    { x: 30, y: 15, corner: false },
+    { x: 20, y: 30, corner: false },
+    { x: 0, y: 30, corner: true },
+    { x: -10, y: 15, corner: false },
+  ];
+  assert.equal(cornerSlot(1, genericEven), true, 'a generic even spline keeps every corner slot');
+  assert.equal(straightMid(genericEven, 1), false, 'a generic even spline has no follower mids');
+  assert.deepEqual(
+    followMids(
+      genericEven.map((point) => ({ ...point })),
+      genericEven.map(() => true),
+    ),
+    genericEven,
+    'a generic even spline keeps its points unchanged',
+  );
+  const genericSharp = withCorners({ spline: { points: genericEven } }, true);
+  assert.ok(
+    genericSharp &&
+      'spline' in genericSharp &&
+      genericSharp.spline.points.every((point) => point.corner),
+    'sharp applies to every point of a non-Rect+ spline',
+  );
   const rectAsSpline = generateFuseGeometry({
     outline,
     spec: splineZone(corners(50, -10, 120, 40)),
@@ -374,10 +476,66 @@ export async function main() {
     FuseGeometryError,
     'a bow tie is refused',
   );
+  const endpointTouch = [
+    { x: 0, y: 0 },
+    { x: 20, y: 0 },
+    { x: 20, y: 10 },
+    { x: 10, y: 0 },
+    { x: 0, y: 10 },
+  ];
+  assert.equal(
+    ringSelfIntersects(endpointTouch),
+    true,
+    'a non-neighbour endpoint touch is refused',
+  );
+  assert.throws(
+    () =>
+      zoneRingMm({
+        spline: { points: endpointTouch.map((point) => ({ ...point, corner: true })) },
+      }),
+    FuseGeometryError,
+    'a sharp endpoint touch is refused after flattening',
+  );
+  assert.equal(
+    ringSelfIntersects([
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 10 },
+      { x: 0, y: 10 },
+    ]),
+    true,
+    'an adjacent collinear reversal is refused',
+  );
   assert.throws(
     () => zoneRingMm({ spline: { points: corners(0, 0, 10, 10).slice(0, 2) } }),
     FuseGeometryError,
   );
+  const clampRing = rectangle(10, 10);
+  const moving = rectangle(2, 3).map((point) => ({ x: point.x + 2, y: point.y + 3 }));
+  const moved = clampZoneTransform(moving, clampRing, (point, amount) => ({
+    x: point.x + 20 * amount,
+    y: point.y,
+  }));
+  near(Math.max(...moved.map((point) => point.x)), 10, 1e-6);
+  near(Math.hypot(moved[1].x - moved[0].x, moved[1].y - moved[0].y), 2, 1e-9);
+  const rotateSource = [
+    { x: 1, y: 1 },
+    { x: 4, y: 1 },
+    { x: 4, y: 9 },
+    { x: 1, y: 9 },
+  ];
+  const rotated = clampZoneTransform(rotateSource, clampRing, (point, amount) => {
+    const angle = (Math.PI / 2) * amount;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return {
+      x: 2.5 + (point.x - 2.5) * cos - (point.y - 5) * sin,
+      y: 5 + (point.x - 2.5) * sin + (point.y - 5) * cos,
+    };
+  });
+  assert.ok(Math.min(...rotated.map((point) => point.x)) >= -1e-7, 'rotation stays in the inset');
+  near(Math.hypot(rotated[1].x - rotated[0].x, rotated[1].y - rotated[0].y), 3, 1e-9);
   // spec → form fields → wire → form fields → spec keeps the spline and its corners.
   const splineSpec = splineZone(bent);
   const splineFields = writeFuseFields(splineSpec);

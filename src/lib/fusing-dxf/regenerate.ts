@@ -37,7 +37,7 @@ import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { normBlock } from 'lib/pattern-import/fabrics/draft';
 import { isInterliningScope, PURPOSE, SECTION } from 'lib/pattern-import/fabrics/scope';
-import type { DraftScopeTarget, PtMm } from 'lib/pattern-import/types';
+import type { DraftScopeTarget } from 'lib/pattern-import/types';
 import { mergeDxfSet } from 'lib/pattern-import/worker/dxf-set';
 import {
   MAX_PATTERN_FILENAME,
@@ -54,6 +54,7 @@ import {
   planFusingLines,
   sameAliasSet,
 } from './aliases';
+import { fusingDartPolygons } from './darts';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -151,32 +152,6 @@ function tokenIndex(sizes: readonly common_Size[], cardSizeIds: readonly number[
       });
   }
   return byToken;
-}
-
-function signedAreaCm2(points: readonly { x: number; y: number }[]): number {
-  let twice = 0;
-  for (let i = 0; i < points.length; i++) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    twice += a.x * b.y - b.x * a.y;
-  }
-  return twice / 2;
-}
-
-function dartPolygons(piece: PieceDTO): PtMm[][] {
-  return (piece.inner ?? []).flatMap((path) => {
-    if (!path.closed || path.pts.length < 3) return [];
-    const area = Math.abs(signedAreaCm2(path.pts));
-    if (!(area > 0.05 && area < piece.areaCm2 * 0.15)) return [];
-    const xs = path.pts.map((point) => point.x);
-    const ys = path.pts.map((point) => point.y);
-    const width = Math.max(...xs) - Math.min(...xs);
-    const height = Math.max(...ys) - Math.min(...ys);
-    // The parser writes/reads drills as 1 × 1 cm closed squares; those are not dart holes.
-    if (path.pts.length === 4 && Math.abs(width - 1) < 0.08 && Math.abs(height - 1) < 0.08)
-      return [];
-    return [path.pts.map((point) => ({ x: point.x * 10, y: point.y * 10 }))];
-  });
 }
 
 function sourceGrain(piece: PieceDTO, layer: string): FusingSourceSize['grain'] {
@@ -289,7 +264,7 @@ function sourcePieces(
         sizeId,
         rank,
         outline: row.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-        darts: dartPolygons(row),
+        darts: fusingDartPolygons(row),
         grain: sourceGrain(row, grainLayer),
       });
     }

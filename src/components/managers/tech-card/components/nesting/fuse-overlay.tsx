@@ -14,11 +14,12 @@ import {
   stripBandPolygons,
   trimEdgeRun,
 } from 'lib/fusing-dxf/edge-runs';
+import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import { flattenSpline } from 'lib/fusing-dxf/spline';
 import type { FusePolygon } from 'lib/fusing-dxf/types';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
-import { PREVIEW_NET_MM, resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
+import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
 import { isDrawnZone, zonePoints, type ZoneBus } from './fuse-zone';
 import { FuseZoneEditor } from './fuse-zone-editor';
 
@@ -56,32 +57,6 @@ function offsetPoly(pts: Pt[], d: number): Pt[] {
 }
 const str = (pts: Pt[]) => pts.map((q) => `${q.x},${q.y}`).join(' ');
 
-function distToSegment(p: Pt, a: Pt, b: Pt) {
-  const d = sub(b, a);
-  const l2 = dot(d, d) || 1;
-  const t = Math.max(0, Math.min(1, dot(sub(p, a), d) / l2));
-  return len(sub(p, add(a, d, t)));
-}
-const nearOutline = (p: Pt, poly: Pt[], tol: number) =>
-  poly.some((a, i) => distToSegment(p, a, poly[(i + 1) % poly.length]) <= tol);
-
-/**
- * Darts as the DXF draws them: an inner V (three points, both legs ending on the outline) or a
- * small closed wedge. Piece-local cm, the same system as `poly`.
- */
-export function dartsOf(p: PieceDTO): Pt[][] {
-  const out: Pt[][] = [];
-  for (const g of p.inner ?? []) {
-    const pts = g.pts;
-    if (!g.closed && pts.length === 3) {
-      if (nearOutline(pts[0], p.poly, 0.3) && nearOutline(pts[2], p.poly, 0.3)) out.push(pts);
-    } else if (g.closed && pts.length >= 3 && pts.length <= 4 && /dart/i.test(g.layer)) {
-      out.push(pts);
-    }
-  }
-  return out;
-}
-
 function svgPoint(e: React.PointerEvent) {
   const el = e.currentTarget as SVGGraphicsElement;
   const svg = el.ownerSVGElement!;
@@ -92,21 +67,28 @@ function svgPoint(e: React.PointerEvent) {
   return { x: r.x, y: r.y };
 }
 
-/** A drawn zone's fusible geometry, piece-local mm; ok=false = the zone is invalid / empty. */
-type ZoneFill = { polys: FusePolygon[]; ok: boolean };
+/** A drawn zone's fusible geometry, piece-local mm. */
+type ZoneFill = { polys: FusePolygon[]; status: 'ok' | 'invalid' | 'unknown' };
 const mm10 = (q: Pt) => ({ x: q.x * 10, y: q.y * 10 });
-function zoneFillOf(p: PieceDTO, f: PieceFuseSpec): ZoneFill | null {
+const cm10 = (q: Pt) => ({ x: q.x / 10, y: q.y / 10 });
+function zoneFillOf(
+  p: PieceDTO,
+  f: PieceFuseSpec,
+  requiredSeamAllowanceMm: number | null,
+): ZoneFill | null {
   if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+  if (f.insetNet && !Number.isFinite(requiredSeamAllowanceMm))
+    return { polys: [], status: 'unknown' };
   try {
     const polys = generateFuseGeometry({
       outline: p.poly.map(mm10),
       spec: f,
-      seamAllowanceMm: PREVIEW_NET_MM,
-      darts: dartsOf(p).map((d) => d.map(mm10)),
+      seamAllowanceMm: requiredSeamAllowanceMm,
+      darts: fusingDartPolygons(p),
     });
-    return { polys, ok: polys.length > 0 };
+    return { polys, status: polys.length > 0 ? 'ok' : 'invalid' };
   } catch {
-    return { polys: [], ok: false };
+    return { polys: [], status: 'invalid' };
   }
 }
 
@@ -118,6 +100,7 @@ export function FuseOverlay({
   fuseOf,
   onChange,
   zoneBus,
+  requiredSeamAllowanceMm,
 }: {
   /** cm per screen pixel. */
   px: number;
@@ -130,6 +113,8 @@ export function FuseOverlay({
   onChange: (ci: string, next: PieceFuseSpec) => void;
   /** Shared with the panel: the zone's clipped area and its undo stack. */
   zoneBus?: ZoneBus;
+  /** The card's live seam-allowance standard; null means no standard is available. */
+  requiredSeamAllowanceMm: number | null;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [handle, setHandle] = useState<{ edge: number; end: 's' | 'e' } | null>(null);
@@ -137,12 +122,12 @@ export function FuseOverlay({
   const fills = useRef(new WeakMap<PieceDTO, Map<string, ZoneFill | null>>());
   const fillOf = (p: PieceDTO, f: PieceFuseSpec) => {
     if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
-    const key = JSON.stringify([f.zone, f.insetNet, f.insetMm, f.darts]);
+    const key = JSON.stringify([f.zone, f.insetNet, f.insetMm, f.darts, requiredSeamAllowanceMm]);
     let m = fills.current.get(p);
     if (!m) fills.current.set(p, (m = new Map()));
     if (!m.has(key)) {
       if (m.size > 64) m.clear();
-      m.set(key, zoneFillOf(p, f));
+      m.set(key, zoneFillOf(p, f, requiredSeamAllowanceMm));
     }
     return m.get(key) ?? null;
   };
@@ -159,23 +144,27 @@ export function FuseOverlay({
     y: -((p.originY ?? 0) + q.y),
   });
   const geo = (p: PieceDTO, f: PieceFuseSpec) => {
-    const r = resolveFuse(f);
+    const r = resolveFuse(f, requiredSeamAllowanceMm);
     const pts = p.poly.map((q) => world(p, q));
     const sign: 1 | -1 = signedArea(pts) > 0 ? 1 : -1;
-    const inner = r.insetMm > 0 ? offsetPoly(pts, r.insetMm / 10) : pts;
-    const darts = dartsOf(p).map((d) => d.map((q) => world(p, q)));
+    const insetMm = r.insetMm;
+    const insetKnown = insetMm != null;
+    const inner = insetMm != null && insetMm > 0 ? offsetPoly(pts, insetMm / 10) : pts;
+    const darts = fusingDartPolygons(p).map((d) => d.map(cm10).map((q) => world(p, q)));
     const runs = edgeRunsOf(pts);
-    return { r, pts, runs, sign, inner, darts };
+    return { r, pts, runs, sign, inner, darts, insetKnown };
   };
 
   const draw = (p: PieceDTO, f: PieceFuseSpec, faint: boolean) => {
-    const { r, pts, runs, sign, inner, darts } = geo(p, f);
+    const { r, pts, runs, sign, inner, darts, insetKnown } = geo(p, f);
     const ox = p.originX ?? 0;
     const oy = p.originY ?? 0;
     const clip = `fuse-clip-${p.id}`;
     const mask = `fuse-mask-${p.id}`;
-    const D = (r.insetMm + r.widthMm) / 10;
-    const holes = r.darts === 'cut' ? darts.map((d) => offsetPoly(d, -r.insetMm / 10)) : [];
+    const insetMm = r.insetMm ?? 0;
+    const D = (insetMm + r.widthMm) / 10;
+    const holes =
+      insetKnown && r.darts === 'cut' ? darts.map((d) => offsetPoly(d, -insetMm / 10)) : [];
     // Drawn zone (rect / spline): stored piece-local mm, Y up → sheet cm, Y down.
     const toSheet = (q: Pt) => ({ x: ox + q.x / 10, y: -(oy + q.y / 10) });
     const ring =
@@ -183,20 +172,21 @@ export function FuseOverlay({
         ? flattenSpline(zonePoints(f.zone)).map(toSheet)
         : null;
     const fill = fillOf(p, f);
-    const fillPath = fill?.ok
-      ? fill.polys
-          .flatMap((poly) => [poly.outer, ...poly.holes])
-          .map(
-            (loop) =>
-              `M ${loop
-                .map((q) => {
-                  const s = toSheet(q);
-                  return `${s.x} ${s.y}`;
-                })
-                .join(' L ')} Z`,
-          )
-          .join(' ')
-      : null;
+    const fillPath =
+      fill?.status === 'ok'
+        ? fill.polys
+            .flatMap((poly) => [poly.outer, ...poly.holes])
+            .map(
+              (loop) =>
+                `M ${loop
+                  .map((q) => {
+                    const s = toSheet(q);
+                    return `${s.x} ${s.y}`;
+                  })
+                  .join(' L ')} Z`,
+            )
+            .join(' ')
+        : null;
     let dxf: string | null = null;
     if (f.mode === 'zone' && f.zone && 'dxfPieceKey' in f.zone) {
       const src = byCi.get(f.zone.dxfPieceKey);
@@ -219,8 +209,9 @@ export function FuseOverlay({
           ))}
         </mask>
         <g clipPath={`url(#${clip})`} mask={`url(#${mask})`} fill={INK} fillOpacity={op}>
-          {f.mode === 'whole' && <polygon points={str(inner)} />}
-          {f.mode === 'strip' &&
+          {insetKnown && f.mode === 'whole' && <polygon points={str(inner)} />}
+          {insetKnown &&
+            f.mode === 'strip' &&
             f.edges.flatMap((edge) => {
               const run = runs[edge.edge];
               if (!run) return [];
@@ -239,17 +230,17 @@ export function FuseOverlay({
                 edge.startMm <= 0 && previous && previous.endMm <= 0 ? D : 0,
                 edge.endMm <= 0 && next && next.startMm <= 0 ? D : 0,
               );
-              return stripBandPolygons(points, r.insetMm / 10, D, sign).map((band, index) => (
+              return stripBandPolygons(points, insetMm / 10, D, sign).map((band, index) => (
                 <polygon key={`${edge.edge}-${index}`} points={str(band)} data-strip={edge.edge} />
               ));
             })}
-          {ring && !fillPath && <polygon points={str(ring)} />}
+          {ring && !fillPath && fill?.status !== 'unknown' && <polygon points={str(ring)} />}
           {dxf && <polygon points={dxf} />}
         </g>
         {fillPath && (
           <path d={fillPath} fill={INK} fillOpacity={op} fillRule='evenodd' data-zone-fill='' />
         )}
-        {!faint && f.mode && (
+        {!faint && f.mode && insetKnown && (
           <polygon
             points={str(inner)}
             fill='none'
@@ -269,9 +260,9 @@ export function FuseOverlay({
                 strokeWidth={1}
                 vectorEffect='non-scaling-stroke'
               />
-              {r.darts === 'cut' && (
+              {insetKnown && r.darts === 'cut' && (
                 <polygon
-                  points={str(offsetPoly(d, -r.insetMm / 10))}
+                  points={str(offsetPoly(d, -insetMm / 10))}
                   data-dart-hole={i}
                   fill='none'
                   stroke={INK}
@@ -297,7 +288,7 @@ export function FuseOverlay({
               points={str(ring)}
               data-zone-line=''
               fill='none'
-              stroke={fill?.ok === false ? 'var(--color-error)' : INK}
+              stroke={fill?.status === 'invalid' ? 'var(--color-error)' : INK}
               strokeWidth={1.5}
               vectorEffect='non-scaling-stroke'
               clipPath={`url(#${clip})`}
@@ -323,7 +314,13 @@ export function FuseOverlay({
   const padOn = !!g && sf!.mode === 'zone';
   // The selected zone's clipped area → the panel (cm²; null = invalid; undefined = not a drawn zone).
   const selFill = sp && sf ? fillOf(sp, sf) : null;
-  const selArea = selFill ? (selFill.ok ? fuseAreaMm2(selFill.polys) / 100 : null) : undefined;
+  const selArea = selFill
+    ? selFill.status === 'ok'
+      ? fuseAreaMm2(selFill.polys) / 100 || null
+      : selFill.status === 'invalid'
+        ? null
+        : undefined
+    : undefined;
   useEffect(() => {
     if (!sel || !zoneBus) return;
     zoneBus.setArea(sel, selArea);

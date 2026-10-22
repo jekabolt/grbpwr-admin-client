@@ -9,6 +9,7 @@ import { flattenSpline } from 'lib/fusing-dxf/spline';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import type { PieceFuseSpec } from './fuse-spec';
 import {
+  clampZoneTransform,
   cornerSlot,
   followMids,
   isDrawnZone,
@@ -163,7 +164,12 @@ export function FuseZoneEditor({
       d.moved = true;
       const dx = q.x - d.from.x;
       const dy = q.y - d.from.y;
-      writeSheet(d.orig.map((p) => ({ x: p.x + dx, y: p.y + dy })));
+      writeSheet(
+        clampZoneTransform(d.orig, inner, (p, amount) => ({
+          x: p.x + dx * amount,
+          y: p.y + dy * amount,
+        })),
+      );
     } else {
       const step = e.shiftKey ? 15 : 1;
       const deg =
@@ -173,13 +179,16 @@ export function FuseZoneEditor({
       d.moved = true;
       d.deg = deg;
       const r = (deg * Math.PI) / 180;
-      const cos = Math.cos(r);
-      const sin = Math.sin(r);
       writeSheet(
-        d.orig.map((p) => ({
-          x: d.c.x + (p.x - d.c.x) * cos - (p.y - d.c.y) * sin,
-          y: d.c.y + (p.x - d.c.x) * sin + (p.y - d.c.y) * cos,
-        })),
+        clampZoneTransform(d.orig, inner, (p, amount) => {
+          const angle = r * amount;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          return {
+            x: d.c.x + (p.x - d.c.x) * cos - (p.y - d.c.y) * sin,
+            y: d.c.y + (p.x - d.c.x) * sin + (p.y - d.c.y) * cos,
+          };
+        }),
       );
     }
   };
@@ -187,7 +196,7 @@ export function FuseZoneEditor({
     const d = drag.current;
     drag.current = null;
     if (!d) return;
-    if (d.t === 'pt' && !d.moved && cornerSlot(d.i, mm.length)) {
+    if (d.t === 'pt' && !d.moved && cornerSlot(d.i, mm)) {
       begin();
       write(mm.map((p, i) => (i === d.i ? { ...p, corner: !p.corner } : p)));
     } else if (d.t === 'rect' && Math.abs(d.b.x - d.a.x) > 0.8 && Math.abs(d.b.y - d.a.y) > 0.8) {
@@ -302,7 +311,7 @@ export function FuseZoneEditor({
         </g>
       )}
       {pts.map((p, i) => {
-        const corner = cornerSlot(i, pts.length);
+        const corner = cornerSlot(i, mm);
         const sharp = mm[i].corner;
         const on = (d?.t === 'pt' && d.i === i && d.moved) || snapped(p);
         const r = corner ? R : R * 0.8;

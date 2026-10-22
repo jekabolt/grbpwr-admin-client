@@ -24,8 +24,6 @@ export {
 
 /** Preview only: the strip drawn for an empty width (the real one is the seam allowance). */
 export const PREVIEW_STRIP_MM = 10;
-/** Preview only: «net» drawn at a typical seam allowance until the card's own is read here. */
-export const PREVIEW_NET_MM = 10;
 
 export const WIDTH_PRESETS = [10, 15, 20, 25];
 export const INSET_PRESETS = [0, 2, 3, 5];
@@ -52,11 +50,15 @@ export const fuseOffDefault = (s: PieceFuseSpec) =>
   s.grain !== 'as_piece' ||
   s.darts !== 'cut';
 
-/** Numbers the canvas draws with. */
-export function resolveFuse(s: PieceFuseSpec) {
+/** Numbers the canvas draws with; a net inset stays unknown until the card standard is available. */
+export function resolveFuse(s: PieceFuseSpec, seamAllowanceMm?: number | null) {
   return {
     widthMm: s.widthMm ?? PREVIEW_STRIP_MM,
-    insetMm: s.insetNet ? PREVIEW_NET_MM : Math.max(0, s.insetMm ?? DEFAULT_INSET_MM),
+    insetMm: s.insetNet
+      ? Number.isFinite(seamAllowanceMm)
+        ? Math.max(0, seamAllowanceMm ?? 0)
+        : null
+      : Math.max(0, s.insetMm ?? DEFAULT_INSET_MM),
     darts: s.darts,
   };
 }
