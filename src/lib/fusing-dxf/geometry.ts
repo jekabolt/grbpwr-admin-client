@@ -1,6 +1,7 @@
 import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import { offsetContour, OFFSET_SCALE } from 'lib/pattern-import/semantics/offset';
 import type { PtMm } from 'lib/pattern-import/types';
+import { edgeRunsOf, extendPolyline, stripBandPolygons, trimEdgeRun } from './edge-runs';
 import type { FuseGeometryInput, FusePolygon, PieceFuseSpec } from './types';
 
 const EPS = 1e-7;
@@ -130,7 +131,7 @@ function selectedEdges(spec: PieceFuseSpec, edgeCount: number) {
   const selected = new Map<number, (typeof spec.edges)[number]>();
   for (const edge of spec.edges) {
     if (!Number.isInteger(edge.edge) || edge.edge < 0 || edge.edge >= edgeCount)
-      throw new FuseTopologyError(`edge ${edge.edge} is outside a ${edgeCount}-segment outline`);
+      throw new FuseTopologyError(`edge ${edge.edge} is outside a ${edgeCount}-run outline`);
     selected.set(edge.edge, edge);
   }
   return selected;
@@ -140,43 +141,27 @@ function stripPaths(outline: readonly PtMm[], spec: PieceFuseSpec, insetMm: numb
   const width = spec.widthMm;
   if (!(width != null && Number.isFinite(width) && width > 0))
     throw new FuseGeometryError('strip width must be greater than zero');
-  const edges = selectedEdges(spec, outline.length);
+  const runs = edgeRunsOf(outline);
+  const edges = selectedEdges(spec, runs.length);
   if (!edges.size) throw new FuseGeometryError('strip mode has no selected edges');
   const bands: Path64[] = [];
   for (const [index, edge] of edges) {
-    const a = outline[index];
-    const b = outline[(index + 1) % outline.length];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const length = Math.hypot(dx, dy);
-    if (length <= EPS) continue;
-    const ux = dx / length;
-    const uy = dy / length;
-    // A cleanRing outline is CCW: the material lies to the left of each directed segment.
-    const nx = -uy;
-    const ny = ux;
+    const run = runs[index];
     const start = Math.max(0, edge.startMm || 0);
     const end = Math.max(0, edge.endMm || 0);
-    if (start + end >= length - EPS) continue;
-    const prev = edges.get((index - 1 + outline.length) % outline.length);
-    const next = edges.get((index + 1) % outline.length);
+    if (start + end >= run.length - EPS) continue;
+    const prev = runs.length > 1 ? edges.get((index - 1 + runs.length) % runs.length) : undefined;
+    const next = runs.length > 1 ? edges.get((index + 1) % runs.length) : undefined;
     const joinReach = insetMm + width;
-    const t0 =
-      start - (start <= EPS && prev && Math.max(0, prev.endMm || 0) <= EPS ? joinReach : 0);
-    const t1 =
-      length - end + (end <= EPS && next && Math.max(0, next.startMm || 0) <= EPS ? joinReach : 0);
-    const at = (t: number, depth: number): PtMm => ({
-      x: a.x + ux * t + nx * depth,
-      y: a.y + uy * t + ny * depth,
-    });
+    const points = extendPolyline(
+      trimEdgeRun(run, start, end),
+      start <= EPS && prev && Math.max(0, prev.endMm || 0) <= EPS ? joinReach : 0,
+      end <= EPS && next && Math.max(0, next.startMm || 0) <= EPS ? joinReach : 0,
+    );
+    // cleanRing makes the outline CCW, so its material is to the left of each run.
     bands.push(
-      toPath(
-        cleanRing([
-          at(t0, insetMm),
-          at(t1, insetMm),
-          at(t1, insetMm + width),
-          at(t0, insetMm + width),
-        ]),
+      ...stripBandPolygons(points, insetMm, insetMm + width, 1).map((band) =>
+        toPath(cleanRing(band)),
       ),
     );
   }
@@ -204,13 +189,14 @@ function rectPath(rect: [number, number, number, number]): Path64 {
 /** Pure fuse geometry in piece-local millimetres. */
 export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
   const outline = cleanRing(input.outline);
+  const edgeCount = edgeRunsOf(outline).length;
   if (
     input.expectedEdgeCount != null &&
     Number.isInteger(input.expectedEdgeCount) &&
-    outline.length !== input.expectedEdgeCount
+    edgeCount !== input.expectedEdgeCount
   ) {
     throw new FuseTopologyError(
-      `outline has ${outline.length} segments; base size has ${input.expectedEdgeCount}`,
+      `outline has ${edgeCount} edge runs; base size has ${input.expectedEdgeCount}`,
     );
   }
   const insetMm = effectiveInset(input.spec, input.seamAllowanceMm);

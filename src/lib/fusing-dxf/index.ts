@@ -9,6 +9,17 @@ export type {
   GeneratedFusingSheet,
 } from './dxf';
 export {
+  EDGE_CORNER_TURN_DEG,
+  edgeRunsOf,
+  extendPolyline,
+  outlineTurnDeg,
+  pointOnEdgeRun,
+  projectPointToEdgeRun,
+  stripBandPolygons,
+  trimEdgeRun,
+} from './edge-runs';
+export type { EdgePoint, EdgeRun, EdgeRunPosition } from './edge-runs';
+export {
   FuseGeometryError,
   FuseTopologyError,
   fuseAreaMm2,

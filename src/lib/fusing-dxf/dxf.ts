@@ -9,6 +9,7 @@ import type {
   PtMm,
 } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
+import { edgeRunsOf } from './edge-runs';
 import { fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
 import type { FusePolygon, PieceFuseSpec } from './types';
 
@@ -219,7 +220,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
             seamAllowanceMm: sourcePiece.seamAllowanceMm,
             darts: sourceSize.darts,
             zoneOutline: reference,
-            expectedEdgeCount: fuse.mode === 'strip' ? base.outline.length : undefined,
+            expectedEdgeCount: fuse.mode === 'strip' ? edgeRunsOf(base.outline).length : undefined,
           });
           const { cut, loops } = cutLoops(polygons);
           sizes.push({

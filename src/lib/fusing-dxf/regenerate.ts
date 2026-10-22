@@ -56,6 +56,8 @@ export type RegenerateFusingSheetsResult = {
   reused: number;
   removed: number;
   changed: boolean;
+  /** The card version this rebuild's own write left (`expected + 1`); absent when it wrote nothing. */
+  lockVersion?: number;
   warnings: string[];
   skippedSizes: BuildFusingSheetsResult['skippedSizes'];
 };
@@ -487,6 +489,7 @@ export async function regenerateFusingSheets(
     removed: oldGenerated.filter((pattern) => !replacements.has(pattern.bomLineKey?.trim() ?? ''))
       .length,
     changed,
+    ...(changed ? { lockVersion: (stored.lockVersion ?? 0) + 1 } : {}),
     warnings,
     skippedSizes: built.skippedSizes,
   };

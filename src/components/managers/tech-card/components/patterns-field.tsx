@@ -114,7 +114,11 @@ import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nestin
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
 import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
-import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
+import {
+  splitPiecesBySize,
+  useDictionarySizeTokens,
+  useFileSizeRun,
+} from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { PATTERN_IMPORT_ENABLED, buildCardContext } from './pattern-import/entry';
 import { createCardApply } from './pattern-import/card-apply';
@@ -528,6 +532,7 @@ export function PatternsField({
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
   const dictTokens = useDictionarySizeTokens();
+  const fileSizeRun = useFileSizeRun();
 
   // Колорвеи карточки с шириной их ПИНОВ по каждому слоту — раскладка меряется на конкретном
   // артикуле, а называет его колорвей. Читается с сервера: рецепт пишется отдельным RPC
@@ -1164,16 +1169,15 @@ export function PatternsField({
   // Загрузку гейтит ТКАНЬ, а не размерный ряд: выкройка привязывается к материалу, и без строки BOM
   // её некуда положить — а вот без размерного ряда положить есть куда (лист без размера, 0281).
   // Порядок работы в ателье обратный: DXF приходит от конструктора раньше, чем кто-либо утверждает
-  // градацию, и ряд из этих же файлов потом и набирают.
+  // градацию, и ряд из этих же файлов потом и набирают: первый DXF на карточке без ряда ставит ряд
+  // из своих размеров сам (withSizes). Склейка тоже не ждёт ряда — она читает размеры по словарю, а
+  // её результат идёт тем же путём. Ряда требует только мастер импорта (PDF и прочее): размеры он
+  // узнаёт внутри себя и раскладывает их по ряду карточки, так что без ряда такие файлы не берутся.
   const canUpload = canEdit && uploadScopes.length > 0;
-
-  // Слот принимает файлы только когда есть размерный ряд: и склейка, и импорт раскладывают
-  // размеры файла по ряду карточки.
-  const canDrop = canUpload && sizeIds.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
   function openPicker(scopeKey: string, rowId = '') {
-    if (!canDrop) return;
+    if (!canUpload) return;
     pickFor.current = scopeKey;
     pickRow.current = rowId;
     fileInputRef.current?.click();
@@ -1234,17 +1238,21 @@ export function PatternsField({
   async function withSizes(
     file: File,
     faults: FileFault[],
-  ): Promise<{ file: File; sizeId?: number } | null> {
+  ): Promise<{ file: File; sizeId?: number; seed?: number[] } | null> {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (asciiDxfProblem(bytes)) return null; // withUnits already said why
     const text = bytesToLatin1(bytes);
     const scan = scanDxfSizes(text, (t) => dictTokens.has(t));
-    const cards = orderSizes(sizeIds).map((id) => ({
+    // A card without a size range takes the file's sizes as its range (set once the file is up).
+    const live = (getValues('sizeIds') ?? []) as number[];
+    const seeded = live.length === 0 ? fileSizeRun(scan.sizes) : [];
+    const seed = seeded.length > 0 ? seeded : undefined;
+    const cards = (seed ?? orderSizes(live)).map((id) => ({
       id,
       label: nameOf(id),
       tokens: sizeTokensOf(sizeById.get(id)),
     }));
-    if (!needsSizeDialog(scan, cards)) return { file };
+    if (!needsSizeDialog(scan, cards)) return { file, seed };
     const picks = await new Promise<Record<string, SizePick> | null>((resolve) =>
       setSizesAsk({
         ask: {
@@ -1267,7 +1275,7 @@ export function PatternsField({
       }),
     );
     if (!picks) return null;
-    if (scan.sizes.length === 0) return { file, sizeId: picks[UNSIZED]?.to || undefined };
+    if (scan.sizes.length === 0) return { file, sizeId: picks[UNSIZED]?.to || undefined, seed };
     try {
       const plan = planSizeMap(scan, picks, cards);
       let out = applySizeMap(text, plan);
@@ -1280,6 +1288,7 @@ export function PatternsField({
       }
       return {
         file: new File([latin1ToBytes(out) as BlobPart], file.name, { type: file.type }),
+        seed,
       };
     } catch (e) {
       faults.push({ name: file.name, why: e instanceof Error ? e.message : String(e) });
@@ -1679,6 +1688,10 @@ export function PatternsField({
     bump(1);
     try {
       const up = await uploadPatternFile(file);
+      // The file's sizes become the range of a card that still has none; the autosave keeps it.
+      if (sized.seed && ((getValues('sizeIds') ?? []) as number[]).length === 0)
+        setValue('sizeIds', sized.seed, { shouldDirty: true });
+      const storeAs = sized.sizeId ?? orderSizes((getValues('sizeIds') ?? []) as number[])[0] ?? 0;
       // Re-found after the upload: the rows may have moved while the file was in flight.
       const at = swap ? plainSwapIndex(scopeKey, target) : -1;
       if (at >= 0) {
@@ -1687,13 +1700,13 @@ export function PatternsField({
         setValue(`patterns.${at}.filename`, up.filename, keep);
         setValue(`patterns.${at}.sizeBytes`, up.sizeBytes, keep);
         setValue(`patterns.${at}.sha256`, up.sha256, keep);
-        setValue(`patterns.${at}.sizeId`, sized.sizeId ?? storageSizeId, keep);
+        setValue(`patterns.${at}.sizeId`, storeAs, keep);
         // 0 = "assign one": the server numbers a url it has not seen on this card.
         setValue(`patterns.${at}.version`, 0, keep);
         setValue(`patterns.${at}.uploadedAt`, '', keep);
       } else
         append({
-          sizeId: sized.sizeId ?? storageSizeId,
+          sizeId: storeAs,
           lineKey: ulid(),
           ...up,
           name: autoName(scopeKey, file),
@@ -1714,11 +1727,14 @@ export function PatternsField({
   function routeFiles(scopeKey: string, list: FileList | File[] | null, target?: string) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
-    if (files.length === 0 || !canDrop) return;
+    if (files.length === 0 || !canUpload) return;
+    const hasRange = ((getValues('sizeIds') ?? []) as number[]).length > 0;
     const errOf = (f: File): string | null => {
       if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
       const ext = (f.name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase();
       if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
+      // The import wizard lays the drawn sizes out on the card's range: it needs one.
+      if (!hasRange) return 'no sizes yet';
       return f.size > MAX_PATTERN_BYTES ? 'too large, 40 MB at most' : null;
     };
     // The whole pick reports once: refusals and the upload's failure together.
@@ -2380,7 +2396,7 @@ export function PatternsField({
     const shownRev = rev;
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
     // A non-DXF row is replaceable too: a plain file swap (uploadOne), no reconcile, no marks.
-    const replaceable = !!slotGroup && canDrop;
+    const replaceable = !!slotGroup && canUpload;
     const rowId = sheetRowId(row);
     const dragging = replaceable && dragRow === rowId;
     const url = row.url ?? '';
@@ -2674,7 +2690,7 @@ export function PatternsField({
 
   // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер.
   const dropProps = (key: string) =>
-    canDrop
+    canUpload
       ? {
           onDragOver: (e: React.DragEvent) => {
             e.preventDefault();
@@ -2701,7 +2717,7 @@ export function PatternsField({
     const active = selectedKey === key;
     const emptyClassName = cn(
       'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
-      canDrop && !busy
+      canUpload && !busy
         ? 'border-labelColor text-textColor group-hover/slot:border-textColor'
         : 'border-borderColor text-labelColor',
     );
@@ -2709,22 +2725,20 @@ export function PatternsField({
       <>
         {busy ? (
           <span className='text-micro'>uploading…</span>
-        ) : !canDrop ? (
-          <span className='text-micro'>
-            {canUpload ? 'set the size range first' : 'no pattern'}
-          </span>
+        ) : !canUpload ? (
+          <span className='text-micro'>no pattern</span>
         ) : (
           <>
             <span className='text-micro'>+ drop pattern files</span>
             <span className='text-nano text-labelColor'>
-              {importOk ? 'DXF or PDF' : 'DXF'} · one file or one per size
+              {importOk && sizeIds.length > 0 ? 'DXF or PDF' : 'DXF'} · one file or one per size
             </span>
           </>
         )}
       </>
     );
     const empty =
-      active && canDrop && !busy ? (
+      active && canUpload && !busy ? (
         <Button
           type='button'
           variant='default'
@@ -2801,6 +2815,11 @@ export function PatternsField({
     const activeMedia = (
       <div className='relative'>
         {media}
+        {has && blocks > 0 && (
+          <span className='pointer-events-none absolute left-px top-px bg-bgColor px-1 py-0.5 text-micro text-labelColor'>
+            {blocks} {plural(blocks, 'piece')}
+          </span>
+        )}
         {canEdit && (
           <div
             className='absolute right-px top-px bg-bgColor'
@@ -2871,6 +2890,7 @@ export function PatternsField({
               items={purposeItems}
               value={scopePurpose}
               placeholder='purpose'
+              size='sm'
               fullWidth
               readOnly={!canEdit || isSubmitting}
               onValueChange={(value) => {
@@ -2886,14 +2906,10 @@ export function PatternsField({
                 aria-label={namedLines.length === 1 ? 'name' : `name ${lineIndex + 1}`}
                 autoComplete='off'
                 readOnly={!canEdit || isSubmitting}
+                className='h-[22px] py-0 text-micro'
               />
             ))}
           </div>
-          {has && blocks > 0 && (
-            <Text size='micro' variant='label' className='truncate'>
-              {blocks} {plural(blocks, 'piece')}
-            </Text>
-          )}
           {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
         </Tile>
       </div>
@@ -3270,11 +3286,7 @@ export function PatternsField({
   }));
   const noPatternWarnings: HeaderWarning[] = materialsWithoutDxf.map((g) => ({
     text: `${scopeLabel(g.scope)}: no pattern`,
-    action: canDrop
-      ? { label: 'add files', onClick: () => openPicker(g.scope.key) }
-      : canUpload
-        ? sizeRangeDoor
-        : undefined,
+    action: canUpload ? { label: 'add files', onClick: () => openPicker(g.scope.key) } : undefined,
   }));
   const looseWarning: HeaderWarning | null =
     looseDxf.length > 0
