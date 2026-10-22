@@ -144,8 +144,8 @@ import { drawingFromDxf } from 'lib/pattern-export/drawing';
 import {
   PatternExportItems,
   PatternExportMenu,
+  HistoryGlyph,
   ROW_ICON_BTN,
-  UploadGlyph,
 } from './pattern-export/export-menu';
 import type { RollPrintTarget } from './pattern-export/roll-print-dialog';
 import {
@@ -619,7 +619,7 @@ export function PatternsField({
       if (p.lineKey && p.history?.length) m.set(p.lineKey, p.history);
     return m;
   }, [cardRead]);
-  // «⋯» of a sheet row: the lineKey whose versions are open.
+  // History button of a sheet row: the lineKey or legacy url whose versions are open.
   const [versionsOf, setVersionsOf] = useState<string | null>(null);
   // Deleted sheets (TechCard.removedPatternHistory), one muted row each under their slot.
   const removed = useMemo(() => removedSheets(cardRead?.removedPatternHistory), [cardRead]);
@@ -670,8 +670,6 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
-  // The sheet row the picked file replaces (sheetRowId); '' = the slot (a tile drop or click).
-  const pickRow = useRef('');
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -1254,10 +1252,9 @@ export function PatternsField({
   const canUpload = canEdit && uploadScopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string, rowId = '') {
+  function openPicker(scopeKey: string) {
     if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     pickFor.current = scopeKey;
-    pickRow.current = rowId;
     fileInputRef.current?.click();
   }
 
@@ -2197,8 +2194,8 @@ export function PatternsField({
     setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
   }
 
-  // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of that
-  // version only — a version without one has no `restore`.
+  // History → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of
+  // that version only — a version without one has no `restore`.
   // DELETE A SHEET (L6b). A DXF row takes its pieces, the steps that hold them and every step
   // downstream with it (removeSheetCascade); issues on removed steps go to 0, as when a step is
   // deleted in the editor. Colourway / area refs are left as they are — the server says its words.
@@ -2863,16 +2860,16 @@ export function PatternsField({
                 )}
               />
             )}
-            {replaceable && (
+            {(row.lineKey || row.url) && (
               <Button
                 type='button'
-                aria-label='new version'
-                title='new version'
+                aria-label='history'
+                title='history'
                 className={ROW_ICON_BTN}
                 disabled={slotBusy}
-                onClick={() => openPicker(slotGroup.scope.key, rowId)}
+                onClick={() => setVersionsOf(row.lineKey || row.url || null)}
               >
-                <UploadGlyph />
+                <HistoryGlyph />
               </Button>
             )}
             {canEdit && (
@@ -2987,7 +2984,7 @@ export function PatternsField({
       return (
         <span className='flex flex-wrap items-center gap-1'>
           {[...a.found].map((t) => (
-            <Chip key={t} tone='default'>
+            <Chip key={t} className='border-solid border-borderColor bg-bgColor text-labelColor'>
               {t}
             </Chip>
           ))}
@@ -3000,7 +2997,14 @@ export function PatternsField({
         {orderSizes(sizeIds).map((id) => {
           const gone = missing.has(id);
           return (
-            <Chip key={id} selected={!gone} tone={gone ? 'error' : 'default'}>
+            <Chip
+              key={id}
+              className={
+                gone
+                  ? 'border-dashed border-error bg-bgColor text-error'
+                  : 'border-solid border-textColor bg-bgColor text-textColor'
+              }
+            >
               {nameOf(id)}
             </Chip>
           );
@@ -3771,7 +3775,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files, pickRow.current || undefined);
+          routeFiles(pickFor.current, e.target.files);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}
