@@ -15,7 +15,6 @@ import {
   notifyFailure,
 } from 'components/managers/production-runs/components/feedback';
 import { PHONE_QUERY, useMediaQuery } from 'components/managers/tasks/hooks/useMediaQuery';
-import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { format } from 'date-fns';
@@ -42,6 +41,8 @@ import {
   resolveMaterialClass,
   saveErrorMessage,
 } from './material-modal';
+import { isPurchasePrice } from './material-price';
+import { materialPriceLabel } from './material-picker';
 import { mediaThumbUrl } from './material-thumb';
 import {
   AdjustStockModal,
@@ -50,7 +51,7 @@ import {
   type MovementTarget,
 } from './movement-modals';
 import { resolveMaterialPurpose } from './purpose-options';
-import { useAddMaterialPrice, useArchiveMaterial, useSaveMaterial } from './useMaterials';
+import { useArchiveMaterial, useSaveMaterial } from './useMaterials';
 import { useMaterialMovements, useMaterialStock } from './useWarehouse';
 import { movementDelta } from './warehouse-options';
 
@@ -65,15 +66,13 @@ type Draft = {
   width: string;
   weight: string;
   unit: string;
-  price: string;
-  currency: string;
   composition: CompRow[];
   imageId: number;
   // Preview only (never compared, never sent): the server resolves `image` from `imageId`.
   image?: common_MediaFull;
 };
 
-type TextKey = 'name' | 'supplier' | 'width' | 'weight' | 'price';
+type TextKey = 'name' | 'supplier' | 'width' | 'weight';
 type Move = 'receive' | 'issue' | 'adjust';
 
 const FABRIC: common_MaterialClass = 'MATERIAL_CLASS_FABRIC';
@@ -140,8 +139,6 @@ function draftOf(m: common_Material): Draft {
     width: widthOf(m, cls),
     weight: weightOf(m, cls),
     unit: m.unit ?? '',
-    price: decimalToInput(m.latestPrice?.price),
-    currency: m.latestPrice?.currency?.trim() || 'EUR',
     composition: (m.compositionEntries ?? []).map((e) => ({
       fiberCode: e.fiberCode ?? '',
       percent: decimalToInput(e.percent),
@@ -168,10 +165,8 @@ const materialChanged = (d: Draft, b: Draft) =>
   d.imageId !== b.imageId ||
   !sameComposition(d.composition, b.composition);
 
-const priceChanged = (d: Draft, b: Draft) => d.price !== b.price || d.currency !== b.currency;
-
 // Same checks as MaterialModal.submit, in short words.
-function problemOf(d: Draft, priceDirty: boolean): string | null {
+function problemOf(d: Draft): string | null {
   if (!d.name.trim()) return 'name required';
   const rows = filledRows(d.composition);
   if (rows.length) {
@@ -185,7 +180,6 @@ function problemOf(d: Draft, priceDirty: boolean): string | null {
     }, 0);
     if (Math.abs(total - 100) > 0.01) return `composition ${Number(total.toFixed(2))}%`;
   }
-  if (priceDirty && !(parseDecimalNumber(d.price) >= 0)) return 'price required';
   return null;
 }
 
@@ -353,15 +347,13 @@ export function MaterialExpand({
   guardRef: MutableRefObject<ExpandGuard | null>;
 }) {
   const phone = useMediaQuery(PHONE_QUERY);
-  const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  const { canWrite, canReadCosting } = usePermissions();
   const canEdit = canWrite(SECTION.techCards);
-  const canEditPrice = canEdit && canReadCosting && canWriteCosting;
   const { dictionary } = useDictionary();
 
   const saveMaterial = useSaveMaterial();
-  const addPrice = useAddMaterialPrice();
   const archive = useArchiveMaterial();
-  const busy = saveMaterial.isPending || addPrice.isPending;
+  const busy = saveMaterial.isPending;
 
   const base = useMemo(() => draftOf(material), [material]);
   // null = pristine: the card follows the loaded material (and its refetches) as is.
@@ -383,8 +375,7 @@ export function MaterialExpand({
   const d = draft ?? base;
   const cls = d.materialClass;
   const materialDirty = materialChanged(d, base);
-  const priceDirty = canEditPrice && priceChanged(d, base);
-  const dirty = draft !== null && (materialDirty || priceDirty);
+  const dirty = draft !== null && materialDirty;
 
   const patch = (p: Partial<Draft>) => setDraft((cur) => ({ ...(cur ?? base), ...p }));
   const reset = () => {
@@ -422,44 +413,15 @@ export function MaterialExpand({
 
   const save = () => {
     if (!canEdit || busy || !dirty) return;
-    const problem = problemOf(d, priceDirty);
+    const problem = problemOf(d);
     if (problem) {
       setFail(problem);
       return;
     }
     setFail(null);
     const snapshot = d;
-    const postPrice = () => {
-      if (!priceDirty) {
-        setDraft(null);
-        return;
-      }
-      // Price is a history: a new NET (ex-VAT) entry from today, like the prices modal adds.
-      addPrice.mutate(
-        {
-          materialId: material.id ?? 0,
-          price: inputToDecimal(snapshot.price),
-          currency: snapshot.currency,
-          validFrom: new Date().toISOString(),
-          source: 'manual',
-          note: '',
-        },
-        {
-          onSuccess: () => setDraft(null),
-          // No retry from the toast: a lost answer may still have added the price.
-          onError: (e) =>
-            isRefusal(e)
-              ? setFail(e instanceof Error ? e.message : 'price not accepted')
-              : notifyFailure(`PRICE · ${subject}`, 'not added', e),
-        },
-      );
-    };
-    if (!materialDirty) {
-      postPrice();
-      return;
-    }
     saveMaterial.mutate(payloadOf(material, snapshot), {
-      onSuccess: postPrice,
+      onSuccess: () => setDraft(null),
       onError: (e) =>
         isRefusal(e)
           ? setFail(saveErrorMessage(e))
@@ -566,8 +528,6 @@ export function MaterialExpand({
     value: u,
     label: u,
   }));
-  const currencyItems = EXPENSE_CURRENCIES.map((c) => c.value);
-  if (d.currency && !currencyItems.includes(d.currency)) currencyItems.unshift(d.currency);
 
   // ---- controls -------------------------------------------------------------------------------
   const frame = cn(
@@ -698,31 +658,13 @@ export function MaterialExpand({
   const priceCell = canReadCosting ? (
     <Cell label='price' phone={phone}>
       <div className={frame}>
-        <Input
-          name={`price-${material.id}`}
-          aria-label='net price'
-          title='net, ex-VAT'
-          inputMode='decimal'
-          value={d.price}
-          readOnly={!canEditPrice}
-          placeholder={phone ? '—' : '0.00'}
-          className={cn(inner, 'tabular-nums', phone && 'px-2')}
-          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-            patch({ price: sanitizeDecimal(e.target.value, 4) })
-          }
-          onKeyDown={revertOnEscape('price')}
-        />
-        <Select
-          name={`currency-${material.id}`}
-          items={currencyItems.map((c) => ({ value: c, label: c.toLowerCase() }))}
-          value={d.currency}
-          placeholder='currency'
-          readOnly={!canEditPrice}
-          className={cn('h-full w-auto shrink-0 gap-1 border-0', lower, phone && 'h-11')}
-          itemClassName={lower}
-          customWidth={90}
-          onValueChange={(v: string) => patch({ currency: v })}
-        />
+        <Text component='span' className='min-w-0 flex-1 truncate px-2 tabular-nums'>
+          {isPurchasePrice(material.latestPrice) ? (
+            materialPriceLabel(material).toLowerCase() || <EmptyCell />
+          ) : (
+            <EmptyCell />
+          )}
+        </Text>
       </div>
     </Cell>
   ) : null;
