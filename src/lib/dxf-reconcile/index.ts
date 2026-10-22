@@ -19,4 +19,14 @@ export {
   unaliasedPieceKeys,
   unplacedPieceKeys,
 } from './marks';
+export { removeSheetCascade } from './cascade';
+export type {
+  CascadeBlock,
+  CascadeInput,
+  CascadeIssue,
+  CascadeRef,
+  CascadeResult,
+  CascadeSeam,
+  CascadeSheet,
+} from './cascade';
 export type * from './types';
