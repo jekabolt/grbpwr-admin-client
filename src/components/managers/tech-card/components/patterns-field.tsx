@@ -132,7 +132,14 @@ import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
 import { PatternExportItems } from './pattern-export/export-menu';
-import { SheetVersionsModal, sheetVersions, type SheetVersion } from './sheet-versions';
+import {
+  ddmm,
+  removedSheets,
+  SheetVersionsModal,
+  sheetVersions,
+  type RemovedSheet,
+  type SheetVersion,
+} from './sheet-versions';
 import { useTechCardStaging } from './useTechCardStaging';
 import {
   RECONCILE_PARSE,
@@ -548,6 +555,11 @@ export function PatternsField({
   }, [cardRead]);
   // «⋯» of a sheet row: the lineKey whose versions are open.
   const [versionsOf, setVersionsOf] = useState<string | null>(null);
+  // Deleted sheets (TechCard.removedPatternHistory), one muted row each under their slot.
+  const removed = useMemo(() => removedSheets(cardRead?.removedPatternHistory), [cardRead]);
+  // «⋯» of a removed row: its key; `restore` of a removed row in flight.
+  const [removedOf, setRemovedOf] = useState<string | null>(null);
+  const [restoringRemoved, setRestoringRemoved] = useState<string | null>(null);
   const { data: materialsData } = useMaterials('', true, !!techCardId);
   const materialById = useMemo(() => {
     const byId = new Map<number, common_Material>();
@@ -2067,29 +2079,136 @@ export function PatternsField({
             useSnackBarStore.getState().showMessage('not restored', 'error');
           if (out === 'applied' || out === 'noop') setVersionsOf(null);
         }}
-        onDeleteRevision={async (v) => {
-          if (!techCardId || v.historyId <= 0) return false;
-          const stored =
-            queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
-          try {
-            await adminService.DeleteTechCardPatternRevision({
-              techCardId,
-              historyId: v.historyId,
-              expectedLockVersion: stored?.lockVersion ?? 0,
-            });
-            // Re-read like restore: the delete answer has no pattern_viewer_token.
-            await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-            return true;
-          } catch (e) {
-            console.error('pattern revision delete failed', e);
-            const said = e instanceof Error ? e.message.trim() : '';
-            useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
-            return false;
-          }
-        }}
+        onDeleteRevision={deleteRevision}
       />
     );
   }
+
+  // `delete` of an old version (live or removed sheet): permanent, DeleteTechCardPatternRevision.
+  async function deleteRevision(v: SheetVersion): Promise<boolean> {
+    if (!techCardId || v.historyId <= 0) return false;
+    const stored =
+      queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
+    try {
+      await adminService.DeleteTechCardPatternRevision({
+        techCardId,
+        historyId: v.historyId,
+        expectedLockVersion: stored?.lockVersion ?? 0,
+      });
+      // Re-read like restore: the delete answer has no pattern_viewer_token.
+      await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      return true;
+    } catch (e) {
+      console.error('pattern revision delete failed', e);
+      const said = e instanceof Error ? e.message.trim() : '';
+      useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
+      return false;
+    }
+  }
+
+  // A removed sheet's restore: the card snapshot frozen by the save that deleted it.
+  const canRestoreRemoved = (snapshotId: number) =>
+    canEdit && !isSubmitting && snapshotId > 0 && !!techCardId;
+  async function restoreRemoved(snapshotId: number): Promise<RestoreOutcome> {
+    const out = await restoreSnapshot(snapshotId);
+    if (out === 'unavailable') useSnackBarStore.getState().showMessage('not restored', 'error');
+    return out;
+  }
+
+  // «⋯» of a removed row: its revisions, each with `restore` / `delete`; no download, no sheet delete.
+  function renderRemovedVersions() {
+    if (!removedOf) return null;
+    const sheet = removed.find((r) => r.key === removedOf);
+    if (!sheet) return null;
+    return (
+      <SheetVersionsModal
+        open
+        versions={sheet.versions}
+        canRestore={(v) => canRestoreRemoved(v.snapshotId)}
+        canDeleteRevision={() => canEdit && !isSubmitting && !!techCardId}
+        download={null}
+        onClose={() => setRemovedOf(null)}
+        onRestore={async (v) => {
+          const out = await restoreRemoved(v.snapshotId);
+          if (out === 'applied' || out === 'noop') setRemovedOf(null);
+        }}
+        onDeleteRevision={deleteRevision}
+      />
+    );
+  }
+
+  // Removed sheets of a slot. A sheet whose slot is unknown sits under the first slot with files
+  // (else the first slot) — the one the shelf opens on.
+  const removedHome =
+    scopeGroups.find((g) => g.entries.length > 0)?.scope.key ?? scopeGroups[0]?.scope.key ?? '';
+  const removedIn = (scopeKey: string) =>
+    removed.filter((r) =>
+      r.scopeKey && scopeGroups.some((g) => g.scope.key === r.scopeKey)
+        ? r.scopeKey === scopeKey
+        : scopeKey === removedHome,
+    );
+
+  // A deleted sheet: muted, no drop target, no `new version`.
+  function renderRemovedRow(sheet: RemovedSheet) {
+    const restorable = sheet.snapshotId > 0;
+    const busy = restoringRemoved === sheet.key;
+    const date = ddmm(sheet.at);
+    return (
+      <li key={sheet.key} className='py-1'>
+        <div className='flex items-center gap-1.5'>
+          <div
+            aria-hidden
+            className='h-14 w-14 shrink-0 border border-borderColor bg-pageBg opacity-40'
+          />
+          <div className='min-w-0 flex-1'>
+            <span title={sheet.fileName} className='block truncate text-micro text-labelColor'>
+              {sheet.fileName}
+            </span>
+          </div>
+          <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+            {date ? `removed · ${date}` : 'removed'}
+          </Text>
+          <span className='inline-flex shrink-0 items-center gap-1'>
+            {restorable && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                disabled={!canRestoreRemoved(sheet.snapshotId) || restoringRemoved !== null}
+                onClick={async () => {
+                  setRestoringRemoved(sheet.key);
+                  try {
+                    await restoreRemoved(sheet.snapshotId);
+                  } finally {
+                    setRestoringRemoved(null);
+                  }
+                }}
+              >
+                {busy ? 'restore…' : 'restore'}
+              </Button>
+            )}
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className={door}
+              aria-label='removed sheet'
+              onClick={() => setRemovedOf(sheet.key)}
+            >
+              ⋯
+            </Button>
+          </span>
+        </div>
+      </li>
+    );
+  }
+
+  const removedList = (scopeKey: string) => {
+    const list = removedIn(scopeKey);
+    return list.length > 0 ? (
+      <ul className='divide-y divide-hairline'>{list.map(renderRemovedRow)}</ul>
+    ) : null;
+  };
 
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
@@ -2517,7 +2636,8 @@ export function PatternsField({
       );
     }
     const g = scopeGroups.find((x) => x.scope.key === selectedKey);
-    if (!g || g.entries.length === 0) return null;
+    if (!g) return null;
+    if (g.entries.length === 0) return removedList(g.scope.key);
     const label = scopeLabel(g.scope);
     // Раскладка мерит КОНКРЕТНЫЙ артикул: запереть её на строку можно только когда назначение
     // владеет ровно одной; иначе модалка спрашивает сама.
@@ -2576,6 +2696,7 @@ export function PatternsField({
           files
         </GroupLabel>
         {sheetList(g.entries)}
+        {removedList(g.scope.key)}
       </div>
     );
   }
@@ -3042,6 +3163,7 @@ export function PatternsField({
       )}
 
       {renderVersions()}
+      {renderRemovedVersions()}
 
       <ConfirmationModal
         open={deleting != null}

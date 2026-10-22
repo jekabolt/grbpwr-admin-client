@@ -65,7 +65,61 @@ export function sheetVersions(
   ];
 }
 
-function ddmm(at: string): string {
+/** A deleted sheet: TechCard.removedPatternHistory rows of one sheet, newest first. */
+export type RemovedSheet = {
+  key: string;
+  /** the slot it was filed under; '' = unknown */
+  scopeKey: string;
+  fileName: string;
+  /** newest revision's date */
+  at: string;
+  /** the newest revision's snapshot (the card before the delete); 0 = not restorable */
+  snapshotId: number;
+  versions: SheetVersion[];
+};
+
+// The read model carries line_key / scope_key only once the proto exposes them; until then a sheet
+// is told apart by its file name (then url).
+type RemovedRevision = common_TechCardPatternRevision & { lineKey?: string; scopeKey?: string };
+
+/** removedPatternHistory (server order: newest first) grouped into one entry per deleted sheet. */
+export function removedSheets(
+  history: readonly common_TechCardPatternRevision[] | undefined,
+): RemovedSheet[] {
+  const out = new Map<string, RemovedSheet>();
+  (history ?? []).forEach((raw, i) => {
+    const h = raw as RemovedRevision;
+    if (!h.url) return;
+    const id = h.lineKey || h.fileName || h.url;
+    const v: SheetVersion = {
+      key: h.historyId ? `history-${h.historyId}` : `removed-${i}`,
+      revision: h.revision && h.revision > 0 ? h.revision : null,
+      historyId: Number(h.historyId ?? 0) || 0,
+      at: h.createdAt ?? '',
+      url: h.url,
+      fileName: h.fileName ?? '',
+      sha256: h.sha256 ?? '',
+      snapshotId: Number(h.snapshotId ?? 0) || 0,
+      current: false,
+    };
+    const seen = out.get(id);
+    if (seen) {
+      seen.versions.push(v);
+      return;
+    }
+    out.set(id, {
+      key: `removed-${id}`,
+      scopeKey: h.scopeKey ?? '',
+      fileName: v.fileName || v.url.split('/').pop() || '',
+      at: v.at,
+      snapshotId: v.snapshotId,
+      versions: [v],
+    });
+  });
+  return [...out.values()];
+}
+
+export function ddmm(at: string): string {
   const d = at ? new Date(at) : null;
   if (!d || Number.isNaN(d.getTime()) || d.getTime() <= 0) return '';
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
