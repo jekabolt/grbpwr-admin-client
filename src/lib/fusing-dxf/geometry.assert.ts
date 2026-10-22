@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  aliasInScope,
+  bindingForScope,
+  fabricScopes,
+  markerScopeLines,
+  scopeKeyOfBinding,
+} from 'components/managers/tech-card/components/bom-purpose';
 import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
@@ -298,7 +305,8 @@ export async function main() {
   // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
   // go, the new ones come. A scope an uploaded sheet also holds is never touched (fail closed):
   // the owner's COLLAR→P6 stays, the rebuild's COLLAR→P5 is not added, and a previous generated
-  // scope that is shared now keeps its rows too.
+  // scope that is shared now keeps its rows too. A legacy generated sheet bound to a purpose (IL-5,
+  // pre-L11) hands its purpose scope back: its rows go, the line-bound replacement links afresh.
   const UNSET = 'TECH_CARD_BOM_PURPOSE_UNSET';
   const INTERFACING = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
   const OTHER = 'TECH_CARD_BOM_PURPOSE_OTHER';
@@ -314,6 +322,7 @@ export async function main() {
     { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'HAND', pieceLineKey: 'P7' },
     { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'COLLAR', pieceLineKey: 'P6' },
     { bomLineKey: 'IL-4', fabricPurpose: OTHER, blockName: 'PAD', pieceLineKey: 'P4' },
+    { bomLineKey: '', fabricPurpose: INTERFACING, blockName: 'LEGACY', pieceLineKey: 'P3' },
   ];
   const plan = nextFusingAliases({
     current,
@@ -323,6 +332,7 @@ export async function main() {
       { bomLineKey: 'IL-3', fabricPurpose: UNSET },
       // moved from the purpose scope to the line scope; an uploaded sheet now holds «other»
       { bomLineKey: 'IL-4', fabricPurpose: OTHER },
+      { bomLineKey: 'IL-5', fabricPurpose: INTERFACING },
     ],
     otherSheets: [
       { bomLineKey: 'MAIN', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
@@ -331,7 +341,7 @@ export async function main() {
     ],
     sheets: [
       {
-        binding: { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
+        binding: { bomLineKey: 'IL-1', fabricPurpose: UNSET },
         links: [{ blockName: 'FRONT', pieceLineKey: 'P1' }],
       },
       {
@@ -342,6 +352,10 @@ export async function main() {
         binding: { bomLineKey: 'IL-4', fabricPurpose: UNSET },
         links: [{ blockName: 'PAD', pieceLineKey: 'P4' }],
       },
+      {
+        binding: { bomLineKey: 'IL-5', fabricPurpose: UNSET },
+        links: [{ blockName: 'SLEEVE', pieceLineKey: 'P2' }],
+      },
     ],
   });
   assert.deepEqual(plan.rows, [
@@ -349,35 +363,101 @@ export async function main() {
     current[3],
     current[4],
     current[5],
-    { bomLineKey: 'IL-1', fabricPurpose: INTERFACING, blockName: 'FRONT', pieceLineKey: 'P1' },
+    { bomLineKey: 'IL-1', fabricPurpose: UNSET, blockName: 'FRONT', pieceLineKey: 'P1' },
     { bomLineKey: 'IL-4', fabricPurpose: UNSET, blockName: 'PAD', pieceLineKey: 'P4' },
+    { bomLineKey: 'IL-5', fabricPurpose: UNSET, blockName: 'SLEEVE', pieceLineKey: 'P2' },
   ]);
   assert.deepEqual(plan.shared.sort(), ['IL-3', 'other']);
-  // A line whose effective scope an uploaded sheet holds is not generated (no fallback to the line
-  // scope: the server folds it back into the purpose); a solo purpose binds and links; a purpose
-  // shared by several lines stays line-bound and unlinked.
-  const lineplan = planFusingLines({
-    lines: [
-      { bomLineKey: 'IL-1', effectiveScope: INTERFACING, soloPurpose: INTERFACING },
-      { bomLineKey: 'IL-4', effectiveScope: OTHER, soloPurpose: OTHER },
-      { bomLineKey: 'IL-5', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
-      { bomLineKey: 'IL-6', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
+
+  // L11 — EVERY INTERLINING LINE IS ITS OWN SCOPE. Three fusibles all marked «interfacing» are three
+  // materials; two main fabrics under one purpose are still one scope (one sheet cut from either).
+  const IL_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';
+  const FABRIC_SECTION = 'TECH_CARD_BOM_SECTION_FABRIC';
+  const MAIN = 'TECH_CARD_BOM_PURPOSE_MAIN';
+  const bom = [
+    { lineKey: 'M-1', purpose: MAIN, section: FABRIC_SECTION },
+    { lineKey: 'M-2', purpose: MAIN, section: FABRIC_SECTION },
+    { lineKey: 'F-1', purpose: INTERFACING, section: IL_SECTION },
+    { lineKey: 'F-2', purpose: INTERFACING, section: IL_SECTION },
+    { lineKey: 'F-3', purpose: INTERFACING, section: IL_SECTION },
+    { lineKey: 'S-1', purpose: OTHER, section: IL_SECTION },
+  ];
+  const scopes = fabricScopes(bom);
+  assert.deepEqual(
+    scopes.map((scope) => [scope.key, scope.byPurpose, scope.lines.map((l) => l.lineKey)]),
+    [
+      [MAIN, true, ['M-1', 'M-2']],
+      ['F-1', false, ['F-1']],
+      ['F-2', false, ['F-2']],
+      ['F-3', false, ['F-3']],
+      ['S-1', false, ['S-1']],
     ],
-    uploadedScopes: [OTHER, 'MAIN-LINE', ''],
+  );
+  const scopeOf = (key: string) => scopes.find((scope) => scope.key === key)!;
+  // a named interlining line wins over the purpose riding along
+  assert.equal(scopeKeyOfBinding(INTERFACING, 'F-2', scopes), 'F-2');
+  assert.equal(scopeKeyOfBinding(UNSET, 'F-3', scopes), 'F-3');
+  // legacy purpose-only binding: the single line of that purpose, never a guess among three
+  assert.equal(scopeKeyOfBinding(OTHER, '', scopes), 'S-1');
+  assert.equal(scopeKeyOfBinding(INTERFACING, '', scopes), '');
+  // main fabric unchanged: purpose, or a line sorted into it
+  assert.equal(scopeKeyOfBinding(MAIN, '', scopes), MAIN);
+  assert.equal(scopeKeyOfBinding(UNSET, 'M-2', scopes), MAIN);
+  assert.ok(
+    aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-1'), scopes),
+  );
+  assert.ok(
+    !aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: 'F-1' }, scopeOf('F-2'), scopes),
+  );
+  assert.ok(!aliasInScope({ fabricPurpose: INTERFACING, bomLineKey: '' }, scopeOf('F-1'), scopes));
+  assert.ok(aliasInScope({ fabricPurpose: OTHER, bomLineKey: '' }, scopeOf('S-1'), scopes));
+  assert.deepEqual(bindingForScope(scopeOf('F-2')), { fabricPurpose: '', bomLineKey: 'F-2' });
+  assert.deepEqual(
+    markerScopeLines('F-2', bom).map((l) => l.lineKey),
+    ['F-2'],
+  );
+  assert.deepEqual(
+    markerScopeLines('M-1', bom).map((l) => l.lineKey),
+    ['M-1', 'M-2'],
+  );
+  // a cloth sorted into the purpose answers a purpose-only binding first; the interlining line of
+  // the same purpose stays out of that cloth's marker scope
+  const withRib = [...bom, { lineKey: 'R-1', purpose: OTHER, section: FABRIC_SECTION }];
+  const ribScopes = fabricScopes(withRib);
+  assert.equal(scopeKeyOfBinding(OTHER, '', ribScopes), OTHER);
+  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', ribScopes), 'S-1');
+  assert.deepEqual(
+    markerScopeLines('R-1', withRib).map((l) => l.lineKey),
+    ['R-1'],
+  );
+
+  // Every generated sheet binds to its LINE and links; a line is blocked only when an uploaded
+  // sheet resolves to that very line (an old-client sheet bound {interfacing, F-2}). A legacy
+  // purpose-only sheet among three same-purpose lines resolves to none and blocks nothing.
+  const lineplan = planFusingLines({
+    lines: ['F-1', 'F-2', 'F-3', 'S-1'].map((key) => ({
+      bomLineKey: key,
+      effectiveScope:
+        scopes.find((scope) => scope.lines.some((l) => l.lineKey === key))?.key ?? key,
+    })),
+    uploadedScopes: [
+      { fabricPurpose: INTERFACING, bomLineKey: 'F-2' },
+      { fabricPurpose: INTERFACING, bomLineKey: '' },
+      { fabricPurpose: MAIN, bomLineKey: '' },
+    ].map((sheet) => scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes)),
   });
-  assert.deepEqual([...lineplan.blocked], ['IL-4']);
-  assert.deepEqual([...lineplan.linked], ['IL-1']);
+  assert.deepEqual([...lineplan.blocked], ['F-2']);
   assert.deepEqual(Object.fromEntries(lineplan.bindings), {
-    'IL-1': { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
-    'IL-5': { bomLineKey: 'IL-5', fabricPurpose: UNSET },
-    'IL-6': { bomLineKey: 'IL-6', fabricPurpose: UNSET },
+    'F-1': { bomLineKey: 'F-1', fabricPurpose: UNSET },
+    'F-3': { bomLineKey: 'F-3', fabricPurpose: UNSET },
+    'S-1': { bomLineKey: 'S-1', fabricPurpose: UNSET },
   });
-  // A blocked line's legacy generated sheet (UNSET + line) is removed, not kept beside the
-  // purpose-bound uploaded sheet; a linked line's row is replaced; uploaded rows ride through.
+  // A blocked line's generated sheet is removed, not kept beside the uploaded sheet that holds the
+  // line; a generated line's row is replaced; uploaded rows ride through.
   const uploadedOther = { name: 'felt.dxf', bomLineKey: 'IL-4', fabricPurpose: OTHER };
   const legacyGenerated = { name: 'gen IL-4', bomLineKey: 'IL-4', fabricPurpose: UNSET };
   const oldIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: UNSET };
-  const newIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: INTERFACING };
+  const newIl1 = { name: 'gen IL-1 v2', bomLineKey: 'IL-1', fabricPurpose: UNSET };
   assert.deepEqual(
     nextGeneratedPatterns(
       [uploadedOther, legacyGenerated, oldIl1],

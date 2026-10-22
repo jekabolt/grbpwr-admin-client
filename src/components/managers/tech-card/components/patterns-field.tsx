@@ -1058,9 +1058,13 @@ export function PatternsField({
     const nextFabricLines = fabricBomLines.map((line) =>
       lineKeys.has(line.lineKey) ? { ...line, purpose } : line,
     );
-    const nextKey = fabricScopeKey(purpose, firstLineKey);
-    const nextScope = fabricScopes(nextFabricLines).find((candidate) => candidate.key === nextKey);
+    // The slot the line lands in, found by the LINE: an interlining line stays its own slot
+    // whatever purpose it gets (L11), so the purpose alone does not name the next key.
+    const nextScope = fabricScopes(nextFabricLines).find((candidate) =>
+      candidate.lines.some((line) => line.lineKey === firstLineKey),
+    );
     if (!nextScope) return;
+    const nextKey = nextScope.key;
 
     // Purpose-bound sheets and aliases must move with the slot. Leaving their old raw purpose
     // behind would put them under "without a material" as soon as the BOM rerendered.
@@ -3351,7 +3355,7 @@ export function PatternsField({
                     files: filesOf(g.entries),
                     bomLineKey: soleLine,
                     // Алиасы ЭТОГО скоупа: одно имя блока на верхе и на подкладе — разные детали.
-                    aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+                    aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope, scopes)),
                     // Строгое направление скоупа; семпловые строки не голосуют, если есть
                     // производственные (0265).
                     fabricDirection: strictestDirection(
@@ -3505,7 +3509,7 @@ export function PatternsField({
         sizeId: g.entries[0]?.row.sizeId || storageSizeId,
         files: filesOf(g.entries),
         bomLineKey: deepMarker,
-        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope)),
+        aliases: pieceDxfAliases.filter((al) => aliasInScope(al, g.scope, scopes)),
         fabricDirection: strictestDirection(
           g.scope.lines.some((l) => !l.isSample)
             ? g.scope.lines.filter((l) => !l.isSample)
@@ -3761,7 +3765,7 @@ export function PatternsField({
             techCardId={techCardId}
             scopes={scopes}
             sheetsOfScope={sheetsOfScope}
-            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc))}
+            aliasesOfScope={(sc) => pieceDxfAliases.filter((a) => aliasInScope(a, sc, scopes))}
             sizeIds={sizeIds}
             savedSizeIds={savedSizeIds}
             sizeNameById={sizeById}
@@ -3993,6 +3997,7 @@ export function PatternsField({
           <PieceMatchModal
             files={matching.files}
             scope={matching.scope}
+            scopes={scopes}
             fabricName={matching.fabricName}
             scopeLabelByKey={scopeLabelByKey}
             sizeLabel=''

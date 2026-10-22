@@ -193,7 +193,12 @@ export default function DxfApplyDialog({
     const scopes = fabricScopes(
       bomRows
         .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
-        .map((b) => ({ lineKey: b.lineKey as string, purpose: b.purpose, name: b.name })),
+        .map((b) => ({
+          lineKey: b.lineKey as string,
+          purpose: b.purpose,
+          name: b.name,
+          section: b.section,
+        })),
     );
     const resolvedKey = scopes.find((s) => s.lines.some((l) => l.lineKey === lineKey))?.key ?? '';
     if (!resolvedKey) return null;

@@ -219,7 +219,7 @@ export default function KitMarkerDialog({
       scope: scopeDef,
       rollLines,
       sheets: sheetsByScope.get(scopeDef.key) ?? [],
-      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scopeDef)),
+      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scopeDef, scopeDefs)),
       // Имя артикула СЛОТА — только для текста отказа о ширине; ширину даёт `colorwayPins`.
       slotArticleName: '',
     });

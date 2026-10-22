@@ -567,7 +567,7 @@ export function BatchMarkerQueue({
           failedSheets: [],
           // Алиасы ЭТОЙ ткани — тем же резолвером скоупа, каким их фильтрует панель выкроек: алиас,
           // записанный до разбора BOM, лежит на СТРОКЕ, а его ткань уже могла стать назначением.
-          aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scope)),
+          aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scope, scopeDefs)),
           pieces: [],
           detectedUnit: 'mm',
           parseWarnings: [],

@@ -70,7 +70,12 @@ export function useFabricDxfPieces(
       fabricScopes(
         bomRows
           .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
-          .map((b) => ({ lineKey: b.lineKey as string, purpose: b.purpose, name: b.name })),
+          .map((b) => ({
+            lineKey: b.lineKey as string,
+            purpose: b.purpose,
+            name: b.name,
+            section: b.section,
+          })),
       ),
     [bomRows],
   );

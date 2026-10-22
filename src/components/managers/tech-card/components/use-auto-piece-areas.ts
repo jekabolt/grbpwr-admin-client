@@ -173,7 +173,7 @@ export function useAutoPieceAreas(args: {
       const state = scopeAreaState(serverScopeKeysOfSheets(sheets), cardRead.pieceAreaScopes);
       if (state.phase === 'fresh') continue;
 
-      const scopeAliases = aliases.filter((a) => aliasInScope(a, scope));
+      const scopeAliases = aliases.filter((a) => aliasInScope(a, scope, scopes));
       const pieces = scopeAreaPieces(scopeAliases, pieceRows, scope.key);
       if (pieces.length === 0) {
         refusals[scope.key] = `${PREFIX}no piece linked to the drawing`;

@@ -1,6 +1,5 @@
 import { common_TechCardBomPurpose } from 'api/proto-http/admin';
 import type { FabricDirection } from 'lib/nesting/types';
-import { sectionShort } from './bom-line-picker';
 
 // НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR (0265). A SECOND axis beside `section`,
 // not a refinement of it: a карманка, a контраст and a сетка are all genuinely section=fabric —
@@ -20,6 +19,7 @@ import {
   UNSET_PURPOSE,
   UNSET_PURPOSE_LABEL,
   bomPurposeLabel,
+  sectionShort,
 } from './bom-purpose-labels';
 
 export { UNSET_PURPOSE, UNSET_PURPOSE_LABEL, bomPurposeLabel } from './bom-purpose-labels';
@@ -192,7 +192,29 @@ export type RollGoodsLine = {
   lineKey: string;
   purpose?: string;
   name?: string;
-  section?: string;
+  /**
+   * REQUIRED, even when unknown (L11): an INTERLINING line is its own scope whatever its purpose
+   * says, so a caller that drops the section would silently fold every fusible into one bucket.
+   */
+  section: string | undefined;
+};
+
+const INTERLINING_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';
+
+/**
+ * ИНТЕРЛИНИНГ — ВСЕГДА СВОЯ СТРОКА (L11). Каждый клеевой материал — свой лист, свои связи, свои
+ * площади и свой расход: два флизелина под одним назначением «interfacing» — две разные ткани,
+ * а не класс. Поэтому строка секции INTERLINING в назначение не сворачивается никогда; основная
+ * ткань, подкладка, карманка и всё прочее — как прежде, COALESCE(purpose, line).
+ * Mirrors the backend's effective scope (internal/entity/fabric_scope.go).
+ */
+export function isInterliningLine(line: { section?: string }): boolean {
+  return (line.section ?? '').trim() === INTERLINING_SECTION;
+}
+
+const purposeOfLine = (purpose?: string): string => {
+  const p = (purpose ?? '').trim();
+  return p && p !== UNSET_PURPOSE ? p : '';
 };
 
 /**
@@ -282,10 +304,15 @@ export function markerScopeLines<L extends RollGoodsLine & { isSample?: boolean 
   if (!key) return [];
   const named = lines.find((l) => (l.lineKey ?? '').trim().toLowerCase() === key);
   if (!named) return [];
+  // Интерлининг — своя ткань (L11): его раскладку судит только он сам, и в чужую группу
+  // назначения он тоже не входит.
+  if (isInterliningLine(named)) return [named];
   const sample = !!named.isSample;
   const purpose = (named.purpose ?? '').trim();
   if (!purpose || purpose === UNSET_PURPOSE) return [named];
-  return lines.filter((l) => !!l.isSample === sample && (l.purpose ?? '').trim() === purpose);
+  return lines.filter(
+    (l) => !isInterliningLine(l) && !!l.isSample === sample && (l.purpose ?? '').trim() === purpose,
+  );
 }
 
 /** Направление, которому обязана подчиняться раскладка на строке `bomLineKey`. */
@@ -310,18 +337,19 @@ export function aliasScopeKey(a: { fabricPurpose?: string; bomLineKey?: string }
 
 /**
  * Fold the card's cloth lines into the scopes the panel groups by: one per назначение present, in
- * the owner's order, then one per UNSORTED line in BOM order.
+ * the owner's order, then one per UNSORTED line and one per INTERLINING line, in BOM order.
  *
  * An unsorted line trailing its own group rather than being folded into MAIN is the same choice
  * groupBomLines makes on the BOM tab, and for the same reason: «not sorted yet» must stay visibly
- * different from «sorted, and the answer is основной материал».
+ * different from «sorted, and the answer is основной материал». An interlining line is never
+ * folded at all (isInterliningLine): its purpose names a role, not a shared cloth.
  */
 export function fabricScopes<L extends RollGoodsLine>(lines: L[]): FabricScope<L>[] {
   const byPurpose = new Map<string, L[]>();
   const loose: FabricScope<L>[] = [];
   for (const l of lines) {
     if (!l.lineKey) continue;
-    const p = l.purpose && l.purpose !== UNSET_PURPOSE ? l.purpose : '';
+    const p = isInterliningLine(l) ? '' : purposeOfLine(l.purpose);
     if (!p) {
       loose.push({ key: l.lineKey, byPurpose: false, lines: [l] });
       continue;
@@ -343,6 +371,36 @@ export function fabricScopes<L extends RollGoodsLine>(lines: L[]): FabricScope<L
   return [...ordered, ...loose];
 }
 
+/** The scope of interlining line `line` — always its own (L11). */
+function interliningScopeOf(
+  line: string,
+  scopes: readonly FabricScope<RollGoodsLine>[],
+): FabricScope<RollGoodsLine> | undefined {
+  return scopes.find(
+    (s) => !s.byPurpose && s.lines.some((l) => l.lineKey === line && isInterliningLine(l)),
+  );
+}
+
+/**
+ * LEGACY READ FALLBACK (L11). A binding written before L11 may name an interlining cloth only by
+ * its purpose. It still belongs to a line when EXACTLY ONE interlining line carries that purpose
+ * (and no other cloth sorted into it answers first). With two or more there is no honest answer:
+ * the binding is left unresolved («без материала») rather than handed to one of them by a guess.
+ */
+function legacyInterliningScope(
+  purpose: string,
+  scopes: readonly FabricScope<RollGoodsLine>[],
+): FabricScope<RollGoodsLine> | undefined {
+  const hits = scopes.filter(
+    (s) =>
+      !s.byPurpose &&
+      s.lines.length === 1 &&
+      isInterliningLine(s.lines[0]) &&
+      purposeOfLine(s.lines[0].purpose) === purpose,
+  );
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
 /**
  * Resolution for DISPLAY: which scope does a STORED binding belong to? This is the case that
  * usually breaks mid-sort, so it is worth stating plainly — a sheet bound to line L, whose L has
@@ -350,19 +408,26 @@ export function fabricScopes<L extends RollGoodsLine>(lines: L[]): FabricScope<L
  * against the group keys would strand it as «без материала» the moment the operator sorted the BOM,
  * which is precisely the "you sorted and lost your work" outcome the additive design exists to avoid.
  *
+ * L11: a binding that NAMES an interlining line belongs to that line, whatever purpose rides along
+ * (the pre-L11 writer put the purpose there when it owned that line alone). A purpose no sorted
+ * cloth carries falls back to the single interlining line of that purpose (legacyInterliningScope).
+ *
  * Returns '' when nothing resolves — a genuinely loose sheet (uploaded before 0260, or its line was
- * deleted/reclassified).
+ * deleted/reclassified, or a legacy purpose shared by several interlining lines).
  */
 export function scopeKeyOfBinding(
   purpose: string | undefined,
   bomLineKey: string | undefined,
-  scopes: FabricScope<RollGoodsLine>[],
+  scopes: readonly FabricScope<RollGoodsLine>[],
 ): string {
-  const p = (purpose ?? '').trim();
-  if (p && p !== UNSET_PURPOSE) {
-    return scopes.some((s) => s.key === p) ? p : '';
-  }
   const line = (bomLineKey ?? '').trim();
+  const own = line ? interliningScopeOf(line, scopes) : undefined;
+  if (own) return own.key;
+  const p = purposeOfLine(purpose);
+  if (p) {
+    if (scopes.some((s) => s.byPurpose && s.key === p)) return p;
+    return legacyInterliningScope(p, scopes)?.key ?? '';
+  }
   if (!line) return '';
   return scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '';
 }
@@ -391,14 +456,16 @@ export function bindingForScope<L extends RollGoodsLine>(
  * назначение P, the alias still belongs to P's group — comparing raw scope keys would say otherwise
  * and the dialog would offer every already-mapped block again, minting a second alias for the same
  * physical piece.
+ *
+ * `scopes` is the card's whole partition (`scope` among them): whether a named line is an
+ * interlining one, and whether a legacy purpose has a single interlining line, are facts about the
+ * card, not about this scope — the same resolution scopeKeyOfBinding makes for sheets.
  */
 export function aliasInScope<L extends RollGoodsLine>(
   a: { fabricPurpose?: string; bomLineKey?: string },
   scope: FabricScope<L>,
+  scopes: readonly FabricScope<L>[],
 ): boolean {
-  const p = (a.fabricPurpose ?? '').trim();
-  if (p && p !== UNSET_PURPOSE) return scope.byPurpose && scope.key === p;
-  const line = (a.bomLineKey ?? '').trim();
-  if (!line) return false;
-  return scope.lines.some((l) => l.lineKey === line);
+  if (!scope.key) return false;
+  return scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes) === scope.key;
 }
