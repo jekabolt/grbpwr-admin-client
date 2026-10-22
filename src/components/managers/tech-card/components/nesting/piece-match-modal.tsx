@@ -40,6 +40,11 @@ import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api
 import type { PieceDTO } from 'lib/nesting/types';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
+import {
+  interliningBlockCodes,
+  interliningIdentityKey,
+  matchInterliningImport,
+} from 'lib/fusing-dxf/interlining-import';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
   Chip,
@@ -84,6 +89,7 @@ import { FuseOverlay } from './fuse-overlay';
 import { createZoneBus, isDrawnZone } from './fuse-zone';
 import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
+  blankFuse,
   readFuseSpec,
   writeFuseFields,
   type PieceFuseFields,
@@ -729,6 +735,7 @@ export function PieceMatchModal({
   colorways,
   pieceAreaScopes,
   techCardId,
+  interlining,
   readOnly: readOnlyProp,
   onClose,
 }: {
@@ -752,6 +759,13 @@ export function PieceMatchModal({
   pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
   // Карточка этой формы: размеры из манифеста ДРУГОЙ карточки сами в ряд не пишутся (F14f).
   techCardId?: number;
+  interlining?: {
+    slotLineKey: string;
+    mainBlocks: readonly PieceDTO[];
+    mainAliases: readonly { blockName?: string; pieceLineKey?: string }[];
+    skippedIdentityKeys: ReadonlySet<string>;
+    onReview: (skippedIdentities: ReadonlySet<string>) => void;
+  };
   // Optional override: the caller may already know the card cannot be edited (no write right).
   // A RELEASED card is detected here on its own either way.
   readOnly?: boolean;
@@ -998,7 +1012,45 @@ export function PieceMatchModal({
   // meant, and the full-set write then rewrites them in that form. The rule asks the FILE, not the
   // shape of the name: «FP_L» is a whole piece name (left front), and cutting its «L» off just
   // because the grade has an L size filed the mapping under a stem no drawing has.
-  const identityOf = (block: string) => aliasIdentity(block, split);
+  const interliningCodes = useMemo(
+    () =>
+      interlining
+        ? interliningBlockCodes({
+            blocks: contourPieces,
+            sizeTokens: dictTokens,
+            mainBlocks: interlining.mainBlocks,
+          })
+        : null,
+    [interlining, contourPieces, dictTokens],
+  );
+  const interliningMatches = useMemo(
+    () =>
+      interlining
+        ? matchInterliningImport({
+            blocks: contourPieces,
+            mainBlocks: interlining.mainBlocks,
+            mainAliases: interlining.mainAliases,
+            previousAliases: (aliases ?? []).filter((alias) => aliasInScope(alias, scope, links)),
+            pieces: pieces ?? [],
+            sizeTokens: dictTokens,
+          })
+        : [],
+    [interlining, contourPieces, aliases, scope, links, pieces, dictTokens],
+  );
+  const interliningIdentityByKey = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const match of interliningMatches) {
+      out.set(interliningIdentityKey(match.identity), match.identity);
+      for (const block of match.blocks) {
+        out.set(interliningIdentityKey(block.blockName ?? ''), match.identity);
+      }
+    }
+    return out;
+  }, [interliningMatches]);
+  const identityOf = (block: string) =>
+    interlining
+      ? interliningIdentityByKey.get(interliningIdentityKey(block)) ?? normBlock(block)
+      : aliasIdentity(block, split);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
@@ -1139,10 +1191,57 @@ export function PieceMatchModal({
     return there;
   }, [aliases, scope, links, livePieceKeys]);
 
+  const interliningBlockCounts = useMemo(() => {
+    const out = new Map<string, CountedBlock>();
+    if (!interlining || !interliningCodes) return out;
+    for (const match of interliningMatches) {
+      const perFileSize = new Map<string, number>();
+      const sizes = new Set<string>();
+      for (const block of match.blocks) {
+        const size = interliningCodes.get(block.id)?.size ?? '';
+        if (size) sizes.add(size);
+        const bucket = `${block.fileIndex ?? block.source}|${size}`;
+        perFileSize.set(bucket, (perFileSize.get(bucket) ?? 0) + 1);
+      }
+      out.set(match.identity.toLowerCase(), {
+        block: match.identity,
+        instances: Math.max(1, ...perFileSize.values()),
+        sizes: [...sizes].sort(
+          (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
+        ),
+        uniBase: '',
+      });
+    }
+    return out;
+  }, [interlining, interliningCodes, interliningMatches, split]);
+
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
   useEffect(() => {
     if (parse.phase !== 'ready') return;
+    if (interlining) {
+      setBlockCounts(interliningBlockCounts);
+      setRows(
+        interliningMatches.flatMap((match) => {
+          const ci = match.identity.toLowerCase();
+          const counted = interliningBlockCounts.get(ci);
+          if (!counted || stored.first.has(ci)) return [];
+          const wasSkipped = interlining.skippedIdentityKeys.has(
+            interliningIdentityKey(match.identity),
+          );
+          const pieceLineKey = wasSkipped ? '' : (match.pieceLineKey ?? '').trim();
+          return [
+            {
+              ...counted,
+              suggested: pieceLineKey,
+              basis: pieceLineKey ? ('exact' as const) : ('none' as const),
+              choice: pieceLineKey,
+            },
+          ];
+        }),
+      );
+      return;
+    }
     const all = countBlocks(contourPieces, split);
     setBlockCounts(all);
     setRows(
@@ -1153,7 +1252,18 @@ export function PieceMatchModal({
         elsewhereOnly,
       }),
     );
-  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock, elsewhereOnly]);
+  }, [
+    parse,
+    interlining,
+    interliningBlockCounts,
+    interliningMatches,
+    split,
+    contourPieces,
+    pieceOptions,
+    stored,
+    otherFabricByBlock,
+    elsewhereOnly,
+  ]);
 
   const decided = rows.filter((r) => r.choice).length;
   const toUnmap = unmapped.length;
@@ -1238,6 +1348,7 @@ export function PieceMatchModal({
   // восстановить нечем. Поэтому по НЕПОЛНОМУ разбору предложений об удалении не бывает вовсе:
   // отсутствие блока в неполном наборе не значит ничего.
   const deleteCandidates = useMemo<DeleteCandidate[]>(() => {
+    if (interlining) return [];
     // Пока разбор не закончился, блоков нет НИ ОДНОГО — и «исчезли все» было бы правдой про
     // каждую привязанную деталь ткани.
     if (parse.phase !== 'ready') return [];
@@ -1302,6 +1413,7 @@ export function PieceMatchModal({
     parsedPresence,
     rows,
     dictTokens,
+    interlining,
   ]);
 
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
@@ -1398,7 +1510,9 @@ export function PieceMatchModal({
       rows,
       draftNames,
     );
-    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts, parseComplete);
+    const { updates, unchanged } = interlining
+      ? { updates: [], unchanged: new Set(bound.values()).size }
+      : planPieceUpdates(live, bound, blockCounts, parseComplete);
     return {
       created,
       reused,
@@ -1421,6 +1535,7 @@ export function PieceMatchModal({
     blockCounts,
     parseComplete,
     pieceEdits,
+    interlining,
   ]);
 
   // Сколько деталей вообще привязано к этой ткани — знаменатель предупреждения о массовом
@@ -1460,6 +1575,13 @@ export function PieceMatchModal({
     return [...byFile.entries()].sort((a, b) => a[0] - b[0]).map(([index, v]) => ({ index, ...v }));
   }, [parse, contourPieces]);
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
+  const sizeOfPiece = (piece: PieceDTO) =>
+    interliningCodes?.get(piece.id)?.size ?? split.codeById.get(piece.id)?.size ?? '';
+  const identityOfPiece = (piece: PieceDTO) =>
+    interliningCodes?.get(piece.id)?.identity ??
+    split.codeById.get(piece.id)?.identity ??
+    piece.blockName ??
+    '';
 
   // Sizes present in the ACTIVE sheet — a second file can legitimately carry a different subset.
   //
@@ -1471,7 +1593,7 @@ export function PieceMatchModal({
     const seen = new Map<string, { count: number; uniCount: number }>();
     for (const p of sheet.pieces) {
       const code = split.codeById.get(p.id);
-      const s = code?.size ?? '';
+      const s = sizeOfPiece(p);
       const prev = seen.get(s) ?? { count: 0, uniCount: 0 };
       seen.set(s, { count: prev.count + 1, uniCount: prev.uniCount + (code?.uni ? 1 : 0) });
     }
@@ -1491,9 +1613,8 @@ export function PieceMatchModal({
         null,
       )?.size ?? '';
   const sheetPieces = useMemo(
-    () =>
-      sheet ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize) : [],
-    [sheet, split, shownSize],
+    () => (sheet ? sheet.pieces.filter((p) => sizeOfPiece(p) === shownSize) : []),
+    [sheet, split, interliningCodes, shownSize],
   );
 
   const nameByPieceKey = useMemo(
@@ -1504,8 +1625,7 @@ export function PieceMatchModal({
   // A contour with no block carries no identity the alias table can hold, so it is drawn but
   // not clickable — '' is the sheet's own signal for that. Keyed on the IDENTITY, so the same
   // piece in another size is the same thing to click.
-  const ciOf = (p: PieceDTO) =>
-    normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
+  const ciOf = (p: PieceDTO) => normBlock(identityOfPiece(p)).toLowerCase();
 
   // The display name of an existing piece, with a buffered rename applied.
   const pieceName = (lineKey: string): string => {
@@ -1951,7 +2071,9 @@ export function PieceMatchModal({
       // видел.
       // Тот же `parseComplete`, что и в сводке выше: сводка обязана называть ровно то, что сделает
       // применение, и разойтись эти два вызова могут только молча.
-      const { updates } = planPieceUpdates(live, boundHere, blockCounts, parseComplete);
+      const { updates } = interlining
+        ? { updates: [] }
+        : planPieceUpdates(live, boundHere, blockCounts, parseComplete);
       for (const u of updates) {
         if (u.piecesPerGarment !== undefined) {
           setValue(`pieces.${u.index}.piecesPerGarment`, u.piecesPerGarment, {
@@ -1962,12 +2084,44 @@ export function PieceMatchModal({
           setValue(`pieces.${u.index}.cutSymmetry`, u.cutSymmetry, { shouldDirty: true });
         }
       }
+      // An owner interlining drawing does not create or recount cut pieces. Mapping a contour is
+      // the one explicit act that binds its existing garment piece to this slot. Keep an authored
+      // strip/zone/full spec only when it already belongs to this slot; every other mapping is a
+      // deliberate rebind and starts as full fusing.
+      const interliningMappedPieceKeys = new Set(
+        interlining
+          ? [...boundHere.values()].map((lineKey) => lineKey.trim().toLowerCase()).filter(Boolean)
+          : [],
+      );
+      if (interlining) {
+        live.forEach((piece, index) => {
+          const pieceKey = (piece.lineKey ?? '').trim().toLowerCase();
+          if (!interliningMappedPieceKeys.has(pieceKey)) return;
+          const current = readFuseSpec(storedFuseOf(piece));
+          const edited = committedPieceEdits[pieceKey]?.fuse;
+          const desired = edited?.mode
+            ? { ...edited, bomLineKey: interlining.slotLineKey }
+            : current.mode && current.bomLineKey === interlining.slotLineKey
+              ? current
+              : { ...blankFuse('whole'), bomLineKey: interlining.slotLineKey };
+          const fields = writeFuseFields(desired);
+          for (const field of FUSE_KEYS) {
+            if (sameField(fields[field], piece[field])) continue;
+            setValue(`pieces.${index}.${field}`, fields[field] as never, { shouldDirty: true });
+          }
+        });
+      }
       // BUFFERED EDITOR FIELDS of existing pieces — nested-path writes, indices by `live` (same
       // reasoning as the recount above). A piece leaving in this same apply gets nothing.
       live.forEach((p, i) => {
         const ed = committedPieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
         if (!ed) return;
         for (const f of FIELD_KEYS) {
+          if (
+            interliningMappedPieceKeys.has((p.lineKey ?? '').trim().toLowerCase()) &&
+            (FUSE_KEYS as readonly string[]).includes(f)
+          )
+            continue;
           if (ed[f] === undefined || sameField(ed[f], p[f])) continue;
           setValue(`pieces.${i}.${f}`, ed[f] as never, { shouldDirty: true });
         }
@@ -1994,7 +2148,14 @@ export function PieceMatchModal({
       const fuseTouched = [...Object.values(pieceEdits), ...Object.values(newEdits)].some(
         (ed) => ed.fuse !== undefined,
       );
-      if (fuseTouched && staging && techCardId) staging.stage(fusingSheetsChange(techCardId));
+      if ((fuseTouched || !!interlining) && staging && techCardId)
+        staging.stage(fusingSheetsChange(techCardId));
+      if (interlining) {
+        const skipped = new Set(
+          [...blockCounts].filter(([ci]) => !boundHere.has(ci)).map(([, counted]) => counted.block),
+        );
+        interlining.onReview(skipped);
+      }
       onClose();
     } finally {
       setSaving(false);
@@ -2007,7 +2168,7 @@ export function PieceMatchModal({
     if (!p) return;
     const fi = sheets.findIndex((sh) => sh.pieces.includes(p));
     if (fi >= 0) setActiveFile(fi);
-    setActiveSize(split.codeById.get(p.id)?.size ?? '');
+    setActiveSize(sizeOfPiece(p));
     const ci = ciOf(p);
     if (ci) setSelected(ci);
   };
@@ -2017,7 +2178,7 @@ export function PieceMatchModal({
     showContour(
       sheet?.pieces.find((p) => {
         const code = split.codeById.get(p.id);
-        return !code?.size && !code?.uni;
+        return !sizeOfPiece(p) && !code?.uni;
       }),
     );
   // Everything the parse or the plan wants to say, as one `! N warnings` door in the top bar
@@ -2122,7 +2283,8 @@ export function PieceMatchModal({
     collapses.size > 0 ||
     outcome.removed > 0 ||
     outcome.updated > 0 ||
-    hasEdits;
+    hasEdits ||
+    (!!interlining && rows.length > 0);
   const canSave = changed && !readOnly;
   // Until every dispute is settled there is nothing valid to save: the server would reject the
   // whole card.
@@ -2335,8 +2497,8 @@ export function PieceMatchModal({
           disabled={readOnly || !focus.known}
           onChange={(e) => choose(ci, e.target.value)}
         >
-          <option value={CREATE}>+ new piece</option>
-          <option value=''>not a piece</option>
+          {!interlining && <option value={CREATE}>+ new piece</option>}
+          <option value=''>{interlining ? 'skip' : 'not a piece'}</option>
           {pieceOptions.map((p) => (
             <option key={p.lineKey} value={p.lineKey}>
               {pieceName(p.lineKey) || p.name}

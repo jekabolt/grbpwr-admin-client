@@ -29,6 +29,13 @@ import {
 } from 'lib/nesting/dxf/insunits';
 import { notify, updateNotify, useSnackBarStore } from 'lib/stores/store';
 import { sha256Hex } from 'lib/features/sha256';
+import {
+  interliningIdentityKey,
+  matchInterliningImport,
+  type InterliningImportMatch,
+} from 'lib/fusing-dxf/interlining-import';
+import { readInterliningSkips, writeInterliningSkips } from 'lib/fusing-dxf/interlining-skips';
+import { GENERATED_FUSING_NAME_PREFIX } from 'lib/fusing-dxf/regenerate';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import type {
   NewAliasSeed,
@@ -110,6 +117,7 @@ import {
 } from './form-writers';
 import { sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
+import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
@@ -456,6 +464,9 @@ function labelOf(row?: PatternRow): string {
   return row?.name || row?.filename || '(unnamed)';
 }
 
+const isGeneratedFusingRow = (row: PatternRow): boolean =>
+  (row.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX);
+
 const filenameStem = (name: string) => name.replace(/\.[^./\\]+$/, '');
 
 /** Follow a changed filename until the operator gives the row a distinct display name. */
@@ -784,6 +795,9 @@ export function PatternsField({
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
+  // Explicit «skip» answers are UI-only metadata: aliases cannot represent a negative mapping.
+  // localStorage keeps them across reloads without widening the backend contract.
+  const [interliningSkipsRevision, setInterliningSkipsRevision] = useState(0);
   // Сопоставление блоков DXF с деталями кроя, как его записал диалог «сопоставить детали».
   // Раскладке оно нужно, чтобы сохранённый маркер нёс piece_line_key и пережил переименование
   // детали; фильтрация по скоупу — здесь, потому что скоуп знает эта панель, а не модалка.
@@ -1004,6 +1018,106 @@ export function PatternsField({
   const geometry = useDxfGeometry(allDxfFiles, armed);
   const dxfIndex = useDxfIndex(geometry.data);
   const bundle = geometry.data;
+
+  const contourPiecesByScope = useMemo(() => {
+    const out = new Map<string, PieceDTO[]>();
+    if (!bundle) return out;
+    for (const group of scopeGroups) {
+      const interlining = group.scope.lines.some(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      const ownerUrls = interlining
+        ? new Set(
+            group.entries
+              .filter((entry) => !isGeneratedFusingRow(entry.row))
+              .map((entry) => entry.row.url)
+              .filter((url): url is string => !!url),
+          )
+        : null;
+      const inScope = bundle.pieces.filter((piece) => {
+        const file = piece.fileIndex ?? -1;
+        if (bundle.scopeByFile.get(file) !== group.scope.key) return false;
+        return !ownerUrls || ownerUrls.has(bundle.urlByFile?.get(file) ?? '');
+      });
+      if (inScope.length === 0) continue;
+      const split = splitPiecesBySize(inScope, dictTokens);
+      const contourLayer = defaultContourLayer(layerOptions(inScope, split.codeById));
+      out.set(
+        group.scope.key,
+        inScope.filter((piece) => (piece.layer ?? '') === contourLayer),
+      );
+    }
+    return out;
+  }, [bundle, scopeGroups, dictTokens]);
+
+  const mainPatternScope = useMemo(
+    () =>
+      scopeGroups.find((group) =>
+        group.scope.byPurpose
+          ? group.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN'
+          : group.scope.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC',
+      ),
+    [scopeGroups],
+  );
+  const mainPatternBlocks = mainPatternScope
+    ? contourPiecesByScope.get(mainPatternScope.scope.key) ?? []
+    : [];
+  const mainPatternAliases = useMemo(
+    () =>
+      mainPatternScope
+        ? pieceDxfAliases.filter((alias) => aliasInScope(alias, mainPatternScope.scope, linkSet))
+        : [],
+    [mainPatternScope, pieceDxfAliases, linkSet],
+  );
+
+  const interliningReviews = useMemo(() => {
+    const out = new Map<
+      string,
+      { matches: InterliningImportMatch[]; unmatched: InterliningImportMatch[] }
+    >();
+    if (!bundle) return out;
+    // This state value is intentionally only a cache-buster for localStorage-backed decisions.
+    void interliningSkipsRevision;
+    for (const group of scopeGroups) {
+      const slot = group.scope.lines.find(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      if (!slot?.lineKey) continue;
+      const hasOwnerFile = group.entries.some((entry) => !isGeneratedFusingRow(entry.row));
+      if (!hasOwnerFile) continue;
+      const blocks = contourPiecesByScope.get(group.scope.key) ?? [];
+      const matches = matchInterliningImport({
+        blocks,
+        mainBlocks: mainPatternBlocks,
+        mainAliases: mainPatternAliases,
+        previousAliases: pieceDxfAliases.filter((alias) =>
+          aliasInScope(alias, group.scope, linkSet),
+        ),
+        pieces: cardPieces,
+        sizeTokens: dictTokens,
+      });
+      const skipped = readInterliningSkips(techCardId, slot.lineKey);
+      out.set(group.scope.key, {
+        matches,
+        unmatched: matches.filter(
+          (match) => !match.pieceLineKey && !skipped.has(interliningIdentityKey(match.identity)),
+        ),
+      });
+    }
+    return out;
+  }, [
+    bundle,
+    mainPatternBlocks,
+    mainPatternAliases,
+    scopeGroups,
+    contourPiecesByScope,
+    pieceDxfAliases,
+    linkSet,
+    cardPieces,
+    dictTokens,
+    techCardId,
+    interliningSkipsRevision,
+  ]);
 
   // ПОКРЫТИЕ РАЗМЕРОВ ПО МАТЕРИАЛАМ — ВЫВОДИТСЯ из разбора, а не хранится состоянием.
   //
@@ -1886,6 +2000,55 @@ export function PatternsField({
     );
   };
 
+  const isInterliningScopeKey = (scopeKey: string) =>
+    scopeOfKey(scopeKey)?.lines.some(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    ) ?? false;
+
+  // An owner interlining revision keeps the row and every scoped alias intact. The generic
+  // re-upload reconciler is intentionally bypassed: it is allowed to create/delete cut pieces,
+  // while an interlining drawing may only map onto pieces that the main sheet already owns.
+  async function replaceInterliningOwnerSheet(
+    scopeKey: string,
+    picked: File,
+    faults: FileFault[],
+    target?: string,
+  ): Promise<boolean> {
+    if (!isInterliningScopeKey(scopeKey)) return false;
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    const owners = rows.filter(
+      (row) =>
+        isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey && !isGeneratedFusingRow(row),
+    );
+    const wanted = (target ?? '').trim();
+    const owner =
+      (wanted ? owners.find((row) => sheetRowId(row) === wanted) : undefined) ?? owners[0];
+    if (!owner) return false;
+    const rowId = sheetRowId(owner);
+    beginReupload(scopeKey, rowId);
+    bumpUploading(scopeKey, 1);
+    try {
+      const up = await uploadPatternFile(picked, owner.name ?? '');
+      const live = (getValues('patterns') ?? []) as PatternRow[];
+      const at = live.findIndex((row) => sheetRowId(row) === rowId);
+      if (at < 0 || liveScopeOf(live[at], 'sheet') !== scopeKey) {
+        faults.push({ name: picked.name, why: 'material changed' });
+        return true;
+      }
+      const replacedUrl = live[at].url ?? '';
+      swapSheetFile(techCardId, writeDirty, at, replacedUrl, up);
+      setAreasArmed(true);
+      setPendingView({ scopeKey, urls: [up.url] });
+    } catch (error) {
+      console.error('UploadPattern failed', error);
+      faults.push({ name: picked.name, why: patternUploadErrorMessage(error) });
+    } finally {
+      bumpUploading(scopeKey, -1);
+      endReupload(scopeKey);
+    }
+    return true;
+  }
+
   async function uploadOne(scopeKey: string, picked: File, faults: FileFault[], target?: string) {
     // The slot is re-read after every await: re-sorted, merged or deleted meanwhile, it takes nothing.
     const sig = scopeSig(scopeKey);
@@ -1896,8 +2059,14 @@ export function PatternsField({
     };
     if (moved()) return;
     const swap = plainSwapIndex(scopeKey, target) >= 0;
+    if (!swap && (await replaceInterliningOwnerSheet(scopeKey, picked, faults, target))) return;
     // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
-    if (!swap && (await replaceSheet(scopeKey, picked, target)) !== 'first') return;
+    if (
+      !swap &&
+      !isInterliningScopeKey(scopeKey) &&
+      (await replaceSheet(scopeKey, picked, target)) !== 'first'
+    )
+      return;
     if (moved()) return;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
@@ -2192,8 +2361,33 @@ export function PatternsField({
     enabled: (active || areasArmed) && canEdit && canPublishIndex && !!techCardId,
   });
 
-  const openPieces = (g: (typeof scopeGroups)[number]) =>
-    setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(g.entries) });
+  const openPieces = (g: (typeof scopeGroups)[number]) => {
+    const interlining = g.scope.lines.some(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    );
+    const entries = interlining
+      ? g.entries.filter((entry) => !isGeneratedFusingRow(entry.row))
+      : g.entries;
+    setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(entries) });
+  };
+
+  const matchingInterlining = useMemo(() => {
+    if (!matching) return undefined;
+    const slot = matching.scope.lines.find(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    );
+    if (!slot?.lineKey) return undefined;
+    return {
+      slotLineKey: slot.lineKey,
+      mainBlocks: mainPatternBlocks,
+      mainAliases: mainPatternAliases,
+      skippedIdentityKeys: readInterliningSkips(techCardId, slot.lineKey),
+      onReview: (skippedIdentities: ReadonlySet<string>) => {
+        writeInterliningSkips(techCardId, slot.lineKey, skippedIdentities);
+        setInterliningSkipsRevision((revision) => revision + 1);
+      },
+    };
+  }, [matching, mainPatternBlocks, mainPatternAliases, techCardId]);
 
   // A sheet just landed: open the pieces viewer once the form rows carry its url, so the viewer
   // reads the new file together with the slot's other sheets.
@@ -3166,6 +3360,24 @@ export function PatternsField({
     const blocks = dxfIndex ? countBlocks(dxfIndex, key) : 0;
     const a = audits[sigOf(g.entries)];
     const missing = a?.phase === 'ready' ? missingIn(a) : [];
+    const interliningUnmatched = interliningReviews.get(key)?.unmatched ?? [];
+    const interliningWarnings: HeaderWarning[] = interliningUnmatched.map((match) => ({
+      text: `${match.identity}: unmapped`,
+      error: true,
+      action: {
+        label: 'map',
+        onClick: () => {
+          setSelectedKey(key);
+          openPieces(g);
+        },
+      },
+    }));
+    const tileName = (
+      <span className='flex min-w-0 items-center justify-between gap-1'>
+        <span className='truncate'>{label}</span>
+        <HeaderWarnings items={interliningWarnings} className='shrink-0' />
+      </span>
+    );
     const active = selectedKey === key;
     const emptyClassName = cn(
       'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
@@ -3286,7 +3498,7 @@ export function PatternsField({
           <Tile
             selected={has && selectedKey === key}
             dashed={!has}
-            tone={missing.length > 0 ? 'error' : 'default'}
+            tone={missing.length > 0 || interliningUnmatched.length > 0 ? 'error' : 'default'}
             onClick={
               has
                 ? undefined
@@ -3297,7 +3509,7 @@ export function PatternsField({
             }
             title={label}
             media={media}
-            name={label}
+            name={tileName}
           >
             {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
           </Tile>
@@ -3383,9 +3595,10 @@ export function PatternsField({
         <Tile
           selected
           dashed={!has}
-          tone={missing.length > 0 ? 'error' : 'default'}
+          tone={missing.length > 0 || interliningUnmatched.length > 0 ? 'error' : 'default'}
           title={label}
           media={activeMedia}
+          name={tileName}
         >
           <div className='mt-1 flex w-full flex-col gap-1'>
             <Select
@@ -4157,6 +4370,7 @@ export function PatternsField({
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
+            interlining={matchingInterlining}
             onClose={() => setMatching(null)}
           />
         </Suspense>

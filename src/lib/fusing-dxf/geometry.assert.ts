@@ -52,6 +52,7 @@ import {
   zoneRingMm,
 } from './geometry';
 import { flattenSpline, ringSelfIntersects } from './spline';
+import { canonicalInterliningIdentity, matchInterliningImport } from './interlining-import';
 import type { FusePolygon, PieceFuseSpec } from './types';
 import type { PieceDTO } from 'lib/nesting/types';
 import {
@@ -68,6 +69,18 @@ const rectangle = (width: number, height: number) => [
   { x: width, y: height },
   { x: 0, y: height },
 ];
+
+const dxfPiece = (id: number, blockName: string, areaCm2: number): PieceDTO => ({
+  id,
+  name: blockName,
+  blockName,
+  source: 'assert.dxf',
+  fileIndex: 0,
+  poly: rectangle(10, 10),
+  bboxW: 10,
+  bboxH: 10,
+  areaCm2,
+});
 
 // Four real edges. The top edge is a smooth collar curve tessellated into eight DXF segments.
 const curvedCollar = [
@@ -126,6 +139,94 @@ function svgOf(polygons: readonly FusePolygon[], title: string): string {
 
 export async function main() {
   const outline = rectangle(100, 80);
+
+  const sizeTokens = new Set(['xs', 's', 'm']);
+  const mainBlocks = [
+    dxfPiece(1001, 'BP_U_XS', 100),
+    dxfPiece(1002, 'BP_U_S', 110),
+    dxfPiece(1003, 'BP_U_M', 120),
+    dxfPiece(1004, 'FP_XS', 90),
+    dxfPiece(1005, 'FP_S', 100),
+    dxfPiece(1006, 'FP_M', 110),
+  ];
+  const canonical = matchInterliningImport({
+    blocks: [
+      dxfPiece(1011, 'BP_U_FUSE_XS', 70),
+      dxfPiece(1012, 'BP_U-F', 70),
+      dxfPiece(1013, 'bp_u_fuse', 70),
+      dxfPiece(1015, 'BP_U_XS_FUSE', 70),
+    ],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    pieces: [{ lineKey: 'piece-bp', name: 'back' }],
+    sizeTokens,
+  });
+  assert.equal(canonical.length, 1, JSON.stringify(canonical.map((match) => match.identity)));
+  assert.equal(canonical[0].identity, 'BP_U');
+  assert.equal(canonical[0].pieceLineKey, 'piece-bp');
+
+  const carried = matchInterliningImport({
+    blocks: [dxfPiece(1014, 'bp-u-fuse-xs', 70)],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    previousAliases: [{ blockName: 'BP_U_FUSING_S', pieceLineKey: 'piece-old' }],
+    pieces: [
+      { lineKey: 'piece-bp', name: 'back' },
+      { lineKey: 'piece-old', name: 'old back' },
+    ],
+    sizeTokens,
+  });
+  assert.equal(carried[0].identity, 'BP_U');
+  assert.equal(carried[0].pieceLineKey, 'piece-old', 'the previous identity wins on a new file');
+
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'SIDE_F',
+      sizeTokens,
+      mainIdentities: new Set(['bpu']),
+    }).identity,
+    'SIDE_F',
+    'a short fusing token is kept when its stem is not a main-sheet identity',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'BP_U_F',
+      sizeTokens,
+      mainIdentities: new Set(['bpu']),
+    }).identity,
+    'BP_U',
+    'a short fusing token is stripped when its stem exists on the main sheet',
+  );
+
+  const ambiguous = matchInterliningImport({
+    blocks: [dxfPiece(1021, 'FRONT_FUSE_XS', 50)],
+    mainBlocks: [
+      dxfPiece(1022, 'FRONT_XS', 100),
+      dxfPiece(1023, 'FRONT_S', 105),
+      dxfPiece(1024, 'FRONT_M', 110),
+      dxfPiece(1025, 'BACK_XS', 100),
+      dxfPiece(1026, 'BACK_S', 105),
+      dxfPiece(1027, 'BACK_M', 110),
+    ],
+    mainAliases: [],
+    pieces: [
+      { lineKey: 'front-a', name: 'front' },
+      { lineKey: 'front-b', name: 'FRONT' },
+    ],
+    sizeTokens,
+  });
+  assert.equal(ambiguous[0].pieceLineKey, undefined);
+  assert.equal(ambiguous[0].reason, 'ambiguous');
+
+  const oversize = matchInterliningImport({
+    blocks: [dxfPiece(1031, 'BP_U_FUSE_XS', 116)],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    pieces: [{ lineKey: 'piece-bp', name: 'back' }],
+    sizeTokens,
+  });
+  assert.equal(oversize[0].pieceLineKey, undefined);
+  assert.equal(oversize[0].reason, 'oversize');
 
   assert.equal(nextNumberedRole('interlining', []), 'interlining 1');
   assert.equal(
