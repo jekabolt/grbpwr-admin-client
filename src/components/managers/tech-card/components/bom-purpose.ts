@@ -837,9 +837,10 @@ export type BindingMove<P, A> =
  * Move ONE sheet onto scope `to` (a drag between tiles). The piece links whose blocks come from
  * this sheet's DXF go with it — only those no other sheet of the old scope still holds (a sibling
  * whose blocks are unknown holds them all). `blocksOf` gives a sheet's block identities (blockKey of
- * each name and of its sizeless identity); null = not read yet, and then the move waits. A sheet
- * bound to nothing live just takes the binding: there are no links to carry. `to`'s own legacy rows
- * are pinned to it (settleSet): the first bound row would otherwise hide them.
+ * each name and of its sizeless identity); null = not read yet, and then the move waits. When the
+ * source no longer resolves, its sheets and links are associated by their normalized raw binding
+ * pair instead. `to`'s own legacy rows are pinned to it (settleSet): the first bound row would
+ * otherwise hide them.
  */
 export function moveSheet<P extends BindingRow, A extends AliasRow>(input: {
   patterns: readonly P[];
@@ -856,16 +857,31 @@ export function moveSheet<P extends BindingRow, A extends AliasRow>(input: {
   const from = sheetsAt[input.sheet];
   if (from === input.to.key) return { kind: 'noop' };
   const carry = new Set<number>();
-  if (from) {
+  const rawPair = (binding: BindingRow): readonly [string, string] => [
+    purposeOfLine(binding.fabricPurpose),
+    (binding.bomLineKey ?? '').trim(),
+  ];
+  const sameRawPair = (binding: BindingRow, pair: readonly [string, string]): boolean => {
+    const candidate = rawPair(binding);
+    return candidate[0] === pair[0] && candidate[1] === pair[1];
+  };
+  const pair = rawPair(row);
+  const candidates = input.aliases.flatMap((a, i) => {
+    const belongs = from ? linksAt[i] === from : sameRawPair(a, pair);
+    return belongs && blockKey(a.blockName) ? [i] : [];
+  });
+  if (from || candidates.length > 0) {
     const own = input.blocksOf(row, input.sheet);
     if (!own) return { kind: 'pending' };
     const siblings = input.patterns
       .map((p, i) => ({ p, i }))
-      .filter(({ i }) => i !== input.sheet && sheetsAt[i] === from)
+      .filter(
+        ({ p, i }) => i !== input.sheet && (from ? sheetsAt[i] === from : sameRawPair(p, pair)),
+      )
       .map(({ p, i }) => input.blocksOf(p, i));
     const held = (k: string) => siblings.some((sib) => sib == null || sib.has(k));
-    input.aliases.forEach((a, i) => {
-      if (linksAt[i] !== from) return;
+    candidates.forEach((i) => {
+      const a = input.aliases[i];
       const k = blockKey(a.blockName);
       if (k && own.has(k) && !held(k)) carry.add(i);
     });

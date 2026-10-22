@@ -128,6 +128,7 @@ import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
+import { serverKeyOfScope } from './piece-areas-state';
 import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import {
   splitPiecesBySize,
@@ -950,11 +951,11 @@ export function PatternsField({
     () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
     [scopes, dxfByScopeMap],
   );
-  // DXF без живой привязки — наследие (залит до 0260, ключа нет вовсе). Состояния «без материала»
-  // больше нет: ни одна правка в него не ведёт (bom-purpose.ts, moveScope), а то, что осталось от
-  // прошлого, показывается под первым материалом (на большинстве карточек — единственным) и
-  // привязывается туда первым же переносом листа на плитку. Только показ: индекс размеров, детали
-  // кроя и очередь раскроя костинга по-прежнему видят такой лист ни к чему не привязанным.
+  // DXF без живой привязки — наследие: ключа нет вовсе или его строка/назначение уже исчезли.
+  // Состояния «без материала» больше нет: ни одна правка в него не ведёт (bom-purpose.ts), а то,
+  // что осталось от прошлого, показывается под первым материалом (на большинстве карточек —
+  // единственным) и привязывается туда первым же переносом листа на плитку. Его ссылки на детали
+  // едут вместе с листом по сырой паре привязки; прочие потребители до переноса видят его ничьим.
   const orphanDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
   const orphanHome = scopes[0]?.key ?? '';
 
@@ -2111,6 +2112,7 @@ export function PatternsField({
     if (had && !force) return { sig, run: had, fresh: false };
     const run = publishPatternSizeIndex({
       techCardId,
+      scopeKey: serverKeyOfScope(g.scope),
       sheets: g.entries.map((e) => ({
         lineKey: e.row.lineKey,
         fabricPurpose: e.row.fabricPurpose,
@@ -3049,8 +3051,9 @@ export function PatternsField({
 
   // A SHEET DRAGGED ONTO ANOTHER MATERIAL (bom-purpose.ts, moveSheet): the sheet takes that
   // material, and the piece links whose blocks come from its DXF go with it — only those no other
-  // sheet of the old material still holds. Block identity is the reconcile cascade's: the name and
-  // its sizeless identity, case and inner spaces aside. A sheet not parsed yet waits.
+  // sheet of the old material still holds. An unresolved source associates links and sibling sheets
+  // by the normalized raw binding pair. Block identity is the reconcile cascade's: the name and its
+  // sizeless identity, case and inner spaces aside. A sheet not parsed yet waits.
   const moveSheetTo = (rowId: string, key: string) => {
     if (!canEdit || isSubmitting || !rowId) return;
     const say = useSnackBarStore.getState().showMessage;

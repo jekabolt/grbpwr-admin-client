@@ -10,6 +10,7 @@ import {
   type RollGoodsLine,
 } from './bom-purpose';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
+import { serverKeyOfScope } from './piece-areas-state';
 import type { TechCardFormData } from './schema';
 
 // ── МОЖНО ЛИ ВООБЩЕ ПУБЛИКОВАТЬ ПЛОЩАДИ ПРЯМО СЕЙЧАС ───────────────────────────────────────────
@@ -130,31 +131,15 @@ export type PieceAreaSheet = { lineKey?: string; fabricPurpose?: string; bomLine
  * ЛИСТЫ, ПО КОТОРЫМ МЕРИЛИ, И СКОУП, ПОД КОТОРЫМ ПИШЕМ, ДОЛЖНЫ БЫТЬ ОДНИМ И ТЕМ ЖЕ. Причина отказа
  * либо `null`.
  *
- * Здесь встречаются ДВА разных ответа на вопрос «чья это ткань», и их несовпадение — не мелочь:
+ * И панель, и сервер отвечают по РАЗРЕШЁННОМУ скоупу: лист, привязанный к строке L, принадлежит
+ * назначению P, если L разложена в P. Поэтому наследная сырая привязка к L не является
+ * несовпадением и публикуется под ключом P. Сверка нужна для другого: каждый переданный лист обязан
+ * разрешаться именно в тот скоуп, под которым пишется весь замер. Иначе геометрия и серверный
+ * отпечаток отвечали бы за разные наборы файлов.
  *
- *   • РАЗРЕШЁННЫЙ скоуп (то, по чему сгруппированы файлы и по чему считалась геометрия): лист,
- *     привязанный к строке L, принадлежит назначению P, если L разложена в P;
- *   • СЫРОЙ скоуп сервера (`entity.FabricScopeKey`): тот же лист лежит в скоупе L, потому что
- *     сервер смотрит на само поле, а не на сегодняшний BOM.
- *
- * Пока карточка разложена целиком, оба ответа совпадают. На ПОЛУразобранной — нет, и тогда прежний
- * код просто отфильтровывал «чужие» листы и публиковал остаток: геометрия бралась с обоих, а
- * отпечаток отвечал за один. Перезалив «невидимый» лист, оператор менял площади и НЕ делал замер
- * устаревшим — то есть получал молча неверную себестоимость, ровно ту, ради предотвращения которой
- * отпечаток и считает сервер.
- *
- * Второе следствие того же: слот, разложенный в назначение, ищет площади под ключом назначения.
- * Замер, записанный под ключом строки, он не найдёт НИКОГДА — запись «удалась» и не значит ничего.
- *
- * Поэтому правило одно на оба входа в замер: все листы этой ткани обязаны сырьём указывать на тот
- * же скоуп, под которым мы пишем; иначе отказ с адресом починки.
- *
- * ИСКЛЮЧЕНИЕ — ДУБЛЕРИН (L11). Сервер раскладывает его листы не по сырому ключу, а по личности
- * строки (PreferredFabricArtifactsByScope): листы, привязанные к строке, ИЛИ — если таких нет —
- * целиком наследный набор «по назначению», у которого строка единственный носитель. Площади он
- * пишет под ключом строки и принимает именно этот набор. Поэтому для скоупа дублерина (`scopes`
- * карточки называют его) каждый лист обязан РАЗРЕШАТЬСЯ в эту строку по тому же правилу набора;
- * сырой ключ наследного листа («interfacing») здесь не отказ.
+ * ДУБЛЕРИН (L11) разрешается по тому же общему зеркалу, но его эффективный скоуп всегда сама строка.
+ * Наследный набор «по назначению» читается только пока строка — единственный носитель назначения и
+ * у неё нет собственного набора (PreferredFabricArtifactsByScope).
  */
 export function pieceAreaSheetsRefusal(
   sheets: readonly PieceAreaSheet[],
@@ -165,11 +150,15 @@ export function pieceAreaSheetsRefusal(
   const key = scopeKey.trim();
   if (!key) return 'the fabric scope is undetermined';
   if (sheets.length === 0) return 'this fabric has no pattern sheets';
-  const interlining = scopes?.find((s) => s.key === key && isInterliningScope(s));
-  if (interlining && scopes) {
+  const effective = scopes?.find((s) => serverKeyOfScope(s) === key);
+  if (effective && scopes) {
     const set = bindingScopes(scopes, sheets);
-    if (sheets.some((sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, set) !== key)) {
-      return 'the sheets of this interlining are bound differently: some to its BOM line, some to a purpose only. the server reads only the line-bound ones, and the measurement would answer for files that are not in its scope. re-bind the purpose-only sheets to the line (the “⇄” button on the sheet row)';
+    if (
+      sheets.some((sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, set) !== effective.key)
+    ) {
+      return isInterliningScope(effective)
+        ? 'the sheets of this interlining are bound differently: some to its BOM line, some to a purpose only. the server reads only the line-bound ones, and the measurement would answer for files that are not in its scope. re-bind the purpose-only sheets to the line (the “⇄” button on the sheet row)'
+        : 'the sheets of this fabric are bound differently: some to a purpose, some to a BOM line. the server keeps them in DIFFERENT scopes, and the measurement would answer for files that are not in its scope. bind the sheets to a purpose as well (the “⇄” button on the sheet row)';
     }
     if (sheets.some((sh) => !(sh.lineKey ?? '').trim())) {
       return 'some sheets have no identifier yet — retry the measurement once the card has saved';

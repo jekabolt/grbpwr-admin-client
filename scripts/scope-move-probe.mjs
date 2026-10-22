@@ -33,6 +33,17 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: { getItem: () => null, setItem() {}, removeItem() {} },
   configurable: true,
 });
+const requests = [];
+Object.defineProperty(globalThis, 'fetch', {
+  value: async (url, init = {}) => {
+    requests.push({ url: String(url), body: init.body ? JSON.parse(String(init.body)) : null });
+    return {
+      ok: true, status: 200, statusText: 'OK', headers: { get: () => 'application/json' },
+      json: async () => ({ resolvedSizeCount: 1, stored: 1 }),
+    };
+  },
+  configurable: true,
+});
 const m = await import(pathToFileURL(outfile).href);
 
 let bad = 0;
@@ -204,6 +215,68 @@ const clean = (out) => out.clash.length === 0 && m.impactEmpty(out.impact);
   });
   eq([orphan.kind, orphan.links], ['moved', 0], 'a sheet bound to nothing live just binds');
   eq(orphan.patterns?.[2], { ...S3, fabricPurpose: MAIN, bomLineKey: '' }, 'orphan → MAIN (two lines: no line key)');
+
+  const deadPair = { fabricPurpose: `  ${LINING}  `, bomLineKey: ' gone ' };
+  const orphanSheets = [
+    { name: 'orphan a', ...deadPair },
+    { name: 'orphan b', fabricPurpose: LINING, bomLineKey: 'gone' },
+  ];
+  const deadAliases = [
+    { fabricPurpose: LINING, bomLineKey: 'gone', blockName: 'shared', pieceLineKey: 'p6' },
+    { fabricPurpose: LINING, bomLineKey: 'gone', blockName: 'back', pieceLineKey: 'p7' },
+    { fabricPurpose: CONTRAST, bomLineKey: 'gone', blockName: 'other', pieceLineKey: 'p8' },
+  ];
+  const deadMove = m.moveSheet({
+    patterns: orphanSheets, aliases: deadAliases, scopes: BEFORE, sheet: 0, to: mainScope,
+    blocksOf: (_r, i) => [new Set(['shared', 'back']), new Set(['shared'])][i],
+  });
+  eq(deadMove.kind, 'moved', 'orphan with dead aliases: moved');
+  eq(deadMove.aliases?.map((a) => a.fabricPurpose),
+    [LINING, MAIN, CONTRAST],
+    'orphan carries only its exclusive raw-pair alias');
+  eq(deadMove.aliases?.[1].bomLineKey, '', 'carried dead alias takes the live target binding');
+  eq([deadMove.sheets, deadMove.links], [1, 1], 'orphan alias move counts');
+
+  const deadClash = m.moveSheet({
+    patterns: orphanSheets,
+    aliases: [...deadAliases, { fabricPurpose: MAIN, bomLineKey: '', blockName: 'BACK', pieceLineKey: 'p9' }],
+    scopes: BEFORE, sheet: 0, to: mainScope,
+    blocksOf: (_r, i) => [new Set(['shared', 'back']), new Set(['shared'])][i],
+  });
+  eq([deadClash.kind, deadClash.blocks?.map((b) => b.toLowerCase())], ['clash', ['back']], 'orphan alias keeps target clash detection');
+}
+
+// ── 3b. sidecars use the resolved server scope, with raw-key read fallback ────────────────────
+{
+  const mainScope = BEFORE.find((s) => s.key === MAIN);
+  const legacySheet = { lineKey: 'PS1', fabricPurpose: UNSET, bomLineKey: 'L1' };
+  const effective = m.serverKeyOfScope(mainScope);
+  eq(effective, 'main', 'legacy line-bound sheet resolves to the purpose wire key');
+  eq(m.pieceAreaSheetsRefusal([legacySheet], effective, BEFORE), null,
+    'piece-area preflight accepts a legacy line binding under its effective purpose');
+  eq(m.areaReadKeysOfScope(mainScope, BEFORE, [legacySheet], [{ scopeKey: effective }]), ['main'],
+    'piece areas prefer the effective purpose key');
+  eq(m.areaReadKeysOfScope(mainScope, BEFORE, [legacySheet], [{ scopeKey: 'L1' }]), ['L1'],
+    'piece areas fall back to the old raw line key');
+
+  requests.length = 0;
+  const index = await m.publishPatternSizeIndex({
+    techCardId: 7, scopeKey: effective, sheets: [legacySheet], sizeTokens: ['48'],
+  });
+  eq(index.ok, true, 'size index publishes for the legacy line-bound sheet');
+  eq(requests.at(-1)?.body?.scopeKey, 'main', 'size index writes the effective purpose key');
+
+  requests.length = 0;
+  const areas = await m.publishPieceAreas({
+    techCardId: 7, scopeKey: effective, scopes: BEFORE, sheets: [legacySheet],
+    areas: [{
+      pieceLineKey: 'P1', sizeId: 1, areaCm2: 10, perimeterCm: 5,
+      hulled: false, ambiguousPick: false,
+    }],
+    contourLayer: 'CUT', seamAllowanceMm: 0,
+  });
+  eq(areas.ok, true, 'piece areas publish for the legacy line-bound sheet');
+  eq(requests.at(-1)?.body?.scopeKey, 'main', 'piece areas write the effective purpose key');
 }
 
 // ── 4. scopeImpact ───────────────────────────────────────────────────────────────────────────

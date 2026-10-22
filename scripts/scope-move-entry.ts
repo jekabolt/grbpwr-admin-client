@@ -15,6 +15,15 @@ export {
   scopeKeyOfBinding,
   scopeOfLine,
 } from 'components/managers/tech-card/components/bom-purpose';
+export { publishPatternSizeIndex } from 'components/managers/tech-card/components/pattern-size-index';
+export {
+  pieceAreaSheetsRefusal,
+  publishPieceAreas,
+} from 'components/managers/tech-card/components/piece-areas';
+export {
+  areaReadKeysOfScope,
+  serverKeyOfScope,
+} from 'components/managers/tech-card/components/piece-areas-state';
 export {
   applyLineChange,
   changeLinePurpose,
