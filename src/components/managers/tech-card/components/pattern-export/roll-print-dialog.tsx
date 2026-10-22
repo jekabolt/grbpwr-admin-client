@@ -380,7 +380,7 @@ function PaperStep({
 }) {
   return (
     <div className='flex w-full max-w-3xl flex-col items-center gap-4'>
-      <div className='grid w-full grid-cols-1 gap-4 sm:grid-cols-3'>
+      <div className='grid w-full grid-cols-3 gap-2 sm:gap-4'>
         {PAPERS.map((x) => (
           <PictureChoice
             key={x.value}
