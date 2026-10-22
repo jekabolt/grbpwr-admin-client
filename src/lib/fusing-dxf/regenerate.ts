@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import type {
   common_Size,
   common_TechCardBomItem,
+  common_TechCardInsert,
   common_TechCardPiece,
   common_TechCardPieceDxfAlias,
   common_TechCardSizePattern,
@@ -313,6 +314,18 @@ function samePatterns(
   return JSON.stringify(material(left)) === JSON.stringify(material(right));
 }
 
+const ECHO_AWARE = {
+  machineFieldsAware: true,
+  assemblyAware: true,
+  mediaAware: true,
+  operationKindsAware: true,
+  operationWorkAware: true,
+  operationDraftAware: true,
+  operationReviewAware: true,
+  bomQtyAware: true,
+  labelsAware: true,
+} satisfies Partial<common_TechCardInsert>;
+
 /**
  * Rebuilds and atomically reattaches generated fusing DXFs. Files upload first; one UpdateTechCard
  * then replaces current generated rows and removes generated rows for no-longer-used lines.
@@ -477,7 +490,9 @@ export async function regenerateFusingSheets(
   if (changed) {
     await adminService.UpdateTechCard({
       id: techCardId,
-      techCard: { ...card, patterns: nextPatterns },
+      // The body is the stored card echoed back, so it does carry every gated field it holds —
+      // without the flags the server refuses it as an outdated client (machine/press steps etc.).
+      techCard: { ...card, ...ECHO_AWARE, patterns: nextPatterns },
       expectedLockVersion: stored.lockVersion,
       snapshotReason: 'Regenerate generated fusing DXF sheets',
     });
