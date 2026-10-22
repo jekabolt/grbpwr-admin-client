@@ -44,6 +44,7 @@ import type {
 import type { PieceDTO } from 'lib/nesting/types';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
+import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   Chip,
   ChipRow,
@@ -996,6 +997,9 @@ export function PieceMatchModal({
   // The piece whose `+ material` door owns the catalog dialog. Kept separately from `selected` so
   // a sheet focus change cannot attach the picked article to another piece.
   const [pickingFuseOf, setPickingFuseOf] = useState<string | null>(null);
+  // The `+ create` door of that dialog: the piece it was opened for survives the dialog closing.
+  const createFuseFor = useRef<string | null>(null);
+  const [createFuseOpen, setCreateFuseOpen] = useState(false);
   // Name typed for a block that is about to become a NEW piece, by ci key. The block name is
   // only a default: «PERED_S» is what the exporter called it, «полочка правая» is what the
   // garment calls it, and the second one is the one that has to reach the factory.
@@ -2406,8 +2410,7 @@ export function PieceMatchModal({
     ? interliningBomItems.find((line) => line.lineKey?.trim() === pickingFuse.bomLineKey.trim())
     : undefined;
   const pickingMaterialId = wireInt(pickingFuseLine?.materialId);
-  const pickFuseMaterial = (material: common_Material) => {
-    const ci = pickingFuseOf;
+  const pickFuseMaterial = (material: common_Material, ci = pickingFuseOf) => {
     const spec = ci ? fuseOfCi(ci) : undefined;
     const materialId = wireInt(material.id);
     if (!ci || !spec?.mode || !materialId) return;
@@ -2597,6 +2600,17 @@ export function PieceMatchModal({
           setPickingFuseOf(null);
         }}
         onClose={() => setPickingFuseOf(null)}
+        onCreate={() => {
+          createFuseFor.current = pickingFuseOf;
+          setPickingFuseOf(null);
+          setCreateFuseOpen(true);
+        }}
+      />
+      <MaterialModal
+        open={createFuseOpen}
+        onOpenChange={setCreateFuseOpen}
+        defaultSection={INTERLINING_SECTION}
+        onCreated={(_id, m) => pickFuseMaterial(m, createFuseFor.current)}
       />
     </ConfirmationModal>
   );
