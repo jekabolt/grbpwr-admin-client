@@ -8,14 +8,11 @@
 import type { ExportDeps, ExportResult } from './formats';
 import type { PatternDrawing } from './drawing';
 import { PDF_PAGE_LIMIT_MM, renderPdf, type PdfPlan } from './dxf-pdf';
-import { area, bounds } from 'lib/nesting/geom/polygon';
-import { estimateRun, type EstimatePiece } from 'lib/nesting/nest/estimate';
-import { mirrorParts, NfpCache, type PreparedPiece } from 'lib/nesting/nest/nfp';
-import { placeOrder, type Gene } from 'lib/nesting/nest/place';
+import { bounds } from 'lib/nesting/geom/polygon';
+import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import {
   NEST_DEFAULTS,
   placedPoly,
-  variantPoly,
   type Placement,
   type Pt,
   type RotationDeg,
@@ -29,6 +26,13 @@ import {
   rollWidthMm,
 } from './roll-layout';
 import { readRollSourceModel, ROLL_PIECE_LABEL_MM, type RollPieceTemplate } from './roll-source';
+import {
+  rollSearch,
+  RollSearchAborted,
+  type RollSearchJob,
+  type RollSearchPlan,
+  type RollSearchResult,
+} from './roll-search';
 
 /** One paper roll as the user set it for this print. */
 export type RollSpec = {
@@ -71,6 +75,16 @@ export type RollPrintPlan = {
   tooWide: string[];
   /** Piece labels longer than one sheet in every orientation. */
   tooLong: string[];
+  /** Sum of the marker engine's used lengths, excluding per-sheet furniture. */
+  markerLengthMm: number;
+  /** How the layout was found; absent when nothing was laid. */
+  search?: {
+    /** Paper of the deterministic plan the search started from, mm (furniture included). */
+    seedLengthMm: number;
+    source: 'seed' | 'search';
+    generations: number;
+    searchMs: number;
+  };
   warnings: string[];
 };
 
@@ -168,70 +182,42 @@ export async function planRollPrint(
       total,
       tooWide,
       tooLong,
+      markerLengthMm: 0,
       warnings: source.warnings,
     };
   }
 
-  const prepared = preparePieces(items);
-  const estimatePieces: EstimatePiece[] = [...prepared.values()].map((piece) => ({
-    id: piece.id,
-    poly: items.find((item) => item.template.piece.id === piece.id)!.template.footprint,
-    allowedRots: uniqueRotations(
-      items
-        .filter((item) => item.template.piece.id === piece.id)
-        .flatMap((item) => item.allowedRots),
-    ),
-    flips: [0],
+  const templates = new Map<number, RollPieceTemplate>();
+  for (const item of items) templates.set(item.template.piece.id, item.template);
+  const job: RollSearchJob = {
+    pieces: [...templates.values()].map((template) => ({
+      id: template.piece.id,
+      footprint: template.footprint,
+    })),
+    items: items.map((item) => ({
+      pieceId: item.template.piece.id,
+      instance: item.instance,
+      allowedRots: item.allowedRots,
+    })),
+    widthCm: printableMm / 10,
+    sheetCm: contentLengthMm / 10,
+    sheetFurnitureCm: ROLL_FURNITURE_MM / 10,
+    gapCm: ROLL_GAP_MM / 10,
+  };
+  const search = await runRollSearch(job, signal);
+  throwIfAborted(signal);
+  const planned = search.best.sheets.map((sheet) => ({
+    // The search works on the printable strip; the roll's dead edge is added only here.
+    placements: sheet.placements.map((placement) => ({
+      ...placement,
+      y: placement.y + roll.edgeMm / 10,
+      flipped: false,
+    })),
+    usedLengthCm: sheet.usedLengthCm,
   }));
-  // This path deliberately reuses the marker's true-contour NFP placer but not its full GA. The
-  // latter has a mandatory two-second search floor; the print dialog recomputes live. A coarse
-  // estimate only chooses the NFP fidelity, then one deterministic, aspect-sensitive marker seed
-  // keeps the live run below the dialog's two-second target.
-  const estimate = estimateRun(estimatePieces, { timeBudgetMs: 1_200, rdpEpsCm: 0.05 });
-  estimatePieces.forEach((piece, index) => {
-    const preparedPiece = prepared.get(piece.id)!;
-    const decomposition = estimate.decompositions[index];
-    preparedPiece.parts0 = [decomposition.parts, mirrorParts(decomposition.parts)];
-  });
-  const gapCm = ROLL_GAP_MM / 10;
-  const nfps = new NfpCache(gapCm + 2 * estimate.effectiveEps, gapCm);
-
-  type PlannedSheet = { placements: Placement[]; usedLengthCm: number };
-  const planned: PlannedSheet[] = [];
-  let remaining = [...items];
-  while (remaining.length > 0) {
-    throwIfAborted(signal);
-    let best: ReturnType<typeof placeOrder> = null;
-    const trials = trialGenes(remaining, prepared, printableMm);
-    for (const genes of trials) {
-      const candidate = placeOrder(
-        genes,
-        roll.widthCm,
-        roll.edgeMm / 10,
-        contentLengthMm / 10,
-        nfps,
-        () => signal?.aborted === true,
-        true,
-      );
-      throwIfAborted(signal);
-      if (!candidate) continue;
-      if (
-        !best ||
-        candidate.placements.length > best.placements.length ||
-        (candidate.placements.length === best.placements.length &&
-          candidate.usedLengthCm < best.usedLengthCm)
-      )
-        best = candidate;
-    }
-    if (!best || best.placements.length === 0)
-      throw new Error('roll print could not place a piece that fits an empty sheet');
-    planned.push({ placements: best.placements, usedLengthCm: best.usedLengthCm });
-    const placedKeys = new Set(best.placements.map((placement) => placementKey(placement)));
-    remaining = remaining.filter(
-      (item) => !placedKeys.has(`${item.template.piece.id}|${item.instance}`),
-    );
-    await yieldTask();
-  }
+  const placedCount = planned.reduce((sum, sheet) => sum + sheet.placements.length, 0);
+  if (placedCount !== items.length)
+    throw new Error(`roll print laid ${placedCount} of ${items.length} pieces`);
 
   const itemByKey = new Map(
     items.map((item) => [`${item.template.piece.id}|${item.instance}`, item] as const),
@@ -254,11 +240,8 @@ export async function planRollPrint(
       lengthMm,
     };
   });
-  const warnings = [...source.warnings];
-  if (estimate.effectiveEps > 0.05)
-    warnings.push(
-      `contours were simplified to ${estimate.effectiveEps} cm for the live roll layout; the ${ROLL_GAP_MM} mm drawn-geometry gap was verified by the placer`,
-    );
+  const sheetPaperMm = (plan: RollSearchPlan) =>
+    plan.sheets.reduce((sum, sheet) => sum + ROLL_FURNITURE_MM + sheet.usedLengthCm * 10, 0);
   return {
     sheets: drawings,
     lengthMm: drawings.reduce((sum, sheet) => sum + sheet.lengthMm, 0),
@@ -266,7 +249,14 @@ export async function planRollPrint(
     total,
     tooWide,
     tooLong,
-    warnings: [...new Set(warnings)],
+    markerLengthMm: planned.reduce((sum, sheet) => sum + sheet.usedLengthCm * 10, 0),
+    search: {
+      seedLengthMm: sheetPaperMm(search.seed),
+      source: search.source,
+      generations: search.generations,
+      searchMs: search.searchMs,
+    },
+    warnings: [...source.warnings],
   };
 }
 
@@ -364,112 +354,55 @@ function rotatedSpansMm(
     : { along: height * 10, across: width * 10 };
 }
 
-function uniqueRotations(rotations: readonly RotationDeg[]): RotationDeg[] {
-  return [...new Set(rotations)];
-}
-
-function preparePieces(
-  items: readonly { template: RollPieceTemplate; allowedRots: RotationDeg[] }[],
-): Map<number, PreparedPiece> {
-  const prepared = new Map<number, PreparedPiece>();
-  for (const item of items) {
-    const { piece: dto, footprint } = item.template;
-    if (prepared.has(dto.id)) continue;
-    const variants = (flipped: boolean) => {
-      const polyAt = {} as Record<RotationDeg, Pt[]>;
-      const boundsAt = {} as Record<
-        RotationDeg,
-        { minX: number; minY: number; maxX: number; maxY: number }
-      >;
-      for (const rotation of [0, 90, 180, 270] as const) {
-        const poly = variantPoly(footprint, rotation, flipped);
-        polyAt[rotation] = poly;
-        boundsAt[rotation] = bounds(poly);
-      }
-      return { polyAt, boundsAt };
-    };
-    const normal = variants(false);
-    const flipped = variants(true);
-    prepared.set(dto.id, {
-      id: dto.id,
-      polyAt: [normal.polyAt, flipped.polyAt],
-      boundsAt: [normal.boundsAt, flipped.boundsAt],
-      parts0: [[], []],
-      areaCm2: area(footprint),
-    });
-  }
-  return prepared;
-}
-
-type TrialItem = {
-  template: RollPieceTemplate;
-  instance: number;
-  allowedRots: RotationDeg[];
+const abortError = () => {
+  const error = new Error('roll print layout aborted');
+  error.name = 'AbortError';
+  return error;
 };
 
-function trialGenes(
-  items: readonly TrialItem[],
-  prepared: ReadonlyMap<number, PreparedPiece>,
-  printableWidthMm: number,
-): Gene[][] {
-  const along = (item: TrialItem, rotation: RotationDeg) =>
-    rotatedSpansMm(item.template, rotation).along;
-  const across = (item: TrialItem, rotation: RotationDeg) =>
-    rotatedSpansMm(item.template, rotation).across;
-  const choose = (item: TrialItem, mode: number, index: number): RotationDeg => {
-    const options = [...item.allowedRots];
-    if (mode === 0)
-      options.sort((a, b) => along(item, a) - along(item, b) || across(item, b) - across(item, a));
-    else if (mode === 1) options.sort((a, b) => Number(a !== 0) - Number(b !== 0) || a - b);
-    else if (mode === 2)
-      options.sort((a, b) => across(item, b) - across(item, a) || along(item, a) - along(item, b));
-    else
-      options.sort(
-        (a, b) =>
-          Number(a !== (index % 2 ? 180 : 0)) - Number(b !== (index % 2 ? 180 : 0)) || a - b,
-      );
-    return options[0];
-  };
-  // A single aspect-sensitive marker seed keeps live recomputation below the dialog's two-second
-  // target. Long-first is measurably tighter on narrow rolls; broad rolls fill more reliably when
-  // pieces with the largest short side lead and their grain direction is preserved.
-  const trials =
-    printableWidthMm < 1_200
-      ? [
-          {
-            mode: 1,
-            order: [...items].sort(
-              (a, b) =>
-                Math.max(
-                  rotatedSpansMm(b.template, 0).along,
-                  rotatedSpansMm(b.template, 0).across,
-                ) -
-                Math.max(rotatedSpansMm(a.template, 0).along, rotatedSpansMm(a.template, 0).across),
-            ),
-          },
-        ]
-      : [
-          {
-            mode: 3,
-            order: [...items].sort(
-              (a, b) =>
-                Math.min(
-                  rotatedSpansMm(b.template, 0).along,
-                  rotatedSpansMm(b.template, 0).across,
-                ) -
-                Math.min(rotatedSpansMm(a.template, 0).along, rotatedSpansMm(a.template, 0).across),
-            ),
-          },
-        ];
-  return trials.map(({ order, mode }) =>
-    order.map((item, index) => ({
-      piece: prepared.get(item.template.piece.id)!,
-      instance: item.instance,
-      rot: choose(item, mode, index),
-      flip: 0,
-      allowedRots: item.allowedRots,
-    })),
-  );
+/**
+ * The roll search off the main thread when a worker exists, in-thread otherwise (node probes).
+ * Abort rejects at once and kills the worker. A worker that fails after posting its seed still
+ * yields a layout: the seed is a complete plan, only unsearched.
+ */
+async function runRollSearch(job: RollSearchJob, signal?: AbortSignal): Promise<RollSearchResult> {
+  throwIfAborted(signal);
+  if (typeof Worker === 'undefined') {
+    try {
+      return await rollSearch(job, () => signal?.aborted === true);
+    } catch (error) {
+      throw error instanceof RollSearchAborted ? abortError() : error;
+    }
+  }
+
+  const client = new NestingWorkerClient();
+  const started = Date.now();
+  let seed: RollSearchPlan | null = null;
+  const run = client.rollSearch(job, (plan) => {
+    seed = plan;
+  });
+  // Terminating the worker rejects `run.done`, so an abort settles the race immediately.
+  const abort = () => client.terminate();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    return await run.done;
+  } catch (error) {
+    throwIfAborted(signal);
+    const fallback: RollSearchPlan | null = seed;
+    if (!fallback) throw error;
+    return {
+      seed: fallback,
+      best: fallback,
+      source: 'seed',
+      generations: 0,
+      evaluated: 0,
+      seedMs: Date.now() - started,
+      searchMs: 0,
+    };
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    client.terminate();
+  }
 }
 
 const placementKey = (placement: Pick<Placement, 'pieceId' | 'instance'>) =>

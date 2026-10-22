@@ -243,11 +243,27 @@ async function main() {
     const store = new Map([[BASE_URL, B.base], ...(opts.store ?? [])]);
     const log = freshLog();
     const c = opts.card ?? card;
-    const out = await M.reuploadSheet(
-      formCard(c, opts.patterns ?? [sheetRow(opts.sha ?? '')], opts.extra),
-      file,
-      makeDeps(M, store, log, opts.faults),
-    );
+    const patterns = opts.patterns ?? [sheetRow(opts.sha ?? '')];
+    const input = formCard(c, patterns, opts.extra);
+    input.planDelete = (rowId, knownBlocks) => {
+      const plan = M.planSheetDelete(
+        {
+          patterns,
+          pieces: input.pieces,
+          aliases: input.aliases,
+          operations: input.operations,
+          issues: input.issues,
+          seams: input.seams,
+          scopeOf: input.scopeOf,
+          isDxf: (u) => input.isDxf(u ?? ''),
+          sizeTokens: input.sizeTokens,
+          blockNamesOf: (url) => knownBlocks.get(url) ?? null,
+        },
+        rowId,
+      );
+      return plan.kind === 'cascade' ? plan : null;
+    };
+    const out = await M.reuploadSheet(input, file, makeDeps(M, store, log, opts.faults));
     return { out, log, store };
   };
 
@@ -592,7 +608,7 @@ async function main() {
       );
   }
 
-  // ── чужой файл: признак плана 'foreign' (L5a) → лист ДОПОЛНИТЕЛЬНЫЙ, карточка не меняется ────
+  // ── чужой файл: до ответа нет загрузки/мутации; replace = каскад + та же строка + first path ─
   {
     const tag = 'foreign';
     is(
@@ -607,10 +623,73 @@ async function main() {
       [true, true, true, false, false],
       'признак читается структурно',
     );
-    const { out, log } = await run({ name: 'g-other.dxf', bytes: B.gOther });
+    const before = {
+      patterns: [sheetRow()],
+      pieces: card.pieces,
+      aliases: card.aliases,
+      operations: card.operations,
+    };
+    const { out, log, store } = await run(
+      { name: 'g-other.dxf', bytes: B.gOther },
+      {
+        patterns: before.patterns,
+        extra: {
+          seams: [
+            {
+              seamKey: 's-old',
+              sideA: { parts: [{ pieceLineKey: K('BP') }] },
+              sideB: { parts: [{ pieceLineKey: K('FP_R') }] },
+            },
+          ],
+        },
+      },
+    );
     if (out.kind === 'foreign') {
-      is(tag, [out.rowIndex, log.uploads.length], [0, 1], 'загружен один файл, размер от строки 0');
-      is(tag, out.row.filename, 'g-other.dxf', 'это сам файл');
+      is(
+        tag,
+        [out.rowIndex, out.pieceCount, out.loss, log.uploads.length],
+        [0, 4, { pieces: 9, steps: 9, seams: 1 }, 0],
+        'исход несёт новые детали и точные потери, файл ещё не загружен',
+      );
+      is(
+        tag,
+        [before.patterns[0].url, before.pieces.length, before.operations.length],
+        [BASE_URL, card.pieces.length, card.operations.length],
+        'до выбора строка, детали и шаги не менялись',
+      );
+
+      const upload = makeDeps(M, store, log).upload;
+      const row = await M.uploadForeignSheet(out, upload);
+      const replace = M.planForeignChoice(out, 'replace', row);
+      if (replace.kind === 'replace') {
+        const patterns = before.patterns.map((r, i) =>
+          i === replace.rowIndex ? { ...r, ...replace.row } : r,
+        );
+        const first = M.cardFromSheet(replace.parsed, { scope: MAIN, sizeTokens: SIZES });
+        const nextPieces = [...replace.pieces, ...first.pieces];
+        is(
+          tag,
+          [
+            patterns[0].lineKey,
+            patterns[0].version,
+            patterns[0].url === BASE_URL,
+            replace.removedSeamIds,
+          ],
+          ['sheet-main', 0, false, ['s-old']],
+          'replace держит id строки, пишет version 0, новый url и снимает старый шов',
+        );
+        yes(
+          tag,
+          card.pieces.every((p) => !replace.pieces.some((n) => n.lineKey === p.lineKey)),
+          'старые детали ушли каскадом',
+        );
+        is(
+          tag,
+          nextPieces.slice(replace.pieces.length).map((p) => p.name),
+          ['PCK_L_#_UNI_1_M', 'PCK_L_#_UNI_2_M', 'PCK_L_UNI_1_M', 'PCK_L_UNI_M'],
+          'новые детали входят через данные первой заливки',
+        );
+      } else yes(tag, false, `replace: исход ${replace.kind}`);
     } else {
       // До L5a сверка «другой файл» только выключает матч по форме — исход ещё не 'foreign'.
       console.log(`  · g-other: ${out.kind} (foreign arrives with L5a)`);

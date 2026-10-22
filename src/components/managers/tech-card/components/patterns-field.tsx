@@ -58,6 +58,7 @@ import {
   Tiles,
   Pill,
   Placeholder,
+  Progress,
   Text,
 } from 'ui';
 import {
@@ -175,8 +176,13 @@ import {
   seamAnchorKeys,
   sheetRowId,
   markJumpParams,
+  planForeignChoice,
   reuploadSheet,
+  uploadForeignSheet,
+  type ForeignChoice,
+  type ForeignReuploadOutcome,
   type ReuploadDeps,
+  type ReuploadDeletePlan,
   type ReuploadOutcome,
   type ReuploadRefusal,
 } from './nesting/dxf-reupload';
@@ -365,6 +371,19 @@ type PatternRow = {
 };
 type Entry = { row: PatternRow; index: number };
 
+type ReuploadFlight = { rowId: string; version: number };
+type ReuploadFeedback =
+  | { kind: 'noop'; version?: number; uploadedAt?: string }
+  | {
+      kind: 'applied';
+      version: number;
+      uploadedAt: string;
+      added: number;
+      reshaped: number;
+      removed: number;
+      marked: number;
+    };
+
 // Rows of the card as the DXF re-upload reads and writes them (nesting/dxf-reupload.ts).
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
   lineKey: string;
@@ -372,6 +391,13 @@ type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
 };
 type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+type ForeignAsk = {
+  scopeKey: string;
+  picked: File;
+  outcome: ForeignReuploadOutcome<FormPiece, FormAlias, FormOp>;
+  current: () => boolean;
+  upload: ReuploadDeps<FormPiece, FormAlias, FormOp>['upload'];
+};
 
 // A refused re-upload keeps the old sheet and says why in 1–2 words.
 const REFUSAL_WORDS: Record<ReuploadRefusal, string> = {
@@ -413,6 +439,20 @@ type BomLine = NonNullable<TechCardFormData['bomItems']>[number];
 function labelOf(row?: PatternRow): string {
   return row?.name || row?.filename || '(unnamed)';
 }
+
+const filenameStem = (name: string) => name.replace(/\.[^./\\]+$/, '');
+
+/** Follow a changed filename until the operator gives the row a distinct display name. */
+function followedName(row: PatternRow, nextFilename: string): string | null {
+  const name = row.name ?? '';
+  const filename = row.filename ?? '';
+  if (!name) return null;
+  if (name === filename) return nextFilename;
+  if (name === filenameStem(filename)) return filenameStem(nextFilename);
+  return null;
+}
+
+const feedbackKey = (row: PatternRow, nextUrl = row.url ?? '') => row.lineKey || nextUrl;
 
 // Rev.N of this sheet, straight off the row — the server numbers a url it has not seen on this
 // card and preserves the number for one it has. 0 is not revision zero, it is a row that was
@@ -630,6 +670,14 @@ export function PatternsField({
   const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
+  const uploadingRef = useRef<Record<string, number>>({});
+  // A replacement keeps the old drawing mounted while its new revision is parsed and uploaded.
+  const [reuploading, setReuploading] = useState<Record<string, ReuploadFlight>>({});
+  // The last replacement result is visit-local: the server remains the persisted revision source.
+  const [reuploadFeedback, setReuploadFeedback] = useState<Record<string, ReuploadFeedback>>({});
+  // A parsed foreign DXF waits here without being uploaded until the operator chooses its fate.
+  const [foreignAsk, setForeignAsk] = useState<ForeignAsk | null>(null);
+  const foreignCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
   const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
   // A re-upload changed the slot's geometry: piece areas are measured on the next save even while
@@ -1211,7 +1259,7 @@ export function PatternsField({
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
   function openPicker(scopeKey: string, rowId = '') {
-    if (!canUpload) return;
+    if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     pickFor.current = scopeKey;
     pickRow.current = rowId;
     fileInputRef.current?.click();
@@ -1384,11 +1432,51 @@ export function PatternsField({
     }
   }
 
-  const bumpUploading = (scopeKey: string, d: number) =>
-    setUploading((u) => {
-      const n = (u[scopeKey] ?? 0) + d;
-      const { [scopeKey]: _gone, ...rest } = u;
-      return n > 0 ? { ...rest, [scopeKey]: n } : rest;
+  const bumpUploading = (scopeKey: string, d: number) => {
+    const current = uploadingRef.current;
+    const n = Math.max(0, (current[scopeKey] ?? 0) + d);
+    const { [scopeKey]: _gone, ...rest } = current;
+    const next = n > 0 ? { ...rest, [scopeKey]: n } : rest;
+    uploadingRef.current = next;
+    setUploading(next);
+  };
+
+  const nextRevision = (row: PatternRow): number => {
+    const history = row.lineKey ? historyByLine.get(row.lineKey) ?? [] : [];
+    const optimistic = reuploadFeedback[feedbackKey(row)]?.version ?? 0;
+    return (
+      Math.max(
+        revisionOf(row) ?? 0,
+        optimistic,
+        ...history.map((revision) => Number(revision.revision ?? 0) || 0),
+      ) + 1
+    );
+  };
+
+  function beginReupload(scopeKey: string, target?: string): ReuploadFlight {
+    const rows = ((getValues('patterns') ?? []) as PatternRow[]).filter(
+      (row) =>
+        isDxfUrl(row.url) &&
+        scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes) === scopeKey,
+    );
+    const exact = target
+      ? rows.find((row) => sheetRowId(row) === target)
+      : rows.length === 1
+        ? rows[0]
+        : undefined;
+    const display = exact ?? rows[0];
+    const flight = {
+      rowId: exact ? sheetRowId(exact) : '',
+      version: display ? nextRevision(display) : 1,
+    };
+    setReuploading((all) => ({ ...all, [scopeKey]: flight }));
+    return flight;
+  }
+
+  const endReupload = (scopeKey: string) =>
+    setReuploading((all) => {
+      const { [scopeKey]: _gone, ...rest } = all;
+      return rest;
     });
 
   // Does this slot already hold a DXF? Then a new DXF REPLACES it (L4a) instead of joining it.
@@ -1505,10 +1593,10 @@ export function PatternsField({
   }
 
   // RE-UPLOAD INTO A SLOT THAT ALREADY HOLDS A SHEET (L4a): reconcile and apply at once. No units or
-  // sizes questions (both come from the replaced sheet), no pieces viewer. Marks on steps send the
-  // operator to the first marked step; without marks the operator stays here. 'first' = an empty
-  // slot: the caller goes on with the first-upload path. `target` = the sheet row (sheetRowId) the
-  // file replaces; without it the slot's only sheet, or the one sharing most blocks.
+  // sizes questions (both come from the replaced sheet), no pieces viewer. The result line links to
+  // the first marked step; the operator stays here after apply. 'first' = an empty slot: the caller
+  // goes on with the first-upload path. `target` = the sheet row (sheetRowId) the file replaces;
+  // without it the slot's only sheet, or the one sharing most blocks.
   async function replaceSheet(
     scopeKey: string,
     picked: File,
@@ -1531,26 +1619,30 @@ export function PatternsField({
     ];
     const refsNow = () =>
       externalPieceRefs(piecesNow(), cardRead?.colorways, cardRead?.pieceAreaScopes, seamKeys());
-    // The confirmed seams the reconcile re-measures on a reshaped piece: the store's rows (saved +
-    // optimistic) once it holds this card, else the card read's.
+    // All seams feed the delete cascade; the confirmed subset is what reconcile re-measures on a
+    // reshaped piece. The store owns saved + optimistic rows once it holds this card.
     const seamsNow = (): TechCardSeamWire[] => {
       const st = useSeamsStore.getState();
-      const rows =
-        techCardId && st.cardId === techCardId
-          ? rowsOf(st).map(toWire)
-          : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
-      return rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
+      return techCardId && st.cardId === techCardId
+        ? rowsOf(st).map(toWire)
+        : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
     };
-    const canonicalSeams = (rows = seamsNow()) =>
+    const reconcileSeams = (rows: TechCardSeamWire[]) =>
+      rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
+    const canonicalSeams = (rows: TechCardSeamWire[]) =>
       [...rows].sort((a, b) => {
         const ak = a.seamKey ?? '';
         const bk = b.seamKey ?? '';
         return ak < bk ? -1 : ak > bk ? 1 : 0;
       });
-    // EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
-    // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step, seam
-    // or piece edited), the plan belongs to another card and is not applied.
-    const inputsSig = (seams = canonicalSeams()) => {
+    const allSeams = canonicalSeams(seamsNow());
+    const seams = reconcileSeams(allSeams);
+    /*
+     * EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
+     * (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step, seam
+     * or piece edited), the plan belongs to another card and is not applied.
+     */
+    const inputsSig = (seamRows = canonicalSeams(seamsNow())) => {
       const rows = (getValues('patterns') ?? []) as PatternRow[];
       return JSON.stringify([
         getValues('pieces') ?? [],
@@ -1570,13 +1662,14 @@ export function PatternsField({
           b.section ?? '',
         ]),
         refsNow(),
-        seams,
+        seamRows,
       ]);
     };
-    const seams = canonicalSeams();
-    const before = inputsSig(seams);
+    const before = inputsSig(allSeams);
     const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
+    const deps = reuploadDeps(scopeKey, picked.type);
+    beginReupload(scopeKey, target);
     bumpUploading(scopeKey, 1);
     try {
       out = await reuploadSheet(
@@ -1594,18 +1687,38 @@ export function PatternsField({
           externalRefs: refsNow(),
           seams,
           target,
+          planDelete: (rowId, knownBlocks) => {
+            const plan = deletePlan(rowId, knownBlocks);
+            return plan.kind === 'cascade' ? plan : null;
+          },
         },
         { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
-        reuploadDeps(scopeKey, picked.type),
+        deps,
       );
     } catch (e) {
       console.error('DXF re-upload failed', e);
       out = { kind: 'refused', why: 'parse' };
     } finally {
       bumpUploading(scopeKey, -1);
+      endReupload(scopeKey);
     }
     if (out.kind === 'first') return 'first';
     if (out.kind === 'noop') {
+      const unchanged = ((getValues('patterns') ?? []) as PatternRow[])[out.rowIndex];
+      if (unchanged) {
+        const key = feedbackKey(unchanged);
+        setReuploadFeedback((all) => {
+          const previous = all[key];
+          return {
+            ...all,
+            [key]: {
+              kind: 'noop',
+              version: previous?.version,
+              uploadedAt: previous?.uploadedAt,
+            },
+          };
+        });
+      }
       say('same file', 'success');
       return 'noop';
     }
@@ -1613,29 +1726,22 @@ export function PatternsField({
       say(REFUSAL_WORDS[out.why], 'error');
       return 'refused';
     }
-    // Another garment's file: the card stays as it is, the file joins the slot as one more sheet,
-    // sized like the sheet it was dropped on. No units, sizes or pieces questions.
+    // A foreign file is parsed but deliberately not uploaded. The choice handler below validates
+    // this same signature once more before and after its deferred upload.
     if (out.kind === 'foreign') {
       if (!slotSig || scopeSig(scopeKey) !== slotSig) {
         say('material changed', 'error');
         return 'refused';
       }
-      const live = (getValues('patterns') ?? []) as PatternRow[];
-      const near = live[out.rowIndex];
-      const sizeId =
-        near && scopeKeyOfBinding(near.fabricPurpose, near.bomLineKey, scopes) === scopeKey
-          ? near.sizeId ?? storageSizeId
-          : storageSizeId;
-      append({
-        sizeId,
-        lineKey: ulid(),
-        ...out.row,
-        name: autoName(scopeKey, picked),
-        ...bindingOf(scopeKey),
+      setForeignAsk({
+        scopeKey,
+        picked,
+        outcome: out,
+        // Same cascade inputs AND the same slot (its lines): chooseForeign asks before and after
+        // its deferred upload.
+        current: () => inputsSig() === before && scopeSig(scopeKey) === slotSig,
+        upload: deps.upload,
       });
-      setAreasArmed(true);
-      autosave.request('dxf-new-sheet');
-      say('new sheet', 'success');
       return 'foreign';
     }
     // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
@@ -1664,6 +1770,8 @@ export function PatternsField({
     });
     setValue(`patterns.${i}.url`, out.row.url, { shouldDirty: true });
     setValue(`patterns.${i}.filename`, out.row.filename, { shouldDirty: true });
+    const nextName = followedName(row, out.row.filename);
+    if (nextName != null) setValue(`patterns.${i}.name`, nextName, { shouldDirty: true });
     setValue(`patterns.${i}.sizeBytes`, out.row.sizeBytes, { shouldDirty: true });
     setValue(`patterns.${i}.sha256`, out.row.sha256, { shouldDirty: true });
     // 0 = "assign one": the server numbers a url it has not seen on this card.
@@ -1674,9 +1782,19 @@ export function PatternsField({
     // The areas of the new geometry are measured once the save lands, even if the marks jump away
     // from this tab (useAutoPieceAreas otherwise waits for the tab).
     setAreasArmed(true);
+    setReuploadFeedback((all) => ({
+      ...all,
+      [feedbackKey(row, out.row.url)]: {
+        kind: 'applied',
+        version: nextRevision(row),
+        uploadedAt: new Date().toISOString(),
+        added: out.result.addedPieceKeys.length,
+        reshaped: out.result.reshapedPieceKeys.length,
+        removed: out.result.removedPieceKeys.length,
+        marked: new Set(out.result.reviews.map((review) => review.opIndex)).size,
+      },
+    }));
     autosave.request('dxf-reupload');
-    const ops = out.operations;
-    setParams((prev) => markJumpParams(prev, ops) ?? prev, { replace: true });
     return 'applied';
   }
 
@@ -1788,7 +1906,7 @@ export function PatternsField({
   function routeFiles(scopeKey: string, list: FileList | File[] | null, target?: string) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
-    if (files.length === 0 || !canUpload) return;
+    if (files.length === 0 || !canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     const hasRange = ((getValues('sizeIds') ?? []) as number[]).length > 0;
     const errOf = (f: File): string | null => {
       if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
@@ -2138,7 +2256,10 @@ export function PatternsField({
     return m;
   }, [bundle]);
 
-  const deletePlan = (rowId: string) => {
+  const deletePlan = (
+    rowId: string,
+    knownBlocks: ReadonlyMap<string, readonly string[]> = new Map(),
+  ) => {
     const pieces = ((getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>).map(
       (p) => ({ ...p, lineKey: p.lineKey ?? '', name: p.name ?? '' }),
     ) as FormPiece[];
@@ -2168,6 +2289,8 @@ export function PatternsField({
         isDxf: (url) => isDxfUrl(url),
         sizeTokens: [...dictTokens.keys()],
         blockNamesOf: (url) => {
+          const known = knownBlocks.get(url);
+          if (known) return known;
           const set = blockNamesByUrl.get(url);
           return set ? [...set] : null;
         },
@@ -2210,6 +2333,116 @@ export function PatternsField({
     return true;
   }
 
+  // Shared by row deletion and a confirmed foreign replacement: one writer for pieces, aliases,
+  // steps and issue remapping. The caller decides whether the row is removed or swapped in place.
+  function applySheetCascade(
+    plan: Pick<
+      ReuploadDeletePlan<FormPiece, FormAlias, FormOp>,
+      'pieces' | 'aliases' | 'operations' | 'issueNumbers'
+    >,
+  ) {
+    setValue('pieces', plan.pieces, { shouldDirty: true });
+    setValue('pieceDxfAliases', plan.aliases, { shouldDirty: true });
+    setValue('operations', plan.operations, { shouldDirty: true });
+    (getValues('issues') ?? []).forEach((iss, ii) => {
+      const next = plan.issueNumbers[ii];
+      if (next != null && next !== (iss.operationNumber ?? 0))
+        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
+    });
+  }
+
+  async function chooseForeign(ask: ForeignAsk, choice: ForeignChoice) {
+    setForeignAsk(null);
+    const say = useSnackBarStore.getState().showMessage;
+    if (!ask.current()) {
+      say('not applied', 'error');
+      return;
+    }
+
+    let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
+    if (choice === 'replace') beginReupload(ask.scopeKey, ask.outcome.rowId);
+    bumpUploading(ask.scopeKey, 1);
+    try {
+      uploaded = await uploadForeignSheet(ask.outcome, ask.upload);
+    } catch (e) {
+      console.error('Foreign DXF upload failed', e);
+      say('upload failed', 'error');
+      return;
+    } finally {
+      bumpUploading(ask.scopeKey, -1);
+      if (choice === 'replace') endReupload(ask.scopeKey);
+    }
+
+    // An edit made while the upload was in flight invalidates the captured cascade. The uploaded
+    // blob is then an orphan, but the form is left intact rather than applying an old plan.
+    if (!ask.current()) {
+      say('not applied', 'error');
+      return;
+    }
+    const plan = planForeignChoice(ask.outcome, choice, uploaded);
+    const live = (getValues('patterns') ?? []) as PatternRow[];
+    const at = live.findIndex((r) => sheetRowId(r) === ask.outcome.rowId);
+    const target = at >= 0 ? live[at] : undefined;
+    if (
+      !target ||
+      target.url !== ask.outcome.replacedUrl ||
+      scopeKeyOfBinding(target.fabricPurpose, target.bomLineKey, scopes) !== ask.scopeKey
+    ) {
+      say('not applied', 'error');
+      return;
+    }
+
+    if (plan.kind === 'add') {
+      append({
+        sizeId: target.sizeId ?? storageSizeId,
+        lineKey: ulid(),
+        ...plan.row,
+        name: autoName(ask.scopeKey, ask.picked),
+        ...bindingOf(ask.scopeKey),
+      });
+      setAreasArmed(true);
+      autosave.request('dxf-new-sheet');
+      say('new sheet', 'success');
+      return;
+    }
+
+    applySheetCascade(plan);
+    const keep = { shouldDirty: true };
+    setValue(`patterns.${at}.url`, plan.row.url, keep);
+    setValue(`patterns.${at}.filename`, plan.row.filename, keep);
+    const nextName = followedName(target, plan.row.filename);
+    if (nextName != null) setValue(`patterns.${at}.name`, nextName, keep);
+    setValue(`patterns.${at}.sizeBytes`, plan.row.sizeBytes, keep);
+    setValue(`patterns.${at}.sha256`, plan.row.sha256, keep);
+    setValue(`patterns.${at}.version`, 0, keep);
+    setValue(`patterns.${at}.uploadedAt`, '', keep);
+    armReuploadSnapshot(techCardId, plan.row.url, plan.replacedUrl);
+    setAreasArmed(true);
+    // This is the established first-upload hand-off: the shared pieces viewer creates and links
+    // the new file's pieces after the old sheet's graph has been removed.
+    setPendingView({ scopeKey: ask.scopeKey, urls: [plan.row.url] });
+    setReuploadFeedback((all) => ({
+      ...all,
+      [feedbackKey(target, plan.row.url)]: {
+        kind: 'applied',
+        version: nextRevision(target),
+        uploadedAt: new Date().toISOString(),
+        added: 0,
+        reshaped: 0,
+        removed: ask.outcome.loss.pieces,
+        marked: 0,
+      },
+    }));
+    say('replaced', 'success');
+    if (!techCardId || plan.removedSeamIds.length === 0) {
+      autosave.request('dxf-reupload');
+      return;
+    }
+    const saved = await autosave.flush('dxf-reupload');
+    if (saved !== 'ok' && saved !== 'nothing') return;
+    await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
+  }
+
   async function confirmDelete(rowId: string) {
     // A non-DXF row: by its index, as the old × did.
     if (rowId.startsWith('#')) {
@@ -2223,14 +2456,7 @@ export function PatternsField({
       remove(plan.rowIndex);
       return;
     }
-    setValue('pieces', plan.pieces, { shouldDirty: true });
-    setValue('pieceDxfAliases', plan.aliases, { shouldDirty: true });
-    setValue('operations', plan.operations, { shouldDirty: true });
-    (getValues('issues') ?? []).forEach((iss, ii) => {
-      const next = plan.issueNumbers[ii];
-      if (next != null && next !== (iss.operationNumber ?? 0))
-        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
-    });
+    applySheetCascade(plan);
     remove(plan.rowIndex);
     armDeleteSnapshot(techCardId, plan.rowUrl);
     if (!techCardId || plan.removedSeamIds.length === 0) {
@@ -2453,42 +2679,57 @@ export function PatternsField({
     const nameTitle =
       [row.filename, converted ? convertedTitle(converted) : ''].filter(Boolean).join('\n') ||
       undefined;
+    const rowId = sheetRowId(row);
+    const slotBusy = !!rowScope && (uploading[rowScope] ?? 0) > 0;
+    const flight = rowScope ? reuploading[rowScope] : undefined;
+    const rowUploading =
+      !!flight &&
+      (flight.rowId === rowId || (!flight.rowId && (slotGroup?.entries.length ?? 0) === 1));
+    const feedback = reuploadFeedback[feedbackKey(row)];
     // v{N}: the active row's own revision (a restored sheet keeps its old number).
-    const shownRev = rev;
+    const shownRev = feedback?.version ?? rev;
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
     // A non-DXF row is replaceable too: a plain file swap (uploadOne), no reconcile, no marks.
     const replaceable = !!slotGroup && canUpload;
-    const rowId = sheetRowId(row);
-    const dragging = replaceable && dragRow === rowId;
+    const dragging = replaceable && !slotBusy && dragRow === rowId;
     const url = row.url ?? '';
-    const uploadedOn = ddmm(row.uploadedAt ?? '');
+    const uploadedOn = ddmm(feedback?.uploadedAt ?? row.uploadedAt ?? '');
+    const summary =
+      feedback?.kind === 'applied'
+        ? [
+            feedback.added > 0 ? `+${feedback.added} ${plural(feedback.added, 'piece')}` : '',
+            feedback.reshaped > 0 ? `${feedback.reshaped} reshaped` : '',
+            feedback.removed > 0 ? `−${feedback.removed} ${plural(feedback.removed, 'piece')}` : '',
+          ].filter(Boolean)
+        : [];
     // A file dropped on the row = a new version of this sheet; the panel's drop stays as it is.
     // A dragged sheet row is not a file: it passes through to the panel (dropProps).
-    const rowDrop = replaceable
-      ? {
-          onDragOver: (e: React.DragEvent) => {
-            if (isSheetDrag(e)) return;
-            e.preventDefault();
-            e.stopPropagation();
-            setDragRow(rowId);
-          },
-          onDragLeave: (e: React.DragEvent) => {
-            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-            setDragRow((r) => (r === rowId ? null : r));
-          },
-          onDrop: (e: React.DragEvent) => {
-            if (isSheetDrag(e)) return;
-            e.preventDefault();
-            e.stopPropagation();
-            setDragRow(null);
-            setDragKey(null);
-            routeFiles(slotGroup.scope.key, e.dataTransfer.files, rowId);
-          },
-        }
-      : {};
+    const rowDrop =
+      replaceable && !slotBusy
+        ? {
+            onDragOver: (e: React.DragEvent) => {
+              if (isSheetDrag(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setDragRow(rowId);
+            },
+            onDragLeave: (e: React.DragEvent) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              setDragRow((r) => (r === rowId ? null : r));
+            },
+            onDrop: (e: React.DragEvent) => {
+              if (isSheetDrag(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setDragRow(null);
+              setDragKey(null);
+              routeFiles(slotGroup.scope.key, e.dataTransfer.files, rowId);
+            },
+          }
+        : {};
     // A DXF sheet drags onto another material's tile and moves there with its own piece links.
     const sheetDrag =
-      dxf && canEdit && !isSubmitting && editing?.index !== index
+      dxf && canEdit && !isSubmitting && !slotBusy && editing?.index !== index
         ? {
             draggable: true,
             onDragStart: (e: React.DragEvent) => {
@@ -2586,18 +2827,36 @@ export function PatternsField({
           </div>
           {dragging && (
             <Text size='nano' component='span' className='shrink-0 uppercase tabular-nums'>
-              {rev != null ? `drop · v${rev + 1}` : 'drop'}
+              {`drop · v${nextRevision(row)}`}
             </Text>
           )}
-          {uploadedOn && (
-            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
-              {uploadedOn}
+          {rowUploading ? (
+            <Text size='nano' component='span' className='shrink-0 tabular-nums'>
+              v{flight?.version ?? nextRevision(row)} · uploading
             </Text>
-          )}
-          {shownRev != null && (
-            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
-              v{shownRev}
-            </Text>
+          ) : (
+            <>
+              {uploadedOn && (
+                <Text
+                  size='nano'
+                  variant='label'
+                  component='span'
+                  className='shrink-0 tabular-nums'
+                >
+                  {uploadedOn}
+                </Text>
+              )}
+              {shownRev != null && (
+                <Text
+                  size='nano'
+                  variant='label'
+                  component='span'
+                  className='shrink-0 tabular-nums'
+                >
+                  v{shownRev}
+                </Text>
+              )}
+            </>
           )}
           <span className='inline-flex shrink-0 items-center gap-1'>
             {stray && canEdit && storageSizeId > 0 && (
@@ -2664,6 +2923,7 @@ export function PatternsField({
                 aria-label='new version'
                 title='new version'
                 className={ROW_ICON_BTN}
+                disabled={slotBusy}
                 onClick={() => openPicker(slotGroup.scope.key, rowId)}
               >
                 <UploadGlyph />
@@ -2674,12 +2934,51 @@ export function PatternsField({
                 size='sm'
                 aria-label={`delete ${labelOf(row)}`}
                 title='delete'
-                disabled={isSubmitting}
+                disabled={isSubmitting || slotBusy}
                 onClick={() => askRemove(row, index)}
               />
             )}
           </span>
         </div>
+        {rowUploading && <Progress value={62} className='mt-1 h-0.5' />}
+        {feedback?.kind === 'noop' && (
+          <Text size='nano' component='p' className='mt-0.5 tabular-nums'>
+            same file
+          </Text>
+        )}
+        {feedback?.kind === 'applied' && (summary.length > 0 || feedback.marked > 0) && (
+          <Text
+            size='nano'
+            component='p'
+            className='mt-0.5 flex flex-wrap items-center tabular-nums'
+          >
+            {summary.map((part, partIndex) => (
+              <span key={part}>
+                {partIndex > 0 ? ' · ' : ''}
+                {part}
+              </span>
+            ))}
+            {feedback.marked > 0 && (
+              <>
+                {summary.length > 0 ? ' · ' : ''}
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  className='p-0 normal-case'
+                  onClick={() =>
+                    setParams(
+                      (prev) => markJumpParams(prev, getValues('operations') ?? []) ?? prev,
+                      { replace: true },
+                    )
+                  }
+                >
+                  check {feedback.marked} {plural(feedback.marked, 'step')}
+                </Button>
+              </>
+            )}
+          </Text>
+        )}
       </li>
     );
   }
@@ -2788,13 +3087,16 @@ export function PatternsField({
 
   // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер, перетащенный лист — в moveSheetTo.
   const dropProps = (key: string) =>
-    canUpload
+    canUpload && (uploading[key] ?? 0) === 0
       ? {
           onDragOver: (e: React.DragEvent) => {
             e.preventDefault();
             setDragKey(key);
           },
-          onDragLeave: () => setDragKey((k) => (k === key ? null : k)),
+          onDragLeave: (e: React.DragEvent) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setDragKey((k) => (k === key ? null : k));
+          },
           onDrop: (e: React.DragEvent) => {
             e.preventDefault();
             setDragKey(null);
@@ -2812,7 +3114,11 @@ export function PatternsField({
     const key = g.scope.key;
     const label = scopeLabel(g.scope);
     const has = g.entries.length > 0;
+    const primaryDxf = g.entries.find((entry) => isDxfUrl(entry.row.url));
+    const hasDxf = !!primaryDxf;
     const busy = (uploading[key] ?? 0) > 0;
+    const flight = reuploading[key];
+    const dragging = dragKey === key;
     const blocks = dxfIndex ? countBlocks(dxfIndex, key) : 0;
     const a = audits[sigOf(g.entries)];
     const missing = a?.phase === 'ready' ? missingIn(a) : [];
@@ -2855,27 +3161,81 @@ export function PatternsField({
       ) : (
         <div className={emptyClassName}>{emptyContents}</div>
       );
-    const media = !has ? (
-      empty
-    ) : busy ? (
-      <Placeholder dashed label='uploading…' className='h-[84px] w-full' />
-    ) : dxfIndex && blocks > 0 ? (
-      <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-pageBg p-1'>
-        <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
+    const drawing =
+      dxfIndex && blocks > 0 ? (
+        <div
+          className={cn(
+            'relative flex h-[84px] w-full items-center justify-center border border-borderColor bg-pageBg p-1 pt-5',
+            hasDxf && canUpload && !busy && 'hover:border-textColor',
+          )}
+        >
+          <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
+          {flight && <Progress value={62} className='absolute inset-x-0 bottom-0 h-0.5' />}
+        </div>
+      ) : (
+        <div className='relative'>
+          <Placeholder
+            dashed
+            label={geometry.isError ? 'parse error' : dxfIndex ? 'no shapes found' : 'parsing…'}
+            className='h-[84px] w-full'
+          />
+          {flight && <Progress value={62} className='absolute inset-x-0 bottom-0 h-0.5' />}
+        </div>
+      );
+    const openVersion = (event: React.MouseEvent) => {
+      event.stopPropagation();
+      if (busy) return;
+      setSelectedKey(key);
+      openPicker(key);
+    };
+    const filled = (
+      <div>
+        <div className='relative'>
+          {hasDxf && canUpload ? (
+            <button
+              type='button'
+              aria-label='new version'
+              disabled={busy}
+              className='block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
+              onClick={openVersion}
+            >
+              {drawing}
+            </button>
+          ) : (
+            drawing
+          )}
+          {blocks > 0 && (
+            <span className='pointer-events-none absolute left-px top-px bg-bgColor px-1 py-0.5 text-micro text-labelColor tabular-nums'>
+              {flight ? `v${flight.version} · uploading` : `${blocks} ${plural(blocks, 'piece')}`}
+            </span>
+          )}
+        </div>
+        {hasDxf && canUpload && (active || dragging || busy) && (
+          <button
+            type='button'
+            disabled={busy}
+            onClick={openVersion}
+            className={cn(
+              'mt-1 flex h-7 w-full cursor-pointer items-center justify-center border border-dashed text-micro uppercase tracking-label focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed',
+              dragging
+                ? 'border-solid border-textColor bg-textColor text-bgColor'
+                : busy
+                  ? 'border-borderColor text-labelColor'
+                  : 'border-labelColor text-textColor hover:border-textColor',
+            )}
+          >
+            {dragging && primaryDxf ? `drop · v${nextRevision(primaryDxf.row)}` : '+ new version'}
+          </button>
+        )}
       </div>
-    ) : (
-      <Placeholder
-        dashed
-        label={geometry.isError ? 'parse error' : dxfIndex ? 'no shapes found' : 'parsing…'}
-        className='h-[84px] w-full'
-      />
     );
+    const media = !has ? empty : filled;
 
     if (!active) {
       return (
         <div
           key={key}
-          className={cn('group/slot', dragKey === key && 'outline outline-2 outline-textColor')}
+          className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
           data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
           {...dropProps(key)}
         >
@@ -2883,14 +3243,17 @@ export function PatternsField({
             selected={has && selectedKey === key}
             dashed={!has}
             tone={missing.length > 0 ? 'error' : 'default'}
-            onClick={() => {
-              setSelectedKey(key);
-              if (!has) openPicker(key);
-            }}
+            onClick={
+              has
+                ? undefined
+                : () => {
+                    setSelectedKey(key);
+                    openPicker(key);
+                  }
+            }
             title={label}
             media={media}
             name={label}
-            sub={has && blocks > 0 ? `${blocks} ${plural(blocks, 'piece')}` : undefined}
           >
             {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
           </Tile>
@@ -2923,14 +3286,9 @@ export function PatternsField({
     const activeMedia = (
       <div className='relative'>
         {media}
-        {has && blocks > 0 && (
-          <span className='pointer-events-none absolute left-px top-px bg-bgColor px-1 py-0.5 text-micro text-labelColor'>
-            {blocks} {plural(blocks, 'piece')}
-          </span>
-        )}
         {canEdit && (
           <div
-            className='absolute right-px top-px bg-bgColor'
+            className='absolute right-px top-px bg-bgColor md:opacity-0 md:group-hover/slot:opacity-100 md:group-focus-within/slot:opacity-100'
             onClick={(event) => event.stopPropagation()}
           >
             {confirmScopeKey === key ? (
@@ -2960,7 +3318,7 @@ export function PatternsField({
               <Close
                 size='sm'
                 aria-label='remove slot'
-                disabled={blockers.length > 0}
+                disabled={busy || blockers.length > 0}
                 title={blockers.length > 0 ? `used by ${blockers.join(', ')}` : 'remove slot'}
                 className='bg-bgColor text-labelColor hover:text-textColor hover:no-underline'
                 onClick={() => setConfirmScopeKey(key)}
@@ -2974,12 +3332,8 @@ export function PatternsField({
     return (
       <div
         key={key}
-        className={cn('group/slot', dragKey === key && 'outline outline-2 outline-textColor')}
+        className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
         data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
-        onClick={() => {
-          setSelectedKey(key);
-          if (!has) openPicker(key);
-        }}
         {...dropProps(key)}
       >
         <Tile
@@ -2989,10 +3343,7 @@ export function PatternsField({
           title={label}
           media={activeMedia}
         >
-          <div
-            className='mt-1 flex w-full flex-col gap-1'
-            onClick={(event) => event.stopPropagation()}
-          >
+          <div className='mt-1 flex w-full flex-col gap-1'>
             <Select
               name={`bomItems.${namedLines[0]?.index ?? 0}.purpose`}
               items={purposeItems}
@@ -3555,6 +3906,62 @@ export function PatternsField({
 
       {renderVersions()}
       {renderRemovedVersions()}
+
+      <ConfirmationModal
+        open={foreignAsk != null}
+        onOpenChange={(open) => {
+          if (!open) setForeignAsk(null);
+        }}
+        onConfirm={() => {
+          if (foreignAsk) void chooseForeign(foreignAsk, 'replace');
+        }}
+        onCancel={() => setForeignAsk(null)}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          foreignCancelRef.current?.focus();
+        }}
+        cancelRef={foreignCancelRef}
+        title='other file'
+        confirmLabel='replace'
+        width='sm'
+        headerActions={
+          <Button
+            variant='secondary'
+            size='xs'
+            onClick={() => {
+              if (foreignAsk) void chooseForeign(foreignAsk, 'add');
+            }}
+          >
+            add sheet
+          </Button>
+        }
+      >
+        <div className='flex flex-col gap-2'>
+          <Text className='break-all'>
+            {foreignAsk?.outcome.file.name} · {foreignAsk?.outcome.pieceCount ?? 0}{' '}
+            {plural(foreignAsk?.outcome.pieceCount ?? 0, 'piece')}
+          </Text>
+          <Text className='break-all'>replaces {foreignAsk?.outcome.replacedName}</Text>
+          {foreignAsk && (
+            <Text className='text-error tabular-nums'>
+              − {foreignAsk.outcome.loss.pieces} {plural(foreignAsk.outcome.loss.pieces, 'piece')}
+              {foreignAsk.outcome.loss.steps > 0 && (
+                <>
+                  {' '}
+                  · {foreignAsk.outcome.loss.steps} {plural(foreignAsk.outcome.loss.steps, 'step')}
+                  {foreignAsk.outcome.loss.seams > 0 && (
+                    <>
+                      {' '}
+                      · {foreignAsk.outcome.loss.seams}{' '}
+                      {plural(foreignAsk.outcome.loss.seams, 'seam')}
+                    </>
+                  )}
+                </>
+              )}
+            </Text>
+          )}
+        </div>
+      </ConfirmationModal>
 
       <ConfirmationModal
         open={deleting != null}

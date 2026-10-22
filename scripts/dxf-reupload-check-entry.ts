@@ -7,10 +7,12 @@ export {
   inheritedCut,
   isForeignPlan,
   markJumpParams,
+  planForeignChoice,
   remapIssueNumbers,
   reuploadSheet,
   seamAnchorKeys,
   sheetRowId,
+  uploadForeignSheet,
 } from 'components/managers/tech-card/components/nesting/dxf-reupload';
 export {
   DELETE_SNAPSHOT_REASON,

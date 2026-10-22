@@ -57,6 +57,10 @@ export type GaOptions = {
   //
   // Мусор здесь безопасен по построению: неперестановка отбрасывается, лишние — обрезаются.
   extraSeeds?: readonly (readonly number[])[];
+  // DECODER OVERRIDE: how one individual's gene order becomes a layout. Absent — the single
+  // strip bottom-left placer, as always. The roll print decodes an order into consecutive
+  // bounded sheets and scores the paper of all of them (pattern-export/roll-search.ts).
+  place?: (genes: readonly Gene[], abort?: () => boolean) => PlacementResult | null;
   isCancelled: () => boolean;
   onGeneration: (p: GaProgress) => void;
 };
@@ -83,7 +87,17 @@ function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): Plac
   // rots are indexed by GENE, not by slot — they survive order crossover intact and can
   // never assign a piece a rotation outside its own allowed set.
   const genes = ind.order.map((gi) => ({ ...opts.genesBase[gi], rot: ind.rots[gi] }));
-  const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort, opts.lengthCapped);
+  const res = opts.place
+    ? opts.place(genes, abort)
+    : placeOrder(
+        genes,
+        opts.fabricWidthCm,
+        opts.edgeMarginCm,
+        opts.lMaxCm,
+        opts.nfps,
+        abort,
+        opts.lengthCapped,
+      );
   if (res) ind.fitness = fitnessOf(res, opts.lMaxCm);
   return res;
 }

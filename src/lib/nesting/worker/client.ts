@@ -2,6 +2,11 @@
 // live progress, cancel via message + terminate() as the hard fallback, safe respawn.
 import type { NestConfig, NestResult, ParseOpts, PieceDTO, Unit, WorkerResponse } from '../types';
 import type { ConversionManifest } from 'lib/pattern-import/types';
+import type {
+  RollSearchJob,
+  RollSearchPlan,
+  RollSearchResult,
+} from 'lib/pattern-export/roll-search';
 
 export type ParseOutcome = {
   // Names this parse inside the worker — nest() must present it back (stale-parse guard).
@@ -43,6 +48,7 @@ export class NestingWorkerClient {
       resolve: (msg: WorkerResponse) => void;
       reject: (e: Error) => void;
       onProgress?: (msg: Extract<WorkerResponse, { type: 'progress' }>) => void;
+      onRollSeed?: (seed: RollSearchPlan) => void;
     }
   >();
 
@@ -55,6 +61,10 @@ export class NestingWorkerClient {
       if (!h) return;
       if (msg.type === 'progress') {
         h.onProgress?.(msg);
+        return;
+      }
+      if (msg.type === 'roll-seed') {
+        h.onRollSeed?.(msg.seed);
         return;
       }
       this.handlers.delete(msg.id);
@@ -123,6 +133,27 @@ export class NestingWorkerClient {
         },
       });
       w.postMessage({ type: 'nest', id, parseId, config });
+    });
+    return { id, done };
+  }
+
+  /** Roll print layout: `onSeed` gets the deterministic plan before the budgeted GA starts. */
+  rollSearch(
+    job: RollSearchJob,
+    onSeed: (seed: RollSearchPlan) => void,
+  ): { id: number; done: Promise<RollSearchResult> } {
+    const id = this.nextId++;
+    const w = this.spawn();
+    const done = new Promise<RollSearchResult>((resolve, reject) => {
+      this.handlers.set(id, {
+        resolve: (msg) => {
+          if (msg.type === 'roll-result') resolve(msg.result);
+          else reject(new Error('unexpected worker reply'));
+        },
+        reject,
+        onRollSeed: onSeed,
+      });
+      w.postMessage({ type: 'roll-search', id, job });
     });
     return { id, done };
   }
