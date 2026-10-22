@@ -44,7 +44,6 @@ import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
   Button,
-  Close,
   Chip,
   ConfirmationModal,
   GroupLabel,
@@ -535,6 +534,8 @@ export function PatternsField({
 
   // Материал, над которым сейчас висит перетаскиваемый файл ('' = ничей).
   const [dragKey, setDragKey] = useState<string | null>(null);
+  // A file dragged over one sheet row (its sheetRowId): that row outlines, its thumb says the next v.
+  const [dragRow, setDragRow] = useState<string | null>(null);
   // Several DXFs dropped on one slot: the size merge, then a direct upload into that slot.
   const [merging, setMerging] = useState<{
     scopeKey: string;
@@ -2000,6 +2001,11 @@ export function PatternsField({
         canRestore={canRestore}
         download={download}
         onClose={() => setVersionsOf(null)}
+        onDelete={() => {
+          const at = rows.indexOf(row);
+          setVersionsOf(null);
+          if (at >= 0) askRemove(row, at);
+        }}
         onRestore={async (v) => {
           const out = await restoreSheetVersion({
             sheetLineKey: row.lineKey ?? '',
@@ -2037,21 +2043,58 @@ export function PatternsField({
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
     // A non-DXF row is replaceable too: a plain file swap (uploadOne), no reconcile, no marks.
     const replaceable = !!slotGroup && canDrop;
-    const thumb =
+    const rowId = sheetRowId(row);
+    const dragging = replaceable && dragRow === rowId;
+    const sheetThumb =
       rowGroup && dxfIndex && countBlocks(dxfIndex, rowGroup.scope.key) > 0 ? (
         <SheetThumb index={dxfIndex} scopeKey={rowGroup.scope.key} className='h-full w-full' />
       ) : null;
+    const thumb = dragging ? (
+      <Text size='nano' component='span' className='text-center uppercase tabular-nums'>
+        {rev != null ? `drop · v${rev + 1}` : 'drop'}
+      </Text>
+    ) : (
+      sheetThumb
+    );
+    // A file dropped on the row = a new version of this sheet; the panel's drop stays as it is.
+    const rowDrop = replaceable
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragRow(rowId);
+          },
+          onDragLeave: (e: React.DragEvent) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setDragRow((r) => (r === rowId ? null : r));
+          },
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragRow(null);
+            setDragKey(null);
+            routeFiles(slotGroup.scope.key, e.dataTransfer.files, rowId);
+          },
+        }
+      : {};
 
     return (
-      <li key={row.lineKey || `row-${index}`} className='group/sheet py-1'>
+      <li
+        key={row.lineKey || `row-${index}`}
+        className={cn('group/sheet py-1', dragging && 'outline outline-1 outline-textColor')}
+        {...rowDrop}
+      >
         <div className='flex items-center gap-1.5'>
           {rowGroup &&
             (canDrop ? (
               <Button
                 type='button'
                 aria-label={`replace ${labelOf(row)}`}
-                onClick={() => openPicker(rowGroup.scope.key, sheetRowId(row))}
-                className='flex h-14 w-14 shrink-0 items-center justify-center border border-borderColor bg-pageBg p-0.5 hover:border-textColor'
+                onClick={() => openPicker(rowGroup.scope.key, rowId)}
+                className={cn(
+                  'flex h-14 w-14 shrink-0 items-center justify-center border bg-pageBg p-0.5 hover:border-textColor',
+                  dragging ? 'border-textColor' : 'border-borderColor',
+                )}
               >
                 {thumb}
               </Button>
@@ -2144,12 +2187,12 @@ export function PatternsField({
                 variant='underline'
                 size='xs'
                 className={door}
-                onClick={() => openPicker(slotGroup.scope.key, sheetRowId(row))}
+                onClick={() => openPicker(slotGroup.scope.key, rowId)}
               >
-                upload
+                new version
               </Button>
             )}
-            {row.url && (
+            {(row.url || row.lineKey) && (
               <Button
                 type='button'
                 variant='underline'
@@ -2162,7 +2205,7 @@ export function PatternsField({
               </Button>
             )}
           </span>
-          {/* ⇄ ✎ × on row hover only; always on touch */}
+          {/* ⇄ ✎ on row hover only; always on touch. Delete lives in ⋯ */}
           <span className='inline-flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/sheet:opacity-100 [@media(hover:none)]:opacity-100'>
             {dxf && uploadScopes.length > 0 && canEdit && (
               <Button
@@ -2185,7 +2228,6 @@ export function PatternsField({
             >
               ✎
             </Button>
-            <Close size='sm' aria-label='remove pattern' onClick={() => askRemove(row, index)} />
           </span>
         </div>
         {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в

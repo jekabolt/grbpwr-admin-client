@@ -1,5 +1,6 @@
 // «⋯» of a sheet row: the versions of one pattern sheet. The active file first (it carries the
-// download), then TechCardSizePattern.history newest first (each with `restore` when restorable).
+// download), then TechCardSizePattern.history newest first (each with `restore` when restorable),
+// and `delete` of the sheet at the bottom (the row carries no ×: a new DXF goes over the old one).
 // Restore itself goes through restoreSheetVersion (nesting/reupload-session.ts).
 import type { common_TechCardPatternRevision } from 'api/proto-http/admin';
 import { useState, type ReactNode } from 'react';
@@ -72,6 +73,7 @@ export function SheetVersionsModal({
   download,
   onRestore,
   onClose,
+  onDelete,
 }: {
   open: boolean;
   versions: SheetVersion[];
@@ -80,6 +82,8 @@ export function SheetVersionsModal({
   download: ReactNode;
   onRestore: (v: SheetVersion) => Promise<void>;
   onClose: () => void;
+  /** the row's delete (askRemove → confirm); absent = no delete */
+  onDelete?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -153,6 +157,13 @@ export function SheetVersionsModal({
           </li>
         ))}
       </ul>
+      {onDelete && (
+        <div className='mt-2 border-t border-borderColor pt-2'>
+          <Button type='button' variant='underline' size='xs' onClick={onDelete}>
+            delete
+          </Button>
+        </div>
+      )}
     </ConfirmationModal>
   );
 }
