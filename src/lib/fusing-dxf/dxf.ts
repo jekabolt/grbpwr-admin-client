@@ -1,4 +1,4 @@
-import { normBlock } from 'lib/pattern-import/fabrics/draft';
+import { aliasNames, normBlock } from 'lib/pattern-import/fabrics/draft';
 import type {
   DraftScopeTarget,
   GrainFeature,
@@ -58,6 +58,11 @@ export type GeneratedFusingSheet = {
   filename: string;
   dxfText: string;
   blocks: string[];
+  /**
+   * How the card links this sheet's blocks to pieces: one row per source identity, spelled as the
+   * importer spells its own converted sheets (`aliasNames`: the identity, or the raw `_UNI` block).
+   */
+  aliases: { identity: string; blockName: string }[];
 };
 
 export type BuildFusingSheetsResult = {
@@ -312,6 +317,10 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       filename: fusingSheetFilename(input.style, line.code),
       dxfText: written.detail.bareText,
       blocks: written.detail.plan.blocks.map((block) => block.name),
+      aliases: [...aliasNames(written.detail.manifest)].map(([identity, blockName]) => ({
+        identity,
+        blockName,
+      })),
     });
   }
   return { sheets, warnings, skippedSizes };

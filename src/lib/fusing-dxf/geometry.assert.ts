@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { nextFusingAliases, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -292,6 +293,60 @@ export async function main() {
   assert.equal(dxf.sheets.length, 1);
   assert.equal(dxf.sheets[0].filename, 'jkt-042-fusing-g700.dxf');
   assert.deepEqual(dxf.sheets[0].blocks, ['FRONT_S', 'FRONT_M']);
+  assert.deepEqual(dxf.sheets[0].aliases, [{ identity: 'FRONT', blockName: 'FRONT' }]);
+
+  // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
+  // go, the new ones come; main links, and a scope shared with an uploaded sheet, ride through.
+  const UNSET = 'TECH_CARD_BOM_PURPOSE_UNSET';
+  const INTERFACING = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+  const current = [
+    {
+      bomLineKey: 'MAIN',
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      blockName: 'FRONT',
+      pieceLineKey: 'P1',
+    },
+    { bomLineKey: 'IL-1', fabricPurpose: UNSET, blockName: 'OLD', pieceLineKey: 'P9' },
+    { bomLineKey: 'IL-2', fabricPurpose: UNSET, blockName: 'GONE', pieceLineKey: 'P8' },
+    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'HAND', pieceLineKey: 'P7' },
+    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'COLLAR', pieceLineKey: 'P6' },
+  ];
+  const next = nextFusingAliases({
+    current,
+    previousGenerated: [
+      { bomLineKey: 'IL-1', fabricPurpose: UNSET },
+      { bomLineKey: 'IL-2', fabricPurpose: UNSET },
+      { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+    ],
+    otherSheets: [
+      { bomLineKey: 'MAIN', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
+      { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+    ],
+    sheets: [
+      {
+        binding: { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
+        links: [{ blockName: 'FRONT', pieceLineKey: 'P1' }],
+      },
+      {
+        binding: { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+        links: [{ blockName: 'collar', pieceLineKey: 'P5' }],
+      },
+    ],
+  });
+  assert.deepEqual(next, [
+    current[0],
+    current[3],
+    { bomLineKey: 'IL-1', fabricPurpose: INTERFACING, blockName: 'FRONT', pieceLineKey: 'P1' },
+    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'collar', pieceLineKey: 'P5' },
+  ]);
+  assert.ok(sameAliasSet(next, [...next].reverse()), 'alias sets compare without order');
+  assert.ok(
+    sameAliasSet(
+      next,
+      nextFusingAliases({ current: next, previousGenerated: [], otherSheets: [], sheets: [] }),
+    ),
+    'nothing generated, nothing owned: the set rides through',
+  );
   assert.match(dxf.sheets[0].dxfText, /FRONT_S/);
   assert.match(dxf.sheets[0].dxfText, /FRONT_M/);
   assert.ok(

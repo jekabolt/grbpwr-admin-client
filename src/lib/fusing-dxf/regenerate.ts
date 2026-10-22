@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import type {
   common_Size,
   common_TechCardBomItem,
+  common_TechCardBomPurpose,
   common_TechCardInsert,
   common_TechCardPiece,
   common_TechCardPieceDxfAlias,
@@ -23,6 +24,7 @@ import {
   defaultGrainLayer,
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
+import { rollGoodsScopes } from 'components/managers/tech-card/components/piece-block-refs';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { sha256Hex } from 'lib/features/sha256';
 import type { PieceDTO } from 'lib/nesting/types';
@@ -40,6 +42,7 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
+import { nextFusingAliases, sameAliasSet, type FusingBinding } from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -193,7 +196,13 @@ function sourcePieces(
   cardSizeIds: readonly number[],
   baseSizeId: number | null | undefined,
   seamAllowanceMm: number | null,
-): { pieces: FusingSourcePiece[]; warnings: string[]; unmatchedFused: string[] } {
+): {
+  pieces: FusingSourcePiece[];
+  warnings: string[];
+  unmatchedFused: string[];
+  /** source identity (lower case) → the card piece it was matched to. */
+  pieceLineKeyByIdentity: Map<string, string>;
+} {
   const warnings: string[] = [];
   const tokens = tokenIndex(dictionarySizes, cardSizeIds);
   const dictSet = new Set(tokens.keys());
@@ -233,9 +242,12 @@ function sourcePieces(
 
   const out: FusingSourcePiece[] = [];
   const matchedFused = new Set<common_TechCardPiece>();
+  const pieceLineKeyByIdentity = new Map<string, string>();
   for (const [identityKey, group] of byIdentity) {
     const cardPiece = pieceForIdentity.get(identityKey);
     if (cardPiece?.fused) matchedFused.add(cardPiece);
+    const pieceLineKey = cardPiece?.lineKey?.trim();
+    if (pieceLineKey) pieceLineKeyByIdentity.set(identityKey, pieceLineKey);
     const bySize = new Map<string, PieceDTO>();
     for (const row of group.rows) {
       const code = split.codeById.get(row.id);
@@ -285,7 +297,22 @@ function sourcePieces(
     unmatchedFused: cardPieces
       .filter((piece) => piece.fused && !matchedFused.has(piece))
       .map((piece) => piece.name?.trim() || piece.lineKey?.trim() || 'unnamed piece'),
+    pieceLineKeyByIdentity,
   };
+}
+
+/**
+ * The binding a generated sheet (and its alias rows) is written under: the line's purpose when that
+ * purpose owns exactly ONE roll-goods line — the slot reads areas under the purpose, and a sheet
+ * bound only to the line would be refused as «bound inconsistently» — else the line alone. Several
+ * interlinings sharing a purpose stay line-bound: under the purpose they would collapse into one scope.
+ */
+function bindingOfLine(bomLineKey: string, bom: readonly common_TechCardBomItem[]): FusingBinding {
+  const scope = rollGoodsScopes(bom).find((candidate) =>
+    candidate.lines.some((line) => line.lineKey.trim() === bomLineKey),
+  );
+  if (scope?.byPurpose && scope.lines.length === 1) return { fabricPurpose: scope.key, bomLineKey };
+  return { fabricPurpose: unsetPurpose, bomLineKey };
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -347,6 +374,7 @@ export async function regenerateFusingSheets(
   const fused = cardPieces.some((piece) => piece.fused);
   const warnings: string[] = [];
   let built: BuildFusingSheetsResult = { sheets: [], warnings: [], skippedSizes: [] };
+  let pieceLineKeyByIdentity = new Map<string, string>();
 
   if (fused && lines.length) {
     const patterns = mainPatterns(oldPatterns, bomByKey);
@@ -407,6 +435,7 @@ export async function regenerateFusingSheets(
         Number(card.requiredSeamAllowanceMm?.value ?? NaN),
       );
       warnings.push(...prepared.warnings);
+      pieceLineKeyByIdentity = prepared.pieceLineKeyByIdentity;
       if (prepared.unmatchedFused.length)
         throw new Error(
           `fused card pieces are not linked to the main DXF: ${prepared.unmatchedFused.join(', ')}`,
@@ -433,12 +462,17 @@ export async function regenerateFusingSheets(
   const replacements = new Map<string, common_TechCardSizePattern>();
   let uploaded = 0;
   let reused = 0;
+  const bindings = new Map(
+    built.sheets.map((sheet) => [sheet.bomLineKey, bindingOfLine(sheet.bomLineKey, bom)]),
+  );
   for (const sheet of built.sheets) {
+    const binding = bindings.get(sheet.bomLineKey)!;
+    const fabricPurpose = binding.fabricPurpose as common_TechCardBomPurpose;
     const bytes = new TextEncoder().encode(sheet.dxfText);
     const digest = await sha256Hex(bytes);
     const old = oldByLine.get(sheet.bomLineKey);
     if (old && digest && old.sha256 === digest) {
-      replacements.set(sheet.bomLineKey, old);
+      replacements.set(sheet.bomLineKey, { ...old, fabricPurpose, bomLineKey: binding.bomLineKey });
       reused++;
       continue;
     }
@@ -466,9 +500,10 @@ export async function regenerateFusingSheets(
       viewUrl: undefined,
       downloadUrl: undefined,
       lineKey: old?.lineKey?.trim() || ulid(),
-      bomLineKey: sheet.bomLineKey,
-      // UNSET is deliberate: purpose-first resolution would collapse several interlinings.
-      fabricPurpose: unsetPurpose,
+      bomLineKey: binding.bomLineKey,
+      // Purpose only when it names this line alone (bindingOfLine): several interlinings under one
+      // purpose would collapse into one scope.
+      fabricPurpose,
       sha256: digest,
       history: undefined,
     });
@@ -486,13 +521,41 @@ export async function regenerateFusingSheets(
   for (const [key, replacement] of replacements) {
     if (!used.has(key)) nextPatterns.push(replacement);
   }
-  const changed = !samePatterns(oldPatterns, nextPatterns);
+  const oldAliases = card.pieceDxfAliases?.items ?? [];
+  const nextAliases = nextFusingAliases({
+    current: oldAliases,
+    previousGenerated: oldGenerated,
+    otherSheets: nextPatterns.filter((pattern) => !isGenerated(pattern)),
+    sheets: built.sheets.map((sheet) => ({
+      binding: bindings.get(sheet.bomLineKey)!,
+      links: sheet.aliases.flatMap((alias) => {
+        const pieceLineKey = pieceLineKeyByIdentity.get(normBlock(alias.identity).toLowerCase());
+        return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
+      }),
+    })),
+  }).map(
+    (row): common_TechCardPieceDxfAlias => ({
+      bomLineKey: row.bomLineKey,
+      blockName: row.blockName,
+      pieceLineKey: row.pieceLineKey,
+      fabricPurpose: row.fabricPurpose as common_TechCardBomPurpose | undefined,
+    }),
+  );
+  const aliasesChanged = !sameAliasSet(oldAliases, nextAliases);
+  const changed = !samePatterns(oldPatterns, nextPatterns) || aliasesChanged;
   if (changed) {
     await adminService.UpdateTechCard({
       id: techCardId,
       // The body is the stored card echoed back, so it does carry every gated field it holds —
       // without the flags the server refuses it as an outdated client (machine/press steps etc.).
-      techCard: { ...card, ...ECHO_AWARE, patterns: nextPatterns },
+      techCard: {
+        ...card,
+        ...ECHO_AWARE,
+        patterns: nextPatterns,
+        // The links of the generated sheets' blocks to their pieces ride in the same write; every
+        // other row is echoed as read.
+        pieceDxfAliases: { items: nextAliases },
+      },
       expectedLockVersion: stored.lockVersion,
       snapshotReason: 'Regenerate generated fusing DXF sheets',
     });
