@@ -233,7 +233,8 @@ function storedPrintRoll(): RollSpec | null {
   try {
     const raw = window.localStorage.getItem(PRINT_ROLL_STORAGE_KEY);
     if (!raw) return null;
-    const last = (JSON.parse(raw) as { last?: Partial<RollSpec> } | null)?.last;
+    const stored = JSON.parse(raw) as { last?: Partial<RollSpec>; testSquare?: boolean } | null;
+    const last = stored?.last;
     const widthCm = Number(last?.widthCm);
     const maxSheetM = Number(last?.maxSheetM ?? ROLL_DEFAULTS.maxSheetM);
     const edgeMm = Number(last?.edgeMm ?? ROLL_DEFAULTS.edgeMm);
@@ -246,7 +247,9 @@ function storedPrintRoll(): RollSpec | null {
       edgeMm < 0
     )
       return null;
-    return { widthCm, maxSheetM, edgeMm };
+    const testSquare =
+      typeof stored?.testSquare === 'boolean' ? stored.testSquare : last?.testSquare !== false;
+    return { widthCm, maxSheetM, edgeMm, testSquare };
   } catch {
     return null;
   }

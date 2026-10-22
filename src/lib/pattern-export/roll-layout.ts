@@ -4,7 +4,13 @@ import type { RollSpec } from './roll-print';
 
 /** Test-square band at the leading end of every sheet. Pieces start after this line. */
 export const ROLL_FURNITURE_MM = 112;
+/** Title-only band when the test square is omitted. */
+export const ROLL_TITLE_FURNITURE_MM = 25;
 const TEST_MM = 100;
+
+export function rollFurnitureMm(roll: RollSpec): number {
+  return roll.testSquare === false ? ROLL_TITLE_FURNITURE_MM : ROLL_FURNITURE_MM;
+}
 
 export function rollWidthMm(roll: RollSpec): number {
   const width = roll.widthCm * 10;
@@ -27,8 +33,8 @@ export function rollSheetLimitMm(roll: RollSpec): number {
   if (!(Number.isFinite(requested) && requested > 0))
     throw new Error('maximum sheet length must be positive');
   const limit = Math.min(requested, PDF_PAGE_LIMIT_MM);
-  if (limit <= ROLL_FURNITURE_MM)
-    throw new Error(`maximum sheet length must exceed ${ROLL_FURNITURE_MM} mm`);
+  const furnitureMm = rollFurnitureMm(roll);
+  if (limit <= furnitureMm) throw new Error(`maximum sheet length must exceed ${furnitureMm} mm`);
   return limit;
 }
 
@@ -59,25 +65,26 @@ export function addRollFurniture(
 ): PatternDrawing {
   const edge = Math.max(0, roll.edgeMm);
   const x = edge;
-  const labels: DrawingLabel[] = [
-    {
+  const testSquare = roll.testSquare !== false;
+  const labels: DrawingLabel[] = [];
+  if (testSquare)
+    labels.push({
       x: x + TEST_MM / 2,
       y: 50,
       s: '10 × 10 cm',
       sizeMm: 3,
       angle: 0,
-    },
-    {
-      x: x + TEST_MM + 10,
-      y: 14,
-      s: rollTitleLine(title, sheet, total, roll),
-      sizeMm: 3,
-      angle: 0,
-    },
-  ];
+    });
+  labels.push({
+    x: testSquare ? x + TEST_MM + 10 : x,
+    y: 14,
+    s: rollTitleLine(title, sheet, total, roll),
+    sizeMm: 3,
+    angle: 0,
+  });
   return {
     ...drawing,
-    strokes: [square(x, 5), ...drawing.strokes],
+    strokes: testSquare ? [square(x, 5), ...drawing.strokes] : drawing.strokes,
     labels: [...labels, ...drawing.labels],
   };
 }

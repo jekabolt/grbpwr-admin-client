@@ -1,7 +1,7 @@
 // Print 1:1 on a print-shop paper roll: the pattern's pieces for the chosen sizes × copies, laid
 // out across the roll's printable width and cut into sheets no longer than the roll profile allows.
-// A sheet break always falls between pieces, and every sheet carries its own test square and title
-// line, so the shop can print and check each sheet on its own.
+// A sheet break always falls between pieces, and every sheet carries its own title line plus an
+// optional test square, so the shop can print and identify each sheet on its own.
 //
 // CONTRACT between the print dialog (UI) and the layout engine. The UI codes against these
 // signatures only; the engine fills in the bodies.
@@ -21,7 +21,7 @@ import {
   addRollFurniture,
   printableRollWidthMm,
   retitleRollDrawing,
-  ROLL_FURNITURE_MM,
+  rollFurnitureMm,
   rollSheetLimitMm,
   rollWidthMm,
 } from './roll-layout';
@@ -42,9 +42,15 @@ export type RollSpec = {
   maxSheetM: number;
   /** Dead edge the printer leaves on each side, mm. Default 5. Printable width = width − 2·edge. */
   edgeMm: number;
+  /** Draw a 10 × 10 cm scale check before the pieces. Defaults to true. */
+  testSquare?: boolean;
 };
 
-export const ROLL_DEFAULTS: Omit<RollSpec, 'widthCm'> = { maxSheetM: 5, edgeMm: 5 };
+export const ROLL_DEFAULTS: Omit<RollSpec, 'widthCm'> = {
+  maxSheetM: 5,
+  edgeMm: 5,
+  testSquare: true,
+};
 export const ROLL_MAX_WIDTH_CM = PDF_PAGE_LIMIT_MM / 10;
 export const ROLL_GAP_MM = NEST_DEFAULTS.gapCm * 10;
 
@@ -59,7 +65,7 @@ export type RollPrintSource = {
 };
 
 export type RollSheet = {
-  /** The sheet as it lands on the PDF page: page width = roll width, test square + title drawn. */
+  /** The sheet as it lands on the PDF page: page width = roll width, title furniture drawn. */
   drawing: PatternDrawing;
   lengthMm: number;
 };
@@ -145,7 +151,8 @@ export async function planRollPrint(
   const widthMm = rollWidthMm(roll);
   const printableMm = printableRollWidthMm(roll);
   const sheetLimitMm = Math.min(rollSheetLimitMm(roll), PDF_PAGE_LIMIT_MM);
-  const contentLengthMm = sheetLimitMm - ROLL_FURNITURE_MM;
+  const furnitureMm = rollFurnitureMm(roll);
+  const contentLengthMm = sheetLimitMm - furnitureMm;
   type Item = {
     template: RollPieceTemplate;
     instance: number;
@@ -201,7 +208,7 @@ export async function planRollPrint(
     })),
     widthCm: printableMm / 10,
     sheetCm: contentLengthMm / 10,
-    sheetFurnitureCm: ROLL_FURNITURE_MM / 10,
+    sheetFurnitureCm: furnitureMm / 10,
     gapCm: ROLL_GAP_MM / 10,
   };
   const search = await runRollSearch(job, signal);
@@ -225,7 +232,7 @@ export async function planRollPrint(
   const drawings = planned.map((sheet, index) => {
     const lengthMm = Math.min(
       sheetLimitMm,
-      Math.max(ROLL_FURNITURE_MM + 1, ROLL_FURNITURE_MM + sheet.usedLengthCm * 10),
+      Math.max(furnitureMm + 1, furnitureMm + sheet.usedLengthCm * 10),
     );
     const drawing = drawingFromRollPlacements(
       sheet.placements,
@@ -234,6 +241,7 @@ export async function planRollPrint(
       lengthMm,
       source.title,
       source.warnings,
+      furnitureMm,
     );
     return {
       drawing: addRollFurniture(drawing, index + 1, planned.length, roll, source.title),
@@ -241,7 +249,7 @@ export async function planRollPrint(
     };
   });
   const sheetPaperMm = (plan: RollSearchPlan) =>
-    plan.sheets.reduce((sum, sheet) => sum + ROLL_FURNITURE_MM + sheet.usedLengthCm * 10, 0);
+    plan.sheets.reduce((sum, sheet) => sum + furnitureMm + sheet.usedLengthCm * 10, 0);
   return {
     sheets: drawings,
     lengthMm: drawings.reduce((sum, sheet) => sum + sheet.lengthMm, 0),
@@ -435,14 +443,12 @@ function drawingFromRollPlacements(
   lengthMm: number,
   title: string,
   warnings: string[],
+  furnitureMm: number,
 ): PatternDrawing {
   const strokes: PatternDrawing['strokes'] = [];
   const labels: PatternDrawing['labels'] = [];
   // The placer already applies the roll edge margin in strip coordinates.
-  const pagePoint = (point: Pt): [number, number] => [
-    point.y * 10,
-    ROLL_FURNITURE_MM + point.x * 10,
-  ];
+  const pagePoint = (point: Pt): [number, number] => [point.y * 10, furnitureMm + point.x * 10];
   for (const placement of placements) {
     const item = itemByKey.get(placementKey(placement));
     if (!item) continue;
