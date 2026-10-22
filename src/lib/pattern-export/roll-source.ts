@@ -6,16 +6,19 @@ import {
 } from 'components/managers/tech-card/components/nesting/contour-layer';
 import { buildAllowanceIndex } from 'components/managers/tech-card/components/nesting/contour-allowance';
 import { dedupeUniPieces } from 'components/managers/tech-card/components/nesting/piece-selection';
+import {
+  defaultGrainLayer,
+  grainLayerOptions,
+} from 'components/managers/tech-card/components/nesting/grain';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import type { ConversionManifest } from 'lib/pattern-import/types';
 import { dxfPairs } from 'lib/nesting/dxf/insunits';
 import { parseFiles } from 'lib/nesting/worker/parse-files';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
-import { convexHull, gapOctagon, minkowskiSumConvex } from 'lib/nesting/geom/convex';
 import { area, bounds } from 'lib/nesting/geom/polygon';
 import { NEST_DEFAULTS, type PieceDTO, type PieceManifestFacts, type Pt } from 'lib/nesting/types';
-import { DRAWING_PEN_MM } from './dxf-pdf';
+import { drawnRollFootprint, straightenRollPiece } from './roll-geometry';
 
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, '') || 'pattern';
 const bare = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
@@ -24,7 +27,7 @@ type PieceCode = { identity: string; size: string };
 
 export type RollPieceTemplate = {
   piece: PieceDTO;
-  /** Convex keep-out containing every rendered stroke and the complete piece label. */
+  /** Concave keep-out containing every rendered stroke and the complete piece label. */
   footprint: Pt[];
   identity: string;
   size: string;
@@ -37,6 +40,7 @@ export type RollSourceModel = {
   title: string;
   templates: RollPieceTemplate[];
   sizes: string[];
+  grainLayer: string;
   warnings: string[];
 };
 
@@ -48,48 +52,6 @@ function pieceLabel(template: { identity: string; size: string; cutMultiplier: n
   return [template.identity, template.size || 'OS', template.cutMultiplier === 2 ? '×2' : '']
     .filter(Boolean)
     .join(' · ');
-}
-
-function polygonCentroid(poly: readonly Pt[]): Pt {
-  let area2 = 0;
-  let x = 0;
-  let y = 0;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const f = poly[j].x * poly[i].y - poly[i].x * poly[j].y;
-    area2 += f;
-    x += (poly[j].x + poly[i].x) * f;
-    y += (poly[j].y + poly[i].y) * f;
-  }
-  if (Math.abs(area2) < 1e-9) {
-    const n = Math.max(1, poly.length);
-    return {
-      x: poly.reduce((sum, point) => sum + point.x, 0) / n,
-      y: poly.reduce((sum, point) => sum + point.y, 0) / n,
-    };
-  }
-  return { x: x / (3 * area2), y: y / (3 * area2) };
-}
-
-/**
- * The placer must reserve what the printer inks, not whichever source layer was selected as CUT.
- * A convex keep-out is deliberately conservative: it contains every source path, the line caps,
- * and the full possible reach of the baseline-left piece label in every quarter-turn.
- */
-function drawnFootprint(piece: PieceDTO, label: string): Pt[] {
-  const points: Pt[] = [...piece.poly];
-  for (const path of piece.inner ?? []) points.push(...path.pts);
-
-  const anchor = polygonCentroid(piece.poly);
-  // dxf-pdf uses the same upper bound to cull placed text. A circle makes that bound invariant
-  // under the piece's quarter-turn and avoids relying on renderer-specific glyph metrics.
-  const labelReachCm = (ROLL_PIECE_LABEL_MM * (label.length + 2)) / 10;
-  for (const point of gapOctagon(labelReachCm))
-    points.push({ x: anchor.x + point.x, y: anchor.y + point.y });
-
-  const hull = convexHull(points);
-  // The edge and gap apply to ink, not path centre-lines. The CUT pen is the widest piece pen.
-  const penRadiusCm = Math.max(DRAWING_PEN_MM.cut, DRAWING_PEN_MM.line) / 20;
-  return minkowskiSumConvex(hull, gapOctagon(penRadiusCm));
 }
 
 function manifestFacts(manifest: ConversionManifest | null): Map<string, PieceManifestFacts> {
@@ -269,9 +231,11 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
   const selected = pieces.filter(
     (piece) => piece.layer === contourLayer && !dedupe.excludedIds.has(piece.id),
   );
+  const grainLayer = defaultGrainLayer(grainLayerOptions(selected));
+  const straightened = selected.map((piece) => straightenRollPiece(piece, grainLayer).piece);
   const measured = options.find((option) => option.layer === contourLayer)?.allowance;
   const allowanceCm = contourIsCutLine(measured) ? 0 : NEST_DEFAULTS.seamAllowanceCm;
-  const seam = applySeamAllowance(selected, allowanceCm);
+  const seam = applySeamAllowance(straightened, allowanceCm);
   if (allowanceCm > 0)
     warnings.push(`a ${(allowanceCm * 10).toFixed(0)} mm seam allowance was added to the contour`);
   if (seam.hulled.length > 0)
@@ -302,7 +266,11 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
       cutMultiplier,
     };
     const label = pieceLabel(template);
-    templates.push({ ...template, label, footprint: drawnFootprint(piece, label) });
+    templates.push({
+      ...template,
+      label,
+      footprint: drawnRollFootprint(piece, label, ROLL_PIECE_LABEL_MM),
+    });
   }
 
   const sizes = split.groups
@@ -314,6 +282,7 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
     title: stripExt(fileName),
     templates,
     sizes: sizes.map((size) => size || 'OS'),
+    grainLayer,
     warnings: [...new Set(warnings)],
   };
   const files = sourceCache.get(dxf) ?? new Map<string, RollSourceModel>();

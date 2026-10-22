@@ -4,7 +4,7 @@ import { basename, resolve } from 'node:path';
 import { jsPDF } from 'jspdf';
 
 import { DRAWING_PEN_MM, type PdfFont } from 'lib/pattern-export/dxf-pdf';
-import type { DrawingStroke } from 'lib/pattern-export/drawing';
+import type { DrawingLabel, DrawingStroke } from 'lib/pattern-export/drawing';
 import { ROLL_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
 import {
   exportRollPrint,
@@ -53,6 +53,35 @@ type InkSegment = {
   b: Point;
   radiusMm: number;
 };
+
+const labelMeasurePdf = new jsPDF({ unit: 'mm', format: [100, 100] });
+font.register(labelMeasurePdf);
+labelMeasurePdf.setFont(font.family, 'normal');
+
+function labelSegments(label: DrawingLabel): InkSegment[] {
+  const sizeMm = label.sizeMm ?? 9 * (25.4 / 72);
+  labelMeasurePdf.setFontSize(sizeMm / (25.4 / 72));
+  const width = labelMeasurePdf.getTextWidth(label.s);
+  // jsPDF draws placed labels from their baseline-left anchor. This em box is deliberately
+  // taller than the font's reported glyph box, so containing it contains every printed glyph.
+  const local: Point[] = [
+    [0, -sizeMm],
+    [width, -sizeMm],
+    [width, sizeMm * 0.35],
+    [0, sizeMm * 0.35],
+  ];
+  const angle = ((label.angle ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const points = local.map(
+    ([x, y]) => [label.x + x * cos - y * sin, label.y + x * sin + y * cos] as Point,
+  );
+  return points.map((point, i) => ({
+    a: point,
+    b: points[(i + 1) % points.length],
+    radiusMm: 0,
+  }));
+}
 
 const cross = (a: Point, b: Point, c: Point) =>
   (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
@@ -177,6 +206,25 @@ function assertPlan(
       segments.push(...strokeSegments(stroke));
       byPiece.set(stroke.pieceKey, segments);
     }
+    for (const label of sheet.drawing.labels) {
+      if (!label.pieceKey) continue;
+      const segments = labelSegments(label);
+      for (const segment of segments) {
+        for (const [x, y] of [segment.a, segment.b]) {
+          const edgeClearance = Math.min(x, roll.widthCm * 10 - x);
+          minEdgeMm = Math.min(minEdgeMm, edgeClearance);
+          if (edgeClearance < roll.edgeMm - 1e-5)
+            throw new Error(
+              `sheet ${sheetIndex + 1}, piece ${label.pieceKey}: label leaves the ${roll.edgeMm} mm edge at x=${x}`,
+            );
+          if (y < ROLL_FURNITURE_MM - 1e-5 || y > sheet.lengthMm + 1e-5)
+            throw new Error(`sheet ${sheetIndex + 1}: a label crosses the sheet edge at y=${y}`);
+        }
+      }
+      const pieceSegments = byPiece.get(label.pieceKey) ?? [];
+      pieceSegments.push(...segments);
+      byPiece.set(label.pieceKey, pieceSegments);
+    }
     const pieces = [...byPiece].map(([key, segments]) => ({
       key,
       segments,
@@ -238,19 +286,22 @@ export async function main(args: string[]) {
   );
 
   const min = minRollWidthCm(bytes, name, copies);
-  const atMin: RollSpec = { widthCm: min, ...ROLL_DEFAULTS };
-  const belowMin: RollSpec = {
-    widthCm: Math.round((min - 0.1) * 10) / 10,
-    ...ROLL_DEFAULTS,
-  };
-  const atMinPlan = await planRollPrint(bytes, name, copies, atMin);
-  const belowMinPlan = await planRollPrint(bytes, name, copies, belowMin);
-
-  const renders: Array<{ pdf: string; pages: number; stem: string }> = [];
+  const renders: Array<{ pdf: string; pages: number; stem: string; suffix: string }> = [];
+  const metrics: Array<{
+    key: string;
+    widthCm: number;
+    lengthMm: number;
+    markerLengthMm: number;
+    seedLengthMm: number;
+    source: string;
+    generations: number;
+    sheets: number;
+    runtimeMs: number;
+  }> = [];
   const cases = [
-    { widthCm: 91.4, copies, title: 'card70-XS-XL' },
-    { widthCm: 152.4, copies, title: 'card70-XS-XL' },
-    { widthCm: 160, copies: xsOnly, title: 'card70-XS' },
+    { key: 'XS@160', widthCm: 160, copies: xsOnly, title: 'card70-XS' },
+    { key: 'XS-XL@91.4', widthCm: 91.4, copies, title: 'card70-XS-XL' },
+    { key: 'XS-XL@152.4', widthCm: 152.4, copies, title: 'card70-XS-XL' },
   ];
   for (const run of cases) {
     const { widthCm } = run;
@@ -259,13 +310,24 @@ export async function main(args: string[]) {
     const plan = await planRollPrint(bytes, name, run.copies, roll);
     const elapsedMs = performance.now() - started;
     const asserted = assertPlan(plan, roll);
+    const accountedLengthMm = plan.markerLengthMm + plan.sheets.length * ROLL_FURNITURE_MM;
+    if (Math.abs(plan.lengthMm - accountedLengthMm) > 1e-4)
+      throw new Error(
+        `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * ROLL_FURNITURE_MM} mm`,
+      );
     const exported = exportRollPrint(plan, run.title, roll, { jsPDF, font });
-    const pdfPath = resolve(outDir, exported.fileName);
+    const base = `${run.title}-roll${widthCm}`;
+    const pdfPath = resolve(outDir, `${base}-after.pdf`);
     writeFileSync(pdfPath, Buffer.from(await exported.blob.arrayBuffer()));
     const tooWide = plan.tooWide.length;
     const tooLong = plan.tooLong.length;
+    if (!plan.search) throw new Error(`${run.key}: plan carries no search report`);
+    if (plan.lengthMm > plan.search.seedLengthMm + 1e-6)
+      throw new Error(
+        `${run.key}: final ${plan.lengthMm} mm is longer than its seed ${plan.search.seedLengthMm} mm`,
+      );
     console.log(
-      `roll ${widthCm} ${run.title}: length ${(plan.lengthMm / 1000).toFixed(3)} m | sheets ${plan.sheets.length} | placed ${plan.placed}/${plan.total} | tooWide ${tooWide} | tooLong ${tooLong} | runtime ${elapsedMs.toFixed(0)} ms`,
+      `after ${run.key}: length ${(plan.lengthMm / 1000).toFixed(3)} m | seed ${(plan.search.seedLengthMm / 1000).toFixed(3)} m | ${plan.search.source} after ${plan.search.generations} generations | marker ${(plan.markerLengthMm / 1000).toFixed(3)} m | sheets ${plan.sheets.length} | placed ${plan.placed}/${plan.total} | tooWide ${tooWide} | tooLong ${tooLong} | runtime ${elapsedMs.toFixed(0)} ms`,
     );
     console.log(
       `assert gap >= ${(ROLL_GAP_MM - 0.5).toFixed(1)} mm across ${asserted.piecePairs} piece pairs | min ink edge ${asserted.minEdgeMm.toFixed(3)} mm`,
@@ -274,15 +336,36 @@ export async function main(args: string[]) {
     renders.push({
       pdf: pdfPath,
       pages: plan.sheets.length,
-      stem: resolve(outDir, exported.fileName.replace(/\.pdf$/i, '')),
+      stem: resolve(outDir, base),
+      suffix: '-after',
+    });
+    metrics.push({
+      key: run.key,
+      widthCm,
+      lengthMm: plan.lengthMm,
+      markerLengthMm: plan.markerLengthMm,
+      seedLengthMm: plan.search.seedLengthMm,
+      source: plan.search.source,
+      generations: plan.search.generations,
+      sheets: plan.sheets.length,
+      runtimeMs: elapsedMs,
     });
   }
-  return {
-    code: 0,
-    renders,
-    min,
-    belowMinWidthCm: belowMin.widthCm,
-    atMinTooWide: atMinPlan.tooWide.length,
-    belowMinTooWide: belowMinPlan.tooWide.length,
-  };
+  const abortController = new AbortController();
+  const abortRun = planRollPrint(
+    bytes,
+    name,
+    xsOnly,
+    { widthCm: 160, ...ROLL_DEFAULTS },
+    abortController.signal,
+  );
+  setTimeout(() => abortController.abort(), 20);
+  try {
+    await abortRun;
+    throw new Error('mid-search abort did not stop roll planning');
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== 'AbortError') throw error;
+  }
+  console.log('assert mid-search AbortSignal: ok');
+  return { code: 0, renders, metrics, min };
 }
