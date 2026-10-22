@@ -74,6 +74,30 @@ export function planFusingLines(input: {
   return { bindings, blocked, linked };
 }
 
+/**
+ * The card's next sheet list: uploaded sheets as they are, each generated row replaced by its line's
+ * new row (first one only), generated rows of lines without a replacement REMOVED — a blocked line's
+ * old generated sheet included: kept beside the uploaded sheet it would sit in one effective scope
+ * under a different raw binding, and the areas of that scope would be refused.
+ */
+export function nextGeneratedPatterns<P extends { bomLineKey?: string }>(
+  oldPatterns: readonly P[],
+  isGenerated: (pattern: P) => boolean,
+  replacements: ReadonlyMap<string, P>,
+): P[] {
+  const used = new Set<string>();
+  const next = oldPatterns.flatMap((pattern) => {
+    if (!isGenerated(pattern)) return [pattern];
+    const key = pattern.bomLineKey?.trim() ?? '';
+    const replacement = replacements.get(key);
+    if (!replacement || used.has(key)) return [];
+    used.add(key);
+    return [replacement];
+  });
+  for (const [key, replacement] of replacements) if (!used.has(key)) next.push(replacement);
+  return next;
+}
+
 const rowKey = (row: FusingAliasRow) =>
   `${fusingScopeKey(row)}|${(row.blockName ?? '').trim().replace(/\s+/g, ' ').toLowerCase()}`;
 

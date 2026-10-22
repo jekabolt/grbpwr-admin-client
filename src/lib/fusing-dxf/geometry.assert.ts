@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { nextFusingAliases, planFusingLines, sameAliasSet } from './aliases';
+import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -372,6 +372,20 @@ export async function main() {
     'IL-5': { bomLineKey: 'IL-5', fabricPurpose: UNSET },
     'IL-6': { bomLineKey: 'IL-6', fabricPurpose: UNSET },
   });
+  // A blocked line's legacy generated sheet (UNSET + line) is removed, not kept beside the
+  // purpose-bound uploaded sheet; a linked line's row is replaced; uploaded rows ride through.
+  const uploadedOther = { name: 'felt.dxf', bomLineKey: 'IL-4', fabricPurpose: OTHER };
+  const legacyGenerated = { name: 'gen IL-4', bomLineKey: 'IL-4', fabricPurpose: UNSET };
+  const oldIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: UNSET };
+  const newIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: INTERFACING };
+  assert.deepEqual(
+    nextGeneratedPatterns(
+      [uploadedOther, legacyGenerated, oldIl1],
+      (pattern) => pattern.name.startsWith('gen '),
+      new Map([['IL-1', newIl1]]),
+    ),
+    [uploadedOther, newIl1],
+  );
   assert.ok(sameAliasSet(plan.rows, [...plan.rows].reverse()), 'alias sets compare without order');
   assert.ok(
     sameAliasSet(

@@ -43,7 +43,7 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { nextFusingAliases, planFusingLines, sameAliasSet } from './aliases';
+import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -466,19 +466,20 @@ export async function regenerateFusingSheets(
       scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, scopes),
     ),
   });
-  // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins. Nothing is
-  // generated, and a generated sheet it already has is kept exactly as it is (binding and links).
-  const keptBlocked: common_TechCardSizePattern[] = [];
+  // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins fully. Nothing is
+  // generated and a generated sheet it already has is REMOVED (nextGeneratedPatterns). Its links
+  // cannot be told from the owner's, so they stay as they are and a warning says so.
+  const removedBlocked: common_TechCardSizePattern[] = [];
   for (const key of blocked) {
     const old = oldByLine.get(key);
-    if (old) {
-      replacements.set(key, old);
-      keptBlocked.push(old);
-    }
-    if (old || built.sheets.some((sheet) => sheet.bomLineKey === key))
+    if (old) removedBlocked.push(old);
+    const label = lines.find((line) => line.bomLineKey === key)?.label ?? key;
+    if (old)
       warnings.push(
-        `${lines.find((line) => line.bomLineKey === key)?.label ?? key}: an uploaded sheet holds this interlining, not generated`,
+        `${label}: an uploaded sheet holds this interlining, generated sheet removed, its piece links left as they are`,
       );
+    else if (built.sheets.some((sheet) => sheet.bomLineKey === key))
+      warnings.push(`${label}: an uploaded sheet holds this interlining, not generated`);
   }
   const activeSheets = built.sheets.filter((sheet) => !blocked.has(sheet.bomLineKey));
   for (const sheet of activeSheets) {
@@ -525,18 +526,7 @@ export async function regenerateFusingSheets(
     });
   }
 
-  const used = new Set<string>();
-  const nextPatterns = oldPatterns.flatMap((pattern) => {
-    if (!isGenerated(pattern)) return [pattern];
-    const key = pattern.bomLineKey?.trim() ?? '';
-    const replacement = replacements.get(key);
-    if (!replacement || used.has(key)) return [];
-    used.add(key);
-    return [replacement];
-  });
-  for (const [key, replacement] of replacements) {
-    if (!used.has(key)) nextPatterns.push(replacement);
-  }
+  const nextPatterns = nextGeneratedPatterns(oldPatterns, isGenerated, replacements);
   const oldAliases = card.pieceDxfAliases?.items ?? [];
   const aliasPlan = nextFusingAliases({
     current: oldAliases,
@@ -547,11 +537,11 @@ export async function regenerateFusingSheets(
       const purpose = (pattern.fabricPurpose ?? '').trim();
       return linked.has(key) || (!!purpose && purpose !== unsetPurpose);
     }),
-    // A kept blocked sheet and an unlinked (line-bound) sheet occupy their scopes like uploaded
+    // A removed blocked sheet and an unlinked (line-bound) sheet occupy their scopes like uploaded
     // ones: their links are not touched.
     otherSheets: [
       ...uploadedSheets,
-      ...keptBlocked,
+      ...removedBlocked,
       ...activeSheets
         .filter((sheet) => !linked.has(sheet.bomLineKey))
         .map((sheet) => bindings.get(sheet.bomLineKey)!),
