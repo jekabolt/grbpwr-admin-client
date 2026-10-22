@@ -14038,6 +14038,39 @@ export type ReceiveMaterialStockResponse = {
   movement: common_MaterialMovement | undefined;
 };
 
+// ReceiveMaterialStockLine is one material of a multi-line (one invoice) receipt.
+export type ReceiveMaterialStockLine = {
+  materialId: number | undefined;
+  // > 0
+  quantity: googletype_Decimal | undefined;
+  // NET per unit, in the request currency; empty = uncosted line.
+  unitCost: googletype_Decimal | undefined;
+  lot: string | undefined;
+};
+
+// ReceiveMaterialStockBatchRequest posts every line of one supplier invoice in ONE transaction.
+// Delivery and input VAT are allocated across the lines in proportion to each line's net.
+export type ReceiveMaterialStockBatchRequest = {
+  // 1..50; a material may not repeat.
+  lines: ReceiveMaterialStockLine[] | undefined;
+  currency: string | undefined;
+  supplierId: number | undefined;
+  supplierDoc: string | undefined;
+  invoiceFileId: number | undefined;
+  occurredAt: string | undefined;
+  expectedAt: string | undefined;
+  comment: string | undefined;
+  // Invoice total input VAT, EUR.
+  inputVatAmount: googletype_Decimal | undefined;
+  inputVatRegime: string | undefined;
+  // Invoice delivery NET, in `currency`; empty/0 = none.
+  deliveryCost: googletype_Decimal | undefined;
+};
+
+export type ReceiveMaterialStockBatchResponse = {
+  movements: common_MaterialMovement[] | undefined;
+};
+
 // MaterialMovement is one row of the append-only stock ledger. unit_cost* fields are confidential.
 export type common_MaterialMovement = {
   id: number | undefined;
@@ -20167,6 +20200,8 @@ export interface AdminService {
   // Material warehouse (new-flow NF-01): on-hand balance + moving-average valuation and an
   // append-only movement ledger per catalog material.
   ReceiveMaterialStock(request: ReceiveMaterialStockRequest): Promise<ReceiveMaterialStockResponse>;
+  // ReceiveMaterialStockBatch posts one supplier invoice with several materials in ONE transaction.
+  ReceiveMaterialStockBatch(request: ReceiveMaterialStockBatchRequest): Promise<ReceiveMaterialStockBatchResponse>;
   IssueMaterialStock(request: IssueMaterialStockRequest): Promise<IssueMaterialStockResponse>;
   AdjustMaterialStock(request: AdjustMaterialStockRequest): Promise<AdjustMaterialStockResponse>;
   // BatchIssueMaterialStock issues (or returns) SEVERAL materials to one target in ONE transaction.
@@ -26586,6 +26621,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ReceiveMaterialStock",
       }) as Promise<ReceiveMaterialStockResponse>;
+    },
+    ReceiveMaterialStockBatch(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/inventory/receive-batch`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReceiveMaterialStockBatch",
+      }) as Promise<ReceiveMaterialStockBatchResponse>;
     },
     IssueMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/issue`; // eslint-disable-line quotes
