@@ -194,6 +194,7 @@ export function writeR12(
     E(30, num(0));
     E(3, name);
     pl('1', b.cut, true);
+    for (const loop of b.cutLoops) pl('1', loop, true);
     if (b.seam) pl('14', b.seam, true);
     if (b.grain) {
       // a 2-point axis, 180 mm, no barb

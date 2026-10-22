@@ -306,6 +306,7 @@ export const fusingModeOptions: Array<{
   // ЧИСЛО В ПОДПИСИ НЕ ОБЕЩАНО: «полосой» с пустой ячейкой — законный ответ, он берёт эталон
   // припуска. «as a strip, mm» читалось бы как «впиши миллиметры», то есть как требование.
   { value: FUSING_MODE_STRIP, label: 'as a strip along the cut edge' },
+  { value: 'TECH_CARD_PIECE_FUSING_MODE_ZONE', label: 'a zone of the piece' },
 ];
 
 const fusingModeValues = new Set<string>(fusingModeOptions.map((o) => o.value));
@@ -353,6 +354,7 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
     return w ? `strip ${w} mm` : 'strip along the seam allowance';
   }
   if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the whole piece';
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_ZONE') return 'a zone of the piece';
   return 'method not specified';
 }
 

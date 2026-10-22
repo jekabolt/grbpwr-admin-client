@@ -3,14 +3,18 @@
 // Один DXF несёт всю градацию: BP_1_XS, BP_1_S, BP_1_M… Пока это не разделено, раскладка кладёт
 // на полосу ВСЕ размеры сразу (и меряет длину, которая не относится ни к одному), а деталей
 // кроя заводится по набору на каждый размер вместо одного набора на стиль.
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 import {
   useSizeNames,
   useSizeOrdering,
+  useSizeSystems,
 } from 'components/managers/model/components/use-size-systems';
 import type { PieceDTO } from 'lib/nesting/types';
-import { deriveBlockSizes, sizeTokensOf } from './block-code';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { permittedSizeSystems } from 'utils/size-systems';
+import { isOsSizeName } from '../size-ids-field';
+import { bareToken, deriveBlockSizes, sizeTokensOf } from './block-code';
 import { manifestFactsOf } from './manifest-facts';
 
 // Чистая половина (splitPiecesBySize, aliasIdentity) живёт в split-pieces.ts: публичному вьюеру
@@ -221,4 +225,64 @@ export function missingSizesIn(
     });
   }
   return [...found.values()];
+}
+
+// РАЗМЕРНЫЙ РЯД ИЗ ФАЙЛА — для карточки, у которой ряда ещё нет (первый DXF ставит ряд сам).
+//
+// Токен файла («s», «36») живёт в словаре в нескольких системах сразу (s, s_36ta_f, s_46ta_m…),
+// поэтому ряд берётся ЦЕЛИКОМ из одной системы: той, что узнаёт больше всего размеров файла; при
+// равенстве — первой по словарю. Токен, неоднозначный внутри самой системы, не берётся. OS в ряд
+// не идёт: он исключает градацию. `allowed` сужает словарь (категория, пол карточки).
+export function sizeRunOfFile(
+  fileSizes: readonly string[],
+  sizeById: ReadonlyMap<number, string>,
+  allowed?: (id: number) => boolean,
+): number[] {
+  const tokens = new Set(fileSizes.map(bareToken).filter(Boolean));
+  if (tokens.size === 0) return [];
+  const bySystem = new Map<string, Map<string, number[]>>();
+  for (const [id, name] of sizeById) {
+    if (isOsSizeName(name) || (allowed && !allowed(id))) continue;
+    const sys = systemOf(name);
+    for (const t of sizeTokensOf(name)) {
+      if (!tokens.has(t)) continue;
+      const byToken = bySystem.get(sys) ?? new Map<string, number[]>();
+      byToken.set(t, [...(byToken.get(t) ?? []), id]);
+      bySystem.set(sys, byToken);
+    }
+  }
+  let best: number[] = [];
+  for (const byToken of bySystem.values()) {
+    const run = [...new Set([...byToken.values()].flatMap((ids) => (ids.length === 1 ? ids : [])))];
+    if (run.length > best.length) best = run;
+  }
+  return best;
+}
+
+/**
+ * The card's size run for a file's sizes, in dictionary order: the sizes the card's category and
+ * gender permit first, the whole dictionary when they recognise none.
+ */
+export function useFileSizeRun(): (fileSizes: readonly string[]) => number[] {
+  const { dictionary } = useDictionary();
+  const sizeById = useSizeNames();
+  const orderSizes = useSizeOrdering();
+  const gender = useWatch({ name: 'targetGender' }) as string | undefined;
+  const categoryId = useWatch({ name: 'categoryId' }) as number | undefined;
+  const allowedSizeSystems = useMemo(
+    () => permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, categoryId),
+    [dictionary?.categories, dictionary?.categorySizeSystems, categoryId],
+  );
+  const { permitted } = useSizeSystems({ gender, allowedSizeSystems, selectedIds: [] });
+  const permittedIds = useMemo(
+    () => new Set(permitted.flatMap((g) => g.sizes.map((s) => s.id ?? 0))),
+    [permitted],
+  );
+  return useCallback(
+    (fileSizes) => {
+      const run = sizeRunOfFile(fileSizes, sizeById, (id) => permittedIds.has(id));
+      return orderSizes(run.length > 0 ? run : sizeRunOfFile(fileSizes, sizeById));
+    },
+    [sizeById, permittedIds, orderSizes],
+  );
 }

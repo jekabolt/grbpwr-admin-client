@@ -121,10 +121,17 @@ import {
   auditOperationPresence,
   contradictsScreen,
   hasPresenceLoss,
+  mergeOperationsAfterSave,
   type PresenceAudit,
 } from './operations-presence';
 import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
+import {
+  FUSING_SHEETS_KEY,
+  fusingSheetsChange,
+  fusingSignature,
+  hasFusedPiece,
+} from './nesting/fusing-sheets-stage';
 import {
   AutosaveContext,
   flushRefusalSentence,
@@ -1203,6 +1210,10 @@ export function TechCardForm({
   const writing = useRef(0);
   // m1: a read this page needed after its own write did not come back — the next body write reads first.
   const needsRead = useRef(false);
+  // The version this page's own staged rebuild (the fusing DXF) left when it actually wrote the card
+  // body: a read of EXACTLY that version is not another editor's write, and the form is rebased onto
+  // it instead of stopping at the conflict decision. Any other version is judged as usual.
+  const ownBodyVersion = useRef<number | null>(null);
   // The stored card the same way: the cache first — every re-read of this page writes it before the
   // render that turns it into the `techCard` prop (R-2b).
   const storedCard = (): common_TechCard | undefined =>
@@ -1298,7 +1309,7 @@ export function TechCardForm({
     // MJ-1: only unsaved work of the BODY stops at the decision. Work outside it — a staged panel, a style
     // fact, dirt nobody can write (mn-3) — is not what their write moved: the body is rebased onto
     // theirs and the queue is kept.
-    if (bodyWorkOf(form)) return 'conflict';
+    if (bodyWorkOf(form) && ownBodyVersion.current !== v) return 'conflict';
     rebaseOnto(fresh);
     adopt(fresh);
     lastBody.current = null;
@@ -1537,13 +1548,31 @@ export function TechCardForm({
     // ПРИСУТСТВИЕ против присутствия, по списку полей из самой zod-схемы шага. Утверждение
     // баннера «ваши значения всё ещё в форме» истинно по построению: строки операций берутся из
     // `sent` (сброс — МЕРДЖ в отправленное, серверные значения идут только в три списка выше).
-    const audit = auditOperationPresence(
-      (sent.operations ?? []) as unknown as Record<string, unknown>[],
-      (server.operations ?? []) as unknown as Record<string, unknown>[],
+    // L5 (fusing): steps are paired by content, not index, and the server's own draft Fusing steps
+    // are not counted — the backend puts them at the front of the order. The form then stands on the
+    // SERVER's list (with the sent values kept only where something did not come back): reset to
+    // what was sent, it would drop the Fusing steps and the next unrelated save would wipe them.
+    type OpRow = NonNullable<TechCardFormData['operations']>[number];
+    const sentOps = (sent.operations ?? []) as OpRow[];
+    const readOps = (server.operations ?? []) as OpRow[];
+    const merged = mergeOperationsAfterSave(
+      sentOps,
+      readOps,
+      auditOperationPresence(
+        sentOps as unknown as Record<string, unknown>[],
+        readOps as unknown as Record<string, unknown>[],
+      ),
     );
     return done(
-      { ...sent, signoffs, patterns, bomItems, construction: server.construction },
-      audit,
+      {
+        ...sent,
+        operations: merged.operations,
+        signoffs,
+        patterns,
+        bomItems,
+        construction: server.construction,
+      },
+      merged.audit,
       server,
     );
   }
@@ -1630,6 +1659,7 @@ export function TechCardForm({
     }
     needsRead.current = false;
     const verdict = reconcileRead(fresh);
+    ownBodyVersion.current = null;
     // After `base` moved: the prop this makes a render later reads as nothing new.
     queryClient.setQueryData(techCardKeys.detail(numId), fresh);
     return verdict;
@@ -1674,7 +1704,21 @@ export function TechCardForm({
         // and the approval doors set a value and save in the same tick (see liveIsDirty). The style
         // facts are not the body's work (M2): the body never writes them.
         const bodyDirty = bodyWorkOf(form);
-        const planned = (bodyDirty ? 1 : 0) + staging.peek().length;
+        // L5 (fusing): the fusible sheets are rebuilt off the stored card, after the body — whenever
+        // this body moves the fuse markup or the interlining lines, whichever panel moved them.
+        // A rebuild already queued (the PIECES modal, a failed earlier one) is taken over the same way,
+        // so its own write is told apart from another editor's (ownBodyVersion).
+        const fuseQueued = staging.peek().some((c) => c.key === FUSING_SHEETS_KEY);
+        const fuseStage =
+          !!numId &&
+          (fuseQueued ||
+            (bodyDirty &&
+              fusingSignature(form.control._defaultValues as TechCardFormData) !==
+                fusingSignature(data) &&
+              (hasFusedPiece(form.control._defaultValues as TechCardFormData) ||
+                hasFusedPiece(data))));
+        const planned =
+          (bodyDirty ? 1 : 0) + staging.peek().length + (fuseStage && !fuseQueued ? 1 : 0);
 
         // B-08: an approval is the LAST write, never one of several. A release that went out beside a
         // staged panel could freeze the card and then watch that panel fail, its work stranded in a
@@ -1682,12 +1726,21 @@ export function TechCardForm({
         // staged in the moment between the two is refused here, before anything is sent.
         const carriesApproval =
           !!approvalAttempt.current && data.approvalState === approvalAttempt.current.next;
-        if (carriesApproval && staging.peek().length > 0) {
+        // The fusing rebuild is pending work too: a release saved beside it would freeze the card the
+        // rebuild then has to write.
+        if (carriesApproval && (staging.peek().length > 0 || fuseStage)) {
           const message =
             'a panel changed while the approval was being saved; nothing was released, try again';
           if (!silent) reportFailure({ text: 'not released', detail: message }, autosaveEnabled);
           return { bodySaved: false, ok: false, outcome: 'error', message };
         }
+        ownBodyVersion.current = null;
+        if (fuseStage && numId)
+          staging.stage(
+            fusingSheetsChange(numId, (v) => {
+              ownBodyVersion.current = v;
+            }),
+          );
 
         // The style facts are written by their own panel (StyleFactsField → UpdateStyle), which
         // commits AFTER the body — the body never writes them at all. A body save therefore never
