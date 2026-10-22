@@ -150,6 +150,10 @@ import { planSheetDelete } from './nesting/dxf-delete';
 import {
   armDeleteSnapshot,
   armReuploadSnapshot,
+  armSeamDeleteRetry,
+  consumeSeamDeleteRetry,
+  noteSheetRestore,
+  peekSeamDeleteRetry,
   provideSheetRestorer,
   restoreSheetVersion,
   type RestoreOutcome,
@@ -509,6 +513,32 @@ export function PatternsField({
   // один раз, без кнопки «ещё раз» и без цикла на каждый рендер формы.
   const { data: cardRead, dataUpdatedAt: cardReadAt } = useTechCard(techCardId);
   const queryClient = useQueryClient();
+  const autosaveRef = useRef(autosave);
+  autosaveRef.current = autosave;
+  const retryingSeamDeletes = useRef(false);
+  const retrySeamDeletesRef = useRef<() => Promise<void>>(async () => {});
+  const lastSeamRetrySave = useRef({ cardId: techCardId, at: autosave.lastSavedAt });
+  retrySeamDeletesRef.current = async () => {
+    if (!techCardId || retryingSeamDeletes.current) return;
+    const seamKeys = peekSeamDeleteRetry(techCardId);
+    if (!seamKeys.length) return;
+    retryingSeamDeletes.current = true;
+    try {
+      await deleteSeamsOnServer(techCardId, seamKeys);
+    } finally {
+      retryingSeamDeletes.current = false;
+    }
+  };
+  useEffect(() => {
+    const seen = lastSeamRetrySave.current;
+    if (seen.cardId !== techCardId) {
+      lastSeamRetrySave.current = { cardId: techCardId, at: autosave.lastSavedAt };
+      return;
+    }
+    if (seen.at === autosave.lastSavedAt) return;
+    seen.at = autosave.lastSavedAt;
+    if (autosave.lastSavedAt != null) void retrySeamDeletesRef.current();
+  }, [autosave.lastSavedAt, techCardId]);
   // Superseded files of each sheet (TechCardSizePattern.history, output-only), by row lineKey.
   const historyByLine = useMemo(() => {
     const m = new Map<string, common_TechCardPatternRevision[]>();
@@ -1308,10 +1338,16 @@ export function PatternsField({
           : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
       return rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
     };
+    const canonicalSeams = (rows = seamsNow()) =>
+      [...rows].sort((a, b) => {
+        const ak = a.seamKey ?? '';
+        const bk = b.seamKey ?? '';
+        return ak < bk ? -1 : ak > bk ? 1 : 0;
+      });
     // EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
-    // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step or a
-    // piece edited), the plan belongs to another card and is not applied.
-    const inputsSig = () => {
+    // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step, seam
+    // or piece edited), the plan belongs to another card and is not applied.
+    const inputsSig = (seams = canonicalSeams()) => {
       const rows = (getValues('patterns') ?? []) as PatternRow[];
       return JSON.stringify([
         getValues('pieces') ?? [],
@@ -1331,9 +1367,11 @@ export function PatternsField({
           b.section ?? '',
         ]),
         refsNow(),
+        seams,
       ]);
     };
-    const before = inputsSig();
+    const seams = canonicalSeams();
+    const before = inputsSig(seams);
     const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
     bumpUploading(scopeKey, 1);
@@ -1351,7 +1389,7 @@ export function PatternsField({
           isDxf: (url) => isDxfUrl(url),
           sizeTokens: [...dictTokens.keys()],
           externalRefs: refsNow(),
-          seams: seamsNow(),
+          seams,
           target,
         },
         { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
@@ -1448,11 +1486,12 @@ export function PatternsField({
     const stored =
       queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
     try {
-      await adminService.RestoreTechCardSnapshot({
+      const restored = await adminService.RestoreTechCardSnapshot({
         techCardId,
         snapshotId,
         expectedLockVersion: stored?.lockVersion ?? 0,
       });
+      noteSheetRestore(techCardId, restored.techCard?.updatedAt);
     } catch (e) {
       console.error('snapshot restore failed', e);
       const said = e instanceof Error ? e.message.trim() : '';
@@ -1919,6 +1958,24 @@ export function PatternsField({
     else if (plan.kind === 'cascade') setDeleting({ rowId, counts: plan.counts });
   }
 
+  async function deleteSeamsOnServer(cardId: number, seamKeys: string[]): Promise<boolean> {
+    let res: Awaited<ReturnType<typeof adminService.DeleteTechCardSeams>>;
+    try {
+      res = await adminService.DeleteTechCardSeams({ techCardId: cardId, seamKeys });
+    } catch (e) {
+      console.error('seams of a deleted sheet not removed', e);
+      armSeamDeleteRetry(cardId, seamKeys);
+      lastSeamRetrySave.current = { cardId, at: autosaveRef.current.lastSavedAt };
+      useSnackBarStore.getState().showMessage('seams not deleted', 'error');
+      return false;
+    }
+    consumeSeamDeleteRetry(cardId, seamKeys);
+    if (useSeamsStore.getState().cardId === cardId)
+      hydrateSeams(cardId, (res.seams ?? []) as TechCardSeamWire[]);
+    await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
+    return true;
+  }
+
   async function confirmDelete(rowId: string) {
     const plan = deletePlan(rowId);
     if (plan.kind === 'missing') return;
@@ -1943,17 +2000,7 @@ export function PatternsField({
     // Seams live outside the card body: they go once the card without their pieces is saved.
     const saved = await autosave.flush('dxf-delete');
     if (saved !== 'ok' && saved !== 'nothing') return;
-    try {
-      const res = await adminService.DeleteTechCardSeams({
-        techCardId,
-        seamKeys: plan.removedSeamIds,
-      });
-      if (useSeamsStore.getState().cardId === techCardId)
-        hydrateSeams(techCardId, (res.seams ?? []) as TechCardSeamWire[]);
-      await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-    } catch (e) {
-      console.error('seams of a deleted sheet not removed', e);
-    }
+    await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
   }
 
   function renderVersions() {

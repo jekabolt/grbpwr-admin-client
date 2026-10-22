@@ -4,14 +4,16 @@
 // по месту (тот же ключ, та же кратность, другая форма) его не трогает, и раскладка, снятая на
 // старой геометрии, читалась бы годной молча. Признак здесь — время: DXF-лист ткани раскладки
 // (тот же резолв слота, что у выкроек: назначение, иначе строка BOM) загружен ПОЗЖЕ, чем раскладка
-// последний раз писалась. Пересъёмка замещает раскладку по id и двигает updated_at — признак
-// снимается сам. Ничего не пересчитывает и не отменяет: только причина «перепроверить».
+// последний раз писалась. Restore возвращает старый uploaded_at, поэтому его серверное время
+// отдельно запоминается в reupload-session. Пересъёмка замещает раскладку по id и двигает updated_at
+// — признак снимается сам. Ничего не пересчитывает и не отменяет: только причина «перепроверить».
 // Время берётся только с привязанного листа (первый лист слота или заменённый), не с чужого
 // дополнительного (L5 fix 5).
 import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { isDxfUrl } from 'utils/pattern';
 import { scopeKeyOfBinding } from '../bom-purpose';
 import { rollGoodsScopes } from '../piece-block-refs';
+import { lastSheetRestoreAt } from './reupload-session';
 
 const ms = (ts?: string): number | null => {
   if (!ts || ts.startsWith('0001-01-01')) return null;
@@ -21,12 +23,14 @@ const ms = (ts?: string): number | null => {
 
 /**
  * По сохранённой карточке: id раскладки → её ткань перезалита после съёмки. Неизвестность (нет
- * времени у раскладки или у листа, раскладка без ткани) — НЕ протухание.
+ * времени у раскладки или у листа, раскладка без ткани) — НЕ протухание, кроме явно записанного
+ * restore: он сам доказывает смену геометрии.
  */
 export function markersBehindSheets(card: common_TechCard | undefined): Set<number> {
   const out = new Set<number>();
   const body = card?.techCard;
   if (!body) return out;
+  const restoredAt = lastSheetRestoreAt(card?.id);
   const scopes = rollGoodsScopes(body.bomItems ?? []);
   // Время двигает только лист, чья геометрия стоит за деталями слота: заменённый (перезалив,
   // восстановление — у строки есть история) или первый DXF-лист слота. Чужой файл, отказанный
@@ -44,12 +48,16 @@ export function markersBehindSheets(card: common_TechCard | undefined): Set<numb
     const t = ms(p.uploadedAt);
     if (t != null) lastBySlot.set(k, Math.max(lastBySlot.get(k) ?? 0, t));
   }
-  if (lastBySlot.size === 0) return out;
+  if (lastBySlot.size === 0 && restoredAt == null) return out;
   for (const m of card?.markers ?? []) {
     const k = scopeKeyOfBinding('', m.bomLineKey, scopes);
     const sheet = k ? lastBySlot.get(k) : undefined;
     const at = ms(m.updatedAt) ?? ms(m.createdAt);
-    if (sheet != null && at != null && sheet > at) out.add(Number(m.id ?? 0));
+    if (
+      (sheet != null && at != null && sheet > at) ||
+      (restoredAt != null && (at == null || restoredAt > at))
+    )
+      out.add(Number(m.id ?? 0));
   }
   return out;
 }
