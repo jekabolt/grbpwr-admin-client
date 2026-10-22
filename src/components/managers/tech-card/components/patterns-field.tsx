@@ -162,8 +162,13 @@ import {
   seamAnchorKeys,
   sheetRowId,
   markJumpParams,
+  planForeignChoice,
   reuploadSheet,
+  uploadForeignSheet,
+  type ForeignChoice,
+  type ForeignReuploadOutcome,
   type ReuploadDeps,
+  type ReuploadDeletePlan,
   type ReuploadOutcome,
   type ReuploadRefusal,
 } from './nesting/dxf-reupload';
@@ -355,6 +360,13 @@ type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
 };
 type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+type ForeignAsk = {
+  scopeKey: string;
+  picked: File;
+  outcome: ForeignReuploadOutcome<FormPiece, FormAlias, FormOp>;
+  current: () => boolean;
+  upload: ReuploadDeps<FormPiece, FormAlias, FormOp>['upload'];
+};
 
 // A refused re-upload keeps the old sheet and says why in 1–2 words.
 const REFUSAL_WORDS: Record<ReuploadRefusal, string> = {
@@ -613,6 +625,9 @@ export function PatternsField({
   const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
   // Direct uploads in flight, per slot.
   const [uploading, setUploading] = useState<Record<string, number>>({});
+  // A parsed foreign DXF waits here without being uploaded until the operator chooses its fate.
+  const [foreignAsk, setForeignAsk] = useState<ForeignAsk | null>(null);
+  const foreignCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
   const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
   // A re-upload changed the slot's geometry: piece areas are measured on the next save even while
@@ -1489,26 +1504,30 @@ export function PatternsField({
     ];
     const refsNow = () =>
       externalPieceRefs(piecesNow(), cardRead?.colorways, cardRead?.pieceAreaScopes, seamKeys());
-    // The confirmed seams the reconcile re-measures on a reshaped piece: the store's rows (saved +
-    // optimistic) once it holds this card, else the card read's.
+    // All seams feed the delete cascade; the confirmed subset is what reconcile re-measures on a
+    // reshaped piece. The store owns saved + optimistic rows once it holds this card.
     const seamsNow = (): TechCardSeamWire[] => {
       const st = useSeamsStore.getState();
-      const rows =
-        techCardId && st.cardId === techCardId
-          ? rowsOf(st).map(toWire)
-          : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
-      return rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
+      return techCardId && st.cardId === techCardId
+        ? rowsOf(st).map(toWire)
+        : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
     };
-    const canonicalSeams = (rows = seamsNow()) =>
+    const reconcileSeams = (rows: TechCardSeamWire[]) =>
+      rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
+    const canonicalSeams = (rows: TechCardSeamWire[]) =>
       [...rows].sort((a, b) => {
         const ak = a.seamKey ?? '';
         const bk = b.seamKey ?? '';
         return ak < bk ? -1 : ak > bk ? 1 : 0;
       });
-    // EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
-    // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step, seam
-    // or piece edited), the plan belongs to another card and is not applied.
-    const inputsSig = (seams = canonicalSeams()) => {
+    const allSeams = canonicalSeams(seamsNow());
+    const seams = reconcileSeams(allSeams);
+    /*
+     * EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
+     * (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step, seam
+     * or piece edited), the plan belongs to another card and is not applied.
+     */
+    const inputsSig = (seamRows = canonicalSeams(seamsNow())) => {
       const rows = (getValues('patterns') ?? []) as PatternRow[];
       return JSON.stringify([
         getValues('pieces') ?? [],
@@ -1528,13 +1547,13 @@ export function PatternsField({
           b.section ?? '',
         ]),
         refsNow(),
-        seams,
+        seamRows,
       ]);
     };
-    const seams = canonicalSeams();
-    const before = inputsSig(seams);
+    const before = inputsSig(allSeams);
     const pieces = piecesNow();
     let out: ReuploadOutcome<FormPiece, FormAlias, FormOp>;
+    const deps = reuploadDeps(scopeKey, picked.type);
     bumpUploading(scopeKey, 1);
     try {
       out = await reuploadSheet(
@@ -1552,9 +1571,13 @@ export function PatternsField({
           externalRefs: refsNow(),
           seams,
           target,
+          planDelete: (rowId, knownBlocks) => {
+            const plan = deletePlan(rowId, knownBlocks);
+            return plan.kind === 'cascade' ? plan : null;
+          },
         },
         { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
-        reuploadDeps(scopeKey, picked.type),
+        deps,
       );
     } catch (e) {
       console.error('DXF re-upload failed', e);
@@ -1571,25 +1594,16 @@ export function PatternsField({
       say(REFUSAL_WORDS[out.why], 'error');
       return 'refused';
     }
-    // Another garment's file: the card stays as it is, the file joins the slot as one more sheet,
-    // sized like the sheet it was dropped on. No units, sizes or pieces questions.
+    // A foreign file is parsed but deliberately not uploaded. The choice handler below validates
+    // this same signature once more before and after its deferred upload.
     if (out.kind === 'foreign') {
-      const live = (getValues('patterns') ?? []) as PatternRow[];
-      const near = live[out.rowIndex];
-      const sizeId =
-        near && scopeKeyOfBinding(near.fabricPurpose, near.bomLineKey, scopes) === scopeKey
-          ? near.sizeId ?? storageSizeId
-          : storageSizeId;
-      append({
-        sizeId,
-        lineKey: ulid(),
-        ...out.row,
-        name: autoName(scopeKey, picked),
-        ...bindingOf(scopeKey),
+      setForeignAsk({
+        scopeKey,
+        picked,
+        outcome: out,
+        current: () => inputsSig() === before,
+        upload: deps.upload,
       });
-      setAreasArmed(true);
-      autosave.request('dxf-new-sheet');
-      say('new sheet', 'success');
       return 'foreign';
     }
     // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
@@ -2082,7 +2096,10 @@ export function PatternsField({
     return m;
   }, [bundle]);
 
-  const deletePlan = (rowId: string) => {
+  const deletePlan = (
+    rowId: string,
+    knownBlocks: ReadonlyMap<string, readonly string[]> = new Map(),
+  ) => {
     const pieces = ((getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>).map(
       (p) => ({ ...p, lineKey: p.lineKey ?? '', name: p.name ?? '' }),
     ) as FormPiece[];
@@ -2112,6 +2129,8 @@ export function PatternsField({
         isDxf: (url) => isDxfUrl(url),
         sizeTokens: [...dictTokens.keys()],
         blockNamesOf: (url) => {
+          const known = knownBlocks.get(url);
+          if (known) return known;
           const set = blockNamesByUrl.get(url);
           return set ? [...set] : null;
         },
@@ -2154,6 +2173,100 @@ export function PatternsField({
     return true;
   }
 
+  // Shared by row deletion and a confirmed foreign replacement: one writer for pieces, aliases,
+  // steps and issue remapping. The caller decides whether the row is removed or swapped in place.
+  function applySheetCascade(
+    plan: Pick<
+      ReuploadDeletePlan<FormPiece, FormAlias, FormOp>,
+      'pieces' | 'aliases' | 'operations' | 'issueNumbers'
+    >,
+  ) {
+    setValue('pieces', plan.pieces, { shouldDirty: true });
+    setValue('pieceDxfAliases', plan.aliases, { shouldDirty: true });
+    setValue('operations', plan.operations, { shouldDirty: true });
+    (getValues('issues') ?? []).forEach((iss, ii) => {
+      const next = plan.issueNumbers[ii];
+      if (next != null && next !== (iss.operationNumber ?? 0))
+        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
+    });
+  }
+
+  async function chooseForeign(ask: ForeignAsk, choice: ForeignChoice) {
+    setForeignAsk(null);
+    const say = useSnackBarStore.getState().showMessage;
+    if (!ask.current()) {
+      say('not applied', 'error');
+      return;
+    }
+
+    let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
+    bumpUploading(ask.scopeKey, 1);
+    try {
+      uploaded = await uploadForeignSheet(ask.outcome, ask.upload);
+    } catch (e) {
+      console.error('Foreign DXF upload failed', e);
+      say('upload failed', 'error');
+      return;
+    } finally {
+      bumpUploading(ask.scopeKey, -1);
+    }
+
+    // An edit made while the upload was in flight invalidates the captured cascade. The uploaded
+    // blob is then an orphan, but the form is left intact rather than applying an old plan.
+    if (!ask.current()) {
+      say('not applied', 'error');
+      return;
+    }
+    const plan = planForeignChoice(ask.outcome, choice, uploaded);
+    const live = (getValues('patterns') ?? []) as PatternRow[];
+    const at = live.findIndex((r) => sheetRowId(r) === ask.outcome.rowId);
+    const target = at >= 0 ? live[at] : undefined;
+    if (
+      !target ||
+      target.url !== ask.outcome.replacedUrl ||
+      scopeKeyOfBinding(target.fabricPurpose, target.bomLineKey, scopes) !== ask.scopeKey
+    ) {
+      say('not applied', 'error');
+      return;
+    }
+
+    if (plan.kind === 'add') {
+      append({
+        sizeId: target.sizeId ?? storageSizeId,
+        lineKey: ulid(),
+        ...plan.row,
+        name: autoName(ask.scopeKey, ask.picked),
+        ...bindingOf(ask.scopeKey),
+      });
+      setAreasArmed(true);
+      autosave.request('dxf-new-sheet');
+      say('new sheet', 'success');
+      return;
+    }
+
+    applySheetCascade(plan);
+    const keep = { shouldDirty: true };
+    setValue(`patterns.${at}.url`, plan.row.url, keep);
+    setValue(`patterns.${at}.filename`, plan.row.filename, keep);
+    setValue(`patterns.${at}.sizeBytes`, plan.row.sizeBytes, keep);
+    setValue(`patterns.${at}.sha256`, plan.row.sha256, keep);
+    setValue(`patterns.${at}.version`, 0, keep);
+    setValue(`patterns.${at}.uploadedAt`, '', keep);
+    armReuploadSnapshot(techCardId, plan.row.url, plan.replacedUrl);
+    setAreasArmed(true);
+    // This is the established first-upload hand-off: the shared pieces viewer creates and links
+    // the new file's pieces after the old sheet's graph has been removed.
+    setPendingView({ scopeKey: ask.scopeKey, urls: [plan.row.url] });
+    say('replaced', 'success');
+    if (!techCardId || plan.removedSeamIds.length === 0) {
+      autosave.request('dxf-reupload');
+      return;
+    }
+    const saved = await autosave.flush('dxf-reupload');
+    if (saved !== 'ok' && saved !== 'nothing') return;
+    await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
+  }
+
   async function confirmDelete(rowId: string) {
     // A non-DXF row: by its index, as the old × did.
     if (rowId.startsWith('#')) {
@@ -2167,14 +2280,7 @@ export function PatternsField({
       remove(plan.rowIndex);
       return;
     }
-    setValue('pieces', plan.pieces, { shouldDirty: true });
-    setValue('pieceDxfAliases', plan.aliases, { shouldDirty: true });
-    setValue('operations', plan.operations, { shouldDirty: true });
-    (getValues('issues') ?? []).forEach((iss, ii) => {
-      const next = plan.issueNumbers[ii];
-      if (next != null && next !== (iss.operationNumber ?? 0))
-        setValue(`issues.${ii}.operationNumber`, next, { shouldDirty: true });
-    });
+    applySheetCascade(plan);
     remove(plan.rowIndex);
     armDeleteSnapshot(techCardId, plan.rowUrl);
     if (!techCardId || plan.removedSeamIds.length === 0) {
@@ -3473,6 +3579,62 @@ export function PatternsField({
 
       {renderVersions()}
       {renderRemovedVersions()}
+
+      <ConfirmationModal
+        open={foreignAsk != null}
+        onOpenChange={(open) => {
+          if (!open) setForeignAsk(null);
+        }}
+        onConfirm={() => {
+          if (foreignAsk) void chooseForeign(foreignAsk, 'replace');
+        }}
+        onCancel={() => setForeignAsk(null)}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          foreignCancelRef.current?.focus();
+        }}
+        cancelRef={foreignCancelRef}
+        title='other file'
+        confirmLabel='replace'
+        width='sm'
+        headerActions={
+          <Button
+            variant='secondary'
+            size='xs'
+            onClick={() => {
+              if (foreignAsk) void chooseForeign(foreignAsk, 'add');
+            }}
+          >
+            add sheet
+          </Button>
+        }
+      >
+        <div className='flex flex-col gap-2'>
+          <Text className='break-all'>
+            {foreignAsk?.outcome.file.name} · {foreignAsk?.outcome.pieceCount ?? 0}{' '}
+            {plural(foreignAsk?.outcome.pieceCount ?? 0, 'piece')}
+          </Text>
+          <Text className='break-all'>replaces {foreignAsk?.outcome.replacedName}</Text>
+          {foreignAsk && (
+            <Text className='text-error tabular-nums'>
+              − {foreignAsk.outcome.loss.pieces} {plural(foreignAsk.outcome.loss.pieces, 'piece')}
+              {foreignAsk.outcome.loss.steps > 0 && (
+                <>
+                  {' '}
+                  · {foreignAsk.outcome.loss.steps} {plural(foreignAsk.outcome.loss.steps, 'step')}
+                  {foreignAsk.outcome.loss.seams > 0 && (
+                    <>
+                      {' '}
+                      · {foreignAsk.outcome.loss.seams}{' '}
+                      {plural(foreignAsk.outcome.loss.seams, 'seam')}
+                    </>
+                  )}
+                </>
+              )}
+            </Text>
+          )}
+        </div>
+      </ConfirmationModal>
 
       <ConfirmationModal
         open={deleting != null}
