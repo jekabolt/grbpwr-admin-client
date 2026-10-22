@@ -6,10 +6,7 @@ import {
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import {
-  formatCompositionCell,
-  materialCompositionCode,
-} from 'components/managers/materials/components/material-code';
+import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   MaterialHoverCard,
@@ -48,6 +45,7 @@ import {
 import { carriesGarmentComposition } from 'utils/care-label';
 import { FIELD_REVEAL_EVENT, revealField, type FieldRevealDetail } from 'utils/field-errors';
 import { sectionShort } from './bom-line-picker';
+import { bornMaterialBomLine, materialAutoFields, materialLineFields } from './bom-material-line';
 import { TrimPictogram, trimPictogramKind } from './design/pattern/trim-pictograms';
 import {
   KIND_HOME_SECTION,
@@ -55,7 +53,6 @@ import {
   isKindEligibleSection,
   kindLabel,
   kindOptionsForSection,
-  kindsForSection,
 } from './bom-kind';
 import {
   UNSET_PURPOSE,
@@ -68,7 +65,7 @@ import {
 import { resolveBomPrice } from './bom-price';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { defaultRoleFor, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
-import { bornBomLine, emptyBomItem } from './form-writers';
+import { emptyBomItem } from './form-writers';
 import {
   LABEL_PART_NAME,
   LABEL_PART_UNSPECIFIED,
@@ -77,7 +74,6 @@ import {
   labelPartFromWire,
   labelPartToWire,
 } from '../care-labels/label-parts';
-import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { TechCardFormData, wireInt } from './schema';
 import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
 
@@ -90,64 +86,6 @@ import { useBomWarnings, type BomLineTone } from './use-bom-warnings';
 // Fabric width/weight read from the typed CTI attrs, falling back to the legacy flat fields —
 // shared by the link-time snapshot, the linked-line catalog plate AND the length→kg weight basis
 // (nesting/fabric-weight.ts, where the pair now lives) so the three never drift apart.
-
-// The catalog facts a BOM line snapshots off the article it links (S23: the line stays
-// self-contained). ONE helper, so creating a line FROM the picker and linking an article onto an
-// existing line can never disagree about what a linked line ends up carrying.
-function materialLineFields(m: common_Material) {
-  return {
-    // NO `name` here — the line's name is the slot ROLE («main zipper»), owned by the operator
-    // and never derived from the article. Stamping the article name in was the regression that made
-    // duplicate-looking slots and printed «YKK → YKK» in the production material plan (SlotName vs
-    // MaterialName). An empty role is legal: the server falls back to the article name on read.
-    section: m.section || emptyBomItem.section,
-    supplier: m.supplier || '',
-    supplierRef: m.supplierRef || '',
-    // The blend as the parseable JSON the CompositionPicker + care generator read — derived from the
-    // material's STRUCTURED fibre entries when it has no legacy free-text `composition`, so a line
-    // linked to a structurally-composed material carries a composition that generates the care label.
-    composition: materialCompositionCode(m),
-    spec: m.spec || '',
-    unit: m.unit || '',
-    fabricWidth: materialFabricWidth(m) || '',
-    fabricWeightGsm: materialFabricWeight(m) || '',
-    // latest_price is costing-gated (absent without access) — seeds price only when present.
-    unitPrice: m.latestPrice?.price?.value || '',
-    currency: m.latestPrice?.currency || '',
-  };
-}
-
-// АВТОЗАПОЛНЕНИЕ ПРИ ПРИВЯЗКЕ (tabs-lite AUTO #1): то, что артикул уже знает о себе, строка берёт
-// сама, но ТОЛЬКО в пустые поля — значение, которое поставил человек, не перетирается никогда.
-//   · направление ворса: у артикула поле другой оси (долевая: lengthwise / crosswise / any), и
-//     про ворс говорит только `any` — «кладётся как угодно», то есть ANY строки. Остальные значения
-//     о ворсе молчат и не переносятся;
-//   · цвет и пантон артикула;
-//   · семпл НЕ выводится (владелец 16.10: семплы — это колорвеи-семплы, не флаг строки BOM);
-//   · вид (нерулонные секции): по словам имени артикула против подписей видов этой секции.
-// Кромка (selvedgeCm) и коэффициент раскроя на строку не пишутся: первое — read-only обогащение
-// чтения, второго у строки нет вовсе (сервер берёт его с артикула).
-function materialAutoFields(m: common_Material, section: string) {
-  const grain = (m.fabricAttrs?.fabricDirection ?? '').trim().toLowerCase();
-  const name = (m.name ?? '').toLowerCase();
-  const words = new Set(name.split(/[^a-z0-9]+/).filter(Boolean));
-  // Самая длинная подпись вида, целиком встречающаяся в имени («cord stopper» сильнее «cord»).
-  const kind = kindsForSection(section)
-    .filter((k) => k !== 'TECH_CARD_BOM_KIND_OTHER')
-    .map((k) => ({ k, label: (kindLabel(k) ?? '').toLowerCase() }))
-    .filter(({ label }) => {
-      const parts = label.split(/[^a-z0-9]+/).filter(Boolean);
-      return parts.length > 0 && parts.every((w) => words.has(w) || words.has(`${w}s`));
-    })
-    .sort((a, b) => b.label.length - a.label.length)[0]?.k;
-  return {
-    fabricDirection:
-      isRollGoodsSection(section) && grain === 'any' ? 'TECH_CARD_FABRIC_DIRECTION_ANY' : '',
-    color: m.color?.trim() ?? '',
-    pantone: m.pantone?.trim() ?? '',
-    kind: kind ?? '',
-  };
-}
 
 // Значения, которые на СУЩЕСТВУЮЩЕЙ строке значат «не задано». Флаг семпла (`isSample`) каталог
 // больше не пишет вовсе: значение на строке лежит как лежало, экран BOM его не показывает.
@@ -916,21 +854,15 @@ export function BomField({
     const base =
       (roll && purpose !== UNSET_PURPOSE ? defaultRoleForPurpose(purpose) : '') ||
       defaultRoleFor(section);
-    const auto = materialAutoFields(m, section);
     const next = fields.length;
     // `bornBomLine` — тот же конструктор, которым рождается строка из черновика construction.
     // Флаг семпла не передаётся: строка рождается с болванкой, каталог его не решает.
     append(
-      bornBomLine({
-        ...materialLineFields(m),
+      bornMaterialBomLine(m, {
+        section,
         name: uniqueRole(base, bomWatch),
         purpose,
         purposeNote: '',
-        kind: auto.kind || UNSET_KIND,
-        color: auto.color,
-        pantone: auto.pantone,
-        fabricDirection: auto.fabricDirection || emptyBomItem.fabricDirection,
-        materialId,
       }) as never,
     );
     warnNoPrice(m);

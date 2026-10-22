@@ -299,6 +299,42 @@ export async function main() {
     'the writer keeps an outer and a dart-hole loop in each block',
   );
 
+  const twoInterlinings = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [
+      { bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' },
+      { bomLineKey: 'IL-2', code: 'KUFNER', label: 'knit fusible' },
+    ],
+    pieces: [
+      {
+        identity: 'FRONT',
+        displayName: 'front',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: spec({ bomLineKey: 'IL-1' }),
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline }],
+      },
+      {
+        identity: 'COLLAR',
+        displayName: 'collar',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: spec({ bomLineKey: 'IL-2' }),
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline: rectangle(60, 25) }],
+      },
+    ],
+  });
+  assert.deepEqual(
+    twoInterlinings.sheets.map((sheet) => ({ key: sheet.bomLineKey, blocks: sheet.blocks })),
+    [
+      { key: 'IL-1', blocks: ['FRONT_M'] },
+      { key: 'IL-2', blocks: ['COLLAR_M'] },
+    ],
+    'each interlining BOM line gets its own fusing DXF',
+  );
+
   const runMismatch = buildFusingSheets({
     techCardId: 7,
     style: 'JKT-042',

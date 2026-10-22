@@ -36,9 +36,14 @@
 // piece created here resolves for the alias that references it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
+import type {
+  common_AdminColorwayRef,
+  common_Material,
+  common_TechCardPieceAreaScope,
+} from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
 import {
   Chip,
   ChipRow,
@@ -51,7 +56,10 @@ import {
   Text,
 } from 'ui';
 import { ulid } from 'utils/ulid';
+import { bornMaterialBomLine } from '../bom-material-line';
+import { bornBomLine } from '../form-writers';
 import { useTechCardStaging } from '../useTechCardStaging';
+import { wireInt } from '../wire-int';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
@@ -208,6 +216,9 @@ const MAX_PIECE_NAME = 255;
 // Выпущенная карточка заморожена целиком — тот же ответ, что у pieces-tab и index.tsx. Модалка
 // рисуется порталом, то есть ВНЕ `<fieldset disabled={frozen}>` страницы, поэтому гасит себя сама.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
+const INTERLINING_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';
+const INTERFACING_PURPOSE = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+type BomLine = NonNullable<TechCardFormData['bomItems']>[number];
 // After every panel that can move pieces or the BOM (the sheets read both off the stored card).
 
 // Поля детали, которые правит редактор справа. Буферизуются в модалке и пишутся в форму только
@@ -770,17 +781,49 @@ export function PieceMatchModal({
     []) as TechCardFormData['pieceDxfAliases'];
   // The fusibles a piece can be fused with: the INTERLINING lines of the BOM.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as TechCardFormData['bomItems'];
+  // Like piece edits, lines born inside this modal wait for its SAVE. Cancel therefore leaves both
+  // arrays untouched. The ref is the same-tick source of truth: two fast fuse gestures must see the
+  // first placeholder before React has rendered it, or each gesture would mint its own slot.
+  const pendingBomItemsRef = useRef<BomLine[]>([]);
+  const [pendingBomItems, setPendingBomItems] = useState<BomLine[]>([]);
+  const queueBomItem = (line: BomLine) => {
+    const key = line.lineKey?.trim() ?? '';
+    const current = pendingBomItemsRef.current;
+    if (key && current.some((item) => item.lineKey?.trim() === key)) return line;
+    const next = [...current, line];
+    pendingBomItemsRef.current = next;
+    setPendingBomItems(next);
+    return line;
+  };
+  const dropQueuedBomItem = (lineKey: string) => {
+    const key = lineKey.trim();
+    const next = pendingBomItemsRef.current.filter((item) => item.lineKey?.trim() !== key);
+    if (next.length === pendingBomItemsRef.current.length) return;
+    pendingBomItemsRef.current = next;
+    setPendingBomItems(next);
+  };
+  const interliningBomItems = useMemo(
+    () =>
+      [...(bomItems ?? []), ...pendingBomItems].filter(
+        (item) => item.section === INTERLINING_SECTION && item.lineKey?.trim(),
+      ),
+    [bomItems, pendingBomItems],
+  );
+  // Event handlers read the live form rather than the render snapshot. This preserves a BOM write
+  // made by another mounted panel while the modal is open and still sees queued, unsaved lines.
+  const currentInterliningBomItems = () =>
+    [
+      ...(((getValues('bomItems') ?? []) as TechCardFormData['bomItems']) ?? []),
+      ...pendingBomItemsRef.current,
+    ].filter((item) => item.section === INTERLINING_SECTION && item.lineKey?.trim());
   const interlinings = useMemo<InterliningLine[]>(
     () =>
-      (bomItems ?? [])
-        .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_INTERLINING' && b.lineKey?.trim())
-        .map((b) => ({
-          key: b.lineKey!.trim(),
-          label:
-            [b.supplierRef?.trim(), b.name?.trim()].filter(Boolean).join(' · ') || 'interlining',
-          color: b.color ?? '',
-        })),
-    [bomItems],
+      interliningBomItems.map((b) => ({
+        key: b.lineKey!.trim(),
+        label: [b.supplierRef?.trim(), b.name?.trim()].filter(Boolean).join(' · ') || 'interlining',
+        color: b.color ?? '',
+      })),
+    [interliningBomItems],
   );
   const { parse, reparse } = useNesting(files);
   // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
@@ -950,6 +993,9 @@ export function PieceMatchModal({
   // The block under the cursor's last click, ci key — shared by the sheet and the list so the
   // two are one selection, not two.
   const [selected, setSelected] = useState<string | null>(null);
+  // The piece whose `+ material` door owns the catalog dialog. Kept separately from `selected` so
+  // a sheet focus change cannot attach the picked article to another piece.
+  const [pickingFuseOf, setPickingFuseOf] = useState<string | null>(null);
   // Name typed for a block that is about to become a NEW piece, by ci key. The block name is
   // only a default: «PERED_S» is what the exporter called it, «полочка правая» is what the
   // garment calls it, and the second one is the one that has to reach the factory.
@@ -1569,6 +1615,67 @@ export function PieceMatchModal({
   function apply() {
     setSaving(true);
     try {
+      // Only slots still selected by a fused edit are committed. This drops the provisional
+      // material-less slot when the same piece picked a catalog material before SAVE, while keeping
+      // it when another fused piece still uses it. The root write is deliberate: the BOM tab owns
+      // the sole useFieldArray for this name and receives array-root setValue broadcasts.
+      const referencedPendingKeys = new Set(
+        [...Object.values(pieceEdits), ...Object.values(newEdits)]
+          .map((edit) => (edit.fuse?.mode ? edit.fuse.bomLineKey.trim() : ''))
+          .filter(Boolean),
+      );
+      const pendingLines = pendingBomItemsRef.current.filter((line) =>
+        referencedPendingKeys.has(line.lineKey?.trim() ?? ''),
+      );
+      const currentBom = (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>;
+      const nextBom = [...currentBom];
+      const currentKeys = new Set(currentBom.map((line) => line.lineKey?.trim()).filter(Boolean));
+      const byMaterialId = new Map<number, BomLine>();
+      for (const line of currentBom) {
+        const materialId = wireInt(line.materialId);
+        if (line.section === INTERLINING_SECTION && materialId && !byMaterialId.has(materialId)) {
+          byMaterialId.set(materialId, line);
+        }
+      }
+      const replacementKeys = new Map<string, string>();
+      for (const line of pendingLines) {
+        const key = line.lineKey?.trim() ?? '';
+        if (!key || currentKeys.has(key)) continue;
+        const materialId = wireInt(line.materialId);
+        const sameMaterial = materialId ? byMaterialId.get(materialId) : undefined;
+        if (sameMaterial?.lineKey?.trim()) {
+          replacementKeys.set(key, sameMaterial.lineKey.trim());
+          continue;
+        }
+        const currentInterlinings = nextBom.filter(
+          (item) => item.section === INTERLINING_SECTION && item.lineKey?.trim(),
+        );
+        // If a sole real line appeared while this modal was open, the provisional placeholder now
+        // means that line. With several lines there is no safe winner, so its own slot remains.
+        if (!materialId && currentInterlinings.length === 1) {
+          replacementKeys.set(key, currentInterlinings[0].lineKey!.trim());
+          continue;
+        }
+        nextBom.push(line);
+        currentKeys.add(key);
+        if (materialId) byMaterialId.set(materialId, line);
+      }
+      if (nextBom.length !== currentBom.length) {
+        setValue('bomItems', nextBom, { shouldDirty: true });
+      }
+      const remapFuseLine = (edit: PieceFields): PieceFields => {
+        const fuse = edit.fuse;
+        const replacement = fuse ? replacementKeys.get(fuse.bomLineKey.trim()) : undefined;
+        if (!fuse || !replacement) return edit;
+        const nextFuse = { ...fuse, bomLineKey: replacement };
+        return { ...edit, fuse: nextFuse, ...writeFuseFields(nextFuse) };
+      };
+      const committedPieceEdits = Object.fromEntries(
+        Object.entries(pieceEdits).map(([key, edit]) => [key, remapFuseLine(edit)]),
+      ) as typeof pieceEdits;
+      const committedNewEdits = Object.fromEntries(
+        Object.entries(newEdits).map(([key, edit]) => [key, remapFuseLine(edit)]),
+      ) as typeof newEdits;
       const created: NonNullable<TechCardFormData['pieces']> = [];
       // Read at commit time, not from the render-time snapshot: the operator can have added or
       // renamed a piece in the table behind this dialog while it was open.
@@ -1707,7 +1814,7 @@ export function PieceMatchModal({
             // Fields typed in the editor for this new piece — one buffer per resolved name, shared
             // by every block that coalesces into it (newTargetOf). A name that binds to an existing
             // piece takes the branch above; its edits sit in pieceEdits and land in the loop below.
-            const ed = newEdits[newEditKey(name)] ?? {};
+            const ed = committedNewEdits[newEditKey(name)] ?? {};
             created.push({
               lineKey: pieceLineKey,
               name,
@@ -1796,7 +1903,7 @@ export function PieceMatchModal({
       // BUFFERED EDITOR FIELDS of existing pieces — nested-path writes, indices by `live` (same
       // reasoning as the recount above). A piece leaving in this same apply gets nothing.
       live.forEach((p, i) => {
-        const ed = pieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
+        const ed = committedPieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
         if (!ed) return;
         for (const f of FIELD_KEYS) {
           if (ed[f] === undefined || sameField(ed[f], p[f])) continue;
@@ -2073,8 +2180,35 @@ export function PieceMatchModal({
   const setFuse = (ci: string, next: PieceFuseSpec) => {
     const { vals, patch } = ioOf(ci);
     const prev = vals.fuse ?? readFuseSpec(vals);
-    if (next.mode !== prev.mode) setZoomOut(null);
-    patch({ fuse: next, ...writeFuseFields(next) });
+    let resolved = next;
+    if (next.mode && !next.bomLineKey.trim()) {
+      const lines = currentInterliningBomItems();
+      if (lines.length === 1) {
+        resolved = { ...next, bomLineKey: lines[0].lineKey!.trim() };
+      } else if (lines.length === 0) {
+        // The placeholder is a real BOM slot with a durable identity, not a UI-only fallback. It is
+        // queued once and every later fused piece sees/reuses it through pendingBomItemsRef.
+        const placeholder = queueBomItem(
+          bornBomLine({
+            section: INTERLINING_SECTION,
+            purpose: INTERFACING_PURPOSE,
+            name: 'interlining',
+          }) as BomLine,
+        );
+        resolved = { ...next, bomLineKey: placeholder.lineKey!.trim() };
+      }
+    }
+    const previousLineKey = prev.bomLineKey.trim();
+    if (previousLineKey && previousLineKey !== resolved.bomLineKey.trim()) {
+      const references = [...Object.values(pieceEdits), ...Object.values(newEdits)].filter(
+        (edit) => edit.fuse?.mode && edit.fuse.bomLineKey.trim() === previousLineKey,
+      ).length;
+      // Queued slots exist only for this dialog. Once their last piece moves away, keeping them in
+      // the select would make one real material look like an ambiguous multi-slot BOM.
+      if (references <= 1) dropQueuedBomItem(previousLineKey);
+    }
+    if (resolved.mode !== prev.mode) setZoomOut(null);
+    patch({ fuse: resolved, ...writeFuseFields(resolved) });
   };
   // Zoomed onto the selected piece: it is fused with a mode and the zoom was not left.
   const zoomed = (() => {
@@ -2171,6 +2305,7 @@ export function PieceMatchModal({
         readOnly={readOnly}
         toggleBox={TOGGLE_BOX}
         onChange={(next) => setFuse(ci, next)}
+        onAddMaterial={() => setPickingFuseOf(ci)}
       />
     );
     fuseDock = fuseFields;
@@ -2243,6 +2378,29 @@ export function PieceMatchModal({
       </div>
     );
   })();
+
+  const pickingFuse = pickingFuseOf ? fuseOfCi(pickingFuseOf) : undefined;
+  const pickingFuseLine = pickingFuse?.bomLineKey
+    ? interliningBomItems.find((line) => line.lineKey?.trim() === pickingFuse.bomLineKey.trim())
+    : undefined;
+  const pickingMaterialId = wireInt(pickingFuseLine?.materialId);
+  const pickFuseMaterial = (material: common_Material) => {
+    const ci = pickingFuseOf;
+    const spec = ci ? fuseOfCi(ci) : undefined;
+    const materialId = wireInt(material.id);
+    if (!ci || !spec?.mode || !materialId) return;
+    let line = currentInterliningBomItems().find((item) => wireInt(item.materialId) === materialId);
+    if (!line) {
+      line = queueBomItem(
+        bornMaterialBomLine(material, {
+          section: INTERLINING_SECTION,
+          purpose: INTERFACING_PURPOSE,
+          name: material.name?.trim() || 'interlining',
+        }) as BomLine,
+      );
+    }
+    setFuse(ci, { ...spec, bomLineKey: line.lineKey!.trim() });
+  };
 
   return (
     <ConfirmationModal
@@ -2405,6 +2563,19 @@ export function PieceMatchModal({
         {/* No sheet to sit beside (nothing drew): the gone-pieces question stands on its own. */}
         {parse.phase === 'ready' && !sheet && goneQuestion}
       </div>
+      <MaterialPickerDialog
+        open={!!pickingFuseOf && !readOnly}
+        section={INTERLINING_SECTION}
+        value={pickingMaterialId}
+        clearable={false}
+        title='interlining material'
+        confirmLabel='select'
+        onPick={(material) => {
+          if (material) pickFuseMaterial(material);
+          setPickingFuseOf(null);
+        }}
+        onClose={() => setPickingFuseOf(null)}
+      />
     </ConfirmationModal>
   );
 }
