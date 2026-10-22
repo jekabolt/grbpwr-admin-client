@@ -108,7 +108,7 @@ function interliningLines(items: readonly common_TechCardBomItem[]): FusingBomLi
   });
 }
 
-const isGenerated = (pattern: common_TechCardSizePattern) =>
+export const isGenerated = (pattern: common_TechCardSizePattern) =>
   (pattern.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX);
 
 function isMainPattern(

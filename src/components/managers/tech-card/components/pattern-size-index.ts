@@ -65,6 +65,8 @@ export type PublishSizeIndexResult =
  */
 export async function publishPatternSizeIndex(input: {
   techCardId: number;
+  /** Effective server scope key of the resolved panel group (`serverKeyOfScope`). */
+  scopeKey: string;
   /** Листы скоупа, как их видит панель: сырая привязка + стабильный line_key строки выкройки. */
   sheets: { lineKey?: string; fabricPurpose?: string; bomLineKey?: string }[];
   /** Нормализованные токены, посчитанные splitPiecesBySize по ВСЕМУ набору листов сразу. */
@@ -74,21 +76,11 @@ export async function publishPatternSizeIndex(input: {
   if (!techCardId) return { ok: false, reason: "the card isn't saved yet" };
   if (sheets.length === 0) return { ok: false, reason: 'no sheets in this scope' };
 
-  // Один вызов = один скоуп. Панель группирует по РАЗРЕШЁННОМУ скоупу, и на полуразобранной
-  // карточке одна группа законно объединяет несколько серверных скоупов (лист лежит на строке,
-  // строку уже разложили в назначение). Публиковать такой пул под одним ключом нельзя ни в какую
-  // сторону: под ключом назначения сервер не найдёт листы, привязанные к строке, а под ключом
-  // строки токены пула ПЕРЕОЦЕНИЛИ бы покрытие подмножества файлов — ровно та подделка, ради
-  // которой отпечаток считает сервер. Молчим и говорим почему.
-  const keys = new Set(sheets.map(serverScopeKeyOfSheet));
-  if (keys.size !== 1) {
-    return {
-      ok: false,
-      reason:
-        'the sheets in this group are bound differently (some to a purpose, some to a BOM line): bind them all to a purpose and the index will save',
-    };
-  }
-  const scopeKey = [...keys][0];
+  // Один вызов = один РАЗРЕШЁННЫЙ скоуп панели. Ключ приходит от serverKeyOfScope: это зеркало
+  // EffectiveFabricScopeKey сервера, поэтому наследный лист, всё ещё привязанный к строке L,
+  // публикуется под назначением этой строки (а интерлининг — всегда под самой строкой). Выводить
+  // ключ повторно из сырых полей листов нельзя: после сортировки BOM это уже старое место хранения.
+  const scopeKey = input.scopeKey.trim();
   if (!scopeKey) return { ok: false, reason: 'the sheets are bound to nothing' };
 
   const sheetLineKeys = sheets.map((s) => (s.lineKey ?? '').trim()).filter(Boolean);

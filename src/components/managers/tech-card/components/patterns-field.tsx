@@ -84,18 +84,31 @@ import {
   aliasInScope,
   bindingForScope,
   bindingScopes,
+  blockKey,
   bomPurposeOrder,
   bomPurposeLabel,
+  clothLines,
+  defaultRoleForPurpose,
   fabricScopes,
+  moveSheet,
   purposeEditorOptions,
+  scopeImpact,
   scopeKeyOfBinding,
+  scopeOfLine,
   type ArtifactKind,
   type BindingRow,
   strictestDirection,
   UNSET_PURPOSE,
 } from './bom-purpose';
-import { bornBomLine, releaseBomLineRefs } from './form-writers';
-import { sizeTokensOf, uniOf } from './nesting/block-code';
+import {
+  applyLineChange,
+  bornBomLine,
+  holdNames,
+  releaseBomLineRefs,
+  withoutGenerated,
+  writeBindings,
+} from './form-writers';
+import { sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
@@ -115,6 +128,7 @@ import { DxfUnitsDialog, type UnitsItem } from './nesting/dxf-units-dialog';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex, type PublishSizeIndexResult } from './pattern-size-index';
 import { useUnsavedAreaSource } from './piece-areas';
+import { serverKeyOfScope } from './piece-areas-state';
 import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import {
   splitPiecesBySize,
@@ -244,11 +258,15 @@ const ROLE_OF_SECTION = new Map<string, string>([
 ]);
 const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
 
-// Плитки полки, у которых нет ключа скоупа: они не материал, но выбираются тем же кликом.
+// Плитка полки без ключа скоупа (наследие в PDF): она не материал, но выбирается тем же кликом.
 // Префикс с двумя подчёркиваниями — ключ скоупа так выглядеть не может (это либо enum назначения,
 // либо ULID строки BOM, либо пустая строка), так что коллизия невозможна по построению.
-const LOOSE_KEY = '__loose';
 const PDF_KEY = '__pdf';
+
+// A sheet row dragged onto a material tile (not a file from the desktop): its row id rides here.
+const SHEET_DRAG = 'application/x-grbpwr-sheet';
+const isSheetDrag = (e: React.DragEvent) =>
+  Array.from(e.dataTransfer.types ?? []).includes(SHEET_DRAG);
 
 // What a slot takes: DXF uploads directly, everything else goes through the import wizard
 // (its files step accepts the same list, pattern-import/steps/files.tsx).
@@ -722,7 +740,7 @@ export function PatternsField({
   useEffect(() => {
     if (active) setArmed(true);
   }, [active]);
-  // Выбранная плитка полки: ключ скоупа, LOOSE_KEY или PDF_KEY. null = экран ещё не трогали, и
+  // Выбранная плитка полки: ключ скоупа или PDF_KEY. null = экран ещё не трогали, и
   // выбор выводится из данных (первый материал с файлами, иначе первый вообще).
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   // Подтверждение удаления живёт в самой плитке; ключ скоупа не зависит от позиции плитки.
@@ -886,10 +904,6 @@ export function PatternsField({
     );
     return once([purpose, names.join(', ')]).join(' · ');
   };
-  const uploadScopes = useMemo(
-    () => scopes.map((s) => ({ key: s.key, label: scopeLabel(s) })),
-    [scopes],
-  );
 
   // Structure (order, ids) from the array snapshot; values from the live form state so
   // setValue-written fields (rename, rebind) show through.
@@ -970,9 +984,13 @@ export function PatternsField({
       },
     ];
   });
-  // DXF без живой привязки: залитые до 0260 (ключа нет вовсе) и те, чью строку BOM удалили или
-  // переклассифицировали. Раскладка для них — догадка, поэтому они собраны отдельно и с ошибкой.
-  const looseDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
+  // DXF без живой привязки — наследие: ключа нет вовсе или его строка/назначение уже исчезли.
+  // Состояния «без материала» больше нет: ни одна правка в него не ведёт (bom-purpose.ts), а то,
+  // что осталось от прошлого, показывается под первым материалом (на большинстве карточек —
+  // единственным) и привязывается туда первым же переносом листа на плитку. Его ссылки на детали
+  // едут вместе с листом по сырой паре привязки; прочие потребители до переноса видят его ничьим.
+  const orphanDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
+  const orphanHome = scopes[0]?.key ?? '';
 
   const filesOf = (list: Entry[]): NestingFile[] =>
     list.map(({ row }) => ({ name: patternSheetName(row), url: row.url! }));
@@ -1058,12 +1076,8 @@ export function PatternsField({
   // материал могли удалить из BOM, пока панель открыта, и залипший ключ показал бы пустоту вместо
   // ближайшего осмысленного материала.
   const shelfKeys = useMemo(
-    () => [
-      ...scopeGroups.map((g) => g.scope.key),
-      ...(looseDxf.length > 0 ? [LOOSE_KEY] : []),
-      ...(pdfEntries.length > 0 ? [PDF_KEY] : []),
-    ],
-    [scopeGroups, looseDxf.length, pdfEntries.length],
+    () => [...scopeGroups.map((g) => g.scope.key), ...(pdfEntries.length > 0 ? [PDF_KEY] : [])],
+    [scopeGroups, pdfEntries.length],
   );
   // Фолбэк идёт ЗА ФАЙЛАМИ, а не за материалами: на карточке, где все DXF залиты до 0260 (значит
   // все непривязанные) или остались только PDF, «первый материал» — это пустая плитка «раскроить
@@ -1072,7 +1086,7 @@ export function PatternsField({
     pickedKey && shelfKeys.includes(pickedKey)
       ? pickedKey
       : scopeGroups.find((g) => g.entries.length > 0)?.scope.key ??
-        (looseDxf.length > 0 ? LOOSE_KEY : null) ??
+        (orphanDxf.length > 0 && orphanHome ? orphanHome : null) ??
         (pdfEntries.length > 0 ? PDF_KEY : null) ??
         shelfKeys[0] ??
         null;
@@ -1103,46 +1117,53 @@ export function PatternsField({
       );
   };
 
+  // The cloth lines as the form holds them NOW. Handlers and uploads read these, not the render's
+  // `scopes`: an upload awaits files, dialogs and the server while the BOM may be re-sorted.
+  const liveCloth = () => clothLines((getValues('bomItems') ?? []) as BomLine[]);
+
+  // What keeps a slot on the card besides colourways: its sheets, piece links and markers. Removing
+  // the slot would leave them without a material, so it is refused, naming them.
+  const scopeHold = (scope: FabricScope<FabricLine>): string[] =>
+    holdNames(
+      withoutGenerated(
+        scopeImpact(scope, {
+          patterns: liveRows,
+          aliases: pieceDxfAliases,
+          markers: cardRead?.markers ?? [],
+          scopes,
+        }),
+      ),
+    );
+
+  // PURPOSE OF A WHOLE SLOT. Its sheets and piece links go with it through the one writer
+  // (form-writers applyLineChange → bom-purpose planLineChange); a merge into a slot that links one
+  // of its blocks to another piece is refused, and so is a change that would strand a sheet.
   const changeScopePurpose = (scope: FabricScope<FabricLine>, nextPurpose: string) => {
     const purpose = nextPurpose || UNSET_PURPOSE;
+    // «Unset» splits a multi-line slot into one slot per line; its sheets have no single home.
+    if (purpose === UNSET_PURPOSE && scope.lines.length > 1) return;
     const lineKeys = new Set(scope.lines.map((line) => line.lineKey));
-    const firstLineKey = scope.lines[0]?.lineKey ?? '';
-    const nextFabricLines = fabricBomLines.map((line) =>
-      lineKeys.has(line.lineKey) ? { ...line, purpose } : line,
+    const items = (getValues('bomItems') ?? []) as BomLine[];
+    const nextItems = items.map((line) =>
+      lineKeys.has(line.lineKey?.trim() ?? '') ? { ...line, purpose } : line,
     );
-    // The slot the line lands in, found by the LINE: an interlining line stays its own slot
-    // whatever purpose it gets (L11), so the purpose alone does not name the next key.
-    const nextScope = fabricScopes(nextFabricLines).find((candidate) =>
-      candidate.lines.some((line) => line.lineKey === firstLineKey),
-    );
-    if (!nextScope) return;
-    const nextKey = nextScope.key;
-
-    // Purpose-bound sheets and aliases must move with the slot. Leaving their old raw purpose
-    // behind would put them under "without a material" as soon as the BOM rerendered.
-    const binding = bindingForScope(nextScope);
-    const patternRows = (getValues('patterns') ?? []) as PatternRow[];
-    const sheetsNow = bindingScopes(scopes, patternRows);
-    patternRows.forEach((row, index) => {
-      if (scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, sheetsNow) !== scope.key) return;
-      setValue(`patterns.${index}.fabricPurpose`, binding.fabricPurpose, { shouldDirty: true });
-      setValue(`patterns.${index}.bomLineKey`, binding.bomLineKey, { shouldDirty: true });
-    });
-    const aliases = (getValues('pieceDxfAliases') ?? []) as Array<{
-      fabricPurpose?: string;
-      bomLineKey?: string;
-    }>;
-    const linksNow = bindingScopes(scopes, aliases);
-    aliases.forEach((alias, index) => {
-      if (scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, linksNow) !== scope.key) return;
-      setValue(`pieceDxfAliases.${index}.fabricPurpose`, binding.fabricPurpose, {
-        shouldDirty: true,
-      });
-      setValue(`pieceDxfAliases.${index}.bomLineKey`, binding.bomLineKey, { shouldDirty: true });
-    });
-
-    const current = (getValues('bomItems') ?? []) as BomLine[];
-    current.forEach((line, index) => {
+    // The slot the lines land in, found by the LINE: an interlining line stays its own slot
+    // whatever purpose it gets (L11).
+    const to = scopeOfLine(fabricScopes(clothLines(nextItems)), scope.lines[0]?.lineKey ?? '');
+    if (!to) return;
+    const out = applyLineChange(getValues, setValue, nextItems as never, lineKeys);
+    if (out.kind !== 'done') {
+      useSnackBarStore
+        .getState()
+        .showMessage(
+          out.kind === 'clash'
+            ? `blocks clash: ${out.blocks.join(', ')}`
+            : `used by ${out.names.join(', ')}`,
+          'error',
+        );
+      return;
+    }
+    items.forEach((line, index) => {
       if (!lineKeys.has(line.lineKey?.trim() ?? '')) return;
       setValue(`bomItems.${index}.purpose`, purpose, {
         shouldDirty: true,
@@ -1150,7 +1171,7 @@ export function PatternsField({
       });
     });
     setConfirmScopeKey(null);
-    setSelectedKey(nextKey);
+    setSelectedKey(to.key);
   };
 
   const addMaterialSlot = () => {
@@ -1163,9 +1184,10 @@ export function PatternsField({
     );
     const purpose =
       bomPurposeOrder.find((candidate) => !used.has(candidate)) ?? 'TECH_CARD_BOM_PURPOSE_OTHER';
+    // The slot is born named after its purpose: an empty name must never block the save.
     const line = bornBomLine({
       section: 'TECH_CARD_BOM_SECTION_FABRIC',
-      name: '',
+      name: defaultRoleForPurpose(purpose) || bomPurposeLabel(purpose),
       purpose,
     }) as BomLine;
     pendingSlotFocus.current = line.lineKey?.trim() ?? null;
@@ -1178,17 +1200,16 @@ export function PatternsField({
   };
 
   const removeMaterialScope = (scope: FabricScope<FabricLine>) => {
-    if (colourwayBlockers(scope).length > 0) return;
+    if (colourwayBlockers(scope).length > 0 || scopeHold(scope).length > 0) return;
     const lineKeys = new Set(scope.lines.map((line) => line.lineKey));
     const current = (getValues('bomItems') ?? []) as BomLine[];
     const removed = current.filter((line) => lineKeys.has(line.lineKey?.trim() ?? ''));
     if (removed.length === 0) return;
     removed.forEach((line) => releaseBomLineRefs(getValues, setValue, line));
-    setValue(
-      'bomItems',
-      current.filter((line) => !lineKeys.has(line.lineKey?.trim() ?? '')) as never,
-      { shouldDirty: true, shouldValidate: true },
-    );
+    const rest = current.filter((line) => !lineKeys.has(line.lineKey?.trim() ?? ''));
+    // The slot's bindings settle in one change; the fusing rebuild's generated sheets leave with it.
+    applyLineChange(getValues, setValue, rest as never, lineKeys, cardRead?.markers ?? []);
+    setValue('bomItems', rest as never, { shouldDirty: true, shouldValidate: true });
     setConfirmScopeKey(null);
     setSelectedKey(scopes.find((candidate) => candidate.key !== scope.key)?.key ?? null);
   };
@@ -1284,7 +1305,7 @@ export function PatternsField({
   // из своих размеров сам (withSizes). Склейка тоже не ждёт ряда — она читает размеры по словарю, а
   // её результат идёт тем же путём. Ряда требует только мастер импорта (PDF и прочее): размеры он
   // узнаёт внутри себя и раскладывает их по ряду карточки, так что без ряда такие файлы не берутся.
-  const canUpload = canEdit && uploadScopes.length > 0;
+  const canUpload = canEdit && scopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
   function openPicker(scopeKey: string) {
@@ -1294,8 +1315,20 @@ export function PatternsField({
   }
 
   const scopeOfKey = (key: string) => scopes.find((x) => x.key === key);
+  // The target slot as the form holds it now. An upload compares its signature before and after
+  // every await: a slot re-sorted, merged or deleted meanwhile takes nothing. '' = the slot is gone.
+  const liveScope = (key: string) => fabricScopes(liveCloth()).find((x) => x.key === key);
+  const scopeSig = (key: string) => {
+    const sc = liveScope(key);
+    return sc
+      ? `${sc.key}|${sc.lines
+          .map((l) => l.lineKey)
+          .sort()
+          .join(',')}`
+      : '';
+  };
   const bindingOf = (key: string) => {
-    const sc = scopeOfKey(key);
+    const sc = liveScope(key);
     return sc ? bindingForScope(sc) : { fabricPurpose: '', bomLineKey: '' };
   };
 
@@ -1618,6 +1651,7 @@ export function PatternsField({
     const sc = scopeOfKey(scopeKey);
     if (!sc || !slotHasSheet(scopeKey)) return 'first';
     const say = useSnackBarStore.getState().showMessage;
+    const slotSig = scopeSig(scopeKey);
     const piecesNow = (): FormPiece[] =>
       ((getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>).map((p) => ({
         ...p,
@@ -1741,11 +1775,17 @@ export function PatternsField({
     // A foreign file is parsed but deliberately not uploaded. The choice handler below validates
     // this same signature once more before and after its deferred upload.
     if (out.kind === 'foreign') {
+      if (!slotSig || scopeSig(scopeKey) !== slotSig) {
+        say('material changed', 'error');
+        return 'refused';
+      }
       setForeignAsk({
         scopeKey,
         picked,
         outcome: out,
-        current: () => inputsSig() === before,
+        // Same cascade inputs AND the same slot (its lines): chooseForeign asks before and after
+        // its deferred upload.
+        current: () => inputsSig() === before && scopeSig(scopeKey) === slotSig,
         upload: deps.upload,
       });
       return 'foreign';
@@ -1847,19 +1887,29 @@ export function PatternsField({
   };
 
   async function uploadOne(scopeKey: string, picked: File, faults: FileFault[], target?: string) {
+    // The slot is re-read after every await: re-sorted, merged or deleted meanwhile, it takes nothing.
+    const sig = scopeSig(scopeKey);
+    const moved = () => {
+      if (sig && scopeSig(scopeKey) === sig) return false;
+      faults.push({ name: picked.name, why: 'material changed' });
+      return true;
+    };
+    if (moved()) return;
     const swap = plainSwapIndex(scopeKey, target) >= 0;
     // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
     if (!swap && (await replaceSheet(scopeKey, picked, target)) !== 'first') return;
+    if (moved()) return;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
-    if (!fixed) return;
+    if (!fixed || moved()) return;
     const sized = await withSizes(fixed[0], faults);
-    if (!sized) return;
+    if (!sized || moved()) return;
     const file = sized.file;
     const bump = (d: number) => bumpUploading(scopeKey, d);
     bump(1);
     try {
       const up = await uploadPatternFile(file);
+      if (moved()) return;
       // The file's sizes become the range of a card that still has none; the autosave keeps it.
       if (sized.seed && ((getValues('sizeIds') ?? []) as number[]).length === 0)
         setValue('sizeIds', sized.seed, { shouldDirty: true });
@@ -2082,6 +2132,7 @@ export function PatternsField({
     if (had && !force) return { sig, run: had, fresh: false };
     const run = publishPatternSizeIndex({
       techCardId,
+      scopeKey: serverKeyOfScope(g.scope),
       sheets: g.entries.map((e) => ({
         lineKey: e.row.lineKey,
         fabricPurpose: e.row.fabricPurpose,
@@ -2684,10 +2735,12 @@ export function PatternsField({
           ].filter(Boolean)
         : [];
     // A file dropped on the row = a new version of this sheet; the panel's drop stays as it is.
+    // A dragged sheet row is not a file: it passes through to the panel (dropProps).
     const rowDrop =
       replaceable && !slotBusy
         ? {
             onDragOver: (e: React.DragEvent) => {
+              if (isSheetDrag(e)) return;
               e.preventDefault();
               e.stopPropagation();
               setDragRow(rowId);
@@ -2697,11 +2750,23 @@ export function PatternsField({
               setDragRow((r) => (r === rowId ? null : r));
             },
             onDrop: (e: React.DragEvent) => {
+              if (isSheetDrag(e)) return;
               e.preventDefault();
               e.stopPropagation();
               setDragRow(null);
               setDragKey(null);
               routeFiles(slotGroup.scope.key, e.dataTransfer.files, rowId);
+            },
+          }
+        : {};
+    // A DXF sheet drags onto another material's tile and moves there with its own piece links.
+    const sheetDrag =
+      dxf && canEdit && !isSubmitting && !slotBusy && editing?.index !== index
+        ? {
+            draggable: true,
+            onDragStart: (e: React.DragEvent) => {
+              e.dataTransfer.setData(SHEET_DRAG, rowId);
+              e.dataTransfer.effectAllowed = 'move';
             },
           }
         : {};
@@ -2711,6 +2776,7 @@ export function PatternsField({
         key={row.lineKey || `row-${index}`}
         className={cn('group/sheet py-1', dragging && 'outline outline-1 outline-textColor')}
         {...rowDrop}
+        {...sheetDrag}
       >
         <div className='flex items-center gap-1.5'>
           <div className='min-w-0 flex-1'>
@@ -2945,32 +3011,6 @@ export function PatternsField({
             )}
           </Text>
         )}
-        {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в
-            панели в одной ткани, а на сервере разрешается в другую. */}
-        {dxf && uploadScopes.length > 0 && !rowScope && (
-          <select
-            className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
-            aria-label={`material for ${labelOf(row)}`}
-            value={rowScope}
-            disabled={isSubmitting || !canEdit}
-            onChange={(e) => {
-              const b = bindingOf(e.target.value);
-              setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, { shouldDirty: true });
-              setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
-            }}
-          >
-            <option value=''>
-              {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
-                ? 'binding lost, pick again'
-                : 'pick a material'}
-            </option>
-            {uploadScopes.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        )}
       </li>
     );
   }
@@ -3036,7 +3076,60 @@ export function PatternsField({
     );
   }
 
-  // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер.
+  // A SHEET DRAGGED ONTO ANOTHER MATERIAL (bom-purpose.ts, moveSheet): the sheet takes that
+  // material, and the piece links whose blocks come from its DXF go with it — only those no other
+  // sheet of the old material still holds. An unresolved source associates links and sibling sheets
+  // by the normalized raw binding pair. Block identity is the reconcile cascade's: the name and its
+  // sizeless identity, case and inner spaces aside. A sheet not parsed yet waits.
+  const moveSheetTo = (rowId: string, key: string) => {
+    if (!canEdit || isSubmitting || !rowId) return;
+    const say = useSnackBarStore.getState().showMessage;
+    const live = fabricScopes(liveCloth());
+    const to = live.find((x) => x.key === key);
+    const patterns = (getValues('patterns') ?? []) as PatternRow[];
+    const sheet = patterns.findIndex((r) => sheetRowId(r) === rowId);
+    if (!to || sheet < 0) return;
+    const aliases = (getValues('pieceDxfAliases') ?? []) as FormAlias[];
+    const sizes = new Set([...dictTokens.keys()].map((t) => t.toLowerCase()));
+    const move = moveSheet({
+      patterns,
+      aliases,
+      scopes: live,
+      sheet,
+      to,
+      blocksOf: (r) => {
+        if (!isDxfUrl(r.url)) return new Set<string>();
+        const names = blockNamesByUrl.get((r.url ?? '').trim());
+        if (!names) return null;
+        const out = new Set<string>();
+        for (const n of names) {
+          if (!blockKey(n)) continue;
+          out.add(blockKey(n));
+          if (sizes.size) out.add(blockKey(splitBlockSize(n, sizes).identity));
+        }
+        out.delete('');
+        return out;
+      },
+    });
+    if (move.kind === 'pending') {
+      say('not parsed yet', 'error');
+      return;
+    }
+    if (move.kind === 'clash') {
+      say(`blocks clash: ${move.blocks.join(', ')}`, 'error');
+      return;
+    }
+    if (move.kind === 'lost') {
+      say('not moved', 'error');
+      return;
+    }
+    if (move.kind === 'noop') return;
+    writeBindings(setValue, 'patterns', patterns, move.patterns);
+    writeBindings(setValue, 'pieceDxfAliases', aliases, move.aliases);
+    setSelectedKey(key);
+  };
+
+  // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер, перетащенный лист — в moveSheetTo.
   const dropProps = (key: string) =>
     canUpload && (uploading[key] ?? 0) === 0
       ? {
@@ -3051,6 +3144,10 @@ export function PatternsField({
           onDrop: (e: React.DragEvent) => {
             e.preventDefault();
             setDragKey(null);
+            if (isSheetDrag(e)) {
+              moveSheetTo(e.dataTransfer.getData(SHEET_DRAG), key);
+              return;
+            }
             routeFiles(key, e.dataTransfer.files);
           },
         }
@@ -3211,10 +3308,16 @@ export function PatternsField({
     const scopePurpose = g.scope.byPurpose
       ? g.scope.key
       : g.scope.lines[0]?.purpose || UNSET_PURPOSE;
-    const purposeItems = purposeEditorOptions.some((option) => option.value === scopePurpose)
-      ? purposeEditorOptions
+    // «Unset» is not offered to a slot of several lines: each line would become a slot of its own,
+    // and its sheets would have no single home to go to.
+    const editorItems =
+      g.scope.lines.length > 1
+        ? purposeEditorOptions.filter((option) => option.value !== UNSET_PURPOSE)
+        : purposeEditorOptions;
+    const purposeItems = editorItems.some((option) => option.value === scopePurpose)
+      ? editorItems
       : [
-          ...purposeEditorOptions,
+          ...editorItems,
           { value: scopePurpose, label: bomPurposeLabel(scopePurpose), disabled: true },
         ];
     const namedLines = g.scope.lines
@@ -3223,7 +3326,7 @@ export function PatternsField({
         index: bomItems.findIndex((candidate) => candidate.lineKey === line.lineKey),
       }))
       .filter(({ index }) => index >= 0);
-    const blockers = colourwayBlockers(g.scope);
+    const blockers = [...colourwayBlockers(g.scope), ...scopeHold(g.scope)];
     const activeMedia = (
       <div className='relative'>
         {media}
@@ -3316,7 +3419,7 @@ export function PatternsField({
     );
   }
 
-  /** Плитка для того, что материалом не подписано: непривязанные DXF и наследие в PDF. */
+  /** Плитка для того, что материалом не подписано: наследие в PDF. */
   function renderExtraTile(key: string, name: string, list: Entry[]) {
     return (
       <Tile
@@ -3340,14 +3443,6 @@ export function PatternsField({
 
   // Панель выбранного слота: файлы и две двери (pieces, marker); `upload` — в строке листа.
   function renderSelected() {
-    if (selectedKey === LOOSE_KEY) {
-      return (
-        <div>
-          <GroupLabel>without a material</GroupLabel>
-          {sheetList(looseDxf)}
-        </div>
-      );
-    }
     if (selectedKey === PDF_KEY) {
       return (
         <div>
@@ -3358,7 +3453,18 @@ export function PatternsField({
     }
     const g = scopeGroups.find((x) => x.scope.key === selectedKey);
     if (!g) return null;
-    if (g.entries.length === 0) return removedList(g.scope.key);
+    // Legacy sheets bound to nothing live sit under the first material (orphanDxf).
+    const orphans = g.scope.key === orphanHome ? orphanDxf : [];
+    if (g.entries.length === 0) {
+      if (orphans.length === 0) return removedList(g.scope.key);
+      return (
+        <div>
+          <GroupLabel>files</GroupLabel>
+          {sheetList(orphans)}
+          {removedList(g.scope.key)}
+        </div>
+      );
+    }
     const label = scopeLabel(g.scope);
     // Раскладка мерит КОНКРЕТНЫЙ артикул: запереть её на строку можно только когда назначение
     // владеет ровно одной; иначе модалка спрашивает сама.
@@ -3437,7 +3543,7 @@ export function PatternsField({
           {/* the tile above already names the material (it is the selected one): the files */}
           files
         </GroupLabel>
-        {sheetList(g.entries)}
+        {sheetList([...g.entries, ...orphans])}
         {removedList(g.scope.key)}
       </div>
     );
@@ -3716,28 +3822,6 @@ export function PatternsField({
     text: `${scopeLabel(g.scope)}: no pattern`,
     action: canUpload ? { label: 'add files', onClick: () => openPicker(g.scope.key) } : undefined,
   }));
-  const looseWarning: HeaderWarning | null =
-    looseDxf.length > 0
-      ? {
-          text: `without a material: ${looseDxf.length}`,
-          action:
-            canEdit && uploadScopes.length > 0
-              ? {
-                  label: 'choose material',
-                  onClick: () => {
-                    // The loose panel shows a material select on every unbound row.
-                    setSelectedKey(LOOSE_KEY);
-                    requestAnimationFrame(() =>
-                      headerEl
-                        ?.closest('section')
-                        ?.querySelector<HTMLSelectElement>('select[aria-label^="material for"]')
-                        ?.focus(),
-                    );
-                  },
-                }
-              : undefined,
-        }
-      : null;
   const indexWarnings: HeaderWarning[] = Object.entries(indexFailures).flatMap(([sig, reason]) => {
     const g = scopeGroups.find((x) => x.entries.length > 0 && sigOf(x.entries) === sig);
     if (!g) return [];
@@ -3781,7 +3865,6 @@ export function PatternsField({
     ...parserWarnings,
     ...missingSizeWarnings,
     ...noPatternWarnings,
-    looseWarning,
     ...indexWarnings,
     ...areaWarnings,
   ].filter((w): w is HeaderWarning => !!w);
@@ -3852,7 +3935,6 @@ export function PatternsField({
           <div data-field='patterns.shelf'>
             <Tiles min={200}>
               {scopeGroups.map(renderTile)}
-              {looseDxf.length > 0 && renderExtraTile(LOOSE_KEY, 'without a material', looseDxf)}
               {pdfEntries.length > 0 && renderExtraTile(PDF_KEY, 'PDF', pdfEntries)}
               {canEdit && (
                 <Tile

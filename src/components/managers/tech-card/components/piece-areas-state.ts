@@ -106,10 +106,10 @@ export function serverKeyOfScope(scope: FabricScope<RollGoodsLine>): string {
 /**
  * Серверные ключи, под которыми читать замер ОДНОЙ группы.
  *
- * Обычная ткань — ключи её листов (serverScopeKeysOfSheets), как и прежде. Дублерин (L11) — ключ
- * его строки; а если под ним замера нет, то наследный ключ назначения, у которого строка
- * единственный носитель (замер, сделанный до L11). Один из двух, никогда оба: сервер прячет
- * наследный набор, как только есть набор строки (FabricScopeReadKeys + preferLineScopedAreaSets).
+ * Сначала — эффективный ключ скоупа (назначение обычной ткани, строка дублерина). Если данных там
+ * ещё нет, читаются старые сырые ключи листов до серверного rekey на следующем сохранении. Для
+ * дублерина наследным ключом остаётся назначение, у которого строка была единственным носителем.
+ * Один набор или другой, никогда оба: свежий эффективный набор всегда побеждает наследный.
  */
 export function areaReadKeysOfScope(
   scope: FabricScope<RollGoodsLine>,
@@ -117,10 +117,19 @@ export function areaReadKeysOfScope(
   sheets: readonly { fabricPurpose?: string; bomLineKey?: string }[],
   areaScopes: readonly Pick<common_TechCardPieceAreaScope, 'scopeKey'>[] | undefined,
 ): string[] {
-  if (!isInterliningScope(scope)) return serverScopeKeysOfSheets(sheets);
-  const line = serverKeyOfScope(scope);
   const has = (k: string) => (areaScopes ?? []).some((s) => (s.scopeKey ?? '').trim() === k);
-  if (has(line)) return [line];
+  const effective = serverKeyOfScope(scope);
+  if (has(effective)) return [effective];
+
+  if (!isInterliningScope(scope)) {
+    // Before EffectiveFabricScopeKey, sidecars of a legacy line-bound sheet were filed under the
+    // raw line key. Prefer the effective purpose as soon as it exists; until the server rekeys old
+    // data on save, read every raw bucket represented by the group's sheets as the fallback set.
+    const legacy = serverScopeKeysOfSheets(sheets);
+    return legacy.length > 0 ? legacy : [effective];
+  }
+
+  const line = effective;
   const legacy = legacyPurposeOfScope(scope, scopes);
   const legacyKey = legacy ? wireFabricPurpose(legacy) : '';
   return legacyKey && has(legacyKey) ? [legacyKey] : [line];

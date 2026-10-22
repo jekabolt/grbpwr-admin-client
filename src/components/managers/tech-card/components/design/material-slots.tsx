@@ -7,6 +7,7 @@ import { parseComposition } from 'components/managers/product/components/composi
 import { CompositionModal } from 'components/managers/product/components/composition/composition-modal/composition-modal';
 import { compositionToValue } from 'components/managers/product/components/composition/composition-modal/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   addDoorClass,
@@ -44,7 +45,13 @@ import {
   UNSET_PURPOSE,
 } from '../bom-purpose';
 import { defaultRoleFor, roleCollision } from '../bom-roles';
-import { bornBomLine, releaseBomLineRefs } from '../form-writers';
+import {
+  bornBomLine,
+  changeLinePurpose,
+  holdNames,
+  lineExitHold,
+  releaseBomLineRefs,
+} from '../form-writers';
 import { unitOptions } from '../tech-card-options';
 import { wireInt, type TechCardFormData } from '../schema';
 
@@ -150,8 +157,19 @@ function familyOf(section?: string): Family {
   return 'hardware';
 }
 
-/** Кто из колорвеев режет эту строку — держит ✕ и называет причину. */
-type Blocker = { sku: string };
+/** Кто держит эту строку — колорвей (его SKU) или лист выкроек — держит ✕ и называет причину. */
+type Blocker = { sku: string } | { sheet: string };
+
+const blockerWord = (blockers: Blocker[]): string => {
+  const skus = blockers.flatMap((b) => ('sku' in b ? [b.sku] : []));
+  const sheets = blockers.flatMap((b) => ('sheet' in b ? [b.sheet] : []));
+  return [
+    skus.length > 0 ? `colourway ${skus.join(', ')}` : '',
+    sheets.length > 0 ? `patterns ${sheets.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+};
 
 export function MaterialSlots({
   techCardId,
@@ -179,7 +197,7 @@ export function MaterialSlots({
   const blockersOf = (line: Line): Blocker[] => {
     const key = line.lineKey?.trim() ?? '';
     const bomItemId = wireInt(line.id);
-    return (colorways ?? [])
+    const users: Blocker[] = (colorways ?? [])
       .filter((c) =>
         (c.usages ?? []).some(
           (u) =>
@@ -190,6 +208,10 @@ export function MaterialSlots({
       .map((c) => ({
         sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
       }));
+    // The last line of a fabric scope holds that scope's sheets, piece links and markers: gone, they
+    // would sit «without a material». Named like the colourways, and cleared the same way — elsewhere.
+    const held = key ? holdNames(lineExitHold(getValues, key, card?.markers)) : [];
+    return [...users, ...held.map((sheet) => ({ sheet }))];
   };
 
   /**
@@ -466,6 +488,7 @@ function SlotRow({
   onRemove: (index: number) => void;
   blockersOf: (line: Line) => Blocker[];
 }) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
   const line = lines[index];
   const section = line.section;
   const rollGoods = isRollGoodsSection(section);
@@ -659,6 +682,20 @@ function SlotRow({
               <SelectField
                 name={`bomItems.${index}.purpose`}
                 label='purpose'
+                // One writer with the BOM tab: the scope's only line takes its sheets along.
+                onValueChange={(value: string | undefined) => {
+                  const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
+                  if (out.kind !== 'done') {
+                    useSnackBarStore
+                      .getState()
+                      .showMessage(
+                        out.kind === 'clash'
+                          ? `blocks clash: ${out.blocks.join(', ')}`
+                          : `used by ${out.names.join(', ')}`,
+                        'error',
+                      );
+                  }
+                }}
                 items={[
                   ...purposeEditorOptions,
                   ...(foreignPurpose
@@ -838,14 +875,8 @@ function SlotRow({
               aria-label='remove material slot'
               disabled={blocked}
               data-b16-remove={index}
-              data-inert={
-                blocked ? `used by colourway ${blockers.map((b) => b.sku).join(', ')}` : undefined
-              }
-              title={
-                blocked
-                  ? `cut by colourway ${blockers.map((b) => b.sku).join(', ')} — remove it on the BOM tab`
-                  : 'remove this slot'
-              }
+              data-inert={blocked ? `used by ${blockerWord(blockers)}` : undefined}
+              title={blocked ? `used by ${blockerWord(blockers)}` : 'remove this slot'}
               onClick={() => onRemove(index)}
             />
           )}
