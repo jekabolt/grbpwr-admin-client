@@ -42,7 +42,7 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { nextFusingAliases, sameAliasSet, type FusingBinding } from './aliases';
+import { nextFusingAliases, pickFusingBinding, sameAliasSet, type FusingBinding } from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -306,13 +306,21 @@ function sourcePieces(
  * purpose owns exactly ONE roll-goods line — the slot reads areas under the purpose, and a sheet
  * bound only to the line would be refused as «bound inconsistently» — else the line alone. Several
  * interlinings sharing a purpose stay line-bound: under the purpose they would collapse into one scope.
+ * A purpose scope an uploaded sheet already holds is refused too (pickFusingBinding).
  */
-function bindingOfLine(bomLineKey: string, bom: readonly common_TechCardBomItem[]): FusingBinding {
+function bindingOfLine(
+  bomLineKey: string,
+  bom: readonly common_TechCardBomItem[],
+  otherSheets: readonly common_TechCardSizePattern[],
+): FusingBinding {
   const scope = rollGoodsScopes(bom).find((candidate) =>
     candidate.lines.some((line) => line.lineKey.trim() === bomLineKey),
   );
-  if (scope?.byPurpose && scope.lines.length === 1) return { fabricPurpose: scope.key, bomLineKey };
-  return { fabricPurpose: unsetPurpose, bomLineKey };
+  return pickFusingBinding(
+    bomLineKey,
+    scope?.byPurpose && scope.lines.length === 1 ? scope.key : '',
+    otherSheets,
+  );
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -462,8 +470,12 @@ export async function regenerateFusingSheets(
   const replacements = new Map<string, common_TechCardSizePattern>();
   let uploaded = 0;
   let reused = 0;
+  const uploadedSheets = oldPatterns.filter((pattern) => !isGenerated(pattern));
   const bindings = new Map(
-    built.sheets.map((sheet) => [sheet.bomLineKey, bindingOfLine(sheet.bomLineKey, bom)]),
+    built.sheets.map((sheet) => [
+      sheet.bomLineKey,
+      bindingOfLine(sheet.bomLineKey, bom, uploadedSheets),
+    ]),
   );
   for (const sheet of built.sheets) {
     const binding = bindings.get(sheet.bomLineKey)!;
@@ -522,10 +534,10 @@ export async function regenerateFusingSheets(
     if (!used.has(key)) nextPatterns.push(replacement);
   }
   const oldAliases = card.pieceDxfAliases?.items ?? [];
-  const nextAliases = nextFusingAliases({
+  const aliasPlan = nextFusingAliases({
     current: oldAliases,
     previousGenerated: oldGenerated,
-    otherSheets: nextPatterns.filter((pattern) => !isGenerated(pattern)),
+    otherSheets: uploadedSheets,
     sheets: built.sheets.map((sheet) => ({
       binding: bindings.get(sheet.bomLineKey)!,
       links: sheet.aliases.flatMap((alias) => {
@@ -533,7 +545,10 @@ export async function regenerateFusingSheets(
         return pieceLineKey ? [{ blockName: alias.blockName, pieceLineKey }] : [];
       }),
     })),
-  }).map(
+  });
+  for (const key of aliasPlan.shared)
+    warnings.push(`piece links of scope ${key} left as they are: an uploaded sheet shares it`);
+  const nextAliases = aliasPlan.rows.map(
     (row): common_TechCardPieceDxfAlias => ({
       bomLineKey: row.bomLineKey,
       blockName: row.blockName,

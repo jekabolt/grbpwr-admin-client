@@ -6,7 +6,7 @@
 // exactly which card piece each block came from, so it OWNS the rows of a scope that only generated
 // sheets hold: they are rebuilt from scratch every time (a hand edit there is overwritten — it could
 // only repeat the rebuild's answer or contradict the source DXF). A scope that also holds a sheet
-// somebody uploaded keeps its other rows; only the rows of the rebuild's own blocks are replaced.
+// somebody uploaded is never touched (see nextFusingAliases).
 
 export type FusingAliasRow = {
   bomLineKey?: string;
@@ -37,29 +37,54 @@ export function fusingScopeKey(row: { fabricPurpose?: string; bomLineKey?: strin
   return (row.bomLineKey ?? '').trim();
 }
 
+/**
+ * The binding of one generated sheet: `soloPurpose` (the purpose when it owns this line alone) unless
+ * an uploaded sheet already holds that purpose scope — then the line scope, which is the generated
+ * sheet's alone, so its rows can never be confused with the owner's.
+ */
+export function pickFusingBinding(
+  bomLineKey: string,
+  soloPurpose: string,
+  otherSheets: readonly { fabricPurpose?: string; bomLineKey?: string }[],
+): FusingBinding {
+  const purpose = { fabricPurpose: purposeOf(soloPurpose), bomLineKey };
+  if (purpose.fabricPurpose) {
+    const key = fusingScopeKey(purpose);
+    if (!otherSheets.some((sheet) => fusingScopeKey(sheet) === key)) return purpose;
+  }
+  return { fabricPurpose: UNSET, bomLineKey };
+}
+
 const rowKey = (row: FusingAliasRow) =>
   `${fusingScopeKey(row)}|${(row.blockName ?? '').trim().replace(/\s+/g, ' ').toLowerCase()}`;
 
 /**
- * The card's next full alias set.
+ * The card's next full alias set, plus the scopes it refused to touch.
  * `previousGenerated` — the generated sheets the card held before this rebuild (their scopes are the
  * rebuild's, even when the sheet is now gone); `otherSheets` — every sheet the rebuild did not make.
+ *
+ * FAIL CLOSED: the server keys a row only by scope + block, so in a scope that an uploaded sheet
+ * also holds nothing proves a row is the rebuild's. Such a scope is never touched — no row removed,
+ * none added — and is returned in `shared` for the caller to warn about.
  */
 export function nextFusingAliases<A extends FusingAliasRow>(input: {
   current: readonly A[];
   previousGenerated: readonly { fabricPurpose?: string; bomLineKey?: string }[];
   otherSheets: readonly { fabricPurpose?: string; bomLineKey?: string }[];
   sheets: readonly FusingSheetLinks[];
-}): FusingAliasRow[] {
-  const shared = new Set(input.otherSheets.map(fusingScopeKey).filter(Boolean));
-  const owned = new Set(
+}): { rows: FusingAliasRow[]; shared: string[] } {
+  const occupied = new Set(input.otherSheets.map(fusingScopeKey).filter(Boolean));
+  const generated = new Set(
     [...input.previousGenerated, ...input.sheets.map((sheet) => sheet.binding)]
       .map(fusingScopeKey)
-      .filter((key) => key && !shared.has(key)),
+      .filter(Boolean),
   );
+  const shared = [...generated].filter((key) => occupied.has(key));
+  const owned = new Set([...generated].filter((key) => !occupied.has(key)));
   const ours: FusingAliasRow[] = [];
   const oursKeys = new Set<string>();
   for (const sheet of input.sheets) {
+    if (!owned.has(fusingScopeKey(sheet.binding))) continue;
     for (const link of sheet.links) {
       const blockName = link.blockName.trim();
       const pieceLineKey = link.pieceLineKey.trim();
@@ -76,10 +101,8 @@ export function nextFusingAliases<A extends FusingAliasRow>(input: {
       ours.push(row);
     }
   }
-  const kept = input.current.filter(
-    (row) => !owned.has(fusingScopeKey(row)) && !oursKeys.has(rowKey(row)),
-  );
-  return [...kept, ...ours];
+  const kept = input.current.filter((row) => !owned.has(fusingScopeKey(row)));
+  return { rows: [...kept, ...ours], shared };
 }
 
 /** Same rows regardless of order (the server may read them back sorted differently). */

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { nextFusingAliases, sameAliasSet } from './aliases';
+import { nextFusingAliases, pickFusingBinding, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -296,9 +296,12 @@ export async function main() {
   assert.deepEqual(dxf.sheets[0].aliases, [{ identity: 'FRONT', blockName: 'FRONT' }]);
 
   // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
-  // go, the new ones come; main links, and a scope shared with an uploaded sheet, ride through.
+  // go, the new ones come. A scope an uploaded sheet also holds is never touched (fail closed):
+  // the owner's COLLAR→P6 stays, the rebuild's COLLAR→P5 is not added, and a previous generated
+  // scope that is shared now keeps its rows too.
   const UNSET = 'TECH_CARD_BOM_PURPOSE_UNSET';
   const INTERFACING = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+  const OTHER = 'TECH_CARD_BOM_PURPOSE_OTHER';
   const current = [
     {
       bomLineKey: 'MAIN',
@@ -310,17 +313,21 @@ export async function main() {
     { bomLineKey: 'IL-2', fabricPurpose: UNSET, blockName: 'GONE', pieceLineKey: 'P8' },
     { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'HAND', pieceLineKey: 'P7' },
     { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'COLLAR', pieceLineKey: 'P6' },
+    { bomLineKey: 'IL-4', fabricPurpose: OTHER, blockName: 'PAD', pieceLineKey: 'P4' },
   ];
-  const next = nextFusingAliases({
+  const plan = nextFusingAliases({
     current,
     previousGenerated: [
       { bomLineKey: 'IL-1', fabricPurpose: UNSET },
       { bomLineKey: 'IL-2', fabricPurpose: UNSET },
       { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+      // moved from the purpose scope to the line scope; an uploaded sheet now holds «other»
+      { bomLineKey: 'IL-4', fabricPurpose: OTHER },
     ],
     otherSheets: [
       { bomLineKey: 'MAIN', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
       { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+      { bomLineKey: 'X', fabricPurpose: OTHER },
     ],
     sheets: [
       {
@@ -329,21 +336,39 @@ export async function main() {
       },
       {
         binding: { bomLineKey: 'IL-3', fabricPurpose: UNSET },
-        links: [{ blockName: 'collar', pieceLineKey: 'P5' }],
+        links: [{ blockName: 'COLLAR', pieceLineKey: 'P5' }],
+      },
+      {
+        binding: { bomLineKey: 'IL-4', fabricPurpose: UNSET },
+        links: [{ blockName: 'PAD', pieceLineKey: 'P4' }],
       },
     ],
   });
-  assert.deepEqual(next, [
+  assert.deepEqual(plan.rows, [
     current[0],
     current[3],
+    current[4],
+    current[5],
     { bomLineKey: 'IL-1', fabricPurpose: INTERFACING, blockName: 'FRONT', pieceLineKey: 'P1' },
-    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'collar', pieceLineKey: 'P5' },
+    { bomLineKey: 'IL-4', fabricPurpose: UNSET, blockName: 'PAD', pieceLineKey: 'P4' },
   ]);
-  assert.ok(sameAliasSet(next, [...next].reverse()), 'alias sets compare without order');
+  assert.deepEqual(plan.shared.sort(), ['IL-3', 'other']);
+  assert.deepEqual(pickFusingBinding('IL-1', INTERFACING, []), {
+    bomLineKey: 'IL-1',
+    fabricPurpose: INTERFACING,
+  });
+  assert.deepEqual(
+    pickFusingBinding('IL-1', INTERFACING, [{ bomLineKey: 'X', fabricPurpose: INTERFACING }]),
+    { bomLineKey: 'IL-1', fabricPurpose: UNSET },
+    'a purpose scope an uploaded sheet holds falls back to the line scope',
+  );
+  assert.deepEqual(pickFusingBinding('IL-2', '', []), { bomLineKey: 'IL-2', fabricPurpose: UNSET });
+  assert.ok(sameAliasSet(plan.rows, [...plan.rows].reverse()), 'alias sets compare without order');
   assert.ok(
     sameAliasSet(
-      next,
-      nextFusingAliases({ current: next, previousGenerated: [], otherSheets: [], sheets: [] }),
+      plan.rows,
+      nextFusingAliases({ current: plan.rows, previousGenerated: [], otherSheets: [], sheets: [] })
+        .rows,
     ),
     'nothing generated, nothing owned: the set rides through',
   );
