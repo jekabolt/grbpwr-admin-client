@@ -35,7 +35,9 @@ await build({
 process.env.ROLL_PRINT_REPO = REPO;
 const probe = await import(pathToFileURL(outfile).href);
 const result = await probe.main([dxf, outDir]);
-console.log(`min ${result.min} cm`);
+console.log(
+  `min ${result.min} cm | at-min tooWide ${result.atMinTooWide} | ${result.belowMinWidthCm} cm tooWide ${result.belowMinTooWide}`,
+);
 if (result.atMinTooWide !== 0)
   throw new Error(`min ${result.min} cm leaves ${result.atMinTooWide} piece(s) too wide`);
 if (result.belowMinTooWide === 0)

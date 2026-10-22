@@ -12,8 +12,10 @@ import type { ConversionManifest } from 'lib/pattern-import/types';
 import { dxfPairs } from 'lib/nesting/dxf/insunits';
 import { parseFiles } from 'lib/nesting/worker/parse-files';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
+import { convexHull, gapOctagon, minkowskiSumConvex } from 'lib/nesting/geom/convex';
 import { area, bounds } from 'lib/nesting/geom/polygon';
-import { NEST_DEFAULTS, type PieceDTO, type PieceManifestFacts } from 'lib/nesting/types';
+import { NEST_DEFAULTS, type PieceDTO, type PieceManifestFacts, type Pt } from 'lib/nesting/types';
+import { DRAWING_PEN_MM } from './dxf-pdf';
 
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, '') || 'pattern';
 const bare = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
@@ -22,10 +24,13 @@ type PieceCode = { identity: string; size: string };
 
 export type RollPieceTemplate = {
   piece: PieceDTO;
+  /** Convex keep-out containing every rendered stroke and the complete piece label. */
+  footprint: Pt[];
   identity: string;
   size: string;
   /** A paper template used for two mirrored cut pieces is printed once and marked x2. */
   cutMultiplier: number;
+  label: string;
 };
 
 export type RollSourceModel = {
@@ -36,6 +41,56 @@ export type RollSourceModel = {
 };
 
 const sourceCache = new WeakMap<ArrayBuffer, Map<string, RollSourceModel>>();
+
+export const ROLL_PIECE_LABEL_MM = 3;
+
+function pieceLabel(template: { identity: string; size: string; cutMultiplier: number }): string {
+  return [template.identity, template.size || 'OS', template.cutMultiplier === 2 ? '×2' : '']
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function polygonCentroid(poly: readonly Pt[]): Pt {
+  let area2 = 0;
+  let x = 0;
+  let y = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const f = poly[j].x * poly[i].y - poly[i].x * poly[j].y;
+    area2 += f;
+    x += (poly[j].x + poly[i].x) * f;
+    y += (poly[j].y + poly[i].y) * f;
+  }
+  if (Math.abs(area2) < 1e-9) {
+    const n = Math.max(1, poly.length);
+    return {
+      x: poly.reduce((sum, point) => sum + point.x, 0) / n,
+      y: poly.reduce((sum, point) => sum + point.y, 0) / n,
+    };
+  }
+  return { x: x / (3 * area2), y: y / (3 * area2) };
+}
+
+/**
+ * The placer must reserve what the printer inks, not whichever source layer was selected as CUT.
+ * A convex keep-out is deliberately conservative: it contains every source path, the line caps,
+ * and the full possible reach of the baseline-left piece label in every quarter-turn.
+ */
+function drawnFootprint(piece: PieceDTO, label: string): Pt[] {
+  const points: Pt[] = [...piece.poly];
+  for (const path of piece.inner ?? []) points.push(...path.pts);
+
+  const anchor = polygonCentroid(piece.poly);
+  // dxf-pdf uses the same upper bound to cull placed text. A circle makes that bound invariant
+  // under the piece's quarter-turn and avoids relying on renderer-specific glyph metrics.
+  const labelReachCm = (ROLL_PIECE_LABEL_MM * (label.length + 2)) / 10;
+  for (const point of gapOctagon(labelReachCm))
+    points.push({ x: anchor.x + point.x, y: anchor.y + point.y });
+
+  const hull = convexHull(points);
+  // The edge and gap apply to ink, not path centre-lines. The CUT pen is the widest piece pen.
+  const penRadiusCm = Math.max(DRAWING_PEN_MM.cut, DRAWING_PEN_MM.line) / 20;
+  return minkowskiSumConvex(hull, gapOctagon(penRadiusCm));
+}
 
 function manifestFacts(manifest: ConversionManifest | null): Map<string, PieceManifestFacts> {
   const out = new Map<string, PieceManifestFacts>();
@@ -240,12 +295,14 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
       if (seenPairs.has(pairKey)) continue;
       seenPairs.add(pairKey);
     }
-    templates.push({
+    const template = {
       piece,
       identity: code.identity || piece.name,
       size: code.size,
       cutMultiplier,
-    });
+    };
+    const label = pieceLabel(template);
+    templates.push({ ...template, label, footprint: drawnFootprint(piece, label) });
   }
 
   const sizes = split.groups

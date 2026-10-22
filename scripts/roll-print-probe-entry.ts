@@ -3,7 +3,8 @@ import { basename, resolve } from 'node:path';
 
 import { jsPDF } from 'jspdf';
 
-import type { PdfFont } from 'lib/pattern-export/dxf-pdf';
+import { DRAWING_PEN_MM, type PdfFont } from 'lib/pattern-export/dxf-pdf';
+import type { DrawingStroke } from 'lib/pattern-export/drawing';
 import { ROLL_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
 import {
   exportRollPrint,
@@ -11,6 +12,7 @@ import {
   planRollPrint,
   readRollPrintSource,
   ROLL_DEFAULTS,
+  ROLL_GAP_MM,
   type RollPrintPlan,
   type RollSpec,
 } from 'lib/pattern-export/roll-print';
@@ -45,22 +47,169 @@ const font: PdfFont = {
 const arrayBuffer = (buffer: Buffer) =>
   buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 
-function assertPlan(plan: RollPrintPlan, roll: RollSpec): void {
+type Point = [number, number];
+type InkSegment = {
+  a: Point;
+  b: Point;
+  radiusMm: number;
+};
+
+const cross = (a: Point, b: Point, c: Point) =>
+  (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+function onSegment(a: Point, b: Point, p: Point): boolean {
+  return (
+    Math.abs(cross(a, b, p)) <= 1e-9 &&
+    p[0] >= Math.min(a[0], b[0]) - 1e-9 &&
+    p[0] <= Math.max(a[0], b[0]) + 1e-9 &&
+    p[1] >= Math.min(a[1], b[1]) - 1e-9 &&
+    p[1] <= Math.max(a[1], b[1]) + 1e-9
+  );
+}
+
+function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+  const o1 = cross(a, b, c);
+  const o2 = cross(a, b, d);
+  const o3 = cross(c, d, a);
+  const o4 = cross(c, d, b);
+  const opposite = (x: number, y: number) => (x > 1e-9 && y < -1e-9) || (x < -1e-9 && y > 1e-9);
+  if (opposite(o1, o2) && opposite(o3, o4)) return true;
+  return (
+    (Math.abs(o1) <= 1e-9 && onSegment(a, b, c)) ||
+    (Math.abs(o2) <= 1e-9 && onSegment(a, b, d)) ||
+    (Math.abs(o3) <= 1e-9 && onSegment(c, d, a)) ||
+    (Math.abs(o4) <= 1e-9 && onSegment(c, d, b))
+  );
+}
+
+function pointSegmentDistance(p: Point, a: Point, b: Point): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length2 = dx * dx + dy * dy;
+  const raw = length2 <= 1e-18 ? 0 : ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2;
+  const t = Math.max(0, Math.min(1, raw));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+function segmentDistance(a: Point, b: Point, c: Point, d: Point): number {
+  if (segmentsIntersect(a, b, c, d)) return 0;
+  return Math.min(
+    pointSegmentDistance(a, c, d),
+    pointSegmentDistance(b, c, d),
+    pointSegmentDistance(c, a, b),
+    pointSegmentDistance(d, a, b),
+  );
+}
+
+function strokeSegments(stroke: DrawingStroke): InkSegment[] {
+  const out: InkSegment[] = [];
+  const radiusMm = DRAWING_PEN_MM[stroke.kind] / 2;
+  for (let i = 1; i < stroke.pts.length; i++)
+    out.push({ a: stroke.pts[i - 1], b: stroke.pts[i], radiusMm });
+  if (stroke.closed && stroke.pts.length > 2)
+    out.push({ a: stroke.pts[stroke.pts.length - 1], b: stroke.pts[0], radiusMm });
+  return out;
+}
+
+const axisDistance = (a0: number, a1: number, b0: number, b1: number) =>
+  a1 < b0 ? b0 - a1 : b1 < a0 ? a0 - b1 : 0;
+
+function segmentBoxesFurtherThan(a: InkSegment, b: InkSegment, distanceMm: number): boolean {
+  const dx = axisDistance(
+    Math.min(a.a[0], a.b[0]),
+    Math.max(a.a[0], a.b[0]),
+    Math.min(b.a[0], b.b[0]),
+    Math.max(b.a[0], b.b[0]),
+  );
+  const dy = axisDistance(
+    Math.min(a.a[1], a.b[1]),
+    Math.max(a.a[1], a.b[1]),
+    Math.min(b.a[1], b.b[1]),
+    Math.max(b.a[1], b.b[1]),
+  );
+  return Math.hypot(dx, dy) >= distanceMm + a.radiusMm + b.radiusMm;
+}
+
+function inkBounds(segments: readonly InkSegment[]) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const segment of segments) {
+    x0 = Math.min(x0, segment.a[0] - segment.radiusMm, segment.b[0] - segment.radiusMm);
+    y0 = Math.min(y0, segment.a[1] - segment.radiusMm, segment.b[1] - segment.radiusMm);
+    x1 = Math.max(x1, segment.a[0] + segment.radiusMm, segment.b[0] + segment.radiusMm);
+    y1 = Math.max(y1, segment.a[1] + segment.radiusMm, segment.b[1] + segment.radiusMm);
+  }
+  return { x0, y0, x1, y1 };
+}
+
+function assertPlan(
+  plan: RollPrintPlan,
+  roll: RollSpec,
+): { piecePairs: number; minEdgeMm: number } {
   let cutStrokes = 0;
+  let piecePairs = 0;
+  let minEdgeMm = Infinity;
+  const requiredGapMm = ROLL_GAP_MM - 0.5;
   for (let sheetIndex = 0; sheetIndex < plan.sheets.length; sheetIndex++) {
     const sheet = plan.sheets[sheetIndex];
+    const byPiece = new Map<string, InkSegment[]>();
     if (sheet.lengthMm > Math.min(roll.maxSheetM * 1000, 5080) + 1e-6)
       throw new Error(`sheet ${sheetIndex + 1} is longer than the roll profile`);
     if (Math.abs(sheet.drawing.w - roll.widthCm * 10) > 1e-6)
       throw new Error(`sheet ${sheetIndex + 1} does not use the full roll width`);
     for (const stroke of sheet.drawing.strokes) {
-      if (stroke.kind !== 'cut') continue;
-      cutStrokes++;
+      if (!stroke.pieceKey) continue; // page furniture is not a laid piece
+      if (stroke.kind === 'cut') cutStrokes++;
+      const radiusMm = DRAWING_PEN_MM[stroke.kind] / 2;
       for (const [x, y] of stroke.pts) {
-        if (x < roll.edgeMm - 1e-5 || x > roll.widthCm * 10 - roll.edgeMm + 1e-5)
-          throw new Error(`sheet ${sheetIndex + 1}: a piece leaves the printable width at x=${x}`);
-        if (y < ROLL_FURNITURE_MM - 1e-5 || y > sheet.lengthMm + 1e-5)
+        const edgeClearance = Math.min(x - radiusMm, roll.widthCm * 10 - x - radiusMm);
+        minEdgeMm = Math.min(minEdgeMm, edgeClearance);
+        if (edgeClearance < roll.edgeMm - 1e-5)
+          throw new Error(
+            `sheet ${sheetIndex + 1}, piece ${stroke.pieceKey}: ink leaves the ${roll.edgeMm} mm edge at x=${x}`,
+          );
+        if (y - radiusMm < ROLL_FURNITURE_MM - 1e-5 || y + radiusMm > sheet.lengthMm + 1e-5)
           throw new Error(`sheet ${sheetIndex + 1}: a piece crosses the sheet edge at y=${y}`);
+      }
+      const segments = byPiece.get(stroke.pieceKey) ?? [];
+      segments.push(...strokeSegments(stroke));
+      byPiece.set(stroke.pieceKey, segments);
+    }
+    const pieces = [...byPiece].map(([key, segments]) => ({
+      key,
+      segments,
+      bounds: inkBounds(segments),
+    }));
+    for (let i = 0; i < pieces.length; i++) {
+      for (let j = i + 1; j < pieces.length; j++) {
+        const aPiece = pieces[i];
+        const bPiece = pieces[j];
+        piecePairs++;
+        const dx = axisDistance(
+          aPiece.bounds.x0,
+          aPiece.bounds.x1,
+          bPiece.bounds.x0,
+          bPiece.bounds.x1,
+        );
+        const dy = axisDistance(
+          aPiece.bounds.y0,
+          aPiece.bounds.y1,
+          bPiece.bounds.y0,
+          bPiece.bounds.y1,
+        );
+        if (Math.hypot(dx, dy) >= requiredGapMm) continue;
+        for (const a of aPiece.segments) {
+          for (const b of bPiece.segments) {
+            if (segmentBoxesFurtherThan(a, b, requiredGapMm)) continue;
+            const clearanceMm = segmentDistance(a.a, a.b, b.a, b.b) - a.radiusMm - b.radiusMm;
+            if (clearanceMm < requiredGapMm - 1e-5)
+              throw new Error(
+                `sheet ${sheetIndex + 1}: pieces ${aPiece.key} and ${bPiece.key} have ${clearanceMm.toFixed(3)} mm ink clearance; need ${requiredGapMm.toFixed(1)} mm`,
+              );
+          }
+        }
       }
     }
   }
@@ -68,6 +217,7 @@ function assertPlan(plan: RollPrintPlan, roll: RollSpec): void {
     throw new Error(`cut-stroke count ${cutStrokes} does not match placed ${plan.placed}`);
   if (plan.placed + plan.tooWide.length + plan.tooLong.length !== plan.total)
     throw new Error('placed + tooWide + tooLong does not match total');
+  return { piecePairs, minEdgeMm };
 }
 
 export async function main(args: string[]) {
@@ -82,6 +232,7 @@ export async function main(args: string[]) {
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new Error(`size order ${JSON.stringify(actual)} != ${JSON.stringify(expected)}`);
   const copies = Object.fromEntries(expected.map((size) => [size, 1]));
+  const xsOnly = Object.fromEntries(expected.map((size) => [size, size === 'XS' ? 1 : 0]));
   console.log(
     `source ${source.title}: ${source.sizes.map((row) => `${row.size}:${row.pieces}`).join(' ')}`,
   );
@@ -96,25 +247,34 @@ export async function main(args: string[]) {
   const belowMinPlan = await planRollPrint(bytes, name, copies, belowMin);
 
   const renders: Array<{ pdf: string; pages: number; stem: string }> = [];
-  for (const widthCm of [91.4, 152.4]) {
+  const cases = [
+    { widthCm: 91.4, copies, title: 'card70-XS-XL' },
+    { widthCm: 152.4, copies, title: 'card70-XS-XL' },
+    { widthCm: 160, copies: xsOnly, title: 'card70-XS' },
+  ];
+  for (const run of cases) {
+    const { widthCm } = run;
     const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS };
     const started = performance.now();
-    const plan = await planRollPrint(bytes, name, copies, roll);
+    const plan = await planRollPrint(bytes, name, run.copies, roll);
     const elapsedMs = performance.now() - started;
-    assertPlan(plan, roll);
-    const exported = exportRollPrint(plan, 'SS25-004', roll, { jsPDF, font });
+    const asserted = assertPlan(plan, roll);
+    const exported = exportRollPrint(plan, run.title, roll, { jsPDF, font });
     const pdfPath = resolve(outDir, exported.fileName);
     writeFileSync(pdfPath, Buffer.from(await exported.blob.arrayBuffer()));
     const tooWide = plan.tooWide.length;
     const tooLong = plan.tooLong.length;
     console.log(
-      `roll ${widthCm}: length ${(plan.lengthMm / 1000).toFixed(3)} m | sheets ${plan.sheets.length} | placed ${plan.placed}/${plan.total} | tooWide ${tooWide} | tooLong ${tooLong} | runtime ${elapsedMs.toFixed(0)} ms`,
+      `roll ${widthCm} ${run.title}: length ${(plan.lengthMm / 1000).toFixed(3)} m | sheets ${plan.sheets.length} | placed ${plan.placed}/${plan.total} | tooWide ${tooWide} | tooLong ${tooLong} | runtime ${elapsedMs.toFixed(0)} ms`,
+    );
+    console.log(
+      `assert gap >= ${(ROLL_GAP_MM - 0.5).toFixed(1)} mm across ${asserted.piecePairs} piece pairs | min ink edge ${asserted.minEdgeMm.toFixed(3)} mm`,
     );
     console.log(`pdf ${pdfPath}`);
     renders.push({
       pdf: pdfPath,
       pages: plan.sheets.length,
-      stem: resolve(outDir, `SS25-004_print_roll${widthCm}`),
+      stem: resolve(outDir, exported.fileName.replace(/\.pdf$/i, '')),
     });
   }
   return {

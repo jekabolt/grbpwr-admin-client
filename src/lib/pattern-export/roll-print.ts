@@ -8,14 +8,14 @@
 import type { ExportDeps, ExportResult } from './formats';
 import type { PatternDrawing } from './drawing';
 import { PDF_PAGE_LIMIT_MM, renderPdf, type PdfPlan } from './dxf-pdf';
-import { bounds } from 'lib/nesting/geom/polygon';
+import { area, bounds } from 'lib/nesting/geom/polygon';
 import { estimateRun, type EstimatePiece } from 'lib/nesting/nest/estimate';
 import { mirrorParts, NfpCache, type PreparedPiece } from 'lib/nesting/nest/nfp';
 import { placeOrder, type Gene } from 'lib/nesting/nest/place';
 import {
+  NEST_DEFAULTS,
   placedPoly,
   variantPoly,
-  type PieceDTO,
   type Placement,
   type Pt,
   type RotationDeg,
@@ -28,7 +28,7 @@ import {
   rollSheetLimitMm,
   rollWidthMm,
 } from './roll-layout';
-import { readRollSourceModel, type RollPieceTemplate } from './roll-source';
+import { readRollSourceModel, ROLL_PIECE_LABEL_MM, type RollPieceTemplate } from './roll-source';
 
 /** One paper roll as the user set it for this print. */
 export type RollSpec = {
@@ -42,6 +42,7 @@ export type RollSpec = {
 
 export const ROLL_DEFAULTS: Omit<RollSpec, 'widthCm'> = { maxSheetM: 5, edgeMm: 5 };
 export const ROLL_MAX_WIDTH_CM = PDF_PAGE_LIMIT_MM / 10;
+export const ROLL_GAP_MM = NEST_DEFAULTS.gapCm * 10;
 
 /** Copies per size, e.g. { XS: 1, M: 2 }. Sizes with 0 copies are left out of the print. */
 export type SizeCopies = Record<string, number>;
@@ -102,7 +103,7 @@ export function minRollWidthCm(
     if (count === 0) continue;
     picked = true;
     const narrowestAcrossMm = Math.min(
-      ...ROLL_ROTATIONS.map((rotation) => rotatedSpansMm(template.piece, rotation).across),
+      ...ROLL_ROTATIONS.map((rotation) => rotatedSpansMm(template, rotation).across),
     );
     requiredAcrossMm = Math.max(requiredAcrossMm, narrowestAcrossMm);
   }
@@ -144,13 +145,12 @@ export async function planRollPrint(
   for (const template of source.templates) {
     const size = template.size || 'OS';
     const count = normalizedCopies(copies[size] ?? copies[template.size] ?? 0);
-    const label = pieceLabel(template);
+    const label = template.label;
     const fitsWidth = ROLL_ROTATIONS.filter(
-      (rotation) =>
-        rotatedSpansMm(template.piece, rotation).across <= printableMm + FIT_TOLERANCE_MM,
+      (rotation) => rotatedSpansMm(template, rotation).across <= printableMm + FIT_TOLERANCE_MM,
     );
     const allowedRots = fitsWidth.filter(
-      (rotation) => rotatedSpansMm(template.piece, rotation).along <= contentLengthMm + 1e-6,
+      (rotation) => rotatedSpansMm(template, rotation).along <= contentLengthMm + 1e-6,
     );
     for (let instance = 0; instance < count; instance++) {
       total++;
@@ -175,7 +175,7 @@ export async function planRollPrint(
   const prepared = preparePieces(items);
   const estimatePieces: EstimatePiece[] = [...prepared.values()].map((piece) => ({
     id: piece.id,
-    poly: items.find((item) => item.template.piece.id === piece.id)!.template.piece.poly,
+    poly: items.find((item) => item.template.piece.id === piece.id)!.template.footprint,
     allowedRots: uniqueRotations(
       items
         .filter((item) => item.template.piece.id === piece.id)
@@ -193,7 +193,8 @@ export async function planRollPrint(
     const decomposition = estimate.decompositions[index];
     preparedPiece.parts0 = [decomposition.parts, mirrorParts(decomposition.parts)];
   });
-  const nfps = new NfpCache(0.5 + 2 * estimate.effectiveEps, 0.5);
+  const gapCm = ROLL_GAP_MM / 10;
+  const nfps = new NfpCache(gapCm + 2 * estimate.effectiveEps, gapCm);
 
   type PlannedSheet = { placements: Placement[]; usedLengthCm: number };
   const planned: PlannedSheet[] = [];
@@ -256,7 +257,7 @@ export async function planRollPrint(
   const warnings = [...source.warnings];
   if (estimate.effectiveEps > 0.05)
     warnings.push(
-      `contours were simplified to ${estimate.effectiveEps} cm for the live roll layout; the 5 mm true-contour gap was verified by the placer`,
+      `contours were simplified to ${estimate.effectiveEps} cm for the live roll layout; the ${ROLL_GAP_MM} mm drawn-geometry gap was verified by the placer`,
     );
   return {
     sheets: drawings,
@@ -351,16 +352,16 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 const yieldTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-function rotatedSpansMm(piece: PieceDTO, rotation: RotationDeg): { along: number; across: number } {
+function rotatedSpansMm(
+  template: RollPieceTemplate,
+  rotation: RotationDeg,
+): { along: number; across: number } {
+  const bb = bounds(template.footprint);
+  const width = bb.maxX - bb.minX;
+  const height = bb.maxY - bb.minY;
   return rotation === 0 || rotation === 180
-    ? { along: piece.bboxW * 10, across: piece.bboxH * 10 }
-    : { along: piece.bboxH * 10, across: piece.bboxW * 10 };
-}
-
-function pieceLabel(template: RollPieceTemplate): string {
-  return [template.identity, template.size || 'OS', template.cutMultiplier === 2 ? '×2' : '']
-    .filter(Boolean)
-    .join(' · ');
+    ? { along: width * 10, across: height * 10 }
+    : { along: height * 10, across: width * 10 };
 }
 
 function uniqueRotations(rotations: readonly RotationDeg[]): RotationDeg[] {
@@ -372,7 +373,7 @@ function preparePieces(
 ): Map<number, PreparedPiece> {
   const prepared = new Map<number, PreparedPiece>();
   for (const item of items) {
-    const dto = item.template.piece;
+    const { piece: dto, footprint } = item.template;
     if (prepared.has(dto.id)) continue;
     const variants = (flipped: boolean) => {
       const polyAt = {} as Record<RotationDeg, Pt[]>;
@@ -381,7 +382,7 @@ function preparePieces(
         { minX: number; minY: number; maxX: number; maxY: number }
       >;
       for (const rotation of [0, 90, 180, 270] as const) {
-        const poly = variantPoly(dto.poly, rotation, flipped);
+        const poly = variantPoly(footprint, rotation, flipped);
         polyAt[rotation] = poly;
         boundsAt[rotation] = bounds(poly);
       }
@@ -394,7 +395,7 @@ function preparePieces(
       polyAt: [normal.polyAt, flipped.polyAt],
       boundsAt: [normal.boundsAt, flipped.boundsAt],
       parts0: [[], []],
-      areaCm2: dto.areaCm2,
+      areaCm2: area(footprint),
     });
   }
   return prepared;
@@ -412,9 +413,9 @@ function trialGenes(
   printableWidthMm: number,
 ): Gene[][] {
   const along = (item: TrialItem, rotation: RotationDeg) =>
-    rotatedSpansMm(item.template.piece, rotation).along;
+    rotatedSpansMm(item.template, rotation).along;
   const across = (item: TrialItem, rotation: RotationDeg) =>
-    rotatedSpansMm(item.template.piece, rotation).across;
+    rotatedSpansMm(item.template, rotation).across;
   const choose = (item: TrialItem, mode: number, index: number): RotationDeg => {
     const options = [...item.allowedRots];
     if (mode === 0)
@@ -439,8 +440,11 @@ function trialGenes(
             mode: 1,
             order: [...items].sort(
               (a, b) =>
-                Math.max(b.template.piece.bboxW, b.template.piece.bboxH) -
-                Math.max(a.template.piece.bboxW, a.template.piece.bboxH),
+                Math.max(
+                  rotatedSpansMm(b.template, 0).along,
+                  rotatedSpansMm(b.template, 0).across,
+                ) -
+                Math.max(rotatedSpansMm(a.template, 0).along, rotatedSpansMm(a.template, 0).across),
             ),
           },
         ]
@@ -449,8 +453,11 @@ function trialGenes(
             mode: 3,
             order: [...items].sort(
               (a, b) =>
-                Math.min(b.template.piece.bboxW, b.template.piece.bboxH) -
-                Math.min(a.template.piece.bboxW, a.template.piece.bboxH),
+                Math.min(
+                  rotatedSpansMm(b.template, 0).along,
+                  rotatedSpansMm(b.template, 0).across,
+                ) -
+                Math.min(rotatedSpansMm(a.template, 0).along, rotatedSpansMm(a.template, 0).across),
             ),
           },
         ];
@@ -507,14 +514,16 @@ function drawingFromRollPlacements(
     const item = itemByKey.get(placementKey(placement));
     if (!item) continue;
     const piece = item.template.piece;
+    const pieceKey = placementKey(placement);
     const outline = placedPoly(piece.poly, placement).map(pagePoint);
-    strokes.push({ kind: 'cut', closed: true, pts: outline });
+    strokes.push({ kind: 'cut', closed: true, pts: outline, pieceKey });
     for (const path of piece.inner ?? []) {
       if (path.pts.length < 2) continue;
       strokes.push({
         kind: 'line',
         closed: path.closed,
         pts: placedPoly(path.pts, placement).map(pagePoint),
+        pieceKey,
       });
     }
     const [x, y] = polygonCentroid(outline);
@@ -522,8 +531,9 @@ function drawingFromRollPlacements(
       x,
       y,
       s: item.label,
-      sizeMm: 3,
+      sizeMm: ROLL_PIECE_LABEL_MM,
       angle: 90 - placement.rot,
+      pieceKey,
     });
   }
   return { w: widthMm, h: lengthMm, strokes, labels, title, warnings: [...warnings] };
