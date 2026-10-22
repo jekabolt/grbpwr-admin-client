@@ -150,7 +150,12 @@ const MUTANTS = [
   {
     id: 'no-reshape-mark',
     file: 'diff.ts',
-    edits: [["pushReview(reviews, 'reshaped', [piece.lineKey]);", '']],
+    edits: [
+      [
+        "if (outsideAutoAccept) pushReview(reviews, 'reshaped', [piece.lineKey]);",
+        "if (false) pushReview(reviews, 'reshaped', [piece.lineKey]);",
+      ],
+    ],
     kills: ['g-combo', 'corpus'],
   },
   {
@@ -184,6 +189,18 @@ const MUTANTS = [
     kills: ['noise'],
   },
   {
+    id: 'no-auto-accept-reshape',
+    file: 'defaults.ts',
+    edits: [['autoAcceptRel: 0.02,', 'autoAcceptRel: 0,']],
+    kills: ['auto-accept-reshape'],
+  },
+  {
+    id: 'ignore-seam-mismatch',
+    file: 'defaults.ts',
+    edits: [['seamMismatchRel: 0.01,', 'seamMismatchRel: 1,']],
+    kills: ['seam-reshape'],
+  },
+  {
     id: 'no-rename-by-shape',
     file: 'defaults.ts',
     edits: [
@@ -191,6 +208,23 @@ const MUTANTS = [
       ['renameMaxNoCommonSize: 0.08,', 'renameMaxNoCommonSize: -1,'],
     ],
     kills: ['corpus', 'g-combo'],
+  },
+  {
+    id: 'no-ghost-auto-replace',
+    file: 'diff.ts',
+    edits: [['const best = sure.length === 1 ? sure[0] : null;', 'const best = null;']],
+    kills: ['ghost-auto-replace'],
+  },
+  {
+    id: 'no-mirror-pair-place',
+    file: 'diff.ts',
+    edits: [
+      [
+        "(c.cmp.frame === 'mirrorU' || c.cmp.frame === 'mirrorV')",
+        "(c.cmp.frame === 'mirrorU' && false)",
+      ],
+    ],
+    kills: ['mirror-pair-place'],
   },
   {
     id: 'review-rank-inverted',
@@ -245,6 +279,18 @@ const MUTANTS = [
     kills: ['g4-split'],
   },
   {
+    id: 'clean-split-marked',
+    file: 'rewrite.ts',
+    edits: [['mark: rv.mark !== false', 'mark: true']],
+    kills: ['g4-split', 'split-join'],
+  },
+  {
+    id: 'split-no-median-smv',
+    file: 'rewrite.ts',
+    edits: [['const joinSmv = medianJoinSmv(input.operations);', "const joinSmv = '';"]],
+    kills: ['split-join'],
+  },
+  {
     id: 'foreign-aliases-dropped',
     file: 'rewrite.ts',
     edits: [
@@ -296,8 +342,8 @@ const MUTANTS = [
     file: 'rewrite.ts',
     edits: [
       [
-        'const operations: O[] = input.operations.map(',
-        'const operations: O[] = input.operations.slice(0, -1).map(',
+        'const operations: O[] = withPlacements.map(',
+        'const operations: O[] = withPlacements.slice(0, -1).map(',
       ],
     ],
     kills: ['apply-invariants'],
@@ -509,6 +555,7 @@ function runCase(M, c) {
     newSheet: { parse: c.neu, sha256: c.newSha ?? null },
     sizeTokens: SIZES,
     otherSheets: c.otherSheets,
+    seams: c.seams,
   };
   const plan = M.reconcile(input);
   const res = M.applyPlan(input, c.tamper ? c.tamper(structuredClone(plan)) : plan, deps());
@@ -526,6 +573,10 @@ const GATES = [
   'g-units',
   'g-sizetail',
   'g-pair-LR',
+  'seam-reshape',
+  'auto-accept-reshape',
+  'ghost-auto-replace',
+  'mirror-pair-place',
   'twin-shapes',
   'noop',
   'determinism',
@@ -597,7 +648,8 @@ function gates(M, data) {
         [j.unitKey, j.unitName],
         `${name}: выход join`,
       );
-      is(g, op?.review, 'split', `${name}: метка join`);
+      if (name !== 'g4-split' && name !== 'split-join')
+        is(g, op?.review, 'split', `${name}: метка join`);
       yes(g, !pieceKeys.has(j.unitKey), `${name}: узел join ${j.unitKey} — ключ детали`);
       const next = res.operations[j.opIndex + 1];
       yes(
@@ -619,7 +671,15 @@ function gates(M, data) {
       let want = was.inputKeys;
       for (const j of joins)
         if (j.opIndex < i) want = want.map((k) => (k === j.parentKey ? j.unitKey : k));
-      is(g, op.inputKeys, want, `${name}: входы шага ${i}`);
+      const paired = res.addedPieceKeys.filter(
+        (k) => (op.inputKeys ?? []).includes(k) && !(want ?? []).includes(k),
+      );
+      is(
+        g,
+        (op.inputKeys ?? []).filter((k) => !paired.includes(k)),
+        want,
+        `${name}: входы шага ${i}`,
+      );
       is(g, op.media ?? null, was.media ?? null, `${name}: аннотации шага ${i}`);
       is(g, op.outputUnitKey, was.outputUnitKey, `${name}: выход шага ${i}`);
     });
@@ -789,30 +849,18 @@ function gates(M, data) {
     is(g, blind.res.reviews, [], 'без старого листа: метки');
   });
 
-  // ── g-other: другой файл → флаг, матч по форме выключен; детали со ссылками — призраки ─────
+  // ── g-other: другой файл → отказанный план без единой перезаписи ─────────────────────────
   guard('g-other', () => {
     const g = 'g-other';
     const r = runCase(M, { old: S.base, neu: S.gOther });
-    invariants(g, r);
+    invariants(g, r, { refused: 'foreign' });
     is(g, r.plan.summary.otherFile, true, 'флаг «другой файл»');
-    is(
-      g,
-      [
-        r.plan.summary.removed,
-        r.plan.summary.added,
-        r.plan.summary.renamed,
-        r.plan.summary.split,
-        r.plan.summary.merged,
-      ],
-      [9, 4, 0, 0, 0],
-      'removed/added/renamed/split/merged',
-    );
-    is(g, r.res.ghostPieceKeys.length, 9, 'все девять — призраки (на них есть шаги)');
-    yes(
-      g,
-      Object.values(markOf(r)).every((v) => v === 'orphan') && Object.keys(markOf(r)).length === 9,
-      `метки orphan ×9: ${JSON.stringify(markOf(r))}`,
-    );
+    is(g, [r.plan.refused, r.plan.rows.length], ['foreign', 0], 'план отказан без строк');
+    is(g, r.res.refused, { reason: 'foreign' }, 'применение отказано');
+    is(g, r.res.pieces, r.input.pieces, 'детали не переписаны');
+    is(g, r.res.aliases, r.input.aliases, 'алиасы не переписаны');
+    is(g, r.res.operations, r.input.operations, 'шаги не переписаны');
+    is(g, r.res.reviews, [], 'меток нет');
   });
 
   // ── g4-split: BP → BP_U + BP_D; деталь — за большей частью, join ▣ BP перед первым шагом ──
@@ -825,7 +873,7 @@ function gates(M, data) {
     });
     invariants(g, r);
     manifestTiers(g, r.plan, manifests[g]);
-    is(g, markOf(r), { [K('BP')]: 'split' }, 'метки');
+    is(g, markOf(r), {}, 'чистый разрез без метки');
     const row = rowBy(r.plan, 'BP');
     const big = row.links.find((l) => l.pieceLineKey === K('BP'));
     const small = row.links.find((l) => l.pieceLineKey === null);
@@ -850,7 +898,7 @@ function gates(M, data) {
       'часть наследует ×2 зеркально',
     );
     is(g, r.res.reshapedPieceKeys, [K('BP')], '«Конструкция» BP протухла');
-    // круг 2: ОДИН join [BP, часть] → ▣ BP перед первым шагом с BP; метка только на нём
+    // L5: ОДИН join [BP, часть] → ▣ BP перед первым шагом с BP; чистый разрез без метки.
     is(
       g,
       r.res.joins.map((j) => [j.opIndex, j.parentKey, j.partKeys, j.unitKey, j.unitName]),
@@ -861,9 +909,10 @@ function gates(M, data) {
     is(
       g,
       r.res.operations.map((o) => o.review ?? ''),
-      r.res.operations.map((_, i) => (i === 0 ? 'split' : '')),
-      'метка только на join',
+      r.res.operations.map(() => ''),
+      'join без метки',
     );
+    is(g, r.res.operations[0].smv, '', 'без SMV других join — пусто');
     is(g, r.res.operations[1].inputKeys, ['BP', K('BP_1')], 'первый шаг берёт ▣ BP');
   });
 
@@ -965,6 +1014,142 @@ function gates(M, data) {
       ['merged', 'FP', 2, M.MIRRORED, []],
       'зеркальная пара FP_L/FP_R → FP ×2',
     );
+  });
+
+  // ── L5 seam-aware reshape: a good seam is automatic; a broken seam marks only its join ───
+  guard('seam-reshape', () => {
+    const g = 'seam-reshape';
+    const only = (identity) => {
+      const take = blocksOf(M, S.base, identity);
+      const pieces = S.base.pieces.filter(take);
+      return { pieces, blockNames: [...new Set(pieces.map((p) => p.blockName))] };
+    };
+    const source = only('BP_2');
+    const renameSource = (to) => ({
+      pieces: source.pieces.map((p) => ({
+        ...p,
+        blockName: to + (p.blockName ?? '').slice('BP_2'.length),
+      })),
+      blockNames: source.blockNames.map((b) => to + (b ?? '').slice('BP_2'.length)),
+    });
+    const left = renameSource('PAIR_L');
+    const right = renameSource('PAIR_R');
+    const old = withPieces(left, right.pieces);
+    const neu = stretchX(M, old, 'PAIR_R', 1.04);
+    const neuBoth = stretchX(M, stretchX(M, old, 'PAIR_L', 1.04), 'PAIR_R', 1.04);
+    const card = M.cardFromSheet(old, { scope: MAIN, sizeTokens: SIZES });
+    card.operations.unshift({
+      title: 'prep R again',
+      inputKeys: [K('PAIR_R')],
+      outputUnitKey: '',
+      outputUnitName: '',
+    });
+
+    let broken = null;
+    for (let a = 0; a < 8 && !broken; a++)
+      for (let b = 0; b < 8 && !broken; b++) {
+        try {
+          const seam = M.probeSeam(old, 'PAIR_L', 'PAIR_R', SIZES, a, b);
+          const r = runCase(M, { old, neu, card, seams: [seam] });
+          if (
+            r.res.reviews.length === 1 &&
+            r.res.reviews[0].opIndex === 1 &&
+            r.res.reviews[0].review === 'reshaped'
+          )
+            broken = r;
+        } catch {
+          // This piece has fewer runs; the bounded search remains deterministic.
+        }
+      }
+    yes(g, !!broken, 'broken seam marks only the step that joins its two sides');
+    if (broken) {
+      invariants(g, broken);
+      is(g, broken.res.operations[0].review ?? '', '', 'other step with the piece is unmarked');
+    }
+
+    let quiet = null;
+    for (let run = 0; run < 8 && !quiet; run++) {
+      try {
+        const seam = M.probeSeam(old, 'PAIR_L', 'PAIR_R', SIZES, run, run);
+        const r = runCase(M, { old, neu: neuBoth, card, seams: [seam] });
+        if (r.res.reviews.length === 0) quiet = r;
+      } catch {
+        // See above.
+      }
+    }
+    yes(g, !!quiet, 'resolved matching seam accepts a material reshape without a mark');
+  });
+
+  // ── L5 no-seam fallback: area + perimeter ≤2% is automatic, larger drift is marked ───────
+  guard('auto-accept-reshape', () => {
+    const g = 'auto-accept-reshape';
+    const small = runCase(M, { old: S.base, neu: stretchX(M, S.base, 'BP_2', 1.01) });
+    invariants(`${g} small`, small);
+    is(g, markOf(small)[K('BP_2')] ?? '', '', '1% reshape automatic');
+    const large = runCase(M, { old: S.base, neu: stretchX(M, S.base, 'BP_2', 1.04) });
+    invariants(`${g} large`, large);
+    is(g, markOf(large)[K('BP_2')], 'reshaped', '4% reshape marked');
+  });
+
+  // ── L5 ghost: one unmatched upload-only block with a clear lead reuses the ghost row ──────
+  guard('ghost-auto-replace', () => {
+    const g = 'ghost-auto-replace';
+    const isBp2 = blocksOf(M, S.base, 'BP_2');
+    const mids = S.base.pieces.filter(isBp2);
+    const mid = mids.find((p) => /_M$/i.test(p.blockName ?? '')) ?? mids[0];
+    const keep = S.base.pieces.filter((p) => !isBp2(p));
+    let chosen = null;
+    for (const k of [1.08, 1.12, 1.16, 1.2, 1.24, 1.28]) {
+      const p = stretchX(
+        M,
+        { pieces: [{ ...mid, blockName: 'BP_AUTO' }], blockNames: ['BP_AUTO'] },
+        'BP_AUTO',
+        k,
+      ).pieces[0];
+      const neu = withPieces(
+        { pieces: keep, blockNames: [...new Set(keep.map((x) => x.blockName))] },
+        [p],
+      );
+      const r = runCase(M, { old: S.base, neu });
+      const row = rowBy(r.plan, 'BP_2');
+      if (
+        row?.tier === 'renamed' &&
+        (row.candidates[0]?.cost ?? 0) > M.THRESH.renameMaxNoCommonSize &&
+        r.res.ghostPieceKeys.length === 0 &&
+        r.res.addedPieceKeys.length === 0 &&
+        r.res.reviews.length === 0
+      ) {
+        chosen = r;
+        break;
+      }
+    }
+    yes(g, !!chosen, 'clear upload-only candidate auto-replaces the ghost');
+    if (chosen) {
+      invariants(g, chosen);
+      is(
+        g,
+        chosen.res.renamed.some((x) => x.pieceLineKey === K('BP_2') && x.to === 'BP_AUTO'),
+        true,
+        'ghost row renamed to the new block',
+      );
+    }
+  });
+
+  // ── L5 mirror pair: a new opposite-hand block joins every step of its proven mate ─────────
+  guard('mirror-pair-place', () => {
+    const g = 'mirror-pair-place';
+    const old = dropIdentity(M, S.base, 'FP_R');
+    const r = runCase(M, { old, neu: S.base });
+    invariants(g, r);
+    const added = r.res.addedPieceKeys[0];
+    is(g, [r.res.addedPieceKeys.length, r.res.reviews.length], [1, 0], 'one pair, no mark');
+    const mateStep = r.res.operations.find((o) => (o.inputKeys ?? []).includes(K('FP_L')));
+    yes(
+      g,
+      !!mateStep && (mateStep.inputKeys ?? []).includes(added),
+      'new mirror is in the mate step',
+    );
+    is(g, M.sweepOf(r.res), [], 'pair placement keeps assembly valid');
   });
 
   // ── две одинаковые формы: переименованный блок узнаётся по месту на листе ────────────────
@@ -1382,6 +1567,7 @@ function gates(M, data) {
       outputUnitKey: '',
       outputUnitName: '',
     });
+    for (const op of card.operations) if (op.outputUnitKey) op.smv = '2.4';
     card.operations[2].media = [{ annotations: [{ pieceLineKey: K('BP') }] }];
     yes(g, M.sweepOf(card).length === 0, 'фикстура чистая');
     const r = runCase(M, { old: S.base, neu: S.g4split, card });
@@ -1398,7 +1584,7 @@ function gates(M, data) {
       r.res.operations.map((o) => [o.title, o.inputKeys, o.review ?? '']),
       [
         ['join 1', [K('BP_1'), K('BP_2')], ''],
-        ['join BP', [K('BP'), part], 'split'],
+        ['join BP', [K('BP'), part], ''],
         ['overlock BP', ['BP'], ''],
         ['join 2', ['u1', 'BP'], ''],
         ...r.input.operations.slice(3).map((o) => [o.title, o.inputKeys, '']),
@@ -1406,13 +1592,14 @@ function gates(M, data) {
       'шаги после разреза',
     );
     is(g, r.res.operations[1].zoneOf, 'overlock BP', 'join знает шаг, перед которым встал');
+    is(g, r.res.operations[1].smv, '2.4', 'join получил медиану SMV других join');
     is(
       g,
       r.res.operations[3].media,
       [{ annotations: [{ pieceLineKey: K('BP') }] }],
       'выноска осталась на детали',
     );
-    is(g, r.res.reviews, [{ opIndex: 1, review: 'split', pieceKeys: [K('BP')] }], 'метки');
+    is(g, r.res.reviews, [], 'чистый split без метки');
     is(
       g,
       r.res.pieces.find((p) => p.lineKey === K('BP'))?.name,

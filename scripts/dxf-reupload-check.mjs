@@ -462,7 +462,67 @@ async function main() {
     }
   }
 
-  // ── g4-split: BP → BP_U + BP_D; один join перед «back», метка только на нём ──────────────
+  // Library handoff with the seams the app lane passes: both changed pieces keep matching sewn
+  // edges, so card 69 is left with only its two ghost marks.
+  {
+    const tag = 'g-combo-seams';
+    const parsed = await M.parseSheets(
+      [{ name: 'g-combo.dxf', open: async () => B.gCombo.slice().buffer }],
+      { ...M.RECONCILE_PARSE },
+    );
+    const old = { pieces: baseParse.pieces, blockNames: baseParse.blockNames };
+    const neu = { pieces: parsed.pieces, blockNames: parsed.blockNames };
+    const baseInput = {
+      scope: MAIN,
+      pieces: card.pieces,
+      aliases: card.aliases,
+      operations: card.operations,
+      oldSheet: { parse: old },
+      newSheet: { parse: neu },
+      sizeTokens: SIZES,
+      externalRefs: {},
+    };
+    const quietSeam = (identity, partner) => {
+      for (let a = 0; a < 12; a++)
+        for (let b = 0; b < 12; b++) {
+          try {
+            const raw = M.probeSeam(old, identity, partner, SIZES, a, b);
+            for (const seam of [raw, M.balanceProbeSeam(neu, raw, SIZES)].filter(Boolean)) {
+              const plan = M.reconcile({ ...baseInput, seams: [seam] });
+              const row = plan.rows.find((r) =>
+                r.old.some((o) => o.identity.toLowerCase() === identity.toLowerCase()),
+              );
+              if (!row?.reviews.some((r) => r.review === 'reshaped')) return seam;
+            }
+          } catch {
+            // The piece has fewer runs; keep the bounded deterministic search.
+          }
+        }
+      return null;
+    };
+    const seams = [quietSeam('BP_2', 'BP_1'), quietSeam('FP_R', 'FP_L')].filter(Boolean);
+    is(tag, seams.length, 2, 'both changed pieces have a resolvable matching seam');
+    const input = { ...baseInput, seams };
+    const plan = M.reconcile(input);
+    const helpers = makeDeps(M, new Map(), freshLog());
+    const result = M.applyPlan(input, plan, {
+      mintKey: helpers.mintKey,
+      makePiece: helpers.makePiece,
+      makeAlias: helpers.makeAlias,
+      makeJoin: helpers.makeJoin,
+      setReview: (op, review) => ({ ...op, review }),
+    });
+    table('g-combo · library with card seams', { ...result, result });
+    is(
+      tag,
+      reviewsOf(result.operations),
+      ['', '', 'orphan', 'orphan', '', '', '', '', ''],
+      'only the two CLR_3 ghost steps remain marked',
+    );
+    is(tag, result.reviews.length, 2, 'marks ≤ 2');
+  }
+
+  // ── g4-split: BP → BP_U + BP_D; clean join before «back», no mark ─────────────────────────
   {
     const tag = 'g4-split';
     // дефекты: 50 («back») и 60 едут за join, 15 — не позиционный, стоит
@@ -482,17 +542,18 @@ async function main() {
       is(
         tag,
         reviewsOf(out.operations),
-        ['', '', '', '', 'split', '', '', '', '', ''],
-        'метка только на join',
+        ['', '', '', '', '', '', '', '', '', ''],
+        'join без метки',
       );
       const j = out.result.joins[0];
       is(tag, out.operations[5].inputKeys, [j?.unitKey, 'YOKE'], '«back» берёт ▣ BP');
       is(
         tag,
-        M.markJumpParams(new URLSearchParams(), out.operations)?.get('opi'),
-        '4',
-        'переход на join',
+        M.markJumpParams(new URLSearchParams(), out.operations),
+        null,
+        'нет перехода к метке',
       );
+      is(tag, out.operations[4].smv ?? '', '', 'нет других SMV — join пустой');
       is(tag, out.result.opIndexOf, [0, 1, 2, 3, 5, 6, 7, 8, 9], 'старый индекс → новый');
       yes(
         tag,

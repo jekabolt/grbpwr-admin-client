@@ -15,12 +15,18 @@ export const THRESH = {
   /** дрейф экспорта — молча, без метки и без протухания «Конструкции» */
   minorRel: 0.005,
   minorForm: 0.025,
+  /** changed shape without a resolvable card seam: area + perimeter inside this are automatic */
+  autoAcceptRel: 0.02,
+  /** a resolved seam is broken when its sides differ by more than max(3 mm, this share) */
+  seamMismatchRel: 0.01,
   /** переименование по форме: уверенно при стоимости ≤ и отрыве от соперника ≥ */
   renameSure: 0.08,
   renameMargin: 0.02,
   /** дальше — не та деталь; без общего размера (сравнение медиан) — строже */
   renameMax: 0.25,
   renameMaxNoCommonSize: 0.08,
+  /** an unmatched upload block may replace a ghost only with this lead over the runner-up */
+  ghostRenameMargin: 0.05,
   /** две одинаковые формы: решает место на листе, если стоимости ближе, чем это */
   tieBucket: 0.01,
   /** разрез/слияние: сумма площадей и сложение габаритов */

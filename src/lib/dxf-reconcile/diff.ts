@@ -11,6 +11,7 @@
 import { aliasIdentity } from 'components/managers/tech-card/components/nesting/split-pieces';
 import { bareToken, normBlock } from 'components/managers/tech-card/components/nesting/block-code';
 
+import { ghostSwapBreaksAssembly } from './candidates';
 import {
   MIRRORED,
   THRESH,
@@ -35,6 +36,7 @@ import {
   type SheetEntry,
   type SheetIndex,
 } from './match';
+import { seamReshapeVerdict, type PieceGeometry } from './seams';
 import type {
   CardAlias,
   CardOperation,
@@ -59,7 +61,7 @@ type OldUnit<P> = {
   entry: SheetEntry | null;
 };
 
-type How = 'exact' | 'tail' | 'shape';
+type How = 'exact' | 'tail' | 'shape' | 'ghost';
 
 type Link<P> = {
   unit: OldUnit<P>;
@@ -129,7 +131,8 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
 ): ReconcilePlan {
   const oldSha = (input.oldSheet?.sha256 ?? '').trim();
   const newSha = (input.newSheet.sha256 ?? '').trim();
-  if (oldSha && oldSha === newSha) return { status: 'noop', rows: [], summary: emptySummary() };
+  if (oldSha && oldSha === newSha)
+    return { status: 'noop', refused: null, rows: [], summary: emptySummary() };
 
   const dict = new Set(input.sizeTokens.map((t) => bareToken(t)).filter(Boolean));
   const oldIdx: SheetIndex | null = input.oldSheet ? indexSheet(input.oldSheet.parse, dict) : null;
@@ -219,7 +222,6 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   }
 
   // ── 4–5. разрез / слияние и форма — по остатку ───────────────────────────────────────────
-  const exactAndTail = new Map(links);
   const oldLeftWithGeom = () => unitList.filter((u) => !links.has(u.key) && u.entry);
   const matrix = shapeMatrix(
     oldLeftWithGeom().map((u) => u.entry!),
@@ -326,15 +328,13 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   let matchedShare = share();
   const otherFile = linked.length > 0 && matchedShare < THRESH.otherFileShare;
   if (otherFile) {
-    links.clear();
-    usedN.clear();
-    for (const [k, l] of exactAndTail) {
-      links.set(k, l);
-      usedN.add(l.n.key);
-    }
-    splits = [];
-    merges = [];
-    matchedShare = share();
+    const summary = emptySummary();
+    return {
+      status: 'ready',
+      refused: 'foreign',
+      rows: [],
+      summary: { ...summary, matchedShare, otherFile: true, scale },
+    };
   }
 
   // ── полные сравнения пар ─────────────────────────────────────────────────────────────────
@@ -423,11 +423,104 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     }
   }
 
-  // ── строки ───────────────────────────────────────────────────────────────────────────────
+  // ── 7c. единственная новая деталь уверенно заменяет призрак ──────────────────────────────
+  // Кандидатами служат только ещё не связанные блоки этой заливки. Существующая деталь карты не
+  // может исчезнуть под видом автоматической замены призрака.
   const refs = refCounts(input.operations, input.externalRefs);
   const pk = (p: P) => p.lineKey.trim().toLowerCase();
   const fateOf = (p: P): PieceFate =>
     elsewhere.has(pk(p)) ? 'keep' : (refs.get(p.lineKey.trim()) ?? 0) > 0 ? 'ghost' : 'delete';
+  const movedKeys = new Set(moved.map((x) => x.n.key));
+  const ghostNews = newLeft().filter((n) => !inSplitMerge(n.key) && !movedKeys.has(n.key));
+  type GhostProposal = {
+    unit: OldUnit<P>;
+    n: SheetEntry;
+    cost: number;
+    candidates: { identity: string; cost: number }[];
+  };
+  const proposals: GhostProposal[] = [];
+  const byGhostPiece = new Map<P, OldUnit<P>[]>();
+  for (const u of unitList) {
+    if (!u.piece || !u.entry || links.has(u.key) || inSplitMerge(u.key) || collapsed.has(u.key))
+      continue;
+    const list = byGhostPiece.get(u.piece) ?? [];
+    list.push(u);
+    byGhostPiece.set(u.piece, list);
+  }
+  for (const [piece, oldUnits] of byGhostPiece) {
+    if (fateOf(piece) !== 'ghost') continue;
+    const ranked = ghostNews
+      .map((n) => {
+        const costs = oldUnits.flatMap((u) => {
+          const c = comparePair(u.entry!, n, scale, false);
+          return c ? [{ unit: u, cost: c.cmp.cost }] : [];
+        });
+        costs.sort((a, b) => a.cost - b.cost || byName(a.unit.key, b.unit.key));
+        return costs[0] ? { n, ...costs[0] } : null;
+      })
+      .filter((x): x is { n: SheetEntry; unit: OldUnit<P>; cost: number } => !!x)
+      .sort((a, b) => a.cost - b.cost || byName(a.n.key, b.n.key));
+    const sure = ranked.filter((x) => x.cost <= THRESH.renameMax);
+    const best = sure.length === 1 ? sure[0] : null;
+    const runner = ranked.find((x) => x !== best);
+    if (!best || (runner && runner.cost - best.cost < THRESH.ghostRenameMargin)) continue;
+    const syntheticKey = `__dxf_new_${best.n.key}`;
+    if (
+      ghostSwapBreaksAssembly(
+        [...input.pieces, { ...piece, lineKey: syntheticKey }],
+        input.operations,
+        piece.lineKey,
+        syntheticKey,
+      )
+    )
+      continue;
+    proposals.push({
+      ...best,
+      candidates: ranked.slice(0, 3).map((x) => ({ identity: x.n.identity, cost: x.cost })),
+    });
+  }
+  const proposalCount = new Map<string, number>();
+  for (const p of proposals) proposalCount.set(p.n.key, (proposalCount.get(p.n.key) ?? 0) + 1);
+  for (const p of proposals
+    .filter((x) => proposalCount.get(x.n.key) === 1)
+    .sort((a, b) => a.cost - b.cost || byName(a.unit.key, b.unit.key))) {
+    if (usedN.has(p.n.key) || links.has(p.unit.key)) continue;
+    pair(p.unit, p.n, 'ghost', 'high', p.cost, p.candidates);
+    const cmp = comparePair(p.unit.entry!, p.n, scale, true);
+    full.set(p.unit.key, {
+      unit: p.unit,
+      n: p.n,
+      how: 'ghost',
+      cost: p.cost,
+      confidence: 'high',
+      candidates: p.candidates,
+      full: cmp,
+      verdict: 'unchanged',
+    });
+  }
+  if (proposals.length) matchedShare = share();
+
+  // ── строки ───────────────────────────────────────────────────────────────────────────────
+  // Geometry by existing card piece, after every accepted link. It also includes other scopes when
+  // their parsed sheets were supplied, so a seam across materials can still be re-measured.
+  const geometry = new Map<string, PieceGeometry>();
+  for (const l of [...full.values()].sort((a, b) => byName(a.unit.key, b.unit.key)))
+    if (l.unit.piece && !geometry.has(l.unit.piece.lineKey))
+      geometry.set(l.unit.piece.lineKey, { entry: l.n, scale });
+  for (const m of moved)
+    if (!geometry.has(m.piece.lineKey)) geometry.set(m.piece.lineKey, { entry: m.n, scale: 1 });
+  for (const sheet of input.otherSheets ?? []) {
+    const key = sheet.scope.fabricPurpose.trim() || sheet.scope.bomLineKey.trim();
+    const idx = indexSheet(sheet.parse, dict);
+    for (const a of input.aliases) {
+      if (aliasScopeKey(a) !== key) continue;
+      const piece = pieceByKey.get((a.pieceLineKey ?? '').trim().toLowerCase());
+      const identity = aliasIdentity(normBlock(a.blockName ?? ''), idx.split).toLowerCase();
+      const entry = idx.entries.get(identity);
+      if (piece && entry && !geometry.has(piece.lineKey))
+        geometry.set(piece.lineKey, { entry, scale: 1 });
+    }
+  }
 
   const unitsOf = new Map<string, OldUnit<P>[]>();
   for (const u of unitList) {
@@ -445,11 +538,31 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     identity: u.identity,
     fate,
   });
-  const pushReview = (list: RowReview[], review: RowReview['review'], keys: string[]) => {
+  const pushReview = (
+    list: RowReview[],
+    review: RowReview['review'],
+    keys: string[],
+    operationIndexes?: number[],
+    mark = true,
+  ) => {
     if (!keys.length) return;
-    const hit = list.find((r) => r.review === review);
+    const direct = operationIndexes?.length
+      ? [...new Set(operationIndexes)].sort((a, b) => a - b)
+      : undefined;
+    const hit = list.find(
+      (r) =>
+        r.review === review &&
+        (r.mark !== false) === mark &&
+        JSON.stringify(r.operationIndexes ?? []) === JSON.stringify(direct ?? []),
+    );
     if (hit) hit.pieceKeys = [...new Set([...hit.pieceKeys, ...keys])];
-    else list.push({ review, pieceKeys: [...keys] });
+    else
+      list.push({
+        review,
+        pieceKeys: [...keys],
+        ...(direct ? { operationIndexes: direct } : {}),
+        ...(mark ? {} : { mark: false }),
+      });
   };
 
   // Поглощённая деталь (слияние / L/R-пара): своих связей нет — призрак или удаление.
@@ -536,7 +649,23 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
         pushReview(reviews, 'remapped', [piece.lineKey]);
     }
     if (reshaped.length && !reviews.some((r) => r.pieceKeys.includes(piece.lineKey))) {
-      pushReview(reviews, 'reshaped', [piece.lineKey]);
+      const seamVerdict = seamReshapeVerdict(input, piece.lineKey, geometry);
+      if (seamVerdict.kind === 'seams') {
+        for (const r of seamVerdict.reviews)
+          pushReview(reviews, r.review, r.pieceKeys, r.operationIndexes);
+      } else {
+        const outsideAutoAccept = myLinks.some((l) => {
+          const c = l.full?.cmp;
+          return (
+            l.verdict === 'changed' &&
+            (!c ||
+              Math.abs(c.dArea) > THRESH.autoAcceptRel ||
+              Math.abs(c.dPerim) > THRESH.autoAcceptRel ||
+              c.dNotches !== 0)
+          );
+        });
+        if (outsideAutoAccept) pushReview(reviews, 'reshaped', [piece.lineKey]);
+      }
     }
     if (myLinks.length === 1 && list.length >= 1) {
       const l = myLinks[0];
@@ -560,7 +689,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
         });
       });
       reshaped.push(piece.lineKey);
-      pushReview(reviews, 'split', [piece.lineKey]);
+      pushReview(reviews, 'split', [piece.lineKey], undefined, false);
       notes.push(`${mySplit.unit.identity} → ${parts.map((e) => e.identity).join(' + ')}`);
       if (!myLinks.length && ciKey(piece.name) === ciKey(mySplit.unit.identity))
         renameTo = parts[0].identity;
@@ -672,8 +801,33 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
 
   const splitParts = new Set(splits.flatMap((s) => s.parts.map((p) => p.key)));
   const mergeWholes = new Set(merges.map((m) => m.whole.key));
+  const placedKeys = new Set(
+    input.operations.flatMap((o) => (o.inputKeys ?? []).map((k) => k.trim())).filter(Boolean),
+  );
   for (const n of newLeft()) {
     if (splitParts.has(n.key) || mergeWholes.has(n.key)) continue;
+    const side = sideOf(n.identity);
+    const pair = side
+      ? [...full.values()]
+          .flatMap((l) => {
+            const other = sideOf(l.n.identity);
+            if (
+              !l.unit.piece ||
+              !placedKeys.has(l.unit.piece.lineKey.trim()) ||
+              !other ||
+              other.stem !== side.stem ||
+              other.side === side.side
+            )
+              return [];
+            const c = comparePair(l.n, n, 1, false);
+            return c &&
+              c.cmp.cost <= THRESH.pairCost &&
+              (c.cmp.frame === 'mirrorU' || c.cmp.frame === 'mirrorV')
+              ? [{ pieceLineKey: l.unit.piece.lineKey, cost: c.cmp.cost }]
+              : [];
+          })
+          .sort((a, b) => a.cost - b.cost || byName(a.pieceLineKey, b.pieceLineKey))[0]
+      : undefined;
     rows.push({
       id: `n:${n.key}`,
       tier: 'added',
@@ -682,7 +836,14 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       confidence: 'high',
       candidates: [],
       delta: null,
-      links: [{ identity: n.identity, pieceLineKey: null, name: '' }],
+      links: [
+        {
+          identity: n.identity,
+          pieceLineKey: null,
+          name: '',
+          ...(pair ? { placeWithPieceKey: pair.pieceLineKey } : {}),
+        },
+      ],
       rename: null,
       pieceUpdate: null,
       reviews: [],
@@ -715,6 +876,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   for (const r of rows) (summary as Record<Tier, number>)[r.tier]++;
   return {
     status: 'ready',
+    refused: null,
     rows,
     summary: { ...summary, matchedShare, otherFile, scale },
   };

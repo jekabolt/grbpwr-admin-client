@@ -10,10 +10,9 @@
 //   · метки не слабеют (L4c): новая сливается с той, что уже стоит на шаге, по REVIEW_RANK, а шаг,
 //     который ссылается на призрак (этой заливки или прошлой, пока у него нет блока), — всегда
 //     'orphan';
-//   · единственное исключение — разрез (круг 2, 21.10): перед первым шагом, где разрезанная деталь
-//     стоит входом, встаёт ОДИН обычный шаг join [деталь, части…] → узел под старым именем детали,
-//     метка 'split' только на нём; входы шагов с этой деталью (с этого места) берут узел вместо
-//     неё, и меток на них нет. Деталь не стоит ни в одном входе — join нет, метки нет;
+//   · единственное исключение — разрез: перед первым шагом, где разрезанная деталь стоит входом,
+//     встаёт ОДИН обычный join [деталь, части…] → узел под старым именем детали. Чистый разрез
+//     остаётся без метки (сомнительный сохраняет 'split'); следующие входы берут узел вместо детали;
 //   · assemblySweep до и после: нарушение, которого не было, отказывает применение целиком
 //     (шаг сравнивается по исходному индексу — вставленный join не делает старые нарушения новыми).
 import {
@@ -93,6 +92,22 @@ function sweep(pieces: readonly CardPiece[], ops: readonly CardOperation[]): Ass
 
 const NOTE_ORDER: Tier[] = ['renamed', 'reshaped', 'split', 'merged', 'added', 'removed', 'moved'];
 
+/** Join-kind = two or more inputs producing an assembly unit. Empty/non-numeric SMV is ignored. */
+function medianJoinSmv(ops: readonly CardOperation[]): string {
+  const values = ops
+    .filter((o) => (o.inputKeys?.length ?? 0) >= 2 && !!o.outputUnitKey?.trim())
+    .map((o) => (o.smv ?? '').trim().replace(',', '.'))
+    .filter(Boolean)
+    .map(Number)
+    .filter((n) => Number.isFinite(n) && n >= 0)
+    .sort((a, b) => a - b);
+  if (!values.length) return '';
+  const mid = Math.floor(values.length / 2);
+  const value =
+    values.length % 2 === 1 ? values[mid] : (values[Math.max(0, mid - 1)] + values[mid]) / 2;
+  return String(+value.toFixed(6));
+}
+
 export function applyPlan<P extends CardPiece, A extends CardAlias, O extends CardOperation>(
   input: ReconcileInput<P, A, O>,
   plan: ReconcilePlan,
@@ -118,6 +133,7 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
     revisionNote: '',
   });
   if (plan.status === 'noop') return untouched({ reason: 'noop' });
+  if (plan.refused === 'foreign') return untouched({ reason: 'foreign' });
 
   // ── судьбы деталей ───────────────────────────────────────────────────────────────────────
   // Деталь, связанная хоть одной строкой, живёт — даже если другая строка считала её пропавшей.
@@ -166,6 +182,7 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
   // ── новые детали: по строкам плана, ключ — mintKey ───────────────────────────────────────
   const byKey = new Map(input.pieces.map((p) => [p.lineKey, p]));
   const added: string[] = [];
+  const placements: { piece: string; withPiece: string }[] = [];
   const keyOfLink = new Map<string, string>(); // `${rowId}|${identity}` → lineKey
   for (const r of plan.rows) {
     for (const l of r.links) {
@@ -185,6 +202,8 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
       );
       keyOfLink.set(`${r.id}|${l.identity}`, lineKey);
       added.push(lineKey);
+      if (l.placeWithPieceKey)
+        placements.push({ piece: lineKey, withPiece: l.placeWithPieceKey.trim() });
     }
   }
 
@@ -230,7 +249,8 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
   // ── метки на шаги ────────────────────────────────────────────────────────────────────────
   const order = new Map(input.pieces.map((p, i) => [p.lineKey.trim(), i]));
   const marks = new Map<string, Review>(); // pieceKey → тяжелейшая метка детали
-  const splits: { parent: string; parts: string[] }[] = [];
+  const directMarks = new Map<number, { review: Review; pieceKeys: string[] }>();
+  const splits: { parent: string; parts: string[]; mark: boolean }[] = [];
   for (const r of plan.rows) {
     for (const rv of r.reviews) {
       // Разрез метит не шаги детали, а join, который встанет перед ними (ниже).
@@ -240,7 +260,19 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
           .filter((l) => l.pieceLineKey === null)
           .map((l) => keyOfLink.get(`${r.id}|${l.identity}`) ?? '')
           .filter(Boolean);
-        if (parent && parts.length && !deleted.has(parent)) splits.push({ parent, parts });
+        if (parent && parts.length && !deleted.has(parent))
+          splits.push({ parent, parts, mark: rv.mark !== false });
+        continue;
+      }
+      if (rv.operationIndexes?.length) {
+        for (const opIndex of rv.operationIndexes) {
+          if (opIndex < 0 || opIndex >= input.operations.length) continue;
+          const cur = directMarks.get(opIndex);
+          if (!cur || REVIEW_RANK[rv.review] > REVIEW_RANK[cur.review])
+            directMarks.set(opIndex, { review: rv.review, pieceKeys: [...rv.pieceKeys] });
+          else if (cur.review === rv.review)
+            cur.pieceKeys = [...new Set([...cur.pieceKeys, ...rv.pieceKeys])];
+        }
         continue;
       }
       for (const k of rv.pieceKeys) {
@@ -268,20 +300,41 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
   const byOrder = (a: string, b: string) =>
     (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || (a < b ? -1 : a > b ? 1 : 0);
 
+  const withPlacements: O[] = input.operations.map((op) => {
+    const inputKeys = op.inputKeys ?? [];
+    let changed = false;
+    const next = [...inputKeys];
+    for (const p of placements) {
+      if (next.some((k) => k.trim() === p.piece)) continue;
+      const at = next.findIndex((k) => k.trim() === p.withPiece);
+      if (at < 0) continue;
+      next.splice(at + 1, 0, p.piece);
+      changed = true;
+    }
+    return changed ? { ...op, inputKeys: next } : op;
+  });
+
   const reviews: ReviewMark[] = [];
-  const operations: O[] = input.operations.map((op, opIndex) => {
+  const operations: O[] = withPlacements.map((op, opIndex) => {
     const { inputs, annotations } = opPieceRefs(op);
     const refs = [...new Set([...inputs.map((k) => k.trim()), ...annotations])];
     const hit = refs.filter((k) => marks.has(k));
     const ghostHit = refs.filter((k) => ghostsAfter.has(k));
-    if (!hit.length && !ghostHit.length) return op;
-    let review: Review = 'reshaped';
-    let pieceKeys: string[] = [];
+    const direct = directMarks.get(opIndex);
+    if (!hit.length && !ghostHit.length && !direct) return op;
+    let review: Review = direct?.review ?? 'reshaped';
+    let pieceKeys: string[] = direct?.pieceKeys ?? [];
     if (hit.length) {
-      review = marks.get(hit[0])!;
+      const hitReview = hit.reduce<Review>(
+        (best, k) => (REVIEW_RANK[marks.get(k)!] > REVIEW_RANK[best] ? marks.get(k)! : best),
+        marks.get(hit[0])!,
+      );
+      if (!direct || REVIEW_RANK[hitReview] > REVIEW_RANK[review]) review = hitReview;
       for (const k of hit)
         if (REVIEW_RANK[marks.get(k)!] > REVIEW_RANK[review]) review = marks.get(k)!;
       pieceKeys = hit.filter((k) => marks.get(k) === review).sort(byOrder);
+      if (direct && direct.review === review)
+        pieceKeys = [...new Set([...pieceKeys, ...direct.pieceKeys])].sort(byOrder);
     }
     // Шаг со ссылкой на призрак — всегда orphan, какой бы ни была метка строки плана.
     if (ghostHit.length && review !== 'orphan') {
@@ -311,7 +364,9 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
     partKeys: string[];
     unitKey: string;
     unitName: string;
+    mark: boolean;
   }[] = [];
+  const joinSmv = medianJoinSmv(input.operations);
   for (const sp of splits) {
     const at = slots.findIndex((x) => (x.op.inputKeys ?? []).some((k) => k.trim() === sp.parent));
     if (at < 0) continue; // деталь нигде не вход — части остаются просто новыми деталями
@@ -321,12 +376,21 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
       inputKeys: [sp.parent, ...sp.parts],
       outputUnitKey: unitKey,
       outputUnitName: unitName,
+      smv: joinSmv,
       before: slots[at].op,
     });
-    if (deps.setReview) join = deps.setReview(join, 'split');
+    join = { ...join, smv: joinSmv };
+    if (sp.mark && deps.setReview) join = deps.setReview(join, 'split');
     slots = slots.map((x, i) => (i < at ? x : { ...x, op: swapInput(x.op, sp.parent, unitKey) }));
     slots.splice(at, 0, { op: join, src: -1 });
-    joinOps.push({ op: join, parentKey: sp.parent, partKeys: sp.parts, unitKey, unitName });
+    joinOps.push({
+      op: join,
+      parentKey: sp.parent,
+      partKeys: sp.parts,
+      unitKey,
+      unitName,
+      mark: sp.mark,
+    });
   }
   const result: O[] = slots.map((x) => x.op);
   const resultIndexOf = new Map<number, number>();
@@ -341,8 +405,13 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
     unitName: j.unitName,
   }));
   for (const m of reviews) m.opIndex = resultIndexOf.get(m.opIndex) ?? m.opIndex;
-  for (const j of joins)
-    reviews.push({ opIndex: j.opIndex, review: 'split', pieceKeys: [j.parentKey] });
+  for (const j of joinOps)
+    if (j.mark)
+      reviews.push({
+        opIndex: result.indexOf(j.op),
+        review: 'split',
+        pieceKeys: [j.parentKey],
+      });
   reviews.sort((a, b) => a.opIndex - b.opIndex);
 
   // ── сторож сборки ────────────────────────────────────────────────────────────────────────

@@ -17,9 +17,9 @@
 //     без ссылок — удаляется молча. Шаг не удаляется НИКОГДА;
 //   · разрез → деталь идёт за большей частью, остальные части — новые детали; перед первым шагом,
 //     где деталь стоит входом, вставляется ОДИН обычный шаг join (вход: деталь + части, выход —
-//     узел ▣ под старым именем детали), метка 'split' только на нём; шаги, где была деталь, берут
-//     этот узел вместо неё и остаются без метки (круг 2, 21.10). Единственный случай, когда
-//     applyPlan добавляет шаг и переписывает входы. Деталь не стоит ни в одном входе — join нет,
+//     узел ▣ под старым именем детали). Чистый разрез даёт join без метки, сомнительный сохраняет
+//     'split'; шаги, где была деталь, берут узел вместо неё. Единственный случай, когда applyPlan
+//     добавляет шаг и переписывает входы. Деталь не стоит ни в одном входе — join нет,
 //     метки нет, части — просто новые детали; слияние → без автоматики: деталь идёт за новым блоком,
 //     поглощённая остаётся призраком/удаляется по правилу выше, шаги обеих — 'remapped';
 //   · перепривязка по форме с неполной уверенностью (две одинаковые формы, заметная разница) →
@@ -30,6 +30,7 @@
 // Библиотека чистая: ни React, ни формы, ни сети. Создание строк формы — фабриками ApplyDeps.
 import type { AssemblyViolation } from 'components/managers/tech-card/components/assembly-frontier';
 import type { PieceDTO } from 'lib/nesting/types';
+import type { StoredSeam, TechCardSeamWire } from 'lib/seams';
 
 // ─── вход ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,8 @@ export type CardOperation = {
   outputUnitKey?: string;
   outputUnitName?: string;
   media?: CardMedia[];
+  /** Standard minute value; split joins inherit the median of the card's other join steps. */
+  smv?: string;
   /** метка «проверить» (Review) или '' — читают хелперы marks.ts / candidates.ts */
   review?: string;
 };
@@ -110,6 +113,8 @@ export type ReconcileInput<
   externalRefs?: Readonly<Record<string, number>>;
   /** Листы других scope — для T7 moved/shared по точному имени И форме. Необязательно. */
   otherSheets?: readonly { scope: ReconcileScope; parse: ParsedSheetLite }[];
+  /** Saved wire rows and optimistic client rows; only confirmed edge seams affect reshape marks. */
+  seams?: readonly (TechCardSeamWire | StoredSeam)[];
   /**
    * Принадлежит ли алиас scope этого листа. По умолчанию — сравнение (fabricPurpose || bomLineKey);
    * форма передаёт резолв по сегодняшнему BOM (scopeKeyOfBinding), как piece-block-refs.
@@ -165,12 +170,18 @@ export type NewLink = {
   pieceLineKey: string | null;
   /** имя новой детали (идентичность, уникализированная по карте); '' у существующей */
   name: string;
+  /** A proven new L/R mate is inserted beside this existing piece in every one of its steps. */
+  placeWithPieceKey?: string;
 };
 
 /** Метка на шаги, где деталь — вход или участник аннотации. */
 export type RowReview = {
   review: Review;
   pieceKeys: string[];
+  /** Seam-aware reshape marks only the operations that actually join the broken seam. */
+  operationIndexes?: number[];
+  /** A clean split still creates its join, but the join is not marked. Default: true. */
+  mark?: boolean;
 };
 
 /** Блок нового листа (одна идентичность = все её размеры). */
@@ -230,7 +241,7 @@ export type ReconcileRow = {
 export type ReconcileSummary = Readonly<Record<Tier, number>> & {
   /** доля связанных старых блоков scope, нашедших пару в новом листе */
   matchedShare: number;
-  /** < 30 % нашли пару: похоже на другой файл (матч по форме при этом выключен) */
+  /** < 30 % нашли пару: план отказан как foreign, без строк и перезаписей */
   otherFile: boolean;
   /** множитель единиц, найденный по парам одноимённых блоков (1 — совпали) */
   scale: number;
@@ -244,6 +255,8 @@ export type PlanStatus =
 
 export type ReconcilePlan = {
   status: PlanStatus;
+  /** A foreign upload is not a replacement plan; applying it must be a no-op. */
+  refused: 'foreign' | null;
   rows: ReconcileRow[];
   summary: ReconcileSummary;
 };
@@ -291,6 +304,8 @@ export type NewJoinSeed<O extends CardOperation = CardOperation> = {
   outputUnitKey: string;
   /** старое имя детали (до переименования за большей частью) */
   outputUnitName: string;
+  /** Median SMV of the card's other join steps, or ''. */
+  smv: string;
   /** шаг, перед которым встаёт join (первый, где деталь стоит входом) — откуда взять зону и т.п. */
   before: O;
 };
@@ -307,6 +322,7 @@ export type ApplyDeps<P extends CardPiece, A extends CardAlias, O extends CardOp
 
 export type ApplyRefusal =
   | { reason: 'noop' }
+  | { reason: 'foreign' }
   /** применение дало нарушение сборки, которого не было до — названо шагом */
   | { reason: 'sweep'; violations: AssemblyViolation[] };
 

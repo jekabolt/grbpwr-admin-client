@@ -31,14 +31,17 @@ export {
   unaliasedPieceKeys,
   unplacedPieceKeys,
 } from 'lib/dxf-reconcile';
+export { applyPlan, reconcile } from 'lib/dxf-reconcile';
 export { sha256Hex } from 'lib/features/sha256';
 export { bytesToLatin1, readInsunits } from 'lib/nesting/dxf/insunits';
 
 export {
   IDENTICAL,
   MIRRORED,
+  balanceProbeSeam,
   cardFromSheet,
   parseSheets,
   pieceKey,
+  probeSeam,
   sweepOf,
 } from './dxf-reconcile-probe-entry';

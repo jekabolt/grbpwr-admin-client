@@ -6,6 +6,14 @@ import {
 } from 'components/managers/tech-card/components/assembly-frontier';
 import { IDENTICAL } from 'lib/dxf-reconcile/defaults';
 import { indexSheet } from 'lib/dxf-reconcile/match';
+import { segmentPiece } from 'lib/assembly-skeleton/geometry';
+import {
+  anchorOf,
+  resolveSeamDecisions,
+  runsOfPiece,
+  type ResolveOptions,
+  type StoredSeam,
+} from 'lib/seams';
 import type {
   CardAlias,
   CardOperation,
@@ -45,8 +53,113 @@ export type CardSpec = {
 
 export type ProbeCard = { pieces: ProbePiece[]; aliases: ProbeAlias[]; operations: ProbeOp[] };
 
+const WIDE_SEAM_THRESHOLDS = {
+  lenRatio: [0, Infinity],
+  notchDiff: Infinity,
+  ratioDrift: Infinity,
+} as unknown as NonNullable<ResolveOptions['thresholds']>;
+
 const keyOf = (identity: string) => `pc-${identity.toLowerCase()}`;
 export const pieceKey = keyOf;
+
+/** A confirmed seam fixture anchored on one run of each named identity. */
+export function probeSeam(
+  parse: ParsedSheetLite,
+  sideA: string,
+  sideB: string,
+  sizeTokens: readonly string[],
+  runA = 0,
+  runB = 0,
+): StoredSeam {
+  const idx = indexSheet(parse, new Set(sizeTokens));
+  const geom = (identity: string) => {
+    const entry = idx.entries.get(identity.toLowerCase());
+    if (!entry) throw new Error(`probe seam: no ${identity}`);
+    const size = entry.bySize.has('m')
+      ? 'm'
+      : entry.sizes[Math.floor((entry.sizes.length - 1) / 2)];
+    const piece = entry.bySize.get(size)!;
+    return segmentPiece({
+      pieceKey: keyOf(identity),
+      name: identity,
+      piece,
+      piecesPerGarment: 1,
+      cutSymmetry: IDENTICAL,
+      cloth: null,
+      fused: false,
+    });
+  };
+  const a = geom(sideA);
+  const b = geom(sideB);
+  const ar = runsOfPiece(a, 3)[runA];
+  const br = runsOfPiece(b, 3)[runB];
+  if (!ar || !br) throw new Error(`probe seam: run ${runA}/${runB} missing`);
+  return {
+    seamKey: `probe-${sideA}-${sideB}-${runA}-${runB}`,
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchorOf(a, ar)],
+    sideB: [anchorOf(b, br)],
+    anchoredSize: entrySize(idx.entries.get(sideA.toLowerCase())!),
+    note: '',
+  };
+}
+
+/** Fit a probe seam's longer side to the shorter one on `parse`; null when an anchor is stale. */
+export function balanceProbeSeam(
+  parse: ParsedSheetLite,
+  seam: StoredSeam,
+  sizeTokens: readonly string[],
+): StoredSeam | null {
+  const idx = indexSheet(parse, new Set(sizeTokens));
+  const geoms = [...new Set([...seam.sideA, ...seam.sideB].map((a) => a.piece))].flatMap(
+    (pieceKey) => {
+      const identity = pieceKey.replace(/^pc-/i, '');
+      const entry = idx.entries.get(identity.toLowerCase());
+      if (!entry) return [];
+      const size = entry.bySize.has('m')
+        ? 'm'
+        : entry.sizes[Math.floor((entry.sizes.length - 1) / 2)];
+      const piece = entry.bySize.get(size);
+      if (!piece) return [];
+      return [
+        segmentPiece({
+          pieceKey,
+          name: entry.identity,
+          piece,
+          piecesPerGarment: 1,
+          cutSymmetry: IDENTICAL,
+          cloth: null,
+          fused: false,
+        }),
+      ];
+    },
+  );
+  const resolved = resolveSeamDecisions([seam], geoms, {
+    thresholds: WIDE_SEAM_THRESHOLDS,
+  }).applied[0];
+  if (!resolved) return null;
+  const length = (hits: typeof resolved.a) => hits.reduce((n, h) => n + h.lenMm, 0);
+  const a = length(resolved.a);
+  const b = length(resolved.b);
+  if (!(a > 0 && b > 0)) return null;
+  const fit = (side: StoredSeam['sideA'], ratio: number) =>
+    side.map((anchor, i) =>
+      i === 0 ? { ...anchor, range: [0, ratio] as [number, number] } : anchor,
+    );
+  return a > b
+    ? { ...seam, sideA: fit(seam.sideA, b / a) }
+    : { ...seam, sideB: fit(seam.sideB, a / b) };
+}
+
+const entrySize = (
+  entry: ReturnType<typeof indexSheet>['entries'] extends Map<string, infer E> ? E : never,
+) =>
+  entry.sizeLabel.get(
+    entry.bySize.has('m') ? 'm' : entry.sizes[Math.floor((entry.sizes.length - 1) / 2)],
+  ) ?? '';
 
 /** Карточка, какой её оставила бы прошлая заливка листа: деталь на идентичность, алиас на неё. */
 export function cardFromSheet(parse: ParsedSheetLite, spec: CardSpec): ProbeCard {
