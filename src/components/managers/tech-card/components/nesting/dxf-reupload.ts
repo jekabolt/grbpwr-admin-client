@@ -216,6 +216,13 @@ const BORN_CUT_KEYS = [
   'ungraded',
   'fusingMode',
   'fusingWidthMm',
+  // The fuse markup that does not hang on the parent's outline (edges and the zone do: a cut
+  // part has its own segments, so it starts without them and the panel flags it).
+  'fusingBomLineKey',
+  'fusingInsetMm',
+  'fusingInsetNet',
+  'fusingGrain',
+  'fusingDarts',
   'materials',
   'note',
 ] as const;

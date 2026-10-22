@@ -51,6 +51,9 @@ import {
   Text,
 } from 'ui';
 import { ulid } from 'utils/ulid';
+import { notify } from 'lib/stores/store';
+import { regenerateFusingSheets } from 'lib/fusing-dxf';
+import { useTechCardStaging } from '../useTechCardStaging';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
@@ -74,7 +77,12 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { readFuseSpec, writeFuseFields, type PieceFuseSpec } from './fuse-spec';
+import {
+  readFuseSpec,
+  writeFuseFields,
+  type PieceFuseFields,
+  type PieceFuseSpec,
+} from './fuse-spec';
 import {
   aliasIdentity,
   foreignManifestSizes,
@@ -201,30 +209,43 @@ const MAX_PIECE_NAME = 255;
 // Выпущенная карточка заморожена целиком — тот же ответ, что у pieces-tab и index.tsx. Модалка
 // рисуется порталом, то есть ВНЕ `<fieldset disabled={frozen}>` страницы, поэтому гасит себя сама.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
+// After every panel that can move pieces or the BOM (the sheets read both off the stored card).
+const FUSING_SHEETS_ORDER = 90;
 
 // Поля детали, которые правит редактор справа. Буферизуются в модалке и пишутся в форму только
 // по SAVE (cancel = ничего не было). Пути и семантика — ровно pieces-tab.tsx (fused/fusingMode/
 // fusingWidthMm/ungraded/grainline/note); имя существующей детали — тоже здесь.
-type PieceFields = {
+type PieceFields = Partial<PieceFuseFields> & {
   name?: string;
-  fused?: boolean;
-  fusingMode?: string;
-  fusingWidthMm?: string;
   ungraded?: boolean;
   grainline?: string;
   note?: string;
-  // The whole fuse markup as the panel holds it (fuse-spec.ts). The stored fields above are kept
-  // in step by writeFuseFields on every change; the rest waits for the proto.
+  // The whole fuse markup as the panel holds it (lib/fusing-dxf PieceFuseSpec). The stored fuse
+  // fields are kept in step by writeFuseFields on every change.
   fuse?: PieceFuseSpec;
 };
-const FIELD_KEYS = [
+// The stored fuse fields of a piece, as the editor reads them off the form.
+const FUSE_KEYS = [
   'fused',
   'fusingMode',
   'fusingWidthMm',
-  'ungraded',
-  'grainline',
-  'note',
-] as const;
+  'fusingBomLineKey',
+  'fusingEdges',
+  'fusingZone',
+  'fusingInsetMm',
+  'fusingInsetNet',
+  'fusingGrain',
+  'fusingDarts',
+] as const satisfies readonly (keyof PieceFuseFields)[];
+const FIELD_KEYS = [...FUSE_KEYS, 'ungraded', 'grainline', 'note'] as const;
+const storedFuseOf = (p: Partial<PieceFuseFields> | undefined): Partial<PieceFuseFields> => {
+  const out: Record<string, unknown> = {};
+  if (p) for (const k of FUSE_KEYS) out[k] = p[k];
+  return out as Partial<PieceFuseFields>;
+};
+// Arrays / the zone object compare by value: a re-read is a new object with the same content.
+const sameField = (a: unknown, b: unknown) =>
+  a === b || (typeof a === 'object' && JSON.stringify(a) === JSON.stringify(b ?? null));
 
 // No width of its own: a `w-full` here beat the caller's `w-24`/`w-56` in the stylesheet and
 // squeezed the row's name to nothing (the gone-pieces rows read just «delete»).
@@ -727,6 +748,7 @@ export function PieceMatchModal({
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { data: cardRead } = useTechCard(techCardId);
+  const staging = useTechCardStaging();
   const readOnly = !!readOnlyProp || cardRead?.techCard?.approvalState === RELEASED_STATE;
   // Pieces are written by setValue on the ARRAY ROOT, not through a second useFieldArray.
   //
@@ -1710,7 +1732,7 @@ export function PieceMatchModal({
                 ? { fusingWidthMm: ed.fusingWidthMm }
                 : {}),
               ...(ed.ungraded !== undefined ? { ungraded: ed.ungraded } : {}),
-              // TODO(fusing-proto): the rest of ed.fuse (writeFuseFields) once the piece has it.
+              ...(ed.fused && ed.fuse ? writeFuseFields(ed.fuse) : {}),
               calloutNumber: 0,
               note: ed.note ?? '',
               materials: [],
@@ -1779,10 +1801,9 @@ export function PieceMatchModal({
         const ed = pieceEdits[(p.lineKey ?? '').trim().toLowerCase()];
         if (!ed) return;
         for (const f of FIELD_KEYS) {
-          if (ed[f] === undefined || ed[f] === p[f]) continue;
+          if (ed[f] === undefined || sameField(ed[f], p[f])) continue;
           setValue(`pieces.${i}.${f}`, ed[f] as never, { shouldDirty: true });
         }
-        // TODO(fusing-proto): write the rest of ed.fuse (writeFuseFields) to pieces.${i}.
         if (ed.name !== undefined && ed.name !== (p.name ?? '')) {
           const value = clampUtf8Bytes(ed.name, MAX_PIECE_NAME);
           setValue(`pieces.${i}.name`, value, { shouldDirty: true });
@@ -1800,8 +1821,41 @@ export function PieceMatchModal({
         }
       });
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
-      // TODO(fusing-dxf): the fusible sheets follow the fuse markup — once the card save has
-      // persisted it: `if (fuseTouched) void regenerateFusingSheets(techCardId);`
+      // The fusible sheets follow the fuse markup. Staged behind the card body: the header's save
+      // writes the pieces first, then this rebuilds the DXFs off the stored card. A failed rebuild
+      // is a toast — the pieces stay saved.
+      const fuseTouched = [...Object.values(pieceEdits), ...Object.values(newEdits)].some(
+        (ed) => ed.fuse !== undefined,
+      );
+      if (fuseTouched && staging && techCardId) {
+        const id = techCardId;
+        staging.stage({
+          key: 'fusingSheets',
+          label: 'fusing DXF',
+          order: FUSING_SHEETS_ORDER,
+          commit: async () => {
+            try {
+              const r = await regenerateFusingSheets(id);
+              if (r.skippedSizes.length)
+                notify({
+                  sev: 'warn',
+                  subject: 'FUSING DXF',
+                  text: `${r.skippedSizes.length} sizes skipped`,
+                  detail: r.skippedSizes
+                    .map((x) => `${x.piece} ${x.size}: ${x.reason}`)
+                    .join('\n'),
+                });
+            } catch (error) {
+              notify({
+                sev: 'error',
+                subject: 'FUSING DXF',
+                text: 'not rebuilt',
+                detail: error instanceof Error ? error.message : String(error),
+              });
+            }
+          },
+        });
+      }
       onClose();
     } finally {
       setSaving(false);
@@ -1974,9 +2028,7 @@ export function PieceMatchModal({
       const p = index >= 0 ? (pieces ?? [])[index] : undefined;
       vals = {
         name: pieceName(st.key),
-        fused: p?.fused,
-        fusingMode: p?.fusingMode,
-        fusingWidthMm: p?.fusingWidthMm,
+        ...storedFuseOf(p),
         ungraded: p?.ungraded,
         grainline: p?.grainline,
         note: p?.note,
@@ -2002,9 +2054,7 @@ export function PieceMatchModal({
         // that piece's — read the form, overlay the shared piece buffer, write the shared buffer.
         const p = (pieces ?? []).find((x) => (x.lineKey ?? '').trim().toLowerCase() === tgt.key);
         vals = {
-          fused: p?.fused,
-          fusingMode: p?.fusingMode,
-          fusingWidthMm: p?.fusingWidthMm,
+          ...storedFuseOf(p),
           ungraded: p?.ungraded,
           grainline: p?.grainline,
           note: p?.note,
@@ -2191,7 +2241,7 @@ export function PieceMatchModal({
             <div {...anchor('grainline')}>
               <Select
                 name='grainline'
-                className='text-micro'
+                size='sm'
                 items={grainlineOptionsFor(vals.grainline)}
                 value={vals.grainline ?? ''}
                 readOnly={readOnly}

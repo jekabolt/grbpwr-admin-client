@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { cn } from 'lib/utility';
 import Text from './text';
 import { Arrow } from '../icons/arrow';
+import { SIZE_SM } from './combobox';
 
 export default function SelectComponent({
   name,
@@ -16,6 +17,7 @@ export default function SelectComponent({
   readOnly,
   invalid,
   onValueChange,
+  size,
   ...props
 }: {
   name: string;
@@ -50,6 +52,8 @@ export default function SelectComponent({
   // Set by SelectField from the field's RHF error. A Radix select has no <input> for FormControl's
   // Slot to land aria-invalid on, so the flag is threaded down to the trigger explicitly.
   invalid?: boolean;
+  /** 'sm' — the dense panel row: a fixed 22px box with micro text, the same as a dense Input/Chip. */
+  size?: 'sm';
   onValueChange?: (value: string) => void;
   renderValue?: (
     selectedValue: string | number,
@@ -118,6 +122,7 @@ export default function SelectComponent({
         isOpen={open}
         readOnly={readOnly}
         invalid={invalid}
+        size={size}
       >
         <Arrow />
       </SelectTrigger>
@@ -216,6 +221,7 @@ export function SelectTrigger({
   renderValue,
   readOnly,
   invalid,
+  size,
 }: {
   children: React.ReactNode;
   placeholder: string;
@@ -229,6 +235,7 @@ export function SelectTrigger({
   isOpen?: boolean;
   readOnly?: boolean;
   invalid?: boolean;
+  size?: 'sm';
 }) {
   let displayValue = null;
   if (renderValue && value != null && value !== '' && items) {
@@ -245,6 +252,7 @@ export function SelectTrigger({
         readOnly && 'pointer-events-none cursor-default opacity-90',
         // Same red box as a blocking <Input>, so a required select reads identically.
         'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
+        size === 'sm' && SIZE_SM,
         className,
       )}
       aria-invalid={invalid || undefined}

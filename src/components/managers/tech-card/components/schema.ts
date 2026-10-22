@@ -111,6 +111,7 @@ import {
 // остался бы на поле, которого нет на экране.
 import { SLIT_OVERCAST_WORK } from './operation-work';
 import { z } from 'zod';
+import { fuseFieldsFromWire, fuseFieldsToWire } from 'lib/fusing-dxf/types';
 import {
   ANNOTATION_CAPS_KEYS,
   ANNOTATION_COLOR_KEYS,
@@ -357,6 +358,24 @@ const pieceSchema = z
     // едет строкой, и промежуточное состояние ввода («2», «2.», «2.5») обязано доживать до конца
     // набора. z.number() схлопнул бы «2.» в 2 под курсором.
     fusingWidthMm: z.string().optional().default(''),
+    // FUSING wave (0426): the rest of the fuse markup, as lib/fusing-dxf/types PieceFuseFields.
+    fusingBomLineKey: z.string().optional().default(''),
+    fusingEdges: z
+      .array(z.object({ edge: z.number(), startMm: z.number(), endMm: z.number() }))
+      .optional()
+      .default([]),
+    fusingZone: z
+      .union([
+        z.object({ rect: z.tuple([z.number(), z.number(), z.number(), z.number()]) }),
+        z.object({ dxfPieceKey: z.string() }),
+      ])
+      .nullable()
+      .optional()
+      .default(null),
+    fusingInsetMm: z.string().optional().default(''),
+    fusingInsetNet: z.boolean().optional().default(false),
+    fusingGrain: z.string().optional().default(''),
+    fusingDarts: z.string().optional().default(''),
     calloutNumber: z.number().optional().default(0),
     note: z.string().optional().default(''),
     materials: z.array(pieceMaterialSchema).default([]),
@@ -2631,6 +2650,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // карточка, сохранённая до 0304, приезжает без него — оба случая сходятся в «не размечено».
       fusingMode: p.fusingMode || UNSET_FUSING_MODE,
       fusingWidthMm: p.fusingWidthMm?.value ?? '',
+      ...fuseFieldsFromWire(p),
       calloutNumber: p.calloutNumber ?? 0,
       note: p.note || '',
       materials: (p.materials ?? []).map((m) => ({
@@ -3380,6 +3400,17 @@ export function mapFormToTechCardInsert(
           fusingTakesWidth(p.fusingMode) && p.fusingWidthMm?.trim()
             ? { value: p.fusingWidthMm.trim() }
             : undefined,
+        // The FUSING wave's fields go out PRESENT, round trip of what was read (absence = «an
+        // older client, keep the stored value»); the server clears what the mode does not take.
+        ...fuseFieldsToWire({
+          fusingBomLineKey: p.fusingBomLineKey ?? '',
+          fusingEdges: p.fusingEdges ?? [],
+          fusingZone: p.fusingZone ?? null,
+          fusingInsetMm: p.fusingInsetMm ?? '',
+          fusingInsetNet: p.fusingInsetNet ?? false,
+          fusingGrain: p.fusingGrain ?? '',
+          fusingDarts: p.fusingDarts ?? '',
+        }),
         // НЕ 0, а «поля нет». Ноль сервер принимает как настоящий номер (dto: `!= nil`), не находит
         // выноску №0 и помечает деталь `detached` — то есть «выноску, на которую ты ссылалась,
         // удалили» у детали, которую никогда ни к чему не прикрепляли. На бете так помечены 16

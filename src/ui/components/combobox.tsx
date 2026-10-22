@@ -25,6 +25,9 @@ import { Arrow } from '../icons/arrow';
 // это решение, а не пробел: обе штуки стояли в первой версии и не понадобились ни одному из двух
 // вызывающих мест, то есть остались бы непроверенным кодом. Понадобятся — войдут вместе со своей
 // цитатой в пробе.
+// One row height for a dense panel: the box Input/Chip get there (h-[22px] py-0 text-micro).
+export const SIZE_SM = 'h-[22px] min-h-0 py-0 text-micro [&_p]:text-micro [&_p]:leading-none';
+
 export type ComboboxOption = { value: string; label: string };
 
 export type ComboboxGroup = { key: string; label: string; options: ComboboxOption[] };
@@ -40,6 +43,7 @@ export function Combobox({
   invalid,
   footer,
   className,
+  size,
 }: {
   name: string;
   /** Что стоит в триггере СЕЙЧАС. Пусто — плейсхолдер. Примитив значения не хранит. */
@@ -54,6 +58,8 @@ export function Combobox({
   /** Подпись под списком: откуда список, чего в нём нет. Рисуется всегда, когда задана. */
   footer?: React.ReactNode;
   className?: string;
+  /** 'sm' — the dense panel row: a fixed 22px box with micro text, the same as a dense Input/Chip. */
+  size?: 'sm';
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -159,6 +165,7 @@ export function Combobox({
           'flex min-h-[22px] w-full items-center justify-between gap-2 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize transition-colors focus:border-textColor focus:outline-none',
           'aria-[invalid=true]:border-error aria-[invalid=true]:focus:border-error',
           readOnly && 'pointer-events-none cursor-default opacity-90',
+          size === 'sm' && SIZE_SM,
         )}
       >
         <span

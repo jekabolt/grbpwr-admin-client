@@ -88,7 +88,7 @@ function polygonsOf(paths: Paths64): FusePolygon[] {
 }
 
 function effectiveInset(spec: PieceFuseSpec, seamAllowanceMm: number | null | undefined): number {
-  if (spec.net) {
+  if (spec.insetNet) {
     if (!Number.isFinite(seamAllowanceMm))
       throw new FuseGeometryError('net inset requires a seam allowance');
     return Math.max(0, seamAllowanceMm ?? 0);
@@ -241,6 +241,8 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
       }
       break;
     }
+    default:
+      throw new FuseGeometryError('fusing mode is not set');
   }
 
   if (!polygons.length) throw new FuseGeometryError(`${input.spec.mode} geometry is empty`);

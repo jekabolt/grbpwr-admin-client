@@ -15,6 +15,7 @@ import {
   fuseLineOf,
   fuseOffDefault,
   isMmText,
+  mmOfText,
   type FuseDarts,
   type FuseGrain,
   type FuseMode,
@@ -23,9 +24,6 @@ import {
 
 export type InterliningLine = { key: string; label: string; color: string };
 
-const SEL = 'text-micro';
-// The picker's trigger in the panel's type size (the primitive sets body size on its button).
-const PICK = '[&_[data-combobox-trigger]]:text-micro';
 const MODES: [FuseMode, string][] = [
   ['', 'no'],
   ['whole', 'whole'],
@@ -119,7 +117,7 @@ export function FuseFields({
       ...spec,
       mode: m,
       edges: m === 'strip' ? spec.edges : [],
-      zone: m === 'zone' ? spec.zone : undefined,
+      zone: m === 'zone' ? spec.zone : null,
     });
   };
 
@@ -163,7 +161,7 @@ export function FuseFields({
           <FuseField label='interlining'>
             <Select
               name='interlining'
-              className={SEL}
+              size='sm'
               placeholder='—'
               items={lines.map((l) => ({
                 value: l.key,
@@ -184,13 +182,13 @@ export function FuseFields({
             <FuseField label='width mm'>
               <Combobox
                 name='width'
-                className={PICK}
+                size='sm'
                 placeholder='mm'
                 searchPlaceholder='mm'
-                valueLabel={spec.widthMm}
+                valueLabel={spec.widthMm == null ? '' : String(spec.widthMm)}
                 filter={(q) => mmGroups(q, WIDTH_PRESETS)}
                 readOnly={readOnly}
-                onSelect={(x) => set({ widthMm: x })}
+                onSelect={(x) => set({ widthMm: mmOfText(x) })}
               />
             </FuseField>
           )}
@@ -201,25 +199,27 @@ export function FuseFields({
           <FuseField label='inset mm'>
             <Combobox
               name='inset'
-              className={PICK}
+              size='sm'
               placeholder='mm'
               searchPlaceholder='mm'
-              valueLabel={spec.insetNet ? 'net' : spec.insetMm || String(DEFAULT_INSET_MM)}
+              valueLabel={spec.insetNet ? 'net' : String(spec.insetMm ?? DEFAULT_INSET_MM)}
               filter={(q) =>
                 mmGroups(q, INSET_PRESETS, !q.trim() || 'net'.startsWith(q.trim()) ? ['net'] : [])
               }
               readOnly={readOnly}
               onSelect={(x) =>
-                x === 'net' ? set({ insetNet: true }) : set({ insetNet: false, insetMm: x })
+                x === 'net'
+                  ? set({ insetNet: true, insetMm: null })
+                  : set({ insetNet: false, insetMm: mmOfText(x) })
               }
             />
           </FuseField>
           <FuseField label='fusible grain'>
             <Select
               name='fusible grain'
-              className={SEL}
+              size='sm'
               items={FUSE_GRAIN_ITEMS}
-              value={spec.grain ?? 'as_piece'}
+              value={spec.grain}
               readOnly={readOnly}
               onValueChange={(x: string) => set({ grain: x as FuseGrain })}
             />
@@ -227,9 +227,9 @@ export function FuseFields({
           <FuseField label='darts'>
             <Select
               name='darts'
-              className={SEL}
+              size='sm'
               items={DART_ITEMS}
-              value={spec.darts ?? 'cut'}
+              value={spec.darts}
               readOnly={readOnly}
               onValueChange={(x: string) => set({ darts: x as FuseDarts })}
             />

@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { buildFusingSheets } from './dxf';
 import { FuseTopologyError, fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
 import type { FusePolygon, PieceFuseSpec } from './types';
-import { fuseSpecFromPiece } from './types';
+import {
+  fuseFieldsFromWire,
+  fuseFieldsToWire,
+  fuseSpecFromPiece,
+  readFuseSpec,
+  writeFuseFields,
+} from './types';
 
 const rectangle = (width: number, height: number) => [
   { x: 0, y: 0 },
@@ -20,7 +26,7 @@ const spec = (changes: Partial<PieceFuseSpec> = {}): PieceFuseSpec => ({
   edges: [],
   zone: null,
   insetMm: null,
-  net: false,
+  insetNet: false,
   grain: 'as_piece',
   darts: 'cut',
   ...changes,
@@ -66,8 +72,52 @@ export async function main() {
       fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_STRIP',
       fusingWidthMm: { value: '25' },
     }),
-    spec({ mode: 'strip', widthMm: 25, bomLineKey: null }),
+    spec({ mode: 'strip', widthMm: 25, bomLineKey: '' }),
   );
+
+  const d = (value: string) => ({ value });
+  const zoneWire = {
+    fused: true,
+    fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_ZONE' as const,
+    fusingWidthMm: undefined,
+    fusingBomLineKey: 'IL-2',
+    fusingZone: { rect: { x0: d('1'), y0: d('2'), x1: d('30'), y1: d('40.5') } },
+    fusingInsetMm: d('5'),
+    fusingInsetNet: true,
+    fusingGrain: 'bias',
+    fusingDarts: 'fuse',
+  };
+  const zoneSpec = spec({
+    mode: 'zone',
+    bomLineKey: 'IL-2',
+    zone: { rect: [1, 2, 30, 40.5] },
+    insetNet: true,
+    grain: 'bias',
+    darts: 'fuse',
+  });
+  assert.deepEqual(fuseSpecFromPiece(zoneWire), zoneSpec);
+  // spec → form fields → wire → form fields → spec is lossless.
+  const fields = writeFuseFields(zoneSpec);
+  assert.equal(fields.fusingMode, 'TECH_CARD_PIECE_FUSING_MODE_ZONE');
+  assert.deepEqual(
+    readFuseSpec({ ...fields, ...fuseFieldsFromWire(fuseFieldsToWire(fields)) }),
+    zoneSpec,
+  );
+  const stripSpec = spec({
+    mode: 'strip',
+    widthMm: 15,
+    insetMm: 2,
+    edges: [{ edge: 3, startMm: 10, endMm: 0 }],
+  });
+  const stripFields = writeFuseFields(stripSpec);
+  assert.deepEqual(
+    readFuseSpec({ ...stripFields, ...fuseFieldsFromWire(fuseFieldsToWire(stripFields)) }),
+    stripSpec,
+  );
+  // Leaving strip clears edges on the wire as a PRESENT empty list (absent would keep them).
+  const cleared = fuseFieldsToWire(writeFuseFields({ ...stripSpec, mode: 'whole' }));
+  assert.deepEqual(cleared.fusingEdges, { items: [] });
+  assert.deepEqual(cleared.fusingZone, {});
 
   const whole = generateFuseGeometry({ outline, spec: spec() });
   assert.equal(whole.length, 1);
@@ -76,7 +126,7 @@ export async function main() {
 
   const net = generateFuseGeometry({
     outline,
-    spec: spec({ net: true }),
+    spec: spec({ insetNet: true }),
     seamAllowanceMm: 10,
   });
   near(fuseAreaMm2(net), 80 * 60);
