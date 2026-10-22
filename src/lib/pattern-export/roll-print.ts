@@ -34,14 +34,14 @@ import { readRollSourceModel, type RollPieceTemplate } from './roll-source';
 export type RollSpec = {
   /** Roll width as sold, cm (61, 91.4, 106.7, 111.8, 152.4 …). */
   widthCm: number;
-  /** Longest sheet the shop prints, m. Default 3. Never above the PDF page limit (5.08 m). */
+  /** Longest sheet the shop prints, m. Default 5. Never above the PDF page limit (5.08 m). */
   maxSheetM: number;
   /** Dead edge the printer leaves on each side, mm. Default 5. Printable width = width − 2·edge. */
   edgeMm: number;
 };
 
-export const ROLL_DEFAULTS: Omit<RollSpec, 'widthCm'> = { maxSheetM: 3, edgeMm: 5 };
-export const STOCK_ROLL_WIDTHS_CM = [61, 91.4, 106.7, 111.8, 152.4] as const;
+export const ROLL_DEFAULTS: Omit<RollSpec, 'widthCm'> = { maxSheetM: 5, edgeMm: 5 };
+export const ROLL_MAX_WIDTH_CM = PDF_PAGE_LIMIT_MM / 10;
 
 /** Copies per size, e.g. { XS: 1, M: 2 }. Sizes with 0 copies are left out of the print. */
 export type SizeCopies = Record<string, number>;
@@ -86,6 +86,31 @@ export function readRollPrintSource(dxf: ArrayBuffer, fileName: string): RollPri
   };
 }
 
+/** Narrowest 0.1 cm roll on which every selected piece fits in at least one quarter-turn. */
+export function minRollWidthCm(
+  dxf: ArrayBuffer,
+  fileName: string,
+  copies: SizeCopies,
+  edgeMm = ROLL_DEFAULTS.edgeMm,
+): number {
+  const source = readRollSourceModel(dxf, fileName);
+  let picked = false;
+  let requiredAcrossMm = 0;
+  for (const template of source.templates) {
+    const size = template.size || 'OS';
+    const count = normalizedCopies(copies[size] ?? copies[template.size] ?? 0);
+    if (count === 0) continue;
+    picked = true;
+    const narrowestAcrossMm = Math.min(
+      ...ROLL_ROTATIONS.map((rotation) => rotatedSpansMm(template.piece, rotation).across),
+    );
+    requiredAcrossMm = Math.max(requiredAcrossMm, narrowestAcrossMm);
+  }
+  if (!picked) return 0;
+  const widthMm = requiredAcrossMm + 2 * normalizedEdgeMm(edgeMm);
+  return Math.ceil(widthMm - FIT_TOLERANCE_MM) / 10;
+}
+
 /**
  * Lay the chosen sizes × copies onto the roll. Async: the engine may run the nesting worker.
  * `signal` aborts a stale run when the user changes a number.
@@ -106,8 +131,6 @@ export async function planRollPrint(
   const printableMm = printableRollWidthMm(roll);
   const sheetLimitMm = Math.min(rollSheetLimitMm(roll), PDF_PAGE_LIMIT_MM);
   const contentLengthMm = sheetLimitMm - ROLL_FURNITURE_MM;
-  const rotations = [0, 90, 180, 270] as const;
-
   type Item = {
     template: RollPieceTemplate;
     instance: number;
@@ -122,8 +145,9 @@ export async function planRollPrint(
     const size = template.size || 'OS';
     const count = normalizedCopies(copies[size] ?? copies[template.size] ?? 0);
     const label = pieceLabel(template);
-    const fitsWidth = rotations.filter(
-      (rotation) => rotatedSpansMm(template.piece, rotation).across <= printableMm + 1e-6,
+    const fitsWidth = ROLL_ROTATIONS.filter(
+      (rotation) =>
+        rotatedSpansMm(template.piece, rotation).across <= printableMm + FIT_TOLERANCE_MM,
     );
     const allowedRots = fitsWidth.filter(
       (rotation) => rotatedSpansMm(template.piece, rotation).along <= contentLengthMm + 1e-6,
@@ -308,6 +332,15 @@ export const rollPrintFileName = (title: string, roll: RollSpec): string =>
 
 const normalizedCopies = (value: number): number =>
   Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+
+const normalizedEdgeMm = (value: number): number => {
+  const edge = Number(value);
+  if (!(Number.isFinite(edge) && edge >= 0)) throw new Error('roll edge must be zero or greater');
+  return edge;
+};
+
+const FIT_TOLERANCE_MM = 1e-6;
+const ROLL_ROTATIONS = [0, 90, 180, 270] as const;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;

@@ -7,8 +7,10 @@ import type { PdfFont } from 'lib/pattern-export/dxf-pdf';
 import { ROLL_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
 import {
   exportRollPrint,
+  minRollWidthCm,
   planRollPrint,
   readRollPrintSource,
+  ROLL_DEFAULTS,
   type RollPrintPlan,
   type RollSpec,
 } from 'lib/pattern-export/roll-print';
@@ -84,9 +86,18 @@ export async function main(args: string[]) {
     `source ${source.title}: ${source.sizes.map((row) => `${row.size}:${row.pieces}`).join(' ')}`,
   );
 
+  const min = minRollWidthCm(bytes, name, copies);
+  const atMin: RollSpec = { widthCm: min, ...ROLL_DEFAULTS };
+  const belowMin: RollSpec = {
+    widthCm: Math.round((min - 0.1) * 10) / 10,
+    ...ROLL_DEFAULTS,
+  };
+  const atMinPlan = await planRollPrint(bytes, name, copies, atMin);
+  const belowMinPlan = await planRollPrint(bytes, name, copies, belowMin);
+
   const renders: Array<{ pdf: string; pages: number; stem: string }> = [];
   for (const widthCm of [91.4, 152.4]) {
-    const roll: RollSpec = { widthCm, maxSheetM: 3, edgeMm: 5 };
+    const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS };
     const started = performance.now();
     const plan = await planRollPrint(bytes, name, copies, roll);
     const elapsedMs = performance.now() - started;
@@ -106,5 +117,12 @@ export async function main(args: string[]) {
       stem: resolve(outDir, `SS25-004_print_roll${widthCm}`),
     });
   }
-  return { code: 0, renders };
+  return {
+    code: 0,
+    renders,
+    min,
+    belowMinWidthCm: belowMin.widthCm,
+    atMinTooWide: atMinPlan.tooWide.length,
+    belowMinTooWide: belowMinPlan.tooWide.length,
+  };
 }

@@ -35,6 +35,11 @@ await build({
 process.env.ROLL_PRINT_REPO = REPO;
 const probe = await import(pathToFileURL(outfile).href);
 const result = await probe.main([dxf, outDir]);
+console.log(`min ${result.min} cm`);
+if (result.atMinTooWide !== 0)
+  throw new Error(`min ${result.min} cm leaves ${result.atMinTooWide} piece(s) too wide`);
+if (result.belowMinTooWide === 0)
+  throw new Error(`min - 0.1 cm (${result.belowMinWidthCm} cm) leaves no pieces too wide`);
 let failed = false;
 for (const render of result.renders ?? []) {
   const oldSheet = new RegExp(
