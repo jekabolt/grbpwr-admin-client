@@ -184,6 +184,7 @@ import {
   peekSeamDeleteRetry,
   provideSheetRestorer,
   restoreSheetVersion,
+  swapSheetFile,
   type RestoreOutcome,
   type SheetRevisionRef,
 } from './nesting/reupload-session';
@@ -551,6 +552,8 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
+  const writeDirty = (path: string, value: unknown) =>
+    setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
@@ -1864,15 +1867,9 @@ export function PatternsField({
       // Re-found after the upload: the rows may have moved while the file was in flight.
       const at = swap ? plainSwapIndex(scopeKey, target) : -1;
       if (at >= 0) {
-        const keep = { shouldDirty: true };
-        setValue(`patterns.${at}.url`, up.url, keep);
-        setValue(`patterns.${at}.filename`, up.filename, keep);
-        setValue(`patterns.${at}.sizeBytes`, up.sizeBytes, keep);
-        setValue(`patterns.${at}.sha256`, up.sha256, keep);
-        setValue(`patterns.${at}.sizeId`, storeAs, keep);
-        // 0 = "assign one": the server numbers a url it has not seen on this card.
-        setValue(`patterns.${at}.version`, 0, keep);
-        setValue(`patterns.${at}.uploadedAt`, '', keep);
+        const replacedUrl = (getValues(`patterns.${at}.url`) as string | undefined) ?? '';
+        // The save whose payload carries the new url archives the old file with a card snapshot.
+        swapSheetFile(techCardId, writeDirty, at, replacedUrl, up, { sizeId: storeAs });
       } else
         append({
           sizeId: storeAs,
@@ -2017,14 +2014,8 @@ export function PatternsField({
             const i = live.findIndex((r) => r.url === row.url);
             // Removed or replaced meanwhile: the new file is not forced onto another row.
             if (i < 0) continue;
-            setValue(`patterns.${i}.url`, up.url, { shouldDirty: true });
-            setValue(`patterns.${i}.filename`, up.filename, { shouldDirty: true });
-            setValue(`patterns.${i}.sizeBytes`, up.sizeBytes, { shouldDirty: true });
-            // The new file's digest, never the old one's (0423).
-            setValue(`patterns.${i}.sha256`, up.sha256, { shouldDirty: true });
-            // 0 = "assign one": the server numbers a url it has not seen on this card.
-            setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
-            setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
+            // The save whose payload carries the new url archives the old file with a card snapshot.
+            swapSheetFile(techCardId, writeDirty, i, row.url, up);
           } catch (e) {
             console.error('UploadPattern failed', e);
             faults.push({ name: labelOf(row), why: patternUploadErrorMessage(e) });
@@ -3507,6 +3498,9 @@ export function PatternsField({
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
               save: (reason) => autosave.flush(reason),
+              // A sheet replaced in place: its save archives the old file with a card snapshot.
+              onReplaced: (list) =>
+                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
               unsaved: {
                 get: () => importUnsaved.current,
                 set: (v) => {
