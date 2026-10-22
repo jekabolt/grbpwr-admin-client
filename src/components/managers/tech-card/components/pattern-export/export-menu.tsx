@@ -127,16 +127,20 @@ export function DownloadGlyph() {
   );
 }
 
-/** Its mirror: a new file goes up (the row's `new version`). */
-export function UploadGlyph() {
+/** The file row's history glyph: a counter-clockwise arrow around clock hands. */
+export function HistoryGlyph() {
   return (
     <svg width='12' height='12' viewBox='0 0 14 14' aria-hidden fill='none'>
-      <path d='M7 12.5v-8M3.5 8 7 4.5 10.5 8M2 1.5h10' stroke='currentColor' strokeWidth='1.2' />
+      <path
+        d='M2 7a5 5 0 1 0 1.46-3.54L2 4.9M2 1.9v3h3M7 4.2V7l2 1.2'
+        stroke='currentColor'
+        strokeWidth='1.2'
+      />
     </svg>
   );
 }
 
-/** The framed 24px icon button of the file row (download, new version). */
+/** The framed 24px icon button of the file row (download, history). */
 export const ROW_ICON_BTN =
   'inline-flex h-6 min-w-6 items-center justify-center border border-borderColor bg-bgColor px-1 text-micro hover:opacity-70';
 

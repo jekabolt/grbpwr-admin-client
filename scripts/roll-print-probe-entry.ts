@@ -2,10 +2,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 
 import { jsPDF } from 'jspdf';
+import { unzipSync } from 'fflate';
 
 import { DRAWING_PEN_MM, type PdfFont } from 'lib/pattern-export/dxf-pdf';
 import type { DrawingLabel, DrawingStroke } from 'lib/pattern-export/drawing';
-import { ROLL_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
+import { rollFurnitureMm, ROLL_TITLE_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
 import {
   exportRollPrint,
   minRollWidthCm,
@@ -16,6 +17,7 @@ import {
   type RollPrintPlan,
   type RollSpec,
 } from 'lib/pattern-export/roll-print';
+import { zipRollPrintPdfs } from 'lib/pattern-export/roll-print-zip';
 
 const REPO = process.env.ROLL_PRINT_REPO ?? process.cwd();
 const parserNoise = (values: unknown[]) =>
@@ -181,6 +183,7 @@ function assertPlan(
   let piecePairs = 0;
   let minEdgeMm = Infinity;
   const requiredGapMm = ROLL_GAP_MM - 0.5;
+  const furnitureMm = rollFurnitureMm(roll);
   for (let sheetIndex = 0; sheetIndex < plan.sheets.length; sheetIndex++) {
     const sheet = plan.sheets[sheetIndex];
     const byPiece = new Map<string, InkSegment[]>();
@@ -199,7 +202,7 @@ function assertPlan(
           throw new Error(
             `sheet ${sheetIndex + 1}, piece ${stroke.pieceKey}: ink leaves the ${roll.edgeMm} mm edge at x=${x}`,
           );
-        if (y - radiusMm < ROLL_FURNITURE_MM - 1e-5 || y + radiusMm > sheet.lengthMm + 1e-5)
+        if (y - radiusMm < furnitureMm - 1e-5 || y + radiusMm > sheet.lengthMm + 1e-5)
           throw new Error(`sheet ${sheetIndex + 1}: a piece crosses the sheet edge at y=${y}`);
       }
       const segments = byPiece.get(stroke.pieceKey) ?? [];
@@ -217,7 +220,7 @@ function assertPlan(
             throw new Error(
               `sheet ${sheetIndex + 1}, piece ${label.pieceKey}: label leaves the ${roll.edgeMm} mm edge at x=${x}`,
             );
-          if (y < ROLL_FURNITURE_MM - 1e-5 || y > sheet.lengthMm + 1e-5)
+          if (y < furnitureMm - 1e-5 || y > sheet.lengthMm + 1e-5)
             throw new Error(`sheet ${sheetIndex + 1}: a label crosses the sheet edge at y=${y}`);
         }
       }
@@ -268,6 +271,56 @@ function assertPlan(
   return { piecePairs, minEdgeMm };
 }
 
+function assertNoTestSquare(plan: RollPrintPlan, roll: RollSpec): void {
+  const furnitureMm = rollFurnitureMm(roll);
+  if (furnitureMm !== ROLL_TITLE_FURNITURE_MM)
+    throw new Error(`title-only furniture is ${furnitureMm} mm`);
+  for (const [index, sheet] of plan.sheets.entries()) {
+    if (sheet.drawing.strokes.some((stroke) => !stroke.pieceKey))
+      throw new Error(`sheet ${index + 1}: title-only plan contains a square stroke`);
+    if (sheet.drawing.labels.some((label) => label.s === '10 × 10 cm'))
+      throw new Error(`sheet ${index + 1}: title-only plan contains a square label`);
+    const pieceY = sheet.drawing.strokes
+      .filter((stroke) => stroke.pieceKey)
+      .flatMap((stroke) => stroke.pts.map((point) => point[1]));
+    if (pieceY.length === 0 || Math.min(...pieceY) < furnitureMm - 1e-5)
+      throw new Error(`sheet ${index + 1}: a piece starts before ${furnitureMm} mm`);
+  }
+  console.log(`assert no test square: pieces start at or after ${furnitureMm} mm`);
+}
+
+export function assertRollPrintZip(
+  pdfs: Uint8Array[] = [
+    new TextEncoder().encode('%PDF first slot'),
+    new TextEncoder().encode('%PDF second slot'),
+  ],
+) {
+  const archive = zipRollPrintPdfs('FW28-001', { kind: 'roll', widthCm: 91.4 }, [
+    { slotLabel: 'Main Material', bytes: pdfs[0] },
+    { slotLabel: 'Lining', bytes: pdfs[1] },
+  ]);
+  const expectedZipPaths = ['FW28-001_main-material_roll91.4.pdf', 'FW28-001_lining_roll91.4.pdf'];
+  const unzipped = unzipSync(archive.bytes);
+  if (archive.name !== 'FW28-001_print_roll91.4.zip')
+    throw new Error(`print zip name ${archive.name} is wrong`);
+  if (JSON.stringify(Object.keys(unzipped)) !== JSON.stringify(expectedZipPaths))
+    throw new Error(`print zip paths ${JSON.stringify(Object.keys(unzipped))} are wrong`);
+  for (const path of expectedZipPaths)
+    if (new TextDecoder().decode(unzipped[path].subarray(0, 4)) !== '%PDF')
+      throw new Error(`${path} is not a PDF`);
+  const tiles = zipRollPrintPdfs('FW28-001', { kind: 'tiles', paper: 'A4' }, [
+    { slotLabel: 'Main Material', bytes: pdfs[0] },
+    { slotLabel: 'Lining', bytes: pdfs[1] },
+  ]);
+  const expectedTilePaths = ['FW28-001_main-material_a4.pdf', 'FW28-001_lining_a4.pdf'];
+  if (
+    tiles.name !== 'FW28-001_print_a4.zip' ||
+    JSON.stringify(tiles.paths) !== JSON.stringify(expectedTilePaths)
+  )
+    throw new Error(`tile print zip names are wrong: ${tiles.name} ${JSON.stringify(tiles.paths)}`);
+  console.log(`assert print zip: ${archive.name} · ${expectedZipPaths.length} PDFs`);
+}
+
 export async function main(args: string[]) {
   const [dxfPath, outDir] = args;
   if (!dxfPath || !outDir) throw new Error('usage: roll-print-probe <file.dxf> <out-dir>');
@@ -287,6 +340,7 @@ export async function main(args: string[]) {
 
   const min = minRollWidthCm(bytes, name, copies);
   const renders: Array<{ pdf: string; pages: number; stem: string; suffix: string }> = [];
+  const zipPdfs: Uint8Array[] = [];
   const metrics: Array<{
     key: string;
     widthCm: number;
@@ -299,26 +353,42 @@ export async function main(args: string[]) {
     runtimeMs: number;
   }> = [];
   const cases = [
-    { key: 'XS@160', widthCm: 160, copies: xsOnly, title: 'card70-XS' },
-    { key: 'XS-XL@91.4', widthCm: 91.4, copies, title: 'card70-XS-XL' },
-    { key: 'XS-XL@152.4', widthCm: 152.4, copies, title: 'card70-XS-XL' },
+    { key: 'XS@160', widthCm: 160, copies: xsOnly, title: 'card70-XS', testSquare: false },
+    {
+      key: 'XS-XL@91.4',
+      widthCm: 91.4,
+      copies,
+      title: 'card70-XS-XL',
+      testSquare: true,
+    },
+    {
+      key: 'XS-XL@152.4',
+      widthCm: 152.4,
+      copies,
+      title: 'card70-XS-XL',
+      testSquare: true,
+    },
   ];
   for (const run of cases) {
     const { widthCm } = run;
-    const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS };
+    const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS, testSquare: run.testSquare };
     const started = performance.now();
     const plan = await planRollPrint(bytes, name, run.copies, roll);
     const elapsedMs = performance.now() - started;
     const asserted = assertPlan(plan, roll);
-    const accountedLengthMm = plan.markerLengthMm + plan.sheets.length * ROLL_FURNITURE_MM;
+    if (!run.testSquare) assertNoTestSquare(plan, roll);
+    const furnitureMm = rollFurnitureMm(roll);
+    const accountedLengthMm = plan.markerLengthMm + plan.sheets.length * furnitureMm;
     if (Math.abs(plan.lengthMm - accountedLengthMm) > 1e-4)
       throw new Error(
-        `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * ROLL_FURNITURE_MM} mm`,
+        `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * furnitureMm} mm`,
       );
     const exported = exportRollPrint(plan, run.title, roll, { jsPDF, font });
+    const exportedBytes = new Uint8Array(await exported.blob.arrayBuffer());
+    if (zipPdfs.length < 2) zipPdfs.push(exportedBytes);
     const base = `${run.title}-roll${widthCm}`;
     const pdfPath = resolve(outDir, `${base}-after.pdf`);
-    writeFileSync(pdfPath, Buffer.from(await exported.blob.arrayBuffer()));
+    writeFileSync(pdfPath, Buffer.from(exportedBytes));
     const tooWide = plan.tooWide.length;
     const tooLong = plan.tooLong.length;
     if (!plan.search) throw new Error(`${run.key}: plan carries no search report`);
@@ -351,6 +421,7 @@ export async function main(args: string[]) {
       runtimeMs: elapsedMs,
     });
   }
+  assertRollPrintZip(zipPdfs);
   const abortController = new AbortController();
   const abortRun = planRollPrint(
     bytes,

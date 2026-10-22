@@ -5,7 +5,7 @@ import type { DrawingLabel, DrawingStroke, PatternDrawing } from './drawing';
 import {
   addRollFurniture,
   printableRollWidthMm,
-  ROLL_FURNITURE_MM,
+  rollFurnitureMm,
   rollSheetLimitMm,
   rollWidthMm,
 } from './roll-layout';
@@ -59,11 +59,12 @@ function transformedMarker(
   strips: number,
   chunkLengthMm: number,
   printableWidthMm: number,
+  furnitureMm: number,
 ): PatternDrawing {
   // Marker frame: x = along fabric, y = across fabric. Roll page: x = across, y = along.
   const point = ([x, y]: [number, number]): [number, number] => [
     acrossOffsetMm + y - acrossStartMm,
-    ROLL_FURNITURE_MM + x - alongStartMm,
+    furnitureMm + x - alongStartMm,
   ];
   const strokes: DrawingStroke[] = marker.strokes.map((stroke) => ({
     ...stroke,
@@ -72,13 +73,13 @@ function transformedMarker(
   const labels: DrawingLabel[] = marker.labels.map((label) => ({
     ...label,
     x: acrossOffsetMm + label.y - acrossStartMm,
-    y: ROLL_FURNITURE_MM + label.x - alongStartMm,
+    y: furnitureMm + label.x - alongStartMm,
     ...(label.sizeMm != null ? { angle: 90 - (label.angle ?? 0) } : {}),
   }));
 
   if (strips > 1) {
-    const top = ROLL_FURNITURE_MM + 7;
-    const bottom = ROLL_FURNITURE_MM + chunkLengthMm - 7;
+    const top = furnitureMm + 7;
+    const bottom = furnitureMm + chunkLengthMm - 7;
     if (strip > 0) {
       const x = acrossOffsetMm + MARKER_STRIP_OVERLAP_MM / 2;
       strokes.push(...cross(x, top), ...cross(x, bottom));
@@ -106,7 +107,8 @@ export function planMarkerRollPrint(
 ): RollPrintPlan & { strips: number } {
   const pageWidthMm = rollWidthMm(roll);
   const sheetLimitMm = rollSheetLimitMm(roll);
-  const contentLimitMm = sheetLimitMm - ROLL_FURNITURE_MM;
+  const furnitureMm = rollFurnitureMm(roll);
+  const contentLimitMm = sheetLimitMm - furnitureMm;
   const markerWidthMm = markerFabricWidthCm * 10;
   const strips = markerStripCount(markerWidthMm, roll);
   if (strips < 1) throw new Error('the marker has no fabric width');
@@ -122,7 +124,7 @@ export function planMarkerRollPrint(
     for (let chunk = 0; chunk < chunks; chunk++) {
       const alongStartMm = chunk * contentLimitMm;
       const chunkLengthMm = Math.min(contentLimitMm, Math.max(0, marker.w - alongStartMm));
-      const lengthMm = ROLL_FURNITURE_MM + Math.max(1, chunkLengthMm);
+      const lengthMm = furnitureMm + Math.max(1, chunkLengthMm);
       bare.push({
         drawing: transformedMarker(
           marker,
@@ -135,6 +137,7 @@ export function planMarkerRollPrint(
           strips,
           chunkLengthMm,
           printableWidthMm,
+          furnitureMm,
         ),
         lengthMm,
       });
@@ -160,7 +163,7 @@ export function planMarkerRollPrint(
     tooWide: [],
     tooLong: [],
     markerLengthMm: sheets.reduce(
-      (sum, sheet) => sum + Math.max(0, sheet.lengthMm - ROLL_FURNITURE_MM),
+      (sum, sheet) => sum + Math.max(0, sheet.lengthMm - furnitureMm),
       0,
     ),
     warnings: [...new Set(warnings)],

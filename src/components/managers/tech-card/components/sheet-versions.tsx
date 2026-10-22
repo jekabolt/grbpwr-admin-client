@@ -1,8 +1,8 @@
-// «⋯» of a sheet row: the versions of one pattern sheet. The active file first (it carries the
-// download), then TechCardSizePattern.history newest first (each with `restore` when restorable and
-// `delete` when it has a stable history id), and `delete` of the sheet at the bottom (the row carries
-// no ×: a new DXF goes over the old one). Restore itself goes through restoreSheetVersion
-// (nesting/reupload-session.ts).
+// The history button of a sheet row opens one pattern sheet's versions. The active file comes first
+// (with download), then TechCardSizePattern.history newest first (each with `restore` when restorable
+// and `delete` when it has a stable history id), and sheet `delete` at the bottom. The row keeps its
+// own ×; re-upload lives in the tile strip and row drag-drop. Restore goes through
+// restoreSheetVersion (nesting/reupload-session.ts).
 import type { common_TechCardPatternRevision } from 'api/proto-http/admin';
 import { useState, type ReactNode } from 'react';
 import { Button, ConfirmationModal, GenericPopover, Text } from 'ui';
@@ -33,7 +33,7 @@ export function sheetVersions(
   },
   history: readonly common_TechCardPatternRevision[] | undefined,
 ): SheetVersion[] {
-  const older = [...(history ?? [])]
+  const retained = [...(history ?? [])]
     .filter((h) => !!h.url && h.url !== active.url)
     .sort((a, b) => (b.revision ?? 0) - (a.revision ?? 0))
     .map<SheetVersion>((h, i) => ({
@@ -61,7 +61,7 @@ export function sheetVersions(
       snapshotId: 0,
       current: true,
     },
-    ...older,
+    ...retained,
   ];
 }
 

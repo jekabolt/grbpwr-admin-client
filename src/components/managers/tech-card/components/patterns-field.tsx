@@ -158,10 +158,10 @@ import { drawingFromDxf } from 'lib/pattern-export/drawing';
 import {
   PatternExportItems,
   PatternExportMenu,
+  HistoryGlyph,
   ROW_ICON_BTN,
-  UploadGlyph,
 } from './pattern-export/export-menu';
-import type { RollPrintTarget } from './pattern-export/roll-print-dialog';
+import type { RollPrintSlot, RollPrintTarget } from './pattern-export/roll-print-dialog';
 import {
   ddmm,
   removedSheets,
@@ -198,6 +198,7 @@ import {
   peekSeamDeleteRetry,
   provideSheetRestorer,
   restoreSheetVersion,
+  swapSheetFile,
   type RestoreOutcome,
   type SheetRevisionRef,
 } from './nesting/reupload-session';
@@ -372,6 +373,19 @@ type PatternRow = {
   sha256?: string;
 };
 type Entry = { row: PatternRow; index: number };
+
+/** The current DXF row with the newest revision in one material slot. */
+function latestDxfEntry(list: readonly Entry[]): Entry | undefined {
+  return list.reduce<Entry | undefined>((latest, entry) => {
+    if (!entry.row.url || !isDxfUrl(entry.row.url)) return latest;
+    if (!latest) return entry;
+    const revision = Number(entry.row.version ?? 0);
+    const latestRevision = Number(latest.row.version ?? 0);
+    return revision > latestRevision || (revision === latestRevision && entry.index > latest.index)
+      ? entry
+      : latest;
+  }, undefined);
+}
 
 type ReuploadFlight = { rowId: string; version: number };
 type ReuploadFeedback =
@@ -556,6 +570,8 @@ export function PatternsField({
   savedSizeIds?: number[];
 }) {
   const { control, setValue, getValues, register, setFocus } = useFormContext<TechCardFormData>();
+  const writeDirty = (path: string, value: unknown) =>
+    setValue(path as Parameters<typeof setValue>[0], value as never, { shouldDirty: true });
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
@@ -637,7 +653,7 @@ export function PatternsField({
       if (p.lineKey && p.history?.length) m.set(p.lineKey, p.history);
     return m;
   }, [cardRead]);
-  // «⋯» of a sheet row: the lineKey whose versions are open.
+  // History button of a sheet row: the lineKey or legacy url whose versions are open.
   const [versionsOf, setVersionsOf] = useState<string | null>(null);
   // Deleted sheets (TechCard.removedPatternHistory), one muted row each under their slot.
   const removed = useMemo(() => removedSheets(cardRead?.removedPatternHistory), [cardRead]);
@@ -688,8 +704,6 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
-  // The sheet row the picked file replaces (sheetRowId); '' = the slot (a tile drop or click).
-  const pickRow = useRef('');
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -951,6 +965,25 @@ export function PatternsField({
     () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
     [scopes, dxfByScopeMap],
   );
+  // Header print = one current DXF per material slot. A slot can retain several present rows
+  // while files are being consolidated; the newest revision is the same row its download menu
+  // presents as current, while superseded revisions remain in `historyByLine` and never enter here.
+  const printSlots: RollPrintSlot[] = scopeGroups.flatMap((group) => {
+    const current = latestDxfEntry(group.entries);
+    if (!current?.row.url) return [];
+    const full = scopeLabel(group.scope);
+    const label = group.scope.byPurpose ? bomPurposeLabel(group.scope.key) : full;
+    const material = once(group.scope.lines.map((line) => line.name)).join(', ') || full;
+    return [
+      {
+        key: group.scope.key,
+        label,
+        material,
+        url: current.row.url,
+        fileName: current.row.filename || `${labelOf(current.row)}.dxf`,
+      },
+    ];
+  });
   // DXF без живой привязки — наследие: ключа нет вовсе или его строка/назначение уже исчезли.
   // Состояния «без материала» больше нет: ни одна правка в него не ведёт (bom-purpose.ts), а то,
   // что осталось от прошлого, показывается под первым материалом (на большинстве карточек —
@@ -1275,10 +1308,9 @@ export function PatternsField({
   const canUpload = canEdit && scopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string, rowId = '') {
+  function openPicker(scopeKey: string) {
     if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     pickFor.current = scopeKey;
-    pickRow.current = rowId;
     fileInputRef.current?.click();
   }
 
@@ -1885,15 +1917,9 @@ export function PatternsField({
       // Re-found after the upload: the rows may have moved while the file was in flight.
       const at = swap ? plainSwapIndex(scopeKey, target) : -1;
       if (at >= 0) {
-        const keep = { shouldDirty: true };
-        setValue(`patterns.${at}.url`, up.url, keep);
-        setValue(`patterns.${at}.filename`, up.filename, keep);
-        setValue(`patterns.${at}.sizeBytes`, up.sizeBytes, keep);
-        setValue(`patterns.${at}.sha256`, up.sha256, keep);
-        setValue(`patterns.${at}.sizeId`, storeAs, keep);
-        // 0 = "assign one": the server numbers a url it has not seen on this card.
-        setValue(`patterns.${at}.version`, 0, keep);
-        setValue(`patterns.${at}.uploadedAt`, '', keep);
+        const replacedUrl = (getValues(`patterns.${at}.url`) as string | undefined) ?? '';
+        // The save whose payload carries the new url archives the old file with a card snapshot.
+        swapSheetFile(techCardId, writeDirty, at, replacedUrl, up, { sizeId: storeAs });
       } else
         append({
           sizeId: storeAs,
@@ -2038,14 +2064,8 @@ export function PatternsField({
             const i = live.findIndex((r) => r.url === row.url);
             // Removed or replaced meanwhile: the new file is not forced onto another row.
             if (i < 0) continue;
-            setValue(`patterns.${i}.url`, up.url, { shouldDirty: true });
-            setValue(`patterns.${i}.filename`, up.filename, { shouldDirty: true });
-            setValue(`patterns.${i}.sizeBytes`, up.sizeBytes, { shouldDirty: true });
-            // The new file's digest, never the old one's (0423).
-            setValue(`patterns.${i}.sha256`, up.sha256, { shouldDirty: true });
-            // 0 = "assign one": the server numbers a url it has not seen on this card.
-            setValue(`patterns.${i}.version`, 0, { shouldDirty: true });
-            setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
+            // The save whose payload carries the new url archives the old file with a card snapshot.
+            swapSheetFile(techCardId, writeDirty, i, row.url, up);
           } catch (e) {
             console.error('UploadPattern failed', e);
             faults.push({ name: labelOf(row), why: patternUploadErrorMessage(e) });
@@ -2248,8 +2268,8 @@ export function PatternsField({
     setFollowUp((j) => (j ? { ...j, rows: retryRows(j.rows, only), nonce: j.nonce + 1 } : j));
   }
 
-  // «⋯» → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of that
-  // version only — a version without one has no `restore`.
+  // History → versions of one sheet. Restore goes through restoreSheetVersion: the card snapshot of
+  // that version only — a version without one has no `restore`.
   // DELETE A SHEET (L6b). A DXF row takes its pieces, the steps that hold them and every step
   // downstream with it (removeSheetCascade); issues on removed steps go to 0, as when a step is
   // deleted in the editor. Colourway / area refs are left as they are — the server says its words.
@@ -2929,16 +2949,16 @@ export function PatternsField({
                 )}
               />
             )}
-            {replaceable && (
+            {(row.lineKey || row.url) && (
               <Button
                 type='button'
-                aria-label='new version'
-                title='new version'
+                aria-label='history'
+                title='history'
                 className={ROW_ICON_BTN}
                 disabled={slotBusy}
-                onClick={() => openPicker(slotGroup.scope.key, rowId)}
+                onClick={() => setVersionsOf(row.lineKey || row.url || null)}
               >
-                <UploadGlyph />
+                <HistoryGlyph />
               </Button>
             )}
             {canEdit && (
@@ -3027,7 +3047,7 @@ export function PatternsField({
       return (
         <span className='flex flex-wrap items-center gap-1'>
           {[...a.found].map((t) => (
-            <Chip key={t} tone='default'>
+            <Chip key={t} className='border-solid border-borderColor bg-bgColor text-labelColor'>
               {t}
             </Chip>
           ))}
@@ -3040,7 +3060,14 @@ export function PatternsField({
         {orderSizes(sizeIds).map((id) => {
           const gone = missing.has(id);
           return (
-            <Chip key={id} selected={!gone} tone={gone ? 'error' : 'default'}>
+            <Chip
+              key={id}
+              className={
+                gone
+                  ? 'border-dashed border-error bg-bgColor text-error'
+                  : 'border-solid border-textColor bg-bgColor text-textColor'
+              }
+            >
               {nameOf(id)}
             </Chip>
           );
@@ -3489,6 +3516,27 @@ export function PatternsField({
               >
                 marker
               </Button>
+              {printSlots.length > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  className={door}
+                  onClick={() => {
+                    const first = printSlots[0];
+                    setPrinting({
+                      url: first.url,
+                      fileName: first.fileName,
+                      material: first.material,
+                      title: styleNumber.trim(),
+                      cardKey: techCardId ? String(techCardId) : '',
+                      ...(printSlots.length > 1 ? { slots: printSlots } : {}),
+                    });
+                  }}
+                >
+                  print
+                </Button>
+              )}
             </div>
           }
         >
@@ -3556,6 +3604,9 @@ export function PatternsField({
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
               save: (reason) => autosave.flush(reason),
+              // A sheet replaced in place: its save archives the old file with a card snapshot.
+              onReplaced: (list) =>
+                list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
               unsaved: {
                 get: () => importUnsaved.current,
                 set: (v) => {
@@ -3854,7 +3905,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files, pickRow.current || undefined);
+          routeFiles(pickFor.current, e.target.files);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}

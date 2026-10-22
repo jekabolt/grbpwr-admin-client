@@ -25,7 +25,9 @@ export {
   peekReuploadSnapshot,
   provideSheetRestorer,
   restoreSheetVersion,
+  swapSheetFile,
 } from 'components/managers/tech-card/components/nesting/reupload-session';
+export { applyDraft } from 'lib/pattern-import/fabrics/apply';
 export {
   clearReview,
   firstMarkedOperation,
