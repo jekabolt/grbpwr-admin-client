@@ -30,6 +30,7 @@ const MODES: [FuseMode, string][] = [
   ['strip', 'strip'],
   ['zone', 'zone'],
 ];
+const ADD_MATERIAL = '+material';
 
 /** Label row (micro uppercase, red when the answer is missing) over one control. */
 export function FuseField({
@@ -95,6 +96,7 @@ export function FuseFields({
   readOnly,
   toggleBox,
   onChange,
+  onAddMaterial,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -104,6 +106,7 @@ export function FuseFields({
   /** The panel's toggle box class (one height for every control in the panel). */
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
+  onAddMaterial: () => void;
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
@@ -163,19 +166,24 @@ export function FuseFields({
               name='interlining'
               size='sm'
               placeholder='—'
-              items={lines.map((l) => ({
-                value: l.key,
-                label: (
-                  <span className='flex min-w-0 items-center gap-1.5'>
-                    <Swatch color={l.color} />
-                    <span className='truncate'>{l.label}</span>
-                  </span>
-                ),
-              }))}
+              items={[
+                ...lines.map((l) => ({
+                  value: l.key,
+                  label: (
+                    <span className='flex min-w-0 items-center gap-1.5'>
+                      <Swatch color={l.color} />
+                      <span className='truncate'>{l.label}</span>
+                    </span>
+                  ),
+                })),
+                { value: ADD_MATERIAL, label: '+ material' },
+              ]}
               value={line}
               readOnly={readOnly}
               invalid={!line}
-              onValueChange={(x: string) => set({ bomLineKey: x })}
+              onValueChange={(x: string) =>
+                x === ADD_MATERIAL ? onAddMaterial() : set({ bomLineKey: x })
+              }
             />
           </FuseField>
           {spec.mode === 'strip' && (
