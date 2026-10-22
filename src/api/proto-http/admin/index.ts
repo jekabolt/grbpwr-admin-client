@@ -10322,11 +10322,12 @@ export type common_TechCardPieceFusingEdge = {
   endMm: googletype_Decimal | undefined;
 };
 
-// Geometry for ZONE fusing: either a rectangle drawn on the garment piece or a dedicated DXF
-// piece supplied by the pattern maker. An empty message deliberately clears the stored zone.
+// Geometry for ZONE fusing: a rectangle or freeform spline drawn on the garment piece, or a
+// dedicated DXF piece supplied by the pattern maker. An empty message deliberately clears it.
 export type common_TechCardPieceFusingZone = {
   rect?: common_TechCardPieceFusingRect;
   dxfPieceKey?: string;
+  spline?: common_TechCardPieceFusingSpline;
 };
 
 // Piece-local rectangle in millimetres. Coordinates are kept separately rather than as four
@@ -10336,6 +10337,17 @@ export type common_TechCardPieceFusingRect = {
   y0: googletype_Decimal | undefined;
   x1: googletype_Decimal | undefined;
   y1: googletype_Decimal | undefined;
+};
+
+// Closed spline through piece-local points in millimetres. corner keeps that point sharp.
+export type common_TechCardPieceFusingSpline = {
+  points: common_TechCardPieceFusingSplinePoint[] | undefined;
+};
+
+export type common_TechCardPieceFusingSplinePoint = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+  corner: boolean | undefined;
 };
 
 // TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text

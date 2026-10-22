@@ -1,4 +1,4 @@
-import type { common_TechCardPiece, googletype_Decimal } from 'api/proto-http/admin';
+import type { common_TechCardPiece, common_TechCardPieceFusingZone } from 'api/proto-http/admin';
 import type { PtMm } from 'lib/pattern-import/types';
 
 /** '' = not fused, or the legacy «fused, how not said» (a stored fused piece with no mode). */
@@ -154,22 +154,6 @@ export function writeFuseFields(s: PieceFuseSpec): PieceFuseFields {
   };
 }
 
-// TODO(L13 proto): grbpwr-proto adds TechCardPieceFusingSpline{points: [{x, y, corner}]} as
-// TechCardPieceFusingZone.spline. Until `make proto` brings it in, the arm is typed here; after it
-// lands this becomes `type WireZone = common_TechCardPieceFusingZone` (import it from
-// 'api/proto-http/admin') and nothing else changes.
-type WireZone = NonNullable<common_TechCardPiece['fusingZone']> & {
-  spline?: {
-    points:
-      | {
-          x: googletype_Decimal | undefined;
-          y: googletype_Decimal | undefined;
-          corner: boolean | undefined;
-        }[]
-      | undefined;
-  };
-};
-
 type WireFuse = Pick<
   common_TechCardPiece,
   | 'fusingBomLineKey'
@@ -178,10 +162,10 @@ type WireFuse = Pick<
   | 'fusingInsetNet'
   | 'fusingGrain'
   | 'fusingDarts'
-> & { fusingZone?: WireZone };
+> & { fusingZone?: common_TechCardPieceFusingZone };
 
 /** The wire zone → the form's zone (null = none, or an unreadable one). */
-function zoneFromWire(z: WireZone | undefined): FuseZone | null {
+function zoneFromWire(z: common_TechCardPieceFusingZone | undefined): FuseZone | null {
   const rect = z?.rect;
   const r = rect ? [rect.x0, rect.y0, rect.x1, rect.y1].map((d) => num(d?.value)) : null;
   if (r && r.every((x) => x != null)) return { rect: r as [number, number, number, number] };
@@ -196,7 +180,7 @@ function zoneFromWire(z: WireZone | undefined): FuseZone | null {
 }
 
 /** The form's zone → the wire. An empty message clears the stored zone. */
-function zoneToWire(z: FuseZone | null): WireZone {
+function zoneToWire(z: FuseZone | null): common_TechCardPieceFusingZone {
   if (!z) return {};
   if ('rect' in z)
     return {
