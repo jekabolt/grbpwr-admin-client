@@ -98,6 +98,11 @@ interface Props {
   fullScreen?: boolean;
   /** Полноэкранный экран рисует собственные шапку и подвал внутри тела. */
   hideHeader?: boolean;
+  /**
+   * Pinned between the scrolling body and the footer: never scrolls away. The caller decides when
+   * it shows (e.g. phone only); nothing is drawn when it is absent.
+   */
+  dock?: React.ReactNode;
 }
 
 export function ConfirmationModal({
@@ -122,6 +127,7 @@ export function ConfirmationModal({
   hideCancel,
   fullScreen,
   hideHeader,
+  dock,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
@@ -215,6 +221,8 @@ export function ConfirmationModal({
               )}
             </div>
           )}
+
+          {dock}
 
           {/* ПОДВАЛ ЖИВЁТ И БЕЗ КНОПОК, ЕСЛИ ЕМУ ЕСТЬ ЧТО СКАЗАТЬ.
               Диалог, который НИЧЕГО не решает, а только показывает (инвентарь прогона, просмотр

@@ -154,6 +154,8 @@ export function PieceSheet({
   topLeft,
   focus,
   focusMark,
+  overlay,
+  onFit,
 }: {
   pieces: readonly PieceDTO[];
   // Overlaid in the canvas's top-left corner (the dialog's size switch).
@@ -166,6 +168,10 @@ export function PieceSheet({
   focus?: BoxMm | null;
   /** Stroke-only ring in the same mm/Y-up sheet coordinates. */
   focusMark?: { x: number; y: number; r: number } | null;
+  /** Drawn over the pieces, under the names, in sheet coords (cm, Y down); gets cm per px. */
+  overlay?: (px: number) => React.ReactNode;
+  /** The corner «whole sheet» button was pressed (a zoomed caller leaves its zoom). */
+  onFit?: () => void;
   // Слой долевой. '' — не показывать. Рисуется поверх контуров: раскладка поворачивает деталь
   // именно по этой линии, и человек должен увидеть прочитанное ДО того, как ткань разрезана.
   grainLayer?: string;
@@ -695,6 +701,8 @@ export function PieceSheet({
             </g>
           ) : null}
 
+          {overlay ? overlay(px) : null}
+
           {prefs.names &&
             Array.from(labelPlans, ([id, plan]) => (
               <g key={`t${id}`} pointerEvents='none'>
@@ -751,7 +759,10 @@ export function PieceSheet({
               type='button'
               aria-label='show the whole sheet'
               title='show the whole sheet'
-              onClick={() => setView(null)}
+              onClick={() => {
+                setView(null);
+                onFit?.();
+              }}
               className={ICON_BTN}
             >
               <svg

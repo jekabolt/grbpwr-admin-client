@@ -47,6 +47,7 @@ import {
   HeaderWarnings,
   type HeaderWarning,
   Input,
+  Select,
   Text,
 } from 'ui';
 import { ulid } from 'utils/ulid';
@@ -55,10 +56,6 @@ import { isOsSizeName } from '../size-ids-field';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
 import {
   IDENTICAL_CUT_SYMMETRY,
-  UNSET_FUSING_MODE,
-  fusingModeOptionsFor,
-  fusingTakesWidth,
-  grainlineArrow,
   grainlineOptionsFor,
   importedCutSymmetry,
   isCutSymmetryMarked,
@@ -75,6 +72,9 @@ import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
+import { FuseFields, type InterliningLine } from './fuse-fields';
+import { FuseOverlay } from './fuse-overlay';
+import { readFuseSpec, writeFuseFields, type PieceFuseSpec } from './fuse-spec';
 import {
   aliasIdentity,
   foreignManifestSizes,
@@ -213,6 +213,9 @@ type PieceFields = {
   ungraded?: boolean;
   grainline?: string;
   note?: string;
+  // The whole fuse markup as the panel holds it (fuse-spec.ts). The stored fields above are kept
+  // in step by writeFuseFields on every change; the rest waits for the proto.
+  fuse?: PieceFuseSpec;
 };
 const FIELD_KEYS = [
   'fused',
@@ -745,6 +748,20 @@ export function PieceMatchModal({
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as TechCardFormData['pieces'];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
+  // The fusibles a piece can be fused with: the INTERLINING lines of the BOM.
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as TechCardFormData['bomItems'];
+  const interlinings = useMemo<InterliningLine[]>(
+    () =>
+      (bomItems ?? [])
+        .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_INTERLINING' && b.lineKey?.trim())
+        .map((b) => ({
+          key: b.lineKey!.trim(),
+          label:
+            [b.supplierRef?.trim(), b.name?.trim()].filter(Boolean).join(' · ') || 'interlining',
+          color: b.color ?? '',
+        })),
+    [bomItems],
+  );
   const { parse, reparse } = useNesting(files);
   // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
   // внутри них не пропущен) решает судьбу ДВУХ исходов сразу: предложений об удалении (находка 1
@@ -925,6 +942,9 @@ export function PieceMatchModal({
   const [newEdits, setNewEdits] = useState<Record<string, PieceFields>>({});
   // Block whose «this is» select was opened by the `relink` door (a linked block shows only its name).
   const [relinkOf, setRelinkOf] = useState<string | null>(null);
+  // Canvas «Zoom»: a fused piece opens zoomed onto itself; the sheet's «whole sheet» button leaves
+  // the zoom for that piece until its fuse mode changes again.
+  const [zoomOut, setZoomOut] = useState<string | null>(null);
   // Which sheet is on screen. Several files reach one fabric slot when the same size was
   // re-uploaded (revisions) — they are separate drawings and must not be drawn on top of
   // each other.
@@ -1690,6 +1710,7 @@ export function PieceMatchModal({
                 ? { fusingWidthMm: ed.fusingWidthMm }
                 : {}),
               ...(ed.ungraded !== undefined ? { ungraded: ed.ungraded } : {}),
+              // TODO(fusing-proto): the rest of ed.fuse (writeFuseFields) once the piece has it.
               calloutNumber: 0,
               note: ed.note ?? '',
               materials: [],
@@ -1761,6 +1782,7 @@ export function PieceMatchModal({
           if (ed[f] === undefined || ed[f] === p[f]) continue;
           setValue(`pieces.${i}.${f}`, ed[f] as never, { shouldDirty: true });
         }
+        // TODO(fusing-proto): write the rest of ed.fuse (writeFuseFields) to pieces.${i}.
         if (ed.name !== undefined && ed.name !== (p.name ?? '')) {
           const value = clampUtf8Bytes(ed.name, MAX_PIECE_NAME);
           setValue(`pieces.${i}.name`, value, { shouldDirty: true });
@@ -1778,6 +1800,8 @@ export function PieceMatchModal({
         }
       });
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
+      // TODO(fusing-dxf): the fusible sheets follow the fuse markup — once the card save has
+      // persisted it: `if (fuseTouched) void regenerateFusingSheets(techCardId);`
       onClose();
     } finally {
       setSaving(false);
@@ -1934,27 +1958,16 @@ export function PieceMatchModal({
       />
     ) : null;
 
-  const editor = (() => {
-    if (pickingOldPieces && goneQuestion) return goneQuestion;
-    if (!focus) {
-      return (
-        goneQuestion ?? (
-          <Text size='micro' variant='label' component='p'>
-            click a piece to edit it
-          </Text>
-        )
-      );
-    }
-    const ci = focus.ci;
+  // What the panel shows for a block and where its edits go, per kind. Existing pieces read the
+  // form and overlay the buffer; new pieces read only the buffer (they do not exist yet). The
+  // canvas reads the same thing for every fused piece on the sheet.
+  const ioOf = (ci: string) => {
     const st = stateOf(ci);
-    const value = st.kind === 'existing' ? optionKeyOf(st.key) : st.kind === 'new' ? CREATE : '';
 
-    // Values shown and the setter, per kind. Existing pieces read the form and overlay the buffer;
-    // new pieces read only the buffer (they do not exist yet).
     let index = -1;
     let vals: PieceFields = {};
     let patch: (p: PieceFields) => void = () => {};
-    let title = focus.block;
+    let title = '';
     if (st.kind === 'existing') {
       const k = st.key.toLowerCase();
       index = (pieces ?? []).findIndex((p) => (p.lineKey ?? '').trim().toLowerCase() === k);
@@ -1979,7 +1992,7 @@ export function PieceMatchModal({
           else rest[k] = next;
           return rest;
         });
-      title = vals.name || focus.block;
+      title = vals.name;
     } else if (st.kind === 'new') {
       const row = st.row;
       const shownName = draftNames[ci] ?? defaultPieceName(row);
@@ -2028,189 +2041,185 @@ export function PieceMatchModal({
       };
       title = newNameOf(row);
     }
+    return { st, index, vals, patch, title };
+  };
+  // The fuse spec of a block that is a fused piece (the buffer's, else read off the stored fields).
+  const fuseOfCi = (ci: string): PieceFuseSpec | undefined => {
+    if (!ci) return undefined;
+    const { st, vals } = ioOf(ci);
+    if (st.kind === 'none' || !vals.fused) return undefined;
+    return vals.fuse ?? readFuseSpec(vals);
+  };
+  const setFuse = (ci: string, next: PieceFuseSpec) => {
+    const { vals, patch } = ioOf(ci);
+    const prev = vals.fuse ?? readFuseSpec(vals);
+    if (next.mode !== prev.mode) setZoomOut(null);
+    patch({ fuse: next, ...writeFuseFields(next) });
+  };
+  // Zoomed onto the selected piece: it is fused with a mode and the zoom was not left.
+  const zoomed = (() => {
+    if (!selected || zoomOut === selected) return null;
+    const f = fuseOfCi(selected);
+    return f?.mode ? selected : null;
+  })();
+
+  // The piece's fuse fields again, for the phone dock above the footer (set by the editor).
+  let fuseDock: React.ReactNode = null;
+  // The zoomed piece's box, mm / Y up (PieceSheet's focus contract).
+  const zoomFocus = (() => {
+    if (!zoomed) return null;
+    const p = sheetPieces.find((q) => ciOf(q) === zoomed && q.originX != null);
+    if (!p) return null;
+    const ox = p.originX ?? 0;
+    const oy = p.originY ?? 0;
+    return { minX: ox * 10, minY: oy * 10, maxX: (ox + p.bboxW) * 10, maxY: (oy + p.bboxH) * 10 };
+  })();
+  const editor = (() => {
+    if (pickingOldPieces && goneQuestion) return goneQuestion;
+    if (!focus) {
+      return (
+        goneQuestion ?? (
+          <Text size='micro' variant='label' component='p'>
+            click a piece to edit it
+          </Text>
+        )
+      );
+    }
+    const ci = focus.ci;
+    const st = stateOf(ci);
+    const value = st.kind === 'existing' ? optionKeyOf(st.key) : st.kind === 'new' ? CREATE : '';
+    const io = ioOf(ci);
+    const { index, vals, patch } = io;
+    const title = io.title || focus.block;
     // Form anchors only for a piece that exists in the form (error deep links land here).
     const anchor = (f: string) => (index >= 0 ? { 'data-field': `pieces.${index}.${f}` } : {});
     const isPiece = st.kind !== 'none';
     const linked = st.kind === 'existing';
 
+    const thisIs = (
+      <PanelField label='this is'>
+        <select
+          className={BOX}
+          aria-label={`what block ${focus.block} is`}
+          value={value}
+          disabled={readOnly || !focus.known}
+          onChange={(e) => choose(ci, e.target.value)}
+        >
+          <option value={CREATE}>+ new piece</option>
+          <option value=''>not a piece</option>
+          {pieceOptions.map((p) => (
+            <option key={p.lineKey} value={p.lineKey}>
+              {pieceName(p.lineKey) || p.name}
+            </option>
+          ))}
+        </select>
+      </PanelField>
+    );
+
+    // Not a piece, or the `relink` door is open: the block's name and what it is.
+    if (!isPiece || (linked && relinkOf === ci)) {
+      return (
+        <div className='space-y-2'>
+          <div>
+            <Text
+              size='micro'
+              component='p'
+              className='truncate border-b border-borderColor pb-0.5 uppercase'
+              title={title}
+            >
+              {title}
+            </Text>
+            <Text size='micro' variant='label' component='p' className='pt-0.5'>
+              ×{focus.instances} per garment
+              {focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
+            </Text>
+          </div>
+          {thisIs}
+        </div>
+      );
+    }
+
+    // A piece, panel «Fold»: NAME · FUSING (phone: docked above the footer) · GRAIN + UNGRADED ·
+    // NOTE.
+    const fuse = vals.fuse ?? readFuseSpec(vals);
+    const fuseFields = (
+      <FuseFields
+        key={ci}
+        spec={fuse}
+        fused={!!vals.fused}
+        lines={interlinings}
+        readOnly={readOnly}
+        toggleBox={TOGGLE_BOX}
+        onChange={(next) => setFuse(ci, next)}
+      />
+    );
+    fuseDock = fuseFields;
     return (
       <div className='space-y-2'>
-        <div>
-          <Text
-            size='micro'
-            component='p'
-            className='truncate border-b border-borderColor pb-0.5 uppercase'
-            title={title}
-          >
-            {title}
-          </Text>
-          <Text size='micro' variant='label' component='p' className='pt-0.5'>
-            ×{focus.instances} per garment
-            {focus.sizes.length > 0 ? ` · ${focus.sizes.join(' ')}` : ''}
-          </Text>
+        {!linked && thisIs}
+        <PanelField
+          label='name'
+          door={
+            linked &&
+            !readOnly &&
+            focus.known && (
+              <button
+                type='button'
+                className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
+                onClick={() => setRelinkOf(ci)}
+              >
+                relink
+              </button>
+            )
+          }
+        >
+          <Input
+            {...anchor('name')}
+            className={INPUT_BOX}
+            aria-label='piece name'
+            placeholder='piece name'
+            disabled={readOnly}
+            value={vals.name ?? ''}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
+          />
+        </PanelField>
+        <div className='hidden sm:block' {...anchor('fusingMode')}>
+          {fuseFields}
         </div>
-        {linked && relinkOf !== ci ? null : (
-          <PanelField label='this is'>
-            <select
-              className={BOX}
-              aria-label={`what block ${focus.block} is`}
-              value={value}
-              disabled={readOnly || !focus.known}
-              onChange={(e) => choose(ci, e.target.value)}
-            >
-              <option value={CREATE}>+ new piece</option>
-              <option value=''>not a piece</option>
-              {pieceOptions.map((p) => (
-                <option key={p.lineKey} value={p.lineKey}>
-                  {pieceName(p.lineKey) || p.name}
-                </option>
-              ))}
-            </select>
-          </PanelField>
-        )}
-        {isPiece && (
-          <>
-            <PanelField
-              label='name'
-              door={
-                linked &&
-                relinkOf !== ci &&
-                !readOnly &&
-                focus.known && (
-                  <button
-                    type='button'
-                    className='text-micro text-labelColor underline underline-offset-2 hover:text-textColor'
-                    onClick={() => setRelinkOf(ci)}
-                  >
-                    relink
-                  </button>
-                )
-              }
-            >
-              <Input
-                {...anchor('name')}
-                className={INPUT_BOX}
-                aria-label='piece name'
-                placeholder='piece name'
-                disabled={readOnly}
-                value={vals.name ?? ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  patch({ name: e.target.value })
-                }
+        <div className='grid grid-cols-2 items-end gap-2'>
+          <PanelField label='grain'>
+            <div {...anchor('grainline')}>
+              <Select
+                name='grainline'
+                className='text-micro'
+                items={grainlineOptionsFor(vals.grainline)}
+                value={vals.grainline ?? ''}
+                readOnly={readOnly}
+                onValueChange={(x: string) => patch({ grainline: x })}
               />
-            </PanelField>
-            <div className='grid grid-cols-2 gap-1'>
-              <Chip
-                className={TOGGLE_BOX}
-                selected={!!vals.fused}
-                pressed={!!vals.fused}
-                disabled={readOnly}
-                aria-label='fused'
-                onClick={() =>
-                  // Unchecking clears the fusing markup at once (pieces-tab, 0304).
-                  patch(
-                    vals.fused
-                      ? { fused: false, fusingMode: UNSET_FUSING_MODE, fusingWidthMm: '' }
-                      : { fused: true },
-                  )
-                }
-              >
-                fused
-              </Chip>
-              <Chip
-                className={TOGGLE_BOX}
-                selected={!!vals.ungraded}
-                pressed={!!vals.ungraded}
-                disabled={readOnly}
-                aria-label='ungraded'
-                onClick={() => patch({ ungraded: !vals.ungraded })}
-              >
-                ungraded
-              </Chip>
             </div>
-            {!!vals.fused && (
-              <PanelField label="how it's fused">
-                <div className='flex gap-1'>
-                  <select
-                    className={`${BOX} min-w-0 flex-1`}
-                    aria-label="how it's fused"
-                    {...anchor('fusingMode')}
-                    disabled={readOnly}
-                    value={vals.fusingMode ?? UNSET_FUSING_MODE}
-                    onChange={(e) => {
-                      const mode = e.target.value;
-                      patch(
-                        fusingTakesWidth(mode)
-                          ? { fusingMode: mode }
-                          : { fusingMode: mode, fusingWidthMm: '' },
-                      );
-                    }}
-                  >
-                    {fusingModeOptionsFor(vals.fusingMode).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  {fusingTakesWidth(vals.fusingMode) && (
-                    <Input
-                      type='number'
-                      min='0.5'
-                      max='100'
-                      step='0.5'
-                      placeholder='mm'
-                      aria-label='fusing strip width, mm'
-                      className={`${INPUT_BOX} w-16 shrink-0`}
-                      {...anchor('fusingWidthMm')}
-                      disabled={readOnly}
-                      value={vals.fusingWidthMm ?? ''}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        patch({ fusingWidthMm: e.target.value })
-                      }
-                    />
-                  )}
-                </div>
-              </PanelField>
-            )}
-            <PanelField label='grain'>
-              {/* The arrow is the select's own glyph: it sits inside the box, where a chevron would. */}
-              <div className='relative'>
-                <select
-                  className={`${BOX} pr-6`}
-                  aria-label='grainline'
-                  {...anchor('grainline')}
-                  disabled={readOnly}
-                  value={vals.grainline ?? ''}
-                  onChange={(e) => patch({ grainline: e.target.value })}
-                >
-                  {grainlineOptionsFor(vals.grainline).map((o) => (
-                    <option key={o.value || '(unset)'} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <span
-                  aria-hidden
-                  className='pointer-events-none absolute inset-y-0 right-[7px] flex items-center text-micro'
-                >
-                  {grainlineArrow(vals.grainline)}
-                </span>
-              </div>
-            </PanelField>
-            <PanelField label='note'>
-              <Input
-                {...anchor('note')}
-                className={INPUT_BOX}
-                aria-label='note'
-                disabled={readOnly}
-                value={vals.note ?? ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  patch({ note: e.target.value })
-                }
-              />
-            </PanelField>
-          </>
-        )}
+          </PanelField>
+          <Chip
+            className={TOGGLE_BOX}
+            selected={!!vals.ungraded}
+            pressed={!!vals.ungraded}
+            disabled={readOnly}
+            aria-label='ungraded'
+            onClick={() => patch({ ungraded: !vals.ungraded })}
+          >
+            ungraded
+          </Chip>
+        </div>
+        <PanelField label='note'>
+          <Input
+            {...anchor('note')}
+            className={INPUT_BOX}
+            aria-label='note'
+            disabled={readOnly}
+            value={vals.note ?? ''}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ note: e.target.value })}
+          />
+        </PanelField>
       </div>
     );
   })();
@@ -2228,6 +2237,13 @@ export function PieceMatchModal({
       confirmDisabled={canSave && (saving || blocked)}
       width='lg'
       closeOnConfirm={false}
+      dock={
+        fuseDock && (
+          <div className='shrink-0 border-t border-textColor bg-bgColor px-2.5 py-2 sm:hidden'>
+            {fuseDock}
+          </div>
+        )
+      }
     >
       <div className='space-y-2'>
         {(sheets.length > 1 || parse.phase === 'loading' || warnings.length > 0) && (
@@ -2258,17 +2274,44 @@ export function PieceMatchModal({
               <PieceSheet
                 // Keyed by the FILE and the SIZE: zoom/pan live inside the sheet, so without a
                 // remount switching either kept the previous drawing's viewBox.
-                key={`${sheet.index}|${shownSize}`}
+                // …and by the zoom: leaving it remounts onto the whole sheet.
+                key={`${sheet.index}|${shownSize}|${zoomed ?? ''}`}
                 pieces={sheetPieces}
                 grainLayer={grainLayer}
                 innerLayers={innerLayers}
                 keyOf={ciOf}
-                markOf={markOf}
+                // Zoomed: everything but the piece being fused steps back.
+                markOf={(p) => (zoomed && ciOf(p) !== zoomed ? 'unnamed' : markOf(p))}
                 labelOf={labelOf}
                 selectedKey={selected}
                 onPick={(key) => {
-                  if (!pickingOldPieces) setSelected(key);
+                  if (pickingOldPieces) return;
+                  // Zone mode: a block that is not a piece (the patternmaker's fusible shape)
+                  // becomes the zone instead of the selection.
+                  const f = zoomed ? fuseOfCi(zoomed) : undefined;
+                  if (
+                    zoomed &&
+                    f?.mode === 'zone' &&
+                    key !== zoomed &&
+                    stateOf(key).kind === 'none'
+                  ) {
+                    setFuse(zoomed, { ...f, zone: { dxfPieceKey: key } });
+                    return;
+                  }
+                  setSelected(key);
                 }}
+                focus={zoomFocus}
+                onFit={() => setZoomOut(selected)}
+                overlay={(px) => (
+                  <FuseOverlay
+                    px={px}
+                    pieces={sheetPieces}
+                    ciOf={ciOf}
+                    sel={zoomed}
+                    fuseOf={fuseOfCi}
+                    onChange={setFuse}
+                  />
+                )}
                 tall
                 bare
                 topLeft={
