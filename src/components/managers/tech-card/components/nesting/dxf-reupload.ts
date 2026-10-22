@@ -36,6 +36,7 @@ import {
   unitsMissing,
   writeInsunits,
 } from 'lib/nesting/dxf/insunits';
+import type { TechCardSeamWire } from 'lib/seams';
 
 /** Причина снимка карточки при первом сохранении после перезалива (UpdateTechCardRequest). */
 export const REUPLOAD_SNAPSHOT_REASON = 'dxf-reupload';
@@ -79,7 +80,12 @@ export type ReuploadDeps<P extends CardPiece, A extends CardAlias, O extends Car
    */
   otherSheets?: () => Promise<{ scope: ReconcileScope; parse: ParsedSheetLite }[]>;
   mintKey: () => string;
-  makePiece: (seed: NewPieceSeed) => P;
+  /**
+   * Новая деталь. `from` — деталь карточки, от которой новая родилась (часть разреза — её родитель,
+   * блок, сопоставленный старой детали, но заведённый новой строкой): форма переносит с неё свойства
+   * кроя (L5 п.6). Без `from` — деталь новая по-настоящему.
+   */
+  makePiece: (seed: NewPieceSeed, from?: P) => P;
   makeAlias: (seed: NewAliasSeed) => A;
   makeJoin: (seed: NewJoinSeed<O>) => O;
 };
@@ -107,6 +113,11 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
   target?: string;
   /** дефекты карточки: их номера шагов переезжают за вставленным join (remapIssueNumbers) */
   issues?: readonly { operationNumber?: number }[];
+  /**
+   * подтверждённые швы карточки (сохранённые + оптимистичные стора, провод TechCardSeam): по ним
+   * сверка перемеряет швы перекроенной детали (L5a п.1). Необязательно.
+   */
+  seams?: readonly TechCardSeamWire[];
 };
 
 /** Идентичность строки листа: lineKey, у строк без него — url. */
@@ -139,7 +150,22 @@ export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends 
       operations: O[];
       plan: ReconcilePlan;
       result: ApplyResult<P, A, O>;
-    };
+    }
+  /**
+   * чужой файл (план `refused: 'foreign'`, L5a п.5): карточка не меняется, файл загружен и ложится
+   * ДОПОЛНИТЕЛЬНЫМ листом слота; `rowIndex` — строка, от которой он берёт размер.
+   */
+  | { kind: 'foreign'; rowIndex: number; row: UploadedSheet };
+
+/**
+ * План «чужой файл». До L5a в типах плана этого нет — признак читается структурно: строка
+ * `'foreign'` в `refused` или `status` плана либо в `reason` отказа применения.
+ */
+export function isForeignPlan(plan: unknown, applied?: unknown): boolean {
+  const p = (plan ?? {}) as { refused?: unknown; status?: unknown };
+  const r = ((applied ?? {}) as { refused?: { reason?: unknown } | null }).refused;
+  return p.refused === 'foreign' || p.status === 'foreign' || r?.reason === 'foreign';
+}
 
 const lower = (s: string | undefined) => (s ?? '').trim().toLowerCase();
 
@@ -264,7 +290,8 @@ export async function reuploadSheet<
   // Дайджест набора слота: старый и новый различаются ровно заменённым файлом. Без дайджеста
   // (нет WebCrypto) — null: «тот же набор» не утверждается.
   const all = (list: string[]) => (list.every(Boolean) ? list.join(',') : null);
-  const input: ReconcileInput<P, A, O> = {
+  // `seams` — поле L5a; до него ReconcileInput его не знает, и тип расширяется здесь.
+  const input: ReconcileInput<P, A, O> & { seams?: readonly TechCardSeamWire[] } = {
     scope: card.scope,
     pieces: card.pieces,
     aliases: card.aliases,
@@ -275,17 +302,42 @@ export async function reuploadSheet<
     externalRefs: card.externalRefs,
     otherSheets,
     aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+    ...(card.seams ? { seams: card.seams } : {}),
   };
   const plan = reconcile(input);
   if (plan.status === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
+  const foreign = async (): Promise<ReuploadOutcome<P, A, O>> => {
+    try {
+      return {
+        kind: 'foreign',
+        rowIndex: rows[t].i,
+        row: await deps.upload({ name: file.name, bytes }),
+      };
+    } catch (e) {
+      return { kind: 'refused', why: 'upload', detail: e instanceof Error ? e.message : String(e) };
+    }
+  };
+  if (isForeignPlan(plan)) return foreign();
+  // Новая деталь, рождённая от детали карточки: строка плана со старой деталью и блоком без детали
+  // (часть разреза; блок, заведённый новой строкой вместо старой). Ключ — идентичность блока.
+  const byKey = new Map(card.pieces.map((p) => [p.lineKey, p]));
+  const originOf = new Map<string, P>();
+  for (const r of plan.rows) {
+    const src = byKey.get(r.old.find((o) => o.pieceLineKey)?.pieceLineKey ?? '');
+    if (!src) continue;
+    for (const l of r.links)
+      if (l.pieceLineKey === null && !originOf.has(lower(l.identity)))
+        originOf.set(lower(l.identity), src);
+  }
   const result = applyPlan(input, plan, {
     mintKey: deps.mintKey,
-    makePiece: deps.makePiece,
+    makePiece: (seed) => deps.makePiece(seed, originOf.get(lower(seed.identity))),
     makeAlias: deps.makeAlias,
     makeJoin: deps.makeJoin,
     setReview: (op, review) => ({ ...op, review }),
   });
   if (result.refused?.reason === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
+  if (isForeignPlan(plan, result)) return foreign();
   if (result.refused) return { kind: 'refused', why: 'sweep', detail: result.revisionNote };
 
   let up: UploadedSheet;

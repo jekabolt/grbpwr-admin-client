@@ -51,6 +51,7 @@ import { KitMarkerHint } from './kit-marker';
 import { MarkerApplyHint } from './marker-apply';
 import { type MarkerColorway } from './nesting/colorway-widths';
 import { bomUnitKind, cardMarkers, markersForLine, markersOfColorway } from './nesting/marker-io';
+import { markersBehindSheets } from './nesting/marker-sheets';
 import { TechCardFormData, wireInt } from './schema';
 import {
   applyPlanToUsages,
@@ -999,6 +1000,7 @@ function ColourwayColumn({
   // другого колорвея, выглядела бы совершенно нормально и была бы неверной.
   const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
   const allCardMarkers = useMemo(() => cardMarkers(markers), [markers]);
+  const markersBehind = useMemo(() => markersBehindSheets(techCard), [techCard]);
 
   // МАТЧЕР АРТИКУЛОВ (чистый): предложения под цвет колорвея. Сам ничего не пишет — план решает,
   // что из них пинится (точное + то же семейство), остальное уходит в `pick one of N`.
@@ -1027,7 +1029,11 @@ function ColourwayColumn({
       cardSlots,
       rowsBySlot,
       materials,
-      markers,
+      // A marker nested before its fabric's latest DXF upload does not seed a norm by itself.
+      markers:
+        markersBehind.size > 0
+          ? (markers ?? []).filter((m) => !markersBehind.has(Number(m.id ?? 0)))
+          : markers,
       otherColorways,
       bomItems,
       pieces,
@@ -1047,6 +1053,7 @@ function ColourwayColumn({
       draft.rowsBySlot,
       materials,
       markers,
+      markersBehind,
       otherColorways,
       bomItems,
       pieces,
@@ -1092,6 +1099,7 @@ function ColourwayColumn({
         rowsBySlot: draft.rowsBySlot,
         materials,
         markers: cwMarkers,
+        markersBehind,
         plan,
         labDipStatus,
         strayCount: draft.strayCount,

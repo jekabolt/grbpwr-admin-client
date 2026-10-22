@@ -33,6 +33,8 @@ export type ColumnWarningsArgs = {
   rowsBySlot: Map<string, SlotRows>;
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
+  /** раскладки, снятые до последней заливки DXF своей ткани (markersBehindSheets) */
+  markersBehind?: ReadonlySet<number>;
   plan: AutoPlan;
   labDipStatus: string;
   strayCount: number;
@@ -52,6 +54,7 @@ export function columnWarnings({
   rowsBySlot,
   materials,
   markers,
+  markersBehind,
   plan,
   labDipStatus,
   strayCount,
@@ -95,7 +98,8 @@ export function columnWarnings({
       const applied = tsMillis(draft.normAppliedAt);
       const moved = tsMillis(marker?.updatedAt);
       const drifted = applied != null && moved != null && moved > applied;
-      if (drifted || markerNormStaleness(marker, articleWidth).stale) {
+      const behind = !!marker && !!markersBehind?.has(Number(marker.id ?? 0));
+      if (drifted || behind || markerNormStaleness(marker, articleWidth).stale) {
         out.push({
           text: `${where}: marker changed, re-apply`,
           action: door('re-apply the norm', () => openNorm(key)),
