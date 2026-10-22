@@ -140,6 +140,32 @@ export function nextFusingAliases<A extends FusingAliasRow>(input: {
   return { rows: [...kept, ...ours], shared };
 }
 
+/**
+ * L11 WHOLE-SET RULE FOR LINKS. A line whose links are still the legacy purpose-first set (read for
+ * it only while no link is bound to the line) would lose every one of them to the first line-bound
+ * link the rebuild wrote. The rebuild rebuilds only rows it owns — of a scope only generated sheets
+ * hold (nextFusingAliases) — and never rebinds an owner's rows, so a line with such owner rows is
+ * HELD, like a line an uploaded sheet holds. `legacyScopeOf(row)` — the line a row is an ACTIVE
+ * legacy link of (bom-purpose activeLegacyScopeOf), else ''.
+ */
+export function linesHeldByLegacyLinks<A extends FusingAliasRow>(input: {
+  current: readonly A[];
+  legacyScopeOf: (row: A) => string;
+  previousGenerated: readonly { fabricPurpose?: string; bomLineKey?: string }[];
+  otherSheets: readonly { fabricPurpose?: string; bomLineKey?: string }[];
+}): Set<string> {
+  const occupied = new Set(input.otherSheets.map(fusingScopeKey).filter(Boolean));
+  const ours = new Set(
+    input.previousGenerated.map(fusingScopeKey).filter((key) => key && !occupied.has(key)),
+  );
+  const held = new Set<string>();
+  for (const row of input.current) {
+    const line = input.legacyScopeOf(row).trim();
+    if (line && !ours.has(fusingScopeKey(row))) held.add(line);
+  }
+  return held;
+}
+
 /** Same rows regardless of order (the server may read them back sorted differently). */
 export function sameAliasSet(
   left: readonly FusingAliasRow[],

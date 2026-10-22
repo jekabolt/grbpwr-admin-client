@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  activeLegacyScopeOf,
   aliasInScope,
   bindingForScope,
   bindingScopes,
@@ -9,7 +10,15 @@ import {
   markerScopeLines,
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
-import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
+import { pieceAreaSheetsRefusal } from 'components/managers/tech-card/components/piece-areas';
+import { areaReadKeysOfScope } from 'components/managers/tech-card/components/piece-areas-state';
+import {
+  linesHeldByLegacyLinks,
+  nextFusingAliases,
+  nextGeneratedPatterns,
+  planFusingLines,
+  sameAliasSet,
+} from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -460,7 +469,10 @@ export async function main() {
   assert.equal(scopeKeyOfBinding(OTHER, '', legacyOnly), 'S-1');
   assert.equal(scopeKeyOfBinding(OTHER, '', lineAndLegacy), '');
   assert.equal(scopeKeyOfBinding(UNSET, 'S-1', lineAndLegacy), 'S-1');
-  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', lineAndLegacy), 'S-1');
+  // a purpose-first row keeps its legacy provenance even with the compatibility line echoed beside
+  // it (the DB buckets it by COALESCE(fabric_purpose, bom_line_key)): the line set suppresses it too
+  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', lineAndLegacy), '');
+  assert.equal(scopeKeyOfBinding(OTHER, 'S-1', legacyOnly), 'S-1');
   assert.ok(aliasInScope(legacyFelt, scopeOf('S-1'), legacyOnly));
   assert.ok(!aliasInScope(legacyFelt, scopeOf('S-1'), lineAndLegacy));
   assert.deepEqual(
@@ -468,13 +480,88 @@ export async function main() {
     [boundFelt],
     'the line set wins whole',
   );
-  // a row that names a line (here a deleted one) is not legacy: it is the felt's own row
+  // backend TestPreferredFabricArtifactsKeepLineAndLegacyInterliningSetsExclusive: purpose-only and
+  // purpose+line rows are one legacy set; two line rows replace it wholesale, and without them the
+  // complete legacy set is read
+  const echoedFelt = { fabricPurpose: OTHER, bomLineKey: 'S-1' };
+  const boundFelt2 = { fabricPurpose: UNSET, bomLineKey: 'S-1' };
+  const mixed = [legacyFelt, echoedFelt, boundFelt, boundFelt2];
+  const mixedSet = bindingScopes(scopes, mixed);
+  assert.deepEqual(
+    mixed.filter((a) => aliasInScope(a, scopeOf('S-1'), mixedSet)),
+    [boundFelt, boundFelt2],
+    'line-scoped set replaces the legacy set wholesale',
+  );
+  const legacyPair = [legacyFelt, echoedFelt];
+  const legacyPairSet = bindingScopes(scopes, legacyPair);
+  assert.deepEqual(
+    legacyPair.filter((a) => aliasInScope(a, scopeOf('S-1'), legacyPairSet)),
+    legacyPair,
+    'empty line set falls back to the complete legacy set',
+  );
+  // a purpose row naming a deleted line is still purpose-first, so legacy: with the purpose-only row
+  // it forms the felt's legacy set, and neither is primary
   const goneLine = bindingScopes(scopes, [
     legacyFelt,
     { fabricPurpose: OTHER, bomLineKey: 'GONE' },
   ]);
   assert.equal(scopeKeyOfBinding(OTHER, 'GONE', goneLine), 'S-1');
-  assert.equal(scopeKeyOfBinding(OTHER, '', goneLine), '');
+  assert.equal(scopeKeyOfBinding(OTHER, '', goneLine), 'S-1');
+  assert.equal(goneLine.primary.size, 0);
+  // AREA SAVE (L11): an interlining scope's sheets pass the preflight by their set-aware scope —
+  // a legacy-only felt set and a line set both measure under the line key; a mixed set is refused.
+  // An ordinary fabric keeps the raw guard (a line-bound main sheet under the purpose key refuses).
+  const sheet = (b: { fabricPurpose: string; bomLineKey: string }, lineKey: string) => ({
+    ...b,
+    lineKey,
+  });
+  assert.equal(pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1')], 'S-1', scopes), null);
+  assert.equal(
+    pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1'), sheet(echoedFelt, 'P2')], 'S-1', scopes),
+    null,
+  );
+  assert.equal(pieceAreaSheetsRefusal([sheet(boundFelt, 'P3')], 'S-1', scopes), null);
+  assert.match(
+    pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1'), sheet(boundFelt, 'P3')], 'S-1', scopes) ?? '',
+    /bound differently/,
+  );
+  assert.match(pieceAreaSheetsRefusal([sheet(legacyFelt, 'P1')], 'S-1') ?? '', /bound to a BOM/);
+  assert.match(
+    pieceAreaSheetsRefusal(
+      [sheet({ fabricPurpose: UNSET, bomLineKey: 'M-1' }, 'P4')],
+      'main',
+      scopes,
+    ) ?? '',
+    /bound to a BOM line/,
+  );
+  assert.equal(
+    pieceAreaSheetsRefusal([sheet({ fabricPurpose: MAIN, bomLineKey: '' }, 'P4')], 'main', scopes),
+    null,
+  );
+  // AREA FRESHNESS: the felt reads its line's measurement, else the legacy purpose one — never both
+  const areaScope = (scopeKey: string) => ({ scopeKey, areas: [] });
+  assert.deepEqual(
+    areaReadKeysOfScope(scopeOf('S-1'), scopes, [legacyFelt], [areaScope('other')]),
+    ['other'],
+  );
+  assert.deepEqual(
+    areaReadKeysOfScope(
+      scopeOf('S-1'),
+      scopes,
+      [legacyFelt],
+      [areaScope('other'), areaScope('S-1')],
+    ),
+    ['S-1'],
+  );
+  assert.deepEqual(areaReadKeysOfScope(scopeOf('S-1'), scopes, [legacyFelt], []), ['S-1']);
+  // F-2 shares «interfacing» with two other fusibles: no legacy purpose key to fall back to
+  assert.deepEqual(areaReadKeysOfScope(scopeOf('F-2'), scopes, [], [areaScope('interfacing')]), [
+    'F-2',
+  ]);
+  assert.deepEqual(
+    areaReadKeysOfScope(scopeOf(MAIN), scopes, [{ fabricPurpose: UNSET, bomLineKey: 'M-1' }], []),
+    ['M-1'],
+  );
   // per artifact kind: the links' line set does not suppress a legacy SHEET, and vice versa
   const sheetsLegacy = bindingScopes(scopes, [legacyFelt]);
   const linksBound = bindingScopes(scopes, [boundFelt, legacyFelt]);
@@ -519,6 +606,24 @@ export async function main() {
     });
   assert.deepEqual([...feltPlan([legacyFelt]).blocked], ['S-1']);
   assert.deepEqual([...feltPlan([legacyFelt, boundFelt]).blocked], []);
+  // …and the same set rule for LINKS: the owner's legacy felt links hold the line (the rebuild's
+  // first line-bound link would hide them all, and it never rebinds an owner's rows); links of an
+  // old generated purpose-bound sheet are the rebuild's own, and a line-bound link set holds nothing.
+  const feltLinkA = { ...legacyFelt, blockName: 'A', pieceLineKey: 'P1' };
+  const held = (current: (typeof feltLinkA)[], previousGenerated: (typeof legacyFelt)[] = []) => [
+    ...linesHeldByLegacyLinks({
+      current,
+      legacyScopeOf: (a) =>
+        activeLegacyScopeOf(a.fabricPurpose, a.bomLineKey, bindingScopes(scopes, current)),
+      previousGenerated,
+      otherSheets: [],
+    }),
+  ];
+  assert.deepEqual(held([feltLinkA]), ['S-1']);
+  assert.deepEqual(held([{ ...feltLinkA, bomLineKey: 'S-1' }]), ['S-1'], 'purpose + echoed line');
+  assert.deepEqual(held([feltLinkA], [legacyFelt]), []);
+  assert.deepEqual(held([feltLinkA, { ...boundFelt, blockName: 'B', pieceLineKey: 'P2' }]), []);
+  assert.deepEqual(held([{ ...feltLinkA, fabricPurpose: INTERFACING, bomLineKey: 'F-2' }]), []);
   // A blocked line's generated sheet is removed, not kept beside the uploaded sheet that holds the
   // line; a generated line's row is replaced; uploaded rows ride through.
   const uploadedOther = { name: 'felt.dxf', bomLineKey: 'IL-4', fabricPurpose: OTHER };

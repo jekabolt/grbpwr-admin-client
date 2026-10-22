@@ -112,6 +112,21 @@ export const scopeKeyOf = (a: { fabricPurpose?: string; bomLineKey?: string }) =
   return (a.bomLineKey ?? '').trim();
 };
 
+const NO_PURPOSE = new Set([
+  'TECH_CARD_BOM_PURPOSE_UNSET',
+  'TECH_CARD_BOM_PURPOSE_UNKNOWN',
+  'TECH_CARD_BOM_PURPOSE_UNSPECIFIED',
+]);
+type Binding = { fabricPurpose: string; bomLineKey: string };
+/** The row is stored bound to the target's LINE (no purpose beside it). */
+const boundTo = (a: { fabricPurpose?: string; bomLineKey?: string }, t: Binding) => {
+  const p = (a.fabricPurpose ?? '').trim();
+  return (
+    (!p || NO_PURPOSE.has(p)) &&
+    (a.bomLineKey ?? '').trim().toLowerCase() === t.bomLineKey.trim().toLowerCase()
+  );
+};
+
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 function clampBytes(s: string, max: number): string {
   let out = s.trim();
@@ -152,6 +167,36 @@ export function planFormWrites(
 } {
   const writes: FormWrite[] = [];
   const scopeOf = opts.scopeOf ?? scopeKeyOf;
+
+  // L11 WHOLE-SET MIGRATION. An interlining line reads its rows of one kind as ONE set: the rows
+  // bound to the line or, while there are none, the legacy purpose-only set (bom-purpose
+  // bindingScopes, backend PreferredFabricArtifactsByScope). The first line-bound row this import
+  // writes would silently drop every legacy row it does not replace — the other sheets, the links
+  // of blocks the new file shares with them. So an interlining scope the import writes into, whose
+  // live set of a kind has no row bound to its line yet, is moved WHOLE: every live sheet and link
+  // that resolves to it is re-filed under the line binding (links deduplicated by scope + block).
+  const lineTargets = new Map<string, Binding>();
+  for (const sc of draft.scopes) {
+    const t = sc.target;
+    const p = (t.fabricPurpose ?? '').trim();
+    if (!t.isInterlining || (p && !NO_PURPOSE.has(p)) || !(t.bomLineKey ?? '').trim()) continue;
+    const touched =
+      uploaded.some((u) => u.scopeKey === t.scopeKey) ||
+      draft.aliases.some((a) => a.scopeKey === t.scopeKey);
+    if (touched)
+      lineTargets.set(t.scopeKey, { fabricPurpose: t.fabricPurpose, bomLineKey: t.bomLineKey });
+  }
+  /** Scopes of `lineTargets` whose live rows (resolved `keys`) hold none bound to the line yet. */
+  const toMigrate = (
+    rows: readonly { fabricPurpose?: string; bomLineKey?: string }[],
+    keys: string[],
+  ) =>
+    new Set(
+      [...lineTargets].flatMap(([key, t]) => {
+        const mine = rows.filter((_, i) => keys[i] === key);
+        return mine.length && !mine.some((r) => boundTo(r, t)) ? [key] : [];
+      }),
+    );
 
   // 1. patterns — one row per uploaded scope: the previous import's row replaced in place, or a new
   //    row appended. The replaced row is re-found in the LIVE form by its lineKey and must still be
@@ -206,7 +251,16 @@ export function planFormWrites(
       },
     ];
   });
-  if (rows.length || replaced.length)
+  const sheetKeys = live.patterns.map((p) => scopeOf(p, 'sheet'));
+  const movedSheets = toMigrate(live.patterns, sheetKeys);
+  let migrated = 0;
+  nextPatterns.forEach((p, i) => {
+    const t = movedSheets.has(sheetKeys[i]) ? lineTargets.get(sheetKeys[i]) : undefined;
+    if (!t || boundTo(p, t)) return;
+    nextPatterns[i] = { ...p, fabricPurpose: t.fabricPurpose, bomLineKey: t.bomLineKey };
+    migrated++;
+  });
+  if (rows.length || replaced.length || migrated)
     writes.push({ path: 'patterns', value: [...nextPatterns, ...rows] });
 
   // 2. pieces — re-resolve every draft piece against the live card
@@ -288,9 +342,12 @@ export function planFormWrites(
   writes.push(...points);
 
   // 4. aliases — full set, ours replace same-key rows in place, others ride through
-  const next: LiveAlias[] = live.aliases.map((a) => ({ ...a }));
+  let next: LiveAlias[] = live.aliases.map((a) => ({ ...a }));
+  const linkKeys = live.aliases.map((a) => scopeOf(a, 'link'));
+  const movedLinks = toMigrate(live.aliases, linkKeys);
+  const keyOf = [...linkKeys];
   const at = new Map<string, number>();
-  next.forEach((a, i) => at.set(aliasKey(scopeOf(a, 'link'), a.blockName ?? ''), i));
+  next.forEach((a, i) => at.set(aliasKey(keyOf[i], a.blockName ?? ''), i));
   for (const a of draft.aliases) {
     const row = {
       bomLineKey: a.bomLineKey,
@@ -302,8 +359,23 @@ export function planFormWrites(
     const i = at.get(k);
     if (i == null) {
       at.set(k, next.length);
+      keyOf.push(a.scopeKey);
       next.push(row);
-    } else next[i] = row;
+    } else {
+      next[i] = row;
+      keyOf[i] = a.scopeKey;
+    }
+  }
+  if (movedLinks.size) {
+    next = next.flatMap((a, i) => {
+      const t = movedLinks.has(keyOf[i]) ? lineTargets.get(keyOf[i]) : undefined;
+      if (!t) return [a];
+      // one row per scope + block: the one the key map holds (the draft's, when it wrote one)
+      if (at.get(aliasKey(keyOf[i], a.blockName ?? '')) !== i) return [];
+      return boundTo(a, t)
+        ? [a]
+        : [{ ...a, fabricPurpose: t.fabricPurpose, bomLineKey: t.bomLineKey }];
+    });
   }
   const same =
     next.length === live.aliases.length &&

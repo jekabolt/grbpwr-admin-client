@@ -48,7 +48,7 @@ import {
   scopeAreaPieces,
   useUnsavedAreaSource,
 } from './piece-areas';
-import { scopeAreaState, serverKeyOfScope, serverScopeKeysOfSheets } from './piece-areas-state';
+import { areaReadKeysOfScope, scopeAreaState, serverKeyOfScope } from './piece-areas-state';
 import type { TechCardFormData } from './schema';
 import { isDxfUrl } from 'utils/pattern';
 
@@ -171,7 +171,8 @@ export function useAutoPieceAreas(args: {
       const sheets = sheetsByScope.get(scope.key) ?? [];
       const dxfSheets = sheets.filter((s) => !!s.url && isDxfUrl(s.url));
       if (dxfSheets.length === 0) continue;
-      const state = scopeAreaState(serverScopeKeysOfSheets(sheets), cardRead.pieceAreaScopes);
+      const areaKeys = areaReadKeysOfScope(scope, scopes, sheets, cardRead.pieceAreaScopes);
+      const state = scopeAreaState(areaKeys, cardRead.pieceAreaScopes);
       if (state.phase === 'fresh') continue;
 
       const scopeAliases = aliases.filter((a) => aliasInScope(a, scope, links));
@@ -185,7 +186,7 @@ export function useAutoPieceAreas(args: {
         continue;
 
       const serverKey = serverKeyOfScope(scope);
-      const sheetsWhy = pieceAreaSheetsRefusal(sheets, serverKey);
+      const sheetsWhy = pieceAreaSheetsRefusal(sheets, serverKey, scopes);
       if (sheetsWhy) {
         // «no identifier yet» is the save's job; the binding mismatches are not.
         if (!sheetsWhy.includes('no identifier yet'))
@@ -268,6 +269,7 @@ export function useAutoPieceAreas(args: {
           const res = await publishPieceAreas({
             techCardId: id,
             scopeKey: serverKey,
+            scopes,
             sheets: [...sheets],
             areas: outcome.areas.pieceRows,
             contourLayer: layer,

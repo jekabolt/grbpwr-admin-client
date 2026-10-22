@@ -25,6 +25,7 @@ import {
   grainLayerOptions,
 } from 'components/managers/tech-card/components/nesting/grain';
 import {
+  activeLegacyScopeOf,
   bindingScopes,
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
@@ -46,7 +47,13 @@ import {
   patternUploadErrorMessage,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
+import {
+  linesHeldByLegacyLinks,
+  nextFusingAliases,
+  nextGeneratedPatterns,
+  planFusingLines,
+  sameAliasSet,
+} from './aliases';
 import { buildFusingSheets } from './dxf';
 import type {
   BuildFusingSheetsResult,
@@ -472,6 +479,34 @@ export async function regenerateFusingSheets(
       scopeKeyOfBinding(sheet.fabricPurpose, sheet.bomLineKey, sheetSet),
     ),
   });
+  const oldAliases = card.pieceDxfAliases?.items ?? [];
+  // A line whose LINKS are the owner's legacy purpose-first set (no link bound to the line yet, and
+  // not a generated sheet's): its first line-bound link would hide them all (L11 set rule), and the
+  // rebuild never rebinds an owner's rows. The line is left exactly as it is — nothing generated,
+  // its generated sheet (if any) kept, its links untouched — and a warning says so.
+  const linkSet = bindingScopes(scopes, oldAliases);
+  const heldByLinks = linesHeldByLegacyLinks({
+    current: oldAliases,
+    legacyScopeOf: (alias) => activeLegacyScopeOf(alias.fabricPurpose, alias.bomLineKey, linkSet),
+    previousGenerated: oldGenerated.filter((p) => !blocked.has(p.bomLineKey?.trim() ?? '')),
+    otherSheets: [
+      ...uploadedSheets,
+      ...oldGenerated.filter((p) => blocked.has(p.bomLineKey?.trim() ?? '')),
+    ],
+  });
+  const held = new Set(
+    lines.map((line) => line.bomLineKey).filter((k) => !blocked.has(k) && heldByLinks.has(k)),
+  );
+  const keptHeld: common_TechCardSizePattern[] = [];
+  for (const key of held) {
+    const old = oldByLine.get(key);
+    if (old) {
+      replacements.set(key, old);
+      keptHeld.push(old);
+    }
+    const label = lines.find((line) => line.bomLineKey === key)?.label ?? key;
+    warnings.push(`${label}: legacy piece links hold this interlining, not regenerated`);
+  }
   // A line whose effective scope an uploaded sheet holds: the uploaded sheet wins fully. Nothing is
   // generated and a generated sheet it already has is REMOVED (nextGeneratedPatterns). Its links
   // cannot be told from the owner's, so they stay as they are and a warning says so.
@@ -487,7 +522,9 @@ export async function regenerateFusingSheets(
     else if (built.sheets.some((sheet) => sheet.bomLineKey === key))
       warnings.push(`${label}: an uploaded sheet holds this interlining, not generated`);
   }
-  const activeSheets = built.sheets.filter((sheet) => !blocked.has(sheet.bomLineKey));
+  const activeSheets = built.sheets.filter(
+    (sheet) => !blocked.has(sheet.bomLineKey) && !held.has(sheet.bomLineKey),
+  );
   for (const sheet of activeSheets) {
     const binding = bindings.get(sheet.bomLineKey)!;
     const fabricPurpose = binding.fabricPurpose as common_TechCardBomPurpose;
@@ -532,16 +569,17 @@ export async function regenerateFusingSheets(
   }
 
   const nextPatterns = nextGeneratedPatterns(oldPatterns, isGenerated, replacements);
-  const oldAliases = card.pieceDxfAliases?.items ?? [];
   const aliasPlan = nextFusingAliases({
     current: oldAliases,
     // Ours to clean: every old generated sheet of a line that is not blocked — also a legacy one
     // bound to a purpose, whose purpose scope stays untouched while an uploaded sheet shares it.
-    previousGenerated: oldGenerated.filter(
-      (pattern) => !blocked.has(pattern.bomLineKey?.trim() ?? ''),
-    ),
-    // A removed blocked sheet occupies its scope like an uploaded one: its links are not touched.
-    otherSheets: [...uploadedSheets, ...removedBlocked],
+    previousGenerated: oldGenerated.filter((pattern) => {
+      const key = pattern.bomLineKey?.trim() ?? '';
+      return !blocked.has(key) && !held.has(key);
+    }),
+    // A removed blocked sheet (and a held line's kept one) occupies its scope like an uploaded one:
+    // its links are not touched.
+    otherSheets: [...uploadedSheets, ...removedBlocked, ...keptHeld],
     sheets: activeSheets.map((sheet) => ({
       binding: bindings.get(sheet.bomLineKey)!,
       links: sheet.aliases.flatMap((alias) => {

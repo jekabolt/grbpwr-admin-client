@@ -215,7 +215,7 @@ export default function DxfApplyDialog({
       (sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, sheets) === lineScope.key,
     );
     if (mine.length === 0) return null;
-    return { techCardId: id, scopeKey: lineScopeKey, sheets: mine };
+    return { techCardId: id, scopeKey: lineScopeKey, scopes, sheets: mine };
   }, [techCardId, patternRows, scopes, lineScope, lineScopeKey]);
 
   const apply = () => {
@@ -254,6 +254,7 @@ export default function DxfApplyDialog({
       void publishPieceAreas({
         techCardId: publishTarget.techCardId,
         scopeKey: publishTarget.scopeKey,
+        scopes: publishTarget.scopes,
         sheets: publishTarget.sheets,
         areas: outcome.areas.pieceRows,
         contourLayer: chosenLayer,
