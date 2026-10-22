@@ -42,6 +42,13 @@ const NOTCH_CLEAR_MM = 10;
 const REACH_VERTS = 40;
 /** A removed turn with a majority neighbour's turn this close is that size's feature too, mm. */
 const SHARED_TURN_MM = 15;
+/**
+ * The most one size's search may measure (Σ vertices of the straightened outlines it tries; the
+ * largest repair met, polupalto's crosses-drawn 44, takes 1.5 M). A line that jitters all along —
+ * a motif drawn as crosses — is not a kink: past this the size is refused (D3: G5 holds the family),
+ * where the search would run for minutes and still refuse.
+ */
+const SEARCH_WORK = 4_000_000;
 
 export type { KinkRecord, KinkRule };
 
@@ -155,6 +162,7 @@ export function straightenSize(
   if (lacks(sh, canon)) return null;
   let E = excess(sh, canon);
   const kinks: KinkDone[] = [];
+  let work = 0;
   for (let iter = 0; E > 0 && iter < 6; iter++) {
     const n = outer.length;
     // the strong turns of this size — the extra ones are among them
@@ -165,6 +173,9 @@ export function straightenSize(
     );
     type Best = { outer: PtMm[]; E: number; arc: number; rec: KinkDone };
     const hold: { best: Best | null } = { best: null };
+    // the excess after a chord a→b depends on the pair alone: neighbouring turns and both tiers
+    // try the same pairs (a jagged motif line has a turn every few vertices), measured once
+    const excessOf = new Map<number, number>();
     for (const t of turns) {
       let v = 0;
       let vd = Infinity;
@@ -224,20 +235,30 @@ export function straightenSize(
                 ),
             );
             if (shared) continue;
-            const next: PtMm[] = [];
-            for (let i = b.i; ; i = (i + 1) % n) {
-              next.push(outer[i]);
-              if (i === a.i) break;
+            const chordOf = () => {
+              const next: PtMm[] = [];
+              for (let i = b.i; ; i = (i + 1) % n) {
+                next.push(outer[i]);
+                if (i === a.i) break;
+              }
+              return next;
+            };
+            const left = ((a.i - b.i + n) % n) + 1;
+            if (left < 3) continue;
+            let E2 = excessOf.get(a.i * n + b.i);
+            if (E2 === undefined) {
+              work += left;
+              if (work > SEARCH_WORK) return null;
+              E2 = excess(shapeOfCut(chordOf(), 0, 0), canon);
+              excessOf.set(a.i * n + b.i, E2);
             }
-            if (next.length < 3) continue;
-            const E2 = excess(shapeOfCut(next, 0, 0), canon);
             const arc = a.arc + b.arc;
             if (E2 >= E) continue;
             found = true;
             const best = hold.best;
             if (!best || E2 < best.E || (E2 === best.E && arc < best.arc))
               hold.best = {
-                outer: next,
+                outer: chordOf(),
                 E: E2,
                 arc,
                 rec: {

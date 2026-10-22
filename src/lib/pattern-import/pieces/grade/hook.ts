@@ -80,7 +80,8 @@ export const SOLVER_MODEL: WallModel = {
  * shows the sheet's sizes side by side — at least min(n, 5), never fewer than 3, same-looking lines
  * (a cut line with its seam line is 2, a hem with fold and facing 3), over a third of the region's
  * lines. Measured on the encoded corpus: 4 lanes still fired on reef (declared-dash, 9 sizes) and 3
- * on viola; 5 fires only on polupalto, whose "encoding" is F3 reading piece numbers as size labels.
+ * on viola. Polupalto's markings, drawn once per size on top of each other, are one lane each
+ * (guard laneMergeMm), so they no longer reach 5.
  */
 export const mixedGuard = (n: number): Partial<GuardOpts> => ({
   minLanes: Math.max(3, Math.min(n, 5)),
@@ -90,10 +91,11 @@ export const mixedGuard = (n: number): Partial<GuardOpts> => ({
 /**
  * And the two-lane or short nest the rule above misses (two sizes nobody encoded, sizes that differ
  * along a tab): a same-look neighbour ≤ 15 mm away along ≥ 80 mm of the region's lines that is NOT
- * the line's sew line (a uniform 2–20 mm allowance all along), whatever its share. Lines under
+ * the line's sew line (a uniform 1.5–20 mm allowance all along), whatever its share. Lines under
  * 40 mm are no lane (lettering, symbols and arrows drawn as strokes). Measured on the encoded
- * corpus: no encoded seed flips (viola's nearest lettering pair: 64 mm of nest at ≤ 15 mm);
- * polupalto (audited, not an encoding) refuses more.
+ * corpus: no encoded seed flips (viola's nearest lettering pair: 64 mm of nest at ≤ 15 mm).
+ * Polupalto's 2 mm double marking lines are a uniform pair since the floor is 1.5 mm; 6 of its
+ * seeds still refuse on graded-length copies of interior lines.
  */
 export const PAIR_GUARD: Partial<GuardOpts> = {
   minLanes: 2,

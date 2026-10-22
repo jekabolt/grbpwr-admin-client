@@ -56,7 +56,12 @@ export function turnsOf(
   outline: readonly PtMm[],
   reach = CORNER_REACH_MM,
 ): { at: PtMm; deg: number }[] {
-  let pts = simplify(outline, true, 0.4);
+  return turnsOn(simplify(outline, true, 0.4), reach);
+}
+
+/** turnsOf on the outline already simplified at 0.4 mm (a shape measures both scales on one). */
+function turnsOn(simplified: readonly PtMm[], reach: number): { at: PtMm; deg: number }[] {
+  let pts = simplified;
   if (
     pts.length > 2 &&
     Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1e-6
@@ -87,10 +92,25 @@ export function turnsOf(
   // a corner turned over two close vertices counts once: keep local maxima 2·reach apart
   const keep: { at: PtMm; deg: number }[] = [];
   const order = out.map((_, i) => i).sort((x, y) => Math.abs(out[y].deg) - Math.abs(out[x].deg));
+  // kept turns by cell of 2·reach: only the 3×3 cells around a turn can hold one that close
+  const cell = 2 * reach;
+  const cells = new Map<number, { at: PtMm; deg: number }[]>();
   for (const i of order) {
     const t = out[i];
-    if (keep.some((k) => Math.hypot(k.at.x - t.at.x, k.at.y - t.at.y) < 2 * reach)) continue;
+    const cx = Math.floor(t.at.x / cell);
+    const cy = Math.floor(t.at.y / cell);
+    let near = false;
+    for (let dx = -1; dx <= 1 && !near; dx++)
+      for (let dy = -1; dy <= 1 && !near; dy++)
+        near = !!cells
+          .get((cx + dx) * 65536 + cy + dy)
+          ?.some((k) => Math.hypot(k.at.x - t.at.x, k.at.y - t.at.y) < 2 * reach);
+    if (near) continue;
     keep.push(t);
+    const kk = cx * 65536 + cy;
+    const arr = cells.get(kk);
+    if (arr) arr.push(t);
+    else cells.set(kk, [t]);
   }
   return keep;
 }
@@ -113,8 +133,9 @@ function eventsOf(cut: readonly PtMm[]): {
   const events: { key: string; strong: number; weak: number; at: PtMm[] }[] = [];
   let corners: PtMm[] = [];
   let weak = 0;
+  const simple = simplify(cut, true, 0.4);
   SCALES.forEach((sc, k) => {
-    const t = turnsOf(cut, sc.reach);
+    const t = turnsOn(simple, sc.reach);
     if (k === 0) {
       corners = t.filter((x) => Math.abs(x.deg) > sc.strong).map((x) => x.at);
       weak = t.filter((x) => Math.abs(x.deg) > sc.weak).length;
