@@ -53,7 +53,7 @@ export type RollSearchJob = {
   widthCm: number;
   /** Longest piece run one sheet may hold, cm (sheet limit minus furniture). */
   sheetCm: number;
-  /** Paper every sheet costs besides its piece run (test square, title), cm. */
+  /** Paper every sheet costs besides its piece run (title and optional test square), cm. */
   sheetFurnitureCm: number;
   gapCm: number;
   /** GA wall-clock budget, ms. Defaults to {@link ROLL_GA_BUDGET_MS}. */

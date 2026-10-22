@@ -39,7 +39,7 @@ import {
 } from '../nesting/marker-quiz/marker-quiz';
 import { PaperChoicePicture } from '../nesting/marker-quiz/pictures';
 import { pdfDeps } from './download';
-import { readPrintRoll, rememberPrintRoll } from './roll-print-memory';
+import { readPrintRoll, rememberPrintRoll, rememberTestSquare } from './roll-print-memory';
 
 export type RollPrintTarget = {
   url: string;
@@ -80,10 +80,11 @@ const PAPERS: readonly { value: Paper; name: string; sub: string }[] = [
 // One long roll: the engine splits only past the PDF page limit (5.08 m). Owner, 22.10.
 const ROLL_SHEET_M = 5;
 const ROLL_EDGE_MM = 5;
-const rollOf = (widthCm: number): RollSpec => ({
+const rollOf = (widthCm: number, testSquare = true): RollSpec => ({
   widthCm,
   maxSheetM: ROLL_SHEET_M,
   edgeMm: ROLL_EDGE_MM,
+  testSquare,
 });
 // The virtual roll the tiles are laid on before they are cut into pages.
 const TILE_ROLL: RollSpec = { widthCm: 100, maxSheetM: ROLL_SHEET_M, edgeMm: 0 };
@@ -172,6 +173,7 @@ export function RollPrintDialog({
   const [loading, setLoading] = useState(false);
   const [copies, setCopies] = useState<SizeCopies>({});
   const [paper, setPaper] = useState<Paper>('roll');
+  const [testSquare, setTestSquare] = useState(true);
   // Typed by hand; prefilled only with the width the user typed last time.
   const [widthText, setWidthText] = useState('');
   const [results, setResults] = useState<SlotResult[]>([]);
@@ -191,6 +193,7 @@ export function RollPrintDialog({
     setCopies({});
     setResults([]);
     setPaper('roll');
+    setTestSquare(mem.testSquare);
     setWidthText(mem.last ? String(mem.last.widthCm) : '');
     void (async () => {
       const next = await Promise.all(
@@ -243,7 +246,7 @@ export function RollPrintDialog({
   const total = order.reduce((n, s) => n + (copies[s] ?? 0), 0);
   const title = target?.title || loaded.find((item) => item.source)?.source?.title || 'pattern';
   const widthCm = parseNum(widthText, true) ?? 0;
-  const roll = rollOf(widthCm);
+  const roll = rollOf(widthCm, testSquare);
   const minCm = useMemo(
     () =>
       selectedLoaded.reduce<number | null>((max, item) => {
@@ -269,7 +272,7 @@ export function RollPrintDialog({
     const ac = new AbortController();
     setRunning(true);
     setResults(selectedLoaded.map((item) => ({ slot: item.slot, laid: null, error: item.error })));
-    const spec = paper === 'roll' ? rollOf(widthCm) : TILE_ROLL;
+    const spec = paper === 'roll' ? rollOf(widthCm, testSquare) : { ...TILE_ROLL, testSquare };
     Promise.all(
       selectedLoaded.map(async (item): Promise<SlotResult> => {
         if (!item.bytes || !item.source)
@@ -304,7 +307,7 @@ export function RollPrintDialog({
         if (!ac.signal.aborted) setRunning(false);
       });
     return () => ac.abort();
-  }, [step, selectedLoaded, target, copies, paper, widthCm, title]);
+  }, [step, selectedLoaded, target, copies, paper, widthCm, testSquare, title]);
 
   const download = async () => {
     if (!target) return;
@@ -367,9 +370,13 @@ export function RollPrintDialog({
   };
 
   const goNext = () => {
-    if (step === 2 && paper === 'roll' && target) {
-      // The width is remembered the moment it is answered: the next print starts from it.
-      rememberPrintRoll(roll, target.cardKey, copies);
+    if (step === 2 && target) {
+      if (paper === 'roll') {
+        // The width is remembered the moment it is answered: the next print starts from it.
+        rememberPrintRoll(roll, target.cardKey, copies);
+      } else {
+        rememberTestSquare(testSquare);
+      }
     }
     setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
   };
@@ -438,6 +445,8 @@ export function RollPrintDialog({
           onWidth={setWidthText}
           minCm={minCm}
           bad={widthBad}
+          testSquare={testSquare}
+          onTestSquare={setTestSquare}
         />
       );
     return multiple ? (
@@ -581,6 +590,8 @@ function PaperStep({
   onWidth,
   minCm,
   bad,
+  testSquare,
+  onTestSquare,
 }: {
   paper: Paper;
   onPaper: (p: Paper) => void;
@@ -588,6 +599,8 @@ function PaperStep({
   onWidth: (w: string) => void;
   minCm: number | null;
   bad: string | null;
+  testSquare: boolean;
+  onTestSquare: (checked: boolean) => void;
 }) {
   return (
     <div className='flex w-full max-w-3xl flex-col items-center gap-4'>
@@ -632,6 +645,10 @@ function PaperStep({
           )}
         </div>
       )}
+      <label htmlFor='print-test-square' className='flex cursor-pointer items-center gap-2'>
+        <CheckboxCommon name='print-test-square' checked={testSquare} onChange={onTestSquare} />
+        <Text component='span'>test square</Text>
+      </label>
     </div>
   );
 }

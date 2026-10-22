@@ -6,7 +6,7 @@ import { unzipSync } from 'fflate';
 
 import { DRAWING_PEN_MM, type PdfFont } from 'lib/pattern-export/dxf-pdf';
 import type { DrawingLabel, DrawingStroke } from 'lib/pattern-export/drawing';
-import { ROLL_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
+import { rollFurnitureMm, ROLL_TITLE_FURNITURE_MM } from 'lib/pattern-export/roll-layout';
 import {
   exportRollPrint,
   minRollWidthCm,
@@ -183,6 +183,7 @@ function assertPlan(
   let piecePairs = 0;
   let minEdgeMm = Infinity;
   const requiredGapMm = ROLL_GAP_MM - 0.5;
+  const furnitureMm = rollFurnitureMm(roll);
   for (let sheetIndex = 0; sheetIndex < plan.sheets.length; sheetIndex++) {
     const sheet = plan.sheets[sheetIndex];
     const byPiece = new Map<string, InkSegment[]>();
@@ -201,7 +202,7 @@ function assertPlan(
           throw new Error(
             `sheet ${sheetIndex + 1}, piece ${stroke.pieceKey}: ink leaves the ${roll.edgeMm} mm edge at x=${x}`,
           );
-        if (y - radiusMm < ROLL_FURNITURE_MM - 1e-5 || y + radiusMm > sheet.lengthMm + 1e-5)
+        if (y - radiusMm < furnitureMm - 1e-5 || y + radiusMm > sheet.lengthMm + 1e-5)
           throw new Error(`sheet ${sheetIndex + 1}: a piece crosses the sheet edge at y=${y}`);
       }
       const segments = byPiece.get(stroke.pieceKey) ?? [];
@@ -219,7 +220,7 @@ function assertPlan(
             throw new Error(
               `sheet ${sheetIndex + 1}, piece ${label.pieceKey}: label leaves the ${roll.edgeMm} mm edge at x=${x}`,
             );
-          if (y < ROLL_FURNITURE_MM - 1e-5 || y > sheet.lengthMm + 1e-5)
+          if (y < furnitureMm - 1e-5 || y > sheet.lengthMm + 1e-5)
             throw new Error(`sheet ${sheetIndex + 1}: a label crosses the sheet edge at y=${y}`);
         }
       }
@@ -268,6 +269,24 @@ function assertPlan(
   if (plan.placed + plan.tooWide.length + plan.tooLong.length !== plan.total)
     throw new Error('placed + tooWide + tooLong does not match total');
   return { piecePairs, minEdgeMm };
+}
+
+function assertNoTestSquare(plan: RollPrintPlan, roll: RollSpec): void {
+  const furnitureMm = rollFurnitureMm(roll);
+  if (furnitureMm !== ROLL_TITLE_FURNITURE_MM)
+    throw new Error(`title-only furniture is ${furnitureMm} mm`);
+  for (const [index, sheet] of plan.sheets.entries()) {
+    if (sheet.drawing.strokes.some((stroke) => !stroke.pieceKey))
+      throw new Error(`sheet ${index + 1}: title-only plan contains a square stroke`);
+    if (sheet.drawing.labels.some((label) => label.s === '10 × 10 cm'))
+      throw new Error(`sheet ${index + 1}: title-only plan contains a square label`);
+    const pieceY = sheet.drawing.strokes
+      .filter((stroke) => stroke.pieceKey)
+      .flatMap((stroke) => stroke.pts.map((point) => point[1]));
+    if (pieceY.length === 0 || Math.min(...pieceY) < furnitureMm - 1e-5)
+      throw new Error(`sheet ${index + 1}: a piece starts before ${furnitureMm} mm`);
+  }
+  console.log(`assert no test square: pieces start at or after ${furnitureMm} mm`);
 }
 
 export function assertRollPrintZip(
@@ -334,21 +353,35 @@ export async function main(args: string[]) {
     runtimeMs: number;
   }> = [];
   const cases = [
-    { key: 'XS@160', widthCm: 160, copies: xsOnly, title: 'card70-XS' },
-    { key: 'XS-XL@91.4', widthCm: 91.4, copies, title: 'card70-XS-XL' },
-    { key: 'XS-XL@152.4', widthCm: 152.4, copies, title: 'card70-XS-XL' },
+    { key: 'XS@160', widthCm: 160, copies: xsOnly, title: 'card70-XS', testSquare: false },
+    {
+      key: 'XS-XL@91.4',
+      widthCm: 91.4,
+      copies,
+      title: 'card70-XS-XL',
+      testSquare: true,
+    },
+    {
+      key: 'XS-XL@152.4',
+      widthCm: 152.4,
+      copies,
+      title: 'card70-XS-XL',
+      testSquare: true,
+    },
   ];
   for (const run of cases) {
     const { widthCm } = run;
-    const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS };
+    const roll: RollSpec = { widthCm, ...ROLL_DEFAULTS, testSquare: run.testSquare };
     const started = performance.now();
     const plan = await planRollPrint(bytes, name, run.copies, roll);
     const elapsedMs = performance.now() - started;
     const asserted = assertPlan(plan, roll);
-    const accountedLengthMm = plan.markerLengthMm + plan.sheets.length * ROLL_FURNITURE_MM;
+    if (!run.testSquare) assertNoTestSquare(plan, roll);
+    const furnitureMm = rollFurnitureMm(roll);
+    const accountedLengthMm = plan.markerLengthMm + plan.sheets.length * furnitureMm;
     if (Math.abs(plan.lengthMm - accountedLengthMm) > 1e-4)
       throw new Error(
-        `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * ROLL_FURNITURE_MM} mm`,
+        `print length ${plan.lengthMm} mm != marker ${plan.markerLengthMm} mm + furniture ${plan.sheets.length * furnitureMm} mm`,
       );
     const exported = exportRollPrint(plan, run.title, roll, { jsPDF, font });
     const exportedBytes = new Uint8Array(await exported.blob.arrayBuffer());
