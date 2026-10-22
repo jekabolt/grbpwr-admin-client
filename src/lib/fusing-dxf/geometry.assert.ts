@@ -2,6 +2,13 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildFusingSheets } from './dxf';
+import {
+  EDGE_CORNER_TURN_DEG,
+  edgeRunsOf,
+  pointOnEdgeRun,
+  projectPointToEdgeRun,
+  trimEdgeRun,
+} from './edge-runs';
 import { FuseTopologyError, fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
 import type { FusePolygon, PieceFuseSpec } from './types';
 import {
@@ -17,6 +24,21 @@ const rectangle = (width: number, height: number) => [
   { x: width, y: 0 },
   { x: width, y: height },
   { x: 0, y: height },
+];
+
+// Four real edges. The top edge is a smooth collar curve tessellated into eight DXF segments.
+const curvedCollar = [
+  { x: 0, y: 0 },
+  { x: 120, y: 0 },
+  { x: 120, y: 18 },
+  { x: 112, y: 28 },
+  { x: 100, y: 36 },
+  { x: 84, y: 42 },
+  { x: 64, y: 45 },
+  { x: 44, y: 42 },
+  { x: 28, y: 36 },
+  { x: 12, y: 28 },
+  { x: 0, y: 18 },
 ];
 
 const spec = (changes: Partial<PieceFuseSpec> = {}): PieceFuseSpec => ({
@@ -61,6 +83,28 @@ function svgOf(polygons: readonly FusePolygon[], title: string): string {
 
 export async function main() {
   const outline = rectangle(100, 80);
+
+  assert.equal(EDGE_CORNER_TURN_DEG, 30);
+  const rectangleRuns = edgeRunsOf(outline);
+  assert.equal(rectangleRuns.length, 4, 'a rectangle has four edge runs');
+  assert.deepEqual(
+    rectangleRuns.map((run) => run.segmentIndices),
+    [[0], [1], [2], [3]],
+  );
+
+  const collarRuns = edgeRunsOf(curvedCollar);
+  assert.equal(collarRuns.length, 4, 'small turns along a curved collar stay one edge run');
+  assert.equal(collarRuns[2].segmentIndices.length, 8, 'the curved edge keeps all its DXF chords');
+  const collarHandle = pointOnEdgeRun(collarRuns[2], 35);
+  near(projectPointToEdgeRun(collarRuns[2], collarHandle.point).distance, 35);
+  near(
+    trimEdgeRun(collarRuns[2], 12, 17).reduce(
+      (sum, point, index, points) =>
+        index ? sum + Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) : 0,
+      0,
+    ),
+    collarRuns[2].length - 29,
+  );
 
   assert.equal(
     fuseSpecFromPiece({ fused: false, fusingMode: undefined, fusingWidthMm: undefined }),
@@ -166,6 +210,48 @@ export async function main() {
   assert.equal(joinedStrip.length, 1, 'adjacent selected edges join at their corner');
   assert.ok(joinedStrip[0].outer.length >= 6, 'joined corner is a band union, not one rectangle');
 
+  const curvedStrip = generateFuseGeometry({
+    outline: curvedCollar,
+    spec: spec({
+      mode: 'strip',
+      widthMm: 12,
+      insetMm: 3,
+      edges: [{ edge: 2, startMm: 12, endMm: 17 }],
+    }),
+  });
+  assert.equal(curvedStrip.length, 1, 'the tessellated collar produces one continuous strip');
+  assert.ok(
+    curvedStrip[0].outer.length > 8,
+    'the strip follows the curved run instead of becoming one segment rectangle',
+  );
+  assert.ok(fuseAreaMm2(curvedStrip) > 1_000, 'the full curved edge contributes useful strip area');
+
+  const dartedPiece = { outline, darts: [dart] };
+  assert.equal(
+    edgeRunsOf(dartedPiece.outline).length,
+    4,
+    'an internal dart does not split an edge',
+  );
+  const dartStripSpec = spec({
+    mode: 'strip',
+    widthMm: 20,
+    edges: [{ edge: 2, startMm: 0, endMm: 0 }],
+  });
+  const dartStripCut = generateFuseGeometry({
+    outline: dartedPiece.outline,
+    darts: dartedPiece.darts,
+    spec: dartStripSpec,
+  });
+  const dartStripFused = generateFuseGeometry({
+    outline: dartedPiece.outline,
+    darts: dartedPiece.darts,
+    spec: { ...dartStripSpec, darts: 'fuse' },
+  });
+  assert.ok(
+    fuseAreaMm2(dartStripCut) < fuseAreaMm2(dartStripFused),
+    'the run-based strip still respects a cut dart',
+  );
+
   const zone = generateFuseGeometry({
     outline,
     spec: spec({ mode: 'zone', zone: { rect: [50, -10, 120, 40] } }),
@@ -213,6 +299,48 @@ export async function main() {
     'the writer keeps an outer and a dart-hole loop in each block',
   );
 
+  const runMismatch = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' }],
+    pieces: [
+      {
+        identity: 'COLLAR',
+        displayName: 'collar',
+        piecesPerGarment: 1,
+        ungraded: false,
+        fuse: spec({
+          mode: 'strip',
+          widthMm: 12,
+          edges: [{ edge: 0, startMm: 0, endMm: 0 }],
+        }),
+        sizes: [
+          {
+            sizeToken: 'S',
+            sizeId: 1,
+            rank: 0,
+            outline: [
+              { x: 0, y: 0 },
+              { x: 100, y: 0 },
+              { x: 120, y: 40 },
+              { x: 100, y: 80 },
+              { x: 0, y: 80 },
+            ],
+          },
+          { sizeToken: 'M', sizeId: 2, rank: 1, outline },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(runMismatch.sheets[0].blocks, ['COLLAR_M']);
+  assert.equal(
+    runMismatch.skippedSizes.length,
+    1,
+    'a graded size with another run count is skipped',
+  );
+  assert.match(runMismatch.skippedSizes[0].reason, /5 edge runs; base size has 4/);
+
   const goldenDir = process.env.FUSING_GOLDEN_DIR?.trim();
   if (goldenDir) {
     await mkdir(goldenDir, { recursive: true });
@@ -224,6 +352,10 @@ export async function main() {
       writeFile(
         join(goldenDir, 'strip-offsets.svg'),
         svgOf(joinedStrip, 'strip · width 18 mm · offsets 12/9 mm · joined corner'),
+      ),
+      writeFile(
+        join(goldenDir, 'strip-curved.svg'),
+        svgOf(curvedStrip, 'curved collar · 8 segments → 1 edge'),
       ),
     ]);
   }

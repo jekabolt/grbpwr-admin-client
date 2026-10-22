@@ -7,7 +7,7 @@ export type FuseGrain = 'as_piece' | 'lengthwise' | 'crosswise' | 'bias' | 'any'
 export type FuseDarts = 'cut' | 'fuse';
 
 export type FuseEdge = {
-  /** Zero-based segment index on the base-size outline (poly[i]→poly[i+1]). */
+  /** Zero-based edge-run index on the base-size outline (a run is bounded by >30° corners). */
   edge: number;
   startMm: number;
   endMm: number;
@@ -60,7 +60,7 @@ export type FuseGeometryInput = {
   darts?: PtMm[][];
   /** Resolved referenced DXF zone when spec.zone is dxfPieceKey. */
   zoneOutline?: PtMm[] | null;
-  /** Base-size segment count. A mismatch is a skipped size, never guessed. */
+  /** Base-size edge-run count. A mismatch is a skipped size, never guessed. */
   expectedEdgeCount?: number;
 };
 
@@ -204,7 +204,14 @@ export function fuseFieldsToWire(
     fusingZone: !z
       ? {}
       : 'rect' in z
-        ? { rect: { x0: dec(z.rect[0]), y0: dec(z.rect[1]), x1: dec(z.rect[2]), y1: dec(z.rect[3]) } }
+        ? {
+            rect: {
+              x0: dec(z.rect[0]),
+              y0: dec(z.rect[1]),
+              x1: dec(z.rect[2]),
+              y1: dec(z.rect[3]),
+            },
+          }
         : { dxfPieceKey: z.dxfPieceKey },
     fusingInsetMm: { value: f.fusingInsetMm.trim() },
     fusingInsetNet: f.fusingInsetNet,
