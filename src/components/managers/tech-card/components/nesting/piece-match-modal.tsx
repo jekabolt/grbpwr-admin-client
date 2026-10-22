@@ -2130,7 +2130,7 @@ export function PieceMatchModal({
       return (
         goneQuestion ?? (
           <Text size='micro' variant='label' component='p'>
-            click a piece to edit it
+            pick a piece
           </Text>
         )
       );
