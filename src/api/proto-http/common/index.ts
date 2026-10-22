@@ -2836,6 +2836,24 @@ export type TechCardSizeQuantity = {
   orderQty: number | undefined;
 };
 
+// TechCardPatternRevision is one superseded file of a pattern sheet. The active file stays on
+// TechCardSizePattern; this read-only history lets a client restore an older file by sending its url
+// back through the ordinary UpdateTechCard flow.
+export type TechCardPatternRevision = {
+  revision: number | undefined;
+  url: string | undefined;
+  sha256: string | undefined;
+  fileName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The tech_card_snapshot frozen by the save that replaced or removed this file: the whole card as
+  // it was while this file was the current sheet. Admin.RestoreTechCardSnapshot takes it to bring the
+  // card back to that state (operations, pieces, aliases, sheets). 0 = no snapshot, not restorable.
+  snapshotId: number | undefined;
+  // Stable id of tech_card_size_pattern_history. Required by
+  // Admin.DeleteTechCardPatternRevision; 0 only for an older snapshot/read model that predates it.
+  historyId: number | undefined;
+};
+
 // TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
 // tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
 // split across sheets). The file is a PDF or a DXF, uploaded via Admin.UploadPattern,
@@ -2905,6 +2923,13 @@ export type TechCardSizePattern = {
   // carried by at least one roll-goods BOM line of this card, except when it round-trips the row's
   // stored value unchanged.
   fabricPurpose?: TechCardBomPurpose;
+  // Lowercase hex SHA-256 of the uploaded object's bytes. Presence is explicit: omission preserves
+  // the stored digest only while the URL is unchanged; a replacement without a digest clears it,
+  // as does a present empty string. Used to stop an identical DXF re-upload before minting a revision.
+  sha256?: string;
+  // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
+  // UpdateTechCard; restoring one means putting its url into the active fields above.
+  history: TechCardPatternRevision[] | undefined;
 };
 
 // TechCardMachineProfile is one row of CARD DEFAULTS: «this card is sewn on such a machine, set up
@@ -3374,6 +3399,10 @@ export type TechCardOperation = {
   // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
   // сборки — это пометка для команды, а не инструкция.
   draft: boolean | undefined;
+  // Why this step needs a human pass after DXF reconciliation. Empty means reviewed; non-empty is
+  // one of reshaped|remapped|split|orphan and blocks release readiness. This is deliberately a
+  // string rather than an enum so an older protojson client cannot silently drop a future reason.
+  review: string | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4048,6 +4077,11 @@ export type TechCardInsert = {
   // флага несёт draft = true (эхо). Флаг не фильтрует разбор. Серверные пути (клон сезона,
   // импорт архива) ставят его явно. ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест.
   operationDraftAware: boolean | undefined;
+  // ЩИТ СВЕРКИ DXF для TechCardOperation.review (69). Операции пишутся полной заменой без
+  // стабильного ключа строки, поэтому неосведомлённая вкладка не может безопасно сохранить
+  // карточку с review-метками: без этого флага сервер отказывает, а не стирает их. Транспорт,
+  // не содержание; ни в один дайджест не входит.
+  operationReviewAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -4154,6 +4188,10 @@ export type TechCard = {
   // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
   // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
   seams: TechCardSeam[] | undefined;
+  // OUTPUT-ONLY pattern-history rows whose stable sheet identity no longer has a live pattern row.
+  // These are deleted sheets, newest first. They stay visible here so snapshot_id can restore the
+  // whole pre-delete card and history_id can remove an unwanted retained revision.
+  removedPatternHistory: TechCardPatternRevision[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -9123,9 +9161,9 @@ export type TaskMediaAnnotations = {
   annotations: TechCardAnnotation[] | undefined;
 };
 
-// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус и
-// доску (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж «заблокирована» и
-// список связей не требовали ни второго RPC, ни N+1.
+// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус,
+// доску и исполнителей (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж
+// «заблокирована» и список связей не требовали ни второго RPC, ни N+1.
 // БЛОКЕР — СОВЕТ, А НЕ ЗАМОК: сервер НЕ запрещает перевести в DONE задачу с открытыми блокерами.
 // Доска — drag-and-drop, и отказ посреди жеста хуже бейджа; заархивированный недоделанный блокер
 // замуровал бы карточку навсегда. Заблокированность считает клиент: есть BLOCKED_BY со status !=
@@ -9139,6 +9177,7 @@ export type TaskLink = {
   board: TaskBoard | undefined;
   archived: boolean | undefined;
   boardId: number | undefined;
+  assignees: string[] | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with

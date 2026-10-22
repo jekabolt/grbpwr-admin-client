@@ -2298,7 +2298,14 @@ export type CardDraft = {
   downloads: { filename: string; dxfText: string }[];
 };
 
-export type ApplyUploaded = { scopeKey: string; url: string; filename: string; sizeBytes: number };
+export type ApplyUploaded = {
+  scopeKey: string;
+  url: string;
+  filename: string;
+  sizeBytes: number;
+  /** hex SHA-256 of the uploaded bytes (0423); '' / absent when unknown */
+  sha256?: string;
+};
 
 /**
  * F7: a failure writes NOTHING to the form; `uploaded` then lists the files that did land before it

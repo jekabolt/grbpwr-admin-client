@@ -30,6 +30,7 @@ import { decimalToInput } from 'utils/decimal';
 import { composeArticleFromMaterial, materialSpec } from './material-code';
 import { type ExpandGuard, MaterialExpand } from './material-expand';
 import { MaterialModal } from './material-modal';
+import { isPurchasePrice } from './material-price';
 import { materialPriceLabel } from './material-picker';
 import { materialImageUrl } from './material-thumb';
 import { useMaterials } from './useMaterials';
@@ -243,7 +244,10 @@ function MaterialTile({
   const url = materialImageUrl(material);
   const code = composeArticleFromMaterial(material, true);
   const spec = materialSpec(material);
-  const price = canReadCosting ? materialPriceLabel(material) : '';
+  const price =
+    canReadCosting && isPurchasePrice(material.latestPrice)
+      ? materialPriceLabel(material).toLowerCase()
+      : '';
   const stockValue = stock ? decimalToInput(stock.onHand) || '0' : stockLoading ? '…' : '0';
   const stockLabel = `${stockValue}${material.unit ? ` ${material.unit}` : ''}`;
   const outOfStock = !stockLoading && Number(stockValue) === 0;

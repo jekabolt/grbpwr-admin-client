@@ -42,6 +42,7 @@ import {
 } from 'utils/field-errors';
 import { notify, updateNotify } from 'lib/stores/store';
 import type { NotifyInput, NotifySev } from 'lib/stores/store-types';
+import { firstMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
@@ -160,6 +161,7 @@ import {
 } from './save-history';
 import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
+import { consumeReuploadSnapshot, peekReuploadSnapshot } from './nesting/reupload-session';
 import {
   decideAutoStage,
   resolveNextStep,
@@ -185,7 +187,7 @@ const TABS = [
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
-  { id: 'construction', label: 'construction' },
+  { id: 'construction', label: 'assembly' },
   { id: 'sizes', label: 'sizes' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
@@ -924,7 +926,6 @@ export function TechCardForm({
           : 'every sign-off section must be APPROVED',
       tab: 'signoff',
     });
-  const canRelease = releaseBlockers.length === 0;
   // `purpose` / `isAux` are read further up — the tab plumbing branches on them.
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
@@ -976,6 +977,12 @@ export function TechCardForm({
   // keystroke (the inline rename holds its draft in the panel's own state).
   const patternsW = useWatch({ control: form.control, name: 'patterns' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
+  const markedOperationCount = ((operationsW ?? []) as CardOperation[]).filter((operation) =>
+    (operation.review ?? '').trim(),
+  ).length;
+  // A step marked by a DXF re-upload holds the release (the server refuses it too): the control
+  // keeps its blocked look, and pressing it goes to the first marked step.
+  const canRelease = releaseBlockers.length === 0 && markedOperationCount === 0;
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
@@ -1719,11 +1726,21 @@ export function TechCardForm({
           // The version this form stands on (M-3); after «keep mine & overwrite» the version read back
           // from the server, so that choice actually overwrites (see keepMineAndOverwrite).
           const expected = claimVersion();
+          // The save whose payload carries a DXF re-upload (its new sheet url) carries the snapshot
+          // reason — read off THIS write's `data`, so a save that gathered its data before the
+          // re-upload never takes it (nesting/reupload-session.ts).
+          const cardId = parseInt(id || '0', 10);
+          const snapshot = peekReuploadSnapshot(
+            cardId,
+            (data.patterns ?? []).map((p) => p.url),
+          );
           await updateTechCard.mutateAsync({
-            id: parseInt(id || '0', 10),
+            id: cardId,
             techCard: techCardInsert,
             expectedLockVersion: expected,
+            ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
           });
+          consumeReuploadSnapshot(cardId, snapshot);
           // The body is committed server-side from here on — anything that fails below leaves the
           // card carrying the values this PUT just wrote (see the return type's comment).
           bodySaved = true;
@@ -1893,13 +1910,19 @@ export function TechCardForm({
           mapFormToTechCardInsert(data, current.techCard?.techCard, canWriteCosting),
           { serverSpeaksDesign: designBandSpeaks },
         );
+        const snapshot = peekReuploadSnapshot(
+          newId,
+          (data.patterns ?? []).map((p) => p.url),
+        );
         await updateTechCard.mutateAsync({
           id: newId,
           techCard: payload,
           // The version read a moment ago. This card is seconds old and only this page knows it; a
           // version remembered from the create would 409 against the panels written since.
           expectedLockVersion: current.techCard?.lockVersion ?? 0,
+          ...(snapshot ? { snapshotReason: snapshot.reason } : {}),
         });
+        consumeReuploadSnapshot(newId, snapshot);
         bodySaved = true;
       } else {
         const created = await createTechCard.mutateAsync({ techCard: techCardInsert });
@@ -3307,9 +3330,14 @@ export function TechCardForm({
             releasing={saving || converting}
             // Enabled even when blocked: pressing it explains WHY, which is the one moment the
             // reasons are actually wanted.
-            onRelease={() =>
-              canRelease ? void submitWithApproval(RELEASED) : setBlockersOpen(true)
-            }
+            onRelease={() => {
+              if (canRelease) return void submitWithApproval(RELEASED);
+              if (releaseBlockers.length > 0 || markedOperationCount === 0)
+                return setBlockersOpen(true);
+              navTo('construction', {
+                opi: String(firstMarkedOperation((operationsW ?? []) as CardOperation[])),
+              });
+            }}
             approvalState={techCard?.techCard?.approvalState}
             onBackToDraft={() => void submitWithApproval(DRAFT)}
             formErrors={formErrorRows}
@@ -3568,7 +3596,16 @@ export function TechCardForm({
                       <button
                         key={tab.id}
                         type='button'
-                        onClick={() => setActiveTab(tab.id)}
+                        onClick={() => {
+                          if (tab.id === 'construction' && markedOperationCount > 0) {
+                            const first = firstMarkedOperation(
+                              (operationsW ?? []) as CardOperation[],
+                            );
+                            navTo(tab.id, { opi: String(first) });
+                            return;
+                          }
+                          setActiveTab(tab.id);
+                        }}
                         aria-current={active ? 'page' : undefined}
                         data-next-tab={isNext ? '' : undefined}
                         title={isNext ? `next: ${nextStep?.label}` : undefined}
@@ -3590,6 +3627,11 @@ export function TechCardForm({
                         </span>
                         {isNext && <span className='sr-only'>(next step)</span>}
                         <span className='min-w-0 flex-1 truncate'>{tab.label}</span>
+                        {tab.id === 'construction' && markedOperationCount > 0 && (
+                          <span className='shrink-0 font-bold text-error'>
+                            ! {markedOperationCount}
+                          </span>
+                        )}
                         {tab.id === 'issues' && openIssues > 0 && (
                           <Pill tone='mut'>{openIssues}</Pill>
                         )}
@@ -3810,7 +3852,7 @@ export function TechCardForm({
                 }
               >
                 <PatternsField
-                  techCardId={numId || undefined}
+                  techCardId={numId || createdId || undefined}
                   headerEl={patternsHeaderEl}
                   // Разбор DXF стартует сам, но только на ОТКРЫТОЙ вкладке: этот SectionStack
                   // смонтирован всегда и прячется через `hidden`, так что без явного ответа

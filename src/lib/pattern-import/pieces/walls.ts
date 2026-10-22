@@ -491,7 +491,12 @@ export function itemsOf(set: ChainSet, ids: Iterable<ChainId>): WallItem[] {
  * largest size's rhythm). Such a stretch is a wall for every rank. "Beside" = a different-rank (or
  * unranked) size line within `sideMm`, roughly parallel, whose perpendicular foot lands inside it —
  * not on its end: just before a fork the diverging lines start at the fork point, so the shared
- * stretch up to the fork stays lone and the walls close there.
+ * stretch up to the fork stays lone and the walls close there. "Parallel" = the single segments
+ * are, OR the lines' chords over ±2.5 mm are: a size drawn as a motif polyline (polupalto's 44
+ * crosses) turns every few tenths of a mm, and a tooth's direction made the line lone beside the
+ * other sizes, so it walled them all (region 10's neckline). The chord only ADDS "beside": a
+ * stretch lone here was lone by segments too (a chord alone cuts a corner and parted a line from
+ * the parallel size beside it — leonie's junk face seeds).
  */
 export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem[] {
   if (m.mode === 'single') return [];
@@ -503,6 +508,8 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
   const answered = answeredLines(set).all;
   const out: WallItem[] = [];
   const step = 2;
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
   for (const id of ids) {
     const c = set.chains[id];
     const rc = rank.get(id) ?? -1;
@@ -530,6 +537,7 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
       const p = { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
       const tx = (b.x - a.x) / l;
       const ty = (b.y - a.y) / l;
+      const t = chordDir(pts, cum, s, chordMm);
       // the nearest point of every other size line within reach (global per chain, not per segment)
       const best = new Map<number, { d: number; i: number; u: number }>();
       grid.near(p, sideMm, (o, i) => {
@@ -552,8 +560,12 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
         const q0 = op[b.i];
         const q1 = op[b.i + 1];
         const ol = dist(q0, q1) || 1;
-        const cos = Math.abs((tx * (q1.x - q0.x) + ty * (q1.y - q0.y)) / ol);
-        if (cos < 0.8) continue;
+        if (Math.abs((tx * (q1.x - q0.x) + ty * (q1.y - q0.y)) / ol) < 0.8) {
+          let oc = cums.get(o);
+          if (!oc) cums.set(o, (oc = cumOf(op)));
+          const q = chordDir(op, oc, oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u, chordMm);
+          if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+        }
         beside = true;
         break;
       }
@@ -576,6 +588,32 @@ export function lonePortions(set: ChainSet, m: WallModel, sideMm = 20): WallItem
     }
   }
   return out;
+}
+
+/** The point at arc length `s` along a polyline (`cum` its cumulative lengths), clamped to it. */
+function arcPt(pts: readonly PtMm[], cum: readonly number[], s: number): PtMm {
+  let lo = 0;
+  let hi = cum.length - 2;
+  while (lo < hi) {
+    const k = (lo + hi + 1) >> 1;
+    if (cum[k] <= s) lo = k;
+    else hi = k - 1;
+  }
+  const l = cum[lo + 1] - cum[lo] || 1;
+  const t = Math.max(0, Math.min(1, (s - cum[lo]) / l));
+  return {
+    x: pts[lo].x + (pts[lo + 1].x - pts[lo].x) * t,
+    y: pts[lo].y + (pts[lo + 1].y - pts[lo].y) * t,
+  };
+}
+
+/** Unit direction of a polyline at arc `s`: the chord over ±`h` mm of arc (clamped to its ends). */
+function chordDir(pts: readonly PtMm[], cum: readonly number[], s: number, h: number): PtMm {
+  const L = cum[cum.length - 1];
+  const a = arcPt(pts, cum, Math.max(0, s - h));
+  const b = arcPt(pts, cum, Math.min(L, s + h));
+  const l = dist(a, b) || 1;
+  return { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
 }
 
 function sub(pts: PtMm[], cum: number[], a: number, b: number): PtMm[] {
@@ -771,39 +809,11 @@ export function rescuedIgnored(
   // faces: there it walled Mood's bead rows into blobs read as background (whole pieces' labels
   // held). Only for the faces (`holdSizeLine`): the fill's continuity closures keep it as before
   // (palto 25·80 closes through such a line; the merged-strip seam fixture is refused through it)
-  const ranked = new SegGrid(4);
-  for (const id of m.byRank.flat()) {
-    const c = set.chains[id];
-    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
-  }
+  const ranked = rankedGrid(set, m);
   // ALL of it — every vertex and every 0.5 mm between, ends included — within 0.3 mm of ONE ranked
   // line (Codex: a line that leaves the size's line anywhere, even for a short excursion, draws
   // something of its own there and stays rescuable)
-  const onOneSizeLine = (c: { pts: PtMm[] }) => {
-    let live: Set<ChainId> | null = null;
-    const probe = (p: PtMm) => {
-      const here = new Set<ChainId>();
-      ranked.near(p, 0.3, (rid, i) => {
-        if (here.has(rid) || (live && !live.has(rid))) return;
-        const q = set.chains[rid].pts;
-        const q1 = i + 1 < q.length ? q[i + 1] : q[0];
-        if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
-      });
-      live = here;
-      return here.size > 0;
-    };
-    for (let i = 0; i < c.pts.length; i++) {
-      if (!probe(c.pts[i])) return false;
-      if (i + 1 >= c.pts.length) break;
-      const a = c.pts[i];
-      const b = c.pts[i + 1];
-      const k = Math.ceil(dist(a, b) / 0.5);
-      for (let j = 1; j < k; j++)
-        if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k }))
-          return false;
-    }
-    return true;
-  };
+  const onOneSizeLine = (c: { pts: PtMm[] }) => wholeOnRanked(set, ranked, c) !== null;
   const cand: ChainId[] = [];
   for (const id of ignore) {
     const c = set.chains[id];
@@ -830,6 +840,449 @@ export function rescuedIgnored(
     if (twins.length >= 4) grid2.add(id);
   }
   return cand.filter((id) => !grid2.has(id));
+}
+
+/** The ranked (size) lines of a model on a segment grid. */
+function rankedGrid(set: ChainSet, m: WallModel): SegGrid {
+  const ranked = new SegGrid(4);
+  for (const id of m.byRank.flat()) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) ranked.addPolyline(id, c.closed ? [...c.pts, c.pts[0]] : c.pts);
+  }
+  return ranked;
+}
+
+/**
+ * The ranked lines a line lies WHOLLY on — every vertex and every 0.5 mm between within 0.3 mm of
+ * each of them — or null when it leaves them anywhere.
+ */
+function wholeOnRanked(set: ChainSet, ranked: SegGrid, c: { pts: PtMm[] }): Set<ChainId> | null {
+  let live: Set<ChainId> | null = null;
+  const probe = (p: PtMm) => {
+    const here = new Set<ChainId>();
+    ranked.near(p, 0.3, (rid, i) => {
+      if (here.has(rid) || (live && !live.has(rid))) return;
+      const q = set.chains[rid].pts;
+      const q1 = i + 1 < q.length ? q[i + 1] : q[0];
+      if (segNearest(p, q[i], q1).d <= 0.3) here.add(rid);
+    });
+    live = here;
+    return here.size > 0;
+  };
+  for (let i = 0; i < c.pts.length; i++) {
+    if (!probe(c.pts[i])) return null;
+    if (i + 1 >= c.pts.length) break;
+    const a = c.pts[i];
+    const b = c.pts[i + 1];
+    const k = Math.ceil(dist(a, b) / 0.5);
+    for (let j = 1; j < k; j++)
+      if (!probe({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k })) return null;
+  }
+  return live;
+}
+
+/**
+ * COPY RANKS (polupalto): a rescued line lying wholly on the line(s) of ONE size rank is that
+ * size's line drawn twice (a tile fragment's copy) — id → that rank. Other lines are absent.
+ */
+export function copyRanks(
+  set: ChainSet,
+  m: WallModel,
+  ids: readonly ChainId[],
+): Map<ChainId, number> {
+  const out = new Map<ChainId, number>();
+  if (m.mode !== 'graded' || probeOff('M_COPY_RANK_OFF')) return out;
+  const rank = new Map<ChainId, number>();
+  m.byRank.forEach((rids, r) => rids.forEach((id) => rank.set(id, r)));
+  const ranked = rankedGrid(set, m);
+  for (const id of ids) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    const on = wholeOnRanked(set, ranked, c);
+    if (!on?.size) continue;
+    const rs = new Set([...on].map((rid) => rank.get(rid)));
+    const r = [...rs][0];
+    if (rs.size === 1 && r !== undefined) out.set(id, r);
+  }
+  return out;
+}
+
+/** How far beside a copy its two sides are probed in s's raster, mm (a wall pixel is 0.5 mm). */
+const SIDE_PROBE_MM = 1;
+/**
+ * A line on the copy's far side (inside s's piece for a larger r, outside it for a smaller one)
+ * this close is the same edge drawn twice, mm: stacked strokes drift 0.1–0.5 mm.
+ */
+const FAR_SIDE_MM = 1;
+/** How far beside a copy r's own edge (its own line or a common one) shows r's side, mm. */
+const EDGE_SIDE_MM = 3;
+/** Samples (1 mm) a far line may miss between two stretches of one run: a turn of the copy, where
+ *  ±2.5 mm chords are not parallel. */
+const TURN_GAP = 7;
+
+/**
+ * Rank r's walls of a copy of rank s's line (`copyRanks`). Where a line of r — or of a size between
+ * r and s — runs beside the copy, r is drawn apart from s there (sizes grade in order: r cannot
+ * coincide with s where a size between them does not), so the copy is s's line, no wall of r. As a
+ * wall it closed the strip between r's own line and s's into r's piece (polupalto: 44 on 46's
+ * copies, 52 on 54's — each piece a strip too wide, read as right). Where no such line is beside,
+ * r coincides with s and the copy stays r's wall (the shared edge drawn once, as s). "Beside" as
+ * for the lone stretches: within `sideMm`, roughly parallel (chords over ±2.5 mm: a motif pen is
+ * a zigzag), foot not within 3 mm of that line's end — and not ON the copy (> `onMm`, the
+ * tolerance a copy lies on its line with): a size drawn apart by any amount is apart (polupalto's
+ * back facing grades its neckline ~0.7 mm per size).
+ * Which side: `outsideOf(s)` tells a point outside every closed piece of s (null on a wall).
+ * r's side of the copy is outside s's piece when r is larger, inside when smaller. A line there
+ * counts. A line on the far side counts only past FAR_SIDE_MM: closer, it is this edge drawn twice
+ * (zhaket's sleeve extension has 40's line 0.4 mm inside 36's side edge; counted, it took the edge
+ * from 42, and 42 closed on its hem fold); further, sizes cross there (reef's side seam fans out:
+ * 3XL and 4XL run 1.4–3.4 mm outside 5XL's edge copy; not counted, the copy walled them and they
+ * took 5XL's piece). Nor where r's own edge (its own line or a common one) runs on the far side
+ * within EDGE_SIDE_MM: the grading turns inward there, the far side is r's. zhaket's cuff corner
+ * has 44's own line 0.7–1.1 mm inside 36's copy (skipped, the copy walled 44 and it took the strip
+ * between); palto's front shoulder has 76 and 80 0.3–1 mm inside 72's copy with the common
+ * shoulder line beyond them (skipped, 72's copy walled 84 and 88 and they ran on 72's line).
+ * Nor where that line leaves the copy by more than FAR_SIDE_MM between two such stretches (gap up
+ * to TURN_GAP): a line drawn twice follows the copy around its turns, a size graded inward cuts
+ * inside them. zhaket's cuff corner has 38's and 40's lines 0.1–0.7 mm inside 36's copy along both
+ * arms and 1–2 mm inside its tip (skipped, the copy walled 42 down to 36's tip, cut off below
+ * 40's); the line is then beside over that whole run, the turn included, and over the stretches
+ * where it touches the copy (40's line lies on it for 11 mm of the arm; cut there, the copy kept
+ * walling 42 outside 40's line along that arm).
+ * Either way the line must belong to the copy's own piece: the way over keeps to that side of s's
+ * outline (no other piece of s between). Where the side cannot be told (s's piece not closed
+ * there), every line counts.
+ */
+export function copyWallsOf(
+  set: ChainSet,
+  m: WallModel,
+  copies: ReadonlyMap<ChainId, number>,
+  ids: readonly ChainId[],
+  r: number,
+  outsideOf?: (s: number) => ((p: PtMm) => boolean | null) | null,
+  sideMm = 20,
+  onMm = 0.3,
+): WallItem[] {
+  const out: WallItem[] = [];
+  // r's own edge: its own lines and the common ones (walls of every rank)
+  const edgeGrid = new SegGrid(8);
+  for (const id of [...(m.byRank[r] ?? []), ...m.common]) {
+    const c = set.chains[id];
+    if (c && c.pts.length >= 2) edgeGrid.addPolyline(id, c.pts);
+  }
+  const grids = new Map<number, SegGrid>();
+  const gridFor = (s: number) => {
+    let g = grids.get(s);
+    if (g) return g;
+    g = new SegGrid(8);
+    const lo = Math.min(r, s);
+    const hi = Math.max(r, s);
+    for (let t = lo; t <= hi; t++) {
+      if (t === s) continue;
+      for (const id of m.byRank[t] ?? []) {
+        const c = set.chains[id];
+        if (c && c.pts.length >= 2) g.addPolyline(id, c.pts);
+      }
+    }
+    grids.set(s, g);
+    return g;
+  };
+  const step = 1;
+  // Directions are chords over ±2.5 mm of arc, not one segment's: a motif pen (crosses) is a
+  // zigzag polyline whose segments cross the line's run.
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
+  for (const id of ids) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    const s = copies.get(id);
+    if (s === undefined || s === r) {
+      out.push(...itemsOf(set, [id]));
+      continue;
+    }
+    const grid = gridFor(s);
+    const outS = outsideOf?.(s) ?? null;
+    const pts = c.pts;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    const L = cum[cum.length - 1];
+    const keep: boolean[] = [];
+    const at: number[] = [];
+    const ps: PtMm[] = [];
+    // far lines skipped as this edge drawn twice, per sample
+    const skipAt: (Set<number> | null)[] = [];
+    let seg = 0;
+    for (let a = 0; a <= L + 1e-9; a += step) {
+      while (seg + 2 < pts.length && cum[seg + 1] < a) seg++;
+      const p0 = pts[seg];
+      const p1 = pts[seg + 1];
+      const l = cum[seg + 1] - cum[seg] || 1;
+      const u = (a - cum[seg]) / l;
+      const p = { x: p0.x + (p1.x - p0.x) * u, y: p0.y + (p1.y - p0.y) * u };
+      const t = chordDir(pts, cum, a, chordMm);
+      const best = new Map<number, { d: number; i: number; u: number }>();
+      grid.near(p, sideMm, (o, i) => {
+        const op = set.chains[o].pts;
+        const q = segNearest(p, op[i], op[i + 1]);
+        const b = best.get(o);
+        if (!b || q.d < b.d) best.set(o, { d: q.d, i, u: q.u });
+      });
+      // r's side of the copy here: +1 the normal's, −1 the other, 0 unknown (every line counts)
+      const n = { x: -t.y, y: t.x };
+      let want = 0;
+      if (outS && best.size) {
+        const sideAt = (k: number) => {
+          for (let e = SIDE_PROBE_MM; e <= SIDE_PROBE_MM + 1.5; e += 0.5) {
+            const v = outS({ x: p.x + k * n.x * e, y: p.y + k * n.y * e });
+            if (v !== null) return v;
+          }
+          return null;
+        };
+        const a = sideAt(1);
+        const b = sideAt(-1);
+        if (a !== null && b !== null && a !== b) want = (a ? 1 : -1) * (r > s ? 1 : -1);
+      }
+      // r's own edge beside on the far side (as "beside" above, within EDGE_SIDE_MM)
+      let edgeFar: boolean | undefined;
+      const farEdge = () => {
+        if (edgeFar !== undefined) return edgeFar;
+        edgeFar = false;
+        const near = new Map<number, { d: number; i: number; u: number }>();
+        edgeGrid.near(p, EDGE_SIDE_MM, (o, i) => {
+          const op = set.chains[o].pts;
+          const q = segNearest(p, op[i], op[i + 1]);
+          const b = near.get(o);
+          if (!b || q.d < b.d) near.set(o, { d: q.d, i, u: q.u });
+        });
+        for (const [o, b] of near) {
+          if (b.d > EDGE_SIDE_MM || b.d <= onMm) continue;
+          const op = set.chains[o].pts;
+          let oc = cums.get(o);
+          if (!oc) cums.set(o, (oc = cumOf(op)));
+          const foot = oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u;
+          const q = chordDir(op, oc, foot, chordMm);
+          if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+          const f = {
+            x: op[b.i].x + (op[b.i + 1].x - op[b.i].x) * b.u,
+            y: op[b.i].y + (op[b.i + 1].y - op[b.i].y) * b.u,
+          };
+          if (Math.sign((f.x - p.x) * n.x + (f.y - p.y) * n.y) === -want) return (edgeFar = true);
+        }
+        return edgeFar;
+      };
+      let beside = false;
+      let skips: Set<number> | null = null;
+      for (const [o, b] of best) {
+        if (b.d > sideMm || b.d <= onMm) continue;
+        const op = set.chains[o].pts;
+        let oc = cums.get(o);
+        if (!oc) cums.set(o, (oc = cumOf(op)));
+        const foot = oc[b.i] + (oc[b.i + 1] - oc[b.i]) * b.u;
+        if (Math.min(foot, oc[oc.length - 1] - foot) < 3) continue;
+        const q = chordDir(op, oc, foot, chordMm);
+        if (Math.abs(t.x * q.x + t.y * q.y) < 0.8) continue;
+        if (want && outS) {
+          const f = {
+            x: op[b.i].x + (op[b.i + 1].x - op[b.i].x) * b.u,
+            y: op[b.i].y + (op[b.i + 1].y - op[b.i].y) * b.u,
+          };
+          const v = { x: f.x - p.x, y: f.y - p.y };
+          const own = Math.sign(v.x * n.x + v.y * n.y) === want; // on r's side
+          if (!own && b.d <= FAR_SIDE_MM && !farEdge()) {
+            (skips ??= new Set()).add(o); // the same edge drawn twice (unless it opens: below)
+            continue;
+          }
+          // the same piece: the way over stays on that side of s's outline
+          const outside = own === r > s;
+          let same = true;
+          for (let e = SIDE_PROBE_MM; e <= b.d - 0.5 && same; e += 0.5) {
+            const w = outS({ x: p.x + (v.x * e) / b.d, y: p.y + (v.y * e) / b.d });
+            if (w !== null && w !== outside) same = false;
+          }
+          if (!same) continue;
+        }
+        beside = true;
+        break;
+      }
+      keep.push(!beside);
+      at.push(a);
+      ps.push(p);
+      skipAt.push(skips);
+    }
+    // A line drawn twice follows the copy around its turns. One that leaves it by more than
+    // FAR_SIDE_MM between two stretches it runs on the far side is a size graded inward there,
+    // drawn apart: beside over that whole run, the copy's turn included. A run goes on where the
+    // line lies on the copy between two stretches; it ends where the line leaves for longer.
+    const far = new Set<number>();
+    for (const k of skipAt) if (k) for (const o of k) far.add(o);
+    for (const o of far) {
+      const idx: number[] = [];
+      skipAt.forEach((k, i) => k?.has(o) && idx.push(i));
+      const op = set.chains[o].pts;
+      const off = (q: PtMm) => {
+        let m = Infinity;
+        grid.near(q, FAR_SIDE_MM, (o2, i) => {
+          if (o2 === o) m = Math.min(m, segNearest(q, op[i], op[i + 1]).d);
+        });
+        return m > FAR_SIDE_MM;
+      };
+      let k = 0;
+      while (k < idx.length) {
+        let e = k;
+        let open = false;
+        while (e + 1 < idx.length) {
+          // between two stretches the line either lies on the copy (≤ onMm: one run) or leaves it
+          let left = false;
+          for (let i = idx[e] + 1; i < idx[e + 1] && !left; i++) left = off(ps[i]);
+          if (left && idx[e + 1] - idx[e] > TURN_GAP) break;
+          if (left) open = true;
+          e++;
+        }
+        if (open) for (let i = idx[k]; i <= idx[e]; i++) keep[i] = false;
+        k = e + 1;
+      }
+    }
+    if (keep.every(Boolean)) {
+      out.push(...itemsOf(set, [id]));
+      continue;
+    }
+    let i = 0;
+    while (i < keep.length) {
+      if (!keep[i]) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j + 1 < keep.length && keep[j + 1]) j++;
+      const a = Math.max(0, at[i] - step / 2);
+      const b = j === keep.length - 1 ? L : Math.min(L, at[j] + step / 2);
+      if (b - a >= 1) out.push({ chain: id, pts: sub(pts, cum, a, b) });
+      i = j + 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * SANDWICH (zhaket): where a smaller size's line and a larger size's line run ON each other, every
+ * size between runs there too — sizes nest, and a point on both outlines is on every outline
+ * between them — so that stretch is a wall of r, drawn in r's pen or not. zhaket's sleeve
+ * extension draws each size's side edge from its own hem fold down, stacked on one place; 42's is
+ * drawn only by 40's and 44's, and 42 closed on its hem fold. "On" = within `onMm` (stacked
+ * strokes measure 0.1–0.5 mm apart there), chords over ±2.5 mm parallel (cos ≥ 0.95: a crossing
+ * is no shared edge), over ≥ 3 mm. Only where no line of a size between the two, nor a line of
+ * no known size (an orphan of `m.graded`, or a rescued line: `rescued` id → its size, null
+ * unknown), runs BESIDE the stretch (off it, within `sideMm`, parallel, foot not at that line's
+ * end): there sizes do not nest — reef's hem has XS's and 2XL's lines on each other with S's own
+ * 2.2 mm inside, viola's 38 and 48 lines meet with 40's (an orphan) 1.1 mm inside — and a wall
+ * outside r's line would hand r the strip between. Nor where r's own line runs there, on the
+ * stack or beside: r has its edge, and the wall (b's line, up to `onMm` off it) only moved r's
+ * outline off its own line (kombinezon P01 8 and FP 10: 60–90 mm runs, G3 held them). Returned as
+ * stretches of the larger size's line.
+ */
+export function sandwichWalls(
+  set: ChainSet,
+  m: WallModel,
+  r: number,
+  rescued: ReadonlyMap<ChainId, number | null> = new Map(),
+  onMm = 0.6,
+  sideMm = 20,
+): WallItem[] {
+  const out: WallItem[] = [];
+  if (m.mode !== 'graded' || r <= 0 || r >= m.byRank.length - 1 || probeOff('M_SANDWICH_OFF'))
+    return out;
+  // every size line (and rescued line) with its size; null = a size not known
+  const rankOf = new Map<ChainId, number | null>();
+  m.byRank.forEach((ids, k) => ids?.forEach((id) => rankOf.set(id, k)));
+  for (const [id, k] of rescued) if (!rankOf.has(id)) rankOf.set(id, k);
+  for (const id of m.graded) if (!rankOf.has(id)) rankOf.set(id, null);
+  const all = new SegGrid(8);
+  let lowerAny = false;
+  for (const [id, k] of rankOf) {
+    const c = set.chains[id];
+    if (!c || c.pts.length < 2) continue;
+    all.addPolyline(id, c.pts);
+    if (k != null && k < r) lowerAny = true;
+  }
+  if (!lowerAny) return out;
+  const step = 1;
+  const chordMm = 2.5;
+  const cums = new Map<ChainId, number[]>();
+  const cumFor = (o: ChainId) => {
+    let oc = cums.get(o);
+    if (!oc) cums.set(o, (oc = cumOf(set.chains[o].pts)));
+    return oc;
+  };
+  const dirAt = (o: ChainId, i: number, u: number) => {
+    const op = set.chains[o].pts;
+    const oc = cumFor(o);
+    const foot = oc[i] + (oc[i + 1] - oc[i]) * u;
+    return { foot, len: oc[oc.length - 1], d: chordDir(op, oc, foot, chordMm) };
+  };
+  // the largest size below r whose line runs on p (−1: none)
+  const lowerOn = (p: PtMm, t: PtMm) => {
+    let s = -1;
+    all.near(p, onMm, (o, i) => {
+      const k = rankOf.get(o);
+      if (k == null || k >= r || k <= s) return;
+      const op = set.chains[o].pts;
+      const q = segNearest(p, op[i], op[i + 1]);
+      if (q.d > onMm) return;
+      const { d } = dirAt(o, i, q.u);
+      if (Math.abs(t.x * d.x + t.y * d.y) >= 0.95) s = k;
+    });
+    return s;
+  };
+  // a line of a size strictly between s and b (or of no known size) beside p, off the stack; or
+  // r's own line anywhere near, on the stack included
+  const between = (p: PtMm, t: PtMm, s: number, b: number) => {
+    let found = false;
+    all.near(p, sideMm, (o, i) => {
+      if (found) return;
+      const k = rankOf.get(o);
+      if (k != null && (k <= s || k >= b)) return;
+      const op = set.chains[o].pts;
+      const q = segNearest(p, op[i], op[i + 1]);
+      // r's own line on the stretch too: r has its edge there, the wall would only move it
+      if (q.d > sideMm || (q.d <= onMm && k !== r)) return;
+      const { foot, len, d } = dirAt(o, i, q.u);
+      if (Math.min(foot, len - foot) < 3) return;
+      if (Math.abs(t.x * d.x + t.y * d.y) >= 0.8) found = true;
+    });
+    return found;
+  };
+  for (let b = r + 1; b < m.byRank.length; b++)
+    for (const id of m.byRank[b] ?? []) {
+      const c = set.chains[id];
+      if (!c || c.pts.length < 2) continue;
+      const pts = c.pts;
+      const cum = cumOf(pts);
+      const L = cum[cum.length - 1];
+      if (L < 3) continue;
+      const on: boolean[] = [];
+      const at: number[] = [];
+      for (let a = 0; a <= L + 1e-9; a += step) {
+        const p = arcPt(pts, cum, a);
+        const t = chordDir(pts, cum, a, chordMm);
+        const s = lowerOn(p, t);
+        on.push(s >= 0 && !between(p, t, s, b));
+        at.push(a);
+      }
+      let i = 0;
+      while (i < on.length) {
+        if (!on[i]) {
+          i++;
+          continue;
+        }
+        let j = i;
+        while (j + 1 < on.length && on[j + 1]) j++;
+        const a0 = Math.max(0, at[i] - step / 2);
+        const b0 = Math.min(L, at[j] + step / 2);
+        if (b0 - a0 >= 3) out.push({ chain: id, pts: sub(pts, cum, a0, b0) });
+        i = j + 1;
+      }
+    }
+  return out;
 }
 
 /**

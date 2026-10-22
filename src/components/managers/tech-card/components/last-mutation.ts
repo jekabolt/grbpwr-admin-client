@@ -313,11 +313,11 @@ export function skeletonLabel(mode: 'append' | 'replace', count: number): string
 }
 
 /**
- * Поля строки шага, которые НЕ факт шага: метка «не проверено» (её и судят этим отпечатком) и
- * номер, который сервер перештамповывает на каждой записи. Всё остальное — факт, и правка любого
- * из них — правка шага.
+ * Поля строки шага, которые НЕ факт шага: метки «не проверено» и «проверить после перезалива DXF»
+ * (их и судят этим отпечатком) и номер, который сервер перештамповывает на каждой записи. Всё
+ * остальное — факт, и правка любого из них — правка шага.
  */
-const NOT_A_ROW_FACT: ReadonlySet<string> = new Set(['draft', 'operationNumber']);
+const NOT_A_ROW_FACT: ReadonlySet<string> = new Set(['draft', 'review', 'operationNumber']);
 
 function canonRow(v: unknown, top: boolean): unknown {
   if (Array.isArray(v)) return v.map((x) => canonRow(x, false));

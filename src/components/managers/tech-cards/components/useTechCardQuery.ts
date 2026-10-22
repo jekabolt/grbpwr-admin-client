@@ -358,11 +358,13 @@ export function useUpdateTechCard() {
       id,
       techCard,
       expectedLockVersion,
+      snapshotReason = '',
     }: {
       id: number;
       techCard: common_TechCardInsert;
       expectedLockVersion: number;
-    }) => adminService.UpdateTechCard({ id, techCard, expectedLockVersion }),
+      snapshotReason?: string;
+    }) => adminService.UpdateTechCard({ id, techCard, expectedLockVersion, snapshotReason }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       queryClient.invalidateQueries({ queryKey: techCardKeys.detail(variables.id) });

@@ -1,5 +1,6 @@
 import { adminService } from 'api/api';
 import { getBase64File } from 'lib/features/getBase64';
+import { sha256Hex } from 'lib/features/sha256';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   MAX_PATTERN_FILENAME,
@@ -30,6 +31,9 @@ export type UploadedPattern = {
   // been sorted and to a BOM line where it has not, and this control lives in ui/ — it must not
   // learn either shape. It hands the key back and the caller translates it into the two wire fields.
   scopeKey: string;
+  // Lowercase hex SHA-256 of the uploaded bytes (0423); '' when WebCrypto is unavailable. Sent with
+  // the row so an identical DXF re-upload is recognised as a no-op.
+  sha256: string;
 };
 
 // A cloth the sheet can be bound to: an opaque key and the fully composed label to show for it.
@@ -45,11 +49,12 @@ export function patternNameOfFile(file: File): string {
 }
 
 /**
- * Direct upload, no naming modal: File → Admin.UploadPattern → {url, filename, sizeBytes, name}.
- * `name` defaults to the file name without its extension. Throws on failure; map the error with
- * patternUploadErrorMessage.
+ * Direct upload, no naming modal: File → Admin.UploadPattern → {url, filename, sizeBytes, name,
+ * sha256}. `name` defaults to the file name without its extension. Throws on failure; map the error
+ * with patternUploadErrorMessage.
  */
 export async function uploadPatternFile(file: File, name?: string): Promise<DirectUpload> {
+  const sha256 = await sha256Hex(file);
   const raw = stripDataUrlPrefix(await getBase64File(file));
   // Byte-clamped, not char-sliced — the server counts BYTES and slice() can split a surrogate pair.
   const filename = clampUtf8Bytes(file.name, MAX_PATTERN_FILENAME);
@@ -62,6 +67,7 @@ export async function uploadPatternFile(file: File, name?: string): Promise<Dire
     // string, which silently blocks the whole save).
     sizeBytes: Number(res.sizeBytes ?? file.size) || 0,
     name: name ?? patternNameOfFile(file),
+    sha256,
   };
 }
 

@@ -46,6 +46,7 @@ export type LivePattern = {
   bomLineKey?: string;
   version?: number;
   uploadedAt?: string;
+  sha256?: string;
 };
 export type LivePiece = {
   lineKey?: string;
@@ -73,7 +74,7 @@ export type ApplyDeps = {
   upload: (file: {
     filename: string;
     text: string;
-  }) => Promise<{ url: string; filename: string; sizeBytes: number }>;
+  }) => Promise<{ url: string; filename: string; sizeBytes: number; sha256?: string }>;
   /** The live form, read at commit time (getValues). */
   read: () => LiveCard;
   /** `setValue(path, value, { shouldDirty: true })`. */
@@ -161,6 +162,8 @@ export function planFormWrites(
           // 0 = "assign one": the server numbers a url it has not seen on this card (schema.ts)
           version: 0,
           uploadedAt: '',
+          // the new file's digest or '' — never the replaced file's (0423)
+          sha256: u.sha256 ?? '',
         };
         return [];
       }
@@ -175,6 +178,7 @@ export function planFormWrites(
         name: clampBytes(sc.name, MAX_NAME_BYTES),
         fabricPurpose: sc.target.fabricPurpose,
         bomLineKey: sc.target.bomLineKey,
+        sha256: u.sha256 ?? '',
       },
     ];
   });
@@ -327,6 +331,7 @@ export async function applyDraft(
         url: res.url,
         filename: res.filename || s.filename,
         sizeBytes: Number(res.sizeBytes) || new TextEncoder().encode(s.dxfText).length,
+        sha256: res.sha256 ?? '',
       });
       onProgress?.({ scopeKey, state: 'uploaded' });
     } catch (e) {

@@ -14,10 +14,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { common_TechCardMachineType } from 'api/proto-http/admin';
+import { clearReview, nextMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Text, EmptyCell } from 'ui';
+import { Button, Text, EmptyCell } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import type { AssemblyBlock } from './assembly-blocks';
@@ -87,6 +88,7 @@ function RailStep({
   workCatalog,
   draft = false,
   onReviewed,
+  onReviewAccepted,
 }: {
   uid: string;
   index: number;
@@ -126,6 +128,8 @@ function RailStep({
   draft?: boolean;
   /** Клик по чипу draft — «проверено»: метка снимается, поля шага не трогаются. */
   onReviewed?: () => void;
+  /** `ok` снимает метку перезалива; владелец рельса затем открывает следующую. */
+  onReviewAccepted?: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -147,6 +151,12 @@ function RailStep({
   const bomLineKeys = (useWatch({ control, name: `operations.${index}.bomLineKeys` }) ??
     []) as string[];
   const smv = (useWatch({ control, name: `operations.${index}.smv` }) ?? '') as string;
+  const review = (useWatch({ control, name: `operations.${index}.review` }) ?? '') as string;
+  const frozen =
+    useWatch({ control, name: 'approvalState' }) === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  const marked = review.trim() !== '';
+  // orphan снимается только заменой призрака или ×, не общим «ok»
+  const acceptable = marked && review.trim() !== 'orphan';
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
@@ -239,7 +249,7 @@ function RailStep({
           }}
           className={cn(
             'flex items-center gap-1 border bg-bgColor pr-1.5 transition-colors',
-            hasError || assemblyBroken || linked
+            hasError || assemblyBroken || marked || linked
               ? 'border-error'
               : selected || over || mapLit
                 ? 'border-textColor'
@@ -302,7 +312,7 @@ function RailStep({
             >
               {label}
             </Text>
-            {(hasError || assemblyBroken) && (
+            {(hasError || assemblyBroken || marked) && (
               <Text
                 size='nano'
                 variant='error'
@@ -311,9 +321,11 @@ function RailStep({
                 // Тултип обязан называть ПРИЧИНУ. Раньше он говорил про незаполненное поле и
                 // при нарушении сборки — то есть про другое, и уводил искать не туда.
                 title={
-                  assemblyBroken && !hasError
-                    ? 'the step breaks the assembly: an input is not on the table at this step — open the step'
-                    : 'the step has an unfilled required field'
+                  marked
+                    ? 'review needed'
+                    : assemblyBroken && !hasError
+                      ? 'assembly broken'
+                      : 'missing field'
                 }
               >
                 !
@@ -344,7 +356,18 @@ function RailStep({
               (открыть шаг), и вложенный орган был бы кнопкой в кнопке. Нативная кнопка, как ручка
               перетаскивания: «проверено» — правка, и в `<fieldset disabled>` выпущенной карточки
               она молчит. */}
-          {draft && (
+          {acceptable && selected ? (
+            <Button
+              onClick={onReviewAccepted}
+              disabled={frozen}
+              data-rail-review={index}
+              aria-label={`accept review for step ${opNumber}`}
+              title='accept review'
+              className='shrink-0 border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
+            >
+              <span className='text-nano uppercase'>ok</span>
+            </Button>
+          ) : draft ? (
             <button
               type='button'
               onClick={onReviewed}
@@ -355,7 +378,7 @@ function RailStep({
             >
               <span className='text-nano uppercase'>draft</span>
             </button>
-          )}
+          ) : null}
         </div>
       )}
     </SortableEntity>
@@ -414,6 +437,7 @@ export function SequenceRail({
   /** «Проверено» по клику на чип draft строки `index`. */
   onReviewed?: (index: number) => void;
 }) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -425,6 +449,18 @@ export function SequenceRail({
     const to = fields.findIndex((f) => f.id === over.id);
     if (from < 0 || to < 0) return;
     onMoveOperation(from, to);
+  };
+  const acceptReview = (index: number) => {
+    if (getValues('approvalState') === 'TECH_CARD_APPROVAL_STATE_RELEASED') return;
+    const operations = (getValues('operations') ?? []) as CardOperation[];
+    const row = operations[index];
+    // orphan: призрак ещё в шаге — метку снимает замена призрака или ×, не «ok»
+    const mark = row?.review?.trim() ?? '';
+    if (!mark || mark === 'orphan') return;
+    const nextOperations = operations.map((op, i) => (i === index ? clearReview(op) : op));
+    setValue(`operations.${index}.review`, '', { shouldDirty: true, shouldTouch: true });
+    const next = nextMarkedOperation(nextOperations, index);
+    if (next >= 0) onSelect(next);
   };
 
   return (
@@ -461,6 +497,7 @@ export function SequenceRail({
                 workCatalog={workCatalog}
                 draft={draftIds?.has(f.id) ?? false}
                 onReviewed={onReviewed ? () => onReviewed(index) : undefined}
+                onReviewAccepted={() => acceptReview(index)}
               />
             </Fragment>
           ))}

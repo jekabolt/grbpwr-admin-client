@@ -24,6 +24,26 @@ export type WChain = {
 
 export const LINK = {
   opGapMm: 25,
+  /** Pass 1 does not bridge a first item that is a lone mark to a line that only reaches it by a
+   * long sideways jump (longer than opTurnGapMm and ≥ 2× the mark, ≥ opTurnDeg off the mark, the
+   * line running on along the jump): that is a moveto to ANOTHER line drawn in the same operation.
+   * palto p26: the vertical «Mod. 125» marker (7 mm) is drawn in the size-76 hem's operation; the
+   * hem's first dash was linked 23.8 mm back to the marker's foot at 84°, so the 76 hem ran a 2 mm
+   * wedge along that undrawn jump. Dash fragments (< markMinMm) keep linking: traced rasters
+   * (leonie) draw dashed size lines in one operation, and their outlines rely on it. */
+  opTurnGapMm: 8,
+  opTurnDeg: 60,
+  markMinMm: 4,
+  markAlongDeg: 25,
+  /** A later junction does not bridge either when the chain so far is a drawn line (≥ lineMinMm,
+   * its widest internal gap × lineGapX below the jump) and the next item starts off its side,
+   * ≥ opTurnDeg from its end tangent, running on along the jump: the line turned a corner into
+   * ANOTHER line. palto p26: size 88's hem (103 mm, gaps ≤ 0.2) ends at its corner and the same
+   * operation goes on 17 mm sideways at 84° into size 80's armhole; the bridge lay on the grade
+   * line through 84's corner, so 84's outline ran on it (G3 BP_4_84: 20.9 mm off the line). Leonie
+   * dashed lines already link across gaps of up to ~19 mm, so no jump there is lineGapX × wider. */
+  lineMinMm: 40,
+  lineGapX: 8,
   decorMm: 0.7,
   seamGapMm: 0.6,
   seamLateralMm: 0.35,
@@ -109,6 +129,65 @@ function chainTangent(ch: WChain, end: 0 | 1, span = 3): PtMm | null {
   }
   if (!q || best < 0.6) return null;
   return { x: (p0.x - q.x) / best, y: (p0.y - q.y) / best };
+}
+
+/** Pass 1, first junction: is `f` a lone mark that `next` only reaches by a long sideways jump? */
+function markJump(f: Link, next: Link): boolean {
+  if (f.it.kind === 'bead' || next.it.kind === 'bead') return false;
+  const fp = linkPts(f);
+  const e = fp[fp.length - 1];
+  const pts = linkPts(next);
+  const p = pts[0];
+  const g = dist(e, p);
+  let len = 0;
+  for (let i = 1; i < fp.length; i++) len += dist(fp[i - 1], fp[i]);
+  if (g <= LINK.opTurnGapMm || len < LINK.markMinMm || g < 2 * len) return false;
+  const ux = (p.x - e.x) / g;
+  const uy = (p.y - e.y) / g;
+  const t = chainTangent({ items: [f], decor: [], dead: false }, 1);
+  if (!t || Math.abs(t.x * ux + t.y * uy) >= Math.cos((LINK.opTurnDeg * Math.PI) / 180))
+    return false;
+  // the next line runs on along the jump (its direction over up to 3 mm from its near end)
+  let q = p;
+  for (const r of pts) {
+    q = r;
+    if (dist(r, p) >= 3) break;
+  }
+  const dq = dist(q, p);
+  return (
+    dq >= 0.6 &&
+    ((q.x - p.x) * ux + (q.y - p.y) * uy) / dq >= Math.cos((LINK.markAlongDeg * Math.PI) / 180)
+  );
+}
+
+/** Pass 1, later junction: does the drawn line `ch` end where `next` starts a line off its side? */
+function cornerJump(ch: WChain, next: Link): boolean {
+  if (next.it.kind === 'bead' || ch.items.length < 3) return false;
+  const e = chainEnd(ch, 1);
+  const pts = linkPts(next);
+  const p = pts[0];
+  const g = dist(e, p);
+  if (g <= LINK.opTurnGapMm) return false;
+  let len = 0;
+  let gap = 0;
+  for (let k = 0; k < ch.items.length; k++) {
+    const lp = linkPts(ch.items[k]);
+    for (let i = 1; i < lp.length; i++) len += dist(lp[i - 1], lp[i]);
+    if (k) gap = Math.max(gap, dist(itemEnds(ch.items[k - 1])[1], itemEnds(ch.items[k])[0]));
+  }
+  if (len < LINK.lineMinMm || g <= LINK.lineGapX * Math.max(gap, 0.5)) return false;
+  const cosMax = Math.cos((LINK.opTurnDeg * Math.PI) / 180);
+  const ux = (p.x - e.x) / g;
+  const uy = (p.y - e.y) / g;
+  const t = chainTangent(ch, 1);
+  if (!t || Math.abs(t.x * ux + t.y * uy) >= cosMax) return false;
+  let q = p;
+  for (const r of pts) {
+    q = r;
+    if (dist(r, p) >= 3) break;
+  }
+  const dq = dist(q, p);
+  return dq >= 0.6 && ((q.x - p.x) * ux + (q.y - p.y) * uy) / dq >= cosMax;
 }
 
 /** Internal gap count above dashGapMm, and total length of drawn items. */
@@ -226,7 +305,10 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
               { g: dist(fa, a), frev: !f.rev, rev: false },
               { g: dist(fa, b), frev: !f.rev, rev: true },
             ].sort((x, y) => x.g - y.g)[0];
-            if (opts4.g <= LINK.opGapMm) {
+            if (
+              opts4.g <= LINK.opGapMm &&
+              !markJump({ it: f.it, rev: opts4.frev }, { it, rev: opts4.rev })
+            ) {
               f.rev = opts4.frev;
               cur.items.push({ it, rev: opts4.rev });
               continue;
@@ -235,7 +317,7 @@ export function linkItems(sheet: Sheet, opts: ChainOpts): LinkResult {
             const e = chainEnd(cur, 1);
             const g0 = dist(e, a);
             const g1 = dist(e, b);
-            if (Math.min(g0, g1) <= LINK.opGapMm) {
+            if (Math.min(g0, g1) <= LINK.opGapMm && !cornerJump(cur, { it, rev: g1 < g0 })) {
               cur.items.push({ it, rev: g1 < g0 });
               continue;
             }

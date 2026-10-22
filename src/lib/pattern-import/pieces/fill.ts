@@ -54,6 +54,7 @@ import { gradeHook, SOLVER_MODEL, type GradeHook } from './grade/hook';
 import { seedFaces, type SeedFaceDiag } from './seed-face';
 import { seedLabel } from './seeds';
 import { snapOutline, type WallItem } from './snap';
+import { cutTails, LineIndex, type TailCut } from './tails';
 import { variantKnifeItems } from './variants';
 import { localRanks } from './bundle-rank';
 import {
@@ -65,7 +66,10 @@ import {
   lonePortions,
   overlayLines,
   rescuedIgnored,
+  copyRanks,
+  copyWallsOf,
   cornerSources,
+  sandwichWalls,
   sheetModule,
   wallModel,
   type WallModel,
@@ -101,6 +105,8 @@ export type FillDiag = {
   reversed?: number[];
   /** Candidates closed by derived bridges (family-corroborated). */
   bridged?: number;
+  /** Marking tails cut off a size's outline at its own line (pieces/tails). */
+  tails?: (TailCut & { seed: number; rank: number })[];
   /** Merged outer regions split by cells (touching pieces). */
   split?: number;
   /** File-per-size: seed placements moved to the matching region of another size's file. */
@@ -439,6 +445,11 @@ function f3Off(): boolean {
   return typeof process !== 'undefined' && !!process.env?.MOOD_F3_OFF;
 }
 
+/** Probe switch: keep the marking tails (pieces/tails) the fill takes. */
+function tailOff(): boolean {
+  return typeof process !== 'undefined' && !!process.env?.M_TAIL_OFF;
+}
+
 /** Share of a polyline (sampled every 0.5 mm) within `tol` of a closed outline. */
 function alongShare(pts: readonly PtMm[], outer: readonly PtMm[], tol: number): number {
   if (pts.length < 2 || outer.length < 3) return 0;
@@ -601,6 +612,73 @@ function fillOneSheet(
   const contSkip = (excl: ReadonlySet<ChainId>) =>
     new Set<ChainId>([...margins, ...excl, ...corners]);
   diag.rescued = rescued.length;
+  // COPY RANKS: a rescued copy of one size's line walls the other sizes only where they coincide
+  // with it (walls.ts copyWallsOf); per rank, built on first use
+  const copies = copyRanks(set, model, rescued);
+  // which side of a copy of s's line is outside s's pieces: s's own walls (its copies whole, no
+  // other size's) on the raster, exterior flooded; built on first use, per s
+  const outsideRaster = new Map<number, ((p: PtMm) => boolean | null) | null>();
+  const outsideOf = (s: number) => {
+    if (outsideRaster.has(s)) return outsideRaster.get(s) ?? null;
+    const own = rescued.filter((id) => (copies.get(id) ?? s) === s);
+    const ctx = buildRank(box, cell, [
+      ...itemsOf(set, [...model.common, ...(model.byRank[s] ?? []), ...own]),
+      ...lone,
+      ...cornerItems(s),
+    ]);
+    const { g, ext, wall } = ctx;
+    // true outside, false inside, null on a wall pixel (no side)
+    const f = (p: PtMm) => {
+      const x = g.ix(p.x);
+      const y = g.iy(p.y);
+      if (!g.inside(x, y)) return true;
+      return wall[y * g.W + x] ? null : ext[y * g.W + x] === 1;
+    };
+    outsideRaster.set(s, f);
+    return f;
+  };
+  const rescuedOf = new Map<number, WallItem[]>();
+  const rescuedItems = (r: number): WallItem[] => {
+    let v = rescuedOf.get(r);
+    if (!v)
+      rescuedOf.set(
+        r,
+        (v = copies.size
+          ? copyWallsOf(set, model, copies, rescued, r, outsideOf)
+          : itemsOf(set, rescued)),
+      );
+    return v;
+  };
+  // SANDWICH: rank r's edge where a smaller and a larger size's lines run on each other (walls.ts)
+  const rescuedRank = new Map(rescued.map((id) => [id, copies.get(id) ?? null] as const));
+  const sandwichOf = new Map<number, WallItem[]>();
+  const sandwichItems = (r: number): WallItem[] => {
+    let v = sandwichOf.get(r);
+    if (!v) sandwichOf.set(r, (v = sandwichWalls(set, model, r, rescuedRank)));
+    return v;
+  };
+  // MARKING TAILS: a marking drawn once per size runs past a smaller size's outline; where its
+  // strokes are closed off out there, the strip between them is enclosed and the fill takes it.
+  // Cut at the size's own line when the tail proves itself (pieces/tails cutTails).
+  const tailsOn = model.mode === 'graded' && !graded?.walls && !tailOff();
+  let commonIdx: LineIndex | null = null;
+  const ownIdx = new Map<string, LineIndex>();
+  const untail = (outer: PtMm[], seedId: number, r: number, from: RankFrom): PtMm[] => {
+    if (!tailsOn) return outer;
+    const re = from === 'bundleRank' || from === 'continuity';
+    const k = `${r}:${re ? 1 : 0}`;
+    let own = ownIdx.get(k);
+    if (!own) {
+      const ids = new Set(model.byRank[r] ?? []);
+      if (re) for (const id of rerank().model.byRank[r] ?? []) ids.add(id);
+      ownIdx.set(k, (own = new LineIndex(itemsOf(set, ids))));
+    }
+    commonIdx ??= new LineIndex(itemsOf(set, model.common));
+    const t = cutTails(outer, own, commonIdx);
+    if (!t.cuts.length) return outer;
+    (diag.tails ??= []).push(...t.cuts.map((c) => ({ ...c, seed: seedId, rank: r })));
+    return t.outer;
+  };
   const textCentres = sheet.texts.map((t) => ({
     id: t.id,
     at: { x: (t.bbox.minX + t.bbox.maxX) / 2, y: (t.bbox.minY + t.bbox.maxY) / 2 },
@@ -767,7 +845,11 @@ function fillOneSheet(
     return [
       ...(graded?.walls
         ? graded.walls(r)
-        : itemsOf(set, [...model.common, ...ownIds, ...rescued, ...extraOf(r)])),
+        : [
+            ...itemsOf(set, [...model.common, ...ownIds, ...extraOf(r)]),
+            ...rescuedItems(r),
+            ...sandwichItems(r),
+          ]),
       ...lone,
       ...opBridges(r).map((b) => ({ chain: -2, pts: [b.from, b.to] })),
       ...bandCuts(r).map((b) => ({ chain: -3, pts: [b.from, b.to] })),
@@ -831,12 +913,8 @@ function fillOneSheet(
               build: () => {
                 const rr = rerank();
                 const items = [
-                  ...itemsOf(set, [
-                    ...rr.model.common,
-                    ...rr.model.byRank[r],
-                    ...rescued,
-                    ...extraOf(r),
-                  ]),
+                  ...itemsOf(set, [...rr.model.common, ...rr.model.byRank[r], ...extraOf(r)]),
+                  ...rescuedItems(r),
                   ...rr.lone,
                   ...cornerItems(r),
                 ];
@@ -1084,7 +1162,12 @@ function fillOneSheet(
           snapMm: opts.snapMm || PATIMPORT.snapMm,
         },
       );
-      const outer = signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer;
+      const outer = untail(
+        signedArea(sn.outer) < 0 ? sn.outer.slice().reverse() : sn.outer,
+        seed.id,
+        r,
+        rankFrom,
+      );
       cand.outer = outer;
       cand.walls = sn.walls.filter((id) => id >= 0);
       // bridges the outline runs along are derived edges the operator must see

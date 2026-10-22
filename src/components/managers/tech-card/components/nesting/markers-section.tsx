@@ -48,6 +48,7 @@ import {
 // geom/, так что импорт в НЕленивый чанк не тащит ни clipper, ни dxf-parser.
 import { patternSourcesForMarker, type MarkerPatternRow } from './marker-rebuild';
 import { planAutoNorm } from './auto-norm';
+import { markerBehind, markersBehindSheets } from './marker-sheets';
 import {
   fabricScopes,
   isRollGoodsSection,
@@ -193,6 +194,8 @@ export function MarkersSection({
   // клиент, из marker-io; здесь он ставится НА ИСТОЧНИК, поэтому карточными оказываются и
   // таблица, и сводка конфликтов, и пустое состояние, и поиск прежней нормы ниже.
   const markers = useMemo(() => cardMarkers(techCard?.markers), [techCard?.markers]);
+  // Captured before the latest DXF upload of its fabric: the geometry it was nested on moved.
+  const behind = useMemo(() => markersBehindSheets(techCard), [techCard]);
   // Колорвей маркера — имя, а не id. Без него две раскладки одного слота на разных ширинах
   // различаются только числом в колонке «ширина», и понять, которая из них чья, нельзя.
   const colorwayLabelById = useMemo(() => {
@@ -482,6 +485,7 @@ export function MarkersSection({
     const draft = isDraftMarker(m);
     const conflict = (m.normConflict ?? '').trim();
     const changed = pieceSetChanged(m);
+    const sheetMoved = markerBehind(behind, m);
     const name = (m.name ?? '').trim();
     const custom =
       name &&
@@ -575,6 +579,7 @@ export function MarkersSection({
               set changed
             </Pill>
           )}
+          {sheetMoved && <Pill tone='attention'>patterns changed</Pill>}
           {conflict && (
             <Pill tone='warn' title={conflict}>
               norm conflict

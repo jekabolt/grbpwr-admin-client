@@ -5498,9 +5498,9 @@ export type common_TaskChecklistItem = {
   createdAt: wellKnownTimestamp | undefined;
 };
 
-// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус и
-// доску (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж «заблокирована» и
-// список связей не требовали ни второго RPC, ни N+1.
+// TaskLink — строка связи, КАК ЕЁ РИСУЕТ КАРТОЧКА: второй конец УЖЕ разрешён в заголовок, статус,
+// доску и исполнителей (та же доктрина проекции, что у admin.LibraryFileTask), чтобы бейдж
+// «заблокирована» и список связей не требовали ни второго RPC, ни N+1.
 // БЛОКЕР — СОВЕТ, А НЕ ЗАМОК: сервер НЕ запрещает перевести в DONE задачу с открытыми блокерами.
 // Доска — drag-and-drop, и отказ посреди жеста хуже бейджа; заархивированный недоделанный блокер
 // замуровал бы карточку навсегда. Заблокированность считает клиент: есть BLOCKED_BY со status !=
@@ -8418,6 +8418,11 @@ export type common_TechCardInsert = {
   // флага несёт draft = true (эхо). Флаг не фильтрует разбор. Серверные пути (клон сезона,
   // импорт архива) ставят его явно. ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест.
   operationDraftAware: boolean | undefined;
+  // ЩИТ СВЕРКИ DXF для TechCardOperation.review (69). Операции пишутся полной заменой без
+  // стабильного ключа строки, поэтому неосведомлённая вкладка не может безопасно сохранить
+  // карточку с review-метками: без этого флага сервер отказывает, а не стирает их. Транспорт,
+  // не содержание; ни в один дайджест не входит.
+  operationReviewAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -9416,6 +9421,10 @@ export type common_TechCardOperation = {
   // а хеш метки переподписывал бы карточку на каждом ревью чужого шага. Не входит ни в аудит, ни в гейт
   // сборки — это пометка для команды, а не инструкция.
   draft: boolean | undefined;
+  // Why this step needs a human pass after DXF reconciliation. Empty means reviewed; non-empty is
+  // one of reshaped|remapped|split|orphan and blocks release readiness. This is deliberately a
+  // string rather than an enum so an older protojson client cannot silently drop a future reason.
+  review: string | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -10151,6 +10160,31 @@ export type common_TechCardSizePattern = {
   // carried by at least one roll-goods BOM line of this card, except when it round-trips the row's
   // stored value unchanged.
   fabricPurpose?: common_TechCardBomPurpose;
+  // Lowercase hex SHA-256 of the uploaded object's bytes. Presence is explicit: omission preserves
+  // the stored digest only while the URL is unchanged; a replacement without a digest clears it,
+  // as does a present empty string. Used to stop an identical DXF re-upload before minting a revision.
+  sha256?: string;
+  // Superseded files, newest first. OUTPUT-ONLY: ignored when this message comes back through
+  // UpdateTechCard; restoring one means putting its url into the active fields above.
+  history: common_TechCardPatternRevision[] | undefined;
+};
+
+// TechCardPatternRevision is one superseded file of a pattern sheet. The active file stays on
+// TechCardSizePattern; this read-only history lets a client restore an older file by sending its url
+// back through the ordinary UpdateTechCard flow.
+export type common_TechCardPatternRevision = {
+  revision: number | undefined;
+  url: string | undefined;
+  sha256: string | undefined;
+  fileName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The tech_card_snapshot frozen by the save that replaced or removed this file: the whole card as
+  // it was while this file was the current sheet. Admin.RestoreTechCardSnapshot takes it to bring the
+  // card back to that state (operations, pieces, aliases, sheets). 0 = no snapshot, not restorable.
+  snapshotId: number | undefined;
+  // Stable id of tech_card_size_pattern_history. Required by
+  // Admin.DeleteTechCardPatternRevision; 0 only for an older snapshot/read model that predates it.
+  historyId: number | undefined;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
@@ -10587,6 +10621,10 @@ export type common_TechCard = {
   // DeleteTechCardSeams — never through TechCardInsert, so a full card save cannot erase them, the
   // seams RPCs never bump lock_version, and they enter no section digest. Ignored on write.
   seams: common_TechCardSeam[] | undefined;
+  // OUTPUT-ONLY pattern-history rows whose stable sheet identity no longer has a live pattern row.
+  // These are deleted sheets, newest first. They stay visible here so snapshot_id can restore the
+  // whole pre-delete card and history_id can remove an unwanted retained revision.
+  removedPatternHistory: common_TechCardPatternRevision[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -11241,9 +11279,32 @@ export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
   expectedLockVersion: number | undefined;
+  // Non-empty only for an atomic, history-worthy rewrite such as DXF reconciliation. The server
+  // stores the pre-update card snapshot and a matching revision-journal line in the same transaction.
+  snapshotReason: string | undefined;
 };
 
 export type UpdateTechCardResponse = {
+};
+
+export type RestoreTechCardSnapshotRequest = {
+  techCardId: number | undefined;
+  snapshotId: number | undefined;
+  expectedLockVersion: number | undefined;
+};
+
+export type RestoreTechCardSnapshotResponse = {
+  techCard: common_TechCard | undefined;
+};
+
+export type DeleteTechCardPatternRevisionRequest = {
+  techCardId: number | undefined;
+  historyId: number | undefined;
+  expectedLockVersion: number | undefined;
+};
+
+export type DeleteTechCardPatternRevisionResponse = {
+  techCard: common_TechCard | undefined;
 };
 
 // GetTechCardConstructionAuditRequest — which saved card to audit. Nothing else: the machine layer
@@ -19824,6 +19885,18 @@ export interface AdminService {
   GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
   // UpdateTechCard updates a tech card, replacing its nested sections.
   UpdateTechCard(request: UpdateTechCardRequest): Promise<UpdateTechCardResponse>;
+  // RestoreTechCardSnapshot brings a card back to one of its own snapshots
+  // (TechCardPatternRevision.snapshot_id). One transaction: the current card is snapshotted first
+  // (reason «restore:<snapshot_id>»), then rewritten through the UpdateTechCard write path. Approval,
+  // sign-offs, stage, style number, category and measurement unit stay as they are now. Errors:
+  // NotFound (no such snapshot on this card), Aborted (expected_lock_version is stale),
+  // FailedPrecondition (released or system card, unreadable snapshot, narrower size range),
+  // PermissionDenied (the snapshot's costing differs from the card's and the caller lacks costing:write).
+  RestoreTechCardSnapshot(request: RestoreTechCardSnapshotRequest): Promise<RestoreTechCardSnapshotResponse>;
+  // DeleteTechCardPatternRevision removes one retained pattern-history row. It cannot remove the
+  // object currently attached to a live sheet. The card is optimistically locked and returned in
+  // the same read shape as GetTechCard.
+  DeleteTechCardPatternRevision(request: DeleteTechCardPatternRevisionRequest): Promise<DeleteTechCardPatternRevisionResponse>;
   // DeleteTechCard deletes a tech card by id (nested sections cascade).
   DeleteTechCard(request: DeleteTechCardRequest): Promise<DeleteTechCardResponse>;
   // ListTechCards lists tech cards (paged, optional filters). Declared AFTER
@@ -25475,6 +25548,55 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateTechCard",
       }) as Promise<UpdateTechCardResponse>;
+    },
+    RestoreTechCardSnapshot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.snapshotId) {
+        throw new Error("missing required field request.snapshot_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/snapshot/${request.snapshotId}/restore`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RestoreTechCardSnapshot",
+      }) as Promise<RestoreTechCardSnapshotResponse>;
+    },
+    DeleteTechCardPatternRevision(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      if (!request.historyId) {
+        throw new Error("missing required field request.history_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/pattern-history/${request.historyId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.expectedLockVersion) {
+        queryParams.push(`expectedLockVersion=${encodeURIComponent(request.expectedLockVersion.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardPatternRevision",
+      }) as Promise<DeleteTechCardPatternRevisionResponse>;
     },
     DeleteTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {

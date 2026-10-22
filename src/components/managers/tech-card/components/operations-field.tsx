@@ -8,7 +8,7 @@ import {
 } from 'api/proto-http/admin';
 import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { ROUTES } from 'constants/routes';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -49,6 +49,7 @@ import {
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
+import { isDxfUrl } from 'utils/pattern';
 import {
   // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
   // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
@@ -175,8 +176,20 @@ import {
 import { OperationsRatifyPanel } from './operations-ratify-panel';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { cardHasDxf } from './nesting/card-has-dxf';
-import { type FoundPiece } from './nesting/dxf-geometry';
-import { pieceRefKey } from './piece-block-refs';
+import {
+  findPiece,
+  useDxfGeometry,
+  useDxfIndex,
+  type FoundPiece,
+  type ScopedDxfFile,
+} from './nesting/dxf-geometry';
+import { scopeKeyOfBinding } from './bom-purpose';
+import {
+  pieceBlockRefs,
+  pieceRefKey,
+  rollGoodsScopes,
+  type PieceAliasRow,
+} from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
@@ -233,15 +246,81 @@ import { SequenceRail } from './sequence-rail';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
-import { PieceTile, TILE_BOX } from './piece-silhouette';
+import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { SkeletonStep } from 'lib/assembly-skeleton/types';
+import {
+  ghostCandidates,
+  nextMarkedOperation,
+  removeGhostFromStep,
+  replaceGhost,
+  reviewAfterEdit,
+  unaliasedPieceKeys,
+  unplacedPieceKeys,
+  type CardOperation,
+} from 'lib/dxf-reconcile';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 
 /** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
+
+type ReviewPatternRow = {
+  lineKey?: string;
+  url?: string;
+  filename?: string;
+  name?: string;
+  bomLineKey?: string;
+  fabricPurpose?: string;
+  history?: Array<{ url?: string }>;
+};
+
+type ReuploadBaseline = {
+  patterns: ReviewPatternRow[];
+  aliases: PieceAliasRow[];
+  pieceKeys: Set<string>;
+};
+
+const copyPatternRows = (rows: readonly ReviewPatternRow[]): ReviewPatternRow[] =>
+  rows.map((row) => ({ ...row, history: row.history?.map((rev) => ({ ...rev })) }));
+
+const copyAliases = (rows: readonly PieceAliasRow[]): PieceAliasRow[] =>
+  rows.map((row) => ({ ...row }));
+
+/**
+ * После сохранения активный URL уже новый, а старый лист лежит в read-only history. Контракт L4b
+ * указывает `history[1]`; до сохранения кэш карточки ещё несёт прежний активный URL, и он точнее.
+ */
+function previousPatternRows(
+  current: readonly ReviewPatternRow[],
+  saved: readonly ReviewPatternRow[],
+): ReviewPatternRow[] {
+  const byKey = new Map(saved.map((row) => [(row.lineKey ?? '').trim(), row]));
+  return current.map((row, index) => {
+    const stored = byKey.get((row.lineKey ?? '').trim()) ?? saved[index];
+    if (!stored) return { ...row };
+    const activeBeforeSave = stored.url && stored.url !== row.url ? stored.url : '';
+    const previousUrl = activeBeforeSave || stored.history?.[1]?.url || '';
+    return previousUrl
+      ? { ...row, url: previousUrl, filename: stored.filename }
+      : { ...row, url: '' };
+  });
+}
+
+function reviewDxfPack(
+  rows: readonly ReviewPatternRow[],
+  scopes: ReturnType<typeof rollGoodsScopes>,
+): ScopedDxfFile[] {
+  return rows
+    .filter((row): row is ReviewPatternRow & { url: string } => !!row.url && isDxfUrl(row.url))
+    .map((row) => ({
+      scopeKey: scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes),
+      name: (row.name ?? '').trim() || (row.filename ?? '').trim() || 'pattern.dxf',
+      url: row.url,
+    }));
+}
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
@@ -667,6 +746,9 @@ export const emptyOperation = {
   smv: '',
   // A hand-made step is never a draft; only the assembly skeleton writes `true` (rowFromStep).
   draft: false,
+  // Nor does it carry a re-upload mark (0422): only a DXF re-upload writes one (lib/dxf-reconcile).
+  // «+ to assembly» and every created step start clean.
+  review: '',
   seamClass: NONE_SEAM_CLASS,
   stitchesPerCm: '',
   seamAllowanceMm: '',
@@ -2511,6 +2593,8 @@ function OperationEditor({
   bomLines,
   pieces,
   pieceShapes,
+  previousPieceShapes,
+  ghostKeys,
   cloth,
   tiled,
   pinOptions,
@@ -2521,6 +2605,8 @@ function OperationEditor({
   pieceSource,
   onActiveBomChange,
   onDropPiece,
+  onReplaceGhost,
+  onRemoveGhost,
   onRenameUnit,
   onDissolveUnit,
   mediaUrls,
@@ -2544,6 +2630,10 @@ function OperationEditor({
   pieces: PieceRef[];
   /** Контуры деталей карточки — та же карта, что у рельса и у тарелки. */
   pieceShapes: PieceShapeMap;
+  /** Контуры с предыдущего листа; null до окончания ленивого разбора или после его отказа. */
+  previousPieceShapes: PieceShapeMap;
+  /** Детали карточки без единого живого алиаса DXF. */
+  ghostKeys: ReadonlySet<string>;
   /**
    * Ткань деталей ПЕРВОГО колорвея — та же карта, что у лотка и у полотна схемы. Здесь она ЧИТАЕТСЯ
    * плиткой состава шага и больше ничем: редактор пишет в форму шаг, а не рецепт.
@@ -2566,6 +2656,10 @@ function OperationEditor({
   pieceSource: { groupHint: string; chipTitle: string; emptyNote: string };
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
+  /** Заменить призрака во всей карте и перейти к следующей метке. */
+  onReplaceGhost: (index: number, ghostKey: string, nextKey: string) => void;
+  /** Убрать призрака только из этого шага и перейти к следующей метке. */
+  onRemoveGhost: (index: number, ghostKey: string) => void;
   /**
    * ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДИН МУТАТОР НА ВСЕ ТОЧКИ ВХОДА. Поле кода живёт в редакторе шага, а
    * когда появится редактор узла (Т6) — и в нём; обе поверхности обязаны звать ЭТОТ колбэк, иначе
@@ -2590,6 +2684,7 @@ function OperationEditor({
   const { control, getValues, setValue } = form;
   const opNumber = (index + 1) * 10;
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
+  const review = (useWatch({ control, name: `operations.${index}.review` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
   const [addingMaterial, setAddingMaterial] = useState(false);
@@ -3916,6 +4011,9 @@ function OperationEditor({
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
+  const chosenGhosts =
+    review.trim() === 'orphan' ? chosenPieces.filter((key) => ghostKeys.has(key)) : [];
+  const chosenLivePieces = chosenPieces.filter((key) => !chosenGhosts.includes(key));
   // Фронтир нужен редактору дважды: чтобы отличить вход-УЗЕЛ от оборванной ссылки на деталь и
   // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
   // форму, а не по строке рельса: редактор смонтирован в единственном экземпляре.
@@ -3924,6 +4022,31 @@ function OperationEditor({
   // целиком и место им на релизном гейте, а не в строке шага.
   const stepViolations = assembly.res.violations.filter((v) => v.step === index);
   const chosenUnits = selectedPieceKeys.filter((k) => !byKey.has(k) && assembly.res.units.has(k));
+  const cardOperations = (getValues('operations') ?? []) as CardOperation[];
+  const shapedPieces = pieces.flatMap((piece) => {
+    const found = pieceShapes?.get(pieceRefKey(piece.lineKey));
+    return found ? [{ pieceLineKey: piece.lineKey, shapes: [found.piece] }] : [];
+  });
+  const candidatesByGhost = new Map(
+    chosenGhosts.map((ghostKey) => {
+      const previous = previousPieceShapes?.get(pieceRefKey(ghostKey));
+      return [
+        ghostKey,
+        previous
+          ? ghostCandidates(
+              {
+                pieceLineKey: ghostKey,
+                shapes: [previous.piece],
+                step: cardOperations[index],
+                assembly: { pieces, operations: cardOperations },
+              },
+              shapedPieces,
+              3,
+            )
+          : [],
+      ] as const;
+    }),
+  );
   // The same composed heading the rail shows, so the open step and its row in the list are named
   // identically — they used to differ, because the rail fell back to the type while the editor
   // header printed only the type and the row printed `node`.
@@ -5415,9 +5538,9 @@ function OperationEditor({
       >
         pieces this step joins
       </GroupLabel>
-      <ChipRow>
-        {chosenPieces.map((k) =>
-          tiled ? (
+      <ChipRow className='items-start'>
+        {chosenLivePieces.map((k) =>
+          tiled || review.trim() === 'reshaped' || review.trim() === 'orphan' ? (
             // Убрать — крестиком В УГЛУ плитки, а не кликом по ней самой: плитка достаточно
             // крупная, чтобы по ней хотелось нажать, и «нажал посмотреть — отвязал деталь» здесь
             // стоило бы молча потерянной связи шага с деталью.
@@ -5432,6 +5555,8 @@ function OperationEditor({
                   не то же самое, что проверенное: сменят бокс здесь — увидят и это число. */}
               <PieceTile
                 found={pieceShapes?.get(pieceRefKey(k)) ?? null}
+                previousFound={previousPieceShapes?.get(pieceRefKey(k)) ?? null}
+                reviewMode={review.trim() === 'reshaped' ? 'reshaped' : undefined}
                 name={byKey.get(k)?.name ?? ''}
                 cloth={cloth?.get(k) ?? null}
                 pxBox={TILE_BOX}
@@ -5473,6 +5598,51 @@ function OperationEditor({
             ▣ {k}
           </Chip>
         ))}
+        {chosenGhosts.map((ghostKey) => {
+          const ghost = byKey.get(ghostKey);
+          const ghostName = ghost?.name?.trim() || 'piece';
+          const previous = previousPieceShapes?.get(pieceRefKey(ghostKey)) ?? null;
+          return (
+            <Fragment key={`ghost:${ghostKey}`}>
+              <span className='relative inline-flex border border-dashed border-error bg-bgColor'>
+                <PieceTile
+                  found={null}
+                  previousFound={previous}
+                  reviewMode='orphan'
+                  name={ghostName}
+                  pxBox={TILE_BOX}
+                />
+                <Close
+                  size='sm'
+                  aria-label={`remove missing piece ${ghostName}`}
+                  title='remove missing piece'
+                  onClick={() => onRemoveGhost(index, ghostKey)}
+                  className='absolute top-0 right-0 bg-bgColor/80 text-error focus-visible:-outline-offset-2'
+                />
+              </span>
+              {(candidatesByGhost.get(ghostKey) ?? []).map((candidate) => {
+                const piece = byKey.get(candidate.pieceLineKey);
+                const candidateName = piece?.name?.trim() || 'piece';
+                return (
+                  <Button
+                    key={`${ghostKey}:${candidate.pieceLineKey}`}
+                    onClick={() => onReplaceGhost(index, ghostKey, candidate.pieceLineKey)}
+                    aria-label={`replace ${ghostName} with ${candidateName}`}
+                    title='replace missing piece'
+                    className='inline-flex border border-borderColor bg-bgColor text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  >
+                    <PieceTile
+                      found={pieceShapes?.get(pieceRefKey(candidate.pieceLineKey)) ?? null}
+                      name={candidateName}
+                      cloth={cloth?.get(candidate.pieceLineKey) ?? null}
+                      pxBox={TILE_BOX}
+                    />
+                  </Button>
+                );
+              })}
+            </Fragment>
+          );
+        })}
         <Chip dashed onClick={onFlashPieces} title={pieceSource.chipTitle}>
           ＋ piece
         </Chip>
@@ -6083,6 +6253,7 @@ export function OperationsField({
   // only, and the print door is not drawn.
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
+  const { data: savedCard } = useTechCard(techCardId);
   const [params, setParams] = useSearchParams();
   // КАТАЛОГ РАБОТ НА ВЕСЬ РЕЛЬС — ОДНОЙ ПОДПИСКОЙ (R8). Имя шага теперь спрашивает работу, а
   // спрашивают его здесь три места сразу: строка рельса, схема сборки и панель ратификации.
@@ -6466,9 +6637,16 @@ export function OperationsField({
   //
   // ЗАПИСЬ — НЕ КАСАНИЕ. Если отпечаток разошёлся, а строка совпадает с сохранённой базой формы на
   // том же месте, — это лёг автосейв (сервер мог канонизировать поле), и отпечаток берётся заново.
+  //
+  // МЕТКА ПЕРЕЗАЛИВА (0422) ЕДЕТ ТЕМ ЖЕ ДЕТЕКТОРОМ: правка шага с `review` снимает её
+  // (`reviewAfterEdit`), кроме 'orphan' — тот живёт, пока шаг ссылается на призрак (деталь без
+  // единого алиаса), и уходит только заменой призрака или удалением его из шага.
   const [draftIds, setDraftIds] = useState<ReadonlySet<string>>(() => new Set());
   const draftRef = useRef(draftIds);
   draftRef.current = draftIds;
+  // Есть ли сейчас шаги с меткой перезалива — без них и без черновиков сверку будит только смена
+  // самих меток (или всей формы).
+  const reviewRowsRef = useRef(false);
   const draftBase = useRef(new Map<string, { print: string; row: Record<string, unknown> }>());
   // ТОЧНЫЕ ЗАПИСИ ПОДСТАНОВКИ (ревью Codex P2): строка → поле → значение, а у нитки — цепочка
   // дельт { remove?, add? } над списком связей. От «касания» освобождается только то, что
@@ -6495,8 +6673,17 @@ export function OperationsField({
         return;
       }
       if (name && !name.startsWith('operations')) return;
-      // Без черновиков будить сверку стоит только сменой самой метки (или всей формы — reset).
-      if (draftRef.current.size === 0 && name && !name.endsWith('.draft')) return;
+      // Без черновиков и меток перезалива будить сверку стоит только сменой самой метки, всего
+      // массива шагов (перезалив пишет его целиком) или всей формы — reset.
+      if (
+        draftRef.current.size === 0 &&
+        !reviewRowsRef.current &&
+        name &&
+        name !== 'operations' &&
+        !name.endsWith('.draft') &&
+        !name.endsWith('.review')
+      )
+        return;
       setTouchTick((t) => t + 1);
     });
     return () => sub.unsubscribe();
@@ -6511,10 +6698,13 @@ export function OperationsField({
     const next = new Set<string>();
     const touched: number[] = [];
     const live = new Set<string>();
+    let anyReview = false;
     fields.forEach((f, i) => {
       live.add(f.id);
       const row = ops[i];
-      if (!row?.draft) {
+      const marked = typeof row?.review === 'string' && row.review !== '';
+      if (marked) anyReview = true;
+      if (!row?.draft && !marked) {
         base.delete(f.id);
         return;
       }
@@ -6522,7 +6712,7 @@ export function OperationsField({
       const was = base.get(f.id);
       const keep = () => {
         base.set(f.id, { print, row: structuredClone(row) });
-        next.add(f.id);
+        if (row.draft) next.add(f.id);
       };
       if (was?.print === print) return keep();
       // С чем сверять подстановку: прежний вид строки, а при первом взгляде — то, что положила
@@ -6569,10 +6759,24 @@ export function OperationsField({
         redo: history.current.redo,
       });
     }
-    if (!frozen)
-      for (const index of touched)
-        setValue(`operations.${index}.draft`, false, { shouldDirty: true });
-    else for (const index of touched) next.add(fields[index].id);
+    reviewRowsRef.current = anyReview;
+    if (!frozen) {
+      // Призраки карты — только если правка задела помеченный шаг (иначе считать нечего).
+      const ghosts = touched.some((index) => ops[index]?.review)
+        ? unaliasedPieceKeys(
+            (getValues('pieces') ?? []).map((p) => ({ lineKey: p?.lineKey ?? '' })),
+            getValues('pieceDxfAliases') ?? [],
+          )
+        : [];
+      for (const index of touched) {
+        const row = ops[index];
+        if (row?.draft) setValue(`operations.${index}.draft`, false, { shouldDirty: true });
+        const review = typeof row?.review === 'string' ? row.review : '';
+        if (!review) continue;
+        const after = reviewAfterEdit(row as CardOperation, ghosts);
+        if (after !== review) setValue(`operations.${index}.review`, after, { shouldDirty: true });
+      }
+    } else for (const index of touched) if (ops[index]?.draft) next.add(fields[index].id);
     setDraftIds((prev) =>
       prev.size === next.size && [...next].every((id) => prev.has(id)) ? prev : next,
     );
@@ -6600,6 +6804,105 @@ export function OperationsField({
   // значило бы отправить оператора в пустоту.
   const patterns = useWatch({ control, name: 'patterns' });
   const hasDxf = cardHasDxf(patterns);
+  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as PieceAliasRow[];
+  const reviewKinds = (useWatch({
+    control,
+    name: 'operations',
+    compute: (rows) => (rows ?? []).map((row) => (row?.review ?? '').trim()),
+  }) ?? []) as string[];
+  const anyReview = reviewKinds.some(Boolean);
+  const patternRows = (patterns ?? []) as ReviewPatternRow[];
+  const [sessionPreviousPatterns, setSessionPreviousPatterns] = useState<ReviewPatternRow[] | null>(
+    null,
+  );
+  const [sessionPreviousAliases, setSessionPreviousAliases] = useState<PieceAliasRow[] | null>(
+    null,
+  );
+  const [reuploadedPieceKeys, setReuploadedPieceKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const reuploadBaseline = useRef<ReuploadBaseline | null>(null);
+  const baselineTimer = useRef<number | null>(null);
+  if (!reuploadBaseline.current) {
+    reuploadBaseline.current = {
+      patterns: copyPatternRows(patternRows),
+      aliases: copyAliases(aliases),
+      pieceKeys: new Set(pieces.map((piece) => piece.lineKey)),
+    };
+  }
+  useEffect(() => {
+    const baseline = reuploadBaseline.current!;
+    const previousByKey = new Map(
+      baseline.patterns.map((row) => [(row.lineKey ?? '').trim(), row]),
+    );
+    const replaced = patternRows.some((row, index) => {
+      const before = previousByKey.get((row.lineKey ?? '').trim()) ?? baseline.patterns[index];
+      return !!before?.url && !!row.url && before.url !== row.url;
+    });
+    if (baselineTimer.current) window.clearTimeout(baselineTimer.current);
+    const settle = () => {
+      reuploadBaseline.current = {
+        patterns: copyPatternRows(patternRows),
+        aliases: copyAliases(aliases),
+        pieceKeys: new Set(pieces.map((piece) => piece.lineKey)),
+      };
+    };
+    if (replaced) {
+      setSessionPreviousPatterns(copyPatternRows(baseline.patterns));
+      setSessionPreviousAliases(copyAliases(baseline.aliases));
+      const added = pieces
+        .map((piece) => piece.lineKey)
+        .filter((key) => key && !baseline.pieceKeys.has(key));
+      if (added.length > 0) {
+        setReuploadedPieceKeys((current) => new Set([...current, ...added]));
+      }
+      settle();
+      return;
+    }
+    // RHF writes pieces/aliases before it swaps the sheet URL. Defer the baseline one task so all
+    // writes of that re-upload are observed as one change; an ordinary edit settles here.
+    baselineTimer.current = window.setTimeout(settle, 0);
+  }, [patternRows, aliases, pieces]);
+  useEffect(
+    () => () => {
+      if (baselineTimer.current) window.clearTimeout(baselineTimer.current);
+    },
+    [],
+  );
+
+  const savedPatterns = (savedCard?.techCard?.patterns ?? []) as ReviewPatternRow[];
+  const savedAliases = (savedCard?.techCard?.pieceDxfAliases?.items ?? []) as PieceAliasRow[];
+  const previousRows = useMemo(
+    () => sessionPreviousPatterns ?? previousPatternRows(patternRows, savedPatterns),
+    [sessionPreviousPatterns, patternRows, savedPatterns],
+  );
+  const scopes = useMemo(() => rollGoodsScopes(bomItems), [bomItems]);
+  const previousPack = useMemo(() => reviewDxfPack(previousRows, scopes), [previousRows, scopes]);
+  const previousGeometry = useDxfGeometry(
+    previousPack,
+    anyReview && params.get('tab') === 'construction',
+  );
+  const previousIndex = useDxfIndex(previousGeometry.data);
+  const previousPieceShapes = useMemo<PieceShapeMap>(() => {
+    if (!previousIndex) return null;
+    const refs = pieceBlockRefs(
+      sessionPreviousAliases ?? (savedAliases.length > 0 ? savedAliases : aliases),
+      scopes,
+    );
+    const found = new Map<string, FoundPiece | null>();
+    for (const [key, pieceRefs] of refs) found.set(key, findPiece(previousIndex, pieceRefs));
+    return found;
+  }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes]);
+  const ghostKeys = useMemo(
+    () =>
+      new Set(
+        unaliasedPieceKeys(
+          pieces.map((piece) => ({ lineKey: piece.lineKey })),
+          aliases,
+        ),
+      ),
+    [pieces, aliases],
+  );
 
   // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
   //
@@ -6874,6 +7177,52 @@ export function OperationsField({
     clearFormHistory();
     setSelected(fields.length);
     append({ ...emptyOperation });
+  };
+
+  const openNextReview = (operations: CardOperation[], afterIndex: number) => {
+    const next = nextMarkedOperation(operations, afterIndex);
+    if (next < 0) return;
+    setSelected(next);
+    requestAnimationFrame(() =>
+      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
+  };
+
+  const replaceStepGhost = (index: number, ghostKey: string, nextKey: string) => {
+    if (frozen) return;
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const next = replaceGhost(operations, ghostKey, nextKey, { ghosts: ghostKeys });
+    if (next.every((row, i) => row === operations[i])) return;
+    clearFormHistory();
+    next.forEach((row, i) => {
+      if (row !== operations[i])
+        setValue(`operations.${i}`, row, { shouldDirty: true, shouldTouch: true });
+    });
+    openNextReview(next, index);
+  };
+
+  const removeStepGhost = (index: number, ghostKey: string) => {
+    if (frozen) return;
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const row = operations[index];
+    if (!row) return;
+    const nextRow = removeGhostFromStep(row, ghostKey, { ghosts: ghostKeys });
+    if (nextRow === row) return;
+    const next = operations.map((operation, i) => (i === index ? nextRow : operation));
+    clearFormHistory();
+    setValue(`operations.${index}`, nextRow, { shouldDirty: true, shouldTouch: true });
+    openNextReview(next, index);
+  };
+
+  const addReuploadedPiece = (pieceKey: string) => {
+    if (frozen || !pieceKey) return;
+    clearFormHistory();
+    const at = fields.length;
+    append({ ...emptyOperation, inputKeys: [pieceKey], review: '', draft: false });
+    setSelected(at);
+    requestAnimationFrame(() =>
+      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
   };
 
   // --- авторинг, общий для СПИСКА и СХЕМЫ -------------------------------------------------------
@@ -7531,6 +7880,28 @@ export function OperationsField({
     }) || 'step') + (draftIds.has(fields[i]?.id ?? '') ? ' · draft' : '');
 
   const pieceNameOf = (k: string) => pieces.find((p) => p.lineKey === k)?.name ?? k;
+  const unplacedReuploadedKeys = unplacedPieceKeys(
+    [...reuploadedPieceKeys],
+    (getValues('operations') ?? []) as CardOperation[],
+  ).filter((key) => pieces.some((piece) => piece.lineKey === key));
+  const reuploadedPieceDoors = unplacedReuploadedKeys.map((pieceKey, index) => {
+    const piece = pieces.find((row) => row.lineKey === pieceKey);
+    const pieceName = piece?.name?.trim() || 'piece';
+    const shape = pieceShapes?.get(pieceRefKey(pieceKey)) ?? null;
+    return (
+      <AddDoor
+        key={pieceKey}
+        afterRows={index === 0 && fields.length > 0}
+        onClick={() => addReuploadedPiece(pieceKey)}
+        aria-label={`add ${pieceName} to assembly`}
+      >
+        <span className='flex min-w-0 items-center gap-1'>
+          <PieceSilhouette found={shape} boxClassName={`m-0 size-4 ${SILHOUETTE_INK}`} />
+          <span className='truncate'>{pieceName}</span>
+        </span>
+      </AddDoor>
+    );
+  });
 
   const pickStepInline = (i: number) => {
     setSelected(i);
@@ -7557,16 +7928,24 @@ export function OperationsField({
   // из старого отчёта может указывать в никуда; выбор «ближайшего» шага показал бы не тот, о
   // котором находка, а прокрутка наверх выглядела бы как поломка. Ничего не происходит — это
   // честнее обоих.
+  //
+  // `opi` — ИНДЕКС шага в форме (0-based), не номер: его ставит перезалив DXF, когда метки легли
+  // на шаги, у которых номера ещё нет (join разреза, шаги до первого сохранения).
   const opParam = params.get('op');
   const unitParam = params.get('unit');
+  const opiParam = params.get('opi');
   useEffect(() => {
-    if (opParam == null && unitParam == null) return;
+    if (opParam == null && unitParam == null && opiParam == null) return;
     const ops = (getValues('operations') ?? []) as Array<{
       operationNumber?: number;
       outputUnitKey?: string;
     }>;
     let idx = -1;
-    if (opParam != null) {
+    if (opiParam != null) {
+      const n = Number(opiParam);
+      if (Number.isInteger(n) && n >= 0 && n < ops.length) idx = n;
+    }
+    if (idx < 0 && opParam != null) {
       const n = parseInt(opParam, 10);
       // Сверка по СОХРАНЁННОМУ номеру, без «а вдруг это кратное десяти» — та же граница, что у
       // `remapIssues`: подставленный номер увёл бы к чужому шагу молча.
@@ -7583,6 +7962,7 @@ export function OperationsField({
         const p = new URLSearchParams(prev);
         p.delete('op');
         p.delete('unit');
+        p.delete('opi');
         return p;
       },
       { replace: true },
@@ -7592,7 +7972,7 @@ export function OperationsField({
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
     );
-  }, [opParam, unitParam, getValues, setParams]);
+  }, [opParam, unitParam, opiParam, getValues, setParams]);
 
   // --- фулскрин: ТРЕТИЙ ВИД ---------------------------------------------------------------------
   //
@@ -7795,7 +8175,9 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
-      {fsOpen ? null : fields.length === 0 && effectiveMode !== 'schematic' ? (
+      {fsOpen ? null : fields.length === 0 &&
+        unplacedReuploadedKeys.length === 0 &&
+        effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             the assembly sequence is empty so far. add the first step.
@@ -7956,7 +8338,11 @@ export function OperationsField({
                   пустого рельса итога нет вовсе, и дверь — его первая строка, без зазора. Тот же
                   порядок и те же зазоры — у рельса фулскрина. */}
               <RailTotal />
-              <AddDoor afterRows={fields.length > 0} onClick={addOperation}>
+              {reuploadedPieceDoors}
+              <AddDoor
+                afterRows={fields.length > 0 || unplacedReuploadedKeys.length > 0}
+                onClick={addOperation}
+              >
                 operation
               </AddDoor>
             </div>
@@ -7994,6 +8380,8 @@ export function OperationsField({
                   bomLines={bomItems}
                   pieces={pieces}
                   pieceShapes={pieceShapes}
+                  previousPieceShapes={previousPieceShapes}
+                  ghostKeys={ghostKeys}
                   cloth={inlineCloth?.map ?? null}
                   tiled={tiled}
                   pinOptions={pinOptions}
@@ -8007,6 +8395,8 @@ export function OperationsField({
                   onActiveBomChange={onActiveBomChange}
                   onEdit={clearFormHistory}
                   onDropPiece={addInputToOperation}
+                  onReplaceGhost={replaceStepGhost}
+                  onRemoveGhost={removeStepGhost}
                   // ОДИН МУТАТОР НА ОБЕ ПОВЕРХНОСТИ: тот же экземпляр, что уезжает в док фулскрина
                   // ниже. Второй «переименовать», написанный для второго экрана, разошёлся бы с
                   // первым молча — ровно то, от чего стережёт R3.
@@ -8100,6 +8490,8 @@ export function OperationsField({
                 bomLines={bomItems}
                 pieces={pieces}
                 pieceShapes={pieceShapes}
+                previousPieceShapes={previousPieceShapes}
+                ghostKeys={ghostKeys}
                 cloth={inlineCloth?.map ?? null}
                 tiled={tiled}
                 pinOptions={pinOptions}
@@ -8113,6 +8505,8 @@ export function OperationsField({
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}
+                onReplaceGhost={replaceStepGhost}
+                onRemoveGhost={removeStepGhost}
                 // ТЕ ЖЕ ЭКЗЕМПЛЯРЫ, что у инлайнового редактора выше, и это весь смысл R3: поле
                 // кода узла стоит на двух поверхностях, а переписыватель ссылок — один.
                 onRenameUnit={renameUnit}
@@ -8129,7 +8523,12 @@ export function OperationsField({
           // Готовым узлом, как `dockChrome`: `RailTotal` — приватный компонент этого файла без
           // пропов, и вытаскивать его наружу ради фулскрина значило бы затевать рефакторинг там,
           // где он не нужен.
-          railTotal={<RailTotal />}
+          railTotal={
+            <>
+              <RailTotal />
+              {reuploadedPieceDoors}
+            </>
+          }
           frozen={frozen}
           onSave={onSave}
           saving={saving}
