@@ -76,7 +76,8 @@ type Link<P> = {
   verdict: ShapeVerdict;
 };
 
-type Split<P> = { unit: OldUnit<P>; parts: SheetEntry[]; err: number };
+/** `sure` — no rival candidate (same old piece or a shared part) fits within THRESH.splitMargin */
+type Split<P> = { unit: OldUnit<P>; parts: SheetEntry[]; err: number; sure: boolean };
 type Merge<P> = { units: OldUnit<P>[]; whole: SheetEntry; err: number };
 
 const TIERS: Tier[] = [
@@ -297,7 +298,19 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       if (c.olds.some((u) => takenO.has(u.key)) || c.news.some((n) => takenN.has(n.key))) continue;
       c.olds.forEach((u) => takenO.add(u.key));
       c.news.forEach((n) => takenN.add(n.key));
-      if (c.kind === 'split') splits.push({ unit: c.olds[0], parts: c.news, err: c.err });
+      // Ambiguity: another candidate over the same old piece or a shared part fits nearly as well.
+      const rival = Math.min(
+        ...cands
+          .filter(
+            (x) =>
+              x !== c &&
+              (x.olds.some((u) => c.olds.includes(u)) || x.news.some((n) => c.news.includes(n))),
+          )
+          .map((x) => x.err),
+        Infinity,
+      );
+      const sure = rival - c.err >= THRESH.splitMargin;
+      if (c.kind === 'split') splits.push({ unit: c.olds[0], parts: c.news, err: c.err, sure });
       else
         merges.push({
           units: [...c.olds].sort(
@@ -324,7 +337,12 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     const l = links.get(u.key);
     return (l && (l.how !== 'shape' || l.cost <= THRESH.renameSure)) || inSplitMerge(u.key);
   };
-  const share = () => (linked.length === 0 ? 1 : linked.filter(found).length / linked.length);
+  // Доля — по деталям заменяемого листа (targetFileIndex), если он назван: нетронутый соседний лист
+  // слота совпадает сам с собой и иначе прятал бы чужой файл, брошенный на другой лист.
+  const target = input.targetFileIndex;
+  const pool =
+    target === undefined ? linked : linked.filter((u) => !!u.entry?.files.includes(target));
+  const share = () => (pool.length === 0 ? 1 : pool.filter(found).length / pool.length);
   let matchedShare = share();
   const otherFile = linked.length > 0 && matchedShare < THRESH.otherFileShare;
   if (otherFile) {
@@ -385,7 +403,9 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
 
   // Свёрнутая половина пары тоже нашла себе блок — для чипа доля честнее с ней.
   if (collapsed.size) {
-    matchedShare = linked.filter((u) => found(u) || collapsed.has(u.key)).length / linked.length;
+    matchedShare = pool.length
+      ? pool.filter((u) => found(u) || collapsed.has(u.key)).length / pool.length
+      : 1;
   }
 
   // ── 7b. moved / shared из другого scope ──────────────────────────────────────────────────
@@ -689,7 +709,8 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
         });
       });
       reshaped.push(piece.lineKey);
-      pushReview(reviews, 'split', [piece.lineKey], undefined, false);
+      // A clean split joins unmarked only when its candidate was unique; doubt keeps the mark.
+      pushReview(reviews, 'split', [piece.lineKey], undefined, !mySplit.sure);
       notes.push(`${mySplit.unit.identity} → ${parts.map((e) => e.identity).join(' + ')}`);
       if (!myLinks.length && ciKey(piece.name) === ciKey(mySplit.unit.identity))
         renameTo = parts[0].identity;

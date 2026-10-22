@@ -4,6 +4,7 @@ export {
   RECONCILE_PARSE,
   REUPLOAD_SNAPSHOT_REASON,
   externalPieceRefs,
+  inheritedCut,
   isForeignPlan,
   markJumpParams,
   remapIssueNumbers,
@@ -33,6 +34,7 @@ export {
   unplacedPieceKeys,
 } from 'lib/dxf-reconcile';
 export { applyPlan, reconcile } from 'lib/dxf-reconcile';
+export { markersBehindSheets } from 'components/managers/tech-card/components/nesting/marker-sheets';
 export { sha256Hex } from 'lib/features/sha256';
 export { bytesToLatin1, readInsunits } from 'lib/nesting/dxf/insunits';
 

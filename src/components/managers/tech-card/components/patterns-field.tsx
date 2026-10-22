@@ -138,6 +138,7 @@ import { useTechCardStaging } from './useTechCardStaging';
 import {
   RECONCILE_PARSE,
   externalPieceRefs,
+  inheritedCut,
   seamAnchorKeys,
   sheetRowId,
   markJumpParams,
@@ -1222,24 +1223,18 @@ export function PatternsField({
       },
       mintKey: () => ulid(),
       // A piece born from a card piece (a split part from its parent) takes the parent's cut: grain,
-      // grading, fusing and the per-colourway fabric. Name, callout and note stay the parent's own.
+      // grading, fusing, the per-colourway fabric and the note. Name and callout stay its own.
       makePiece: (seed: NewPieceSeed, from?: FormPiece): FormPiece => ({
         lineKey: seed.lineKey,
         name: seed.name,
         piecesPerGarment: seed.piecesPerGarment,
         cutSymmetry: seed.cutSymmetry,
-        grainline: from?.grainline ?? '',
-        fused: from?.fused ?? false,
-        ...(from
-          ? {
-              ungraded: from.ungraded,
-              fusingMode: from.fusingMode,
-              fusingWidthMm: from.fusingWidthMm,
-            }
-          : {}),
+        grainline: '',
+        fused: false,
         calloutNumber: 0,
         note: '',
-        materials: (from?.materials ?? []).map((m) => ({ ...m })),
+        materials: [],
+        ...inheritedCut(from),
       }),
       makeAlias: (seed: NewAliasSeed): FormAlias => ({
         bomLineKey: seed.bomLineKey,

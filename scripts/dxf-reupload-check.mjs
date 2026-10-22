@@ -141,6 +141,8 @@ function makeDeps(M, store, log, faults = {}) {
       piecesPerGarment: s.piecesPerGarment,
       cutSymmetry: s.cutSymmetry,
       bornFrom: from?.lineKey ?? '',
+      // тот же перенос кроя, что у формы (patterns-field → inheritedCut)
+      ...M.inheritedCut(from),
     }),
     makeAlias: (s) => ({
       id: `al-new-${s.blockName}`,
@@ -784,6 +786,115 @@ async function main() {
       out.kind === 'applied' ? reviewsOf(out.operations) : out.kind,
       ['orphan', 'split', 'orphan', 'orphan', '', '', '', '', ''],
       'orphan и split поверх reshaped стоят',
+    );
+  }
+
+  // ── L5 fix 1: «чужой» считается по заменяемому листу, а не по всему слоту ────────────────
+  // Слот из двух листов: base (все детали карточки) и ZZ — тот же лист с другими именами блоков,
+  // тоже привязанный. Карманы чужого изделия, брошенные на ZZ: base по-прежнему совпадает целиком,
+  // но к ZZ файл отношения не имеет — он ложится дополнительным листом, ZZ не перезаписывается.
+  {
+    const tag = 'foreign-by-sheet';
+    let text = M.bytesToLatin1(B.base);
+    for (const b of [...new Set(baseParse.blockNames)].sort((x, y) => y.length - x.length))
+      text = text.replace(
+        new RegExp(`(\\n)${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\r?\\n)`, 'g'),
+        `$1ZZ${b}$2`,
+      );
+    const zz = Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+    const ZZ_URL = 'mem://v3/zz.dxf';
+    const both = await M.parseSheets(
+      [
+        { name: 'allsizes-merged.dxf', open: async () => B.base.slice().buffer },
+        { name: 'zz.dxf', open: async () => zz.slice().buffer },
+      ],
+      { ...M.RECONCILE_PARSE },
+    );
+    const c = M.cardFromSheet(
+      { pieces: both.pieces, blockNames: both.blockNames },
+      { scope: MAIN, sizeTokens: SIZES },
+    );
+    const patterns = [
+      sheetRow(),
+      { lineKey: 'sheet-zz', url: ZZ_URL, filename: 'zz.dxf', sha256: '', ...MAIN },
+    ];
+    const store = [[ZZ_URL, zz]];
+    const pinned = await run(
+      { name: 'g-other.dxf', bytes: B.gOther },
+      { card: c, patterns, store, extra: { target: 'sheet-zz' } },
+    );
+    is(
+      tag,
+      pinned.out.kind === 'foreign' ? [pinned.out.kind, pinned.out.rowIndex] : pinned.out.kind,
+      ['foreign', 1],
+      'карманы на ZZ — чужой файл, хотя base совпадает целиком',
+    );
+    // Свой файл на base — не чужой (доля по base полная).
+    const own = await run(
+      { name: 'g-combo.dxf', bytes: B.gCombo },
+      { card: c, patterns, store, extra: { target: 'sheet-main' } },
+    );
+    yes(tag, own.out.kind === 'applied', `свой лист base — применён (${own.out.kind})`);
+  }
+
+  // ── L5 fix 4: часть разреза наследует примечание родителя ─────────────────────────────────
+  {
+    const tag = 'split-note';
+    const c = card69(M, { pieces: baseParse.pieces, blockNames: baseParse.blockNames });
+    c.pieces = c.pieces.map((p) => (p.lineKey === K('BP') ? { ...p, note: 'cut on fold' } : p));
+    const { out } = await run({ name: 'g4-split.dxf', bytes: B.g4split }, { card: c });
+    is(tag, out.kind, 'applied', 'исход');
+    if (out.kind === 'applied') {
+      const born = out.result.addedPieceKeys.map(
+        (k) => out.pieces.find((p) => p.lineKey === k)?.note ?? '',
+      );
+      is(tag, born, ['cut on fold'], 'рождённая часть — с примечанием BP');
+    }
+    is(
+      tag,
+      M.inheritedCut({ note: 'n', grainline: 'g', materials: [{ a: 1 }], name: 'X' }),
+      { grainline: 'g', materials: [{ a: 1 }], note: 'n' },
+      'крой и примечание, не имя',
+    );
+  }
+
+  // ── L5 fix 5: раскладку старит только заменённый привязанный лист, не чужой добавленный ──
+  {
+    const tag = 'marker-stale';
+    const at = (d) => `2026-10-${d}T10:00:00Z`;
+    const cardWith = (patterns) => ({
+      techCard: {
+        bomItems: [{ lineKey: 'bom-main', section: 'TECH_CARD_BOM_SECTION_FABRIC', purpose: '' }],
+        patterns,
+      },
+      markers: [{ id: 7, bomLineKey: 'bom-main', updatedAt: at(10) }],
+    });
+    const main = (extra = {}) => ({
+      url: 'https://cdn.test/a.dxf',
+      bomLineKey: 'bom-main',
+      uploadedAt: at(5),
+      history: [],
+      ...extra,
+    });
+    const foreignRow = {
+      url: 'https://cdn.test/b.dxf',
+      bomLineKey: 'bom-main',
+      uploadedAt: at(12),
+    };
+    is(
+      tag,
+      [
+        [...M.markersBehindSheets(cardWith([main()]))],
+        [...M.markersBehindSheets(cardWith([main(), foreignRow]))],
+        [
+          ...M.markersBehindSheets(
+            cardWith([main({ uploadedAt: at(12), history: [{ url: 'https://cdn.test/a0.dxf' }] })]),
+          ),
+        ],
+        [...M.markersBehindSheets(cardWith([main({ uploadedAt: at(12) })]))],
+      ],
+      [[], [], [7], [7]],
+      'чужой лист не старит; заменённый и единственный — старят',
     );
   }
 

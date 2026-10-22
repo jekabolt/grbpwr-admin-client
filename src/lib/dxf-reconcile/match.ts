@@ -43,6 +43,8 @@ export type SheetEntry = {
   stem: string;
   /** место срединного размера на листе, доли габарита листа */
   pos: Pt2 | null;
+  /** файлы набора (PieceDTO.fileIndex, -1 без него), где есть блоки идентичности, по возрастанию */
+  files: number[];
 };
 
 export type SheetIndex = {
@@ -92,6 +94,7 @@ export function indexSheet(
       spell: Set<string>;
       bySize: Map<string, PieceDTO[]>;
       label: Map<string, string>;
+      files: Set<number>;
     }
   >();
   for (const p of parse.pieces) {
@@ -104,8 +107,10 @@ export function indexSheet(
       spell: new Set(),
       bySize: new Map(),
       label: new Map(),
+      files: new Set(),
     };
     groups.set(key, g);
+    g.files.add(p.fileIndex ?? -1);
     g.names.add(normBlock(p.blockName ?? ''));
     g.spell.add(identity);
     const size = bareToken(code?.size ?? '');
@@ -168,6 +173,7 @@ export function indexSheet(
       tail,
       stem: tail && m ? normBlock(m[1]) : '',
       pos,
+      files: [...g.files].sort((a, b) => a - b),
     });
   }
   return { entries, split, layer };

@@ -207,6 +207,35 @@ export function inheritUnits(next: Uint8Array, replaced: Uint8Array): Uint8Array
   return latin1ToBytes(writeInsunits(text, readInsunits(old)!));
 }
 
+// Деталь, рождённая от детали карточки (часть разреза), берёт её крой: долевую, градацию, дублирование,
+// материалы по расцветкам и примечание («cut on fold» — указание производству; чистый разрез без
+// метки, и потерю никто бы не увидел). Имя и выноска — свои.
+const BORN_CUT_KEYS = [
+  'grainline',
+  'fused',
+  'ungraded',
+  'fusingMode',
+  'fusingWidthMm',
+  'materials',
+  'note',
+] as const;
+type BornCutKey = (typeof BORN_CUT_KEYS)[number];
+
+/** Поля кроя родителя для рождённой детали; только заданные, материалы — копиями. */
+export function inheritedCut<P extends object>(
+  from: P | undefined,
+): Partial<Pick<P, Extract<keyof P, BornCutKey>>> {
+  const out: Record<string, unknown> = {};
+  if (!from) return out as Partial<Pick<P, Extract<keyof P, BornCutKey>>>;
+  const src = from as Record<string, unknown>;
+  for (const k of BORN_CUT_KEYS) {
+    const v = src[k];
+    if (v === undefined) continue;
+    out[k] = Array.isArray(v) ? v.map((m) => (m && typeof m === 'object' ? { ...m } : m)) : v;
+  }
+  return out as Partial<Pick<P, Extract<keyof P, BornCutKey>>>;
+}
+
 const sheetName = (r: ReuploadSheetRow, i: number) =>
   (r.name ?? '').trim() || (r.filename ?? '').trim() || `sheet ${i + 1}`;
 
@@ -302,6 +331,8 @@ export async function reuploadSheet<
     externalRefs: card.externalRefs,
     otherSheets,
     aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+    // Несколько листов в слоте: «чужой файл» решается по заменяемому листу, не по всему слоту.
+    ...(rows.length > 1 ? { targetFileIndex: t } : {}),
     ...(card.seams ? { seams: card.seams } : {}),
   };
   const plan = reconcile(input);

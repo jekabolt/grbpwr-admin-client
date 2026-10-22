@@ -34,6 +34,8 @@ export const THRESH = {
   splitBox: 0.1,
   /** часть разреза, которая сама по себе почти точно совпала со старым блоком, — не разрез */
   splitNotIfRename: 0.02,
+  /** a clean split joins without a mark only when no rival candidate fits within this margin */
+  splitMargin: 0.01,
   /** L/R-пара → одна деталь: вторая половина конгруэнтна новой детали (в любом кадре) */
   pairCost: 0.12,
   /** moved/shared из другого scope: только точное имя И почти та же форма */

@@ -189,6 +189,23 @@ const MUTANTS = [
     kills: ['noise'],
   },
   {
+    id: 'seam-unit-mark-dropped',
+    file: 'seams.ts',
+    edits: [
+      [
+        "else reviews.push({ review: 'reshaped', pieceKeys: [pieceKey.trim()], operationIndexes: [] });",
+        '',
+      ],
+    ],
+    kills: ['seam-unit-fallback'],
+  },
+  {
+    id: 'split-always-sure',
+    file: 'diff.ts',
+    edits: [['const sure = rival - c.err >= THRESH.splitMargin;', 'const sure = true;']],
+    kills: ['split-ambiguous'],
+  },
+  {
     id: 'no-auto-accept-reshape',
     file: 'defaults.ts',
     edits: [['autoAcceptRel: 0.02,', 'autoAcceptRel: 0,']],
@@ -574,6 +591,8 @@ const GATES = [
   'g-sizetail',
   'g-pair-LR',
   'seam-reshape',
+  'seam-unit-fallback',
+  'split-ambiguous',
   'auto-accept-reshape',
   'ghost-auto-replace',
   'mirror-pair-place',
@@ -1078,6 +1097,86 @@ function gates(M, data) {
       }
     }
     yes(g, !!quiet, 'resolved matching seam accepts a material reshape without a mark');
+  });
+
+  // ── L5 fix 2: a broken seam whose sides meet only through a unit still leaves a mark ─────
+  // Step 1 turns PAIR_L (+ PAIR_X) into ▣ U, step 2 joins U with PAIR_R: no step holds both seam
+  // sides, so the seam resolves to no operation — the piece-wide reshape mark must stand instead.
+  guard('seam-unit-fallback', () => {
+    const g = 'seam-unit-fallback';
+    const take = blocksOf(M, S.base, 'BP_2');
+    const source = S.base.pieces.filter(take);
+    const as = (to) => ({
+      pieces: source.map((p) => ({ ...p, blockName: to + (p.blockName ?? '').slice(4) })),
+      blockNames: [],
+    });
+    const old = withPieces(withPieces(as('PAIR_L'), as('PAIR_R').pieces), as('PAIR_X').pieces);
+    const neu = stretchX(M, old, 'PAIR_R', 1.04);
+    const direct = M.cardFromSheet(old, { scope: MAIN, sizeTokens: SIZES });
+    direct.operations = [
+      {
+        title: 'L+R',
+        inputKeys: [K('PAIR_L'), K('PAIR_R')],
+        outputUnitKey: 'U',
+        outputUnitName: 'U',
+      },
+      { title: 'U+X', inputKeys: ['U', K('PAIR_X')], outputUnitKey: 'V', outputUnitName: 'V' },
+    ];
+    const viaUnit = M.cardFromSheet(old, { scope: MAIN, sizeTokens: SIZES });
+    viaUnit.operations = [
+      {
+        title: 'L+X',
+        inputKeys: [K('PAIR_L'), K('PAIR_X')],
+        outputUnitKey: 'U',
+        outputUnitName: 'U',
+      },
+      { title: 'U+R', inputKeys: ['U', K('PAIR_R')], outputUnitKey: 'V', outputUnitName: 'V' },
+    ];
+    is(g, [M.sweepOf(direct).length, M.sweepOf(viaUnit).length], [0, 0], 'fixture cards assemble');
+    let seam = null;
+    for (let a = 0; a < 8 && !seam; a++)
+      for (let b = 0; b < 8 && !seam; b++) {
+        try {
+          const s = M.probeSeam(old, 'PAIR_L', 'PAIR_R', SIZES, a, b);
+          const r = runCase(M, { old, neu, card: direct, seams: [s] });
+          if (r.res.reviews.length === 1 && r.res.reviews[0].opIndex === 0) seam = s;
+        } catch {
+          // fewer runs on this piece; the bounded search stays deterministic
+        }
+      }
+    yes(g, !!seam, 'fixture: a seam that breaks when its sides are joined directly');
+    if (!seam) return;
+    const r = runCase(M, { old, neu, card: viaUnit, seams: [seam] });
+    invariants(g, r);
+    is(
+      g,
+      r.res.operations.map((o) => o.review ?? ''),
+      ['', 'reshaped'],
+      'the step that uses the reshaped piece is marked, never silently dropped',
+    );
+  });
+
+  // ── L5 fix 3: two equally good split pairs — the split keeps its mark ─────────────────────
+  guard('split-ambiguous', () => {
+    const g = 'split-ambiguous';
+    const isU = blocksOf(M, S.g4split, 'BP_U');
+    const twin = S.g4split.pieces
+      .filter(isU)
+      .map((p) => ({ ...p, blockName: 'BP_V' + (p.blockName ?? '').slice(4) }));
+    const neu = withPieces(S.g4split, twin);
+    const r = runCase(M, {
+      old: S.base,
+      neu,
+      spec: { overrides: { BP: { piecesPerGarment: 2, cutSymmetry: M.MIRRORED } } },
+    });
+    invariants(g, r);
+    is(g, rowBy(r.plan, 'BP')?.tier, 'split', 'still a split');
+    is(
+      g,
+      r.res.joins.map((j) => r.res.operations[j.opIndex]?.review ?? ''),
+      ['split'],
+      'ambiguous split join is marked',
+    );
   });
 
   // ── L5 no-seam fallback: area + perimeter ≤2% is automatic, larger drift is marked ───────

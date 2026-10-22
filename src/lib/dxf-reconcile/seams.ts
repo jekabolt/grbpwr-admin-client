@@ -130,7 +130,8 @@ function joiningOperations<O extends CardOperation>(
 
 /**
  * Resolve every confirmed sewn seam touching `pieceKey`. No seam, or one unresolved anchor, asks
- * the caller to use the area/perimeter fallback. Otherwise only broken seam joins are returned.
+ * the caller to use the area/perimeter fallback. Otherwise only broken seam joins are returned; a
+ * broken seam with no joining step returns an empty `operationIndexes` (piece-wide mark).
  */
 export function seamReshapeVerdict<
   P extends CardPiece,
@@ -182,8 +183,11 @@ export function seamReshapeVerdict<
     const sideA = new Set(seam.sideA.map((a) => a.piece.trim()).filter(Boolean));
     const sideB = new Set(seam.sideB.map((a) => a.piece.trim()).filter(Boolean));
     const operationIndexes = joiningOperations(input.operations, sideA, sideB);
+    // The sides meet only through an assembly unit (A → ▣ U, then U + B): no step holds both. The
+    // seam is still broken — mark every step that uses the reshaped piece, never drop the mark.
     if (operationIndexes.length)
       reviews.push({ review: 'reshaped', pieceKeys: keys, operationIndexes });
+    else reviews.push({ review: 'reshaped', pieceKeys: [pieceKey.trim()], operationIndexes: [] });
   }
   return { kind: 'seams', reviews };
 }

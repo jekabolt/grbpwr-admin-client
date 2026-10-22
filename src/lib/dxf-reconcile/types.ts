@@ -113,6 +113,12 @@ export type ReconcileInput<
   externalRefs?: Readonly<Record<string, number>>;
   /** Листы других scope — для T7 moved/shared по точному имени И форме. Необязательно. */
   otherSheets?: readonly { scope: ReconcileScope; parse: ParsedSheetLite }[];
+  /**
+   * Which file of a multi-file slot is being replaced (PieceDTO.fileIndex, the same in old and new
+   * parse). «Другой файл» is then judged by the linked pieces of THAT sheet only: an untouched
+   * sibling sheet always matches itself and would otherwise hide a foreign upload.
+   */
+  targetFileIndex?: number;
   /** Saved wire rows and optimistic client rows; only confirmed edge seams affect reshape marks. */
   seams?: readonly (TechCardSeamWire | StoredSeam)[];
   /**
