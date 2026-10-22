@@ -324,8 +324,8 @@ function RailStep({
                   marked
                     ? 'review needed'
                     : assemblyBroken && !hasError
-                      ? 'the step breaks the assembly: an input is not on the table at this step — open the step'
-                      : 'the step has an unfilled required field'
+                      ? 'assembly broken'
+                      : 'missing field'
                 }
               >
                 !

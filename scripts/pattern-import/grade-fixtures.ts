@@ -243,7 +243,10 @@ function mixedSolve(): FixtureResult {
  * wide rule (≥ min(n, 5) lanes over a third of the lines) misses an unencoded piece that draws TWO
  * sizes (graded unevenly: 10 mm at the side, 3 mm at top and bottom) and one whose five sizes differ
  * only along a 40 mm tab; the pair rule sees both. A cut line with its sew line drawn alike at a
- * uniform 10 mm is no nest for either.
+ * uniform 10 mm is no nest for either, nor is a double marking line drawn once per size on top of
+ * itself (polupalto's lengthen/shorten lines). Lines drawn twice in place stay one lane each: five
+ * sizes drawn twice are still five sizes. Under 2 mm only a double line drawn as one (equal lengths,
+ * ends facing) is a marking: two real sizes 1.7 mm apart are still two sizes.
  */
 function mixedNarrow(): FixtureResult {
   let id = 0;
@@ -259,10 +262,26 @@ function mixedNarrow(): FixtureResult {
   for (let k = 0; k < 5; k++) tab.push(chain([{ x: W, y: 80 }, { x: W + 8 + 3 * k, y: 100 }, { x: W, y: 120 }]));
   const rect = (i: number) => [{ x: i, y: i }, { x: 300 - i, y: i }, { x: 300 - i, y: 200 - i }, { x: i, y: 200 - i }];
   const sew = [chain(rect(0), true), chain(rect(10), true)];
+  // a marking drawn once per size in one pen, stacked: the lengthen/shorten double line (1.95 mm
+  // apart, as measured on polupalto) six times over, each copy as long as its size
+  const stacked: Chain[] = [];
+  for (let k = 0; k < 6; k++)
+    for (const y of [0, 1.95]) stacked.push(chain([{ x: 0, y }, { x: 300 + 10 * k, y }]));
+  // five sizes nobody encoded, every line drawn twice on top of itself: still five lanes
+  const twice = gradedPiece(0, 0, 5, () => 0).draws.flatMap((d) => [chain(d.pts), chain(d.pts)]);
+  // two real sizes 1.7 mm apart all round (neighbouring sizes measure 1.5–2 mm on robe, viola,
+  // reef, leonie): uniform, but the copies differ in length (6.8 mm), so no double line
+  const close = gradedPiece(0, 0, 2, () => 0, 240, 300, 1.7, 1.7).draws.map((d) => chain(d.pts));
+  // one double line 1.7 mm apart: equal lengths, ends facing — a marking, no nest
+  const dbl = [chain([{ x: 0, y: 0 }, { x: 300, y: 0 }]), chain([{ x: 0, y: 1.7 }, { x: 300, y: 1.7 }])];
   const cases = [
     { name: 'two sizes', chains: two, wide: false, pair: true },
     { name: 'tab', chains: tab, wide: false, pair: true },
     { name: 'cut + sew line', chains: sew, wide: false, pair: false },
+    { name: 'double line x6', chains: stacked, wide: false, pair: false },
+    { name: 'five sizes drawn twice', chains: twice, wide: true, pair: true },
+    { name: 'two sizes 1.7 mm apart', chains: close, wide: false, pair: true },
+    { name: 'double line 1.7 mm', chains: dbl, wide: false, pair: false },
   ];
   let ok = true;
   const notes = cases.map((k) => {

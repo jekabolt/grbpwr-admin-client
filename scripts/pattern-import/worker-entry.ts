@@ -298,6 +298,7 @@ export async function main(): Promise<number> {
   if (process.env.PI_E3_ONLY) {
     await dxfNamesCase();
     await tracedOutlineCase();
+    await zhaketExtensionCase();
     const failed = rows.filter((r) => !r.ok).length;
     console.log(`\n${rows.length - failed}/${rows.length} PASS`);
     return failed ? 1 : 0;
@@ -624,6 +625,7 @@ export async function main(): Promise<number> {
   await roundTripCase();
   await dxfNamesCase();
   await tracedOutlineCase();
+  await zhaketExtensionCase();
   check(
     'garbage plt',
     'refused at open',
@@ -853,8 +855,16 @@ async function operatorBridgeGateCase() {
   const opts = { ...FILL, variant: 'Mod. 125' };
   const pc0 = await run('pieces', { edits: [], opts });
   const open0 = pc0.families.filter((f) => f.candidates.some((c) => c.outcome !== 'closed'));
+  // POLUPALTO lane M 21.10: the 76 no longer leaks at the underarm tip. A copy of the 72 line walls
+  // the 76 only where the 76 coincides with it, and at the tip it does: the 76 closes on the same
+  // 4.6 mm the operator's bridge draws (996.6,1194.0 → 997.7,1189.5, within 0.35 mm), its cap on
+  // its own line (auto/POLUPALTO-DIAG.md; runs/polupalto/pics/palto/sl-corner.png, sl-cap.png).
+  // So the corner piece is found by place; the bridge must keep it closed and be audited on it.
+  const nearCorner = (p: { x: number; y: number }) => Math.hypot(p.x - 997.5, p.y - 1190.5) < 5;
   const corner = pc0.families.find((f) =>
-    f.candidates.some((c) => c.leakAt && Math.hypot(c.leakAt.x - 997.5, c.leakAt.y - 1190.5) < 5),
+    f.candidates.some(
+      (c) => (c.leakAt && nearCorner(c.leakAt)) || (c.rank === 1 && c.outer?.some(nearCorner)),
+    ),
   );
   const edits: PieceEdit[] = [
     {
@@ -869,11 +879,13 @@ async function operatorBridgeGateCase() {
   const fixed = pc1.families.find((f) => f.seed === corner?.seed);
   check(
     name,
-    'one bridge "all sizes" closes the corner piece in every size (refill of the seeds it reaches)',
+    'one bridge "all sizes" leaves the corner piece closed in every size and on its outline (refill of the seeds it reaches)',
     !!fixed &&
       fixed.candidates.every((c) => c.outcome === 'closed') &&
       fixed.candidates.some((c) => c.derived?.some((d) => d.kind === 'operator-bridge')),
-    fixed?.candidates.map((c) => c.outcome[0]).join('') ?? 'no corner leak found',
+    corner && fixed
+      ? `${corner.candidates.map((c) => c.outcome[0]).join('')} → ${fixed.candidates.map((c) => c.outcome[0]).join('')}`
+      : 'no corner piece found',
   );
   const drop = pc1.families
     .filter((f) => f.candidates.some((c) => c.outcome !== 'closed'))
@@ -920,10 +932,17 @@ async function operatorBridgeGateCase() {
   // armhole of 76/80/84 ends in a horizontal step onto the common side line (≈ 10 / 8 / 4 mm, 80
   // with a small loop), 88 runs straight — a real outline difference, not the allowance
   // (auto/silent-tail/palto-FP_L-armhole-step.png). The bridge itself must not block.
+  // POLUPALTO lane M 21.10: the 76 runs its own cap now (the 72 cap run G22 held is gone: a copy
+  // of the 72 line no longer walls the 76 where the 76's own cap runs beside it;
+  // runs/polupalto/pics/palto/sl-cap.png). G22 holds nothing, and the 76 grades between 72 and 80:
+  // area within 0.5 % of their mean (574 vs 573.5 cm²; on the 72 cap it was 580, 1.1 %).
   const w = await writeCase(name, run, sem, sz.map, { mustPass: false });
   const g = w.gate[MAIN.scopeKey];
   const holds = g?.checks.filter((c) => !c.ok && c.severity === 'block') ?? [];
   const g22 = holds.find((c) => c.id === 'G22-identity');
+  const sl = pc.families.find((f) => f.seed === corner?.seed);
+  const areaOf = (r: number) => sl?.candidates.find((c) => c.rank === r)?.areaMm2 ?? NaN;
+  const slGrade = Math.abs(areaOf(1) - (areaOf(0) + areaOf(2)) / 2) / areaOf(1);
   const g8h = holds.find((c) => c.id === 'G8-monotone');
   const shapeOnlyHold = (c: (typeof holds)[number]) =>
     c.id === 'G5-features' &&
@@ -933,18 +952,15 @@ async function operatorBridgeGateCase() {
       .every((x) => x.includes('one piece, one shape across sizes'));
   check(
     name,
-    "held by G22 (G26 neighbour: SL 76 on size 72's cap) and the one-shape rule on FP only",
+    'held by the one-shape rule on FP only; SL 76 on its own cap (no G22, grades between 72 and 80)',
     holds.every(
       (c) =>
-        c.id === 'G22-identity' ||
-        c.id === 'G8-monotone' ||
-        (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
+        c.id === 'G8-monotone' || (shapeOnlyHold(c) && c.blocks.every((b) => /^FP_[LR]_/.test(b))),
     ) &&
-      !!g22 &&
-      g22.blocks.length > 0 &&
-      g22.blocks.every((b) => /^SL_[LR]_76$/.test(b)) &&
+      !g22 &&
+      slGrade <= 0.005 &&
       (!g8h || g8h.blocks.every((b) => b.startsWith('SL_'))),
-    holds.map((c) => `${c.id}[${c.blocks.join(',')}]`).join(' | ') || 'no hold',
+    `${holds.map((c) => `${c.id}[${c.blocks.join(',')}]`).join(' | ') || 'no hold'} · SL 76 ${(slGrade * 100).toFixed(2)} % off the 72/80 mean`,
   );
   const g4 = g?.checks.find((c) => c.id === 'G4-hausdorff');
   const g15 = g?.checks.find((c) => c.id === 'G15-derived');
@@ -1248,12 +1264,40 @@ async function pipelineCase(
     // M7: with the denominator from source topology the two size-72 pieces whose outline leaves
     // its wall for 5–10 mm (the raster necks F13c saw at 72/76) block; BP_3_84's earlier block
     // came from the sheet frame line counted as its wall and is gone.
+    // POLUPALTO lane M 21.10: those 72 necks were the 72 closed on a copy of the 76 line (5 / 10
+    // mm out, onto the 76); a copy now walls only the size it coincides with, the 72s run their
+    // own lines (runs/polupalto/pics/palto/s0-z.png, s2-z.png) and G3 passes, rightly. G3's
+    // blocking side keeps its negative control on robe (BP_L_2_42).
     const g3 = w.gate[MAIN.scopeKey]?.checks.find((c) => c.id === 'G3-coverage');
     check(
       name,
-      'M7: G3 blocks only size-72 blocks (outline leaves its wall there)',
-      !!g3 && !g3.ok && g3.blocks.length > 0 && g3.blocks.every((b) => b.endsWith('_72')),
+      'M7: G3 passes — the size-72 outlines run their own walls',
+      !!g3 && g3.ok,
       `${g3?.value} [${g3?.blocks.join(',')}]`,
+    );
+    // POLUPALTO Review 2 (chains/link.ts): pass 1 bridged two undrawn jumps inside one pen
+    // operation of «23» (auto seed 3). markJump: the 7 mm «Mod. 125» marker was linked 23.8 mm on
+    // to 76's hem, and 76 ran a 1.9 mm wedge along that jump (apex (483.28, 968.11)). cornerJump:
+    // 88's hem was linked 17 mm on at its corner into 80's armhole (one chain, 80's pen), and 88
+    // closed along 80's armhole (through (72.81, 963.78), 10 mm off its own, which passes
+    // (84.68, 964.69)). sw/pics/j57.png, p3-hook-on11.png.
+    const f23 = pc.families.find((f) => pc.seeds.find((x) => x.id === f.seed)?.text?.text === '23');
+    const ring = (r: number) =>
+      f23?.candidates.find((c) => c.rank === r && c.outcome === 'closed')?.outer ?? [];
+    const wedge = ringOff({ x: 483.28, y: 968.11 }, ring(1));
+    check(
+      name,
+      '«23» 76: the hem runs straight past the «Mod. 125» marker, no wedge along the jump',
+      wedge >= 1,
+      `${wedge.toFixed(2)} mm from the old wedge apex`,
+    );
+    const on80 = ringOff({ x: 72.81, y: 963.78 }, ring(4));
+    const own88 = ringOff({ x: 84.68, y: 964.69 }, ring(4));
+    check(
+      name,
+      "«23» 88: closes on its own armhole, not on 80's across the corner jump",
+      on80 >= 5 && own88 <= 0.5,
+      `${on80.toFixed(2)} mm off 80's armhole · ${own88.toFixed(2)} mm off its own`,
     );
   }
   console.log(`      ${name}: pipeline ${Date.now() - t0} ms`);
@@ -2842,12 +2886,26 @@ async function tracedOutlineCase() {
       ? seam.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ')
       : `${seam.pieces[0].sizes.length} sizes · dev ≤ ${Math.max(...devs).toFixed(3)} mm`,
   );
-  const cut = await run('semantics', ofSeam('cut'));
+  // POLUPALTO lane M 21.10: 36 no longer merges the strip (outline 3578 → 2934 mm, inside 40: a
+  // copy of another size's line walls 36 only where 36 coincides with it), so its "cut" offset no
+  // longer splits. What is still wrong in 36 is a stretch at the knee where it runs ~1.7 mm off
+  // its own line (onto 40's) for ~14.5 mm (runs/polupalto/pics/e3/all.png, z-notch.png). Written
+  // with the other sizes, the gate must hold 36 by name (G5 one-shape names 36's extra turn;
+  // before lane M, G4 named 36).
+  const seam36 = await run('semantics', ofSeam('seam'));
+  const w36 = await writeCase(`${C} · 36–46`, run, seam36, sz.map, { mustPass: false });
+  const h36 = (w36.gate[MAIN.scopeKey]?.checks ?? []).filter(
+    (c) =>
+      !c.ok &&
+      c.severity === 'block' &&
+      c.blocks.some((b) => /_36$/.test(b)) &&
+      /\b36's\b|_36\b/.test(c.note ?? ''),
+  );
   check(
     C,
-    '"cut line": the inward seam line of 36 splits at the merged strip (G6 refuses it, rightly)',
-    cut.blocked.some((b) => b.reason === 'offset-topology' && /^36:/.test(b.detail)),
-    cut.blocked.map((b) => `${b.reason}: ${b.detail}`).join(' | ') || 'not blocked',
+    "36 (a step onto 40's line at the knee) is held at the gate by name",
+    h36.length > 0,
+    h36.map((c) => `${c.id}: ${(c.note ?? '').slice(0, 140)}`).join(' | ') || 'not held',
   );
   // negative control: the same outlines NOT cleaned (as before E3) — the offset breaks
   const inner = s as unknown as { traced: () => boolean };
@@ -2889,6 +2947,117 @@ async function tracedOutlineCase() {
     );
   }
   s.close();
+}
+
+/**
+ * zhaket (burda Mod. 126) review case 21.10: the piece at the "2" label (auto seed 8) carries a
+ * hem extension whose left edge 42 does not draw in its own pen; there only 38's, 40's and 44's
+ * lines run, stacked. 36's rescued edge was cut where 40's line sits 0.4 mm inside it, so 42 leaked
+ * into the extension and closed on its hem-fold line (1203 cm², below 40's 1253; only G8 held it,
+ * and only on a run of 3+ sizes). Now a line on the copy's far side within 1 mm (the same edge
+ * drawn twice) does not cut it, and where a smaller and a larger size's lines run on each other
+ * without 42's own line, 42 is walled there too.
+ * 42 must close on its extension edge: area on the 38→40 trend, bottom edge 6 mm below 40's.
+ */
+async function zhaketExtensionCase() {
+  const C = 'zhaket 42 extension';
+  const s = new Session(1, [fileOf('pdf/zhaket.pdf')]);
+  const run: Run = (st, input) => s.runStage(st, input, ctx());
+  const ex = await run('extract', { opts: { sagittaMm: 0.05, keepFills: true } });
+  await run('scale', {
+    decision: { factor: ex.scale[0].factor, method: ex.scale[0].method, operatorConfirmed: true },
+  });
+  const sheets = [...new Set(ex.pages.filter((p) => p.cls === 'tile').map((p) => p.sheet))];
+  await run('assemble', { sheet: sheets[0] ?? 0 });
+  await run('chains', { opts: CHAIN_OPTS });
+  await run('sizes', { card: card(['36', '38', '40', '42', '44']) });
+  const seed: Seed = { id: 1, at: { x: 215.4, y: 905.5 }, origin: 'click', variant: null };
+  const pc = await run('pieces', { seeds: [seed], edits: [], opts: { ...FILL, variant: null } });
+  const cs = pc.families[0]?.candidates ?? [];
+  const at = (r: number) => cs.find((c) => c.rank === r);
+  const area = (r: number) => (at(r)?.outcome === 'closed' ? at(r)!.areaMm2 / 100 : NaN);
+  const bottom = (r: number) => Math.max(...(at(r)?.outer ?? []).map((p) => p.y));
+  const want = 2 * area(2) - area(1);
+  const step = bottom(3) - bottom(2);
+  check(
+    C,
+    "42 closes on its extension edge, not the hem fold (area on trend, edge 6 mm below 40's)",
+    at(3)?.outcome === 'closed' &&
+      Math.abs(area(3) - want) / want <= 0.01 &&
+      Math.abs(step - (bottom(2) - bottom(1))) <= 1,
+    `${cs.map((c) => `${c.rank}:${c.outcome}${c.outcome === 'closed' ? ` ${Math.round(c.areaMm2 / 100)}` : ''}`).join(' ')} cm² · trend ${Math.round(want)} · step ${step.toFixed(1)} mm`,
+  );
+  // Review 2 (22.10): the back at the "3" label (auto seed 5) ends in a V whose tip the sizes
+  // grade INWARD — 36's lowest (992.77), 38 991.48, 40 990.73, 44 988.69; 42's own pen ends on
+  // 44's tip. 38's and 40's lines run 0.1–0.7 mm inside 36's rescued copy along both arms and 1–2
+  // mm inside its tip. Skipped as "the same edge drawn twice", the copy walled 42 down to 36's
+  // tip, cut off at 991.48 — below 40's, sizes out of order, and no size gate saw it; the copy's
+  // end exclusion also moved 44 there. A line drawn twice follows the copy around its turns, a
+  // graded one cuts inside them (walls.ts copyWallsOf).
+  const V = 'zhaket V tip';
+  const vSeed: Seed = { id: 2, at: { x: 764.87, y: 875.94 }, origin: 'click', variant: null };
+  const pv = await run('pieces', { seeds: [vSeed], edits: [], opts: { ...FILL, variant: null } });
+  const vs = pv.families[0]?.candidates ?? [];
+  const tip = (r: number) => {
+    const c = vs.find((x) => x.rank === r && x.outcome === 'closed');
+    const ys = (c?.outer ?? []).filter((p) => p.x > 745 && p.x < 765).map((p) => p.y);
+    return ys.length ? Math.max(...ys) : NaN;
+  };
+  const tips = [0, 1, 2, 3, 4].map(tip);
+  // the sizes grade inward on both arms: each closed size lies inside the one before it there
+  const ringOf = (r: number) => vs.find((x) => x.rank === r && x.outcome === 'closed')?.outer ?? [];
+  const inRing = (p: { x: number; y: number }, ring: readonly { x: number; y: number }[]) => {
+    let ins = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i];
+      const b = ring[j];
+      if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
+        ins = !ins;
+    }
+    return ins;
+  };
+  const pokes = [1, 2, 3, 4].map((r) => {
+    const inner = ringOf(r);
+    const outer = ringOf(r - 1);
+    if (!inner.length || !outer.length) return 0;
+    let m = 0;
+    for (let i = 0; i < inner.length; i++) {
+      const a = inner[i];
+      const b = inner[(i + 1) % inner.length];
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.5));
+      for (let k = 0; k < n; k++) {
+        const p = { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n };
+        if (p.x < 735 || p.x > 805 || p.y < 905 || p.y > 995 || inRing(p, outer)) continue;
+        m = Math.max(m, ringOff(p, outer));
+      }
+    }
+    return m;
+  });
+  check(
+    V,
+    "44 closes on its own tip (988.69); 42 on its own pen's tip or not at all, never below 40's",
+    Math.abs(tips[4] - 988.69) <= 0.1 &&
+      (Number.isNaN(tips[3]) || (tips[3] <= tips[2] + 0.05 && tips[3] >= tips[4] - 0.05)) &&
+      pokes.every((d) => d <= 0.3),
+    `tips ${tips.map((y, r) => `${r}:${Number.isNaN(y) ? vs.find((c) => c.rank === r)?.outcome : y.toFixed(2)}`).join(' ')} · out of the size before on the arms ${pokes.map((d) => d.toFixed(2)).join(' ')} mm`,
+  );
+  s.close();
+}
+
+/** Distance from p to a closed ring, mm (NaN for no ring). */
+function ringOff(p: { x: number; y: number }, ring: readonly { x: number; y: number }[]): number {
+  let m = NaN;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l = dx * dx + dy * dy || 1;
+    const u = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l));
+    const d = Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy);
+    if (!(d >= m)) m = d;
+  }
+  return m;
 }
 
 /** A one-page PDF (595 × 842 pt) with `content` as its only content stream. */
