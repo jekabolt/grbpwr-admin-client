@@ -49,7 +49,7 @@ const violationKey = (
   v: AssemblyViolation,
   stepOf: (i: number) => string = String,
   keyOf: (k: string) => string = (k) => k,
-) => `${v.rule}|${v.detail}|${v.step < 0 ? v.step : stepOf(v.step)}|${v.input}|${keyOf(v.key)}`;
+) => `${v.rule}|${v.detail}|${v.step < 0 ? v.step : stepOf(v.step)}|${keyOf(v.key)}`;
 
 const UNIT_BYTES = 64;
 
