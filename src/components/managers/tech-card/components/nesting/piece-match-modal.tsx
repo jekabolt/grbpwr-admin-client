@@ -51,8 +51,6 @@ import {
   Text,
 } from 'ui';
 import { ulid } from 'utils/ulid';
-import { notify } from 'lib/stores/store';
-import { regenerateFusingSheets } from 'lib/fusing-dxf';
 import { useTechCardStaging } from '../useTechCardStaging';
 import { clampUtf8Bytes, isDxfUrl } from 'utils/pattern';
 import { isOsSizeName } from '../size-ids-field';
@@ -77,6 +75,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
+import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
   readFuseSpec,
   writeFuseFields,
@@ -210,7 +209,6 @@ const MAX_PIECE_NAME = 255;
 // рисуется порталом, то есть ВНЕ `<fieldset disabled={frozen}>` страницы, поэтому гасит себя сама.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 // After every panel that can move pieces or the BOM (the sheets read both off the stored card).
-const FUSING_SHEETS_ORDER = 90;
 
 // Поля детали, которые правит редактор справа. Буферизуются в модалке и пишутся в форму только
 // по SAVE (cancel = ничего не было). Пути и семантика — ровно pieces-tab.tsx (fused/fusingMode/
@@ -1827,35 +1825,7 @@ export function PieceMatchModal({
       const fuseTouched = [...Object.values(pieceEdits), ...Object.values(newEdits)].some(
         (ed) => ed.fuse !== undefined,
       );
-      if (fuseTouched && staging && techCardId) {
-        const id = techCardId;
-        staging.stage({
-          key: 'fusingSheets',
-          label: 'fusing DXF',
-          order: FUSING_SHEETS_ORDER,
-          commit: async () => {
-            try {
-              const r = await regenerateFusingSheets(id);
-              if (r.skippedSizes.length)
-                notify({
-                  sev: 'warn',
-                  subject: 'FUSING DXF',
-                  text: `${r.skippedSizes.length} sizes skipped`,
-                  detail: r.skippedSizes
-                    .map((x) => `${x.piece} ${x.size}: ${x.reason}`)
-                    .join('\n'),
-                });
-            } catch (error) {
-              notify({
-                sev: 'error',
-                subject: 'FUSING DXF',
-                text: 'not rebuilt',
-                detail: error instanceof Error ? error.message : String(error),
-              });
-            }
-          },
-        });
-      }
+      if (fuseTouched && staging && techCardId) staging.stage(fusingSheetsChange(techCardId));
       onClose();
     } finally {
       setSaving(false);
