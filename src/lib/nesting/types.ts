@@ -4,6 +4,11 @@
 // lands in the main bundle.
 
 import type { ConversionManifest } from 'lib/pattern-import/types';
+import type {
+  RollSearchJob,
+  RollSearchPlan,
+  RollSearchResult,
+} from 'lib/pattern-export/roll-search';
 
 export type Pt = { x: number; y: number };
 
@@ -416,6 +421,8 @@ export type WorkerRequest =
   // races a newer parse is rejected instead of silently nesting the wrong geometry.
   | { type: 'parse'; id: number; files: File[]; opts: ParseOpts }
   | { type: 'nest'; id: number; parseId: number; config: NestConfig }
+  /** Roll print layout (pattern-export/roll-search.ts): seed first, then the budgeted GA. */
+  | { type: 'roll-search'; id: number; job: RollSearchJob }
   | { type: 'cancel'; id: number };
 
 export type WorkerResponse =
@@ -459,6 +466,9 @@ export type WorkerResponse =
       nfpTotal?: number;
     }
   | { type: 'result'; id: number; result: NestResult }
+  /** The roll search's deterministic plan, posted before its GA starts. */
+  | { type: 'roll-seed'; id: number; seed: RollSearchPlan }
+  | { type: 'roll-result'; id: number; result: RollSearchResult }
   | { type: 'error'; id: number; message: string };
 
 export const NEST_DEFAULTS = {

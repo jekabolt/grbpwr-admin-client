@@ -550,6 +550,9 @@ function PaperCanvas({ laid, running }: { laid: Laid | null; running: boolean })
   );
 }
 
+/** Canvas height of a sheet on screen = the roll's width. */
+const SHEET_PX = 240;
+
 function SheetSvg({
   drawing,
   lengthMm,
@@ -570,8 +573,9 @@ function SheetSvg({
   return (
     <svg
       viewBox={`0 0 ${L} ${W}`}
-      className='block min-h-0 flex-1 border border-textColor bg-bgColor text-textColor'
-      style={{ aspectRatio: `${L} / ${W}` }}
+      className='block shrink-0 border border-textColor bg-bgColor text-textColor'
+      // Explicit size: a flex column sizes itself to the label, so an aspect-ratio box collapses.
+      style={{ height: SHEET_PX, width: (SHEET_PX * L) / W }}
       role='img'
       aria-label={name}
     >

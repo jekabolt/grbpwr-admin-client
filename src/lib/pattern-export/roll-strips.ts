@@ -159,6 +159,10 @@ export function planMarkerRollPrint(
     total: pieceCount,
     tooWide: [],
     tooLong: [],
+    markerLengthMm: sheets.reduce(
+      (sum, sheet) => sum + Math.max(0, sheet.lengthMm - ROLL_FURNITURE_MM),
+      0,
+    ),
     warnings: [...new Set(warnings)],
   };
 }

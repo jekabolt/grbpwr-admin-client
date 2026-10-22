@@ -55,7 +55,11 @@ export type TilePaper = keyof typeof TILE_PAPERS;
 export type PdfLayout = { kind: 'sheet' } | { kind: 'tiles'; paper: TilePaper };
 
 /** Stroke widths per role, mm. One pen per role: the importer separates roles by pen. */
-const PEN: Record<DrawingStroke['kind'], number> = { cut: 0.35, notch: 0.25, line: 0.15 };
+export const DRAWING_PEN_MM: Record<DrawingStroke['kind'], number> = {
+  cut: 0.35,
+  notch: 0.25,
+  line: 0.15,
+};
 /** Grey of the marks: min(R,G,B) ≥ 140 is «light grey» to the importer (chains/classify.ts). */
 const MARK = 170;
 const MARK_W = 0.2;
@@ -841,7 +845,7 @@ function drawContent(pdf: JsPdf, d: PatternDrawing, page: PlanPage, family: stri
   pdf.setLineCap('round');
   // Internals first, cutting lines on top.
   for (const kind of ['line', 'notch', 'cut'] as const) {
-    pdf.setLineWidth(PEN[kind]);
+    pdf.setLineWidth(DRAWING_PEN_MM[kind]);
     let dashed = false;
     for (const s of d.strokes) {
       if (s.kind !== kind || s.pts.length < 2) continue;

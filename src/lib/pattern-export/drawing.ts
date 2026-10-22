@@ -26,13 +26,23 @@ export type DrawingStroke = {
   pts: [number, number][];
   /** Dash pattern, mm (on, off, …) — a PLT line type; DXF and marker lines are solid. */
   dash?: number[];
+  /** Non-rendered source identity, used by geometry probes to keep piece strokes grouped. */
+  pieceKey?: string;
 };
 /**
  * A text of the drawing. Without `sizeMm`: a piece name, centred on (x, y) at the renderer's own
  * label size. With `sizeMm`: a text placed by its source (a PLT `LB`) — (x, y) is the baseline
  * start, `sizeMm` the font size, `angle` degrees CCW as seen on paper.
  */
-export type DrawingLabel = { x: number; y: number; s: string; sizeMm?: number; angle?: number };
+export type DrawingLabel = {
+  x: number;
+  y: number;
+  s: string;
+  sizeMm?: number;
+  angle?: number;
+  /** Non-rendered source identity, parallel to `DrawingStroke.pieceKey`. */
+  pieceKey?: string;
+};
 
 export type PatternDrawing = {
   /** Extent of the line work, mm. */

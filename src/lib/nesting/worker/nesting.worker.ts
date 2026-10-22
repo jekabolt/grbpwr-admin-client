@@ -6,6 +6,7 @@ import { parseSheets, type SheetBytes } from './parse-files';
 import { orientToGrain } from '../geom/grain-orient';
 import { applySeamAllowance } from '../geom/seam-allowance';
 import { nest } from '../nest';
+import { rollSearch, type RollSearchJob } from 'lib/pattern-export/roll-search';
 
 const post = (msg: WorkerResponse) => {
   (self as unknown as { postMessage: (m: WorkerResponse) => void }).postMessage(msg);
@@ -127,6 +128,19 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
   cancelled.delete(id);
 }
 
+async function handleRollSearch(id: number, job: RollSearchJob): Promise<void> {
+  try {
+    const result = await rollSearch(
+      job,
+      () => cancelled.has(id),
+      (seed) => post({ type: 'roll-seed', id, seed }),
+    );
+    post({ type: 'roll-result', id, result });
+  } finally {
+    cancelled.delete(id);
+  }
+}
+
 self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
   switch (msg.type) {
@@ -137,6 +151,11 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       break;
     case 'nest':
       void handleNest(msg.id, msg.parseId, msg.config).catch((e) =>
+        post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
+      );
+      break;
+    case 'roll-search':
+      void handleRollSearch(msg.id, msg.job).catch((e) =>
         post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
       );
       break;

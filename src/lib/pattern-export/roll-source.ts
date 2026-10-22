@@ -6,6 +6,10 @@ import {
 } from 'components/managers/tech-card/components/nesting/contour-layer';
 import { buildAllowanceIndex } from 'components/managers/tech-card/components/nesting/contour-allowance';
 import { dedupeUniPieces } from 'components/managers/tech-card/components/nesting/piece-selection';
+import {
+  defaultGrainLayer,
+  grainLayerOptions,
+} from 'components/managers/tech-card/components/nesting/grain';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import { readManifestBytes } from 'lib/pattern-import/manifest';
 import type { ConversionManifest } from 'lib/pattern-import/types';
@@ -13,7 +17,8 @@ import { dxfPairs } from 'lib/nesting/dxf/insunits';
 import { parseFiles } from 'lib/nesting/worker/parse-files';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { area, bounds } from 'lib/nesting/geom/polygon';
-import { NEST_DEFAULTS, type PieceDTO, type PieceManifestFacts } from 'lib/nesting/types';
+import { NEST_DEFAULTS, type PieceDTO, type PieceManifestFacts, type Pt } from 'lib/nesting/types';
+import { drawnRollFootprint, straightenRollPiece } from './roll-geometry';
 
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, '') || 'pattern';
 const bare = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
@@ -22,20 +27,32 @@ type PieceCode = { identity: string; size: string };
 
 export type RollPieceTemplate = {
   piece: PieceDTO;
+  /** Concave keep-out containing every rendered stroke and the complete piece label. */
+  footprint: Pt[];
   identity: string;
   size: string;
   /** A paper template used for two mirrored cut pieces is printed once and marked x2. */
   cutMultiplier: number;
+  label: string;
 };
 
 export type RollSourceModel = {
   title: string;
   templates: RollPieceTemplate[];
   sizes: string[];
+  grainLayer: string;
   warnings: string[];
 };
 
 const sourceCache = new WeakMap<ArrayBuffer, Map<string, RollSourceModel>>();
+
+export const ROLL_PIECE_LABEL_MM = 3;
+
+function pieceLabel(template: { identity: string; size: string; cutMultiplier: number }): string {
+  return [template.identity, template.size || 'OS', template.cutMultiplier === 2 ? '×2' : '']
+    .filter(Boolean)
+    .join(' · ');
+}
 
 function manifestFacts(manifest: ConversionManifest | null): Map<string, PieceManifestFacts> {
   const out = new Map<string, PieceManifestFacts>();
@@ -214,9 +231,11 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
   const selected = pieces.filter(
     (piece) => piece.layer === contourLayer && !dedupe.excludedIds.has(piece.id),
   );
+  const grainLayer = defaultGrainLayer(grainLayerOptions(selected));
+  const straightened = selected.map((piece) => straightenRollPiece(piece, grainLayer).piece);
   const measured = options.find((option) => option.layer === contourLayer)?.allowance;
   const allowanceCm = contourIsCutLine(measured) ? 0 : NEST_DEFAULTS.seamAllowanceCm;
-  const seam = applySeamAllowance(selected, allowanceCm);
+  const seam = applySeamAllowance(straightened, allowanceCm);
   if (allowanceCm > 0)
     warnings.push(`a ${(allowanceCm * 10).toFixed(0)} mm seam allowance was added to the contour`);
   if (seam.hulled.length > 0)
@@ -240,11 +259,17 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
       if (seenPairs.has(pairKey)) continue;
       seenPairs.add(pairKey);
     }
-    templates.push({
+    const template = {
       piece,
       identity: code.identity || piece.name,
       size: code.size,
       cutMultiplier,
+    };
+    const label = pieceLabel(template);
+    templates.push({
+      ...template,
+      label,
+      footprint: drawnRollFootprint(piece, label, ROLL_PIECE_LABEL_MM),
     });
   }
 
@@ -257,6 +282,7 @@ export function readRollSourceModel(dxf: ArrayBuffer, fileName: string): RollSou
     title: stripExt(fileName),
     templates,
     sizes: sizes.map((size) => size || 'OS'),
+    grainLayer,
     warnings: [...new Set(warnings)],
   };
   const files = sourceCache.get(dxf) ?? new Map<string, RollSourceModel>();

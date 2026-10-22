@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { nextFusingAliases, nextGeneratedPatterns, planFusingLines, sameAliasSet } from './aliases';
 import { buildFusingSheets } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
@@ -292,11 +293,149 @@ export async function main() {
   assert.equal(dxf.sheets.length, 1);
   assert.equal(dxf.sheets[0].filename, 'jkt-042-fusing-g700.dxf');
   assert.deepEqual(dxf.sheets[0].blocks, ['FRONT_S', 'FRONT_M']);
+  assert.deepEqual(dxf.sheets[0].aliases, [{ identity: 'FRONT', blockName: 'FRONT' }]);
+
+  // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
+  // go, the new ones come. A scope an uploaded sheet also holds is never touched (fail closed):
+  // the owner's COLLAR→P6 stays, the rebuild's COLLAR→P5 is not added, and a previous generated
+  // scope that is shared now keeps its rows too.
+  const UNSET = 'TECH_CARD_BOM_PURPOSE_UNSET';
+  const INTERFACING = 'TECH_CARD_BOM_PURPOSE_INTERFACING';
+  const OTHER = 'TECH_CARD_BOM_PURPOSE_OTHER';
+  const current = [
+    {
+      bomLineKey: 'MAIN',
+      fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+      blockName: 'FRONT',
+      pieceLineKey: 'P1',
+    },
+    { bomLineKey: 'IL-1', fabricPurpose: UNSET, blockName: 'OLD', pieceLineKey: 'P9' },
+    { bomLineKey: 'IL-2', fabricPurpose: UNSET, blockName: 'GONE', pieceLineKey: 'P8' },
+    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'HAND', pieceLineKey: 'P7' },
+    { bomLineKey: 'IL-3', fabricPurpose: UNSET, blockName: 'COLLAR', pieceLineKey: 'P6' },
+    { bomLineKey: 'IL-4', fabricPurpose: OTHER, blockName: 'PAD', pieceLineKey: 'P4' },
+  ];
+  const plan = nextFusingAliases({
+    current,
+    previousGenerated: [
+      { bomLineKey: 'IL-1', fabricPurpose: UNSET },
+      { bomLineKey: 'IL-2', fabricPurpose: UNSET },
+      { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+      // moved from the purpose scope to the line scope; an uploaded sheet now holds «other»
+      { bomLineKey: 'IL-4', fabricPurpose: OTHER },
+    ],
+    otherSheets: [
+      { bomLineKey: 'MAIN', fabricPurpose: 'TECH_CARD_BOM_PURPOSE_MAIN' },
+      { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+      { bomLineKey: 'X', fabricPurpose: OTHER },
+    ],
+    sheets: [
+      {
+        binding: { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
+        links: [{ blockName: 'FRONT', pieceLineKey: 'P1' }],
+      },
+      {
+        binding: { bomLineKey: 'IL-3', fabricPurpose: UNSET },
+        links: [{ blockName: 'COLLAR', pieceLineKey: 'P5' }],
+      },
+      {
+        binding: { bomLineKey: 'IL-4', fabricPurpose: UNSET },
+        links: [{ blockName: 'PAD', pieceLineKey: 'P4' }],
+      },
+    ],
+  });
+  assert.deepEqual(plan.rows, [
+    current[0],
+    current[3],
+    current[4],
+    current[5],
+    { bomLineKey: 'IL-1', fabricPurpose: INTERFACING, blockName: 'FRONT', pieceLineKey: 'P1' },
+    { bomLineKey: 'IL-4', fabricPurpose: UNSET, blockName: 'PAD', pieceLineKey: 'P4' },
+  ]);
+  assert.deepEqual(plan.shared.sort(), ['IL-3', 'other']);
+  // A line whose effective scope an uploaded sheet holds is not generated (no fallback to the line
+  // scope: the server folds it back into the purpose); a solo purpose binds and links; a purpose
+  // shared by several lines stays line-bound and unlinked.
+  const lineplan = planFusingLines({
+    lines: [
+      { bomLineKey: 'IL-1', effectiveScope: INTERFACING, soloPurpose: INTERFACING },
+      { bomLineKey: 'IL-4', effectiveScope: OTHER, soloPurpose: OTHER },
+      { bomLineKey: 'IL-5', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
+      { bomLineKey: 'IL-6', effectiveScope: 'TECH_CARD_BOM_PURPOSE_MESH', soloPurpose: '' },
+    ],
+    uploadedScopes: [OTHER, 'MAIN-LINE', ''],
+  });
+  assert.deepEqual([...lineplan.blocked], ['IL-4']);
+  assert.deepEqual([...lineplan.linked], ['IL-1']);
+  assert.deepEqual(Object.fromEntries(lineplan.bindings), {
+    'IL-1': { bomLineKey: 'IL-1', fabricPurpose: INTERFACING },
+    'IL-5': { bomLineKey: 'IL-5', fabricPurpose: UNSET },
+    'IL-6': { bomLineKey: 'IL-6', fabricPurpose: UNSET },
+  });
+  // A blocked line's legacy generated sheet (UNSET + line) is removed, not kept beside the
+  // purpose-bound uploaded sheet; a linked line's row is replaced; uploaded rows ride through.
+  const uploadedOther = { name: 'felt.dxf', bomLineKey: 'IL-4', fabricPurpose: OTHER };
+  const legacyGenerated = { name: 'gen IL-4', bomLineKey: 'IL-4', fabricPurpose: UNSET };
+  const oldIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: UNSET };
+  const newIl1 = { name: 'gen IL-1', bomLineKey: 'IL-1', fabricPurpose: INTERFACING };
+  assert.deepEqual(
+    nextGeneratedPatterns(
+      [uploadedOther, legacyGenerated, oldIl1],
+      (pattern) => pattern.name.startsWith('gen '),
+      new Map([['IL-1', newIl1]]),
+    ),
+    [uploadedOther, newIl1],
+  );
+  assert.ok(sameAliasSet(plan.rows, [...plan.rows].reverse()), 'alias sets compare without order');
+  assert.ok(
+    sameAliasSet(
+      plan.rows,
+      nextFusingAliases({ current: plan.rows, previousGenerated: [], otherSheets: [], sheets: [] })
+        .rows,
+    ),
+    'nothing generated, nothing owned: the set rides through',
+  );
   assert.match(dxf.sheets[0].dxfText, /FRONT_S/);
   assert.match(dxf.sheets[0].dxfText, /FRONT_M/);
   assert.ok(
     (dxf.sheets[0].dxfText.match(/\r?\nPOLYLINE\r?\n/g) ?? []).length >= 4,
     'the writer keeps an outer and a dart-hole loop in each block',
+  );
+
+  const twoInterlinings = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [
+      { bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' },
+      { bomLineKey: 'IL-2', code: 'KUFNER', label: 'knit fusible' },
+    ],
+    pieces: [
+      {
+        identity: 'FRONT',
+        displayName: 'front',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: spec({ bomLineKey: 'IL-1' }),
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline }],
+      },
+      {
+        identity: 'COLLAR',
+        displayName: 'collar',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: spec({ bomLineKey: 'IL-2' }),
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline: rectangle(60, 25) }],
+      },
+    ],
+  });
+  assert.deepEqual(
+    twoInterlinings.sheets.map((sheet) => ({ key: sheet.bomLineKey, blocks: sheet.blocks })),
+    [
+      { key: 'IL-1', blocks: ['FRONT_M'] },
+      { key: 'IL-2', blocks: ['COLLAR_M'] },
+    ],
+    'each interlining BOM line gets its own fusing DXF',
   );
 
   const runMismatch = buildFusingSheets({
