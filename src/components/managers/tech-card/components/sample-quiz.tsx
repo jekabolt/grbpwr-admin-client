@@ -1,6 +1,7 @@
 import { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { MaterialPickerDialog } from 'components/managers/materials/components/material-picker';
 import { findInDictionary } from 'lib/features/findInDictionary';
+import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState, useSyncExternalStore } from 'react';
 import { Button, Chip, ChipRow, Section, HeaderNote, Tile, Tiles } from 'ui';
@@ -11,7 +12,13 @@ import type { AutoCreateSample } from './use-auto-create-sample';
 import { wireInt } from './wire-int';
 
 /** A colourway's swatch square for a chip — the studio strip's own rule: devHex → pantone → white. */
-export function ColourwayDot({ colorway }: { colorway?: common_AdminColorwayRef }) {
+export function ColourwayDot({
+  colorway,
+  className,
+}: {
+  colorway?: common_AdminColorwayRef;
+  className?: string;
+}) {
   useSyncExternalStore(subscribePantone, pantoneVersion, pantoneVersion);
   const hex = colorway
     ? (colorway.devHex ?? '').trim() || findPantone(colorway.pantone)?.hex || '#fff'
@@ -19,7 +26,10 @@ export function ColourwayDot({ colorway }: { colorway?: common_AdminColorwayRef 
   return (
     <span
       aria-hidden
-      className='inline-block size-[9px] shrink-0 border border-borderColor bg-pageBg'
+      className={cn(
+        'inline-block size-[9px] shrink-0 border border-borderColor bg-pageBg',
+        className,
+      )}
       style={hex ? { background: hex } : undefined}
     />
   );

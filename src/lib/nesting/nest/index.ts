@@ -70,6 +70,8 @@ export async function nest(
   // именем), и множество имён схлопнуло бы их в одну строку — раскройщик прочёл бы, что
   // зеркал лишилась одна деталь, а лишились две.
   const mirrorRefused = new Map<number, string>();
+  // L14: halves on fold that cannot be cut (PieceDTO.fold 'refused'), with their reasons.
+  const foldRefused = new Map<number, string>();
 
   const byId = new Map(allPieces.map((p) => [p.id, p]));
   const genesBase: Gene[] = [];
@@ -92,6 +94,15 @@ export async function nest(
       for (let inst = 0; inst < pc.quantity; inst++) {
         unplacedUpFront.push({ pieceId: pc.pieceId, instance: inst, reason: 'missing' });
       }
+      continue;
+    }
+    // A half on fold the unit could not be built for: laying the half as drawn cuts half a piece
+    // per garment, and nothing on the marker would show it (geom/fold-unit.ts).
+    if (dto.fold?.kind === 'refused') {
+      for (let inst = 0; inst < pc.quantity; inst++) {
+        unplacedUpFront.push({ pieceId: dto.id, instance: inst, reason: 'fold' });
+      }
+      if (pc.quantity > 0) foldRefused.set(dto.id, `${dto.name} (${dto.fold.reason})`);
       continue;
     }
 
@@ -186,6 +197,10 @@ export async function nest(
         'marker with it cannot be saved. mirrored pieces on a napped fabric are cut in two plies ' +
         'face to face — that is a different marker.',
     );
+  }
+
+  if (foldRefused.size > 0) {
+    warnings.push(`half on fold, not placed: ${[...foldRefused.values()].join('; ')}`);
   }
 
   const totalCount = config.pieces.reduce((s, pc) => s + Math.max(0, pc.quantity), 0);

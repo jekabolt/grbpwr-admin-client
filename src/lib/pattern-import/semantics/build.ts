@@ -66,6 +66,7 @@ import type {
   SizeRun,
   Unproven,
   GradeAsk,
+  NotchVariantAsk,
   GradeCountFeature,
   KinkRecord,
   ShapeFixRecord,
@@ -87,6 +88,7 @@ import { silentOff } from '../pieces/gfit/silent';
 import { type Excursion, stripSpikes } from '../spikes';
 import { featuresOf, innerSeamLines, measuredAllowance } from './allowance';
 import { readNotchMarks, type MarkRead } from '../pieces/notch-marks';
+import { notchQualifier, notchVariantOf } from './notch-variants';
 import { classifyFeatures } from './features';
 import { gradeP1Off, gradeShape } from './grade-shape';
 import {
@@ -743,6 +745,9 @@ export function buildPieceSpecsDetailed(
   const unproven: Unproven[] = [];
   /** GRADE P1: one shape across sizes — the operator's questions (never blocking). */
   const gradeAsks: GradeAsk[] = [];
+  const notchVariantAsks: NotchVariantAsk[] = [];
+  const nvAskOf = new Map<SeedId, Omit<NotchVariantAsk, 'seed' | 'identity'>>();
+  const sheetWords = [...sheet.texts.map((t) => t.text), ...(input.docTexts ?? [])];
   const gradeRefusals: Record<string, string> = {};
   const refusedSeed = new Map<string, SeedId>();
   /** GRADE P1: per `${seed}:${rank}`, the notch bumps crossed by their chord (source frame). */
@@ -1341,6 +1346,45 @@ export function buildPieceSpecsDetailed(
             undefined,
             { paths: sheet.paths, styles: sheet.styles, texts: sheet.texts, run },
           );
+    // BACK-VARIANT: a notch whose label names a model variant («Style B notch») is that model's;
+    // alternatives of one notch («High back» / «Low back») are asked, never picked (notch-variants.ts)
+    const nv = notchVariantOf({
+      seed,
+      read: {
+        sizes: p.cands.map(({ c, card }) => {
+          const mr = markReads.get(c.rank);
+          return {
+            size: card.token,
+            notches: (mr?.notches ?? []).map((n, k) => ({
+              at: n.at,
+              label: mr?.labels?.[k] ?? null,
+            })),
+          };
+        }),
+      },
+      models: input.models ?? [],
+      chosen: input.variant ?? null,
+      texts: sheetWords,
+      // a drawn twin carries its other hand's question: either hand's answer answers both
+      answer:
+        ov.notchVariant ??
+        (twinOf.has(seed) ? pieceOverrides[twinOf.get(seed)!]?.notchVariant : undefined),
+    });
+    if (nv.kind === 'apply') {
+      let dropped = 0;
+      for (const mr of markReads.values()) {
+        const keep = mr.notches.map((_, k) => {
+          const l = mr.labels?.[k];
+          return !l || !nv.drop.has(notchQualifier(l));
+        });
+        dropped += keep.filter((x) => !x).length;
+        mr.notches = mr.notches.filter((_, k) => keep[k]);
+        if (mr.labels) mr.labels = mr.labels.filter((_, k) => keep[k]);
+      }
+      pieceNotes.push(
+        `notch variant: ${nv.why}${dropped ? ` — ${dropped} notch(es) left out` : ''}`,
+      );
+    }
 
     // GRADE P1: a notch drawn AS the outline (a bump / dip of notch shape) at a grade-consistent
     // place in ≥ 2 sizes is a notch — each size's line crosses it by the chord (pieces/gfit/notch-bumps)
@@ -1463,6 +1507,39 @@ export function buildPieceSpecsDetailed(
         }
     }
 
+    // L14: ONE cleaned outline per candidate — mark reads, notch-bump chords, kink repair, then
+    // spikes (drawn) or the traced cleaning — used by the size loop (the export, the half's check)
+    // AND by the half-on-fold offer below, so the two never judge different lines. Pure and
+    // memoized: the loop adds its notes / notches from `st` / `tr` itself.
+    type Cleaned = {
+      outer: PtMm[];
+      st: ReturnType<typeof stripSpikes> | null;
+      tr: ReturnType<typeof cleanTracedOutline> | null;
+    };
+    const cleanedByCand = new Map<(typeof p.cands)[number]['c'], Cleaned>();
+    const cleanedOf = (c: (typeof p.cands)[number]['c']): Cleaned => {
+      const had = cleanedByCand.get(c);
+      if (had) return had;
+      const mr = markReads.get(c.rank);
+      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      const nb = bumpsByRank.get(c.rank);
+      if (nb?.length) outer = chordAcross(outer, nb);
+      const kk = kinkByRank.get(c.rank);
+      if (kk) outer = kk.outer;
+      let st: Cleaned['st'] = null;
+      let tr: Cleaned['tr'] = null;
+      if (!traced) {
+        st = stripSpikes(outer);
+        if (st.spikes) outer = st.ring;
+      } else {
+        tr = cleanTracedOutline(outer);
+        outer = tr.pts;
+      }
+      const out = { outer, st, tr };
+      cleanedByCand.set(c, out);
+      return out;
+    };
+
     for (const { c, card } of p.cands) {
       // SHAPE-KINK: the operator's "drop this size" — the piece is exported without it (recorded)
       if (fixOf(card.token) === 'drop') {
@@ -1484,7 +1561,9 @@ export function buildPieceSpecsDetailed(
       // A1: a drawn line with ONE evidence is a proposal, never this size's grain by itself
       const found = feats.find((f): f is GrainFeature => f.kind === 'grain') ?? null;
       const proposedLine = found?.origin === 'proposed' ? found : null;
-      let outer = ccw(mr?.cleaned.length ? mr.outer : c.outer);
+      // the outline as cleaned below (cleanedOf: bump chords, kinks, spikes / traced cleaning)
+      const cleaned = cleanedOf(c);
+      let outer = cleaned.outer;
       // SHAPE-KINK (pieces/notch-marks.ts): a placement mark this size ran around, kept on its line
       const sizeKinks: KinkRecord[] = (c.placeMarks ?? []).map((m) => ({
         at: m.at,
@@ -1498,7 +1577,6 @@ export function buildPieceSpecsDetailed(
         );
       const nb = bumpsByRank.get(c.rank);
       if (nb?.length) {
-        outer = chordAcross(outer, nb);
         for (const b of nb) {
           const d = Math.min(
             PATIMPORT.notchMaxMm,
@@ -1544,7 +1622,6 @@ export function buildPieceSpecsDetailed(
         });
         const key = `${seed}:${c.rank}`;
         notchChords.set(key, [...(notchChords.get(key) ?? []), ...removed]);
-        outer = kk.outer;
         sizeKinks.push(...kk.kinks.map(({ chord: _c, removed: _r, ...k }) => k));
         pieceNotes.push(
           `${card.token}: outline straightened onto the family's shape at ${kk.kinks.length} place(s) (${kk.kinks.map((k) => `${k.rule} ${k.mm} mm over ${k.spanMm} mm`).join(', ')}; a strict majority of sizes does not turn there) — D5`,
@@ -1558,10 +1635,9 @@ export function buildPieceSpecsDetailed(
       // A stretch the DRAWING itself runs in and out along (its legs on this piece's own cut-line
       // chains, ≥ notchMinMm deep) is a slit notch drawn into the cut line: it leaves the ring and
       // comes back as a notch at that point (layer 4), never silently lost (Codex, r5a).
-      if (!traced) {
-        const st = stripSpikes(outer);
+      const st = cleaned.st;
+      if (st) {
         if (st.spikes) {
-          outer = st.ring;
           const sl = slitNotches(st.excursions, c, set, run);
           feats.push(...sl.notches);
           pieceNotes.push(
@@ -1575,9 +1651,8 @@ export function buildPieceSpecsDetailed(
       }
       // A traced (scan) outline zig-zags between twin traces and runs out and back along ticks: a
       // simple polygon first, or no offset of it is a parallel curve (offset.ts, E3).
-      if (traced) {
-        const t = cleanTracedOutline(outer);
-        outer = t.pts;
+      const t = cleaned.tr;
+      if (t) {
         const r = t.report;
         pieceNotes.push(
           r.cleaned
@@ -2039,7 +2114,11 @@ export function buildPieceSpecsDetailed(
         // offer the half with a fold line (auto when every size agrees, D3)
         const offer = claims.length
           ? halfOfferOf(
-              p.cands.map(({ c: x, card: k }) => ({ outer: x.outer, token: k.token })),
+              // L14: the outlines the size loop checks and exports (cleaned), over the sizes
+              // the operator kept — a dropped size never blocks or carries the offer
+              p.cands
+                .filter(({ card: k }) => fixOf(k.token) !== 'drop')
+                .map(({ c: x, card: k }) => ({ outer: cleanedOf(x).outer, token: k.token })),
               claims,
               brackets(),
               cofWords,
@@ -2257,6 +2336,7 @@ export function buildPieceSpecsDetailed(
       ...(name.aiConfidence != null ? { aiConfidence: name.aiConfidence } : {}),
       seed,
       variant: null,
+      ...(nv.kind === 'apply' && nv.answer ? { notchVariant: nv.answer } : {}),
       unfoldedFold: anyFold,
       ...(halfSizes.length
         ? { halfFold: { evidence: ['answered: export the half with a fold line', ...halfSizes] } }
@@ -2359,6 +2439,9 @@ export function buildPieceSpecsDetailed(
       for (const s of out) walls.delete(s.identity);
       continue;
     }
+    // BACK-VARIANT: asked last — after the piece's other questions and the file's name clashes
+    // (below), so one visit of the details step answers them together
+    if (nv.kind === 'ask') nvAskOf.set(seed, nv.ask);
     for (const s of out) {
       notes[s.identity] = pieceNotes;
       pieces.push(s);
@@ -2415,7 +2498,21 @@ export function buildPieceSpecsDetailed(
     }
     seen.set(k, s.seed);
   }
-  for (const s of pieces) if (!dupSeeds.has(s.seed)) unique.push(s);
+  for (const s of pieces) {
+    if (dupSeeds.has(s.seed)) continue;
+    const ask = nvAskOf.get(s.seed);
+    if (!ask) {
+      unique.push(s);
+      continue;
+    }
+    // BACK-VARIANT: a named, unclashing piece still waits for its variant notch answer
+    if (!blocked.some((b) => b.seed === s.seed)) {
+      block(s.seed, 'notch-variant', ask.question, blockedNameOf(s));
+      notchVariantAsks.push({ seed: s.seed, identity: s.identity, ...ask });
+    }
+    walls.delete(s.identity);
+    delete notes[s.identity];
+  }
   // a drawn hand whose twin was blocked must not be written alone (G12: sibling not in the file)
   for (let changed = true; changed; ) {
     changed = false;
@@ -2430,6 +2527,12 @@ export function buildPieceSpecsDetailed(
         `its other hand ${s.pairOf} is blocked${why ? `: ${why.detail}` : ''}`,
         blockedNameOf(s),
       );
+      // BACK-VARIANT: the twin's variant question is this hand's too (answered for both)
+      const twinAsk =
+        why?.reason === 'notch-variant'
+          ? notchVariantAsks.find((q) => q.seed === why.seed)
+          : undefined;
+      if (twinAsk) notchVariantAsks.push({ ...twinAsk, seed: s.seed, identity: s.identity });
       unique.splice(i, 1);
       changed = true;
     }
@@ -2688,6 +2791,7 @@ export function buildPieceSpecsDetailed(
           }
         : {}),
       ...(foldAsks.length ? { folds: foldAsks } : {}),
+      ...(notchVariantAsks.length ? { notchVariantAsks } : {}),
       ...(foldMisses.some((m) =>
         blocked.some((b) => b.seed === m.seed && b.reason === 'fold-unresolved'),
       )

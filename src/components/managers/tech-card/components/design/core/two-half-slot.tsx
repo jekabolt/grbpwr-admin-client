@@ -1,8 +1,8 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { PLACEHOLDER_SURFACE, Glyph } from 'ui';
 import { cn } from 'lib/utility';
 import type { JSX } from 'react';
-import { PLACEHOLDER_SURFACE } from 'ui';
 
 /**
  * ═══ ПЛИТКА НА ДВЕ ПОЛОВИНЫ — ОДИН ОРГАН НА ВСЕ ЛЕНТЫ ПОЛОСЫ ══════════════════════════════════
@@ -26,29 +26,6 @@ import { PLACEHOLDER_SURFACE } from 'ui';
  * заводится. Низ — перо и глагол на той же полосатой поверхности. Обе половины заводят ОДИН
  * предмет — картинку в этот слот, — поэтому рамку несёт коробка, а не половины по отдельности.
  */
-
-/**
- * Перо нижней половины — тем же штрихом и в той же коробке 24×24, что фотоглиф верхней у
- * `MediaSlot`: две половины одной плитки обязаны читаться одной парой «знак + глагол».
- */
-function PenGlyph({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      aria-hidden
-      width={20}
-      height={20}
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-      className={cn('shrink-0', className)}
-    >
-      <path d='M4.5 19.5 6 14.5 16.5 4l3.5 3.5L9.5 18z' />
-      <path d='M14.5 6l3.5 3.5' />
-      <path d='M6 14.5l3.5 3.5' />
-    </svg>
-  );
-}
 
 /** Лицо половины — общее для верхней и нижней, чтобы «знак + глагол» стояли на одной высоте. */
 export const HALF_FACE =
@@ -143,7 +120,7 @@ function DrawHalf({
       style={{ minHeight: 0 }}
       className={cn(HALF_FACE, 'border-t border-dashed border-borderColor', className)}
     >
-      {glyph ?? <PenGlyph />}
+      {glyph ?? <Glyph name='pen' />}
       <span className='leading-tight'>{label}</span>
     </button>
   );

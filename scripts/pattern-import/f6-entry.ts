@@ -1122,16 +1122,17 @@ export async function main(opts: { plans: string }): Promise<number> {
         ? `${s12.length} blocks`
         : `${s12.slice(0, 2).join(' ')} vs ${s20.slice(0, 2).join(' ')}`,
     );
-    // a fold piece written as its HALF: the fold line is the AAMA mirror line (layer 6) + CUT ON FOLD
+    // a fold piece written as its HALF: the fold line is the AAMA mirror line (layer 6) + the
+    // annotation says it is the half (L14: HALF - CUT n ON FOLD)
     const half = { ...bpSpec(), unfoldedFold: false };
     const wh = writeDxfDetailed(job(MAIN, [half], 'r12'), { embed: null, now: NOW });
     const hM = readRawDxf(wh.bareText).blocks.get('BP_M')!;
     ck(
       hM.filter((e) => e.layer === '6').length === 1 &&
         hM.filter((e) => e.layer === '6')[0].pts.length === 3 &&
-        hM.some((e) => e.layer === '15' && e.text === 'CUT ON FOLD') &&
+        hM.some((e) => e.layer === '15' && /^HALF - CUT \d+ ON FOLD$/.test(e.text ?? '')) &&
         hM.filter((e) => e.layer === '8' && !e.closed).length === 1,
-      'W3 a half (not unfolded): fold line on layer 6 (3 points: never a grain candidate) + CUT ON FOLD',
+      'W3 a half (not unfolded): fold line on layer 6 (3 points: never a grain candidate) + HALF - CUT n ON FOLD',
     );
   }
 

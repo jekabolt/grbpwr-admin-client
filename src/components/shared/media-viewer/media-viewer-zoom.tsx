@@ -1,12 +1,3 @@
-import {
-  DownloadIcon,
-  Half2Icon,
-  Pencil1Icon,
-  RotateCounterClockwiseIcon,
-  TrashIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from '@radix-ui/react-icons';
 import { urlToDataUrl } from 'lib/features/getCropped';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -327,18 +318,18 @@ export interface AnnotateColor {
   value: string;
 }
 
+// The admin's own palette (mockup viewer-unify, frame 4): red, ink, white, blue.
 const ANNOTATE_COLORS: AnnotateColor[] = [
-  { name: 'red', value: '#ff3b30' },
-  { name: 'yellow', value: '#ffcc00' },
-  { name: 'green', value: '#34c759' },
+  { name: 'red', value: '#ff0000' },
+  { name: 'black', value: '#000000' },
   { name: 'white', value: '#ffffff' },
+  { name: 'blue', value: '#2323ff' },
 ];
 
-/** Pen weights, in image-space px. `fine` is for marking a stitch line, `bold` for circling a panel. */
+/** Pen weights, in image-space px. `thin` marks a stitch line, `thick` circles a panel. */
 export const ANNOTATE_WIDTHS = [
-  { name: 'fine', value: 2 },
-  { name: 'medium', value: 4 },
-  { name: 'bold', value: 9 },
+  { name: 'thin', value: 3 },
+  { name: 'thick', value: 9 },
 ] as const;
 
 interface Stroke {
@@ -636,6 +627,7 @@ export function useImageAdjust(params: {
   return {
     /** Открыт ли ряд ручек. Не то же самое, что «коррекция стоит». */
     open,
+    setOpen,
     toggle,
     values,
     setValues,
@@ -660,7 +652,7 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
   const { resetKey, baseSize } = params;
   const [drawMode, setDrawMode] = useState(false);
   const [color, setColor] = useState(ANNOTATE_COLORS[0]?.value ?? '#ff3b30');
-  const [width, setWidth] = useState<number>(ANNOTATE_WIDTHS[1].value);
+  const [width, setWidth] = useState<number>(ANNOTATE_WIDTHS[0].value);
   const [hasStrokes, setHasStrokes] = useState(false);
   const [saving, setSaving] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -794,16 +786,7 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
       try {
         const out = await bake(src, adjust);
         if (!out) return;
-        const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
-        if (!blob) return;
-        const href = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = filename || 'annotated.png';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(href);
+        downloadHref(out.toDataURL('image/png'), filename || 'annotated.png');
       } finally {
         setSaving(false);
       }
@@ -827,6 +810,7 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
 
   return {
     drawMode,
+    setDrawMode,
     toggleDrawMode,
     color,
     setColor,
@@ -850,107 +834,41 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
   };
 }
 
-function ToolbarIconButton({
-  onClick,
-  disabled,
-  active,
-  label,
-  probe,
-  children,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  label: string;
-  /** Якорь для проб. Роль органа читается по нему, а не по подписи, которая меняется с состоянием. */
-  probe?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type='button'
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      {...(probe ? { 'data-probe': probe } : {})}
-      className={cn(
-        'flex size-8 shrink-0 items-center justify-center border transition-colors',
-        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
-        'disabled:cursor-not-allowed disabled:opacity-30',
-        active
-          ? 'border-bgColor bg-bgColor text-textColor'
-          : 'border-bgColor/40 bg-black/40 text-bgColor backdrop-blur-sm hover:bg-bgColor hover:text-textColor',
-      )}
-    >
-      {children}
-    </button>
-  );
+/** Hand a data/blob url to the browser as a file download. */
+export function downloadHref(href: string, filename: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /**
- * Словесная кнопка тёмного хрома. Та же кожа, что у глифовой: одна грамматика на весь тулбар,
- * иначе «reset» и «undo» читались бы как органы разных приложений.
- *
- * ВЫКЛЮЧЕННАЯ — НЕ СЕРАЯ ПЛИТА, А КОНТУР (система, «Buttons/Disabled»): гасятся линия и подпись,
- * заливка не появляется.
+ * The untouched file, as a download. A bare `<a download>` on a foreign origin is ignored by the
+ * browser (it navigates instead), so the bytes come through the same CORS proxy the baker uses.
  */
-function ToolbarTextButton({
-  onClick,
-  disabled,
-  label,
-  probe,
-  children,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  label: string;
-  probe?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type='button'
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      {...(probe ? { 'data-probe': probe } : {})}
-      className={cn(
-        'shrink-0 border px-2 py-1 text-micro uppercase leading-4 tracking-label transition-colors',
-        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
-        'border-bgColor/40 text-bgColor hover:bg-bgColor hover:text-textColor',
-        'disabled:cursor-not-allowed disabled:border-bgColor/20 disabled:text-bgColor/30 disabled:hover:bg-transparent disabled:hover:text-bgColor/30',
-      )}
-    >
-      {children}
-    </button>
-  );
+export async function downloadOriginal(src: string, filename: string) {
+  const dataUrl = await urlToDataUrl(src);
+  downloadHref(dataUrl, filename);
 }
 
 /**
- * ОДНА РУЧКА КОРРЕКЦИИ: имя, ползунок, число.
- *
- * ОРГАН — НАТИВНЫЙ `input[type=range]` ПОД `accent-color`, как полоса зума у кадрирования
- * (`crop-range`) и рейка кисти: клавиатура (стрелки, Home/End), автоповтор, касание и
- * перетаскивание уже написаны в браузере, а свой ползунок — это переизобретение стандартного
- * органа, которое продукт запрещает прямо, и вдобавок потеря всего перечисленного.
- *
- * `accent-bgColor` НЕ УКРАШЕНИЕ: без него браузер красит ход системным синим — цветом, который в
- * этой системе обязан значить «в полёте» и не значит здесь ничего.
- *
- * Число слева от края фиксированной ширины и `tabular-nums`: иначе ряд дёргался бы на каждой
- * смене разряда, пока ручку ведут.
+ * ОДНА РУЧКА КОРРЕКЦИИ. ОРГАН — НАТИВНЫЙ `input[type=range]` ПОД `accent-color`, как полоса зума у
+ * кадрирования: клавиатура (стрелки, Home/End), автоповтор, касание и перетаскивание уже написаны
+ * в браузере, а свой ползунок — переизобретение стандартного органа, которое продукт запрещает
+ * прямо. `accent-bgColor` не украшение: без него браузер красит ход системным синим, а синий в
+ * этой системе значит «в полёте».
  */
-function AdjustSlider({
+export function AdjustRange({
   name,
   probe,
   value,
   min,
   max,
-  unit,
+  valueText,
   disabled,
+  big,
   onChange,
 }: {
   name: string;
@@ -958,335 +876,33 @@ function AdjustSlider({
   value: number;
   min: number;
   max: number;
-  unit: '' | '%';
+  /** The signed value, also for the screen reader: «−30» and «30» are two different pictures. */
+  valueText: string;
   disabled: boolean;
+  /** Phone: one tall slider with a thumb-sized hit area. */
+  big?: boolean;
   onChange: (v: number) => void;
 }) {
-  const shown =
-    unit === '%' ? `${value}%` : value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : '0';
   return (
-    <label className='flex shrink-0 items-center gap-1.5'>
-      <span className='text-micro uppercase tracking-label text-bgColor/70'>{name}</span>
-      <input
-        type='range'
-        min={min}
-        max={max}
-        step={1}
-        value={value}
-        disabled={disabled}
-        aria-label={name}
-        // Читалке объявляется ЗНАЧЕНИЕ СО ЗНАКОМ, а не голое число хода: «минус тридцать» и
-        // «тридцать» — это две разные картинки, и различать их обязан и голос.
-        aria-valuetext={shown}
-        data-probe={`adjust-${probe}`}
-        title={`${name} — double-click to reset`}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onDoubleClick={() => onChange(0)}
-        className={cn(
-          'h-[14px] w-24 min-w-0 cursor-pointer accent-bgColor',
-          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
-          'disabled:cursor-default disabled:opacity-40',
-        )}
-      />
-      <span className='w-8 shrink-0 text-right text-micro tabular-nums'>{shown}</span>
-    </label>
-  );
-}
-
-interface ZoomDrawToolbarProps {
-  scale: number;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-  isZoomed: boolean;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onReset: () => void;
-  drawMode: boolean;
-  onToggleDraw: () => void;
-  color: string;
-  onColorChange: (c: string) => void;
-  colors: AnnotateColor[];
-  width: number;
-  onWidthChange: (w: number) => void;
-  widths: readonly { name: string; value: number }[];
-  hasStrokes: boolean;
-  onUndo: () => void;
-  onClear: () => void;
-  /** Flatten the ink onto the picture and download it. Omitted where there is nothing to save to. */
-  onSave?: () => void;
-  saving?: boolean;
-  /* ── Коррекция кадра (J-13). Ряд ручек живёт ЗДЕСЬ, потому что он такой же сеансовый орган
-        поверх снимка, как перо: одно место — один закон сброса. ── */
-  adjustOpen: boolean;
-  onToggleAdjust: () => void;
-  adjust: AdjustParams;
-  onAdjustChange: (next: AdjustParams) => void;
-  onAdjustReset: () => void;
-  /** Пока подложка не привезена, ручки заперты — и сказано, почему. */
-  adjustStatus: 'idle' | 'loading' | 'ready' | 'failed';
-  /**
-   * Завести результат НОВОЙ КАРТИНКОЙ у хозяина просмотрщика. Absent — хозяина нет (библиотека),
-   * и единственная дверь наружу это «скачать», как было до J-13.
-   */
-  onSaveAsPicture?: () => void;
-}
-
-/** Floating bottom-center toolbar: zoom controls always shown, draw controls
- * (pen weight / colors / undo / clear) appear once draw mode is toggled on, and the three
- * correction knobs appear on their own row once `adjust` is toggled on. */
-export function ZoomDrawToolbar({
-  scale,
-  canZoomIn,
-  canZoomOut,
-  isZoomed,
-  onZoomIn,
-  onZoomOut,
-  onReset,
-  drawMode,
-  onToggleDraw,
-  color,
-  onColorChange,
-  colors,
-  width,
-  onWidthChange,
-  widths,
-  hasStrokes,
-  onUndo,
-  onClear,
-  onSave,
-  saving,
-  adjustOpen,
-  onToggleAdjust,
-  adjust,
-  onAdjustChange,
-  onAdjustReset,
-  adjustStatus,
-  onSaveAsPicture,
-}: ZoomDrawToolbarProps) {
-  const knobsLive = adjustStatus === 'ready';
-  /** Нечего запекать: ни чернил, ни коррекции. Обе двери наружу тогда заперты, и это честно. */
-  const nothingToBake = !hasStrokes && adjustIsZero(adjust);
-  return (
-    <div
-      role='toolbar'
-      aria-label='Image zoom, adjust and drawing controls'
-      // Stop clicks/gestures on the toolbar itself from reaching the stage's
-      // close-on-background-click and pan/swipe handling.
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      /* ЦЕНТРИРОВАНИЕ ПОЛЯМИ, А НЕ СДВИГОМ. `left-1/2 + -translate-x-1/2` центрирует картинкой, но
-         ШИРИНУ при этом считает от левого края до правого края сцены — то есть ровно половину, — и
-         ряд ручек ломался на две строки посреди пустого экрана. `left-3 right-3` + `w-fit` даёт
-         тот же центр и всю ширину. */
-      className='absolute bottom-3 left-3 right-3 z-10 mx-auto flex w-fit flex-col items-center gap-1.5'
-    >
-      {/* РЯД РУЧЕК СТОИТ НАД РЯДОМ КНОПОК, А НЕ ПОД НИМ. Кнопки — постоянный орган, и они обязаны
-          оставаться на одном расстоянии от низа сцены: ряд, вставший снизу, толкал бы их вверх на
-          каждое открытие, и человек попадал бы мимо той кнопки, в которую целился. */}
-      {adjustOpen && (
-        <div
-          data-probe='adjust-row'
-          className='flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border border-bgColor/40 bg-black/40 px-2 py-1 backdrop-blur-sm'
-        >
-          <AdjustSlider
-            name='brightness'
-            probe='brightness'
-            value={adjust.brightness}
-            min={-100}
-            max={100}
-            unit=''
-            disabled={!knobsLive}
-            onChange={(v) => onAdjustChange({ ...adjust, brightness: v })}
-          />
-          <AdjustSlider
-            name='contrast'
-            probe='contrast'
-            value={adjust.contrast}
-            min={-100}
-            max={100}
-            unit=''
-            disabled={!knobsLive}
-            onChange={(v) => onAdjustChange({ ...adjust, contrast: v })}
-          />
-          <AdjustSlider
-            name='black point'
-            probe='black'
-            value={adjust.black}
-            min={0}
-            max={50}
-            unit='%'
-            disabled={!knobsLive}
-            onChange={(v) => onAdjustChange({ ...adjust, black: v })}
-          />
-          {/* Внутренняя линейка ряда — `/20`, как между строками панели сведений; внешний контур
-              коробки — `/40`. Две ступени, не одна. */}
-          <span aria-hidden className='h-4 w-px shrink-0 bg-bgColor/20' />
-          {!knobsLive && (
-            <span className='shrink-0 text-micro text-bgColor/70'>
-              {adjustStatus === 'failed' ? 'pixels unreadable' : 'reading pixels…'}
-            </span>
-          )}
-          <ToolbarTextButton
-            label='Reset adjustments'
-            probe='adjust-reset'
-            onClick={onAdjustReset}
-            disabled={adjustIsZero(adjust)}
-          >
-            reset
-          </ToolbarTextButton>
-          {onSaveAsPicture && (
-            <ToolbarTextButton
-              label='Save as a new picture'
-              probe='save-as-picture'
-              onClick={onSaveAsPicture}
-              disabled={nothingToBake || !!saving}
-            >
-              save as a new picture
-            </ToolbarTextButton>
-          )}
-        </div>
+    <input
+      type='range'
+      min={min}
+      max={max}
+      step={1}
+      value={value}
+      disabled={disabled}
+      aria-label={name}
+      aria-valuetext={valueText}
+      data-probe={`adjust-${probe}`}
+      title={`${name} — double-click to reset`}
+      onChange={(e) => onChange(Number(e.target.value))}
+      onDoubleClick={() => onChange(0)}
+      className={cn(
+        'min-w-0 flex-1 cursor-pointer accent-bgColor',
+        big ? 'h-11' : 'h-6',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
+        'disabled:cursor-default disabled:opacity-40',
       )}
-
-      <div className='flex max-w-full flex-wrap items-center justify-center gap-1.5'>
-      {/* Phone: pinch does the zoom, so the +/- group is desktop only. */}
-      <div className='hidden items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm lg:flex'>
-        <ToolbarIconButton label='Zoom out' onClick={onZoomOut} disabled={!canZoomOut}>
-          <ZoomOutIcon className='size-4' />
-        </ToolbarIconButton>
-        <button
-          type='button'
-          aria-label='Reset zoom'
-          title='Reset zoom'
-          onClick={onReset}
-          disabled={!isZoomed}
-          className='min-w-14 px-1 text-center text-textBaseSize uppercase tabular-nums text-bgColor disabled:cursor-not-allowed disabled:opacity-60'
-        >
-          {Math.round(scale * 100)}%
-        </button>
-        <ToolbarIconButton label='Zoom in' onClick={onZoomIn} disabled={!canZoomIn}>
-          <ZoomInIcon className='size-4' />
-        </ToolbarIconButton>
-      </div>
-
-      {/* Phone: adjust / draw open from the viewer's `more` sheet; this group shows only while
-          one of them is on, to work it and to switch it off. */}
-      <div
-        className={cn(
-          'flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm',
-          !drawMode && !adjustOpen && 'max-lg:hidden',
-        )}
-      >
-        {/* ЧИП КОРРЕКЦИИ — В ТОЙ ЖЕ КОРОБКЕ, ЧТО КАРАНДАШ, И ПЕРЕД НИМ. Это два режима одного
-            занятия «поправить снимок», и разводить их по разным группам значило бы сказать, что они
-            из разных семейств. ПЕРЕД, а не после: когда перо раскрыто, его собственные органы
-            (вес, цвет, откат, очистка) идут следом за ним сплошняком — чип, поставленный в хвост,
-            оказался бы за корзиной и читался бы как ещё один инструмент рисования.
-            Глиф — половина круга, обычный знак контраста. */}
-        <ToolbarIconButton
-          label={adjustOpen ? 'Close adjust' : 'Adjust brightness, contrast and black point'}
-          probe='adjust-chip'
-          active={adjustOpen}
-          onClick={onToggleAdjust}
-        >
-          <Half2Icon className='size-4' />
-        </ToolbarIconButton>
-        <ToolbarIconButton
-          label={drawMode ? 'Exit draw mode' : 'Draw on image'}
-          active={drawMode}
-          onClick={onToggleDraw}
-        >
-          <Pencil1Icon className='size-4' />
-        </ToolbarIconButton>
-
-        {drawMode && (
-          <>
-            {/* Pen weight, shown as the dot it draws — a "2 / 4 / 9" label would make you
-                translate a number into a line thickness on every pick. */}
-              <div
-                role='radiogroup'
-                aria-label='Pen weight'
-                className='ml-1 flex items-center gap-1'
-              >
-              {widths.map((w) => (
-                <button
-                  key={w.value}
-                  type='button'
-                  role='radio'
-                  aria-checked={width === w.value}
-                  aria-label={`${w.name} pen`}
-                  title={`${w.name} pen`}
-                  onClick={() => onWidthChange(w.value)}
-                  className={cn(
-                    'flex size-6 shrink-0 items-center justify-center border transition-colors',
-                    width === w.value
-                      ? 'border-bgColor bg-bgColor'
-                      : 'border-transparent hover:border-bgColor/40',
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    // Sized off the real pen width, clamped so `bold` still fits the 24px cell.
-                    style={{
-                      width: Math.min(w.value + 1, 12),
-                      height: Math.min(w.value + 1, 12),
-                      backgroundColor: width === w.value ? '#000' : color,
-                    }}
-                    className='block rounded-full'
-                  />
-                </button>
-              ))}
-            </div>
-
-              <div
-                role='radiogroup'
-                aria-label='Pen color'
-                className='mx-1 flex items-center gap-1'
-              >
-              {colors.map((c) => (
-                <button
-                  key={c.value}
-                  type='button'
-                  role='radio'
-                  aria-checked={color === c.value}
-                  aria-label={`${c.name} pen`}
-                  title={c.name}
-                  onClick={() => onColorChange(c.value)}
-                  style={{ backgroundColor: c.value }}
-                  className={cn(
-                    'size-5 shrink-0 rounded-full border-2 transition-transform',
-                    color === c.value ? 'scale-110 border-bgColor' : 'border-transparent',
-                  )}
-                />
-              ))}
-            </div>
-            <ToolbarIconButton label='Undo last stroke' onClick={onUndo} disabled={!hasStrokes}>
-              <RotateCounterClockwiseIcon className='size-4' />
-            </ToolbarIconButton>
-            <ToolbarIconButton label='Clear drawing' onClick={onClear} disabled={!hasStrokes}>
-              <TrashIcon className='size-4' />
-            </ToolbarIconButton>
-          </>
-        )}
-      </div>
-
-      {/* ДВЕРИ НАРУЖУ — СВОЯ ГРУППА, А НЕ ХВОСТ ГРУППЫ ПЕРА.
-          Раньше «скачать» жила ВНУТРИ пера и показывалась только в режиме рисования — то есть
-          человек, который ничего не рисовал, а только поправил яркость, не мог вынести результат
-          вовсе, пока не возьмёт карандаш. Дверей две («скачать себе» и «завести картинкой»), они
-          одни и те же для чернил и для коррекции, и поэтому стоят снаружи обоих режимов. */}
-      {(drawMode || adjustOpen) && onSave && (
-        <div className='flex items-center gap-1 border border-bgColor/40 bg-black/40 p-1 backdrop-blur-sm'>
-          <ToolbarIconButton
-            label={saving ? 'Saving…' : 'Download this picture with the changes'}
-            probe='save-download'
-            onClick={onSave}
-            disabled={nothingToBake || !!saving}
-          >
-            <DownloadIcon className='size-4' />
-          </ToolbarIconButton>
-        </div>
-      )}
-      </div>
-    </div>
+    />
   );
 }

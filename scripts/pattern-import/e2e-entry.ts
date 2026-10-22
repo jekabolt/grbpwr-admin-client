@@ -428,6 +428,8 @@ export const CLICKS = {
   'clean-accept': 1,
   // UXHOOKS: "the missing pages are blank" on the sheet step's blocker, one click
   'missing-accept': 1,
+  // BACK-VARIANT: «which back: high / low?» — one pick answers every piece the same question asks
+  'notch-variant': 1,
   blocker: 0,
   note: 0,
 } as const;
@@ -1313,6 +1315,13 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
     const codeBulk: { seed: number; pass: number; label: string; code: string; mods: string[] }[] =
       [];
     const firstProposal = new Map<number, NonNullable<typeof sem.grainProposals>[number]>();
+    const notchVariantSeen: {
+      pieces: string[];
+      question: string;
+      options: { key: string; label: string; model: string | null; perSize: number }[];
+      suggested: string | null;
+      picked: string;
+    }[] = [];
     const grainSeen: {
       piece: string;
       why: string;
@@ -1475,8 +1484,43 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
           1 + marked.length,
         );
       }
+      // BACK-VARIANT: the operator picks the suggested option (else the first), once per question
+      const nvAsks = (sem.notchVariantAsks ?? []).filter(
+        (q) => overrides[q.seed]?.notchVariant === undefined,
+      );
+      const nvByQ = new Map<string, typeof nvAsks>();
+      for (const q of nvAsks) {
+        const k = `${q.question}|${q.options
+          .map((o) => o.key)
+          .sort()
+          .join('|')}`;
+        nvByQ.set(k, [...(nvByQ.get(k) ?? []), q]);
+      }
+      for (const qs of nvByQ.values()) {
+        const pick = qs[0].suggested ?? qs[0].options[0].key;
+        for (const q of qs)
+          overrides[q.seed] = { ...(overrides[q.seed] ?? {}), notchVariant: pick };
+        notchVariantSeen.push({
+          pieces: qs.map((q) => labelOf(seedsNow)(q.seed)),
+          question: qs[0].question,
+          options: qs[0].options.map((o) => ({
+            key: o.key,
+            label: o.label,
+            model: o.model,
+            perSize: o.perSize.length,
+          })),
+          suggested: qs[0].suggested ?? null,
+          picked: pick,
+        });
+        op(
+          'notch-variant',
+          `${qs[0].question} ${qs.map((q) => labelOf(seedsNow)(q.seed)).join(',')} → «${pick}»`,
+        );
+      }
       const other = sem.blocked.filter(
-        (b) => !['no-grain', 'grammar', 'duplicate-identity', 'fold-question'].includes(b.reason),
+        (b) =>
+          !['no-grain', 'grammar', 'duplicate-identity', 'fold-question'].includes(b.reason) &&
+          !(b.reason === 'notch-variant' && overrides[b.seed]?.notchVariant !== undefined),
       );
       if (other.length) {
         dropped.push(...other.map((b) => `${b.reason}:${labelOf(seedsNow)(b.seed)}`));
@@ -1497,6 +1541,7 @@ export async function runCase(c: Case, hooks: CaseHooks = {}): Promise<Rec> {
       });
     }
     rec.droppedAtMeaning = dropped;
+    if (notchVariantSeen.length) rec.notchVariant = notchVariantSeen;
     if (codeBulk.length) rec.codeBulk = codeBulk;
     // D3: what the drawing does not prove — the wizard stops on it (footer) until answered.
     // Allowance: one explicit answer for the file ("cut line" / "seam line + N mm"); quantities and

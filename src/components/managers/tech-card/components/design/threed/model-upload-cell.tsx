@@ -1,8 +1,4 @@
 import { adminService } from 'api/api';
-import { getBase64File } from 'lib/features/getBase64';
-
-import { cn } from 'lib/utility';
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import {
   Button,
   CalloutBox,
@@ -11,7 +7,12 @@ import {
   placeholderClass,
   Text,
   TILE_QUIET,
+  Glyph,
 } from 'ui';
+import { getBase64File } from 'lib/features/getBase64';
+import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 
 import { InertDoor } from '../bench-slot';
@@ -23,27 +24,6 @@ import {
   modelFileError,
   modelUploadErrorMessage,
 } from './model-file';
-
-/**
- * Глиф пустого кадра — коробка модели, тем же штрихом 1.25 и в той же коробке 24×24, что фотоглиф
- * слота медиа: полосатый прямоугольник без знака читается как «тут что-то сломалось».
- */
-function ModelGlyph({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-      className={cn('h-5 w-5 shrink-0', className)}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-    >
-      <path d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
-      <path d='M3.5 7 12 11.25 20.5 7' />
-      <path d='M12 11.25v10' />
-    </svg>
-  );
-}
 
 /**
  * ═══ ПРИНЕСТИ СВОЮ 3D-МОДЕЛЬ — ДВЕРЬ В ПОЛОСЕ `3D MODELS OF THIS CARD` (E-13) ═════════════════
@@ -404,7 +384,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
                one hint. No ⌘V: the clipboard does not carry a model file, and a promised gesture
                that does nothing is worse than a missing one. */
             <>
-              <ModelGlyph className='hidden @[6rem]:block' />
+              <Glyph name='model' className='hidden @[6rem]:block' />
               <Text
                 size='control'
                 variant='uppercase'

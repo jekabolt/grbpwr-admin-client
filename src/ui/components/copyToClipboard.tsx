@@ -1,4 +1,4 @@
-import { CheckCircledIcon, ClipboardCopyIcon } from '@radix-ui/react-icons';
+import { CheckCircledIcon, ClipboardCopyIcon } from '../icons';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { FC, useEffect, useState } from 'react';
 

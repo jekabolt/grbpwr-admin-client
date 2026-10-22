@@ -98,6 +98,9 @@ export type PieceManifestFacts = {
   pairOf: string | null;
   // Деталь со сгиба, развёрнутая конвертером в полную: линия сгиба лежит на слое 8 как справка.
   unfolded: boolean;
+  // L13/L14: a HALF on fold — the drawing carries the half, its fold line is the AAMA mirror line
+  // (layer 6). The card cuts half ∪ its mirror (geom/fold-unit.ts), never the half once.
+  halfFold: boolean;
   // Слои, как их записал конвертер: крой (финальный), шов, долевая.
   cutLayer: string;
   seamLayer: string;
@@ -156,6 +159,11 @@ export type PieceDTO = {
   originY?: number;
   // См. PieceManifestFacts. Только у деталей файла с манифестом конвертации.
   manifest?: PieceManifestFacts;
+  // L14: a half on fold, as the card cuts it (geom/fold-unit.ts, applied with the seam allowance).
+  // 'unit' — poly is the half ∪ its mirror across the fold line (what folded fabric yields);
+  // 'refused' — poly is still the half, and no marker or norm may use it (the reason says why).
+  // Absent: not a fold piece.
+  fold?: { kind: 'unit'; halfAreaCm2: number } | { kind: 'refused'; reason: string };
 };
 
 export type NestPieceConfig = {
@@ -346,7 +354,9 @@ export type PlacedTransform = Pick<Placement, 'rot' | 'x' | 'y' | 'flipped'>;
 //   'table-full' — задан NestConfig.maxLengthCm, и экземпляр не влез в длину стола. Это НЕ
 //                патология (в отличие от 'no-space'), а ожидаемый ответ «стол кончился»: лечится
 //                меньшим числом изделий на слой или более длинным столом, а не поиском.
-export type UnplacedReason = 'width' | 'no-space' | 'missing' | 'mirror' | 'table-full';
+//   'fold'     — a half on fold that cannot be cut as drawn (PieceDTO.fold 'refused'): laying the
+//                half once would cut half a piece per garment.
+export type UnplacedReason = 'width' | 'no-space' | 'missing' | 'mirror' | 'table-full' | 'fold';
 
 export type UnplacedPiece = {
   pieceId: number;

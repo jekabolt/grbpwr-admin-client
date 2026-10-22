@@ -1,27 +1,7 @@
 import { differenceInCalendarDays, format, isToday } from 'date-fns';
-import { TaskBoard, TaskPriority, TaskStatus } from '../api/types';
+import { TaskPriority, TaskStatus } from '../api/types';
 
-// Display order + labels for the board taxonomy. Kept out of the components so
-// there is one source of truth for tabs, columns, selects and filters.
-
-export const BOARDS: TaskBoard[] = [
-  'TASK_BOARD_DEVELOPMENT',
-  'TASK_BOARD_DESIGN',
-  'TASK_BOARD_MARKETING',
-  'TASK_BOARD_PRODUCTION',
-  'TASK_BOARD_SOURCING',
-  'TASK_BOARD_CONTENT',
-];
-
-export const BOARD_LABEL: Record<TaskBoard, string> = {
-  TASK_BOARD_UNKNOWN: 'unknown',
-  TASK_BOARD_DEVELOPMENT: 'development',
-  TASK_BOARD_DESIGN: 'design',
-  TASK_BOARD_MARKETING: 'marketing',
-  TASK_BOARD_PRODUCTION: 'production',
-  TASK_BOARD_SOURCING: 'sourcing',
-  TASK_BOARD_CONTENT: 'content',
-};
+// Display order + labels for statuses and priorities. Boards are rows now (ListTaskBoards).
 
 export const STATUSES: TaskStatus[] = [
   'TASK_STATUS_BACKLOG',

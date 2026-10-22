@@ -1,5 +1,9 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
-import { buildPrintScope, parsePrintQuery } from 'components/managers/print/scope';
+import {
+  buildPrintScope,
+  parsePrintQuery,
+  type PrintOrient,
+} from 'components/managers/print/scope';
 import {
   useProductionRun,
   useRunCutPlan,
@@ -11,9 +15,10 @@ import { useTechCardPrint } from 'components/managers/tech-cards/components/useT
 import { ROUTES } from 'constants/routes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { BackLink, Button, Text } from 'ui';
+import { BackLink, Button, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
+import { TechpackDocument } from './techpack/document';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -29,9 +34,15 @@ const PRINT_CSS = `
   .techpack-toolbar { display: none !important; }
   .techpack-doc { border: 0 !important; box-shadow: none !important; }
   .techpack-doc > * { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+  .techpack-page { max-width: none !important; padding: 0 !important; gap: 0 !important; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 `;
+
+const ORIENT_OPTIONS: readonly ViewSwitchOption<PrintOrient>[] = [
+  { value: 'land', label: 'landscape' },
+  { value: 'port', label: 'portrait' },
+];
 
 export function TechCardPrint() {
   const { id } = useParams<{ id: string }>();
@@ -39,8 +50,31 @@ export function TechCardPrint() {
   // Скоуп печати приезжает query-параметрами: ?run=&colorway=&sizes=&profile=&booklets=&release=.
   // Без них печать неотличима от прежней — это осознанное свойство, а не переходный период:
   // внутренний тех-пак обо всём сразу остаётся валидным документом.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
+  // The v6 document only implements paper orientation and release snapshots. Any URL carrying a
+  // narrower print scope must stay on the classic document until v6 can apply that scope to every
+  // section; silently ignoring even an empty/invalid filter would print a broader pack than asked.
+  const hasClassicOnlyScope = ['profile', 'colorway', 'sizes', 'booklets', 'run'].some((name) =>
+    searchParams.has(name),
+  );
+  const classic = searchParams.get('layout') === 'classic' || hasClassicOnlyScope;
+  // Ориентация живёт в адресе (?orient=land), как и весь скоуп: ссылка на печать воспроизводит
+  // лист целиком. Книжная — умолчание, параметр для неё снимается.
+  const setOrient = useCallback(
+    (next: PrintOrient) => {
+      setSearchParams(
+        (prev) => {
+          const sp = new URLSearchParams(prev);
+          if (next === 'land') sp.set('orient', 'land');
+          else sp.delete('orient');
+          return sp;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   // `?sheet=N` больше не читается и не разбирается. Он приходил от кнопки печати ВЕРСИИ листа в
   // ARTIFACTS, и всё, что бумага с ним делала, — печатала плашку «просили версию N, а напечатан
   // текущий документ». Версии снесены целиком, вместе с бэкендом: кнопки, которая ставила этот
@@ -176,7 +210,11 @@ export function TechCardPrint() {
   }, [goBack]);
 
   return (
-    <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
+    <div
+      className={`mx-auto flex flex-col gap-4 p-4 pb-10 ${
+        query.orient === 'land' ? 'max-w-[317mm]' : 'max-w-[230mm]'
+      }${classic ? '' : ' techpack-page'}`}
+    >
       <style>{PRINT_CSS}</style>
 
       <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
@@ -199,6 +237,12 @@ export function TechCardPrint() {
           </Text>
         </div>
         <div className='flex items-center gap-3'>
+          <ViewSwitch
+            label='page orientation'
+            value={query.orient}
+            options={ORIENT_OPTIONS}
+            onChange={setOrient}
+          />
           <Text variant='inactive' size='small'>
             choose “save as PDF” as the destination · only Chrome prints the running head and page
             numbers
@@ -231,7 +275,9 @@ export function TechCardPrint() {
           <BackLink to={ROUTES.techCards}>tech cards</BackLink>
         </div>
       ) : (
-        <div className='techpack-doc border border-borderColor shadow-sm'>
+        <div
+          className={classic ? 'techpack-doc border border-borderColor shadow-sm' : 'techpack-doc'}
+        >
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
               плашка без неё напечаталась бы текстом впритык к рамке. */}
           <div className='px-8 pt-6'>
@@ -261,15 +307,28 @@ export function TechCardPrint() {
               </p>
             </div>
           )}
-          <TechPackDocument
-            techCard={snapshot ?? techCard}
-            scope={scope}
-            assembly={assemblyData?.items ?? []}
-            packagingRecipe={packagingRecipeData?.items ?? []}
-            patternViewerToken={printData?.patternViewerToken ?? ''}
-            onDataStatus={setDocDeps}
-            cutPlan={cutPlanError ? undefined : cutPlan}
-          />
+          {classic ? (
+            <TechPackDocument
+              techCard={snapshot ?? techCard}
+              scope={scope}
+              assembly={assemblyData?.items ?? []}
+              packagingRecipe={packagingRecipeData?.items ?? []}
+              patternViewerToken={printData?.patternViewerToken ?? ''}
+              onDataStatus={setDocDeps}
+              cutPlan={cutPlanError ? undefined : cutPlan}
+            />
+          ) : (
+            <TechpackDocument
+              techCard={snapshot ?? techCard}
+              orient={query.orient}
+              release={!!snapshot}
+              revision={
+                snapshot ? `rev.${wireInt(releaseData?.release?.releaseNumber) || '—'}` : undefined
+              }
+              patternViewerToken={printData?.patternViewerToken ?? ''}
+              onDataStatus={setDocDeps}
+            />
+          )}
         </div>
       )}
     </div>

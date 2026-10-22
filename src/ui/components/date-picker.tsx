@@ -1,7 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { useState } from 'react';
-import { DayPicker } from 'react-day-picker';
+import { DayPicker, type DateRange } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { cn } from 'lib/utility';
 import { Arrow } from '../icons/arrow';
@@ -17,6 +17,35 @@ interface DatePickerProps {
    * and the arrow in the text colour — so a red (overdue) chip stays red end to end.
    */
   compact?: boolean;
+  /** Select-sized 26px field for dense filter rows. */
+  boxed?: boolean;
+}
+
+const BOXED_TRIGGER =
+  'h-[26px] border border-borderColor px-[7px] py-[3px] uppercase transition-colors focus:border-textColor focus:outline-none focus:ring-0';
+
+const rangeDate = (value?: string): Date | undefined => {
+  if (!value) return undefined;
+  const date = parseISO(value);
+  return isValid(date) ? date : undefined;
+};
+
+const isoDate = (value?: Date): string => (value ? format(value, 'yyyy-MM-dd') : '');
+
+const yearSuffix = (date: Date): string =>
+  date.getFullYear() === new Date().getFullYear() ? '' : ` ${format(date, 'yyyy')}`;
+
+function rangeLabel(from?: Date, to?: Date): string {
+  if (from && to) {
+    const sameMonth = from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth();
+    if (sameMonth) return `${format(from, 'dd')}–${format(to, 'dd MMM')}${yearSuffix(to)}`;
+
+    const fromYear = from.getFullYear() === to.getFullYear() ? '' : yearSuffix(from);
+    return `${format(from, 'dd MMM')}${fromYear}–${format(to, 'dd MMM')}${yearSuffix(to)}`;
+  }
+  if (from) return `from ${format(from, 'dd MMM')}${yearSuffix(from)}`;
+  if (to) return `to ${format(to, 'dd MMM')}${yearSuffix(to)}`;
+  return '';
 }
 
 // Monochrome, portalled date field. The calendar internals are themed globally
@@ -29,6 +58,7 @@ export function DatePicker({
   disabled,
   placeholder = 'pick a date',
   compact,
+  boxed,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
 
@@ -39,9 +69,12 @@ export function DatePicker({
           type='button'
           disabled={disabled}
           className={cn(
-            'flex w-full items-center justify-between gap-2 border-b border-borderColor bg-bgColor py-1 text-left text-textBaseSize focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:opacity-50',
-            compact &&
-              'border-b-0 bg-transparent py-0 text-control uppercase leading-none tracking-label',
+            'flex w-full items-center justify-between gap-2 bg-bgColor text-left text-textBaseSize disabled:opacity-50',
+            boxed
+              ? BOXED_TRIGGER
+              : compact
+                ? 'border-b-0 bg-transparent py-0 text-control uppercase leading-none tracking-label focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                : 'border-b border-borderColor py-1 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
           )}
         >
           <span className={cn(!value && 'text-labelColor')}>
@@ -87,6 +120,83 @@ export function DatePicker({
               if (d) setOpen(false);
             }}
             disabled={disabled}
+          />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+export function DateRangePicker({
+  from,
+  to,
+  onChange,
+  placeholder = 'dates',
+  className,
+}: {
+  from?: string;
+  to?: string;
+  onChange: (from: string, to: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const fromDate = rangeDate(from);
+  const toDate = rangeDate(to);
+  const label = rangeLabel(fromDate, toDate);
+  const hasValue = !!fromDate || !!toDate;
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type='button'
+          aria-label={placeholder}
+          className={cn(
+            'flex w-full items-center justify-between gap-2 bg-bgColor text-left text-textBaseSize',
+            BOXED_TRIGGER,
+            className,
+          )}
+        >
+          <span className={cn('min-w-0 truncate whitespace-nowrap', !label && 'text-labelColor')}>
+            {label || placeholder}
+          </span>
+          {hasValue ? (
+            <Close
+              asChild
+              size='sm'
+              tabIndex={-1}
+              aria-label='clear dates'
+              onClick={(event) => {
+                event.stopPropagation();
+                onChange('', '');
+              }}
+            />
+          ) : (
+            <span aria-hidden className='shrink-0 rotate-180 text-textColor'>
+              <Arrow />
+            </span>
+          )}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align='start'
+          sideOffset={4}
+          className='z-[var(--z-popover)] border border-borderColor bg-bgColor p-2 text-textColor shadow-[var(--shadow-popover)]'
+        >
+          <DayPicker
+            mode='range'
+            weekStartsOn={1}
+            showOutsideDays
+            selected={{ from: fromDate, to: toDate } as DateRange}
+            defaultMonth={fromDate ?? toDate}
+            onSelect={(range) => {
+              onChange(isoDate(range?.from), isoDate(range?.to));
+              if (range?.from && range.to && range.from.getTime() !== range.to.getTime()) {
+                setOpen(false);
+              }
+            }}
           />
         </Popover.Content>
       </Popover.Portal>

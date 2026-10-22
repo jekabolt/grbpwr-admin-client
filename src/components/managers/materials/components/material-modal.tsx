@@ -68,7 +68,7 @@ const cell =
 // CTI typing (S15/PLM-rework Q5): material_class selects which typed attribute set below applies.
 // MATERIAL_CLASS_UNKNOWN is not offered as a choice — legacy rows are resolved to FABRIC or OTHER
 // on load (see resolveMaterialClass) and every save writes one of these five.
-const materialClassOptions: Array<{ value: common_MaterialClass; label: string }> = [
+export const materialClassOptions: Array<{ value: common_MaterialClass; label: string }> = [
   { value: 'MATERIAL_CLASS_FABRIC', label: 'fabric' },
   { value: 'MATERIAL_CLASS_HARDWARE', label: 'hardware' },
   { value: 'MATERIAL_CLASS_THREAD', label: 'thread' },
@@ -85,7 +85,7 @@ const fabricDirectionOptions: Array<{ value: string; label: string }> = [
 
 // section -> default material_class on CREATE (defaultSection comes from e.g. the packaging aux
 // output picker). Sections with no natural class (trim/label) fall back to OTHER.
-const classForSection = (section: common_TechCardBomSection): common_MaterialClass => {
+export const classForSection = (section: common_TechCardBomSection): common_MaterialClass => {
   switch (section) {
     case 'TECH_CARD_BOM_SECTION_PACKAGING':
       return 'MATERIAL_CLASS_PACKAGING';
@@ -115,13 +115,13 @@ const SECTION_FOR_CLASS: Partial<Record<common_MaterialClass, common_TechCardBom
 };
 // A 1:1 section (control hidden, value auto-derived) for hardware/thread/packaging; undefined for
 // FABRIC/OTHER, whose section stays operator-chosen via the still-visible select.
-const derivedSection = (cls: common_MaterialClass): common_TechCardBomSection | undefined =>
+export const derivedSection = (cls: common_MaterialClass): common_TechCardBomSection | undefined =>
   SECTION_FOR_CLASS[cls];
 
 // Legacy rows predate CTI typing and carry MATERIAL_CLASS_UNKNOWN (or no typed attrs at all).
 // Infer FABRIC when the old flat fields carry data (the pre-migration catalog was fabric-only),
 // else OTHER — so the class select never opens on the unofferable UNKNOWN value.
-const resolveMaterialClass = (m: common_Material): common_MaterialClass => {
+export const resolveMaterialClass = (m: common_Material): common_MaterialClass => {
   if (m.materialClass && m.materialClass !== 'MATERIAL_CLASS_UNKNOWN') return m.materialClass;
   const legacyHasData = !!(m.fabricWidth?.value || m.fabricWeightGsm?.value || m.composition);
   return legacyHasData ? 'MATERIAL_CLASS_FABRIC' : 'MATERIAL_CLASS_OTHER';
@@ -330,7 +330,7 @@ const draftFromMaterial = (material: common_Material): Draft => ({
 
 // The unique-code guard and the optimistic lock (S25) are enforced server-side; surface their
 // rejections in plain words instead of the raw status text.
-const saveErrorMessage = (e: unknown): string => {
+export const saveErrorMessage = (e: unknown): string => {
   const err = e as { status?: number; message?: string } | undefined;
   const status = err?.status;
   const message = (err?.message ?? '').toLowerCase();

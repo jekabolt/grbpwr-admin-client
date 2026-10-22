@@ -9,6 +9,7 @@ import { adminService } from 'api/api';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
+import { Button, GroupLabel, Section, HeaderCount, Text, Select, Textarea, Glyph } from 'ui';
 import {
   ensurePantoneLibrary,
   pantoneLibraryState,
@@ -20,7 +21,6 @@ import { notify } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Button, GroupLabel, Section, HeaderCount, Text, Select, Textarea } from 'ui';
 
 import { kindLabel } from '../../bom-kind';
 import { bornBomLine, patchBomLine } from '../../form-writers';
@@ -2132,14 +2132,7 @@ function SlotCell({
       onSelect={halves ? onPlaceMedia : undefined}
       onDraw={halves ? onGenerateHalf : undefined}
       drawLabel='generate'
-      drawGlyph={
-        <span
-          aria-hidden
-          className='flex size-5 items-center justify-center text-[15px] leading-none'
-        >
-          ✦
-        </span>
-      }
+      drawGlyph={<Glyph name='sparkle' className='size-5' />}
       drawTitle={`make ${slot.name} with GENERATE below`}
       drawAriaLabel={`generate ${slot.name}`}
       instead={halves ? undefined : <span />}
@@ -2148,10 +2141,7 @@ function SlotCell({
       // absolute too: a static one would take a track of the frame's two-row grid.
       backdrop={
         halves ? (
-          <span
-            aria-hidden
-            style={{ position: 'absolute', inset: 0, opacity: 0.5, pointerEvents: 'none' }}
-          >
+          <span aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
             <TrimPictogramBackdrop slot={slot} />
           </span>
         ) : (

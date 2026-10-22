@@ -53,7 +53,12 @@ export function isBlocked(task: Pick<Task, 'relations'>): boolean {
   return openBlockers(task.relations).length > 0;
 }
 
-/** Связи одного вида, в порядке, в котором их прислал сервер. */
+/** Связи одного вида: открытые первыми, затем решённые; внутри — порядок сервера. */
 export function relationsOfKind(relations: TaskRelation[], kind: TaskRelationKind): TaskRelation[] {
-  return relations.filter((r) => r.kind === kind);
+  const rows = relations.filter((r) => r.kind === kind);
+  const done = (r: TaskRelation) => (r.status === 'TASK_STATUS_DONE' ? 1 : 0);
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => done(a.r) - done(b.r) || a.i - b.i)
+    .map((x) => x.r);
 }

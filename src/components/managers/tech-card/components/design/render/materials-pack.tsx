@@ -225,7 +225,7 @@ function HardwareTile({
             armed && 'border-2 border-textColor',
           )}
         >
-          <TrimPictogram kind={m.pictogram ?? 'generic'} className='size-full opacity-60' />
+          <TrimPictogram kind={m.pictogram ?? 'generic'} className='size-full opacity-35' />
         </span>
       )}
       {/* R9 fix 6 · the whole name, wrapped to two lines under the tile, the count on its tail. */}

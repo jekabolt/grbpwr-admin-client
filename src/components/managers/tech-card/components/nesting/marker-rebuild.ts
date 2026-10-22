@@ -128,6 +128,9 @@ export type RebuildError =
       reason: 'no-block-name' | 'ambiguous';
       more: number;
     }
+  // L14: the block is a half on fold that cannot be cut (geom/fold-unit.ts) — a file of it
+  // would cut half a piece per garment.
+  | { kind: 'fold-refused'; blockName: string; reason: string; more: number }
   // Блок нашёлся, а контур разошёлся: файл заменили (или это другой размер/слой/допуск).
   // `deltaCm === null` — разошлось ЧИСЛО точек, тогда расстояние не определено вовсе.
   | {
@@ -165,6 +168,8 @@ export function describeRebuildError(e: RebuildError): string {
       return e.reason === 'no-block-name'
         ? `piece “${e.pieceName}”${more(e.more)} was saved without a block name (an old marker), and the pattern holds no single contour that matches it. the drawing can't be restored — re-capture the marker`
         : `piece “${e.pieceName}”${more(e.more)} matches several blocks of the pattern at once, and their drawings differ — which of them is the one is unknown. re-capture the marker`;
+    case 'fold-refused':
+      return `piece ${e.blockName}${more(e.more)} is a half on fold that cannot be cut: ${e.reason}. export is impossible`;
     case 'geometry-drift':
       if (e.deltaCm === null) {
         return `the pattern was replaced: piece ${e.blockName}${more(e.more)} has a different number of contour points (was ${e.storedPoints}, now ${e.rebuiltPoints}). export with the drawing is impossible — re-capture the marker`;
@@ -360,8 +365,9 @@ const FAILURE_RANK: Record<RebuildError['kind'], number> = {
   'conditions-missing': 1,
   'fetch-failed': 2,
   'block-missing': 3,
-  'geometry-drift': 4,
-  'piece-unidentified': 5,
+  'fold-refused': 4,
+  'geometry-drift': 5,
+  'piece-unidentified': 6,
 };
 
 export type RebuildCoreInput = {
@@ -519,6 +525,19 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
     }
 
     let pick = matched[0];
+    const refusedFold = matched.find((c) => c.fold?.kind === 'refused');
+    if (refusedFold?.fold?.kind === 'refused') {
+      failures.push({
+        stored: sp,
+        error: {
+          kind: 'fold-refused',
+          blockName: sp.blockName || sp.name,
+          reason: refusedFold.fold.reason,
+          more: 0,
+        },
+      });
+      continue;
+    }
     if (matched.length > 1) {
       const fromSameSheet = matched.filter((c) => sameSheetName(c.source, sp.source));
       if (fromSameSheet.length === 1) {
@@ -599,6 +618,8 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
     const more = failures.length - 1;
     switch (primary.kind) {
       case 'block-missing':
+        return { ok: false, error: { ...primary, more } };
+      case 'fold-refused':
         return { ok: false, error: { ...primary, more } };
       case 'geometry-drift':
         return { ok: false, error: { ...primary, more } };

@@ -3544,7 +3544,7 @@ export function TechCardForm({
           aria-label='Tech card sections'
           className='top-16 min-w-0 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'
         >
-          <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
+          <div className='relative flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
             {TAB_GROUPS.map((group, gi) => {
               const groupTabs = group.tabs
                 .map((id) => TABS.find((t) => t.id === id)!)
@@ -3704,7 +3704,12 @@ export function TechCardForm({
                 disabled={frozen}
                 labelMedia={techCard?.resolvedLabelMedia}
                 cardDetails={cardDetails}
-                constructionAspects={<DetailsEditor techCard={techCard} />}
+                constructionAspects={
+                  <DetailsEditor
+                    techCard={techCard}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                  />
+                }
                 /* THE GUIDE (onboarding S4): the server's flag once the card exists, the address's
                    promise (`?guided=1`) before it does. */
                 guided={techCard?.guided ?? guidedCreate}
@@ -3931,8 +3936,14 @@ export function TechCardForm({
                   techCardId={isEditMode && numId ? numId : undefined}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                 />
-                <LabelsBlock resolvedMedia={techCard?.resolvedLabelMedia} />
-                <PackagingBlock resolvedMedia={techCard?.resolvedLabelMedia} />
+                <LabelsBlock
+                  resolvedMedia={techCard?.resolvedLabelMedia}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
+                <PackagingBlock
+                  resolvedMedia={techCard?.resolvedLabelMedia}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
               </div>
               {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
                 need a saved card id. For a brand-new card, prompt to Save (which lands back here)

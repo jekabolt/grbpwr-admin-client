@@ -20,6 +20,17 @@ export type TaskBoard =
   | 'TASK_BOARD_SOURCING'
   | 'TASK_BOARD_CONTENT';
 
+// A board as the rail draws it (common.TaskBoardEntry). Boards are rows now, addressed by id;
+// `legacyBoard` maps one of the six seeded boards back to the old enum (UNKNOWN for a new one).
+export interface TaskBoardEntry {
+  id: number;
+  name: string;
+  legacyBoard: TaskBoard;
+  position: number;
+  taskCount: number;
+  archivedTaskCount: number;
+}
+
 export type TaskStatus =
   | 'TASK_STATUS_UNKNOWN'
   | 'TASK_STATUS_BACKLOG'
@@ -157,22 +168,55 @@ export interface TaskRelation {
   kind: TaskRelationKind;
   title: string;
   status: TaskStatus;
-  board: TaskBoard;
+  boardId: number;
   archived: boolean;
+  /** Исполнители второго конца; пусто, пока сервер не прислал поле. */
+  assignees: string[];
+}
+
+// One status move; fromStatus UNKNOWN = creation (toStatus UNKNOWN too when it predates history),
+// except an `approximate` row: a legacy DONE backfill dated by the card's last edit, not a creation.
+export interface TaskStatusChange {
+  fromStatus: TaskStatus;
+  toStatus: TaskStatus;
+  changedBy: string;
+  changedAt: string;
+  approximate: boolean;
+}
+
+// Closing fact of a card that is DONE now (ListTasks with a closed_from/closed_to window).
+// `approximate` = closed before status history existed; `closedAt` is then its last edit.
+export interface TaskClosed {
+  taskId: number;
+  closedAt: string;
+  closedBy: string;
+  approximate: boolean;
+}
+
+// Where a ListTasks query hit a card (common.TaskMatch). `snippet` is empty for title / id.
+export interface TaskMatch {
+  taskId: number;
+  field: string;
+  snippet: string;
 }
 
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
   task: TaskInsert;
-  board: TaskBoard;
+  boardId: number;
   status: TaskStatus;
+  // List-only age of the current status. Empty on detail reads or when timing is unavailable.
+  statusSince: string;
+  statusSinceApprox: boolean;
   position: number;
   media: TaskMedia[];
   // Resolved library attachments, present only on GetTask (the list response carries
   // ids alone). They hold presigned urls with a short life, so they are never cached
   // beyond the response that minted them.
   files: LibraryFile[];
+  // Status moves, newest first; present only on GetTask (lists carry []).
+  statusHistory: TaskStatusChange[];
   checklist: TaskChecklistItem[];
   createdBy: string; // AdminAccount.username
   createdAt: string;
@@ -226,7 +270,7 @@ export interface TaskComment {
 
 // Filters for ListTasks (all optional; empty/0 = no filter).
 export interface ListTasksFilter {
-  board?: TaskBoard;
+  boardId?: number;
   status?: TaskStatus;
   assignee?: string;
   techCardId?: number;
@@ -252,7 +296,7 @@ export interface ListTasksFilter {
   includeArchived?: boolean; // false/undefined = active only; true = include archived
   /**
    * Free-text search across title, description, comments and checklist (backend T2). Empty =
-   * no search. With no `board` it spans every board.
+   * no search. With no `boardId` it spans every board.
    */
   query?: string;
 }
@@ -260,7 +304,7 @@ export interface ListTasksFilter {
 // Form values = content + its (initial or edited) placement. The modal edits
 // board/column inline; on submit the page splits this back into content +
 // placement (AddTask sets both; edits go through UpdateTask + MoveTask).
-export type TaskFormValues = TaskInsert & { board: TaskBoard; status: TaskStatus };
+export type TaskFormValues = TaskInsert & { boardId: number; status: TaskStatus };
 
 // A blank writable payload (content only).
 export function emptyTaskInsert(): TaskInsert {
@@ -288,6 +332,6 @@ export function emptyTaskInsert(): TaskInsert {
 }
 
 // A blank form seeded with the create target's placement.
-export function emptyFormValues(board: TaskBoard, status: TaskStatus): TaskFormValues {
-  return { ...emptyTaskInsert(), board, status };
+export function emptyFormValues(boardId: number, status: TaskStatus): TaskFormValues {
+  return { ...emptyTaskInsert(), boardId, status };
 }

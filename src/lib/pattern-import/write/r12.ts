@@ -17,14 +17,14 @@
 //       drill square stays here too (CLO reads drills there, the card counts them there)
 //   13  drill holes: POINT at the centre
 //   14  sew line
-//   15  annotation text: the piece's human name, "CUT ON FOLD"
+//   15  annotation text: the piece's human name, "HALF - CUT n ON FOLD" (a half's drawing)
 // TABLES declare every layer (LTYPE BYBLOCK/BYLAYER/CONTINUOUS + DASHED for the sew line, STYLE
 // STANDARD); POLYLINEs carry no header point (as CLO-AAMA writes them, and our readers expect); text is
 // ASCII by transliteration (`asciiText`), never `\U+` escapes (R2000+ only).
 
 import type { PtMm } from '../types';
 import type { PlannedBlock } from './plan';
-import { GRAIN_SHAFT_MM } from './plan';
+import { GRAIN_SHAFT_MM, halfOnFoldText } from './plan';
 import { drillSquare, insertsOf, labelAnchor } from './r2000';
 import { type Tag, asciiText, num, serialize } from './format';
 
@@ -63,7 +63,7 @@ export function aamaAnnotations(b: PlannedBlock): string[] {
   const out: string[] = [];
   const name = b.displayName.trim();
   if (name && name.toUpperCase() !== b.identity.toUpperCase()) out.push(name);
-  if (b.foldIsMirror) out.push('CUT ON FOLD');
+  if (b.foldIsMirror) out.push(halfOnFoldText(b.quantity));
   return out;
 }
 

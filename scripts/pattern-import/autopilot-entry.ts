@@ -793,6 +793,11 @@ type GoldenAnswers = {
   folds?: Record<string, string>;
   /** The count of a piece drawn once with nothing said (`qty:<seed>=<n>` in cases.tsv). */
   qty?: Record<string, number>;
+  /**
+   * BACK-VARIANT: the variant notch the chosen model keeps (`notch:<word>` in cases.tsv) — the
+   * option of every open «which …: a / b?» question that carries the word.
+   */
+  notch?: string;
 };
 const golden = (): GoldenAnswers | null =>
   process.env.GOLDEN_ANSWERS ? (JSON.parse(process.env.GOLDEN_ANSWERS) as GoldenAnswers) : null;
@@ -921,6 +926,25 @@ export async function runCase(c: Case, mutate: string | null) {
           operatorAnswers++;
           return {
             patch,
+            events: [{ type: 'names', decisions: snap.session.names }],
+            assumptions: [],
+          };
+        }
+      }
+      const nvAsks = (sem?.notchVariantAsks ?? []).filter(
+        (q) => snap.inputs.overrides[q.seed]?.notchVariant === undefined,
+      );
+      if (ga.notch && step === 'meaning' && nvAsks.length) {
+        const w = ga.notch.toLowerCase();
+        const overrides = { ...snap.inputs.overrides };
+        for (const q of nvAsks) {
+          const o = q.options.find((x) => x.key.split(' ').includes(w));
+          if (o) overrides[q.seed] = { ...(overrides[q.seed] ?? {}), notchVariant: o.key };
+        }
+        if (nvAsks.some((q) => overrides[q.seed]?.notchVariant !== undefined)) {
+          operatorAnswers++;
+          return {
+            patch: { overrides },
             events: [{ type: 'names', decisions: snap.session.names }],
             assumptions: [],
           };
@@ -1360,6 +1384,28 @@ export async function runCase(c: Case, mutate: string | null) {
           want: fab.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase(),
           assumed: assumedOn(sd, ['fabric']) ?? assumedOn(null, ['fabric'], 'every piece'),
         });
+    }
+    // BACK-VARIANT: a piece blocked on the operator's variant-notch question waits for its answer
+    // (the run stopped on it) — held, not missing: its truth piece is taken, never scored
+    for (const b of sem.blocked.filter((x) => x.reason === 'notch-variant')) {
+      if (bySeed.has(b.seed)) continue;
+      const o = outerOf(b.seed);
+      const l = pts.length ? null : byLabel(b.seed);
+      const t = pts.length
+        ? o
+          ? tps.find(
+              (x) =>
+                !taken.has(x) &&
+                pts.some((p) => norm(p.label) === norm(x.label) && insidePoly(p.at, o.outer)),
+            )
+          : undefined
+        : l && !taken.has(l)
+          ? l
+          : undefined;
+      if (t) {
+        taken.add(t);
+        matched++;
+      }
     }
     // a truth piece the export misses: set aside by the autopilot (with or without a label), by
     // the reader, or never found

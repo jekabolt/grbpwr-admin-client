@@ -1547,7 +1547,7 @@ function meaningStep(snap: Snap): AutopilotDecision {
 
   // 1 · a piece that cannot be built (offset, leak, merged, sizes not told apart …) is a stop:
   //     a geometry failure is never answered by dropping the piece (Codex #3)
-  const fail = sem.blocked.filter((b) => !ANSWERED.has(b.reason));
+  const fail = sem.blocked.filter((b) => !ANSWERED.has(b.reason) && b.reason !== 'notch-variant');
   if (fail.length)
     return stopAt(
       'meaning',
@@ -1556,6 +1556,17 @@ function meaningStep(snap: Snap): AutopilotDecision {
         .map((b) => `${subj(b.seed)} ${b.reason}`)
         .join('; ')}`,
     );
+  // BACK-VARIANT: which of a piece's variant notches the chosen model keeps — the operator's
+  // answer, never the autopilot's (the sheet's word is one evidence at most, D3)
+  const nv = sem.blocked.filter((b) => b.reason === 'notch-variant');
+  if (nv.length) {
+    const byQ = new Map<string, string[]>();
+    for (const b of nv) byQ.set(b.detail, [...(byQ.get(b.detail) ?? []), subj(b.seed)]);
+    return stopAt(
+      'meaning',
+      [...byQ].map(([q, ps]) => `${[...new Set(ps)].join(', ')}: ${q}`).join('; '),
+    );
+  }
   void presegmented;
 
   // 2 · names, grainlines, folds: one semantics answer for every blocked piece

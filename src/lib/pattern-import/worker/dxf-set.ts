@@ -341,10 +341,12 @@ export async function mergeDxfSet(files: DxfSetFile[], ctx: DxfSetCtx): Promise<
     const text = decodeDxfBytes(f.bytes);
     read.push({ ...f, text, scan: scanDxf(text, f.name) });
   }
-  const old = read.filter((r) => !R2000_PLUS.has(r.scan.version));
+  // CLO gives per-size AAMA out in R12 or R2000+; the merger takes either, but not a mix
+  const allR12 = read.every((r) => r.scan.version === 'AC1009');
+  const old = allR12 ? [] : read.filter((r) => !R2000_PLUS.has(r.scan.version));
   if (old.length)
     throw refuse(
-      `${list(old.map((r) => `${r.name} (${r.scan.version || 'no version'})`))}: several DXF files are merged from AAMA R2000+ exports only (AC1015 and newer, as CLO gives them out per size). Export the sizes as R2000, or all sizes into one DXF`,
+      `${list(old.map((r) => `${r.name} (${r.scan.version || 'no version'})`))}: several DXF files are merged from AAMA exports in one version, R12 (AC1009) or R2000+ (AC1015 and newer). Export every size the same way, or all sizes into one DXF`,
     );
   for (const r of read)
     if (!r.scan.blocks.length)

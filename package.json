@@ -159,6 +159,7 @@
     "patimport:lineassign": "node scripts/pattern-import/lineassign.mjs",
     "patimport:archive": "node scripts/pattern-import/archive.mjs",
     "patimport:variants": "node scripts/pattern-import/variants.mjs",
+    "patimport:backvariant": "node scripts/pattern-import/backvariant.mjs",
     "patimport:kombiap": "node scripts/pattern-import/kombiap.mjs",
     "patimport:shape": "node scripts/pattern-import/shape.mjs",
     "patimport:sizesocg": "node scripts/pattern-import/sizesocg.mjs",

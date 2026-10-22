@@ -5230,6 +5230,7 @@ export type ListSamplesResponse = {
 
 export type AddTaskRequest = {
   task: common_TaskInsert | undefined;
+  // Legacy enum board; board_id wins when set. One of the two is required.
   board: common_TaskBoard | undefined;
   status: common_TaskStatus | undefined;
   // Родитель СОЗДАВАЕМОЙ карточки; 0 = верхний уровень. Единственное место, где родитель едет не
@@ -5237,6 +5238,9 @@ export type AddTaskRequest = {
   // карточки ещё нет. Несуществующий id отвечает тем же InvalidArgument, что остальные глубокие
   // ссылки.
   parentTaskId: number | undefined;
+  // The board the card is created on (TaskBoardEntry.id). It lives here and not on TaskInsert
+  // because TaskInsert is the full-replace CONTENT of a card; placement is never part of it.
+  boardId: number | undefined;
 };
 
 // TaskInsert is the writable CONTENT of a task (create/update). Placement on the
@@ -5389,9 +5393,11 @@ export type common_TechCardAnnotation = {
   caps: common_TechCardAnnotationCaps | undefined;
 };
 
-// TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
-// task belongs to exactly one board. Extend by appending members (never reuse
-// numbers) — 0 stays UNKNOWN per proto3 convention.
+// TaskBoard is the LEGACY department-lane enum. Since custom boards (migration 0420) a board is a
+// TaskBoardEntry row addressed by id, and the six members below are the six seeded boards (their
+// ids equal these numbers, and TaskBoardEntry.legacy_board maps back). Kept only so clients built
+// before board ids keep working: requests accept either the enum or a board_id (board_id wins);
+// responses fill the enum for a seeded board and UNKNOWN for a custom one. Do not extend.
 export type common_TaskBoard =
   | "TASK_BOARD_UNKNOWN"
   | "TASK_BOARD_DEVELOPMENT"
@@ -5422,6 +5428,9 @@ export type GetTaskResponse = {
   // common.Task itself only carries their ids: it is reused in contexts that get
   // persisted, and a url with a 6-12h life must never be written down anywhere.
   files: LibraryFile[] | undefined;
+  // Detail-only status audit trail, ordered by changed_at DESC, id DESC. Kept off common.Task
+  // because that message is reused in heavy lists and durable snapshots.
+  statusHistory: common_TaskStatusChange[] | undefined;
 };
 
 // Task is a stored kanban card: its content (TaskInsert), its placement on the
@@ -5430,6 +5439,7 @@ export type GetTaskResponse = {
 export type common_Task = {
   id: number | undefined;
   task: common_TaskInsert | undefined;
+  // Legacy enum of the board (UNKNOWN for a custom board); the placement is board_id.
   board: common_TaskBoard | undefined;
   status: common_TaskStatus | undefined;
   position: number | undefined;
@@ -5471,6 +5481,8 @@ export type common_Task = {
   // берёт их фильтром ListTasks(parent_task_id).
   subtaskTotal: number | undefined;
   subtaskDone: number | undefined;
+  // Placement: TaskBoardEntry.id of the board; set by AddTask, changed by MoveTask.
+  boardId: number | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -5501,6 +5513,8 @@ export type common_TaskLink = {
   status: common_TaskStatus | undefined;
   board: common_TaskBoard | undefined;
   archived: boolean | undefined;
+  boardId: number | undefined;
+  assignees: string[] | undefined;
 };
 
 // TaskLinkKind — ВИД СВЯЗИ С ТОЧКИ ЗРЕНИЯ ВЛАДЕЛЬЦА СПИСКА, а не вид строки в хранилище.
@@ -5636,6 +5650,18 @@ export type LibraryFileRole = {
   projectTopicName: string | undefined;
   roleId: number | undefined;
   roleName: string | undefined;
+};
+
+// TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation and for an
+// approximate legacy DONE backfill (distinguished by approximate=true). For tasks created before
+// status history existed, GetTask appends a synthetic creation event whose to_status is also
+// UNKNOWN because the initial status cannot be recovered.
+export type common_TaskStatusChange = {
+  fromStatus: common_TaskStatus | undefined;
+  toStatus: common_TaskStatus | undefined;
+  changedBy: string | undefined;
+  changedAt: wellKnownTimestamp | undefined;
+  approximate: boolean | undefined;
 };
 
 // FileRole is one entry of the closed role vocabulary OF ONE PROJECT.
@@ -6169,6 +6195,7 @@ export type LibraryFileTask = {
   // Все, кто на задаче; пусто = её никто не взял. Порядок — порядок показа аватарок, «главного»
   // среди них нет (см. common.TaskInsert.assignees).
   assignees: string[] | undefined;
+  boardId: number | undefined;
 };
 
 export type ListLibraryFileTasksRequest = {
@@ -6541,9 +6568,11 @@ export type UpdateTaskResponse = {
 
 export type MoveTaskRequest = {
   id: number | undefined;
+  // Legacy enum target board; TASK_BOARD_UNKNOWN (and board_id 0) = keep current board.
   board: common_TaskBoard | undefined;
   status: common_TaskStatus | undefined;
   position: number | undefined;
+  boardId: number | undefined;
 };
 
 export type MoveTaskResponse = {
@@ -6556,7 +6585,63 @@ export type DeleteTaskRequest = {
 export type DeleteTaskResponse = {
 };
 
+export type ListTaskBoardsRequest = {
+};
+
+export type ListTaskBoardsResponse = {
+  boards: common_TaskBoardEntry[] | undefined;
+};
+
+// TaskBoardEntry is one kanban board (department lane) as the board rail draws it.
+export type common_TaskBoardEntry = {
+  id: number | undefined;
+  name: string | undefined;
+  // The enum this board had before custom boards; UNKNOWN for a board created in the admin.
+  // Lets a client translate an enum it stored earlier (e.g. the last open board) into an id.
+  legacyBoard: common_TaskBoard | undefined;
+  position: number | undefined;
+  taskCount: number | undefined;
+  archivedTaskCount: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ReorderTaskBoardsRequest = {
+  ids: number[] | undefined;
+};
+
+export type ReorderTaskBoardsResponse = {
+  boards: common_TaskBoardEntry[] | undefined;
+};
+
+export type AddTaskBoardRequest = {
+  name: string | undefined;
+};
+
+export type AddTaskBoardResponse = {
+  board: common_TaskBoardEntry | undefined;
+};
+
+export type UpdateTaskBoardRequest = {
+  id: number | undefined;
+  name: string | undefined;
+};
+
+export type UpdateTaskBoardResponse = {
+  board: common_TaskBoardEntry | undefined;
+};
+
+export type DeleteTaskBoardRequest = {
+  id: number | undefined;
+  // Board that receives the deleted board's tasks; required when it has any, ignored when empty.
+  moveToId: number | undefined;
+};
+
+export type DeleteTaskBoardResponse = {
+};
+
 export type ListTasksRequest = {
+  // Legacy enum board filter; TASK_BOARD_UNKNOWN = all boards. board_id wins when set.
   board: common_TaskBoard | undefined;
   status: common_TaskStatus | undefined;
   assignee: string | undefined;
@@ -6586,11 +6671,47 @@ export type ListTasksRequest = {
   // rd(tasks). 0 = no filter.
   parentTaskId: number | undefined;
   query: string | undefined;
+  // Half-open closing-time filter [closed_from, closed_to). Setting either bound also restricts
+  // the answer to cards whose CURRENT status is DONE; include_archived retains its normal meaning.
+  closedFrom: wellKnownTimestamp | undefined;
+  closedTo: wellKnownTimestamp | undefined;
+  boardId: number | undefined;
 };
 
 export type ListTasksResponse = {
   tasks: common_Task[] | undefined;
   total: number | undefined;
+  closed: common_TaskClosed[] | undefined;
+  timing: common_TaskTiming[] | undefined;
+  matches: common_TaskMatch[] | undefined;
+};
+
+// TaskClosed is list-only closing metadata. It deliberately does not live on Task: Task is
+// persisted in snapshots, while a closing fact is meaningful only while the card is currently
+// DONE. ListTasksResponse carries one row for each returned DONE task.
+export type common_TaskClosed = {
+  taskId: number | undefined;
+  closedAt: wellKnownTimestamp | undefined;
+  closedBy: string | undefined;
+  approximate: boolean | undefined;
+};
+
+// TaskTiming is list-only status-age metadata. status_since is the latest transition into the
+// card's current status. approximate is copied from that transition, or true when legacy data has
+// no matching transition and the server falls back to the task's own timestamps.
+export type common_TaskTiming = {
+  taskId: number | undefined;
+  statusSince: wellKnownTimestamp | undefined;
+  approximate: boolean | undefined;
+};
+
+// TaskMatch is list-only search metadata. One row accompanies every task returned by a non-empty
+// ListTasks query. field is one of title|description|id|comment|checklist; title/id need no snippet
+// because the task row already shows the title (and its id).
+export type common_TaskMatch = {
+  taskId: number | undefined;
+  field: string | undefined;
+  snippet: string | undefined;
 };
 
 export type AddTaskCommentRequest = {
@@ -19373,6 +19494,20 @@ export interface AdminService {
   // last (see route-ordering note above) so GET /task/list is not shadowed by
   // GET /task/{id}.
   ListTasks(request: ListTasksRequest): Promise<ListTasksResponse>;
+  // ListTaskBoards returns every board in rail order with its task counts. rd(tasks).
+  ListTaskBoards(request: ListTaskBoardsRequest): Promise<ListTaskBoardsResponse>;
+  // ReorderTaskBoards replaces the whole board rail order. ids must contain every current board
+  // exactly once; accepting a partial list would silently hide concurrent/new boards at the end.
+  ReorderTaskBoards(request: ReorderTaskBoardsRequest): Promise<ReorderTaskBoardsResponse>;
+  // AddTaskBoard creates a board at the end of the rail. A name already taken (case-insensitive)
+  // is ALREADY_EXISTS.
+  AddTaskBoard(request: AddTaskBoardRequest): Promise<AddTaskBoardResponse>;
+  // UpdateTaskBoard renames a board, the six seeded ones included.
+  UpdateTaskBoard(request: UpdateTaskBoardRequest): Promise<UpdateTaskBoardResponse>;
+  // DeleteTaskBoard deletes a board. A board with tasks (archived ones included) needs move_to_id:
+  // its tasks move there, appended to the end of each column in their current order. Without it
+  // the call is FAILED_PRECONDITION, as is deleting the last board.
+  DeleteTaskBoard(request: DeleteTaskBoardRequest): Promise<DeleteTaskBoardResponse>;
   // ArchiveTask soft-archives a task: it is hidden from the board and the default
   // list (restorable), and its former (board,status) column is re-sequenced so
   // positions stay gap-free. Placement is otherwise preserved.
@@ -23922,6 +24057,15 @@ export function createAdminServiceClient(
       if (request.query) {
         queryParams.push(`query=${encodeURIComponent(request.query.toString())}`)
       }
+      if (request.closedFrom) {
+        queryParams.push(`closedFrom=${encodeURIComponent(request.closedFrom.toString())}`)
+      }
+      if (request.closedTo) {
+        queryParams.push(`closedTo=${encodeURIComponent(request.closedTo.toString())}`)
+      }
+      if (request.boardId) {
+        queryParams.push(`boardId=${encodeURIComponent(request.boardId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -23934,6 +24078,97 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListTasks",
       }) as Promise<ListTasksResponse>;
+    },
+    ListTaskBoards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/board/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTaskBoards",
+      }) as Promise<ListTaskBoardsResponse>;
+    },
+    ReorderTaskBoards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/board/reorder`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReorderTaskBoards",
+      }) as Promise<ReorderTaskBoardsResponse>;
+    },
+    AddTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/board/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskBoard",
+      }) as Promise<AddTaskBoardResponse>;
+    },
+    UpdateTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/task/board/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTaskBoard",
+      }) as Promise<UpdateTaskBoardResponse>;
+    },
+    DeleteTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/task/board/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.moveToId) {
+        queryParams.push(`moveToId=${encodeURIComponent(request.moveToId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskBoard",
+      }) as Promise<DeleteTaskBoardResponse>;
     },
     ArchiveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/archive`; // eslint-disable-line quotes

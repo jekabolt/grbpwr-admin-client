@@ -5,6 +5,7 @@ import {
   Combobox,
   type ComboboxGroup,
   DatePicker,
+  DateRangePicker,
   Input,
   Select,
   Textarea,
@@ -58,7 +59,12 @@ function TextareaDemo() {
           label: 'secondary',
           cells: [
             <Textarea name='kit-ta2-empty' variant='secondary' placeholder='note' />,
-            <Textarea name='kit-ta2-fixed' variant='secondary' autoGrow={false} defaultValue='fixed' />,
+            <Textarea
+              name='kit-ta2-fixed'
+              variant='secondary'
+              autoGrow={false}
+              defaultValue='fixed'
+            />,
           ],
         },
       ]}
@@ -84,7 +90,13 @@ function SelectDemo() {
               onValueChange={setValue}
             />,
             <Select name='kit-select-error' items={SIZES} placeholder='size' invalid />,
-            <Select name='kit-select-disabled' items={SIZES} placeholder='size' value='M' disabled />,
+            <Select
+              name='kit-select-disabled'
+              items={SIZES}
+              placeholder='size'
+              value='M'
+              disabled
+            />,
           ],
         },
       ]}
@@ -113,7 +125,12 @@ function ComboboxDemo() {
         {
           label: 'Combobox',
           cells: [
-            <Combobox name='kit-cb-empty' placeholder='fabric' filter={filter} onSelect={setPicked} />,
+            <Combobox
+              name='kit-cb-empty'
+              placeholder='fabric'
+              filter={filter}
+              onSelect={setPicked}
+            />,
             <Combobox
               name='kit-cb-filled'
               placeholder='fabric'
@@ -150,11 +167,41 @@ function DatePickerDemo() {
       cols={['empty', 'filled', 'disabled']}
       rows={[
         {
-          label: 'DatePicker',
+          label: 'default',
           cells: [
             <DatePicker onChange={() => undefined} />,
             <DatePicker value={date} onChange={setDate} />,
             <DatePicker value={SAMPLE_DATE} onChange={() => undefined} disabled />,
+          ],
+        },
+        {
+          label: 'boxed',
+          cells: [
+            <DatePicker boxed onChange={() => undefined} />,
+            <DatePicker boxed value={date} onChange={setDate} />,
+            <DatePicker boxed value={SAMPLE_DATE} onChange={() => undefined} disabled />,
+          ],
+        },
+      ]}
+    />
+  );
+}
+
+function DateRangePickerDemo() {
+  const [range, setRange] = useState({ from: '2026-09-28', to: '2026-10-02' });
+  return (
+    <KitMatrix
+      cols={['empty', 'filled']}
+      rows={[
+        {
+          label: 'DateRangePicker',
+          cells: [
+            <DateRangePicker onChange={() => undefined} />,
+            <DateRangePicker
+              from={range.from}
+              to={range.to}
+              onChange={(from, to) => setRange({ from, to })}
+            />,
           ],
         },
       ]}
@@ -234,6 +281,7 @@ export const inputDemos: KitDemo[] = [
   { names: ['Select', 'SelectTrigger', 'SelectContent', 'SelectItem'], Demo: SelectDemo },
   { names: ['Combobox'], Demo: ComboboxDemo },
   { names: ['DatePicker'], Demo: DatePickerDemo },
+  { names: ['DateRangePicker'], Demo: DateRangePickerDemo },
   { names: ['CheckboxCommon'], Demo: CheckboxDemo },
   { names: ['ToggleSwitch'], Demo: ToggleSwitchDemo },
   { names: ['ChecklistEditor'], Demo: ChecklistDemo },

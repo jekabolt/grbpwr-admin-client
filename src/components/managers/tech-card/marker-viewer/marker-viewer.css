@@ -1,0 +1,270 @@
+.marker-viewer-page {
+  min-height: 100vh;
+}
+
+.marker-viewer-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  min-height: 4.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 0.625rem 1.25rem;
+  border-bottom: 1px solid var(--color-borderColor);
+  background: var(--color-bgColor);
+}
+
+.marker-viewer-identity {
+  min-width: 0;
+}
+
+.marker-viewer-title-row,
+.marker-viewer-summary,
+.marker-viewer-failure {
+  display: flex;
+  align-items: center;
+}
+
+.marker-viewer-title-row {
+  flex-wrap: wrap;
+  gap: 0.4375rem;
+  margin-top: 0.25rem;
+}
+
+.marker-viewer-summary {
+  flex: none;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.marker-viewer-edit {
+  margin-left: 0.625rem;
+  text-underline-offset: 0.1875rem;
+}
+
+.marker-viewer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1.25rem 1.25rem;
+}
+
+.marker-viewer-failure {
+  justify-content: space-between;
+  gap: var(--spacing-stack);
+  background: var(--color-bgColor);
+}
+
+.marker-viewer-fabrics {
+  position: sticky;
+  top: 5.125rem;
+  z-index: 10;
+  min-height: 2.75rem;
+}
+
+.marker-viewer-fabric-rule {
+  width: 1px;
+  height: 1.125rem;
+  background: var(--color-borderColor);
+}
+
+.marker-viewer-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18.25rem;
+  align-items: start;
+  gap: 0.875rem;
+}
+
+.marker-viewer-canvas,
+.marker-viewer-inspector {
+  min-width: 0;
+}
+
+.marker-viewer-pan {
+  width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y pinch-zoom;
+  scrollbar-gutter: stable both-edges;
+  -webkit-overflow-scrolling: touch;
+}
+
+.marker-viewer-pan svg {
+  display: block;
+  width: 100%;
+  min-width: 42.5rem;
+  height: auto;
+  background: var(--color-pageBg);
+}
+
+.marker-viewer-pan .marker-layout-grid {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.marker-viewer-pan .marker-layout-piece {
+  cursor: pointer;
+  outline: none;
+}
+
+.marker-viewer-pan .marker-layout-piece:hover > polygon:first-child,
+.marker-viewer-pan .marker-layout-piece:focus-visible > polygon:first-child {
+  fill: var(--color-hairline);
+  stroke: var(--color-textColor);
+}
+
+.marker-viewer-pan .marker-layout-piece:focus-visible > polygon:first-child {
+  stroke-width: 2;
+}
+
+.marker-viewer-pan .marker-layout-piece.is-selected > polygon:first-child {
+  fill: var(--color-borderColor);
+  stroke: var(--color-textColor);
+  stroke-width: 2;
+}
+
+.marker-viewer-inspector {
+  position: sticky;
+  top: 8.5rem;
+}
+
+.marker-viewer-selection {
+  display: flex;
+  min-height: 2.1875rem;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-stack);
+  padding: 0.4375rem 0.25rem;
+  border-bottom: 1px solid var(--color-borderColor);
+}
+
+.marker-viewer-selection-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.marker-viewer-piece-list {
+  max-height: calc(100vh - 13.75rem);
+  overflow: auto;
+}
+
+.marker-viewer-piece-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.marker-viewer-piece-row:last-child {
+  border-bottom: 0;
+}
+
+.marker-viewer-piece-button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.0625rem;
+  padding: 0.375rem 0.3125rem;
+  text-align: left;
+}
+
+.marker-viewer-piece-button:focus-visible {
+  outline-offset: -2px;
+}
+
+.marker-viewer-piece-button:not([aria-pressed='true']):hover {
+  background: var(--color-pageBg);
+}
+
+.marker-viewer-piece-name,
+.marker-viewer-piece-code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.marker-viewer-piece-code {
+  background: transparent;
+}
+
+.marker-viewer-piece-button[aria-pressed='true'] .marker-viewer-piece-code {
+  color: var(--color-bgColor);
+}
+
+.marker-viewer-piece-quantity {
+  display: flex;
+  min-width: 3.375rem;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.375rem 0.25rem 0.375rem 0.5rem;
+}
+
+@media (min-width: 80rem) {
+  .marker-viewer-pan svg {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 51.25rem) {
+  .marker-viewer-topbar {
+    position: static;
+    padding-inline: 0.75rem;
+  }
+
+  .marker-viewer-content {
+    padding: 0.625rem 0.75rem 1rem;
+  }
+
+  .marker-viewer-fabrics,
+  .marker-viewer-inspector {
+    position: static;
+  }
+
+  .marker-viewer-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .marker-viewer-piece-list {
+    max-height: none;
+  }
+}
+
+@media (max-width: 32.5rem) {
+  .marker-viewer-topbar {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .marker-viewer-summary {
+    width: 100%;
+    gap: 0.4375rem;
+  }
+
+  .marker-viewer-edit {
+    margin-left: auto;
+  }
+
+  .marker-viewer-content {
+    gap: 0.5rem;
+  }
+
+  .marker-viewer-fabrics {
+    gap: 0.4375rem;
+  }
+
+  .marker-viewer-fabrics > :first-child {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .marker-viewer-fabric-rule,
+  .marker-viewer-fabrics > :empty {
+    display: none;
+  }
+}

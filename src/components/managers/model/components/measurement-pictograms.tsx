@@ -1,3 +1,4 @@
+import { DASH, GHOST_OPACITY, LINE, LINE_BOLD, LINE_EMPHASIS } from 'ui';
 import { cn } from 'lib/utility';
 
 // Hover/focus pictograms for the body-measurement labels in the model editor (admin #63) — a
@@ -137,48 +138,54 @@ export function resolveMeasurementGeometry(measurementName?: string, label?: str
   return FALLBACK_GEOMETRY;
 }
 
-const RING_STROKE = 1.8;
-const BOLD_STROKE = 2.25;
 const TICK = 2.5;
+
+// «GRBPWR line»: the measured band/trace/ring is the emphasis weight, the end ticks are hairlines,
+// a back-plane measurement is the shared dash. Non-scaling, so the pictogram keeps the same
+// on-screen line at h-36 as everywhere else.
+const EMPHASIS = { ...LINE, strokeWidth: LINE_BOLD } as const;
+const TICKS = { ...LINE, strokeWidth: LINE_EMPHASIS } as const;
 
 function Highlight({ geometry }: { geometry: Geometry }) {
   switch (geometry.kind) {
     case 'band': {
       const { y, x1, x2, dashed } = geometry;
       return (
-        <g
-          stroke='currentColor'
-          strokeWidth={BOLD_STROKE}
-          strokeLinecap='round'
-          strokeDasharray={dashed ? '3 2' : undefined}
-        >
-          <line x1={x1} y1={y} x2={x2} y2={y} />
-          <line x1={x1} y1={y - TICK} x2={x1} y2={y + TICK} />
-          <line x1={x2} y1={y - TICK} x2={x2} y2={y + TICK} />
+        <g>
+          <line
+            {...EMPHASIS}
+            strokeDasharray={dashed ? DASH : undefined}
+            x1={x1}
+            y1={y}
+            x2={x2}
+            y2={y}
+          />
+          <line {...TICKS} x1={x1} y1={y - TICK} x2={x1} y2={y + TICK} />
+          <line {...TICKS} x1={x2} y1={y - TICK} x2={x2} y2={y + TICK} />
         </g>
       );
     }
     case 'vband': {
       const { x, y1, y2, dashed } = geometry;
       return (
-        <g
-          stroke='currentColor'
-          strokeWidth={BOLD_STROKE}
-          strokeLinecap='round'
-          strokeDasharray={dashed ? '3 2' : undefined}
-        >
-          <line x1={x} y1={y1} x2={x} y2={y2} />
-          <line x1={x - TICK} y1={y1} x2={x + TICK} y2={y1} />
-          <line x1={x - TICK} y1={y2} x2={x + TICK} y2={y2} />
+        <g>
+          <line
+            {...EMPHASIS}
+            strokeDasharray={dashed ? DASH : undefined}
+            x1={x}
+            y1={y1}
+            x2={x}
+            y2={y2}
+          />
+          <line {...TICKS} x1={x - TICK} y1={y1} x2={x + TICK} y2={y1} />
+          <line {...TICKS} x1={x - TICK} y1={y2} x2={x + TICK} y2={y2} />
         </g>
       );
     }
     case 'ring':
       return (
         <ellipse
-          stroke='currentColor'
-          fill='none'
-          strokeWidth={RING_STROKE}
+          {...EMPHASIS}
           cx={geometry.cx}
           cy={geometry.cy}
           rx={geometry.rx}
@@ -186,16 +193,7 @@ function Highlight({ geometry }: { geometry: Geometry }) {
         />
       );
     case 'trace':
-      return (
-        <polyline
-          stroke='currentColor'
-          fill='none'
-          strokeWidth={BOLD_STROKE}
-          strokeLinecap='round'
-          strokeLinejoin='round'
-          points={geometry.points}
-        />
-      );
+      return <polyline {...EMPHASIS} points={geometry.points} />;
   }
 }
 
@@ -220,17 +218,10 @@ export function MeasurementPictogram({
       aria-hidden='true'
       xmlns='http://www.w3.org/2000/svg'
     >
-      <g
-        fill='none'
-        stroke='currentColor'
-        strokeWidth={1.4}
-        strokeLinecap='round'
-        strokeLinejoin='round'
-        opacity={0.35}
-      >
-        <circle cx={32} cy={10} r={6} />
+      <g opacity={GHOST_OPACITY}>
+        <circle {...LINE} cx={32} cy={10} r={6} />
         {MANNEQUIN_LINES.map((points) => (
-          <polyline key={points} points={points} />
+          <polyline {...LINE} key={points} points={points} />
         ))}
       </g>
       <Highlight geometry={geometry} />

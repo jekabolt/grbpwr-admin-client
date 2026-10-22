@@ -159,6 +159,11 @@ const TechCardImport = lazyRoute(() =>
 const TechCardPrint = lazyRoute(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
+const TechCardMarkerViewer = lazyRoute(() =>
+  import('components/managers/tech-card/marker-viewer/page').then((m) => ({
+    default: m.TechCardMarkerViewer,
+  })),
+);
 const TechCardAssemblyPrint = lazyRoute(() =>
   import('components/managers/tech-card/assembly-print/page').then((m) => ({
     default: m.TechCardAssemblyPrint,
@@ -487,6 +492,7 @@ root.render(
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
+                  <Route path={ROUTES.techCardMarkerViewer} element={<TechCardMarkerViewer />} />
                   {/* Схема сборки на одном листе (420 / 841 мм): лист сам объявляет @page,
                       поэтому тоже голый маршрут — под Layout ему нечего делать. */}
                   <Route path={ROUTES.techCardAssemblyPrint} element={<TechCardAssemblyPrint />} />

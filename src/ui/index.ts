@@ -38,7 +38,7 @@ export { CopyToClipboard } from './components/copyToClipboard';
 /** @primitive Table grammar wrapper */
 export { DataTable, EmptyCell, TotalRow } from './components/data-table';
 /** @primitive Portalled date field */
-export { DatePicker } from './components/date-picker';
+export { DatePicker, DateRangePicker } from './components/date-picker';
 /** @primitive Date pill scroll handle (touch) */
 export { DateScrubber, scrubLabel, type DateScrubberProps } from './components/date-scrubber';
 /** @primitive Month to list offset index */
@@ -162,3 +162,46 @@ export { default as ToggleGroupField } from './form/fields/toggle-group-field';
 export { Arrow } from './icons/arrow';
 /** @primitive Brand mark logo */
 export { GrbpwrMark } from './icons/grbpwr-mark';
+/** @primitive Icon set */
+export {
+  ArchiveIcon,
+  ArrowRightIcon,
+  ChatBubbleIcon,
+  CheckCircledIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  ClipboardCopyIcon,
+  ClockIcon,
+  CopyIcon,
+  DotsHorizontalIcon,
+  DownloadIcon,
+  EnterFullScreenIcon,
+  ExternalLinkIcon,
+  EyeNoneIcon,
+  Half2Icon,
+  InfoCircledIcon,
+  MinusIcon,
+  Pencil1Icon,
+  PlusIcon,
+  RotateCounterClockwiseIcon,
+  TrashIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from './icons';
+/** @primitive Empty-slot placeholder glyph */
+export { Glyph, type GlyphName } from './icons/glyph';
+/** @primitive «GRBPWR line» icon style constants */
+export {
+  ACCENT_FILL_OPACITY,
+  BACKDROP_OPACITY,
+  DASH,
+  GHOST_OPACITY,
+  GRID,
+  LINE,
+  LINE_BOLD,
+  LINE_EMPHASIS,
+  LINE_HAIRLINE,
+} from './icons/line';

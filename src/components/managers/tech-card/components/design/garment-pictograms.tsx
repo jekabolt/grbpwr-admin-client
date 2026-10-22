@@ -1,4 +1,5 @@
 import type { common_Category } from 'api/proto-http/admin';
+import { BACKDROP_OPACITY, LINE } from 'ui';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, type CSSProperties } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -64,7 +65,7 @@ import { isActiveView, normaliseViewKey, type ActiveView } from './views';
  *
  * ЧЕРТА — `currentColor`, заливки нет, `vector-effect: non-scaling-stroke`: кадр ячейки 136px, а
  * рисунок масштабируется в полтора раза, и толщина обязана остаться волосной, какой её видит глаз
- * на соседних рамках. Бледность (0.12) задаёт обёртка `PictogramBackdrop`, а не цвет черты: сам
+ * на соседних рамках. Бледность задаёт обёртка `PictogramBackdrop`, а не цвет черты: сам
  * рисунок остаётся годным и на полную яркость (стенд, будущая легенда).
  *
  * СЕМЕЙСТВО ЧИТАЕТСЯ ИЗ КАТЕГОРИИ ПО ИМЕНАМ СЛОВАРЯ, не по id: id различаются между бетой и продом,
@@ -971,21 +972,10 @@ export function GarmentPictogram({
 }): JSX.Element {
   const paths = pictogramPaths(family, view);
   return (
-    <svg
-      aria-hidden
-      data-pictogram={view}
-      viewBox={viewBox}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={1.25}
-      strokeLinejoin='round'
-      strokeLinecap='round'
-      className={className}
-      style={style}
-    >
+    <svg aria-hidden data-pictogram={view} viewBox={viewBox} className={className} style={style}>
       <g transform={view === 'side_r' ? MIRROR_TRANSFORM : undefined}>
         {paths.map((d) => (
-          <path key={d} d={d} vectorEffect='non-scaling-stroke' />
+          <path key={d} {...LINE} d={d} />
         ))}
       </g>
     </svg>
@@ -993,13 +983,13 @@ export function GarmentPictogram({
 }
 
 /**
- * ФОН ПУСТОЙ ЯЧЕЙКИ: пиктограмма ЭТОЙ стороны во всю высоту кадра, по центру, 0.12 и мимо
+ * ФОН ПУСТОЙ ЯЧЕЙКИ: пиктограмма ЭТОЙ стороны во всю высоту кадра, по центру, бледно и мимо
  * указателя.
  *
  * ⚠ ЛЕЖИТ ПОВЕРХ ПОЛОС, А НЕ ПОД НИМИ, И ЭТО НЕ ВЫБОР, А ГЕОМЕТРИЯ. Полосы — непрозрачный фон
  * дважды: у кадра и у самой кнопки слота медиа (`MediaSlot` красит `PLACEHOLDER_SURFACE` на себе).
  * Рисунок «под полосами» не был бы виден вовсе, а под одной верхней половиной — виден наполовину.
- * Поэтому он лежит слоем над кадром, но с прозрачностью 0.12 и `pointer-events: none`: глазом —
+ * Поэтому он лежит слоем над кадром, но с `BACKDROP_OPACITY` и `pointer-events: none`: глазом —
  * часть фактуры полос, рукой — его нет, клик и бросок файла уходят в двери под ним.
  *
  * Геометрия — ИНЛАЙНОМ (как у кадра в `core/two-half-slot.tsx`): стенд читает собранный CSS, и
@@ -1025,7 +1015,7 @@ export function PictogramBackdrop({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '6px 0',
-        opacity: 0.12,
+        opacity: BACKDROP_OPACITY,
         pointerEvents: 'none',
       }}
     >

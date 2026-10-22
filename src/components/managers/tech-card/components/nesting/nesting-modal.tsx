@@ -1350,6 +1350,8 @@ export function NestingModal({
       // Здесь достаточно сказать, что делать: оба случая чинятся на вкладке BOM.
       mirror:
         'the fabric allows no flipping — there is nothing to lay the mirrored instance with: set or fix the direction on the fabric line on the BOM tab (paired pieces on a nap are cut in two plies face to face — that is a different marker)',
+      // L14: the engine's warning names the reason per piece
+      fold: 'half on fold',
     };
     return [...byReason.entries()]
       .map(([reason, names]) => `${[...names].join(', ')} — ${word[reason] ?? reason}`)

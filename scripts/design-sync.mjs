@@ -16,7 +16,19 @@ if (process.argv.some((argument) => argument.startsWith('--') && argument !== '-
 }
 
 const GENERATED_GROUPS = ['colors', 'typography', 'spacing', 'rounded'];
-const STANDARD_VARIANT_PROPS = new Set(['variant', 'size', 'tone', 'kind']);
+const STANDARD_VARIANT_PROPS = new Set([
+  'variant',
+  'size',
+  'tone',
+  'kind',
+  'boxed',
+  'swatch',
+  'rule',
+  'plain',
+  'stickyHeader',
+  'hoverRows',
+]);
+const DOCUMENTED_PROP_VALUES = new Map([['swatch', ['ReactNode']]]);
 
 function frontmatterOf(markdown) {
   const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
@@ -377,6 +389,11 @@ function addVariants(primitives) {
     for (const name of candidateNames) {
       const prop = propSymbols.get(name);
       if (!prop) continue;
+      const documentedValues = DOCUMENTED_PROP_VALUES.get(name);
+      if (documentedValues) {
+        primitive.variants.push({ name, values: documentedValues });
+        continue;
+      }
       const valuesFromCva = moduleInfo.cva.get(name);
       if (valuesFromCva) {
         primitive.variants.push({ name, values: valuesFromCva });

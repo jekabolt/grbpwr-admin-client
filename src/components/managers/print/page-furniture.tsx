@@ -1,3 +1,5 @@
+import type { PrintOrient } from './scope';
+
 // Постраничная обвязка печатного документа: бегущий колонтитул и «стр. N / M».
 //
 // ЗАЧЕМ. Печатный комплект уезжает в цех стопкой листов, которую там разбирают руками. До этого
@@ -25,10 +27,10 @@
 // страницы в своих PRINT_CSS; два объявления @page в одном документе — это конфликт, который
 // разрешается порядком подключения, а не смыслом.
 
-const PAGE_CSS = `
+const pageCss = (orient: PrintOrient) => `
 @media print {
   @page {
-    size: A4 portrait;
+    size: A4 ${orient === 'land' ? 'landscape' : 'portrait'};
     margin: 14mm 12mm;
 
     @top-center {
@@ -58,10 +60,11 @@ const PAGE_CSS = `
 
 // line — то, чем лист идентифицируется на столе: стиль, колорвей, партия, ревизия. Держать
 // коротким: margin box не переносится, лишнее просто обрежется.
-export function PageFurniture({ line }: { line: string }) {
+// orient — ориентация листа из ?orient=; без него лист книжный, как раньше.
+export function PageFurniture({ line, orient = 'port' }: { line: string; orient?: PrintOrient }) {
   return (
     <>
-      <style>{PAGE_CSS}</style>
+      <style>{pageCss(orient)}</style>
       {/* Элемент обязан РЕНДЕРИТЬСЯ (не display:none), иначе string-set не сработает: строка
           берётся из содержимого живого элемента. Поэтому он уводится за край, а не прячется. */}
       <div className='print-docline' aria-hidden>
