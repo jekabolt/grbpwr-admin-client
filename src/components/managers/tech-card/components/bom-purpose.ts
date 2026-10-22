@@ -402,3 +402,242 @@ export function aliasInScope<L extends RollGoodsLine>(
   if (!line) return false;
   return scope.lines.some((l) => l.lineKey === line);
 }
+
+// ═══ ONE WRITER FOR A SCOPE'S BINDINGS (sheet binding, lane B1) ═══════════════════════════════
+//
+// The owner's rule: a DXF sheet is never «without a material». Every path that moves a cloth line
+// between scopes — the purpose select on BOM, MATERIALS and PATTERNS, a section change, a delete,
+// the construction draft's undo, a sheet dragged onto another tile — either carries the sheets and
+// piece links along or refuses. These pure helpers are the one place that decides which rows go,
+// so the editors cannot drift apart. They return the next arrays; the caller writes them.
+
+/** A stored binding: a pattern sheet row or a DXF piece link. */
+export type BindingRow = { fabricPurpose?: string; bomLineKey?: string };
+/** A DXF piece link (`pieceDxfAliases[]`). */
+export type AliasRow = BindingRow & { blockName?: string; pieceLineKey?: string };
+/** A saved marker: it measures one BOM line. */
+export type MarkerRef = { bomLineKey?: string };
+
+/** The card's cloth lines as the scopes see them: the four roll-goods sections, keyed lines only. */
+export function clothLines(
+  items: readonly { lineKey?: string; purpose?: string; name?: string; section?: string }[],
+): RollGoodsLine[] {
+  return items
+    .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey?.trim())
+    .map((b) => ({
+      lineKey: (b.lineKey ?? '').trim(),
+      purpose: b.purpose ?? '',
+      name: b.name ?? '',
+      section: b.section ?? '',
+    }));
+}
+
+/** The scope a line sits in; undefined when the line is not cloth. */
+export function scopeOfLine<L extends RollGoodsLine>(
+  scopes: readonly FabricScope<L>[],
+  lineKey: string,
+): FabricScope<L> | undefined {
+  const key = lineKey.trim();
+  return key ? scopes.find((s) => s.lines.some((l) => l.lineKey === key)) : undefined;
+}
+
+/** Block identity for «which sheet holds this block»: case and inner spaces do not count. */
+export function blockKey(name?: string): string {
+  return (name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+const resolvedScope = (b: BindingRow, scopes: readonly FabricScope<RollGoodsLine>[]) =>
+  scopeKeyOfBinding(b.fabricPurpose, b.bomLineKey, scopes as FabricScope<RollGoodsLine>[]);
+
+/**
+ * Piece links that would bounce the save: two different pieces on one block under one STORED scope
+ * — the same key as the schema's alias dedupe and the server's UNIQUE. Only groups holding a row of
+ * `touched` count: an old clash is not this move's doing.
+ */
+export function aliasCollisions(
+  aliases: readonly AliasRow[],
+  touched: ReadonlySet<number>,
+): string[] {
+  const groups = new Map<string, { block: string; pieces: Set<string>; touched: boolean }>();
+  aliases.forEach((a, i) => {
+    const block = a.blockName?.trim() ?? '';
+    const piece = a.pieceLineKey?.trim() ?? '';
+    if (!block || !piece) return;
+    const key = `${aliasScopeKey(a).toLowerCase()}|${block.toLowerCase()}`;
+    const g = groups.get(key) ?? { block, pieces: new Set<string>(), touched: false };
+    g.pieces.add(piece);
+    if (touched.has(i)) g.touched = true;
+    groups.set(key, g);
+  });
+  const out: string[] = [];
+  for (const g of groups.values()) {
+    if (g.touched && g.pieces.size > 1 && !out.includes(g.block)) out.push(g.block);
+  }
+  return out;
+}
+
+/** What uses a scope: its sheets, its piece links, and the markers of its lines. */
+export type ScopeImpact<P, A, M> = { sheets: P[]; aliases: A[]; markers: M[] };
+
+export function impactEmpty(i: ScopeImpact<unknown, unknown, unknown>): boolean {
+  return i.sheets.length + i.aliases.length + i.markers.length === 0;
+}
+
+export function scopeImpact<P extends BindingRow, A extends BindingRow, M extends MarkerRef>(
+  scope: FabricScope<RollGoodsLine>,
+  card: {
+    patterns: readonly P[];
+    aliases: readonly A[];
+    markers?: readonly M[];
+    scopes: readonly FabricScope<RollGoodsLine>[];
+  },
+): ScopeImpact<P, A, M> {
+  const keys = new Set(scope.lines.map((l) => l.lineKey));
+  return {
+    sheets: card.patterns.filter((p) => resolvedScope(p, card.scopes) === scope.key),
+    aliases: card.aliases.filter((a) => resolvedScope(a, card.scopes) === scope.key),
+    markers: (card.markers ?? []).filter((m) => keys.has(m.bomLineKey?.trim() ?? '')),
+  };
+}
+
+/**
+ * What holds a line in the cloth (delete, section change, the draft's undo): the rows that resolve
+ * now and would resolve to nothing once the line is gone — the «without a material» rows. A line
+ * that shares its purpose with others strands nothing (the purpose still resolves); the LAST line
+ * of a scope takes the whole scope with it, its markers included.
+ */
+export function lineExitImpact<P extends BindingRow, A extends BindingRow, M extends MarkerRef>(
+  lineKey: string,
+  card: {
+    lines: readonly RollGoodsLine[];
+    patterns: readonly P[];
+    aliases: readonly A[];
+    markers?: readonly M[];
+  },
+): ScopeImpact<P, A, M> {
+  const key = lineKey.trim();
+  const before = fabricScopes([...card.lines]);
+  const own = scopeOfLine(before, key);
+  if (!own) return { sheets: [], aliases: [], markers: [] };
+  const after = fabricScopes(card.lines.filter((l) => l.lineKey !== key));
+  const strands = (b: BindingRow) =>
+    resolvedScope(b, before) !== '' && resolvedScope(b, after) === '';
+  return {
+    sheets: card.patterns.filter(strands),
+    aliases: card.aliases.filter(strands),
+    markers:
+      own.lines.length === 1
+        ? (card.markers ?? []).filter((m) => m.bomLineKey?.trim() === key)
+        : [],
+  };
+}
+
+/**
+ * A line leaves a purpose that stays live: rows that carried its key as the compatibility line get
+ * the scope's own answer (its one remaining line, or none). The purpose still resolves them; the
+ * stale key would only point the next reader at a line that is gone.
+ */
+export function releaseLineKey(
+  rows: readonly BindingRow[],
+  lineKey: string,
+  nextLines: readonly RollGoodsLine[],
+): Array<{ index: number; bomLineKey: string }> {
+  const key = lineKey.trim();
+  if (!key) return [];
+  const next = fabricScopes([...nextLines]);
+  const out: Array<{ index: number; bomLineKey: string }> = [];
+  rows.forEach((r, index) => {
+    if ((r.bomLineKey ?? '').trim() !== key) return;
+    const p = (r.fabricPurpose ?? '').trim();
+    if (!p || p === UNSET_PURPOSE) return;
+    const scope = next.find((s) => s.byPurpose && s.key === p);
+    if (!scope) return;
+    const bomLineKey = bindingForScope(scope).bomLineKey;
+    if (bomLineKey !== key) out.push({ index, bomLineKey });
+  });
+  return out;
+}
+
+/** The answer of a move: the next arrays, nothing to do, a block clash, or blocks not read yet. */
+export type BindingMove<P, A> =
+  | { kind: 'moved'; patterns: P[]; aliases: A[]; sheets: number; links: number }
+  | { kind: 'noop' }
+  | { kind: 'clash'; blocks: string[] }
+  | { kind: 'pending' };
+
+/**
+ * Move everything bound to scope `from` onto `to`: sheets AND piece links, both fields of the
+ * binding at once (bindingForScope). `scopes` are the scopes BEFORE the change — they decide what
+ * belongs to `from`; `to` is the target AFTER it, so its line count picks the compatibility line.
+ * A merge into a scope that already links a block of the same name to another piece is refused
+ * with the clashing block names: the save would bounce on it, so the move does not happen.
+ */
+export function moveScope<P extends BindingRow, A extends AliasRow>(input: {
+  patterns: readonly P[];
+  aliases: readonly A[];
+  scopes: readonly FabricScope<RollGoodsLine>[];
+  from: string;
+  to: FabricScope<RollGoodsLine>;
+}): BindingMove<P, A> {
+  const from = input.from.trim();
+  if (!from) return { kind: 'noop' };
+  const binding = bindingForScope(input.to);
+  let sheets = 0;
+  const patterns = input.patterns.map((p) => {
+    if (resolvedScope(p, input.scopes) !== from) return p;
+    sheets++;
+    return { ...p, ...binding };
+  });
+  const touched = new Set<number>();
+  const aliases = input.aliases.map((a, i) => {
+    if (resolvedScope(a, input.scopes) !== from) return a;
+    touched.add(i);
+    return { ...a, ...binding };
+  });
+  if (sheets === 0 && touched.size === 0) return { kind: 'noop' };
+  const blocks = aliasCollisions(aliases, touched);
+  if (blocks.length > 0) return { kind: 'clash', blocks };
+  return { kind: 'moved', patterns, aliases, sheets, links: touched.size };
+}
+
+/**
+ * Move ONE sheet onto scope `to` (a drag between tiles). The piece links whose blocks come from
+ * this sheet's DXF go with it — only those no other sheet of the old scope still holds (a sibling
+ * whose blocks are unknown holds them all). `blocksOf` gives a sheet's block identities (blockKey of
+ * each name and of its sizeless identity); null = not read yet, and then the move waits. A sheet
+ * bound to nothing live just takes the binding: there are no links to carry.
+ */
+export function moveSheet<P extends BindingRow, A extends AliasRow>(input: {
+  patterns: readonly P[];
+  aliases: readonly A[];
+  scopes: readonly FabricScope<RollGoodsLine>[];
+  sheet: number;
+  to: FabricScope<RollGoodsLine>;
+  blocksOf: (row: P, index: number) => ReadonlySet<string> | null;
+}): BindingMove<P, A> {
+  const row = input.patterns[input.sheet];
+  if (!row) return { kind: 'noop' };
+  const from = resolvedScope(row, input.scopes);
+  if (from === input.to.key) return { kind: 'noop' };
+  const binding = bindingForScope(input.to);
+  const patterns = input.patterns.map((p, i) => (i === input.sheet ? { ...p, ...binding } : p));
+  if (!from) return { kind: 'moved', patterns, aliases: [...input.aliases], sheets: 1, links: 0 };
+  const own = input.blocksOf(row, input.sheet);
+  if (!own) return { kind: 'pending' };
+  const siblings = input.patterns
+    .map((p, i) => ({ p, i }))
+    .filter(({ p, i }) => i !== input.sheet && resolvedScope(p, input.scopes) === from)
+    .map(({ p, i }) => input.blocksOf(p, i));
+  const held = (k: string) => siblings.some((s) => s == null || s.has(k));
+  const touched = new Set<number>();
+  const aliases = input.aliases.map((a, i) => {
+    if (resolvedScope(a, input.scopes) !== from) return a;
+    const k = blockKey(a.blockName);
+    if (!k || !own.has(k) || held(k)) return a;
+    touched.add(i);
+    return { ...a, ...binding };
+  });
+  const blocks = aliasCollisions(aliases, touched);
+  if (blocks.length > 0) return { kind: 'clash', blocks };
+  return { kind: 'moved', patterns, aliases, sheets: 1, links: touched.size };
+}

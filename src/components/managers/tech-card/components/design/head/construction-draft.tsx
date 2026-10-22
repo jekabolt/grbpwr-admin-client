@@ -30,7 +30,13 @@ import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import { kindsForSection } from '../../bom-kind';
 import { isRollGoodsSection } from '../../bom-purpose';
-import { bornBomLine, releaseBomLineRefs, upsertDetailText } from '../../form-writers';
+import {
+  bornBomLine,
+  holdNames,
+  lineExitHold,
+  releaseBomLineRefs,
+  upsertDetailText,
+} from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { anyDirty } from '../../useTechCardAutosave';
 import {
@@ -446,6 +452,9 @@ export function ConstructionDraft({
   const decided = useMemo(() => decisionLines(quizAnswers), [quizAnswers]);
   /** Сохранённые колорвеи карточки — новый ответ их не предлагает снова (T06). */
   const { data: savedCard } = useTechCard(techCardId);
+  // A drafted slot that became the last line of a fabric scope with sheets cannot be undone away.
+  const slotHold = (lineKey: string): string[] =>
+    holdNames(lineExitHold(getValues, lineKey, savedCard?.markers));
   const writes = useDesignWrites(techCardId);
   const queryClient = useQueryClient();
   const benchDetails = useMemo(() => readBench(band, 'flat').details, [band]);
@@ -1039,6 +1048,9 @@ export function ConstructionDraft({
       return;
     } else {
       const cur = (getValues('bomItems') ?? []) as { lineKey?: string; id?: unknown }[];
+      // The last line of a fabric scope holds its sheets, piece links and markers: it stays, and the
+      // record with it (the confirm already named them and did not let this through).
+      if (slotHold(t.lineKey).length > 0) return;
       // Те же ссылки, что чистит вкладка BOM при удалении строки: операции, детали, лейблы.
       const gone = cur.find((r) => r.lineKey === t.lineKey);
       if (gone) releaseBomLineRefs(getValues, setValue, gone);
@@ -1159,6 +1171,12 @@ export function ConstructionDraft({
    */
   const [confirmUndo, setConfirmUndo] = useState<{ fills: Fill[]; all: boolean } | null>(null);
   const confirmSlots = (confirmUndo?.fills ?? []).filter((f) => f.target.kind === 'slot');
+  // What the slots of this undo would strand without a material — named, and the undo is held.
+  const confirmHeld = [
+    ...new Set(
+      confirmSlots.flatMap((f) => (f.target.kind === 'slot' ? slotHold(f.target.lineKey) : [])),
+    ),
+  ];
   const slotRole = (f: Fill | undefined): string => {
     if (!f || f.target.kind !== 'slot') return '';
     const key = f.target.lineKey;
@@ -2227,9 +2245,25 @@ export function ConstructionDraft({
                   : `remove slot ${slotRole(confirmSlots[0])}?`
               }
               confirmLabel={confirmUndo?.all ? `undo ${confirmUndo.fills.length}` : 'remove slot'}
+              confirmDisabled={confirmHeld.length > 0}
               width='sm'
               hideCancel
             >
+              {confirmHeld.length > 0 && (
+                <div className='flex flex-col'>
+                  <Text size='micro' variant='error'>
+                    used in patterns
+                  </Text>
+                  {confirmHeld.map((name) => (
+                    <span
+                      key={name}
+                      className='border-b border-hairline py-1 text-micro last:border-b-0'
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
               <Text size='micro' variant='label'>
                 {confirmSlots.length > 0
                   ? `${confirmUndo?.all ? `removes ${confirmSlots.length} bom slot${confirmSlots.length === 1 ? '' : 's'} · ` : ''}links in operations, pieces and labels are cleared`

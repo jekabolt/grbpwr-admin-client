@@ -31,6 +31,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import {
   AddDoor,
+  Button,
   GroupLabel,
   HeaderWarnings,
   Close,
@@ -65,7 +66,14 @@ import {
 import { resolveBomPrice } from './bom-price';
 import { ResidueStrip, type ResidueErrorRow, type ResidueRow } from './residue-strip';
 import { defaultRoleFor, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
-import { emptyBomItem } from './form-writers';
+import {
+  changeLinePurpose,
+  changeLineSection,
+  emptyBomItem,
+  holdNames,
+  lineExitHold,
+  releaseLineBindings,
+} from './form-writers';
 import {
   LABEL_PART_NAME,
   LABEL_PART_UNSPECIFIED,
@@ -157,8 +165,19 @@ type BomIdentityField = {
 // article-borrowed role permanently uncorrectable. Section is editable on a linked line too: the
 // article keeps its own catalog section on the plate, and a deliberate divergence (a jersey
 // article serving a LINING slot) must be expressible.
-export function SlotIdentityFields({ index, stacked }: { index: number; stacked?: boolean }) {
-  const { control, setValue } = useFormContext<TechCardFormData>();
+export function SlotIdentityFields({
+  index,
+  stacked,
+  markers,
+}: {
+  index: number;
+  stacked?: boolean;
+  /** Card markers as READ: the last line of a fabric scope keeps them, so it cannot leave it. */
+  markers?: common_TechCardMarkerSummary[];
+}) {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  // A section or purpose change the sheets refused: the reason and what it names, under the row.
+  const [refusal, setRefusal] = useState<{ title: string; items: string[] } | null>(null);
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const rowPurpose = useWatch({ control, name: `bomItems.${index}.purpose` }) as string | undefined;
   const rowKind = useWatch({ control, name: `bomItems.${index}.kind` }) as string | undefined;
@@ -331,11 +350,25 @@ export function SlotIdentityFields({ index, stacked }: { index: number; stacked?
           name={`bomItems.${index}.section`}
           label='section'
           items={techCardBomSectionOptions}
+          // Leaving the cloth strands the sheets of a scope's last line: one writer decides.
+          onValueChange={(value: string | undefined) => {
+            const out = changeLineSection(getValues, setValue, index, value ?? '', markers);
+            setRefusal(
+              out.kind === 'held' ? { title: 'used in patterns', items: out.names } : null,
+            );
+          }}
         />
         {rollGoods && (
           <SelectField
             name={`bomItems.${index}.purpose`}
             label='purpose'
+            // The scope's only line takes its sheets and piece links along (bom-purpose moveScope).
+            onValueChange={(value: string | undefined) => {
+              const out = changeLinePurpose(getValues, setValue, index, value ?? UNSET_PURPOSE);
+              setRefusal(
+                out.kind === 'clash' ? { title: 'blocks clash', items: out.blocks } : null,
+              );
+            }}
             items={[
               ...purposeEditorOptions,
               ...(foreignPurpose
@@ -398,6 +431,18 @@ export function SlotIdentityFields({ index, stacked }: { index: number; stacked?
           ]}
         />
       </div>
+      {refusal && (
+        <div className='flex flex-col' data-bom-refusal={index}>
+          <Text size='micro' variant='error'>
+            {refusal.title}
+          </Text>
+          {refusal.items.map((item) => (
+            <span key={item} className='border-b border-hairline py-1 text-micro last:border-b-0'>
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
       {/* ПОЛОСА ОСТАТКОВ — сразу под рядом: значение, у которого на этой секции нет контрола. */}
       <ResidueStrip
         rows={residueRows}
@@ -422,7 +467,15 @@ type BlockingUser = { colorwayId: number; sku: string };
 // строка (якорь `#bom-composition-{index}`: вкладка labels ведёт сюда за пустым составом).
 //
 // Надбавки раскроя здесь НЕТ (она своя у каждого кроя и задаётся в раскладке), флага семпла тоже.
-function BomLineEditor({ index, highlight }: { index: number; highlight?: boolean }) {
+function BomLineEditor({
+  index,
+  highlight,
+  markers,
+}: {
+  index: number;
+  highlight?: boolean;
+  markers?: common_TechCardMarkerSummary[];
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
@@ -450,7 +503,7 @@ function BomLineEditor({ index, highlight }: { index: number; highlight?: boolea
           items={techCardFabricDirectionOptions}
         />
       )}
-      <SlotIdentityFields index={index} stacked />
+      <SlotIdentityFields index={index} stacked markers={markers} />
     </div>
   );
 }
@@ -780,7 +833,18 @@ export function BomField({
     const users = colorwayUsers(removedKey, wireInt(getValues(`bomItems.${bi}.id`)));
     // Модалка удаления уже назвала эти колорвеи и не дала подтвердить; здесь — последний засов.
     if (users.length > 0) return;
+    // The last line of a fabric scope holds its sheets, piece links and markers: same bolt.
+    if (removedKey && holdNames(lineExitHold(getValues, removedKey, markers)).length > 0) return;
     if (removedKey) {
+      // A purpose that stays live drops this line's key from its sheets and piece links.
+      releaseLineBindings(
+        getValues,
+        setValue,
+        removedKey,
+        ((getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>).filter(
+          (_, i) => i !== bi,
+        ),
+      );
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
         // The LIST is the reference: `operations.N.bomLineKey` is vestigial (the write derives it
@@ -1032,6 +1096,15 @@ export function BomField({
           wireInt(lines[confirmRemove].id),
         )
       : [];
+  const removeHold =
+    confirmRemove !== null && lines[confirmRemove]?.lineKey
+      ? holdNames(lineExitHold(getValues, lines[confirmRemove].lineKey as string, markers))
+      : [];
+  const openPatterns = () => {
+    const next = new URLSearchParams(params);
+    next.set('tab', 'patterns');
+    setParams(next, { replace: true });
+  };
   const addTile = (
     <AddDoor
       shape='tile'
@@ -1083,6 +1156,7 @@ export function BomField({
               key={fields[selected]?.id ?? selected}
               index={selected}
               highlight={highlightActive}
+              markers={markers}
             />
           </fieldset>
         )}
@@ -1103,9 +1177,32 @@ export function BomField({
             : undefined
         }
         confirmLabel='remove slot'
-        confirmDisabled={removeUsers.length > 0}
+        confirmDisabled={removeUsers.length > 0 || removeHold.length > 0}
         hideCancel
       >
+        {removeHold.length > 0 && (
+          <div className='flex flex-col'>
+            <Text size='micro' variant='error'>
+              used in patterns
+            </Text>
+            {removeHold.map((name) => (
+              <span key={name} className='border-b border-hairline py-1 text-micro last:border-b-0'>
+                {name}
+              </span>
+            ))}
+            <Button
+              variant='underline'
+              size='xs'
+              className='self-start'
+              onClick={() => {
+                setConfirmRemove(null);
+                openPatterns();
+              }}
+            >
+              open patterns
+            </Button>
+          </div>
+        )}
         {removeUsers.length > 0 ? (
           <div className='flex flex-col'>
             <Text size='micro' variant='error'>
@@ -1125,7 +1222,7 @@ export function BomField({
               </button>
             ))}
           </div>
-        ) : (
+        ) : removeHold.length > 0 ? null : (
           <Text size='micro' variant='label'>
             its links in operations, pieces and labels are cleared
           </Text>

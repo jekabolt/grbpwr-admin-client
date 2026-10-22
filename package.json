@@ -64,6 +64,7 @@
     "marker:per-size": "node scripts/per-size-consumption-probe.mjs",
     "nest:mixed": "node scripts/mixed-vs-homogeneous-probe.mjs",
     "gate:keys": "node scripts/run-gate-keys-probe.mjs",
+    "scope:move": "node scripts/scope-move-probe.mjs",
     "assembly:cases": "node scripts/assembly-cases-probe.mjs",
     "assembly:blocks": "node scripts/assembly-blocks-probe.mjs",
     "assembly:layout": "node scripts/assembly-layout-probe.mjs",
