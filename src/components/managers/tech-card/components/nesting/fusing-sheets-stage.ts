@@ -10,8 +10,15 @@ import type { StagedChange } from '../useTechCardStaging';
 export const FUSING_SHEETS_KEY = 'fusingSheets';
 export const FUSING_SHEETS_ORDER = 90;
 
-// A failed or partial rebuild is a toast, never a refusal of the save: the pieces stay saved.
-export function fusingSheetsChange(techCardId: number): StagedChange {
+// A partial rebuild (skipped pieces or sizes) is a warning toast. A FAILED one is a toast AND a
+// failure of the change: it stays staged and the next save retries it — swallowed, the queue called
+// the save complete and the form's baseline already held the new fuse inputs, so nothing would ever
+// rebuild the stale sheets. `onWrote` hears the version the rebuild's own card write left, only when
+// it actually wrote.
+export function fusingSheetsChange(
+  techCardId: number,
+  onWrote?: (lockVersion: number) => void,
+): StagedChange {
   return {
     key: FUSING_SHEETS_KEY,
     label: 'fusing DXF',
@@ -19,6 +26,7 @@ export function fusingSheetsChange(techCardId: number): StagedChange {
     commit: async () => {
       try {
         const r = await regenerateFusingSheets(techCardId);
+        if (r.lockVersion !== undefined) onWrote?.(r.lockVersion);
         // L5: the warnings were dropped — a piece fused with no interlining chosen built no sheet,
         // and the rebuild ended with no request and no word.
         if (r.warnings.length)
@@ -42,6 +50,7 @@ export function fusingSheetsChange(techCardId: number): StagedChange {
           text: 'not rebuilt',
           detail: error instanceof Error ? error.message : String(error),
         });
+        throw error;
       }
     },
   };

@@ -240,9 +240,10 @@ export function auditOperationPresence(
 // would wipe the Fusing steps the server just made. So:
 //   · nothing lost → the server's list, exactly what a reload would show;
 //   · something lost (the version-skew windows above) → the server's list with every paired step
-//     replaced by the SENT one (the banner promises «your values are still in the form»), each
-//     sent step that came back as nothing put back after its sent predecessor, and the step number
-//     taken from the server, so the Fusing identity is never claimed by another step.
+//     replaced by the SENT one (the banner promises «your values are still in the form»), an
+//     unpaired server step kept only when the server manages it, each sent step that came back as
+//     nothing put back after its sent predecessor, and the step number taken from the server, so
+//     the Fusing identity is never claimed by another step.
 export function mergeOperationsAfterSave<T extends OpLike>(
   sent: ReadonlyArray<T>,
   read: ReadonlyArray<T>,
@@ -254,12 +255,17 @@ export function mergeOperationsAfterSave<T extends OpLike>(
     if (r >= 0) sentOfRead.set(r, s);
   });
   // Entries carry the sent index they stand for (-1: a server step with no sent twin).
-  const entries: { op: T; sent: number }[] = read.map((op, r) => {
-    const s = sentOfRead.get(r);
-    return s === undefined
-      ? { op, sent: -1 }
-      : { op: { ...sent[s], operationNumber: op.operationNumber } as T, sent: s };
-  });
+  const entries: { op: T; sent: number }[] = read
+    .map((op, r) => {
+      const s = sentOfRead.get(r);
+      return s === undefined
+        ? { op, sent: -1 }
+        : { op: { ...sent[s], operationNumber: op.operationNumber } as T, sent: s };
+    })
+    // Sent-centric: a read step no sent step came back as is kept only when the server manages it
+    // (a draft Fusing step). Any other one is a step the operator deleted that an older backend
+    // still returns — kept, it would come back into the form settled as clean.
+    .filter((e) => e.sent >= 0 || isServerManagedStep(e.op));
   sent.forEach((op, s) => {
     if (audit.pairs[s] >= 0 || isServerManagedStep(op)) return;
     // After the nearest sent predecessor already placed; at the front of the operator's steps if
