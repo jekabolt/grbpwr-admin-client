@@ -1,9 +1,11 @@
 // The fuse markup drawn over the PIECES sheet (canvas «Zoom»): the fusible fill (whole / strip
 // bands / zone), the inset contour dashed, dart holes, and on the piece being edited the handles —
-// click an edge to add it to the strip, drag a strip end to trim it (live mm, snap 5), drag a rect
-// or click a DXF block for the zone, click a dart to toggle cut / fuse over. Other fused pieces
-// show faint. Coordinates: the sheet's own SVG space — cm, Y down.
-import { useMemo, useRef, useState } from 'react';
+// click an edge to add it to the strip, drag a strip end to trim it (live mm, snap 5), shape the
+// zone with the Rect+ editor (fuse-zone-editor) or click a DXF block for it, click a dart to toggle
+// cut / fuse over. Other fused pieces show faint. A drawn zone's fill is the fusible DXF's own
+// geometry (lib/fusing-dxf generateFuseGeometry), so what is drawn is what is cut; its clipped
+// area goes to the panel through the zone bus. Coordinates: the sheet's own SVG space — cm, Y down.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   edgeRunsOf,
   extendPolyline,
@@ -12,8 +14,13 @@ import {
   stripBandPolygons,
   trimEdgeRun,
 } from 'lib/fusing-dxf/edge-runs';
+import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
+import { flattenSpline } from 'lib/fusing-dxf/spline';
+import type { FusePolygon } from 'lib/fusing-dxf/types';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
-import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
+import { PREVIEW_NET_MM, resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
+import { isDrawnZone, zonePoints, type ZoneBus } from './fuse-zone';
+import { FuseZoneEditor } from './fuse-zone-editor';
 
 const INK = 'var(--color-warning)';
 const PAPER = 'var(--color-bgColor)';
@@ -85,7 +92,23 @@ function svgPoint(e: React.PointerEvent) {
   return { x: r.x, y: r.y };
 }
 
-type Rect = { x: number; y: number; w: number; h: number };
+/** A drawn zone's fusible geometry, piece-local mm; ok=false = the zone is invalid / empty. */
+type ZoneFill = { polys: FusePolygon[]; ok: boolean };
+const mm10 = (q: Pt) => ({ x: q.x * 10, y: q.y * 10 });
+function zoneFillOf(p: PieceDTO, f: PieceFuseSpec): ZoneFill | null {
+  if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+  try {
+    const polys = generateFuseGeometry({
+      outline: p.poly.map(mm10),
+      spec: f,
+      seamAllowanceMm: PREVIEW_NET_MM,
+      darts: dartsOf(p).map((d) => d.map(mm10)),
+    });
+    return { polys, ok: polys.length > 0 };
+  } catch {
+    return { polys: [], ok: false };
+  }
+}
 
 export function FuseOverlay({
   px,
@@ -94,6 +117,7 @@ export function FuseOverlay({
   sel,
   fuseOf,
   onChange,
+  zoneBus,
 }: {
   /** cm per screen pixel. */
   px: number;
@@ -104,11 +128,24 @@ export function FuseOverlay({
   /** The fuse spec of a fused piece; undefined = not fused. */
   fuseOf: (ci: string) => PieceFuseSpec | undefined;
   onChange: (ci: string, next: PieceFuseSpec) => void;
+  /** Shared with the panel: the zone's clipped area and its undo stack. */
+  zoneBus?: ZoneBus;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const [live, setLive] = useState<Rect | null>(null);
   const [handle, setHandle] = useState<{ edge: number; end: 's' | 'e' } | null>(null);
-  const drag = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  // Fill cache: a zone's geometry per piece object, keyed by what the geometry reads.
+  const fills = useRef(new WeakMap<PieceDTO, Map<string, ZoneFill | null>>());
+  const fillOf = (p: PieceDTO, f: PieceFuseSpec) => {
+    if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+    const key = JSON.stringify([f.zone, f.insetNet, f.insetMm, f.darts]);
+    let m = fills.current.get(p);
+    if (!m) fills.current.set(p, (m = new Map()));
+    if (!m.has(key)) {
+      if (m.size > 64) m.clear();
+      m.set(key, zoneFillOf(p, f));
+    }
+    return m.get(key) ?? null;
+  };
   const byCi = useMemo(() => {
     const m = new Map<string, PieceDTO>();
     for (const p of pieces) if (p.originX != null && p.originY != null) m.set(ciOf(p), p);
@@ -131,7 +168,7 @@ export function FuseOverlay({
     return { r, pts, runs, sign, inner, darts };
   };
 
-  const draw = (p: PieceDTO, f: PieceFuseSpec, faint: boolean, liveRect: Rect | null) => {
+  const draw = (p: PieceDTO, f: PieceFuseSpec, faint: boolean) => {
     const { r, pts, runs, sign, inner, darts } = geo(p, f);
     const ox = p.originX ?? 0;
     const oy = p.originY ?? 0;
@@ -139,12 +176,27 @@ export function FuseOverlay({
     const mask = `fuse-mask-${p.id}`;
     const D = (r.insetMm + r.widthMm) / 10;
     const holes = r.darts === 'cut' ? darts.map((d) => offsetPoly(d, -r.insetMm / 10)) : [];
-    // Zone rect: stored piece-local mm, Y up → sheet cm, Y down.
-    let rect = liveRect;
-    if (!rect && f.mode === 'zone' && f.zone && 'rect' in f.zone) {
-      const [x0, y0, x1, y1] = f.zone.rect;
-      rect = { x: ox + x0 / 10, y: -(oy + y1 / 10), w: (x1 - x0) / 10, h: (y1 - y0) / 10 };
-    }
+    // Drawn zone (rect / spline): stored piece-local mm, Y up → sheet cm, Y down.
+    const toSheet = (q: Pt) => ({ x: ox + q.x / 10, y: -(oy + q.y / 10) });
+    const ring =
+      f.mode === 'zone' && isDrawnZone(f.zone)
+        ? flattenSpline(zonePoints(f.zone)).map(toSheet)
+        : null;
+    const fill = fillOf(p, f);
+    const fillPath = fill?.ok
+      ? fill.polys
+          .flatMap((poly) => [poly.outer, ...poly.holes])
+          .map(
+            (loop) =>
+              `M ${loop
+                .map((q) => {
+                  const s = toSheet(q);
+                  return `${s.x} ${s.y}`;
+                })
+                .join(' L ')} Z`,
+          )
+          .join(' ')
+      : null;
     let dxf: string | null = null;
     if (f.mode === 'zone' && f.zone && 'dxfPieceKey' in f.zone) {
       const src = byCi.get(f.zone.dxfPieceKey);
@@ -191,9 +243,12 @@ export function FuseOverlay({
                 <polygon key={`${edge.edge}-${index}`} points={str(band)} data-strip={edge.edge} />
               ));
             })}
-          {rect && <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} />}
+          {ring && !fillPath && <polygon points={str(ring)} />}
           {dxf && <polygon points={dxf} />}
         </g>
+        {fillPath && (
+          <path d={fillPath} fill={INK} fillOpacity={op} fillRule='evenodd' data-zone-fill='' />
+        )}
         {!faint && f.mode && (
           <polygon
             points={str(inner)}
@@ -227,19 +282,27 @@ export function FuseOverlay({
               )}
             </g>
           ))}
-        {!faint && rect && (
-          <rect
-            x={rect.x}
-            y={rect.y}
-            width={rect.w}
-            height={rect.h}
-            fill='none'
-            stroke={INK}
-            strokeWidth={1}
-            strokeDasharray='4 3'
-            vectorEffect='non-scaling-stroke'
-            clipPath={`url(#${clip})`}
-          />
+        {!faint && ring && (
+          <>
+            <polygon
+              points={str(ring)}
+              fill='none'
+              stroke={INK}
+              strokeOpacity={0.4}
+              strokeWidth={1}
+              strokeDasharray='3 3'
+              vectorEffect='non-scaling-stroke'
+            />
+            <polygon
+              points={str(ring)}
+              data-zone-line=''
+              fill='none'
+              stroke={fill?.ok === false ? 'var(--color-error)' : INK}
+              strokeWidth={1.5}
+              vectorEffect='non-scaling-stroke'
+              clipPath={`url(#${clip})`}
+            />
+          </>
         )}
         {!faint && dxf && (
           <polygon
@@ -258,6 +321,14 @@ export function FuseOverlay({
   const g = sp && sf ? geo(sp, sf) : null;
   const pts = g?.pts ?? [];
   const padOn = !!g && sf!.mode === 'zone';
+  // The selected zone's clipped area → the panel (cm²; null = invalid; undefined = not a drawn zone).
+  const selFill = sp && sf ? fillOf(sp, sf) : null;
+  const selArea = selFill ? (selFill.ok ? fuseAreaMm2(selFill.polys) / 100 : null) : undefined;
+  useEffect(() => {
+    if (!sel || !zoneBus) return;
+    zoneBus.setArea(sel, selArea);
+    return () => zoneBus.setArea(sel, undefined);
+  }, [sel, selArea, zoneBus]);
   const edgesOn = !!g && sf!.mode === 'strip';
   const hs = 8 * px;
 
@@ -268,7 +339,7 @@ export function FuseOverlay({
         if (!f || !f.mode) return null;
         const isSel = ci === sel;
         if (!isSel && fuseIncomplete(f)) return null;
-        return draw(p, f, !isSel, isSel ? live : null);
+        return draw(p, f, !isSel);
       })}
       {sp &&
         sf &&
@@ -286,45 +357,16 @@ export function FuseOverlay({
             }
           />
         ))}
-      {sp && sf && padOn && (
-        <polygon
-          points={str(pts)}
-          data-fuse-pad=''
-          fill='transparent'
-          style={{ cursor: 'crosshair' }}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            drag.current = { ...svgPoint(e), cx: e.clientX, cy: e.clientY };
-            (e.currentTarget as Element).setPointerCapture(e.pointerId);
-          }}
-          onPointerMove={(e) => {
-            const d = drag.current;
-            if (!d || Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 5) return;
-            const q = svgPoint(e);
-            setLive({
-              x: Math.min(d.x, q.x),
-              y: Math.min(d.y, q.y),
-              w: Math.abs(q.x - d.x),
-              h: Math.abs(q.y - d.y),
-            });
-          }}
-          onPointerUp={() => {
-            const d = drag.current;
-            drag.current = null;
-            if (!d || !sel) return;
-            if (live && live.w > 0.8 && live.h > 0.8) {
-              const ox = sp.originX ?? 0;
-              const oy = sp.originY ?? 0;
-              // Sheet cm, Y down → piece-local mm, Y up.
-              const x0 = (live.x - ox) * 10;
-              const x1 = (live.x + live.w - ox) * 10;
-              const y0 = (-(live.y + live.h) - oy) * 10;
-              const y1 = (-live.y - oy) * 10;
-              const r1 = (v: number) => Math.round(v * 10) / 10;
-              onChange(sel, { ...sf, zone: { rect: [r1(x0), r1(y0), r1(x1), r1(y1)] } });
-            }
-            setLive(null);
-          }}
+      {sp && sf && sel && g && padOn && (
+        <FuseZoneEditor
+          px={px}
+          piece={sp}
+          ci={sel}
+          spec={sf}
+          outline={pts}
+          inner={g.inner}
+          bus={zoneBus}
+          onChange={(next) => onChange(sel, next)}
         />
       )}
       {sp &&

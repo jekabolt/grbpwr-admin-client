@@ -33,7 +33,15 @@ import {
   projectPointToEdgeRun,
   trimEdgeRun,
 } from './edge-runs';
-import { FuseTopologyError, fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
+import {
+  FuseGeometryError,
+  FuseTopologyError,
+  fuseAreaMm2,
+  generateFuseGeometry,
+  signedArea,
+  zoneRingMm,
+} from './geometry';
+import { flattenSpline } from './spline';
 import type { FusePolygon, PieceFuseSpec } from './types';
 import {
   fuseFieldsFromWire,
@@ -281,6 +289,123 @@ export async function main() {
     spec: spec({ mode: 'zone', zone: { rect: [50, -10, 120, 40] } }),
   });
   near(fuseAreaMm2(zone), 47 * 37);
+
+  // L13 freeform zone. A rect is the 4-corner spline, and the editor's 4 corners + 4 straight mids.
+  const corners = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0, corner: true },
+    { x: x1, y: y0, corner: true },
+    { x: x1, y: y1, corner: true },
+    { x: x0, y: y1, corner: true },
+  ];
+  const withMids = (c: { x: number; y: number; corner: boolean }[]) =>
+    c.flatMap((p, i) => {
+      const q = c[(i + 1) % c.length];
+      return [p, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, corner: false }];
+    });
+  const splineZone = (points: { x: number; y: number; corner?: boolean }[]) =>
+    spec({ mode: 'zone', zone: { spline: { points } } });
+  const rectAsSpline = generateFuseGeometry({
+    outline,
+    spec: splineZone(corners(50, -10, 120, 40)),
+  });
+  near(fuseAreaMm2(rectAsSpline), fuseAreaMm2(zone));
+  const rectAsEight = generateFuseGeometry({
+    outline,
+    spec: splineZone(withMids(corners(50, -10, 120, 40))),
+  });
+  near(fuseAreaMm2(rectAsEight), fuseAreaMm2(zone));
+
+  // Bent: the top mid pushed up 12 mm inside the piece → more area than the rectangle, less than
+  // the triangle-capped bound (corners stay sharp, the bend is a smooth bulge).
+  const flat = withMids(corners(20, 20, 60, 50));
+  const bent = flat.map((p, i) => (i === 5 ? { ...p, y: p.y + 12 } : p));
+  const bentArea = fuseAreaMm2(generateFuseGeometry({ outline, spec: splineZone(bent) }));
+  assert.ok(bentArea > 40 * 30 + 100, `bent zone adds area (${bentArea})`);
+  assert.ok(bentArea < 40 * 30 + 40 * 12, `bent zone stays under the cap (${bentArea})`);
+
+  // All round: 8 points on a circle → a circle within 3 % (Catmull-Rom runs ~2 % inside), and the 0.5 mm chord bound holds.
+  const circle = Array.from({ length: 8 }, (_, i) => ({
+    x: 50 + 20 * Math.cos((i * Math.PI) / 4),
+    y: 40 + 20 * Math.sin((i * Math.PI) / 4),
+  }));
+  const roundArea = fuseAreaMm2(generateFuseGeometry({ outline, spec: splineZone(circle) }));
+  assert.ok(Math.abs(roundArea / (Math.PI * 400) - 1) < 0.03, `round zone ≈ circle (${roundArea})`);
+  const coarse = flattenSpline(circle);
+  const fine = flattenSpline(circle, 0.005);
+  const distToRing = (q: { x: number; y: number }) =>
+    Math.min(
+      ...coarse.map((a, i) => {
+        const b = coarse[(i + 1) % coarse.length];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const t = Math.max(
+          0,
+          Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)),
+        );
+        return Math.hypot(q.x - a.x - dx * t, q.y - a.y - dy * t);
+      }),
+    );
+  assert.ok(Math.max(...fine.map(distToRing)) <= 0.5, 'flattening keeps chord error ≤ 0.5 mm');
+
+  // Clipped to the inset contour: half outside the piece → only the inside half is cut.
+  const overhang = generateFuseGeometry({
+    outline,
+    spec: splineZone(
+      withMids(corners(80, 20, 120, 50)).map((p, i) => (i === 3 ? { ...p, x: 130 } : p)),
+    ),
+  });
+  near(fuseAreaMm2(overhang), (97 - 80) * 30);
+  assert.throws(
+    () => generateFuseGeometry({ outline, spec: splineZone(corners(200, 200, 240, 240)) }),
+    /zone geometry is empty/,
+  );
+  assert.throws(
+    () =>
+      zoneRingMm({
+        spline: {
+          points: [
+            { x: 0, y: 0, corner: true },
+            { x: 40, y: 40, corner: true },
+            { x: 40, y: 0, corner: true },
+            { x: 0, y: 40, corner: true },
+          ],
+        },
+      }),
+    FuseGeometryError,
+    'a bow tie is refused',
+  );
+  assert.throws(
+    () => zoneRingMm({ spline: { points: corners(0, 0, 10, 10).slice(0, 2) } }),
+    FuseGeometryError,
+  );
+  // spec → form fields → wire → form fields → spec keeps the spline and its corners.
+  const splineSpec = splineZone(bent);
+  const splineFields = writeFuseFields(splineSpec);
+  const splineWire = fuseFieldsToWire(splineFields);
+  assert.equal(splineWire.fusingZone?.rect, undefined);
+  assert.equal(splineWire.fusingZone?.spline?.points?.length, 8);
+  assert.deepEqual(
+    readFuseSpec({ ...splineFields, ...fuseFieldsFromWire(splineWire) }),
+    splineSpec,
+  );
+  const splineDxf = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' }],
+    pieces: [
+      {
+        identity: 'FRONT',
+        displayName: 'front',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: splineSpec,
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline }],
+      },
+    ],
+  });
+  assert.deepEqual(splineDxf.sheets[0].blocks, ['FRONT_M'], 'a spline zone reaches the DXF');
+  const bentPolygons = generateFuseGeometry({ outline, spec: splineSpec });
 
   const referenced = generateFuseGeometry({
     outline,
@@ -818,6 +943,7 @@ export async function main() {
         join(goldenDir, 'strip-offsets.svg'),
         svgOf(joinedStrip, 'strip · width 18 mm · offsets 12/9 mm · joined corner'),
       ),
+      writeFile(join(goldenDir, 'zone-spline.svg'), svgOf(bentPolygons, 'zone · rect+ · top bent')),
       writeFile(
         join(goldenDir, 'strip-curved.svg'),
         svgOf(curvedStrip, 'curved collar · 8 segments → 1 edge'),

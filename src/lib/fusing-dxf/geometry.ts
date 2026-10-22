@@ -2,7 +2,8 @@ import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import { offsetContour, OFFSET_SCALE } from 'lib/pattern-import/semantics/offset';
 import type { PtMm } from 'lib/pattern-import/types';
 import { edgeRunsOf, extendPolyline, stripBandPolygons, trimEdgeRun } from './edge-runs';
-import type { FuseGeometryInput, FusePolygon, PieceFuseSpec } from './types';
+import { SPLINE_MAX_POINTS, SPLINE_MIN_POINTS, flattenSpline, ringSelfIntersects } from './spline';
+import type { FuseGeometryInput, FusePolygon, FuseZone, PieceFuseSpec } from './types';
 
 const EPS = 1e-7;
 
@@ -169,21 +170,32 @@ function stripPaths(outline: readonly PtMm[], spec: PieceFuseSpec, insetMm: numb
   return Clipper.Union(bands, undefined, FillRule.NonZero);
 }
 
-function rectPath(rect: [number, number, number, number]): Path64 {
-  const [ax, ay, bx, by] = rect;
-  const x0 = Math.min(ax, bx);
-  const x1 = Math.max(ax, bx);
-  const y0 = Math.min(ay, by);
-  const y1 = Math.max(ay, by);
-  if (x1 - x0 <= EPS || y1 - y0 <= EPS) throw new FuseGeometryError('zone rect is empty');
-  return toPath(
-    cleanRing([
+/** A drawn zone (rect / spline) as one closed ring in piece-local mm, validated. */
+export function zoneRingMm(zone: Exclude<FuseZone, { dxfPieceKey: string }>): PtMm[] {
+  if ('rect' in zone) {
+    const [ax, ay, bx, by] = zone.rect;
+    const x0 = Math.min(ax, bx);
+    const x1 = Math.max(ax, bx);
+    const y0 = Math.min(ay, by);
+    const y1 = Math.max(ay, by);
+    if (x1 - x0 <= EPS || y1 - y0 <= EPS) throw new FuseGeometryError('zone rect is empty');
+    return cleanRing([
       { x: x0, y: y0 },
       { x: x1, y: y0 },
       { x: x1, y: y1 },
       { x: x0, y: y1 },
-    ]),
-  );
+    ]);
+  }
+  const points = zone.spline.points;
+  if (points.length < SPLINE_MIN_POINTS || points.length > SPLINE_MAX_POINTS)
+    throw new FuseGeometryError(
+      `zone spline needs ${SPLINE_MIN_POINTS}..${SPLINE_MAX_POINTS} points, has ${points.length}`,
+    );
+  if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
+    throw new FuseGeometryError('zone spline has a non-finite point');
+  const ring = cleanRing(flattenSpline(points));
+  if (ringSelfIntersects(ring)) throw new FuseGeometryError('zone spline crosses itself');
+  return ring;
 }
 
 /** Pure fuse geometry in piece-local millimetres. */
@@ -215,9 +227,10 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
     case 'zone': {
       const zone = input.spec.zone;
       if (!zone) throw new FuseGeometryError('zone mode has no zone');
-      if ('rect' in zone) {
+      if (!('dxfPieceKey' in zone)) {
+        // The drawn zone (rect or flattened spline) is clipped to the inset contour.
         polygons = polygonsOf(
-          Clipper.Intersect([rectPath(zone.rect)], [toPath(inset)], FillRule.NonZero),
+          Clipper.Intersect([toPath(zoneRingMm(zone))], [toPath(inset)], FillRule.NonZero),
         );
       } else {
         if (!input.zoneOutline)

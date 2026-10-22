@@ -85,6 +85,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
+import { createZoneBus } from './fuse-zone';
 import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
   readFuseSpec,
@@ -1022,6 +1023,8 @@ export function PieceMatchModal({
   // Canvas «Zoom»: a fused piece opens zoomed onto itself; the sheet's «whole sheet» button leaves
   // the zoom for that piece until its fuse mode changes again.
   const [zoomOut, setZoomOut] = useState<string | null>(null);
+  // The drawn zone's canvas ↔ panel bus (clipped area, undo stack), one per dialog.
+  const [zoneBus] = useState(createZoneBus);
   // Which sheet is on screen. Several files reach one fabric slot when the same size was
   // re-uploaded (revisions) — they are separate drawings and must not be drawn on top of
   // each other.
@@ -2350,6 +2353,8 @@ export function PieceMatchModal({
         toggleBox={TOGGLE_BOX}
         onChange={(next) => setFuse(ci, next)}
         onAddMaterial={() => setPickingFuseOf(ci)}
+        ci={ci}
+        zoneBus={zoneBus}
       />
     );
     fuseDock = fuseFields;
@@ -2531,6 +2536,7 @@ export function PieceMatchModal({
                     sel={zoomed}
                     fuseOf={fuseOfCi}
                     onChange={setFuse}
+                    zoneBus={zoneBus}
                   />
                 )}
                 tall

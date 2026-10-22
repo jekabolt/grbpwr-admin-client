@@ -1,9 +1,19 @@
 // The fuse fields of the piece panel, variant «Fold» (owner OK 2026-10-22): FUSING no / whole /
 // strip / zone with `⋯` in the door; INTERLINING (always shown, prefilled when the BOM has one);
 // WIDTH MM for a strip; `⋯` opens INSET MM / FUSIBLE GRAIN / DARTS in place, and opens by itself
-// when any of them is off its default. Desktop: in the panel. Phone: docked above the footer.
-import { useState } from 'react';
-import { Button, Chip, Combobox, DotsHorizontalIcon, Select, Text, type ComboboxGroup } from 'ui';
+// when any of them is off its default. ZONE (L13 Rect+): clipped area in the door, sharp / round,
+// undo / reset. Desktop: in the panel. Phone: docked above the footer.
+import { useState, useSyncExternalStore } from 'react';
+import {
+  Button,
+  Chip,
+  Combobox,
+  DotsHorizontalIcon,
+  EmptyCell,
+  Select,
+  Text,
+  type ComboboxGroup,
+} from 'ui';
 import {
   DART_ITEMS,
   DEFAULT_INSET_MM,
@@ -21,6 +31,7 @@ import {
   type FuseMode,
   type PieceFuseSpec,
 } from './fuse-spec';
+import { allCorners, isDrawnZone, resetZone, withCorners, type ZoneBus } from './fuse-zone';
 
 export type InterliningLine = { key: string; label: string; color: string };
 
@@ -97,6 +108,8 @@ export function FuseFields({
   toggleBox,
   onChange,
   onAddMaterial,
+  ci,
+  zoneBus,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -107,6 +120,9 @@ export function FuseFields({
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
   onAddMaterial: () => void;
+  /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
+  ci?: string;
+  zoneBus?: ZoneBus;
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
@@ -202,6 +218,16 @@ export function FuseFields({
           )}
         </div>
       )}
+      {spec.mode === 'zone' && ci && zoneBus && (
+        <ZoneRow
+          spec={spec}
+          ci={ci}
+          bus={zoneBus}
+          readOnly={readOnly}
+          toggleBox={toggleBox}
+          onChange={onChange}
+        />
+      )}
       {on && more && (
         <div className='grid grid-cols-3 items-end gap-2'>
           <FuseField label='inset mm'>
@@ -245,5 +271,68 @@ export function FuseFields({
         </div>
       )}
     </div>
+  );
+}
+
+/** ZONE: the clipped area, all corners sharp / round, undo, back to the rectangle. */
+function ZoneRow({
+  spec,
+  ci,
+  bus,
+  readOnly,
+  toggleBox,
+  onChange,
+}: {
+  spec: PieceFuseSpec;
+  ci: string;
+  bus: ZoneBus;
+  readOnly: boolean;
+  toggleBox: string;
+  onChange: (next: PieceFuseSpec) => void;
+}) {
+  useSyncExternalStore(bus.subscribe, bus.version);
+  const area = bus.area(ci);
+  const drawn = isDrawnZone(spec.zone);
+  const canUndo = bus.canUndo(ci);
+  const write = (zone: PieceFuseSpec['zone']) => {
+    bus.push(ci, spec.zone);
+    onChange({ ...spec, zone });
+  };
+  const chip = (label: string, on: boolean, off: boolean, onClick: () => void) => (
+    <Chip
+      className={toggleBox}
+      selected={on}
+      pressed={on}
+      disabled={readOnly || off}
+      aria-label={label}
+      onClick={onClick}
+    >
+      {label}
+    </Chip>
+  );
+  return (
+    <FuseField
+      label='zone'
+      error={drawn && area === null}
+      door={
+        <Text size='micro' component='span' data-zone-area={area ?? ''}>
+          {area != null ? `${Math.round(area)} cm²` : <EmptyCell />}
+        </Text>
+      }
+    >
+      <div className='grid grid-cols-2 gap-1'>
+        {chip('sharp', drawn && allCorners(spec.zone, true), !drawn, () =>
+          write(withCorners(spec.zone, true)),
+        )}
+        {chip('round', drawn && allCorners(spec.zone, false), !drawn, () =>
+          write(withCorners(spec.zone, false)),
+        )}
+        {chip('undo', false, !canUndo, () => {
+          const prev = bus.pop(ci);
+          if (prev) onChange({ ...spec, zone: prev.zone });
+        })}
+        {chip('reset', false, !drawn, () => write(resetZone(spec.zone)))}
+      </div>
+    </FuseField>
   );
 }
