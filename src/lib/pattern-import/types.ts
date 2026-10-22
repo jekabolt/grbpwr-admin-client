@@ -1651,6 +1651,12 @@ export type PieceSizeSpec = {
   sizeToken: string; // card token written into the block name
   sizeId: number;
   cut: PtMm[];
+  /**
+   * Additional layer-1 loops in the same block. Positive (CCW) loops are separate cut islands;
+   * negative (CW) loops are holes. Used by derived shapes such as fusible strips; absent for the
+   * ordinary one-outline pattern-import path.
+   */
+  cutLoops?: PtMm[][];
   seam: PtMm[] | null;
   grain: GrainFeature | null;
   notches: NotchFeature[];

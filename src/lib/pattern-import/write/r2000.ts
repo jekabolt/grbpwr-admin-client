@@ -314,6 +314,7 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     blockBegin(o, name, false, name);
     if (b.seam) lw(o, '14', b.seam, true); // seam line first, as CLO does
     lw(o, '1', b.cut, true); // final cutting line
+    for (const loop of b.cutLoops) lw(o, '1', loop, true);
     for (const ip of b.internal) lw(o, '8', ip.pts, ip.closed);
     for (const d of b.drills) lw(o, '8', drillSquare(d), true);
     if (b.grain) lw(o, '7', [b.grain.tail, b.grain.tip, b.grain.barb], false);

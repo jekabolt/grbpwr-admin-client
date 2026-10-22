@@ -84,6 +84,8 @@ export type PlannedBlock = {
   displayName: string;
   annotation: string[];
   cut: PtMm[];
+  /** Additional layer-1 islands/holes; winding is preserved. */
+  cutLoops: PtMm[][];
   seam: PtMm[] | null;
   /** L8 lines: internal features, then the fold line. Open 2-pt lines already densified. */
   internal: { pts: PtMm[]; closed: boolean }[];
@@ -152,6 +154,7 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
   return {
     ...s,
     cut,
+    cutLoops: s.cutLoops?.map((loop) => mapPts(t, loop)),
     seam: s.seam ? mapPts(t, s.seam) : null,
     grain,
     notches,
@@ -164,6 +167,18 @@ function transformSize(s: PieceSizeSpec, t: Affine): PieceSizeSpec {
 }
 
 const ccw = (pts: PtMm[]) => (signedArea(pts) < 0 ? [...pts].reverse() : pts);
+const preserveWinding = (before: readonly PtMm[], after: PtMm[]) =>
+  signedArea(before) < 0 === signedArea(after) < 0 ? after : [...after].reverse();
+
+const cutBox = (s: PieceSizeSpec) => {
+  let box = bboxOf(s.cut);
+  for (const loop of s.cutLoops ?? []) box = unionBox(box, bboxOf(loop));
+  return box;
+};
+
+const cutArea = (cut: readonly PtMm[], loops: readonly PtMm[][]) =>
+  areaOf(cut) +
+  loops.reduce((sum, loop) => sum + (signedArea(loop) < 0 ? -areaOf(loop) : areaOf(loop)), 0);
 
 // ── pairs ──────────────────────────────────────────────────────────────────────────────────
 
@@ -327,7 +342,7 @@ export function planBlocks(
   for (const w of written) {
     if (!w.sizes.length) continue;
     let box = bboxOf(w.sizes[0].cut);
-    for (const s of w.sizes) box = unionBox(box, bboxOf(s.cut)); // srcT already applied in derived sizes
+    for (const s of w.sizes) box = unionBox(box, cutBox(s)); // srcT already applied in derived sizes
     const W = box.maxX - box.minX;
     const H = box.maxY - box.minY;
     if (cx > 0 && cx + W > LAYOUT_ROW_MAX_MM) {
@@ -357,6 +372,9 @@ export function planBlocks(
       const cutS = stripSpikes(simplify(s.cut, true, WRITE_SIMPLIFY_MM));
       const seamS = s.seam ? stripSpikes(simplify(s.seam, true, WRITE_SIMPLIFY_MM)) : null;
       const cut = ccw(cutS.ring);
+      const cutLoops = (s.cutLoops ?? []).map((loop) =>
+        preserveWinding(loop, stripSpikes(simplify(loop, true, WRITE_SIMPLIFY_MM)).ring),
+      );
       const seam = seamS ? ccw(seamS.ring) : null;
       // …and never silently dropped (Codex, r5a): what semantics did not already turn into a notch
       // and still goes in and out of the cut line ≥ notchMinMm is written as a notch there, warned
@@ -410,10 +428,11 @@ export function planBlocks(
       const size: PieceSizeSpec = {
         ...s,
         cut,
+        cutLoops,
         seam,
         notches: sNotches,
-        bbox: bboxOf(cut),
-        areaMm2: areaOf(cut),
+        bbox: cutBox({ ...s, cut, cutLoops }),
+        areaMm2: cutArea(cut, cutLoops),
       };
       outSizes.push(size);
       blocks.push({
@@ -429,6 +448,7 @@ export function planBlocks(
         displayName: w.spec.displayName,
         annotation,
         cut,
+        cutLoops,
         seam,
         internal,
         foldLines,
