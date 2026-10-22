@@ -64,8 +64,12 @@ import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { drawingFromMarker } from 'lib/pattern-export/drawing';
+import { downloadFile } from 'lib/pattern-export/download';
+import { exportRollPrint, ROLL_DEFAULTS, type RollSpec } from 'lib/pattern-export/roll-print';
+import { markerStripCount, planMarkerRollPrint } from 'lib/pattern-export/roll-strips';
 import { plotFromMarker } from 'lib/pattern-export/plot-drawing';
 import { PatternExportItems } from '../pattern-export/export-menu';
+import { pdfDeps } from '../pattern-export/download';
 import { CANVAS_ICON_BTN, LayoutEditor } from './layout-editor';
 import { isFetchFailure } from './dxf-warnings';
 import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
@@ -223,6 +227,30 @@ const END_LOSS_DEFAULT_CM = 2;
 // «fit to the table»: пробные прогоны коротким бюджетом, не больше стольких попыток.
 const FIT_PROBE_BUDGET_MS = 4000;
 const FIT_MAX_ATTEMPTS = 6;
+const PRINT_ROLL_STORAGE_KEY = 'grbpwr.printRoll';
+
+function storedPrintRoll(): RollSpec | null {
+  try {
+    const raw = window.localStorage.getItem(PRINT_ROLL_STORAGE_KEY);
+    if (!raw) return null;
+    const last = (JSON.parse(raw) as { last?: Partial<RollSpec> } | null)?.last;
+    const widthCm = Number(last?.widthCm);
+    const maxSheetM = Number(last?.maxSheetM ?? ROLL_DEFAULTS.maxSheetM);
+    const edgeMm = Number(last?.edgeMm ?? ROLL_DEFAULTS.edgeMm);
+    if (
+      !Number.isFinite(widthCm) ||
+      widthCm <= 0 ||
+      !Number.isFinite(maxSheetM) ||
+      maxSheetM <= 0 ||
+      !Number.isFinite(edgeMm) ||
+      edgeMm < 0
+    )
+      return null;
+    return { widthCm, maxSheetM, edgeMm };
+  } catch {
+    return null;
+  }
+}
 
 // СНИМОК ТОГО, С ЧЕМ ЗАПУЩЕН ПРОГОН. Сохранение и холст читают его, а не текущие поля: настройки
 // цеха и артикул догружаются асинхронно и могли сменить припуск или ширину посреди прогона, и
@@ -1509,6 +1537,7 @@ export function NestingModal({
   // ── «сохранить раскладку» (Ф4б) ────────────────────────────────────────────────────────
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  const [markerPdfBusy, setMarkerPdfBusy] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [markerName, setMarkerName] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
@@ -3160,6 +3189,38 @@ export function NestingModal({
       );
     });
   const titleFabric = (lockedSlot ?? slot)?.name?.trim();
+  const markerRoll = storedPrintRoll();
+  let markerStrips = 0;
+  if (markerRoll) {
+    try {
+      markerStrips = markerStripCount(displayWidth * 10, markerRoll);
+    } catch {
+      markerStrips = 0;
+    }
+  }
+  const markerRollTitle =
+    fileParts()
+      .filter((part): part is string => !!part && !!part.trim())
+      .join('-') || 'marker';
+  const downloadMarkerRoll = async () => {
+    if (!markerRoll || markerStrips < 1 || !effective || !dxfReady || markerPdfBusy) return;
+    setMarkerPdfBusy(true);
+    try {
+      const drawing = drawingFromMarker(effective, displayPieces, displayWidth, markerRollTitle);
+      const plan = planMarkerRollPrint(drawing, displayWidth, markerRoll);
+      const deps = await pdfDeps();
+      const exported = exportRollPrint(plan, markerRollTitle, markerRoll, deps);
+      downloadFile(exported.blob, exported.fileName);
+      showMessage(
+        `saved · ${exported.fileName} · ${plan.sheets.length} ${plan.sheets.length === 1 ? 'sheet' : 'sheets'}`,
+        'success',
+      );
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : 'marker PDF not exported', 'error');
+    } finally {
+      setMarkerPdfBusy(false);
+    }
+  };
   // Выгрузка: та же кнопка 28×28, что «по ширине» и «весь маркер», в той же группе угла холста.
   const downloadButton =
     effective && !running ? (
@@ -3200,6 +3261,21 @@ export function NestingModal({
           >
             DXF
           </Button>
+          {markerRoll && markerStrips > 0 && (
+            <Button
+              type='button'
+              variant='underline'
+              disabled={!dxfReady || markerPdfBusy}
+              title={exportBlockReason || undefined}
+              onClick={() => void downloadMarkerRoll()}
+            >
+              {markerPdfBusy
+                ? 'PDF…'
+                : markerStrips === 1
+                  ? `PDF · roll ${markerRoll.widthCm}`
+                  : `PDF · ${markerStrips} strips`}
+            </Button>
+          )}
           {/* The marker at 1:1 on paper (one sheet / tiles) — the EFFECTIVE placements, as DXF. */}
           <PatternExportItems
             disabled={!dxfReady}
