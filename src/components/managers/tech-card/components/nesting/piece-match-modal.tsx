@@ -1615,12 +1615,39 @@ export function PieceMatchModal({
   function apply() {
     setSaving(true);
     try {
+      // Read at commit time, not from the render-time snapshot: the operator can have added or
+      // renamed a piece in the table behind this dialog while it was open.
+      const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+      const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+      const live = all.filter((p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()));
+
+      // A renamed new piece leaves its old buffer behind because another block may still resolve
+      // to that name. Count it only when this apply really creates that name; existing live pieces
+      // likewise contribute only through the edit keyed to a piece that survives this apply.
+      const occupiedNames = new Set(
+        withEditedNames(live)
+          .map((p) => p.name?.trim().toLowerCase())
+          .filter(Boolean) as string[],
+      );
+      const createdEditKeys = new Set<string>();
+      for (const r of rows) {
+        if (r.choice !== CREATE) continue;
+        const name = (draftNames[r.block.toLowerCase()] ?? '').trim() || defaultPieceName(r);
+        const key = newEditKey(name);
+        if (occupiedNames.has(key)) continue;
+        occupiedNames.add(key);
+        createdEditKeys.add(key);
+      }
+      const committedEdits = [
+        ...live.map((p) => pieceEdits[(p.lineKey ?? '').trim().toLowerCase()]),
+        ...[...createdEditKeys].map((key) => newEdits[key]),
+      ].filter((edit): edit is PieceFields => edit !== undefined);
       // Only slots still selected by a fused edit are committed. This drops the provisional
       // material-less slot when the same piece picked a catalog material before SAVE, while keeping
       // it when another fused piece still uses it. The root write is deliberate: the BOM tab owns
       // the sole useFieldArray for this name and receives array-root setValue broadcasts.
       const referencedPendingKeys = new Set(
-        [...Object.values(pieceEdits), ...Object.values(newEdits)]
+        committedEdits
           .map((edit) => (edit.fuse?.mode ? edit.fuse.bomLineKey.trim() : ''))
           .filter(Boolean),
       );
@@ -1677,16 +1704,11 @@ export function PieceMatchModal({
         Object.entries(newEdits).map(([key, edit]) => [key, remapFuseLine(edit)]),
       ) as typeof newEdits;
       const created: NonNullable<TechCardFormData['pieces']> = [];
-      // Read at commit time, not from the render-time snapshot: the operator can have added or
-      // renamed a piece in the table behind this dialog while it was open.
-      const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
       // Детали, которых в чертеже больше нет и которые оператор не оставил вручную. Всё
       // дальнейшее считается уже БЕЗ них: имена (иначе новый блок с тем же именем привязался бы
       // к уходящей детали), набор живых ключей (по нему отсеиваются её алиасы) и сама запись
       // массива. Каскад на сервере (строки рецепта, замеренные площади) сработает при
       // СОХРАНЕНИИ карточки, не здесь.
-      const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
-      const live = all.filter((p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()));
       // Ссылки на деталь снимаются ДО того, как она исчезнет, — тот же контракт, что у
       // pieces-tab.removePiece: операция, всё ещё называющая удалённую деталь, роняет сохранение
       // на сервере (operations[N].piece_line_key: no cut-piece "…") и откатывает всю транзакцию —

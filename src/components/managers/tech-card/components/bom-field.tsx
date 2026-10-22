@@ -796,6 +796,9 @@ export function BomField({
       });
       const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
       (pieces ?? []).forEach((p, pi) => {
+        if (p.fusingBomLineKey === removedKey) {
+          setValue(`pieces.${pi}.fusingBomLineKey`, '', { shouldDirty: true });
+        }
         (p.materials ?? []).forEach((m, mi) => {
           if (m.bomLineKey === removedKey) {
             setValue(`pieces.${pi}.materials.${mi}.bomLineKey`, '', { shouldDirty: true });
