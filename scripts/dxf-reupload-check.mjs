@@ -25,6 +25,7 @@ const FILES = {
   gCombo: `${GOLDEN}/g-combo.dxf`,
   g4split: `${GOLDEN}/g4-split.dxf`,
   gSame: `${GOLDEN}/g-same.dxf`,
+  gOther: `${GOLDEN}/g-other.dxf`,
 };
 const SIZES = ['xs', 's', 'm', 'l', 'xl'];
 const MAIN = { bomLineKey: 'bom-main', fabricPurpose: 'MAIN' };
@@ -133,11 +134,13 @@ function makeDeps(M, store, log, faults = {}) {
       return [];
     },
     mintKey: () => `new-${++minted}`,
-    makePiece: (s) => ({
+    // `from` — деталь карточки, от которой новая родилась (L5 п.6): форма переносит с неё крой.
+    makePiece: (s, from) => ({
       lineKey: s.lineKey,
       name: s.name,
       piecesPerGarment: s.piecesPerGarment,
       cutSymmetry: s.cutSymmetry,
+      bornFrom: from?.lineKey ?? '',
     }),
     makeAlias: (s) => ({
       id: `al-new-${s.blockName}`,
@@ -494,11 +497,60 @@ async function main() {
         'переход на join',
       );
       is(tag, out.result.opIndexOf, [0, 1, 2, 3, 5, 6, 7, 8, 9], 'старый индекс → новый');
+      const parts = new Set(j?.partKeys ?? []);
+      is(
+        tag,
+        out.pieces.filter((p) => parts.has(p.lineKey)).map((p) => p.bornFrom),
+        [...parts].map(() => K('BP')),
+        'части разреза рождены от BP (крой переносится)',
+      );
+      yes(
+        tag,
+        out.pieces.filter((p) => !parts.has(p.lineKey) && p.bornFrom).length === 0,
+        'прочие детали ни от кого не рождены',
+      );
       yes(
         tag,
         M.sweepOf({ pieces: out.pieces, operations: out.operations }).length === 0,
         'сборка чистая',
       );
+    }
+  }
+
+  // ── g-combo: новая деталь (PKT) — новая по-настоящему, крой ни от кого ─────────────────────
+  {
+    const tag = 'carry';
+    const { out } = await run({ name: 'g-combo.dxf', bytes: B.gCombo });
+    if (out.kind === 'applied')
+      yes(
+        tag,
+        out.result.addedPieceKeys.every((k) => !out.pieces.find((p) => p.lineKey === k)?.bornFrom),
+        'добавленные детали без источника',
+      );
+  }
+
+  // ── чужой файл: признак плана 'foreign' (L5a) → лист ДОПОЛНИТЕЛЬНЫЙ, карточка не меняется ────
+  {
+    const tag = 'foreign';
+    is(
+      tag,
+      [
+        M.isForeignPlan({ status: 'ready', refused: 'foreign' }),
+        M.isForeignPlan({ status: 'foreign' }),
+        M.isForeignPlan({ status: 'ready' }, { refused: { reason: 'foreign' } }),
+        M.isForeignPlan({ status: 'ready' }, { refused: { reason: 'sweep' } }),
+        M.isForeignPlan({ status: 'ready', refused: null }),
+      ],
+      [true, true, true, false, false],
+      'признак читается структурно',
+    );
+    const { out, log } = await run({ name: 'g-other.dxf', bytes: B.gOther });
+    if (out.kind === 'foreign') {
+      is(tag, [out.rowIndex, log.uploads.length], [0, 1], 'загружен один файл, размер от строки 0');
+      is(tag, out.row.filename, 'g-other.dxf', 'это сам файл');
+    } else {
+      // До L5a сверка «другой файл» только выключает матч по форме — исход ещё не 'foreign'.
+      console.log(`  · g-other: ${out.kind} (foreign arrives with L5a)`);
     }
   }
 

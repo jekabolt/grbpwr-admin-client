@@ -4,6 +4,7 @@ export {
   RECONCILE_PARSE,
   REUPLOAD_SNAPSHOT_REASON,
   externalPieceRefs,
+  isForeignPlan,
   markJumpParams,
   remapIssueNumbers,
   reuploadSheet,

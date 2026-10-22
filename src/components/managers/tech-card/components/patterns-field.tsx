@@ -94,6 +94,7 @@ import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
   applySizeMap,
@@ -543,6 +544,9 @@ export function PatternsField({
   const [uploading, setUploading] = useState<Record<string, number>>({});
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
   const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
+  // A re-upload changed the slot's geometry: piece areas are measured on the next save even while
+  // another tab is open (latched for the session).
+  const [areasArmed, setAreasArmed] = useState(false);
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
@@ -1217,16 +1221,25 @@ export function PatternsField({
         return out;
       },
       mintKey: () => ulid(),
-      makePiece: (seed: NewPieceSeed): FormPiece => ({
+      // A piece born from a card piece (a split part from its parent) takes the parent's cut: grain,
+      // grading, fusing and the per-colourway fabric. Name, callout and note stay the parent's own.
+      makePiece: (seed: NewPieceSeed, from?: FormPiece): FormPiece => ({
         lineKey: seed.lineKey,
         name: seed.name,
         piecesPerGarment: seed.piecesPerGarment,
         cutSymmetry: seed.cutSymmetry,
-        grainline: '',
-        fused: false,
+        grainline: from?.grainline ?? '',
+        fused: from?.fused ?? false,
+        ...(from
+          ? {
+              ungraded: from.ungraded,
+              fusingMode: from.fusingMode,
+              fusingWidthMm: from.fusingWidthMm,
+            }
+          : {}),
         calloutNumber: 0,
         note: '',
-        materials: [],
+        materials: (from?.materials ?? []).map((m) => ({ ...m })),
       }),
       makeAlias: (seed: NewAliasSeed): FormAlias => ({
         bomLineKey: seed.bomLineKey,
@@ -1282,6 +1295,16 @@ export function PatternsField({
     ];
     const refsNow = () =>
       externalPieceRefs(piecesNow(), cardRead?.colorways, cardRead?.pieceAreaScopes, seamKeys());
+    // The confirmed seams the reconcile re-measures on a reshaped piece: the store's rows (saved +
+    // optimistic) once it holds this card, else the card read's.
+    const seamsNow = (): TechCardSeamWire[] => {
+      const st = useSeamsStore.getState();
+      const rows =
+        techCardId && st.cardId === techCardId
+          ? rowsOf(st).map(toWire)
+          : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
+      return rows.filter((r) => r.status === 'TECH_CARD_SEAM_STATUS_CONFIRMED');
+    };
     // EVERYTHING the plan is made from. The files are read for seconds; if any of it moved meanwhile
     // (a row rebound to another material, a sheet added to the slot, the BOM re-sorted, a step or a
     // piece edited), the plan belongs to another card and is not applied.
@@ -1325,6 +1348,7 @@ export function PatternsField({
           isDxf: (url) => isDxfUrl(url),
           sizeTokens: [...dictTokens.keys()],
           externalRefs: refsNow(),
+          seams: seamsNow(),
           target,
         },
         { name: picked.name, bytes: new Uint8Array(await picked.arrayBuffer()) },
@@ -1344,6 +1368,27 @@ export function PatternsField({
     if (out.kind === 'refused') {
       say(REFUSAL_WORDS[out.why], 'error');
       return 'refused';
+    }
+    // Another garment's file: the card stays as it is, the file joins the slot as one more sheet,
+    // sized like the sheet it was dropped on. No units, sizes or pieces questions.
+    if (out.kind === 'foreign') {
+      const live = (getValues('patterns') ?? []) as PatternRow[];
+      const near = live[out.rowIndex];
+      const sizeId =
+        near && scopeKeyOfBinding(near.fabricPurpose, near.bomLineKey, scopes) === scopeKey
+          ? near.sizeId ?? storageSizeId
+          : storageSizeId;
+      append({
+        sizeId,
+        lineKey: ulid(),
+        ...out.row,
+        name: autoName(scopeKey, picked),
+        ...bindingOf(scopeKey),
+      });
+      setAreasArmed(true);
+      autosave.request('dxf-new-sheet');
+      say('new sheet', 'success');
+      return 'foreign';
     }
     // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
     const live = (getValues('patterns') ?? []) as PatternRow[];
@@ -1378,6 +1423,9 @@ export function PatternsField({
     setValue(`patterns.${i}.uploadedAt`, '', { shouldDirty: true });
     // The save whose payload carries this new sheet url carries the snapshot reason (index.tsx).
     armReuploadSnapshot(techCardId, out.row.url, out.replacedUrl);
+    // The areas of the new geometry are measured once the save lands, even if the marks jump away
+    // from this tab (useAutoPieceAreas otherwise waits for the tab).
+    setAreasArmed(true);
     autosave.request('dxf-reupload');
     const ops = out.operations;
     setParams((prev) => markJumpParams(prev, ops) ?? prev, { replace: true });
@@ -1725,7 +1773,7 @@ export function PatternsField({
   useUniPrefill();
   const areaRefusals = useAutoPieceAreas({
     techCardId,
-    enabled: active && canEdit && canPublishIndex && !!techCardId,
+    enabled: (active || areasArmed) && canEdit && canPublishIndex && !!techCardId,
   });
 
   const openPieces = (g: (typeof scopeGroups)[number]) =>
