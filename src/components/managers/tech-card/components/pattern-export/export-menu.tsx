@@ -23,8 +23,11 @@ export function PatternExportItems({
   disabled,
   title,
   onDone,
+  only,
 }: {
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
+  /** Given → only these formats are listed (the original stays when given). */
+  only?: readonly ExportFormatId[];
   /** Given → the «PLT · plotter» item is shown. */
   plot?: PlotSource;
   /** Given → the «DXF · original» item is shown first. */
@@ -97,21 +100,45 @@ export function PatternExportItems({
           {busy === 'dxf' ? 'DXF · original…' : 'DXF · original'}
         </Button>
       )}
-      {EXPORT_FORMATS.filter((f) => f.id !== 'plt' || plot).map((f) => (
-        <Button
-          key={f.id}
-          type='button'
-          variant='underline'
-          disabled={disabled || busy !== null}
-          title={title || f.hint}
-          onClick={() => void run(f.id)}
-        >
-          {busy === f.id ? `${f.label}…` : f.label}
-        </Button>
-      ))}
+      {EXPORT_FORMATS.filter((f) => (f.id !== 'plt' || plot) && (!only || only.includes(f.id))).map(
+        (f) => (
+          <Button
+            key={f.id}
+            type='button'
+            variant='underline'
+            disabled={disabled || busy !== null}
+            title={title || f.hint}
+            onClick={() => void run(f.id)}
+          >
+            {busy === f.id ? `${f.label}…` : f.label}
+          </Button>
+        ),
+      )}
     </>
   );
 }
+
+/** The 12px download glyph of the file row. */
+export function DownloadGlyph() {
+  return (
+    <svg width='12' height='12' viewBox='0 0 14 14' aria-hidden fill='none'>
+      <path d='M7 1.5v8M3.5 6 7 9.5 10.5 6M2 12.5h10' stroke='currentColor' strokeWidth='1.2' />
+    </svg>
+  );
+}
+
+/** Its mirror: a new file goes up (the row's `new version`). */
+export function UploadGlyph() {
+  return (
+    <svg width='12' height='12' viewBox='0 0 14 14' aria-hidden fill='none'>
+      <path d='M7 12.5v-8M3.5 8 7 4.5 10.5 8M2 1.5h10' stroke='currentColor' strokeWidth='1.2' />
+    </svg>
+  );
+}
+
+/** The framed 24px icon button of the file row (download, new version). */
+export const ROW_ICON_BTN =
+  'inline-flex h-6 min-w-6 items-center justify-center border border-borderColor bg-bgColor px-1 text-micro hover:opacity-70';
 
 /** A small «⤓» trigger with the list — the per-file menu on the patterns tab. */
 export function PatternExportMenu({
@@ -119,39 +146,46 @@ export function PatternExportMenu({
   plot,
   original,
   label,
+  only,
+  after,
 }: {
   drawing: () => PatternDrawing | Promise<PatternDrawing>;
   plot?: PlotSource;
   original?: OriginalSource;
   label: string;
+  only?: readonly ExportFormatId[];
+  /** Under a hairline, after the formats; gets the close callback. */
+  after?: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
   return (
     <GenericPopover
       noTail
       open={open}
       onOpenChange={setOpen}
-      className='w-[180px]'
+      className='w-44'
       contentProps={{ align: 'end', side: 'bottom', sideOffset: 4 }}
       triggerProps={{
-        'aria-label': `download ${label} as`,
-        title: 'download as…',
-        className:
-          'inline-flex h-6 min-w-6 items-center justify-center border border-borderColor bg-bgColor px-1 text-micro hover:opacity-70',
+        'aria-label': `download ${label}`,
+        title: 'download',
+        className: ROW_ICON_BTN,
       }}
-      openElement={
-        <svg width='12' height='12' viewBox='0 0 14 14' aria-hidden fill='none'>
-          <path d='M7 1.5v8M3.5 6 7 9.5 10.5 6M2 12.5h10' stroke='currentColor' strokeWidth='1.2' />
-        </svg>
-      }
+      openElement={<DownloadGlyph />}
     >
       <div className='flex flex-col items-start gap-1'>
         <PatternExportItems
           drawing={drawing}
           plot={plot}
           original={original}
-          onDone={() => setOpen(false)}
+          only={only}
+          onDone={close}
         />
+        {after && (
+          <div className='flex w-full flex-col items-start gap-1 border-t border-hairline pt-1'>
+            {after(close)}
+          </div>
+        )}
       </div>
     </GenericPopover>
   );

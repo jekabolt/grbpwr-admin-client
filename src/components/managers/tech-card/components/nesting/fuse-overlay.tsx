@@ -4,6 +4,14 @@
 // or click a DXF block for the zone, click a dart to toggle cut / fuse over. Other fused pieces
 // show faint. Coordinates: the sheet's own SVG space — cm, Y down.
 import { useMemo, useRef, useState } from 'react';
+import {
+  edgeRunsOf,
+  extendPolyline,
+  pointOnEdgeRun,
+  projectPointToEdgeRun,
+  stripBandPolygons,
+  trimEdgeRun,
+} from 'lib/fusing-dxf/edge-runs';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
 
@@ -116,14 +124,15 @@ export function FuseOverlay({
   const geo = (p: PieceDTO, f: PieceFuseSpec) => {
     const r = resolveFuse(f);
     const pts = p.poly.map((q) => world(p, q));
-    const sign = signedArea(pts) > 0 ? 1 : -1;
+    const sign: 1 | -1 = signedArea(pts) > 0 ? 1 : -1;
     const inner = r.insetMm > 0 ? offsetPoly(pts, r.insetMm / 10) : pts;
     const darts = dartsOf(p).map((d) => d.map((q) => world(p, q)));
-    return { r, pts, sign, inner, darts };
+    const runs = edgeRunsOf(pts);
+    return { r, pts, runs, sign, inner, darts };
   };
 
   const draw = (p: PieceDTO, f: PieceFuseSpec, faint: boolean, liveRect: Rect | null) => {
-    const { r, pts, sign, inner, darts } = geo(p, f);
+    const { r, pts, runs, sign, inner, darts } = geo(p, f);
     const ox = p.originX ?? 0;
     const oy = p.originY ?? 0;
     const clip = `fuse-clip-${p.id}`;
@@ -160,18 +169,27 @@ export function FuseOverlay({
         <g clipPath={`url(#${clip})`} mask={`url(#${mask})`} fill={INK} fillOpacity={op}>
           {f.mode === 'whole' && <polygon points={str(inner)} />}
           {f.mode === 'strip' &&
-            f.edges.map((e) => {
-              const i = e.edge;
-              const a = pts[i];
-              const b = pts[(i + 1) % pts.length];
-              if (!a || !b) return null;
-              const L = len(sub(b, a)) || 1;
-              const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
-              const n = inward(a, b, sign);
-              const s0 = add(a, u, e.startMm / 10 - (e.startMm ? 0 : D));
-              const e0 = add(b, u, -(e.endMm / 10) + (e.endMm ? 0 : D));
-              const band = [add(s0, n, -0.5), add(e0, n, -0.5), add(e0, n, D), add(s0, n, D)];
-              return <polygon key={i} points={str(band)} data-strip={i} />;
+            f.edges.flatMap((edge) => {
+              const run = runs[edge.edge];
+              if (!run) return [];
+              const previous =
+                runs.length > 1
+                  ? f.edges.find(
+                      (candidate) => candidate.edge === (edge.edge - 1 + runs.length) % runs.length,
+                    )
+                  : undefined;
+              const next =
+                runs.length > 1
+                  ? f.edges.find((candidate) => candidate.edge === (edge.edge + 1) % runs.length)
+                  : undefined;
+              const points = extendPolyline(
+                trimEdgeRun(run, edge.startMm / 10, edge.endMm / 10),
+                edge.startMm <= 0 && previous && previous.endMm <= 0 ? D : 0,
+                edge.endMm <= 0 && next && next.startMm <= 0 ? D : 0,
+              );
+              return stripBandPolygons(points, r.insetMm / 10, D, sign).map((band, index) => (
+                <polygon key={`${edge.edge}-${index}`} points={str(band)} data-strip={edge.edge} />
+              ));
             })}
           {rect && <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} />}
           {dxf && <polygon points={dxf} />}
@@ -312,18 +330,16 @@ export function FuseOverlay({
       {sp &&
         sf &&
         edgesOn &&
-        pts.map((a, i) => {
-          const b = pts[(i + 1) % pts.length];
-          const on = sf.edges.some((e) => e.edge === i);
+        g!.runs.map((run) => {
+          const i = run.index;
+          const on = sf.edges.some((edge) => edge.edge === i);
           return (
             <g key={`edge-${i}`}>
               {(on || hover === i) && (
-                <line
+                <polyline
                   pointerEvents='none'
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
+                  points={str(run.points)}
+                  fill='none'
                   stroke={INK}
                   strokeWidth={on ? 3 : 2}
                   strokeDasharray={on ? undefined : '4 3'}
@@ -331,12 +347,10 @@ export function FuseOverlay({
                   strokeLinecap='round'
                 />
               )}
-              <line
+              <polyline
                 data-edge={i}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
+                points={str(run.points)}
+                fill='none'
                 stroke='transparent'
                 strokeWidth={12}
                 vectorEffect='non-scaling-stroke'
@@ -364,14 +378,18 @@ export function FuseOverlay({
         edgesOn &&
         sf.edges.map((o) => {
           const i = o.edge;
-          const a = pts[i];
-          const b = pts[(i + 1) % pts.length];
-          if (!a || !b) return null;
-          const L = len(sub(b, a)) || 1;
-          const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
-          const n = inward(a, b, g.sign);
+          const run = g.runs[i];
+          if (!run) return null;
           return (['s', 'e'] as const).map((end) => {
-            const at = end === 's' ? add(a, u, o.startMm / 10) : add(b, u, -o.endMm / 10);
+            const position = pointOnEdgeRun(
+              run,
+              end === 's' ? o.startMm / 10 : run.length - o.endMm / 10,
+            );
+            const at = position.point;
+            const n = {
+              x: -position.tangent.y * g.sign,
+              y: position.tangent.x * g.sign,
+            };
             const active = handle?.edge === i && handle.end === end;
             const mm = end === 's' ? o.startMm : o.endMm;
             const lab = add(at, n, -38 * px);
@@ -396,14 +414,17 @@ export function FuseOverlay({
                   onPointerMove={(e) => {
                     if (!active || !sel) return;
                     const q = svgPoint(e);
-                    const t = dot(sub(q, a), u) * 10;
-                    const raw = end === 's' ? t : L * 10 - t;
+                    const projected = projectPointToEdgeRun(run, q);
+                    const raw =
+                      end === 's'
+                        ? projected.distance * 10
+                        : (run.length - projected.distance) * 10;
                     const other = end === 's' ? o.endMm : o.startMm;
                     const v = Math.max(
                       0,
                       Math.min(
                         Math.round(raw / SNAP_MM) * SNAP_MM,
-                        Math.floor(L * 10 - other - 10),
+                        Math.floor(run.length * 10 - other - 10),
                       ),
                     );
                     onChange(sel, {

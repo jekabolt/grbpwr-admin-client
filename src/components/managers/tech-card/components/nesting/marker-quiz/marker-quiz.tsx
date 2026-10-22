@@ -125,21 +125,21 @@ export type MarkerQuizState = ReturnType<typeof useMarkerQuiz>;
 
 // Один размер шрифта на весь квиз — базовый админский; иерархия только цветом и капслоком.
 // Чипы и кнопки `xs`/`sm` из 'ui' по умолчанию мельче, поэтому размер задаётся явно.
-const ONE_SIZE = 'text-textBaseSize';
+export const ONE_SIZE = 'text-textBaseSize';
 // Рамочная кнопка базового размера (size по умолчанию не тянет `text-micro`).
-const FRAMED = 'px-2.5 py-1 uppercase tracking-label';
+export const FRAMED = 'px-2.5 py-1 uppercase tracking-label';
 // Одна высота у всех контролов ряда: поле, сегменты.
-const CTRL_H = 'h-8';
+export const CTRL_H = 'h-8';
 
 // Число из поля: пустое и мусор — null (поле держит строку, пока в фокусе).
-const parseNum = (raw: string, decimal: boolean): number | null => {
+export const parseNum = (raw: string, decimal: boolean): number | null => {
   const t = raw.trim().replace(',', '.');
   if (t === '' || !(decimal ? /^\d*\.?\d*$/ : /^\d+$/).test(t) || t === '.') return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 };
 
-function NumField({
+export function NumField({
   value,
   onCommit,
   label,
@@ -179,7 +179,7 @@ function NumField({
 }
 
 /** Количество изделий размера: число справа, без −/+. */
-function QtyField({
+export function QtyField({
   value,
   min,
   onChange,
@@ -206,7 +206,7 @@ function QtyField({
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
+export function Label({ children }: { children: React.ReactNode }) {
   return (
     <Text variant='label' tracking='label' component='span' className='uppercase'>
       {children}
@@ -460,19 +460,16 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                 ['table', 'Stack of layers', 'knife'],
               ] as const
             ).map(([m, name, sub]) => (
-              <Button
+              <PictureChoice
                 key={m}
-                aria-pressed={p.layMode === m}
+                picked={p.layMode === m}
                 disabled={p.busy}
-                className={`flex flex-col gap-2 border p-4 text-left transition-colors hover:border-textColor ${
-                  p.layMode === m ? 'border-textColor' : 'border-borderColor'
-                }`}
+                name={name}
+                sub={sub}
                 onClick={() => p.onLayMode(m)}
               >
                 <SpreadChoicePicture kind={m} />
-                <Text component='span'>{name}</Text>
-                <Label>{sub}</Label>
-              </Button>
+              </PictureChoice>
             ))}
           </div>
         );
@@ -532,31 +529,7 @@ export function MarkerQuiz(p: MarkerQuizProps) {
                 </div>
               </div>
             )}
-            <div className='flex flex-col border-t border-textColor'>
-              {p.rows.map((r) => (
-                <div
-                  key={r.key}
-                  className={`flex items-center justify-between gap-3 border-b border-hairline py-1.5 ${
-                    r.qty > 0 ? '' : 'text-labelColor'
-                  }`}
-                >
-                  <Text component='span' className={r.bad ? 'text-error' : undefined}>
-                    {r.label}
-                  </Text>
-                  <QtyField
-                    label={r.label}
-                    value={r.qty}
-                    min={r.min}
-                    disabled={p.busy}
-                    onChange={(n) => p.onQty(r.key, n)}
-                  />
-                </div>
-              ))}
-              <div className='flex items-center justify-between gap-3 border-b border-textColor py-1.5 uppercase'>
-                <span>total</span>
-                <span className='w-24 pr-2.5 text-right tabular-nums'>{p.cutTotal}</span>
-              </div>
-            </div>
+            <QtyRows rows={p.rows} total={p.cutTotal} disabled={p.busy} onQty={p.onQty} />
           </div>
         );
       case 'layers': {
@@ -761,38 +734,161 @@ export function MarkerQuiz(p: MarkerQuizProps) {
   })();
 
   return (
-    <div className={`flex flex-col ${ONE_SIZE}`}>
-      <div className='flex min-h-96 flex-col items-center gap-4 px-2 pt-2 pb-4'>
-        <Text component='h2' className='text-center'>
-          {QUESTION[step]}
-        </Text>
-        {body}
-      </div>
-      <div className='flex items-center gap-3 border-t border-borderColor pt-3'>
-        <Button
-          variant='secondary'
-          className={FRAMED}
-          disabled={quiz.index === 0 || p.busy}
-          onClick={quiz.back}
-        >
-          Back
-        </Button>
-        <span className='flex-1' />
-        {step === 'run' && p.onShowResult && (
+    <QuizFrame
+      question={QUESTION[step]}
+      backDisabled={quiz.index === 0 || p.busy}
+      onBack={quiz.back}
+      aside={
+        step === 'run' && p.onShowResult ? (
           <Button variant='underline' className='uppercase' onClick={p.onShowResult}>
             show result
           </Button>
-        )}
-        {step !== 'spread' && (
-          <Button
-            variant='main'
-            className={FRAMED}
-            disabled={nextDisabled}
-            onClick={() => void onNext()}
-          >
-            {nextLabel}
-          </Button>
-        )}
+        ) : undefined
+      }
+      main={
+        step !== 'spread'
+          ? { label: nextLabel, disabled: nextDisabled, onClick: () => void onNext() }
+          : undefined
+      }
+    >
+      {body}
+    </QuizFrame>
+  );
+}
+
+/** A picture card answer (the spread question, the print's paper): picture, name, sub. */
+export function PictureChoice({
+  picked,
+  disabled,
+  name,
+  sub,
+  onClick,
+  children,
+}: {
+  picked: boolean;
+  disabled?: boolean;
+  name: string;
+  sub: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      aria-pressed={picked}
+      disabled={disabled}
+      className={`flex flex-col gap-2 border p-4 text-left transition-colors hover:border-textColor ${
+        picked ? 'border-textColor' : 'border-borderColor'
+      }`}
+      onClick={onClick}
+    >
+      {children}
+      <Text component='span'>{name}</Text>
+      <Label>{sub}</Label>
+    </Button>
+  );
+}
+
+export type QuizMain = { label: string; disabled?: boolean; onClick: () => void };
+
+/** Подвал квиза: «Back» слева, главная кнопка справа. Отдельно — телефон кладёт его в dock модалки. */
+export function QuizFooter({
+  backDisabled,
+  onBack,
+  aside,
+  main,
+  className = 'border-t border-borderColor pt-3',
+}: {
+  backDisabled?: boolean;
+  onBack: () => void;
+  aside?: React.ReactNode;
+  main?: QuizMain;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-center gap-3 ${className}`}>
+      <Button variant='secondary' className={FRAMED} disabled={backDisabled} onClick={onBack}>
+        Back
+      </Button>
+      <span className='flex-1' />
+      {aside}
+      {main && (
+        <Button variant='main' className={FRAMED} disabled={main.disabled} onClick={main.onClick}>
+          {main.label}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Экран квиза: вопрос по центру, тело, подвал (если `footer` не унесён наружу). */
+export function QuizFrame({
+  question,
+  children,
+  backDisabled,
+  onBack,
+  aside,
+  main,
+  footer = true,
+}: {
+  question: React.ReactNode;
+  children: React.ReactNode;
+  backDisabled?: boolean;
+  onBack: () => void;
+  aside?: React.ReactNode;
+  main?: QuizMain;
+  footer?: boolean;
+}) {
+  return (
+    <div className={`flex flex-col ${ONE_SIZE}`}>
+      <div className='flex min-h-96 flex-col items-center gap-4 px-2 pt-2 pb-4'>
+        <Text component='h2' className='text-center'>
+          {question}
+        </Text>
+        {children}
+      </div>
+      {footer && (
+        <QuizFooter backDisabled={backDisabled} onBack={onBack} aside={aside} main={main} />
+      )}
+    </div>
+  );
+}
+
+/** Размер × количество: строки под линией и TOTAL (шаг «what» маркера, шаг 1 печати). */
+export function QtyRows({
+  rows,
+  total,
+  disabled,
+  onQty,
+}: {
+  rows: ReadonlyArray<Pick<QuizRow, 'key' | 'label' | 'qty' | 'bad' | 'min'>>;
+  total: number;
+  disabled?: boolean;
+  onQty: (key: string, n: number) => void;
+}) {
+  return (
+    <div className='flex flex-col border-t border-textColor'>
+      {rows.map((r) => (
+        <div
+          key={r.key}
+          className={`flex items-center justify-between gap-3 border-b border-hairline py-1.5 ${
+            r.qty > 0 ? '' : 'text-labelColor'
+          }`}
+        >
+          <Text component='span' className={r.bad ? 'text-error' : undefined}>
+            {r.label}
+          </Text>
+          <QtyField
+            label={r.label}
+            value={r.qty}
+            min={r.min}
+            disabled={disabled}
+            onChange={(n) => onQty(r.key, n)}
+          />
+        </div>
+      ))}
+      <div className='flex items-center justify-between gap-3 border-b border-textColor py-1.5 uppercase'>
+        <span>total</span>
+        <span className='w-24 pr-2.5 text-right tabular-nums'>{total}</span>
       </div>
     </div>
   );

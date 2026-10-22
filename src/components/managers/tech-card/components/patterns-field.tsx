@@ -139,7 +139,13 @@ import { TechCardFormData } from './schema';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
-import { PatternExportItems } from './pattern-export/export-menu';
+import {
+  PatternExportItems,
+  PatternExportMenu,
+  ROW_ICON_BTN,
+  UploadGlyph,
+} from './pattern-export/export-menu';
+import type { RollPrintTarget } from './pattern-export/roll-print-dialog';
 import {
   ddmm,
   removedSheets,
@@ -451,6 +457,14 @@ type SizeAudit =
 //
 // Строка размера в БД никуда не делась (tech_card_size_pattern.size_id NOT NULL), но это теперь
 // артефакт хранения — см. storageSizeId.
+const RollPrintDialog = lazy(() =>
+  import('./pattern-export/roll-print-dialog').then((m) => ({ default: m.RollPrintDialog })),
+);
+
+// Double-click on the name renames; a single click still opens the pieces — after the
+// double-click window, so a rename never flashes the viewer open first.
+const DBL_MS = 250;
+
 export function PatternsField({
   techCardId,
   active,
@@ -628,14 +642,16 @@ export function PatternsField({
   const [unitsFetching, setUnitsFetching] = useState(false);
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
-  // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
-  // её селект открытым у каждой строки значило печатать ответ под заголовком, который его уже дал.
-  const [rebinding, setRebinding] = useState<number | null>(null);
-  // × on a DXF sheet: the cascade's counts, asked before anything leaves the form (L6b).
+  // × on a sheet row: always asked; a DXF cascade carries its counts (L6b).
   const [deleting, setDeleting] = useState<{
     rowId: string;
-    counts: { pieces: number; steps: number };
+    name: string;
+    counts: { pieces: number; steps: number } | null;
   } | null>(null);
+  // `for print` of a DXF row: the roll print dialog's file.
+  const [printing, setPrinting] = useState<RollPrintTarget | null>(null);
+  // The single click on a name waits out the double-click window.
+  const nameClick = useRef<number | null>(null);
   // Разбор включён. ЛАТЧ, а не зеркало `active`: уход на соседнюю вкладку не имеет права отменить
   // уже идущее скачивание (React Query бросил бы запрос на полпути и следующий заход начал бы его
   // заново), а вернувшись, оператор должен увидеть готовый ответ, а не второй разбор.
@@ -1986,6 +2002,12 @@ export function PatternsField({
   }, [pendingView, scopeGroups]);
 
   function commitRename(index: number, value: string) {
+    // The field starts with the shown label: committing it unchanged writes nothing.
+    const row = ((getValues('patterns') ?? []) as PatternRow[])[index];
+    if (row && value === labelOf(row)) {
+      setEditing(null);
+      return;
+    }
     // '' is a legal committed value — it clears the name and the row falls back to the
     // filename (the save path still sends name explicitly, so the clear reaches the server).
     // setValue on the nested path, NOT useFieldArray.update: update() replaces the whole
@@ -2093,16 +2115,20 @@ export function PatternsField({
     );
   };
 
-  // × on a row: a non-DXF sheet goes as before; a DXF sheet asks first.
+  // × on a row asks first; a DXF sheet's cascade says what goes with it.
   function askRemove(row: PatternRow, index: number) {
     if (!isDxfUrl(row.url)) {
-      remove(index);
+      setDeleting({ rowId: `#${index}`, name: labelOf(row), counts: null });
       return;
     }
     const rowId = sheetRowId(row);
     const plan = deletePlan(rowId);
-    if (plan.kind === 'plain') remove(plan.rowIndex);
-    else if (plan.kind === 'cascade') setDeleting({ rowId, counts: plan.counts });
+    if (plan.kind === 'missing') return;
+    setDeleting({
+      rowId,
+      name: labelOf(row),
+      counts: plan.kind === 'cascade' ? plan.counts : null,
+    });
   }
 
   async function deleteSeamsOnServer(cardId: number, seamKeys: string[]): Promise<boolean> {
@@ -2124,6 +2150,12 @@ export function PatternsField({
   }
 
   async function confirmDelete(rowId: string) {
+    // A non-DXF row: by its index, as the old × did.
+    if (rowId.startsWith('#')) {
+      const at = Number(rowId.slice(1));
+      if (Number.isInteger(at) && at >= 0) remove(at);
+      return;
+    }
     const plan = deletePlan(rowId);
     if (plan.kind === 'missing') return;
     if (plan.kind === 'plain') {
@@ -2367,17 +2399,8 @@ export function PatternsField({
     const replaceable = !!slotGroup && canUpload;
     const rowId = sheetRowId(row);
     const dragging = replaceable && dragRow === rowId;
-    const sheetThumb =
-      rowGroup && dxfIndex && countBlocks(dxfIndex, rowGroup.scope.key) > 0 ? (
-        <SheetThumb index={dxfIndex} scopeKey={rowGroup.scope.key} className='h-full w-full' />
-      ) : null;
-    const thumb = dragging ? (
-      <Text size='nano' component='span' className='text-center uppercase tabular-nums'>
-        {rev != null ? `drop · v${rev + 1}` : 'drop'}
-      </Text>
-    ) : (
-      sheetThumb
-    );
+    const url = row.url ?? '';
+    const uploadedOn = ddmm(row.uploadedAt ?? '');
     // A file dropped on the row = a new version of this sheet; the panel's drop stays as it is.
     const rowDrop = replaceable
       ? {
@@ -2407,24 +2430,6 @@ export function PatternsField({
         {...rowDrop}
       >
         <div className='flex items-center gap-1.5'>
-          {rowGroup &&
-            (canUpload ? (
-              <Button
-                type='button'
-                aria-label={`replace ${labelOf(row)}`}
-                onClick={() => openPicker(rowGroup.scope.key, rowId)}
-                className={cn(
-                  'flex h-14 w-14 shrink-0 items-center justify-center border bg-pageBg p-0.5 hover:border-textColor',
-                  dragging ? 'border-textColor' : 'border-borderColor',
-                )}
-              >
-                {thumb}
-              </Button>
-            ) : (
-              <div className='flex h-14 w-14 shrink-0 items-center justify-center border border-borderColor bg-pageBg p-0.5'>
-                {thumb}
-              </div>
-            ))}
           <div className='min-w-0 flex-1'>
             {editing?.index === index ? (
               <Input
@@ -2435,6 +2440,12 @@ export function PatternsField({
                 autoFocus
                 autoComplete='off'
                 className='px-1 py-0 text-micro'
+                onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
+                  // The name without its extension is selected: typing replaces just that.
+                  const el = e.currentTarget;
+                  const dot = el.value.lastIndexOf('.');
+                  el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
+                }}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setEditing({ index, value: e.target.value })
                 }
@@ -2444,25 +2455,38 @@ export function PatternsField({
                     e.preventDefault();
                     commitRename(index, editing.value);
                   }
-                  if (e.key === 'Escape') setEditing(null);
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setEditing(null);
+                  }
                 }}
               />
             ) : (
               <span className='flex flex-wrap items-center gap-1.5'>
-                {!dxf || rowGroup ? (
-                  <button
-                    type='button'
-                    onClick={() => (rowGroup ? openPieces(rowGroup) : setViewing(row))}
-                    title={nameTitle}
-                    className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
-                  >
-                    {labelOf(row)}
-                  </button>
-                ) : (
-                  <span title={nameTitle} className='min-w-0 truncate text-micro'>
-                    {labelOf(row)}
-                  </span>
-                )}
+                <Button
+                  type='button'
+                  variant='underline'
+                  title={nameTitle}
+                  className='min-w-0 truncate text-left text-micro normal-case'
+                  onClick={() => {
+                    if (!(!dxf || rowGroup)) return;
+                    if (nameClick.current != null) window.clearTimeout(nameClick.current);
+                    nameClick.current = window.setTimeout(() => {
+                      nameClick.current = null;
+                      if (rowGroup) openPieces(rowGroup);
+                      else setViewing(row);
+                    }, DBL_MS);
+                  }}
+                  onDoubleClick={() => {
+                    if (nameClick.current != null) window.clearTimeout(nameClick.current);
+                    nameClick.current = null;
+                    if (isSubmitting || !canEdit) return;
+                    setEditing({ index, value: labelOf(row) });
+                  }}
+                >
+                  {labelOf(row)}
+                </Button>
                 {!dxf && <Pill tone='mut'>pdf</Pill>}
                 {/* «converted» carried no decision: what the importer wrote rides in the name's
                     tooltip; only the autopilot's «auto · N to check» stays beside the name */}
@@ -2484,6 +2508,16 @@ export function PatternsField({
               </span>
             )}
           </div>
+          {dragging && (
+            <Text size='nano' component='span' className='shrink-0 uppercase tabular-nums'>
+              {rev != null ? `drop · v${rev + 1}` : 'drop'}
+            </Text>
+          )}
+          {uploadedOn && (
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {uploadedOn}
+            </Text>
+          )}
           {shownRev != null && (
             <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
               v{shownRev}
@@ -2503,58 +2537,76 @@ export function PatternsField({
                 re-file
               </Button>
             )}
+            {dxf && row.url && (
+              <PatternExportMenu
+                label={labelOf(row)}
+                only={['plt']}
+                original={async () => ({
+                  blob: await fetchMediaBlob(url),
+                  fileName: row.filename || `${labelOf(row)}.dxf`,
+                })}
+                drawing={async () =>
+                  drawingFromDxf(await (await fetchMediaBlob(url)).arrayBuffer(), labelOf(row))
+                }
+                plot={async () => {
+                  const [{ plotFromDxfBytes }, blob] = await Promise.all([
+                    import('lib/pattern-export/plot-dxf'),
+                    fetchMediaBlob(url),
+                  ]);
+                  return {
+                    plot: await plotFromDxfBytes(
+                      await blob.arrayBuffer(),
+                      labelOf(row),
+                      dxfIndex?.contourLayer,
+                    ),
+                    title: labelOf(row),
+                  };
+                }}
+                after={(close) => (
+                  <Button
+                    type='button'
+                    variant='underline'
+                    onClick={() => {
+                      close();
+                      setPrinting({
+                        url,
+                        fileName: row.filename || `${labelOf(row)}.dxf`,
+                        material: rowGroup ? scopeLabel(rowGroup.scope) : '',
+                        title: styleNumber.trim(),
+                        cardKey: techCardId ? String(techCardId) : '',
+                      });
+                    }}
+                  >
+                    for print
+                  </Button>
+                )}
+              />
+            )}
             {replaceable && (
               <Button
                 type='button'
-                variant='underline'
-                size='xs'
-                className={door}
+                aria-label='new version'
+                title='new version'
+                className={ROW_ICON_BTN}
                 onClick={() => openPicker(slotGroup.scope.key, rowId)}
               >
-                new version
+                <UploadGlyph />
               </Button>
             )}
-            {(row.url || row.lineKey) && (
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                className={door}
-                aria-label='versions'
-                onClick={() => setVersionsOf(row.lineKey || row.url || null)}
-              >
-                ⋯
-              </Button>
+            {canEdit && (
+              <Close
+                size='sm'
+                aria-label={`delete ${labelOf(row)}`}
+                title='delete'
+                disabled={isSubmitting}
+                onClick={() => askRemove(row, index)}
+              />
             )}
-          </span>
-          {/* ⇄ ✎ on row hover only; always on touch. Delete lives in ⋯ */}
-          <span className='inline-flex shrink-0 gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/sheet:opacity-100 [@media(hover:none)]:opacity-100'>
-            {dxf && uploadScopes.length > 0 && canEdit && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                aria-label='rebind pattern'
-                onClick={() => setRebinding((r) => (r === index ? null : index))}
-              >
-                ⇄
-              </Button>
-            )}
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              aria-label='rename pattern'
-              disabled={isSubmitting}
-              onClick={() => setEditing({ index, value: row.name ?? '' })}
-            >
-              ✎
-            </Button>
           </span>
         </div>
         {/* Перепривязка за «⇄»; пишутся ОБА поля разом через bindingForScope — иначе лист лежит в
             панели в одной ткани, а на сервере разрешается в другую. */}
-        {dxf && uploadScopes.length > 0 && (rebinding === index || !rowScope) && (
+        {dxf && uploadScopes.length > 0 && !rowScope && (
           <select
             className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
             aria-label={`material for ${labelOf(row)}`}
@@ -2564,7 +2616,6 @@ export function PatternsField({
               const b = bindingOf(e.target.value);
               setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, { shouldDirty: true });
               setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
-              setRebinding(null);
             }}
           >
             <option value=''>
@@ -3428,14 +3479,25 @@ export function PatternsField({
           setDeleting(null);
           if (rowId) void confirmDelete(rowId);
         }}
-        title='delete pattern'
+        title='delete file'
         confirmLabel='delete'
         width='sm'
       >
-        <Text className='tabular-nums'>
-          {deleting?.counts.pieces ?? 0} pieces · {deleting?.counts.steps ?? 0} steps
-        </Text>
+        <div className='flex flex-col gap-2'>
+          <Text className='break-all'>{deleting?.name}</Text>
+          {deleting?.counts && (
+            <Text className='text-error tabular-nums'>
+              ! removes {deleting.counts.pieces} pieces · {deleting.counts.steps} steps
+            </Text>
+          )}
+        </div>
       </ConfirmationModal>
+
+      {printing && (
+        <Suspense fallback={null}>
+          <RollPrintDialog target={printing} onClose={() => setPrinting(null)} />
+        </Suspense>
+      )}
 
       {/* In-app PDF viewer, kept for the legacy rows. */}
       <ConfirmationModal
