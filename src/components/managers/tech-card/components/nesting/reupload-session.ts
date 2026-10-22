@@ -94,6 +94,63 @@ export function consumeReuploadSnapshot(
   else armed.delete(cardId);
 }
 
+// ─── хвост удаления швов после удаления листа ────────────────────────────────────────────────
+
+const seamDeleteRetries = new Map<number, Set<string>>();
+const seamDeleteKey = (cardId: number) => `plm.techcard.seam-delete.v1.${cardId}`;
+
+function storedSeamDeleteRetries(cardId: number): Set<string> {
+  const cached = seamDeleteRetries.get(cardId);
+  if (cached) return cached;
+  let keys: string[] = [];
+  try {
+    const raw = globalThis.localStorage?.getItem(seamDeleteKey(cardId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed))
+      keys = parsed.filter((x): x is string => typeof x === 'string' && !!x);
+  } catch {
+    // Memory still carries the retry when storage is unavailable or corrupt.
+  }
+  const next = new Set(keys);
+  seamDeleteRetries.set(cardId, next);
+  return next;
+}
+
+function storeSeamDeleteRetries(cardId: number, keys: ReadonlySet<string>): void {
+  try {
+    if (keys.size)
+      globalThis.localStorage?.setItem(seamDeleteKey(cardId), JSON.stringify([...keys]));
+    else globalThis.localStorage?.removeItem(seamDeleteKey(cardId));
+  } catch {
+    // Best effort: the module copy still retries for this page session.
+  }
+}
+
+/** A post-save seam cascade failed. Keep every missing key until an RPC accepts it. */
+export function armSeamDeleteRetry(cardId: number | undefined, seamKeys: Iterable<string>): void {
+  if (!cardId) return;
+  const pending = storedSeamDeleteRetries(cardId);
+  for (const key of seamKeys) if (key) pending.add(key);
+  storeSeamDeleteRetries(cardId, pending);
+}
+
+/** The seam keys whose cascade must run after this card next saves. */
+export function peekSeamDeleteRetry(cardId: number | undefined): string[] {
+  return cardId ? [...storedSeamDeleteRetries(cardId)] : [];
+}
+
+/** One retry landed; do not consume keys added while its RPC was in flight. */
+export function consumeSeamDeleteRetry(
+  cardId: number | undefined,
+  seamKeys: Iterable<string>,
+): void {
+  if (!cardId) return;
+  const pending = storedSeamDeleteRetries(cardId);
+  for (const key of seamKeys) pending.delete(key);
+  if (!pending.size) seamDeleteRetries.delete(cardId);
+  storeSeamDeleteRetries(cardId, pending);
+}
+
 // ─── восстановление версии листа ─────────────────────────────────────────────────────────────
 //
 // ОДНА ТОЧКА ВХОДА для всех, кто восстанавливает: `restoreSheetVersion(rev)`. Восстанавливается
@@ -114,6 +171,37 @@ export type SheetRevisionRef = {
 };
 
 export type RestoreOutcome = 'applied' | 'noop' | 'refused' | 'unavailable';
+
+const sheetRestoreAt = new Map<number, number>();
+const sheetRestoreKey = (cardId: number) => `plm.techcard.sheet-restore-at.v1.${cardId}`;
+
+/** Remember the server time of a restore so markers made against the replaced geometry go stale. */
+export function noteSheetRestore(cardId: number | undefined, restoredAt?: string): void {
+  if (!cardId) return;
+  const parsed = restoredAt ? new Date(restoredAt).getTime() : NaN;
+  const at = Number.isFinite(parsed) ? parsed : Date.now();
+  sheetRestoreAt.set(cardId, Math.max(sheetRestoreAt.get(cardId) ?? 0, at));
+  try {
+    globalThis.localStorage?.setItem(sheetRestoreKey(cardId), String(sheetRestoreAt.get(cardId)));
+  } catch {
+    // Best effort: the module copy still protects this page session.
+  }
+}
+
+export function lastSheetRestoreAt(cardId: number | undefined): number | null {
+  if (!cardId) return null;
+  const cached = sheetRestoreAt.get(cardId);
+  if (cached != null) return cached;
+  let stored = NaN;
+  try {
+    stored = Number(globalThis.localStorage?.getItem(sheetRestoreKey(cardId)) ?? '');
+  } catch {
+    // No persisted restore marker in this browser.
+  }
+  if (!Number.isFinite(stored) || stored <= 0) return null;
+  sheetRestoreAt.set(cardId, stored);
+  return stored;
+}
 
 type Restorer = (rev: SheetRevisionRef) => Promise<RestoreOutcome>;
 let restorer: Restorer | null = null;

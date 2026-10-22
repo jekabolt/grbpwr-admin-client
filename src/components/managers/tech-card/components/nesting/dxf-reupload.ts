@@ -266,7 +266,8 @@ export async function reuploadSheet<
 
   // Тот же файл по записанному дайджесту — без единого скачивания.
   const rawSha = lower(await deps.sha256(file.bytes));
-  const storedSame = rawSha ? rows.find((x) => lower(x.r.sha256) === rawSha) : undefined;
+  const digestRows = pinned >= 0 ? [rows[pinned]] : rows;
+  const storedSame = rawSha ? digestRows.find((x) => lower(x.r.sha256) === rawSha) : undefined;
   if (storedSame) return { kind: 'noop', rowIndex: storedSame.i };
 
   let olds: Uint8Array[];
@@ -279,7 +280,13 @@ export async function reuploadSheet<
   const oldShas = await Promise.all(
     rows.map(async (x, k) => lower(x.r.sha256) || lower(await deps.sha256(olds[k]))),
   );
-  const rawHit = rawSha ? oldShas.indexOf(rawSha) : -1;
+  const rawHit = rawSha
+    ? pinned >= 0
+      ? oldShas[pinned] === rawSha
+        ? pinned
+        : -1
+      : oldShas.indexOf(rawSha)
+    : -1;
   if (rawHit >= 0) return { kind: 'noop', rowIndex: rows[rawHit].i };
 
   const oldFiles = rows.map((x, k) => ({ name: sheetName(x.r, k), bytes: olds[k] }));
@@ -299,6 +306,43 @@ export async function reuploadSheet<
   const bytes = inheritUnits(file.bytes, olds[t]);
   const sha = bytes === file.bytes ? rawSha : lower(await deps.sha256(bytes));
   if (sha && sha === oldShas[t]) return { kind: 'noop', rowIndex: rows[t].i };
+
+  const foreign = async (): Promise<ReuploadOutcome<P, A, O>> => {
+    try {
+      return {
+        kind: 'foreign',
+        rowIndex: rows[t].i,
+        row: await deps.upload({ name: file.name, bytes }),
+      };
+    } catch (e) {
+      return { kind: 'refused', why: 'upload', detail: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
+  if (rows.length > 1) {
+    // Нетронутый сосед может нести те же блоки: решаем «замена или чужой» только по двум файлам.
+    const [targetOld, targetNew] = await Promise.all([
+      deps.parse([oldFiles[t]]),
+      deps.parse([{ name: file.name, bytes }]),
+    ]);
+    if (targetOld.failedFiles > 0) return { kind: 'refused', why: 'parse', detail: 'old sheet' };
+    if (targetNew.failedFiles > 0 || targetNew.pieces.length === 0)
+      return { kind: 'refused', why: 'parse', detail: 'new file' };
+    const targetPlan = reconcile({
+      scope: card.scope,
+      pieces: card.pieces,
+      aliases: card.aliases,
+      operations: card.operations,
+      oldSheet: { parse: targetOld, sha256: oldShas[t] },
+      newSheet: { parse: targetNew, sha256: sha },
+      sizeTokens: card.sizeTokens,
+      externalRefs: card.externalRefs,
+      aliasInScope: (a) => card.scopeOf(a) === card.scopeKey,
+      targetFileIndex: 0,
+      ...(card.seams ? { seams: card.seams } : {}),
+    });
+    if (isForeignPlan(targetPlan)) return foreign();
+  }
 
   const newFiles = oldFiles.map((f, k) => (k === t ? { name: file.name, bytes } : f));
   const newParse = await deps.parse(newFiles);
@@ -337,17 +381,6 @@ export async function reuploadSheet<
   };
   const plan = reconcile(input);
   if (plan.status === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
-  const foreign = async (): Promise<ReuploadOutcome<P, A, O>> => {
-    try {
-      return {
-        kind: 'foreign',
-        rowIndex: rows[t].i,
-        row: await deps.upload({ name: file.name, bytes }),
-      };
-    } catch (e) {
-      return { kind: 'refused', why: 'upload', detail: e instanceof Error ? e.message : String(e) };
-    }
-  };
   if (isForeignPlan(plan)) return foreign();
   // Новая деталь, рождённая от детали карточки: строка плана со старой деталью и блоком без детали
   // (часть разреза; блок, заведённый новой строкой вместо старой). Ключ — идентичность блока.

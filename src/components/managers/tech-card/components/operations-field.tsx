@@ -260,6 +260,7 @@ import {
   unplacedPieceKeys,
   type CardOperation,
 } from 'lib/dxf-reconcile';
+import { opPieceRefs } from 'lib/dxf-reconcile/defaults';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -290,8 +291,10 @@ const copyAliases = (rows: readonly PieceAliasRow[]): PieceAliasRow[] =>
   rows.map((row) => ({ ...row }));
 
 /**
- * После сохранения активный URL уже новый, а старый лист лежит в read-only history. Контракт L4b
- * указывает `history[1]`; до сохранения кэш карточки ещё несёт прежний активный URL, и он точнее.
+ * После сохранения активный URL уже новый, а старый лист лежит в read-only history. History —
+ * только вытесненные файлы, новейший первым (активный сервер в неё не кладёт, enrich.go), так что
+ * только что заменённый — первая запись с URL не активного; до сохранения кэш карточки ещё несёт
+ * прежний активный URL, и он точнее.
  */
 function previousPatternRows(
   current: readonly ReviewPatternRow[],
@@ -302,7 +305,8 @@ function previousPatternRows(
     const stored = byKey.get((row.lineKey ?? '').trim()) ?? saved[index];
     if (!stored) return { ...row };
     const activeBeforeSave = stored.url && stored.url !== row.url ? stored.url : '';
-    const previousUrl = activeBeforeSave || stored.history?.[1]?.url || '';
+    const replaced = stored.history?.find((rev) => !!rev.url && rev.url !== stored.url)?.url;
+    const previousUrl = activeBeforeSave || replaced || '';
     return previousUrl
       ? { ...row, url: previousUrl, filename: stored.filename }
       : { ...row, url: '' };
@@ -4009,10 +4013,20 @@ function OperationEditor({
     control,
     name: `operations.${index}.inputKeys`,
   }) ?? []) as string[];
+  // Выноска на фото — тоже ссылка шага: призрак, на которого указывает только она, держит orphan
+  // (reviewAfterEdit), значит и плитку с × и заменами получает так же, как вход. Иначе метку
+  // нечем было снять, а релиз ждал её вечно.
+  const stepMedia = useWatch({ control, name: `operations.${index}.media` }) as
+    | CardOperation['media']
+    | undefined;
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
   const chosenGhosts =
-    review.trim() === 'orphan' ? chosenPieces.filter((key) => ghostKeys.has(key)) : [];
+    review.trim() === 'orphan'
+      ? [...new Set([...chosenPieces, ...opPieceRefs({ media: stepMedia }).annotations])].filter(
+          (key) => byKey.has(key) && ghostKeys.has(key),
+        )
+      : [];
   const chosenLivePieces = chosenPieces.filter((key) => !chosenGhosts.includes(key));
   // Фронтир нужен редактору дважды: чтобы отличить вход-УЗЕЛ от оборванной ссылки на деталь и
   // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
@@ -6883,16 +6897,6 @@ export function OperationsField({
     anyReview && params.get('tab') === 'construction',
   );
   const previousIndex = useDxfIndex(previousGeometry.data);
-  const previousPieceShapes = useMemo<PieceShapeMap>(() => {
-    if (!previousIndex) return null;
-    const refs = pieceBlockRefs(
-      sessionPreviousAliases ?? (savedAliases.length > 0 ? savedAliases : aliases),
-      scopes,
-    );
-    const found = new Map<string, FoundPiece | null>();
-    for (const [key, pieceRefs] of refs) found.set(key, findPiece(previousIndex, pieceRefs));
-    return found;
-  }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes]);
   const ghostKeys = useMemo(
     () =>
       new Set(
@@ -6903,6 +6907,28 @@ export function OperationsField({
       ),
     [pieces, aliases],
   );
+  const previousPieceShapes = useMemo<PieceShapeMap>(() => {
+    if (!previousIndex) return null;
+    const refs = pieceBlockRefs(
+      sessionPreviousAliases ?? (savedAliases.length > 0 ? savedAliases : aliases),
+      scopes,
+    );
+    // После перезагрузки сессии нет, а в сохранённых алиасах призрака уже нет (сверка отвязала
+    // его блок): контур в прежнем листе ищется по имени детали — сопоставление и сверка называют
+    // новую деталь именем её блока. Без этого у призрака пропадали и контур, и замены.
+    const priorScopes = [...previousIndex.filesOfScope.keys()];
+    for (const piece of pieces) {
+      const key = pieceRefKey(piece.lineKey);
+      if (refs.has(key) || !ghostKeys.has(piece.lineKey.trim())) continue;
+      refs.set(
+        key,
+        priorScopes.map((scopeKey) => ({ scopeKey, block: piece.name })),
+      );
+    }
+    const found = new Map<string, FoundPiece | null>();
+    for (const [key, pieceRefs] of refs) found.set(key, findPiece(previousIndex, pieceRefs));
+    return found;
+  }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes, pieces, ghostKeys]);
 
   // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
   //
@@ -7039,7 +7065,21 @@ export function OperationsField({
   //
   // Вывод остаётся дефолтом: неразмеченная карточка открывается списком (пустое полотно на первом
   // открытии читается как «сломалось»), размеченная — схемой. Но переключиться можно всегда.
-  const effectiveMode = mode ?? (grouping.marked ? 'schematic' : 'list');
+  //
+  // МЕТКИ ПЕРЕЗАЛИВА ПРИНИМАЕТ ТОЛЬКО СТРОКА РЕЛЬСА (`ok`), у схемы их нет вовсе: пока на карточке
+  // есть помеченный шаг, вид открывается списком. Выбор вида, сделанный при метках, сильнее; метки
+  // ушли — выбор забыт, и следующий перезалив снова откроет список.
+  const [reviewMode, setReviewMode] = useState<SchematicMode | null>(null);
+  useEffect(() => {
+    if (!anyReview) setReviewMode(null);
+  }, [anyReview]);
+  const effectiveMode = anyReview
+    ? reviewMode ?? 'list'
+    : mode ?? (grouping.marked ? 'schematic' : 'list');
+  const pickMode = (next: SchematicMode) => {
+    if (anyReview) setReviewMode(next);
+    setMode(next);
+  };
   const grouped = grouping.marked && effectiveMode === 'list';
   // Заголовок рельса называет режим, чтобы «схемой» не читалось как «что-то ещё».
   const prevSubmit = useRef(submitCount);
@@ -7209,6 +7249,28 @@ export function OperationsField({
     const nextRow = removeGhostFromStep(row, ghostKey, { ghosts: ghostKeys });
     if (nextRow === row) return;
     const next = operations.map((operation, i) => (i === index ? nextRow : operation));
+    // Призрак из джойна двух оставил бы узел из одного входа: сборка такого не примет, а снятая
+    // метка увела бы на следующий шаг мимо нарушения. Отказ — словами движка, как у дропа;
+    // джойн чинят входом, растворением или заменой призрака.
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const violationsOf = (ops: readonly OperationFormValue[]) =>
+      assemblySweep(
+        sweepPieces,
+        ops.map((o) => ({
+          inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+          outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+          outputUnitName: (o?.outputUnitName ?? '').trim(),
+        })),
+      ).violations;
+    const sig = (v: { rule: number; detail: string; step: number; key: string }) =>
+      `${v.rule}|${v.detail}|${v.step}|${v.key}`;
+    const had = new Set(violationsOf(operations).map(sig));
+    const broken = violationsOf(next).find((v) => !had.has(sig(v)));
+    if (broken) {
+      refuseGesture(`STEP ${index + 1}`, 'input refused', broken.message);
+      return;
+    }
     clearFormHistory();
     setValue(`operations.${index}`, nextRow, { shouldDirty: true, shouldTouch: true });
     openNextReview(next, index);
@@ -8229,7 +8291,7 @@ export function OperationsField({
             className='mb-2.5'
             lead={
               <div className='flex items-center gap-2'>
-                <SequenceViewSwitch mode={effectiveMode} onMode={setMode} />
+                <SequenceViewSwitch mode={effectiveMode} onMode={pickMode} />
                 {/* `nonForm` — ОБЯЗАТЕЛЬНО: на выпущенной карточке всё это живёт под внешним
                     `<fieldset disabled>`, а он глушит настоящую кнопку насмерть. Смотреть и
                     раскладывать разрешено и там (R10), значит и вход обязан работать. */}

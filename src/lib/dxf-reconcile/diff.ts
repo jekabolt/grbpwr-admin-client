@@ -456,6 +456,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     unit: OldUnit<P>;
     n: SheetEntry;
     cost: number;
+    mode: PairCmp['mode'];
     candidates: { identity: string; cost: number }[];
   };
   const proposals: GhostProposal[] = [];
@@ -473,14 +474,25 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       .map((n) => {
         const costs = oldUnits.flatMap((u) => {
           const c = comparePair(u.entry!, n, scale, false);
-          return c ? [{ unit: u, cost: c.cmp.cost }] : [];
+          return c ? [{ unit: u, cost: c.cmp.cost, mode: c.mode }] : [];
         });
         costs.sort((a, b) => a.cost - b.cost || byName(a.unit.key, b.unit.key));
         return costs[0] ? { n, ...costs[0] } : null;
       })
-      .filter((x): x is { n: SheetEntry; unit: OldUnit<P>; cost: number } => !!x)
+      .filter(
+        (
+          x,
+        ): x is {
+          n: SheetEntry;
+          unit: OldUnit<P>;
+          cost: number;
+          mode: PairCmp['mode'];
+        } => !!x,
+      )
       .sort((a, b) => a.cost - b.cost || byName(a.n.key, b.n.key));
-    const sure = ranked.filter((x) => x.cost <= THRESH.renameMax);
+    const sure = ranked.filter(
+      (x) => x.cost <= (x.mode === 'median' ? THRESH.renameMaxNoCommonSize : THRESH.renameMax),
+    );
     const best = sure.length === 1 ? sure[0] : null;
     const runner = ranked.find((x) => x !== best);
     if (!best || (runner && runner.cost - best.cost < THRESH.ghostRenameMargin)) continue;
@@ -515,7 +527,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       confidence: 'high',
       candidates: p.candidates,
       full: cmp,
-      verdict: 'unchanged',
+      verdict: verdictOf(cmp?.cmp ?? null),
     });
   }
   if (proposals.length) matchedShare = share();
