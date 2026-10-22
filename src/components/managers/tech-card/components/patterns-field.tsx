@@ -1999,6 +1999,7 @@ export function PatternsField({
         open
         versions={versions}
         canRestore={canRestore}
+        canDeleteRevision={() => canEdit && !isSubmitting && !!techCardId}
         download={download}
         onClose={() => setVersionsOf(null)}
         onDelete={() => {
@@ -2018,6 +2019,26 @@ export function PatternsField({
           if (out === 'unavailable')
             useSnackBarStore.getState().showMessage('not restored', 'error');
           if (out === 'applied' || out === 'noop') setVersionsOf(null);
+        }}
+        onDeleteRevision={async (v) => {
+          if (!techCardId || v.historyId <= 0) return false;
+          const stored =
+            queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
+          try {
+            await adminService.DeleteTechCardPatternRevision({
+              techCardId,
+              historyId: v.historyId,
+              expectedLockVersion: stored?.lockVersion ?? 0,
+            });
+            // Re-read like restore: the delete answer has no pattern_viewer_token.
+            await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+            return true;
+          } catch (e) {
+            console.error('pattern revision delete failed', e);
+            const said = e instanceof Error ? e.message.trim() : '';
+            useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
+            return false;
+          }
         }}
       />
     );
