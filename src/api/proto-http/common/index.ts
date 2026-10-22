@@ -5125,7 +5125,7 @@ export type DesignRunParams = {
   image: DesignImageOptions | undefined;
   // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
   inpaint: DesignInpaintParams | undefined;
-  // THE TARGET CANVAS OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: DesignVideoParams | undefined;
@@ -5501,27 +5501,16 @@ export type DesignInpaintParams = {
   maskMediaId: number | undefined;
 };
 
-// DesignExtendParams — the canvas of an extend (outpaint) run. The ONE source travels in
+// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
 // DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
-// (`extend_takes_no_words`). There are two modes, selected by FIELD PRESENCE rather than by a non-zero value:
-// · with none of expand_top / bottom / left / right present, the old aspect-ratio mode is unchanged:
-// aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
-// (`extend_aspect_unknown`), and the source is centred on the axis the target grows;
-// · with ANY expand_* present, the sides are whole pixels in the SOURCE picture's coordinates and the canvas is
-// exactly source + those four sides. Omitted sides are zero; aspect_ratio may be empty and does not place the
-// source. Every side must be non-negative and at most 3× its corresponding source side (`extend_sides_invalid`).
-// A request that adds no pixels is `target_aspect_must_extend` in either mode (so four explicitly present zeroes do
-// not buy a no-op). The server caps the canvas at 3 megapixels by downscaling the source AND all four stated sides
-// together, and re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original
-// is kept» is a fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows).
-// The source may be at most 18 MP (`source_too_large`).
+// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
+// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
 export type DesignExtendParams = {
-  // Legacy target mode. Ignored for placement when any expand_* field is present.
   aspectRatio: string | undefined;
-  expandTop?: number;
-  expandBottom?: number;
-  expandLeft?: number;
-  expandRight?: number;
 };
 
 // DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
@@ -7063,8 +7052,8 @@ export type Dictionary = {
   revisions: DictionaryRevision[] | undefined;
   categorySizeSystems: CategorySizeSystem[] | undefined;
   careSymbols: CareSymbol[] | undefined;
-  // Id of the hidden system tech card that owns model-photo framing runs (StartDesignRun kind
-  // extend and cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
+  // Id of the hidden system tech card that owns model-photo cutout runs (StartDesignRun kind
+  // cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
   // The card never appears in tech card lists, search or counts and cannot be edited or deleted.
   modelPhotoTechCardId: number | undefined;
 };

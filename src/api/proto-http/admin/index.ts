@@ -232,8 +232,8 @@ export type common_Dictionary = {
   revisions: common_DictionaryRevision[] | undefined;
   categorySizeSystems: common_CategorySizeSystem[] | undefined;
   careSymbols: common_CareSymbol[] | undefined;
-  // Id of the hidden system tech card that owns model-photo framing runs (StartDesignRun kind
-  // extend and cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
+  // Id of the hidden system tech card that owns model-photo cutout runs (StartDesignRun kind
+  // cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
   // The card never appears in tech card lists, search or counts and cannot be edited or deleted.
   modelPhotoTechCardId: number | undefined;
 };
@@ -16885,7 +16885,7 @@ export type common_DesignRunParams = {
   image: common_DesignImageOptions | undefined;
   // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
   inpaint: common_DesignInpaintParams | undefined;
-  // THE TARGET CANVAS OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: common_DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: common_DesignVideoParams | undefined;
@@ -17108,27 +17108,16 @@ export type common_DesignInpaintParams = {
   maskMediaId: number | undefined;
 };
 
-// DesignExtendParams — the canvas of an extend (outpaint) run. The ONE source travels in
+// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
 // DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
-// (`extend_takes_no_words`). There are two modes, selected by FIELD PRESENCE rather than by a non-zero value:
-// · with none of expand_top / bottom / left / right present, the old aspect-ratio mode is unchanged:
-// aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
-// (`extend_aspect_unknown`), and the source is centred on the axis the target grows;
-// · with ANY expand_* present, the sides are whole pixels in the SOURCE picture's coordinates and the canvas is
-// exactly source + those four sides. Omitted sides are zero; aspect_ratio may be empty and does not place the
-// source. Every side must be non-negative and at most 3× its corresponding source side (`extend_sides_invalid`).
-// A request that adds no pixels is `target_aspect_must_extend` in either mode (so four explicitly present zeroes do
-// not buy a no-op). The server caps the canvas at 3 megapixels by downscaling the source AND all four stated sides
-// together, and re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original
-// is kept» is a fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows).
-// The source may be at most 18 MP (`source_too_large`).
+// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
+// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
 export type common_DesignExtendParams = {
-  // Legacy target mode. Ignored for placement when any expand_* field is present.
   aspectRatio: string | undefined;
-  expandTop?: number;
-  expandBottom?: number;
-  expandLeft?: number;
-  expandRight?: number;
 };
 
 // DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
@@ -17836,13 +17825,11 @@ export type StartDesignRunRequest = {
   // free, before anything is reserved:
   // · extend — anything other than exactly one picture in params.extra_input_media_ids
   // («one_source_picture»); an `ask` or a params.freeform on a route that reads no words
-  // («extend_takes_no_words»); with no per-side fields, a params.extend.aspect_ratio outside the
-  // nine targets, `auto` and '' included («extend_aspect_unknown»); with any per-side field,
-  // a negative expansion or one over 3× its corresponding source side («extend_sides_invalid»);
-  // a target within 0.5 % of the source's own proportion OR a per-side request whose four sides
-  // are zero, both of which add no pixels («target_aspect_must_extend»); a source under the
-  // minimum side («source_too_small»); a source over 18 MP, by its stored size or its header
-  // («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
+  // («extend_takes_no_words»); a params.extend.aspect_ratio outside the nine targets, `auto`
+  // and '' included («extend_aspect_unknown»); a target within 0.5 % of the source's own
+  // proportion, which adds no pixels on either side («target_aspect_must_extend»); a source
+  // under the minimum side («source_too_small»); a source over 18 MP, by its stored size or its
+  // header («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
   // · inpaint — no params.inpaint.source_media_id («no_source_picture»); no
   // params.inpaint.mask_media_id («mask_required»); a mask whose width and height differ from
   // the source's («mask_size_mismatch»); a mask that is not a readable PNG, or is the source
@@ -18722,26 +18709,26 @@ export type DesignQuizQuestion = {
   // media_id — the moodboard picture (tech card media id, as attached to the board) this question
   // is about; 0 = not a picture question. When set, part is "whole" and family/view are ignored by
   // clients (no pictogram: the board anchors to the picture instead). Clients echo it on save.
-  mediaId: number | undefined;
+  mediaId?: number | undefined;
   // spots — the 1–3 places IN the anchored picture the question is about (99-SPOTS), drawn as
   // numbered rings on the board tile. Only when media_id ≠ 0 and the picture is a target or detail
   // reference; empty for whole-picture questions. Clients echo it on save (like media_id).
-  spots: DesignQuizSpot[] | undefined;
+  spots?: DesignQuizSpot[] | undefined;
 };
 
 // DesignQuizSpot — one place on a quiz question's picture (99-SPOTS).
 export type DesignQuizSpot = {
   // label — the place in the question's own words, 1–4 words ("inner strap edge").
-  label: string | undefined;
+  label?: string | undefined;
   // x — 0..1000 across the picture's width, from the left edge as the viewer sees it.
-  x: number | undefined;
+  x?: number | undefined;
   // y — 0..1000 down the picture's height, from the top.
-  y: number | undefined;
+  y?: number | undefined;
   // scale — "zone" (a part: sleeve, yoke, the run of a hem) or "detail" (a stitch line, a button).
-  scale: string | undefined;
+  scale?: string | undefined;
   // at — output only, server-computed: where label sits inside the question text, as a UTF-16 code
   // unit offset (a JS string index), matched case-insensitively; -1 = not found. Ignored on save.
-  at: number | undefined;
+  at?: number | undefined;
 };
 
 export type GenerateDesignQuizRequest = {

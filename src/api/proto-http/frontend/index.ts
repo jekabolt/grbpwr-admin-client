@@ -686,8 +686,8 @@ export type common_Dictionary = {
   revisions: common_DictionaryRevision[] | undefined;
   categorySizeSystems: common_CategorySizeSystem[] | undefined;
   careSymbols: common_CareSymbol[] | undefined;
-  // Id of the hidden system tech card that owns model-photo framing runs (StartDesignRun kind
-  // extend and cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
+  // Id of the hidden system tech card that owns model-photo cutout runs (StartDesignRun kind
+  // cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
   // The card never appears in tech card lists, search or counts and cannot be edited or deleted.
   modelPhotoTechCardId: number | undefined;
 };
