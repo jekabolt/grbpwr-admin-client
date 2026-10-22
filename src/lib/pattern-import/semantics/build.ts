@@ -98,7 +98,7 @@ import {
 import { facingFolds, type FoldChord } from './facing';
 import { oneSizeRead } from './one-size';
 import { drawnProposal, proposeGrain } from './grain-propose';
-import { vetProposal } from './grain-inside';
+import { fitGrainInside, vetProposal } from './grain-inside';
 import {
   FOLD_TEXT_MAX_MM,
   FOLD_TOL_MM,
@@ -1382,6 +1382,31 @@ export function buildPieceSpecsDetailed(
     // the operator asked (api.fixShape, ≤ 6 mm); never at a notch (semantics/kink-repair.ts, D3)
     const kinkByRank = new Map<number, { outer: PtMm[]; kinks: KinkDone[] }>();
     const kept = p.cands.filter(({ card }) => fixOf(card.token) !== 'drop');
+    // GRAIN: one grainline is drawn for the whole nest and may end on the LARGEST size's edge, a
+    // millimetre or two outside the smaller ones (palto «23»: the 752 mm arrow ends on 88's
+    // armhole, 0.3–1.9 mm out of 72–84, so only 88 holds it inside and the piece asked for a
+    // click). A size with no grain of its own borrows the line another size of the family
+    // detected, fitted onto every size's outline as a proposal is; a grain found per size wins.
+    const familyGrain = ((): GrainFeature | null => {
+      if (opGrain) return null;
+      let g: GrainFeature | null = null;
+      for (const { c } of kept) {
+        const f = featsFor(c).find((x): x is GrainFeature => x.kind === 'grain');
+        if (
+          f?.origin === 'detected' &&
+          (!g || (f.evidence?.length ?? 0) > (g.evidence?.length ?? 0))
+        )
+          g = f;
+      }
+      const fit = g
+        ? fitGrainInside(
+            g.a,
+            g.b,
+            kept.map(({ c }) => c.outer),
+          )
+        : null;
+      return g && fit ? { ...g, a: fit[0], b: fit[1] } : null;
+    })();
     if (
       !traced &&
       !p.ungraded &&
@@ -1824,7 +1849,7 @@ export function buildPieceSpecsDetailed(
             : ['operator'],
         };
       grain ??= found && !proposedLine ? found : null;
-      const borrowed = lastGrain as GrainFeature | null;
+      const borrowed = (lastGrain ?? familyGrain) as GrainFeature | null;
       if (!grain && borrowed)
         grain = {
           ...borrowed,
