@@ -579,11 +579,7 @@ export function MarkersSection({
               set changed
             </Pill>
           )}
-          {sheetMoved && (
-            <Pill tone='attention' title='patterns re-uploaded after the capture — recheck'>
-              patterns changed
-            </Pill>
-          )}
+          {sheetMoved && <Pill tone='attention'>patterns changed</Pill>}
           {conflict && (
             <Pill tone='warn' title={conflict}>
               norm conflict
