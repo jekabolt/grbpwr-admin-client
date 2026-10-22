@@ -379,6 +379,38 @@ export async function main() {
     });
   const splineZone = (points: { x: number; y: number; corner?: boolean }[]) =>
     spec({ mode: 'zone', zone: { spline: { points } } });
+  const goldenSpline = [
+    { x: 0, y: 0, corner: false },
+    { x: 100, y: 0, corner: false },
+    { x: 101, y: 1, corner: false },
+    { x: 101, y: 100, corner: false },
+  ];
+  const goldenFlat = flattenSpline(goldenSpline);
+  const goldenStarts = goldenSpline.map((point) =>
+    goldenFlat.findIndex((candidate) => candidate.x === point.x && candidate.y === point.y),
+  );
+  assert.deepEqual(
+    goldenStarts.map((start, i) =>
+      i + 1 < goldenStarts.length ? goldenStarts[i + 1] - start : goldenFlat.length - start,
+    ),
+    [12, 2, 12, 14],
+    'centripetal spline uses the backend golden step counts',
+  );
+  assert.equal(goldenFlat.length, 40, 'centripetal spline uses the backend golden vertex count');
+  near(goldenFlat[goldenStarts[1] + 1].x, 100.65804836398324, 1e-9);
+  near(goldenFlat[goldenStarts[1] + 1].y, 0.34215574839178853, 1e-9);
+  const exactRectangle = flattenSpline(withMids(corners(0, 0, 20, 10)));
+  assert.ok(
+    exactRectangle.every(
+      (point) =>
+        (point.y === 0 && point.x >= 0 && point.x <= 20) ||
+        (point.x === 20 && point.y >= 0 && point.y <= 10) ||
+        (point.y === 10 && point.x >= 0 && point.x <= 20) ||
+        (point.x === 0 && point.y >= 0 && point.y <= 10),
+    ),
+    '4 corners + 4 mids stay exactly on the rectangle boundary',
+  );
+  near(Math.abs(signedArea(exactRectangle)), 20 * 10, 1e-9);
   const rectPlusPoints = withMids(corners(10, 10, 40, 40));
   assert.equal(cornerSlot(1, rectPlusPoints), false, 'Rect+ keeps its odd slots as mids');
   const genericEven: ZonePoint[] = [

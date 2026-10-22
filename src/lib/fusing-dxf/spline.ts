@@ -1,11 +1,13 @@
 // The freeform fusing zone (L13): a closed curve through ordered control points, piece-local mm.
 // ONE rule, shared by the canvas editor, the drawn fill, the area and the fusible DXF — and mirrored
-// byte for byte by the backend (internal/entity, fusingops) so both sides cut the same shape:
+// operation for operation by the backend (internal/entity, fusingops) so both sides cut the same
+// shape:
 //
 //   segment i runs from P[i] to P[i+1] (closed, indices mod N) as a cubic Hermite curve with
-//   tangents m[i] = (P[i+1] − P[i−1]) / 2 (uniform Catmull-Rom), and m[i] = 0 at a corner point
-//   (a sharp vertex: the curve does not round through it, so a run between two corners is a straight
-//   chord and 4 corners + 4 straight mids are exactly a rectangle).
+//   [0,1]-scaled centripetal Catmull-Rom tangents (alpha = 0.5), calculated from the adjacent chord
+//   lengths for that segment. A tangent is zero at a corner point (a sharp vertex: the curve does
+//   not round through it), so a run between two corners is a straight chord and 4 corners + 4
+//   straight mids are exactly a rectangle. A zero-length segment emits only its start point.
 //
 // Flattening: each segment is cut into n equal-t steps with n = ceil(sqrt(max|B''| / (8·tol))),
 // where B'' is the second derivative of the segment's Bezier form — that bounds the chord error by
@@ -18,12 +20,45 @@ export const SPLINE_MAX_POINTS = 64;
 export const SPLINE_TOLERANCE_MM = 0.5;
 const MAX_STEPS = 64;
 
-function tangent(points: readonly FuseSplinePoint[], i: number): PtMm {
+function centripetalTangents(
+  points: readonly FuseSplinePoint[],
+  i: number,
+): { m1: PtMm; m2: PtMm; zeroLength: boolean } {
   const n = points.length;
-  if (points[i].corner) return { x: 0, y: 0 };
-  const a = points[(i - 1 + n) % n];
-  const b = points[(i + 1) % n];
-  return { x: (b.x - a.x) / 2, y: (b.y - a.y) / 2 };
+  const p0 = points[(i - 1 + n) % n];
+  const p1 = points[i];
+  const p2 = points[(i + 1) % n];
+  const p3 = points[(i + 2) % n];
+  const d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+  const d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const d23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+  const t01 = Math.sqrt(d01);
+  const t12 = Math.sqrt(d12);
+  const t23 = Math.sqrt(d23);
+  if (d12 === 0) return { m1: { x: 0, y: 0 }, m2: { x: 0, y: 0 }, zeroLength: true };
+  let m1: PtMm = { x: 0, y: 0 };
+  if (!p1.corner) {
+    if (d01 === 0) {
+      m1 = { x: p2.x - p1.x, y: p2.y - p1.y };
+    } else {
+      m1 = {
+        x: t12 * ((p1.x - p0.x) / t01 - (p2.x - p0.x) / (t01 + t12) + (p2.x - p1.x) / t12),
+        y: t12 * ((p1.y - p0.y) / t01 - (p2.y - p0.y) / (t01 + t12) + (p2.y - p1.y) / t12),
+      };
+    }
+  }
+  let m2: PtMm = { x: 0, y: 0 };
+  if (!p2.corner) {
+    if (d23 === 0) {
+      m2 = { x: p2.x - p1.x, y: p2.y - p1.y };
+    } else {
+      m2 = {
+        x: t12 * ((p2.x - p1.x) / t12 - (p3.x - p1.x) / (t12 + t23) + (p3.x - p2.x) / t23),
+        y: t12 * ((p2.y - p1.y) / t12 - (p3.y - p1.y) / (t12 + t23) + (p3.y - p2.y) / t23),
+      };
+    }
+  }
+  return { m1, m2, zeroLength: false };
 }
 
 /** Steps for one Hermite segment so the chord error stays within tol. */
@@ -49,8 +84,11 @@ export function flattenSpline(
   for (let i = 0; i < n; i++) {
     const p1 = points[i];
     const p2 = points[(i + 1) % n];
-    const m1 = tangent(points, i);
-    const m2 = tangent(points, (i + 1) % n);
+    const { m1, m2, zeroLength } = centripetalTangents(points, i);
+    if (zeroLength) {
+      out.push({ x: p1.x, y: p1.y });
+      continue;
+    }
     const steps = stepsOf(p1, m1, p2, m2, tolMm);
     for (let k = 0; k < steps; k++) {
       const t = k / steps;
