@@ -3,6 +3,7 @@
 // here would let the probe go green on the model instead of the code.
 export {
   buildSkeleton,
+  groupDetailed,
   groupUnits,
   orderTemplate,
   readTemplate,

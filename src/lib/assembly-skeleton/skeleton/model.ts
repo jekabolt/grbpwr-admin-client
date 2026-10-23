@@ -215,6 +215,7 @@ export class SeamIndex {
   private edges = new Map<string, Edge>();
   private names: Map<string, string>;
   private roleOf: Map<string, string | null>;
+  private handOf: Map<string, Hand>;
   private mergeHands: Set<string>;
   readonly usable: SeamCandidate[];
 
@@ -222,8 +223,39 @@ export class SeamIndex {
     for (const p of graph.pieces) for (const e of p.edges) this.edges.set(e.id, e);
     this.names = new Map(pieces.map((p) => [p.key, p.name]));
     this.roleOf = new Map(pieces.map((p) => [p.key, p.role]));
+    this.handOf = new Map(pieces.map((p) => [p.key, p.hand]));
     this.mergeHands = new Set(template.mergeHands);
     this.usable = graph.chosen.filter((c) => this.isEvidence(c)).sort((a, b) => b.score - a.score);
+  }
+
+  /** PCK_BACK_L / PCK_B_L says back; PCK_FRONT_L / PCK_F_L says front. */
+  private pointsAtPanel(piece: string, role: string): boolean {
+    const tokens = new Set(
+      nameTokens(this.names.get(piece) ?? '').map((x) => x.replace(/^\d+|\d+$/g, '')),
+    );
+    const shorthand = role === 'back' ? 'b' : role === 'front' ? 'f' : '';
+    return (
+      (!!shorthand && tokens.has(shorthand)) ||
+      (roleDef(role)?.tokens ?? []).some((token) => tokens.has(token))
+    );
+  }
+
+  /**
+   * A handed part that must stay on its hand cannot take a neutral panel's coincident edge as its
+   * host. Card 6 is the concrete failure: PCK_L_MAIN's straight edge fits both P_L_U and BP_U,
+   * and the latter is rectangle noise, not a pocket-to-back seam. An explicit panel name keeps the
+   * legitimate exception (PCK_BACK_L / PCK_B_L).
+   */
+  private contradictsHand(part: string, panel: string): boolean {
+    const partRole = this.roleOf.get(part) ?? null;
+    const panelRole = this.roleOf.get(panel) ?? null;
+    const def = roleDef(partRole);
+    const hand = this.handOf.get(part) ?? null;
+    if (!def?.sameHand || !hand || !panelRole || !def.attachTo?.includes(panelRole)) return false;
+    const panelHand = this.handOf.get(panel) ?? null;
+    if (panelHand === hand) return false;
+    if (panelHand) return true;
+    return !this.pointsAtPanel(part, panelRole);
   }
 
   /**
@@ -238,6 +270,7 @@ export class SeamIndex {
     const b = pieceOfEdge(c.b);
     if (a === b || c.evidence.self) return false;
     if (!this.names.has(a) || !this.names.has(b)) return false;
+    if (this.contradictsHand(a, b) || this.contradictsHand(b, a)) return false;
     if (c.evidence.twin === 'mirror' && c.evidence.hand === 'cross') {
       const ra = this.roleOf.get(a);
       const rb = this.roleOf.get(b);

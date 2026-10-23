@@ -73,6 +73,7 @@ await build({
 });
 const {
   buildSkeleton,
+  groupDetailed,
   groupUnits,
   orderTemplate,
   skeletonDeps,
@@ -1689,6 +1690,30 @@ console.log('\nPlacement without a seam (synthetic, fixtures/placement.json)');
       'control: numbered halves with no panel in their names stay layers',
       joinOf(c, ['PCK_L'], ['PCK_B_L']).i >= 0,
       placed(c, 'PCK_L'),
+    );
+  }
+  // Card 6: a straight edge on PCK_L_MAIN nearly matches the centre-back yoke as well as its
+  // real left-front host. That neutral-panel match is not usable sewing evidence unless the pocket
+  // names the back explicitly (PCK_BACK_L / PCK_B_L).
+  {
+    const c = synthCard(cards.pocketBackNoise);
+    const g = groupDetailed(c.graph, c.facts, orderTemplate(c.facts.category));
+    gate(
+      'card 6: a handed pocket ignores a near-equal centre-back edge match',
+      g.seams.between(['PCK_L_MAIN'], ['P_L_U']).length === 1 &&
+        g.seams.between(['PCK_L_MAIN'], ['BP_U']).length === 0 &&
+        partnerOf(run(c), 'PCK_L_MAIN').with.join() === 'P_L_U',
+      placed(run(c), 'PCK_L_MAIN'),
+    );
+    const named = synthCard(cards.pocketBackNoise, { PCK_L_MAIN: 'PCK_BACK_L' });
+    const namedGrouping = groupDetailed(
+      named.graph,
+      named.facts,
+      orderTemplate(named.facts.category),
+    );
+    gate(
+      'control: a pocket that explicitly names the back keeps its back-panel seam',
+      namedGrouping.seams.between(['PCK_L_MAIN'], ['BP_U']).length === 1,
     );
   }
   // §4.3 orphans: a seamless, roleless left placket onto the left panel with the fewest parts

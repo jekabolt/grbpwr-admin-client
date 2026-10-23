@@ -50,6 +50,20 @@
         ["PCK_L", "PCK_B_L", 0.97]
       ]
     },
+    "pocketBackNoise": {
+      "_why": "Card 6 shape: a left pocket edge fits its left-front host and, almost as well, the neutral centre-back yoke. The neutral match is rectangle noise unless the pocket name explicitly says back.",
+      "category": "shirt",
+      "pieces": [
+        ["P_L_U", 50000],
+        ["BP_U", 70000],
+        ["PCK_L_MAIN", 5000]
+      ],
+      "seams": [
+        ["PCK_L_MAIN", "P_L_U", 0.77],
+        ["PCK_L_MAIN", "BP_U", 0.765],
+        ["P_L_U", "BP_U", 0.8]
+      ]
+    },
     "orphans": {
       "_why": "A left sleeve placket with no role in its name and no seam: onto the left panel with the fewest parts (the sleeve; the larger front already carries a pocket), as a guess.",
       "category": "generic",
