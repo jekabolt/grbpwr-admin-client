@@ -14,7 +14,7 @@
 //     fused collar IS the collar; `piece_id` is not in the alias uniqueness, the server measures the
 //     fused layer by the piece's own interlining-scope contour when it has one). Interlining with no
 //     BOM line has no file at all: its pieces carry `fused` (decision 14).
-//   · Every other secondary cloth (pocketing, contrast/rib, insulation, mesh, other) also keeps the
+//   · Every other secondary cloth (pocketing, contrast/binding/rib, insulation, mesh, other) also keeps the
 //     identity and the card piece: the card models "one piece cut from several layers" by aliases in
 //     several scopes. Only the lining is a separate piece by the owner's request.
 //   · A fabric with no live BOM scope writes no DXF and its pieces are REFUSED with a reason the
@@ -39,6 +39,7 @@ export const PURPOSE = {
   interfacing: 'TECH_CARD_BOM_PURPOSE_INTERFACING',
   insulation: 'TECH_CARD_BOM_PURPOSE_INSULATION',
   contrast: 'TECH_CARD_BOM_PURPOSE_CONTRAST',
+  binding: 'TECH_CARD_BOM_PURPOSE_BINDING',
   mesh: 'TECH_CARD_BOM_PURPOSE_MESH',
   other: 'TECH_CARD_BOM_PURPOSE_OTHER',
 } as const;
@@ -69,6 +70,7 @@ export const KIND_OF_PURPOSE: Record<string, FabricKind> = {
   [PURPOSE.pocketing]: 'pocketing',
   [PURPOSE.insulation]: 'insulation',
   [PURPOSE.contrast]: 'contrast',
+  [PURPOSE.binding]: 'contrast',
   [PURPOSE.mesh]: 'mesh',
 };
 
@@ -96,6 +98,7 @@ export function kindsOfScope(t: DraftScopeTarget): FabricKind[] {
     case PURPOSE.insulation:
       return ['insulation'];
     case PURPOSE.contrast:
+    case PURPOSE.binding:
       return ['contrast', 'rib'];
     case PURPOSE.mesh:
       return ['mesh'];
@@ -133,7 +136,9 @@ export function scopeFor(
   if (named.length === 1) return { target: named[0], alternatives: 0 };
   if (kind === 'rib') {
     // Burda: «Garniturstoff: Rippenstrickstoff» — rib knit is the contrast cloth, else «other»
-    const contrast = cands.filter((t) => t.fabricPurpose === PURPOSE.contrast);
+    const contrast = cands.filter(
+      (t) => t.fabricPurpose === PURPOSE.contrast || t.fabricPurpose === PURPOSE.binding,
+    );
     const other = cands.filter((t) => t.fabricPurpose === PURPOSE.other);
     const pick = contrast.length ? contrast : other;
     return pick.length ? { target: pick[0], alternatives: pick.length - 1 } : null;

@@ -40,6 +40,7 @@ const CLOTH: Record<string, ClothState> = {
   TECH_CARD_BOM_PURPOSE_INTERFACING: 'interfacing',
   TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
   TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast',
+  TECH_CARD_BOM_PURPOSE_BINDING: 'contrast',
   TECH_CARD_BOM_PURPOSE_MESH: 'mesh',
   TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };

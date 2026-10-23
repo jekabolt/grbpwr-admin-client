@@ -63,6 +63,7 @@ const WIRE_PURPOSES = [
   'interfacing',
   'insulation',
   'contrast',
+  'binding',
   'mesh',
   'other',
 ];

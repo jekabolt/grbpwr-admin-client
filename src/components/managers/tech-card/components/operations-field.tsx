@@ -133,6 +133,7 @@ import {
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
+import { operationMoveMembership } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
   isMachineStepType,
@@ -755,6 +756,8 @@ export const emptyOperation = {
   // Nor does it carry a re-upload mark (0422): only a DXF re-upload writes one (lib/dxf-reconcile).
   // «+ to assembly» and every created step start clean.
   review: '',
+  // Membership is inferred until the operator explicitly drops this step on a block divider.
+  assemblyBlockDetached: false,
   seamClass: NONE_SEAM_CLASS,
   stitchesPerCm: '',
   seamAllowanceMm: '',
@@ -1309,7 +1312,12 @@ type AssemblyView = {
 
 function useAssemblyView(pieces: PieceRef[]): AssemblyView {
   const ops = useWatch({ name: 'operations' }) as
-    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | Array<{
+        inputKeys?: string[];
+        outputUnitKey?: string;
+        outputUnitName?: string;
+        assemblyBlockDetached?: boolean;
+      }>
     | undefined;
   return useMemo(() => {
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
@@ -1318,6 +1326,7 @@ function useAssemblyView(pieces: PieceRef[]): AssemblyView {
       inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
       outputUnitKey: (o?.outputUnitKey ?? '').trim(),
       outputUnitName: (o?.outputUnitName ?? '').trim(),
+      assemblyBlockDetached: !!o?.assemblyBlockDetached,
     }));
     const res = assemblySweep(sweepPieces, steps);
     const eatenInto = new Map<string, string>();
@@ -1346,6 +1355,8 @@ type RailGrouping = {
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
   /** Все шаги вне узлов, включая поздние прогоны без собственной шапки. */
   looseSteps: Set<number>;
+  /** Explicitly detached rows: outside every block, but not part of the loose tail. */
+  standaloneSteps: Set<number>;
   /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
   marked: boolean;
   /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
@@ -1373,7 +1384,12 @@ type RailGrouping = {
 // в чужой блок, заголовки просто перестроятся, а не запретят жест.
 function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): RailGrouping {
   const ops = useWatch({ name: 'operations' }) as
-    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | Array<{
+        inputKeys?: string[];
+        outputUnitKey?: string;
+        outputUnitName?: string;
+        assemblyBlockDetached?: boolean;
+      }>
     | undefined;
   return useMemo(() => {
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
@@ -1382,6 +1398,7 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
       inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
       outputUnitKey: (o?.outputUnitKey ?? '').trim(),
       outputUnitName: (o?.outputUnitName ?? '').trim(),
+      assemblyBlockDetached: !!o?.assemblyBlockDetached,
     }));
     const res = assemblySweep(sweepPieces, steps);
 
@@ -1432,6 +1449,7 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
       broken,
       headerBefore,
       looseSteps: new Set(grouped.loose.steps),
+      standaloneSteps: new Set(grouped.standalone),
       smvOfBlock,
       tailSmv,
       marked: grouped.blocks.length > 0,
@@ -1933,6 +1951,7 @@ function ClearAssemblyButton({
     const ops = (getValues('operations') ?? []) as Array<{
       inputKeys?: string[];
       outputUnitKey?: string;
+      assemblyBlockDetached?: boolean;
     }>;
     const pieceKeys = new Set(pieces.map((p) => p.lineKey));
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
@@ -1940,6 +1959,7 @@ function ClearAssemblyButton({
       inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
       outputUnitKey: (o?.outputUnitKey ?? '').trim(),
       outputUnitName: '',
+      assemblyBlockDetached: !!o?.assemblyBlockDetached,
     }));
     // Состав узла берётся НА МОМЕНТ ШАГА, а не финальный. Разница не косметическая: при
     // «A+B→GARMENT, обработка [GARMENT], GARMENT+C→GARMENT» финальное замыкание вернуло бы
@@ -1970,6 +1990,7 @@ function ClearAssemblyButton({
       setValue(`operations.${i}.inputKeys`, expanded, { shouldDirty: true });
       setValue(`operations.${i}.outputUnitKey`, '', { shouldDirty: true });
       setValue(`operations.${i}.outputUnitName`, '', { shouldDirty: true });
+      setValue(`operations.${i}.assemblyBlockDetached`, false, { shouldDirty: true });
     });
     // Намерение объявляется ровно на это сохранение.
     setValue('assemblyCleared', true, { shouldDirty: true });
@@ -6294,22 +6315,26 @@ export function OperationsField({
       return;
     }
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
-    if (standalone) {
-      const outputUnitKey = (operations[from]?.outputUnitKey ?? '').trim();
+    const operation = operations[from];
+    if (!operation) return;
+    const membership = operationMoveMembership(
+      operation,
+      standalone,
+      new Set(pieces.map((piece) => piece.lineKey)),
+    );
+    if (!membership.accepted) {
+      if (membership.reason === 'pieces-only') {
+        refuseGesture('SEQUENCE', 'pieces only', 'use cut pieces');
+        return;
+      }
       // Производящий шаг — несущая точка графа: снятие его выхода превращает каждую позднюю ссылку
       // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Структурное
       // растворение остаётся отдельным явным жестом.
-      if (outputUnitKey) {
-        refuseGesture('SEQUENCE', 'join kept', `dissolve ▣ ${outputUnitKey} explicitly`);
-        return;
-      }
-      // Входы обработки — производственный факт: по ним схема рисует обработку на плитке детали.
-      // Принадлежность блоку пока выводится из тех же входов и отдельного хранимого факта не имеет,
-      // поэтому честно отделить строку без потери данных этот бандл не может.
-      refuseGesture('SEQUENCE', 'join kept', 'detach unavailable');
+      refuseGesture('SEQUENCE', 'join kept', `dissolve ▣ ${membership.outputUnitKey} explicitly`);
       return;
     }
-    if (from === to && !standalone) return;
+    if (from === to && !!operation.assemblyBlockDetached === membership.assemblyBlockDetached)
+      return;
     // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
     clearFormHistory();
@@ -6327,6 +6352,11 @@ export function OperationsField({
         return s;
       });
     }
+    // Inputs are a production fact and stay untouched. Divider drop sets only membership; an
+    // ordinary row drop clears it. Write after `move` so the address is the final row position.
+    setValue(`operations.${to}.assemblyBlockDetached`, membership.assemblyBlockDetached, {
+      shouldDirty: true,
+    });
   };
 
   // append here (this field array owns the rendered list) when the panel requests it. The request
@@ -7094,6 +7124,7 @@ export function OperationsField({
       inputKeys?: string[];
       outputUnitKey?: string;
       outputUnitName?: string;
+      assemblyBlockDetached?: boolean;
     }>;
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
     const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
@@ -7101,9 +7132,12 @@ export function OperationsField({
       inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
       outputUnitKey: (o?.outputUnitKey ?? '').trim(),
       outputUnitName: (o?.outputUnitName ?? '').trim(),
+      assemblyBlockDetached: !!o?.assemblyBlockDetached,
     }));
     const res = assemblySweep(sweepPieces, steps);
-    const available = res.frontierBefore[index] ?? res.frontier;
+    const available = formOps[index]?.assemblyBlockDetached
+      ? [...pieceKeys]
+      : res.frontierBefore[index] ?? res.frontier;
     if (!available.includes(key)) {
       const eater = res.consumedBy.get(key);
       const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
@@ -7212,6 +7246,7 @@ export function OperationsField({
           inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
           outputUnitKey: (o?.outputUnitKey ?? '').trim(),
           outputUnitName: (o?.outputUnitName ?? '').trim(),
+          assemblyBlockDetached: !!o?.assemblyBlockDetached,
         })),
       ).violations;
     const sig = (v: { rule: number; detail: string; step: number; key: string }) =>
@@ -8243,6 +8278,7 @@ export function OperationsField({
                     grouped={grouped}
                     headerBefore={grouping.headerBefore}
                     looseSteps={grouping.looseSteps}
+                    standaloneSteps={grouping.standaloneSteps}
                     selectedIndex={selectedIndex}
                     onSelect={(index) => setSelected(index)}
                     errorIndices={errorIndices}
@@ -8379,6 +8415,7 @@ export function OperationsField({
           railMarked={grouping.marked}
           railHeaderBefore={grouping.headerBefore}
           railLooseSteps={grouping.looseSteps}
+          railStandaloneSteps={grouping.standaloneSteps}
           railErrorIndices={errorIndices}
           railBrokenSteps={brokenSteps}
           activePin={activePin}

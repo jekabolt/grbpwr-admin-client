@@ -5,3 +5,4 @@ export {
   classifyAssemblyInputs,
 } from '../src/components/managers/tech-card/components/assembly-frontier';
 export { assemblyBlocks } from '../src/components/managers/tech-card/components/assembly-blocks';
+export { assemblyLayout } from '../src/components/managers/tech-card/components/assembly-layout';

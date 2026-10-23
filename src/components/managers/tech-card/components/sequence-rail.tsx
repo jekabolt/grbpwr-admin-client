@@ -435,6 +435,7 @@ export function SequenceRail({
   grouped,
   headerBefore,
   looseSteps,
+  standaloneSteps,
   selectedIndex,
   onSelect,
   errorIndices,
@@ -460,6 +461,8 @@ export function SequenceRail({
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
   /** Индексы шагов вне узлов: поздний отдельный прогон закрывает предыдущий блок своей чертой. */
   looseSteps: ReadonlySet<number>;
+  /** Stored outside-block rows. A run starts behind the same closing rule as a loose run. */
+  standaloneSteps: ReadonlySet<number>;
   selectedIndex: number;
   onSelect: (index: number) => void;
   errorIndices: ReadonlySet<number>;
@@ -528,8 +531,14 @@ export function SequenceRail({
     looseSteps.has(index) &&
     !looseSteps.has(index - 1) &&
     !headerBefore.has(index);
+  const startsStandaloneRun = (index: number) =>
+    grouped && standaloneSteps.has(index) && (index === 0 || !standaloneSteps.has(index - 1));
   const hasDividerBefore = (index: number) =>
-    grouped && (index === 0 || headerBefore.has(index) || startsUnheadedLooseRun(index));
+    grouped &&
+    (index === 0 ||
+      headerBefore.has(index) ||
+      startsUnheadedLooseRun(index) ||
+      startsStandaloneRun(index));
   // Разделители входят в геометрию сортировки, хотя сами не перетаскиваются. Иначе при наведении
   // на их id `SortableContext` получал `overIndex = -1`, снимал все transform и строки ниже
   // схлопывались обратно прямо под перетаскиваемым шагом.
@@ -551,9 +560,12 @@ export function SequenceRail({
             // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
             // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
             const startsLooseRun = startsUnheadedLooseRun(index);
+            const startsStandalone = startsStandaloneRun(index);
             return (
               <Fragment key={f.id}>
-                {hasDividerBefore(index) && <SequenceDivider at={index} visible={startsLooseRun} />}
+                {hasDividerBefore(index) && (
+                  <SequenceDivider at={index} visible={startsLooseRun || startsStandalone} />
+                )}
                 {grouped && headerBefore.has(index) && (
                   <UnitBlockHeader
                     block={headerBefore.get(index)!.block}

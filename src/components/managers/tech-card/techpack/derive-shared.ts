@@ -184,6 +184,7 @@ export function materialForPiece(
     const rank: Record<string, number> = {
       TECH_CARD_BOM_PURPOSE_MAIN: 0,
       TECH_CARD_BOM_PURPOSE_CONTRAST: 1,
+      TECH_CARD_BOM_PURPOSE_BINDING: 1,
       TECH_CARD_BOM_PURPOSE_LINING: 2,
       TECH_CARD_BOM_PURPOSE_POCKETING: 3,
       TECH_CARD_BOM_PURPOSE_MESH: 4,

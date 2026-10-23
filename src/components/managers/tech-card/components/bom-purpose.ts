@@ -10,7 +10,7 @@ import type { FabricDirection } from 'lib/nesting/types';
 // The list is closed because the field exists to GROUP. A free-text role stops grouping the moment
 // one operator writes «карманка» and the next writes «мешковина кармана», which is exactly what the
 // free-text slot NAME already does today. OTHER carries its meaning in a separate note so the note
-// can never quietly become a ninth purpose.
+// can never quietly become a tenth purpose.
 
 // Подписи назначений живут в bom-purpose-labels.ts (лист без тяжёлых импортов — его читает и
 // публичный вьюер выкроек); реэкспорт сохраняет всех прежних импортёров этого файла.
@@ -33,6 +33,7 @@ export const bomPurposeOrder: common_TechCardBomPurpose[] = [
   'TECH_CARD_BOM_PURPOSE_INTERFACING',
   'TECH_CARD_BOM_PURPOSE_INSULATION',
   'TECH_CARD_BOM_PURPOSE_CONTRAST',
+  'TECH_CARD_BOM_PURPOSE_BINDING',
   'TECH_CARD_BOM_PURPOSE_MESH',
   'TECH_CARD_BOM_PURPOSE_OTHER',
 ];

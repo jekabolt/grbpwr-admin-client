@@ -27,7 +27,7 @@ import { derivePieceLayerRole } from './piece-layer-role';
 // кат-лист /r/:token.
 import { wireInt } from './wire-int';
 
-/** Роль слоя, как её видит рисующий: восемь назначений роллгудс-строки. */
+/** Роль слоя, как её видит рисующий: девять назначений; бейка рисуется как отделочная ткань. */
 export type PieceClothRole =
   | 'main'
   | 'contrast'
@@ -130,7 +130,7 @@ export const CLOTH_GEOMETRY: Record<PieceClothState, ClothGeom> = {
 // они получают только тогда, когда других слоёв у детали нет вовсе.
 const DEFERRED_LAYERS: readonly PieceClothState[] = ['interfacing', 'insulation'];
 
-// main > contrast > lining > pocketing > mesh > other > unsorted — выведено из рампы, а не написано
+// main > contrast/binding > lining > pocketing > mesh > other > unsorted — выведено из рампы, а не написано
 // вторым литералом: иначе два порядка разойдутся первой же правкой одного из них.
 const LAYER_PRIORITY: readonly PieceClothState[] = CLOTH_RAMP.filter(
   (s) => s !== 'unbound' && !DEFERRED_LAYERS.includes(s),
@@ -145,6 +145,7 @@ const STATE_BY_PURPOSE: Record<string, PieceClothRole> = {
   TECH_CARD_BOM_PURPOSE_INTERFACING: 'interfacing',
   TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
   TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast',
+  TECH_CARD_BOM_PURPOSE_BINDING: 'contrast',
   TECH_CARD_BOM_PURPOSE_MESH: 'mesh',
   TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };

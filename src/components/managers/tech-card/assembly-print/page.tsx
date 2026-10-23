@@ -143,6 +143,7 @@ function printInput(
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
       outputUnitKey: (o.outputUnitKey ?? '').trim(),
       outputUnitName: (o.outputUnitName ?? '').trim(),
+      assemblyBlockDetached: !!o.assemblyBlockDetached,
     };
   });
   return { pieces, steps };

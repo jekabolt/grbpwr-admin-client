@@ -8323,6 +8323,8 @@ export type common_TechCardInsert = {
   // карточку с review-метками: без этого флага сервер отказывает, а не стирает их. Транспорт,
   // не содержание; ни в один дайджест не входит.
   operationReviewAware: boolean | undefined;
+  // Declares support for TechCardOperation.assembly_block_detached on full-replace writes.
+  operationBlockMembershipAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -8554,7 +8556,7 @@ export type common_TechCardBomItem = {
   // real answer, and demanding one just farms junk text.
   // Optional по той же причине, что и purpose — отсутствие означает «не трогай».
   purposeNote?: string;
-  // Семпловая: this line is the yardage the SAMPLE is sewn from. A flag, not a ninth purpose — a
+  // Семпловая: this line is the yardage the SAMPLE is sewn from. A flag, not a tenth purpose — a
   // sample is assembled from a sample MAIN plus a sample LINING, and as a purpose value both would
   // collapse into one bucket and lose the role that makes them useful.
   // Optional по той же причине: голый bool от старого бандла приходит как false и снял бы признак
@@ -8700,8 +8702,8 @@ export type common_TechCardFabricDirection =
 // a раскладка may bind to, and a pocket-bag / contrast / mesh fabric is genuinely fabric on all
 // three counts — it differs only in role. It is not free text either: the field exists to GROUP, and
 // a free-text role stops grouping the moment two operators spell it differently. Hence a closed
-// eight-value list, with `other` carrying its meaning in the SEPARATE purpose_note field so a note
-// can never become a shadow purpose on one of the seven real values.
+// nine-value list, with `other` carrying its meaning in the SEPARATE purpose_note field so a note
+// can never become a shadow purpose on one of the eight real values.
 // UNSET (0) is a first-class state meaning "not sorted yet", not a default. Every line that existed
 // before 0265 is UNSET on purpose: section='fabric' is exactly where pocket-bag, contrast and mesh
 // hide today, so a backfill would have labelled them MAIN confidently and wrongly.
@@ -8714,7 +8716,8 @@ export type common_TechCardBomPurpose =
   | 'TECH_CARD_BOM_PURPOSE_INSULATION'
   | 'TECH_CARD_BOM_PURPOSE_CONTRAST'
   | 'TECH_CARD_BOM_PURPOSE_MESH'
-  | 'TECH_CARD_BOM_PURPOSE_OTHER';
+  | 'TECH_CARD_BOM_PURPOSE_OTHER'
+  | 'TECH_CARD_BOM_PURPOSE_BINDING';
 // MaterialUnit is the closed vocabulary a material quantity is measured in (Ф5а.3), mirroring
 // entity.MaterialUnit. Before it, every unit was free text and every consumer compared raw strings:
 // the production material plan carried a private metre synonym set (m/м/meter/meters/metre/metres)
@@ -9325,6 +9328,8 @@ export type common_TechCardOperation = {
   // one of reshaped|remapped|split|orphan and blocks release readiness. This is deliberately a
   // string rather than an enum so an older protojson client cannot silently drop a future reason.
   review: string | undefined;
+  // Keeps a piece-processing step between assembly blocks without making it part of either block.
+  assemblyBlockDetached: boolean | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
