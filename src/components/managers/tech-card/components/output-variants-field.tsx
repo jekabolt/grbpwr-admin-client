@@ -133,9 +133,7 @@ export function useDeleteOutputVariant(techCardId: number) {
   const undoHistory = useUndoHistory();
   return useMutation({
     mutationFn: async (id: number) => {
-      const ready = await undoHistory.barrier('output-variant-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('output-variant-delete');
       return adminService.DeleteTechCardOutputVariant({ id });
     },
     onSuccess: invalidate,

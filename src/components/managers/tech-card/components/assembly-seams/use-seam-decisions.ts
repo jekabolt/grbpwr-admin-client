@@ -206,8 +206,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
 
   const remove = useCallback(
     async (rows: StoredSeam[]) => {
-      const ready = await undoHistory.barrier('seam-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return false;
+      undoHistory.cut('seam-delete');
       return run(
         Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
         () =>

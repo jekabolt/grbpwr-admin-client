@@ -82,9 +82,7 @@ export function useDeleteDevExpense(techCardId: number) {
   const undoHistory = useUndoHistory();
   return useMutation({
     mutationFn: async (id: number) => {
-      const ready = await undoHistory.barrier('expense-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('expense-delete');
       return adminService.DeleteTechCardDevExpense({ id });
     },
     onSuccess: () => {

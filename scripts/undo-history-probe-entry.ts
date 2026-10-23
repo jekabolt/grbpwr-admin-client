@@ -5,6 +5,8 @@ export {
   diffHistoryValues,
   emptyUndoHistory,
   historyBarrier,
+  historyArrayIdentityChanged,
+  recordUndoPatches,
   recordUndoStep,
   redoHistoryStep,
   undoHistoryStep,

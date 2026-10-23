@@ -247,7 +247,7 @@ export function useStartRun(techCardId?: number): StartRunState {
     async (input: StartRunInput, onStarted?: () => void): Promise<RunRefusal | null> => {
       const card = techCardId ?? 0;
       if (card <= 0) return null;
-      const ready = await undoHistory.barrier(`generate:${input.kind}`);
+      const ready = await undoHistory.flushThenCut(`generate:${input.kind}`);
       if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return null;
       // THE FINGERPRINT IS TAKEN OF THE WIRE OBJECT (`render/run-ledger.ts`) — built here field for
       // field as `startRun` sends it, minus the key, so what is fingerprinted and what departs cannot

@@ -439,8 +439,7 @@ export function MarkersSection({
     if (!deleting) return;
     setDeleteBusy(true);
     try {
-      const ready = await undoHistory.barrier('marker-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
+      undoHistory.cut('marker-delete');
       await adminService.DeleteTechCardMarker({ id: deleting.id });
       // The row leaving the list is the receipt.
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });

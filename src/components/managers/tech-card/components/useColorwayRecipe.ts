@@ -210,9 +210,7 @@ export function useDeleteColorway(techCardId: number) {
       colorwayId: number;
       expectedVersion: number;
     }) => {
-      const ready = await undoHistory.barrier('colourway-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('colourway-delete');
       return adminService.DeleteColorwayByID({ colorwayId, expectedVersion, dryRun: false });
     },
     onSuccess: () =>

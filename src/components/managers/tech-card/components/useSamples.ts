@@ -152,9 +152,7 @@ export function useDeleteSampleSubstitution(sampleId: number) {
   const undoHistory = useUndoHistory();
   return useMutation({
     mutationFn: async (id: number) => {
-      const ready = await undoHistory.barrier('sample-substitution-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('sample-substitution-delete');
       return adminService.DeleteSampleSubstitution({ id });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: substitutionKeys.list(sampleId) }),
@@ -208,9 +206,7 @@ export function useDeleteSample(techCardId: number) {
   const undoHistory = useUndoHistory();
   return useMutation({
     mutationFn: async (id: number) => {
-      const ready = await undoHistory.barrier('sample-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('sample-delete');
       return adminService.DeleteSample({ id, dryRun: false });
     },
     // ЧТО ИНВАЛИДИРУЕМ — по словарю самого вердикта (каскад / сироты), а не «на всякий случай».

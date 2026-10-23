@@ -442,9 +442,6 @@ export function useDesignWrites(techCardId?: number) {
         newDetailName?: string;
       } & SilentWrite,
     ) => {
-      const ready = await undoHistory.barrier('design-upload');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before uploading');
       return adminService.RegisterDesignUpload({
         techCardId: techCardId ?? 0,
         clientRequestId: input.clientRequestId,
@@ -482,9 +479,7 @@ export function useDesignWrites(techCardId?: number) {
 
   const deleteDetailSlot = useMutation({
     mutationFn: async (slotId: number) => {
-      const ready = await undoHistory.barrier('detail-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('detail-delete');
       return adminService.DeleteDesignDetailSlot({ slotId });
     },
     onMutate,

@@ -60,6 +60,7 @@ import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-tex
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { isDxfUrl } from 'utils/pattern';
+import { ulid } from 'utils/ulid';
 import {
   // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
   // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
@@ -754,6 +755,7 @@ const LINKABLE_SECTION_LABEL: Record<string, string> = {
 // indistinguishable from «it defaulted to 4», and the card stops being able to say which steps
 // genuinely differ.
 export const emptyOperation = {
+  historyKey: '',
   operationNumber: 0,
   operationType: NONE_OP_TYPE,
   // РАБОТА (0330) — пустая строка, и это ЗАКОННОЕ состояние, а не заготовка. Новый шаг вида не
@@ -862,6 +864,10 @@ type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 /** A step row exactly as the field array holds it. */
 export type OperationRow = typeof emptyOperation;
 
+function newOperationRow(overrides: Partial<OperationRow> = {}): OperationRow {
+  return { ...emptyOperation, historyKey: ulid(), ...overrides };
+}
+
 /**
  * THE ONE DEFINITION OF «A FILLED STEP THIS SCREEN WRITES». The create dialog's result and the
  * skeleton's step both land here: a second spread of `emptyOperation` next to this one would drift
@@ -870,8 +876,7 @@ export type OperationRow = typeof emptyOperation;
  * Pure: no form, no history, no position. The caller decides where the row goes.
  */
 export function rowFromCreate(r: CreateResult): OperationRow {
-  return {
-    ...emptyOperation,
+  return newOperationRow({
     inputKeys: r.inputKeys,
     outputUnitKey: r.outputUnitKey,
     outputUnitName: r.outputUnitName,
@@ -895,7 +900,7 @@ export function rowFromCreate(r: CreateResult): OperationRow {
     ...(Object.fromEntries(
       Object.entries(r.kindWrites ?? {}).filter(([k]) => k in emptyOperation),
     ) as Partial<OperationRow>),
-  };
+  });
 }
 
 /**
@@ -6335,7 +6340,7 @@ export function OperationsField({
     if (frozen) return;
     clearFormHistory(); // (2/10)
     remapIssues((old) => (old > index ? old + 1 : old));
-    insert(index + 1, { ...emptyOperation });
+    insert(index + 1, newOperationRow());
     setSelected(index + 1);
   };
 
@@ -6399,7 +6404,7 @@ export function OperationsField({
   useEffect(() => {
     if (!addRequest) return;
     clearFormHistory(); // (4/10) шаг дописала ПАНЕЛЬ, а не жест полотна
-    append({ ...emptyOperation });
+    append(newOperationRow());
     setSelected(fields.length);
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7252,7 +7257,7 @@ export function OperationsField({
     // указывала бы на шаг, стоящий уже не там.
     clearFormHistory();
     setSelected(fields.length);
-    append({ ...emptyOperation });
+    append(newOperationRow());
   };
 
   const openNextReview = (operations: CardOperation[], afterIndex: number) => {
@@ -7317,7 +7322,7 @@ export function OperationsField({
     if (frozen || !pieceKey) return;
     clearFormHistory();
     const at = fields.length;
-    append({ ...emptyOperation, inputKeys: [pieceKey], review: '', draft: false });
+    append(newOperationRow({ inputKeys: [pieceKey], review: '', draft: false }));
     setSelected(at);
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),

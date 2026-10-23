@@ -248,9 +248,7 @@ export function DetailsEditor({
     if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
       throw new Error('slot changed');
 
-    const ready = await undoHistory.barrier('detail-upload');
-    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-      throw new Error('save the card before uploading');
+    undoHistory.cut('detail-upload');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;

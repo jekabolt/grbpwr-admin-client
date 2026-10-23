@@ -51,16 +51,20 @@ export type UndoHistoryState = {
 };
 
 const ROW_KEY_PREFERENCE = [
+  'historyKey',
   'lineKey',
   'profileKey',
   'rowKey',
-  'key',
-  'id',
+  'clientRef',
   'mediaId',
   'patternId',
   'calloutId',
   'issueId',
   'signoffId',
+  'section',
+  'labelType',
+  'number',
+  'key',
 ] as const;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -174,10 +178,8 @@ function diffInto(
       return;
     }
 
-    if (before.length === after.length) {
-      after.forEach((value, index) => diffInto(before[index], value, [...path, index], patches));
-      return;
-    }
+    // A row without a durable identity can never be addressed safely after an insert or reorder.
+    // Keep the array atomic instead of emitting numeric paths which may later hit another row.
   }
 
   if (isObject(before) && isObject(after)) {
@@ -207,6 +209,56 @@ export function diffHistoryValues(before: unknown, after: unknown): HistoryPatch
   const patches: HistoryPatch[] = [];
   diffInto(before, after, [], patches);
   return patches;
+}
+
+function nestedArrayIdentityChanged(before: unknown, after: unknown): boolean {
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const key = stableRowKey(before, after);
+    if (!key) return !sameValue(before, after);
+    const beforeKeys = before.map(
+      (row) => (row as Record<string, unknown>)[key] as PrimitiveKey,
+    );
+    const afterKeys = after.map((row) => (row as Record<string, unknown>)[key] as PrimitiveKey);
+    if (!sameValue(beforeKeys, afterKeys)) return true;
+    const afterByKey = new Map(
+      after.map((row) => [(row as Record<string, unknown>)[key] as PrimitiveKey, row]),
+    );
+    return before.some((row) => {
+      const object = row as Record<string, unknown>;
+      const next = afterByKey.get(object[key] as PrimitiveKey) as
+        | Record<string, unknown>
+        | undefined;
+      if (!next) return true;
+      // A server id is not the row selector, but replacing 0 with the stored id invalidates every
+      // pre-save row snapshot. Cut before an undo can write the placeholder back.
+      if (('id' in object || 'id' in next) && !Object.is(object.id ?? 0, next.id ?? 0)) return true;
+      const fields = new Set([...Object.keys(object), ...Object.keys(next)]);
+      for (const field of fields) {
+        if (Array.isArray(object[field]) || Array.isArray(next[field])) {
+          if (nestedArrayIdentityChanged(object[field], next[field])) return true;
+        } else if (isObject(object[field]) && isObject(next[field])) {
+          if (nestedArrayIdentityChanged(object[field], next[field])) return true;
+        }
+      }
+      return false;
+    });
+  }
+  if (isObject(before) && isObject(after)) {
+    const fields = new Set([...Object.keys(before), ...Object.keys(after)]);
+    for (const field of fields) {
+      if (Array.isArray(before[field]) || Array.isArray(after[field])) {
+        if (nestedArrayIdentityChanged(before[field], after[field])) return true;
+      } else if (isObject(before[field]) && isObject(after[field])) {
+        if (nestedArrayIdentityChanged(before[field], after[field])) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** True when server reconciliation makes existing row-addressed history unsafe to replay. */
+export function historyArrayIdentityChanged(before: unknown, after: unknown): boolean {
+  return nestedArrayIdentityChanged(before, after);
 }
 
 function valueAt(root: unknown, path: HistoryPathToken[]): unknown {
@@ -320,6 +372,17 @@ export function recordUndoStep(
   limits: { steps?: number; bytes?: number } = {},
 ): UndoHistoryState {
   const patches = diffHistoryValues(before, after);
+  return recordUndoPatches(state, patches, label, mergeKey, limits);
+}
+
+/** Records already-computed patches so a watcher never deep-diffs the same change twice. */
+export function recordUndoPatches(
+  state: UndoHistoryState,
+  patches: HistoryPatch[],
+  label: string,
+  mergeKey?: string,
+  limits: { steps?: number; bytes?: number } = {},
+): UndoHistoryState {
   if (patches.length === 0) return state;
   const id =
     mergeKey && state.undo.at(-1)?.mergeKey === mergeKey ? state.undo.at(-1)!.id : state.nextId;

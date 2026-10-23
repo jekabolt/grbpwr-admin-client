@@ -652,7 +652,7 @@ export function ConstructionDraft({
     patchRun(card, { phase: 'saving', refused: null });
     let flushed: FlushResult;
     try {
-      flushed = await undoHistory.barrier('draft');
+      flushed = await undoHistory.flushThenCut('draft');
     } catch {
       // Контракт отвечает исходом, а не исключением; брошенное всё равно читается отказом, а не
       // разрешением платить.

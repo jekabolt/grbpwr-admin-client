@@ -3001,11 +3001,7 @@ export function PatternsField({
       say('not applied', 'error');
       return false;
     }
-    const ready = await undoHistory.barrier('dxf-reupload');
-    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') {
-      say('save the card before replacing the file', 'error');
-      return false;
-    }
+    undoHistory.cut('dxf-reupload');
 
     let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
     beginReupload(ask.scopeKey, ask.outcome.rowId);
@@ -3079,8 +3075,7 @@ export function PatternsField({
   }
 
   async function confirmDelete(rowId: string) {
-    const ready = await undoHistory.barrier('dxf-delete');
-    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
+    undoHistory.cut('dxf-delete');
     // A non-DXF row: by its index, as the old × did.
     if (rowId.startsWith('#')) {
       const at = Number(rowId.slice(1));
@@ -3178,8 +3173,7 @@ export function PatternsField({
   // `delete` of an old version (live or removed sheet): permanent, DeleteTechCardPatternRevision.
   async function deleteRevision(v: SheetVersion): Promise<boolean> {
     if (!techCardId || v.historyId <= 0) return false;
-    const ready = await undoHistory.barrier('pattern-revision-delete');
-    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return false;
+    undoHistory.cut('pattern-revision-delete');
     const stored =
       queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
     try {
@@ -4408,7 +4402,7 @@ export function PatternsField({
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
-              save: (reason) => undoHistory.barrier(reason),
+              save: (reason) => undoHistory.flushThenCut(reason),
               // A sheet replaced in place: its save archives the old file with a card snapshot.
               onReplaced: (list) =>
                 list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),

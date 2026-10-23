@@ -739,7 +739,7 @@ export function FlatRunRow({
       }
       let saved: FlushResult;
       try {
-        saved = await undoHistory.barrier('flat');
+        saved = await undoHistory.flushThenCut('flat');
       } catch {
         saved = 'error';
       }
@@ -789,7 +789,7 @@ export function FlatRunRow({
         qc,
         card,
         form,
-        flush: () => undoHistory.barrier('flat'),
+        flush: () => undoHistory.flushThenCut('flat'),
         ask: (signal) =>
           abortableAdminService(signal).PreviewDesignRunInputs({
             techCardId: card,

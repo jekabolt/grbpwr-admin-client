@@ -187,9 +187,7 @@ function KeyedCards({
     if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
       throw new Error('slot changed');
 
-    const ready = await undoHistory.barrier('label-upload');
-    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-      throw new Error('save the card before uploading');
+    undoHistory.cut('label-upload');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;

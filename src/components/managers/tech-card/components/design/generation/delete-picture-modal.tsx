@@ -144,9 +144,7 @@ export function useDeletePicture(
      is already gone (or the menu still busy) when the question closes. */
   const remove = useMutation({
     mutationFn: async () => {
-      const ready = await undoHistory.barrier('picture-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('picture-delete');
       return deleteDesignPicture(pictureId);
     },
     onSuccess: async (res) => {

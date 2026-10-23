@@ -130,8 +130,7 @@ export function useDeleteUnfitted(techCardId: number) {
         qc.invalidateQueries({ queryKey: sampleKeys.all });
         return false;
       }
-      const ready = await undoHistory.barrier('sample-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return false;
+      undoHistory.cut('sample-delete');
       const batches = batchesOf(await outstandingOf(sampleId));
       for (const batch of batches) {
         // A later batch failing stops here: the sample is NOT deleted, the error names it.

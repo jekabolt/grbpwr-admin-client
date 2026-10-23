@@ -2295,7 +2295,7 @@ export function ArtifactsPanel({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await undoHistory.barrier('suggest-callouts');
+        flushed = await undoHistory.flushThenCut('suggest-callouts');
       } catch {
         flushed = 'error';
       }

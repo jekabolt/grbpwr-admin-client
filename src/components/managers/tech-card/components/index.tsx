@@ -176,6 +176,7 @@ import {
   type UndoHistoryApi,
   type UndoHistoryCaptureProps,
 } from './undo-history';
+import { historyArrayIdentityChanged } from './undo-history-core';
 import { consumeReuploadSnapshot, peekReuploadSnapshot } from './nesting/reupload-session';
 import {
   decideAutoStage,
@@ -1640,7 +1641,7 @@ export function TechCardForm({
     // what was sent, it would drop the Fusing steps and the next unrelated save would wipe them.
     type OpRow = NonNullable<TechCardFormData['operations']>[number];
     const sentOps = (sent.operations ?? []) as OpRow[];
-    const readOps = (server.operations ?? []) as OpRow[];
+    const readOps = [...(server.operations ?? [])] as OpRow[];
     const rawOperationAudit = auditOperationPresence(
       sentOps as unknown as Record<string, unknown>[],
       readOps as unknown as Record<string, unknown>[],
@@ -1655,6 +1656,13 @@ export function TechCardForm({
       rawOperationAudit,
       fuseOverrides.map((override) => override.manualIndex),
     );
+    // mapTechCardToForm minted fresh client-only keys for the read. Carry the sent key onto each
+    // paired manual row; genuinely inserted server rows keep their new key, which makes the
+    // reconciliation below an explicit history cut instead of an index-addressed undo hazard.
+    operationAudit.pairs.forEach((readIndex, sentIndex) => {
+      if (readIndex < 0 || !readOps[readIndex] || !sentOps[sentIndex]?.historyKey) return;
+      readOps[readIndex] = { ...readOps[readIndex], historyKey: sentOps[sentIndex].historyKey };
+    });
     if (fuseOverrides.length > 0) {
       notify({
         sev: 'warn',
@@ -1700,6 +1708,7 @@ export function TechCardForm({
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
   ): Promise<WriteResult> {
     writing.current += 1;
+    const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
     try {
       // mn-5: the decision is pending — nothing goes out but its answer («keep mine» closes it first).
       if (conflictOpen.current) {
@@ -1735,6 +1744,7 @@ export function TechCardForm({
       }
       return await writeTechCardPass(data, opts);
     } finally {
+      finishHistoryReconciliation();
       writing.current -= 1;
       // A read that came in while this chain ran waited for it (M-3): judged now, against the card the
       // chain left this page standing on.
@@ -2299,6 +2309,8 @@ export function TechCardForm({
     // the body and settles them itself once its own write lands.
     keepBaseline: readonly (keyof TechCardFormData)[] = [],
   ) {
+    const typed = form.getValues();
+    if (historyArrayIdentityChanged(typed, settled.values)) undoHistory.api.clear();
     // The merge, the baseline key by key (R-1) and the sparse dirty map (R-8) live beside the machine
     // (useTechCardAutosave.ts), where the probe runs them on a real RHF form.
     settleFormAfterSave(form, before, settled, {

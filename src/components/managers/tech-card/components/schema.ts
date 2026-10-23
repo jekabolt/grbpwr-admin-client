@@ -1282,6 +1282,10 @@ export function operationFieldNames(): string[] {
 
 const operationSchema = z
   .object({
+    // Client-only row identity for in-session undo. It is preserved through reconciliation and
+    // deliberately omitted by mapFormToTechCardInsert; operationNumber is server-owned and changes
+    // whenever the server inserts a generated Fusing step or renumbers the sequence.
+    historyKey: z.string().min(1).default(ulid),
     // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
     // («Node is required») is why: a mandatory field with free input has no right answer, so the
     // operator invents one and no two cards say the same thing the same way.
@@ -2750,6 +2754,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
+      historyKey: ulid(),
       // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
       // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),

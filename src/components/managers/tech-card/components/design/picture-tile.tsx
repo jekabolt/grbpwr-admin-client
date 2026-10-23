@@ -24,6 +24,7 @@ import {
 import { PICKER_BLEED, PICKER_ROW } from './core/two-step-picker';
 import { uploadRaster } from './modals/use-edit-layer';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
+import { useUndoHistory } from '../undo-history';
 
 import { ThreedModelModal } from './threed/model-modal';
 import { isModelUrl } from './threed/media';
@@ -398,6 +399,7 @@ export function PictureGalleryProvider({
    */
   const writes = useDesignWrites(techCardId);
   const { registerUpload } = writes;
+  const undoHistory = useUndoHistory();
 
   /** Картинка полосы, стоящая за медиа, — или `null`: кадр не из полосы. */
   const pictureOfMedia = useCallback(
@@ -444,6 +446,7 @@ export function PictureGalleryProvider({
         });
         return;
       }
+      undoHistory.cut('picture-copy-upload');
       const media = await uploadRaster(dataUrl);
       await registerUpload.mutateAsync({
         clientRequestId: newClientRequestId(),
@@ -464,7 +467,7 @@ export function PictureGalleryProvider({
         ],
       });
     },
-    [pictureOfMedia, registerUpload],
+    [pictureOfMedia, registerUpload, undoHistory],
   );
 
   const api = useMemo<GalleryApi>(() => ({ register, openAt }), [register, openAt]);

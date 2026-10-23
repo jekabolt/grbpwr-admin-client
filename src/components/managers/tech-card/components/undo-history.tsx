@@ -17,7 +17,7 @@ import {
   diffHistoryValues,
   emptyUndoHistory,
   historyBarrier,
-  recordUndoStep,
+  recordUndoPatches,
   redoHistoryStep,
   undoHistoryStep,
   type HistoryPatch,
@@ -35,8 +35,12 @@ export type UndoHistoryApi = {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   clear: () => void;
-  /** Flush the ordinary autosave queue, then cut history before an irreversible action. */
-  barrier: (reason: string) => Promise<FlushResult>;
+  /** Cut history synchronously without validating or saving unrelated card fields. */
+  cut: (reason: string) => void;
+  /** Flush the card body required by a server-side run, then cut history. */
+  flushThenCut: (reason: string) => Promise<FlushResult>;
+  /** Close the operator gesture and ignore form writes performed by one server reconciliation. */
+  beginServerReconciliation: () => () => void;
 };
 
 const OFF: UndoHistoryApi = {
@@ -45,7 +49,9 @@ const OFF: UndoHistoryApi = {
   undo: async () => {},
   redo: async () => {},
   clear: () => {},
-  barrier: async () => 'off',
+  cut: () => {},
+  flushThenCut: async () => 'off',
+  beginServerReconciliation: () => () => {},
 };
 
 export const UndoHistoryContext = createContext<UndoHistoryApi>(OFF);
@@ -89,6 +95,8 @@ type Gesture = {
   before: TechCardFormData;
   label?: string;
   textPath?: string;
+  paths: Set<string>;
+  queued: boolean;
 };
 
 const ROOT_LABELS: Record<string, string> = {
@@ -180,6 +188,53 @@ function flushPassed(result: FlushResult): boolean {
   return result === 'ok' || result === 'nothing' || result === 'off';
 }
 
+function pathTokens(path: string): Array<string | number> {
+  return path
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean)
+    .map((token) => (/^\d+$/.test(token) ? Number(token) : token));
+}
+
+function valueAtPath(root: unknown, path: readonly (string | number)[]): unknown {
+  let value = root;
+  for (const token of path) {
+    if (value == null || typeof value !== 'object') return undefined;
+    value = (value as Record<string | number, unknown>)[token];
+  }
+  return value;
+}
+
+/** Diff the smallest safe subtree: a leaf unless its address crosses a mutable row array. */
+function diffRootForPath(root: unknown, path: readonly (string | number)[]): Array<string | number> {
+  let value = root;
+  const out: Array<string | number> = [];
+  for (const token of path) {
+    if (Array.isArray(value)) return out;
+    out.push(token);
+    if (value == null || typeof value !== 'object') break;
+    value = (value as Record<string | number, unknown>)[token];
+  }
+  return out;
+}
+
+function minimalPaths(paths: readonly string[], root: unknown): Array<Array<string | number>> {
+  const unique = new Map<string, Array<string | number>>();
+  for (const path of paths) {
+    const safe = diffRootForPath(root, pathTokens(path));
+    unique.set(safe.join('.'), safe);
+  }
+  return [...unique.values()].filter(
+    (path, index, all) =>
+      !all.some(
+        (other, otherIndex) =>
+          otherIndex !== index &&
+          other.length < path.length &&
+          other.every((token, tokenIndex) => Object.is(token, path[tokenIndex])),
+      ),
+  );
+}
+
 export function useTechCardUndoHistory({
   scope,
   enabled,
@@ -198,6 +253,7 @@ export function useTechCardUndoHistory({
   const textTimer = useRef<number | null>(null);
   const discreteTimer = useRef<number | null>(null);
   const applying = useRef(false);
+  const reconciling = useRef(0);
 
   const publish = useCallback((next: UndoHistoryState) => {
     core.current = next;
@@ -258,6 +314,8 @@ export function useTechCardUndoHistory({
         before,
         label: path ? labelOf(path, []) : undefined,
         ...(text ? { textPath: path ?? '' } : {}),
+        paths: new Set(),
+        queued: false,
       };
       if (text) textTimer.current = window.setTimeout(closeGesture, TEXT_BURST_MS);
     },
@@ -270,16 +328,29 @@ export function useTechCardUndoHistory({
   }, [closeGesture]);
 
   useEffect(() => {
-    const subscription = form.watch(() => {
-      if (applying.current) return;
+    const subscription = form.watch((_values, { name }) => {
+      if (applying.current || reconciling.current > 0 || !name) return;
       const active = gesture.current;
       if (!active) return;
+      active.paths.add(name);
+      if (active.queued) return;
+      active.queued = true;
       queueMicrotask(() => {
-        if (applying.current || gesture.current?.token !== active.token) return;
+        active.queued = false;
+        if (
+          applying.current ||
+          reconciling.current > 0 ||
+          gesture.current?.token !== active.token
+        )
+          return;
         const current = form.getValues();
-        const patches = diffHistoryValues(active.before, current);
+        const patches = minimalPaths([...active.paths], active.before).flatMap((path) =>
+          diffHistoryValues(valueAtPath(active.before, path), valueAtPath(current, path)).map(
+            (patch) => ({ ...patch, path: [...path, ...patch.path] }),
+          ),
+        );
         const label = active.label || labelOf(active.textPath, patches);
-        const next = recordUndoStep(core.current, active.before, current, label, active.token);
+        const next = recordUndoPatches(core.current, patches, label, active.token);
         if (next !== core.current) publish(next);
       });
     });
@@ -321,15 +392,34 @@ export function useTechCardUndoHistory({
     [autosave, closeGesture, form, publish],
   );
 
-  const barrier = useCallback(
+  const cut = useCallback(
+    (_reason: string) => {
+      closeGesture();
+      publish(historyBarrier(core.current));
+    },
+    [closeGesture, publish],
+  );
+
+  const flushThenCut = useCallback(
     async (reason: string) => {
       closeGesture();
-      const result = await autosave.flush(`barrier:${reason}`);
+      const result = await autosave.flush(`history:${reason}`);
       if (flushPassed(result)) publish(historyBarrier(core.current));
       return result;
     },
     [autosave, closeGesture, publish],
   );
+
+  const beginServerReconciliation = useCallback(() => {
+    closeGesture();
+    reconciling.current += 1;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      reconciling.current = Math.max(0, reconciling.current - 1);
+    };
+  }, [closeGesture]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -415,9 +505,11 @@ export function useTechCardUndoHistory({
       undo: () => apply('undo'),
       redo: () => apply('redo'),
       clear,
-      barrier,
+      cut,
+      flushThenCut,
+      beginServerReconciliation,
     }),
-    [apply, barrier, clear, view],
+    [apply, beginServerReconciliation, clear, cut, flushThenCut, view],
   );
 
   return { api, captureProps };

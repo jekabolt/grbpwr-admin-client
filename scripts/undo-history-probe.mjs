@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { build } from 'esbuild';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -70,6 +71,62 @@ same(
   beforeRows,
 );
 
+const operationBefore = {
+  operations: [
+    { historyKey: 'op-a', operationNumber: 10, note: 'first' },
+    { historyKey: 'op-b', operationNumber: 20, note: 'second' },
+  ],
+};
+const operationAfter = {
+  operations: [
+    { historyKey: 'op-b', operationNumber: 20, note: 'changed' },
+    { historyKey: 'op-a', operationNumber: 10, note: 'first' },
+  ],
+};
+const operationPatches = history.diffHistoryValues(operationBefore, operationAfter);
+same(
+  'operations are patched by durable history key, never row index',
+  operationPatches.some(
+    (patch) =>
+      patch.kind === 'value' &&
+      patch.path.some(
+        (token) => typeof token === 'object' && token.key === 'historyKey' && token.value === 'op-b',
+      ),
+  ),
+  true,
+);
+same(
+  'server row insertion or reorder cuts history',
+  history.historyArrayIdentityChanged(operationBefore, {
+    operations: [
+      { historyKey: 'server-fuse', operationNumber: 10, note: 'generated' },
+      { historyKey: 'op-a', operationNumber: 20, note: 'first' },
+      { historyKey: 'op-b', operationNumber: 30, note: 'changed' },
+    ],
+  }),
+  true,
+);
+same(
+  'server id assignment cuts history before id zero can be replayed',
+  history.historyArrayIdentityChanged(
+    { bomItems: [{ lineKey: 'shell', id: 0, name: 'shell' }] },
+    { bomItems: [{ lineKey: 'shell', id: 41, name: 'shell' }] },
+  ),
+  true,
+);
+const unkeyed = history.diffHistoryValues(
+  { issues: [{ description: 'a' }, { description: 'b' }] },
+  { issues: [{ description: 'a' }, { description: 'changed' }] },
+);
+same(
+  'unkeyed row arrays are atomic instead of index patched',
+  unkeyed.length === 1 &&
+    unkeyed[0].kind === 'value' &&
+    unkeyed[0].path.length === 1 &&
+    unkeyed[0].path[0] === 'issues',
+  true,
+);
+
 state = history.emptyUndoHistory();
 let value = { count: 0 };
 for (let count = 1; count <= 60; count += 1) {
@@ -104,6 +161,31 @@ state = history.recordUndoStep(
   { bytes: 64 },
 );
 same('an oversized step becomes a barrier', [state.undo.length, state.redo.length], [0, 0]);
+
+const hookSource = await readFile(
+  resolve(root, 'src/components/managers/tech-card/components/undo-history.tsx'),
+  'utf8',
+);
+const formSource = await readFile(
+  resolve(root, 'src/components/managers/tech-card/components/index.tsx'),
+  'utf8',
+);
+const cutBody = hookSource.slice(
+  hookSource.indexOf('const cut = useCallback'),
+  hookSource.indexOf('const flushThenCut = useCallback'),
+);
+same(
+  'independent history cut never validates or flushes autosave',
+  !cutBody.includes('autosave.flush') && cutBody.includes('historyBarrier'),
+  true,
+);
+same(
+  'save reconciliation closes gestures and suppresses watcher recording',
+  hookSource.includes('reconciling.current > 0') &&
+    formSource.includes('undoHistory.api.beginServerReconciliation()') &&
+    formSource.includes('finishHistoryReconciliation();'),
+  true,
+);
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 process.exit(failures === 0 ? 0 : 1);

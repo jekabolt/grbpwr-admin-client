@@ -316,7 +316,7 @@ export function MoodQuiz({
       // Сервер читает СОХРАНЁННУЮ карточку: сперва автосейв.
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await undoHistory.barrier('quiz');
+        flushed = await undoHistory.flushThenCut('quiz');
       } catch {
         flushed = 'error';
       }
@@ -531,7 +531,7 @@ export function MoodQuiz({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await undoHistory.barrier('quiz-apply');
+        flushed = await undoHistory.flushThenCut('quiz-apply');
       } catch {
         flushed = 'error';
       }

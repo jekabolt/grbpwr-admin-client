@@ -869,8 +869,7 @@ function MaterialBench({
       }
       const ids = unusedHardwareIds(fresh, held, cutting, Date.now());
       if (ids.length > 0) {
-        const ready = await undoHistory.barrier('hardware-delete');
-        if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
+        undoHistory.cut('hardware-delete');
       }
       for (const assetId of ids) {
         await adminService.DeleteDesignAsset({ techCardId, assetId });

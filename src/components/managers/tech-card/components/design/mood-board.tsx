@@ -885,7 +885,7 @@ export function MoodBoard({
     const card = techCardId;
     let saved: FlushResult;
     try {
-      saved = await undoHistory.barrier('moodboard: a picture off the board');
+      saved = await undoHistory.flushThenCut('moodboard: a picture off the board');
     } catch {
       saved = 'error';
     }
@@ -1117,7 +1117,7 @@ export function MoodBoard({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await undoHistory.barrier('describe');
+        flushed = await undoHistory.flushThenCut('describe');
       } catch {
         flushed = 'error';
       }

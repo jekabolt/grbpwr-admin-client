@@ -343,7 +343,7 @@ export function useStartDesignRun(
   const start = useCallback(
     async (input: StartRunInput, opts?: StartRunCallbacks) => {
       if (!techCardId || techCardId <= 0) return;
-      const ready = await undoHistory.barrier(`generate:${input.kind}`);
+      const ready = await undoHistory.flushThenCut(`generate:${input.kind}`);
       if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
       // THE WIRE OBJECT IS BUILT ONCE, AND THE FINGERPRINT IS TAKEN OF IT (r2 N2): every field that
       // reaches the server is in it — the card (the server scopes its idempotency by it), `rerun_of`

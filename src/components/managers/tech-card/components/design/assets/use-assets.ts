@@ -84,9 +84,7 @@ export function useAssetWrites(techCardId: number) {
    */
   const deleteAsset = useMutation({
     mutationFn: async (assetId: number) => {
-      const ready = await undoHistory.barrier('asset-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('asset-delete');
       return adminService.DeleteDesignAsset({ techCardId, assetId });
     },
     onSuccess: invalidate,
@@ -126,9 +124,7 @@ export function useAssetWrites(techCardId: number) {
 
   const deletePlacement = useMutation({
     mutationFn: async (placementId: number) => {
-      const ready = await undoHistory.barrier('asset-placement-delete');
-      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
-        throw new Error('save the card before deleting');
+      undoHistory.cut('asset-placement-delete');
       return adminService.DeleteDesignAssetPlacement({ techCardId, placementId });
     },
     onSuccess: invalidate,
