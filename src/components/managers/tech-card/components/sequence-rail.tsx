@@ -158,27 +158,35 @@ function OperationSeamClass({
               invalid={!!fieldState.error}
               readOnly={frozen}
               size='sm'
-              className={cn(inherited ? 'text-labelColor' : 'border-textColor text-textColor')}
+              renderValue={(_, item) => (
+                <span className='block min-w-0 truncate text-left'>{item?.label}</span>
+              )}
+              className={cn(
+                'min-w-0',
+                inherited ? 'text-labelColor' : 'border-textColor text-textColor',
+              )}
             />
-            {!inherited && (
-              <Button
-                variant='underline'
-                size='xs'
-                disabled={frozen}
-                onClick={() => field.onChange('TECH_CARD_SEAM_CLASS_UNKNOWN')}
-                className='p-0 text-labelColor hover:text-textColor'
+            <span className='flex items-center gap-2 whitespace-nowrap'>
+              {!inherited && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  disabled={frozen}
+                  onClick={() => field.onChange('TECH_CARD_SEAM_CLASS_UNKNOWN')}
+                  className='p-0 text-labelColor hover:text-textColor'
+                >
+                  Reset
+                </Button>
+              )}
+              <Text
+                size='nano'
+                variant={inherited ? 'label' : undefined}
+                component='span'
+                className='uppercase tracking-label'
               >
-                Reset
-              </Button>
-            )}
-            <Text
-              size='nano'
-              variant={inherited ? 'label' : undefined}
-              component='span'
-              className='uppercase tracking-label'
-            >
-              {inherited ? 'Standard' : 'Override'}
-            </Text>
+                {inherited ? 'Standard' : 'Override'}
+              </Text>
+            </span>
             <FormMessage className='col-span-2' />
           </FormItem>
         );
