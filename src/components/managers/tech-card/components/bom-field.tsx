@@ -71,9 +71,10 @@ import {
   changeLinePurpose,
   changeLineSection,
   emptyBomItem,
+  hasFusingDataForBomLine,
   holdNames,
   lineExitHold,
-  releaseLineBindings,
+  releaseBomLineRefs,
 } from './form-writers';
 import {
   LABEL_PART_NAME,
@@ -832,63 +833,23 @@ export function BomField({
   };
 
   const removeArticle = (bi: number) => {
-    const removedKey = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
+    const line = getValues(`bomItems.${bi}`) as MatrixLine | undefined;
+    if (!line) return;
+    const removedKey = line.lineKey || '';
+    const cascadeFusing = line.section === 'TECH_CARD_BOM_SECTION_INTERLINING';
     // Colourway recipes are the one referrer this form does not own, so they are the one thing
     // that can block — refused here, shown inline in the editor, not as a server wall of text.
     const users = colorwayUsers(removedKey, wireInt(getValues(`bomItems.${bi}.id`)));
     // Модалка удаления уже назвала эти колорвеи и не дала подтвердить; здесь — последний засов.
-    if (users.length > 0) return;
+    if (!cascadeFusing && users.length > 0) return;
     // The last line of a fabric scope holds its sheets, piece links and markers: same bolt.
-    if (removedKey && holdNames(lineExitHold(getValues, removedKey, markers)).length > 0) return;
-    if (removedKey) {
-      // A purpose that stays live drops this line's key from its sheets and piece links.
-      releaseLineBindings(
-        getValues,
-        setValue,
-        removedKey,
-        ((getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>).filter(
-          (_, i) => i !== bi,
-        ),
-      );
-      const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
-      (operations ?? []).forEach((o, oi) => {
-        // The LIST is the reference: `operations.N.bomLineKey` is vestigial (the write derives it
-        // back from bomLineKeys[0]), so clearing only the singular shipped the removed key anyway.
-        const keys = (o.bomLineKeys ?? []).filter(Boolean);
-        if (keys.includes(removedKey)) {
-          setValue(
-            `operations.${oi}.bomLineKeys`,
-            keys.filter((k) => k !== removedKey),
-            { shouldDirty: true },
-          );
-        }
-      });
-      const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
-      (pieces ?? []).forEach((p, pi) => {
-        if (p.fusingBomLineKey === removedKey) {
-          setValue(`pieces.${pi}.fusingBomLineKey`, '', { shouldDirty: true });
-        }
-        (p.materials ?? []).forEach((m, mi) => {
-          if (m.bomLineKey === removedKey) {
-            setValue(`pieces.${pi}.materials.${mi}.bomLineKey`, '', { shouldDirty: true });
-          }
-          if (m.fusingBomLineKey === removedKey) {
-            setValue(`pieces.${pi}.materials.${mi}.fusingBomLineKey`, '', { shouldDirty: true });
-          }
-        });
-      });
-      // Labels reference a BOM line by resolved ID, and no screen renders that link: an invisible
-      // referrer has to be released here, or the save fails with a bare FK error.
-      const removedId = wireInt(getValues(`bomItems.${bi}.id`));
-      if (removedId > 0) {
-        const labels = (getValues('labels') ?? []) as Array<{ bomItemId?: number }>;
-        labels.forEach((l, li) => {
-          if (wireInt(l.bomItemId) === removedId) {
-            setValue(`labels.${li}.bomItemId`, 0, { shouldDirty: true });
-          }
-        });
-      }
-    }
+    if (
+      !cascadeFusing &&
+      removedKey &&
+      holdNames(lineExitHold(getValues, removedKey, markers)).length > 0
+    )
+      return;
+    releaseBomLineRefs(getValues, setValue, line);
     // Indices shift under an open editor once a row above it is gone; close it rather than let it
     // repoint at whatever slid into that slot.
     setSelected(null);
@@ -1095,14 +1056,18 @@ export function BomField({
   };
 
   const removeUsers =
-    confirmRemove !== null && lines[confirmRemove]
+    confirmRemove !== null &&
+    lines[confirmRemove] &&
+    lines[confirmRemove].section !== 'TECH_CARD_BOM_SECTION_INTERLINING'
       ? colorwayUsers(
           (lines[confirmRemove].lineKey as string) || '',
           wireInt(lines[confirmRemove].id),
         )
       : [];
   const removeHold =
-    confirmRemove !== null && lines[confirmRemove]?.lineKey
+    confirmRemove !== null &&
+    lines[confirmRemove]?.lineKey &&
+    lines[confirmRemove].section !== 'TECH_CARD_BOM_SECTION_INTERLINING'
       ? holdNames(lineExitHold(getValues, lines[confirmRemove].lineKey as string, markers))
       : [];
   const openPatterns = () => {
@@ -1176,14 +1141,9 @@ export function BomField({
           if (confirmRemove !== null) removeArticle(confirmRemove);
           setConfirmRemove(null);
         }}
-        title={
-          confirmRemove !== null
-            ? `remove slot ${lines[confirmRemove] ? roleLabel(lines[confirmRemove], confirmRemove) : ''}?`
-            : undefined
-        }
-        confirmLabel='remove slot'
+        title='delete slot?'
+        confirmLabel='delete slot'
         confirmDisabled={removeUsers.length > 0 || removeHold.length > 0}
-        hideCancel
       >
         {removeHold.length > 0 && (
           <div className='flex flex-col'>
@@ -1229,7 +1189,11 @@ export function BomField({
           </div>
         ) : removeHold.length > 0 ? null : (
           <Text size='micro' variant='label'>
-            its links in operations, pieces and labels are cleared
+            {confirmRemove !== null &&
+            lines[confirmRemove] &&
+            hasFusingDataForBomLine(getValues, lines[confirmRemove])
+              ? 'fusing data deleted'
+              : 'slot and links deleted'}
           </Text>
         )}
       </ConfirmationModal>

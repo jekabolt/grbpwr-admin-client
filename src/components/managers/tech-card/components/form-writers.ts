@@ -1,5 +1,6 @@
 import type { common_TechCardSizePattern } from 'api/proto-http/admin';
 import { isGenerated } from 'lib/fusing-dxf/regenerate';
+import { blankFuse, writeFuseFields } from 'lib/fusing-dxf/types';
 import type { UseFormGetValues, UseFormSetValue } from 'react-hook-form';
 import { ulid } from 'utils/ulid';
 import { wireInt } from './wire-int';
@@ -384,16 +385,23 @@ export function setCareLabelColorway(
  * `removeArticle` does, for the two other places that drop a line (material slots, the
  * construction draft's undo). Operations lose the key from `bomLineKeys`, piece materials lose
  * `bomLineKey`/`fusingBomLineKey`, labels lose `bomItemId` (an invisible referrer: left behind it
- * fails the save with a bare FK error). Refs to other lines are untouched. Call BEFORE the line
- * leaves `bomItems`. Colourway recipes are not form state and are not touched here — callers block.
+ * fails the save with a bare FK error). An INTERLINING line additionally owns its complete piece
+ * fusing specs and its directly-bound DXF rows. Refs to other lines are untouched. Call BEFORE the
+ * line leaves `bomItems`. The backend removes colourway usages for an INTERLINING line in the same
+ * transaction; callers keep blocking recipes for every other material family.
  */
 export function releaseBomLineRefs(
   getValues: UseFormGetValues<TechCardFormData>,
   setValue: UseFormSetValue<TechCardFormData>,
-  line: { lineKey?: string; id?: unknown },
+  line: { lineKey?: string; id?: unknown; section?: string },
 ): void {
   const key = line.lineKey?.trim() ?? '';
   if (key) {
+    const interlining = line.section === 'TECH_CARD_BOM_SECTION_INTERLINING';
+    const bomItems = (getValues('bomItems') ?? []) as BomItems;
+    const soleInterlining =
+      interlining &&
+      bomItems.filter((b) => b.section === 'TECH_CARD_BOM_SECTION_INTERLINING').length === 1;
     const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
     (operations ?? []).forEach((o, oi) => {
       const keys = (o.bomLineKeys ?? []).filter(Boolean);
@@ -407,6 +415,18 @@ export function releaseBomLineRefs(
     });
     const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
     (pieces ?? []).forEach((p, pi) => {
+      const ownsFusing =
+        interlining &&
+        (p.fusingBomLineKey?.trim() === key ||
+          (!!p.fused && !p.fusingBomLineKey?.trim() && soleInterlining));
+      if (ownsFusing) {
+        const cleared = writeFuseFields(blankFuse());
+        (Object.keys(cleared) as Array<keyof typeof cleared>).forEach((field) => {
+          setValue(`pieces.${pi}.${field}` as never, cleared[field] as never, {
+            shouldDirty: true,
+          });
+        });
+      }
       (p.materials ?? []).forEach((m, mi) => {
         if (m.bomLineKey === key) {
           setValue(`pieces.${pi}.materials.${mi}.bomLineKey`, '', { shouldDirty: true });
@@ -416,10 +436,19 @@ export function releaseBomLineRefs(
         }
       });
     });
-    const rest = ((getValues('bomItems') ?? []) as BomItems).filter(
-      (b) => b.lineKey?.trim() !== key,
-    );
-    releaseLineBindings(getValues, setValue, key, rest);
+    if (interlining) {
+      const patterns = (getValues('patterns') ?? []) as SheetRow[];
+      const aliases = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
+      setValue('patterns', patterns.filter((p) => p.bomLineKey?.trim() !== key) as never, {
+        shouldDirty: true,
+      });
+      setValue('pieceDxfAliases', aliases.filter((a) => a.bomLineKey?.trim() !== key) as never, {
+        shouldDirty: true,
+      });
+    } else {
+      const rest = bomItems.filter((b) => b.lineKey?.trim() !== key);
+      releaseLineBindings(getValues, setValue, key, rest);
+    }
   }
   const id = wireInt(line.id);
   if (id > 0) {
@@ -430,6 +459,44 @@ export function releaseBomLineRefs(
       }
     });
   }
+}
+
+/** Whether deleting this line will erase fusing-specific data (used only for terse confirm copy). */
+export function hasFusingDataForBomLine(
+  getValues: UseFormGetValues<TechCardFormData>,
+  line: { lineKey?: string; section?: string },
+): boolean {
+  const key = line.lineKey?.trim() ?? '';
+  if (!key) return false;
+  const bomItems = (getValues('bomItems') ?? []) as BomItems;
+  const soleInterlining =
+    line.section === 'TECH_CARD_BOM_SECTION_INTERLINING' &&
+    bomItems.filter((b) => b.section === 'TECH_CARD_BOM_SECTION_INTERLINING').length === 1;
+  const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
+  if (
+    (pieces ?? []).some(
+      (p) =>
+        p.fusingBomLineKey?.trim() === key ||
+        (!!p.fused && !p.fusingBomLineKey?.trim() && soleInterlining) ||
+        (p.materials ?? []).some((m) => m.fusingBomLineKey?.trim() === key),
+    )
+  )
+    return true;
+  const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+  if (
+    (operations ?? []).some(
+      (o) =>
+        o.operationType === 'TECH_CARD_OPERATION_TYPE_FUSING' &&
+        (o.bomLineKeys ?? []).some((k) => k?.trim() === key),
+    )
+  )
+    return true;
+  const patterns = (getValues('patterns') ?? []) as SheetRow[];
+  const aliases = (getValues('pieceDxfAliases') ?? []) as AliasRow[];
+  return (
+    patterns.some((p) => p.bomLineKey?.trim() === key) ||
+    aliases.some((a) => a.bomLineKey?.trim() === key)
+  );
 }
 
 // ═══ SHEETS AND PIECE LINKS FOLLOW THEIR LINE (sheet binding, lane B1) ═══════════════════════

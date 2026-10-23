@@ -118,7 +118,12 @@ import {
 // остался бы на поле, которого нет на экране.
 import { SLIT_OVERCAST_WORK } from './operation-work';
 import { z } from 'zod';
-import { fuseFieldsFromWire, fuseFieldsToWire } from 'lib/fusing-dxf/types';
+import {
+  blankFuse,
+  fuseFieldsFromWire,
+  fuseFieldsToWire,
+  writeFuseFields,
+} from 'lib/fusing-dxf/types';
 import {
   ANNOTATION_CAPS_KEYS,
   ANNOTATION_COLOR_KEYS,
@@ -2518,11 +2523,15 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   // save); a line that HAS one keeps it, whatever shape it is.
   const bomItemsForm = (insert?.bomItems ?? []).map(mapBomItemToForm);
   const bomKeyByIndex = bomItemsForm.map((b) => b.lineKey);
+  const bomSectionByKey = new Map(bomItemsForm.map((b) => [b.lineKey.trim(), b.section]));
+  const interliningKeys = bomItemsForm
+    .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_INTERLINING')
+    .map((b) => b.lineKey.trim());
   const refKey = (bomLineKey?: string, bomItemIndex?: number): string => {
-    // Any non-blank key is the reference — same reason as mapBomItemToForm above. Demanding a ULID
-    // here silently dropped a legacy/seeded ref to the positional fallback below, which is wrong the
-    // moment the BOM is reordered.
-    if (bomLineKey?.trim()) return bomLineKey;
+    // Any LIVE non-blank key is the reference — same reason as mapBomItemToForm above. Demanding a
+    // ULID here silently dropped a legacy/seeded ref; accepting a key absent from this BOM kept a
+    // half-deleted fusing slot alive and made the next save fail.
+    if (bomLineKey?.trim()) return bomSectionByKey.has(bomLineKey.trim()) ? bomLineKey : '';
     if (
       typeof bomItemIndex === 'number' &&
       bomItemIndex >= 0 &&
@@ -2593,19 +2602,24 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // Kept EXACTLY as stored, including the LEGACY… keys the 0260 backfill wrote: this client
       // never re-mints an existing row's key (see patternSchema).
       lineKey: p.lineKey ?? '',
-      bomLineKey: p.bomLineKey ?? '',
+      // A removed slot must not make an old card permanently unsavable. Keep the sheet, but ignore
+      // its dangling direct binding; generated fusing sheets are then removed by the normal rebuild.
+      bomLineKey:
+        p.bomLineKey?.trim() && bomSectionByKey.has(p.bomLineKey.trim()) ? p.bomLineKey : '',
       // The server always states presence on read, so UNSET arrives as a real value — normalise it
       // to '' here so every reader can test the field with a plain truthiness check.
       fabricPurpose: p.fabricPurpose && p.fabricPurpose !== UNSET_PURPOSE ? p.fabricPurpose : '',
       sha256: (p.sha256 ?? '').trim().toLowerCase(),
     })),
     // The wrapper is always present on read, so `items` is the authoritative stored set.
-    pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
-      bomLineKey: a.bomLineKey ?? '',
-      fabricPurpose: a.fabricPurpose && a.fabricPurpose !== UNSET_PURPOSE ? a.fabricPurpose : '',
-      blockName: a.blockName ?? '',
-      pieceLineKey: a.pieceLineKey ?? '',
-    })),
+    pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? [])
+      .filter((a) => !a.bomLineKey?.trim() || bomSectionByKey.has(a.bomLineKey.trim()))
+      .map((a) => ({
+        bomLineKey: a.bomLineKey ?? '',
+        fabricPurpose: a.fabricPurpose && a.fabricPurpose !== UNSET_PURPOSE ? a.fabricPurpose : '',
+        blockName: a.blockName ?? '',
+        pieceLineKey: a.pieceLineKey ?? '',
+      })),
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
     outputMaterialId: insert?.outputMaterialId || 0,
@@ -2644,40 +2658,48 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // '' и '{}' — одно «обычное»; форма держит пустое, чтобы прочитанное без правки не было грязным.
       spec: parseSpec(c.spec) ? c.spec ?? '' : '',
     })),
-    pieces: (insert?.pieces ?? []).map((p) => ({
-      // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
-      // backfilled them with the same LEGACY… keys the ULID test rejects.
-      lineKey: p.lineKey?.trim() || ulid(),
-      name: p.name || '',
-      piecesPerGarment: p.piecesPerGarment ?? 1,
-      // Круглый рейс начинается ЗДЕСЬ. Сервер шлёт поле на чтении всегда; неразмеченная деталь
-      // приезжает как `_UNKNOWN` (или отсутствует у карточки, сохранённой до 0275) — оба случая
-      // сходятся в одно «не размечено», и именно оно потом уедет обратно нетронутым.
-      cutSymmetry: p.cutSymmetry || UNSET_CUT_SYMMETRY,
-      // Круглый рейс, как у cutSymmetry рядом: сервер отдаёт поле на чтении всегда, карточка,
-      // сохранённая до 0302, приезжает без него — оба случая сходятся в «не помечена».
-      ungraded: p.ungraded ?? false,
-      grainline: p.grainline || '',
-      fused: p.fused ?? false,
-      // Круглый рейс, как у cutSymmetry и ungraded рядом: сервер отдаёт режим на чтении ВСЕГДА,
-      // карточка, сохранённая до 0304, приезжает без него — оба случая сходятся в «не размечено».
-      fusingMode: p.fusingMode || UNSET_FUSING_MODE,
-      fusingWidthMm: p.fusingWidthMm?.value ?? '',
-      ...fuseFieldsFromWire(p),
-      calloutNumber: p.calloutNumber ?? 0,
-      note: p.note || '',
-      materials: (p.materials ?? []).map((m) => ({
-        // NOTE: the FORM key is `colorwayIndex`, the proto field is `colorwayId` — the rename
-        // landed on the wire and the form key was deliberately left alone (it is read by
-        // pieces-tab, sample-cut-views and the print doc). It holds a colourway ID, never an index.
-        // colorway_id is int64 on the wire and grpc-gateway serialises int64 as a STRING, so this
-        // must be coerced or z.number() rejects it as "Invalid input" — same trap as materialId.
-        colorwayIndex: wireInt(m.colorwayId),
-        bomLineKey: refKey(m.bomLineKey, m.bomItemIndex),
-        fusingBomLineKey: refKey(m.fusingBomLineKey, m.fusingBomItemIndex),
-        note: m.note || '',
-      })),
-    })),
+    pieces: (insert?.pieces ?? []).map((p) => {
+      const fuseFields = fuseFieldsFromWire(p);
+      const selectedFusingLine = fuseFields.fusingBomLineKey.trim();
+      const danglingFusing = selectedFusingLine
+        ? bomSectionByKey.get(selectedFusingLine) !== 'TECH_CARD_BOM_SECTION_INTERLINING'
+        : !!p.fused && interliningKeys.length === 0;
+      const safeFuseFields = danglingFusing ? writeFuseFields(blankFuse()) : fuseFields;
+      return {
+        // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
+        // backfilled them with the same LEGACY… keys the ULID test rejects.
+        lineKey: p.lineKey?.trim() || ulid(),
+        name: p.name || '',
+        piecesPerGarment: p.piecesPerGarment ?? 1,
+        // Круглый рейс начинается ЗДЕСЬ. Сервер шлёт поле на чтении всегда; неразмеченная деталь
+        // приезжает как `_UNKNOWN` (или отсутствует у карточки, сохранённой до 0275) — оба случая
+        // сходятся в одно «не размечено», и именно оно потом уедет обратно нетронутым.
+        cutSymmetry: p.cutSymmetry || UNSET_CUT_SYMMETRY,
+        // Круглый рейс, как у cutSymmetry рядом: сервер отдаёт поле на чтении всегда, карточка,
+        // сохранённая до 0302, приезжает без него — оба случая сходятся в «не помечена».
+        ungraded: p.ungraded ?? false,
+        grainline: p.grainline || '',
+        fused: danglingFusing ? false : p.fused ?? false,
+        // Круглый рейс, как у cutSymmetry и ungraded рядом: сервер отдаёт режим на чтении ВСЕГДА,
+        // карточка, сохранённая до 0304, приезжает без него — оба случая сходятся в «не размечено».
+        fusingMode: danglingFusing ? UNSET_FUSING_MODE : p.fusingMode || UNSET_FUSING_MODE,
+        fusingWidthMm: danglingFusing ? '' : p.fusingWidthMm?.value ?? '',
+        ...safeFuseFields,
+        calloutNumber: p.calloutNumber ?? 0,
+        note: p.note || '',
+        materials: (p.materials ?? []).map((m) => ({
+          // NOTE: the FORM key is `colorwayIndex`, the proto field is `colorwayId` — the rename
+          // landed on the wire and the form key was deliberately left alone (it is read by
+          // pieces-tab, sample-cut-views and the print doc). It holds a colourway ID, never an index.
+          // colorway_id is int64 on the wire and grpc-gateway serialises int64 as a STRING, so this
+          // must be coerced or z.number() rejects it as "Invalid input" — same trap as materialId.
+          colorwayIndex: wireInt(m.colorwayId),
+          bomLineKey: refKey(m.bomLineKey, m.bomItemIndex),
+          fusingBomLineKey: refKey(m.fusingBomLineKey, m.fusingBomItemIndex),
+          note: m.note || '',
+        })),
+      };
+    }),
     bomItems: bomItemsForm,
     details: (insert?.details ?? []).map((d) => ({
       key: d.key || '',
@@ -2741,7 +2763,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
-      bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
+      bomLineKeys: (o.bomLineKeys ?? []).filter((key) => !!key && bomSectionByKey.has(key.trim())),
       // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
       // тип на проводе, в форме и в БД — круговой рейс без округлений.
       media: (o.media ?? []).map((m) => ({

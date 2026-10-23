@@ -48,6 +48,7 @@ import { defaultRoleFor, roleCollision } from '../bom-roles';
 import {
   bornBomLine,
   changeLinePurpose,
+  hasFusingDataForBomLine,
   holdNames,
   lineExitHold,
   releaseBomLineRefs,
@@ -195,6 +196,9 @@ export function MaterialSlots({
   // вкладка BOM: чтение не отдаёт `bom_line_key` на usage вовсе, и это тот же FK, на котором
   // сервер отвечает RESTRICT. Ни разу не сохранённая строка имеет id 0, и сослаться на неё некому.
   const blockersOf = (line: Line): Blocker[] => {
+    // Deleting INTERLINING is an explicit cascade: its colourway usage and fusing-owned pattern
+    // state leave in the same backend transaction. Other material families keep their blockers.
+    if (line.section === 'TECH_CARD_BOM_SECTION_INTERLINING') return [];
     const key = line.lineKey?.trim() ?? '';
     const bomItemId = wireInt(line.id);
     const users: Blocker[] = (colorways ?? [])
@@ -258,6 +262,9 @@ export function MaterialSlots({
   const slotIndex = (c: { index: number; key: string }, list: Line[]) =>
     c.key ? list.findIndex((l) => l.lineKey?.trim() === c.key) : c.index;
   const confirmLine = confirm ? lines[slotIndex(confirm, lines)] : undefined;
+  const confirmDeletesFusing = confirmLine
+    ? hasFusingDataForBomLine(getValues, confirmLine)
+    : false;
   const askRemove = (index: number) =>
     setConfirm({ index, key: lines[index]?.lineKey?.trim() ?? '' });
   const removeSlot = (c: { index: number; key: string }) => {
@@ -452,13 +459,12 @@ export function MaterialSlots({
           if (confirm) removeSlot(confirm);
           setConfirm(null);
         }}
-        title={`remove slot ${confirmLine?.name?.trim() || 'unnamed'}?`}
-        confirmLabel='remove slot'
+        title='delete slot?'
+        confirmLabel='delete slot'
         width='sm'
-        hideCancel
       >
         <Text size='micro' variant='label'>
-          its links in operations, pieces and labels are cleared
+          {confirmDeletesFusing ? 'fusing data deleted' : 'slot and links deleted'}
         </Text>
       </ConfirmationModal>
     </Section>
