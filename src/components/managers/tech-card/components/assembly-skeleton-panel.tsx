@@ -644,6 +644,7 @@ function AssemblySkeletonPanel({
         inputs: classifyAssemblyInputs(pieceKeys, (o.inputKeys ?? []).filter(Boolean)),
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
+        assemblyBlockDetached: !!o.assemblyBlockDetached,
       })),
     [operations, pieceKeys],
   );

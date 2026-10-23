@@ -39,9 +39,11 @@ export type AssemblyBlock = {
 
 export type AssemblyBlocks = {
   blocks: AssemblyBlock[];
+  /** Stored outside-block steps, in sequence order. They are not part of the loose tail. */
+  standalone: number[];
   /** Хвостовой псевдоблок: шаги, не достигающие ни одного узла. */
   loose: AssemblyBlock;
-  /** Индекс шага → ключ его блока ('' для хвостового). */
+  /** Индекс шага → ключ его блока ('' для хвостового; detached отсутствует). */
   blockOfStep: Map<number, string>;
 };
 
@@ -95,8 +97,13 @@ export function assemblyBlocks(steps: AssemblyStep[], res: AssemblyResult): Asse
     absorbedInto: '',
   };
   const blockOfStep = new Map<number, string>();
+  const standalone: number[] = [];
 
   steps.forEach((s, i) => {
+    if (s.assemblyBlockDetached) {
+      standalone.push(i);
+      return;
+    }
     // Производящий шаг принадлежит своему узлу — включая поглощающий: он дособирает ТОТ ЖЕ узел,
     // и его место в его блоке.
     if (s.outputUnitKey && byKey.has(s.outputUnitKey)) {
@@ -118,5 +125,5 @@ export function assemblyBlocks(steps: AssemblyStep[], res: AssemblyResult): Asse
     blockOfStep.set(i, TAIL_KEY);
   });
 
-  return { blocks: order.map((k) => byKey.get(k)!), loose, blockOfStep };
+  return { blocks: order.map((k) => byKey.get(k)!), standalone, loose, blockOfStep };
 }

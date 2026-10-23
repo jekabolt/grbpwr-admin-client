@@ -246,6 +246,8 @@ export type AssemblyFullscreenProps = {
   railHeaderBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
   /** Все шаги вне узлов, включая поздние прогоны без собственной шапки. */
   railLooseSteps: ReadonlySet<number>;
+  /** Stored outside-block rows, distinct from the inferred loose tail. */
+  railStandaloneSteps: ReadonlySet<number>;
   /** Шаги с незаполненным обязательным полем. */
   railErrorIndices: ReadonlySet<number>;
   /** Шаги, ломающие сборочный граф. */
@@ -473,6 +475,7 @@ export function AssemblyFullscreen({
   railMarked,
   railHeaderBefore,
   railLooseSteps,
+  railStandaloneSteps,
   railErrorIndices,
   railBrokenSteps,
   activePin,
@@ -1936,6 +1939,7 @@ export function AssemblyFullscreen({
                       grouped={railMarked}
                       headerBefore={railHeaderBefore}
                       looseSteps={railLooseSteps}
+                      standaloneSteps={railStandaloneSteps}
                       selectedIndex={selectedIndex}
                       // ТОЛЬКО ВЫБОР, БЕЗ `setDockStep`: редактор стоит в колонке справа, и
                       // открытый заодно док положил бы те же поля на экран дважды. `onPickStep`

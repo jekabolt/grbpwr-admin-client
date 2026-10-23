@@ -40,6 +40,7 @@ export type PrintStep = {
   inputKeys: string[];
   outputUnitKey: string;
   outputUnitName: string;
+  assemblyBlockDetached?: boolean;
 };
 
 export type PrintCardInput = { pieces: PrintPiece[]; steps: PrintStep[] };
@@ -135,6 +136,7 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
     inputs: classifyAssemblyInputs(pieceKeys, s.inputKeys),
     outputUnitKey: s.outputUnitKey,
     outputUnitName: s.outputUnitName,
+    assemblyBlockDetached: s.assemblyBlockDetached,
   }));
   const res = assemblySweep(sweepPieces, steps);
   const releaseViolations = assemblyReleaseCheck(sweepPieces, steps, res);
@@ -318,11 +320,13 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
     // Принятые входы: у makes/adds — то, что этот шаг съел (consumedBy), у обработки — то, что
     // лежало на столе перед ней (frontierBefore); дубли схлопнуты.
     const before = new Set(res.frontierBefore[i] ?? []);
-    const accepted = rejected
-      ? []
-      : dedupe(s.inputs.map((x) => x.key)).filter((k) =>
-          k === own ? false : own ? res.consumedBy.get(k) === i : before.has(k),
-        );
+    const accepted = s.assemblyBlockDetached
+      ? dedupe(s.inputs.map((x) => x.key))
+      : rejected
+        ? []
+        : dedupe(s.inputs.map((x) => x.key)).filter((k) =>
+            k === own ? false : own ? res.consumedBy.get(k) === i : before.has(k),
+          );
     const unitInputs = accepted.filter((k) => res.units.has(k));
     const pieceInputs = accepted.filter((k) => pieceKeys.has(k));
     return {

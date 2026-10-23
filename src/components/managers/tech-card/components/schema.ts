@@ -1315,6 +1315,9 @@ const operationSchema = z
     // by any edit of it, except 'orphan', which goes only when the ghost piece leaves the step
     // (reviewAfterEdit, lib/dxf-reconcile).
     review: z.string().optional().default(''),
+    // Stored membership override: the step keeps its piece inputs and sequence position but is
+    // attributed to no assembly block. False is the ordinary inferred-membership mode.
+    assemblyBlockDetached: z.boolean().optional().default(false),
 
     // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
     // inherited value. That is exactly what the old operation-type preset did, and it made «the
@@ -2783,6 +2786,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       smv: decimalToInput(o.smv),
       draft: !!o.draft,
       review: (o.review ?? '').trim(),
+      assemblyBlockDetached: !!o.assemblyBlockDetached,
       calloutNumber: o.calloutNumber || 0,
       // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
       // empty control, not as 0 — 0 is the separate, real setting «cut on the line as drawn».
@@ -3654,6 +3658,9 @@ export function mapFormToTechCardInsert(
     // СЕДЬМОЙ — метка «проверить» после перезалива DXF (0422). Ставится ВСЕГДА, как draft: этот
     // бандл везёт `review` каждого шага, и '' здесь — «проверено», а не «не знаю про поле».
     operationReviewAware: true,
+    // Full-replace operations must always declare that this bundle carries the stored block
+    // membership override; otherwise an older payload could silently clear detached rows.
+    operationBlockMembershipAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3858,6 +3865,7 @@ export function mapFormToTechCardInsert(
         draft: !!o.draft,
         // REVIEW rides every write as it stands, like draft: a checked step goes out as ''.
         review: (o.review ?? '').trim(),
+        assemblyBlockDetached: !!o.assemblyBlockDetached,
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,

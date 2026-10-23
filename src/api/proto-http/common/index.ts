@@ -3406,6 +3406,8 @@ export type TechCardOperation = {
   // one of reshaped|remapped|split|orphan and blocks release readiness. This is deliberately a
   // string rather than an enum so an older protojson client cannot silently drop a future reason.
   review: string | undefined;
+  // Keeps a piece-processing step between assembly blocks without making it part of either block.
+  assemblyBlockDetached: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4151,6 +4153,8 @@ export type TechCardInsert = {
   // карточку с review-метками: без этого флага сервер отказывает, а не стирает их. Транспорт,
   // не содержание; ни в один дайджест не входит.
   operationReviewAware: boolean | undefined;
+  // Declares support for TechCardOperation.assembly_block_detached on full-replace writes.
+  operationBlockMembershipAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.

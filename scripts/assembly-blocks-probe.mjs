@@ -17,8 +17,17 @@ const root = resolve(here, '..');
 const entry = resolve(root, 'scripts/assembly-blocks-probe-entry.ts');
 
 const outfile = resolve(tmpdir(), `assembly-blocks-${process.pid}.mjs`);
-await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent' });
-const { assemblySweep, classifyAssemblyInputs, assemblyBlocks } = await import(pathToFileURL(outfile).href);
+await build({
+  entryPoints: [entry],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  outfile,
+  logLevel: 'silent',
+});
+const { assemblySweep, classifyAssemblyInputs, assemblyBlocks, assemblyLayout } = await import(
+  pathToFileURL(outfile).href
+);
 
 const failed = new Set();
 const fail = (name, msg) => {
@@ -34,6 +43,7 @@ function run(name, pieces, rawSteps, expect) {
     inputs: classifyAssemblyInputs(keys, s.in ?? []),
     outputUnitKey: s.out ?? '',
     outputUnitName: s.name ?? '',
+    assemblyBlockDetached: !!s.detached,
   }));
   const res = assemblySweep(p, steps);
   if (res.violations.length > 0) {
@@ -42,13 +52,49 @@ function run(name, pieces, rawSteps, expect) {
   }
   const b = assemblyBlocks(steps, res);
   const gotOrder = b.blocks.map((x) => x.key);
-  if (!eq(gotOrder, expect.order)) fail(name, `порядок блоков ${JSON.stringify(gotOrder)}, ожидался ${JSON.stringify(expect.order)}`);
+  if (!eq(gotOrder, expect.order))
+    fail(
+      name,
+      `порядок блоков ${JSON.stringify(gotOrder)}, ожидался ${JSON.stringify(expect.order)}`,
+    );
   for (const [key, wantSteps] of Object.entries(expect.steps)) {
     const got = b.blocks.find((x) => x.key === key)?.steps ?? [];
-    if (!eq(got, wantSteps)) fail(name, `блок ${key}: шаги ${JSON.stringify(got)}, ожидались ${JSON.stringify(wantSteps)}`);
+    if (!eq(got, wantSteps))
+      fail(
+        name,
+        `блок ${key}: шаги ${JSON.stringify(got)}, ожидались ${JSON.stringify(wantSteps)}`,
+      );
   }
   if (expect.loose !== undefined && !eq(b.loose.steps, expect.loose)) {
-    fail(name, `хвост «вне узлов»: ${JSON.stringify(b.loose.steps)}, ожидался ${JSON.stringify(expect.loose)}`);
+    fail(
+      name,
+      `хвост «вне узлов»: ${JSON.stringify(b.loose.steps)}, ожидался ${JSON.stringify(expect.loose)}`,
+    );
+  }
+  if (expect.standalone !== undefined && !eq(b.standalone, expect.standalone)) {
+    fail(
+      name,
+      `отдельные шаги: ${JSON.stringify(b.standalone)}, ожидались ${JSON.stringify(expect.standalone)}`,
+    );
+  }
+  for (const index of b.standalone) {
+    if (b.blockOfStep.has(index)) {
+      fail(name, `отдельный шаг ${index} получил блок «${b.blockOfStep.get(index)}»`);
+    }
+  }
+  if (expect.tileProcessing) {
+    const layout = assemblyLayout([...b.blocks, b.loose], steps, res);
+    for (const [key, want] of Object.entries(expect.tileProcessing)) {
+      const got = layout.tileByKey.get(key)?.processing ?? [];
+      if (!eq(got, want))
+        fail(
+          name,
+          `обработки плитки ${key}: ${JSON.stringify(got)}, ожидались ${JSON.stringify(want)}`,
+        );
+    }
+    if (layout.tailSteps.some((i) => b.standalone.includes(i))) {
+      fail(name, `отдельный шаг попал в хвост схемы: ${JSON.stringify(layout.tailSteps)}`);
+    }
   }
   if (expect.absorbedInto) {
     for (const [key, into] of Object.entries(expect.absorbedInto)) {
@@ -126,5 +172,22 @@ run(
   { order: [], steps: {}, loose: [0, 1] },
 );
 
-console.log(`\n${6 - failed.size}/6 кейсов прошло`);
+run(
+  'отделённая обработка остаётся на плитке и не попадает ни в блок, ни в хвост',
+  ['A', 'B', 'C', 'D'],
+  [
+    { in: ['A', 'B'], out: 'FIRST', name: 'первый узел' },
+    { in: ['A'], detached: true },
+    { in: ['C', 'D'], out: 'SECOND', name: 'второй узел' },
+  ],
+  {
+    order: ['FIRST', 'SECOND'],
+    steps: { FIRST: [0], SECOND: [2] },
+    standalone: [1],
+    loose: [],
+    tileProcessing: { A: [1] },
+  },
+);
+
+console.log(`\n${7 - failed.size}/7 кейсов прошло`);
 if (failed.size) process.exitCode = 1;

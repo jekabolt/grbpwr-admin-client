@@ -8323,6 +8323,8 @@ export type common_TechCardInsert = {
   // карточку с review-метками: без этого флага сервер отказывает, а не стирает их. Транспорт,
   // не содержание; ни в один дайджест не входит.
   operationReviewAware: boolean | undefined;
+  // Declares support for TechCardOperation.assembly_block_detached on full-replace writes.
+  operationBlockMembershipAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -9326,6 +9328,8 @@ export type common_TechCardOperation = {
   // one of reshaped|remapped|split|orphan and blocks release readiness. This is deliberately a
   // string rather than an enum so an older protojson client cannot silently drop a future reason.
   review: string | undefined;
+  // Keeps a piece-processing step between assembly blocks without making it part of either block.
+  assemblyBlockDetached: boolean | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a

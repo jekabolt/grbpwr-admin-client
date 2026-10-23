@@ -742,6 +742,7 @@ export function TechPackDocument({
       ),
       outputUnitKey: (o.outputUnitKey ?? '').trim(),
       outputUnitName: (o.outputUnitName ?? '').trim(),
+      assemblyBlockDetached: !!o.assemblyBlockDetached,
     }));
     const res = assemblySweep(pieces, steps);
     const grouped = assemblyBlocks(steps, res);
@@ -764,7 +765,11 @@ export function TechPackDocument({
         operations: b.steps.map((i) => indexed[i]).filter(Boolean),
       });
     }
-    if (grouped.loose.steps.length > 0) {
+    // The block projection keeps explicitly detached rows separate from the inferred loose tail so
+    // the schematic never draws them in its waiting box. The printed route still needs every step,
+    // so both outside-block lists share this neutral final section in their original order.
+    const outside = [...grouped.loose.steps, ...grouped.standalone].sort((a, b) => a - b);
+    if (outside.length > 0) {
       out.push({
         key: '',
         label: '◌ outside units',
@@ -772,7 +777,7 @@ export function TechPackDocument({
         // шаги, чей узел НЕ РОДИЛСЯ. У вторых в строке стоит «produces ▣ SHELL», и заголовок
         // «выход шага — не узел» спорил бы с их же строкой.
         sub: 'steps outside recognised units',
-        operations: grouped.loose.steps.map((i) => indexed[i]).filter(Boolean),
+        operations: outside.map((i) => indexed[i]).filter(Boolean),
       });
     }
     // Без страховки `out.length > 0`: после гейта выше блок гарантированно есть, и мнимый

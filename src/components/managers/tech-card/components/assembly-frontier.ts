@@ -38,6 +38,8 @@ export type AssemblyStep = {
   inputs: OperationInput[];
   outputUnitKey: string;
   outputUnitName: string;
+  /** Explicitly stays in sequence while taking no part in assembly graph membership/order. */
+  assemblyBlockDetached?: boolean;
 };
 
 /** Номер нарушенного правила. Совпадает с сервером — по нему считают отказы в логах. */
@@ -156,6 +158,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
   // искать опечатку там, где переставлены шаги.
   const firstProducer = new Map<string, number>();
   steps.forEach((s, i) => {
+    if (s.assemblyBlockDetached) return;
     if (s.outputUnitKey && !firstProducer.has(s.outputUnitKey))
       firstProducer.set(s.outputUnitKey, i);
   });
@@ -175,6 +178,11 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
 
   steps.forEach((s, i) => {
     res.frontierBefore.push(filterLive());
+
+    // A detached piece-processing step is deliberately outside assembly order. Its inputs remain
+    // on the step so the layout can render processing on the piece tile, but they neither validate
+    // against nor mutate the frontier at this sequence position.
+    if (s.assemblyBlockDetached) return;
 
     if (!s.outputUnitKey && s.outputUnitName) {
       res.violations.push({
@@ -373,7 +381,7 @@ export function assemblyReleaseCheck(
   steps: AssemblyStep[],
   res: AssemblyResult,
 ): AssemblyViolation[] {
-  if (!steps.some((s) => !!s.outputUnitKey)) return [];
+  if (!steps.some((s) => !s.assemblyBlockDetached && !!s.outputUnitKey)) return [];
 
   const out: AssemblyViolation[] = [];
   const terminals = res.frontier.filter((k) => res.units.has(k));
