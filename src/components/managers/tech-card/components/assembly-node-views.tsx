@@ -1668,13 +1668,7 @@ export function TileView({
         // подсказки обещала съеденной плитке «open the step that consumed it»: один орган,
         // два противоположных смысла, и выбор между ними по невидимому на глаз состоянию.
         // Ровно тот перегруз, который с бокса уже снят; навигация переехала на чип.
-        title={
-          orphan
-            ? name
-            : t.state === 'free'
-              ? `${name} — hasn't gone into any unit yet\nclick to select the piece`
-              : `${name} — already in unit ▣ ${t.into}\nclick to select the piece`
-        }
+        title={orphan ? name : t.state === 'free' ? `${name} · free` : `${name} · ▣ ${t.into}`}
       >
         {/* ГОЛОВА — САМА ДЕТАЛЬ, и она же PICK-ЗОНА плитки. Орган переехал с внешней коробки
             сюда ровно по образцу бокса узла: строки под головой — уже кнопки шагов, и оставь
