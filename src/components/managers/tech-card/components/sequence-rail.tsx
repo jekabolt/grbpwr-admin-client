@@ -77,12 +77,14 @@ const sequenceCollisionDetection: CollisionDetection = (args) => {
   return underPointer.length > 0 ? underPointer : closestCenter(args);
 };
 
+const sequenceDividerId = (at: number) => `sequence-divider:${at}`;
+
 // Разделитель — отдельная цель, а не сортируемая строка. Строка означает «поставить рядом»;
 // разделитель означает «поставить сюда И снять со сборочного графа». Смешать их одним id значило
 // бы снова сделать принадлежность к узлу случайным побочным эффектом позиции.
 function SequenceDivider({ at, visible = false }: { at: number; visible?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: `sequence-divider:${at}`,
+    id: sequenceDividerId(at),
     data: { sequenceDividerAt: at },
   });
 
@@ -513,6 +515,22 @@ export function SequenceRail({
     if (next >= 0) onSelect(next);
   };
 
+  const startsUnheadedLooseRun = (index: number) =>
+    grouped &&
+    index > 0 &&
+    looseSteps.has(index) &&
+    !looseSteps.has(index - 1) &&
+    !headerBefore.has(index);
+  const hasDividerBefore = (index: number) =>
+    grouped && (index === 0 || headerBefore.has(index) || startsUnheadedLooseRun(index));
+  // Разделители входят в геометрию сортировки, хотя сами не перетаскиваются. Иначе при наведении
+  // на их id `SortableContext` получал `overIndex = -1`, снимал все transform и строки ниже
+  // схлопывались обратно прямо под перетаскиваемым шагом.
+  const sortableItems = fields.flatMap((field, index) =>
+    hasDividerBefore(index) ? [sequenceDividerId(index), field.id] : [field.id],
+  );
+  if (grouped) sortableItems.push(sequenceDividerId(fields.length));
+
   return (
     <DndContext
       sensors={sensors}
@@ -520,22 +538,15 @@ export function SequenceRail({
       modifiers={[restrictToVerticalAxis]}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
         <div className='flex flex-col gap-0.5'>
           {fields.map((f, index) => {
             // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
             // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
-            const startsUnheadedLooseRun =
-              grouped &&
-              index > 0 &&
-              looseSteps.has(index) &&
-              !looseSteps.has(index - 1) &&
-              !headerBefore.has(index);
+            const startsLooseRun = startsUnheadedLooseRun(index);
             return (
               <Fragment key={f.id}>
-                {grouped && (index === 0 || headerBefore.has(index) || startsUnheadedLooseRun) && (
-                  <SequenceDivider at={index} visible={startsUnheadedLooseRun} />
-                )}
+                {hasDividerBefore(index) && <SequenceDivider at={index} visible={startsLooseRun} />}
                 {grouped && headerBefore.has(index) && (
                   <UnitBlockHeader
                     block={headerBefore.get(index)!.block}

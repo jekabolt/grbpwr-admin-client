@@ -6513,14 +6513,23 @@ export function OperationsField({
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
-    if (from === to && !standalone) return;
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
-    const clearsLastStoredUnit =
-      standalone &&
-      !!operations[from]?.outputUnitKey?.trim() &&
-      operations.every((operation, index) =>
-        index === from ? true : !(operation?.outputUnitKey ?? '').trim(),
-      );
+    if (standalone) {
+      const outputUnitKey = (operations[from]?.outputUnitKey ?? '').trim();
+      // Производящий шаг — несущая точка графа: снятие его выхода превращает каждую позднюю ссылку
+      // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Структурное
+      // растворение остаётся отдельным явным жестом.
+      if (outputUnitKey) {
+        refuseGesture('SEQUENCE', 'join kept', `dissolve ▣ ${outputUnitKey} explicitly`);
+        return;
+      }
+      // Входы обработки — производственный факт: по ним схема рисует обработку на плитке детали.
+      // Принадлежность блоку пока выводится из тех же входов и отдельного хранимого факта не имеет,
+      // поэтому честно отделить строку без потери данных этот бандл не может.
+      refuseGesture('SEQUENCE', 'join kept', 'detach unavailable');
+      return;
+    }
+    if (from === to && !standalone) return;
     // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
     clearFormHistory();
@@ -6537,18 +6546,6 @@ export function OperationsField({
         if (to <= s && s < from) return s + 1;
         return s;
       });
-    }
-    if (standalone) {
-      // Принадлежность блоку НЕ ХРАНИТСЯ полем: assemblyBlocks выводит её из входов и выхода.
-      // Поэтому дроп на границу снимает именно участие шага в графе, а не рисует исключение над
-      // прежними данными. Все производственные поля строки остаются на месте.
-      setValue(`operations.${to}.inputKeys`, [], { shouldDirty: true });
-      setValue(`operations.${to}.outputUnitKey`, '', { shouldDirty: true });
-      setValue(`operations.${to}.outputUnitName`, '', { shouldDirty: true });
-      // Сервер защищает полное снятие сохранённой разметки отдельным флагом. Без него перенос
-      // последнего производящего шага выглядел бы правильно в форме, но был бы отвергнут записью.
-      if (clearsLastStoredUnit && storedHasUnits)
-        setValue('assemblyCleared', true, { shouldDirty: true });
     }
   };
 
