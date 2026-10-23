@@ -84,14 +84,9 @@ type VersionRow = {
   current: boolean;
 };
 
-function restoredLabel(reason: string | undefined, items: TechCardSnapshotListItem[]) {
-  const match = /^restore:(\d+)$/i.exec(reason?.trim() ?? '');
-  if (!match) return null;
-  const target = items.find((item) => item.snapshotId === Number(match[1]));
-  if (!target?.createdAt) return `restored ${match[1]}`;
-  const date = validDate(target.createdAt, new Date());
-  const numeric = date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
-  return `restored ${numeric} ${timeLabel(date)}`;
+function restoredLabel(reason: string | undefined, changes: readonly string[] | undefined) {
+  if (!/^restore:\d+$/i.test(reason?.trim() ?? '')) return null;
+  return shortVersionChanges(changes, 'restored');
 }
 
 function rowsOf(
@@ -115,7 +110,7 @@ function rowsOf(
       date: validDate(item.createdAt, currentDate),
       author: authorLabel(item.authorLabel),
       changes:
-        restoredLabel(item.reason, items) ??
+        restoredLabel(item.reason, item.changes) ??
         shortVersionChanges(item.changes, item.reason || 'saved'),
       pinned: !!item.pinned,
       current: false,
