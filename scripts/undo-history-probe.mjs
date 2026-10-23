@@ -90,7 +90,8 @@ same(
     (patch) =>
       patch.kind === 'value' &&
       patch.path.some(
-        (token) => typeof token === 'object' && token.key === 'historyKey' && token.value === 'op-b',
+        (token) =>
+          typeof token === 'object' && token.key === 'historyKey' && token.value === 'op-b',
       ),
   ),
   true,
@@ -170,6 +171,14 @@ const formSource = await readFile(
   resolve(root, 'src/components/managers/tech-card/components/index.tsx'),
   'utf8',
 );
+const autosaveSource = await readFile(
+  resolve(root, 'src/components/managers/tech-card/components/useTechCardAutosave.ts'),
+  'utf8',
+);
+const patternsSource = await readFile(
+  resolve(root, 'src/components/managers/tech-card/components/patterns-field.tsx'),
+  'utf8',
+);
 const cutBody = hookSource.slice(
   hookSource.indexOf('const cut = useCallback'),
   hookSource.indexOf('const flushThenCut = useCallback'),
@@ -180,10 +189,67 @@ same(
   true,
 );
 same(
-  'save reconciliation closes gestures and suppresses watcher recording',
+  'save reconciliation suppresses only synchronous form writes',
   hookSource.includes('reconciling.current > 0') &&
-    formSource.includes('undoHistory.api.beginServerReconciliation()') &&
-    formSource.includes('finishHistoryReconciliation();'),
+    !hookSource
+      .slice(
+        hookSource.indexOf('const beginServerReconciliation = useCallback'),
+        hookSource.indexOf(
+          'useEffect(() => {',
+          hookSource.indexOf('const beginServerReconciliation'),
+        ),
+      )
+      .includes('closeGesture') &&
+    !formSource
+      .slice(
+        formSource.indexOf('async function writeTechCard('),
+        formSource.indexOf('async function readInChain('),
+      )
+      .includes('beginServerReconciliation') &&
+    formSource
+      .slice(
+        formSource.indexOf('function settleAfterBodySave('),
+        formSource.indexOf('// NF-07 guided convert'),
+      )
+      .includes('settleFormAfterSave') &&
+    formSource
+      .slice(
+        formSource.indexOf('function settleAfterBodySave('),
+        formSource.indexOf('// NF-07 guided convert'),
+      )
+      .includes('finishHistoryReconciliation();'),
+  true,
+);
+const settleBody = formSource.slice(
+  formSource.indexOf('function settleAfterBodySave('),
+  formSource.indexOf('// NF-07 guided convert'),
+);
+same(
+  'a concurrent array edit is checked against the reconciled form, not the old server snapshot',
+  settleBody.includes('const typed = cloneFormValues(form.getValues())') &&
+    settleBody.includes('historyArrayIdentityChanged(typed, form.getValues())') &&
+    !settleBody.includes('historyArrayIdentityChanged(typed, settled.values)'),
+  true,
+);
+const waitBody = hookSource.slice(
+  hookSource.indexOf('const waitThenCut = useCallback'),
+  hookSource.indexOf('const flushThenCut = useCallback'),
+);
+const revisionDeleteBody = patternsSource.slice(
+  patternsSource.indexOf('async function deleteRevision('),
+  patternsSource.indexOf("// A removed sheet's restore"),
+);
+same(
+  'the revision CAS waits behind a non-saving autosave hold and reads its lock afterwards',
+  waitBody.includes('autosave.holdWrites()') &&
+    waitBody.indexOf('await autosave.whenSettled()') < waitBody.indexOf('return await action()') &&
+    waitBody.indexOf('return await action()') < waitBody.indexOf('release();') &&
+    !waitBody.includes('autosave.flush') &&
+    autosaveSource.includes('optsRef.current.paused || writeHolds.current > 0') &&
+    autosaveSource.includes('if (deps.isPaused()) {\n      skippedWhilePaused = true;') &&
+    revisionDeleteBody.includes("undoHistory.waitThenCut('pattern-revision-delete'") &&
+    revisionDeleteBody.indexOf('getQueryData<common_TechCard>') >
+      revisionDeleteBody.indexOf("undoHistory.waitThenCut('pattern-revision-delete'"),
   true,
 );
 

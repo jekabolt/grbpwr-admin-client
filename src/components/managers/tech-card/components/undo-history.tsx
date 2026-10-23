@@ -37,9 +37,14 @@ export type UndoHistoryApi = {
   clear: () => void;
   /** Cut history synchronously without validating or saving unrelated card fields. */
   cut: (reason: string) => void;
+  /**
+   * Cut history, hold new autosaves, wait for the write already on the wire, then run one
+   * independent CAS. Dirty fields are deliberately not flushed.
+   */
+  waitThenCut: <T>(reason: string, action: () => Promise<T>) => Promise<T>;
   /** Flush the card body required by a server-side run, then cut history. */
   flushThenCut: (reason: string) => Promise<FlushResult>;
-  /** Close the operator gesture and ignore form writes performed by one server reconciliation. */
+  /** Ignore only the synchronous form writes performed by one server reconciliation. */
   beginServerReconciliation: () => () => void;
 };
 
@@ -50,6 +55,7 @@ const OFF: UndoHistoryApi = {
   redo: async () => {},
   clear: () => {},
   cut: () => {},
+  waitThenCut: async <T,>(_reason: string, action: () => Promise<T>) => action(),
   flushThenCut: async () => 'off',
   beginServerReconciliation: () => () => {},
 };
@@ -206,7 +212,10 @@ function valueAtPath(root: unknown, path: readonly (string | number)[]): unknown
 }
 
 /** Diff the smallest safe subtree: a leaf unless its address crosses a mutable row array. */
-function diffRootForPath(root: unknown, path: readonly (string | number)[]): Array<string | number> {
+function diffRootForPath(
+  root: unknown,
+  path: readonly (string | number)[],
+): Array<string | number> {
   let value = root;
   const out: Array<string | number> = [];
   for (const token of path) {
@@ -337,11 +346,7 @@ export function useTechCardUndoHistory({
       active.queued = true;
       queueMicrotask(() => {
         active.queued = false;
-        if (
-          applying.current ||
-          reconciling.current > 0 ||
-          gesture.current?.token !== active.token
-        )
+        if (applying.current || reconciling.current > 0 || gesture.current?.token !== active.token)
           return;
         const current = form.getValues();
         const patches = minimalPaths([...active.paths], active.before).flatMap((path) =>
@@ -400,6 +405,21 @@ export function useTechCardUndoHistory({
     [closeGesture, publish],
   );
 
+  const waitThenCut = useCallback(
+    async <T,>(_reason: string, action: () => Promise<T>): Promise<T> => {
+      const release = autosave.holdWrites();
+      closeGesture();
+      publish(historyBarrier(core.current));
+      try {
+        await autosave.whenSettled();
+        return await action();
+      } finally {
+        release();
+      }
+    },
+    [autosave, closeGesture, publish],
+  );
+
   const flushThenCut = useCallback(
     async (reason: string) => {
       closeGesture();
@@ -411,7 +431,6 @@ export function useTechCardUndoHistory({
   );
 
   const beginServerReconciliation = useCallback(() => {
-    closeGesture();
     reconciling.current += 1;
     let active = true;
     return () => {
@@ -419,7 +438,7 @@ export function useTechCardUndoHistory({
       active = false;
       reconciling.current = Math.max(0, reconciling.current - 1);
     };
-  }, [closeGesture]);
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -506,10 +525,11 @@ export function useTechCardUndoHistory({
       redo: () => apply('redo'),
       clear,
       cut,
+      waitThenCut,
       flushThenCut,
       beginServerReconciliation,
     }),
-    [apply, beginServerReconciliation, clear, cut, flushThenCut, view],
+    [apply, beginServerReconciliation, clear, cut, flushThenCut, view, waitThenCut],
   );
 
   return { api, captureProps };

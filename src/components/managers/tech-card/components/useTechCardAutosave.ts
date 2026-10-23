@@ -318,6 +318,13 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         return 'invalid';
       }
     }
+    // A non-saving CAS barrier may rise while the asynchronous quiet validation above is running.
+    // Re-check it at the last point before the wire so the barrier can safely wait only for a write
+    // that was already in flight; validated work remains dirty and is armed again when the hold ends.
+    if (deps.isPaused()) {
+      skippedWhilePaused = true;
+      return 'needs-confirm';
+    }
     set({ status: 'saving', message: undefined });
     // P1-3 (O-60 r4): what the machine had heard when this write left, and the operator's gestures then.
     // A change the operator makes while it is out keeps its own debounce if the write fails (see settle).
@@ -1144,6 +1151,11 @@ export type AutosaveController = AutosaveApi & {
   /** Wait only for the save already on the wire; unlike flush, this never starts a new save. */
   whenSettled: () => Promise<void>;
   /**
+   * Prevent a new body save from starting until the returned release function is called. A save
+   * already on the wire is not cancelled; pair this with `whenSettled` before an independent CAS.
+   */
+  holdWrites: () => () => void;
+  /**
    * При `error`: упала запись (`failed`), панель менялась, пока писалась (`restaged`, O-60 r4), или
    * сервер отказал самому телу (`refused`, D-66).
    */
@@ -1231,6 +1243,7 @@ export function useTechCardAutosaveController(opts: {
   const [state, setState] = useState<MachineState>({ status: opts.enabled ? 'idle' : 'off' });
   const machineRef = useRef<AutosaveMachine | null>(null);
   const settleWaiters = useRef(new Set<() => void>());
+  const writeHolds = useRef(0);
   const onMachineState = (next: MachineState) => {
     setState(next);
     if (next.status === 'saving') return;
@@ -1284,7 +1297,7 @@ export function useTechCardAutosaveController(opts: {
       clearTimer: (h) => window.clearTimeout(h as number),
       now: () => Date.now(),
       isEnabled: () => optsRef.current.enabled && !(optsRef.current.halted?.() ?? false),
-      isPaused: () => optsRef.current.paused,
+      isPaused: () => optsRef.current.paused || writeHolds.current > 0,
       hasWork: () =>
         (optsRef.current.bodyWork?.() ?? liveIsDirty(optsRef.current.form)) ||
         optsRef.current.hasStaged(),
@@ -1323,7 +1336,7 @@ export function useTechCardAutosaveController(opts: {
 
   // m9: the convert dialog let go of the page — a cycle that came due under it is armed now.
   useEffect(() => {
-    if (!opts.paused) machineRef.current?.resume();
+    if (!opts.paused && writeHolds.current === 0) machineRef.current?.resume();
   }, [opts.paused]);
 
   // Любая правка формы: значение, setValue, reset. Сброс, который делает сама запись, тоже сюда
@@ -1406,6 +1419,16 @@ export function useTechCardAutosaveController(opts: {
         const machine = machineRef.current;
         if (!machine || machine.state().status !== 'saving') return Promise.resolve();
         return new Promise<void>((resolve) => settleWaiters.current.add(resolve));
+      },
+      holdWrites: () => {
+        writeHolds.current += 1;
+        let held = true;
+        return () => {
+          if (!held) return;
+          held = false;
+          writeHolds.current = Math.max(0, writeHolds.current - 1);
+          if (writeHolds.current === 0 && !optsRef.current.paused) machineRef.current?.resume();
+        };
       },
       refusalNow: () => {
         const live = machineRef.current?.state();

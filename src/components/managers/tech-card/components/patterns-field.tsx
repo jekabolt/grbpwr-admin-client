@@ -3175,24 +3175,28 @@ export function PatternsField({
   // `delete` of an old version (live or removed sheet): permanent, DeleteTechCardPatternRevision.
   async function deleteRevision(v: SheetVersion): Promise<boolean> {
     if (!techCardId || v.historyId <= 0) return false;
-    undoHistory.cut('pattern-revision-delete');
-    const stored =
-      queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
-    try {
-      await adminService.DeleteTechCardPatternRevision({
-        techCardId,
-        historyId: v.historyId,
-        expectedLockVersion: stored?.lockVersion ?? 0,
-      });
-      // Re-read like restore: the delete answer has no pattern_viewer_token.
-      await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-      return true;
-    } catch (e) {
-      console.error('pattern revision delete failed', e);
-      const said = e instanceof Error ? e.message.trim() : '';
-      useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
-      return false;
-    }
+    return undoHistory.waitThenCut('pattern-revision-delete', async () => {
+      // Read the lock only after an older body write has settled: its reconciliation has adopted the
+      // version that write left in the shared detail cache. Dirty fields are still local and paused.
+      const stored =
+        queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
+      try {
+        await adminService.DeleteTechCardPatternRevision({
+          techCardId,
+          historyId: v.historyId,
+          expectedLockVersion: stored?.lockVersion ?? 0,
+        });
+        // Re-read like restore: the delete answer has no pattern_viewer_token. Keep autosave held
+        // until the detail cache has adopted the delete's own lock bump too.
+        await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        return true;
+      } catch (e) {
+        console.error('pattern revision delete failed', e);
+        const said = e instanceof Error ? e.message.trim() : '';
+        useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
+        return false;
+      }
+    });
   }
 
   // A removed sheet's restore: the card snapshot frozen by the save that deleted it.

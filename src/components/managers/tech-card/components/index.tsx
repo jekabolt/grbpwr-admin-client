@@ -1355,11 +1355,21 @@ export function TechCardForm({
     if ((techCard.lockVersion ?? 0) < base.current.version) return;
     const stored = mapTechCardToForm(techCard);
     const baseline = form.control._defaultValues as Partial<TechCardFormData>;
-    for (const key of ['approvalState', 'stage'] as const) {
+    const updates = (['approvalState', 'stage'] as const).filter((key) => {
       const server = stored[key];
-      if (baseline[key] === server || form.getValues(key) !== baseline[key]) continue;
-      (baseline as Record<string, unknown>)[key] = server;
-      form.setValue(key, server, { shouldDirty: true });
+      return baseline[key] !== server && form.getValues(key) === baseline[key];
+    });
+    if (updates.length > 0) {
+      const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
+      try {
+        for (const key of updates) {
+          const server = stored[key];
+          (baseline as Record<string, unknown>)[key] = server;
+          form.setValue(key, server, { shouldDirty: true });
+        }
+      } finally {
+        finishHistoryReconciliation();
+      }
     }
     // `form` is stable for the page's life; the trigger is a new read of the card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1688,7 +1698,6 @@ export function TechCardForm({
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
   ): Promise<WriteResult> {
     writing.current += 1;
-    const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
     try {
       // mn-5: the decision is pending — nothing goes out but its answer («keep mine» closes it first).
       if (conflictOpen.current) {
@@ -1724,7 +1733,6 @@ export function TechCardForm({
       }
       return await writeTechCardPass(data, opts);
     } finally {
-      finishHistoryReconciliation();
       writing.current -= 1;
       // A read that came in while this chain ran waited for it (M-3): judged now, against the card the
       // chain left this page standing on.
@@ -2155,7 +2163,12 @@ export function TechCardForm({
         // that still carries it. The cached version is left as it was: pairing a fresher lock with
         // this page's stale values is how a write would silently overwrite the other editor.
         const saved = (form.control._defaultValues as Partial<TechCardFormData>).stage ?? '';
-        form.setValue('stage', saved, { shouldDirty: true });
+        const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
+        try {
+          form.setValue('stage', saved, { shouldDirty: true });
+        } finally {
+          finishHistoryReconciliation();
+        }
         // mn-2: typed during the read — their card moved under the typing; the decision, not a merge.
         if (reread === 'typed') {
           const message = 'another editor saved this card while you were typing';
@@ -2295,15 +2308,23 @@ export function TechCardForm({
     // the body and settles them itself once its own write lands.
     keepBaseline: readonly (keyof TechCardFormData)[] = [],
   ) {
-    const typed = form.getValues();
-    if (historyArrayIdentityChanged(typed, settled.values)) undoHistory.api.clear();
+    // Compare the form immediately before and after the synchronous reconciliation. Edits made
+    // while the request was on the wire are already in `typed`; when the merge preserves them they
+    // cannot become a false history boundary merely because they differ from the server snapshot.
+    const typed = cloneFormValues(form.getValues());
+    const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
     // The merge, the baseline key by key (R-1) and the sparse dirty map (R-8) live beside the machine
     // (useTechCardAutosave.ts), where the probe runs them on a real RHF form.
-    settleFormAfterSave(form, before, settled, {
-      keepPurpose,
-      keepBaseline,
-      serverLists: assignServerLists,
-    });
+    try {
+      settleFormAfterSave(form, before, settled, {
+        keepPurpose,
+        keepBaseline,
+        serverLists: assignServerLists,
+      });
+    } finally {
+      finishHistoryReconciliation();
+    }
+    if (typed && historyArrayIdentityChanged(typed, form.getValues())) undoHistory.api.clear();
   }
 
   // NF-07 guided convert. The server's purpose lock counts LIVE colourways, and the client already
@@ -3117,9 +3138,8 @@ export function TechCardForm({
     restoreFlight.current = true;
     setRestoringSnapshotId(snapshotId);
     // A server restore replaces the editing universe. Cut immediately, before any wait or request,
-    // and suppress RHF changes while the returned server card becomes the new form baseline.
+    // then suppress only the synchronous reset that makes the returned card the new form baseline.
     undoHistory.api.clear();
-    const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
     try {
       // Let a body write that was already on the wire settle first. The state update above pauses a
       // pending debounce, so an unsaved local form is deliberately discarded by this no-confirm door.
@@ -3145,7 +3165,12 @@ export function TechCardForm({
       setVersionSkew(null);
       setPresenceLoss(null);
       setSilentIssues([]);
-      form.reset(mapTechCardToForm(fresh));
+      const finishHistoryReconciliation = undoHistory.api.beginServerReconciliation();
+      try {
+        form.reset(mapTechCardToForm(fresh));
+      } finally {
+        finishHistoryReconciliation();
+      }
       queryClient.setQueryData(techCardKeys.detail(numId), fresh);
       autosave.settleExternal({ outcome: 'complete' }, 'version-restore');
 
@@ -3173,7 +3198,6 @@ export function TechCardForm({
         );
       }
     } finally {
-      finishHistoryReconciliation();
       restoreFlight.current = false;
       setRestoringSnapshotId(null);
     }
