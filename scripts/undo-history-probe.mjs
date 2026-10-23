@@ -240,16 +240,35 @@ const revisionDeleteBody = patternsSource.slice(
   patternsSource.indexOf("// A removed sheet's restore"),
 );
 same(
-  'the revision CAS waits behind a non-saving autosave hold and reads its lock afterwards',
+  'the revision CAS waits behind a non-saving hold and reads the live autosave base afterwards',
   waitBody.includes('autosave.holdWrites()') &&
     waitBody.indexOf('await autosave.whenSettled()') < waitBody.indexOf('return await action()') &&
     waitBody.indexOf('return await action()') < waitBody.indexOf('release();') &&
     !waitBody.includes('autosave.flush') &&
     autosaveSource.includes('optsRef.current.paused || writeHolds.current > 0') &&
     autosaveSource.includes('if (deps.isPaused()) {\n      skippedWhilePaused = true;') &&
+    autosaveSource.includes(
+      'getBaseLockVersion: () => optsRef.current.getBaseLockVersion()',
+    ) &&
+    formSource.includes('getBaseLockVersion: () => base.current.version') &&
     revisionDeleteBody.includes("undoHistory.waitThenCut('pattern-revision-delete'") &&
-    revisionDeleteBody.indexOf('getQueryData<common_TechCard>') >
-      revisionDeleteBody.indexOf("undoHistory.waitThenCut('pattern-revision-delete'"),
+    revisionDeleteBody.includes('expectedLockVersion: autosave.getBaseLockVersion()') &&
+    !revisionDeleteBody.includes('getQueryData<common_TechCard>'),
+  true,
+);
+same(
+  'the revision delete adopts its returned lock before every held write can resume',
+  revisionDeleteBody.includes('const fresh = response.techCard;') &&
+    revisionDeleteBody.indexOf('autosave.adoptBase(fresh)') <
+      revisionDeleteBody.indexOf('queryClient.setQueryData') &&
+    revisionDeleteBody.indexOf('queryClient.setQueryData') <
+      revisionDeleteBody.indexOf('return true;') &&
+    autosaveSource.includes('adoptBase: (card) => optsRef.current.adoptBase(card)') &&
+    formSource.includes('adoptBase: adoptExternalBase') &&
+    waitBody.includes('} finally {') &&
+    waitBody.includes('heldWriteReleases.current.delete(release)') &&
+    hookSource.includes('const releases = [...heldWriteReleases.current]') &&
+    hookSource.includes('releases.forEach((release) => release())'),
   true,
 );
 

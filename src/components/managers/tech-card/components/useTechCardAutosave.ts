@@ -1234,6 +1234,9 @@ export function useTechCardAutosaveController(opts: {
    * работой они становятся через её очередь). Без ответа — «форма грязна».
    */
   bodyWork?: () => boolean;
+  /** Live edit base owned by the page; independent CAS doors read and advance it while held. */
+  getBaseLockVersion: () => number;
+  adoptBase: (card: common_TechCard) => void;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
   retryIntervalMs?: number;
@@ -1448,6 +1451,8 @@ export function useTechCardAutosaveController(opts: {
         machineRef.current.notifyChange();
       },
       flush: (reason) => machineRef.current?.flush(reason) ?? Promise.resolve('off' as const),
+      getBaseLockVersion: () => optsRef.current.getBaseLockVersion(),
+      adoptBase: (card) => optsRef.current.adoptBase(card),
       saveNow: (reason) =>
         machineRef.current?.flush(reason, 'explicit') ?? Promise.resolve('off' as const),
       resolveConflict: () => machineRef.current?.resolveConflict(),

@@ -36,6 +36,8 @@ const log: string[] = ((window as unknown as { __log: string[] }).__log = []);
 const autosave: AutosaveApi = {
   status: 'idle',
   request: () => {},
+  getBaseLockVersion: () => 0,
+  adoptBase: () => {},
   flush: async (reason) => {
     log.push(`flush:${reason}`);
     // Проба может задержать сейв, чтобы отменить прогон, пока он ещё ждёт карточку.

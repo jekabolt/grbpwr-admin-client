@@ -263,6 +263,7 @@ export function useTechCardUndoHistory({
   const discreteTimer = useRef<number | null>(null);
   const applying = useRef(false);
   const reconciling = useRef(0);
+  const heldWriteReleases = useRef(new Set<() => void>());
 
   const publish = useCallback((next: UndoHistoryState) => {
     core.current = next;
@@ -294,6 +295,14 @@ export function useTechCardUndoHistory({
     if (autosave.status === 'conflict') clear();
   }, [autosave.status, clear]);
   useEffect(() => () => cancelTimers(), [cancelTimers]);
+  useEffect(
+    () => () => {
+      const releases = [...heldWriteReleases.current];
+      heldWriteReleases.current.clear();
+      releases.forEach((release) => release());
+    },
+    [],
+  );
 
   const begin = useCallback(
     (target: HTMLElement | null, text: boolean) => {
@@ -408,12 +417,14 @@ export function useTechCardUndoHistory({
   const waitThenCut = useCallback(
     async <T,>(_reason: string, action: () => Promise<T>): Promise<T> => {
       const release = autosave.holdWrites();
+      heldWriteReleases.current.add(release);
       closeGesture();
       publish(historyBarrier(core.current));
       try {
         await autosave.whenSettled();
         return await action();
       } finally {
+        heldWriteReleases.current.delete(release);
         release();
       }
     },

@@ -1302,6 +1302,14 @@ export function TechCardForm({
     techCard;
   // R-1 backstop: the body this page last wrote, and the version the server holds it under.
   const lastBody = useRef<{ payload: string; lock: number } | null>(null);
+  const adoptExternalBase = (card: common_TechCard) => {
+    adopt(card);
+    lockOverride.current = null;
+    needsRead.current = false;
+    ownBodyVersion.current = null;
+    if (lastBody.current)
+      lastBody.current = { ...lastBody.current, lock: card.lockVersion ?? 0 };
+  };
   // G1: the approval door's own question — did a body write that CARRIED the requested approval
   // land? Marked inside writeTechCard, so a concurrent autosave that did not carry it cannot answer.
   const approvalAttempt = useRef<{ next: string; landed: boolean } | null>(null);
@@ -3125,6 +3133,8 @@ export function TechCardForm({
     countErrors: () => flattenFieldErrors(form.control._formState.errors as FieldErrors).length,
     // M2: a style fact is work only through the style panel's queue — the body never writes it.
     bodyWork: () => bodyWorkOf(form),
+    getBaseLockVersion: () => base.current.version,
+    adoptBase: adoptExternalBase,
   });
   const undoHistory = useTechCardUndoHistory({
     scope: numId ?? clientRequestId.current,

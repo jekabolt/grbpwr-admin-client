@@ -1,3 +1,4 @@
+import type { common_TechCard } from 'api/proto-http/admin';
 import { createContext, useContext } from 'react';
 
 /**
@@ -70,6 +71,10 @@ export type AutosaveApi = {
   request: (reason: string) => void;
   /** «Сохрани сейчас и скажи, вышло ли». Ждёт завершения текущего сохранения, если оно идёт. */
   flush: (reason: string) => Promise<FlushResult>;
+  /** Lock version of the server card this editing form currently stands on. */
+  getBaseLockVersion: () => number;
+  /** Move that base to a card returned by an independent card-level CAS. */
+  adoptBase: (card: common_TechCard) => void;
 };
 
 const noop = () => {};
@@ -79,6 +84,8 @@ export const AUTOSAVE_OFF: AutosaveApi = {
   status: 'off',
   request: noop,
   flush: async () => 'off',
+  getBaseLockVersion: () => 0,
+  adoptBase: noop,
 };
 
 export const AutosaveContext = createContext<AutosaveApi>(AUTOSAVE_OFF);
