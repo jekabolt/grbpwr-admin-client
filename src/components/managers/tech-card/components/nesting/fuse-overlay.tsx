@@ -1,7 +1,7 @@
 // The fuse markup drawn over the PIECES sheet (canvas «Zoom»): the fusible fill (whole / strip
 // bands / zone), the inset contour dashed, dart holes, and on the piece being edited the handles —
 // click an edge to add it to the strip, drag a strip end to trim it (live mm, snap 5), shape the
-// zone with the Rect+ editor (fuse-zone-editor) or click a DXF block for it, click a dart to toggle
+// zone with the pen editor (fuse-zone-editor) or click a DXF block for it, click a dart to toggle
 // cut / fuse over. Other fused pieces show faint. A drawn zone's fill is the fusible DXF's own
 // geometry (lib/fusing-dxf generateFuseGeometry), so what is drawn is what is cut; its clipped
 // area goes to the panel through the zone bus. Coordinates: the sheet's own SVG space — cm, Y down.
@@ -134,7 +134,7 @@ export function FuseOverlay({
   // exactly the contour its sides follow and the DXF is clipped to.
   const insets = useRef(new WeakMap<PieceDTO, Map<string, Pt[] | null>>());
   const zoneInsetOf = (p: PieceDTO, f: PieceFuseSpec) => {
-    if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+    if (f.mode !== 'zone') return null;
     const key = JSON.stringify([f.insetNet, f.insetMm, requiredSeamAllowanceMm]);
     let m = insets.current.get(p);
     if (!m) insets.current.set(p, (m = new Map()));

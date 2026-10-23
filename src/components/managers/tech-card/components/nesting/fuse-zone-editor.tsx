@@ -1,10 +1,8 @@
-// Rect+ — the drawn fusing zone's canvas editor (L13, owner OK 22.10, mockup variant 3). Starts as
-// the current rectangle: drag on the piece = a new rectangle, drag inside the zone = move it,
-// corner + mid handles reshape it (straight mids follow their corners; a moved mid bends the side),
-// the top handle rotates (shift = 15° steps), a tap on a corner toggles sharp / round, ⌘Z undoes.
-// Points snap onto the inset contour and never leave it; a side between two snapped points follows
-// the contour. A double tap on a side inserts a point there, a double tap on a point (or Backspace /
-// Delete on the last touched one) removes it, min 3. Finger-size handles on touch.
+// Pen editor for the drawn fusing zone. Drag a point to carve the full-fill seed inward; near the
+// inset contour it snaps back and adjacent snapped sides follow the contour. A tap toggles sharp /
+// round, a double tap on a side inserts a point, and a double tap on a point (or Backspace / Delete
+// on the last touched one) removes it, min 3. Empty piece/zone drags are deliberately inert so the
+// sheet does not pan or create a rectangle. ⌘Z undoes. Finger-size handles on touch.
 // Coordinates: the sheet's SVG space (cm, Y down); the zone itself is piece-local mm, Y up.
 import { useEffect, useRef, useState } from 'react';
 import { ZONE_ON_CONTOUR_MM } from 'lib/fusing-dxf/spline';
@@ -12,15 +10,10 @@ import type { PieceDTO, Pt } from 'lib/nesting/types';
 import type { FuseZone } from 'lib/fusing-dxf/types';
 import type { PieceFuseSpec } from './fuse-spec';
 import {
-  clampZoneTransform,
-  cornerSlot,
-  followMids,
   insertZonePoint,
   isDrawnZone,
-  rectPoints,
   removeZonePoint,
-  storedZone,
-  straightMid,
+  splineZone,
   zoneOutline,
   zonePoints,
   type ZoneBus,
@@ -29,7 +22,6 @@ import {
 
 const INK = 'var(--color-warning)';
 const PAPER = 'var(--color-bgColor)';
-const ROT_GAP_PX = 26;
 /** Two taps on the same handle / side within this many ms are a double tap. */
 const DOUBLE_TAP_MS = 350;
 
@@ -72,10 +64,8 @@ function nearestOn(q: Pt, ring: Pt[]) {
 }
 
 type Drag =
-  | { t: 'pt'; i: number; moved: boolean; cx: number; cy: number; straight: boolean[] }
-  | { t: 'rect'; a: Pt; b: Pt }
-  | { t: 'move'; from: Pt; orig: Pt[]; moved: boolean; cx: number; cy: number; side?: number }
-  | { t: 'rot'; c: Pt; a0: number; orig: Pt[]; deg: number; moved: boolean };
+  | { t: 'pt'; i: number; moved: boolean; cx: number; cy: number }
+  | { t: 'side'; side?: number };
 
 export function FuseZoneEditor({
   px,
@@ -137,7 +127,7 @@ export function FuseZoneEditor({
         e.preventDefault();
         if (!next) return;
         b?.push(ci, s.zone);
-        set({ ...s, zone: storedZone(next) });
+        set({ ...s, zone: splineZone(next) });
         setPicked(null);
         return;
       }
@@ -159,9 +149,7 @@ export function FuseZoneEditor({
   };
   const snapped = (q: Pt) => inner.length >= 3 && nearestOn(q, inner).d <= ZONE_ON_CONTOUR_MM / 10;
   const begin = () => bus?.push(ci, zone);
-  const write = (next: ZonePoint[]) => onChange({ ...spec, zone: storedZone(next) });
-  const writeSheet = (sheet: Pt[]) =>
-    write(sheet.map((s, i) => ({ ...L(s), corner: mm[i]?.corner ?? false })));
+  const write = (next: ZonePoint[]) => onChange({ ...spec, zone: splineZone(next) });
 
   const down = (e: React.PointerEvent, d: Drag) => {
     e.stopPropagation();
@@ -179,42 +167,7 @@ export function FuseZoneEditor({
       d.moved = true;
       const next = mm.slice();
       next[d.i] = { ...L(keep(q)), corner: mm[d.i].corner };
-      write(followMids(next, d.straight));
-    } else if (d.t === 'rect') {
-      d.b = keep(q);
-      rerender();
-    } else if (d.t === 'move') {
-      if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
-      if (!d.moved) begin();
-      d.moved = true;
-      const dx = q.x - d.from.x;
-      const dy = q.y - d.from.y;
-      writeSheet(
-        clampZoneTransform(d.orig, inner, (p, amount) => ({
-          x: p.x + dx * amount,
-          y: p.y + dy * amount,
-        })),
-      );
-    } else {
-      const step = e.shiftKey ? 15 : 1;
-      const deg =
-        Math.round(((Math.atan2(q.y - d.c.y, q.x - d.c.x) - d.a0) * 180) / Math.PI / step) * step;
-      if (!d.moved && deg === 0) return;
-      if (!d.moved) begin();
-      d.moved = true;
-      d.deg = deg;
-      const r = (deg * Math.PI) / 180;
-      writeSheet(
-        clampZoneTransform(d.orig, inner, (p, amount) => {
-          const angle = r * amount;
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-          return {
-            x: d.c.x + (p.x - d.c.x) * cos - (p.y - d.c.y) * sin,
-            y: d.c.y + (p.x - d.c.x) * sin + (p.y - d.c.y) * cos,
-          };
-        }),
-      );
+      write(next);
     }
   };
   /** A tap without a drag; true when it completes a double tap on the same key. */
@@ -242,11 +195,11 @@ export function FuseZoneEditor({
           write(next);
           setPicked(null);
         }
-      } else if (cornerSlot(d.i, mm)) {
+      } else {
         begin();
         write(mm.map((p, i) => (i === d.i ? { ...p, corner: !p.corner } : p)));
       }
-    } else if (d.t === 'move' && !d.moved && d.side != null) {
+    } else if (d.t === 'side' && d.side != null) {
       const at = svgAt.current;
       if (tapped(`side-${d.side}`) && at) {
         const side = sideAt(at);
@@ -259,11 +212,6 @@ export function FuseZoneEditor({
       }
     } else if (d.t === 'pt' && d.moved) {
       lastTap.current = null;
-    } else if (d.t === 'rect' && Math.abs(d.b.x - d.a.x) > 0.8 && Math.abs(d.b.y - d.a.y) > 0.8) {
-      begin();
-      const a = L(d.a);
-      const b = L(d.b);
-      write(rectPoints(a.x, a.y, b.x, b.y));
     }
     rerender();
   };
@@ -274,26 +222,9 @@ export function FuseZoneEditor({
     return { side: outlineMm.side[n.edge] ?? 0, p: n.p, d: n.d };
   };
   const svgAt = useRef<Pt | null>(null);
-  const onPad = (e: React.PointerEvent) => {
-    const q = svgPoint(e);
-    if (drawn && ring.length >= 3 && inside(q, ring))
-      return down(e, {
-        t: 'move',
-        from: q,
-        orig: pts,
-        moved: false,
-        cx: e.clientX,
-        cy: e.clientY,
-      });
-    const a = keep(q);
-    return down(e, { t: 'rect', a, b: a });
-  };
+  const onPad = (e: React.PointerEvent) => e.stopPropagation();
 
   const d = drag.current;
-  const cx = pts.reduce((s, p) => s + p.x, 0) / (pts.length || 1);
-  const cy = pts.reduce((s, p) => s + p.y, 0) / (pts.length || 1);
-  const top = pts.length ? Math.min(...pts.map((p) => p.y)) : 0;
-  const rot = { x: cx, y: top - ROT_GAP_PX * px };
 
   return (
     <g onPointerMove={move} onPointerUp={up} onPointerCancel={up} data-zone-editor=''>
@@ -301,7 +232,7 @@ export function FuseZoneEditor({
         points={str(outline)}
         data-fuse-pad=''
         fill='transparent'
-        style={{ cursor: drawn ? 'move' : 'crosshair', touchAction: 'none' }}
+        style={{ cursor: 'default', touchAction: 'none' }}
         onPointerDown={onPad}
       />
       {drawn && ring.length >= 3 && (
@@ -311,108 +242,22 @@ export function FuseZoneEditor({
           fill='none'
           stroke='transparent'
           strokeWidth={2 * HIT}
-          style={{ cursor: 'move', touchAction: 'none' }}
+          style={{ cursor: 'crosshair', touchAction: 'none' }}
           onPointerDown={(e) => {
             const q = svgPoint(e);
             svgAt.current = q;
             const side = sideAt(q);
             down(e, {
-              t: 'move',
-              from: q,
-              orig: pts,
-              moved: false,
-              cx: e.clientX,
-              cy: e.clientY,
+              t: 'side',
               side: side?.side,
             });
           }}
         />
       )}
-      {d?.t === 'rect' && (
-        <rect
-          x={Math.min(d.a.x, d.b.x)}
-          y={Math.min(d.a.y, d.b.y)}
-          width={Math.abs(d.b.x - d.a.x)}
-          height={Math.abs(d.b.y - d.a.y)}
-          fill={INK}
-          fillOpacity={0.2}
-          stroke={INK}
-          strokeDasharray='4 3'
-          vectorEffect='non-scaling-stroke'
-          pointerEvents='none'
-        />
-      )}
-      {drawn && pts.length >= 3 && (
-        <g>
-          <line
-            x1={rot.x}
-            y1={rot.y}
-            x2={cx}
-            y2={top}
-            stroke={INK}
-            strokeWidth={1}
-            vectorEffect='non-scaling-stroke'
-            pointerEvents='none'
-          />
-          <circle
-            cx={rot.x}
-            cy={rot.y}
-            r={R}
-            fill={PAPER}
-            stroke={INK}
-            strokeWidth={1.5}
-            vectorEffect='non-scaling-stroke'
-            pointerEvents='none'
-          />
-          <path
-            d={`M ${rot.x - R * 0.5} ${rot.y} A ${R * 0.5} ${R * 0.5} 0 1 1 ${rot.x} ${rot.y + R * 0.5}`}
-            fill='none'
-            stroke={INK}
-            strokeWidth={1}
-            vectorEffect='non-scaling-stroke'
-            pointerEvents='none'
-          />
-          <circle
-            data-zone-rot=''
-            cx={rot.x}
-            cy={rot.y}
-            r={HIT}
-            fill='transparent'
-            style={{ cursor: 'grab', touchAction: 'none' }}
-            onPointerDown={(e) => {
-              const q = svgPoint(e);
-              down(e, {
-                t: 'rot',
-                c: { x: cx, y: cy },
-                a0: Math.atan2(q.y - cy, q.x - cx),
-                orig: pts,
-                deg: 0,
-                moved: false,
-              });
-            }}
-          />
-          {d?.t === 'rot' && (
-            <text
-              x={rot.x + 2 * R}
-              y={rot.y}
-              fontSize={11 * px}
-              dominantBaseline='middle'
-              fill={INK}
-              paintOrder='stroke'
-              stroke={PAPER}
-              strokeWidth={3 * px}
-              pointerEvents='none'
-            >
-              {d.deg}°
-            </text>
-          )}
-        </g>
-      )}
       {pts.map((p, i) => {
-        const corner = cornerSlot(i, mm);
         const sharp = mm[i].corner;
         const on = (d?.t === 'pt' && d.i === i && d.moved) || snapped(p);
-        const r = corner ? R : R * 0.8;
+        const r = sharp ? R : R * 0.8;
         return (
           <g key={`zh-${i}`}>
             {sharp ? (
@@ -454,7 +299,6 @@ export function FuseZoneEditor({
                   moved: false,
                   cx: e.clientX,
                   cy: e.clientY,
-                  straight: mm.map((_, k) => k !== i && straightMid(mm, k)),
                 });
               }}
             />

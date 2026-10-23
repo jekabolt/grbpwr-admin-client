@@ -39,7 +39,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
-import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
+import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import {
   interliningBlockCodes,
   interliningIdentityKey,
@@ -86,7 +86,7 @@ import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
-import { createZoneBus, isDrawnZone } from './fuse-zone';
+import { createZoneBus, isDrawnZone, seedZone } from './fuse-zone';
 import { fusingSheetsChange } from './fusing-sheets-stage';
 import {
   blankFuse,
@@ -2498,8 +2498,9 @@ export function PieceMatchModal({
   const fuseOfCi = (ci: string): PieceFuseSpec | undefined => {
     if (!ci) return undefined;
     const { st, vals } = ioOf(ci);
-    if (st.kind === 'none' || !vals.fused) return undefined;
-    return vals.fuse ?? readFuseSpec(vals);
+    if (st.kind === 'none') return undefined;
+    if (vals.fuse) return vals.fuse;
+    return vals.fused ? readFuseSpec(vals) : undefined;
   };
   const ownerFileLinesOfPiece = (pieceLineKey: string): string[] => {
     const pieceKey = pieceLineKey.trim().toLowerCase();
@@ -2537,6 +2538,21 @@ export function PieceMatchModal({
           true,
         );
         resolved = { ...next, bomLineKey: placeholder.lineKey!.trim() };
+      }
+    }
+    if (resolved.mode === 'zone' && !resolved.zone) {
+      const piece = sheetPieces.find((candidate) => ciOf(candidate) === ci);
+      if (piece) {
+        try {
+          const inset = fuseInsetRingMm(
+            piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
+            resolved,
+            requiredSeamAllowanceMm,
+          );
+          resolved = { ...resolved, zone: seedZone(inset) };
+        } catch {
+          // The normal incomplete/error state remains visible if this piece cannot produce an inset.
+        }
       }
     }
     const previousLineKey = prev.bomLineKey.trim();
