@@ -44,9 +44,19 @@ export {
   unplacedPieceKeys,
 } from 'lib/dxf-reconcile';
 export { applyPlan, reconcile } from 'lib/dxf-reconcile';
+export {
+  pieceShapeReferences,
+  proposePieceShapes,
+  SHAPE_PROPOSAL_THRESHOLDS,
+} from 'lib/dxf-reconcile';
 export { markersBehindSheets } from 'components/managers/tech-card/components/nesting/marker-sheets';
 export { sha256Hex } from 'lib/features/sha256';
 export { bytesToLatin1, readInsunits } from 'lib/nesting/dxf/insunits';
+export {
+  autoPieceMatchRows,
+  CREATE_PIECE_CHOICE,
+  pieceMatchActionDisabled,
+} from 'components/managers/tech-card/components/nesting/piece-match-auto';
 
 export {
   IDENTICAL,

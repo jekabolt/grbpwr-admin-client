@@ -134,6 +134,8 @@ export function applyPlan<P extends CardPiece, A extends CardAlias, O extends Ca
   });
   if (plan.status === 'noop') return untouched({ reason: 'noop' });
   if (plan.refused === 'foreign') return untouched({ reason: 'foreign' });
+  if (plan.needsPieceMatch || plan.rows.some((row) => row.tier === 'unlinked'))
+    return untouched({ reason: 'unresolved' });
 
   // ── судьбы деталей ───────────────────────────────────────────────────────────────────────
   // Деталь, связанная хоть одной строкой, живёт — даже если другая строка считала её пропавшей.

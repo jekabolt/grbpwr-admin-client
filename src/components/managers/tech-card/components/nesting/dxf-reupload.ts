@@ -1,8 +1,8 @@
-// ПЕРЕЗАЛИВ DXF В СЛОТ, ГДЕ ЛИСТ УЖЕ ЕСТЬ (L4a, 21.10): без диалога и без вопросов.
+// ПЕРЕЗАЛИВ DXF В СЛОТ, ГДЕ ЛИСТ УЖЕ ЕСТЬ (L4a, 21.10).
 //
-// Новый файл заменяет лист слота и применяется сразу: `reconcile` → `applyPlan` → новые детали,
-// алиасы и шаги (с метками `review`). Переименования и новые детали молчат; перекрой, призрак,
-// разрез и перепривязка ставят метку на шаги, и метки держат релиз (сервер).
+// Разрешённый план применяется сразу: `reconcile` → `applyPlan` → новые детали, алиасы и шаги
+// (с метками `review`). Если хотя бы один блок остался без решения, файл передаётся существующему
+// PieceMatchModal и карточка не меняется до его SAVE.
 //
 // Единицы и размеры НЕ спрашиваются: файл без $INSUNITS получает единицы заменяемого листа, а строка
 // листа сохраняет свой size_id. Просмотр деталей после замены не открывается.
@@ -109,6 +109,8 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
   scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') => string;
   isDxf: (url: string) => boolean;
   sizeTokens: readonly string[];
+  /** Dictionary tokens of the card's base/sample size, preferred for shape comparison. */
+  preferredSizeTokens?: readonly string[];
   /** ссылки на деталь вне шагов (рецепт, площади, материалы детали, швы): деталь станет призраком */
   externalRefs?: Readonly<Record<string, number>>;
   /**
@@ -185,6 +187,14 @@ export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends 
   /** тот же файл — ничего не делать */
   | { kind: 'noop'; rowIndex: number }
   | { kind: 'refused'; why: ReuploadRefusal; detail?: string }
+  | {
+      kind: 'match';
+      rowIndex: number;
+      replacedUrl: string;
+      rowId: string;
+      row: SheetPatch;
+      plan: ReconcilePlan;
+    }
   | {
       kind: 'applied';
       /** индекс заменённой строки в `card.patterns` */
@@ -502,6 +512,7 @@ export async function reuploadSheet<
       oldSheet: { parse: targetOld, sha256: oldShas[t] },
       newSheet: { parse: targetNew, sha256: sha },
       sizeTokens: card.sizeTokens,
+      preferredSizeTokens: card.preferredSizeTokens,
       externalRefs: card.externalRefs,
       aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
       targetFileIndex: 0,
@@ -538,6 +549,7 @@ export async function reuploadSheet<
     oldSheet: { parse: oldParse, sha256: all(oldShas) },
     newSheet: { parse: newParse, sha256: all(oldShas.map((s, k) => (k === t ? sha : s))) },
     sizeTokens: card.sizeTokens,
+    preferredSizeTokens: card.preferredSizeTokens,
     externalRefs: card.externalRefs,
     otherSheets,
     aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
@@ -548,6 +560,22 @@ export async function reuploadSheet<
   const plan = reconcile(input);
   if (plan.status === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
   if (isForeignPlan(plan)) return foreign();
+  if (plan.needsPieceMatch || plan.needsShapeReview) {
+    let up: UploadedSheet;
+    try {
+      up = await deps.upload({ name: file.name, bytes });
+    } catch (e) {
+      return { kind: 'refused', why: 'upload', detail: e instanceof Error ? e.message : String(e) };
+    }
+    return {
+      kind: 'match',
+      rowIndex: rows[t].i,
+      replacedUrl: rows[t].r.url!,
+      rowId: sheetRowId(rows[t].r),
+      row: { ...up, sha256: lower(up.sha256) || sha, version: 0, uploadedAt: '' },
+      plan,
+    };
+  }
   // Новая деталь, рождённая от детали карточки: строка плана со старой деталью и блоком без детали
   // (часть разреза; блок, заведённый новой строкой вместо старой). Ключ — идентичность блока.
   const byKey = new Map(card.pieces.map((p) => [p.lineKey, p]));

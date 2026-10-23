@@ -1,13 +1,14 @@
 import { cn } from 'lib/utility';
 import {
   Fragment,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type HTMLAttributes,
   type ReactNode,
 } from 'react';
-import { Chip, Text } from 'ui';
+import { Button, Chip, Close, FoldCaret, Pill, Select, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { CreatePrefill } from './assembly-create-dialog';
@@ -20,9 +21,11 @@ import type {
 import {
   SCHEMATIC_METRICS,
   type BoxLayout,
+  type HiddenPiecesDoorLayout,
   type SchematicLayout,
   type TileLayout,
 } from './assembly-layout';
+import type { OrphanBoardState, OrphanPieceInfo, RankedOrphanBlock } from './orphan-pieces';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
@@ -1438,6 +1441,100 @@ export function TailBoxView({
   );
 }
 
+const candidateValue = (candidate: RankedOrphanBlock): string => candidate.key;
+
+function OrphanResolver({
+  lineKey,
+  top,
+  orphan,
+  frozen,
+  onRelink,
+  onDelete,
+}: {
+  lineKey: string;
+  top: number;
+  orphan: OrphanPieceInfo;
+  frozen: boolean;
+  onRelink: OrphanBoardState['onRelink'];
+  onDelete: OrphanBoardState['onDelete'];
+}) {
+  const [selected, setSelected] = useState(() => orphan.candidates[0]?.key ?? '');
+  useEffect(() => {
+    if (!orphan.candidates.some((candidate) => candidateValue(candidate) === selected)) {
+      setSelected(orphan.candidates[0]?.key ?? '');
+    }
+  }, [orphan.candidates, selected]);
+  const candidate = orphan.candidates.find((item) => candidateValue(item) === selected);
+
+  return (
+    <div
+      className='absolute left-0 flex w-full flex-col gap-2 border border-borderColor bg-bgColor p-2'
+      style={{ top }}
+      onPointerDown={(event: React.PointerEvent) => event.stopPropagation()}
+    >
+      <div className='flex items-center gap-2'>
+        <Text size='micro' variant='uppercase' component='span' className='shrink-0'>
+          block
+        </Text>
+        <Select
+          name={`orphan-block-${lineKey}`}
+          value={selected}
+          items={orphan.candidates.map((item) => ({
+            value: candidateValue(item),
+            label: `${item.block} · shape ${item.shapeScore}%`,
+          }))}
+          placeholder='block'
+          size='sm'
+          fullWidth
+          readOnly={frozen}
+          onValueChange={setSelected}
+        />
+      </div>
+      <div className='flex items-center gap-2'>
+        <Text size='micro' variant='label' component='span' className='mr-auto tabular-nums'>
+          ops {orphan.operations}
+        </Text>
+        <Button
+          variant='main'
+          size='xs'
+          disabled={frozen || !candidate}
+          onClick={() => candidate && onRelink(lineKey, candidate)}
+        >
+          Relink
+        </Button>
+        <Button variant='secondary' size='xs' disabled={frozen} onClick={() => onDelete(lineKey)}>
+          Delete
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function HiddenPiecesDoor({
+  door,
+  open,
+  onToggle,
+}: {
+  door: HiddenPiecesDoorLayout;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      variant='default'
+      size='xs'
+      className='absolute flex items-center whitespace-nowrap text-labelColor hover:text-textColor'
+      style={{ left: door.x, top: door.y, width: door.w, height: door.h }}
+      aria-expanded={open}
+      onPointerDown={(event: React.PointerEvent) => event.stopPropagation()}
+      onClick={onToggle}
+    >
+      +{door.count} hidden
+      <FoldCaret open={open} />
+    </Button>
+  );
+}
+
 /**
  * ПЛИТКА ДЕТАЛИ КАК НОДА ПОЛОТНА: бокс, состояние рамкой, подпись и сам контур с штриховкой.
  *
@@ -1471,6 +1568,7 @@ export function TileView({
   stepProps,
   onAddOperation,
   onGoToUnit,
+  orphanBoard,
 }: {
   tile: TileLayout;
   /** Человеческое имя детали. */
@@ -1506,9 +1604,14 @@ export function TileView({
   onAddOperation?: () => void;
   /** Перейти к узлу, который деталь съел. Пусто у свободной: вести некуда. */
   onGoToUnit?: () => void;
+  /** Контролы сироты принадлежат форме выше; вьюшка только раскладывает их на полотне. */
+  orphanBoard?: OrphanBoardState;
 }) {
   const { TILE, PROC_ROW_H } = SCHEMATIC_METRICS;
-  const addable = !frozen && !!onAddOperation;
+  const orphan = orphanBoard?.pieces.get(t.key);
+  const addable = !orphan && !frozen && !!onAddOperation;
+  const navigable = !orphan && !!onGoToUnit;
+  const tileH = t.hitH ?? t.h;
   return (
     // ВНЕШНЯЯ КОРОБКА НЕСЁТ ТОЛЬКО МЕСТО И ЖЕСТ, а рисунок с рамкой переехал внутрь. Причина
     // ровно одна и она про всплытие: `organProps` плитки («выделить деталь») висели на КОРНЕ, а
@@ -1519,15 +1622,21 @@ export function TileView({
     // полосу: она теперь ему не потомок.
     <div
       className='absolute'
-      style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
+      style={{
+        left: t.x,
+        top: t.y,
+        width: t.contentW ?? t.w,
+        height: t.h,
+        touchAction: NODE_TOUCH,
+      }}
       {...dragProps}
       {...hoverProps}
     >
       {/* ДЕЙСТВИЯ ДЕТАЛИ — ТА ЖЕ ПОЛОСА, ЧТО У БОКСА, и те же два рода чипов: читающий сплошной
           и живой на `frozen`, пишущий пунктирный и на `frozen` отсутствующий. */}
-      {hovered && (addable || onGoToUnit) && (
+      {hovered && (addable || navigable) && (
         <NodeHoverBar>
-          {onGoToUnit && (
+          {navigable && (
             // «УЙТИ К ТОМУ, КТО СЪЕЛ» ЖИВЁТ ЗДЕСЬ, А НЕ НА ГОЛОВЕ ПЛИТКИ. У бокса этот
             // вопрос решён токеном `▣ ИМЯ` прямо в строке, но у плитки имени узла на экране
             // не напечатано вовсе, а 52 пикселя строки для него не дадут. Значит тот же
@@ -1546,21 +1655,20 @@ export function TileView({
       )}
       <div
         className={cn(
-          'flex size-full flex-col overflow-hidden border',
+          orphan
+            ? 'group relative flex flex-col overflow-hidden border'
+            : 'flex size-full flex-col overflow-hidden border',
           t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
           picked && 'border-solid border-textColor',
           dragging && 'opacity-70',
           ringClassName,
         )}
+        style={orphan ? { width: t.w, height: tileH } : undefined}
         // КЛИК ПО ПЛИТКЕ ЗНАЧИТ ОДНО И ТО ЖЕ ВЕЗДЕ — выделить. Раньше вторая половина
         // подсказки обещала съеденной плитке «open the step that consumed it»: один орган,
         // два противоположных смысла, и выбор между ними по невидимому на глаз состоянию.
         // Ровно тот перегруз, который с бокса уже снят; навигация переехала на чип.
-        title={
-          t.state === 'free'
-            ? `${name} — hasn't gone into any unit yet\nclick to select the piece`
-            : `${name} — already in unit ▣ ${t.into}\nclick to select the piece`
-        }
+        title={orphan ? name : t.state === 'free' ? `${name} · free` : `${name} · ▣ ${t.into}`}
       >
         {/* ГОЛОВА — САМА ДЕТАЛЬ, и она же PICK-ЗОНА плитки. Орган переехал с внешней коробки
             сюда ровно по образцу бокса узла: строки под головой — уже кнопки шагов, и оставь
@@ -1572,6 +1680,21 @@ export function TileView({
             сам равен `TILE` минус рамка плитки. Напиши здесь `TILE` числом — и голова окажется
             на два пикселя выше своего места, потому что рамку раскладка считает внутри плитки
             (замерено: силуэт голой плитки 46, а не 48). */}
+        {orphan?.kind === 'used' && (
+          <Pill tone='mut' className='absolute left-1 top-1 z-10 bg-bgColor'>
+            OLD
+          </Pill>
+        )}
+        {orphan?.kind === 'hidden' && !frozen && (
+          <Close
+            size='sm'
+            className='absolute right-1 top-1 z-10 min-h-6 opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100'
+            aria-label={`Delete ${name}`}
+            title='Delete'
+            onPointerDown={(event: React.PointerEvent) => event.stopPropagation()}
+            onClick={() => orphanBoard?.onDelete(t.key)}
+          />
+        )}
         <div {...organProps} className='flex min-h-0 flex-1 items-center justify-center'>
           {/* `pxBox` — бокс ГОЛОВЫ, тот, в котором силуэт действительно рисуется (free 64×48,
               stack 52×48). Паддинги своей обёртки плитка вычитает сама; передать сюда бокс
@@ -1583,6 +1706,7 @@ export function TileView({
             cloth={cloth?.get(t.key) ?? null}
             pxBox={{ w: t.w, h: TILE }}
             className='size-full'
+            orphan={!!orphan}
           />
         </div>
         {/* ОБРАБОТКИ ЭТОЙ ДЕТАЛИ — её СОСТОЯНИЕ, а не список работ. Плитка обязана читаться
@@ -1637,6 +1761,16 @@ export function TileView({
           </div>
         ))}
       </div>
+      {orphan?.kind === 'used' && orphanBoard?.expandedKey === t.key && (
+        <OrphanResolver
+          lineKey={t.key}
+          top={tileH + SCHEMATIC_METRICS.TILE_GAP}
+          orphan={orphan}
+          frozen={orphanBoard.frozen}
+          onRelink={orphanBoard.onRelink}
+          onDelete={orphanBoard.onDelete}
+        />
+      )}
     </div>
   );
 }

@@ -177,6 +177,14 @@ export type SigCompare = ShapeDelta & {
   turnL1: number;
 };
 
+export type RotationTolerantCompare = {
+  cmp: SigCompare;
+  /** Absolute log-ratio of the two bounding-box aspects; 0 means the same aspect. */
+  aspect: number;
+  /** The second outline was quarter-turned before the ordinary mirror/180° comparison. */
+  quarterTurn: boolean;
+};
+
 /**
  * Лучшее совмещение b с a. Перебор в фиксированном порядке (кадр, сдвиг, фаза), побеждает строго
  * меньшая форма — при равенстве asis и меньший сдвиг: результат не зависит от того, что и в каком
@@ -228,4 +236,42 @@ export function compareSigs(a: ShapeSig, b: ShapeSig, size = ''): SigCompare {
     rms: best.rms,
     turnL1: best.turnL1,
   };
+}
+
+const aspectDelta = (a: ShapeSig, b: ShapeSig): number => {
+  if (!(a.w > 0 && a.h > 0 && b.w > 0 && b.h > 0)) return Infinity;
+  return Math.abs(Math.log(b.w / b.h / (a.w / a.h)));
+};
+
+/**
+ * The regular signature comparison already tolerates reversed traversal, 180° and both mirrors.
+ * A DXF block may additionally arrive quarter-turned on its sheet, so compare that frame too. The
+ * small aspect term only chooses the correct frame; the returned contour cost keeps its established
+ * meaning and thresholds.
+ */
+export function compareSigsRotationTolerant(
+  a: ShapeSig,
+  b: ShapeSig,
+  size = '',
+): RotationTolerantCompare {
+  const quarter: ShapeSig = {
+    ...b,
+    w: b.h,
+    h: b.w,
+    ring: b.ring.map(([x, y]) => [1 - y, x]),
+  };
+  const candidates = [
+    { cmp: compareSigs(a, b, size), aspect: aspectDelta(a, b), quarterTurn: false },
+    {
+      cmp: compareSigs(a, quarter, size),
+      aspect: aspectDelta(a, quarter),
+      quarterTurn: true,
+    },
+  ];
+  candidates.sort(
+    (x, y) =>
+      x.cmp.cost + 0.1 * x.aspect - (y.cmp.cost + 0.1 * y.aspect) ||
+      Number(x.quarterTurn) - Number(y.quarterTurn),
+  );
+  return candidates[0];
 }

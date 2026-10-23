@@ -14,7 +14,14 @@ import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { findPiece, useDxfGeometry, useDxfIndex, type FoundPiece } from './nesting/dxf-geometry';
-import { pieceBlockRefs, rollGoodsScopes, type PieceAliasRow } from './piece-block-refs';
+import { aliasIdentity } from './nesting/use-block-sizes';
+import type { OrphanBlockCandidate } from './orphan-pieces';
+import {
+  pieceBlockRefs,
+  pieceRefKey,
+  rollGoodsScopes,
+  type PieceAliasRow,
+} from './piece-block-refs';
 import type { TechCardFormData } from './schema';
 
 /** Ключ — `pieceRefKey(lineKey)` детали. Читатели обязаны сворачивать ключ тем же правилом. */
@@ -41,6 +48,8 @@ export type PieceShapes = {
    */
   parsedPieces?: number | null;
   namedBlocks?: number | null;
+  /** Current DXF identities that no live cut piece owns, ready for the inline relink picker. */
+  unlinkedBlocks?: OrphanBlockCandidate[];
   /** Разбор идёт прямо сейчас — свой или заказанный соседним экраном: запрос-то один на пачку. */
   isLoading: boolean;
   error: Error | null;
@@ -51,6 +60,8 @@ export function usePieceShapes(enabled: boolean): PieceShapes {
     []) as PieceAliasRow[];
   const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ??
     []) as TechCardFormData['bomItems'];
+  const pieces = (useWatch<TechCardFormData>({ name: 'pieces' }) ??
+    []) as TechCardFormData['pieces'];
   const pack = useCardDxfPack();
   const geometry = useDxfGeometry(pack, enabled);
   const index = useDxfIndex(geometry.data);
@@ -65,6 +76,36 @@ export function usePieceShapes(enabled: boolean): PieceShapes {
     for (const [key, refs] of refsByPiece) m.set(key, findPiece(index, refs));
     return m;
   }, [index, refsByPiece]);
+  const unlinkedBlocks = useMemo<OrphanBlockCandidate[]>(() => {
+    if (!index || !geometry.data) return [];
+    const livePieceKeys = new Set((pieces ?? []).map((piece) => pieceRefKey(piece.lineKey ?? '')));
+    const linked = new Set<string>();
+    for (const [pieceKey, refs] of refsByPiece) {
+      if (!livePieceKeys.has(pieceKey)) continue;
+      for (const ref of refs) {
+        const identity = aliasIdentity(ref.block, index.split);
+        if (identity) linked.add(`${ref.scopeKey}|${identity.toLowerCase()}`);
+      }
+    }
+
+    const out: OrphanBlockCandidate[] = [];
+    for (const [key, bySize] of index.byKey) {
+      if (linked.has(key) || bySize.size === 0) continue;
+      const sizes = [...bySize.keys()].sort(
+        (a, b) => (index.split.orderOfSize.get(a) ?? 1e6) - (index.split.orderOfSize.get(b) ?? 1e6),
+      );
+      const list = bySize.get(sizes[Math.floor((sizes.length - 1) / 2)]) ?? [];
+      const onLayer = list.filter((piece) => (piece.layer ?? '') === index.contourLayer);
+      const piece = (onLayer.length > 0 ? onLayer : list)[0];
+      if (!piece) continue;
+      const code = index.split.codeById.get(piece.id);
+      const block = (code?.identity ?? piece.blockName ?? '').trim();
+      const scopeKey = geometry.data.scopeByFile.get(piece.fileIndex ?? -1) ?? '';
+      if (!block || !scopeKey) continue;
+      out.push({ key, scopeKey, block, piece });
+    }
+    return out;
+  }, [index, geometry.data, pieces, refsByPiece]);
 
   return {
     shapeByKey,
@@ -75,6 +116,7 @@ export function usePieceShapes(enabled: boolean): PieceShapes {
     foundCount: shapeByKey ? [...shapeByKey.values()].filter(Boolean).length : 0,
     parsedPieces: geometry.data ? geometry.data.pieces.length : null,
     namedBlocks: index ? index.byKey.size : null,
+    unlinkedBlocks,
     // isFetching, а не isLoading: разбор мог уже идти по заказу вкладки PATTERNS, и тогда
     // предлагать нажать «показать силуэты» бессмысленно — надо сказать «идёт».
     isLoading: geometry.isFetching,

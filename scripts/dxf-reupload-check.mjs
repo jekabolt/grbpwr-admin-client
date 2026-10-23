@@ -271,7 +271,11 @@ async function main() {
   {
     const tag = 'g-combo';
     const { out, log } = await run({ name: 'g-combo.dxf', bytes: B.gCombo });
-    is(tag, out.kind, 'applied', 'исход');
+    is(tag, out.kind, 'match', 'shape-only изменения переданы PieceMatchModal');
+    if (out.kind === 'match') {
+      yes(tag, out.plan.needsShapeReview, 'план помечен shape review');
+      is(tag, [log.downloads, log.uploads.length], [1, 1], 'старый скачан, новый staged');
+    }
     if (out.kind === 'applied') {
       table('g-combo · base → g-combo.dxf (card 69 shape)', out);
       is(
@@ -736,20 +740,13 @@ async function main() {
     const bytes = Uint8Array.from(text, (ch) => ch.charCodeAt(0));
     is(tag, M.readInsunits(M.bytesToLatin1(bytes)), 0, 'фикстура без единиц');
     const { out, log } = await run({ name: 'g-combo-nounits.dxf', bytes });
-    is(tag, out.kind, 'applied', 'исход');
+    is(tag, out.kind, 'match', 'shape-only план передан PieceMatchModal');
     is(
       tag,
       M.readInsunits(M.bytesToLatin1(log.uploads[0]?.bytes ?? new Uint8Array())),
       4,
       'загружен с мм',
     );
-    if (out.kind === 'applied')
-      is(
-        tag,
-        reviewsOf(out.operations),
-        ['reshaped', 'reshaped', 'orphan', 'orphan', '', '', '', '', ''],
-        'метки как у g-combo',
-      );
   }
 
   // ── отказ — старый лист остаётся, на сервер ничего не ушло ──────────────────────────────────
@@ -822,7 +819,7 @@ async function main() {
     );
     is(
       tag,
-      pinned.out.kind === 'applied'
+      pinned.out.kind === 'applied' || pinned.out.kind === 'match'
         ? [pinned.out.rowIndex, pinned.out.rowId, pinned.out.replacedUrl]
         : pinned.out.kind,
       [0, 'sheet-zz', ZZ_URL],
@@ -831,7 +828,7 @@ async function main() {
     const byBlocks = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { patterns: two, store });
     is(
       tag,
-      byBlocks.out.kind === 'applied'
+      byBlocks.out.kind === 'applied' || byBlocks.out.kind === 'match'
         ? [byBlocks.out.rowIndex, byBlocks.out.rowId]
         : byBlocks.out.kind,
       [1, 'sheet-main'],
@@ -871,7 +868,12 @@ async function main() {
           : r.out.result.ghostPieceKeys.includes(K('CLR_3'))
             ? 'ghost'
             : 'kept';
-    is(tag, [fate(bare), fate(saved), fate(live)], ['removed', 'ghost', 'ghost'], 'CLR_3 под швом');
+    is(
+      tag,
+      [fate(bare), fate(saved), fate(live)],
+      ['match', 'match', 'match'],
+      'shape review не применяет судьбу CLR_3 до решения modal',
+    );
   }
 
   // ── метки не слабеют: стоящая тяжелее плана остаётся (L4c) ────────────────────────────────
@@ -885,8 +887,8 @@ async function main() {
     is(
       tag,
       out.kind === 'applied' ? reviewsOf(out.operations) : out.kind,
-      ['orphan', 'split', 'orphan', 'orphan', '', '', '', '', ''],
-      'orphan и split поверх reshaped стоят',
+      'match',
+      'shape review не переписывает существующие метки автоматически',
     );
   }
 
@@ -935,7 +937,11 @@ async function main() {
       { name: 'g-combo.dxf', bytes: B.gCombo },
       { card: c, patterns, store, extra: { target: 'sheet-main' } },
     );
-    yes(tag, own.out.kind === 'applied', `свой лист base — применён (${own.out.kind})`);
+    yes(
+      tag,
+      own.out.kind === 'match' && own.out.plan.needsShapeReview,
+      `свой лист base — не foreign, shape review (${own.out.kind})`,
+    );
   }
 
   // ── L5 fix 4: часть разреза наследует примечание родителя ─────────────────────────────────

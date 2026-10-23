@@ -43,6 +43,7 @@ import {
 } from './use-panel-prefs';
 import type { PieceShapeMap } from './use-piece-shapes';
 import type { useSchematicPrefs } from './use-schematic-prefs';
+import type { OrphanBoardState } from './orphan-pieces';
 
 // ФУЛСКРИН СХЕМЫ СБОРКИ — ТРЕТИЙ ВИД, а не отдельный экран.
 //
@@ -192,6 +193,7 @@ export type AssemblyFullscreenProps = {
   /** Короткая подпись шага — та же, что у `AssemblySchematic`. */
   labelOf: (index: number) => string;
   pieceShapes: PieceShapeMap;
+  orphanBoard?: OrphanBoardState;
   smvOfBlock: Map<string, string>;
   /**
    * Σ SMV ХВОСТОВОГО БОКСА — по НАРИСОВАННЫМ им строкам, а не по хвостовому блоку. Считает досье
@@ -453,6 +455,7 @@ export function AssemblyFullscreen({
   pieceNameOf,
   labelOf,
   pieceShapes,
+  orphanBoard,
   smvOfBlock,
   tailSmv,
   prefs,
@@ -2021,6 +2024,7 @@ export function AssemblyFullscreen({
                   picked={picked}
                   onPicked={setPicked}
                   onHint={setHint}
+                  orphanBoard={orphanBoard}
                 />
               )}
               {/* СТИКЕР ЭСКИЗА — СЛОЙ ПОВЕРХ СЦЕНЫ, А НЕ ВОСЬМОЙ ТРЕК ГРИДА. Грид-ребёнком он был

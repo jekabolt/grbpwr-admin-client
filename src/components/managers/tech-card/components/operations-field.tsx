@@ -183,7 +183,7 @@ import {
   type FoundPiece,
   type ScopedDxfFile,
 } from './nesting/dxf-geometry';
-import { bindingScopes, scopeKeyOfBinding } from './bom-purpose';
+import { bindingForScope, bindingScopes, scopeKeyOfBinding } from './bom-purpose';
 import {
   pieceBlockRefs,
   pieceRefKey,
@@ -249,6 +249,13 @@ import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piec
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
+import {
+  rankOrphanBlocks,
+  type OrphanBlockCandidate,
+  type OrphanBoardState,
+  type OrphanPieceInfo,
+} from './orphan-pieces';
+import { planOldPieceOps } from './nesting/old-pieces-ops';
 import type { SkeletonStep } from 'lib/assembly-skeleton/types';
 import {
   ghostCandidates,
@@ -6163,6 +6170,7 @@ export function OperationsField({
   colorwayArticles,
   pieceClothByColorway,
   pieceShapes = null,
+  orphanBlocks = [],
   addRequest = null,
   onAdded,
   applyRequest = null,
@@ -6212,6 +6220,8 @@ export function OperationsField({
   // компонент перерисовывается на каждый символ — считать карту заново на каждый рендер значило бы
   // обнулять memo у PieceShape во всех двадцати строках сразу.
   pieceShapes?: PieceShapeMap;
+  /** Current DXF blocks not owned by a live piece; used only by an orphan tile's relink row. */
+  orphanBlocks?: OrphanBlockCandidate[];
   // request from the construction panel to append an operation for a part (nonce dedupes)
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
@@ -6825,6 +6835,12 @@ export function OperationsField({
     name: 'operations',
     compute: (rows) => (rows ?? []).map((row) => (row?.review ?? '').trim()),
   }) ?? []) as string[];
+  const operationPieceInputs = (useWatch({
+    control,
+    name: 'operations',
+    compute: (rows) =>
+      (rows ?? []).map((row) => [...new Set((row?.inputKeys ?? []).filter(Boolean))]),
+  }) ?? []) as string[][];
   const anyReview = reviewKinds.some(Boolean);
   const patternRows = (patterns ?? []) as ReviewPatternRow[];
   const [sessionPreviousPatterns, setSessionPreviousPatterns] = useState<ReviewPatternRow[] | null>(
@@ -6930,6 +6946,133 @@ export function OperationsField({
     for (const [key, pieceRefs] of refs) found.set(key, findPiece(previousIndex, pieceRefs));
     return found;
   }, [previousIndex, sessionPreviousAliases, savedAliases, aliases, scopes, pieces, ghostKeys]);
+
+  const operationsByPiece = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const inputKeys of operationPieceInputs) {
+      for (const key of inputKeys) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [operationPieceInputs]);
+  const orphanPieces = useMemo(() => {
+    const out = new Map<string, OrphanPieceInfo>();
+    if (!pieceShapes) return out;
+    for (const piece of pieces) {
+      if (pieceShapes.get(pieceRefKey(piece.lineKey))) continue;
+      const operations = operationsByPiece.get(piece.lineKey) ?? 0;
+      const previous = previousPieceShapes?.get(pieceRefKey(piece.lineKey))?.piece;
+      out.set(piece.lineKey, {
+        kind: operations > 0 ? 'used' : 'hidden',
+        operations,
+        candidates: rankOrphanBlocks(previous, orphanBlocks),
+      });
+    }
+    return out;
+  }, [pieceShapes, pieces, operationsByPiece, previousPieceShapes, orphanBlocks]);
+  const orphanKeys = useMemo(() => new Set(orphanPieces.keys()), [orphanPieces]);
+  const hiddenOrphanKeys = useMemo(
+    () =>
+      new Set(
+        [...orphanPieces]
+          .filter(([, orphan]) => orphan.kind === 'hidden')
+          .map(([lineKey]) => lineKey),
+      ),
+    [orphanPieces],
+  );
+  const [expandedOrphan, setExpandedOrphan] = useState<string | null>(null);
+  const [showHiddenOrphans, setShowHiddenOrphans] = useState(false);
+  useEffect(() => {
+    if (expandedOrphan && orphanPieces.get(expandedOrphan)?.kind !== 'used') {
+      setExpandedOrphan(null);
+    }
+    if (hiddenOrphanKeys.size === 0 && showHiddenOrphans) setShowHiddenOrphans(false);
+  }, [expandedOrphan, orphanPieces, hiddenOrphanKeys, showHiddenOrphans]);
+
+  const relinkOrphan = useCallback(
+    (lineKey: string, candidate: OrphanBlockCandidate) => {
+      if (frozen) return;
+      const scope = scopes.find((item) => item.key === candidate.scopeKey);
+      if (!scope) return;
+      clearFormHistory();
+      const current = (getValues('pieceDxfAliases') ?? []) as PieceAliasRow[];
+      const links = bindingScopes(scopes, current);
+      const live = current.filter(
+        (alias) =>
+          !(
+            pieceRefKey(alias.pieceLineKey ?? '') === pieceRefKey(lineKey) &&
+            scopeKeyOfBinding(alias.fabricPurpose, alias.bomLineKey, links) === candidate.scopeKey
+          ),
+      );
+      const binding = bindingForScope(scope);
+      setValue(
+        'pieceDxfAliases',
+        [
+          ...live,
+          {
+            ...binding,
+            blockName: candidate.block,
+            pieceLineKey: lineKey,
+          },
+        ],
+        { shouldDirty: true, shouldTouch: true },
+      );
+      setExpandedOrphan(null);
+    },
+    [clearFormHistory, frozen, getValues, scopes, setValue],
+  );
+
+  const deleteOrphan = useCallback(
+    (lineKey: string) => {
+      if (frozen) return;
+      clearFormHistory();
+      const currentPieces = getValues('pieces') ?? [];
+      setValue(
+        'pieces',
+        currentPieces.filter((piece) => piece.lineKey !== lineKey),
+        { shouldDirty: true, shouldTouch: true },
+      );
+      const folded = pieceRefKey(lineKey);
+      const currentAliases = (getValues('pieceDxfAliases') ?? []) as PieceAliasRow[];
+      setValue(
+        'pieceDxfAliases',
+        currentAliases.filter((alias) => pieceRefKey(alias.pieceLineKey ?? '') !== folded),
+        { shouldDirty: true, shouldTouch: true },
+      );
+      const operations = (getValues('operations') ?? []) as NonNullable<
+        TechCardFormData['operations']
+      >;
+      const plan = planOldPieceOps(operations, new Set([lineKey]));
+      if (plan.changed) setValue('operations', plan.operations, { shouldDirty: true });
+      setExpandedOrphan(null);
+    },
+    [clearFormHistory, frozen, getValues, setValue],
+  );
+
+  const orphanBoard = useMemo<OrphanBoardState>(
+    () => ({
+      pieces: orphanPieces,
+      hiddenKeys: hiddenOrphanKeys,
+      orphanKeys,
+      expandedKey: expandedOrphan,
+      showHidden: showHiddenOrphans,
+      frozen,
+      onTogglePiece: (lineKey) =>
+        setExpandedOrphan((current) => (current === lineKey ? null : lineKey)),
+      onToggleHidden: () => setShowHiddenOrphans((current) => !current),
+      onRelink: relinkOrphan,
+      onDelete: deleteOrphan,
+    }),
+    [
+      orphanPieces,
+      hiddenOrphanKeys,
+      orphanKeys,
+      expandedOrphan,
+      showHiddenOrphans,
+      frozen,
+      relinkOrphan,
+      deleteOrphan,
+    ],
+  );
 
   // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
   //
@@ -8365,6 +8508,7 @@ export function OperationsField({
                   // ВЕСТЬ ИДЁТ ОБОИМ ВИДАМ, а не одному: полуразведённый проп — ровно тот дефект,
                   // который этот раунд вычищал.
                   renamedUnit={renamedUnit}
+                  orphanBoard={orphanBoard}
                   frozen={frozen}
                 />
               ) : (
@@ -8483,6 +8627,7 @@ export function OperationsField({
           pieceNameOf={pieceNameOf}
           labelOf={labelOfStep}
           pieceShapes={pieceShapes}
+          orphanBoard={orphanBoard}
           smvOfBlock={grouping.smvOfBlock}
           tailSmv={grouping.tailSmv}
           // ЦЕЛИКОМ, а не разложенный на positions/onMove/…: после Ф5б в объекте появятся ось и её

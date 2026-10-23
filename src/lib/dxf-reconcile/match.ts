@@ -17,7 +17,7 @@ import {
 import type { PieceDTO } from 'lib/nesting/types';
 
 import { THRESH, UNIT_FACTORS, ciKey } from './defaults';
-import { compareSigs, scaleSig, shapeSigOf, type SigCompare } from './shape-sig';
+import { compareSigsRotationTolerant, scaleSig, shapeSigOf, type SigCompare } from './shape-sig';
 import type { Confidence, ParsedSheetLite } from './types';
 
 type Pt2 = [number, number];
@@ -184,6 +184,8 @@ export function indexSheet(
 export type PairCmp = {
   /** худший размер (все общие размеры) или срединный (быстрый режим) */
   cmp: SigCompare;
+  /** Rotation-tolerant bounding-box aspect distance (absolute log-ratio). */
+  aspect: number;
   /** как нашёлся общий размер */
   mode: 'common' | 'tail' | 'median';
 };
@@ -192,26 +194,39 @@ const median = <T>(xs: readonly T[]): T => xs[Math.floor((xs.length - 1) / 2)];
 
 /**
  * Старый ↔ новый. `k` — множитель единиц нового к старому (новый делится на него). `all` — все
- * общие размеры, худший побеждает (ярус); иначе только срединный общий (матрица кандидатов).
+ * общие размеры, худший побеждает (ярус); иначе base/sample size, если он есть с обеих сторон,
+ * и только затем срединный общий (матрица кандидатов).
  */
-export function comparePair(o: SheetEntry, n: SheetEntry, k: number, all: boolean): PairCmp | null {
+export function comparePair(
+  o: SheetEntry,
+  n: SheetEntry,
+  k: number,
+  all: boolean,
+  preferredSizes: ReadonlySet<string> = new Set(),
+): PairCmp | null {
   const common = o.sizes.filter((s) => n.bySize.has(s));
   const sig = (p: PieceDTO, scaleNew: boolean) =>
     scaleNew ? scaleSig(shapeSigOf(p), 1 / k) : shapeSigOf(p);
   const label = (s: string) => n.sizeLabel.get(s) ?? o.sizeLabel.get(s) ?? s;
   if (common.length > 0) {
-    const sizes = all ? common : [median(common)];
-    let worst: SigCompare | null = null;
+    const preferred = common.find((size) => preferredSizes.has(size));
+    const sizes = all ? common : [preferred ?? median(common)];
+    let worst: { cmp: SigCompare; aspect: number } | null = null;
     for (const s of sizes) {
-      const c = compareSigs(sig(o.bySize.get(s)!, false), sig(n.bySize.get(s)!, true), label(s));
-      if (!worst || c.cost > worst.cost + 1e-12) worst = c;
+      const c = compareSigsRotationTolerant(
+        sig(o.bySize.get(s)!, false),
+        sig(n.bySize.get(s)!, true),
+        label(s),
+      );
+      if (!worst || c.cmp.cost + 0.1 * c.aspect > worst.cmp.cost + 0.1 * worst.aspect + 1e-12)
+        worst = c;
     }
-    return worst && { cmp: worst, mode: 'common' };
+    return worst && { ...worst, mode: 'common' };
   }
   // Одноразмерный лист против градуированного: хвост имени и есть размер («PCK_INS_S» ↔ S).
   if (o.sizes.length === 1 && o.sizes[0] === '' && o.tail && n.bySize.has(o.tail)) {
     return {
-      cmp: compareSigs(
+      ...compareSigsRotationTolerant(
         sig(o.bySize.get('')!, false),
         sig(n.bySize.get(o.tail)!, true),
         label(o.tail),
@@ -221,7 +236,7 @@ export function comparePair(o: SheetEntry, n: SheetEntry, k: number, all: boolea
   }
   if (n.sizes.length === 1 && n.sizes[0] === '' && n.tail && o.bySize.has(n.tail)) {
     return {
-      cmp: compareSigs(
+      ...compareSigsRotationTolerant(
         sig(o.bySize.get(n.tail)!, false),
         sig(n.bySize.get('')!, true),
         label(n.tail),
@@ -233,7 +248,11 @@ export function comparePair(o: SheetEntry, n: SheetEntry, k: number, all: boolea
   const os = median(o.sizes);
   const ns = median(n.sizes);
   return {
-    cmp: compareSigs(sig(o.bySize.get(os)!, false), sig(n.bySize.get(ns)!, true), label(ns)),
+    ...compareSigsRotationTolerant(
+      sig(o.bySize.get(os)!, false),
+      sig(n.bySize.get(ns)!, true),
+      label(ns),
+    ),
     mode: 'median',
   };
 }
@@ -285,16 +304,18 @@ export type ShapeMatch = {
 const posDist = (a: SheetEntry, b: SheetEntry) =>
   a.pos && b.pos ? Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) : 2;
 
-/** Матрица кандидатов старый × новый (срединный общий размер). */
+/** Матрица кандидатов старый × новый (base/sample либо срединный общий размер). */
 export function shapeMatrix(
   olds: readonly SheetEntry[],
   news: readonly SheetEntry[],
   k: number,
+  preferredSizes: ReadonlySet<string> = new Set(),
 ): ShapeCandidate[] {
   const out: ShapeCandidate[] = [];
   for (const o of olds) {
     for (const n of news) {
-      const c = comparePair(o, n, k, false);
+      if (mirrorSidesConflict(o.identity, n.identity)) continue;
+      const c = comparePair(o, n, k, false, preferredSizes);
       if (!c) continue;
       out.push({ o: o.key, n: n.key, cost: c.cmp.cost, mode: c.mode, pos: posDist(o, n) });
     }
@@ -396,4 +417,11 @@ export function sideOf(identity: string): { stem: string; side: 'l' | 'r' } | nu
   if (!m) return null;
   const side = SIDE[bareToken(m[2])];
   return side ? { stem: ciKey(m[1]), side } : null;
+}
+
+/** Opposite hands of the same explicitly named L/R pair are never a shape-only candidate. */
+export function mirrorSidesConflict(a: string, b: string): boolean {
+  const left = sideOf(a);
+  const right = sideOf(b);
+  return !!left && !!right && left.stem === right.stem && left.side !== right.side;
 }

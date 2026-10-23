@@ -173,7 +173,10 @@ const MUTANTS = [
   {
     id: 'no-moved',
     file: 'diff.ts',
-    edits: [['if (input.otherSheets?.length)', 'if (false)']],
+    edits: [
+      ['const piece = pieceForIdentity(n.identity);', 'const piece = null as P | null;'],
+      ['if (otherIndexes.length)', 'if (false)'],
+    ],
     kills: ['moved'],
   },
   {
@@ -1612,9 +1615,10 @@ function gates(M, data) {
       ['LINING', 'MAIN'],
       'алиасы в обоих scope',
     );
-    // без листов других scope — обычная новая деталь
+    // Even before the other sheet is loaded, the live card piece name is a card-wide identity.
     const plain = runCase(M, { old: S.base, neu, card });
-    is(g, plain.plan.summary.moved, 0, 'без otherSheets — не moved');
+    is(g, plain.plan.summary.moved, 1, 'без otherSheets — reuse по имени детали');
+    is(g, plain.res.addedPieceKeys, [], 'без otherSheets — новая деталь не заводится');
   });
 
   // ── сторож сборки: план, удаляющий деталь со ссылками, отказывается целиком ───────────────

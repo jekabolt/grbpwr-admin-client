@@ -106,6 +106,8 @@ export type ReconcileInput<
   newSheet: SheetSide;
   /** Токены словаря, которые бывают размерами (как у splitPiecesBySize), в нижнем регистре. */
   sizeTokens: readonly string[];
+  /** Токены base/sample size; shape matching prefers the first one present in both blocks. */
+  preferredSizeTokens?: readonly string[];
   /**
    * Ссылки на деталь ВНЕ шагов/аннотаций, которых либа не видит (рецепт, площади, CONSTRUCTION…):
    * pieceLineKey → число. Деталь со ссылками не удаляется — остаётся призраком.
@@ -263,6 +265,10 @@ export type ReconcilePlan = {
   status: PlanStatus;
   /** A foreign upload is not a replacement plan; applying it must be a no-op. */
   refused: 'foreign' | null;
+  /** At least one DXF identity still needs a human choice and must not be auto-applied. */
+  needsPieceMatch: boolean;
+  /** Strong shape-only recognition exists; the re-upload path must ask the piece matcher. */
+  needsShapeReview: boolean;
   rows: ReconcileRow[];
   summary: ReconcileSummary;
 };
@@ -329,6 +335,7 @@ export type ApplyDeps<P extends CardPiece, A extends CardAlias, O extends CardOp
 export type ApplyRefusal =
   | { reason: 'noop' }
   | { reason: 'foreign' }
+  | { reason: 'unresolved' }
   /** применение дало нарушение сборки, которого не было до — названо шагом */
   | { reason: 'sweep'; violations: AssemblyViolation[] };
 
