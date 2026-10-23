@@ -16,6 +16,7 @@ export type FuseEdge = {
 
 /** A control point of a freeform zone; corner = a sharp vertex (the curve does not round it). */
 export type FuseSplinePoint = { x: number; y: number; corner?: boolean };
+export type FuseSpline = { points: FuseSplinePoint[] };
 
 /**
  * Piece-local mm, DXF axes (Y up), the outline's own frame — or another DXF block. A spline is a
@@ -24,7 +25,7 @@ export type FuseSplinePoint = { x: number; y: number; corner?: boolean };
  */
 export type FuseZone =
   | { rect: [x0: number, y0: number, x1: number, y1: number] }
-  | { spline: { points: FuseSplinePoint[] } }
+  | { spline: FuseSpline; holes: FuseSpline[]; islands: FuseSpline[] }
   | { dxfPieceKey: string };
 
 /**
@@ -176,16 +177,32 @@ type WireFuse = Pick<
   | 'fusingDarts'
 > & { fusingZone?: common_TechCardPieceFusingZone };
 
+/** One wire spline → one form spline (null = absent or unreadable). */
+function splineFromWire(spline: common_TechCardPieceFusingZone['spline']): FuseSpline | null {
+  const pts = spline?.points ?? [];
+  if (!pts.length) return null;
+  const points = pts.map((p) => ({ x: num(p.x?.value), y: num(p.y?.value), corner: !!p.corner }));
+  return points.every((p) => p.x != null && p.y != null)
+    ? { points: points as { x: number; y: number; corner: boolean }[] }
+    : null;
+}
+
 /** The wire zone → the form's zone (null = none, or an unreadable one). */
 function zoneFromWire(z: common_TechCardPieceFusingZone | undefined): FuseZone | null {
   const rect = z?.rect;
   const r = rect ? [rect.x0, rect.y0, rect.x1, rect.y1].map((d) => num(d?.value)) : null;
   if (r && r.every((x) => x != null)) return { rect: r as [number, number, number, number] };
-  const pts = z?.spline?.points ?? [];
-  if (pts.length) {
-    const points = pts.map((p) => ({ x: num(p.x?.value), y: num(p.y?.value), corner: !!p.corner }));
-    if (points.every((p) => p.x != null && p.y != null))
-      return { spline: { points: points as { x: number; y: number; corner: boolean }[] } };
+  const spline = splineFromWire(z?.spline);
+  if (spline) {
+    const holes = (z?.holes ?? []).map(splineFromWire);
+    const islands = (z?.islands ?? []).map(splineFromWire);
+    if (holes.every(Boolean) && islands.every(Boolean)) {
+      return {
+        spline,
+        holes: holes as FuseSpline[],
+        islands: islands as FuseSpline[],
+      };
+    }
   }
   const key = z?.dxfPieceKey?.trim();
   return key ? { dxfPieceKey: key } : null;
@@ -193,18 +210,23 @@ function zoneFromWire(z: common_TechCardPieceFusingZone | undefined): FuseZone |
 
 /** The form's zone → the wire. An empty message clears the stored zone. */
 function zoneToWire(z: FuseZone | null): common_TechCardPieceFusingZone {
-  if (!z) return {};
+  const splineToWire = (spline: FuseSpline) => ({
+    points: spline.points.map((p) => ({ x: dec(p.x), y: dec(p.y), corner: !!p.corner })),
+  });
+  if (!z) return { holes: [], islands: [] };
   if ('rect' in z)
     return {
       rect: { x0: dec(z.rect[0]), y0: dec(z.rect[1]), x1: dec(z.rect[2]), y1: dec(z.rect[3]) },
+      holes: [],
+      islands: [],
     };
   if ('spline' in z)
     return {
-      spline: {
-        points: z.spline.points.map((p) => ({ x: dec(p.x), y: dec(p.y), corner: !!p.corner })),
-      },
+      spline: splineToWire(z.spline),
+      holes: z.holes.map(splineToWire),
+      islands: z.islands.map(splineToWire),
     };
-  return { dxfPieceKey: z.dxfPieceKey };
+  return { dxfPieceKey: z.dxfPieceKey, holes: [], islands: [] };
 }
 
 /** The wire piece → the form's plain fields (the new FUSING fields; fused/mode/width stay put). */

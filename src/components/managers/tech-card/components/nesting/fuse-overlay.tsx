@@ -19,7 +19,13 @@ import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-d
 import type { FusePolygon } from 'lib/fusing-dxf/types';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
-import { isDrawnZone, zoneOutline, type ZoneBus } from './fuse-zone';
+import {
+  isDrawnZone,
+  zoneRingOutline,
+  zoneRingRefs,
+  type ZoneBus,
+  type ZoneRingRef,
+} from './fuse-zone';
 import { FuseZoneEditor } from './fuse-zone-editor';
 
 const INK = 'var(--color-warning)';
@@ -191,13 +197,17 @@ export function FuseOverlay({
       insetKnown && r.darts === 'cut' ? darts.map((d) => offsetPoly(d, -insetMm / 10)) : [];
     // Drawn zone (rect / spline): stored piece-local mm, Y up → sheet cm, Y down.
     const toSheet = (q: Pt) => ({ x: ox + q.x / 10, y: -(oy + q.y / 10) });
-    const ring =
+    const zoneRings =
       f.mode === 'zone' && isDrawnZone(f.zone)
-        ? zoneOutline(
-            f.zone,
-            inner.map((s) => ({ x: (s.x - ox) * 10, y: (-s.y - oy) * 10 })),
-          ).ring.map(toSheet)
-        : null;
+        ? zoneRingRefs(f.zone).map((ref) => ({
+            ref,
+            points: zoneRingOutline(
+              f.zone,
+              ref,
+              inner.map((s) => ({ x: (s.x - ox) * 10, y: (-s.y - oy) * 10 })),
+            ).ring.map(toSheet),
+          }))
+        : [];
     const fill = fillOf(p, f);
     const fillPath =
       fill?.status === 'ok'
@@ -261,7 +271,17 @@ export function FuseOverlay({
                 <polygon key={`${edge.edge}-${index}`} points={str(band)} data-strip={edge.edge} />
               ));
             })}
-          {ring && !fillPath && fill?.status !== 'unknown' && <polygon points={str(ring)} />}
+          {zoneRings.length > 0 && !fillPath && fill?.status !== 'unknown' && (
+            <path
+              d={zoneRings
+                .map(
+                  ({ points }) =>
+                    `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')} Z`,
+                )
+                .join(' ')}
+              fillRule='evenodd'
+            />
+          )}
           {dxf && <polygon points={dxf} />}
         </g>
         {fillPath && (
@@ -300,28 +320,29 @@ export function FuseOverlay({
               )}
             </g>
           ))}
-        {!faint && ring && (
-          <>
-            <polygon
-              points={str(ring)}
-              fill='none'
-              stroke={INK}
-              strokeOpacity={0.4}
-              strokeWidth={1}
-              strokeDasharray='3 3'
-              vectorEffect='non-scaling-stroke'
-            />
-            <polygon
-              points={str(ring)}
-              data-zone-line=''
-              fill='none'
-              stroke={fill?.status === 'invalid' ? 'var(--color-error)' : INK}
-              strokeWidth={1.5}
-              vectorEffect='non-scaling-stroke'
-              clipPath={`url(#${clip})`}
-            />
-          </>
-        )}
+        {!faint &&
+          zoneRings.map(({ ref, points }) => (
+            <g key={ref} data-zone-ring-line={ref}>
+              <polygon
+                points={str(points)}
+                fill='none'
+                stroke={INK}
+                strokeOpacity={0.4}
+                strokeWidth={1}
+                strokeDasharray='3 3'
+                vectorEffect='non-scaling-stroke'
+              />
+              <polygon
+                points={str(points)}
+                data-zone-line=''
+                fill='none'
+                stroke={fill?.status === 'invalid' ? 'var(--color-error)' : INK}
+                strokeWidth={1.5}
+                vectorEffect='non-scaling-stroke'
+                clipPath={`url(#${clip})`}
+              />
+            </g>
+          ))}
         {!faint && dxf && (
           <polygon
             points={dxf}
@@ -348,11 +369,41 @@ export function FuseOverlay({
         ? null
         : undefined
     : undefined;
+  const selRingAreas: Partial<Record<ZoneRingRef, number | null>> = {};
+  let selContour: Pt[] | undefined;
+  if (sp && sf && g && isDrawnZone(sf.zone)) {
+    const ox = sp.originX ?? 0;
+    const oy = sp.originY ?? 0;
+    const contour = g.inner.map((point) => ({
+      x: (point.x - ox) * 10,
+      y: (-point.y - oy) * 10,
+    }));
+    selContour = contour;
+    for (const ref of zoneRingRefs(sf.zone)) {
+      try {
+        const ring = zoneRingOutline(sf.zone, ref, contour).ring;
+        selRingAreas[ref] = Math.abs(signedArea(ring)) / 100 || null;
+      } catch {
+        selRingAreas[ref] = null;
+      }
+    }
+  }
+  const selRingAreasKey = JSON.stringify(selRingAreas);
+  const selContourKey = JSON.stringify(selContour ?? []);
   useEffect(() => {
     if (!sel || !zoneBus) return;
     zoneBus.setArea(sel, selArea);
-    return () => zoneBus.setArea(sel, undefined);
-  }, [sel, selArea, zoneBus]);
+    zoneBus.setRingAreas(
+      sel,
+      JSON.parse(selRingAreasKey) as Partial<Record<ZoneRingRef, number | null>>,
+    );
+    zoneBus.setContour(sel, JSON.parse(selContourKey) as Pt[]);
+    return () => {
+      zoneBus.setArea(sel, undefined);
+      zoneBus.setRingAreas(sel, undefined);
+      zoneBus.setContour(sel, undefined);
+    };
+  }, [sel, selArea, selContourKey, selRingAreasKey, zoneBus]);
   const edgesOn = !!g && sf!.mode === 'strip';
   const hs = 8 * px;
 
