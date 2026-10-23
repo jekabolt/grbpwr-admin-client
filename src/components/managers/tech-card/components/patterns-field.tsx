@@ -37,12 +37,14 @@ import {
 import { readInterliningSkips, writeInterliningSkips } from 'lib/fusing-dxf/interlining-skips';
 import { GENERATED_FUSING_NAME_PREFIX } from 'lib/fusing-dxf/regenerate';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import type {
-  NewAliasSeed,
-  NewJoinSeed,
-  NewPieceSeed,
-  ParsedSheetLite,
-  ReconcileScope,
+import {
+  pieceShapeReferences,
+  type NewAliasSeed,
+  type NewJoinSeed,
+  type NewPieceSeed,
+  type ParsedSheetLite,
+  type PieceShapeReference,
+  type ReconcileScope,
 } from 'lib/dxf-reconcile';
 import type { NotifyInput } from 'lib/stores/store-types';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
@@ -603,6 +605,7 @@ export function PatternsField({
   const autosave = useTechCardAutosave();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
   // Live row values. `fields` is a snapshot that array actions refresh but setValue on a
   // nested path does NOT — rename writes via setValue (a useFieldArray.update would replace
   // the row and revert any sibling Controller-written field), so display must read live.
@@ -631,6 +634,10 @@ export function PatternsField({
   const cardName = (useWatch({ control, name: 'name' }) ?? '') as string;
 
   const sizeById = useSizeNames();
+  const preferredShapeSizeTokens = useMemo(
+    () => sizeTokensOf(sizeById.get(baseSampleSizeId)),
+    [sizeById, baseSampleSizeId],
+  );
   const orderSizes = useSizeOrdering();
   const dictTokens = useDictionarySizeTokens();
   const fileSizeRun = useFileSizeRun();
@@ -1089,6 +1096,28 @@ export function PatternsField({
     }
     return out;
   }, [bundle, scopeGroups, dictTokens]);
+
+  const knownPieceShapes = useMemo<PieceShapeReference[]>(() => {
+    if (!bundle) return [];
+    const livePieces = cardPieces.flatMap((piece) => {
+      const lineKey = piece.lineKey?.trim() ?? '';
+      const name = piece.name?.trim() ?? '';
+      return lineKey && name ? [{ ...piece, lineKey, name }] : [];
+    });
+    return scopeGroups.flatMap((group) => {
+      const scoped = contourPiecesByScope.get(group.scope.key) ?? [];
+      if (scoped.length === 0) return [];
+      return pieceShapeReferences({
+        parse: {
+          pieces: scoped,
+          blockNames: scoped.flatMap((piece) => (piece.blockName?.trim() ? [piece.blockName] : [])),
+        },
+        bindings: pieceDxfAliases.filter((alias) => aliasInScope(alias, group.scope, linkSet)),
+        pieces: livePieces,
+        sizeTokens: [...dictTokens.keys()],
+      });
+    });
+  }, [bundle, cardPieces, scopeGroups, contourPiecesByScope, pieceDxfAliases, linkSet, dictTokens]);
 
   const mainPatternScope = useMemo(
     () =>
@@ -1899,6 +1928,7 @@ export function PatternsField({
         getValues('pieces') ?? [],
         getValues('pieceDxfAliases') ?? [],
         getValues('operations') ?? [],
+        getValues('baseSampleSizeId') ?? 0,
         (getValues('issues') ?? []).map((i) => i.operationNumber ?? 0),
         rows.map((r) => [
           sheetRowId(r),
@@ -1935,6 +1965,9 @@ export function PatternsField({
           scopeOf: liveScopeOf,
           isDxf: (url) => isDxfUrl(url),
           sizeTokens: [...dictTokens.keys()],
+          preferredSizeTokens: sizeTokensOf(
+            sizeById.get(Number(getValues('baseSampleSizeId') ?? 0)),
+          ),
           externalRefs: refsNow(),
           seams,
           target,
@@ -4724,6 +4757,8 @@ export function PatternsField({
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
+            knownPieceShapes={knownPieceShapes}
+            preferredShapeSizeTokens={preferredShapeSizeTokens}
             interlining={matchingInterlining}
             interliningOwnerFiles={interliningOwnerFiles}
             onUploadInterliningFile={(lineKey, files) =>

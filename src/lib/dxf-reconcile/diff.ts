@@ -29,6 +29,7 @@ import {
   byName,
   comparePair,
   indexSheet,
+  mirrorSidesConflict,
   partsFit,
   shapeMatrix,
   sideOf,
@@ -38,6 +39,7 @@ import {
   type SheetIndex,
 } from './match';
 import { seamReshapeVerdict, type PieceGeometry } from './seams';
+import { pieceShapeReferences, proposePieceShapes } from './piece-shape';
 import type {
   CardAlias,
   CardOperation,
@@ -62,7 +64,7 @@ type OldUnit<P> = {
   entry: SheetEntry | null;
 };
 
-type How = 'exact' | 'tail' | 'shape' | 'ghost';
+type How = 'exact' | 'name' | 'tail' | 'shape' | 'ghost';
 
 type Link<P> = {
   unit: OldUnit<P>;
@@ -138,11 +140,15 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       status: 'noop',
       refused: null,
       needsPieceMatch: false,
+      needsShapeReview: false,
       rows: [],
       summary: emptySummary(),
     };
 
   const dict = new Set(input.sizeTokens.map((t) => bareToken(t)).filter(Boolean));
+  const preferredSizes = new Set(
+    (input.preferredSizeTokens ?? []).map((token) => bareToken(token)).filter(Boolean),
+  );
   const oldIdx: SheetIndex | null = input.oldSheet ? indexSheet(input.oldSheet.parse, dict) : null;
   const newIdx = indexSheet(input.newSheet.parse, dict, oldIdx?.layer);
   const foldSplit = (oldIdx ?? newIdx).split;
@@ -167,6 +173,33 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       byName(normBlock(a.blockName ?? ''), normBlock(b.blockName ?? '')) ||
       byName(a.pieceLineKey ?? '', b.pieceLineKey ?? ''),
   );
+  const otherIndexes = (input.otherSheets ?? []).map((sheet) => ({
+    key: sheet.scope.fabricPurpose.trim() || sheet.scope.bomLineKey.trim(),
+    parse: sheet.parse,
+    idx: indexSheet(sheet.parse, dict),
+  }));
+
+  // Name is the first signal across the whole card, not just the re-uploaded scope. The piece's
+  // own name keeps the modal's exact/loose precedence; only when that tier has no answer do stored
+  // aliases from any parsed DXF provide an identity answer.
+  const pieceForIdentity = (identity: string): P | null => {
+    const named = pieceNameMatches([identity], input.pieces);
+    if (named.matches.length > 0) return named.matches.length === 1 ? named.matches[0] : null;
+    const key = identity.toLowerCase();
+    const hits = new Map<string, P>();
+    for (const alias of input.aliases) {
+      const piece = pieceByKey.get((alias.pieceLineKey ?? '').trim().toLowerCase());
+      if (!piece) continue;
+      const source = inScope(alias)
+        ? foldSplit
+        : otherIndexes.find((sheet) => sheet.key === aliasScopeKey(alias))?.idx.split;
+      const aliasKey = source
+        ? aliasIdentity(normBlock(alias.blockName ?? ''), source).toLowerCase()
+        : normBlock(alias.blockName ?? '').toLowerCase();
+      if (aliasKey === key) hits.set(piece.lineKey.trim().toLowerCase(), piece);
+    }
+    return hits.size === 1 ? [...hits.values()][0] : null;
+  };
 
   const units = new Map<string, OldUnit<P>>();
   for (const a of scoped) {
@@ -203,6 +236,10 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     const n = newIdx.entries.get(u.key);
     if (n) pair(u, n, 'exact', u.entry ? 'high' : 'low');
   }
+  for (const link of links.values()) {
+    if (link.unit.piece) continue;
+    link.unit.piece = pieceForIdentity(link.n.identity);
+  }
 
   // ── 2. единицы ───────────────────────────────────────────────────────────────────────────
   const scale = unitsScale(
@@ -229,12 +266,33 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     if (u && !links.has(u.key)) pair(u, n, 'tail', 'high');
   }
 
+  // A new identity may already be a live card piece even when it never existed in this scope.
+  // If that same piece had one old identity here, this is a name-proven rename; otherwise it is a
+  // shared/moved alias. Both happen before geometry, so identical contours cannot steal the block.
+  const crossNamed: { n: SheetEntry; piece: P }[] = [];
+  const pendingNamed = new Map<string, { n: SheetEntry; piece: P }>();
+  const nameProvenTargets = new Set<string>();
+  for (const n of newLeft()) {
+    const piece = pieceForIdentity(n.identity);
+    if (!piece) continue;
+    nameProvenTargets.add(n.key);
+    const oldForPiece = unitList.filter(
+      (unit) => !links.has(unit.key) && unit.entry && unit.piece === piece,
+    );
+    if (oldForPiece.length === 1) pair(oldForPiece[0], n, 'name', 'high');
+    else if (oldForPiece.length === 0) {
+      crossNamed.push({ n, piece });
+      usedN.add(n.key);
+    } else pendingNamed.set(n.key, { n, piece });
+  }
+
   // ── 4–5. разрез / слияние и форма — по остатку ───────────────────────────────────────────
   const oldLeftWithGeom = () => unitList.filter((u) => !links.has(u.key) && u.entry);
   const matrix = shapeMatrix(
     oldLeftWithGeom().map((u) => u.entry!),
     newLeft(),
     scale,
+    preferredSizes,
   );
   const minCostO = new Map<string, number>();
   const minCostN = new Map<string, number>();
@@ -335,6 +393,11 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   for (const m of assignByShape(matrix.filter((c) => !inSplitMerge(c.o) && !inSplitMerge(c.n)))) {
     pair(units.get(m.o)!, newIdx.entries.get(m.n)!, 'shape', m.confidence, m.cost, m.candidates);
   }
+  for (const match of pendingNamed.values()) {
+    if (usedN.has(match.n.key)) continue;
+    crossNamed.push(match);
+    usedN.add(match.n.key);
+  }
 
   // ── 6. другой файл ───────────────────────────────────────────────────────────────────────
   const linked = unitList.filter((u) => u.piece);
@@ -358,6 +421,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       status: 'ready',
       refused: 'foreign',
       needsPieceMatch: false,
+      needsShapeReview: false,
       rows: [],
       summary: { ...summary, matchedShare, otherFile: true, scale },
     };
@@ -368,25 +432,6 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   for (const [k, l] of links) {
     const cmp = l.unit.entry ? comparePair(l.unit.entry, l.n, scale, true) : null;
     full.set(k, { ...l, full: cmp, verdict: verdictOf(cmp?.cmp ?? null) });
-  }
-
-  // An occupied scope can have no aliases even though its blocks are already live cut pieces. This
-  // happens when pieces moved here from another DXF: old-unit construction above can only recover
-  // scoped aliases, so an exact block survives as an otherwise empty `unlinked` row. Use the same
-  // exact/loose name tiers as PieceMatchModal, but only when the winning tier has one answer. A
-  // piece that already has any alias in this scope is not a candidate for this recovery.
-  const scopedPieceKeys = new Set(
-    scoped
-      .map((alias) => (alias.pieceLineKey ?? '').trim().toLowerCase())
-      .filter((key) => key && pieceByKey.has(key)),
-  );
-  const unboundPieces = input.pieces.filter(
-    (piece) => !scopedPieceKeys.has(piece.lineKey.trim().toLowerCase()),
-  );
-  for (const link of full.values()) {
-    if (link.unit.piece) continue;
-    const named = pieceNameMatches([link.n.identity], unboundPieces);
-    if (named.matches.length === 1) link.unit.piece = named.matches[0];
   }
 
   // ── 7a. L/R-пара → одна деталь ───────────────────────────────────────────────────────────
@@ -408,7 +453,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
       // Новый блок без стороны («FP», не «FP_R»): лист сам свернул пару. Пропавшая половина при
       // живой и всё ещё сторонней второй — просто пропавшая деталь.
       if (!partner || sideOf(partner.n.identity)) continue;
-      const c = comparePair(u.entry, partner.n, scale, false);
+      const c = comparePair(u.entry, partner.n, scale, false, preferredSizes);
       if (c && c.cmp.cost <= THRESH.pairCost) collapsed.set(u.key, { unit: u, into: partner });
     }
     // Соперник партнёра по форме — его же вторая половина; она поглощена, уверенность без неё.
@@ -436,22 +481,19 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   }
 
   // ── 7b. moved / shared из другого scope ──────────────────────────────────────────────────
-  const moved: { n: SheetEntry; piece: P }[] = [];
+  const moved: { n: SheetEntry; piece: P }[] = [...crossNamed];
   const linkedPieces = new Set(
-    [...full.values()]
-      .filter((l) => l.unit.piece)
-      .map((l) => l.unit.piece!.lineKey.trim().toLowerCase()),
+    [
+      ...[...full.values()].filter((l) => l.unit.piece).map((l) => l.unit.piece!),
+      ...moved.map((match) => match.piece),
+    ].map((piece) => piece.lineKey.trim().toLowerCase()),
   );
-  if (input.otherSheets?.length) {
-    const others = input.otherSheets.map((s) => {
-      const key = s.scope.fabricPurpose.trim() || s.scope.bomLineKey.trim();
-      return { key, idx: indexSheet(s.parse, dict) };
-    });
+  if (otherIndexes.length) {
     for (const n of newLeft().filter((e) => !inSplitMerge(e.key))) {
       const hits: { piece: P; cost: number; order: string }[] = [];
       for (const a of input.aliases) {
         if (inScope(a)) continue;
-        const other = others.find((o) => o.key === aliasScopeKey(a));
+        const other = otherIndexes.find((o) => o.key === aliasScopeKey(a));
         const piece = pieceByKey.get((a.pieceLineKey ?? '').trim().toLowerCase());
         if (!other || !piece || linkedPieces.has(piece.lineKey.trim().toLowerCase())) continue;
         const ident = aliasIdentity(normBlock(a.blockName ?? ''), other.idx.split).toLowerCase();
@@ -500,7 +542,8 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     const ranked = ghostNews
       .map((n) => {
         const costs = oldUnits.flatMap((u) => {
-          const c = comparePair(u.entry!, n, scale, false);
+          if (mirrorSidesConflict(u.identity, n.identity)) return [];
+          const c = comparePair(u.entry!, n, scale, false, preferredSizes);
           return c ? [{ unit: u, cost: c.cmp.cost, mode: c.mode }] : [];
         });
         costs.sort((a, b) => a.cost - b.cost || byName(a.unit.key, b.unit.key));
@@ -879,7 +922,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
               other.side === side.side
             )
               return [];
-            const c = comparePair(l.n, n, 1, false);
+            const c = comparePair(l.n, n, 1, false, preferredSizes);
             return c &&
               c.cmp.cost <= THRESH.pairCost &&
               (c.cmp.frame === 'mirrorU' || c.cmp.frame === 'mirrorV')
@@ -934,10 +977,47 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
 
   const summary = emptySummary() as Record<Tier, number> & ReconcileSummary;
   for (const r of rows) (summary as Record<Tier, number>)[r.tier]++;
+  const shapeReferences = [
+    ...(input.oldSheet
+      ? pieceShapeReferences({
+          parse: input.oldSheet.parse,
+          bindings: scoped,
+          pieces: input.pieces,
+          sizeTokens: input.sizeTokens,
+        })
+      : []),
+    ...otherIndexes.flatMap((sheet) =>
+      pieceShapeReferences({
+        parse: sheet.parse,
+        bindings: input.aliases.filter((alias) => aliasScopeKey(alias) === sheet.key),
+        pieces: input.pieces,
+        sizeTokens: input.sizeTokens,
+      }),
+    ),
+  ];
+  const shapeProposals = proposePieceShapes({
+    target: input.newSheet.parse,
+    references: shapeReferences,
+    pieces: input.pieces,
+    sizeTokens: input.sizeTokens,
+    preferredSizeTokens: input.preferredSizeTokens,
+  });
+  const nameAgreed = new Set([
+    ...nameProvenTargets,
+    ...[...full.values()]
+      .filter((link) => link.how === 'exact' || link.how === 'name' || link.how === 'tail')
+      .map((link) => link.n.key),
+    ...moved.map((match) => match.n.key),
+  ]);
+  const shapeOnlyLink = [...full.values()].some(
+    (link) => (link.how === 'shape' || link.how === 'ghost') && !nameAgreed.has(link.n.key),
+  );
+  const shapeOnlyProposal = [...shapeProposals.keys()].some((key) => !nameAgreed.has(key));
   return {
     status: 'ready',
     refused: null,
     needsPieceMatch: rows.some((row) => row.tier === 'unlinked'),
+    needsShapeReview: shapeOnlyLink || shapeOnlyProposal,
     rows,
     summary: { ...summary, matchedShare, otherFile, scale },
   };

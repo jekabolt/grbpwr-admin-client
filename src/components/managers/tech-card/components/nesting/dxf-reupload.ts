@@ -109,6 +109,8 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
   scopeOf: (b: { fabricPurpose?: string; bomLineKey?: string }, kind: 'sheet' | 'link') => string;
   isDxf: (url: string) => boolean;
   sizeTokens: readonly string[];
+  /** Dictionary tokens of the card's base/sample size, preferred for shape comparison. */
+  preferredSizeTokens?: readonly string[];
   /** ссылки на деталь вне шагов (рецепт, площади, материалы детали, швы): деталь станет призраком */
   externalRefs?: Readonly<Record<string, number>>;
   /**
@@ -510,6 +512,7 @@ export async function reuploadSheet<
       oldSheet: { parse: targetOld, sha256: oldShas[t] },
       newSheet: { parse: targetNew, sha256: sha },
       sizeTokens: card.sizeTokens,
+      preferredSizeTokens: card.preferredSizeTokens,
       externalRefs: card.externalRefs,
       aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
       targetFileIndex: 0,
@@ -546,6 +549,7 @@ export async function reuploadSheet<
     oldSheet: { parse: oldParse, sha256: all(oldShas) },
     newSheet: { parse: newParse, sha256: all(oldShas.map((s, k) => (k === t ? sha : s))) },
     sizeTokens: card.sizeTokens,
+    preferredSizeTokens: card.preferredSizeTokens,
     externalRefs: card.externalRefs,
     otherSheets,
     aliasInScope: (a) => card.scopeOf(a, 'link') === card.scopeKey,
@@ -556,7 +560,7 @@ export async function reuploadSheet<
   const plan = reconcile(input);
   if (plan.status === 'noop') return { kind: 'noop', rowIndex: rows[t].i };
   if (isForeignPlan(plan)) return foreign();
-  if (plan.needsPieceMatch) {
+  if (plan.needsPieceMatch || plan.needsShapeReview) {
     let up: UploadedSheet;
     try {
       up = await deps.upload({ name: file.name, bytes });
