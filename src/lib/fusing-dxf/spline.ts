@@ -324,6 +324,76 @@ function segmentsIntersect(a: PtMm, b: PtMm, c: PtMm, d: PtMm): boolean {
   );
 }
 
+function normalizedRingPair(a: readonly PtMm[], b: readonly PtMm[]): [PtMm[], PtMm[]] | null {
+  if (!a.length || !b.length) return null;
+  let minX = a[0].x;
+  let maxX = a[0].x;
+  let minY = a[0].y;
+  let maxY = a[0].y;
+  for (const ring of [a, b]) {
+    for (const point of ring) {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  const scale = Math.max(maxX - minX, maxY - minY);
+  if (scale === 0 || !Number.isFinite(scale)) return null;
+  const normalize = (ring: readonly PtMm[]) =>
+    ring.map((point) => ({ x: (point.x - minX) / scale, y: (point.y - minY) / scale }));
+  return [normalize(a), normalize(b)];
+}
+
+function pointStrictlyInsideRing(point: PtMm, ring: readonly PtMm[]): boolean {
+  let inside = false;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    if (pointOnSegment(a, b, point)) return false;
+    if (
+      a.y > point.y !== b.y > point.y &&
+      point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x
+    )
+      inside = !inside;
+  }
+  return inside;
+}
+
+/** Every vertex and edge of `inner` lies strictly inside `outer`; touching is false. */
+export function ringStrictlyInside(inner: readonly PtMm[], outer: readonly PtMm[]): boolean {
+  const normalized = normalizedRingPair(inner, outer);
+  if (!normalized) return false;
+  const [a, b] = normalized;
+  for (let i = 0; i < a.length; i++) {
+    for (let j = 0; j < b.length; j++) {
+      if (segmentsIntersect(a[i], a[(i + 1) % a.length], b[j], b[(j + 1) % b.length])) return false;
+    }
+  }
+  return a.every((point) => pointStrictlyInsideRing(point, b));
+}
+
+/** Closed rings overlap, touch, or nest. */
+export function ringsOverlap(a: readonly PtMm[], b: readonly PtMm[]): boolean {
+  const normalized = normalizedRingPair(a, b);
+  if (!normalized) return true;
+  const [left, right] = normalized;
+  for (let i = 0; i < left.length; i++) {
+    for (let j = 0; j < right.length; j++) {
+      if (
+        segmentsIntersect(
+          left[i],
+          left[(i + 1) % left.length],
+          right[j],
+          right[(j + 1) % right.length],
+        )
+      )
+        return true;
+    }
+  }
+  return pointStrictlyInsideRing(left[0], right) || pointStrictlyInsideRing(right[0], left);
+}
+
 /** Two closed-ring edges that are not neighbours cross or touch. */
 export function ringSelfIntersects(ring: readonly PtMm[]): boolean {
   const points = normalizedRing(ring);

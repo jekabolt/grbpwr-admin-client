@@ -380,6 +380,20 @@ const pieceSchema = z
               z.object({ x: z.number(), y: z.number(), corner: z.boolean().optional() }),
             ),
           }),
+          holes: z.array(
+            z.object({
+              points: z.array(
+                z.object({ x: z.number(), y: z.number(), corner: z.boolean().optional() }),
+              ),
+            }),
+          ),
+          islands: z.array(
+            z.object({
+              points: z.array(
+                z.object({ x: z.number(), y: z.number(), corner: z.boolean().optional() }),
+              ),
+            }),
+          ),
         }),
         z.object({ dxfPieceKey: z.string() }),
       ])

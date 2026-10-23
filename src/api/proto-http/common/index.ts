@@ -131,92 +131,92 @@ export type MediaInfo = {
 };
 
 export type SizeSkuSystem =
-  | "SIZE_SKU_SYSTEM_UNKNOWN"
-  | "SIZE_SKU_SYSTEM_APPAREL"
-  | "SIZE_SKU_SYSTEM_SHOE"
-  | "SIZE_SKU_SYSTEM_COMPOSITE_TA"
-  | "SIZE_SKU_SYSTEM_COMPOSITE_BO";
+  | 'SIZE_SKU_SYSTEM_UNKNOWN'
+  | 'SIZE_SKU_SYSTEM_APPAREL'
+  | 'SIZE_SKU_SYSTEM_SHOE'
+  | 'SIZE_SKU_SYSTEM_COMPOSITE_TA'
+  | 'SIZE_SKU_SYSTEM_COMPOSITE_BO';
 export type GenderEnum =
-  | "GENDER_ENUM_UNKNOWN"
-  | "GENDER_ENUM_MALE"
-  | "GENDER_ENUM_FEMALE"
-  | "GENDER_ENUM_UNISEX";
+  | 'GENDER_ENUM_UNKNOWN'
+  | 'GENDER_ENUM_MALE'
+  | 'GENDER_ENUM_FEMALE'
+  | 'GENDER_ENUM_UNISEX';
 // AgeGroupEnum is the style's target age group — a style fact like target_gender (0366).
 // Stored on the tech_card row as a lowercase token (adult/teen/kids/toddler/baby) and written only
 // through UpdateStyle (StylePatch.age_group). UNKNOWN is the absence of a value on the wire: a read
 // emits it for a style whose age group is not set (NULL — every style predating 0366 until someone
 // picks one) or holds a token this build cannot map; a write naming age_group refuses it.
 export type AgeGroupEnum =
-  | "AGE_GROUP_ENUM_UNKNOWN"
-  | "AGE_GROUP_ENUM_ADULT"
-  | "AGE_GROUP_ENUM_TEEN"
-  | "AGE_GROUP_ENUM_KIDS"
-  | "AGE_GROUP_ENUM_TODDLER"
-  | "AGE_GROUP_ENUM_BABY";
+  | 'AGE_GROUP_ENUM_UNKNOWN'
+  | 'AGE_GROUP_ENUM_ADULT'
+  | 'AGE_GROUP_ENUM_TEEN'
+  | 'AGE_GROUP_ENUM_KIDS'
+  | 'AGE_GROUP_ENUM_TODDLER'
+  | 'AGE_GROUP_ENUM_BABY';
 export type SeasonEnum =
-  | "SEASON_ENUM_UNKNOWN"
-  | "SEASON_ENUM_SS"
-  | "SEASON_ENUM_FW"
-  | "SEASON_ENUM_PF"
-  | "SEASON_ENUM_RC";
+  | 'SEASON_ENUM_UNKNOWN'
+  | 'SEASON_ENUM_SS'
+  | 'SEASON_ENUM_FW'
+  | 'SEASON_ENUM_PF'
+  | 'SEASON_ENUM_RC';
 // ColorwayLifecycleStatus is the stored lifecycle of a colourway (R6). Numbers are fixed and match the
 // DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
 // (the colourway is not shown). Only ACTIVE is exposed publicly.
 export type ColorwayLifecycleStatus =
-  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
-  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
-  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
-  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
-  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
+  | 'COLORWAY_LIFECYCLE_STATUS_UNKNOWN'
+  | 'COLORWAY_LIFECYCLE_STATUS_DRAFT'
+  | 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'
+  | 'COLORWAY_LIFECYCLE_STATUS_HIDDEN'
+  | 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
 // VariantLifecycleStatus is the stored lifecycle of a variant (R2). Variants archive, never delete.
 export type VariantLifecycleStatus =
-  | "VARIANT_LIFECYCLE_STATUS_UNKNOWN"
-  | "VARIANT_LIFECYCLE_STATUS_ACTIVE"
-  | "VARIANT_LIFECYCLE_STATUS_ARCHIVED";
+  | 'VARIANT_LIFECYCLE_STATUS_UNKNOWN'
+  | 'VARIANT_LIFECYCLE_STATUS_ACTIVE'
+  | 'VARIANT_LIFECYCLE_STATUS_ARCHIVED';
 // ColorwayCostSource records where a colourway's COGS came from (R4), separating cost provenance from
 // the owning style relation.
 export type ColorwayCostSource =
-  | "COLORWAY_COST_SOURCE_UNKNOWN"
-  | "COLORWAY_COST_SOURCE_MANUAL"
-  | "COLORWAY_COST_SOURCE_STYLE"
-  | "COLORWAY_COST_SOURCE_PRODUCTION_RUN";
+  | 'COLORWAY_COST_SOURCE_UNKNOWN'
+  | 'COLORWAY_COST_SOURCE_MANUAL'
+  | 'COLORWAY_COST_SOURCE_STYLE'
+  | 'COLORWAY_COST_SOURCE_PRODUCTION_RUN';
 export type StockChangeSource =
-  | "STOCK_CHANGE_SOURCE_UNSPECIFIED"
-  | "STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT"
-  | "STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT"
-  | "STOCK_CHANGE_SOURCE_ORDER_PAID"
-  | "STOCK_CHANGE_SOURCE_ORDER_CUSTOM"
-  | "STOCK_CHANGE_SOURCE_ORDER_RETURNED"
-  | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED"
-  | "STOCK_CHANGE_SOURCE_PRODUCTION_RECEIVED";
+  | 'STOCK_CHANGE_SOURCE_UNSPECIFIED'
+  | 'STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT'
+  | 'STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT'
+  | 'STOCK_CHANGE_SOURCE_ORDER_PAID'
+  | 'STOCK_CHANGE_SOURCE_ORDER_CUSTOM'
+  | 'STOCK_CHANGE_SOURCE_ORDER_RETURNED'
+  | 'STOCK_CHANGE_SOURCE_ORDER_CANCELLED'
+  | 'STOCK_CHANGE_SOURCE_PRODUCTION_RECEIVED';
 export type StockChangeReason =
-  | "STOCK_CHANGE_REASON_UNSPECIFIED"
+  | 'STOCK_CHANGE_REASON_UNSPECIFIED'
   // admin_new_product reasons
-  | "STOCK_CHANGE_REASON_INITIAL_STOCK"
+  | 'STOCK_CHANGE_REASON_INITIAL_STOCK'
   // manual_adjustment reasons
-  | "STOCK_CHANGE_REASON_STOCK_COUNT"
-  | "STOCK_CHANGE_REASON_DAMAGE"
-  | "STOCK_CHANGE_REASON_LOSS"
-  | "STOCK_CHANGE_REASON_FOUND"
-  | "STOCK_CHANGE_REASON_CORRECTION"
-  | "STOCK_CHANGE_REASON_RESERVED_RELEASE"
-  | "STOCK_CHANGE_REASON_OTHER"
+  | 'STOCK_CHANGE_REASON_STOCK_COUNT'
+  | 'STOCK_CHANGE_REASON_DAMAGE'
+  | 'STOCK_CHANGE_REASON_LOSS'
+  | 'STOCK_CHANGE_REASON_FOUND'
+  | 'STOCK_CHANGE_REASON_CORRECTION'
+  | 'STOCK_CHANGE_REASON_RESERVED_RELEASE'
+  | 'STOCK_CHANGE_REASON_OTHER'
   // order_reserved reasons
-  | "STOCK_CHANGE_REASON_ORDER"
+  | 'STOCK_CHANGE_REASON_ORDER'
   // order_custom_reserved reasons
-  | "STOCK_CHANGE_REASON_CUSTOM_ORDER"
+  | 'STOCK_CHANGE_REASON_CUSTOM_ORDER'
   // order_returned reasons
-  | "STOCK_CHANGE_REASON_RETURN_TO_STOCK"
+  | 'STOCK_CHANGE_REASON_RETURN_TO_STOCK'
   // order_cancelled reasons
-  | "STOCK_CHANGE_REASON_ORDER_CANCELLED";
+  | 'STOCK_CHANGE_REASON_ORDER_CANCELLED';
 export type StockAdjustmentMode =
-  | "STOCK_ADJUSTMENT_MODE_UNSPECIFIED"
-  | "STOCK_ADJUSTMENT_MODE_SET"
-  | "STOCK_ADJUSTMENT_MODE_ADJUST";
+  | 'STOCK_ADJUSTMENT_MODE_UNSPECIFIED'
+  | 'STOCK_ADJUSTMENT_MODE_SET'
+  | 'STOCK_ADJUSTMENT_MODE_ADJUST';
 export type StockAdjustmentDirection =
-  | "STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED"
-  | "STOCK_ADJUSTMENT_DIRECTION_INCREASE"
-  | "STOCK_ADJUSTMENT_DIRECTION_DECREASE";
+  | 'STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED'
+  | 'STOCK_ADJUSTMENT_DIRECTION_INCREASE'
+  | 'STOCK_ADJUSTMENT_DIRECTION_DECREASE';
 // Category represents a hierarchical category structure
 export type Category = {
   id: number | undefined;
@@ -557,24 +557,24 @@ export type StockChange = {
 // Blocks may repeat and appear in any order; only the archive thumbnail, title
 // (heading translation) and tag are mandatory — every timeline block is optional.
 export type ArchiveItemType =
-  | "ARCHIVE_ITEM_TYPE_UNKNOWN"
-  | "ARCHIVE_ITEM_TYPE_MAIN_MEDIA"
-  | "ARCHIVE_ITEM_TYPE_MEDIA_LINE"
-  | "ARCHIVE_ITEM_TYPE_TEXT"
-  | "ARCHIVE_ITEM_TYPE_EMBED"
-  | "ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION"
-  | "ARCHIVE_ITEM_TYPE_PRODUCT"
-  | "ARCHIVE_ITEM_TYPE_PRODUCTS_TAG"
-  | "ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL";
+  | 'ARCHIVE_ITEM_TYPE_UNKNOWN'
+  | 'ARCHIVE_ITEM_TYPE_MAIN_MEDIA'
+  | 'ARCHIVE_ITEM_TYPE_MEDIA_LINE'
+  | 'ARCHIVE_ITEM_TYPE_TEXT'
+  | 'ARCHIVE_ITEM_TYPE_EMBED'
+  | 'ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION'
+  | 'ARCHIVE_ITEM_TYPE_PRODUCT'
+  | 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG'
+  | 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL';
 // ArchiveMediaAspectRatio is the presentation aspect ratio for the media blocks.
 // MAIN_MEDIA uses 16X9 / 2X1 / 1X1 (or UNKNOWN — e.g. a video that carries its
 // own dimensions); MEDIA_LINE and MEDIA_WITH_CAPTION use 3X4 / 1X1.
 export type ArchiveMediaAspectRatio =
-  | "ARCHIVE_MEDIA_ASPECT_RATIO_UNKNOWN"
-  | "ARCHIVE_MEDIA_ASPECT_RATIO_16X9"
-  | "ARCHIVE_MEDIA_ASPECT_RATIO_2X1"
-  | "ARCHIVE_MEDIA_ASPECT_RATIO_1X1"
-  | "ARCHIVE_MEDIA_ASPECT_RATIO_3X4";
+  | 'ARCHIVE_MEDIA_ASPECT_RATIO_UNKNOWN'
+  | 'ARCHIVE_MEDIA_ASPECT_RATIO_16X9'
+  | 'ARCHIVE_MEDIA_ASPECT_RATIO_2X1'
+  | 'ARCHIVE_MEDIA_ASPECT_RATIO_1X1'
+  | 'ARCHIVE_MEDIA_ASPECT_RATIO_3X4';
 export type ArchiveList = {
   id: number | undefined;
   translations: ArchiveInsertTranslation[] | undefined;
@@ -749,75 +749,75 @@ export type BuyerInsert = {
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type TechCardStage =
-  | "TECH_CARD_STAGE_UNKNOWN"
-  | "TECH_CARD_STAGE_PROTO"
-  | "TECH_CARD_STAGE_FIT"
-  | "TECH_CARD_STAGE_SMS"
-  | "TECH_CARD_STAGE_PP"
-  | "TECH_CARD_STAGE_PROD"
-  | "TECH_CARD_STAGE_IDEA";
+  | 'TECH_CARD_STAGE_UNKNOWN'
+  | 'TECH_CARD_STAGE_PROTO'
+  | 'TECH_CARD_STAGE_FIT'
+  | 'TECH_CARD_STAGE_SMS'
+  | 'TECH_CARD_STAGE_PP'
+  | 'TECH_CARD_STAGE_PROD'
+  | 'TECH_CARD_STAGE_IDEA';
 // TechCardApprovalState is the gating release state of a tech card, orthogonal to
 // TechCardStage (which tracks development progress). A factory must only receive a
 // card in the RELEASED state.
 export type TechCardApprovalState =
-  | "TECH_CARD_APPROVAL_STATE_UNKNOWN"
-  | "TECH_CARD_APPROVAL_STATE_DRAFT"
-  | "TECH_CARD_APPROVAL_STATE_IN_REVIEW"
-  | "TECH_CARD_APPROVAL_STATE_APPROVED"
-  | "TECH_CARD_APPROVAL_STATE_RELEASED"
-  | "TECH_CARD_APPROVAL_STATE_OBSOLETE";
+  | 'TECH_CARD_APPROVAL_STATE_UNKNOWN'
+  | 'TECH_CARD_APPROVAL_STATE_DRAFT'
+  | 'TECH_CARD_APPROVAL_STATE_IN_REVIEW'
+  | 'TECH_CARD_APPROVAL_STATE_APPROVED'
+  | 'TECH_CARD_APPROVAL_STATE_RELEASED'
+  | 'TECH_CARD_APPROVAL_STATE_OBSOLETE';
 // TechCardMeasurementUnit is the unit for the card's geometry (callout dimensions).
 // Metric only — the brand works in cm and mm, never inches.
 export type TechCardMeasurementUnit =
-  | "TECH_CARD_MEASUREMENT_UNIT_UNKNOWN"
-  | "TECH_CARD_MEASUREMENT_UNIT_CM"
-  | "TECH_CARD_MEASUREMENT_UNIT_MM";
+  | 'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN'
+  | 'TECH_CARD_MEASUREMENT_UNIT_CM'
+  | 'TECH_CARD_MEASUREMENT_UNIT_MM';
 // TechCardMediaKind classifies a tech-card sketch image.
 export type TechCardMediaKind =
-  | "TECH_CARD_MEDIA_KIND_UNKNOWN"
-  | "TECH_CARD_MEDIA_KIND_FRONT"
-  | "TECH_CARD_MEDIA_KIND_BACK"
-  | "TECH_CARD_MEDIA_KIND_DETAIL"
-  | "TECH_CARD_MEDIA_KIND_LINING"
-  | "TECH_CARD_MEDIA_KIND_PREVIEW"
-  | "TECH_CARD_MEDIA_KIND_MOODBOARD"
-  | "TECH_CARD_MEDIA_KIND_REFERENCE"
-  | "TECH_CARD_MEDIA_KIND_SWATCH"
+  | 'TECH_CARD_MEDIA_KIND_UNKNOWN'
+  | 'TECH_CARD_MEDIA_KIND_FRONT'
+  | 'TECH_CARD_MEDIA_KIND_BACK'
+  | 'TECH_CARD_MEDIA_KIND_DETAIL'
+  | 'TECH_CARD_MEDIA_KIND_LINING'
+  | 'TECH_CARD_MEDIA_KIND_PREVIEW'
+  | 'TECH_CARD_MEDIA_KIND_MOODBOARD'
+  | 'TECH_CARD_MEDIA_KIND_REFERENCE'
+  | 'TECH_CARD_MEDIA_KIND_SWATCH'
   // Side views. The DESIGN band's view matrix has four silhouette sides, and without these two a
   // side flat has nowhere to be filed — it would have to masquerade as DETAIL and stop being a
   // side. This EXTENDS the existing vocabulary; it is not a second axis.
-  | "TECH_CARD_MEDIA_KIND_SIDE_L"
-  | "TECH_CARD_MEDIA_KIND_SIDE_R"
+  | 'TECH_CARD_MEDIA_KIND_SIDE_L'
+  | 'TECH_CARD_MEDIA_KIND_SIDE_R'
   // An ACCEPTED render — a rendered image promoted into category='technical', i.e. one that leaves
   // the studio and goes out with the card. The pair (category='technical', kind=RENDER) is what
   // says «this is a render and it is official»; there is no separate artifact_role column.
-  | "TECH_CARD_MEDIA_KIND_RENDER";
+  | 'TECH_CARD_MEDIA_KIND_RENDER';
 // TechCardRole is a responsible-account role on a tech card (PLM-rework Q5). Replaces the free-text
 // designer/constructor/technologist/approved_by strings; approval is the APPROVER role plus a
 // server-stamped journal event, not a free-text name.
 export type TechCardRole =
-  | "TECH_CARD_ROLE_UNKNOWN"
-  | "TECH_CARD_ROLE_DESIGNER"
-  | "TECH_CARD_ROLE_CONSTRUCTOR"
-  | "TECH_CARD_ROLE_TECHNOLOGIST"
-  | "TECH_CARD_ROLE_PATTERN_MAKER"
-  | "TECH_CARD_ROLE_GRADER"
-  | "TECH_CARD_ROLE_APPROVER"
-  | "TECH_CARD_ROLE_OTHER";
+  | 'TECH_CARD_ROLE_UNKNOWN'
+  | 'TECH_CARD_ROLE_DESIGNER'
+  | 'TECH_CARD_ROLE_CONSTRUCTOR'
+  | 'TECH_CARD_ROLE_TECHNOLOGIST'
+  | 'TECH_CARD_ROLE_PATTERN_MAKER'
+  | 'TECH_CARD_ROLE_GRADER'
+  | 'TECH_CARD_ROLE_APPROVER'
+  | 'TECH_CARD_ROLE_OTHER';
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
 export type TechCardBomSection =
-  | "TECH_CARD_BOM_SECTION_UNKNOWN"
-  | "TECH_CARD_BOM_SECTION_FABRIC"
-  | "TECH_CARD_BOM_SECTION_LINING"
-  | "TECH_CARD_BOM_SECTION_INTERLINING"
-  | "TECH_CARD_BOM_SECTION_INSULATION"
-  | "TECH_CARD_BOM_SECTION_HARDWARE"
-  | "TECH_CARD_BOM_SECTION_THREAD"
-  | "TECH_CARD_BOM_SECTION_LABEL"
-  | "TECH_CARD_BOM_SECTION_PACKAGING"
-  | "TECH_CARD_BOM_SECTION_TRIM"
-  | "TECH_CARD_BOM_SECTION_DECORATION"
-  | "TECH_CARD_BOM_SECTION_OTHER";
+  | 'TECH_CARD_BOM_SECTION_UNKNOWN'
+  | 'TECH_CARD_BOM_SECTION_FABRIC'
+  | 'TECH_CARD_BOM_SECTION_LINING'
+  | 'TECH_CARD_BOM_SECTION_INTERLINING'
+  | 'TECH_CARD_BOM_SECTION_INSULATION'
+  | 'TECH_CARD_BOM_SECTION_HARDWARE'
+  | 'TECH_CARD_BOM_SECTION_THREAD'
+  | 'TECH_CARD_BOM_SECTION_LABEL'
+  | 'TECH_CARD_BOM_SECTION_PACKAGING'
+  | 'TECH_CARD_BOM_SECTION_TRIM'
+  | 'TECH_CARD_BOM_SECTION_DECORATION'
+  | 'TECH_CARD_BOM_SECTION_OTHER';
 // TechCardBomPurpose is НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR, on its own axis
 // beside `section` (0265). Several lines legitimately share one purpose; that IS the point, the
 // field exists to name a SUBSET of fabrics ("the lining ones", "the contrast ones").
@@ -831,15 +831,15 @@ export type TechCardBomSection =
 // before 0265 is UNSET on purpose: section='fabric' is exactly where pocket-bag, contrast and mesh
 // hide today, so a backfill would have labelled them MAIN confidently and wrongly.
 export type TechCardBomPurpose =
-  | "TECH_CARD_BOM_PURPOSE_UNSET"
-  | "TECH_CARD_BOM_PURPOSE_MAIN"
-  | "TECH_CARD_BOM_PURPOSE_LINING"
-  | "TECH_CARD_BOM_PURPOSE_POCKETING"
-  | "TECH_CARD_BOM_PURPOSE_INTERFACING"
-  | "TECH_CARD_BOM_PURPOSE_INSULATION"
-  | "TECH_CARD_BOM_PURPOSE_CONTRAST"
-  | "TECH_CARD_BOM_PURPOSE_MESH"
-  | "TECH_CARD_BOM_PURPOSE_OTHER";
+  | 'TECH_CARD_BOM_PURPOSE_UNSET'
+  | 'TECH_CARD_BOM_PURPOSE_MAIN'
+  | 'TECH_CARD_BOM_PURPOSE_LINING'
+  | 'TECH_CARD_BOM_PURPOSE_POCKETING'
+  | 'TECH_CARD_BOM_PURPOSE_INTERFACING'
+  | 'TECH_CARD_BOM_PURPOSE_INSULATION'
+  | 'TECH_CARD_BOM_PURPOSE_CONTRAST'
+  | 'TECH_CARD_BOM_PURPOSE_MESH'
+  | 'TECH_CARD_BOM_PURPOSE_OTHER';
 // TechCardBomKind is ЧТО ЭТО ЗА ПОЗИЦИЯ — the mirror image of TechCardBomPurpose (0265). Purpose
 // says what the garment uses a ROLL-GOODS line FOR; kind says what a NON-roll-goods line IS. The
 // two never meet on the same row: purpose is legal only on fabric/lining/interlining/insulation,
@@ -868,83 +868,83 @@ export type TechCardBomPurpose =
 // * такая же по виду декоративная клёпка, которая ничего не держит → STUD, decoration;
 // * шнур → DRAWCORD, trim (продаётся метражом); его фиксатор → CORD_STOPPER, hardware (штучный).
 export type TechCardBomKind =
-  | "TECH_CARD_BOM_KIND_UNSET"
+  | 'TECH_CARD_BOM_KIND_UNSET'
   // ФУРНИТУРА — section=hardware. Countable fittings; the garment stops working without them.
-  | "TECH_CARD_BOM_KIND_ZIPPER"
-  | "TECH_CARD_BOM_KIND_ZIPPER_SLIDER"
-  | "TECH_CARD_BOM_KIND_BUTTON"
-  | "TECH_CARD_BOM_KIND_SNAP"
-  | "TECH_CARD_BOM_KIND_RIVET"
-  | "TECH_CARD_BOM_KIND_EYELET"
-  | "TECH_CARD_BOM_KIND_HOOK_AND_BAR"
-  | "TECH_CARD_BOM_KIND_SNAP_HOOK"
-  | "TECH_CARD_BOM_KIND_BUCKLE"
-  | "TECH_CARD_BOM_KIND_STRAP_ADJUSTER"
-  | "TECH_CARD_BOM_KIND_RING"
+  | 'TECH_CARD_BOM_KIND_ZIPPER'
+  | 'TECH_CARD_BOM_KIND_ZIPPER_SLIDER'
+  | 'TECH_CARD_BOM_KIND_BUTTON'
+  | 'TECH_CARD_BOM_KIND_SNAP'
+  | 'TECH_CARD_BOM_KIND_RIVET'
+  | 'TECH_CARD_BOM_KIND_EYELET'
+  | 'TECH_CARD_BOM_KIND_HOOK_AND_BAR'
+  | 'TECH_CARD_BOM_KIND_SNAP_HOOK'
+  | 'TECH_CARD_BOM_KIND_BUCKLE'
+  | 'TECH_CARD_BOM_KIND_STRAP_ADJUSTER'
+  | 'TECH_CARD_BOM_KIND_RING'
   // ТОЛЬКО пуговица-палочка (дафлкот). «Толстовочный фиксатор» — это CORD_STOPPER, и до 0327 он
   // стоял в обоих комментариях сразу: классический синоним из списка, собранного в двух местах.
-  | "TECH_CARD_BOM_KIND_TOGGLE"
-  | "TECH_CARD_BOM_KIND_CORD_STOPPER"
-  | "TECH_CARD_BOM_KIND_CORD_END"
-  | "TECH_CARD_BOM_KIND_MAGNET"
-  | "TECH_CARD_BOM_KIND_CHAIN"
+  | 'TECH_CARD_BOM_KIND_TOGGLE'
+  | 'TECH_CARD_BOM_KIND_CORD_STOPPER'
+  | 'TECH_CARD_BOM_KIND_CORD_END'
+  | 'TECH_CARD_BOM_KIND_MAGNET'
+  | 'TECH_CARD_BOM_KIND_CHAIN'
   // ОТДЕЛОЧНЫЕ МАТЕРИАЛЫ — section=trim. Soft goods sold by length; they keep their wastage gross-up.
-  | "TECH_CARD_BOM_KIND_ELASTIC"
-  | "TECH_CARD_BOM_KIND_DRAWCORD"
-  | "TECH_CARD_BOM_KIND_BINDING"
-  | "TECH_CARD_BOM_KIND_TAPE"
-  | "TECH_CARD_BOM_KIND_PIPING"
-  | "TECH_CARD_BOM_KIND_WEBBING"
-  | "TECH_CARD_BOM_KIND_HOOK_LOOP"
-  | "TECH_CARD_BOM_KIND_BONING"
-  | "TECH_CARD_BOM_KIND_LACE"
-  | "TECH_CARD_BOM_KIND_RIBBING"
+  | 'TECH_CARD_BOM_KIND_ELASTIC'
+  | 'TECH_CARD_BOM_KIND_DRAWCORD'
+  | 'TECH_CARD_BOM_KIND_BINDING'
+  | 'TECH_CARD_BOM_KIND_TAPE'
+  | 'TECH_CARD_BOM_KIND_PIPING'
+  | 'TECH_CARD_BOM_KIND_WEBBING'
+  | 'TECH_CARD_BOM_KIND_HOOK_LOOP'
+  | 'TECH_CARD_BOM_KIND_BONING'
+  | 'TECH_CARD_BOM_KIND_LACE'
+  | 'TECH_CARD_BOM_KIND_RIBBING'
   // ДЕКОР — section=decoration. Applied ONTO the garment; nothing here holds anything together.
-  | "TECH_CARD_BOM_KIND_PRINT"
-  | "TECH_CARD_BOM_KIND_EMBROIDERY"
-  | "TECH_CARD_BOM_KIND_APPLIQUE"
-  | "TECH_CARD_BOM_KIND_PATCH"
-  | "TECH_CARD_BOM_KIND_HEAT_TRANSFER"
-  | "TECH_CARD_BOM_KIND_RHINESTONE"
-  | "TECH_CARD_BOM_KIND_SEQUIN"
-  | "TECH_CARD_BOM_KIND_STUD"
-  | "TECH_CARD_BOM_KIND_FOIL"
-  | "TECH_CARD_BOM_KIND_LASER"
+  | 'TECH_CARD_BOM_KIND_PRINT'
+  | 'TECH_CARD_BOM_KIND_EMBROIDERY'
+  | 'TECH_CARD_BOM_KIND_APPLIQUE'
+  | 'TECH_CARD_BOM_KIND_PATCH'
+  | 'TECH_CARD_BOM_KIND_HEAT_TRANSFER'
+  | 'TECH_CARD_BOM_KIND_RHINESTONE'
+  | 'TECH_CARD_BOM_KIND_SEQUIN'
+  | 'TECH_CARD_BOM_KIND_STUD'
+  | 'TECH_CARD_BOM_KIND_FOIL'
+  | 'TECH_CARD_BOM_KIND_LASER'
   // НИТКИ — section=thread. Split by the JOB the thread does, which is what picks the machine.
-  | "TECH_CARD_BOM_KIND_SEWING_THREAD"
-  | "TECH_CARD_BOM_KIND_TOPSTITCH_THREAD"
-  | "TECH_CARD_BOM_KIND_OVERLOCK_THREAD"
-  | "TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD"
-  | "TECH_CARD_BOM_KIND_EMBROIDERY_THREAD"
-  | "TECH_CARD_BOM_KIND_ELASTIC_THREAD"
+  | 'TECH_CARD_BOM_KIND_SEWING_THREAD'
+  | 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'
+  | 'TECH_CARD_BOM_KIND_OVERLOCK_THREAD'
+  | 'TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'
+  | 'TECH_CARD_BOM_KIND_EMBROIDERY_THREAD'
+  | 'TECH_CARD_BOM_KIND_ELASTIC_THREAD'
   // УПАКОВКА — section=packaging. Spellings deliberately match TechCardAuxSubtype wherever the two
   // name the SAME object (sticker / dust_bag / garment_case / hanger), so an auxiliary card that
   // MAKES the item and the BOM line that CONSUMES it read as one word. The three that differ do so
   // because the object differs: HANGTAG_STRING is the string, not the aux HANGTAG it hangs;
   // INSERT_CARD is a printed card, narrower than the aux INSERT; CARTON is the outer shipping box
   // (TechCardPackaging.units_per_box / box_marking), not the aux BOX the customer receives.
-  | "TECH_CARD_BOM_KIND_POLYBAG"
-  | "TECH_CARD_BOM_KIND_CARTON"
-  | "TECH_CARD_BOM_KIND_HANGER"
-  | "TECH_CARD_BOM_KIND_HANGTAG_STRING"
-  | "TECH_CARD_BOM_KIND_STICKER"
-  | "TECH_CARD_BOM_KIND_TISSUE"
-  | "TECH_CARD_BOM_KIND_DUST_BAG"
-  | "TECH_CARD_BOM_KIND_GARMENT_CASE"
-  | "TECH_CARD_BOM_KIND_INSERT_CARD"
+  | 'TECH_CARD_BOM_KIND_POLYBAG'
+  | 'TECH_CARD_BOM_KIND_CARTON'
+  | 'TECH_CARD_BOM_KIND_HANGER'
+  | 'TECH_CARD_BOM_KIND_HANGTAG_STRING'
+  | 'TECH_CARD_BOM_KIND_STICKER'
+  | 'TECH_CARD_BOM_KIND_TISSUE'
+  | 'TECH_CARD_BOM_KIND_DUST_BAG'
+  | 'TECH_CARD_BOM_KIND_GARMENT_CASE'
+  | 'TECH_CARD_BOM_KIND_INSERT_CARD'
   // ДРУГОЕ — the ONLY value legal in EVERY eligible section (including section=other, which has no
   // kinds of its own). Its meaning lives in the separate kind_note, never in a shadow value on one
   // of the 55 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
-  | "TECH_CARD_BOM_KIND_OTHER"
+  | 'TECH_CARD_BOM_KIND_OTHER'
   // ДОБАВЛЕНО ВОЛНОЙ ВИДОВ ОПЕРАЦИЙ, строго append'ом — ПОСЛЕ OTHER. Порядок членов enum'а секции
   // не задаёт: домашнюю секцию вида держит bomKindHomeSection в entity, и вид без записи там для
   // валидации не существует вовсе.
-  | "TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE"
+  | 'TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE'
   // 54 — ДЫРА: номер обещан отложенному `wet_chemical` фазы расширяемых свойств. НЕ занимать.
   // Стабилизатор под вышивку живёт в section=DECORATION, а НЕ в interlining: interlining — рулонная
   // секция, а рулонные секции видов не принимают вовсе. Клиентский пикер обязан предлагать этот вид
   // только в декоре; на паре «вид ↔ секция» стор откажет.
-  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER"
+  | 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER'
   // ДОБАВЛЕНО ВОЛНОЙ СЧЁТНЫХ НОРМ (0335), тем же append'ом в хвост. Оба — section=packaging.
   // SPARE_KIT_BAG — пакетик, в котором запасная фурнитура едет с изделием. Не оттенок POLYBAG: у
   // него есть собственное поведение, которого нет ни у одного соседа — его наличие связано с
@@ -954,11 +954,11 @@ export type TechCardBomKind =
   // ОБА ЧЛЕНА ПАРЫ ПИШУТСЯ ОДНИМ СЛОВОМ — правило блока выше: расходятся только те пары, у которых
   // предметы разные (HANGTAG_STRING — шнурок, а не ярлык; INSERT_CARD — карточка, а не вкладыш;
   // CARTON — транспортный короб, а не коробка покупателю). Здесь предмет один — тот самый пакетик.
-  | "TECH_CARD_BOM_KIND_SPARE_KIT_BAG"
+  | 'TECH_CARD_BOM_KIND_SPARE_KIT_BAG'
   // TOTE_BAG закрывает асимметрию, жившую с 0255: TECH_CARD_AUX_SUBTYPE_TOTE_BAG = 12 был, а
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
-  | "TECH_CARD_BOM_KIND_TOTE_BAG";
+  | 'TECH_CARD_BOM_KIND_TOTE_BAG';
 // TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
 // BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
 // рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
@@ -969,74 +969,74 @@ export type TechCardBomKind =
 // в отличие от UNSPECIFIED, которое ленту не исключает.
 // Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
 export type TechCardBomLabelPart =
-  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
-  | "TECH_CARD_BOM_LABEL_PART_SHELL"
-  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
-  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
-  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
-  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
-  | "TECH_CARD_BOM_LABEL_PART_FILLING"
-  | "TECH_CARD_BOM_LABEL_PART_TRIM"
-  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
+  | 'TECH_CARD_BOM_LABEL_PART_UNSPECIFIED'
+  | 'TECH_CARD_BOM_LABEL_PART_SHELL'
+  | 'TECH_CARD_BOM_LABEL_PART_BODY_LINING'
+  | 'TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING'
+  | 'TECH_CARD_BOM_LABEL_PART_POCKET_LINING'
+  | 'TECH_CARD_BOM_LABEL_PART_HOOD_LINING'
+  | 'TECH_CARD_BOM_LABEL_PART_FILLING'
+  | 'TECH_CARD_BOM_LABEL_PART_TRIM'
+  | 'TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL';
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
-  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
-  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
-  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
-  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
-  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
+  | 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
+  | 'TECH_CARD_LAB_DIP_STATUS_PENDING'
+  | 'TECH_CARD_LAB_DIP_STATUS_SUBMITTED'
+  | 'TECH_CARD_LAB_DIP_STATUS_APPROVED'
+  | 'TECH_CARD_LAB_DIP_STATUS_REJECTED';
 // TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text
 // `purpose` field; UNKNOWN is rejected on write.
 export type TechCardPurpose =
-  | "TECH_CARD_PURPOSE_UNKNOWN"
-  | "TECH_CARD_PURPOSE_SELLABLE"
-  | "TECH_CARD_PURPOSE_AUXILIARY";
+  | 'TECH_CARD_PURPOSE_UNKNOWN'
+  | 'TECH_CARD_PURPOSE_SELLABLE'
+  | 'TECH_CARD_PURPOSE_AUXILIARY';
 // TechCardAuxSubtype sub-classifies an AUXILIARY card (purpose=auxiliary) into the concrete kind of
 // non-sold item it produces (WS7). UNKNOWN=0 means unset — a sellable card, or an auxiliary card not yet
 // classified (stored NULL). Only meaningful with purpose=auxiliary.
 export type TechCardAuxSubtype =
-  | "TECH_CARD_AUX_SUBTYPE_UNKNOWN"
-  | "TECH_CARD_AUX_SUBTYPE_BRAND_LABEL"
-  | "TECH_CARD_AUX_SUBTYPE_CARE_LABEL"
-  | "TECH_CARD_AUX_SUBTYPE_SIZE_LABEL"
-  | "TECH_CARD_AUX_SUBTYPE_HANGTAG"
-  | "TECH_CARD_AUX_SUBTYPE_STICKER"
-  | "TECH_CARD_AUX_SUBTYPE_DUST_BAG"
-  | "TECH_CARD_AUX_SUBTYPE_BOX"
-  | "TECH_CARD_AUX_SUBTYPE_INSERT"
-  | "TECH_CARD_AUX_SUBTYPE_HANGER"
-  | "TECH_CARD_AUX_SUBTYPE_OTHER"
+  | 'TECH_CARD_AUX_SUBTYPE_UNKNOWN'
+  | 'TECH_CARD_AUX_SUBTYPE_BRAND_LABEL'
+  | 'TECH_CARD_AUX_SUBTYPE_CARE_LABEL'
+  | 'TECH_CARD_AUX_SUBTYPE_SIZE_LABEL'
+  | 'TECH_CARD_AUX_SUBTYPE_HANGTAG'
+  | 'TECH_CARD_AUX_SUBTYPE_STICKER'
+  | 'TECH_CARD_AUX_SUBTYPE_DUST_BAG'
+  | 'TECH_CARD_AUX_SUBTYPE_BOX'
+  | 'TECH_CARD_AUX_SUBTYPE_INSERT'
+  | 'TECH_CARD_AUX_SUBTYPE_HANGER'
+  | 'TECH_CARD_AUX_SUBTYPE_OTHER'
   // кофр — the carrier a garment travels/hangs in. Its own sub-type rather than a dust bag: it is
   // cut, sewn and costed as its own item, and an assembly bill names which of the two ships.
-  | "TECH_CARD_AUX_SUBTYPE_GARMENT_CASE"
+  | 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE'
   // шоппер — the carrier the customer takes the purchase away in and keeps using. Its own sub-type
   // rather than a dust bag: it is cut, sewn and costed as its own item, and an assembly bill names
   // which carrier ships.
-  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG"
+  | 'TECH_CARD_AUX_SUBTYPE_TOTE_BAG'
   // пакетик с запасной фурнитурой, сшитый своими силами (0335). Пакетик и покупают готовым, и шьют
   // сами, и ветвления это не создаёт: в обеих ветках он остаётся ОДНОЙ строкой спецификации с
   // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
   // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
-  | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
+  | 'TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG';
 // Material is a catalog material — shared nomenclature a tech-card BOM line can optionally link
 // to. Descriptive fields only; price lives in the append-only MaterialPrice history.
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
 // attribute set a material carries. Mirrors entity.MaterialClass and the DB CHECK chk_material_class.
 export type MaterialClass =
-  | "MATERIAL_CLASS_UNKNOWN"
-  | "MATERIAL_CLASS_FABRIC"
-  | "MATERIAL_CLASS_HARDWARE"
-  | "MATERIAL_CLASS_THREAD"
-  | "MATERIAL_CLASS_PACKAGING"
-  | "MATERIAL_CLASS_OTHER";
+  | 'MATERIAL_CLASS_UNKNOWN'
+  | 'MATERIAL_CLASS_FABRIC'
+  | 'MATERIAL_CLASS_HARDWARE'
+  | 'MATERIAL_CLASS_THREAD'
+  | 'MATERIAL_CLASS_PACKAGING'
+  | 'MATERIAL_CLASS_OTHER';
 // MaterialPurpose (#40) marks whether a catalog material is used for samples, production, or both,
 // so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
 // chk_material_purpose. UNKNOWN defaults to BOTH on write.
 export type MaterialPurpose =
-  | "MATERIAL_PURPOSE_UNKNOWN"
-  | "MATERIAL_PURPOSE_SAMPLE"
-  | "MATERIAL_PURPOSE_PRODUCTION"
-  | "MATERIAL_PURPOSE_BOTH";
+  | 'MATERIAL_PURPOSE_UNKNOWN'
+  | 'MATERIAL_PURPOSE_SAMPLE'
+  | 'MATERIAL_PURPOSE_PRODUCTION'
+  | 'MATERIAL_PURPOSE_BOTH';
 // MaterialUnit is the closed vocabulary a material quantity is measured in (Ф5а.3), mirroring
 // entity.MaterialUnit. Before it, every unit was free text and every consumer compared raw strings:
 // the production material plan carried a private metre synonym set (m/м/meter/meters/metre/metres)
@@ -1049,24 +1049,24 @@ export type MaterialPurpose =
 // set of rows reporting UNKNOWN is precisely the list of units that still need a human. A client
 // must therefore never treat UNKNOWN as "no unit" or as "clear the unit".
 export type MaterialUnit =
-  | "MATERIAL_UNIT_UNKNOWN"
-  | "MATERIAL_UNIT_M"
-  | "MATERIAL_UNIT_CM"
-  | "MATERIAL_UNIT_MM"
-  | "MATERIAL_UNIT_M2"
-  | "MATERIAL_UNIT_G"
-  | "MATERIAL_UNIT_KG"
-  | "MATERIAL_UNIT_PCS"
-  | "MATERIAL_UNIT_PAIR"
-  | "MATERIAL_UNIT_SET"
-  | "MATERIAL_UNIT_CONE"
-  | "MATERIAL_UNIT_ROLL";
+  | 'MATERIAL_UNIT_UNKNOWN'
+  | 'MATERIAL_UNIT_M'
+  | 'MATERIAL_UNIT_CM'
+  | 'MATERIAL_UNIT_MM'
+  | 'MATERIAL_UNIT_M2'
+  | 'MATERIAL_UNIT_G'
+  | 'MATERIAL_UNIT_KG'
+  | 'MATERIAL_UNIT_PCS'
+  | 'MATERIAL_UNIT_PAIR'
+  | 'MATERIAL_UNIT_SET'
+  | 'MATERIAL_UNIT_CONE'
+  | 'MATERIAL_UNIT_ROLL';
 // TechCardFabricDirection is the cutting layout a fabric requires.
 export type TechCardFabricDirection =
-  | "TECH_CARD_FABRIC_DIRECTION_UNKNOWN"
-  | "TECH_CARD_FABRIC_DIRECTION_ANY"
-  | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
-  | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
+  | 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
+  | 'TECH_CARD_FABRIC_DIRECTION_ANY'
+  | 'TECH_CARD_FABRIC_DIRECTION_ONE_WAY'
+  | 'TECH_CARD_FABRIC_DIRECTION_TWO_WAY';
 // TechCardPieceCutSymmetry — КАК деталь кроится (миграция 0275). Не количество: количество целиком
 // живёт в pieces_per_garment (0266 свернула туда зеркальное удвоение), и ни одно значение отсюда
 // ничего не умножает. Вернуть множитель нельзя: тех-пак печатает pieces_per_garment и НИКОГДА total,
@@ -1078,10 +1078,10 @@ export type TechCardFabricDirection =
 // контур симметричен сам себе, а отражение симметричного контура конгруэнтно ему. «Со сгибом и нужна
 // дважды» (манжеты) = FOLD + pieces_per_garment = 2.
 export type TechCardPieceCutSymmetry =
-  | "TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN"
-  | "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
-  | "TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED"
-  | "TECH_CARD_PIECE_CUT_SYMMETRY_FOLD";
+  | 'TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN'
+  | 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL'
+  | 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED'
+  | 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD';
 // TechCardPieceFusingMode — КАК ИМЕННО дублируется деталь (миграция 0304). Осмысленно только у
 // детали с поднятой галкой `fused`: галка отвечает «дублируется ли», это поле — «где именно лежит
 // клеевая».
@@ -1105,21 +1105,21 @@ export type TechCardPieceCutSymmetry =
 // stitches_per_cm и все overrides шага. Связь с эталоном при этом не теряется, а укрепляется:
 // раньше эталон читал только один из двух режимов.
 export type TechCardPieceFusingMode =
-  | "TECH_CARD_PIECE_FUSING_MODE_UNKNOWN"
-  | "TECH_CARD_PIECE_FUSING_MODE_FULL"
-  | "TECH_CARD_PIECE_FUSING_MODE_STRIP"
-  | "TECH_CARD_PIECE_FUSING_MODE_ZONE";
+  | 'TECH_CARD_PIECE_FUSING_MODE_UNKNOWN'
+  | 'TECH_CARD_PIECE_FUSING_MODE_FULL'
+  | 'TECH_CARD_PIECE_FUSING_MODE_STRIP'
+  | 'TECH_CARD_PIECE_FUSING_MODE_ZONE';
 // TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
 export type TechCardLabelType =
-  | "TECH_CARD_LABEL_TYPE_UNKNOWN"
-  | "TECH_CARD_LABEL_TYPE_MAIN"
-  | "TECH_CARD_LABEL_TYPE_SIZE"
-  | "TECH_CARD_LABEL_TYPE_CARE"
-  | "TECH_CARD_LABEL_TYPE_ORIGIN"
-  | "TECH_CARD_LABEL_TYPE_FLAG"
-  | "TECH_CARD_LABEL_TYPE_HANGTAG"
-  | "TECH_CARD_LABEL_TYPE_BARCODE"
-  | "TECH_CARD_LABEL_TYPE_SPECIAL";
+  | 'TECH_CARD_LABEL_TYPE_UNKNOWN'
+  | 'TECH_CARD_LABEL_TYPE_MAIN'
+  | 'TECH_CARD_LABEL_TYPE_SIZE'
+  | 'TECH_CARD_LABEL_TYPE_CARE'
+  | 'TECH_CARD_LABEL_TYPE_ORIGIN'
+  | 'TECH_CARD_LABEL_TYPE_FLAG'
+  | 'TECH_CARD_LABEL_TYPE_HANGTAG'
+  | 'TECH_CARD_LABEL_TYPE_BARCODE'
+  | 'TECH_CARD_LABEL_TYPE_SPECIAL';
 // TechCardMachineType is the SECOND AXIS of a sewing step: operation_type says WHAT is done
 // («machine», «press», «fusing»…), this says ON WHAT. Holding both on one field is what made the
 // old TechCardOperationType a mixture of a verb and a machine class — a step could not say
@@ -1128,102 +1128,102 @@ export type TechCardLabelType =
 // reason: without it the migration of the legacy `double_needle` operation type would have
 // collapsed irreversibly into the plain lockstitch and lost the fact somebody recorded.
 export type TechCardMachineType =
-  | "TECH_CARD_MACHINE_TYPE_UNKNOWN"
-  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH"
+  | 'TECH_CARD_MACHINE_TYPE_UNKNOWN'
+  | 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH'
   // Двухигольная прямострочная. ТРЕБУЕТ needle_count = 2 (правило Go): машина и число игл — один
   // факт, и до этого правила были законны все четыре комбинации, включая «двухигольная, игл 1».
   // Член ОСТАЁТСЯ живым, хотя двухигольность выразима числом: он единственная цель канонизации
   // замороженного легаси-глагола DOUBLE_NEEDLE, и снятие сломало бы чтение старых строк. Из пикера
   // он убран — писать двухигольность полагается прямострочкой с needle_count = 2.
-  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE"
-  | "TECH_CARD_MACHINE_TYPE_OVERLOCK"
-  | "TECH_CARD_MACHINE_TYPE_COVERSTITCH"
-  | "TECH_CARD_MACHINE_TYPE_COVERLOCK"
-  | "TECH_CARD_MACHINE_TYPE_CHAINSTITCH"
-  | "TECH_CARD_MACHINE_TYPE_BLINDSTITCH"
-  | "TECH_CARD_MACHINE_TYPE_ZIGZAG"
-  | "TECH_CARD_MACHINE_TYPE_BARTACK"
-  | "TECH_CARD_MACHINE_TYPE_BUTTONHOLE"
-  | "TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH"
-  | "TECH_CARD_MACHINE_TYPE_EMBROIDERY"
-  | "TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION"
-  | "TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH"
-  | "TECH_CARD_MACHINE_TYPE_BINDING_TAPING"
-  | "TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING"
-  | "TECH_CARD_MACHINE_TYPE_GATHERING"
-  | "TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO"
-  | "TECH_CARD_MACHINE_TYPE_OTHER"
+  | 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE'
+  | 'TECH_CARD_MACHINE_TYPE_OVERLOCK'
+  | 'TECH_CARD_MACHINE_TYPE_COVERSTITCH'
+  | 'TECH_CARD_MACHINE_TYPE_COVERLOCK'
+  | 'TECH_CARD_MACHINE_TYPE_CHAINSTITCH'
+  | 'TECH_CARD_MACHINE_TYPE_BLINDSTITCH'
+  | 'TECH_CARD_MACHINE_TYPE_ZIGZAG'
+  | 'TECH_CARD_MACHINE_TYPE_BARTACK'
+  | 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE'
+  | 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH'
+  | 'TECH_CARD_MACHINE_TYPE_EMBROIDERY'
+  | 'TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION'
+  | 'TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH'
+  | 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING'
+  | 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING'
+  | 'TECH_CARD_MACHINE_TYPE_GATHERING'
+  | 'TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO'
+  | 'TECH_CARD_MACHINE_TYPE_OTHER'
   // СВАРКА И ПРОКЛЕЙКА — иглы и нитки тут нет вовсе. Легаси-двойника среди 1..9
   // TechCardOperationType у них нет, поэтому в компат-канонизацию они не входят: шаг пишется как
   // (MACHINE, этот тип), ровно как coverlock сегодня. Ниточно-игольные overrides шага
   // (thread_count, needle_type, needle_size_nm, thread_tension, stitch_width_mm) при этих двух
   // типах отвергаются: у сварного шва их нет.
-  | "TECH_CARD_MACHINE_TYPE_SEAM_TAPING"
-  | "TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER";
+  | 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING'
+  | 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER';
 // TechCardPressEquipment is the «on what» of a ВТО step (PRESS / PRESS_OPEN / FUSING), the press
 // side of the same second axis TechCardMachineType covers for sewing.
 export type TechCardPressEquipment =
-  | "TECH_CARD_PRESS_EQUIPMENT_UNKNOWN"
-  | "TECH_CARD_PRESS_EQUIPMENT_IRON"
-  | "TECH_CARD_PRESS_EQUIPMENT_PRESS"
-  | "TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS"
-  | "TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY"
-  | "TECH_CARD_PRESS_EQUIPMENT_STEAMER"
-  | "TECH_CARD_PRESS_EQUIPMENT_OTHER";
+  | 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
+  | 'TECH_CARD_PRESS_EQUIPMENT_IRON'
+  | 'TECH_CARD_PRESS_EQUIPMENT_PRESS'
+  | 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS'
+  | 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY'
+  | 'TECH_CARD_PRESS_EQUIPMENT_STEAMER'
+  | 'TECH_CARD_PRESS_EQUIPMENT_OTHER';
 // TechCardNeedleType is the needle point, the fact that decides whether a knit is pierced or
 // pushed aside. UNKNOWN = inherit (profile → nothing), never «universal by default».
 export type TechCardNeedleType =
-  | "TECH_CARD_NEEDLE_TYPE_UNKNOWN"
-  | "TECH_CARD_NEEDLE_TYPE_UNIVERSAL"
-  | "TECH_CARD_NEEDLE_TYPE_BALLPOINT"
-  | "TECH_CARD_NEEDLE_TYPE_STRETCH"
-  | "TECH_CARD_NEEDLE_TYPE_JEANS"
-  | "TECH_CARD_NEEDLE_TYPE_LEATHER"
-  | "TECH_CARD_NEEDLE_TYPE_MICROTEX"
-  | "TECH_CARD_NEEDLE_TYPE_EMBROIDERY"
-  | "TECH_CARD_NEEDLE_TYPE_OTHER";
+  | 'TECH_CARD_NEEDLE_TYPE_UNKNOWN'
+  | 'TECH_CARD_NEEDLE_TYPE_UNIVERSAL'
+  | 'TECH_CARD_NEEDLE_TYPE_BALLPOINT'
+  | 'TECH_CARD_NEEDLE_TYPE_STRETCH'
+  | 'TECH_CARD_NEEDLE_TYPE_JEANS'
+  | 'TECH_CARD_NEEDLE_TYPE_LEATHER'
+  | 'TECH_CARD_NEEDLE_TYPE_MICROTEX'
+  | 'TECH_CARD_NEEDLE_TYPE_EMBROIDERY'
+  | 'TECH_CARD_NEEDLE_TYPE_OTHER';
 // TechCardBedType is the machine's bed. It is the IDENTITY of a machine, not a setting of a step —
 // which is why it lives on the profile only and has deliberately no override on the operation:
 // a different bed is a different machine, so the step changes machine_type instead.
 export type TechCardBedType =
-  | "TECH_CARD_BED_TYPE_UNKNOWN"
-  | "TECH_CARD_BED_TYPE_FLATBED"
-  | "TECH_CARD_BED_TYPE_CYLINDER_BED"
-  | "TECH_CARD_BED_TYPE_POST_BED"
-  | "TECH_CARD_BED_TYPE_FEED_OFF_ARM"
-  | "TECH_CARD_BED_TYPE_OTHER";
+  | 'TECH_CARD_BED_TYPE_UNKNOWN'
+  | 'TECH_CARD_BED_TYPE_FLATBED'
+  | 'TECH_CARD_BED_TYPE_CYLINDER_BED'
+  | 'TECH_CARD_BED_TYPE_POST_BED'
+  | 'TECH_CARD_BED_TYPE_FEED_OFF_ARM'
+  | 'TECH_CARD_BED_TYPE_OTHER';
 // TechCardAutomationLevel is an ORDERED SCALE, and therefore has NO `OTHER`: a scale with an
 // «other» member is no longer a scale. Like bed_type it is machine identity, profile-only.
 export type TechCardAutomationLevel =
-  | "TECH_CARD_AUTOMATION_LEVEL_UNKNOWN"
-  | "TECH_CARD_AUTOMATION_LEVEL_BASIC"
-  | "TECH_CARD_AUTOMATION_LEVEL_SEMI_AUTO"
-  | "TECH_CARD_AUTOMATION_LEVEL_AUTO";
+  | 'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN'
+  | 'TECH_CARD_AUTOMATION_LEVEL_BASIC'
+  | 'TECH_CARD_AUTOMATION_LEVEL_SEMI_AUTO'
+  | 'TECH_CARD_AUTOMATION_LEVEL_AUTO';
 // TechCardThreadTension is a CLOSED SCALE relative to the machine's normal setting, plus a free
 // thread_tension_note for the numbers a particular machine wants. A raw dial number was rejected
 // deliberately: it means nothing across two machines of the same class.
 export type TechCardThreadTension =
-  | "TECH_CARD_THREAD_TENSION_UNKNOWN"
-  | "TECH_CARD_THREAD_TENSION_LOOSER"
-  | "TECH_CARD_THREAD_TENSION_NORMAL"
-  | "TECH_CARD_THREAD_TENSION_TIGHTER";
+  | 'TECH_CARD_THREAD_TENSION_UNKNOWN'
+  | 'TECH_CARD_THREAD_TENSION_LOOSER'
+  | 'TECH_CARD_THREAD_TENSION_NORMAL'
+  | 'TECH_CARD_THREAD_TENSION_TIGHTER';
 // TechCardPressCloth is what sits between the iron and the cloth.
 // NONE IS NOT UNKNOWN HERE, and that is the point: with inheritance in play, «не указано» means
 // «take the card profile's answer», so without an explicit NONE a step could never CANCEL the
 // profile's press cloth. The same argument added NONE to TechCardAttachmentKind.
 export type TechCardPressCloth =
-  | "TECH_CARD_PRESS_CLOTH_UNKNOWN"
-  | "TECH_CARD_PRESS_CLOTH_NONE"
-  | "TECH_CARD_PRESS_CLOTH_PRESS_CLOTH"
-  | "TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH"
-  | "TECH_CARD_PRESS_CLOTH_TEFLON_SHEET"
-  | "TECH_CARD_PRESS_CLOTH_OTHER"
-  | "TECH_CARD_PRESS_CLOTH_SILICONE_PAPER";
+  | 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
+  | 'TECH_CARD_PRESS_CLOTH_NONE'
+  | 'TECH_CARD_PRESS_CLOTH_PRESS_CLOTH'
+  | 'TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH'
+  | 'TECH_CARD_PRESS_CLOTH_TEFLON_SHEET'
+  | 'TECH_CARD_PRESS_CLOTH_OTHER'
+  | 'TECH_CARD_PRESS_CLOTH_SILICONE_PAPER';
 // TechCardOperationType says WHAT a step does. It used to mix that with the machine class, which
 // is why 1-9 read like a machine list: a step could not say «прострочить» without also committing
 // to a stitch class in the same value, and «на чём» had no field of its own. The second axis is
@@ -1236,36 +1236,36 @@ export type TechCardPressCloth =
 // TechCardOperation); FOLD и PACK не несут ни одного поля — у них нет ни машины, ни настроек,
 // только место и время.
 export type TechCardOperationType =
-  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
+  | 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
   // 1-9 ARE LEGACY AND LIVE FOREVER. They are still ACCEPTED on write (canonicalised into
   // (MACHINE, machine_type) before anything else sees them) but never EMITTED on read.
   // The symbols themselves can never be deleted: a release snapshot is immutable protojson holding
   // these very names, and removing a member would make such a snapshot parse «successfully» while
   // silently losing what the step was. A cleanup phase for them was considered and cancelled.
-  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
-  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
-  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
-  | "TECH_CARD_OPERATION_TYPE_BARTACK"
-  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
-  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
-  | "TECH_CARD_OPERATION_TYPE_FUSING"
-  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
-  | "TECH_CARD_OPERATION_TYPE_OTHER"
-  | "TECH_CARD_OPERATION_TYPE_MACHINE"
-  | "TECH_CARD_OPERATION_TYPE_PRESS"
-  | "TECH_CARD_OPERATION_TYPE_PRESS_OPEN"
-  | "TECH_CARD_OPERATION_TYPE_HARDWARE_SET"
-  | "TECH_CARD_OPERATION_TYPE_PRINT"
-  | "TECH_CARD_OPERATION_TYPE_TRIM"
-  | "TECH_CARD_OPERATION_TYPE_THREAD_TRIM"
-  | "TECH_CARD_OPERATION_TYPE_CLEAN"
-  | "TECH_CARD_OPERATION_TYPE_INSPECT"
-  | "TECH_CARD_OPERATION_TYPE_FOLD"
-  | "TECH_CARD_OPERATION_TYPE_PACK"
-  | "TECH_CARD_OPERATION_TYPE_WET_PROCESS";
+  | 'TECH_CARD_OPERATION_TYPE_LOCKSTITCH'
+  | 'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE'
+  | 'TECH_CARD_OPERATION_TYPE_OVERLOCK'
+  | 'TECH_CARD_OPERATION_TYPE_COVERSTITCH'
+  | 'TECH_CARD_OPERATION_TYPE_CHAINSTITCH'
+  | 'TECH_CARD_OPERATION_TYPE_BLINDHEM'
+  | 'TECH_CARD_OPERATION_TYPE_BARTACK'
+  | 'TECH_CARD_OPERATION_TYPE_BUTTONHOLE'
+  | 'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH'
+  | 'TECH_CARD_OPERATION_TYPE_FUSING'
+  | 'TECH_CARD_OPERATION_TYPE_HANDWORK'
+  | 'TECH_CARD_OPERATION_TYPE_OTHER'
+  | 'TECH_CARD_OPERATION_TYPE_MACHINE'
+  | 'TECH_CARD_OPERATION_TYPE_PRESS'
+  | 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN'
+  | 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET'
+  | 'TECH_CARD_OPERATION_TYPE_PRINT'
+  | 'TECH_CARD_OPERATION_TYPE_TRIM'
+  | 'TECH_CARD_OPERATION_TYPE_THREAD_TRIM'
+  | 'TECH_CARD_OPERATION_TYPE_CLEAN'
+  | 'TECH_CARD_OPERATION_TYPE_INSPECT'
+  | 'TECH_CARD_OPERATION_TYPE_FOLD'
+  | 'TECH_CARD_OPERATION_TYPE_PACK'
+  | 'TECH_CARD_OPERATION_TYPE_WET_PROCESS';
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
 // step cannot be saved without (the other is operation_type). Renamed from
 // TechCardConstructionZone, which had only the three material BANDS and therefore could not answer
@@ -1279,24 +1279,24 @@ export type TechCardOperationType =
 // NUMBERS ARE NOT REPACKED: OTHER stays 4 because it is already on the wire, and the areas take
 // 5..17 after it. Reading order (bands, then areas, then other) lives in GarmentZoneTokens.
 export type TechCardGarmentZone =
-  | "TECH_CARD_GARMENT_ZONE_UNKNOWN"
-  | "TECH_CARD_GARMENT_ZONE_OUTER"
-  | "TECH_CARD_GARMENT_ZONE_LINING"
-  | "TECH_CARD_GARMENT_ZONE_INTERLINING"
-  | "TECH_CARD_GARMENT_ZONE_OTHER"
-  | "TECH_CARD_GARMENT_ZONE_SLEEVE"
-  | "TECH_CARD_GARMENT_ZONE_COLLAR"
-  | "TECH_CARD_GARMENT_ZONE_NECKLINE"
-  | "TECH_CARD_GARMENT_ZONE_ARMHOLE"
-  | "TECH_CARD_GARMENT_ZONE_SHOULDER"
-  | "TECH_CARD_GARMENT_ZONE_CHEST"
-  | "TECH_CARD_GARMENT_ZONE_WAIST"
-  | "TECH_CARD_GARMENT_ZONE_HIP"
-  | "TECH_CARD_GARMENT_ZONE_HEM"
-  | "TECH_CARD_GARMENT_ZONE_POCKET"
-  | "TECH_CARD_GARMENT_ZONE_CLOSURE"
-  | "TECH_CARD_GARMENT_ZONE_BACK"
-  | "TECH_CARD_GARMENT_ZONE_FRONT";
+  | 'TECH_CARD_GARMENT_ZONE_UNKNOWN'
+  | 'TECH_CARD_GARMENT_ZONE_OUTER'
+  | 'TECH_CARD_GARMENT_ZONE_LINING'
+  | 'TECH_CARD_GARMENT_ZONE_INTERLINING'
+  | 'TECH_CARD_GARMENT_ZONE_OTHER'
+  | 'TECH_CARD_GARMENT_ZONE_SLEEVE'
+  | 'TECH_CARD_GARMENT_ZONE_COLLAR'
+  | 'TECH_CARD_GARMENT_ZONE_NECKLINE'
+  | 'TECH_CARD_GARMENT_ZONE_ARMHOLE'
+  | 'TECH_CARD_GARMENT_ZONE_SHOULDER'
+  | 'TECH_CARD_GARMENT_ZONE_CHEST'
+  | 'TECH_CARD_GARMENT_ZONE_WAIST'
+  | 'TECH_CARD_GARMENT_ZONE_HIP'
+  | 'TECH_CARD_GARMENT_ZONE_HEM'
+  | 'TECH_CARD_GARMENT_ZONE_POCKET'
+  | 'TECH_CARD_GARMENT_ZONE_CLOSURE'
+  | 'TECH_CARD_GARMENT_ZONE_BACK'
+  | 'TECH_CARD_GARMENT_ZONE_FRONT';
 // TechCardSeamClass is the ISO 4916 seam class, in its six families: SS superimposed, LS lapped,
 // EF edge finishing, BS bound, FS flat, OS ornamental. It replaces the free-text `seam_type`,
 // whose suggestion list mixed the class with the PRESSING DIRECTION — «стачной взаутюжку» and
@@ -1308,22 +1308,22 @@ export type TechCardGarmentZone =
 // server stores the unset value and never materialises the inherited one, so «the technologist
 // chose this» stays distinguishable from «it defaulted».
 export type TechCardSeamClass =
-  | "TECH_CARD_SEAM_CLASS_UNKNOWN"
-  | "TECH_CARD_SEAM_CLASS_SS_PLAIN"
-  | "TECH_CARD_SEAM_CLASS_SS_FRENCH"
-  | "TECH_CARD_SEAM_CLASS_LS_LAPPED"
-  | "TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED"
-  | "TECH_CARD_SEAM_CLASS_EF_HEM_RAW"
-  | "TECH_CARD_SEAM_CLASS_EF_HEM_TURNED"
-  | "TECH_CARD_SEAM_CLASS_EF_FACED"
-  | "TECH_CARD_SEAM_CLASS_BS_BOUND"
-  | "TECH_CARD_SEAM_CLASS_FS_FLAT"
+  | 'TECH_CARD_SEAM_CLASS_UNKNOWN'
+  | 'TECH_CARD_SEAM_CLASS_SS_PLAIN'
+  | 'TECH_CARD_SEAM_CLASS_SS_FRENCH'
+  | 'TECH_CARD_SEAM_CLASS_LS_LAPPED'
+  | 'TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED'
+  | 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW'
+  | 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED'
+  | 'TECH_CARD_SEAM_CLASS_EF_FACED'
+  | 'TECH_CARD_SEAM_CLASS_BS_BOUND'
+  | 'TECH_CARD_SEAM_CLASS_FS_FLAT'
   // ОТДЕЛОЧНАЯ СТРОЧКА — не класс шва наравне с прочими, а утверждение «соединительного шва у
   // этого шага нет». ТРЕБУЕТ непустого TechCardTopstitch.mode (правило Go), и обратно: непустой
   // mode при НЕНАЗВАННОМ классе отвергается — неназванный класс наследует умолчание карточки, и
   // чисто декоративная строчка молча объявлялась бы стачным швом.
-  | "TECH_CARD_SEAM_CLASS_OS_TOPSTITCH"
-  | "TECH_CARD_SEAM_CLASS_OTHER";
+  | 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH'
+  | 'TECH_CARD_SEAM_CLASS_OTHER';
 // TechCardAttachmentKind is the folder / guide / presser foot the step runs with.
 // THERE IS A `NONE` NOW, AND IT IS NOT A SPELLING OF UNKNOWN. The old comment here said the
 // opposite — «none» and «not specified» are the same fact — and it was TRUE for as long as this
@@ -1335,19 +1335,19 @@ export type TechCardSeamClass =
 // machine with a unison / top feed — a property of the TRANSPORT, not a snap-on foot an operator
 // fits per step. If it is ever needed it belongs next to bed_type on the machine, not here.
 export type TechCardAttachmentKind =
-  | "TECH_CARD_ATTACHMENT_KIND_UNKNOWN"
-  | "TECH_CARD_ATTACHMENT_KIND_BINDER"
-  | "TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER"
-  | "TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE"
-  | "TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT"
-  | "TECH_CARD_ATTACHMENT_KIND_OTHER"
-  | "TECH_CARD_ATTACHMENT_KIND_TEFLON_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_ROLLER_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_NONE";
+  | 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'
+  | 'TECH_CARD_ATTACHMENT_KIND_BINDER'
+  | 'TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER'
+  | 'TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE'
+  | 'TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT'
+  | 'TECH_CARD_ATTACHMENT_KIND_OTHER'
+  | 'TECH_CARD_ATTACHMENT_KIND_TEFLON_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_ROLLER_FOOT'
+  | 'TECH_CARD_ATTACHMENT_KIND_NONE';
 // TechCardTopstitchMode replaces the free-text `topstitch_width`, whose real values were three
 // different KINDS of answer at once: «нет», «в край» (a placement, not a width) and «2 × 6 мм»
 // (a width AND a row count).
@@ -1368,66 +1368,66 @@ export type TechCardAttachmentKind =
 // EDGE меряли от одного края, число просто стало свойством EDGE, а колонка ширины не тронута.
 // Релизов с этим полем — 0, подписей — 0, поэтому ни один отпечаток перенос не сдвинул.
 export type TechCardTopstitchMode =
-  | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
+  | 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
   // В КРАЙ / НА ОТСТУПЕ ОТ КРАЯ: точка отсчёта — КРАЙ ДЕТАЛИ. width_mm здесь ОПЦИОНАЛЬНА:
   // заполнена — отступ от края в мм, пуста — строчка идёт вплотную к краю.
-  | "TECH_CARD_TOPSTITCH_MODE_EDGE"
+  | 'TECH_CARD_TOPSTITCH_MODE_EDGE'
   // В ШОВ («в канавку»): строчка ложится в сам шов, ширины у неё нет — width_mm отвергается.
-  | "TECH_CARD_TOPSTITCH_MODE_IN_DITCH"
+  | 'TECH_CARD_TOPSTITCH_MODE_IN_DITCH'
   // ПАРАЛЛЕЛЬНО ШВУ: width_mm здесь REQUIRED и значит ОТСТУП ОТ ЛИНИИ ШВА. От EDGE отличается
   // точкой отсчёта: у EDGE это край детали, здесь — шов. Два разных факта под одним числом
   // разошлись бы на печати молча, поэтому это отдельный режим, а не примечание к EDGE.
-  | "TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM";
+  | 'TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM';
 // Закрепка концов строчки. NONE — явное «без закрепки»: так шьётся то, что дальше поймается
 // другим швом, и это не то же самое, что «не указано».
 export type TechCardSeamSecuring =
-  | "TECH_CARD_SEAM_SECURING_UNKNOWN"
-  | "TECH_CARD_SEAM_SECURING_NONE"
-  | "TECH_CARD_SEAM_SECURING_BACKTACK"
-  | "TECH_CARD_SEAM_SECURING_CONDENSED"
-  | "TECH_CARD_SEAM_SECURING_LATCHED";
+  | 'TECH_CARD_SEAM_SECURING_UNKNOWN'
+  | 'TECH_CARD_SEAM_SECURING_NONE'
+  | 'TECH_CARD_SEAM_SECURING_BACKTACK'
+  | 'TECH_CARD_SEAM_SECURING_CONDENSED'
+  | 'TECH_CARD_SEAM_SECURING_LATCHED';
 // Способ КРЕПЛЕНИЯ фурнитуры — дискриминатор шага HARDWARE_SET: поле REQUIRED, и UNKNOWN на таком
 // шаге отвергается. Отвечает «как ставим», а не «что ставим»: что — это kind строки BOM.
 export type TechCardHardwareAttachMethod =
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_SEW"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP"
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED"
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_SEW'
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH'
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET'
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP'
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | "TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER";
+  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER';
 // Подготовка отверстия под фурнитуру — ось «готовим отверстие ОТДЕЛЬНЫМ ШАГОМ или нет».
 export type TechCardHolePrep =
-  | "TECH_CARD_HOLE_PREP_UNKNOWN"
-  | "TECH_CARD_HOLE_PREP_NONE"
-  | "TECH_CARD_HOLE_PREP_AWL_PIERCE"
-  | "TECH_CARD_HOLE_PREP_PUNCH";
+  | 'TECH_CARD_HOLE_PREP_UNKNOWN'
+  | 'TECH_CARD_HOLE_PREP_NONE'
+  | 'TECH_CARD_HOLE_PREP_AWL_PIERCE'
+  | 'TECH_CARD_HOLE_PREP_PUNCH';
 // Усилитель под фурнитурой, петлёй или закрепкой. Здесь только СПОСОБ; сам материал усилителя —
 // строкой BOM, а не тенью в этом поле.
 export type TechCardReinforcement =
-  | "TECH_CARD_REINFORCEMENT_UNKNOWN"
-  | "TECH_CARD_REINFORCEMENT_NONE"
-  | "TECH_CARD_REINFORCEMENT_TAPE"
-  | "TECH_CARD_REINFORCEMENT_SEAM_CATCH"
-  | "TECH_CARD_REINFORCEMENT_OTHER"
-  | "TECH_CARD_REINFORCEMENT_PATCH";
+  | 'TECH_CARD_REINFORCEMENT_UNKNOWN'
+  | 'TECH_CARD_REINFORCEMENT_NONE'
+  | 'TECH_CARD_REINFORCEMENT_TAPE'
+  | 'TECH_CARD_REINFORCEMENT_SEAM_CATCH'
+  | 'TECH_CARD_REINFORCEMENT_OTHER'
+  | 'TECH_CARD_REINFORCEMENT_PATCH';
 // Вторая ось шага PRINT — точный образец пары MACHINE / machine_type: глагол говорит ЧТО делаем,
 // это — ЧЕМ. Носитель — TechCardOperation.print_method (поле 51), REQUIRED при PRINT.
 // LASER_ENGRAVE — метод без краски, без носителя и без прижима: при нём отвергаются peel_mode,
 // second_press_sec и весь ВТО-блок шага. SCREEN носителя тоже не имеет, и peel_mode при нём
 // отвергается (0327) — но прижим у шелкографии бывает, поэтому весь ВТО-блок при ней законен.
 export type TechCardPrintMethod =
-  | "TECH_CARD_PRINT_METHOD_UNKNOWN"
-  | "TECH_CARD_PRINT_METHOD_SCREEN"
-  | "TECH_CARD_PRINT_METHOD_DTF"
-  | "TECH_CARD_PRINT_METHOD_HEAT_TRANSFER"
-  | "TECH_CARD_PRINT_METHOD_FOIL"
-  | "TECH_CARD_PRINT_METHOD_LASER_ENGRAVE"
+  | 'TECH_CARD_PRINT_METHOD_UNKNOWN'
+  | 'TECH_CARD_PRINT_METHOD_SCREEN'
+  | 'TECH_CARD_PRINT_METHOD_DTF'
+  | 'TECH_CARD_PRINT_METHOD_HEAT_TRANSFER'
+  | 'TECH_CARD_PRINT_METHOD_FOIL'
+  | 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
@@ -1435,126 +1435,126 @@ export type TechCardPrintMethod =
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
   // ВЫШИВКИ В ПРИМЕРАХ НЕТ НАМЕРЕННО: вышивка — это МАШИНА (machine_type = embroidery), а не
   // метод печати, и вторым написанием она была ровно так же, как press_action = open.
-  | "TECH_CARD_PRINT_METHOD_OTHER";
+  | 'TECH_CARD_PRINT_METHOD_OTHER';
 // Съём носителя после прижима.
 export type TechCardPeelMode =
-  | "TECH_CARD_PEEL_MODE_UNKNOWN"
-  | "TECH_CARD_PEEL_MODE_HOT"
-  | "TECH_CARD_PEEL_MODE_WARM"
-  | "TECH_CARD_PEEL_MODE_COLD";
+  | 'TECH_CARD_PEEL_MODE_UNKNOWN'
+  | 'TECH_CARD_PEEL_MODE_HOT'
+  | 'TECH_CARD_PEEL_MODE_WARM'
+  | 'TECH_CARD_PEEL_MODE_COLD';
 // Что именно делает шаг TRIM — дискриминатор: поле REQUIRED, UNKNOWN на таком шаге отвергается.
 export type TechCardTrimAction =
-  | "TECH_CARD_TRIM_ACTION_UNKNOWN"
-  | "TECH_CARD_TRIM_ACTION_TRIM_EVEN"
-  | "TECH_CARD_TRIM_ACTION_GRADE_LAYERS"
-  | "TECH_CARD_TRIM_ACTION_CLIP_CONCAVE"
-  | "TECH_CARD_TRIM_ACTION_NOTCH_CONVEX"
-  | "TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL"
-  | "TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE"
+  | 'TECH_CARD_TRIM_ACTION_UNKNOWN'
+  | 'TECH_CARD_TRIM_ACTION_TRIM_EVEN'
+  | 'TECH_CARD_TRIM_ACTION_GRADE_LAYERS'
+  | 'TECH_CARD_TRIM_ACTION_CLIP_CONCAVE'
+  | 'TECH_CARD_TRIM_ACTION_NOTCH_CONVEX'
+  | 'TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL'
+  | 'TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | "TECH_CARD_TRIM_ACTION_OTHER";
+  | 'TECH_CARD_TRIM_ACTION_OTHER';
 // Что чистит шаг CLEAN — дискриминатор: REQUIRED, UNKNOWN отвергается. ЧЕМ чистит (вода,
 // растворитель, пар, щётка) — отложено: у цеха на это пока один ответ, и поле сегодня записывало
 // бы одно и то же.
 export type TechCardCleaningKind =
-  | "TECH_CARD_CLEANING_KIND_UNKNOWN"
-  | "TECH_CARD_CLEANING_KIND_SPOT_CLEAN"
-  | "TECH_CARD_CLEANING_KIND_DUST_LINT"
+  | 'TECH_CARD_CLEANING_KIND_UNKNOWN'
+  | 'TECH_CARD_CLEANING_KIND_SPOT_CLEAN'
+  | 'TECH_CARD_CLEANING_KIND_DUST_LINT'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | "TECH_CARD_CLEANING_KIND_OTHER";
+  | 'TECH_CARD_CLEANING_KIND_OTHER';
 // Охват контроля — дискриминатор шага INSPECT: REQUIRED, UNKNOWN отвергается. Словарь отвечает на
 // ОДИН вопрос — сколько изделий смотрим: все (EACH_UNIT) или выборку, и по какому правилу
 // (SAMPLE_PER_BUNDLE, AQL_PLAN).
 export type TechCardInspectCoverage =
-  | "TECH_CARD_INSPECT_COVERAGE_UNKNOWN"
-  | "TECH_CARD_INSPECT_COVERAGE_EACH_UNIT"
-  | "TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE"
-  | "TECH_CARD_INSPECT_COVERAGE_AQL_PLAN"
+  | 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN'
+  | 'TECH_CARD_INSPECT_COVERAGE_EACH_UNIT'
+  | 'TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE'
+  | 'TECH_CARD_INSPECT_COVERAGE_AQL_PLAN'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | "TECH_CARD_INSPECT_COVERAGE_OTHER";
+  | 'TECH_CARD_INSPECT_COVERAGE_OTHER';
 // Вид мокрой обработки — дискриминатор шага WET_PROCESS: REQUIRED, UNKNOWN отвергается. Носитель —
 // TechCardOperation.wet_process_kind (поле 61), а не блок: семейство из одного факта не нуждается
 // в сообщении вокруг него.
 export type TechCardWetProcessKind =
-  | "TECH_CARD_WET_PROCESS_KIND_UNKNOWN"
-  | "TECH_CARD_WET_PROCESS_KIND_RINSE"
-  | "TECH_CARD_WET_PROCESS_KIND_ENZYME"
-  | "TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE"
-  | "TECH_CARD_WET_PROCESS_KIND_SOFTENER"
+  | 'TECH_CARD_WET_PROCESS_KIND_UNKNOWN'
+  | 'TECH_CARD_WET_PROCESS_KIND_RINSE'
+  | 'TECH_CARD_WET_PROCESS_KIND_ENZYME'
+  | 'TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE'
+  | 'TECH_CARD_WET_PROCESS_KIND_SOFTENER'
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | "TECH_CARD_WET_PROCESS_KIND_OTHER";
+  | 'TECH_CARD_WET_PROCESS_KIND_OTHER';
 // Форма петли. Обтачной петли здесь нет и не будет: она не форма, а несколько швейных шагов.
 export type TechCardButtonholeStyle =
-  | "TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN"
-  | "TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT"
-  | "TECH_CARD_BUTTONHOLE_STYLE_EYELET"
-  | "TECH_CARD_BUTTONHOLE_STYLE_ROUND_END"
-  | "TECH_CARD_BUTTONHOLE_STYLE_OTHER";
+  | 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'
+  | 'TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT'
+  | 'TECH_CARD_BUTTONHOLE_STYLE_EYELET'
+  | 'TECH_CARD_BUTTONHOLE_STYLE_ROUND_END'
+  | 'TECH_CARD_BUTTONHOLE_STYLE_OTHER';
 // Направление петли на изделии. Точное МЕСТО петли — выноской на снимке шага, а не полем: место
 // это координата, и полем оно выражается ровно один раз — неправильно.
 export type TechCardButtonholeOrientation =
-  | "TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN"
-  | "TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL"
-  | "TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL"
-  | "TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED";
+  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'
+  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL'
+  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL'
+  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED';
 // Рисунок пришивания пуговицы. Согласованность с числом отверстий — мягкое предупреждение формы,
 // а не отказ сохранения: число отверстий это свойство артикула из строки BOM, и оно может прийти
 // позже самого шага.
 export type TechCardButtonAttachPattern =
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN"
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X"
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL"
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE"
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE"
-  | "TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER";
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X'
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL'
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE'
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE'
+  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER';
 // Метод втачивания молнии — закрытый список ИСПОЛНЕНИЙ, то есть того, как закрыта лента. Ни МЕСТА,
 // ни свойств самого артикула здесь нет: место — это zone шага, разъёмность — свойство молнии из
 // строки BOM.
 export type TechCardZipperApplication =
-  | "TECH_CARD_ZIPPER_APPLICATION_UNKNOWN"
-  | "TECH_CARD_ZIPPER_APPLICATION_CENTERED"
-  | "TECH_CARD_ZIPPER_APPLICATION_LAPPED"
-  | "TECH_CARD_ZIPPER_APPLICATION_INVISIBLE"
-  | "TECH_CARD_ZIPPER_APPLICATION_EXPOSED"
-  | "TECH_CARD_ZIPPER_APPLICATION_FLY"
-  | "TECH_CARD_ZIPPER_APPLICATION_OTHER";
+  | 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'
+  | 'TECH_CARD_ZIPPER_APPLICATION_CENTERED'
+  | 'TECH_CARD_ZIPPER_APPLICATION_LAPPED'
+  | 'TECH_CARD_ZIPPER_APPLICATION_INVISIBLE'
+  | 'TECH_CARD_ZIPPER_APPLICATION_EXPOSED'
+  | 'TECH_CARD_ZIPPER_APPLICATION_FLY'
+  | 'TECH_CARD_ZIPPER_APPLICATION_OTHER';
 // Как сложена бейка. ISO-класс шва при этом НЕ расщепляется: BS_BOUND остаётся одним классом, а
 // это его исполнение — иначе один факт отвечал бы на два вопроса, как когда-то `seam_type`.
 // ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ — ИМЕННО seam_class = BS_BOUND, и только при нём это поле законно.
 // Машина (binding_taping) и окантовыватель (attachment_kind = BINDER) говорят «это окантовка»
 // во второй и в третий раз и обязательными спутниками не являются.
 export type TechCardBindingStyle =
-  | "TECH_CARD_BINDING_STYLE_UNKNOWN"
-  | "TECH_CARD_BINDING_STYLE_RAW"
-  | "TECH_CARD_BINDING_STYLE_SINGLE_FOLD"
-  | "TECH_CARD_BINDING_STYLE_DOUBLE_FOLD";
+  | 'TECH_CARD_BINDING_STYLE_UNKNOWN'
+  | 'TECH_CARD_BINDING_STYLE_RAW'
+  | 'TECH_CARD_BINDING_STYLE_SINGLE_FOLD'
+  | 'TECH_CARD_BINDING_STYLE_DOUBLE_FOLD';
 // Схема пришивания этикетки. Сама этикетка — строкой BOM (bom_line_keys), здесь только шов; тип
 // фолда этикетки — свойство артикула, а не шага.
 export type TechCardLabelAttachStitch =
-  | "TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK"
-  | "TECH_CARD_LABEL_ATTACH_STITCH_OTHER";
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK'
+  | 'TECH_CARD_LABEL_ATTACH_STITCH_OTHER';
 // ЧТО ИМЕННО делает ВТО-шаг. Подпись глагола PRESS обещает «to one side / steam», а сказать это
 // было нечем: глагол оставался мешком из четырёх разных приёмов, и разница уезжала в прозу note,
 // которой нет ни в подписи, ни на печатном листе.
@@ -1567,15 +1567,15 @@ export type TechCardLabelAttachStitch =
 // отпечатки. Конвенция «пикер пишет глагол и press_action не пишет вовсе» держалась ровно до
 // первого технолога, которому пикер предлагал обе строки подряд.
 export type TechCardPressAction =
-  | "TECH_CARD_PRESS_ACTION_UNKNOWN"
-  | "TECH_CARD_PRESS_ACTION_PRESS_FLAT"
-  | "TECH_CARD_PRESS_ACTION_TO_ONE_SIDE"
-  | "TECH_CARD_PRESS_ACTION_STEAM"
-  | "TECH_CARD_PRESS_ACTION_FINAL"
-  | "TECH_CARD_PRESS_ACTION_EASE_IN"
-  | "TECH_CARD_PRESS_ACTION_STRETCH"
-  | "TECH_CARD_PRESS_ACTION_MOULD"
-  | "TECH_CARD_PRESS_ACTION_OTHER";
+  | 'TECH_CARD_PRESS_ACTION_UNKNOWN'
+  | 'TECH_CARD_PRESS_ACTION_PRESS_FLAT'
+  | 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE'
+  | 'TECH_CARD_PRESS_ACTION_STEAM'
+  | 'TECH_CARD_PRESS_ACTION_FINAL'
+  | 'TECH_CARD_PRESS_ACTION_EASE_IN'
+  | 'TECH_CARD_PRESS_ACTION_STRETCH'
+  | 'TECH_CARD_PRESS_ACTION_MOULD'
+  | 'TECH_CARD_PRESS_ACTION_OTHER';
 // КУДА лёг припуск. СОБСТВЕННЫЙ словарь, а НЕ переиспользование TechCardGarmentZone: «вверх»,
 // «вниз» и «к центру» зонами не являются, а второе поле зонного типа на шаге, у которого уже есть
 // zone, — это ровно ловушка «два ключа под одним именем».
@@ -1583,19 +1583,19 @@ export type TechCardPressAction =
 // ровно один. Законен ТОЛЬКО при press_action = TO_ONE_SIDE и там ОБЯЗАТЕЛЕН — обязательность,
 // которая не может стать ретроактивной: значения TO_ONE_SIDE ни одна сохранённая строка не имеет.
 export type TechCardPressToward =
-  | "TECH_CARD_PRESS_TOWARD_UNKNOWN"
-  | "TECH_CARD_PRESS_TOWARD_FRONT"
-  | "TECH_CARD_PRESS_TOWARD_BACK"
-  | "TECH_CARD_PRESS_TOWARD_UP"
-  | "TECH_CARD_PRESS_TOWARD_DOWN"
-  | "TECH_CARD_PRESS_TOWARD_TOWARD_CENTER"
-  | "TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER"
-  | "TECH_CARD_PRESS_TOWARD_SLEEVE"
-  | "TECH_CARD_PRESS_TOWARD_BODY"
-  | "TECH_CARD_PRESS_TOWARD_FACING"
-  | "TECH_CARD_PRESS_TOWARD_SHELL"
-  | "TECH_CARD_PRESS_TOWARD_LINING"
-  | "TECH_CARD_PRESS_TOWARD_OTHER";
+  | 'TECH_CARD_PRESS_TOWARD_UNKNOWN'
+  | 'TECH_CARD_PRESS_TOWARD_FRONT'
+  | 'TECH_CARD_PRESS_TOWARD_BACK'
+  | 'TECH_CARD_PRESS_TOWARD_UP'
+  | 'TECH_CARD_PRESS_TOWARD_DOWN'
+  | 'TECH_CARD_PRESS_TOWARD_TOWARD_CENTER'
+  | 'TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER'
+  | 'TECH_CARD_PRESS_TOWARD_SLEEVE'
+  | 'TECH_CARD_PRESS_TOWARD_BODY'
+  | 'TECH_CARD_PRESS_TOWARD_FACING'
+  | 'TECH_CARD_PRESS_TOWARD_SHELL'
+  | 'TECH_CARD_PRESS_TOWARD_LINING'
+  | 'TECH_CARD_PRESS_TOWARD_OTHER';
 // TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
 // THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
 // path). Eleven fields left, and they left for three different reasons:
@@ -1631,24 +1631,24 @@ export type TechCardPressToward =
 // СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
 // примерке — им нужно будет лишь своё поле, а не свой формат выноски.
 export type TechCardAnnotationKind =
-  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
+  | 'TECH_CARD_ANNOTATION_KIND_UNKNOWN'
   // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
-  | "TECH_CARD_ANNOTATION_KIND_PIN"
+  | 'TECH_CARD_ANNOTATION_KIND_PIN'
   // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
-  | "TECH_CARD_ANNOTATION_KIND_LABEL"
+  | 'TECH_CARD_ANNOTATION_KIND_LABEL'
   // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
-  | "TECH_CARD_ANNOTATION_KIND_DIM"
+  | 'TECH_CARD_ANNOTATION_KIND_DIM'
   // 2 точки. Скобка над участком; текст — что с этим участком делать.
-  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
+  | 'TECH_CARD_ANNOTATION_KIND_BRACKET'
   // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
-  | "TECH_CARD_ANNOTATION_KIND_MULTI"
+  | 'TECH_CARD_ANNOTATION_KIND_MULTI'
   // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
   // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
   // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
   // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
   // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
   // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
-  | "TECH_CARD_ANNOTATION_KIND_ARC"
+  | 'TECH_CARD_ANNOTATION_KIND_ARC'
   // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
   // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
   // порок ткани и участок дублирования имеют форму пятна.
@@ -1656,28 +1656,28 @@ export type TechCardAnnotationKind =
   // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
   // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
   // предательски на печати.
-  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
+  | 'TECH_CARD_ANNOTATION_KIND_POLYGON'
   // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
   // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
   // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
   // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
   // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
   // здесь потолок, а не норма.
-  | "TECH_CARD_ANNOTATION_KIND_INK";
+  | 'TECH_CARD_ANNOTATION_KIND_INK';
 // Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
 // принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
 // (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
 // пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
 export type TechCardAnnotationColor =
-  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
-  | "TECH_CARD_ANNOTATION_COLOR_RED"
-  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
-  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
-  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
+  | 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN'
+  | 'TECH_CARD_ANNOTATION_COLOR_RED'
+  | 'TECH_CARD_ANNOTATION_COLOR_BLUE'
+  | 'TECH_CARD_ANNOTATION_COLOR_GREEN'
+  | 'TECH_CARD_ANNOTATION_COLOR_ORANGE'
   // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
   // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
   // на белом листе видно контур, а на чёрном снимке — саму линию.
-  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
+  | 'TECH_CARD_ANNOTATION_COLOR_WHITE';
 // Наконечник линии — ЧЕМ КОНЧАЕТСЯ отрезок или кривая. Ось, отдельная от вида: до круга 18 в
 // наборе стояли ДВА вида, различавшихся только концами (`DIM` — засечки, `BRACKET` — скобки),
 // и человек выбирал между ними как между разными инструментами, хотя рисовал одну и ту же линию.
@@ -1694,49 +1694,49 @@ export type TechCardAnnotationColor =
 // ПРИВОДИТ поле к UNSPECIFIED, а не отвергает карточку, — по тому же доводу, что и `filled`
 // у не-полигона: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже.
 export type TechCardAnnotationCaps =
-  | "TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED"
-  | "TECH_CARD_ANNOTATION_CAPS_TICK"
-  | "TECH_CARD_ANNOTATION_CAPS_BRACKET"
-  | "TECH_CARD_ANNOTATION_CAPS_BULLET"
-  | "TECH_CARD_ANNOTATION_CAPS_ARROW";
+  | 'TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED'
+  | 'TECH_CARD_ANNOTATION_CAPS_TICK'
+  | 'TECH_CARD_ANNOTATION_CAPS_BRACKET'
+  | 'TECH_CARD_ANNOTATION_CAPS_BULLET'
+  | 'TECH_CARD_ANNOTATION_CAPS_ARROW';
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type TechCardIssueSeverity =
-  | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
-  | "TECH_CARD_ISSUE_SEVERITY_LOW"
-  | "TECH_CARD_ISSUE_SEVERITY_MEDIUM"
-  | "TECH_CARD_ISSUE_SEVERITY_HIGH";
+  | 'TECH_CARD_ISSUE_SEVERITY_UNKNOWN'
+  | 'TECH_CARD_ISSUE_SEVERITY_LOW'
+  | 'TECH_CARD_ISSUE_SEVERITY_MEDIUM'
+  | 'TECH_CARD_ISSUE_SEVERITY_HIGH';
 // TechCardIssueStatus is the resolution state of a flagged issue.
 export type TechCardIssueStatus =
-  | "TECH_CARD_ISSUE_STATUS_UNKNOWN"
-  | "TECH_CARD_ISSUE_STATUS_OPEN"
-  | "TECH_CARD_ISSUE_STATUS_RESOLVED"
-  | "TECH_CARD_ISSUE_STATUS_WONTFIX";
+  | 'TECH_CARD_ISSUE_STATUS_UNKNOWN'
+  | 'TECH_CARD_ISSUE_STATUS_OPEN'
+  | 'TECH_CARD_ISSUE_STATUS_RESOLVED'
+  | 'TECH_CARD_ISSUE_STATUS_WONTFIX';
 // TechCardInsert is the writable payload for a tech card. Nested lists are full
 // replacements on update (like ColorwayNew).
 // TechCardSignoffSection is the sheet a sign-off covers.
 export type TechCardSignoffSection =
-  | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
-  | "TECH_CARD_SIGNOFF_SECTION_DESIGN"
-  | "TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION"
-  | "TECH_CARD_SIGNOFF_SECTION_MATERIALS"
-  | "TECH_CARD_SIGNOFF_SECTION_COLOUR"
-  | "TECH_CARD_SIGNOFF_SECTION_LABELS"
-  | "TECH_CARD_SIGNOFF_SECTION_PACKAGING"
-  | "TECH_CARD_SIGNOFF_SECTION_COSTING";
+  | 'TECH_CARD_SIGNOFF_SECTION_UNKNOWN'
+  | 'TECH_CARD_SIGNOFF_SECTION_DESIGN'
+  | 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION'
+  | 'TECH_CARD_SIGNOFF_SECTION_MATERIALS'
+  | 'TECH_CARD_SIGNOFF_SECTION_COLOUR'
+  | 'TECH_CARD_SIGNOFF_SECTION_LABELS'
+  | 'TECH_CARD_SIGNOFF_SECTION_PACKAGING'
+  | 'TECH_CARD_SIGNOFF_SECTION_COSTING';
 // TechCardSignoffState is the sign-off decision for a section.
 export type TechCardSignoffState =
-  | "TECH_CARD_SIGNOFF_STATE_UNKNOWN"
-  | "TECH_CARD_SIGNOFF_STATE_PENDING"
-  | "TECH_CARD_SIGNOFF_STATE_APPROVED"
-  | "TECH_CARD_SIGNOFF_STATE_REJECTED";
+  | 'TECH_CARD_SIGNOFF_STATE_UNKNOWN'
+  | 'TECH_CARD_SIGNOFF_STATE_PENDING'
+  | 'TECH_CARD_SIGNOFF_STATE_APPROVED'
+  | 'TECH_CARD_SIGNOFF_STATE_REJECTED';
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
 // server proposed it from the season+sequence contract (SuggestStyleNumber); MANUAL = the owner
 // overrode the proposal (the value then passes the strict format validator). UNKNOWN defaults to
 // GENERATED on write.
 export type StyleNumberSource =
-  | "STYLE_NUMBER_SOURCE_UNKNOWN"
-  | "STYLE_NUMBER_SOURCE_GENERATED"
-  | "STYLE_NUMBER_SOURCE_MANUAL";
+  | 'STYLE_NUMBER_SOURCE_UNKNOWN'
+  | 'STYLE_NUMBER_SOURCE_GENERATED'
+  | 'STYLE_NUMBER_SOURCE_MANUAL';
 // AssemblyResolutionBasis records WHY the packing spec named (or refused to name) a warehouse bucket
 // for one assembly line of one order item — the difference between "this is the black bag because the
 // garment is black" and "this is the only bag there is". A packer reading a prescribed colour has to be
@@ -1745,56 +1745,56 @@ export type StyleNumberSource =
 // The three resolved values are ordered by strength; the four unresolved ones each name their own fix.
 export type AssemblyResolutionBasis =
   // Not attempted: a bill read on its own (ListStyleAssembly) has no order item to resolve against.
-  | "ASSEMBLY_RESOLUTION_BASIS_UNKNOWN"
+  | 'ASSEMBLY_RESOLUTION_BASIS_UNKNOWN'
   // Resolved: an ACTIVE colour variant whose code equals the item's colourway. The real answer.
-  | "ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH"
+  | 'ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH'
   // Resolved by substitution: the card has exactly ONE live colour, so there is no choice to get
   // wrong (a single-colour dust bag ships with every colourway). Not a colour match — show it as such.
-  | "ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT"
+  | 'ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT'
   // Resolved: the card has no colours at all and its single tech_card.output_material_id stands.
-  | "ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT"
+  | 'ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT'
   // Unresolved: the item's colour EXISTS on this card but is RETIRED. Never auto-substituted — fix by
   // reactivating that colour, or by deciding a substitute deliberately.
-  | "ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR"
+  | 'ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR'
   // Unresolved: the card has live colours, none of them this item's (and more than one, so no sole
   // fallback). Fix by adding the colour.
-  | "ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH"
+  | 'ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH'
   // Unresolved: a bucket WAS named but its material is archived nomenclature. Fix by un-archiving it
   // or pointing the colour at a live material.
-  | "ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL"
+  | 'ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL'
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
-  | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
+  | 'ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT';
 // TechCardSeamStatus is the technologist's decision on a seam.
 export type TechCardSeamStatus =
-  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
-  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
-  | "TECH_CARD_SEAM_STATUS_REJECTED";
+  | 'TECH_CARD_SEAM_STATUS_UNKNOWN'
+  | 'TECH_CARD_SEAM_STATUS_CONFIRMED'
+  | 'TECH_CARD_SEAM_STATUS_REJECTED';
 // TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
 // walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
 // closure (zip / button front) that is NOT sewn shut.
 export type TechCardSeamKind =
-  | "TECH_CARD_SEAM_KIND_UNKNOWN"
-  | "TECH_CARD_SEAM_KIND_EDGE"
-  | "TECH_CARD_SEAM_KIND_PARTIAL"
-  | "TECH_CARD_SEAM_KIND_COMPOSITE"
-  | "TECH_CARD_SEAM_KIND_SURFACE"
-  | "TECH_CARD_SEAM_KIND_CLOSURE";
+  | 'TECH_CARD_SEAM_KIND_UNKNOWN'
+  | 'TECH_CARD_SEAM_KIND_EDGE'
+  | 'TECH_CARD_SEAM_KIND_PARTIAL'
+  | 'TECH_CARD_SEAM_KIND_COMPOSITE'
+  | 'TECH_CARD_SEAM_KIND_SURFACE'
+  | 'TECH_CARD_SEAM_KIND_CLOSURE';
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.
 export type TechCardSeamDirection =
-  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
-  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
-  | "TECH_CARD_SEAM_DIRECTION_SAME";
+  | 'TECH_CARD_SEAM_DIRECTION_UNKNOWN'
+  | 'TECH_CARD_SEAM_DIRECTION_REVERSED'
+  | 'TECH_CARD_SEAM_DIRECTION_SAME';
 // TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
 export type TechCardSeamSource =
-  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
-  | "TECH_CARD_SEAM_SOURCE_GRAPH"
-  | "TECH_CARD_SEAM_SOURCE_DOLL"
-  | "TECH_CARD_SEAM_SOURCE_ORDER"
-  | "TECH_CARD_SEAM_SOURCE_MANUAL"
-  | "TECH_CARD_SEAM_SOURCE_AI";
+  | 'TECH_CARD_SEAM_SOURCE_UNKNOWN'
+  | 'TECH_CARD_SEAM_SOURCE_GRAPH'
+  | 'TECH_CARD_SEAM_SOURCE_DOLL'
+  | 'TECH_CARD_SEAM_SOURCE_ORDER'
+  | 'TECH_CARD_SEAM_SOURCE_MANUAL'
+  | 'TECH_CARD_SEAM_SOURCE_AI';
 // TechCardMarkerPieceSetStatus compares a раскладка's stored fingerprint of the card's cut-piece set
 // against the set the card carries TODAY (Ф3.6).
 // Three states and not a bool, because two are not enough: a marker taken before Ф3 carries no
@@ -1812,14 +1812,14 @@ export type TechCardSeamSource =
 export type TechCardMarkerPieceSetStatus =
   // No fingerprint recorded (a раскладка taken before Ф3), or one cannot be computed today.
   // NEVER read this as «changed».
-  | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
-  | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
-  | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
+  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN'
+  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES'
+  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED';
 // TechCardMarkerSpreadMode is how the plies of the настил face each other.
 export type TechCardMarkerSpreadMode =
-  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
-  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
-  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
+  | 'TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN'
+  | 'TECH_CARD_MARKER_SPREAD_MODE_FACE_UP'
+  | 'TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE';
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type TechCardMediaItem = {
   mediaId: number | undefined;
@@ -2855,12 +2855,13 @@ export type TechCardPatternRevision = {
   historyId: number | undefined;
 };
 
-// TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
-// tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
-// split across sheets). The file is a PDF or a DXF, uploaded via Admin.UploadPattern,
-// which returns the url stored here; the binary lives in object storage, not the media
-// library. The file type is carried by the url's extension (.pdf / .dxf), which the
-// server derives from the uploaded bytes — there is no separate content-type field.
+// TechCardSizePattern is a downloadable выкройка (cut pattern) file for one material slot of a
+// tech card. A material slot holds at most ONE pattern file. Its binding is fabric_purpose (trimmed,
+// lowercase), otherwise the legacy bom_line_key (trimmed, uppercase); rows with neither are unbound
+// and are not limited. The file is a PDF or a DXF, uploaded via Admin.UploadPattern, which returns
+// the url stored here; the binary lives in object storage, not the media library. The file type is
+// carried by the url's extension (.pdf / .dxf), which the server derives from the uploaded bytes —
+// there is no separate content-type field.
 export type TechCardSizePattern = {
   // size_id is the size the sheet is FILED UNDER, and 0 means it is filed under none — the sheet is
   // graded and its sizes live in the DXF's block names, which only the client reads. A non-zero
@@ -3727,6 +3728,12 @@ export type TechCardPieceFusingZone = {
   rect?: TechCardPieceFusingRect;
   dxfPieceKey?: string;
   spline?: TechCardPieceFusingSpline;
+  // Flat cut-out list for all outer rings. Valid only with spline; at most 16 non-overlapping holes.
+  // Every hole must lie strictly inside exactly one of spline or islands.
+  holes: TechCardPieceFusingSpline[] | undefined;
+  // Additional disjoint outer rings beside spline. Valid only with spline; spline plus islands has
+  // at most 16 outer rings, which may neither overlap, touch, nor nest.
+  islands: TechCardPieceFusingSpline[] | undefined;
 };
 
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
@@ -3930,6 +3937,8 @@ export type TechCardInsert = {
   issues: TechCardIssue[] | undefined;
   sizeQuantities: TechCardSizeQuantity[] | undefined;
   signoffs: TechCardSignoff[] | undefined;
+  // Full-replace cut-pattern files. At most one file may bind to each material slot; unbound rows
+  // (neither fabric_purpose nor bom_line_key) are not limited.
   patterns: TechCardSizePattern[] | undefined;
   // construction-description aspects with reference images (replaces the flat strings).
   details: TechCardDetail[] | undefined;
@@ -6723,16 +6732,13 @@ export type DesignPartsPiecesProposal = {
   readAt: wellKnownTimestamp | undefined;
 };
 
-export type OrderFactor =
-  | "ORDER_FACTOR_UNKNOWN"
-  | "ORDER_FACTOR_ASC"
-  | "ORDER_FACTOR_DESC";
+export type OrderFactor = 'ORDER_FACTOR_UNKNOWN' | 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC';
 export type SortFactor =
-  | "SORT_FACTOR_UNKNOWN"
-  | "SORT_FACTOR_CREATED_AT"
-  | "SORT_FACTOR_UPDATED_AT"
-  | "SORT_FACTOR_NAME"
-  | "SORT_FACTOR_PRICE";
+  | 'SORT_FACTOR_UNKNOWN'
+  | 'SORT_FACTOR_CREATED_AT'
+  | 'SORT_FACTOR_UPDATED_AT'
+  | 'SORT_FACTOR_NAME'
+  | 'SORT_FACTOR_PRICE';
 export type FilterConditions = {
   from: string | undefined;
   to: string | undefined;
@@ -6753,11 +6759,11 @@ export type FilterConditions = {
 };
 
 export type PaymentMethodNameEnum =
-  | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD"
-  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
-  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
-  | "PAYMENT_METHOD_NAME_ENUM_CASH";
+  | 'PAYMENT_METHOD_NAME_ENUM_UNKNOWN'
+  | 'PAYMENT_METHOD_NAME_ENUM_CARD'
+  | 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST'
+  | 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE'
+  | 'PAYMENT_METHOD_NAME_ENUM_CASH';
 // Payment represents the payment table
 export type Payment = {
   createdAt: wellKnownTimestamp | undefined;
@@ -6828,12 +6834,12 @@ export type PromoCode = {
 };
 
 export type ShippingRegion =
-  | "SHIPPING_REGION_UNKNOWN"
-  | "SHIPPING_REGION_AFRICA"
-  | "SHIPPING_REGION_AMERICAS"
-  | "SHIPPING_REGION_ASIA_PACIFIC"
-  | "SHIPPING_REGION_EUROPE"
-  | "SHIPPING_REGION_MIDDLE_EAST";
+  | 'SHIPPING_REGION_UNKNOWN'
+  | 'SHIPPING_REGION_AFRICA'
+  | 'SHIPPING_REGION_AMERICAS'
+  | 'SHIPPING_REGION_ASIA_PACIFIC'
+  | 'SHIPPING_REGION_EUROPE'
+  | 'SHIPPING_REGION_MIDDLE_EAST';
 export type ShipmentCarrierPrice = {
   currency: string | undefined;
   price: googletype_Decimal | undefined;
@@ -6879,49 +6885,49 @@ export type Shipment = {
 };
 
 export type OrderItemAdjustmentReasonEnum =
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_UNKNOWN"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_OUT_OF_STOCK"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_REDUCED"
-  | "ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_CAPPED";
+  | 'ORDER_ITEM_ADJUSTMENT_REASON_ENUM_UNKNOWN'
+  | 'ORDER_ITEM_ADJUSTMENT_REASON_ENUM_OUT_OF_STOCK'
+  | 'ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_REDUCED'
+  | 'ORDER_ITEM_ADJUSTMENT_REASON_ENUM_QUANTITY_CAPPED';
 export type OrderStatusEnum =
-  | "ORDER_STATUS_ENUM_UNKNOWN"
-  | "ORDER_STATUS_ENUM_PLACED"
-  | "ORDER_STATUS_ENUM_AWAITING_PAYMENT"
-  | "ORDER_STATUS_ENUM_CONFIRMED"
-  | "ORDER_STATUS_ENUM_SHIPPED"
-  | "ORDER_STATUS_ENUM_DELIVERED"
-  | "ORDER_STATUS_ENUM_CANCELLED"
-  | "ORDER_STATUS_ENUM_PENDING_RETURN"
-  | "ORDER_STATUS_ENUM_REFUND_IN_PROGRESS"
-  | "ORDER_STATUS_ENUM_REFUNDED"
-  | "ORDER_STATUS_ENUM_PARTIALLY_REFUNDED";
+  | 'ORDER_STATUS_ENUM_UNKNOWN'
+  | 'ORDER_STATUS_ENUM_PLACED'
+  | 'ORDER_STATUS_ENUM_AWAITING_PAYMENT'
+  | 'ORDER_STATUS_ENUM_CONFIRMED'
+  | 'ORDER_STATUS_ENUM_SHIPPED'
+  | 'ORDER_STATUS_ENUM_DELIVERED'
+  | 'ORDER_STATUS_ENUM_CANCELLED'
+  | 'ORDER_STATUS_ENUM_PENDING_RETURN'
+  | 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS'
+  | 'ORDER_STATUS_ENUM_REFUNDED'
+  | 'ORDER_STATUS_ENUM_PARTIALLY_REFUNDED';
 export type ProductRatingEnum =
-  | "PRODUCT_RATING_ENUM_UNKNOWN"
-  | "PRODUCT_RATING_ENUM_POOR"
-  | "PRODUCT_RATING_ENUM_FAIR"
-  | "PRODUCT_RATING_ENUM_GOOD"
-  | "PRODUCT_RATING_ENUM_VERY_GOOD"
-  | "PRODUCT_RATING_ENUM_EXCELLENT";
+  | 'PRODUCT_RATING_ENUM_UNKNOWN'
+  | 'PRODUCT_RATING_ENUM_POOR'
+  | 'PRODUCT_RATING_ENUM_FAIR'
+  | 'PRODUCT_RATING_ENUM_GOOD'
+  | 'PRODUCT_RATING_ENUM_VERY_GOOD'
+  | 'PRODUCT_RATING_ENUM_EXCELLENT';
 export type FitScaleEnum =
-  | "FIT_SCALE_ENUM_UNKNOWN"
-  | "FIT_SCALE_ENUM_RUNS_SMALL"
-  | "FIT_SCALE_ENUM_SLIGHTLY_SMALL"
-  | "FIT_SCALE_ENUM_TRUE_TO_SIZE"
-  | "FIT_SCALE_ENUM_SLIGHTLY_LARGE"
-  | "FIT_SCALE_ENUM_RUNS_LARGE";
+  | 'FIT_SCALE_ENUM_UNKNOWN'
+  | 'FIT_SCALE_ENUM_RUNS_SMALL'
+  | 'FIT_SCALE_ENUM_SLIGHTLY_SMALL'
+  | 'FIT_SCALE_ENUM_TRUE_TO_SIZE'
+  | 'FIT_SCALE_ENUM_SLIGHTLY_LARGE'
+  | 'FIT_SCALE_ENUM_RUNS_LARGE';
 export type DeliverySpeedEnum =
-  | "DELIVERY_SPEED_ENUM_UNKNOWN"
-  | "DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_AS_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED"
-  | "DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED";
+  | 'DELIVERY_SPEED_ENUM_UNKNOWN'
+  | 'DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED'
+  | 'DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED'
+  | 'DELIVERY_SPEED_ENUM_AS_EXPECTED'
+  | 'DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED'
+  | 'DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED';
 export type PackagingConditionEnum =
-  | "PACKAGING_CONDITION_ENUM_UNKNOWN"
-  | "PACKAGING_CONDITION_ENUM_DAMAGED"
-  | "PACKAGING_CONDITION_ENUM_ACCEPTABLE"
-  | "PACKAGING_CONDITION_ENUM_GOOD"
-  | "PACKAGING_CONDITION_ENUM_EXCELLENT";
+  | 'PACKAGING_CONDITION_ENUM_UNKNOWN'
+  | 'PACKAGING_CONDITION_ENUM_DAMAGED'
+  | 'PACKAGING_CONDITION_ENUM_ACCEPTABLE'
+  | 'PACKAGING_CONDITION_ENUM_GOOD'
+  | 'PACKAGING_CONDITION_ENUM_EXCELLENT';
 export type OrderNew = {
   items: OrderItemInsert[] | undefined;
   shippingAddress: AddressInsert | undefined;
@@ -7222,50 +7228,44 @@ export type SortFactors = {
 
 // EmailBlockType identifies the payload carried by an EmailBlock.
 export type EmailBlockType =
-  | "EMAIL_BLOCK_TYPE_UNKNOWN"
-  | "EMAIL_BLOCK_TYPE_HEADER"
-  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
-  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
-  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
-  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
-  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
-  | "EMAIL_BLOCK_TYPE_DIVIDER"
-  | "EMAIL_BLOCK_TYPE_SPACER"
-  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
-  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
-  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
-  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
+  | 'EMAIL_BLOCK_TYPE_UNKNOWN'
+  | 'EMAIL_BLOCK_TYPE_HEADER'
+  | 'EMAIL_BLOCK_TYPE_IMAGE_LINK'
+  | 'EMAIL_BLOCK_TYPE_RICH_TEXT'
+  | 'EMAIL_BLOCK_TYPE_PRODUCT_CARD'
+  | 'EMAIL_BLOCK_TYPE_PRODUCT_GRID'
+  | 'EMAIL_BLOCK_TYPE_CTA_BUTTON'
+  | 'EMAIL_BLOCK_TYPE_DIVIDER'
+  | 'EMAIL_BLOCK_TYPE_SPACER'
+  | 'EMAIL_BLOCK_TYPE_TWO_COLUMN'
+  | 'EMAIL_BLOCK_TYPE_SOCIAL_LINKS'
+  | 'EMAIL_BLOCK_TYPE_COUNTDOWN'
+  | 'EMAIL_BLOCK_TYPE_VIDEO_THUMB';
 export type EmailCampaignTopic =
-  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
-  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
-  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
-  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
+  | 'EMAIL_CAMPAIGN_TOPIC_UNKNOWN'
+  | 'EMAIL_CAMPAIGN_TOPIC_NEWSLETTER'
+  | 'EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS'
+  | 'EMAIL_CAMPAIGN_TOPIC_EVENTS';
 export type EmailCampaignStatus =
-  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
-  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
-  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
-  | "EMAIL_CAMPAIGN_STATUS_SENDING"
-  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
-  | "EMAIL_CAMPAIGN_STATUS_SENT"
-  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
-export type ABDimension =
-  | "AB_DIMENSION_UNKNOWN"
-  | "AB_DIMENSION_SUBJECT"
-  | "AB_DIMENSION_CONTENT";
+  | 'EMAIL_CAMPAIGN_STATUS_UNKNOWN'
+  | 'EMAIL_CAMPAIGN_STATUS_DRAFT'
+  | 'EMAIL_CAMPAIGN_STATUS_SCHEDULED'
+  | 'EMAIL_CAMPAIGN_STATUS_SENDING'
+  | 'EMAIL_CAMPAIGN_STATUS_PAUSED'
+  | 'EMAIL_CAMPAIGN_STATUS_SENT'
+  | 'EMAIL_CAMPAIGN_STATUS_CANCELLED';
+export type ABDimension = 'AB_DIMENSION_UNKNOWN' | 'AB_DIMENSION_SUBJECT' | 'AB_DIMENSION_CONTENT';
 export type EmailCampaignRecipientStatus =
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
-  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
+  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN'
+  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING'
+  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT'
+  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED'
+  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED';
 export type EmailCampaignCohort =
-  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
-  | "EMAIL_CAMPAIGN_COHORT_AB"
-  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
-export type SegmentOp =
-  | "SEGMENT_OP_UNKNOWN"
-  | "SEGMENT_OP_AND"
-  | "SEGMENT_OP_OR";
+  | 'EMAIL_CAMPAIGN_COHORT_UNKNOWN'
+  | 'EMAIL_CAMPAIGN_COHORT_AB'
+  | 'EMAIL_CAMPAIGN_COHORT_REMAINDER';
+export type SegmentOp = 'SEGMENT_OP_UNKNOWN' | 'SEGMENT_OP_AND' | 'SEGMENT_OP_OR';
 // EmailLink is localized link copy used by header-style blocks.
 export type EmailLink = {
   label: string | undefined;
@@ -7300,8 +7300,7 @@ export type EmailImageLinkBlock = {
   aspect: string | undefined;
 };
 
-export type EmailRichTextBlock = {
-};
+export type EmailRichTextBlock = {};
 
 export type EmailProductCardBlock = {
   productId: number | undefined;
@@ -7536,17 +7535,17 @@ export type RenderWarning = {
 
 // FittingStatus is the lifecycle state of a fitting session.
 export type FittingStatus =
-  | "FITTING_STATUS_UNKNOWN"
-  | "FITTING_STATUS_PLANNED"
-  | "FITTING_STATUS_DONE"
-  | "FITTING_STATUS_CANCELLED";
+  | 'FITTING_STATUS_UNKNOWN'
+  | 'FITTING_STATUS_PLANNED'
+  | 'FITTING_STATUS_DONE'
+  | 'FITTING_STATUS_CANCELLED';
 // FittingVerdict is the outcome of a fitting session.
 export type FittingVerdict =
-  | "FITTING_VERDICT_UNKNOWN"
-  | "FITTING_VERDICT_PENDING"
-  | "FITTING_VERDICT_APPROVED"
-  | "FITTING_VERDICT_NEEDS_REWORK"
-  | "FITTING_VERDICT_REJECTED";
+  | 'FITTING_VERDICT_UNKNOWN'
+  | 'FITTING_VERDICT_PENDING'
+  | 'FITTING_VERDICT_APPROVED'
+  | 'FITTING_VERDICT_NEEDS_REWORK'
+  | 'FITTING_VERDICT_REJECTED';
 // FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
 export type FittingSizeInsert = {
   sizeId: number | undefined;
@@ -7715,10 +7714,10 @@ export type Fitting = {
 // FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
 // kanban columns), each column is bound to a concrete order status.
 export type FulfillmentColumn =
-  | "FULFILLMENT_COLUMN_UNKNOWN"
-  | "FULFILLMENT_COLUMN_TO_FULFILL"
-  | "FULFILLMENT_COLUMN_SHIPPED"
-  | "FULFILLMENT_COLUMN_DELIVERED";
+  | 'FULFILLMENT_COLUMN_UNKNOWN'
+  | 'FULFILLMENT_COLUMN_TO_FULFILL'
+  | 'FULFILLMENT_COLUMN_SHIPPED'
+  | 'FULFILLMENT_COLUMN_DELIVERED';
 // FulfillmentChecklistItem is one packing-checklist row on a fulfillment card
 // (e.g. "picked", "packed", "label printed"). Managed by dedicated add/toggle/
 // delete RPCs, same as a task checklist item.
@@ -7760,35 +7759,35 @@ export type FulfillmentColumnCards = {
 };
 
 export type HeroType =
-  | "HERO_TYPE_UNKNOWN"
-  | "HERO_TYPE_SINGLE"
-  | "HERO_TYPE_DOUBLE"
-  | "HERO_TYPE_MAIN"
-  | "HERO_TYPE_FEATURED_PRODUCTS"
-  | "HERO_TYPE_FEATURED_PRODUCTS_TAG"
-  | "HERO_TYPE_FEATURED_ARCHIVE"
-  | "HERO_TYPE_EMBED"
-  | "HERO_TYPE_DROP"
-  | "HERO_TYPE_LAST_CHANCE"
-  | "HERO_TYPE_MARQUEE"
-  | "HERO_TYPE_NEW_ARRIVALS"
-  | "HERO_TYPE_SLIDESHOW"
-  | "HERO_TYPE_MOSAIC"
-  | "HERO_TYPE_SPLIT"
-  | "HERO_TYPE_VIDEO"
-  | "HERO_TYPE_PRODUCT_SPOTLIGHT"
-  | "HERO_TYPE_NEWSLETTER"
-  | "HERO_TYPE_STATEMENT"
-  | "HERO_TYPE_LOOKBOOK";
+  | 'HERO_TYPE_UNKNOWN'
+  | 'HERO_TYPE_SINGLE'
+  | 'HERO_TYPE_DOUBLE'
+  | 'HERO_TYPE_MAIN'
+  | 'HERO_TYPE_FEATURED_PRODUCTS'
+  | 'HERO_TYPE_FEATURED_PRODUCTS_TAG'
+  | 'HERO_TYPE_FEATURED_ARCHIVE'
+  | 'HERO_TYPE_EMBED'
+  | 'HERO_TYPE_DROP'
+  | 'HERO_TYPE_LAST_CHANCE'
+  | 'HERO_TYPE_MARQUEE'
+  | 'HERO_TYPE_NEW_ARRIVALS'
+  | 'HERO_TYPE_SLIDESHOW'
+  | 'HERO_TYPE_MOSAIC'
+  | 'HERO_TYPE_SPLIT'
+  | 'HERO_TYPE_VIDEO'
+  | 'HERO_TYPE_PRODUCT_SPOTLIGHT'
+  | 'HERO_TYPE_NEWSLETTER'
+  | 'HERO_TYPE_STATEMENT'
+  | 'HERO_TYPE_LOOKBOOK';
 // HeroAudience is the TARGETING modifier: who a block is shown to. Enforcement
 // requires the frontend GetHero to know the viewer (auth → tier); until then it
 // is carried through and may be applied client-side.
 export type HeroAudience =
-  | "HERO_AUDIENCE_UNKNOWN"
-  | "HERO_AUDIENCE_ALL"
-  | "HERO_AUDIENCE_GUESTS"
-  | "HERO_AUDIENCE_MEMBERS"
-  | "HERO_AUDIENCE_TIER";
+  | 'HERO_AUDIENCE_UNKNOWN'
+  | 'HERO_AUDIENCE_ALL'
+  | 'HERO_AUDIENCE_GUESTS'
+  | 'HERO_AUDIENCE_MEMBERS'
+  | 'HERO_AUDIENCE_TIER';
 // HeroMedia is a portrait/landscape media pair addressed by id (write side).
 // The per-slot presentation modifiers live here: disable_overlay toggles the
 // scrim, disable_tint toggles the frontend's background colour tint, and stroke
@@ -8135,15 +8134,15 @@ export type HeroLookbookInsert = {
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
 // always non-negative; the type (with on_hand before/after) encodes the direction.
 export type MaterialMovementType =
-  | "MATERIAL_MOVEMENT_TYPE_UNKNOWN"
-  | "MATERIAL_MOVEMENT_TYPE_RECEIPT"
-  | "MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION"
-  | "MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION"
-  | "MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE"
-  | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
-  | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
-  | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
-  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+  | 'MATERIAL_MOVEMENT_TYPE_UNKNOWN'
+  | 'MATERIAL_MOVEMENT_TYPE_RECEIPT'
+  | 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION'
+  | 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION'
+  | 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE'
+  | 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION'
+  | 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE'
+  | 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT'
+  | 'MATERIAL_MOVEMENT_TYPE_WRITEOFF';
 // MaterialStock is a material's maintained on-hand balance and moving-average unit cost. The cost
 // fields are confidential (stripped for accounts without costing:read).
 export type MaterialStock = {
@@ -8251,32 +8250,32 @@ export type MaterialStockRow = {
 // BodyMeasurementName enumerates the body-measurement types captured for a fit
 // model. It is intentionally separate from the garment MeasurementName dictionary.
 export type BodyMeasurementName =
-  | "BODY_MEASUREMENT_NAME_UNKNOWN"
+  | 'BODY_MEASUREMENT_NAME_UNKNOWN'
   // Torso
-  | "BODY_MEASUREMENT_NAME_CHEST"
-  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
-  | "BODY_MEASUREMENT_NAME_WAIST"
-  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
-  | "BODY_MEASUREMENT_NAME_HIP"
-  | "BODY_MEASUREMENT_NAME_NECK_BASE"
+  | 'BODY_MEASUREMENT_NAME_CHEST'
+  | 'BODY_MEASUREMENT_NAME_UNDER_BUST'
+  | 'BODY_MEASUREMENT_NAME_WAIST'
+  | 'BODY_MEASUREMENT_NAME_HIGH_HIP'
+  | 'BODY_MEASUREMENT_NAME_HIP'
+  | 'BODY_MEASUREMENT_NAME_NECK_BASE'
   // Arms
-  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
-  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
-  | "BODY_MEASUREMENT_NAME_BICEP"
-  | "BODY_MEASUREMENT_NAME_WRIST"
+  | 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER'
+  | 'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH'
+  | 'BODY_MEASUREMENT_NAME_BICEP'
+  | 'BODY_MEASUREMENT_NAME_WRIST'
   // Legs
-  | "BODY_MEASUREMENT_NAME_INSEAM"
-  | "BODY_MEASUREMENT_NAME_THIGH"
-  | "BODY_MEASUREMENT_NAME_KNEE"
-  | "BODY_MEASUREMENT_NAME_CALF"
-  | "BODY_MEASUREMENT_NAME_ANKLE"
+  | 'BODY_MEASUREMENT_NAME_INSEAM'
+  | 'BODY_MEASUREMENT_NAME_THIGH'
+  | 'BODY_MEASUREMENT_NAME_KNEE'
+  | 'BODY_MEASUREMENT_NAME_CALF'
+  | 'BODY_MEASUREMENT_NAME_ANKLE'
   // Vertical / lengths
-  | "BODY_MEASUREMENT_NAME_HEIGHT"
-  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
-  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
+  | 'BODY_MEASUREMENT_NAME_HEIGHT'
+  | 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT'
+  | 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST'
   // Widths (front / back)
-  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
-  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
+  | 'BODY_MEASUREMENT_NAME_ACROSS_FRONT'
+  | 'BODY_MEASUREMENT_NAME_ACROSS_BACK';
 // ModelMeasurement is a single body measurement value, in millimetres.
 export type ModelMeasurement = {
   name: BodyMeasurementName | undefined;
@@ -8309,57 +8308,57 @@ export type Model = {
 // started (in_progress), then received into stock, then closed; it can be cancelled from any
 // non-terminal state. Stored as its lowercase name in the DB.
 export type ProductionRunStatus =
-  | "PRODUCTION_RUN_STATUS_UNKNOWN"
-  | "PRODUCTION_RUN_STATUS_PLANNED"
-  | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
-  | "PRODUCTION_RUN_STATUS_RECEIVED"
-  | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED"
+  | 'PRODUCTION_RUN_STATUS_UNKNOWN'
+  | 'PRODUCTION_RUN_STATUS_PLANNED'
+  | 'PRODUCTION_RUN_STATUS_IN_PROGRESS'
+  | 'PRODUCTION_RUN_STATUS_RECEIVED'
+  | 'PRODUCTION_RUN_STATUS_CLOSED'
+  | 'PRODUCTION_RUN_STATUS_CANCELLED'
   // At least one partial receipt is booked and the operator has not yet declared the run complete
   // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
   // writable through UpdateProductionRun.
-  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED"
+  | 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED'
   // DRAFT (Ф2): расчётная партия — состав набран, деньги считаются, производство НЕ начато.
   // Отличается от PLANNED ровно тремя обязательствами, которых у неё НЕТ: она не резервирует ткань,
   // не проходит гейт готовности и не печатает наряд. Всё это появляется на переходе draft → planned.
   // Так и должно быть: прикидка «сколько будет стоить сто чёрных и полсотни белых» не имеет права
   // занимать сырьё на складе, иначе соседний прогон увидит нехватку из-за чужого черновика.
-  | "PRODUCTION_RUN_STATUS_DRAFT";
+  | 'PRODUCTION_RUN_STATUS_DRAFT';
 // ProductionRunCostKind is the article category of an actual production-run cost.
 export type ProductionRunCostKind =
-  | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
-  | "PRODUCTION_RUN_COST_KIND_MATERIALS"
-  | "PRODUCTION_RUN_COST_KIND_CMT"
-  | "PRODUCTION_RUN_COST_KIND_HARDWARE"
-  | "PRODUCTION_RUN_COST_KIND_PACKAGING"
-  | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
-  | "PRODUCTION_RUN_COST_KIND_DUTY"
-  | "PRODUCTION_RUN_COST_KIND_OTHER";
+  | 'PRODUCTION_RUN_COST_KIND_UNKNOWN'
+  | 'PRODUCTION_RUN_COST_KIND_MATERIALS'
+  | 'PRODUCTION_RUN_COST_KIND_CMT'
+  | 'PRODUCTION_RUN_COST_KIND_HARDWARE'
+  | 'PRODUCTION_RUN_COST_KIND_PACKAGING'
+  | 'PRODUCTION_RUN_COST_KIND_LOGISTICS'
+  | 'PRODUCTION_RUN_COST_KIND_DUTY'
+  | 'PRODUCTION_RUN_COST_KIND_OTHER';
 // Режим настилания. Решает три физических вопроса сразу (00-model.md:35-39): обязано ли число
 // слоёв быть чётным, можно ли направленную ткань, и как развёртка зеркальных деталей в маркере
 // превращается в изделия.
 export type ProductionLayMode =
-  | "PRODUCTION_LAY_MODE_UNSPECIFIED"
-  | "PRODUCTION_LAY_MODE_FACE_UP"
-  | "PRODUCTION_LAY_MODE_FACE_TO_FACE";
+  | 'PRODUCTION_LAY_MODE_UNSPECIFIED'
+  | 'PRODUCTION_LAY_MODE_FACE_UP'
+  | 'PRODUCTION_LAY_MODE_FACE_TO_FACE';
 // Чем ИЗМЕРЕН фактический расход настила (Ф5б.2). Метод едет рядом с числом, а не подразумевается,
 // потому что два метода врут по-разному: рулон до/после наследует ошибку измерения остатка и не
 // видит того, что уехало в обрезки, а взвешивание переводится в метры через плотность и ширину и
 // потому чувствительно к ним обеим. Число без метода — это число, о точности которого нечего
 // сказать, поэтому схема требует их вместе (chk_prlay_actual_complete, 0285).
 export type ProductionLayActualMethod =
-  | "PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED"
-  | "PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER"
-  | "PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED";
+  | 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
+  | 'PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER'
+  | 'PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED';
 // Статус любой проверки Ф4. UNKNOWN — ПЕРВОКЛАССНОЕ значение и НИКОГДА не читается как OK:
 // «не смогли проверить» и «проверили, всё хорошо» — разные предложения, и клиент обязан их
 // различать. Это та же дисциплина, что unknown_count у гейта Ф6.
 export type ProductionLayCheckStatus =
-  | "PRODUCTION_LAY_CHECK_STATUS_UNSPECIFIED"
-  | "PRODUCTION_LAY_CHECK_STATUS_OK"
-  | "PRODUCTION_LAY_CHECK_STATUS_WARNING"
-  | "PRODUCTION_LAY_CHECK_STATUS_BLOCKER"
-  | "PRODUCTION_LAY_CHECK_STATUS_UNKNOWN";
+  | 'PRODUCTION_LAY_CHECK_STATUS_UNSPECIFIED'
+  | 'PRODUCTION_LAY_CHECK_STATUS_OK'
+  | 'PRODUCTION_LAY_CHECK_STATUS_WARNING'
+  | 'PRODUCTION_LAY_CHECK_STATUS_BLOCKER'
+  | 'PRODUCTION_LAY_CHECK_STATUS_UNKNOWN';
 // КАЛИБРОВКА КОЭФФИЦИЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (Ф5б.3, решение Р4).
 // дрейф_настила = actual_qty / planned_lay_qty − 1
 // предложение   = МЕДИАНА дрейфов настилов этого артикула, где есть И план, И факт
@@ -8373,16 +8372,16 @@ export type ProductionLayCheckStatus =
 export type MaterialCoefficientSuggestionStatus =
   // Сервер ВСЕГДА присылает одно из трёх ниже. Ноль остаётся за «поле не заполнено» и обязан
   // читаться клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
-  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED"
+  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED'
   // Настилов с планом И фактом меньше трёх. Предложения нет вовсе, и это содержание ответа, а не
   // его отсутствие: коэффициент, выведенный из одного замера, — догадка в одежде числа.
-  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS"
+  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS'
   // Медиана посчитана, но коэффициент из неё поле не примет (вне [1, 3], chk 0270). ИЗМЕРЕНИЕ
   // отдаётся (median_drift_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе:
   // зажать −12% в 1.0 значило бы подменить измерение ближайшим сохраняемым значением.
-  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE"
+  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE'
   // Предложение есть, и его можно сохранить как есть.
-  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY";
+  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY';
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (T7 волна 2) — СОСЕД калибровки коэффициента выше, И ЭТО ДРУГОЕ
 // ЧИСЛО С ДРУГИМ ЗНАМЕНАТЕЛЕМ. Не сливать:
 // калибровка КОЭФФИЦИЕНТА: дрейф = факт ÷ ПЛАН-ГЕОМЕТРИЯ настила (длина раскладки × слои +
@@ -8407,15 +8406,15 @@ export type MaterialCoefficientSuggestionStatus =
 export type BomWastageSuggestionStatus =
   // Сервер всегда присылает одно из трёх ниже; ноль остаётся за «поле не заполнено» и читается
   // клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
-  | "BOM_WASTAGE_SUGGESTION_STATUS_UNSPECIFIED"
+  | 'BOM_WASTAGE_SUGGESTION_STATUS_UNSPECIFIED'
   // Настилов с netto И фактом меньше трёх. Это СОСТОЯНИЕ, а не ошибка: «фактов пока N из 3» — и
   // после выката это основной ответ (настилов с замером может не быть месяцами).
-  | "BOM_WASTAGE_SUGGESTION_STATUS_TOO_FEW_FACTS"
+  | 'BOM_WASTAGE_SUGGESTION_STATUS_TOO_FEW_FACTS'
   // Медиана посчитана, но поле её не примет (wastage_percent живёт в [0, 100]). ИЗМЕРЕНИЕ отдаётся
   // (median_over_netto_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе.
-  | "BOM_WASTAGE_SUGGESTION_STATUS_OUT_OF_RANGE"
+  | 'BOM_WASTAGE_SUGGESTION_STATUS_OUT_OF_RANGE'
   // Предложение есть, и его можно вписать в поле как есть.
-  | "BOM_WASTAGE_SUGGESTION_STATUS_READY";
+  | 'BOM_WASTAGE_SUGGESTION_STATUS_READY';
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -9011,18 +9010,18 @@ export type Subscriber = {
 };
 
 export type SupportTicketStatus =
-  | "SUPPORT_TICKET_STATUS_UNKNOWN"
-  | "SUPPORT_TICKET_STATUS_SUBMITTED"
-  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
-  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
-  | "SUPPORT_TICKET_STATUS_RESOLVED"
-  | "SUPPORT_TICKET_STATUS_CLOSED";
+  | 'SUPPORT_TICKET_STATUS_UNKNOWN'
+  | 'SUPPORT_TICKET_STATUS_SUBMITTED'
+  | 'SUPPORT_TICKET_STATUS_IN_PROGRESS'
+  | 'SUPPORT_TICKET_STATUS_WAITING_CUSTOMER'
+  | 'SUPPORT_TICKET_STATUS_RESOLVED'
+  | 'SUPPORT_TICKET_STATUS_CLOSED';
 export type SupportTicketPriority =
-  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
-  | "SUPPORT_TICKET_PRIORITY_LOW"
-  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
-  | "SUPPORT_TICKET_PRIORITY_HIGH"
-  | "SUPPORT_TICKET_PRIORITY_URGENT";
+  | 'SUPPORT_TICKET_PRIORITY_UNKNOWN'
+  | 'SUPPORT_TICKET_PRIORITY_LOW'
+  | 'SUPPORT_TICKET_PRIORITY_MEDIUM'
+  | 'SUPPORT_TICKET_PRIORITY_HIGH'
+  | 'SUPPORT_TICKET_PRIORITY_URGENT';
 export type SupportTicketInsert = {
   topic: string | undefined;
   subject: string | undefined;
@@ -9055,27 +9054,27 @@ export type SupportTicket = {
 // before board ids keep working: requests accept either the enum or a board_id (board_id wins);
 // responses fill the enum for a seeded board and UNKNOWN for a custom one. Do not extend.
 export type TaskBoard =
-  | "TASK_BOARD_UNKNOWN"
-  | "TASK_BOARD_DEVELOPMENT"
-  | "TASK_BOARD_DESIGN"
-  | "TASK_BOARD_MARKETING"
-  | "TASK_BOARD_PRODUCTION"
-  | "TASK_BOARD_SOURCING"
-  | "TASK_BOARD_CONTENT";
+  | 'TASK_BOARD_UNKNOWN'
+  | 'TASK_BOARD_DEVELOPMENT'
+  | 'TASK_BOARD_DESIGN'
+  | 'TASK_BOARD_MARKETING'
+  | 'TASK_BOARD_PRODUCTION'
+  | 'TASK_BOARD_SOURCING'
+  | 'TASK_BOARD_CONTENT';
 // TaskStatus is the kanban column. A drag between columns is a status change.
 export type TaskStatus =
-  | "TASK_STATUS_UNKNOWN"
-  | "TASK_STATUS_BACKLOG"
-  | "TASK_STATUS_TODO"
-  | "TASK_STATUS_IN_PROGRESS"
-  | "TASK_STATUS_REVIEW"
-  | "TASK_STATUS_DONE";
+  | 'TASK_STATUS_UNKNOWN'
+  | 'TASK_STATUS_BACKLOG'
+  | 'TASK_STATUS_TODO'
+  | 'TASK_STATUS_IN_PROGRESS'
+  | 'TASK_STATUS_REVIEW'
+  | 'TASK_STATUS_DONE';
 export type TaskPriority =
-  | "TASK_PRIORITY_UNKNOWN"
-  | "TASK_PRIORITY_LOW"
-  | "TASK_PRIORITY_MEDIUM"
-  | "TASK_PRIORITY_HIGH"
-  | "TASK_PRIORITY_URGENT";
+  | 'TASK_PRIORITY_UNKNOWN'
+  | 'TASK_PRIORITY_LOW'
+  | 'TASK_PRIORITY_MEDIUM'
+  | 'TASK_PRIORITY_HIGH'
+  | 'TASK_PRIORITY_URGENT';
 // TaskLinkKind — ВИД СВЯЗИ С ТОЧКИ ЗРЕНИЯ ВЛАДЕЛЬЦА СПИСКА, а не вид строки в хранилище.
 // В хранилище видов ДВА (blocks|relates) и на один факт приходится ОДНА строка: BLOCKED_BY — это
 // blocks, прочитанный с другого конца. Две строки на один факт позволили бы паре полусуществовать —
@@ -9083,10 +9082,10 @@ export type TaskPriority =
 // RELATES симметрична и нормализуется при записи (меньший id первым), поэтому дубль (A,B)+(B,A)
 // невыразим схемой, а не только кодом.
 export type TaskLinkKind =
-  | "TASK_LINK_KIND_UNKNOWN"
-  | "TASK_LINK_KIND_BLOCKS"
-  | "TASK_LINK_KIND_BLOCKED_BY"
-  | "TASK_LINK_KIND_RELATES";
+  | 'TASK_LINK_KIND_UNKNOWN'
+  | 'TASK_LINK_KIND_BLOCKS'
+  | 'TASK_LINK_KIND_BLOCKED_BY'
+  | 'TASK_LINK_KIND_RELATES';
 // TaskStatusChange is one status-only audit event. from_status is UNKNOWN for creation and for an
 // approximate legacy DONE backfill (distinguished by approximate=true). For tasks created before
 // status history existed, GetTask appends a synthetic creation event whose to_status is also
@@ -9338,6 +9337,5 @@ export type TaskComment = {
   // перепиской прежнего (тот же гейт и тот же довод, что у LibraryFileComment, 0316).
   authorId: number | undefined;
 };
-
 
 // @@protoc_insertion_point(typescript-http-eof)
