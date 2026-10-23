@@ -540,6 +540,23 @@ export async function main() {
   });
   near(fuseAreaMm2(strip), 75 * 20);
 
+  const allEdgeOutline = rectangle(300, 400);
+  const allEdgeWidth = 25;
+  const allEdgeStrip = generateFuseGeometry({
+    outline: allEdgeOutline,
+    spec: spec({ mode: 'strip', widthMm: allEdgeWidth, edges: [] }),
+  });
+  const allEdgeArea = fuseAreaMm2(allEdgeStrip);
+  const perimeterEstimate = 2 * (300 + 400) * allEdgeWidth;
+  assert.ok(
+    Math.abs(allEdgeArea - perimeterEstimate) / perimeterEstimate < 0.12,
+    'a strip with no explicit edges defaults to a band around the whole outline',
+  );
+  assert.ok(
+    allEdgeArea < 300 * 400 * 0.3,
+    'a 25 mm all-edge strip stays far smaller than the 300 × 400 mm piece area',
+  );
+
   const joinedStrip = generateFuseGeometry({
     outline,
     spec: spec({

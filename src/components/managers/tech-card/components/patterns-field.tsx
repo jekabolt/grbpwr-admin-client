@@ -150,7 +150,6 @@ import { useUnsavedAreaSource } from './piece-areas';
 import { serverKeyOfScope } from './piece-areas-state';
 import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import {
-  aliasIdentity,
   splitPiecesBySize,
   useDictionarySizeTokens,
   useFileSizeRun,
@@ -229,7 +228,6 @@ import {
   getFusingSheetGenerationState,
   subscribeFusingSheetGeneration,
 } from './nesting/fusing-sheets-stage';
-import { readFuseSpec, type PieceFuseSpec } from './nesting/fuse-spec';
 import type { PieceMatchApplyResult } from './nesting/piece-match-modal';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -1229,30 +1227,6 @@ export function PatternsField({
   const geometry = useDxfGeometry(allDxfFiles, armed);
   const dxfIndex = useDxfIndex(geometry.data);
   const bundle = geometry.data;
-  const thumbnailFuseByScope = useMemo(() => {
-    const out = new Map<string, Map<string, PieceFuseSpec>>();
-    if (!dxfIndex) return out;
-    const piecesByKey = new Map(
-      cardPieces.map((piece) => [(piece.lineKey ?? '').trim().toLowerCase(), piece]),
-    );
-    for (const group of scopeGroups) {
-      const fuseByIdentity = new Map<string, PieceFuseSpec>();
-      for (const alias of pieceDxfAliases) {
-        if (!aliasInScope(alias, group.scope, linkSet)) continue;
-        const piece = piecesByKey.get((alias.pieceLineKey ?? '').trim().toLowerCase());
-        if (!piece?.fused) continue;
-        const fuse = readFuseSpec(piece);
-        if (!fuse.mode) continue;
-        const identity = normBlock(
-          aliasIdentity(alias.blockName ?? '', dxfIndex.split),
-        ).toLowerCase();
-        if (identity) fuseByIdentity.set(identity, fuse);
-      }
-      if (fuseByIdentity.size > 0) out.set(group.scope.key, fuseByIdentity);
-    }
-    return out;
-  }, [cardPieces, dxfIndex, linkSet, pieceDxfAliases, scopeGroups]);
-
   const contourPiecesByScope = useMemo(() => {
     const out = new Map<string, PieceDTO[]>();
     if (!bundle) return out;
@@ -4020,13 +3994,7 @@ export function PatternsField({
             hasDxf && canUpload && !busy && 'hover:border-textColor',
           )}
         >
-          <SheetThumb
-            index={dxfIndex}
-            scopeKey={key}
-            className='h-full w-full'
-            fuseByIdentity={thumbnailFuseByScope.get(key)}
-            requiredSeamAllowanceMm={cardSeamAllowanceMm}
-          />
+          <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
           <SlotStateOverlay state={slotState} />
           {flight && <Progress value={62} className='absolute inset-x-0 bottom-0 h-0.5' />}
         </div>

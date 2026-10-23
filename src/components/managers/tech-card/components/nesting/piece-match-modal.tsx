@@ -3005,7 +3005,9 @@ export function PieceMatchModal({
                 // Zoomed: everything but the piece being fused steps back.
                 markOf={(p) => (zoomed && ciOf(p) !== zoomed ? 'unnamed' : markOf(p))}
                 labelOf={labelOf}
-                selectedKey={selected}
+                selectedKey={
+                  interlining || (selected && fuseOfCi(selected)?.mode) ? null : selected
+                }
                 onPick={(key) => {
                   if (pickingOldPieces) return;
                   // Zone mode: a block that is not a piece (the patternmaker's fusible shape)

@@ -248,24 +248,6 @@ export function FuseOverlay({
             <polygon key={i} points={str(h)} fill='black' />
           ))}
         </mask>
-        <polygon
-          points={str(pts)}
-          fill='none'
-          stroke={INK}
-          strokeOpacity={0.16}
-          strokeWidth={6}
-          vectorEffect='non-scaling-stroke'
-          strokeLinejoin='round'
-        />
-        <polygon
-          points={str(pts)}
-          fill={INK}
-          fillOpacity={0.12}
-          stroke={INK}
-          strokeWidth={2.5}
-          vectorEffect='non-scaling-stroke'
-          strokeLinejoin='round'
-        />
         <g clipPath={`url(#${clip})`} mask={`url(#${mask})`} fill={INK} fillOpacity={0.28}>
           {dxf && <polygon points={dxf} />}
         </g>
@@ -275,19 +257,19 @@ export function FuseOverlay({
             clipPath={`url(#${clip})`}
             fill='none'
             stroke={INK}
-            strokeWidth={2.5}
+            strokeWidth={1}
             vectorEffect='non-scaling-stroke'
             strokeLinejoin='round'
           />
         )}
-        {fillPath && f.mode !== 'whole' && (
+        {fillPath && (
           <path
             d={fillPath}
             fill={INK}
             fillOpacity={0.28}
             fillRule='evenodd'
             stroke={INK}
-            strokeWidth={2.5}
+            strokeWidth={1}
             vectorEffect='non-scaling-stroke'
             strokeLinejoin='round'
             data-zone-fill=''
@@ -343,7 +325,7 @@ export function FuseOverlay({
                 data-zone-line=''
                 fill='none'
                 stroke={fill?.status === 'invalid' ? 'var(--color-error)' : INK}
-                strokeWidth={1.5}
+                strokeWidth={1}
                 vectorEffect='non-scaling-stroke'
                 clipPath={`url(#${clip})`}
               />
@@ -468,7 +450,8 @@ export function FuseOverlay({
         edgesOn &&
         g!.runs.map((run) => {
           const i = run.index;
-          const on = sf.edges.some((edge) => edge.edge === i);
+          const implicitAll = sf.edges.length === 0;
+          const on = implicitAll || sf.edges.some((edge) => edge.edge === i);
           return (
             <g key={`edge-${i}`}>
               {(on || hover === i) && (
@@ -477,7 +460,7 @@ export function FuseOverlay({
                   points={str(run.points)}
                   fill='none'
                   stroke={INK}
-                  strokeWidth={on ? 3 : 2}
+                  strokeWidth={1}
                   strokeDasharray={on ? undefined : '4 3'}
                   vectorEffect='non-scaling-stroke'
                   strokeLinecap='round'
@@ -500,7 +483,10 @@ export function FuseOverlay({
                   onChange(sel, {
                     ...sf,
                     edges: on
-                      ? cur.filter((x) => x.edge !== i)
+                      ? (implicitAll
+                          ? g!.runs.map(({ index }) => ({ edge: index, startMm: 0, endMm: 0 }))
+                          : cur
+                        ).filter((x) => x.edge !== i)
                       : [...cur, { edge: i, startMm: 0, endMm: 0 }].sort((x, y) => x.edge - y.edge),
                   });
                 }}
@@ -539,7 +525,7 @@ export function FuseOverlay({
                   height={hs}
                   fill={PAPER}
                   stroke={INK}
-                  strokeWidth={1.5}
+                  strokeWidth={1}
                   vectorEffect='non-scaling-stroke'
                   style={{ cursor: 'grab' }}
                   onPointerDown={(e) => {

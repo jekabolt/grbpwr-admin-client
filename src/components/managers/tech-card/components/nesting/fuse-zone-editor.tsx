@@ -320,7 +320,7 @@ export function FuseZoneEditor({
                 height={2 * r}
                 fill={on ? INK : PAPER}
                 stroke={INK}
-                strokeWidth={picked === i ? 2.5 : 1.5}
+                strokeWidth={1}
                 vectorEffect='non-scaling-stroke'
                 pointerEvents='none'
               />
@@ -331,7 +331,7 @@ export function FuseZoneEditor({
                 r={r}
                 fill={on ? INK : PAPER}
                 stroke={INK}
-                strokeWidth={picked === i ? 2.5 : 1.5}
+                strokeWidth={1}
                 vectorEffect='non-scaling-stroke'
                 pointerEvents='none'
               />
