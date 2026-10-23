@@ -218,6 +218,48 @@ async function main() {
       minted === 0,
   );
 
+  const shapeRow = renamePlan.rows
+    .flatMap((row) =>
+      row.new.map((next) => ({
+        block: next.identity,
+        suggested: row.links.find((link) => link.identity === next.identity)?.pieceLineKey ?? '',
+        choice: M.CREATE_PIECE_CHOICE,
+      })),
+    )
+    .find((row) => row.block === 'RENAMED_PANEL');
+  const acceptedShape = shapeRow ? M.autoPieceMatchRows([shapeRow], new Set())[0] : undefined;
+  const autoRenamePlan = {
+    ...renamePlan,
+    needsShapeReview: false,
+    rows: renamePlan.rows.map((row) => ({
+      ...row,
+      links: row.links.map((link) =>
+        link.identity === acceptedShape?.block
+          ? { ...link, pieceLineKey: acceptedShape.choice, name: '' }
+          : link,
+      ),
+    })),
+  };
+  const shapeApplied = M.applyPlan(renameInput, autoRenamePlan, {
+    mintKey: () => 'must-not-mint',
+    makePiece: (seed) => seed,
+    makeAlias: (seed) => seed,
+    makeJoin: (seed) => seed.before,
+  });
+  assert(
+    'AUTO applies a shape-only proposal',
+    acceptedShape?.choice === 'piece-old' &&
+      shapeApplied.refused === null &&
+      shapeApplied.addedPieceKeys.length === 0 &&
+      shapeApplied.aliases.some(
+        (alias) => alias.blockName === 'RENAMED_PANEL' && alias.pieceLineKey === 'piece-old',
+      ),
+  );
+  assert(
+    'AUTO is disabled by the same blocking guard as SAVE',
+    M.pieceMatchActionDisabled(true, false, true),
+  );
+
   const pockets = parsed([
     { block: 'PCK_L', contour: fixture.contours.pocket },
     { block: 'PCK_L_1', contour: fixture.contours.pocket },

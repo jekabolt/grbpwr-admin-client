@@ -102,8 +102,27 @@ async function main() {
     guarded.refused?.reason === 'unresolved' && guarded.aliases.length === 0 && minted === 0,
   );
 
-  // The modal's default for an unmatched identity is "create". Resolve only those rows, then run
-  // the same deterministic apply path to verify the complete mapping and preserved live keys.
+  // AUTO accepts every current proposal, and falls back to the modal's existing "create" default
+  // only when there is no candidate. Feed the resulting choices into the same deterministic apply
+  // path to verify the complete mapping and preserved live keys.
+  const autoRows = M.autoPieceMatchRows(
+    plan.rows.flatMap((row) =>
+      row.new.map((next) => ({
+        block: next.identity,
+        suggested:
+          row.links.find((link) => lower(link.identity) === lower(next.identity))?.pieceLineKey ??
+          '',
+        choice: M.CREATE_PIECE_CHOICE,
+      })),
+    ),
+    new Set(),
+  );
+  const autoChoice = new Map(autoRows.map((row) => [lower(row.block), row.choice]));
+  assert(
+    'card-11 AUTO chooses reuse 7 + create 3',
+    autoRows.filter((row) => row.choice === M.CREATE_PIECE_CHOICE).length === 3 &&
+      autoRows.filter((row) => row.choice !== M.CREATE_PIECE_CHOICE).length === 7,
+  );
   const decided = {
     ...plan,
     needsPieceMatch: false,
@@ -113,18 +132,21 @@ async function main() {
         : {
             ...row,
             tier: 'added',
-            links: row.new.map((next) => ({
-              identity: next.identity,
-              pieceLineKey: null,
-              name: next.identity,
-            })),
+            links: row.new.map((next) => {
+              const choice = autoChoice.get(lower(next.identity));
+              return {
+                identity: next.identity,
+                pieceLineKey: choice === M.CREATE_PIECE_CHOICE ? null : choice,
+                name: choice === M.CREATE_PIECE_CHOICE ? next.identity : '',
+              };
+            }),
           },
     ),
   };
   const applied = M.applyPlan(input, decided, applyDeps);
   const aliasByIdentity = new Map(applied.aliases.map((alias) => [lower(alias.blockName), alias]));
   assert(
-    'resolved reconcile/apply aliases every DXF identity',
+    'card-11 AUTO aliases every DXF identity',
     parsed.blockNames.every((name) => aliasByIdentity.has(lower(name))),
   );
   assert(
@@ -134,13 +156,27 @@ async function main() {
     ),
   );
   assert(
-    'resolved reconcile/apply creates exactly three new pieces',
+    'card-11 AUTO creates exactly three new pieces',
     applied.addedPieceKeys.length === 3 &&
       applied.pieces
         .filter((piece) => applied.addedPieceKeys.includes(piece.lineKey))
         .map((piece) => piece.name)
         .sort()
         .join('|') === [...snapshot.newPieceIdentities].sort().join('|'),
+  );
+
+  const manualBlock = autoRows.find((row) => row.suggested)?.block;
+  const withManualChoice = autoRows.map((row) =>
+    row.block === manualBlock ? { ...row, choice: M.CREATE_PIECE_CHOICE } : row,
+  );
+  const preserved = M.autoPieceMatchRows(
+    withManualChoice,
+    new Set(manualBlock ? [lower(manualBlock)] : []),
+  );
+  assert(
+    'AUTO preserves a choice the user already changed',
+    !!manualBlock &&
+      preserved.find((row) => row.block === manualBlock)?.choice === M.CREATE_PIECE_CHOICE,
   );
 
   const pckOnly = {

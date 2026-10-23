@@ -28,8 +28,9 @@
 //
 // The machine proposes, the human decides. Auto-suggestion runs in three descending tiers
 // (exact case-insensitive → normalized → similarity, the last one badged «предложено»), and
-// every row still has to be confirmed by a person: a wrong mapping silently mis-assigns cloth
-// to a piece, which is a cutting-floor error, not a UI annoyance.
+// every row stays editable by a person. AUTO is an explicit batch acceptance of those visible
+// proposals, never background application: a wrong mapping silently mis-assigns cloth to a piece,
+// which is a cutting-floor error, not a UI annoyance.
 //
 // Writes nothing of its own — it stages `pieces` and `pieceDxfAliases` into the card form, and
 // the card's own Save persists both in one transaction (the store upserts pieces first, so a
@@ -52,6 +53,7 @@ import {
 } from 'lib/fusing-dxf/interlining-import';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
+  Button,
   Chip,
   ChipRow,
   ConfirmationModal,
@@ -117,6 +119,11 @@ import { useNesting, type NestingFile } from './use-nesting';
 import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
 import { planOldPieceOps } from './old-pieces-ops';
+import {
+  autoPieceMatchRows,
+  CREATE_PIECE_CHOICE,
+  pieceMatchActionDisabled,
+} from './piece-match-auto';
 import {
   hasOldPieceLoss,
   OldPiecesDecision,
@@ -213,7 +220,7 @@ const defaultPieceName = (row: { block: string; uniBase: string; manifestName?: 
 // ULID is 26 chars of upper-case Crockford base32, so a '+' and lower case can never be one.
 // (It used to be a string containing a raw NUL byte — invisible in every editor, and enough to
 // make grep treat this whole file as binary.)
-const CREATE = '+create';
+const CREATE = CREATE_PIECE_CHOICE;
 const SKIP = '+skip';
 
 function interliningInitialChoice(pieceLineKey: string | undefined, wasSkipped: boolean): string {
@@ -1080,6 +1087,9 @@ export function PieceMatchModal({
       : aliasIdentity(block, split);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
+  // AUTO accepts proposals only for untouched rows. A manual choice stays the operator's even
+  // when it is «not a piece» (empty) or the same value the proposal currently happens to hold.
+  const changedRowChoices = useRef(new Set<string>());
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
@@ -1797,6 +1807,7 @@ export function PieceMatchModal({
   // to its stored piece it is the old restore. Rows are appended, never rebuilt by the effect,
   // which would throw away every choice already made.
   const choose = (ci: string, value: string) => {
+    changedRowChoices.current.add(ci);
     const stored = mineByBlock.get(ci);
     if (!stored) {
       setChoice(ci, value);
@@ -1850,7 +1861,7 @@ export function PieceMatchModal({
     };
   }, [selected, blockCounts, rowByCi, mineByBlock]);
 
-  function apply() {
+  function apply(rowsToApply: readonly BlockRow[] = rows) {
     if (invalidEditedZone) return;
     setSaving(true);
     try {
@@ -1869,7 +1880,7 @@ export function PieceMatchModal({
           .filter(Boolean) as string[],
       );
       const createdEditKeys = new Set<string>();
-      for (const r of rows) {
+      for (const r of rowsToApply) {
         if (r.choice !== CREATE) continue;
         const name = (draftNames[r.block.toLowerCase()] ?? '').trim() || defaultPieceName(r);
         const key = newEditKey(name);
@@ -2078,7 +2089,7 @@ export function PieceMatchModal({
       // по циклу, а правило (сумма по РАЗЛИЧНЫМ, максимум по копиям ОДНОЙ) отвечает только на
       // ПОЛНОМ наборе — см. perGarmentFromBlocks и находку 4.
       const createdBlocks = new Map<string, { identity: string; instances: number }[]>();
-      for (const r of rows) {
+      for (const r of rowsToApply) {
         if (!r.choice || r.choice === SKIP) continue;
         let pieceLineKey = r.choice;
         if (r.choice === CREATE) {
@@ -2220,7 +2231,7 @@ export function PieceMatchModal({
       // strip/zone/full spec when it already belongs here; only a mapping made or changed in this
       // session is force-rebound to full fusing.
       const sessionMappedBlockKeys = new Set(
-        rows
+        rowsToApply
           .filter((row) => row.choice && row.choice !== SKIP)
           .map((row) => row.block.toLowerCase()),
       );
@@ -2300,7 +2311,9 @@ export function PieceMatchModal({
       if ((fuseTouched || !!interlining) && staging && techCardId)
         staging.stage(fusingSheetsChange(techCardId));
       if (interlining) {
-        const skipped = new Set(rows.filter((row) => row.choice === SKIP).map((row) => row.block));
+        const skipped = new Set(
+          rowsToApply.filter((row) => row.choice === SKIP).map((row) => row.block),
+        );
         interlining.onReview(skipped);
       }
       onClose(true);
@@ -2436,6 +2449,17 @@ export function PieceMatchModal({
   // Until every dispute is settled there is nothing valid to save: the server would reject the
   // whole card.
   const blocked = unresolvedCollapses.length > 0 || invalidEditedZone;
+  const actionDisabled = pieceMatchActionDisabled(canSave, saving, blocked);
+  const applyAuto = () => {
+    if (actionDisabled) return;
+    if (!canSave) {
+      onClose(false);
+      return;
+    }
+    const accepted = autoPieceMatchRows(rows, changedRowChoices.current);
+    setRows(accepted);
+    apply(accepted);
+  };
 
   // ── the editor ────────────────────────────────────────────────────────────────────────
   const optionKeyOf = (key: string) =>
@@ -2860,11 +2884,24 @@ export function PieceMatchModal({
       onOpenChange={(o: boolean) => {
         if (!o && !saving) onClose(false);
       }}
-      onConfirm={canSave ? apply : () => onClose(false)}
+      onConfirm={canSave ? () => apply() : () => onClose(false)}
       onCancel={() => onClose(false)}
       title={`pieces · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={canSave ? 'save' : 'done'}
-      confirmDisabled={canSave && (saving || blocked)}
+      confirmDisabled={actionDisabled}
+      footerActions={
+        !interlining && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            disabled={actionDisabled}
+            onClick={applyAuto}
+          >
+            AUTO
+          </Button>
+        )
+      }
       width='lg'
       closeOnConfirm={false}
       dock={
