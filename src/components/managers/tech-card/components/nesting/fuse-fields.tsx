@@ -1,8 +1,8 @@
 // The fuse fields of the piece panel, variant «Fold» (owner OK 2026-10-22): FUSING no / whole /
 // strip / zone / derived file with `⋯` in the door; INTERLINING (prefilled when the BOM has one);
 // WIDTH MM for a strip; `⋯` opens INSET MM / FUSIBLE GRAIN / DARTS in place, and opens by itself
-// when any of them is off its default. ZONE (L13 Rect+): clipped area in the door, sharp / round,
-// undo / reset. Desktop: in the panel. Phone: docked above the footer.
+// when any of them is off its default. ZONE: clipped area in the door, sharp / round, undo / reset.
+// Desktop: in the panel. Phone: docked above the footer.
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   Button,
@@ -34,7 +34,7 @@ import {
   type FusePanelMode,
   type PieceFuseSpec,
 } from './fuse-spec';
-import { allCorners, isDrawnZone, resetZone, withCorners, type ZoneBus } from './fuse-zone';
+import { allCorners, isDrawnZone, withCorners, type ZoneBus } from './fuse-zone';
 import { PatternDropZone } from '../pattern-drop-zone';
 
 export type InterliningLine = {
@@ -391,7 +391,7 @@ export function FuseFields({
   );
 }
 
-/** ZONE: the clipped area, all corners sharp / round, undo, back to the rectangle. */
+/** ZONE: the clipped area, all points sharp / round, undo, back to the full-fill seed. */
 function ZoneRow({
   spec,
   ci,
@@ -448,7 +448,7 @@ function ZoneRow({
           const prev = bus.pop(ci);
           if (prev) onChange({ ...spec, zone: prev.zone });
         })}
-        {chip('reset', false, !drawn, () => write(resetZone(spec.zone)))}
+        {chip('reset', false, !drawn, () => write(null))}
       </div>
     </FuseField>
   );

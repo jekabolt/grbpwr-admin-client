@@ -4,7 +4,11 @@ import assert from 'node:assert/strict';
 import {
   insertZonePoint,
   removeZonePoint,
+  seedZone,
+  splineZone,
   storedZone,
+  zonePoints,
+  ZONE_SEED_MAX_POINTS,
   type ZonePoint,
 } from 'components/managers/tech-card/components/nesting/fuse-zone';
 import { buildFusingSheets, mapFuseSpecToSize } from './dxf';
@@ -51,6 +55,49 @@ export function main() {
   const outline = archOutline(200, 100);
   const s0 = spec(null);
   const inset = fuseInsetRingMm(outline, s0, null);
+
+  // The pen starts as a sparse set of significant inset vertices. Because every point is on the
+  // contour, every side follows it and the resulting ZONE is the same fill as WHOLE.
+  const seed = seedZone(inset);
+  assert.ok(seed && 'spline' in seed, 'a curved inset produces a spline seed');
+  const seedPoints = seed.spline.points;
+  assert.ok(seedPoints.length >= 3, 'the seed has a valid ring');
+  assert.ok(seedPoints.length <= 8, `the curved seed stays small (${seedPoints.length})`);
+  assert.ok(seedPoints.length <= ZONE_SEED_MAX_POINTS, 'the seed respects its hard cap');
+  assert.ok(
+    seedPoints.every((point) => point.corner),
+    'every seed point is sharp',
+  );
+  assert.ok(seedPoints.every((point) => onRing(point, inset, ZONE_ON_CONTOUR_MM)));
+  const wholeGeometry = generateFuseGeometry({ outline, spec: spec(null, { mode: 'whole' }) });
+  const seedGeometry = generateFuseGeometry({ outline, spec: spec(seed) });
+  const wholeArea = Math.abs(signedArea(wholeGeometry[0].outer));
+  const seedArea = Math.abs(signedArea(seedGeometry[0].outer));
+  assert.ok(
+    Math.abs(seedArea - wholeArea) / wholeArea <= 0.005,
+    `seed equals WHOLE within 0.5% (${seedArea} vs ${wholeArea})`,
+  );
+
+  // Pulling one seed point toward the centre carves material away without crossing the ring.
+  const centre = inset.reduce(
+    (sum, point) => ({ x: sum.x + point.x / inset.length, y: sum.y + point.y / inset.length }),
+    { x: 0, y: 0 },
+  );
+  const carvedPoints = zonePoints(seed).map((point, index) =>
+    index === 0
+      ? {
+          ...point,
+          x: point.x + (centre.x - point.x) * 0.25,
+          y: point.y + (centre.y - point.y) * 0.25,
+        }
+      : point,
+  );
+  const carved = splineZone(carvedPoints);
+  const carvedRing = zoneRingMm(carved, inset);
+  const carvedArea = Math.abs(signedArea(carvedRing));
+  assert.ok(carvedArea < seedArea, `an inward point lowers area (${carvedArea} < ${seedArea})`);
+  assert.equal(ringSelfIntersects(carvedRing), false, 'the carved ring stays simple');
+  assert.deepEqual(seedZone(inset), seed, 'reset restores the exact full-fill seed');
 
   // Points on the arch of the inset: the arch is at y >= height; project guesses onto the inset.
   const on = (x: number, y: number) => projectOnRing({ x, y }, inset).p;
