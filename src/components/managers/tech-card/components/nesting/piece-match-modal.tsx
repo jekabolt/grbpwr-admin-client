@@ -28,8 +28,9 @@
 //
 // The machine proposes, the human decides. Auto-suggestion runs in three descending tiers
 // (exact case-insensitive → normalized → similarity, the last one badged «предложено»), and
-// every row still has to be confirmed by a person: a wrong mapping silently mis-assigns cloth
-// to a piece, which is a cutting-floor error, not a UI annoyance.
+// every row stays editable by a person. AUTO is an explicit batch acceptance of those visible
+// proposals, never background application: a wrong mapping silently mis-assigns cloth to a piece,
+// which is a cutting-floor error, not a UI annoyance.
 //
 // Writes nothing of its own — it stages `pieces` and `pieceDxfAliases` into the card form, and
 // the card's own Save persists both in one transaction (the store upserts pieces first, so a
@@ -38,6 +39,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
+import {
+  proposePieceShapes,
+  type PieceShapeProposal,
+  type PieceShapeReference,
+} from 'lib/dxf-reconcile';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import {
@@ -47,6 +53,7 @@ import {
 } from 'lib/fusing-dxf/interlining-import';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import {
+  Button,
   Chip,
   ChipRow,
   ConfirmationModal,
@@ -113,6 +120,11 @@ import { manifestFactsOf } from './manifest-facts';
 import { isFetchFailure } from './dxf-warnings';
 import { planOldPieceOps } from './old-pieces-ops';
 import {
+  autoPieceMatchRows,
+  CREATE_PIECE_CHOICE,
+  pieceMatchActionDisabled,
+} from './piece-match-auto';
+import {
   hasOldPieceLoss,
   OldPiecesDecision,
   type OldPieceDecision,
@@ -162,12 +174,12 @@ type BlockRow = {
   // не-uni блоков. Служит ИМЕНЕМ ПО УМОЛЧАНИЮ для новой детали — см. defaultPieceName.
   uniBase: string;
   // What the dialog proposes and why. 'exact' | 'loose' need no badge — they ARE the name;
-  // 'similar' and 'other-fabric' are guesses and say so.
+  // 'similar', 'shape' and 'other-fabric' are proposals; shape remains a human-confirmed choice.
   suggested: string; // piece lineKey, '' = none
   // 'same-name-elsewhere' — ТОЛЬКО у строк файла с манифестом (F6b): имя совпало с деталью, которая
   // привязана к ДРУГОЙ ткани и не к этой. Подкладочная FP_L и FP_L верха — разные детали кроя, и
   // совпадение имени здесь — подсказка, а не ответ: предлагается, но не выбирается само (K1, C5).
-  basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'same-name-elsewhere' | 'none';
+  basis: 'exact' | 'loose' | 'shape' | 'similar' | 'other-fabric' | 'same-name-elsewhere' | 'none';
   // Слот, с которого пришла подсказка 'other-fabric'. '' для остальных оснований.
   fromSlot?: string;
   choice: string; // piece lineKey, '' = unresolved, SKIP = explicit skip, NEW = create a piece
@@ -208,7 +220,7 @@ const defaultPieceName = (row: { block: string; uniBase: string; manifestName?: 
 // ULID is 26 chars of upper-case Crockford base32, so a '+' and lower case can never be one.
 // (It used to be a string containing a raw NUL byte — invisible in every editor, and enough to
 // make grep treat this whole file as binary.)
-const CREATE = '+create';
+const CREATE = CREATE_PIECE_CHOICE;
 const SKIP = '+skip';
 
 function interliningInitialChoice(pieceLineKey: string | undefined, wasSkipped: boolean): string {
@@ -417,9 +429,10 @@ function proposeRows(
     pieceOptions: readonly { lineKey: string; name: string }[];
     otherFabricByBlock: ReadonlyMap<string, { pieceKey: string; fromSlot: string }>;
     elsewhereOnly: ReadonlyMap<string, string>;
+    shapeByBlock: ReadonlyMap<string, PieceShapeProposal>;
   },
 ): BlockRow[] {
-  const { storedFirst, pieceOptions, otherFabricByBlock, elsewhereOnly } = args;
+  const { storedFirst, pieceOptions, otherFabricByBlock, elsewhereOnly, shapeByBlock } = args;
   const next: BlockRow[] = [];
   for (const [ci, c] of counted) {
     const block = c.block;
@@ -439,13 +452,17 @@ function proposeRows(
         : [block];
     const named = pieceNameMatches(names, pieceOptions);
     const hint = otherFabricByBlock.get(loosePieceName(block));
-    if (named.matches[0]) {
+    const shaped = shapeByBlock.get(ci);
+    if (named.matches.length === 1) {
       suggested = named.matches[0].lineKey;
       basis = named.basis;
     } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
       suggested = hint.pieceKey;
       basis = 'other-fabric';
       fromSlot = hint.fromSlot;
+    } else if (shaped && pieceOptions.some((p) => p.lineKey === shaped.pieceLineKey)) {
+      suggested = shaped.pieceLineKey;
+      basis = 'shape';
     } else {
       let best = SUGGEST_MIN;
       for (const p of pieceOptions) {
@@ -466,11 +483,12 @@ function proposeRows(
         fromSlot = from;
       }
     }
-    // Only the two exact tiers bind to an existing piece by default. A similarity guess or another
-    // fabric's mapping is never applied — being wrong there costs cloth. Everything else defaults
-    // to a NEW piece named after the block (patterns-lite: the target action is one SAVE; the old
-    // «create all» button is now the default). The editor still offers «not a piece».
-    const preselect = basis === 'exact' || basis === 'loose' ? suggested : CREATE;
+    // Name/alias answers and a strong unique shape proposal are preselected, but still pass through
+    // this human-confirmed modal. Only fuzzy text similarity defaults to a new piece.
+    const preselect =
+      basis === 'exact' || basis === 'loose' || basis === 'other-fabric' || basis === 'shape'
+        ? suggested
+        : CREATE;
     next.push({
       block,
       instances,
@@ -733,6 +751,8 @@ export function PieceMatchModal({
   colorways,
   pieceAreaScopes,
   techCardId,
+  knownPieceShapes,
+  preferredShapeSizeTokens,
   interlining,
   interliningOwnerFiles,
   onUploadInterliningFile,
@@ -760,6 +780,10 @@ export function PieceMatchModal({
   pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
   // Карточка этой формы: размеры из манифеста ДРУГОЙ карточки сами в ряд не пишутся (F14f).
   techCardId?: number;
+  /** Geometry of live pieces from every card DXF already parsed by the parent. */
+  knownPieceShapes?: readonly PieceShapeReference[];
+  /** Dictionary tokens of the base/sample size, preferred when both blocks contain it. */
+  preferredShapeSizeTokens?: readonly string[];
   interlining?: {
     slotLineKey: string;
     mainBlocks: readonly PieceDTO[];
@@ -1063,6 +1087,9 @@ export function PieceMatchModal({
       : aliasIdentity(block, split);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
+  // AUTO accepts proposals only for untouched rows. A manual choice stays the operator's even
+  // when it is «not a piece» (empty) or the same value the proposal currently happens to hold.
+  const changedRowChoices = useRef(new Set<string>());
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
@@ -1106,6 +1133,31 @@ export function PieceMatchModal({
         .filter((p) => !!p.lineKey?.trim() && !!p.name?.trim())
         .map((p) => ({ lineKey: p.lineKey!.trim(), name: p.name!.trim() })),
     [pieces],
+  );
+  const shapeByBlock = useMemo(
+    () =>
+      interlining
+        ? new Map<string, PieceShapeProposal>()
+        : proposePieceShapes({
+            target: {
+              pieces: contourPieces,
+              blockNames: contourPieces.flatMap((piece) =>
+                piece.blockName?.trim() ? [piece.blockName] : [],
+              ),
+            },
+            references: knownPieceShapes ?? [],
+            pieces: pieceOptions,
+            sizeTokens: [...dictTokens.keys()],
+            preferredSizeTokens: preferredShapeSizeTokens,
+          }),
+    [
+      interlining,
+      contourPieces,
+      knownPieceShapes,
+      pieceOptions,
+      dictTokens,
+      preferredShapeSizeTokens,
+    ],
   );
 
   // This fabric's stored mapping, keyed the way the server keys it (normalized + case-folded).
@@ -1172,7 +1224,7 @@ export function PieceMatchModal({
   // кроя. Поэтому запоминается ещё и слот-источник — подсказка обязана называть, откуда она, а
   // не выглядеть как факт: её принимают пачкой.
   const otherFabricByBlock = useMemo(() => {
-    const m = new Map<string, { pieceKey: string; fromSlot: string }>();
+    const candidates = new Map<string, Map<string, { pieceKey: string; fromSlot: string }>>();
     for (const a of aliases ?? []) {
       if (aliasInScope(a, scope, links)) continue;
       // The SOURCE key as the alias itself carries it — a назначение when it has one, its line
@@ -1181,10 +1233,17 @@ export function PieceMatchModal({
       // ткани», which reads as a fact rather than as a guess.
       const from = aliasScopeKey(a);
       const k = loosePieceName(identityOf(a.blockName ?? ''));
-      if (!m.has(k)) m.set(k, { pieceKey: a.pieceLineKey ?? '', fromSlot: from });
+      const pieceKey = (a.pieceLineKey ?? '').trim();
+      if (!k || !pieceKey || !livePieceKeys.has(pieceKey.toLowerCase())) continue;
+      const byPiece = candidates.get(k) ?? new Map();
+      byPiece.set(pieceKey.toLowerCase(), { pieceKey, fromSlot: from });
+      candidates.set(k, byPiece);
     }
+    const m = new Map<string, { pieceKey: string; fromSlot: string }>();
+    for (const [key, byPiece] of candidates)
+      if (byPiece.size === 1) m.set(key, [...byPiece.values()][0]);
     return m;
-  }, [aliases, scope, links, split]);
+  }, [aliases, scope, links, split, livePieceKeys]);
 
   // F6b: детали, привязанные к ДРУГИМ тканям и ни разу к этой, — lineKey (ci) → ключ первой такой
   // ткани. Читается только строками файла с манифестом (см. proposeRows, 'same-name-elsewhere').
@@ -1260,6 +1319,7 @@ export function PieceMatchModal({
         pieceOptions,
         otherFabricByBlock,
         elsewhereOnly,
+        shapeByBlock,
       }),
     );
   }, [
@@ -1273,6 +1333,7 @@ export function PieceMatchModal({
     stored,
     otherFabricByBlock,
     elsewhereOnly,
+    shapeByBlock,
   ]);
 
   const decided = rows.filter((r) => r.choice).length;
@@ -1746,6 +1807,7 @@ export function PieceMatchModal({
   // to its stored piece it is the old restore. Rows are appended, never rebuilt by the effect,
   // which would throw away every choice already made.
   const choose = (ci: string, value: string) => {
+    changedRowChoices.current.add(ci);
     const stored = mineByBlock.get(ci);
     if (!stored) {
       setChoice(ci, value);
@@ -1799,7 +1861,7 @@ export function PieceMatchModal({
     };
   }, [selected, blockCounts, rowByCi, mineByBlock]);
 
-  function apply() {
+  function apply(rowsToApply: readonly BlockRow[] = rows) {
     if (invalidEditedZone) return;
     setSaving(true);
     try {
@@ -1818,7 +1880,7 @@ export function PieceMatchModal({
           .filter(Boolean) as string[],
       );
       const createdEditKeys = new Set<string>();
-      for (const r of rows) {
+      for (const r of rowsToApply) {
         if (r.choice !== CREATE) continue;
         const name = (draftNames[r.block.toLowerCase()] ?? '').trim() || defaultPieceName(r);
         const key = newEditKey(name);
@@ -2002,6 +2064,13 @@ export function PieceMatchModal({
         // сюда не дотягивается (он про ЧУЖИЕ скоупы), а алиас на несуществующую деталь сервер
         // не разрешит — piece_line_key: not_found, и падает сохранение всей карты.
         if (!liveKeys.has(pieceLineKey.trim().toLowerCase())) continue;
+        // A complete replacement is also the authority on which old blocks vanished. Keep their
+        // pieces live, but do not carry dead aliases into the new revision; a shape/name proposal
+        // below can relink the same piece under its new identity.
+        if (parseComplete && !parsedPresence.has(ci)) {
+          const stem = sizelessStem(ci, (token) => dictTokens.has(token));
+          if (!stem || !parsedPresence.has(stem)) continue;
+        }
         boundHere.set(ci, pieceLineKey);
         byKey.set(aliasKey(scope.key, mineSpelling.get(ci) ?? ci), {
           ...bind,
@@ -2020,7 +2089,7 @@ export function PieceMatchModal({
       // по циклу, а правило (сумма по РАЗЛИЧНЫМ, максимум по копиям ОДНОЙ) отвечает только на
       // ПОЛНОМ наборе — см. perGarmentFromBlocks и находку 4.
       const createdBlocks = new Map<string, { identity: string; instances: number }[]>();
-      for (const r of rows) {
+      for (const r of rowsToApply) {
         if (!r.choice || r.choice === SKIP) continue;
         let pieceLineKey = r.choice;
         if (r.choice === CREATE) {
@@ -2162,7 +2231,7 @@ export function PieceMatchModal({
       // strip/zone/full spec when it already belongs here; only a mapping made or changed in this
       // session is force-rebound to full fusing.
       const sessionMappedBlockKeys = new Set(
-        rows
+        rowsToApply
           .filter((row) => row.choice && row.choice !== SKIP)
           .map((row) => row.block.toLowerCase()),
       );
@@ -2242,7 +2311,9 @@ export function PieceMatchModal({
       if ((fuseTouched || !!interlining) && staging && techCardId)
         staging.stage(fusingSheetsChange(techCardId));
       if (interlining) {
-        const skipped = new Set(rows.filter((row) => row.choice === SKIP).map((row) => row.block));
+        const skipped = new Set(
+          rowsToApply.filter((row) => row.choice === SKIP).map((row) => row.block),
+        );
         interlining.onReview(skipped);
       }
       onClose(true);
@@ -2378,6 +2449,17 @@ export function PieceMatchModal({
   // Until every dispute is settled there is nothing valid to save: the server would reject the
   // whole card.
   const blocked = unresolvedCollapses.length > 0 || invalidEditedZone;
+  const actionDisabled = pieceMatchActionDisabled(canSave, saving, blocked);
+  const applyAuto = () => {
+    if (actionDisabled) return;
+    if (!canSave) {
+      onClose(false);
+      return;
+    }
+    const accepted = autoPieceMatchRows(rows, changedRowChoices.current);
+    setRows(accepted);
+    apply(accepted);
+  };
 
   // ── the editor ────────────────────────────────────────────────────────────────────────
   const optionKeyOf = (key: string) =>
@@ -2802,11 +2884,24 @@ export function PieceMatchModal({
       onOpenChange={(o: boolean) => {
         if (!o && !saving) onClose(false);
       }}
-      onConfirm={canSave ? apply : () => onClose(false)}
+      onConfirm={canSave ? () => apply() : () => onClose(false)}
       onCancel={() => onClose(false)}
       title={`pieces · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={canSave ? 'save' : 'done'}
-      confirmDisabled={canSave && (saving || blocked)}
+      confirmDisabled={actionDisabled}
+      footerActions={
+        !interlining && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            disabled={actionDisabled}
+            onClick={applyAuto}
+          >
+            AUTO
+          </Button>
+        )
+      }
       width='lg'
       closeOnConfirm={false}
       dock={

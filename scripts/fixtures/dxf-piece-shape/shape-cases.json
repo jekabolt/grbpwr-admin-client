@@ -1,0 +1,42 @@
+{
+  "source": "synthetic one-size contours for cross-file piece recognition",
+  "contours": {
+    "rename": [
+      [0, 0],
+      [8, 0],
+      [8, 2],
+      [5, 2],
+      [5, 6],
+      [0, 6]
+    ],
+    "renameQuarterTurn": [
+      [6, 0],
+      [6, 8],
+      [4, 8],
+      [4, 5],
+      [0, 5],
+      [0, 0]
+    ],
+    "pocket": [
+      [0, 0],
+      [6, 0],
+      [6, 3],
+      [3, 4],
+      [0, 3]
+    ],
+    "sleeveRight": [
+      [0, 0],
+      [7, 0],
+      [6, 2],
+      [3, 5],
+      [0, 4]
+    ],
+    "sleeveLeft": [
+      [7, 0],
+      [0, 0],
+      [1, 2],
+      [4, 5],
+      [7, 4]
+    ]
+  }
+}

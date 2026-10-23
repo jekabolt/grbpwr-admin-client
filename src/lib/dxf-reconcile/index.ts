@@ -20,6 +20,8 @@ export {
   unplacedPieceKeys,
 } from './marks';
 export { removeSheetCascade } from './cascade';
+export { pieceShapeReferences, proposePieceShapes, SHAPE_PROPOSAL_THRESHOLDS } from './piece-shape';
+export type { PieceShapeProposal, PieceShapeReference } from './piece-shape';
 export type {
   CascadeBlock,
   CascadeInput,
