@@ -84,7 +84,8 @@ export function applyOverrides(layout: SchematicLayout, pos: PosOverrides): Sche
   let right = 0;
   let bottom = 0;
   for (const n of [...boxes, ...tiles, ...(tail ? [tail] : [])]) {
-    if (n.x + n.w > right) right = n.x + n.w;
+    const width = 'contentW' in n ? n.contentW : n.w;
+    if (n.x + width > right) right = n.x + width;
     if (n.y + n.h > bottom) bottom = n.y + n.h;
   }
 
@@ -123,8 +124,8 @@ export function hitNode(
    */
   exclude?: string,
 ): NodeHit | null {
-  const inside = (n: { x: number; y: number; w: number; h: number }) =>
-    x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h;
+  const inside = (n: { x: number; y: number; w: number; h: number; hitH?: number }) =>
+    x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + (n.hitH ?? n.h);
 
   for (let i = layout.tiles.length - 1; i >= 0; i--) {
     const t = layout.tiles[i];
@@ -137,9 +138,7 @@ export function hitNode(
   return null;
 }
 
-export type CombineVerdict =
-  | { ok: true; absorbInto?: string }
-  | { ok: false; reason: string };
+export type CombineVerdict = { ok: true; absorbInto?: string } | { ok: false; reason: string };
 
 /**
  * Можно ли соединить перетаскиваемую ноду с той, на которую её бросили.

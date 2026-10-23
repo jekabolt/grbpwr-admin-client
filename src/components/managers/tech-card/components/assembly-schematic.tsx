@@ -9,6 +9,7 @@ import { assemblyLayout } from './assembly-layout';
 import {
   buildWires,
   directInputsOf,
+  HiddenPiecesDoor,
   makeRowY,
   picksMany,
   pieceAddPrefill,
@@ -26,6 +27,7 @@ import { revealDelta } from './canvas-view';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useActiveStepStore } from './assembly-map/active-step';
+import type { OrphanBoardState } from './orphan-pieces';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -93,6 +95,7 @@ export function AssemblySchematic({
   onMove,
   onResetPositions,
   renamedUnit,
+  orphanBoard,
   frozen = false,
 }: {
   blocks: AssemblyBlock[];
@@ -142,6 +145,7 @@ export function AssemblySchematic({
    * Новый объект на каждый жест, включая ⌘Z: тождеством и распознаётся «весть новая».
    */
   renamedUnit: UnitRenameNotice | null;
+  orphanBoard?: OrphanBoardState;
   /** Карточка выпущена: схема остаётся читаемой и раскладываемой, но не редактируемой. */
   frozen?: boolean;
 }) {
@@ -222,7 +226,16 @@ export function AssemblySchematic({
 
   // Объявлена ВЫШЕ чистки выбора намеренно: чистка спрашивает у раскладки, жива ли нода, и
   // порядок объявления здесь — не стиль, а условие того, что она спрашивает свежую.
-  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+  const auto = useMemo(
+    () =>
+      assemblyLayout(blocks, steps, res, new Set(), {
+        hiddenKeys: orphanBoard?.hiddenKeys,
+        orphanKeys: orphanBoard?.orphanKeys,
+        revealHidden: orphanBoard?.showHidden,
+        expandedKey: orphanBoard?.expandedKey,
+      }),
+    [blocks, steps, res, orphanBoard],
+  );
 
   useEffect(() => {
     setPicked((cur) => {
@@ -673,7 +686,12 @@ export function AssemblySchematic({
 
   const manual = Object.keys(positions).length;
 
-  if (layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail) {
+  if (
+    layout.tiles.length === 0 &&
+    layout.boxes.length === 0 &&
+    !layout.tail &&
+    !layout.hiddenDoor
+  ) {
     // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно — но теперь оно означает ровно одно:
     // на карточке НЕТ ДЕТАЛЕЙ. До Ф7 сюда попадала и размеченная деталями карточка без единого
     // узла, то есть экран говорил «нечего рисовать» ровно тогда, когда рисовать было что.
@@ -860,6 +878,7 @@ export function AssemblySchematic({
             // ПОЗИЦИЯ ШАГА НА ПЛИТКЕ — по раскладке, «сразу за ближайшим блоком»; раскладка та
             // же эффективная, что рисует ноды, вместе с ручными позициями.
             const addPrefill = pieceAddPrefill(t.key, steps, res, blocks, layout);
+            const orphan = orphanBoard?.pieces.get(t.key);
             return (
               <TileView
                 key={`tile:${t.key}`}
@@ -878,7 +897,13 @@ export function AssemblySchematic({
                 // шагу, который её съел: навигация, переодетая в жест выделения, и выбор между
                 // двумя смыслами по невидимому состоянию. Вопрос «куда деталь делась» никуда не
                 // делся — на него отвечает чип `→ ▣ ИМЯ` в ховер-полосе, и отвечает адресно.
-                organProps={activate(clickGuard(() => toggle(t.key)))}
+                organProps={
+                  orphan?.kind === 'used'
+                    ? activate(clickGuard(() => orphanBoard?.onTogglePiece(t.key)))
+                    : orphan?.kind === 'hidden'
+                      ? {}
+                      : activate(clickGuard(() => toggle(t.key)))
+                }
                 dragProps={dragHandlers(t.key, t.x, t.y)}
                 hoverProps={hoverHandlers(t.key)}
                 // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
@@ -888,9 +913,17 @@ export function AssemblySchematic({
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
                 }
+                orphanBoard={orphanBoard}
               />
             );
           })}
+          {layout.hiddenDoor && orphanBoard && (
+            <HiddenPiecesDoor
+              door={layout.hiddenDoor}
+              open={orphanBoard.showHidden}
+              onToggle={orphanBoard.onToggleHidden}
+            />
+          )}
         </div>
       </div>
 

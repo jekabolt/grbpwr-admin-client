@@ -699,6 +699,7 @@ export function ConstructionTab({
                   colorwayArticles={colorwayArticles}
                   pieceClothByColorway={pieceClothByColorway}
                   pieceShapes={pieceShapes.shapeByKey}
+                  orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
                   // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
                   // принимает намерение «снять разметку» только против карточки, которая её несёт,
                   // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже

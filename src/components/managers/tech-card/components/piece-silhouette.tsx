@@ -6,6 +6,7 @@
 // piece-block-refs.ts и card-dxf-pack.ts. Контур сюда приходит уже НАЙДЕННЫМ (usePieceShapes), так
 // что этот файл отвечает ровно за одно: как деталь выглядит рядом со своим именем.
 import { cn } from 'lib/utility';
+import { PLACEHOLDER_SURFACE } from 'ui';
 import { fmtCm, PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 import type { PieceCloth } from './piece-cloth';
 
@@ -202,6 +203,7 @@ export function PieceTile({
   name,
   className,
   cloth,
+  orphan = false,
   pxBox = TILE_BOX,
 }: {
   found: FoundPiece | null;
@@ -213,6 +215,8 @@ export function PieceTile({
   className?: string;
   /** Из чего деталь кроят (`pieceClothMap`). null/undefined — вопрос не задавали: плитка как была. */
   cloth?: PieceCloth | null;
+  /** Current DXFs carry no linked contour for this card piece. */
+  orphan?: boolean;
   /** ВНЕШНИЙ бокс плитки в CSS-пикселях: тот, что дала раскладка. Паддинги вычитаются здесь. */
   pxBox?: { w: number; h: number };
 }) {
@@ -234,6 +238,7 @@ export function PieceTile({
         className,
       )}
     >
+      {orphan && <span aria-hidden className='absolute inset-0' style={PLACEHOLDER_SURFACE} />}
       {/* Поле снизу — под саму подпись: контур ужимается ДО неё, а не прячет под ней свой низ.
           Паддинг живёт на обёртке, а не на <svg>: у svg он режет область просмотра, а не поле. */}
       {showReconcile ? (
@@ -252,7 +257,12 @@ export function PieceTile({
           />
         </span>
       ) : null}
-      <span className='absolute inset-x-0 bottom-0 truncate bg-bgColor/80 px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase'>
+      <span
+        className={cn(
+          'absolute inset-x-0 bottom-0 truncate bg-bgColor/80 px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase',
+          orphan && 'text-labelColor',
+        )}
+      >
         {name}
       </span>
     </span>

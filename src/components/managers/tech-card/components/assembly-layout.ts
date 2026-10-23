@@ -88,7 +88,11 @@ export type TileLayout = {
   x: number;
   y: number;
   w: number;
+  /** Width of the full inline content; wider than `w` only while the orphan resolver is open. */
+  contentW: number;
   h: number;
+  /** Click/drag target height; the resolver below it is form UI, not part of the node hit area. */
+  hitH: number;
   /** Лежит на столе или уже вошла в узел. Место плитки следует из этого. */
   state: 'free' | 'eaten';
   /** Узел, съевший деталь; пусто у свободной. */
@@ -107,6 +111,14 @@ export type TileLayout = {
    * есть. Блок отвечает «какая работа скатывается в узел», плитка — «в каком состоянии деталь».
    */
   processing: number[];
+};
+
+export type HiddenPiecesDoorLayout = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  count: number;
 };
 
 export type SchematicLayout = {
@@ -144,6 +156,15 @@ export type SchematicLayout = {
   /** Все детали карточки как ноды. Ровно одна плитка на деталь при любом графе. */
   tiles: TileLayout[];
   tileByKey: Map<string, TileLayout>;
+  /** Disclosure at the end of the free-piece column. */
+  hiddenDoor?: HiddenPiecesDoorLayout;
+};
+
+export type OrphanLayoutOptions = {
+  hiddenKeys?: ReadonlySet<string>;
+  orphanKeys?: ReadonlySet<string>;
+  revealHidden?: boolean;
+  expandedKey?: string | null;
 };
 
 // Размеры взяты из прототипа: 180×15px строки под шапкой 21px, зазоры 96×18, плитка 48.
@@ -175,6 +196,9 @@ const STACK_DX = -60;
  * однажды разойдутся, а разойдутся они молча.
  */
 const PROC_ROW_H = 12;
+const ORPHAN_RESOLVER_W = 280;
+const ORPHAN_RESOLVER_H = 90;
+const HIDDEN_DOOR_H = 22;
 
 /**
  * ДЕТАЛЬ, НА ПЛИТКЕ КОТОРОЙ РИСУЕТСЯ СТРОКА ЭТОГО ШАГА; пусто — ни на одной.
@@ -224,6 +248,7 @@ export function assemblyLayout(
   steps: AssemblyStep[],
   res: AssemblyResult,
   collapsed: Set<string> = new Set(),
+  orphan: OrphanLayoutOptions = {},
 ): SchematicLayout {
   const real = blocks.filter((b) => b.key !== '');
   const loose = blocks.find((b) => b.key === '');
@@ -233,6 +258,9 @@ export function assemblyLayout(
   // список деталей. Брать состав деталей из `pieceInputs` блоков нельзя — деталь, не взятую
   // ни одним шагом, там не найти, а нода ей нужна: с неё начинается сборка.
   const allPieces = res.frontierBefore[0] ?? res.frontier.filter((k) => !res.units.has(k));
+  const hiddenKeys = orphan.hiddenKeys ?? new Set<string>();
+  const orphanKeys = orphan.orphanKeys ?? new Set<string>();
+  const visiblePieces = allPieces.filter((key) => orphan.revealHidden || !hiddenKeys.has(key));
 
   // Кто съел деталь и на каких шагах она вообще упоминается.
   const intoOf = new Map<string, string>();
@@ -271,7 +299,9 @@ export function assemblyLayout(
     if (own.length) processingOf.set(key, own);
   });
   /** Высота плитки: голова детали плюс её строки обработки. Без обработок — ровно голова. */
-  const tileH = (key: string) => TILE + (processingOf.get(key)?.length ?? 0) * PROC_ROW_H;
+  const tileBaseH = (key: string) => TILE + (processingOf.get(key)?.length ?? 0) * PROC_ROW_H;
+  const tileH = (key: string) =>
+    tileBaseH(key) + (orphan.expandedKey === key ? TILE_GAP + ORPHAN_RESOLVER_H : 0);
 
   // Хвост — шаги, не принадлежащие вообще ничему. Обработка, получившая свою плитку, из него
   // уходит: держать её в обоих местах значило бы вернуть ту самую кучу, из-за которой всё и
@@ -282,15 +312,18 @@ export function assemblyLayout(
   const buildTiles = (place: Map<string, { x: number; y: number; w: number; h: number }>) => {
     const tiles: TileLayout[] = [];
     const tileByKey = new Map<string, TileLayout>();
-    for (const key of allPieces) {
+    for (const key of visiblePieces) {
       const p = place.get(key);
       if (!p) continue;
+      const expanded = orphan.expandedKey === key;
       const tile: TileLayout = {
         key,
         x: p.x,
         y: p.y,
         w: p.w,
+        contentW: expanded ? ORPHAN_RESOLVER_W : p.w,
         h: p.h,
+        hitH: tileBaseH(key),
         state: stateOf(key),
         into: intoOf.get(key) ?? '',
         consumers: consumersOf.get(key) ?? [],
@@ -301,6 +334,11 @@ export function assemblyLayout(
     }
     return { tiles, tileByKey };
   };
+
+  const hiddenDoorAt = (y: number): HiddenPiecesDoorLayout | undefined =>
+    hiddenKeys.size > 0
+      ? { x: FREE_TILE_X, y, w: FREE_TILE_W, h: HIDDEN_DOOR_H, count: hiddenKeys.size }
+      : undefined;
 
   /** Хвостовой бокс: геометрия строк та же, что у боксов узлов. */
   const tailBox = (col: number, x: number): BoxLayout | undefined => {
@@ -327,19 +365,31 @@ export function assemblyLayout(
     // Курсор вместо шага по индексу: без него плитка с обработками легла бы строками на голову
     // следующей. На карточке без обработок курсор даёт ровно прежний шаг 48+8.
     let cursor = 16;
-    for (const key of allPieces) {
+    const ordered = [
+      ...visiblePieces.filter((key) => !hiddenKeys.has(key)),
+      ...visiblePieces.filter((key) => hiddenKeys.has(key)),
+    ];
+    for (const key of ordered) {
       const h = tileH(key);
       place.set(key, { x: FREE_TILE_X, y: cursor, w: FREE_TILE_W, h });
       cursor += h + TILE_GAP;
     }
     const { tiles, tileByKey } = buildTiles(place);
-    const x0 = (tiles.length ? 76 : 0) + 104;
+    const hiddenDoor = hiddenDoorAt(cursor);
+    const columnContentW = orphan.expandedKey ? ORPHAN_RESOLVER_W : FREE_TILE_W;
+    const hasColumn = tiles.length > 0 || !!hiddenDoor;
+    const x0 = (hasColumn ? FREE_TILE_X + columnContentW + 4 : 0) + 104;
     const tail = tailBox(0, x0);
-    const tilesH = tiles.length ? cursor : 0;
+    const tilesH = hiddenDoor ? hiddenDoor.y + hiddenDoor.h : tiles.length ? cursor : 0;
     const height = Math.max(tilesH, tail ? tail.y + tail.h : 0);
     // Правый отступ тот же, что закладывает `applyOverrides`: разойдись они — «пустой набор
     // оверрайдов даёт точное тождество» перестало бы быть правдой в этой ветке.
-    const width = tail ? x0 + W + 24 : tiles.length ? FREE_TILE_X + FREE_TILE_W + 24 : 0;
+    const contentRight = Math.max(
+      ...tiles.map((tile) => tile.x + tile.contentW),
+      hiddenDoor ? hiddenDoor.x + hiddenDoor.w : 0,
+      0,
+    );
+    const width = tail ? x0 + W + 24 : contentRight ? contentRight + 24 : 0;
     return {
       boxes: [],
       byKey: new Map(),
@@ -351,6 +401,7 @@ export function assemblyLayout(
       unassigned: [],
       tiles,
       tileByKey,
+      hiddenDoor,
       tailSteps,
     };
   }
@@ -363,7 +414,8 @@ export function assemblyLayout(
     const acc: string[] = [];
     for (const i of b.steps) {
       for (const input of steps[i]?.inputs ?? []) {
-        if (input.kind === 'unit' && input.key !== b.key && res.units.has(input.key)) acc.push(input.key);
+        if (input.kind === 'unit' && input.key !== b.key && res.units.has(input.key))
+          acc.push(input.key);
       }
     }
     unitInputsOf.set(b.key, acc);
@@ -413,8 +465,13 @@ export function assemblyLayout(
 
   // Детали, не вошедшие никуда: отдельная колонка у левого края, чтобы «ещё не пришито» было
   // видно как состояние, а не как отсутствие.
-  const unassigned = res.frontier.filter((k) => !res.units.has(k));
-  const x0 = (unassigned.length ? 76 : 0) + 104;
+  const unassigned = res.frontier.filter((k) => !res.units.has(k) && visiblePieces.includes(k));
+  const columnExpected = visiblePieces.some(
+    (key) => stateOf(key) === 'free' || orphanKeys.has(key),
+  );
+  const expandedInColumn = !!orphan.expandedKey && orphanKeys.has(orphan.expandedKey);
+  const columnContentW = expandedInColumn ? ORPHAN_RESOLVER_W : FREE_TILE_W;
+  const x0 = (columnExpected || hiddenKeys.size ? FREE_TILE_X + columnContentW + 4 : 0) + 104;
 
   // --- 3. вертикаль: притяжение к середине входов, курсор против наездов ------------------------
   const boxes: BoxLayout[] = [];
@@ -487,7 +544,13 @@ export function assemblyLayout(
     // ростом, и стопка просто кончается выше своего резерва.
     let grown = 0;
     box.pieceInputs.forEach((key, i) => {
-      if (place.has(key) || stateOf(key) !== 'eaten' || intoOf.get(key) !== box.key) return;
+      if (
+        place.has(key) ||
+        orphanKeys.has(key) ||
+        stateOf(key) !== 'eaten' ||
+        intoOf.get(key) !== box.key
+      )
+        return;
       const h = tileH(key);
       place.set(key, {
         x: box.x + STACK_DX,
@@ -501,7 +564,15 @@ export function assemblyLayout(
   // Колонка у левого края: свободные в порядке фронта, следом — детали, которым не нашлось
   // места у бокса. Второе возможно только на битом графе (съевший узел не родился), но нода
   // нужна и там: «одна деталь — ровно одна плитка» не должно зависеть от валидности карточки.
-  const columnKeys = [...unassigned, ...allPieces.filter((k) => !place.has(k) && !unassigned.includes(k))];
+  const columnKeys: string[] = [];
+  const addColumn = (key: string) => {
+    if (!visiblePieces.includes(key) || hiddenKeys.has(key) || columnKeys.includes(key)) return;
+    columnKeys.push(key);
+  };
+  unassigned.forEach(addColumn);
+  visiblePieces.filter((key) => orphanKeys.has(key)).forEach(addColumn);
+  visiblePieces.filter((key) => !place.has(key)).forEach(addColumn);
+  visiblePieces.filter((key) => hiddenKeys.has(key)).forEach((key) => columnKeys.push(key));
   let cursor = 16;
   for (const key of columnKeys) {
     const h = tileH(key);
@@ -509,11 +580,12 @@ export function assemblyLayout(
     cursor += h + TILE_GAP;
   }
   const { tiles, tileByKey } = buildTiles(place);
+  const hiddenDoor = hiddenDoorAt(cursor);
 
   const tail = tailBox(maxCol + 1, x0 + (maxCol + 1) * (W + GAP_X));
   if (tail && tail.y + tail.h > height) height = tail.y + tail.h;
 
-  const tilesH = cursor;
+  const tilesH = hiddenDoor ? hiddenDoor.y + hiddenDoor.h : cursor;
   if (tilesH > height) height = tilesH;
   // Полотно обязано вместить каждую плитку: уехавшее за край прокрутки не достать — `overflow:
   // auto` вниз за границу контента не листает. До Т9г этот проход работал ПОСТОЯННО: стопка
@@ -522,15 +594,21 @@ export function assemblyLayout(
   // СТРАХОВКОЙ — он сработает, если расстановка плиток и резерв под них однажды разойдутся.
   for (const t of tiles) if (t.y + t.h > height) height = t.y + t.h;
 
+  const contentRight = Math.max(
+    ...tiles.map((tile) => tile.x + tile.contentW),
+    hiddenDoor ? hiddenDoor.x + hiddenDoor.w : 0,
+    0,
+  );
   return {
     boxes,
     byKey,
     tail,
-    width: (tail ? tail.x : x0 + maxCol * (W + GAP_X)) + W + 24,
+    width: Math.max((tail ? tail.x : x0 + maxCol * (W + GAP_X)) + W + 24, contentRight + 24),
     height: height + 30,
     unassigned,
     tiles,
     tileByKey,
+    hiddenDoor,
     tailSteps,
   };
 }
@@ -544,4 +622,13 @@ function bary(b: AssemblyBlock, rank: Map<string, number>, ins: Map<string, stri
 // Числа для разметки. `TILE` — это ГОЛОВА плитки, а не её высота: высота растёт под строки
 // обработки и приходит в `TileLayout.h`. Кто нарисует силуэт по `h`, растянет деталь на её же
 // строки, а кто отсчитает строки не от `TILE` — положит первую поверх силуэта.
-export const SCHEMATIC_METRICS = { W, LINE_H, HEAD_H, FOOT_H, TILE, TILE_GAP, PROC_ROW_H };
+export const SCHEMATIC_METRICS = {
+  W,
+  LINE_H,
+  HEAD_H,
+  FOOT_H,
+  TILE,
+  TILE_GAP,
+  PROC_ROW_H,
+  ORPHAN_RESOLVER_H,
+};

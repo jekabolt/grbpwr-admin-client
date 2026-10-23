@@ -19,6 +19,7 @@ import { assemblyLayout, type SchematicLayout } from './assembly-layout';
 import {
   buildWires,
   directInputsOf,
+  HiddenPiecesDoor,
   makeRowY,
   notifyWorldMoved,
   picksMany,
@@ -57,6 +58,7 @@ import {
 import { hatchId } from './cloth-hatch';
 import { clothRollup, type PieceCloth, type PieceClothState } from './piece-cloth';
 import type { PieceShapeMap } from './use-piece-shapes';
+import type { OrphanBoardState } from './orphan-pieces';
 
 // ПОЛОТНО ФУЛСКРИНА: тот же граф, что на инлайновой схеме, но в мире с трансформом.
 //
@@ -269,6 +271,7 @@ export type AssemblyCanvasProps = {
    * перерисовывал бы редактор шага шестьдесят раз в секунду.
    */
   onHint: (hint: CanvasHint) => void;
+  orphanBoard?: OrphanBoardState;
 };
 
 export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(function AssemblyCanvas(
@@ -293,6 +296,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     picked,
     onPicked,
     onHint,
+    orphanBoard,
   },
   handleRef,
 ) {
@@ -319,7 +323,16 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
    */
   const pickedFree = picked.filter((k) => onTable.has(k));
 
-  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+  const auto = useMemo(
+    () =>
+      assemblyLayout(blocks, steps, res, new Set(), {
+        hiddenKeys: orphanBoard?.hiddenKeys,
+        orphanKeys: orphanBoard?.orphanKeys,
+        revealHidden: orphanBoard?.showHidden,
+        expandedKey: orphanBoard?.expandedKey,
+      }),
+    [blocks, steps, res, orphanBoard],
+  );
 
   // ВЫБОР ЖИВЁТ, ПОКА ЖИВА САМА НОДА, а не пока она на столе. Раньше здесь стоял фильтр по
   // фронтиру — под прежний контракт «выделение = входы следующего жеста». Контракт отменён:
@@ -360,7 +373,8 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
 
-  const empty = layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail;
+  const empty =
+    layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail && !layout.hiddenDoor;
 
   // --- вид: пан, зум, лист --------------------------------------------------------------------
 
@@ -1803,6 +1817,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
             // раскладка сюда идёт ЭФФЕКТИВНАЯ, с ручными позициями: догадка обязана считать по
             // тому, что человек видит, а не по автоматической расстановке под ней.
             const addPrefill = pieceAddPrefill(t.key, steps, res, blocks, layout);
+            const orphan = orphanBoard?.pieces.get(t.key);
             return (
               <TileView
                 key={`tile:${t.key}`}
@@ -1823,7 +1838,13 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 // выделяет, съеденная уводит к съевшему шагу, под `frozen` свободная мертва.
                 // Один орган, три смысла, и смысл зависел от невидимого на глаз состояния;
                 // «уйти к съевшему» переехало на чип полосы, где у него своё место.
-                organProps={activate(clickGuard(() => toggle(t.key)))}
+                organProps={
+                  orphan?.kind === 'used'
+                    ? activate(clickGuard(() => orphanBoard?.onTogglePiece(t.key)))
+                    : orphan?.kind === 'hidden'
+                      ? {}
+                      : activate(clickGuard(() => toggle(t.key)))
+                }
                 dragProps={dragHandlers(t.key, t.x, t.y)}
                 hoverProps={hoverHandlers(t.key)}
                 // Строка обработки открывает шаг РОВНО ТЕМ ЖЕ органом, что строка блока: второго
@@ -1835,9 +1856,17 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
                 }
+                orphanBoard={orphanBoard}
               />
             );
           })}
+          {layout.hiddenDoor && orphanBoard && (
+            <HiddenPiecesDoor
+              door={layout.hiddenDoor}
+              open={orphanBoard.showHidden}
+              onToggle={orphanBoard.onToggleHidden}
+            />
+          )}
         </div>
       )}
 
@@ -2024,11 +2053,16 @@ function contentBox(layout: SchematicLayout): Rect {
   let y0 = Infinity;
   let x1 = -Infinity;
   let y1 = -Infinity;
-  const nodes = [...layout.boxes, ...layout.tiles, ...(layout.tail ? [layout.tail] : [])];
+  const nodes = [
+    ...layout.boxes,
+    ...layout.tiles,
+    ...(layout.tail ? [layout.tail] : []),
+    ...(layout.hiddenDoor ? [layout.hiddenDoor] : []),
+  ];
   for (const n of nodes) {
     x0 = Math.min(x0, n.x);
     y0 = Math.min(y0, n.y);
-    x1 = Math.max(x1, n.x + n.w);
+    x1 = Math.max(x1, n.x + ('contentW' in n ? n.contentW : n.w));
     y1 = Math.max(y1, n.y + n.h);
   }
   if (!Number.isFinite(x0)) return { x: 0, y: 0, w: 400, h: 300 };
