@@ -478,10 +478,11 @@ export const views = {
   buildWires,
   makeRowY,
   METRICS: SCHEMATIC_METRICS,
-  // Клик по шапке узла и позиция шага, добавленного на плитку детали, — см. пояснение у
+  // Клик по шапке узла и позиции шагов, добавленных в бокс или на плитку, — см. пояснение у
   // namespace-импорта выше.
   unitHeadTarget: (nodeViews as Record<string, unknown>).unitHeadTarget,
   unitHeadOpen: (nodeViews as Record<string, unknown>).unitHeadOpen,
+  unitAddPrefill: (nodeViews as Record<string, unknown>).unitAddPrefill,
   pieceAddPrefill: (nodeViews as Record<string, unknown>).pieceAddPrefill,
 };
 

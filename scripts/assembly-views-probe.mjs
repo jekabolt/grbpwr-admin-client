@@ -595,12 +595,18 @@ console.log('\nшапка узла на обеих поверхностях — 
 
 console.log('\npieceAddPrefill — обработка детали идёт ЗА ближайшим блоком, а не в конец листа');
 {
-  const { pieceAddPrefill } = views;
+  const { pieceAddPrefill, unitAddPrefill } = views;
   const buildCase = mod.engine?.buildCase;
   const assemblyLayout = mod.engine?.assemblyLayout;
   ck(typeof pieceAddPrefill === 'function', 'позиция шага на плитке вынесена функцией');
+  ck(typeof unitAddPrefill === 'function', 'позиция шага в объединённом блоке вынесена функцией');
   ck(typeof buildCase === 'function' && typeof assemblyLayout === 'function', 'энтри отдаёт конвейер и раскладку');
-  if (typeof pieceAddPrefill === 'function' && typeof buildCase === 'function' && assemblyLayout) {
+  if (
+    typeof pieceAddPrefill === 'function' &&
+    typeof unitAddPrefill === 'function' &&
+    typeof buildCase === 'function' &&
+    assemblyLayout
+  ) {
     /**
      * КАРТОЧКА ВЛАДЕЛЬЦА: девять шагов (10…90), свободная деталь FL. Узел ▣ OUTER собирается
      * шагами 10 и 20 — «до того как соединить аутер и фл было 10 и 20, значит всё что с фл это
@@ -644,6 +650,12 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
     };
 
     const base = assemblyLayout(c.blocks, c.steps, c.res);
+    const inOuter = unitAddPrefill(outer, c.res);
+    ck(
+      inOuter?.at === 2,
+      'регрессия объединённого блока: после шагов 10 и 20 новый получает номер 30',
+      JSON.stringify(inOuter),
+    );
     const nearOuter = pieceAddPrefill('FL', c.steps, c.res, c.blocks, nextTo(base, 'FL', 'OUTER'));
     ck(
       nearOuter?.at === 2,
@@ -685,6 +697,69 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
     ck(bareLayout.boxes.length === 0, 'фикстура границы 1 действительно без единого блока');
     const bareAt = pieceAddPrefill('FL', bare.steps, bare.res, bare.blocks, bareLayout);
     ck(bareAt?.at === bare.steps.length, 'блоков нет → конец листа', JSON.stringify(bareAt));
+
+    // САМОСТОЯТЕЛЬНАЯ ДЕТАЛЬ — СВОЙ БЛОК. Её строки 10 и 30 уже нарисованы на одной плитке;
+    // чужие строки 40 и 50 после них не имеют права утащить новую операцию в общий хвост.
+    const standalone = buildCase(
+      [
+        { lineKey: 'PLCK_L', name: 'left placket' },
+        { lineKey: 'OTHER', name: 'other' },
+      ],
+      [
+        { in: ['PLCK_L'] },
+        { in: ['OTHER'] },
+        { in: ['PLCK_L'] },
+        { in: ['OTHER'] },
+        { in: ['OTHER'] },
+      ],
+    );
+    const standaloneLayout = assemblyLayout(standalone.blocks, standalone.steps, standalone.res);
+    const standaloneAt = pieceAddPrefill(
+      'PLCK_L',
+      standalone.steps,
+      standalone.res,
+      standalone.blocks,
+      standaloneLayout,
+    );
+    ck(
+      standaloneAt?.at === 3,
+      'самостоятельная PLCK_L: после своих 10 и 30 новая получает 40, не общий хвост 60',
+      JSON.stringify(standaloneAt),
+    );
+
+    // ФЬЮЗИНГ НИЗКО, ОСТАЛЬНЫЕ ОПЕРАЦИИ ВЫШЕ — случай PLCK_L со снимка. В проекции сборки вид
+    // операции намеренно не участвует: шаг 110 — обычная строка детали с точки зрения порядка.
+    // После её следующей собственной строки 180 новая получает 190; брать первый совпавший (110)
+    // или конец всего листа (400) одинаково неверно.
+    const fusedRows = Array.from({ length: 39 }, () => ({ in: ['OTHER'] }));
+    fusedRows[10] = { in: ['PLCK_L'] }; // 110 · fusing
+    fusedRows[17] = { in: ['PLCK_L'] }; // 180 · later processing
+    const fused = buildCase(
+      [
+        { lineKey: 'PLCK_L', name: 'left placket' },
+        { lineKey: 'OTHER', name: 'other' },
+      ],
+      fusedRows,
+    );
+    const fusedLayout = assemblyLayout(fused.blocks, fused.steps, fused.res);
+    ck(
+      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing) ===
+        JSON.stringify([10, 17]),
+      'плитка fused PLCK_L считает своими и фьюзинг 110, и обработку 180',
+      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing),
+    );
+    const fusedAt = pieceAddPrefill(
+      'PLCK_L',
+      fused.steps,
+      fused.res,
+      fused.blocks,
+      fusedLayout,
+    );
+    ck(
+      fusedAt?.at === 18 && (fusedAt.at + 1) * 10 === 190,
+      'fused PLCK_L: последняя своя операция 180 → новая 190, не хвост 400',
+      JSON.stringify(fusedAt),
+    );
 
     // ГРАНИЦА 2: у детали УЖЕ есть свои обработки — новая не смеет прыгнуть перед ними. Обработка
     // FL стоит шагом 70 (индекс 6), а ближайший блок OUTER кончается на индексе 1: побеждает пол
