@@ -8,8 +8,8 @@
 //      form; files that landed before it are listed as orphans (unreferenced objects in storage —
 //      acceptable, K1; the card's orphan sweep only sees URLs the card once held).
 //   2. ONE ordered batch of form writes, re-resolved against the LIVE form (the card may have moved
-//      since the wizard read it): `patterns` (append rows; a scope in 'replace' mode (MF-C, M4) puts
-//      its file into the previous import's row instead — same lineKey, name, size slot and binding,
+//      since the wizard read it): `patterns` (a scope with an occupant puts its file into that row —
+//      same lineKey, name, size slot and binding,
 //      new url/filename/size, version 0 so the server numbers the new file) → `pieces` (append
 //      created) → point writes
 //      `pieces.N.*` (symmetry, × per garment, fused — never a root rewrite of existing pieces) →
@@ -34,6 +34,8 @@ import {
 export const MAX_PATTERN_BYTES = 40 * 1024 * 1024;
 /** `MAX_PATTERN_NAME` bytes (utils/pattern.ts `clampPatternName`). */
 const MAX_NAME_BYTES = 255;
+/** Kept local so this pure commit module does not pull browser upload dependencies into probes. */
+const GENERATED_FUSING_NAME_PREFIX = 'Fusing · generated · ';
 
 export type LivePattern = {
   sizeId?: number;
@@ -205,44 +207,54 @@ export function planFormWrites(
       }),
     );
 
-  // 1. patterns — one row per uploaded scope: the previous import's row replaced in place, or a new
-  //    row appended. The replaced row is re-found in the LIVE form by its lineKey and must still be
-  //    bound to the same scope; if the operator removed or rebound it meanwhile, the file is added.
+  // 1. patterns — one row per uploaded scope. The captured occupant is re-found in the live form;
+  //    if it moved, any current occupant of the scope replaces it. A row is appended only when the
+  //    scope is still empty at commit time.
   const nextPatterns = live.patterns.map((p) => ({ ...p }));
   const replaced: ApplyReplaced[] = [];
   const rows = uploaded.flatMap((u) => {
     const sc = draft.scopes.find((s) => s.target.scopeKey === u.scopeKey);
     if (!sc) return [];
-    if (sc.replaces && sc.sheetMode !== 'add') {
-      const key = sc.replaces.lineKey.toLowerCase();
-      const i = nextPatterns.findIndex(
-        (p) => (p.lineKey ?? '').trim().toLowerCase() === key && scopeOf(p, 'sheet') === u.scopeKey,
-      );
-      if (i >= 0 && !replaced.some((r) => r.lineKey.toLowerCase() === key)) {
-        const old = nextPatterns[i];
-        replaced.push({
-          scopeKey: u.scopeKey,
-          lineKey: old.lineKey ?? '',
-          oldUrl: old.url ?? '',
-          newUrl: u.url,
-        });
-        nextPatterns[i] = {
-          ...old,
-          // the row is re-filed under the scope's binding: a legacy purpose-only sheet of an
-          // interlining line becomes line-bound here, instead of staying a purpose row (L11)
-          fabricPurpose: sc.target.fabricPurpose,
-          bomLineKey: sc.target.bomLineKey,
-          url: u.url,
-          filename: u.filename,
-          sizeBytes: u.sizeBytes,
-          // 0 = "assign one": the server numbers a url it has not seen on this card (schema.ts)
-          version: 0,
-          uploadedAt: '',
-          // the new file's digest or '' — never the replaced file's (0423)
-          sha256: u.sha256 ?? '',
-        };
-        return [];
-      }
+    const key = sc.replaces?.lineKey.trim().toLowerCase() ?? '';
+    const exact = sc.replaces
+      ? nextPatterns.findIndex(
+          (p) =>
+            scopeOf(p, 'sheet') === u.scopeKey &&
+            (key
+              ? (p.lineKey ?? '').trim().toLowerCase() === key
+              : !!sc.replaces?.url && p.url === sc.replaces.url),
+        )
+      : -1;
+    const i =
+      exact >= 0 ? exact : nextPatterns.findIndex((p) => scopeOf(p, 'sheet') === u.scopeKey);
+    if (i >= 0 && !replaced.some((r) => r.scopeKey === u.scopeKey)) {
+      const old = nextPatterns[i];
+      replaced.push({
+        scopeKey: u.scopeKey,
+        lineKey: old.lineKey ?? '',
+        oldUrl: old.url ?? '',
+        newUrl: u.url,
+      });
+      nextPatterns[i] = {
+        ...old,
+        // the row is re-filed under the scope's binding: a legacy purpose-only sheet of an
+        // interlining line becomes line-bound here, instead of staying a purpose row (L11)
+        fabricPurpose: sc.target.fabricPurpose,
+        bomLineKey: sc.target.bomLineKey,
+        url: u.url,
+        filename: u.filename,
+        sizeBytes: u.sizeBytes,
+        // 0 = "assign one": the server numbers a url it has not seen on this card (schema.ts)
+        version: 0,
+        uploadedAt: '',
+        // the new file's digest or '' — never the replaced file's (0423)
+        sha256: u.sha256 ?? '',
+        // A generated fusing row loses its generated identity when an uploaded owner replaces it.
+        name: (old.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX)
+          ? clampBytes(sc.name, MAX_NAME_BYTES)
+          : old.name,
+      };
+      return [];
     }
     return [
       {

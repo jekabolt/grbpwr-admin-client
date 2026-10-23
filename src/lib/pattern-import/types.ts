@@ -2212,14 +2212,11 @@ export type DraftScope = {
    */
   alreadyOnCard?: { url: string; filename: string } | null;
   /**
-   * MF-C (M4): a sheet THIS importer wrote earlier (its manifest is on the card) in the same scope.
-   * `replace` (the default when present) puts the new file into that row (lineKey, name, binding
-   * kept; url, filename and size new) instead of adding a second sheet the card would count as a
-   * revision. `matchedBy`: the same source file (sha256 / file name) or just the same scope.
+   * MF-C (M4): the active sheet in the same scope. The import puts the new file into that row
+   * (lineKey, name and binding kept; url, filename and size new) instead of adding a second active
+   * sheet. An importer manifest improves `matchedBy`; foreign and legacy rows still qualify.
    */
   replaces?: DraftReplaceTarget | null;
-  /** MF-C: the operator's answer when `replaces` is set; absent = 'replace'. */
-  sheetMode?: 'replace' | 'add';
   /**
    * MF-C: block links of this scope that the replaced sheet's import wrote and the new file no
    * longer draws. Never removed by apply: listed, and handed to the piece-match modal's deletion

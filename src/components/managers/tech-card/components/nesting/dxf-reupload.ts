@@ -8,8 +8,8 @@
 // листа сохраняет свой size_id. Просмотр деталей после замены не открывается.
 //
 // Отказ — старый лист остаётся как был. Загрузка файла — только после удачного плана, так что отказ
-// не оставляет на сервере ничьих файлов. Чужой файл тоже возвращается ДО загрузки: приложение
-// сначала спрашивает, заменить лист или добавить ещё один. Тот же sha256, что у заменяемого
+// не оставляет на сервере ничьих файлов. Чужой файл тоже возвращается ДО загрузки: в занятом
+// слоте выбор уже сделан до сверки, и файл может только заменить строку. Тот же sha256, что у заменяемого
 // листа, — ничего не делать.
 //
 // Чистый модуль: ни React, ни формы, ни сети — всё приходит зависимостями, поэтому весь путь
@@ -205,24 +205,40 @@ export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends 
   /** чужой файл: разобран, но не загружен и ничего на карточке ещё не изменил. */
   | ForeignReuploadOutcome<P, A, O>;
 
-export type ForeignChoice = 'add' | 'replace';
+export type ForeignReplacementPlan<
+  P extends CardPiece,
+  A extends CardAlias,
+  O extends CardOperation,
+> = {
+  kind: 'replace';
+  rowIndex: number;
+  replacedUrl: string;
+  rowId: string;
+  row: SheetPatch;
+  pieces: P[];
+  aliases: A[];
+  operations: O[];
+  issueNumbers: number[];
+  removedSeamIds: string[];
+  /** Новый лист отдаётся существующему пути первой заливки (pieces viewer). */
+  parsed: ParsedSheetLite;
+};
 
-export type ForeignChoicePlan<P extends CardPiece, A extends CardAlias, O extends CardOperation> =
-  | { kind: 'add'; row: SheetPatch }
-  | {
-      kind: 'replace';
-      rowIndex: number;
-      replacedUrl: string;
-      rowId: string;
-      row: SheetPatch;
-      pieces: P[];
-      aliases: A[];
-      operations: O[];
-      issueNumbers: number[];
-      removedSeamIds: string[];
-      /** Новый лист отдаётся существующему пути первой заливки (pieces viewer). */
-      parsed: ParsedSheetLite;
-    };
+/** The only two decisions for files dropped on an occupied material slot. */
+export type OccupiedChoice = 'replace' | 'merge';
+
+/**
+ * Files handed to the merge modal after the occupied-slot decision. Replace merges only a dropped
+ * batch; merge prepends the current sheet, making it the template and duplicate-block winner.
+ */
+export function planOccupiedFiles<T>(
+  existing: T,
+  dropped: readonly T[],
+  choice: OccupiedChoice,
+): { files: T[]; merge: boolean } {
+  if (choice === 'merge') return { files: [existing, ...dropped], merge: true };
+  return { files: [...dropped], merge: dropped.length > 1 };
+}
 
 /** Загрузка отложенного чужого файла. До этого вызова на сервере и в форме ничего нового нет. */
 export async function uploadForeignSheet<
@@ -242,17 +258,12 @@ export async function uploadForeignSheet<
   };
 }
 
-/** Чистый план выбора: строка добавляется либо меняется на месте; применение остаётся за формой. */
-export function planForeignChoice<
+/** Чистый план подтверждённой замены чужим файлом; добавить вторую строку нельзя. */
+export function planForeignReplacement<
   P extends CardPiece,
   A extends CardAlias,
   O extends CardOperation,
->(
-  out: ForeignReuploadOutcome<P, A, O>,
-  choice: ForeignChoice,
-  row: SheetPatch,
-): ForeignChoicePlan<P, A, O> {
-  if (choice === 'add') return { kind: 'add', row };
+>(out: ForeignReuploadOutcome<P, A, O>, row: SheetPatch): ForeignReplacementPlan<P, A, O> {
   return {
     kind: 'replace',
     rowIndex: out.rowIndex,

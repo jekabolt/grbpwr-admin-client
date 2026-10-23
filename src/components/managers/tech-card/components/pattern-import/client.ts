@@ -63,8 +63,7 @@ export type CardContext = {
   existingAliases?: { scopeKey: string; blockName: string; pieceLineKey: string }[];
   /**
    * Pattern rows the card already has, by scope key (F7: the same file is not uploaded twice).
-   * MF-C: `lineKey`/`name` and the conversion manifest the card's parse read off the sheet — a
-   * sheet this importer wrote earlier is offered for replacement on a re-import (M4).
+   * `lineKey`/`name` identify any occupant. A conversion manifest adds source-match facts.
    */
   existingPatterns?: {
     scopeKey: string;

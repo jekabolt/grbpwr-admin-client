@@ -1251,7 +1251,7 @@ export async function main(): Promise<number> {
   }
 
   // ── F ───────────────────────────────────────────────────────────────────────────────────
-  head('F  re-import (replace / add / vanished / zero-diff) + the follow-up after the save (MF-C)');
+  head('F  re-import (one slot / vanished / zero-diff) + the follow-up after the save (MF-C)');
   {
     // the card after the first import; the parse read each of our sheets' manifests (by url)
     const manifestByUrl = new Map<string, ConversionManifest>();
@@ -1451,7 +1451,6 @@ export async function main(): Promise<number> {
               target: felt,
               filename: 'felt-new.dxf',
               name: 'felt',
-              sheetMode: replaces ? 'replace' : 'add',
               replaces: replaces
                 ? {
                     lineKey: 'L1',
@@ -1511,8 +1510,8 @@ export async function main(): Promise<number> {
       const add = after(legacyCard, planFormWrites(feltDraft(false), legacyCard, up, opts));
       ck(
         JSON.stringify(feltOf(add)) ===
-          JSON.stringify({ sheets: ['u-new', 'u1', 'u2'], links: ['a', 'b'] }),
-        'F2c add into a legacy felt set keeps the old sheets in the felt',
+          JSON.stringify({ sheets: ['u-new', 'u2'], links: ['a', 'b'] }),
+        'F2c a draft without a captured target still replaces a live occupant',
         JSON.stringify(feltOf(add)),
       );
       const again = planFormWrites(feltDraft(false), rep, [], {
@@ -1574,12 +1573,12 @@ export async function main(): Promise<number> {
       ck(!!r3.ok && followUpTargets(d3, r3) === null, 'F3 zero-diff re-apply starts no follow-up');
     }
 
-    // F4 add as another sheet: the old row stays, a second sheet in the scope
+    // F4 there is no add mode: even a draft with no captured replacement uses the live occupant
     {
       const f4 = fakeForm(afterFirst);
       const d4 = {
         ...d2,
-        scopes: d2.scopes.map((x) => (x.replaces ? { ...x, sheetMode: 'add' as const } : x)),
+        scopes: d2.scopes.map((x) => (x.replaces ? { ...x, replaces: null } : x)),
       };
       const r4 = await applyDraft(d4, {
         upload: fakeUpload(null).upload,
@@ -1590,21 +1589,33 @@ export async function main(): Promise<number> {
       const mains = f4.state.patterns.filter((p) => scopeKeyOf(p) === MAIN.scopeKey);
       ck(
         r4.ok &&
-          !r4.replaced &&
-          f4.state.patterns.length === afterFirst.patterns.length + 1 &&
-          mains.length === 2 &&
-          mains.some((p) => p.url === mainRow0.url),
-        'F4 add: old main row intact + a second main row',
+          r4.replaced?.length === 1 &&
+          f4.state.patterns.length === afterFirst.patterns.length &&
+          mains.length === 1 &&
+          !mains.some((p) => p.url === mainRow0.url),
+        'F4 no add path: the live main occupant is replaced',
       );
     }
-    // F5 a foreign sheet (no manifest) is never replaced
+    // F5 a foreign sheet (no manifest) still occupies the slot and is replaced
     {
       const d5 = buildDraft({ scopes: r2.scopes }, withManifests(afterFirst, false), {
         mintKey: mint,
       });
+      const main = d5.scopes.find((x) => x.target.scopeKey === MAIN.scopeKey)!;
+      const f5 = fakeForm(afterFirst);
+      const r5 = await applyDraft(d5, {
+        upload: fakeUpload(null).upload,
+        read: f5.read,
+        write: f5.write,
+        storageSizeId: 501,
+      });
       ck(
-        d5.scopes.every((x) => !x.replaces && (x.vanished ?? []).length === 0),
-        'F5 sheets without a manifest: no replace offered, nothing listed as vanished',
+        main.replaces?.lineKey === mainRow0.lineKey &&
+          (main.vanished ?? []).length === 0 &&
+          r5.ok &&
+          r5.replaced?.length === 1 &&
+          f5.state.patterns.length === afterFirst.patterns.length,
+        'F5 foreign occupant: replaced in place, no importer-only vanished facts',
       );
     }
     // F6 the row was removed in the form after the wizard read the card → the file is added
@@ -1624,6 +1635,29 @@ export async function main(): Promise<number> {
           f6.state.patterns.length === live.patterns.length + 1 &&
           f6.state.patterns.some((p) => p.url === `https://cdn.test/${m2.filename}`),
         'F6 replaced row gone from the live form → the new file is appended, nothing lost',
+      );
+    }
+    // F6b the captured row changed, but another live occupant exists: replace it, never append
+    {
+      const live = structuredClone(afterFirst) as LiveCard;
+      live.patterns = live.patterns.map((p) =>
+        p.lineKey === mainRow0.lineKey
+          ? { ...p, lineKey: 'main-replacement', url: 'https://cdn.test/foreign-main.dxf' }
+          : p,
+      );
+      const f6b = fakeForm(live);
+      const r6b = await applyDraft(d2, {
+        upload: fakeUpload(null).upload,
+        read: f6b.read,
+        write: f6b.write,
+        storageSizeId: 501,
+      });
+      ck(
+        r6b.ok &&
+          r6b.replaced?.[0]?.lineKey === 'main-replacement' &&
+          f6b.state.patterns.length === live.patterns.length &&
+          f6b.state.patterns.filter((p) => scopeKeyOf(p) === MAIN.scopeKey).length === 1,
+        'F6b changed target: replace the current occupant, no second row',
       );
     }
 

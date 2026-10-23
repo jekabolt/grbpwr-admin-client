@@ -608,9 +608,31 @@ async function main() {
       );
   }
 
-  // ── чужой файл: до ответа нет загрузки/мутации; replace = каскад + та же строка + first path ─
+  // ── занятый слот: до ответа нет загрузки; replace или merge, но не add ─────────────
   {
     const tag = 'foreign';
+    const old = { name: 'old' };
+    const one = { name: 'one' };
+    const two = { name: 'two' };
+    yes(tag, !('planForeignChoice' in M), 'the add planner is not exported');
+    is(
+      tag,
+      M.planOccupiedFiles(old, [one], 'replace'),
+      { files: [one], merge: false },
+      'replace one: direct replacement',
+    );
+    is(
+      tag,
+      M.planOccupiedFiles(old, [one, two], 'replace'),
+      { files: [one, two], merge: true },
+      'replace many: dropped files merge first',
+    );
+    is(
+      tag,
+      M.planOccupiedFiles(old, [one, two], 'merge'),
+      { files: [old, one, two], merge: true },
+      'merge: current sheet is preloaded first',
+    );
     is(
       tag,
       [
@@ -660,7 +682,7 @@ async function main() {
 
       const upload = makeDeps(M, store, log).upload;
       const row = await M.uploadForeignSheet(out, upload);
-      const replace = M.planForeignChoice(out, 'replace', row);
+      const replace = M.planForeignReplacement(out, row);
       if (replace.kind === 'replace') {
         const patterns = before.patterns.map((r, i) =>
           i === replace.rowIndex ? { ...r, ...replace.row } : r,
@@ -1046,7 +1068,6 @@ async function main() {
           {
             target: { scopeKey: SCOPE_KEY, label: 'main', ...MAIN },
             replaces: { lineKey: 'line-a' },
-            sheetMode: 'replace',
             filename: 'a-v5.dxf',
             dxfText: '0\nEOF\n',
             name: 'a',
