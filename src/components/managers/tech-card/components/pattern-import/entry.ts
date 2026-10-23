@@ -94,11 +94,11 @@ export function buildCardContext(args: {
         : [],
     ),
     existingPatterns: (args.patterns ?? []).flatMap((p) =>
-      p.scopeKey && p.filename
+      p.scopeKey && (p.filename || p.url)
         ? [
             {
               scopeKey: p.scopeKey,
-              filename: p.filename,
+              filename: p.filename ?? '',
               url: p.url ?? '',
               lineKey: p.lineKey ?? '',
               name: p.name ?? '',

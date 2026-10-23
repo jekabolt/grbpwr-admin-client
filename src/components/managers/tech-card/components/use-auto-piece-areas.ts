@@ -31,15 +31,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
 import { aliasInScope, bindingScopes } from './bom-purpose';
+import { interliningBlockCodes } from 'lib/fusing-dxf/interlining-import';
+import { GENERATED_FUSING_NAME_PREFIX } from 'lib/fusing-dxf/regenerate';
+import type { PieceDTO } from 'lib/nesting/types';
 import { mmToEngineCm } from './nesting/allowance-units';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { contourIsCutLine } from './nesting/contour-layer';
+import { contourIsCutLine, defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { applyLayerOptions, applySeamPrefill } from './nesting/dxf-apply-conditions';
 import { dxfByScope } from './nesting/dxf-by-scope';
 import { dxfNormAreas } from './nesting/dxf-consumption';
-import { useDxfGeometry, useDxfIndex } from './nesting/dxf-geometry';
+import { useDxfGeometry, useDxfIndex, type DxfBundle, type DxfIndex } from './nesting/dxf-geometry';
 import { isFetchFailure } from './nesting/dxf-warnings';
+import { useDictionarySizeTokens } from './nesting/use-block-sizes';
 import { rollGoodsScopes, type PieceAliasRow } from './piece-block-refs';
 import {
   pieceAreaSheetsRefusal,
@@ -54,6 +58,7 @@ import { isDxfUrl } from 'utils/pattern';
 
 type SheetRow = {
   url?: string;
+  name?: string;
   lineKey?: string;
   fabricPurpose?: string;
   bomLineKey?: string;
@@ -82,6 +87,59 @@ type Job = {
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 const PREFIX = 'piece areas: ';
+const INTERLINING_SECTION = 'TECH_CARD_BOM_SECTION_INTERLINING';
+const MAIN_PURPOSE = 'TECH_CARD_BOM_PURPOSE_MAIN';
+
+function interliningAreaIndex(args: {
+  index: DxfIndex;
+  bundle: DxfBundle;
+  scopeKey: string;
+  mainScopeKey: string;
+  sizeTokens: { has(token: string): boolean };
+}): DxfIndex {
+  const { index, bundle, scopeKey, mainScopeKey, sizeTokens } = args;
+  const ofScope = (key: string): PieceDTO[] =>
+    key
+      ? bundle.pieces.filter((piece) => bundle.scopeByFile.get(piece.fileIndex ?? -1) === key)
+      : [];
+  const blocks = ofScope(scopeKey);
+  const codes = interliningBlockCodes({
+    blocks,
+    mainBlocks: ofScope(mainScopeKey),
+    sizeTokens,
+  });
+  const codeById = new Map(index.split.codeById);
+  const identities = new Set(index.split.identities);
+  const identityByBlock = new Map(index.split.identityByBlock);
+  const byKey = new Map([...index.byKey].filter(([key]) => !key.startsWith(`${scopeKey}|`)));
+  for (const block of blocks) {
+    const canonical = codes.get(block.id);
+    if (!canonical?.identity) continue;
+    const old = codeById.get(block.id);
+    codeById.set(block.id, {
+      raw: old?.raw ?? block.blockName ?? '',
+      identity: canonical.identity,
+      size: canonical.size,
+      uni: old?.uni ?? false,
+      uniBase: old?.uniBase ?? '',
+    });
+    const ci = canonical.identity.toLowerCase();
+    identities.add(ci);
+    if (canonical.size && block.blockName) {
+      identityByBlock.set(block.blockName.trim().toLowerCase(), canonical.identity);
+    }
+    const key = `${scopeKey}|${ci}`;
+    const bySize = byKey.get(key) ?? new Map<string, PieceDTO[]>();
+    bySize.set(canonical.size, [...(bySize.get(canonical.size) ?? []), block]);
+    byKey.set(key, bySize);
+  }
+  return {
+    ...index,
+    split: { ...index.split, codeById, identities, identityByBlock },
+    contourLayer: defaultContourLayer(layerOptions(blocks, codeById)),
+    byKey,
+  };
+}
 
 /** The engine's long refusals, folded to a few words for a header warning. */
 function shortNormReason(reason: string): string {
@@ -109,6 +167,7 @@ export function useAutoPieceAreas(args: {
   const { data: cardRead } = useTechCard(techCardId);
   const workshop = useWorkshopSettings();
   const sizeNameById = useSizeNames();
+  const dictionarySizeTokens = useDictionarySizeTokens();
 
   const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as SheetRow[];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as PieceAliasRow[];
@@ -178,6 +237,11 @@ export function useAutoPieceAreas(args: {
       : aliases;
     const areaPieceRows = savedBody ? ((savedBody.pieces ?? []) as PieceRow[]) : pieceRows;
     const links = bindingScopes(scopes, areaAliases);
+    const mainScope = scopes.find((candidate) =>
+      candidate.byPurpose
+        ? candidate.key === MAIN_PURPOSE
+        : candidate.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC',
+    );
     for (const scope of scopes) {
       const sheets = sheetsByScope.get(scope.key) ?? [];
       const dxfSheets = sheets.filter((s) => !!s.url && isDxfUrl(s.url));
@@ -228,7 +292,20 @@ export function useAutoPieceAreas(args: {
         refusals[scope.key] = `${PREFIX}converted sheets disagree on layer`;
         continue;
       }
-      const layer = converted.length > 0 ? [...cutLayers][0] : index.contourLayer || '';
+      const isInterlining = scope.lines.some((line) => line.section === INTERLINING_SECTION);
+      const hasInterliningOwner =
+        isInterlining &&
+        dxfSheets.some((sheet) => !(sheet.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX));
+      const idx = hasInterliningOwner
+        ? interliningAreaIndex({
+            index,
+            bundle: geometry.data,
+            scopeKey: scope.key,
+            mainScopeKey: mainScope?.key ?? '',
+            sizeTokens: dictionarySizeTokens,
+          })
+        : index;
+      const layer = converted.length > 0 ? [...cutLayers][0] : idx.contourLayer || '';
       const option = layers.find((o) => o.layer === layer);
       const seamMm = applySeamPrefill(
         option,
@@ -248,13 +325,13 @@ export function useAutoPieceAreas(args: {
         id,
         scope.key,
         serverKey,
+        hasInterliningOwner ? 'interlining-owner-v1' : '',
         sheets.map((s) => [s.lineKey, s.url, s.fabricPurpose, s.bomLineKey]),
         pieces.map((p) => [p.lineKey, p.ungraded, p.refs.map((r) => r.block)]),
         [...sizeIds].sort((a, b) => a - b),
         layer,
         seamMm,
       ]);
-      const idx = index;
       const sizeName = (sid: number) => sizeNameById.get(sid) ?? `#${sid}`;
       jobs.push({
         scopeKey: scope.key,
@@ -321,6 +398,7 @@ export function useAutoPieceAreas(args: {
     layers,
     cardSeamMm,
     sizeNameById,
+    dictionarySizeTokens,
   ]);
 
   // ── the runner: one attempt per signature, one write at a time ─────────────────────────────

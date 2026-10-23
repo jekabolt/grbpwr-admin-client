@@ -7,13 +7,12 @@ import { isRollGoodsSection } from './bom-purpose';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { wireInt } from './wire-int';
 
-// The catalog facts a BOM line snapshots off the article it links. Creation from the BOM tab and
-// creation from the PIECES fuse picker both pass through these helpers, so a linked line cannot
-// acquire a different shape depending on which screen created it.
+// The catalog facts a BOM line snapshots off the article it links. Every catalog-backed BOM birth
+// and link passes through these helpers, so a linked line cannot acquire a different shape
+// depending on which screen created it.
 export function materialLineFields(m: common_Material) {
   return {
-    // `name` is intentionally not a catalog snapshot. Most callers use the garment role; the fuse
-    // picker explicitly supplies the material name required by that flow.
+    // `name` is intentionally not a catalog snapshot. Callers preserve or supply the garment role.
     section: m.section || emptyBomItem.section,
     supplier: m.supplier || '',
     supplierRef: m.supplierRef || '',

@@ -3,30 +3,15 @@
 // batch of writes (Codex C5, F7 `applyDraft`). A failed upload leaves the card untouched. The same
 // files can also just be downloaded.
 //
-// MF-C: a scope that already holds a sheet this importer wrote asks "replace the existing sheet"
-// (default) or "add as another sheet"; blocks the new file no longer draws are listed, never
-// deleted here — removal goes through the piece-match modal, which shows its consequences. After
-// the save, piece areas and the size index are measured (run by the card, shown here with retry).
+// MF-C: a scope that already holds a sheet replaces it in place. Blocks the new file no longer
+// draws are listed, never deleted here. After the save, piece areas and the size index are measured.
 //
 // import-ux PR5: the screen says the consequences (pieces, sizes, fabric files, what is left out)
-// and asks replace / add only on a re-import; the apply and download buttons are the wizard
-// footer's. The piece list, the block links and the autopilot's assumptions are folds.
+// and names replacements before apply. The piece list, block links and assumptions are folds.
 import type { FollowUpCell, FollowUpRow, FollowUpStep } from 'lib/pattern-import/fabrics/followup';
 import type { DraftScope } from 'lib/pattern-import/types';
 import { useContext, useState } from 'react';
-import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import {
-  Button,
-  CalloutBox,
-  Chip,
-  ChipRow,
-  DataTable,
-  GroupLabel,
-  Pill,
-  Row,
-  Text,
-  EmptyCell,
-} from 'ui';
+import { Button, CalloutBox, DataTable, GroupLabel, Pill, Row, Text, EmptyCell } from 'ui';
 import type { CardContext } from '../client';
 import type { ImportSessionApi } from '../use-import-session';
 import { DebugFold, Fold, Panel, ask, fmtBytes } from '../ui-bits';
@@ -42,15 +27,6 @@ const CUT_SYMMETRY_WORD: Record<string, string> = {
 
 /** The card save answered something other than "saved" / "nothing to save". */
 const saveFailed = (save?: string) => !!save && save !== 'ok' && save !== 'nothing';
-
-/** The coach's how (THE ASK CONTRACT, ui-bits) on a re-import. */
-const SHEET_MODE_HINT = 'replace the old sheet, or add another';
-
-const MATCHED_BY: Record<NonNullable<DraftScope['replaces']>['matchedBy'], string> = {
-  sha256: 'same source file',
-  source: 'same source file name',
-  scope: 'same fabric',
-};
 
 function FollowUpValue({ cell, onRetry }: { cell: FollowUpCell; onRetry?: () => void }) {
   switch (cell.state) {
@@ -91,7 +67,7 @@ export function ApplyStep({
   onRetryFollowUp?: (only?: { scopeKey?: string; step?: FollowUpStep }) => void;
   onReviewPieces?: (scopeKey: string) => void;
 }) {
-  const { session, apply, sheetModes, setSheetMode } = api;
+  const { session, apply } = api;
   const { labels } = useContext(DroppedLabels);
   const draft = session.draft;
   if (!draft) return null;
@@ -103,10 +79,8 @@ export function ApplyStep({
   const reused = draft.pieces.filter((p) => p.existingLineKey);
   const existingName = (lineKey: string) =>
     card.existingPieces.find((p) => p.lineKey === lineKey)?.name ?? lineKey;
-  const modeOf = (sc: DraftScope) => sheetModes[sc.target.scopeKey] ?? 'replace';
   const reimports = draft.scopes.filter((sc) => !!sc.replaces);
-  const replacing = reimports.filter((sc) => modeOf(sc) === 'replace');
-  const vanishedScopes = replacing.filter((sc) => (sc.vanished ?? []).length > 0);
+  const vanishedScopes = reimports.filter((sc) => (sc.vanished ?? []).length > 0);
   const followUpWaitsForSave = !!done?.ok && !!done.writes && done.save !== 'ok' && !stub;
   const sizes = [...new Set(draft.scopes.flatMap((sc) => sc.manifest.sizes.map((z) => z.token)))];
   const left = leftOut(api, labels);
@@ -158,9 +132,7 @@ export function ApplyStep({
             <span className='inline-flex items-center gap-1.5'>
               <Text size='micro' variant='label' component='span'>
                 {s.filename}
-                {s.replaces && modeOf(s) === 'replace'
-                  ? ` → replaces “${s.replaces.name || s.replaces.filename}”`
-                  : ''}
+                {s.replaces ? ` → replaces “${s.replaces.name || s.replaces.filename}”` : ''}
               </Text>
               {uploadState(s)}
             </span>
@@ -197,45 +169,15 @@ export function ApplyStep({
           <GroupLabel>previous import</GroupLabel>
           {reimports.map((sc) => {
             const r = sc.replaces!;
-            const mode = modeOf(sc);
-            const at = formatTechCardDate(r.convertedAt);
             return (
-              // replace / add for this fabric: the coach's zone (asked only on a re-import)
               <div
                 key={sc.target.scopeKey}
-                data-ask-zone=''
                 className='border-b border-hairline py-1.5 last:border-b-0'
               >
-                <Text
-                  size='micro'
-                  component='p'
-                  title={`converted${at !== '—' ? ` ${at}` : ''} · ${MATCHED_BY[r.matchedBy]}`}
-                >
+                <Text size='micro' component='p'>
                   {sc.target.label}: “{r.name || r.filename}”
                 </Text>
-                <ChipRow className='mt-1'>
-                  <Chip
-                    selected={mode === 'replace'}
-                    pressed={mode === 'replace'}
-                    disabled={running || !!done?.ok}
-                    title='the new file goes into that row: its name, fabric binding and storage slot stay, the server numbers the new file. the old file leaves the card.'
-                    onClick={() => setSheetMode(sc.target.scopeKey, 'replace')}
-                    {...ask('apply-sheet-mode', !done, SHEET_MODE_HINT)}
-                  >
-                    replace
-                  </Chip>
-                  <Chip
-                    selected={mode === 'add'}
-                    pressed={mode === 'add'}
-                    disabled={running || !!done?.ok}
-                    title='the old sheet stays. the card reads two sheets of one fabric as revisions: it counts the larger of them, not the sum.'
-                    onClick={() => setSheetMode(sc.target.scopeKey, 'add')}
-                    {...ask('apply-sheet-mode', !done, SHEET_MODE_HINT)}
-                  >
-                    add as another
-                  </Chip>
-                </ChipRow>
-                {mode === 'replace' && (sc.vanished ?? []).length > 0 && (
+                {(sc.vanished ?? []).length > 0 && (
                   <Fold label={`${plural(sc.vanished!.length, 'block')} no longer drawn`}>
                     <Text
                       size='nano'
@@ -263,7 +205,7 @@ export function ApplyStep({
                     </DataTable>
                   </Fold>
                 )}
-                {mode === 'replace' && (sc.vanished ?? []).length > 0 && !sc.readsBack && (
+                {(sc.vanished ?? []).length > 0 && !sc.readsBack && (
                   <Text size='nano' component='p' className='mt-1 text-error'>
                     ! the new file did not read back completely (gate G1), so removal is not offered
                     from here.

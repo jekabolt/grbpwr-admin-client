@@ -23,12 +23,10 @@
 //     kept otherwise (F14 MAJOR 2). A rewrite is a point write with the reason, never a root rewrite.
 //   · FUSED: any interlining copy (file or `fused` flag) → `fused` + fusing mode FULL on a new piece;
 //     an existing piece's own fusing mode is kept.
-//   · RE-IMPORT (MF-C, M4): a scope that already holds a sheet THIS importer wrote (manifest on the
-//     card) gets `replaces` = that row, default mode 'replace': the new file takes the row's place
-//     instead of becoming a revision. Picked by the same source file (sha256, then file name), else
-//     the scope alone (newest conversion). `vanished` = the scope's links to blocks the old manifest
-//     drew and the new one does not — listed, never removed here (presence ≠ geometry: only the
-//     piece-match modal, on the card's complete parse, may offer removal).
+//   · RE-IMPORT (MF-C, M4): a scope that already holds any sheet gets `replaces` = that row: the new
+//     file takes its place instead of becoming a second active row. An importer manifest improves the
+//     match (source digest, file name, newest conversion), but is not required. `vanished` is known
+//     only for an old importer manifest and stays review-only.
 //   · ALIASES: per scope per identity, `blockName` = the identity as the card's splitter keys it (the
 //     manifest identity; an ungraded `_UNI` block keeps its raw name — split-pieces.ts does the same).
 
@@ -68,8 +66,7 @@ export type DraftCardContext = {
   /** Live block → piece links, scope = `fabricScopeKey(purpose, line)`. */
   existingAliases?: { scopeKey: string; blockName: string; pieceLineKey: string }[];
   /**
-   * Live pattern rows, scope as above. `manifest` = the conversion manifest the card's parse read
-   * off that sheet (MF-C: a sheet this importer wrote; null/absent = a foreign DXF or not parsed).
+   * Live pattern rows, scope as above. Every row is an occupant; `manifest` only adds source facts.
    */
   existingPatterns?: {
     scopeKey: string;
@@ -361,17 +358,16 @@ export function readsBack(m: ConversionManifest): boolean {
 const nonEmpty = (xs: string[]) => xs.map((x) => x.trim().toLowerCase()).filter(Boolean);
 
 /**
- * The previous import's sheet in this scope, if any. Only rows whose manifest the card's parse read
- * (a sheet this importer wrote) qualify: a foreign CLO sheet is never replaced. Strongest match
- * first: the same source sha256 (MF-B fills it), the same source file name, else the scope alone
- * (the newest conversion — one DXF per scope is the importer's rule, K1 item 7).
+ * The active sheet in this scope, if any. Strongest importer match first: the same source sha256,
+ * the same source file name, then the newest converted row. A foreign DXF or legacy PDF still owns
+ * the slot and is the scope fallback, so apply can never append beside it.
  */
 export function replaceTargetOf(
   sc: Pick<DraftScope, 'target' | 'manifest'>,
   card: Pick<DraftCardContext, 'existingPatterns'>,
 ): DraftReplaceTarget | null {
   const rows = (card.existingPatterns ?? []).filter(
-    (p) => p.scopeKey === sc.target.scopeKey && !!p.manifest && !!(p.lineKey ?? '').trim(),
+    (p) => p.scopeKey === sc.target.scopeKey && (!!(p.lineKey ?? '').trim() || !!p.url),
   );
   if (!rows.length) return null;
   // Codex C8: a manifest from the card's read is validated, but these rows also come from callers
@@ -394,15 +390,15 @@ export function replaceTargetOf(
     .sort(
       (a, b) =>
         b.s[0] - a.s[0] ||
-        (b.p.manifest!.createdAt ?? '').localeCompare(a.p.manifest!.createdAt ?? ''),
+        (b.p.manifest?.createdAt ?? '').localeCompare(a.p.manifest?.createdAt ?? ''),
     )[0];
   return {
-    lineKey: best.p.lineKey!.trim(),
+    lineKey: (best.p.lineKey ?? '').trim(),
     url: best.p.url,
     filename: best.p.filename,
     name: best.p.name ?? '',
     matchedBy: best.s[1],
-    convertedAt: best.p.manifest!.createdAt ?? '',
+    convertedAt: best.p.manifest?.createdAt ?? '',
   };
 }
 

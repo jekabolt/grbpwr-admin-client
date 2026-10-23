@@ -374,6 +374,13 @@ const pieceSchema = z
     fusingZone: z
       .union([
         z.object({ rect: z.tuple([z.number(), z.number(), z.number(), z.number()]) }),
+        z.object({
+          spline: z.object({
+            points: z.array(
+              z.object({ x: z.number(), y: z.number(), corner: z.boolean().optional() }),
+            ),
+          }),
+        }),
         z.object({ dxfPieceKey: z.string() }),
       ])
       .nullable()

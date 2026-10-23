@@ -10,14 +10,25 @@ import {
   markerScopeLines,
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
+import { nextNumberedRole } from 'components/managers/tech-card/components/bom-roles';
 import {
   pieceAreaSheetsRefusal,
   scopeAreaPieces,
 } from 'components/managers/tech-card/components/piece-areas';
 import {
+  clampZoneTransform,
+  cornerSlot,
+  followMids,
+  straightMid,
+  withCorners,
+  type ZonePoint,
+} from 'components/managers/tech-card/components/nesting/fuse-zone';
+import { fuseLineOf } from 'components/managers/tech-card/components/nesting/fuse-spec';
+import {
   areaReadKeysOfScope,
   scopeAreaState,
 } from 'components/managers/tech-card/components/piece-areas-state';
+import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import {
   linesHeldByLegacyLinks,
   nextFusingAliases,
@@ -25,7 +36,8 @@ import {
   planFusingLines,
   sameAliasSet,
 } from './aliases';
-import { buildFusingSheets } from './dxf';
+import { fusingDartPolygons } from './darts';
+import { buildFusingSheets, mapFuseSpecToSize } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
   edgeRunsOf,
@@ -33,9 +45,20 @@ import {
   projectPointToEdgeRun,
   trimEdgeRun,
 } from './edge-runs';
-import { FuseTopologyError, fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
-import type { FusePolygon, PieceFuseSpec } from './types';
 import {
+  FuseGeometryError,
+  FuseTopologyError,
+  fuseAreaMm2,
+  generateFuseGeometry,
+  signedArea,
+  zoneRingMm,
+} from './geometry';
+import { flattenSpline, ringSelfIntersects } from './spline';
+import { canonicalInterliningIdentity, matchInterliningImport } from './interlining-import';
+import type { FusePolygon, PieceFuseSpec } from './types';
+import type { PieceDTO } from 'lib/nesting/types';
+import {
+  deriveFusePanelMode,
   fuseFieldsFromWire,
   fuseFieldsToWire,
   fuseSpecFromPiece,
@@ -49,6 +72,18 @@ const rectangle = (width: number, height: number) => [
   { x: width, y: height },
   { x: 0, y: height },
 ];
+
+const dxfPiece = (id: number, blockName: string, areaCm2: number): PieceDTO => ({
+  id,
+  name: blockName,
+  blockName,
+  source: 'assert.dxf',
+  fileIndex: 0,
+  poly: rectangle(10, 10),
+  bboxW: 10,
+  bboxH: 10,
+  areaCm2,
+});
 
 // Four real edges. The top edge is a smooth collar curve tessellated into eight DXF segments.
 const curvedCollar = [
@@ -107,6 +142,178 @@ function svgOf(polygons: readonly FusePolygon[], title: string): string {
 
 export async function main() {
   const outline = rectangle(100, 80);
+
+  assert.equal(deriveFusePanelMode(spec(), false), 'whole');
+  assert.equal(deriveFusePanelMode(spec(), true), 'file');
+  assert.equal(deriveFusePanelMode(spec({ mode: 'strip' }), true), 'strip');
+  assert.equal(deriveFusePanelMode(spec({ mode: '' }), true), '');
+
+  const sizeTokens = new Set(['xs', 's', 'm']);
+  const mainBlocks = [
+    dxfPiece(1001, 'BP_U_XS', 100),
+    dxfPiece(1002, 'BP_U_S', 110),
+    dxfPiece(1003, 'BP_U_M', 120),
+    dxfPiece(1004, 'FP_XS', 90),
+    dxfPiece(1005, 'FP_S', 100),
+    dxfPiece(1006, 'FP_M', 110),
+  ];
+  const canonical = matchInterliningImport({
+    blocks: [
+      dxfPiece(1011, 'BP_U_FUSE_XS', 70),
+      dxfPiece(1012, 'BP_U-F', 70),
+      dxfPiece(1013, 'bp_u_fuse', 70),
+      dxfPiece(1015, 'BP_U_XS_FUSE', 70),
+    ],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    pieces: [{ lineKey: 'piece-bp', name: 'back' }],
+    sizeTokens,
+  });
+  assert.equal(canonical.length, 1, JSON.stringify(canonical.map((match) => match.identity)));
+  assert.equal(canonical[0].identity, 'BP_U');
+  assert.equal(canonical[0].pieceLineKey, 'piece-bp');
+  assert.equal(canonical[0].previouslyBound, false, 'an automatic main-sheet match stays pending');
+
+  const ownerGradeTokens = new Set(['xs', 's', 'm', 'l', 'xl']);
+  const ownerGrade = ['XS', 'S', 'M', 'L', 'XL'].map((size, index) =>
+    dxfPiece(1100 + index, `SL_R_${size}`, 100 + index),
+  );
+  const ownerSplit = splitPiecesBySize(ownerGrade, ownerGradeTokens);
+  assert.deepEqual(
+    ownerSplit.groups.map((group) => ({
+      size: group.size,
+      identity: ownerSplit.codeById.get(group.pieces[0].id)?.identity,
+    })),
+    ['XS', 'S', 'M', 'L', 'XL'].map((size) => ({ size, identity: 'SL_R' })),
+    'one graded interlining piece is split into five sizes of one SL_R identity',
+  );
+  const ownerMatch = matchInterliningImport({
+    blocks: ownerGrade,
+    mainBlocks: ownerGrade,
+    mainAliases: [{ blockName: 'SL_R', pieceLineKey: 'piece-sl-r' }],
+    pieces: [{ lineKey: 'piece-sl-r', name: 'sleeve right' }],
+    sizeTokens: ownerGradeTokens,
+  });
+  assert.equal(ownerMatch.length, 1);
+  assert.equal(ownerMatch[0].identity, 'SL_R');
+  assert.equal(ownerMatch[0].blocks.length, 5);
+  assert.equal(ownerMatch[0].pieceLineKey, 'piece-sl-r');
+
+  const carried = matchInterliningImport({
+    blocks: [dxfPiece(1014, 'bp-u-fuse-xs', 70)],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    previousAliases: [{ blockName: 'BP_U_FUSING_S', pieceLineKey: 'piece-old' }],
+    pieces: [
+      { lineKey: 'piece-bp', name: 'back' },
+      { lineKey: 'piece-old', name: 'old back' },
+    ],
+    sizeTokens,
+  });
+  assert.equal(carried[0].identity, 'BP_U');
+  assert.equal(carried[0].pieceLineKey, 'piece-old', 'the previous identity wins on a new file');
+  assert.equal(carried[0].previouslyBound, true, 'a stored owner alias is already reviewed');
+
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'SIDE_F',
+      sizeTokens,
+      mainIdentities: new Set(['bpu']),
+    }).identity,
+    'SIDE_F',
+    'a short fusing token is kept when its stem is not a main-sheet identity',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'BP_U_F',
+      sizeTokens,
+      mainIdentities: new Set(['bpu']),
+    }).identity,
+    'BP_U',
+    'a short fusing token is stripped when its stem exists on the main sheet',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'POCKET_INT',
+      sizeTokens,
+      mainIdentities: new Set(['pocket', 'pocketint']),
+    }).identity,
+    'POCKET_INT',
+    'a complete main identity wins over its interlining-looking suffix',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(['collar']),
+    }).identity,
+    'COLLAR',
+    'a fusing suffix is stripped when its stem exists and the full identity does not',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(['collarfuse']),
+    }).identity,
+    'COLLAR_FUSE',
+    'a complete main identity is not stripped to a missing stem',
+  );
+  assert.equal(
+    canonicalInterliningIdentity({
+      blockName: 'COLLAR_FUSE',
+      sizeTokens,
+      mainIdentities: new Set(),
+    }).identity,
+    'COLLAR_FUSE',
+    'a fusing suffix is not stripped when its stem is absent',
+  );
+  assert.equal(
+    fuseLineOf(spec({ bomLineKey: '' }), ['IL-ONLY']),
+    'IL-ONLY',
+    'a legacy empty fuse line belongs to the only interlining line',
+  );
+
+  const ambiguous = matchInterliningImport({
+    blocks: [dxfPiece(1021, 'FRONT_FUSE_XS', 50)],
+    mainBlocks: [
+      dxfPiece(1022, 'FRONT_XS', 100),
+      dxfPiece(1023, 'FRONT_S', 105),
+      dxfPiece(1024, 'FRONT_M', 110),
+      dxfPiece(1025, 'BACK_XS', 100),
+      dxfPiece(1026, 'BACK_S', 105),
+      dxfPiece(1027, 'BACK_M', 110),
+    ],
+    mainAliases: [],
+    pieces: [
+      { lineKey: 'front-a', name: 'front' },
+      { lineKey: 'front-b', name: 'FRONT' },
+    ],
+    sizeTokens,
+  });
+  assert.equal(ambiguous[0].pieceLineKey, undefined);
+  assert.equal(ambiguous[0].reason, 'ambiguous');
+
+  const oversize = matchInterliningImport({
+    blocks: [dxfPiece(1031, 'BP_U_FUSE_XS', 116)],
+    mainBlocks,
+    mainAliases: [{ blockName: 'BP_U', pieceLineKey: 'piece-bp' }],
+    pieces: [{ lineKey: 'piece-bp', name: 'back' }],
+    sizeTokens,
+  });
+  assert.equal(oversize[0].pieceLineKey, undefined);
+  assert.equal(oversize[0].reason, 'oversize');
+
+  assert.equal(nextNumberedRole('interlining', []), 'interlining 1');
+  assert.equal(
+    nextNumberedRole('interlining', [
+      { name: 'Interlining 1' },
+      { name: 'collar interlining' },
+      { name: ' interlining 3 ' },
+    ]),
+    'interlining 2',
+    'a new interlining slot takes the first free exact numbered role',
+  );
 
   assert.equal(EDGE_CORNER_TURN_DEG, 30);
   const rectangleRuns = edgeRunsOf(outline);
@@ -198,12 +405,77 @@ export async function main() {
     seamAllowanceMm: 10,
   });
   near(fuseAreaMm2(net), 80 * 60);
+  const netTwenty = generateFuseGeometry({
+    outline: rectangle(100, 100),
+    spec: spec({ insetNet: true }),
+    seamAllowanceMm: 20,
+  });
+  near(fuseAreaMm2(netTwenty) / 100, 36, 0.001);
+  assert.throws(
+    () =>
+      generateFuseGeometry({
+        outline: rectangle(100, 100),
+        spec: spec({ insetNet: true }),
+        seamAllowanceMm: null,
+      }),
+    /net inset requires a seam allowance/,
+  );
 
   const dart = [
     { x: 43, y: 25 },
     { x: 57, y: 25 },
     { x: 50, y: 58 },
   ];
+  const dartSource = {
+    id: 1,
+    name: 'front',
+    source: 'front.dxf',
+    poly: rectangle(10, 10),
+    bboxW: 10,
+    bboxH: 10,
+    areaCm2: 100,
+    inner: [
+      {
+        layer: 'DART',
+        closed: false,
+        pts: [
+          { x: 0, y: 0 },
+          { x: 2, y: 3 },
+          { x: 4, y: 0 },
+        ],
+      },
+      {
+        layer: 'DART',
+        closed: true,
+        pts: [
+          { x: 2, y: 2 },
+          { x: 4, y: 2 },
+          { x: 3, y: 5 },
+        ],
+      },
+      {
+        layer: 'DRILL',
+        closed: true,
+        pts: [
+          { x: 6, y: 6 },
+          { x: 7, y: 6 },
+          { x: 7, y: 7 },
+          { x: 6, y: 7 },
+        ],
+      },
+    ],
+  } satisfies PieceDTO;
+  assert.deepEqual(
+    fusingDartPolygons(dartSource),
+    [
+      [
+        { x: 20, y: 20 },
+        { x: 40, y: 20 },
+        { x: 30, y: 50 },
+      ],
+    ],
+    'preview and regeneration share the closed-polygon dart rule',
+  );
   const wholeDart = generateFuseGeometry({ outline, spec: spec(), darts: [dart] });
   assert.equal(wholeDart[0].holes.length, 1, 'cut dart becomes a hole');
   assert.ok(signedArea(wholeDart[0].holes[0]) < 0, 'hole loop is CW');
@@ -282,6 +554,238 @@ export async function main() {
   });
   near(fuseAreaMm2(zone), 47 * 37);
 
+  // L13 freeform zone. A rect is the 4-corner spline, and the editor's 4 corners + 4 straight mids.
+  const corners = (x0: number, y0: number, x1: number, y1: number) => [
+    { x: x0, y: y0, corner: true },
+    { x: x1, y: y0, corner: true },
+    { x: x1, y: y1, corner: true },
+    { x: x0, y: y1, corner: true },
+  ];
+  const withMids = (c: { x: number; y: number; corner: boolean }[]) =>
+    c.flatMap((p, i) => {
+      const q = c[(i + 1) % c.length];
+      return [p, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, corner: false }];
+    });
+  const splineZone = (points: { x: number; y: number; corner?: boolean }[]) =>
+    spec({ mode: 'zone', zone: { spline: { points } } });
+  const goldenSpline = [
+    { x: 0, y: 0, corner: false },
+    { x: 100, y: 0, corner: false },
+    { x: 101, y: 1, corner: false },
+    { x: 101, y: 100, corner: false },
+  ];
+  const goldenFlat = flattenSpline(goldenSpline);
+  const goldenStarts = goldenSpline.map((point) =>
+    goldenFlat.findIndex((candidate) => candidate.x === point.x && candidate.y === point.y),
+  );
+  assert.deepEqual(
+    goldenStarts.map((start, i) =>
+      i + 1 < goldenStarts.length ? goldenStarts[i + 1] - start : goldenFlat.length - start,
+    ),
+    [12, 2, 12, 14],
+    'centripetal spline uses the backend golden step counts',
+  );
+  assert.equal(goldenFlat.length, 40, 'centripetal spline uses the backend golden vertex count');
+  near(goldenFlat[goldenStarts[1] + 1].x, 100.65804836398324, 1e-9);
+  near(goldenFlat[goldenStarts[1] + 1].y, 0.34215574839178853, 1e-9);
+  const exactRectangle = flattenSpline(withMids(corners(0, 0, 20, 10)));
+  assert.ok(
+    exactRectangle.every(
+      (point) =>
+        (point.y === 0 && point.x >= 0 && point.x <= 20) ||
+        (point.x === 20 && point.y >= 0 && point.y <= 10) ||
+        (point.y === 10 && point.x >= 0 && point.x <= 20) ||
+        (point.x === 0 && point.y >= 0 && point.y <= 10),
+    ),
+    '4 corners + 4 mids stay exactly on the rectangle boundary',
+  );
+  near(Math.abs(signedArea(exactRectangle)), 20 * 10, 1e-9);
+  const rectPlusPoints = withMids(corners(10, 10, 40, 40));
+  assert.equal(cornerSlot(1, rectPlusPoints), false, 'Rect+ keeps its odd slots as mids');
+  const genericEven: ZonePoint[] = [
+    { x: 0, y: 0, corner: true },
+    { x: 20, y: 0, corner: true },
+    { x: 30, y: 15, corner: false },
+    { x: 20, y: 30, corner: false },
+    { x: 0, y: 30, corner: true },
+    { x: -10, y: 15, corner: false },
+  ];
+  assert.equal(cornerSlot(1, genericEven), true, 'a generic even spline keeps every corner slot');
+  assert.equal(straightMid(genericEven, 1), false, 'a generic even spline has no follower mids');
+  assert.deepEqual(
+    followMids(
+      genericEven.map((point) => ({ ...point })),
+      genericEven.map(() => true),
+    ),
+    genericEven,
+    'a generic even spline keeps its points unchanged',
+  );
+  const genericSharp = withCorners({ spline: { points: genericEven } }, true);
+  assert.ok(
+    genericSharp &&
+      'spline' in genericSharp &&
+      genericSharp.spline.points.every((point) => point.corner),
+    'sharp applies to every point of a non-Rect+ spline',
+  );
+  const rectAsSpline = generateFuseGeometry({
+    outline,
+    spec: splineZone(corners(50, -10, 120, 40)),
+  });
+  near(fuseAreaMm2(rectAsSpline), fuseAreaMm2(zone));
+  const rectAsEight = generateFuseGeometry({
+    outline,
+    spec: splineZone(withMids(corners(50, -10, 120, 40))),
+  });
+  near(fuseAreaMm2(rectAsEight), fuseAreaMm2(zone));
+
+  // Bent: the top mid pushed up 12 mm inside the piece → more area than the rectangle, less than
+  // the triangle-capped bound (corners stay sharp, the bend is a smooth bulge).
+  const flat = withMids(corners(20, 20, 60, 50));
+  const bent = flat.map((p, i) => (i === 5 ? { ...p, y: p.y + 12 } : p));
+  const bentArea = fuseAreaMm2(generateFuseGeometry({ outline, spec: splineZone(bent) }));
+  assert.ok(bentArea > 40 * 30 + 100, `bent zone adds area (${bentArea})`);
+  assert.ok(bentArea < 40 * 30 + 40 * 12, `bent zone stays under the cap (${bentArea})`);
+
+  // All round: 8 points on a circle → a circle within 3 % (Catmull-Rom runs ~2 % inside), and the 0.5 mm chord bound holds.
+  const circle = Array.from({ length: 8 }, (_, i) => ({
+    x: 50 + 20 * Math.cos((i * Math.PI) / 4),
+    y: 40 + 20 * Math.sin((i * Math.PI) / 4),
+  }));
+  const roundArea = fuseAreaMm2(generateFuseGeometry({ outline, spec: splineZone(circle) }));
+  assert.ok(Math.abs(roundArea / (Math.PI * 400) - 1) < 0.03, `round zone ≈ circle (${roundArea})`);
+  const coarse = flattenSpline(circle);
+  const fine = flattenSpline(circle, 0.005);
+  const distToRing = (q: { x: number; y: number }) =>
+    Math.min(
+      ...coarse.map((a, i) => {
+        const b = coarse[(i + 1) % coarse.length];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const t = Math.max(
+          0,
+          Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / (dx * dx + dy * dy)),
+        );
+        return Math.hypot(q.x - a.x - dx * t, q.y - a.y - dy * t);
+      }),
+    );
+  assert.ok(Math.max(...fine.map(distToRing)) <= 0.5, 'flattening keeps chord error ≤ 0.5 mm');
+
+  // Clipped to the inset contour: half outside the piece → only the inside half is cut.
+  const overhang = generateFuseGeometry({
+    outline,
+    spec: splineZone(
+      withMids(corners(80, 20, 120, 50)).map((p, i) => (i === 3 ? { ...p, x: 130 } : p)),
+    ),
+  });
+  near(fuseAreaMm2(overhang), (97 - 80) * 30);
+  assert.throws(
+    () => generateFuseGeometry({ outline, spec: splineZone(corners(200, 200, 240, 240)) }),
+    /zone geometry is empty/,
+  );
+  assert.throws(
+    () =>
+      zoneRingMm({
+        spline: {
+          points: [
+            { x: 0, y: 0, corner: true },
+            { x: 40, y: 40, corner: true },
+            { x: 40, y: 0, corner: true },
+            { x: 0, y: 40, corner: true },
+          ],
+        },
+      }),
+    FuseGeometryError,
+    'a bow tie is refused',
+  );
+  const endpointTouch = [
+    { x: 0, y: 0 },
+    { x: 20, y: 0 },
+    { x: 20, y: 10 },
+    { x: 10, y: 0 },
+    { x: 0, y: 10 },
+  ];
+  assert.equal(
+    ringSelfIntersects(endpointTouch),
+    true,
+    'a non-neighbour endpoint touch is refused',
+  );
+  assert.throws(
+    () =>
+      zoneRingMm({
+        spline: { points: endpointTouch.map((point) => ({ ...point, corner: true })) },
+      }),
+    FuseGeometryError,
+    'a sharp endpoint touch is refused after flattening',
+  );
+  assert.equal(
+    ringSelfIntersects([
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 10 },
+      { x: 0, y: 10 },
+    ]),
+    true,
+    'an adjacent collinear reversal is refused',
+  );
+  assert.throws(
+    () => zoneRingMm({ spline: { points: corners(0, 0, 10, 10).slice(0, 2) } }),
+    FuseGeometryError,
+  );
+  const clampRing = rectangle(10, 10);
+  const moving = rectangle(2, 3).map((point) => ({ x: point.x + 2, y: point.y + 3 }));
+  const moved = clampZoneTransform(moving, clampRing, (point, amount) => ({
+    x: point.x + 20 * amount,
+    y: point.y,
+  }));
+  near(Math.max(...moved.map((point) => point.x)), 10, 1e-6);
+  near(Math.hypot(moved[1].x - moved[0].x, moved[1].y - moved[0].y), 2, 1e-9);
+  const rotateSource = [
+    { x: 1, y: 1 },
+    { x: 4, y: 1 },
+    { x: 4, y: 9 },
+    { x: 1, y: 9 },
+  ];
+  const rotated = clampZoneTransform(rotateSource, clampRing, (point, amount) => {
+    const angle = (Math.PI / 2) * amount;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return {
+      x: 2.5 + (point.x - 2.5) * cos - (point.y - 5) * sin,
+      y: 5 + (point.x - 2.5) * sin + (point.y - 5) * cos,
+    };
+  });
+  assert.ok(Math.min(...rotated.map((point) => point.x)) >= -1e-7, 'rotation stays in the inset');
+  near(Math.hypot(rotated[1].x - rotated[0].x, rotated[1].y - rotated[0].y), 3, 1e-9);
+  // spec → form fields → wire → form fields → spec keeps the spline and its corners.
+  const splineSpec = splineZone(bent);
+  const splineFields = writeFuseFields(splineSpec);
+  const splineWire = fuseFieldsToWire(splineFields);
+  assert.equal(splineWire.fusingZone?.rect, undefined);
+  assert.equal(splineWire.fusingZone?.spline?.points?.length, 8);
+  assert.deepEqual(
+    readFuseSpec({ ...splineFields, ...fuseFieldsFromWire(splineWire) }),
+    splineSpec,
+  );
+  const splineDxf = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' }],
+    pieces: [
+      {
+        identity: 'FRONT',
+        displayName: 'front',
+        piecesPerGarment: 2,
+        ungraded: false,
+        fuse: splineSpec,
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline }],
+      },
+    ],
+  });
+  assert.deepEqual(splineDxf.sheets[0].blocks, ['FRONT_M'], 'a spline zone reaches the DXF');
+  const bentPolygons = generateFuseGeometry({ outline, spec: splineSpec });
+
   const referenced = generateFuseGeometry({
     outline,
     spec: spec({ mode: 'zone', zone: { dxfPieceKey: 'PATCH' } }),
@@ -317,6 +821,55 @@ export async function main() {
   assert.equal(dxf.sheets[0].filename, 'jkt-042-fusing-g700.dxf');
   assert.deepEqual(dxf.sheets[0].blocks, ['FRONT_S', 'FRONT_M']);
   assert.deepEqual(dxf.sheets[0].aliases, [{ identity: 'FRONT', blockName: 'FRONT' }]);
+
+  const gradedOutlines = ['XS', 'S', 'M', 'L', 'XL'].map((sizeToken, rank) => ({
+    sizeToken,
+    sizeId: rank + 1,
+    rank,
+    outline: rectangle(80 + rank * 10, 60 + rank * 5),
+  }));
+  const proportionalZone = spec({ mode: 'zone', zone: { rect: [8, 6, 40, 30] } });
+  const mappedZone = mapFuseSpecToSize(
+    proportionalZone,
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
+  );
+  assert.deepEqual(
+    mappedZone.zone,
+    { rect: [12, 8, 60, 40] },
+    'a drawn zone keeps its proportional position in the target-size outline',
+  );
+  const mappedStrip = mapFuseSpecToSize(
+    spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
+  );
+  assert.deepEqual(
+    mappedStrip.edges,
+    [{ edge: 0, startMm: 12, endMm: 24 }],
+    'strip trim positions keep their fraction of the graded edge',
+  );
+  const gradedSheet = buildFusingSheets({
+    techCardId: 71,
+    style: 'FW28-001',
+    baseSizeId: 3,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'interlining', label: 'interlining' }],
+    pieces: [
+      {
+        identity: 'SL_R',
+        displayName: 'sleeve right',
+        piecesPerGarment: 1,
+        ungraded: true,
+        fuse: proportionalZone,
+        sizes: gradedOutlines,
+      },
+    ],
+  });
+  assert.deepEqual(
+    gradedSheet.sheets[0].blocks,
+    ['SL_R_XS', 'SL_R_S', 'SL_R_M', 'SL_R_L', 'SL_R_XL'],
+    'the generator emits every graded size for the interlining piece',
+  );
 
   // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
   // go, the new ones come. A scope an uploaded sheet also holds is never touched (fail closed):
@@ -818,6 +1371,7 @@ export async function main() {
         join(goldenDir, 'strip-offsets.svg'),
         svgOf(joinedStrip, 'strip · width 18 mm · offsets 12/9 mm · joined corner'),
       ),
+      writeFile(join(goldenDir, 'zone-spline.svg'), svgOf(bentPolygons, 'zone · rect+ · top bent')),
       writeFile(
         join(goldenDir, 'strip-curved.svg'),
         svgOf(curvedStrip, 'curved collar · 8 segments → 1 edge'),

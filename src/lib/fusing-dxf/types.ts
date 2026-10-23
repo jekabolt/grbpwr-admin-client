@@ -1,8 +1,9 @@
-import type { common_TechCardPiece } from 'api/proto-http/admin';
+import type { common_TechCardPiece, common_TechCardPieceFusingZone } from 'api/proto-http/admin';
 import type { PtMm } from 'lib/pattern-import/types';
 
 /** '' = not fused, or the legacy «fused, how not said» (a stored fused piece with no mode). */
 export type FuseMode = '' | 'whole' | 'strip' | 'zone';
+export type FusePanelMode = FuseMode | 'file';
 export type FuseGrain = 'as_piece' | 'lengthwise' | 'crosswise' | 'bias' | 'any';
 export type FuseDarts = 'cut' | 'fuse';
 
@@ -13,9 +14,17 @@ export type FuseEdge = {
   endMm: number;
 };
 
-/** Piece-local mm, DXF axes (Y up), the outline's own frame — or another DXF block. */
+/** A control point of a freeform zone; corner = a sharp vertex (the curve does not round it). */
+export type FuseSplinePoint = { x: number; y: number; corner?: boolean };
+
+/**
+ * Piece-local mm, DXF axes (Y up), the outline's own frame — or another DXF block. A spline is a
+ * closed curve through its 3..64 points (rule in ./spline.ts); a rect is its 4-corner special case
+ * and stays the stored shape of an untouched rectangle.
+ */
 export type FuseZone =
   | { rect: [x0: number, y0: number, x1: number, y1: number] }
+  | { spline: { points: FuseSplinePoint[] } }
   | { dxfPieceKey: string };
 
 /**
@@ -51,6 +60,17 @@ export const blankFuse = (mode: FuseMode = ''): PieceFuseSpec => ({
   grain: 'as_piece',
   darts: 'cut',
 });
+
+/**
+ * FILE is a view of stored FULL fusing, never a fifth wire value. The caller supplies the other
+ * half of the fact: this piece is mapped to a block of the selected slot's owner drawing.
+ */
+export function deriveFusePanelMode(
+  spec: Pick<PieceFuseSpec, 'mode'>,
+  mappedToOwnerFile: boolean,
+): FusePanelMode {
+  return spec.mode === 'whole' && mappedToOwnerFile ? 'file' : spec.mode;
+}
 
 export type FuseGeometryInput = {
   outline: PtMm[];
@@ -150,20 +170,47 @@ type WireFuse = Pick<
   common_TechCardPiece,
   | 'fusingBomLineKey'
   | 'fusingEdges'
-  | 'fusingZone'
   | 'fusingInsetMm'
   | 'fusingInsetNet'
   | 'fusingGrain'
   | 'fusingDarts'
->;
+> & { fusingZone?: common_TechCardPieceFusingZone };
+
+/** The wire zone → the form's zone (null = none, or an unreadable one). */
+function zoneFromWire(z: common_TechCardPieceFusingZone | undefined): FuseZone | null {
+  const rect = z?.rect;
+  const r = rect ? [rect.x0, rect.y0, rect.x1, rect.y1].map((d) => num(d?.value)) : null;
+  if (r && r.every((x) => x != null)) return { rect: r as [number, number, number, number] };
+  const pts = z?.spline?.points ?? [];
+  if (pts.length) {
+    const points = pts.map((p) => ({ x: num(p.x?.value), y: num(p.y?.value), corner: !!p.corner }));
+    if (points.every((p) => p.x != null && p.y != null))
+      return { spline: { points: points as { x: number; y: number; corner: boolean }[] } };
+  }
+  const key = z?.dxfPieceKey?.trim();
+  return key ? { dxfPieceKey: key } : null;
+}
+
+/** The form's zone → the wire. An empty message clears the stored zone. */
+function zoneToWire(z: FuseZone | null): common_TechCardPieceFusingZone {
+  if (!z) return {};
+  if ('rect' in z)
+    return {
+      rect: { x0: dec(z.rect[0]), y0: dec(z.rect[1]), x1: dec(z.rect[2]), y1: dec(z.rect[3]) },
+    };
+  if ('spline' in z)
+    return {
+      spline: {
+        points: z.spline.points.map((p) => ({ x: dec(p.x), y: dec(p.y), corner: !!p.corner })),
+      },
+    };
+  return { dxfPieceKey: z.dxfPieceKey };
+}
 
 /** The wire piece → the form's plain fields (the new FUSING fields; fused/mode/width stay put). */
 export function fuseFieldsFromWire(
   p: Partial<WireFuse>,
 ): Omit<PieceFuseFields, 'fused' | 'fusingMode' | 'fusingWidthMm'> {
-  const rect = p.fusingZone?.rect;
-  const key = p.fusingZone?.dxfPieceKey?.trim();
-  const r = rect ? [rect.x0, rect.y0, rect.x1, rect.y1].map((d) => num(d?.value)) : null;
   return {
     fusingBomLineKey: (p.fusingBomLineKey ?? '').trim(),
     fusingEdges: (p.fusingEdges?.items ?? []).map((e) => ({
@@ -171,12 +218,7 @@ export function fuseFieldsFromWire(
       startMm: num(e.startMm?.value) ?? 0,
       endMm: num(e.endMm?.value) ?? 0,
     })),
-    fusingZone:
-      r && r.every((x) => x != null)
-        ? { rect: r as [number, number, number, number] }
-        : key
-          ? { dxfPieceKey: key }
-          : null,
+    fusingZone: zoneFromWire(p.fusingZone),
     fusingInsetMm: (p.fusingInsetMm?.value ?? '').trim(),
     fusingInsetNet: !!p.fusingInsetNet,
     fusingGrain: (p.fusingGrain ?? '').trim(),
@@ -191,7 +233,6 @@ export function fuseFieldsFromWire(
 export function fuseFieldsToWire(
   f: Omit<PieceFuseFields, 'fused' | 'fusingMode' | 'fusingWidthMm'>,
 ): WireFuse {
-  const z = f.fusingZone;
   return {
     fusingBomLineKey: f.fusingBomLineKey.trim(),
     fusingEdges: {
@@ -201,18 +242,7 @@ export function fuseFieldsToWire(
         endMm: dec(e.endMm),
       })),
     },
-    fusingZone: !z
-      ? {}
-      : 'rect' in z
-        ? {
-            rect: {
-              x0: dec(z.rect[0]),
-              y0: dec(z.rect[1]),
-              x1: dec(z.rect[2]),
-              y1: dec(z.rect[3]),
-            },
-          }
-        : { dxfPieceKey: z.dxfPieceKey },
+    fusingZone: zoneToWire(f.fusingZone),
     fusingInsetMm: { value: f.fusingInsetMm.trim() },
     fusingInsetNet: f.fusingInsetNet,
     fusingGrain: f.fusingGrain.trim(),

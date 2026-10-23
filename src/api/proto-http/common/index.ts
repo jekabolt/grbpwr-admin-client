@@ -3710,11 +3710,23 @@ export type TechCardPieceFusingRect = {
   y1: googletype_Decimal | undefined;
 };
 
-// Geometry for ZONE fusing: either a rectangle drawn on the garment piece or a dedicated DXF
-// piece supplied by the pattern maker. An empty message deliberately clears the stored zone.
+export type TechCardPieceFusingSplinePoint = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+  corner: boolean | undefined;
+};
+
+// Closed spline through piece-local points in millimetres. corner keeps that point sharp.
+export type TechCardPieceFusingSpline = {
+  points: TechCardPieceFusingSplinePoint[] | undefined;
+};
+
+// Geometry for ZONE fusing: a rectangle or freeform spline drawn on the garment piece, or a
+// dedicated DXF piece supplied by the pattern maker. An empty message deliberately clears it.
 export type TechCardPieceFusingZone = {
   rect?: TechCardPieceFusingRect;
   dxfPieceKey?: string;
+  spline?: TechCardPieceFusingSpline;
 };
 
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):

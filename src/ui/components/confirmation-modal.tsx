@@ -51,6 +51,8 @@ interface Props {
    * подпись уезжает со скроллом и теряется среди полей, а подвал не скроллится и всегда виден.
    */
   footerHint?: React.ReactNode;
+  /** Extra footer actions, rendered between cancel and the primary confirm action. */
+  footerActions?: React.ReactNode;
   /**
    * Cascade guard. When set, the confirm button stays disabled until the user types
    * this string exactly. Use for anything that destroys data it cannot recover.
@@ -120,6 +122,7 @@ export function ConfirmationModal({
   width = 'md',
   hideActions,
   footerHint,
+  footerActions,
   typeToConfirm,
   closeOnConfirm = true,
   onCloseAutoFocus,
@@ -233,8 +236,8 @@ export function ConfirmationModal({
               рядом с «close» — это два органа с одним смыслом. Но `hideActions` до сих пор уносил
               вместе с кнопками и `footerHint`, то есть строку вроде «здесь ничего не правится,
               каждый факт правится у своего поля» — а она у такого диалога и есть единственное
-              содержание подвала. Поэтому условия теперь два, а не одно. */}
-          {(!hideActions || footerHint) && (
+              содержание подвала. Дополнительные `footerActions` тоже рисуют подвал. */}
+          {(!hideActions || footerHint || footerActions) && (
             <div className='flex shrink-0 items-center justify-end gap-1.5 border-t border-borderColor px-2.5 py-1.5'>
               {footerHint && (
                 <Text
@@ -246,30 +249,29 @@ export function ConfirmationModal({
                   {footerHint}
                 </Text>
               )}
+              {!hideActions && !hideCancel && (
+                <Button
+                  ref={cancelRef}
+                  type='button'
+                  onClick={handleCancel}
+                  variant='secondary'
+                  size='sm'
+                  disabled={cancelDisabled}
+                >
+                  {cancelLabel}
+                </Button>
+              )}
+              {footerActions}
               {!hideActions && (
-                <>
-                  {!hideCancel && (
-                    <Button
-                      ref={cancelRef}
-                      type='button'
-                      onClick={handleCancel}
-                      variant='secondary'
-                      size='sm'
-                      disabled={cancelDisabled}
-                    >
-                      {cancelLabel}
-                    </Button>
-                  )}
-                  <Button
-                    type='button'
-                    onClick={handleConfirm}
-                    variant='main'
-                    size='sm'
-                    disabled={confirmDisabled || guardUnmet}
-                  >
-                    {confirmLabel}
-                  </Button>
-                </>
+                <Button
+                  type='button'
+                  onClick={handleConfirm}
+                  variant='main'
+                  size='sm'
+                  disabled={confirmDisabled || guardUnmet}
+                >
+                  {confirmLabel}
+                </Button>
               )}
             </div>
           )}

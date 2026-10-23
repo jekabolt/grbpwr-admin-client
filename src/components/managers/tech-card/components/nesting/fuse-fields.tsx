@@ -1,9 +1,20 @@
 // The fuse fields of the piece panel, variant «Fold» (owner OK 2026-10-22): FUSING no / whole /
-// strip / zone with `⋯` in the door; INTERLINING (always shown, prefilled when the BOM has one);
+// strip / zone / derived file with `⋯` in the door; INTERLINING (prefilled when the BOM has one);
 // WIDTH MM for a strip; `⋯` opens INSET MM / FUSIBLE GRAIN / DARTS in place, and opens by itself
-// when any of them is off its default. Desktop: in the panel. Phone: docked above the footer.
-import { useState } from 'react';
-import { Button, Chip, Combobox, DotsHorizontalIcon, Select, Text, type ComboboxGroup } from 'ui';
+// when any of them is off its default. ZONE (L13 Rect+): clipped area in the door, sharp / round,
+// undo / reset. Desktop: in the panel. Phone: docked above the footer.
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  Button,
+  Chip,
+  Combobox,
+  DotsHorizontalIcon,
+  EmptyCell,
+  Input,
+  Select,
+  Text,
+  type ComboboxGroup,
+} from 'ui';
 import {
   DART_ITEMS,
   DEFAULT_INSET_MM,
@@ -11,6 +22,7 @@ import {
   INSET_PRESETS,
   WIDTH_PRESETS,
   blankFuse,
+  deriveFusePanelMode,
   fuseIncomplete,
   fuseLineOf,
   fuseOffDefault,
@@ -19,18 +31,28 @@ import {
   type FuseDarts,
   type FuseGrain,
   type FuseMode,
+  type FusePanelMode,
   type PieceFuseSpec,
 } from './fuse-spec';
+import { allCorners, isDrawnZone, resetZone, withCorners, type ZoneBus } from './fuse-zone';
+import { PatternDropZone } from '../pattern-drop-zone';
 
-export type InterliningLine = { key: string; label: string; color: string };
+export type InterliningLine = {
+  key: string;
+  label: string;
+  color: string;
+  ownerFileName?: string;
+  uploading?: boolean;
+};
 
-const MODES: [FuseMode, string][] = [
+const MODES: [FusePanelMode, string][] = [
   ['', 'no'],
   ['whole', 'whole'],
   ['strip', 'strip'],
   ['zone', 'zone'],
+  ['file', 'file'],
 ];
-const ADD_MATERIAL = '+material';
+const ADD_SLOT = '+slot';
 
 /** Label row (micro uppercase, red when the answer is missing) over one control. */
 export function FuseField({
@@ -96,7 +118,14 @@ export function FuseFields({
   readOnly,
   toggleBox,
   onChange,
-  onAddMaterial,
+  onAddSlot,
+  onAddFileSlot,
+  onUploadFile,
+  onPickFile,
+  onLeaveFile,
+  fileMappedLineKeys = [],
+  ci,
+  zoneBus,
 }: {
   spec: PieceFuseSpec;
   /** The stored `fused` — true with no mode is the legacy «fused, how not said». */
@@ -106,13 +135,43 @@ export function FuseFields({
   /** The panel's toggle box class (one height for every control in the panel). */
   toggleBox: string;
   onChange: (next: PieceFuseSpec) => void;
-  onAddMaterial: () => void;
+  onAddSlot: () => void;
+  onAddFileSlot?: () => string | void;
+  onUploadFile?: (lineKey: string, files: FileList | File[]) => void;
+  onPickFile?: (lineKey: string) => void;
+  onLeaveFile?: (lineKey: string) => void;
+  /** Owner-file slots whose aliases currently point at this piece. */
+  fileMappedLineKeys?: readonly string[];
+  /** The piece's canvas id and the dialog's zone bus (area + undo), shared with the canvas. */
+  ci?: string;
+  zoneBus?: ZoneBus;
 }) {
   const on = spec.mode !== '';
   const [more, setMore] = useState(() => fuseOffDefault(spec));
   const lineKeys = lines.map((l) => l.key);
   const line = fuseLineOf(spec, lineKeys);
-  const cur: FuseMode | null = !fused ? '' : spec.mode || null;
+  const ownerMapped =
+    !!line &&
+    fileMappedLineKeys.includes(line) &&
+    lines.some((candidate) => candidate.key === line && !!candidate.ownerFileName);
+  const derivedMode = deriveFusePanelMode(spec, ownerMapped);
+  const [fileOpen, setFileOpen] = useState(() => derivedMode === 'file');
+  const [fileLineKey, setFileLineKey] = useState(() => line || lines[0]?.key || '');
+  const [fileDragging, setFileDragging] = useState(false);
+  useEffect(() => {
+    if (derivedMode !== 'file' || !line) return;
+    setFileOpen(true);
+    setFileLineKey(line);
+  }, [derivedMode, line]);
+  const shownLineKey = fileOpen ? fileLineKey : line;
+  const shownLine = lines.find((candidate) => candidate.key === shownLineKey);
+  const cur: FusePanelMode | null = fileOpen
+    ? 'file'
+    : !fused
+      ? ''
+      : derivedMode === 'file' && shownLineKey === line
+        ? 'file'
+        : spec.mode || null;
   const set = (d: Partial<PieceFuseSpec>) => onChange({ ...spec, ...d });
   const setMode = (m: FuseMode) => {
     if (!m) return onChange(blankFuse());
@@ -123,6 +182,17 @@ export function FuseFields({
       zone: m === 'zone' ? spec.zone : null,
     });
   };
+  const chooseMode = (mode: FusePanelMode) => {
+    if (mode === 'file') {
+      setFileOpen(true);
+      if (!fileLineKey) setFileLineKey(line || lines[0]?.key || '');
+      return;
+    }
+    if (derivedMode === 'file' && line) onLeaveFile?.(line);
+    setFileOpen(false);
+    setMode(mode);
+  };
+  const fileReady = !!shownLine && !shownLine.uploading && !readOnly;
 
   return (
     <div className='space-y-2' data-fuse-fields=''>
@@ -143,7 +213,7 @@ export function FuseFields({
           )
         }
       >
-        <div className='grid grid-cols-4 gap-1'>
+        <div className='grid grid-cols-5 gap-1'>
           {MODES.map(([m, l]) => (
             <Chip
               key={m || 'no'}
@@ -152,15 +222,17 @@ export function FuseFields({
               pressed={cur === m}
               disabled={readOnly}
               aria-label={l}
-              onClick={() => setMode(m)}
+              onClick={() => chooseMode(m)}
             >
               {l}
             </Chip>
           ))}
         </div>
       </FuseField>
-      {on && (
-        <div className={spec.mode === 'strip' ? 'grid grid-cols-2 items-end gap-2' : ''}>
+      {(on || fileOpen) && (
+        <div
+          className={!fileOpen && spec.mode === 'strip' ? 'grid grid-cols-2 items-end gap-2' : ''}
+        >
           <FuseField label='interlining'>
             <Select
               name='interlining'
@@ -176,17 +248,25 @@ export function FuseFields({
                     </span>
                   ),
                 })),
-                { value: ADD_MATERIAL, label: '+ material' },
+                { value: ADD_SLOT, label: '+ slot' },
               ]}
-              value={line}
+              value={shownLineKey}
               readOnly={readOnly}
-              invalid={!line}
-              onValueChange={(x: string) =>
-                x === ADD_MATERIAL ? onAddMaterial() : set({ bomLineKey: x })
-              }
+              invalid={!shownLineKey}
+              onValueChange={(x: string) => {
+                if (x === ADD_SLOT) {
+                  if (fileOpen) {
+                    const added = onAddFileSlot?.();
+                    if (added) setFileLineKey(added);
+                  } else onAddSlot();
+                  return;
+                }
+                if (fileOpen) setFileLineKey(x);
+                else set({ bomLineKey: x });
+              }}
             />
           </FuseField>
-          {spec.mode === 'strip' && (
+          {!fileOpen && spec.mode === 'strip' && (
             <FuseField label='width mm'>
               <Combobox
                 name='width'
@@ -201,6 +281,69 @@ export function FuseFields({
             </FuseField>
           )}
         </div>
+      )}
+      {fileOpen && (
+        <FuseField
+          label='file'
+          door={
+            shownLine?.ownerFileName &&
+            !readOnly && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                disabled={shownLine.uploading}
+                onClick={() => onPickFile?.(shownLine.key)}
+              >
+                replace
+              </Button>
+            )
+          }
+        >
+          {shownLine?.ownerFileName ? (
+            <Input
+              readOnly
+              aria-label='owner file'
+              className='bg-pageBg text-micro'
+              title={shownLine.ownerFileName}
+              value={shownLine.uploading ? 'uploading…' : shownLine.ownerFileName}
+            />
+          ) : (
+            <PatternDropZone
+              interactive={fileReady}
+              active={fileDragging}
+              disabled={!fileReady}
+              className='h-14'
+              onClick={() => shownLine && onPickFile?.(shownLine.key)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (!fileReady) return;
+                setFileDragging(true);
+              }}
+              onDragLeave={() => setFileDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setFileDragging(false);
+                if (!fileReady || !shownLine) return;
+                onUploadFile?.(shownLine.key, event.dataTransfer.files);
+              }}
+            >
+              <Text size='micro' component='span'>
+                {shownLine?.uploading ? 'uploading…' : shownLine ? 'drop dxf' : 'select slot'}
+              </Text>
+            </PatternDropZone>
+          )}
+        </FuseField>
+      )}
+      {spec.mode === 'zone' && ci && zoneBus && (
+        <ZoneRow
+          spec={spec}
+          ci={ci}
+          bus={zoneBus}
+          readOnly={readOnly}
+          toggleBox={toggleBox}
+          onChange={onChange}
+        />
       )}
       {on && more && (
         <div className='grid grid-cols-3 items-end gap-2'>
@@ -245,5 +388,68 @@ export function FuseFields({
         </div>
       )}
     </div>
+  );
+}
+
+/** ZONE: the clipped area, all corners sharp / round, undo, back to the rectangle. */
+function ZoneRow({
+  spec,
+  ci,
+  bus,
+  readOnly,
+  toggleBox,
+  onChange,
+}: {
+  spec: PieceFuseSpec;
+  ci: string;
+  bus: ZoneBus;
+  readOnly: boolean;
+  toggleBox: string;
+  onChange: (next: PieceFuseSpec) => void;
+}) {
+  useSyncExternalStore(bus.subscribe, bus.version);
+  const area = bus.area(ci);
+  const drawn = isDrawnZone(spec.zone);
+  const canUndo = bus.canUndo(ci);
+  const write = (zone: PieceFuseSpec['zone']) => {
+    bus.push(ci, spec.zone);
+    onChange({ ...spec, zone });
+  };
+  const chip = (label: string, on: boolean, off: boolean, onClick: () => void) => (
+    <Chip
+      className={toggleBox}
+      selected={on}
+      pressed={on}
+      disabled={readOnly || off}
+      aria-label={label}
+      onClick={onClick}
+    >
+      {label}
+    </Chip>
+  );
+  return (
+    <FuseField
+      label='zone'
+      error={drawn && area === null}
+      door={
+        <Text size='micro' component='span' data-zone-area={area ?? ''}>
+          {area != null ? `${Math.round(area)} cm²` : <EmptyCell />}
+        </Text>
+      }
+    >
+      <div className='grid grid-cols-2 gap-1'>
+        {chip('sharp', drawn && allCorners(spec.zone, true), !drawn, () =>
+          write(withCorners(spec.zone, true)),
+        )}
+        {chip('round', drawn && allCorners(spec.zone, false), !drawn, () =>
+          write(withCorners(spec.zone, false)),
+        )}
+        {chip('undo', false, !canUndo, () => {
+          const prev = bus.pop(ci);
+          if (prev) onChange({ ...spec, zone: prev.zone });
+        })}
+        {chip('reset', false, !drawn, () => write(resetZone(spec.zone)))}
+      </div>
+    </FuseField>
   );
 }

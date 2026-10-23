@@ -50,7 +50,7 @@ await esbuild({
           loader: 'js',
         }));
         b.onLoad({ filter: MODAL_RE }, (args) => ({
-          contents: `${readFileSync(args.path, 'utf8')}\nexport { countBlocks, planPieceUpdates, perGarmentFromBlocks };\n`,
+          contents: `${readFileSync(args.path, 'utf8')}\nexport { countBlocks, interliningInitialChoice, planPieceUpdates, perGarmentFromBlocks };\n`,
           loader: 'tsx',
           resolveDir: dirname(args.path),
         }));

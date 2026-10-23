@@ -25,7 +25,9 @@ export {
   fuseAreaMm2,
   generateFuseGeometry,
   signedArea,
+  zoneRingMm,
 } from './geometry';
+export { SPLINE_MAX_POINTS, SPLINE_MIN_POINTS, flattenSpline } from './spline';
 export {
   DEFAULT_INSET_MM,
   blankFuse,
@@ -44,6 +46,7 @@ export type {
   FuseGrain,
   FuseMode,
   FusePolygon,
+  FuseSplinePoint,
   FuseZone,
   PieceFuseFields,
   PieceFuseSpec,

@@ -450,13 +450,6 @@ export function useImportSession(deps: {
   const [session, setSession] = useState<ImportSession>(EMPTY_SESSION);
   const [inputs, setInputs] = useState<Inputs>(EMPTY_INPUTS);
   const [apply, setApply] = useState<ApplyState>({ phase: 'idle' });
-  /**
-   * MF-C (M4): per scope, what to do with the previous import's sheet the draft found
-   * (`DraftScope.replaces`). Absent = 'replace', the default. Read at apply time.
-   */
-  const [sheetModes, setSheetModes] = useState<Record<string, 'replace' | 'add'>>({});
-  const modesRef = useRef(sheetModes);
-  modesRef.current = sheetModes;
   const [extracted, setExtracted] = useState<ExtractInfo>(NO_EXTRACT);
   const [errorCode, setErrorCode] = useState<ImportErrorCode | null>(null);
   /** The latest Set-of-Mark render (what the AI was shown), kept to draw it on the details step. */
@@ -1413,22 +1406,13 @@ export function useImportSession(deps: {
             });
             return;
           }
-          // The operator's replace/add answer rides on the draft the card receives (MF-C, M4).
-          const draft = {
-            ...built,
-            scopes: built.scopes.map((sc) =>
-              sc.replaces
-                ? { ...sc, sheetMode: modesRef.current[sc.target.scopeKey] ?? 'replace' }
-                : sc,
-            ),
-          };
           const progress: Record<string, ApplyProgress['state']> = {};
           setApply({ phase: 'running', progress });
           // Codex final #2: whatever the apply throws (a rejected save, an upload) lands as a
           // failed result with its reason — the step never stays 'running'
           let result: ApplyResult;
           try {
-            result = await applyDraft(draft, (p) => {
+            result = await applyDraft(built, (p) => {
               progress[p.scopeKey] = p.state;
               setApply({ phase: 'running', progress: { ...progress } });
             });
@@ -2684,7 +2668,6 @@ export function useImportSession(deps: {
     /** Codex re-check #2: take the apply lock of this draft (null = held already). */
     lockApply,
     unlockApply,
-    sheetModes,
     /**
      * RULHOOK: the storage the next write uses, judged against this run's sizes — `ignored` says
      * why an asked base is not used. Set it with `dispatch({ type: 'write-storage', … })`.
@@ -2720,10 +2703,6 @@ export function useImportSession(deps: {
     /** STOPFIX: write the check step's draft again with the storage chosen (after a failed one). */
     retryWrite: () =>
       dispatch({ type: 'write-storage', ...(iRef.current.writeStorage ?? { storage: 'blocks' }) }),
-    setSheetMode: (scopeKey: string, mode: 'replace' | 'add') => {
-      operatorActs();
-      setSheetModes((m) => ({ ...m, [scopeKey]: mode }));
-    },
     extracted,
     errorCode,
     notice,

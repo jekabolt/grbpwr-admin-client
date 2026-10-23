@@ -29,6 +29,13 @@ import {
 } from 'lib/nesting/dxf/insunits';
 import { notify, updateNotify, useSnackBarStore } from 'lib/stores/store';
 import { sha256Hex } from 'lib/features/sha256';
+import {
+  interliningIdentityKey,
+  matchInterliningImport,
+  type InterliningImportMatch,
+} from 'lib/fusing-dxf/interlining-import';
+import { readInterliningSkips, writeInterliningSkips } from 'lib/fusing-dxf/interlining-skips';
+import { GENERATED_FUSING_NAME_PREFIX } from 'lib/fusing-dxf/regenerate';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import type {
   NewAliasSeed,
@@ -110,6 +117,7 @@ import {
 } from './form-writers';
 import { sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
+import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { hydrateSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
@@ -178,11 +186,12 @@ import {
   seamAnchorKeys,
   sheetRowId,
   markJumpParams,
-  planForeignChoice,
+  planForeignReplacement,
+  planOccupiedFiles,
   reuploadSheet,
   uploadForeignSheet,
-  type ForeignChoice,
   type ForeignReuploadOutcome,
+  type OccupiedChoice,
   type ReuploadDeps,
   type ReuploadDeletePlan,
   type ReuploadOutcome,
@@ -203,6 +212,7 @@ import {
   type SheetRevisionRef,
 } from './nesting/reupload-session';
 import { rowFromStep } from './operations-field';
+import { PatternDropZone } from './pattern-drop-zone';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -407,7 +417,11 @@ type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
 };
 type FormAlias = NonNullable<TechCardFormData['pieceDxfAliases']>[number];
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
-type ForeignAsk = {
+type OccupiedAsk =
+  | { kind: 'files'; scopeKey: string; files: File[]; target: string }
+  | { kind: 'move'; scopeKey: string; rowId: string }
+  | { kind: 'purpose'; scopeKey: string; nextPurpose: string };
+type ForeignPending = {
   scopeKey: string;
   picked: File;
   outcome: ForeignReuploadOutcome<FormPiece, FormAlias, FormOp>;
@@ -455,6 +469,13 @@ type BomLine = NonNullable<TechCardFormData['bomItems']>[number];
 function labelOf(row?: PatternRow): string {
   return row?.name || row?.filename || '(unnamed)';
 }
+
+function fileNameOf(row?: PatternRow): string {
+  return row?.filename || patternSheetName(row ?? {});
+}
+
+const isGeneratedFusingRow = (row: PatternRow): boolean =>
+  (row.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX);
 
 const filenameStem = (name: string) => name.replace(/\.[^./\\]+$/, '');
 
@@ -683,6 +704,7 @@ export function PatternsField({
     scopeKey: string;
     files: File[];
     target?: string;
+    afterReady?: () => Promise<void> | void;
   } | null>(null);
   // Non-DXF files dropped on a slot: the import wizard, starting from those files.
   const [importing, setImporting] = useState<{ scopeKey: string; files: File[] } | null>(null);
@@ -693,9 +715,9 @@ export function PatternsField({
   const [reuploading, setReuploading] = useState<Record<string, ReuploadFlight>>({});
   // The last replacement result is visit-local: the server remains the persisted revision source.
   const [reuploadFeedback, setReuploadFeedback] = useState<Record<string, ReuploadFeedback>>({});
-  // A parsed foreign DXF waits here without being uploaded until the operator chooses its fate.
-  const [foreignAsk, setForeignAsk] = useState<ForeignAsk | null>(null);
-  const foreignCancelRef = useRef<HTMLButtonElement>(null);
+  // Every operation that would put a second active row in a slot stops at the same choice.
+  const [occupiedAsk, setOccupiedAsk] = useState<OccupiedAsk | null>(null);
+  const occupiedCancelRef = useRef<HTMLButtonElement>(null);
   // Open the pieces viewer of this slot as soon as the form holds these sheet urls.
   const [pendingView, setPendingView] = useState<{ scopeKey: string; urls: string[] } | null>(null);
   // A re-upload changed the slot's geometry: piece areas are measured on the next save even while
@@ -704,6 +726,7 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
+  const pickDxfOnly = useRef(false);
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -784,6 +807,9 @@ export function PatternsField({
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
+  // Explicit «skip» answers are UI-only metadata: aliases cannot represent a negative mapping.
+  // localStorage keeps them across reloads without widening the backend contract.
+  const [interliningSkipsRevision, setInterliningSkipsRevision] = useState(0);
   // Сопоставление блоков DXF с деталями кроя, как его записал диалог «сопоставить детали».
   // Раскладке оно нужно, чтобы сохранённый маркер нёс piece_line_key и пережил переименование
   // детали; фильтрация по скоупу — здесь, потому что скоуп знает эта панель, а не модалка.
@@ -965,6 +991,23 @@ export function PatternsField({
     () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
     [scopes, dxfByScopeMap],
   );
+  const interliningOwnerFiles = useMemo(() => {
+    const out = new Map<string, { fileName?: string; uploading: boolean }>();
+    for (const group of scopeGroups) {
+      const slot = group.scope.lines.find(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      if (!slot?.lineKey) continue;
+      const owner = latestDxfEntry(
+        group.entries.filter((entry) => !isGeneratedFusingRow(entry.row)),
+      );
+      out.set(slot.lineKey, {
+        ...(owner ? { fileName: owner.row.filename || patternSheetName(owner.row) } : {}),
+        uploading: (uploading[group.scope.key] ?? 0) > 0,
+      });
+    }
+    return out;
+  }, [scopeGroups, uploading]);
   // Header print = one current DXF per material slot. A slot can retain several present rows
   // while files are being consolidated; the newest revision is the same row its download menu
   // presents as current, while superseded revisions remain in `historyByLine` and never enter here.
@@ -1004,6 +1047,108 @@ export function PatternsField({
   const geometry = useDxfGeometry(allDxfFiles, armed);
   const dxfIndex = useDxfIndex(geometry.data);
   const bundle = geometry.data;
+
+  const contourPiecesByScope = useMemo(() => {
+    const out = new Map<string, PieceDTO[]>();
+    if (!bundle) return out;
+    for (const group of scopeGroups) {
+      const interlining = group.scope.lines.some(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      const ownerUrls = interlining
+        ? new Set(
+            group.entries
+              .filter((entry) => !isGeneratedFusingRow(entry.row))
+              .map((entry) => entry.row.url)
+              .filter((url): url is string => !!url),
+          )
+        : null;
+      const inScope = bundle.pieces.filter((piece) => {
+        const file = piece.fileIndex ?? -1;
+        if (bundle.scopeByFile.get(file) !== group.scope.key) return false;
+        return !ownerUrls || ownerUrls.has(bundle.urlByFile?.get(file) ?? '');
+      });
+      if (inScope.length === 0) continue;
+      const split = splitPiecesBySize(inScope, dictTokens);
+      const contourLayer = defaultContourLayer(layerOptions(inScope, split.codeById));
+      out.set(
+        group.scope.key,
+        inScope.filter((piece) => (piece.layer ?? '') === contourLayer),
+      );
+    }
+    return out;
+  }, [bundle, scopeGroups, dictTokens]);
+
+  const mainPatternScope = useMemo(
+    () =>
+      scopeGroups.find((group) =>
+        group.scope.byPurpose
+          ? group.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN'
+          : group.scope.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC',
+      ),
+    [scopeGroups],
+  );
+  const mainPatternBlocks = mainPatternScope
+    ? contourPiecesByScope.get(mainPatternScope.scope.key) ?? []
+    : [];
+  const mainPatternAliases = useMemo(
+    () =>
+      mainPatternScope
+        ? pieceDxfAliases.filter((alias) => aliasInScope(alias, mainPatternScope.scope, linkSet))
+        : [],
+    [mainPatternScope, pieceDxfAliases, linkSet],
+  );
+
+  const interliningReviews = useMemo(() => {
+    const out = new Map<
+      string,
+      { matches: InterliningImportMatch[]; unmatched: InterliningImportMatch[] }
+    >();
+    if (!bundle) return out;
+    // This state value is intentionally only a cache-buster for localStorage-backed decisions.
+    void interliningSkipsRevision;
+    for (const group of scopeGroups) {
+      const slot = group.scope.lines.find(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      if (!slot?.lineKey) continue;
+      const hasOwnerFile = group.entries.some((entry) => !isGeneratedFusingRow(entry.row));
+      if (!hasOwnerFile) continue;
+      const blocks = contourPiecesByScope.get(group.scope.key) ?? [];
+      const matches = matchInterliningImport({
+        blocks,
+        mainBlocks: mainPatternBlocks,
+        mainAliases: mainPatternAliases,
+        previousAliases: pieceDxfAliases.filter((alias) =>
+          aliasInScope(alias, group.scope, linkSet),
+        ),
+        pieces: cardPieces,
+        sizeTokens: dictTokens,
+      });
+      const skipped = readInterliningSkips(techCardId, slot.lineKey);
+      out.set(group.scope.key, {
+        matches,
+        unmatched: matches.filter(
+          (match) =>
+            (!match.pieceLineKey || !match.previouslyBound) &&
+            !skipped.has(interliningIdentityKey(match.identity)),
+        ),
+      });
+    }
+    return out;
+  }, [
+    bundle,
+    mainPatternBlocks,
+    mainPatternAliases,
+    scopeGroups,
+    contourPiecesByScope,
+    pieceDxfAliases,
+    linkSet,
+    cardPieces,
+    dictTokens,
+    techCardId,
+    interliningSkipsRevision,
+  ]);
 
   // ПОКРЫТИЕ РАЗМЕРОВ ПО МАТЕРИАЛАМ — ВЫВОДИТСЯ из разбора, а не хранится состоянием.
   //
@@ -1138,10 +1283,14 @@ export function PatternsField({
   // PURPOSE OF A WHOLE SLOT. Its sheets and piece links go with it through the one writer
   // (form-writers applyLineChange → bom-purpose planLineChange); a merge into a slot that links one
   // of its blocks to another piece is refused, and so is a change that would strand a sheet.
-  const changeScopePurpose = (scope: FabricScope<FabricLine>, nextPurpose: string) => {
+  const changeScopePurpose = (
+    scope: FabricScope<FabricLine>,
+    nextPurpose: string,
+    occupiedConfirmed = false,
+  ): boolean => {
     const purpose = nextPurpose || UNSET_PURPOSE;
     // «Unset» splits a multi-line slot into one slot per line; its sheets have no single home.
-    if (purpose === UNSET_PURPOSE && scope.lines.length > 1) return;
+    if (purpose === UNSET_PURPOSE && scope.lines.length > 1) return false;
     const lineKeys = new Set(scope.lines.map((line) => line.lineKey));
     const items = (getValues('bomItems') ?? []) as BomLine[];
     const nextItems = items.map((line) =>
@@ -1150,7 +1299,15 @@ export function PatternsField({
     // The slot the lines land in, found by the LINE: an interlining line stays its own slot
     // whatever purpose it gets (L11).
     const to = scopeOfLine(fabricScopes(clothLines(nextItems)), scope.lines[0]?.lineKey ?? '');
-    if (!to) return;
+    if (!to) return false;
+    if (!occupiedConfirmed && to.key !== scope.key) {
+      const sourceHas = slotRows(scope.key).length > 0;
+      const targetHas = slotRows(to.key).length > 0;
+      if (sourceHas && targetHas) {
+        setOccupiedAsk({ kind: 'purpose', scopeKey: scope.key, nextPurpose: purpose });
+        return false;
+      }
+    }
     const out = applyLineChange(getValues, setValue, nextItems as never, lineKeys);
     if (out.kind !== 'done') {
       useSnackBarStore
@@ -1161,7 +1318,7 @@ export function PatternsField({
             : `used by ${out.names.join(', ')}`,
           'error',
         );
-      return;
+      return false;
     }
     items.forEach((line, index) => {
       if (!lineKeys.has(line.lineKey?.trim() ?? '')) return;
@@ -1172,6 +1329,7 @@ export function PatternsField({
     });
     setConfirmScopeKey(null);
     setSelectedKey(to.key);
+    return true;
   };
 
   const addMaterialSlot = () => {
@@ -1308,9 +1466,16 @@ export function PatternsField({
   const canUpload = canEdit && scopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string) {
+  function openPicker(scopeKey: string, dxfOnly = false) {
     if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     pickFor.current = scopeKey;
+    pickDxfOnly.current = dxfOnly;
+    if (fileInputRef.current)
+      fileInputRef.current.accept = dxfOnly
+        ? SLOT_ACCEPT_DXF
+        : importOk
+          ? SLOT_ACCEPT_ALL
+          : SLOT_ACCEPT_DXF;
     fileInputRef.current?.click();
   }
 
@@ -1472,10 +1637,10 @@ export function PatternsField({
     picked: File,
     batch?: FileFault[],
     target?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const faults = batch ?? [];
     try {
-      await uploadOne(scopeKey, picked, faults, target);
+      return await uploadOne(scopeKey, picked, faults, target);
     } finally {
       if (!batch) settleFileBatch(null, 1, faults);
     }
@@ -1526,11 +1691,37 @@ export function PatternsField({
       return rest;
     });
 
-  // Does this slot already hold a DXF? Then a new DXF REPLACES it (L4a) instead of joining it.
-  const slotHasSheet = (scopeKey: string) =>
-    ((getValues('patterns') ?? []) as PatternRow[]).some(
-      (r) => isDxfUrl(r.url) && liveScopeOf(r, 'sheet') === scopeKey,
+  // Occupancy is format-blind: a legacy PDF owns the same single slot as a DXF.
+  const slotRows = (scopeKey: string) =>
+    ((getValues('patterns') ?? []) as PatternRow[]).filter(
+      (row) => !!row.url && liveScopeOf(row, 'sheet') === scopeKey,
     );
+  const slotOccupant = (scopeKey: string, target?: string) => {
+    const rows = slotRows(scopeKey);
+    const wanted = (target ?? '').trim();
+    return (
+      (wanted ? rows.find((row) => sheetRowId(row) === wanted) : undefined) ??
+      rows.find((row) => !isGeneratedFusingRow(row)) ??
+      rows[0]
+    );
+  };
+  const slotHasSheet = (scopeKey: string) => slotRows(scopeKey).length > 0;
+
+  async function patternRowFile(row: PatternRow): Promise<File | null> {
+    if (!row.url || !isDxfUrl(row.url)) return null;
+    const blob = await fetchMediaBlob(row.url);
+    return new File([blob], patternSheetName(row), { type: blob.type || 'application/dxf' });
+  }
+
+  /** Download the current DXF as the first merge input. PDFs still occupy a slot but cannot merge. */
+  async function occupiedDxf(scopeKey: string, target?: string): Promise<File | null> {
+    const preferred = slotOccupant(scopeKey, target);
+    const row =
+      preferred && isDxfUrl(preferred.url)
+        ? preferred
+        : slotRows(scopeKey).find((candidate) => isDxfUrl(candidate.url));
+    return row ? patternRowFile(row) : null;
+  }
 
   // What the re-upload needs from the outside world: the files, the worker, the server, and the
   // writers of new rows (the same writers as everywhere else on the card).
@@ -1772,14 +1963,14 @@ export function PatternsField({
       say(REFUSAL_WORDS[out.why], 'error');
       return 'refused';
     }
-    // A foreign file is parsed but deliberately not uploaded. The choice handler below validates
-    // this same signature once more before and after its deferred upload.
+    // The occupied-slot choice was already explicit. A foreign drawing therefore follows its
+    // replacement cascade directly; there is no path that can append it as another active row.
     if (out.kind === 'foreign') {
       if (!slotSig || scopeSig(scopeKey) !== slotSig) {
         say('material changed', 'error');
         return 'refused';
       }
-      setForeignAsk({
+      const applied = await commitForeignReplacement({
         scopeKey,
         picked,
         outcome: out,
@@ -1788,7 +1979,7 @@ export function PatternsField({
         current: () => inputsSig() === before && scopeSig(scopeKey) === slotSig,
         upload: deps.upload,
       });
-      return 'foreign';
+      return applied ? 'applied' : 'refused';
     }
     // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
     const live = (getValues('patterns') ?? []) as PatternRow[];
@@ -1886,7 +2077,62 @@ export function PatternsField({
     );
   };
 
-  async function uploadOne(scopeKey: string, picked: File, faults: FileFault[], target?: string) {
+  const isInterliningScopeKey = (scopeKey: string) =>
+    scopeOfKey(scopeKey)?.lines.some(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    ) ?? false;
+
+  // An owner interlining revision keeps the row and every scoped alias intact. The generic
+  // re-upload reconciler is intentionally bypassed: it is allowed to create/delete cut pieces,
+  // while an interlining drawing may only map onto pieces that the main sheet already owns.
+  async function replaceInterliningOwnerSheet(
+    scopeKey: string,
+    picked: File,
+    faults: FileFault[],
+    target?: string,
+  ): Promise<boolean | null> {
+    if (!isInterliningScopeKey(scopeKey)) return null;
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    const owners = rows.filter(
+      (row) =>
+        isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey && !isGeneratedFusingRow(row),
+    );
+    const wanted = (target ?? '').trim();
+    const owner =
+      (wanted ? owners.find((row) => sheetRowId(row) === wanted) : undefined) ?? owners[0];
+    if (!owner) return null;
+    const rowId = sheetRowId(owner);
+    beginReupload(scopeKey, rowId);
+    bumpUploading(scopeKey, 1);
+    try {
+      const up = await uploadPatternFile(picked, owner.name ?? '');
+      const live = (getValues('patterns') ?? []) as PatternRow[];
+      const at = live.findIndex((row) => sheetRowId(row) === rowId);
+      if (at < 0 || liveScopeOf(live[at], 'sheet') !== scopeKey) {
+        faults.push({ name: picked.name, why: 'material changed' });
+        return false;
+      }
+      const replacedUrl = live[at].url ?? '';
+      swapSheetFile(techCardId, writeDirty, at, replacedUrl, up);
+      setAreasArmed(true);
+      setPendingView({ scopeKey, urls: [up.url] });
+      return true;
+    } catch (error) {
+      console.error('UploadPattern failed', error);
+      faults.push({ name: picked.name, why: patternUploadErrorMessage(error) });
+      return false;
+    } finally {
+      bumpUploading(scopeKey, -1);
+      endReupload(scopeKey);
+    }
+  }
+
+  async function uploadOne(
+    scopeKey: string,
+    picked: File,
+    faults: FileFault[],
+    target?: string,
+  ): Promise<boolean> {
     // The slot is re-read after every await: re-sorted, merged or deleted meanwhile, it takes nothing.
     const sig = scopeSig(scopeKey);
     const moved = () => {
@@ -1894,22 +2140,29 @@ export function PatternsField({
       faults.push({ name: picked.name, why: 'material changed' });
       return true;
     };
-    if (moved()) return;
+    if (moved()) return false;
     const swap = plainSwapIndex(scopeKey, target) >= 0;
-    // A slot that already holds a sheet: the file replaces it, without questions or the viewer.
-    if (!swap && (await replaceSheet(scopeKey, picked, target)) !== 'first') return;
-    if (moved()) return;
+    const interlining = swap
+      ? null
+      : await replaceInterliningOwnerSheet(scopeKey, picked, faults, target);
+    if (interlining != null) return interlining;
+    // The occupied-slot question was answered before this function: replace the chosen row.
+    if (!swap && !isInterliningScopeKey(scopeKey)) {
+      const outcome = await replaceSheet(scopeKey, picked, target);
+      if (outcome !== 'first') return outcome === 'applied' || outcome === 'noop';
+    }
+    if (moved()) return false;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
     const fixed = await withUnits([picked], faults);
-    if (!fixed || moved()) return;
+    if (!fixed || moved()) return false;
     const sized = await withSizes(fixed[0], faults);
-    if (!sized || moved()) return;
+    if (!sized || moved()) return false;
     const file = sized.file;
     const bump = (d: number) => bumpUploading(scopeKey, d);
     bump(1);
     try {
       const up = await uploadPatternFile(file);
-      if (moved()) return;
+      if (moved()) return false;
       // The file's sizes become the range of a card that still has none; the autosave keeps it.
       if (sized.seed && ((getValues('sizeIds') ?? []) as number[]).length === 0)
         setValue('sizeIds', sized.seed, { shouldDirty: true });
@@ -1929,9 +2182,11 @@ export function PatternsField({
           ...bindingOf(scopeKey),
         });
       setPendingView({ scopeKey, urls: [up.url] });
+      return true;
     } catch (e) {
       console.error('UploadPattern failed', e);
       faults.push({ name: file.name, why: patternUploadErrorMessage(e) });
+      return false;
     } finally {
       bump(-1);
     }
@@ -1940,13 +2195,19 @@ export function PatternsField({
   // The file router: tile drop, tile click and a sheet row's «upload» all land here.
   //   1 DXF → direct upload → pieces; ≥2 DXF → size merge → upload → pieces;
   //   anything else → import wizard → apply → pieces.
-  function routeFiles(scopeKey: string, list: FileList | File[] | null, target?: string) {
+  function routeFiles(
+    scopeKey: string,
+    list: FileList | File[] | null,
+    target?: string,
+    dxfOnly = false,
+  ) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
     if (files.length === 0 || !canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     const hasRange = ((getValues('sizeIds') ?? []) as number[]).length > 0;
     const errOf = (f: File): string | null => {
       if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
+      if (dxfOnly) return 'DXF only';
       const ext = (f.name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase();
       if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
       // The import wizard lays the drawn sizes out on the card's range: it needs one.
@@ -1965,14 +2226,18 @@ export function PatternsField({
     if (good.length === 0) return handOff();
     setSelectedKey(scopeKey);
     if (good.every(isDxfFile)) {
+      const occupant = slotOccupant(scopeKey, target);
+      if (occupant) {
+        handOff();
+        setOccupiedAsk({
+          kind: 'files',
+          scopeKey,
+          files: good,
+          target: sheetRowId(occupant),
+        });
+        return;
+      }
       void (async () => {
-        // One DXF into a slot that already holds a sheet: a re-upload, asked nothing (units and
-        // sizes come from the sheet it replaces).
-        if (good.length === 1 && slotHasSheet(scopeKey)) {
-          await directUpload(scopeKey, good[0], faults, target);
-          settleFileBatch(null, files.length, faults);
-          return;
-        }
         const ready = await withUnits(good, faults);
         if (ready && ready.length === 1) {
           await directUpload(scopeKey, ready[0], faults, target);
@@ -1986,6 +2251,50 @@ export function PatternsField({
     }
     handOff();
     setImporting({ scopeKey, files: good });
+  }
+
+  async function chooseOccupiedFiles(
+    ask: Extract<OccupiedAsk, { kind: 'files' }>,
+    choice: OccupiedChoice,
+  ) {
+    setOccupiedAsk(null);
+    const current = slotOccupant(ask.scopeKey, ask.target);
+    if (!current || sheetRowId(current) !== ask.target) {
+      useSnackBarStore.getState().showMessage('material changed', 'error');
+      return;
+    }
+    if (choice === 'replace' && ask.files.length === 1) {
+      await directUpload(ask.scopeKey, ask.files[0], undefined, ask.target);
+      return;
+    }
+
+    const faults: FileFault[] = [];
+    const dropped = await withUnits(ask.files, faults);
+    if (!dropped) {
+      settleFileBatch(null, ask.files.length, faults);
+      return;
+    }
+    let existing = dropped[0];
+    if (choice === 'merge') {
+      try {
+        const loaded = await occupiedDxf(ask.scopeKey, ask.target);
+        if (!loaded) {
+          useSnackBarStore.getState().showMessage('DXF only', 'error');
+          return;
+        }
+        existing = loaded;
+      } catch (error) {
+        console.error('Occupied DXF download failed', error);
+        useSnackBarStore.getState().showMessage('download failed', 'error');
+        return;
+      }
+    }
+    const plan = planOccupiedFiles(existing, dropped, choice);
+    if (!plan.merge) {
+      await directUpload(ask.scopeKey, plan.files[0], undefined, ask.target);
+      return;
+    }
+    setMerging({ scopeKey: ask.scopeKey, files: plan.files, target: ask.target });
   }
 
   // Sheets already on the card that the parser read with guessed units.
@@ -2192,8 +2501,37 @@ export function PatternsField({
     enabled: (active || areasArmed) && canEdit && canPublishIndex && !!techCardId,
   });
 
-  const openPieces = (g: (typeof scopeGroups)[number]) =>
-    setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(g.entries) });
+  const openPieces = (g: (typeof scopeGroups)[number]) => {
+    const interlining = g.scope.lines.some(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    );
+    const ownerEntries = interlining
+      ? g.entries.filter((entry) => !isGeneratedFusingRow(entry.row))
+      : [];
+    // Owner drawings are the editable source of truth when present. A generated-only slot still
+    // has a real sheet to inspect: filtering generated rows unconditionally passed [] to the
+    // parser, leaving the PIECES · INTERLINING modal as a header and footer with no body.
+    const entries = interlining && ownerEntries.length > 0 ? ownerEntries : g.entries;
+    setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(entries) });
+  };
+
+  const matchingInterlining = useMemo(() => {
+    if (!matching) return undefined;
+    const slot = matching.scope.lines.find(
+      (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+    );
+    if (!slot?.lineKey) return undefined;
+    return {
+      slotLineKey: slot.lineKey,
+      mainBlocks: mainPatternBlocks,
+      mainAliases: mainPatternAliases,
+      skippedIdentityKeys: readInterliningSkips(techCardId, slot.lineKey),
+      onReview: (skippedIdentities: ReadonlySet<string>) => {
+        writeInterliningSkips(techCardId, slot.lineKey, skippedIdentities);
+        setInterliningSkipsRevision((revision) => revision + 1);
+      },
+    };
+  }, [matching, mainPatternBlocks, mainPatternAliases, techCardId]);
 
   // A sheet just landed: open the pieces viewer once the form rows carry its url, so the viewer
   // reads the new file together with the slot's other sheets.
@@ -2383,35 +2721,34 @@ export function PatternsField({
     });
   }
 
-  async function chooseForeign(ask: ForeignAsk, choice: ForeignChoice) {
-    setForeignAsk(null);
+  async function commitForeignReplacement(ask: ForeignPending): Promise<boolean> {
     const say = useSnackBarStore.getState().showMessage;
     if (!ask.current()) {
       say('not applied', 'error');
-      return;
+      return false;
     }
 
     let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
-    if (choice === 'replace') beginReupload(ask.scopeKey, ask.outcome.rowId);
+    beginReupload(ask.scopeKey, ask.outcome.rowId);
     bumpUploading(ask.scopeKey, 1);
     try {
       uploaded = await uploadForeignSheet(ask.outcome, ask.upload);
     } catch (e) {
       console.error('Foreign DXF upload failed', e);
       say('upload failed', 'error');
-      return;
+      return false;
     } finally {
       bumpUploading(ask.scopeKey, -1);
-      if (choice === 'replace') endReupload(ask.scopeKey);
+      endReupload(ask.scopeKey);
     }
 
     // An edit made while the upload was in flight invalidates the captured cascade. The uploaded
     // blob is then an orphan, but the form is left intact rather than applying an old plan.
     if (!ask.current()) {
       say('not applied', 'error');
-      return;
+      return false;
     }
-    const plan = planForeignChoice(ask.outcome, choice, uploaded);
+    const plan = planForeignReplacement(ask.outcome, uploaded);
     const live = (getValues('patterns') ?? []) as PatternRow[];
     const at = live.findIndex((r) => sheetRowId(r) === ask.outcome.rowId);
     const target = at >= 0 ? live[at] : undefined;
@@ -2421,21 +2758,7 @@ export function PatternsField({
       liveScopeOf(target, 'sheet') !== ask.scopeKey
     ) {
       say('not applied', 'error');
-      return;
-    }
-
-    if (plan.kind === 'add') {
-      append({
-        sizeId: target.sizeId ?? storageSizeId,
-        lineKey: ulid(),
-        ...plan.row,
-        name: autoName(ask.scopeKey, ask.picked),
-        ...bindingOf(ask.scopeKey),
-      });
-      setAreasArmed(true);
-      autosave.request('dxf-new-sheet');
-      say('new sheet', 'success');
-      return;
+      return false;
     }
 
     applySheetCascade(plan);
@@ -2468,11 +2791,12 @@ export function PatternsField({
     say('replaced', 'success');
     if (!techCardId || plan.removedSeamIds.length === 0) {
       autosave.request('dxf-reupload');
-      return;
+      return true;
     }
     const saved = await autosave.flush('dxf-reupload');
-    if (saved !== 'ok' && saved !== 'nothing') return;
+    if (saved !== 'ok' && saved !== 'nothing') return false;
     await deleteSeamsOnServer(techCardId, plan.removedSeamIds);
+    return true;
   }
 
   async function confirmDelete(rowId: string) {
@@ -3081,14 +3405,19 @@ export function PatternsField({
   // sheet of the old material still holds. An unresolved source associates links and sibling sheets
   // by the normalized raw binding pair. Block identity is the reconcile cascade's: the name and its
   // sizeless identity, case and inner spaces aside. A sheet not parsed yet waits.
-  const moveSheetTo = (rowId: string, key: string) => {
-    if (!canEdit || isSubmitting || !rowId) return;
+  const moveSheetTo = (rowId: string, key: string, occupiedConfirmed = false): boolean => {
+    if (!canEdit || isSubmitting || !rowId) return false;
     const say = useSnackBarStore.getState().showMessage;
     const live = fabricScopes(liveCloth());
     const to = live.find((x) => x.key === key);
     const patterns = (getValues('patterns') ?? []) as PatternRow[];
     const sheet = patterns.findIndex((r) => sheetRowId(r) === rowId);
-    if (!to || sheet < 0) return;
+    if (!to || sheet < 0) return false;
+    const fromKey = liveScopeOf(patterns[sheet], 'sheet');
+    if (!occupiedConfirmed && fromKey !== key && slotRows(key).length > 0) {
+      setOccupiedAsk({ kind: 'move', scopeKey: key, rowId });
+      return false;
+    }
     const aliases = (getValues('pieceDxfAliases') ?? []) as FormAlias[];
     const sizes = new Set([...dictTokens.keys()].map((t) => t.toLowerCase()));
     const move = moveSheet({
@@ -3113,21 +3442,145 @@ export function PatternsField({
     });
     if (move.kind === 'pending') {
       say('not parsed yet', 'error');
-      return;
+      return false;
     }
     if (move.kind === 'clash') {
       say(`blocks clash: ${move.blocks.join(', ')}`, 'error');
-      return;
+      return false;
     }
     if (move.kind === 'lost') {
       say('not moved', 'error');
-      return;
+      return false;
     }
-    if (move.kind === 'noop') return;
+    if (move.kind === 'noop') return true;
     writeBindings(setValue, 'patterns', patterns, move.patterns);
     writeBindings(setValue, 'pieceDxfAliases', aliases, move.aliases);
     setSelectedKey(key);
+    return true;
   };
+
+  function removeRowOnly(rowId: string) {
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    const at = rows.findIndex((row) => sheetRowId(row) === rowId);
+    if (at < 0) return;
+    const url = rows[at].url ?? '';
+    remove(at);
+    if (url && isDxfUrl(url)) armDeleteSnapshot(techCardId, url);
+    autosave.request('dxf-delete');
+  }
+
+  async function removeOccupiedRow(rowId: string) {
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    const at = rows.findIndex((row) => sheetRowId(row) === rowId);
+    if (at < 0) return;
+    await confirmDelete(isDxfUrl(rows[at].url) ? rowId : `#${at}`);
+  }
+
+  async function mergeRowFiles(first: PatternRow, rest: PatternRow[]): Promise<File[] | null> {
+    try {
+      const files = await Promise.all([first, ...rest].map(patternRowFile));
+      if (files.some((file) => !file)) {
+        useSnackBarStore.getState().showMessage('DXF only', 'error');
+        return null;
+      }
+      return files as File[];
+    } catch (error) {
+      console.error('Occupied DXF download failed', error);
+      useSnackBarStore.getState().showMessage('download failed', 'error');
+      return null;
+    }
+  }
+
+  async function chooseOccupied(ask: OccupiedAsk, choice: OccupiedChoice) {
+    if (ask.kind === 'files') {
+      await chooseOccupiedFiles(ask, choice);
+      return;
+    }
+    setOccupiedAsk(null);
+
+    if (ask.kind === 'move') {
+      const rows = (getValues('patterns') ?? []) as PatternRow[];
+      const source = rows.find((row) => sheetRowId(row) === ask.rowId);
+      const target = slotOccupant(ask.scopeKey);
+      if (!source || !target || source === target) return;
+      const targetId = sheetRowId(target);
+      if (choice === 'replace') {
+        if (moveSheetTo(ask.rowId, ask.scopeKey, true)) await removeOccupiedRow(targetId);
+        return;
+      }
+      const files = await mergeRowFiles(target, [source]);
+      if (!files) return;
+      setMerging({
+        scopeKey: ask.scopeKey,
+        files,
+        target: targetId,
+        afterReady: () => {
+          if (moveSheetTo(ask.rowId, ask.scopeKey, true)) removeRowOnly(ask.rowId);
+        },
+      });
+      return;
+    }
+
+    const sourceScope = scopeOfKey(ask.scopeKey);
+    if (!sourceScope) return;
+    const lineKeys = new Set(sourceScope.lines.map((line) => line.lineKey));
+    const items = (getValues('bomItems') ?? []) as BomLine[];
+    const nextItems = items.map((line) =>
+      lineKeys.has(line.lineKey?.trim() ?? '') ? { ...line, purpose: ask.nextPurpose } : line,
+    );
+    const targetScope = scopeOfLine(
+      fabricScopes(clothLines(nextItems)),
+      sourceScope.lines[0]?.lineKey ?? '',
+    );
+    const source = slotOccupant(sourceScope.key);
+    const target = targetScope ? slotOccupant(targetScope.key) : undefined;
+    if (!targetScope || !source || !target || source === target) return;
+    const sourceId = sheetRowId(source);
+    const targetId = sheetRowId(target);
+    if (choice === 'replace') {
+      if (changeScopePurpose(sourceScope, ask.nextPurpose, true)) await removeOccupiedRow(targetId);
+      return;
+    }
+    const files = await mergeRowFiles(target, [source]);
+    if (!files) return;
+    setMerging({
+      scopeKey: targetScope.key,
+      files,
+      target: targetId,
+      afterReady: () => {
+        if (changeScopePurpose(sourceScope, ask.nextPurpose, true)) removeRowOnly(sourceId);
+      },
+    });
+  }
+
+  function occupiedFileLine(ask: OccupiedAsk): string {
+    if (ask.kind === 'files') {
+      const current = slotOccupant(ask.scopeKey, ask.target);
+      return `${ask.files.map((file) => file.name).join(' + ')} → ${fileNameOf(current)}`;
+    }
+
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    if (ask.kind === 'move') {
+      const incoming = rows.find((row) => sheetRowId(row) === ask.rowId);
+      const current = slotOccupant(ask.scopeKey);
+      return `${fileNameOf(incoming)} → ${fileNameOf(current)}`;
+    }
+
+    const sourceScope = scopeOfKey(ask.scopeKey);
+    const source = sourceScope ? slotOccupant(sourceScope.key) : undefined;
+    if (!sourceScope) return `${fileNameOf(source)} → ${fileNameOf()}`;
+    const lineKeys = new Set(sourceScope.lines.map((line) => line.lineKey));
+    const items = (getValues('bomItems') ?? []) as BomLine[];
+    const nextItems = items.map((line) =>
+      lineKeys.has(line.lineKey?.trim() ?? '') ? { ...line, purpose: ask.nextPurpose } : line,
+    );
+    const targetScope = scopeOfLine(
+      fabricScopes(clothLines(nextItems)),
+      sourceScope.lines[0]?.lineKey ?? '',
+    );
+    const current = targetScope ? slotOccupant(targetScope.key) : undefined;
+    return `${fileNameOf(source)} → ${fileNameOf(current)}`;
+  }
 
   // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер, перетащенный лист — в moveSheetTo.
   const dropProps = (key: string) =>
@@ -3166,13 +3619,25 @@ export function PatternsField({
     const blocks = dxfIndex ? countBlocks(dxfIndex, key) : 0;
     const a = audits[sigOf(g.entries)];
     const missing = a?.phase === 'ready' ? missingIn(a) : [];
-    const active = selectedKey === key;
-    const emptyClassName = cn(
-      'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
-      canUpload && !busy
-        ? 'border-labelColor text-textColor group-hover/slot:border-textColor'
-        : 'border-borderColor text-labelColor',
+    const interliningUnmatched = interliningReviews.get(key)?.unmatched ?? [];
+    const interliningWarnings: HeaderWarning[] = interliningUnmatched.map((match) => ({
+      text: `${match.identity}: unmapped`,
+      error: true,
+      action: {
+        label: 'map',
+        onClick: () => {
+          setSelectedKey(key);
+          openPieces(g);
+        },
+      },
+    }));
+    const tileName = (
+      <span className='flex min-w-0 items-center justify-between gap-1'>
+        <span className='truncate'>{label}</span>
+        <HeaderWarnings items={interliningWarnings} className='shrink-0' />
+      </span>
     );
+    const active = selectedKey === key;
     const emptyContents = (
       <>
         {busy ? (
@@ -3189,22 +3654,16 @@ export function PatternsField({
         )}
       </>
     );
-    const empty =
-      active && canUpload && !busy ? (
-        <Button
-          type='button'
-          variant='default'
-          className={emptyClassName}
-          onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            openPicker(key);
-          }}
-        >
-          {emptyContents}
-        </Button>
-      ) : (
-        <div className={emptyClassName}>{emptyContents}</div>
-      );
+    const empty = (
+      <PatternDropZone
+        interactive={active && canUpload && !busy}
+        disabled={!canUpload || busy}
+        className={cn('h-[84px]', canUpload && !busy && 'group-hover/slot:border-textColor')}
+        onClick={() => openPicker(key)}
+      >
+        {emptyContents}
+      </PatternDropZone>
+    );
     const drawing =
       dxfIndex && blocks > 0 ? (
         <div
@@ -3235,13 +3694,18 @@ export function PatternsField({
     const filled = (
       <div>
         <div className='relative'>
-          {hasDxf && canUpload ? (
+          {hasDxf ? (
             <button
               type='button'
-              aria-label='new version'
+              aria-label='pieces'
               disabled={busy}
               className='block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
-              onClick={openVersion}
+              onClick={(event: React.MouseEvent) => {
+                event.stopPropagation();
+                if (busy) return;
+                setSelectedKey(key);
+                openPieces(g);
+              }}
             >
               {drawing}
             </button>
@@ -3281,12 +3745,13 @@ export function PatternsField({
           key={key}
           className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
           data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
+          onClickCapture={() => setSelectedKey(key)}
           {...dropProps(key)}
         >
           <Tile
             selected={has && selectedKey === key}
             dashed={!has}
-            tone={missing.length > 0 ? 'error' : 'default'}
+            tone={missing.length > 0 || interliningUnmatched.length > 0 ? 'error' : 'default'}
             onClick={
               has
                 ? undefined
@@ -3297,7 +3762,7 @@ export function PatternsField({
             }
             title={label}
             media={media}
-            name={label}
+            name={tileName}
           >
             {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
           </Tile>
@@ -3378,14 +3843,16 @@ export function PatternsField({
         key={key}
         className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
         data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
+        onClickCapture={() => setSelectedKey(key)}
         {...dropProps(key)}
       >
         <Tile
           selected
           dashed={!has}
-          tone={missing.length > 0 ? 'error' : 'default'}
+          tone={missing.length > 0 || interliningUnmatched.length > 0 ? 'error' : 'default'}
           title={label}
           media={activeMedia}
+          name={tileName}
         >
           <div className='mt-1 flex w-full flex-col gap-1'>
             <Select
@@ -3905,7 +4372,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files);
+          routeFiles(pickFor.current, e.target.files, undefined, pickDxfOnly.current);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}
@@ -3964,13 +4431,18 @@ export function PatternsField({
             scopeKey={merging.scopeKey}
             onClose={() => setMerging(null)}
             onReady={(file, scopeKey) => {
+              const pending = merging;
               setMerging(null);
-              void directUpload(
-                scopeKey ?? merging.scopeKey,
-                file,
-                undefined,
-                !scopeKey || scopeKey === merging.scopeKey ? merging.target : undefined,
-              );
+              void (async () => {
+                const readyScope = scopeKey ?? pending.scopeKey;
+                const applied = await directUpload(
+                  readyScope,
+                  file,
+                  undefined,
+                  !scopeKey || scopeKey === pending.scopeKey ? pending.target : undefined,
+                );
+                if (applied) await pending.afterReady?.();
+              })();
             }}
           />
         </Suspense>
@@ -3980,59 +4452,37 @@ export function PatternsField({
       {renderRemovedVersions()}
 
       <ConfirmationModal
-        open={foreignAsk != null}
+        open={occupiedAsk != null}
         onOpenChange={(open) => {
-          if (!open) setForeignAsk(null);
+          if (!open) setOccupiedAsk(null);
         }}
         onConfirm={() => {
-          if (foreignAsk) void chooseForeign(foreignAsk, 'replace');
+          if (occupiedAsk) void chooseOccupied(occupiedAsk, 'replace');
         }}
-        onCancel={() => setForeignAsk(null)}
+        onCancel={() => setOccupiedAsk(null)}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          foreignCancelRef.current?.focus();
+          occupiedCancelRef.current?.focus();
         }}
-        cancelRef={foreignCancelRef}
-        title='other file'
+        cancelRef={occupiedCancelRef}
+        title='occupied slot'
         confirmLabel='replace'
         width='sm'
-        headerActions={
+        footerActions={
           <Button
             variant='secondary'
-            size='xs'
+            size='sm'
             onClick={() => {
-              if (foreignAsk) void chooseForeign(foreignAsk, 'add');
+              if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
             }}
           >
-            add sheet
+            merge
           </Button>
         }
       >
-        <div className='flex flex-col gap-2'>
-          <Text className='break-all'>
-            {foreignAsk?.outcome.file.name} · {foreignAsk?.outcome.pieceCount ?? 0}{' '}
-            {plural(foreignAsk?.outcome.pieceCount ?? 0, 'piece')}
-          </Text>
-          <Text className='break-all'>replaces {foreignAsk?.outcome.replacedName}</Text>
-          {foreignAsk && (
-            <Text className='text-error tabular-nums'>
-              − {foreignAsk.outcome.loss.pieces} {plural(foreignAsk.outcome.loss.pieces, 'piece')}
-              {foreignAsk.outcome.loss.steps > 0 && (
-                <>
-                  {' '}
-                  · {foreignAsk.outcome.loss.steps} {plural(foreignAsk.outcome.loss.steps, 'step')}
-                  {foreignAsk.outcome.loss.seams > 0 && (
-                    <>
-                      {' '}
-                      · {foreignAsk.outcome.loss.seams}{' '}
-                      {plural(foreignAsk.outcome.loss.seams, 'seam')}
-                    </>
-                  )}
-                </>
-              )}
-            </Text>
-          )}
-        </div>
+        <Text className='break-all tabular-nums'>
+          {occupiedAsk ? occupiedFileLine(occupiedAsk) : ''}
+        </Text>
       </ConfirmationModal>
 
       <ConfirmationModal
@@ -4157,6 +4607,13 @@ export function PatternsField({
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
+            interlining={matchingInterlining}
+            interliningOwnerFiles={interliningOwnerFiles}
+            onUploadInterliningFile={(lineKey, files) =>
+              routeFiles(lineKey, files, undefined, true)
+            }
+            onPickInterliningFile={(lineKey) => openPicker(lineKey, true)}
+            readOnly={!canEdit}
             onClose={() => setMatching(null)}
           />
         </Suspense>
