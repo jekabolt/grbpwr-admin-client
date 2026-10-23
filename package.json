@@ -21,6 +21,7 @@
     "nest:probe": "node scripts/nest-probe.mjs",
     "reconcile:probe": "node scripts/dxf-reconcile-probe.mjs",
     "reupload:check": "node scripts/dxf-reupload-check.mjs",
+    "reupload:unlinked": "node scripts/dxf-reupload-unlinked-check.mjs",
     "cascade:probe": "node scripts/dxf-cascade-probe.mjs",
     "patimport:f6": "node scripts/pattern-import/f6.mjs",
     "patimport:dxf": "node scripts/pattern-import/dxf.mjs",

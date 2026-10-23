@@ -10,6 +10,7 @@
 //   7. L/R-пара → одна деталь ×2; moved из другого scope; остальное — пропала / новая.
 import { aliasIdentity } from 'components/managers/tech-card/components/nesting/split-pieces';
 import { bareToken, normBlock } from 'components/managers/tech-card/components/nesting/block-code';
+import { pieceNameMatches } from 'components/managers/tech-card/components/nesting/piece-name-match';
 
 import { ghostSwapBreaksAssembly } from './candidates';
 import {
@@ -133,7 +134,13 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   const oldSha = (input.oldSheet?.sha256 ?? '').trim();
   const newSha = (input.newSheet.sha256 ?? '').trim();
   if (oldSha && oldSha === newSha)
-    return { status: 'noop', refused: null, rows: [], summary: emptySummary() };
+    return {
+      status: 'noop',
+      refused: null,
+      needsPieceMatch: false,
+      rows: [],
+      summary: emptySummary(),
+    };
 
   const dict = new Set(input.sizeTokens.map((t) => bareToken(t)).filter(Boolean));
   const oldIdx: SheetIndex | null = input.oldSheet ? indexSheet(input.oldSheet.parse, dict) : null;
@@ -350,6 +357,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
     return {
       status: 'ready',
       refused: 'foreign',
+      needsPieceMatch: false,
       rows: [],
       summary: { ...summary, matchedShare, otherFile: true, scale },
     };
@@ -360,6 +368,25 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   for (const [k, l] of links) {
     const cmp = l.unit.entry ? comparePair(l.unit.entry, l.n, scale, true) : null;
     full.set(k, { ...l, full: cmp, verdict: verdictOf(cmp?.cmp ?? null) });
+  }
+
+  // An occupied scope can have no aliases even though its blocks are already live cut pieces. This
+  // happens when pieces moved here from another DXF: old-unit construction above can only recover
+  // scoped aliases, so an exact block survives as an otherwise empty `unlinked` row. Use the same
+  // exact/loose name tiers as PieceMatchModal, but only when the winning tier has one answer. A
+  // piece that already has any alias in this scope is not a candidate for this recovery.
+  const scopedPieceKeys = new Set(
+    scoped
+      .map((alias) => (alias.pieceLineKey ?? '').trim().toLowerCase())
+      .filter((key) => key && pieceByKey.has(key)),
+  );
+  const unboundPieces = input.pieces.filter(
+    (piece) => !scopedPieceKeys.has(piece.lineKey.trim().toLowerCase()),
+  );
+  for (const link of full.values()) {
+    if (link.unit.piece) continue;
+    const named = pieceNameMatches([link.n.identity], unboundPieces);
+    if (named.matches.length === 1) link.unit.piece = named.matches[0];
   }
 
   // ── 7a. L/R-пара → одна деталь ───────────────────────────────────────────────────────────
@@ -910,6 +937,7 @@ export function reconcile<P extends CardPiece, A extends CardAlias, O extends Ca
   return {
     status: 'ready',
     refused: null,
+    needsPieceMatch: rows.some((row) => row.tier === 'unlinked'),
     rows,
     summary: { ...summary, matchedShare, otherFile, scale },
   };

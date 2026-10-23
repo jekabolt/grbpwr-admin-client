@@ -118,18 +118,13 @@ import {
   type OldPieceDecision,
   type OldPieceItem,
 } from './old-pieces-panel';
-
-// Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
-// «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.
-function loose(s: string): string {
-  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-}
+import { loosePieceName, pieceNameMatches } from './piece-name-match';
 
 // Sørensen–Dice over character bigrams: cheap, order-insensitive enough to survive a
 // transposition, and it does not reward length the way a raw common-prefix score does.
 function similarity(a: string, b: string): number {
-  const A = loose(a);
-  const B = loose(b);
+  const A = loosePieceName(a);
+  const B = loosePieceName(b);
   if (!A || !B) return 0;
   if (A === B) return 1;
   if (A.length < 2 || B.length < 2) return A === B ? 1 : 0;
@@ -429,7 +424,7 @@ function proposeRows(
   for (const [ci, c] of counted) {
     const block = c.block;
     const instances = c.instances;
-    // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
+    // "Already mapped" is tested on the SERVER's key, not on loosePieceName(): it strips all
     // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
     // from the dialog with no way to ever map it.
     if (storedFirst.has(ci)) continue;
@@ -442,17 +437,11 @@ function proposeRows(
       c.manifestName && c.manifestName.toLowerCase() !== block.toLowerCase()
         ? [block, c.manifestName]
         : [block];
-    const exact = pieceOptions.find((p) =>
-      names.some((n) => p.name.toLowerCase() === n.toLowerCase()),
-    );
-    const byLoose = pieceOptions.find((p) => names.some((n) => loose(p.name) === loose(n)));
-    const hint = otherFabricByBlock.get(loose(block));
-    if (exact) {
-      suggested = exact.lineKey;
-      basis = 'exact';
-    } else if (byLoose) {
-      suggested = byLoose.lineKey;
-      basis = 'loose';
+    const named = pieceNameMatches(names, pieceOptions);
+    const hint = otherFabricByBlock.get(loosePieceName(block));
+    if (named.matches[0]) {
+      suggested = named.matches[0].lineKey;
+      basis = named.basis;
     } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
       suggested = hint.pieceKey;
       basis = 'other-fabric';
@@ -784,7 +773,7 @@ export function PieceMatchModal({
   // Optional override: the caller may already know the card cannot be edited (no write right).
   // A RELEASED card is detected here on its own either way.
   readOnly?: boolean;
-  onClose: () => void;
+  onClose: (applied?: boolean) => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { data: cardRead } = useTechCard(techCardId);
@@ -1191,7 +1180,7 @@ export function PieceMatchModal({
       // not-yet-sorted line can still name where it came from instead of degrading to «по другой
       // ткани», which reads as a fact rather than as a guess.
       const from = aliasScopeKey(a);
-      const k = loose(identityOf(a.blockName ?? ''));
+      const k = loosePieceName(identityOf(a.blockName ?? ''));
       if (!m.has(k)) m.set(k, { pieceKey: a.pieceLineKey ?? '', fromSlot: from });
     }
     return m;
@@ -2256,7 +2245,7 @@ export function PieceMatchModal({
         const skipped = new Set(rows.filter((row) => row.choice === SKIP).map((row) => row.block));
         interlining.onReview(skipped);
       }
-      onClose();
+      onClose(true);
     } finally {
       setSaving(false);
     }
@@ -2811,10 +2800,10 @@ export function PieceMatchModal({
     <ConfirmationModal
       open={files != null}
       onOpenChange={(o: boolean) => {
-        if (!o && !saving) onClose();
+        if (!o && !saving) onClose(false);
       }}
-      onConfirm={canSave ? apply : onClose}
-      onCancel={onClose}
+      onConfirm={canSave ? apply : () => onClose(false)}
+      onCancel={() => onClose(false)}
       title={`pieces · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={canSave ? 'save' : 'done'}
       confirmDisabled={canSave && (saving || blocked)}

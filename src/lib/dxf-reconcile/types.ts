@@ -263,6 +263,8 @@ export type ReconcilePlan = {
   status: PlanStatus;
   /** A foreign upload is not a replacement plan; applying it must be a no-op. */
   refused: 'foreign' | null;
+  /** At least one DXF identity still needs a human choice and must not be auto-applied. */
+  needsPieceMatch: boolean;
   rows: ReconcileRow[];
   summary: ReconcileSummary;
 };
@@ -329,6 +331,7 @@ export type ApplyDeps<P extends CardPiece, A extends CardAlias, O extends CardOp
 export type ApplyRefusal =
   | { reason: 'noop' }
   | { reason: 'foreign' }
+  | { reason: 'unresolved' }
   /** применение дало нарушение сборки, которого не было до — названо шагом */
   | { reason: 'sweep'; violations: AssemblyViolation[] };
 

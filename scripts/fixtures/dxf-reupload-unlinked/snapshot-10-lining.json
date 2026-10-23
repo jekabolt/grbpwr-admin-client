@@ -1,0 +1,54 @@
+{
+  "source": "production card 11 snapshot-10, trimmed to the pieces relevant to the lining re-upload",
+  "scope": {
+    "bomLineKey": "01M5J98ZAV9AETVPE2HRAYNG5R",
+    "fabricPurpose": "TECH_CARD_BOM_PURPOSE_POCKETING"
+  },
+  "pieces": [
+    {
+      "name": "PCK_BACK_1L",
+      "lineKey": "01M1M1ZAHF10J2M5MN8ZQV2CF6",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "PCK_BACK_1R",
+      "lineKey": "01M1M1ZAHFNSEHSFSE9DWFFHZ5",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "PCK_BACK_L",
+      "lineKey": "01M1M1ZAHFFT5H38VH8HM9N3FQ",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "PCK_L",
+      "lineKey": "01M1M1ZAHFK1V1SCZCYCHYWHZQ",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "PCK_R",
+      "lineKey": "01M1M1ZAHFCB3HDD6BYW0C6N74",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "WST_L_1",
+      "lineKey": "01M1PKV2XYJJ4QMT3XB0T35MCC",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    },
+    {
+      "name": "WST_R_1",
+      "lineKey": "01M1PKV2XYGMMR2H9HJ0W0GEMA",
+      "piecesPerGarment": 1,
+      "cutSymmetry": "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+    }
+  ],
+  "aliases": [],
+  "operations": [],
+  "newPieceIdentities": ["PCK_BACK_L_1", "PCK_L_1", "PCK_R_1"]
+}

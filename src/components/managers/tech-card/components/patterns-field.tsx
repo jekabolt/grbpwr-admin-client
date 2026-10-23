@@ -197,6 +197,7 @@ import {
   type ReuploadDeletePlan,
   type ReuploadOutcome,
   type ReuploadRefusal,
+  type SheetPatch,
 } from './nesting/dxf-reupload';
 import { planSheetDelete } from './nesting/dxf-delete';
 import {
@@ -810,6 +811,12 @@ export function PatternsField({
     scope: FabricScope<FabricLine>;
     fabricName: string;
     files: NestingFile[];
+    replacement?: {
+      scopeKey: string;
+      rowId: string;
+      replacedUrl: string;
+      row: SheetPatch;
+    };
   } | null>(null);
   // Explicit «skip» answers are UI-only metadata: aliases cannot represent a negative mapping.
   // localStorage keeps them across reloads without widening the backend contract.
@@ -1988,6 +1995,39 @@ export function PatternsField({
       });
       return applied ? 'applied' : 'refused';
     }
+    if (out.kind === 'match') {
+      const live = (getValues('patterns') ?? []) as PatternRow[];
+      const i = live.findIndex((row) => sheetRowId(row) === out.rowId);
+      const row = i >= 0 ? live[i] : undefined;
+      if (
+        !row ||
+        row.url !== out.replacedUrl ||
+        liveScopeOf(row, 'sheet') !== scopeKey ||
+        inputsSig() !== before
+      ) {
+        say('not applied', 'error');
+        return 'refused';
+      }
+      const files = live.flatMap((candidate) => {
+        if (!candidate.url || !isDxfUrl(candidate.url)) return [];
+        if (liveScopeOf(candidate, 'sheet') !== scopeKey) return [];
+        const shown =
+          sheetRowId(candidate) === out.rowId ? { ...candidate, ...out.row } : candidate;
+        return [{ name: patternSheetName(shown), url: shown.url! }];
+      });
+      setMatching({
+        scope: sc,
+        fabricName: scopeLabel(sc),
+        files,
+        replacement: {
+          scopeKey,
+          rowId: out.rowId,
+          replacedUrl: out.replacedUrl,
+          row: out.row,
+        },
+      });
+      return 'match';
+    }
     // The target row by its identity, still holding the sheet the plan replaced, still in this slot.
     const live = (getValues('patterns') ?? []) as PatternRow[];
     const rowId = out.rowId;
@@ -2156,7 +2196,8 @@ export function PatternsField({
     // The occupied-slot question was answered before this function: replace the chosen row.
     if (!swap && !isInterliningScopeKey(scopeKey)) {
       const outcome = await replaceSheet(scopeKey, picked, target);
-      if (outcome !== 'first') return outcome === 'applied' || outcome === 'noop';
+      if (outcome !== 'first')
+        return outcome === 'applied' || outcome === 'noop' || outcome === 'match';
     }
     if (moved()) return false;
     // Already asked on the way in; the merge output (files re-picked inside the merge) is not.
@@ -2520,6 +2561,39 @@ export function PatternsField({
     // parser, leaving the PIECES · INTERLINING modal as a header and footer with no body.
     const entries = interlining && ownerEntries.length > 0 ? ownerEntries : g.entries;
     setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(entries) });
+  };
+
+  const closePieces = (applied = false) => {
+    const replacement = matching?.replacement;
+    if (!applied || !replacement) {
+      setMatching(null);
+      return;
+    }
+    const live = (getValues('patterns') ?? []) as PatternRow[];
+    const at = live.findIndex((row) => sheetRowId(row) === replacement.rowId);
+    const target = at >= 0 ? live[at] : undefined;
+    if (
+      !target ||
+      target.url !== replacement.replacedUrl ||
+      liveScopeOf(target, 'sheet') !== replacement.scopeKey
+    ) {
+      useSnackBarStore.getState().showMessage('not applied', 'error');
+      setMatching(null);
+      return;
+    }
+    const keep = { shouldDirty: true };
+    setValue(`patterns.${at}.url`, replacement.row.url, keep);
+    setValue(`patterns.${at}.filename`, replacement.row.filename, keep);
+    const nextName = followedName(target, replacement.row.filename);
+    if (nextName != null) setValue(`patterns.${at}.name`, nextName, keep);
+    setValue(`patterns.${at}.sizeBytes`, replacement.row.sizeBytes, keep);
+    setValue(`patterns.${at}.sha256`, replacement.row.sha256, keep);
+    setValue(`patterns.${at}.version`, 0, keep);
+    setValue(`patterns.${at}.uploadedAt`, '', keep);
+    armReuploadSnapshot(techCardId, replacement.row.url, replacement.replacedUrl);
+    setAreasArmed(true);
+    setMatching(null);
+    autosave.request('dxf-reupload');
   };
 
   const matchingInterlining = useMemo(() => {
@@ -4657,7 +4731,7 @@ export function PatternsField({
             }
             onPickInterliningFile={(lineKey) => openPicker(lineKey, true)}
             readOnly={!canEdit}
-            onClose={() => setMatching(null)}
+            onClose={closePieces}
           />
         </Suspense>
       )}

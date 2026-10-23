@@ -822,7 +822,7 @@ async function main() {
     );
     is(
       tag,
-      pinned.out.kind === 'applied'
+      pinned.out.kind === 'applied' || pinned.out.kind === 'match'
         ? [pinned.out.rowIndex, pinned.out.rowId, pinned.out.replacedUrl]
         : pinned.out.kind,
       [0, 'sheet-zz', ZZ_URL],
@@ -831,7 +831,7 @@ async function main() {
     const byBlocks = await run({ name: 'g-combo.dxf', bytes: B.gCombo }, { patterns: two, store });
     is(
       tag,
-      byBlocks.out.kind === 'applied'
+      byBlocks.out.kind === 'applied' || byBlocks.out.kind === 'match'
         ? [byBlocks.out.rowIndex, byBlocks.out.rowId]
         : byBlocks.out.kind,
       [1, 'sheet-main'],
