@@ -5,4 +5,9 @@ export {
   classifyAssemblyInputs,
 } from '../src/components/managers/tech-card/components/assembly-frontier';
 export { assemblyBlocks } from '../src/components/managers/tech-card/components/assembly-blocks';
+export { compactAssemblyBlockOrder } from '../src/components/managers/tech-card/components/assembly-blocks';
 export { assemblyLayout } from '../src/components/managers/tech-card/components/assembly-layout';
+export {
+  mapFormToTechCardInsert,
+  techCardDefaultData,
+} from '../src/components/managers/tech-card/components/schema';

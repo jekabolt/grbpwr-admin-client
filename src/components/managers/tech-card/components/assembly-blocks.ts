@@ -3,14 +3,11 @@ import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 // Группировка операций в БЛОКИ ПОДСБОРОК — проекция, а не источник истины.
 //
 // ГЛАВНОЕ, ЧТО НАДО ПОНЯТЬ ПРО ЭТОТ ФАЙЛ: линейная последовательность шагов первична, блоки
-// выводятся из неё. Первая редакция плана предлагала обратное — «порядок компилируется из
-// блоков», — и это выброшено по двум причинам. Во-первых, прототип, объявленный источником
-// варианта C, делает ровно наоборот: `blocksC` перечисляет производящие операции в порядке
-// массива, топологической сортировки там нет и не нужно — правило 5 уже даёт топологию.
-// Во-вторых, компиляция порядка перенумеровывает шаги, а массового ремапа ссылок дефектов на
-// номера шагов в клиенте НЕ СУЩЕСТВУЕТ: единственный путь через replace() ссылки обнуляет.
-// Строить перенумерацию поверх несуществующей дорожки — гарантированный тихий отрыв претензий
-// от шагов.
+// выводятся из неё. Редактор не держит вторую копию порядка в блоках: `assemblyBlocks` остаётся
+// чистой проекцией текущего массива. Единственное обратное преобразование живёт ниже —
+// `compactAssemblyBlockOrder` собирает индексы для ЗАПИСИ, где ссылка дефекта на номер операции
+// ремапится тем же преобразованием. Так экран не получает второго источника истины, а сохранённый
+// маршрут не оставляет операции одного узла разбросанными между чужими блоками.
 //
 // АТРИБУЦИЯ ТРАНЗИТИВНАЯ, и это не украшение. Прототип приписывает шаг блоку, только если среди
 // его входов есть УЗЕЛ. Чисто детальные заготовительные шаги — обметать, подогнуть, приутюжить,
@@ -126,4 +123,77 @@ export function assemblyBlocks(steps: AssemblyStep[], res: AssemblyResult): Asse
   });
 
   return { blocks: order.map((k) => byKey.get(k)!), standalone, loose, blockOfStep };
+}
+
+/**
+ * ПОРЯДОК ЗАПИСИ, В КОТОРОМ КАЖДЫЙ УЗЕЛ — ОДИН НЕПРЕРЫВНЫЙ БЛОК.
+ *
+ * `assemblyBlocks` намеренно хранит ГЛОБАЛЬНЫЕ индексы: поэтому `[12, 24, 59]` на экране раньше
+ * уезжало на сервер как 130, 250, 600. Сервер не знает о блоках и честно перенумеровывает входной
+ * массив `(position + 1) * 10`; значит собрать блоки обязан клиент до записи.
+ *
+ * Блок атомарен, но порядок блоков не берётся слепо по первой строке. Если узел A поглощается B,
+ * весь A обязан стоять раньше всего B — иначе ранняя заготовительная строка B могла бы вытащить
+ * его перед производителем A и сломать фронтир. Среди уже допустимых блоков побеждает самый ранний
+ * исходный индекс: независимые узлы сохраняют авторский порядок. Отделённые и хвостовые строки —
+ * самостоятельные группы; они остаются вне узлов, но больше не разрывают узел посередине.
+ *
+ * Возвращаются СТАРЫЕ индексы в новом порядке. Это важно: писатель тем же массивом строит обратную
+ * карту и перевозит `issues[].operationNumber` вместе с операцией, а не оставляет претензию на
+ * прежнем числе.
+ */
+export function compactAssemblyBlockOrder(grouped: AssemblyBlocks, stepCount: number): number[] {
+  const identity = Array.from({ length: stepCount }, (_, index) => index);
+  if (stepCount < 2 || grouped.blocks.length === 0) return identity;
+
+  type Group = { id: string; steps: number[]; first: number; needs: Set<string> };
+  const groups: Group[] = [];
+  const groupByUnit = new Map<string, Group>();
+  const claimed = new Set<number>();
+
+  for (const block of grouped.blocks) {
+    if (block.steps.length === 0) continue;
+    const own = [...block.steps].sort((a, b) => a - b);
+    // Повреждённая проекция не получает «починку», которая сама теряет или дублирует строку.
+    if (own.some((index) => index < 0 || index >= stepCount || claimed.has(index))) return identity;
+    own.forEach((index) => claimed.add(index));
+    const group: Group = {
+      id: `unit:${block.key}`,
+      steps: own,
+      first: own[0],
+      needs: new Set(),
+    };
+    groups.push(group);
+    groupByUnit.set(block.key, group);
+  }
+
+  // Всё, что проекция не отнесла к узлу (включая explicit detached), остаётся отдельной строкой.
+  for (const index of identity) {
+    if (claimed.has(index)) continue;
+    groups.push({ id: `step:${index}`, steps: [index], first: index, needs: new Set() });
+  }
+
+  // Поглощение — единственная межблочная зависимость: дочерний узел должен быть готов раньше
+  // родительского блока целиком. Внутри блока исходный порядок строк уже сохранён массивом `steps`.
+  for (const block of grouped.blocks) {
+    if (!block.absorbedInto || block.absorbedInto === block.key) continue;
+    const child = groupByUnit.get(block.key);
+    const parent = groupByUnit.get(block.absorbedInto);
+    if (child && parent) parent.needs.add(child.id);
+  }
+
+  const done = new Set<string>();
+  const ordered: number[] = [];
+  while (done.size < groups.length) {
+    const next = groups
+      .filter((group) => !done.has(group.id) && [...group.needs].every((id) => done.has(id)))
+      .sort((a, b) => a.first - b.first || a.id.localeCompare(b.id))[0];
+    // Цикл невозможен в валидном сборочном графе. Если проекция всё же повреждена, порядок не
+    // угадываем: исходный массив безопаснее частичной перестановки.
+    if (!next) return identity;
+    ordered.push(...next.steps);
+    done.add(next.id);
+  }
+
+  return ordered.length === stepCount && new Set(ordered).size === stepCount ? ordered : identity;
 }
