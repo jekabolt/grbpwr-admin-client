@@ -66,6 +66,7 @@ import {
   Pill,
   Placeholder,
   Progress,
+  Row,
   Text,
 } from 'ui';
 import {
@@ -421,6 +422,7 @@ type OccupiedAsk =
   | { kind: 'files'; scopeKey: string; files: File[]; target: string }
   | { kind: 'move'; scopeKey: string; rowId: string }
   | { kind: 'purpose'; scopeKey: string; nextPurpose: string };
+type OccupiedVersion = { current?: PatternRow; incomingNames: string[] };
 type ForeignPending = {
   scopeKey: string;
   picked: File;
@@ -471,7 +473,9 @@ function labelOf(row?: PatternRow): string {
 }
 
 function fileNameOf(row?: PatternRow): string {
-  return row?.filename || patternSheetName(row ?? {});
+  if (row?.filename) return row.filename;
+  const name = patternSheetName(row ?? {});
+  return isDxfUrl(name) ? name : `${name}.dxf`;
 }
 
 const isGeneratedFusingRow = (row: PatternRow): boolean =>
@@ -1667,6 +1671,9 @@ export function PatternsField({
     );
   };
 
+  const shownRevision = (row?: PatternRow): number | null =>
+    row ? reuploadFeedback[feedbackKey(row)]?.version ?? revisionOf(row) : null;
+
   function beginReupload(scopeKey: string, target?: string): ReuploadFlight {
     const rows = ((getValues('patterns') ?? []) as PatternRow[]).filter(
       (row) => isDxfUrl(row.url) && liveScopeOf(row, 'sheet') === scopeKey,
@@ -1710,7 +1717,7 @@ export function PatternsField({
   async function patternRowFile(row: PatternRow): Promise<File | null> {
     if (!row.url || !isDxfUrl(row.url)) return null;
     const blob = await fetchMediaBlob(row.url);
-    return new File([blob], patternSheetName(row), { type: blob.type || 'application/dxf' });
+    return new File([blob], fileNameOf(row), { type: blob.type || 'application/dxf' });
   }
 
   /** Download the current DXF as the first merge input. PDFs still occupy a slot but cannot merge. */
@@ -3022,7 +3029,6 @@ export function PatternsField({
 
   function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
-    const rev = revisionOf(row);
     // Лист БЕЗ размера (0281) — не «размер вне ряда»: сервер его с рядом не сверяет.
     const stray = !!row.sizeId && !inRange.has(row.sizeId);
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM. '' = ни к чему живому.
@@ -3043,7 +3049,7 @@ export function PatternsField({
       (flight.rowId === rowId || (!flight.rowId && (slotGroup?.entries.length ?? 0) === 1));
     const feedback = reuploadFeedback[feedbackKey(row)];
     // v{N}: the active row's own revision (a restored sheet keeps its old number).
-    const shownRev = feedback?.version ?? rev;
+    const shownRev = shownRevision(row);
     // Click or drop on the thumbnail = replace this slot's sheet (the panel is the drop zone).
     // A non-DXF row is replaceable too: a plain file swap (uploadOne), no reconcile, no marks.
     const replaceable = !!slotGroup && canUpload;
@@ -3553,22 +3559,26 @@ export function PatternsField({
     });
   }
 
-  function occupiedFileLine(ask: OccupiedAsk): string {
+  function occupiedVersionDetails(ask: OccupiedAsk): OccupiedVersion {
     if (ask.kind === 'files') {
-      const current = slotOccupant(ask.scopeKey, ask.target);
-      return `${ask.files.map((file) => file.name).join(' + ')} → ${fileNameOf(current)}`;
+      return {
+        current: slotOccupant(ask.scopeKey, ask.target),
+        incomingNames: ask.files.map((file) => file.name),
+      };
     }
 
     const rows = (getValues('patterns') ?? []) as PatternRow[];
     if (ask.kind === 'move') {
       const incoming = rows.find((row) => sheetRowId(row) === ask.rowId);
-      const current = slotOccupant(ask.scopeKey);
-      return `${fileNameOf(incoming)} → ${fileNameOf(current)}`;
+      return {
+        current: slotOccupant(ask.scopeKey),
+        incomingNames: [fileNameOf(incoming)],
+      };
     }
 
     const sourceScope = scopeOfKey(ask.scopeKey);
     const source = sourceScope ? slotOccupant(sourceScope.key) : undefined;
-    if (!sourceScope) return `${fileNameOf(source)} → ${fileNameOf()}`;
+    if (!sourceScope) return { incomingNames: [fileNameOf(source)] };
     const lineKeys = new Set(sourceScope.lines.map((line) => line.lineKey));
     const items = (getValues('bomItems') ?? []) as BomLine[];
     const nextItems = items.map((line) =>
@@ -3578,8 +3588,10 @@ export function PatternsField({
       fabricScopes(clothLines(nextItems)),
       sourceScope.lines[0]?.lineKey ?? '',
     );
-    const current = targetScope ? slotOccupant(targetScope.key) : undefined;
-    return `${fileNameOf(source)} → ${fileNameOf(current)}`;
+    return {
+      current: targetScope ? slotOccupant(targetScope.key) : undefined,
+      incomingNames: [fileNameOf(source)],
+    };
   }
 
   // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер, перетащенный лист — в moveSheetTo.
@@ -4358,6 +4370,10 @@ export function PatternsField({
     );
   }
 
+  const occupiedVersion = occupiedAsk ? occupiedVersionDetails(occupiedAsk) : null;
+  const occupiedCurrentRevision = shownRevision(occupiedVersion?.current);
+  const occupiedNextRevision = occupiedCurrentRevision == null ? null : occupiedCurrentRevision + 1;
+
   return (
     <div className='space-y-2.5'>
       {headerPortal}
@@ -4465,8 +4481,10 @@ export function PatternsField({
           occupiedCancelRef.current?.focus();
         }}
         cancelRef={occupiedCancelRef}
-        title='occupied slot'
-        confirmLabel='replace'
+        title={
+          occupiedNextRevision == null ? 'new version' : `new version · v${occupiedNextRevision}`
+        }
+        confirmLabel='new version'
         width='sm'
         footerActions={
           <Button
@@ -4476,13 +4494,38 @@ export function PatternsField({
               if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
             }}
           >
-            merge
+            {occupiedCurrentRevision == null
+              ? 'merge with current'
+              : `merge with v${occupiedCurrentRevision}`}
           </Button>
         }
       >
-        <Text className='break-all tabular-nums'>
-          {occupiedAsk ? occupiedFileLine(occupiedAsk) : ''}
-        </Text>
+        <div>
+          <Row
+            label={
+              <span className='flex min-w-0 items-baseline gap-2.5'>
+                <Text component='span' variant='label' className='shrink-0 tabular-nums'>
+                  {occupiedCurrentRevision == null ? 'current' : `v${occupiedCurrentRevision}`}
+                </Text>
+                <Text component='span' className='min-w-0 break-all'>
+                  {fileNameOf(occupiedVersion?.current)}
+                </Text>
+              </span>
+            }
+          />
+          <Row
+            label={
+              <span className='flex min-w-0 items-baseline gap-2.5'>
+                <Text component='span' variant='label' className='shrink-0 tabular-nums'>
+                  {occupiedNextRevision == null ? 'new' : `v${occupiedNextRevision}`}
+                </Text>
+                <Text component='span' className='min-w-0 break-all'>
+                  {occupiedVersion?.incomingNames.join(' + ') ?? ''}
+                </Text>
+              </span>
+            }
+          />
+        </div>
       </ConfirmationModal>
 
       <ConfirmationModal
