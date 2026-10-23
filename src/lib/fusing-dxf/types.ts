@@ -3,6 +3,7 @@ import type { PtMm } from 'lib/pattern-import/types';
 
 /** '' = not fused, or the legacy «fused, how not said» (a stored fused piece with no mode). */
 export type FuseMode = '' | 'whole' | 'strip' | 'zone';
+export type FusePanelMode = FuseMode | 'file';
 export type FuseGrain = 'as_piece' | 'lengthwise' | 'crosswise' | 'bias' | 'any';
 export type FuseDarts = 'cut' | 'fuse';
 
@@ -59,6 +60,17 @@ export const blankFuse = (mode: FuseMode = ''): PieceFuseSpec => ({
   grain: 'as_piece',
   darts: 'cut',
 });
+
+/**
+ * FILE is a view of stored FULL fusing, never a fifth wire value. The caller supplies the other
+ * half of the fact: this piece is mapped to a block of the selected slot's owner drawing.
+ */
+export function deriveFusePanelMode(
+  spec: Pick<PieceFuseSpec, 'mode'>,
+  mappedToOwnerFile: boolean,
+): FusePanelMode {
+  return spec.mode === 'whole' && mappedToOwnerFile ? 'file' : spec.mode;
+}
 
 export type FuseGeometryInput = {
   outline: PtMm[];

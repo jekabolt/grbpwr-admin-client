@@ -58,6 +58,7 @@ import { canonicalInterliningIdentity, matchInterliningImport } from './interlin
 import type { FusePolygon, PieceFuseSpec } from './types';
 import type { PieceDTO } from 'lib/nesting/types';
 import {
+  deriveFusePanelMode,
   fuseFieldsFromWire,
   fuseFieldsToWire,
   fuseSpecFromPiece,
@@ -141,6 +142,11 @@ function svgOf(polygons: readonly FusePolygon[], title: string): string {
 
 export async function main() {
   const outline = rectangle(100, 80);
+
+  assert.equal(deriveFusePanelMode(spec(), false), 'whole');
+  assert.equal(deriveFusePanelMode(spec(), true), 'file');
+  assert.equal(deriveFusePanelMode(spec({ mode: 'strip' }), true), 'strip');
+  assert.equal(deriveFusePanelMode(spec({ mode: '' }), true), '');
 
   const sizeTokens = new Set(['xs', 's', 'm']);
   const mainBlocks = [

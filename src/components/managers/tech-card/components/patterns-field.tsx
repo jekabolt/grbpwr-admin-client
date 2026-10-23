@@ -211,6 +211,7 @@ import {
   type SheetRevisionRef,
 } from './nesting/reupload-session';
 import { rowFromStep } from './operations-field';
+import { PatternDropZone } from './pattern-drop-zone';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -715,6 +716,7 @@ export function PatternsField({
   // The hidden picker and the slot it was opened for.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickFor = useRef('');
+  const pickDxfOnly = useRef(false);
   // Legacy PDF sheet open in the in-app viewer (null = closed). DXF names open the pieces viewer.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Units dialog: DXFs without $INSUNITS, and what confirm does with the picked units.
@@ -979,6 +981,23 @@ export function PatternsField({
     () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
     [scopes, dxfByScopeMap],
   );
+  const interliningOwnerFiles = useMemo(() => {
+    const out = new Map<string, { fileName?: string; uploading: boolean }>();
+    for (const group of scopeGroups) {
+      const slot = group.scope.lines.find(
+        (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
+      );
+      if (!slot?.lineKey) continue;
+      const owner = latestDxfEntry(
+        group.entries.filter((entry) => !isGeneratedFusingRow(entry.row)),
+      );
+      out.set(slot.lineKey, {
+        ...(owner ? { fileName: owner.row.filename || patternSheetName(owner.row) } : {}),
+        uploading: (uploading[group.scope.key] ?? 0) > 0,
+      });
+    }
+    return out;
+  }, [scopeGroups, uploading]);
   // Header print = one current DXF per material slot. A slot can retain several present rows
   // while files are being consolidated; the newest revision is the same row its download menu
   // presents as current, while superseded revisions remain in `historyByLine` and never enter here.
@@ -1424,9 +1443,16 @@ export function PatternsField({
   const canUpload = canEdit && scopes.length > 0;
   const importOk = PATTERN_IMPORT_ENABLED && !!techCardId;
 
-  function openPicker(scopeKey: string) {
+  function openPicker(scopeKey: string, dxfOnly = false) {
     if (!canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     pickFor.current = scopeKey;
+    pickDxfOnly.current = dxfOnly;
+    if (fileInputRef.current)
+      fileInputRef.current.accept = dxfOnly
+        ? SLOT_ACCEPT_DXF
+        : importOk
+          ? SLOT_ACCEPT_ALL
+          : SLOT_ACCEPT_DXF;
     fileInputRef.current?.click();
   }
 
@@ -2111,13 +2137,19 @@ export function PatternsField({
   // The file router: tile drop, tile click and a sheet row's «upload» all land here.
   //   1 DXF → direct upload → pieces; ≥2 DXF → size merge → upload → pieces;
   //   anything else → import wizard → apply → pieces.
-  function routeFiles(scopeKey: string, list: FileList | File[] | null, target?: string) {
+  function routeFiles(
+    scopeKey: string,
+    list: FileList | File[] | null,
+    target?: string,
+    dxfOnly = false,
+  ) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
     if (files.length === 0 || !canUpload || (uploadingRef.current[scopeKey] ?? 0) > 0) return;
     const hasRange = ((getValues('sizeIds') ?? []) as number[]).length > 0;
     const errOf = (f: File): string | null => {
       if (isDxfFile(f)) return patternFileError(f, { dxfOnly: true });
+      if (dxfOnly) return 'DXF only';
       const ext = (f.name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase();
       if (!importOk || !IMPORT_EXT.has(ext)) return 'DXF only';
       // The import wizard lays the drawn sizes out on the card's range: it needs one.
@@ -3385,12 +3417,6 @@ export function PatternsField({
       </span>
     );
     const active = selectedKey === key;
-    const emptyClassName = cn(
-      'flex h-[84px] w-full flex-col items-center justify-center gap-1 border border-dashed bg-bgColor px-2 text-center uppercase tracking-label',
-      canUpload && !busy
-        ? 'border-labelColor text-textColor group-hover/slot:border-textColor'
-        : 'border-borderColor text-labelColor',
-    );
     const emptyContents = (
       <>
         {busy ? (
@@ -3407,22 +3433,16 @@ export function PatternsField({
         )}
       </>
     );
-    const empty =
-      active && canUpload && !busy ? (
-        <Button
-          type='button'
-          variant='default'
-          className={emptyClassName}
-          onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            openPicker(key);
-          }}
-        >
-          {emptyContents}
-        </Button>
-      ) : (
-        <div className={emptyClassName}>{emptyContents}</div>
-      );
+    const empty = (
+      <PatternDropZone
+        interactive={active && canUpload && !busy}
+        disabled={!canUpload || busy}
+        className={cn('h-[84px]', canUpload && !busy && 'group-hover/slot:border-textColor')}
+        onClick={() => openPicker(key)}
+      >
+        {emptyContents}
+      </PatternDropZone>
+    );
     const drawing =
       dxfIndex && blocks > 0 ? (
         <div
@@ -3453,13 +3473,18 @@ export function PatternsField({
     const filled = (
       <div>
         <div className='relative'>
-          {hasDxf && canUpload ? (
+          {hasDxf ? (
             <button
               type='button'
-              aria-label='new version'
+              aria-label='pieces'
               disabled={busy}
               className='block w-full cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
-              onClick={openVersion}
+              onClick={(event: React.MouseEvent) => {
+                event.stopPropagation();
+                if (busy) return;
+                setSelectedKey(key);
+                openPieces(g);
+              }}
             >
               {drawing}
             </button>
@@ -4126,7 +4151,7 @@ export function PatternsField({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          routeFiles(pickFor.current, e.target.files);
+          routeFiles(pickFor.current, e.target.files, undefined, pickDxfOnly.current);
           // Reset so re-picking the same file re-fires onChange.
           e.target.value = '';
         }}
@@ -4379,6 +4404,12 @@ export function PatternsField({
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
             interlining={matchingInterlining}
+            interliningOwnerFiles={interliningOwnerFiles}
+            onUploadInterliningFile={(lineKey, files) =>
+              routeFiles(lineKey, files, undefined, true)
+            }
+            onPickInterliningFile={(lineKey) => openPicker(lineKey, true)}
+            readOnly={!canEdit}
             onClose={() => setMatching(null)}
           />
         </Suspense>

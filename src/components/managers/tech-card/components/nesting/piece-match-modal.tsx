@@ -244,6 +244,8 @@ type PieceFields = Partial<PieceFuseFields> & {
   // The whole fuse markup as the panel holds it (lib/fusing-dxf PieceFuseSpec). The stored fuse
   // fields are kept in step by writeFuseFields on every change.
   fuse?: PieceFuseSpec;
+  // UI-only: leaving derived FILE removes this piece's owner-file aliases in these slots on SAVE.
+  dropFileBomLineKeys?: string[];
 };
 // The stored fuse fields of a piece, as the editor reads them off the form.
 const FUSE_KEYS = [
@@ -743,6 +745,9 @@ export function PieceMatchModal({
   pieceAreaScopes,
   techCardId,
   interlining,
+  interliningOwnerFiles,
+  onUploadInterliningFile,
+  onPickInterliningFile,
   readOnly: readOnlyProp,
   onClose,
 }: {
@@ -773,6 +778,9 @@ export function PieceMatchModal({
     skippedIdentityKeys: ReadonlySet<string>;
     onReview: (skippedIdentities: ReadonlySet<string>) => void;
   };
+  interliningOwnerFiles?: ReadonlyMap<string, { fileName?: string; uploading: boolean }>;
+  onUploadInterliningFile?: (lineKey: string, files: FileList | File[]) => void;
+  onPickInterliningFile?: (lineKey: string) => void;
   // Optional override: the caller may already know the card cannot be edited (no write right).
   // A RELEASED card is detected here on its own either way.
   readOnly?: boolean;
@@ -857,12 +865,18 @@ export function PieceMatchModal({
     ].filter((item) => item.section === INTERLINING_SECTION && item.lineKey?.trim());
   const interlinings = useMemo<InterliningLine[]>(
     () =>
-      interliningBomItems.map((b) => ({
-        key: b.lineKey!.trim(),
-        label: b.name?.trim() || 'interlining',
-        color: b.color ?? '',
-      })),
-    [interliningBomItems],
+      interliningBomItems.map((b) => {
+        const key = b.lineKey!.trim();
+        const owner = interliningOwnerFiles?.get(key);
+        return {
+          key,
+          label: b.name?.trim() || 'interlining',
+          color: b.color ?? '',
+          ...(owner?.fileName ? { ownerFileName: owner.fileName } : {}),
+          uploading: !!owner?.uploading,
+        };
+      }),
+    [interliningBomItems, interliningOwnerFiles],
   );
   const { parse, reparse } = useNesting(files);
   // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
@@ -1863,9 +1877,18 @@ export function PieceMatchModal({
       const remapFuseLine = (edit: PieceFields): PieceFields => {
         const fuse = edit.fuse;
         const replacement = fuse ? replacementKeys.get(fuse.bomLineKey.trim()) : undefined;
-        if (!fuse || !replacement) return edit;
+        const dropped = edit.dropFileBomLineKeys?.map(
+          (key) => replacementKeys.get(key.trim()) ?? key,
+        );
+        if (!fuse || !replacement)
+          return dropped ? { ...edit, dropFileBomLineKeys: dropped } : edit;
         const nextFuse = { ...fuse, bomLineKey: replacement };
-        return { ...edit, fuse: nextFuse, ...writeFuseFields(nextFuse) };
+        return {
+          ...edit,
+          fuse: nextFuse,
+          ...writeFuseFields(nextFuse),
+          ...(dropped ? { dropFileBomLineKeys: dropped } : {}),
+        };
       };
       const committedPieceEdits = Object.fromEntries(
         Object.entries(pieceEdits).map(([key, edit]) => [key, remapFuseLine(edit)]),
@@ -1873,6 +1896,25 @@ export function PieceMatchModal({
       const committedNewEdits = Object.fromEntries(
         Object.entries(newEdits).map(([key, edit]) => [key, remapFuseLine(edit)]),
       ) as typeof newEdits;
+      const droppedOwnerLinesByPiece = new Map<string, Set<string>>();
+      for (const [pieceKey, edit] of Object.entries(committedPieceEdits)) {
+        const droppedLines = (edit.dropFileBomLineKeys ?? [])
+          .map((key) => key.trim())
+          .filter(Boolean);
+        if (droppedLines.length) droppedOwnerLinesByPiece.set(pieceKey, new Set(droppedLines));
+      }
+      const dropsOwnerAlias = (
+        alias: NonNullable<TechCardFormData['pieceDxfAliases']>[number],
+      ): boolean => {
+        const pieceKey = (alias.pieceLineKey ?? '').trim().toLowerCase();
+        const droppedLines = droppedOwnerLinesByPiece.get(pieceKey);
+        if (!droppedLines?.size) return false;
+        for (const lineKey of droppedLines) {
+          const lineScope = scopes.find((candidate) => candidate.key === lineKey);
+          if (lineScope && aliasInScope(alias, lineScope, links)) return true;
+        }
+        return false;
+      };
       const created: NonNullable<TechCardFormData['pieces']> = [];
       // Детали, которых в чертеже больше нет и которые оператор не оставил вручную. Всё
       // дальнейшее считается уже БЕЗ них: имена (иначе новый блок с тем же именем привязался бы
@@ -1947,6 +1989,7 @@ export function PieceMatchModal({
         // dangling alias is excluded from `mineByBlock` so its block can be mapped again). The
         // full-set write makes dropping it the repair.
         if (!liveKeys.has((a.pieceLineKey ?? '').trim().toLowerCase())) continue;
+        if (dropsOwnerAlias(a)) continue;
         if (aliasInScope(a, scope, links)) continue;
         // Свёрнуто к ИДЕНТИЧНОСТИ и на записи тоже. Читающая сторона (mineByBlock, mappedRows,
         // ciOf, unmapped) вся работает по идентичности, и пока эта петля переносила сырое имя,
@@ -2047,6 +2090,18 @@ export function PieceMatchModal({
           blockName: r.block,
           pieceLineKey,
         });
+      }
+      const droppedHere = new Set(
+        [...droppedOwnerLinesByPiece]
+          .filter(([, lineKeys]) => lineKeys.has(scope.key))
+          .map(([pieceKey]) => pieceKey),
+      );
+      if (droppedHere.size) {
+        for (const [ci, pieceLineKey] of [...boundHere]) {
+          if (!droppedHere.has(pieceLineKey.trim().toLowerCase())) continue;
+          boundHere.delete(ci);
+          byKey.delete(aliasKey(scope.key, ci));
+        }
       }
       const interliningLineKeys = nextBom
         .filter((item) => item.section === INTERLINING_SECTION && item.lineKey?.trim())
@@ -2446,6 +2501,22 @@ export function PieceMatchModal({
     if (st.kind === 'none' || !vals.fused) return undefined;
     return vals.fuse ?? readFuseSpec(vals);
   };
+  const ownerFileLinesOfPiece = (pieceLineKey: string): string[] => {
+    const pieceKey = pieceLineKey.trim().toLowerCase();
+    if (!pieceKey) return [];
+    return interlinings.flatMap((line) => {
+      if (!line.ownerFileName) return [];
+      const lineScope = scopes.find((candidate) => candidate.key === line.key);
+      if (!lineScope) return [];
+      return (aliases ?? []).some(
+        (alias) =>
+          (alias.pieceLineKey ?? '').trim().toLowerCase() === pieceKey &&
+          aliasInScope(alias, lineScope, links),
+      )
+        ? [line.key]
+        : [];
+    });
+  };
   const setFuse = (ci: string, next: PieceFuseSpec) => {
     const { vals, patch } = ioOf(ci);
     const prev = vals.fuse ?? readFuseSpec(vals);
@@ -2492,6 +2563,43 @@ export function PieceMatchModal({
       }) as BomLine,
     );
     setFuse(ci, { ...spec, bomLineKey: line.lineKey!.trim() });
+  };
+  const addFileSlot = (): string => {
+    const lines = currentInterliningBomItems();
+    const line = queueBomItem(
+      bornBomLine({
+        section: INTERLINING_SECTION,
+        purpose: INTERFACING_PURPOSE,
+        name: nextNumberedRole('interlining', lines),
+      }) as BomLine,
+    );
+    return line.lineKey!.trim();
+  };
+  const commitFileSlot = (lineKey: string): string => {
+    const key = lineKey.trim();
+    if (!key) return '';
+    const queued = pendingBomItemsRef.current.find((line) => line.lineKey?.trim() === key);
+    if (!queued) return key;
+    const current = (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>;
+    if (!current.some((line) => line.lineKey?.trim() === key)) {
+      setValue('bomItems', [...current, queued], { shouldDirty: true });
+    }
+    dropQueuedBomItem(key);
+    return key;
+  };
+  const uploadInterliningFile = (lineKey: string, files: FileList | File[]) => {
+    const key = commitFileSlot(lineKey);
+    if (key) onUploadInterliningFile?.(key, files);
+  };
+  const pickInterliningFile = (lineKey: string) => {
+    const key = commitFileSlot(lineKey);
+    if (key) onPickInterliningFile?.(key);
+  };
+  const leaveOwnerFile = (ci: string, lineKey: string) => {
+    const { vals, patch } = ioOf(ci);
+    const keys = new Set(vals.dropFileBomLineKeys ?? []);
+    keys.add(lineKey);
+    patch({ dropFileBomLineKeys: [...keys] });
   };
   // Zoomed onto the selected piece: it is fused with a mode and the zoom was not left.
   const zoomed = (() => {
@@ -2603,6 +2711,11 @@ export function PieceMatchModal({
         toggleBox={TOGGLE_BOX}
         onChange={(next) => setFuse(ci, next)}
         onAddSlot={() => addFuseSlot(ci)}
+        onAddFileSlot={addFileSlot}
+        onUploadFile={uploadInterliningFile}
+        onPickFile={pickInterliningFile}
+        onLeaveFile={(lineKey) => leaveOwnerFile(ci, lineKey)}
+        fileMappedLineKeys={st.kind === 'existing' ? ownerFileLinesOfPiece(st.key) : []}
         ci={ci}
         zoneBus={zoneBus}
       />
