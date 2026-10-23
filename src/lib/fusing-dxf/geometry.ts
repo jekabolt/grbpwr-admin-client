@@ -2,7 +2,7 @@ import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import { offsetContour, OFFSET_SCALE } from 'lib/pattern-import/semantics/offset';
 import type { PtMm } from 'lib/pattern-import/types';
 import { edgeRunsOf, extendPolyline, stripBandPolygons, trimEdgeRun } from './edge-runs';
-import { SPLINE_MAX_POINTS, SPLINE_MIN_POINTS, flattenSpline, ringSelfIntersects } from './spline';
+import { SPLINE_MAX_POINTS, SPLINE_MIN_POINTS, flattenZone, ringSelfIntersects } from './spline';
 import type { FuseGeometryInput, FusePolygon, FuseZone, PieceFuseSpec } from './types';
 
 const EPS = 1e-7;
@@ -106,6 +106,15 @@ function insetOutline(outline: readonly PtMm[], insetMm: number): PtMm[] {
   return cleanRing(result.pts);
 }
 
+/** The inset contour the fuse is clipped to (and a drawn zone's sides follow), piece-local mm. */
+export function fuseInsetRingMm(
+  outline: readonly PtMm[],
+  spec: PieceFuseSpec,
+  seamAllowanceMm: number | null | undefined,
+): PtMm[] {
+  return insetOutline(cleanRing(outline), effectiveInset(spec, seamAllowanceMm));
+}
+
 function expandedDarts(darts: readonly PtMm[][], insetMm: number): PtMm[][] {
   return darts.flatMap((dart) => {
     const source = cleanRing(dart);
@@ -170,8 +179,14 @@ function stripPaths(outline: readonly PtMm[], spec: PieceFuseSpec, insetMm: numb
   return Clipper.Union(bands, undefined, FillRule.NonZero);
 }
 
-/** A drawn zone (rect / spline) as one closed ring in piece-local mm, validated. */
-export function zoneRingMm(zone: Exclude<FuseZone, { dxfPieceKey: string }>): PtMm[] {
+/**
+ * A drawn zone (rect / spline) as one closed ring in piece-local mm, validated. With the inset
+ * contour, a spline side between two points on it follows it (spline.ts flattenZoneSides).
+ */
+export function zoneRingMm(
+  zone: Exclude<FuseZone, { dxfPieceKey: string }>,
+  contour?: readonly PtMm[] | null,
+): PtMm[] {
   if ('rect' in zone) {
     const [ax, ay, bx, by] = zone.rect;
     const x0 = Math.min(ax, bx);
@@ -193,7 +208,7 @@ export function zoneRingMm(zone: Exclude<FuseZone, { dxfPieceKey: string }>): Pt
     );
   if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
     throw new FuseGeometryError('zone spline has a non-finite point');
-  const flattened = flattenSpline(points);
+  const flattened = flattenZone(points, contour);
   if (ringSelfIntersects(flattened)) throw new FuseGeometryError('zone spline crosses itself');
   return cleanRing(flattened);
 }
@@ -230,7 +245,7 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
       if (!('dxfPieceKey' in zone)) {
         // The drawn zone (rect or flattened spline) is clipped to the inset contour.
         polygons = polygonsOf(
-          Clipper.Intersect([toPath(zoneRingMm(zone))], [toPath(inset)], FillRule.NonZero),
+          Clipper.Intersect([toPath(zoneRingMm(zone, inset))], [toPath(inset)], FillRule.NonZero),
         );
       } else {
         if (!input.zoneOutline)

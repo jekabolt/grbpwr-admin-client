@@ -12,6 +12,9 @@
 // Flattening: each segment is cut into n equal-t steps with n = ceil(sqrt(max|B''| / (8·tol))),
 // where B'' is the second derivative of the segment's Bezier form — that bounds the chord error by
 // tol (0.5 mm), 1 ≤ n ≤ 64.
+//
+// Exception (flattenZoneSides below): a side between two control points that both sit on the inset
+// contour follows the contour instead of the spline.
 import type { PtMm } from 'lib/pattern-import/types';
 import type { FuseSplinePoint } from './types';
 
@@ -73,6 +76,31 @@ function stepsOf(p1: PtMm, m1: PtMm, p2: PtMm, m2: PtMm, tol: number): number {
   return Math.max(1, Math.min(MAX_STEPS, Number.isFinite(n) ? n : 1));
 }
 
+/** Segment i of the closed curve (P[i] → P[i+1]) as polyline points, its end point excluded. */
+function segmentPoints(points: readonly FuseSplinePoint[], i: number, tolMm: number): PtMm[] {
+  const n = points.length;
+  const p1 = points[i];
+  const p2 = points[(i + 1) % n];
+  const { m1, m2, zeroLength } = centripetalTangents(points, i);
+  if (zeroLength) return [{ x: p1.x, y: p1.y }];
+  const steps = stepsOf(p1, m1, p2, m2, tolMm);
+  const out: PtMm[] = [];
+  for (let k = 0; k < steps; k++) {
+    const t = k / steps;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const h00 = 2 * t3 - 3 * t2 + 1;
+    const h10 = t3 - 2 * t2 + t;
+    const h01 = -2 * t3 + 3 * t2;
+    const h11 = t3 - t2;
+    out.push({
+      x: h00 * p1.x + h10 * m1.x + h01 * p2.x + h11 * m2.x,
+      y: h00 * p1.y + h10 * m1.y + h01 * p2.y + h11 * m2.y,
+    });
+  }
+  return out;
+}
+
 /** The closed curve as a polyline (no repeated closing point). Fewer than 3 points → as given. */
 export function flattenSpline(
   points: readonly FuseSplinePoint[],
@@ -81,31 +109,168 @@ export function flattenSpline(
   const n = points.length;
   if (n < 3) return points.map((p) => ({ x: p.x, y: p.y }));
   const out: PtMm[] = [];
-  for (let i = 0; i < n; i++) {
-    const p1 = points[i];
-    const p2 = points[(i + 1) % n];
-    const { m1, m2, zeroLength } = centripetalTangents(points, i);
-    if (zeroLength) {
-      out.push({ x: p1.x, y: p1.y });
-      continue;
-    }
-    const steps = stepsOf(p1, m1, p2, m2, tolMm);
-    for (let k = 0; k < steps; k++) {
-      const t = k / steps;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const h00 = 2 * t3 - 3 * t2 + 1;
-      const h10 = t3 - 2 * t2 + t;
-      const h01 = -2 * t3 + 3 * t2;
-      const h11 = t3 - t2;
-      out.push({
-        x: h00 * p1.x + h10 * m1.x + h01 * p2.x + h11 * m2.x,
-        y: h00 * p1.y + h10 * m1.y + h01 * p2.y + h11 * m2.y,
-      });
-    }
-  }
+  for (let i = 0; i < n; i++) out.push(...segmentPoints(points, i, tolMm));
   return out;
 }
+
+// ---------- contour-following sides ----------
+//
+// A side whose two control points both sit on the inset contour (within ZONE_ON_CONTOUR_MM) is the
+// contour path itself, not a spline, so a zone can hug an armhole / neckline / hem curve. Nothing is
+// stored: "on the contour" is read from the geometry at render / generate time.
+//
+// Which way round: a zone inside the contour that shares part of its boundary runs along that
+// shared part in the same rotational sense as the contour (both interiors on the same side). So the
+// contour is oriented like the zone's control polygon and the side runs FORWARD along it from P[i]'s
+// projection to P[i+1]'s. A forward run that would pass another on-contour control point is refused
+// (that side stays a spline): the zone's points are then not in the contour's cyclic order.
+
+/** Control points this close to the inset contour count as on it (stored points round to 0.1 mm). */
+export const ZONE_ON_CONTOUR_MM = 0.5;
+const ARC_EPSILON = 1e-9;
+const DEDUPE_MM = 1e-6;
+
+export type RingProjection = { p: PtMm; d: number; edge: number; s: number };
+
+const ringArea = (ring: readonly PtMm[]) => {
+  let twice = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    twice += a.x * b.y - b.x * a.y;
+  }
+  return twice / 2;
+};
+
+function cumulative(ring: readonly PtMm[]): number[] {
+  const cum = [0];
+  for (let i = 1; i <= ring.length; i++) {
+    const a = ring[i - 1];
+    const b = ring[i % ring.length];
+    cum.push(cum[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  return cum;
+}
+
+/** The nearest point of a closed ring, with its edge and its arc position from ring[0]. */
+export function projectOnRing(
+  q: PtMm,
+  ring: readonly PtMm[],
+  cum: readonly number[] = cumulative(ring),
+): RingProjection {
+  let best: RingProjection = { p: { x: q.x, y: q.y }, d: Infinity, edge: 0, s: 0 };
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const ll = abx * abx + aby * aby;
+    const t = ll > 0 ? Math.max(0, Math.min(1, ((q.x - a.x) * abx + (q.y - a.y) * aby) / ll)) : 0;
+    const p = { x: a.x + abx * t, y: a.y + aby * t };
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best.d) best = { p, d, edge: i, s: cum[i] + Math.sqrt(ll) * t };
+  }
+  return best;
+}
+
+export type FlatZone = {
+  ring: PtMm[];
+  /** side[k] = the control segment (P[i] → P[i+1]) ring vertex k belongs to. */
+  side: number[];
+  /** follows[i] = segment i runs along the contour. */
+  follows: boolean[];
+};
+
+/**
+ * The zone's closed outline: spline sides as flattenSpline, contour-following sides as the contour
+ * path. Without a contour (or with no side on it) the ring is exactly flattenSpline's.
+ */
+export function flattenZoneSides(
+  points: readonly FuseSplinePoint[],
+  contour?: readonly PtMm[] | null,
+  tolMm: number = SPLINE_TOLERANCE_MM,
+  onMm: number = ZONE_ON_CONTOUR_MM,
+): FlatZone {
+  const n = points.length;
+  const follows = points.map(() => false);
+  const plain = (): FlatZone => {
+    if (n < 3) return { ring: flattenSpline(points), side: points.map((_, i) => i), follows };
+    const ring: PtMm[] = [];
+    const side: number[] = [];
+    for (let i = 0; i < n; i++)
+      for (const p of segmentPoints(points, i, tolMm)) {
+        ring.push(p);
+        side.push(i);
+      }
+    return { ring, side, follows };
+  };
+  const zoneArea = n >= 3 ? ringArea(points) : 0;
+  if (!contour || contour.length < 3 || n < 3 || zoneArea === 0) return plain();
+  const contourArea = ringArea(contour);
+  if (contourArea === 0) return plain();
+  const ring =
+    Math.sign(contourArea) === Math.sign(zoneArea) ? [...contour] : [...contour].reverse();
+  const cum = cumulative(ring);
+  const perimeter = cum[ring.length];
+  if (!(perimeter > 0)) return plain();
+  const proj = points.map((p) => projectOnRing(p, ring, cum));
+  const on = proj.map((p) => p.d <= onMm);
+  const ahead = (from: number, to: number) => (((to - from) % perimeter) + perimeter) % perimeter;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    if (!on[i] || !on[j]) continue;
+    const run = ahead(proj[i].s, proj[j].s);
+    const blocked = proj.some(
+      (p, k) =>
+        k !== i &&
+        k !== j &&
+        on[k] &&
+        ahead(proj[i].s, p.s) > ARC_EPSILON &&
+        ahead(proj[i].s, p.s) < run - ARC_EPSILON,
+    );
+    follows[i] = !blocked;
+  }
+  if (!follows.some(Boolean)) return plain();
+
+  const out: PtMm[] = [];
+  const side: number[] = [];
+  const push = (p: PtMm, i: number) => {
+    const last = out[out.length - 1];
+    if (last && Math.hypot(last.x - p.x, last.y - p.y) <= DEDUPE_MM) return;
+    out.push({ x: p.x, y: p.y });
+    side.push(i);
+  };
+  for (let i = 0; i < n; i++) {
+    if (!follows[i]) {
+      for (const p of segmentPoints(points, i, tolMm)) push(p, i);
+      continue;
+    }
+    const a = proj[i];
+    const run = ahead(a.s, proj[(i + 1) % n].s);
+    push(a.p, i);
+    for (let k = 1; k <= ring.length; k++) {
+      const v = (a.edge + k) % ring.length;
+      const f = ahead(a.s, cum[v]);
+      if (f <= ARC_EPSILON) continue;
+      if (f >= run - ARC_EPSILON) break;
+      push(ring[v], i);
+    }
+  }
+  while (
+    out.length > 1 &&
+    Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= DEDUPE_MM
+  ) {
+    out.pop();
+    side.pop();
+  }
+  return { ring: out, side, follows };
+}
+
+export const flattenZone = (
+  points: readonly FuseSplinePoint[],
+  contour?: readonly PtMm[] | null,
+  tolMm: number = SPLINE_TOLERANCE_MM,
+) => flattenZoneSides(points, contour, tolMm).ring;
 
 const INTERSECTION_EPSILON = 1e-12;
 

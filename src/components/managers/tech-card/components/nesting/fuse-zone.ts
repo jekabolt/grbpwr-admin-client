@@ -4,6 +4,13 @@
 // and follows them. Other spline rings keep every point's own corner semantics. An untouched
 // axis-aligned rectangle is stored as `rect`; anything bent, rotated or rounded is stored as
 // `spline`. Plus the per-dialog bus the canvas and the panel share: the clipped area and undo stack.
+import {
+  SPLINE_MAX_POINTS,
+  SPLINE_MIN_POINTS,
+  flattenZoneSides,
+  type FlatZone,
+} from 'lib/fusing-dxf/spline';
+import type { PtMm } from 'lib/pattern-import/types';
 import type { FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
 export type ZonePoint = { x: number; y: number; corner: boolean };
@@ -83,6 +90,34 @@ export function storedZone(pts: readonly ZonePoint[]): DrawnZone {
   }
   const points: FuseSplinePoint[] = pts.map((p) => ({ x: r1(p.x), y: r1(p.y), corner: p.corner }));
   return { spline: { points } };
+}
+
+/**
+ * The zone's outline as it is drawn and cut, piece-local mm (the generator's zoneRingMm rule): a
+ * rect is its rectangle; a spline side between two points on the inset contour follows the contour.
+ */
+export function zoneOutline(
+  z: FuseZone | null | undefined,
+  contourMm?: readonly PtMm[] | null,
+): FlatZone {
+  const pts = zonePoints(z);
+  return flattenZoneSides(pts, isDrawnZone(z) && 'spline' in z ? contourMm : null);
+}
+
+/** A round point inserted after control point `side` (on that side); null at the point cap. */
+export function insertZonePoint(
+  pts: readonly ZonePoint[],
+  side: number,
+  at: XY,
+): ZonePoint[] | null {
+  if (pts.length >= SPLINE_MAX_POINTS || side < 0 || side >= pts.length) return null;
+  return [...pts.slice(0, side + 1), { x: at.x, y: at.y, corner: false }, ...pts.slice(side + 1)];
+}
+
+/** Control point i removed; null when the zone would drop below its minimum of points. */
+export function removeZonePoint(pts: readonly ZonePoint[], i: number): ZonePoint[] | null {
+  if (pts.length <= SPLINE_MIN_POINTS || i < 0 || i >= pts.length) return null;
+  return pts.filter((_, k) => k !== i);
 }
 
 /** Every corner slot sharp (sharp=true) or every point round. */

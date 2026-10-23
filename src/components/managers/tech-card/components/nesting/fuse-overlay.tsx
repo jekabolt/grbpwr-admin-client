@@ -15,12 +15,11 @@ import {
   trimEdgeRun,
 } from 'lib/fusing-dxf/edge-runs';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
-import { fuseAreaMm2, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
-import { flattenSpline } from 'lib/fusing-dxf/spline';
+import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import type { FusePolygon } from 'lib/fusing-dxf/types';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { resolveFuse, fuseIncomplete, type PieceFuseSpec } from './fuse-spec';
-import { isDrawnZone, zonePoints, type ZoneBus } from './fuse-zone';
+import { isDrawnZone, zoneOutline, type ZoneBus } from './fuse-zone';
 import { FuseZoneEditor } from './fuse-zone-editor';
 
 const INK = 'var(--color-warning)';
@@ -131,6 +130,26 @@ export function FuseOverlay({
     }
     return m.get(key) ?? null;
   };
+  // A drawn zone's inset contour is the generator's own (piece-local mm), so the handles snap onto
+  // exactly the contour its sides follow and the DXF is clipped to.
+  const insets = useRef(new WeakMap<PieceDTO, Map<string, Pt[] | null>>());
+  const zoneInsetOf = (p: PieceDTO, f: PieceFuseSpec) => {
+    if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+    const key = JSON.stringify([f.insetNet, f.insetMm, requiredSeamAllowanceMm]);
+    let m = insets.current.get(p);
+    if (!m) insets.current.set(p, (m = new Map()));
+    if (!m.has(key)) {
+      if (m.size > 16) m.clear();
+      let ring: Pt[] | null = null;
+      try {
+        ring = fuseInsetRingMm(p.poly.map(mm10), f, requiredSeamAllowanceMm);
+      } catch {
+        ring = null;
+      }
+      m.set(key, ring);
+    }
+    return m.get(key) ?? null;
+  };
   const byCi = useMemo(() => {
     const m = new Map<string, PieceDTO>();
     for (const p of pieces) if (p.originX != null && p.originY != null) m.set(ciOf(p), p);
@@ -149,7 +168,12 @@ export function FuseOverlay({
     const sign: 1 | -1 = signedArea(pts) > 0 ? 1 : -1;
     const insetMm = r.insetMm;
     const insetKnown = insetMm != null;
-    const inner = insetMm != null && insetMm > 0 ? offsetPoly(pts, insetMm / 10) : pts;
+    const zoneInset = insetMm != null && insetMm > 0 ? zoneInsetOf(p, f) : null;
+    const inner = zoneInset
+      ? zoneInset.map((q) => world(p, cm10(q)))
+      : insetMm != null && insetMm > 0
+        ? offsetPoly(pts, insetMm / 10)
+        : pts;
     const darts = fusingDartPolygons(p).map((d) => d.map(cm10).map((q) => world(p, q)));
     const runs = edgeRunsOf(pts);
     return { r, pts, runs, sign, inner, darts, insetKnown };
@@ -169,7 +193,10 @@ export function FuseOverlay({
     const toSheet = (q: Pt) => ({ x: ox + q.x / 10, y: -(oy + q.y / 10) });
     const ring =
       f.mode === 'zone' && isDrawnZone(f.zone)
-        ? flattenSpline(zonePoints(f.zone)).map(toSheet)
+        ? zoneOutline(
+            f.zone,
+            inner.map((s) => ({ x: (s.x - ox) * 10, y: (-s.y - oy) * 10 })),
+          ).ring.map(toSheet)
         : null;
     const fill = fillOf(p, f);
     const fillPath =

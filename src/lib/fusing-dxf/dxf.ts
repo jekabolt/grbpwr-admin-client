@@ -10,7 +10,8 @@ import type {
 } from 'lib/pattern-import/types';
 import { writeScopes } from 'lib/pattern-import/write';
 import { edgeRunsOf } from './edge-runs';
-import { fuseAreaMm2, generateFuseGeometry, signedArea } from './geometry';
+import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry, signedArea } from './geometry';
+import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
 import type { FusePolygon, PieceFuseSpec } from './types';
 
 export type FusingBomLine = {
@@ -189,12 +190,15 @@ function mapPointBetweenOutlines(
 /**
  * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
  * positions follow the grade. Drawn zones use the two outlines' local frames, while strip trims
- * keep the same fraction of their selected edge run.
+ * keep the same fraction of their selected edge run. A spline point on the base size's inset
+ * contour lands on the target size's inset contour (nearest point to its proportional position), so
+ * a contour-following side keeps following the contour in every size.
  */
 export function mapFuseSpecToSize(
   source: PieceFuseSpec,
   baseOutline: readonly PtMm[],
   targetOutline: readonly PtMm[],
+  seamAllowanceMm?: number | null,
 ): PieceFuseSpec {
   if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
     const from = bbox(baseOutline);
@@ -212,14 +216,27 @@ export function mapFuseSpecToSize(
       );
       return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
     }
+    let baseInset: PtMm[] | null = null;
+    let targetInset: PtMm[] | null = null;
+    try {
+      baseInset = fuseInsetRingMm(baseOutline, source, seamAllowanceMm);
+      targetInset = fuseInsetRingMm(targetOutline, source, seamAllowanceMm);
+    } catch {
+      // generateFuseGeometry owns the inset refusal; the points then map proportionally only.
+    }
     return {
       ...source,
       zone: {
         spline: {
-          points: source.zone.spline.points.map((point) => ({
-            ...point,
-            ...mapPointBetweenOutlines(point, from, to),
-          })),
+          points: source.zone.spline.points.map((point) => {
+            const mapped = mapPointBetweenOutlines(point, from, to);
+            const onContour =
+              baseInset && targetInset && projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
+            return {
+              ...point,
+              ...(onContour ? projectOnRing(mapped, targetInset!).p : mapped),
+            };
+          }),
         },
       },
     };
@@ -284,7 +301,12 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       const sizes: PieceSizeSpec[] = [];
       for (const sourceSize of ordered) {
         try {
-          const sizedFuse = mapFuseSpecToSize(fuse, base.outline, sourceSize.outline);
+          const sizedFuse = mapFuseSpecToSize(
+            fuse,
+            base.outline,
+            sourceSize.outline,
+            sourcePiece.seamAllowanceMm,
+          );
           const reference =
             fuse.zone && 'dxfPieceKey' in fuse.zone
               ? zoneOutlines.get(zoneKey(fuse.zone.dxfPieceKey, sourceSize.sizeToken)) ??
