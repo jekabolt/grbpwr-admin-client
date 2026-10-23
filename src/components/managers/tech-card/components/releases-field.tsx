@@ -43,7 +43,6 @@ import {
 } from './equipment-options';
 import {
   densityText,
-  effectiveSeamClass,
   legacyMachineFact,
   machineProfileSummary,
   OPERATION_TYPE_LABELS,
@@ -312,7 +311,6 @@ function SnapshotOperations({
   ops,
   pieces,
   park,
-  defaultSeamClass,
   mediaUrlById,
 }: {
   ops: common_TechCardOperation[];
@@ -320,7 +318,6 @@ function SnapshotOperations({
   pieces: common_TechCardPiece[];
   /** Парк оборудования ЭТОГО ЖЕ снапшота — шаг чаще всего не несёт машинку, а наследует её. */
   park?: common_TechCardEquipmentDefaults;
-  defaultSeamClass?: string;
   /** Адреса операционных снимков — из resolvedOperationMedia ЭТОГО ЖЕ СНАПШОТА, не живой карточки. */
   mediaUrlById: Map<number, string>;
 }) {
@@ -465,10 +462,9 @@ function SnapshotOperations({
                     // the machine. operationHeading reads both, so a frozen release keeps the verb
                     // it was signed with.
                     machineType: o.machineType,
-                    // Класс шва — якорь вида отстрочки, и снапшот несёт его наравне с машинкой:
-                    // выпущенная карточка обязана называть шаг тем же словом, каким его называла
-                    // живая.
-                    seamClass: effectiveSeamClass(o.seamClass, defaultSeamClass),
+                    // Снапшот несёт оба сырых входа общего резолва: mode для новых A2 и OS для легаси.
+                    seamClass: o.seamClass,
+                    topstitchMode: o.topstitch?.mode,
                     // Работа снапшота, если она в нём есть: подписанный шаг обязан называться на
                     // экране архива тем же словом, что на бумаге того же релиза (R8).
                     work: o.work,
@@ -635,7 +631,6 @@ function ReleaseSnapshot({
             ops={snap.operations ?? []}
             pieces={snap.pieces ?? []}
             park={snap.construction?.equipmentDefaults}
-            defaultSeamClass={snap.construction?.defaultSeamClass}
             mediaUrlById={mediaUrlById}
           />
 

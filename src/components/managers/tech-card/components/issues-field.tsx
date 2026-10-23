@@ -17,7 +17,7 @@ import {
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { TechCardFormData } from './schema';
-import { effectiveSeamClass, operationHeading } from './operation-options';
+import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useFormPieces } from './piece-picker';
 
@@ -268,9 +268,6 @@ export function IssuesField() {
     outputUnitKey?: string;
     outputUnitName?: string;
   }>;
-  const cardSeamClass = useWatch({ control, name: 'construction.defaultSeamClass' }) as
-    | string
-    | undefined;
   const formPieces = useFormPieces();
   const unitNameByKey = useMemo(() => {
     const names = new Map<string, string>();
@@ -290,6 +287,7 @@ export function IssuesField() {
       operationType?: string;
       machineType?: string;
       seamClass?: string;
+      topstitchMode?: string;
       work?: string;
       zone?: string;
       note?: string;
@@ -300,9 +298,9 @@ export function IssuesField() {
         // The verb of a machine step comes from its machine — an issue that points at «machine ·
         // hem» names no step on a card where nine steps are machine steps.
         machineType: o.machineType as Parameters<typeof operationHeading>[0]['machineType'],
-        // ...и вид — из класса шва: ссылка «join · подол» на карточке, где подол отстрочен, не
-        // называет шаг, а путает с соседним.
-        seamClass: effectiveSeamClass(o.seamClass, cardSeamClass),
+        // ...и вид — из сырых полей шага: mode якорит новые A2, OS читает легаси.
+        seamClass: o.seamClass,
+        topstitchMode: o.topstitchMode as Parameters<typeof operationHeading>[0]['topstitchMode'],
         // ...и названная работа бьёт обе выведенные лестницы (R8).
         work: o.work,
         workCatalog,
@@ -317,7 +315,7 @@ export function IssuesField() {
         ),
         note: o.note,
       }),
-    [cardSeamClass, formPieces, unitNameByKey, workCatalog],
+    [formPieces, unitNameByKey, workCatalog],
   );
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
     number?: number;

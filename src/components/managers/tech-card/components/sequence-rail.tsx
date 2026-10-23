@@ -298,6 +298,10 @@ function RailStep({
   // Класс шва — ЯКОРЬ ВИДА, и рельсу он нужен по той же причине, по какой нужен машинный тип:
   // без него отстрочка на одноигольной читалась бы «join» в списке и «Topstitch» в открытом шаге.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  const topstitchMode = (useWatch({
+    control,
+    name: `operations.${index}.topstitchMode`,
+  }) ?? '') as Parameters<typeof operationHeading>[0]['topstitchMode'];
   // РАБОТА — НАЗВАННОЕ ИМЯ ШАГА, и оно бьёт обе выведенные лестницы выше. Без этой подписки шаг,
   // которому назначили работу, продолжал бы зваться в рельсе выведенным словом, пока пикер в
   // открытом редакторе называет его выбранным, — тот самый остаток, ради которого R8 и заведена.
@@ -356,7 +360,8 @@ function RailStep({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
-      seamClass: effectiveSeamClass(seamClass, cardSeamClass),
+      seamClass,
+      topstitchMode,
       work,
       workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],

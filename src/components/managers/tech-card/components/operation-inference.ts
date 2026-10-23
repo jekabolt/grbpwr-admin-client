@@ -44,7 +44,6 @@ import { UNSET_PURPOSE, bindingScopes, scopeKeyOfBinding } from './bom-purpose';
 // фолдится только шов «деталь ↔ связка», потому что только через него пишут чужие руки.
 import { pieceRefKey, rollGoodsScopes } from './piece-block-refs';
 import { kindOf } from './operation-kinds';
-import { effectiveSeamClass } from './operation-options';
 import { isMachineStepType, isPressStepType, pressProfileFitsStep } from './equipment-options';
 
 // ─── вход: снимок карточки, ровно те поля, по которым что-то выводится ──────────────────────────
@@ -84,6 +83,7 @@ export type InferenceStep = {
   operationType?: string;
   machineType?: string;
   seamClass?: string;
+  topstitchMode?: string;
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
@@ -349,9 +349,7 @@ function descendToPieces(
 
   walk(steps[index]?.inputKeys ?? [], index, 0);
 
-  const ordered = [...leaves].sort(
-    (a, b) => (pieceOrder.get(a) ?? 0) - (pieceOrder.get(b) ?? 0),
-  );
+  const ordered = [...leaves].sort((a, b) => (pieceOrder.get(a) ?? 0) - (pieceOrder.get(b) ?? 0));
   return { pieces: ordered, dangling: [...dangling].sort(), complete, unitsExpanded };
 }
 
@@ -456,16 +454,13 @@ function stepBomKinds(step: InferenceStep, bomByKey: Map<string, InferenceBomLin
 }
 
 /** Вид шага сегодня — вычисляемый, как везде на карточке (своей колонки у него ещё нет). */
-export function stepKindId(
-  step: InferenceStep,
-  bomByKey: Map<string, InferenceBomLine>,
-  defaultSeamClass?: string,
-): string {
+export function stepKindId(step: InferenceStep, bomByKey: Map<string, InferenceBomLine>): string {
   return (
     kindOf({
       operationType: step.operationType,
       machineType: step.machineType,
-      seamClass: effectiveSeamClass(step.seamClass, defaultSeamClass),
+      seamClass: step.seamClass,
+      topstitchMode: step.topstitchMode,
       attachMethod: step.attachMethod,
       coverageMode: step.coverageMode,
       labelAttachStitch: step.labelAttachStitch,
@@ -523,12 +518,8 @@ function nameOpinion(leaves: string[], idx: CardIndex): SourceOpinion {
 }
 
 /** ОБЛАСТЬ ПО ВИДУ РАБОТЫ. До появления оси `work` источник живёт на вычисляемом виде. */
-function workOpinion(
-  step: InferenceStep,
-  idx: CardIndex,
-  defaultSeamClass?: string,
-): SourceOpinion {
-  const zone = KIND_ZONE_DRAFT[stepKindId(step, idx.bomByKey, defaultSeamClass)];
+function workOpinion(step: InferenceStep, idx: CardIndex): SourceOpinion {
+  const zone = KIND_ZONE_DRAFT[stepKindId(step, idx.bomByKey)];
   return { id: 'work', zones: zone ? [zone] : [] };
 }
 
@@ -544,9 +535,7 @@ function inferZoneWith(card: InferenceCard, index: number, idx: CardIndex): Zone
   const byPieces: SourceOpinion[] = descent.complete
     ? [fabricOpinion(descent.pieces, idx), nameOpinion(descent.pieces, idx)]
     : [];
-  const sources = [...byPieces, workOpinion(step, idx, card.defaultSeamClass)].filter(
-    (s) => s.zones.length > 0,
-  );
+  const sources = [...byPieces, workOpinion(step, idx)].filter((s) => s.zones.length > 0);
 
   const verdict = arbitrate(sources);
   const reason: ZoneInference['reason'] = verdict.value
@@ -584,15 +573,10 @@ export function inferThread(card: InferenceCard, index: number): ThreadInference
   return inferThreadWith(card, index, indexCard(card));
 }
 
-function inferThreadWith(
-  card: InferenceCard,
-  index: number,
-  idx: CardIndex,
-): ThreadInference {
+function inferThreadWith(card: InferenceCard, index: number, idx: CardIndex): ThreadInference {
   const step = card.steps[index] ?? {};
   const type = step.operationType ?? '';
-  const eats =
-    isMachineStepType(type) || type === 'TECH_CARD_OPERATION_TYPE_HANDWORK';
+  const eats = isMachineStepType(type) || type === 'TECH_CARD_OPERATION_TYPE_HANDWORK';
   if (!eats) return { lineKey: '', candidates: [], reason: 'not-a-thread-step' };
 
   const linked = (step.bomLineKeys ?? []).map((k) => (k ?? '').trim()).filter(Boolean);
@@ -605,11 +589,9 @@ function inferThreadWith(
     .map((b) => (b.lineKey ?? '').trim());
   if (threads.length === 0) return { lineKey: '', candidates: [], reason: 'no-data' };
 
-  const kindId = stepKindId(step, idx.bomByKey, card.defaultSeamClass);
+  const kindId = stepKindId(step, idx.bomByKey);
   const preferred = kindId ? KIND_THREAD_PREFERENCE[kindId] : undefined;
-  const narrowed = preferred
-    ? threads.filter((k) => idx.bomByKey.get(k)?.kind === preferred)
-    : [];
+  const narrowed = preferred ? threads.filter((k) => idx.bomByKey.get(k)?.kind === preferred) : [];
   const pool = narrowed.length > 0 ? narrowed : threads;
 
   return pool.length === 1
@@ -653,8 +635,7 @@ export function inferPress(card: InferenceCard, index: number): PressInference {
   if (!isPressStepType(type)) {
     return { pressEquipment: '', profileKey: '', candidates: [], reason: 'not-a-press-step' };
   }
-  const set =
-    !!(step.pressEquipment ?? '') && step.pressEquipment !== NONE_PRESS_EQUIPMENT;
+  const set = !!(step.pressEquipment ?? '') && step.pressEquipment !== NONE_PRESS_EQUIPMENT;
   if (set || (step.pressProfileKey ?? '').trim()) {
     return { pressEquipment: '', profileKey: '', candidates: [], reason: 'already-set' };
   }
@@ -719,14 +700,14 @@ function smvHintWith(
 ): SmvHint {
   const step = card.steps[index] ?? {};
   if ((step.smv ?? '').trim()) return { smv: '', fromStep: 0 };
-  const kind = stepKindId(step, idx.bomByKey, card.defaultSeamClass);
+  const kind = stepKindId(step, idx.bomByKey);
   if (!kind) return { smv: '', fromStep: 0 };
 
   for (let j = index - 1; j >= 0; j--) {
     const prev = card.steps[j];
     const value = (prev?.smv ?? '').trim();
     if (!value) continue;
-    if (stepKindId(prev, idx.bomByKey, card.defaultSeamClass) !== kind) continue;
+    if (stepKindId(prev, idx.bomByKey) !== kind) continue;
     return { smv: value, fromStep: j + 1 };
   }
   const fromCatalog = (catalogByKind[kind] ?? '').trim();
@@ -764,5 +745,4 @@ export function inferStep(
 }
 
 /** Зона у шага не заполнена — только в это состояние вообще что-то подставляется. */
-export const zoneIsUnset = (zone?: string): boolean =>
-  !(zone ?? '').trim() || zone === NONE_ZONE;
+export const zoneIsUnset = (zone?: string): boolean => !(zone ?? '').trim() || zone === NONE_ZONE;

@@ -1913,28 +1913,14 @@ const operationSchema = z
       }
     }
 
-    // F11 (0328): КЛАСС ШВА И БЛОК ОТСТРОЧКИ ГОВОРЯТ ОБ ОДНОМ ШАГЕ, И ТЕПЕРЬ ОНИ СВЯЗАНЫ.
-    // `os_topstitch` — не класс наравне с прочими, а утверждение «соединительного шва у этого шага
-    // нет, есть только отделочная строчка»; соседний блок говорит, ГДЕ она лежит.
-    //
-    // ВТОРАЯ ПОЛОВИНА ВАЖНЕЕ ПЕРВОЙ: НЕНАЗВАННЫЙ класс НАСЛЕДУЕТ умолчание карточки, а оно бывает
-    // `ss_plain`, — то есть чисто декоративная отстрочка, у которой заполнили только блок, МОЛЧА
-    // объявлялась стачным швом и уезжала такой в подпись и на печатный лист. Наследование от ответа
-    // здесь не отличить ничем, поэтому шаг обязан сказать одно из двух.
+    // Декоративный OS без режима не говорит, где идёт строчка. Обратное больше не верно:
+    // названный topstitch mode законно живёт при UNKNOWN на строке и наследует обычный класс шва карточки.
     if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchMode'],
         message:
           'a topstitch seam class says the step has no joining seam, only a decorative line — say WHERE that line runs, or pick the seam class the step actually makes',
-      });
-    }
-    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['seamClass'],
-        message:
-          'an unnamed seam class inherits the card default, and this step is topstitched — name the class it makes, or set «topstitch» to say it makes no joining seam at all',
       });
     }
 

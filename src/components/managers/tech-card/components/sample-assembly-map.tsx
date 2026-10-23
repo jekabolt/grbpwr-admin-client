@@ -321,9 +321,11 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                       machineType: o.machineType as Parameters<
                         typeof operationHeading
                       >[0]['machineType'],
-                      // ...а вид — из класса шва: у отстрочки якорь именно там, и без него карта
-                      // называла бы её «join» рядом с редактором, который зовёт её «Topstitch».
-                      seamClass: effectiveSeamClass(o.seamClass, cardSeamClass),
+                      // ...а вид — из сырых mode и seam class, по общему предикату A2.
+                      seamClass: o.seamClass,
+                      topstitchMode: o.topstitchMode as Parameters<
+                        typeof operationHeading
+                      >[0]['topstitchMode'],
                       // ...а названная работа бьёт обе выведенные лестницы (R8): шаг, которому
                       // назначили работу, зовётся здесь её подписью — той же, что в рельсе и на
                       // печатном листе.

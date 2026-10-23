@@ -519,6 +519,7 @@ const operationTypeText = (
     operationType?: common_TechCardOperationType;
     machineType?: common_TechCardMachineType;
     seamClass?: common_TechCardSeamClass;
+    topstitchMode?: common_TechCardTopstitch['mode'];
     work?: string;
     /** Заметка — ПОСЛЕДНЯЯ ступень имени, и только у двух глаголов она до неё доходит. См. ниже. */
     note?: string;
@@ -531,19 +532,19 @@ const operationTypeText = (
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       work: o.work,
       workCatalog,
       pieceNames: [],
     });
   }
   if (isMachineStepType(v)) {
-    // КЛАСС ШВА ЕДЕТ В КОМПОЗИТОР, потому что у отстрочки якорь вида именно там: без него бумага
-    // напечатала бы «join» на строчке, которую экран называет «topstitch», — а бумага и есть та
-    // единственная копия карточки, что стоит у машины.
+    // ОБА СЫРЫХ ВХОДА ВИДА ЕДУТ В КОМПОЗИТОР: mode якорит новые A2, OS читает легаси-строки.
     return operationHeading({
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       // РАБОТЫ ЗДЕСЬ ЗАВЕДОМО НЕТ — ветка выше её перехватила, — и `undefined` написан вслух,
       // потому что композитор требует ответа: «называю по-старому» обязано быть решением, а не
       // забытым аргументом.
@@ -2996,7 +2997,10 @@ export function TechPackDocument({
                         o.seamClass,
                         tc.construction?.defaultSeamClass,
                       );
-                      const stepName = operationTypeText({ ...o, seamClass }, workCatalog);
+                      const stepName = operationTypeText(
+                        { ...o, topstitchMode: o.topstitch?.mode },
+                        workCatalog,
+                      );
                       // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
                       // только собственное значение шага, то есть корректно унаследованная от
                       // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,

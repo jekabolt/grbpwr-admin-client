@@ -2915,12 +2915,8 @@ function OperationEditor({
     ),
     textState('attachmentSizeMm', 'attachment size, mm', attachmentSizeMm, showAttachmentSize),
     // ШОВ И ПЛОТНОСТЬ (ревью шва Ф4+Ф5+Ф7). Четвёрка «seam & stitch» прячется у ВТО-шага, пока он
-    // её не несёт, — но отказ сервера бывает и на ПУСТОМ её поле: пара Ф3 «режим отстрочки ↔ класс
-    // шва» отвечает `seam_class: required` на шаг, где режим остался, а класс не назван. Вне этой
-    // таблицы такой отказ был невидим: контрола нет, остатка нет (поле пустое), а створке его
-    // чинить нечем. Строкой ОСТАТКА четвёрка не бывает по построению — любое её заполненное
-    // значение само открывает секцию (`showSewingOverrides`), — поэтому здесь она даёт только
-    // catch-строки.
+    // её не несёт. UNKNOWN у класса шва законно наследует стандарт карточки даже при названном
+    // topstitch mode; сам mode открывает секцию и даёт контролу свой именованный путь ошибки.
     enumState(
       'seamClass',
       'seam class',
@@ -3363,7 +3359,8 @@ function OperationEditor({
   const resolvedKind = kindOf({
     operationType: opType,
     machineType,
-    seamClass: effectiveSeam,
+    seamClass,
+    topstitchMode,
     attachMethod,
     coverageMode,
     labelAttachStitch,
@@ -3503,7 +3500,7 @@ function OperationEditor({
    * ровно по гейту сервера, а не по короткому списку пункта.
    *
    * ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ (`kindClears`, спрошенный
-   * писателем). Без него правило оборачивалось против себя: оставшийся `seam_class` перехватывал
+   * писателем). Без него правило оборачивалось против себя: оставшийся `topstitch_mode` или легаси-OS перехватывал
    * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
    * которое человек не заполнял.
    */
@@ -3548,6 +3545,7 @@ function OperationEditor({
         machineType,
         pressEquipment,
         seamClass,
+        topstitchMode,
         attachMethod,
         coverageMode,
         labelAttachStitch,
@@ -3653,7 +3651,8 @@ function OperationEditor({
       const rk = kindOf({
         operationType: r.operationType as string,
         machineType: r.machineType as string,
-        seamClass: effectiveSeamClass(r.seamClass as string, cardSeamClass),
+        seamClass: r.seamClass as string,
+        topstitchMode: r.topstitchMode as string,
         attachMethod: r.attachMethod as string,
         coverageMode: r.coverageMode as string,
         labelAttachStitch: r.labelAttachStitch as string,
@@ -3898,9 +3897,10 @@ function OperationEditor({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
-      // ЯКОРЬ ВИДА едет в композитор: без него отстрочка на одноигольной называлась бы «join»
+      // Оба сырых входа едут в общий резолв: mode якорит новые A2, OS читает легаси-строки.
       // здесь и «Topstitch» в пикере на два сантиметра выше.
-      seamClass: effectiveSeam,
+      seamClass,
+      topstitchMode,
       // ...А НАЗВАННАЯ РАБОТА БЬЁТ И ЕГО (R8). Именно здесь оставался остаток R6: шаг с классом шва
       // отстрочки, которому назначили работу без пункта, звался отстрочкой во всех заголовках,
       // пока пикер на два сантиметра выше называл его выбранной работой.
@@ -4661,10 +4661,10 @@ function OperationEditor({
           className={selectNoGrow}
         />
         {/* «НА ЧЁМ» — СУЖЕННЫЙ СПИСОК И ДРУГОЕ СЛОВО НАД НИМ, когда вид якорится не машинкой.
-            У отстрочки якорь — класс шва (`OS_TOPSTITCH`), а машинку шаг MACHINE обязан нести:
+            У отстрочки якорь — названный mode, а машинку шаг MACHINE обязан нести:
             сервер отвергает MACHINE без неё. Поэтому пункт машинку ставит, но не угадывает молча —
             вопрос стоит здесь, на виду, раскрытым. И смена машинки внутри списка вид НЕ меняет:
-            переставил одноигольную на двухигольную — `seam_class` не тронулся, вид прежний. */}
+            переставил одноигольную на двухигольную — `topstitch_mode` не тронулся, вид прежний. */}
         {isMachineStep && (
           <SelectField
             name={`operations.${index}.machineType`}
@@ -7878,10 +7878,10 @@ export function OperationsField({
         typeof operationHeading
       >[0]['operationType'],
       machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
-      seamClass: effectiveSeamClass(
-        getValues(`operations.${i}.seamClass`) as string,
-        cardSeamClass,
-      ),
+      seamClass: getValues(`operations.${i}.seamClass`) as string,
+      topstitchMode: getValues(`operations.${i}.topstitchMode`) as Parameters<
+        typeof operationHeading
+      >[0]['topstitchMode'],
       // Схема сборки называет шаг тем же словом, что рельс: работа названа — её подпись (R8).
       work: getValues(`operations.${i}.work`) as string,
       workCatalog,

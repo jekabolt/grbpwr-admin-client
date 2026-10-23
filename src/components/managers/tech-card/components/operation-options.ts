@@ -381,7 +381,7 @@ export function cardSeamClassOptions(
 export const seamClassLabel = (v?: string): string =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''
-    : (SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '');
+    : SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '';
 
 // THERE IS A «NONE» NOW, AND IT IS NOT A SPELLING OF UNKNOWN. The old comment here said the
 // opposite — «none» and «not specified» are one fact — and it was true for exactly as long as
@@ -417,7 +417,7 @@ export const attachmentOptions: Array<{ value: common_TechCardAttachmentKind; la
 export const attachmentKindLabel = (v?: string): string =>
   !v || v === 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'
     ? ''
-    : (ATTACHMENT_KIND_LABELS[v as common_TechCardAttachmentKind] ?? '');
+    : ATTACHMENT_KIND_LABELS[v as common_TechCardAttachmentKind] ?? '';
 
 // ОДНА КАРТА НА ВЕСЬ РЕЖИМ ОТСТРОЧКИ: как он называется, есть ли у него число, ОБЯЗАТЕЛЬНО ли оно и
 // ОТ КАКОЙ ЛИНИИ меряется. Четыре вопроса — один ответ на член перечисления.
@@ -680,12 +680,13 @@ export function operationHeading(args: {
   pieceNames: string[];
   note?: string;
   /**
-   * КЛАСС ШВА — НЕ УКРАШЕНИЕ ЗАГОЛОВКА, А ЯКОРЬ ВИДА. Отстрочка на одноигольной несёт машинку
-   * `lockstitch`, чей глагол буквально «join», — и без этого поля заголовок называл бы её «join»,
-   * пока пикер вида называет её «topstitch». Необязательно: заголовок собирается и по архивному
+   * КЛАСС ШВА И РЕЖИМ ОТСТРОЧКИ — ВХОДЫ РЕЗОЛВА ВИДА. Новые строки A2 якорятся на
+   * `topstitch_mode`; явный OS остаётся легаси-входом. Оба поля передаются сырыми: карточный стандарт
+   * не имеет права превратить каждый наследующий шов в Topstitch. Необязательно: заголовок собирается и по архивному
    * снапшоту, где спрашивать нечего, и там лестница ниже уже права.
    */
   seamClass?: string;
+  topstitchMode?: string;
   /**
    * Токен работы из строки шага (`TechCardOperation.work`). Пусто или `undefined` — работы нет.
    *
@@ -704,12 +705,13 @@ export function operationHeading(args: {
    */
   workCatalog: WorkCatalog | undefined;
 }): string {
-  const typeVerb = args.operationType ? (OPERATION_TYPE_VERB[args.operationType] ?? '') : '';
+  const typeVerb = args.operationType ? OPERATION_TYPE_VERB[args.operationType] ?? '' : '';
   // ВИД СПРАШИВАЕТСЯ ПЕРВЫМ, и отвечает он только там, где говорит больше второй оси.
   const kindVerb = kindHeadingVerb({
     operationType: args.operationType,
     machineType: args.machineType,
     seamClass: args.seamClass,
+    topstitchMode: args.topstitchMode,
   });
   // РАБОТА БЬЁТ ОБЕ ВЫВЕДЕННЫЕ ЛЕСТНИЦЫ. Она НАЗВАНА человеком и хранится, а они выведены из
   // соседних полей; давать выведенному перебить записанное значило бы называть шаг словом, которое
@@ -942,7 +944,9 @@ export function machineProfileParts(p: MachineSettings): Array<SettingPart<Machi
     // topstitch inset (or the reverse) is sewn wrong and noticed after the batch.
     {
       field: 'stitchWidth',
-      text: (p.stitchWidthMm ?? '').trim() ? `stitch width ${(p.stitchWidthMm ?? '').trim()} mm` : '',
+      text: (p.stitchWidthMm ?? '').trim()
+        ? `stitch width ${(p.stitchWidthMm ?? '').trim()} mm`
+        : '',
     },
     // '' for UNKNOWN, the real words for NONE: «runs bare» is a настройка somebody chose, and the
     // summary of a profile that states it must not read the same as one that says nothing.
@@ -955,7 +959,10 @@ export const machineProfileSummary = (p: MachineSettings): string =>
 
 export function pressProfileParts(p: PressSettings): Array<SettingPart<PressSettingField>> {
   return nonEmpty<PressSettingField>([
-    { field: 'temperature', text: (p.pressTemperatureC ?? 0) > 0 ? `${p.pressTemperatureC} °C` : '' },
+    {
+      field: 'temperature',
+      text: (p.pressTemperatureC ?? 0) > 0 ? `${p.pressTemperatureC} °C` : '',
+    },
     { field: 'dwell', text: (p.pressDwellSec ?? 0) > 0 ? `${p.pressDwellSec} s` : '' },
     // THE UNIT IS IN THE TEXT, always: press pressure is quoted in bar, in kg and in N/cm² by three
     // different people, and a bare number on a printed sheet gets read in whichever the reader uses.
@@ -1092,7 +1099,7 @@ const enumText = <T extends string>(labels: Record<T, string>, v?: string): stri
   // '' for the UNKNOWN member and for a token this bundle has never heard of — the same direction
   // the equipment label helpers take. A raw «TECH_CARD_TRIM_ACTION_…» on a sheet for the floor is
   // worse than a blank, because a blank is visibly incomplete and a token looks like an answer.
-  return !t || t.endsWith('_UNKNOWN') ? '' : (labels[t as T] ?? '');
+  return !t || t.endsWith('_UNKNOWN') ? '' : labels[t as T] ?? '';
 };
 const mm = (v?: string): string => ((v ?? '').trim() ? `${(v ?? '').trim()} mm` : '');
 const positive = (n?: number): number => ((n ?? 0) > 0 ? (n as number) : 0);
@@ -1593,7 +1600,10 @@ export function stepToolFactParts(
   // отсюда же, откуда её читает ярлык контрола в редакторе: два написания одного слова — это тот
   // самый разъезд, который уже случился.
   const cutNoun = cutLengthNoun(workCatalog, o.work);
-  const buttonhole = [bhWords || cut ? `${bhWords ? `${bhWords} ` : ''}${cutNoun}` : '', cut ? `cut ${cut}` : '']
+  const buttonhole = [
+    bhWords || cut ? `${bhWords ? `${bhWords} ` : ''}${cutNoun}` : '',
+    cut ? `cut ${cut}` : '',
+  ]
     .filter(Boolean)
     .join(', ');
   const secondPress = positive(p?.secondPressSec);
@@ -1622,7 +1632,6 @@ export function stepToolFactParts(
     { field: 'zipper', text: zipperApplicationLabel(f?.zipperApplication) },
   ]);
 }
-
 
 // ОБЯЗАТЕЛЬНЫЙ ВОПРОС ГЛАГОЛА — ОДНА ТАБЛИЦА НА ВЕСЬ ЭКРАН, И ЖИВЁТ ОНА ЗДЕСЬ, А НЕ В РЕДАКТОРЕ.
 // Спрашивают её ДВОЕ: `operations-field` — в сетке открытого шага, `assembly-create-dialog` — на
