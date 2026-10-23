@@ -934,7 +934,7 @@ const pressProfileSchema = z.object({
 
 const constructionSchema = z
   .object({
-    defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_SS_PLAIN'),
     defaultStitchesPerCm: z.string().optional().default(''),
     hemFinish: z.string().optional().default(''),
     notes: z.string().optional().default(''),
@@ -2035,7 +2035,7 @@ const costingSchema = z.object({
 });
 
 export const emptyConstruction: z.input<typeof constructionSchema> = {
-  defaultSeamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+  defaultSeamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
   defaultStitchesPerCm: '',
   hemFinish: '',
   notes: '',
