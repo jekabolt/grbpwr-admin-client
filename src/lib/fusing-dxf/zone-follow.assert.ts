@@ -12,7 +12,13 @@ import {
   type ZonePoint,
 } from 'components/managers/tech-card/components/nesting/fuse-zone';
 import { buildFusingSheets, mapFuseSpecToSize } from './dxf';
-import { fuseInsetRingMm, generateFuseGeometry, signedArea, zoneRingMm } from './geometry';
+import {
+  fuseAreaMm2,
+  fuseInsetRingMm,
+  generateFuseGeometry,
+  signedArea,
+  zoneRingMm,
+} from './geometry';
 import {
   ZONE_ON_CONTOUR_MM,
   flattenSpline,
@@ -34,6 +40,32 @@ function archOutline(width: number, height: number, steps = 48): PtMm[] {
     const a = (Math.PI * k) / steps;
     out.push({ x: r + r * Math.cos(a), y: height + r * Math.sin(a) });
   }
+  return out;
+}
+
+/**
+ * Sleeve-like contour with four construction corners and a densely sampled cap. Near-duplicate
+ * cap vertices model the tiny offset artefacts seen in the beta FW28 DXF: their one-vertex turns
+ * are large, but over a few millimetres they are still one smooth curve.
+ */
+function noisySleeveOutline(width = 420, sideHeight = 190, capHeight = 100): PtMm[] {
+  const out: PtMm[] = [
+    { x: width - 35, y: 0 },
+    { x: width, y: sideHeight },
+  ];
+  const steps = 72;
+  for (let step = 0; step <= steps; step++) {
+    const t = step / steps;
+    const point = {
+      x: width * (1 - t),
+      y: sideHeight + capHeight * Math.sin(Math.PI * t),
+    };
+    out.push(point);
+    if (step > 8 && step < steps - 8 && step % 5 === 0) {
+      out.push({ x: point.x + 0.001, y: point.y - 0.001 });
+    }
+  }
+  out.push({ x: 35, y: 0 });
   return out;
 }
 
@@ -98,6 +130,49 @@ export function main() {
   assert.ok(carvedArea < seedArea, `an inward point lowers area (${carvedArea} < ${seedArea})`);
   assert.equal(ringSelfIntersects(carvedRing), false, 'the carved ring stays simple');
   assert.deepEqual(seedZone(inset), seed, 'reset restores the exact full-fill seed');
+
+  const sleeveOutline = noisySleeveOutline();
+  const noisySleeve = seedZone(fuseInsetRingMm(sleeveOutline, s0, null));
+  assert.ok(noisySleeve && 'spline' in noisySleeve);
+  assert.equal(
+    noisySleeve.spline.points.length,
+    4,
+    'a tessellated sleeve cap keeps exactly cap-left, cap-right, hem-left and hem-right',
+  );
+  const sleevePoints = zonePoints(noisySleeve);
+  const sleeveCentre = sleevePoints.reduce(
+    (sum, point) => ({
+      x: sum.x + point.x / sleevePoints.length,
+      y: sum.y + point.y / sleevePoints.length,
+    }),
+    { x: 0, y: 0 },
+  );
+  const hemLeft = sleevePoints.reduce(
+    (best, point, index) =>
+      point.x < sleeveCentre.x && point.y < sleevePoints[best].y ? index : best,
+    sleevePoints.findIndex((point) => point.x < sleeveCentre.x),
+  );
+  const editedSleeve = splineZone(
+    sleevePoints.map((point, index) =>
+      index === hemLeft
+        ? {
+            ...point,
+            x: point.x + (sleeveCentre.x - point.x) * 0.2,
+            y: point.y + (sleeveCentre.y - point.y) * 0.2,
+          }
+        : point,
+    ),
+  );
+  for (const gradedSleeve of [sleeveOutline, noisySleeveOutline(424, 190, 102)]) {
+    const editedGeometry = generateFuseGeometry({
+      outline: gradedSleeve,
+      spec: spec(editedSleeve),
+    });
+    assert.ok(
+      fuseAreaMm2(editedGeometry) > 0,
+      'dragging hem-left keeps the edited zone valid across the sleeve grade',
+    );
+  }
 
   // Points on the arch of the inset: the arch is at y >= height; project guesses onto the inset.
   const on = (x: number, y: number) => projectOnRing({ x, y }, inset).p;

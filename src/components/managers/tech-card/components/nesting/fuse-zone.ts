@@ -9,7 +9,7 @@ import {
   flattenZoneSides,
   type FlatZone,
 } from 'lib/fusing-dxf/spline';
-import { EDGE_CORNER_TURN_DEG, outlineTurnDeg } from 'lib/fusing-dxf/edge-runs';
+import { EDGE_CORNER_TURN_DEG } from 'lib/fusing-dxf/edge-runs';
 import type { PtMm } from 'lib/pattern-import/types';
 import type { FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
@@ -21,6 +21,8 @@ const STRAIGHT_MM = 0.08;
 const RING_EPSILON = 1e-9;
 /** Enough anchors for complex pieces without turning a tessellated curve into dozens of handles. */
 export const ZONE_SEED_MAX_POINTS = 24;
+/** Arc sampled on each side of a vertex when deciding whether it is a physical corner. */
+export const ZONE_SEED_CORNER_WINDOW_MM = 5;
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const midOf = (a: ZonePoint, b: ZonePoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
@@ -99,12 +101,82 @@ export function splineZone(pts: readonly ZonePoint[]): DrawnZone {
   return { spline: { points } };
 }
 
+type ArcCorner = { index: number; at: number; turn: number };
+
+const arcGap = (a: number, b: number, perimeter: number) => {
+  const along = Math.abs(a - b);
+  return Math.min(along, perimeter - along);
+};
+
+/** A point at a wrapped arc-length position on a closed polyline. */
+function pointAtArc(
+  ring: readonly PtMm[],
+  distanceAt: readonly number[],
+  perimeter: number,
+  at: number,
+): PtMm {
+  const target = ((at % perimeter) + perimeter) % perimeter;
+  let low = 0;
+  let high = ring.length;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (distanceAt[middle] <= target) low = middle;
+    else high = middle;
+  }
+  const a = ring[low];
+  const b = ring[(low + 1) % ring.length];
+  const length = distanceAt[low + 1] - distanceAt[low];
+  const t = length > RING_EPSILON ? (target - distanceAt[low]) / length : 0;
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
 /**
- * The inset contour → the initial full-fill zone. Vertices turning more than the shared edge-run
- * threshold are kept as significant corners. A contour with fewer than three such corners is
- * completed with far-apart existing contour vertices; an unusually busy contour is capped by
- * sampling its corner sequence. Every stored point is sharp and remains on the contour after the
- * normal 0.1 mm wire rounding (within the 0.5 mm contour-follow tolerance).
+ * Physical corners of a tessellated outline. The turn is measured between points a short arc
+ * distance before and after every vertex, so a rounded/split CAD corner accumulates while the many
+ * tiny turns of a smooth curve stay below the threshold. Non-max suppression then leaves one
+ * handle at the strongest vertex of each corner neighbourhood.
+ */
+function arcCorners(
+  ring: readonly PtMm[],
+  distanceAt: readonly number[],
+  perimeter: number,
+): ArcCorner[] {
+  // On unusually small pieces, keep the probe local enough that it cannot span much of the ring.
+  const window = Math.min(ZONE_SEED_CORNER_WINDOW_MM, perimeter / 12);
+  if (!(window > RING_EPSILON)) return [];
+  const ranked = ring
+    .map((point, index): ArcCorner => {
+      const before = pointAtArc(ring, distanceAt, perimeter, distanceAt[index] - window);
+      const after = pointAtArc(ring, distanceAt, perimeter, distanceAt[index] + window);
+      const incoming = { x: point.x - before.x, y: point.y - before.y };
+      const outgoing = { x: after.x - point.x, y: after.y - point.y };
+      const cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+      const dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
+      return {
+        index,
+        at: distanceAt[index],
+        turn: (Math.atan2(Math.abs(cross), dot) * 180) / Math.PI,
+      };
+    })
+    .filter((candidate) => candidate.turn > EDGE_CORNER_TURN_DEG)
+    .sort((a, b) => b.turn - a.turn || a.index - b.index);
+
+  const kept: ArcCorner[] = [];
+  for (const candidate of ranked) {
+    if (kept.every((other) => arcGap(candidate.at, other.at, perimeter) > window)) {
+      kept.push(candidate);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The inset contour → the initial full-fill zone. Vertices whose accumulated turn over a short
+ * arc exceeds the shared edge-run threshold are kept as significant corners, with one local
+ * maximum per corner. A contour with fewer than three such corners is completed with far-apart
+ * existing contour vertices; an unusually busy contour keeps its strongest corners. Every stored
+ * point is sharp and remains on the contour after the normal 0.1 mm wire rounding (within the
+ * 0.5 mm contour-follow tolerance).
  */
 export function seedZone(contour: readonly PtMm[]): DrawnZone | null {
   const ring = contour.filter(
@@ -120,15 +192,6 @@ export function seedZone(contour: readonly PtMm[]): DrawnZone | null {
     ring.pop();
   if (ring.length < SPLINE_MIN_POINTS) return null;
 
-  const corners = ring
-    .map((_, index) => index)
-    .filter((index) => outlineTurnDeg(ring, index) > EDGE_CORNER_TURN_DEG);
-  const selected = new Set<number>();
-  if (corners.length <= ZONE_SEED_MAX_POINTS) corners.forEach((index) => selected.add(index));
-  else
-    for (let slot = 0; slot < ZONE_SEED_MAX_POINTS; slot++)
-      selected.add(corners[Math.floor((slot * corners.length) / ZONE_SEED_MAX_POINTS)]);
-
   const distanceAt = [0];
   for (let index = 1; index <= ring.length; index++) {
     const previous = ring[index - 1];
@@ -137,6 +200,11 @@ export function seedZone(contour: readonly PtMm[]): DrawnZone | null {
   }
   const perimeter = distanceAt[ring.length];
   if (!(perimeter > 0)) return null;
+  const selected = new Set(
+    arcCorners(ring, distanceAt, perimeter)
+      .slice(0, ZONE_SEED_MAX_POINTS)
+      .map((corner) => corner.index),
+  );
   if (!selected.size) selected.add(0);
   while (selected.size < SPLINE_MIN_POINTS) {
     let best = -1;
@@ -144,10 +212,7 @@ export function seedZone(contour: readonly PtMm[]): DrawnZone | null {
     for (let index = 0; index < ring.length; index++) {
       if (selected.has(index)) continue;
       const gap = Math.min(
-        ...[...selected].map((other) => {
-          const along = Math.abs(distanceAt[index] - distanceAt[other]);
-          return Math.min(along, perimeter - along);
-        }),
+        ...[...selected].map((other) => arcGap(distanceAt[index], distanceAt[other], perimeter)),
       );
       if (gap > bestGap) {
         best = index;
