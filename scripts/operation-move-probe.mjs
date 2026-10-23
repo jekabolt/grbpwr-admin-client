@@ -23,21 +23,31 @@ const check = (condition, message) => {
 };
 
 const inputs = ['CLR_3', 'CLR_4'];
+const pieceKeys = new Set(inputs);
 const operation = { inputKeys: inputs, outputUnitKey: '', assemblyBlockDetached: false };
-const detached = operationMoveMembership(operation, true);
+const detached = operationMoveMembership(operation, true, pieceKeys);
 check(detached.accepted && detached.assemblyBlockDetached === true, 'divider drop must detach');
 check(operation.inputKeys === inputs, 'divider drop decision must not replace inputs');
 check(inputs.join(',') === 'CLR_3,CLR_4', 'divider drop decision must not mutate inputs');
 
-const joined = operationMoveMembership({ outputUnitKey: ' COLLAR ' }, true);
+const joined = operationMoveMembership({ outputUnitKey: ' COLLAR ' }, true, pieceKeys);
 check(!joined.accepted && joined.outputUnitKey === 'COLLAR', 'producing join must stay attached');
 
-const attached = operationMoveMembership({ assemblyBlockDetached: true }, false);
+const unitInput = operationMoveMembership({ inputKeys: ['COLLAR'] }, true, pieceKeys);
+check(!unitInput.accepted && unitInput.reason === 'pieces-only', 'unit input must stay attached');
+
+const emptyInput = operationMoveMembership({ inputKeys: [] }, true, pieceKeys);
+check(
+  !emptyInput.accepted && emptyInput.reason === 'pieces-only',
+  'empty input must stay attached',
+);
+
+const attached = operationMoveMembership({ assemblyBlockDetached: true }, false, pieceKeys);
 check(attached.accepted && attached.assemblyBlockDetached === false, 'row drop must clear detach');
 
 if (failures.length) {
   failures.forEach((message) => console.error(`FAIL  ${message}`));
   process.exitCode = 1;
 } else {
-  console.log('3/3 operation move cases passed');
+  console.log('5/5 operation move cases passed');
 }

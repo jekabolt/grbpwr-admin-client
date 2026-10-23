@@ -6317,8 +6317,16 @@ export function OperationsField({
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const operation = operations[from];
     if (!operation) return;
-    const membership = operationMoveMembership(operation, standalone);
+    const membership = operationMoveMembership(
+      operation,
+      standalone,
+      new Set(pieces.map((piece) => piece.lineKey)),
+    );
     if (!membership.accepted) {
+      if (membership.reason === 'pieces-only') {
+        refuseGesture('SEQUENCE', 'pieces only', 'use cut pieces');
+        return;
+      }
       // Производящий шаг — несущая точка графа: снятие его выхода превращает каждую позднюю ссылку
       // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Структурное
       // растворение остаётся отдельным явным жестом.
