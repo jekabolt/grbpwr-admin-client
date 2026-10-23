@@ -324,7 +324,7 @@ for (const frozen of ['false', 'true']) {
   ck(/<pattern /.test(s), `frozen=${frozen}: паттерны штриховки ткани в разметке`);
   ck(s.includes("role=\"button\""), `frozen=${frozen}: органы полотна — div с ролью кнопки`);
 }
-// ПОКОЙНАЯ РАЗМЕТКА ПОД ЗАМОРОЗКОЙ ТЕПЕРЬ ТА ЖЕ, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ДОПУСКАЕТСЯ.
+// ПОКОЙНАЯ РАЗМЕТКА ПОД ЗАМОРОЗКОЙ ТА ЖЕ, КРОМЕ ПОЛЕЙ ИМЕНИ, И ЭТО ПРОВЕРЯЕТСЯ.
 //
 // Раньше здесь стояло обратное — «frozen меняет разметку» и «кликабельных органов меньше», — и
 // стояло справедливо: голова плитки под заморозкой роли не получала вовсе, а у свободной детали
@@ -332,11 +332,20 @@ for (const frozen of ['false', 'true']) {
 // делать ровно одно — выделить её, а выделение это ПРЕЗЕНТАЦИЯ, и смотреть на RELEASED разрешено
 // (R10). Всё, что заморозка отнимает, живёт в ховер-полосе и в этот снимок не попадает ни байтом.
 //
-// Проверка от этого не стала холостой, она сменила знак: любое расхождение покойной разметки по
-// `frozen` означает, что на выпущенной карточке снова что-то не рисуется, — и падает тут же.
+// Имя теперь настоящее поле. В портале фулскрина внешний `<fieldset disabled>` до него не доходит,
+// поэтому заморозка обязана доехать собственным `disabled`; это единственное разрешённое отличие.
+const unitNameFields = (html) => [...html.matchAll(/aria-label="unit name for [^"]*"/g)].length;
+const disabledUnitNameFields = (html) =>
+  [...html.matchAll(/aria-label="unit name for [^"]*"[^>]* disabled=""/g)].length;
+const withoutDisabled = (html) => html.replaceAll(' disabled=""', '');
+ck(unitNameFields(shots.false) === 5, 'имя каждого из пяти узлов — настоящее поле');
 ck(
-  shots.false === shots.true,
-  'в покое frozen разметку НЕ меняет: смотреть и выделять разрешено везде',
+  disabledUnitNameFields(shots.false) === 0 && disabledUnitNameFields(shots.true) === 5,
+  'поля имён доступны на draft и выключены на released',
+);
+ck(
+  withoutDisabled(shots.false) === withoutDisabled(shots.true),
+  'кроме disabled у полей имён frozen разметку не меняет',
   `длины ${shots.false.length} и ${shots.true.length}`,
 );
 // `<button>` под внешним `<fieldset disabled>` карточки мёртв (R4): шапки, строки шагов и плитки
