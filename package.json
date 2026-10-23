@@ -70,6 +70,7 @@
     "assembly:cases": "node scripts/assembly-cases-probe.mjs",
     "assembly:blocks": "node scripts/assembly-blocks-probe.mjs",
     "operation:move": "node scripts/operation-move-probe.mjs",
+    "operation:auto-fuse": "node scripts/auto-fuse-override-probe.mjs",
     "assembly:layout": "node scripts/assembly-layout-probe.mjs",
     "assembly:positions": "node scripts/assembly-positions-probe.mjs",
     "assembly:rename": "node scripts/assembly-rename-probe.mjs",

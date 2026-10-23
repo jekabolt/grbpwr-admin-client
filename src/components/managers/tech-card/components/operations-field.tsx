@@ -133,6 +133,7 @@ import {
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
+import { autoFuseRefusal, operationStepNumber } from './fusing-override';
 import { operationMoveMembership } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
@@ -7123,11 +7124,28 @@ export function OperationsField({
     if (cur.includes(key)) return;
 
     const formOps = (getValues('operations') ?? []) as Array<{
+      operationType?: string;
+      operationNumber?: number;
+      draft?: boolean;
       inputKeys?: string[];
       outputUnitKey?: string;
       outputUnitName?: string;
       assemblyBlockDetached?: boolean;
     }>;
+    const autoFuse = autoFuseRefusal(
+      formOps,
+      (getValues('pieces') ?? []) as Array<{ lineKey?: string; fused?: boolean }>,
+      index,
+      key,
+    );
+    if (autoFuse) {
+      refuseGesture(
+        `STEP ${operationStepNumber(index)}`,
+        `auto fuse ${autoFuse.autoStepNumber}`,
+        pieces.find((piece) => piece.lineKey === key)?.name ?? key,
+      );
+      return;
+    }
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
     const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const steps = formOps.map((o) => ({
