@@ -53,10 +53,18 @@ export function useUnsavedAreaSource(control: Control<TechCardFormData>): boolea
       : v !== null && typeof v === 'object'
         ? Object.values(v as Record<string, unknown>).some(anyDirty)
         : v === true;
+  const anyUngraded = (v: unknown): boolean =>
+    v === true ||
+    (v !== null &&
+      typeof v === 'object' &&
+      Object.values(v as Record<string, unknown>).some(
+        (p) => (p as { ungraded?: unknown } | null)?.ungraded === true,
+      ));
   return (
     anyDirty(dirtyFields.patterns) ||
     anyDirty(dirtyFields.pieceDxfAliases) ||
-    (dirtyFields.pieces ?? []).some((p) => p?.ungraded === true)
+    // После удаления детали RHF кладёт сюда не массив, а `true` или объект по индексам.
+    anyUngraded(dirtyFields.pieces)
   );
 }
 
