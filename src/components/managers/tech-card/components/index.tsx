@@ -100,6 +100,7 @@ import {
   TechCardFormData,
   mapFormToTechCardInsert,
   mapTechCardToForm,
+  operationWriteOrder,
   techCardDefaultData,
   techCardSchema,
   toPurposeEnum,
@@ -1638,7 +1639,11 @@ export function TechCardForm({
     // SERVER's list (with the sent values kept only where something did not come back): reset to
     // what was sent, it would drop the Fusing steps and the next unrelated save would wipe them.
     type OpRow = NonNullable<TechCardFormData['operations']>[number];
-    const sentOps = (sent.operations ?? []) as OpRow[];
+    const sourceSentOps = (sent.operations ?? []) as OpRow[];
+    // The write mapper compacts assembly blocks before the full-replace payload leaves. Audit the
+    // same sequence, otherwise the LCS can leave a moved operation unpaired and report its fields
+    // as dropped even though the server returned the payload exactly.
+    const sentOps = operationWriteOrder(sent).map((sourceIndex) => sourceSentOps[sourceIndex]);
     const readOps = [...(server.operations ?? [])] as OpRow[];
     const rawOperationAudit = auditOperationPresence(
       sentOps as unknown as Record<string, unknown>[],

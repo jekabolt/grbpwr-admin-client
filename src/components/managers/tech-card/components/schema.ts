@@ -3145,6 +3145,33 @@ function estUsageOut(raw?: string): googletype_Decimal | undefined {
   return { value: normalizeDecimalInput(raw) };
 }
 
+/** The exact source-row order used by the full-replace operations payload. */
+export function operationWriteOrder(
+  data: Pick<TechCardFormData, 'operations' | 'pieces'>,
+): number[] {
+  const sourceOperations = data.operations ?? [];
+  const sequencePieces = (data.pieces ?? [])
+    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
+    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
+  const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
+  const sequenceSteps = sourceOperations.map((operation) => ({
+    inputs: classifyAssemblyInputs(
+      sequencePieceKeys,
+      (operation.inputKeys ?? []).map((key) => key.trim()).filter(Boolean),
+    ),
+    outputUnitKey: operation.outputUnitKey?.trim() || '',
+    outputUnitName: operation.outputUnitName?.trim() || '',
+    assemblyBlockDetached: !!operation.assemblyBlockDetached,
+  }));
+  const sequenceResult = assemblySweep(sequencePieces, sequenceSteps);
+  return sequenceResult.violations.length === 0
+    ? compactAssemblyBlockOrder(
+        assemblyBlocks(sequenceSteps, sequenceResult),
+        sourceOperations.length,
+      )
+    : sourceOperations.map((_, index) => index);
+}
+
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
@@ -3186,27 +3213,7 @@ export function mapFormToTechCardInsert(
   // operationNumber ниже ничего не решает, сервер его намеренно пересчитывает. Пишем каждый узел
   // непрерывно и той же перестановкой перевозим ссылки дефектов ниже.
   const sourceOperations = data.operations ?? [];
-  const sequencePieces = (data.pieces ?? [])
-    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
-    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
-  const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
-  const sequenceSteps = sourceOperations.map((operation) => ({
-    inputs: classifyAssemblyInputs(
-      sequencePieceKeys,
-      (operation.inputKeys ?? []).map((key) => key.trim()).filter(Boolean),
-    ),
-    outputUnitKey: operation.outputUnitKey?.trim() || '',
-    outputUnitName: operation.outputUnitName?.trim() || '',
-    assemblyBlockDetached: !!operation.assemblyBlockDetached,
-  }));
-  const sequenceResult = assemblySweep(sequencePieces, sequenceSteps);
-  const operationOrder =
-    sequenceResult.violations.length === 0
-      ? compactAssemblyBlockOrder(
-          assemblyBlocks(sequenceSteps, sequenceResult),
-          sourceOperations.length,
-        )
-      : sourceOperations.map((_, index) => index);
+  const operationOrder = operationWriteOrder(data);
   const operationWriteIndex = new Map<number, number>();
   operationOrder.forEach((oldIndex, newIndex) => operationWriteIndex.set(oldIndex, newIndex));
   const operationNumberForWrite = (number: number): number => {
