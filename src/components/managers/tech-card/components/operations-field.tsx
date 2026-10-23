@@ -7,6 +7,7 @@ import {
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
 import { notify } from 'lib/stores/store';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -201,14 +202,7 @@ import {
   type CreateResult,
 } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
-import {
-  planUnitRename,
-  renamePosEdits,
-  unitKeyLengthRefusal,
-  unitRenameAct,
-  type UnitKeyRow,
-  type UnitRenameNotice,
-} from './assembly-rename';
+import { type UnitRenameNotice } from './assembly-rename';
 import {
   appendLabel,
   canRedo,
@@ -227,7 +221,6 @@ import {
   record,
   redoStep,
   redoTitle,
-  renameLabel,
   resolvePending,
   operationRowPrint,
   skeletonCanUndo,
@@ -243,6 +236,7 @@ import {
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
+import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
@@ -1487,14 +1481,14 @@ function AssemblyTray({
     <>
       {units.map((key) => {
         const unit = view.res.units.get(key);
-        const title = unit?.name ? `${key} — ${unit.name}` : key;
+        const name = unitDisplayName({ key, outputUnitName: unit?.name });
         return (
           <Chip
             key={`unit:${key}`}
             onClick={() => onAdd(key)}
-            title={`${title}: a unit of ${unit?.leaves.length ?? 0} pieces — click to add it to the open step`}
+            title={`${name}: a unit of ${unit?.leaves.length ?? 0} pieces — click to add it to the open step`}
           >
-            ▣ {key}
+            ▣ {name}
           </Chip>
         );
       })}
@@ -1521,10 +1515,13 @@ function AssemblyTray({
           {consumedOpen &&
             eaten.map((p) => {
               const into = view.eatenInto.get(p.lineKey);
+              const intoName = into
+                ? unitDisplayName({ key: into, outputUnitName: view.res.units.get(into)?.name })
+                : '';
               return (
                 <Text key={`eaten:${p.lineKey}`} size='micro' variant='label' component='span'>
                   {p.name}
-                  {into ? ` ∈ ${into}` : ''}
+                  {intoName ? ` ∈ ${intoName}` : ''}
                 </Text>
               );
             })}
@@ -1617,207 +1614,9 @@ function TrayChip({
 // выражается тем, что автор берёт узел входом и пишет его же ключ выходом. Движок узнаёт
 // поглощение сам; отдельная кнопка «поглотить» была бы вторым способом сказать то же самое.
 
-/**
- * Ответ мутатора переименования полю.
- *
- * ОТКАЗ ВОЗВРАЩАЕТСЯ, А НЕ ТОЛЬКО ПРОИЗНОСИТСЯ. Снекбар гаснет через несколько секунд, а поле с
- * набранным, но не применённым кодом остаётся на экране — и без причины под ним читалось бы как
- * «переименовал». Слова у обоих одни и те же, движковые.
- */
-type RenameOutcome = { ok: true } | { ok: false; why: string };
-
 /** A refused gesture of the sequence editor: no field holds the answer, so it goes to the inbox. */
 function refuseGesture(subject: string, text: string, detail: string) {
   notify({ sev: 'error', subject, text, detail });
-}
-
-/**
- * КОД УЗЛА — ПОДТВЕРЖДАЕМЫЙ АКТ, А НЕ ЖИВОЕ ПОЛЕ ФОРМЫ.
- *
- * Раньше здесь стоял `InputField`, писавший в форму на каждый символ. Переписыватель ссылок,
- * работающий так же, переписал бы потребителей сначала на `S`, потом на `SH`, потом на `SHE` — и
- * цепочка рвалась бы на каждом нажатии, а свип на каждом нажатии заливал бы экран красным везде,
- * КРОМЕ места правки. Поэтому набор живёт в локальном черновике, а в форму уходит ОДНА атомарная
- * перезапись — по Enter или по уходу фокуса.
- *
- * ЧЕРНОВИК МИМО RHF, и это не мелочь: новое поле формы протухало бы черновик карточки (zod-дефолт
- * стирает отсутствующие поля при восстановлении). Незаписанный черновик умирает вместе с
- * редактором — человек, ушедший со страницы посреди набора, НЕ получает половину переименования;
- * ровно поэтому строка под полем всё время набора говорит, что жест ещё не применён.
- *
- * ESC ВОЗВРАЩАЕТ ПРЕЖНИЙ КОД и НЕ уносит со слоя: Esc — верхняя ступень лестницы фулскрина
- * (палитра, шпаргалка, выделение), и живой набор стоит выше неё, как драг ноды и маркиза.
- *
- * ДВА КУСКА, А НЕ ОДИН, И РАЗМЕЩАЕТ ИХ ВЫЗЫВАЮЩИЙ. Поле стоит в строке с именем узла и чипом
- * растворения, а слова про цену — ПОД строкой: верни их одним фрагментом, и они встали бы между
- * кодом и именем, разорвав строку надвое (замерено скриншотом стенда). Владелец акта при этом
- * остаётся один — этот хук.
- */
-function useUnitCodeAct({
-  index,
-  outputKey,
-  onRename,
-}: {
-  index: number;
-  /** Ключ, как он стоит В ФОРМЕ. Черновик его не трогает до подтверждения. */
-  outputKey: string;
-  /** Единственный мутатор переименования (живёт в `OperationsField`, R3). */
-  onRename: (index: number, next: string) => RenameOutcome;
-}): { field: ReactNode; note: ReactNode } {
-  const { getValues } = useFormContext<TechCardFormData>();
-  const [draft, setDraft] = useState<string | null>(null);
-  /** Отказ движка стоит под полем, пока набранное не изменили: снекбар гаснет, а вопрос — нет. */
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const ref = useRef<HTMLInputElement>(null);
-  const id = `op-${index}-unit-code`;
-  const pending = draft !== null && draft !== outputKey;
-  // ЦЕНА СЧИТАЕТСЯ ТЕМ ЖЕ ПЛАНИРОВЩИКОМ, КОТОРЫЙ ЕЁ И ОПЛАТИТ. Второй счёт «сколько шагов
-  // затронет» разошёлся бы с первым молча — и баннер обещал бы не то, что произошло.
-  // Через `getValues`, а не подпиской: редактор и так перерисовывается на каждую правку операций
-  // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
-  const plan = pending
-    ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey)
-    : null;
-  // ТОТ ЖЕ КЛЮЧ, КОТОРЫЙ ЛЯЖЕТ В ФОРМУ: вердикт нормализует набранное (подрезает), и подсказка
-  // обязана называть результат, а не черновик. Хвостовой пробел невидим — подсказка, печатающая
-  // «→ BODY⎵», читается как «→ BODY», то есть обещает не то, что произойдёт.
-  const typed = (draft ?? '').trim();
-  const dissolving = pending && typed === '';
-  // ДЛИНА ГОВОРИТСЯ ПРЯМО ВО ВРЕМЯ НАБОРА, а не после Enter: тем же счётом, каким её посчитает
-  // мутатор, — второй счёт разошёлся бы с первым молча. Отказ мутатора при этом остаётся: слова
-  // под полем гаснут вместе с черновиком, а жест обязан отказать и мимо этого поля.
-  const tooLong = pending && !dissolving ? unitKeyLengthRefusal(typed) : null;
-
-  // ЖИВОЙ НАБОР ВЫШЕ ВСЕЙ ESC-ЛЕСТНИЦЫ ЭКРАНА — как драг ноды, маркиза и драг плитки с полки, и
-  // слушатель по той же причине window-капчурный. Radix ловит Escape на ДОКУМЕНТЕ в фазе
-  // перехвата, то есть раньше, чем событие вообще дойдёт до поля: `stopPropagation` в
-  // React-обработчике опаздывает навсегда, и Esc, которым отменяют набор, уносил бы со ВСЕГО
-  // экрана (замерено стендом — фулскрин закрывался).
-  //
-  // ФОКУС СПРАШИВАЕТСЯ В САМОМ ОБРАБОТЧИКЕ: отклонённый черновик переживает уход фокуса (набранное
-  // не выбрасывается в ответ на «так нельзя»), и слушатель, судящий только по его наличию, глотал
-  // бы Esc всего экрана, пока человек смотрит совсем в другое место.
-  useEffect(() => {
-    if (draft === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || document.activeElement !== ref.current) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDraft(null);
-      setRefusal(null);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [draft]);
-
-  const commit = () => {
-    if (draft === null) return;
-    if (draft === outputKey) {
-      setDraft(null); // набрали ровно то же самое — жеста не было
-      return;
-    }
-    if (refusal !== null) return; // отказ уже произнесён и стоит под полем; молча повторять его незачем
-    const outcome = onRename(index, draft);
-    if (outcome.ok) {
-      // Применилось: поле возвращается к значению ФОРМЫ, а там уже новый ключ.
-      setDraft(null);
-      return;
-    }
-    // ОТКАЗ ОСТАВЛЯЕТ НАБРАННОЕ В ПОЛЕ. Стереть его значило бы выбросить работу человека в ответ
-    // на «так нельзя»; вернуть прежний код он может Esc'ом.
-    setRefusal(outcome.why);
-  };
-
-  const field = (
-    <div className='space-y-px' data-field={`operations.${index}.outputUnitKey`}>
-      <label htmlFor={id} className='block leading-none'>
-        <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
-          unit code
-        </Text>
-      </label>
-      {/* Голый `Input`, а не `InputField`: связь с формой здесь и есть то, что убрано. Значение в
-          форму кладёт мутатор одной записью.
-
-          `maxLength` СНЯТ НАМЕРЕННО. Он считает единицы UTF-16, а сервер — БАЙТЫ
-          (`assemblyUnitKeyMaxLen`): на кириллице потолок расходился вдвое, и поле сначала молча
-          обрезало набранное на 64-м символе, а потом сервер всё равно отвечал `too_long` на 128
-          байт. Обрезка посреди набора — худший из двух отказов: она не называет правила и портит
-          работу молча. Теперь длину считает `unitKeyLengthRefusal` — словами, до отправки, и тем
-          же счётом, что у мутатора. */}
-      <Input
-        name={id}
-        ref={ref}
-        value={draft ?? outputKey}
-        aria-invalid={refusal !== null || tooLong !== null || undefined}
-        placeholder='SHELL'
-        title='rename the unit: type a new code and press Enter — every step that references it is rewritten in one act'
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-          setDraft(e.target.value);
-          if (refusal !== null) setRefusal(null); // набрали другое — вопрос снят, можно пробовать снова
-        }}
-        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-          if (e.key === 'Enter') {
-            // `preventDefault` обязателен: у карточки настоящая <form>, и Enter в поле иначе
-            // отправляет её целиком — то есть переименование превращалось бы в сохранение.
-            e.preventDefault();
-            commit();
-            return;
-          }
-          // Esc здесь НЕ разбирается: до этого обработчика он не доходит — его снимает
-          // window-капчурный слушатель выше, и снимает потому, что иначе его первым увидит
-          // Radix и закроет весь экран.
-        }}
-        onBlur={commit}
-      />
-    </div>
-  );
-
-  const note = (
-    <>
-      {refusal !== null && (
-        <Text size='micro' variant='label' className='mt-1'>
-          not renamed: {refusal}
-        </Text>
-      )}
-      {refusal === null && tooLong !== null && (
-        <Text size='micro' variant='label' className='mt-1'>
-          too long: {tooLong}
-        </Text>
-      )}
-      {refusal === null && tooLong === null && dissolving && (
-        <Text size='micro' variant='label' className='mt-1'>
-          press Enter to clear the code: ▣ {outputKey} dissolves and its inputs go back on the table
-          for the next steps
-        </Text>
-      )}
-      {/* `typed !== outputKey` — набрали тот же код, только с пробелами: вердикт ответит `noop`,
-          и обещать «переписано в N шагах» было бы обещанием жеста, которого не будет. */}
-      {refusal === null && tooLong === null && pending && !dissolving && typed !== outputKey && (
-        <>
-          <Text size='micro' variant='label' className='mt-1'>
-            press Enter: ▣ {outputKey} → {typed} is rewritten in {plan?.steps ?? 0}{' '}
-            {plan?.steps === 1 ? 'step' : 'steps'} at once — until then nothing has moved
-          </Text>
-          {/* НЕПЕРЕПИСЫВАЕМОЕ НАЗЫВАЕТСЯ ДО ПОДТВЕРЖДЕНИЯ, а не после. Код узла печатается на
-              бумаге, а сам он входит в подпись раздела CONSTRUCTION (`assemblyInputTail` хеширует
-              и выход шага, и ключи входов) — значит уже выданные в цех комплекты после
-              переименования врут, и подпись протухает. Это по дизайну; человек обязан узнать это
-              от интерфейса, а не от технолога в цеху.
-
-              ПРО QR ЗДЕСЬ НЕ ГОВОРИТСЯ, и это правка ревью: QR наряда ведёт на `/r/:token`, а тот
-              читает наряд ЖИВЫМ запросом (`GetRunPack`) — открытый по старой бумаге, он покажет уже
-              новый код. Старым остаётся ровно бумага. Предупреждение, обещающее лишнее, — дефект
-              того же рода, что чинит весь этот раунд, просто в безопасную сторону. */}
-          <Text size='micro' variant='label'>
-            printed packets already in the workshop keep “{outputKey}”, and the CONSTRUCTION
-            signature goes stale
-          </Text>
-        </>
-      )}
-    </>
-  );
-
-  return { field, note };
 }
 
 function ProducesBlock({
@@ -1825,7 +1624,6 @@ function ProducesBlock({
   inputKeys,
   pieces,
   assembly,
-  onRename,
   onDissolve,
   onEdit,
 }: {
@@ -1833,8 +1631,6 @@ function ProducesBlock({
   inputKeys: string[];
   pieces: PieceRef[];
   assembly: AssemblyView;
-  /** Мутатор переименования узла — один на все точки входа (R3), живёт в `OperationsField`. */
-  onRename: (index: number, next: string) => RenameOutcome;
   /**
    * Мутатор растворения — ТОТ ЖЕ, что зовут полотно и схема. Свой `setValue` здесь стоял и делал
    * ровно то же самое, только мимо истории: растворение чипом отменить было нельзя, а
@@ -1858,23 +1654,18 @@ function ProducesBlock({
 
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
-  // Акт переименования: поле встаёт в строку, слова про цену — под неё (см. шапку хука).
-  const rename = useUnitCodeAct({ index, outputKey, onRename });
-
-  // СПРЯТАЛ КОНТРОЛ — ОЧИСТИ ЗНАЧЕНИЕ. Ключ можно стереть бэкспейсом, а не только «растворить»:
-  // ветка переключается на чип «сделать узлом», оба инпута размонтируются, и оставшееся имя
-  // становится теневым значением — сервер откажет всей записи гигиеной (shadow-name), а контрола,
-  // чтобы это исправить, на экране уже нет. То же правило, что у ширины отстрочки ниже.
+  // Защитная гигиена для старых/внешних мутаций: без внутреннего ключа имя не имеет владельца и
+  // сервер отвергнет теневое значение. Обычный dissolve очищает оба поля одним жестом.
   useEffect(() => {
     if (!outputKey && outputName) {
       setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
     }
   }, [outputKey, outputName, index, setValue]);
   const absorbs = !!outputKey && inputKeys.includes(outputKey) && assembly.res.units.has(outputKey);
+  const nameProducer = unitNameProducerIndex(assembly.res, outputKey, index);
 
-  // Код предлагается по зоне шага, а не по именам деталей: имена длинные и меняются, а код
-  // печатается на бумаге и в QR. Совпадение с существующим узлом — не беда: это и есть
-  // поглощение, если тот же узел взят входом.
+  // Внутренний ключ выводится из зоны и занятого пространства имён. Владелец его не видит и не
+  // отвечает за коллизии: `suggestUnitCode` всегда сдвигается к свободному варианту.
   const suggest = () => {
     const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
     // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
@@ -1898,14 +1689,6 @@ function ProducesBlock({
       return;
     }
     const code = suggest();
-    if (byKey.has(code)) {
-      refuseGesture(
-        `STEP ${index + 1}`,
-        'not a unit',
-        `the key “${code}” is taken by a piece — pieces and units share one namespace`,
-      );
-      return;
-    }
     setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
     // Разметка появилась снова — намерение «снять разметку» отменено. Без этого сценарий
     // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
@@ -1926,17 +1709,10 @@ function ProducesBlock({
       ) : (
         <>
           <div className='flex flex-wrap items-center gap-2'>
-            {/* КОД — ЧЕРЕЗ АКТ, ИМЯ — ЖИВЫМ ПОЛЕМ, и разница не в аккуратности. На ключ ссылаются
-                входы других шагов, он и есть идентичность узла; имя не адресует ничего, поэтому
-                живая запись имени не рвёт ни одной ссылки. maxLength у имени — по колонке сервера
-                (VARCHAR(255)). */}
-            {rename.field}
-            <InputField
-              name={`operations.${index}.outputUnitName`}
-              label='unit name'
-              placeholder='body'
-              maxLength={255}
-            />
+            {/* Имя живёт на первом производителе. Поглощающий шаг показывает то же поле, но пишет
+                в канонический адрес: сервер очищает outputUnitName на всех поглощениях, потому
+                что второе имя одного узла было бы вторым мнением о факте. */}
+            <UnitNameField unitKey={outputKey} producedAt={nameProducer} />
             {/* ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
                 чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
                 отменялся из редактора. */}
@@ -1948,15 +1724,9 @@ function ProducesBlock({
               dissolve
             </Chip>
           </div>
-          {rename.note}
           {absorbs && (
             <Text size='micro' variant='label' className='mt-1'>
-              absorption: unit {outputKey} keeps its identity and gains the contents of this step
-            </Text>
-          )}
-          {!outputName && (
-            <Text size='micro' variant='label' className='mt-1'>
-              the name is optional, but in print and on the floor people read it, not the code
+              absorption: this unit keeps its identity and gains the contents of this step
             </Text>
           )}
           {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
@@ -2622,7 +2392,6 @@ function OperationEditor({
   onDropPiece,
   onReplaceGhost,
   onRemoveGhost,
-  onRenameUnit,
   onDissolveUnit,
   mediaUrls,
   onEdit,
@@ -2675,12 +2444,6 @@ function OperationEditor({
   onReplaceGhost: (index: number, ghostKey: string, nextKey: string) => void;
   /** Убрать призрака только из этого шага и перейти к следующей метке. */
   onRemoveGhost: (index: number, ghostKey: string) => void;
-  /**
-   * ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДИН МУТАТОР НА ВСЕ ТОЧКИ ВХОДА. Поле кода живёт в редакторе шага, а
-   * когда появится редактор узла (Т6) — и в нём; обе поверхности обязаны звать ЭТОТ колбэк, иначе
-   * «переименовать» на одном экране и на другом разойдутся в мелочах, и разойдутся молча (R3).
-   */
-  onRenameUnit: (index: number, next: string) => RenameOutcome;
   /** Растворение — тот же мутатор, что зовут полотно и схема. */
   onDissolveUnit: (index: number) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
@@ -4043,11 +3806,25 @@ function OperationEditor({
   // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
   // форму, а не по строке рельса: редактор смонтирован в единственном экземпляре.
   const assembly = useAssemblyView(pieces);
+  const cardOperations = (getValues('operations') ?? []) as CardOperation[];
   // Нарушения ИМЕННО ЭТОГО шага. Карточные (правило 4) сюда не попадают — они про сборку
   // целиком и место им на релизном гейте, а не в строке шага.
   const stepViolations = assembly.res.violations.filter((v) => v.step === index);
+  const unitNames = new Map<string, string>();
+  for (const operation of cardOperations) {
+    const key = (operation.outputUnitKey ?? '').trim();
+    if (key && !unitNames.has(key)) {
+      unitNames.set(key, unitDisplayName({ key, outputUnitName: operation.outputUnitName }));
+    }
+  }
+  const ownerViolationMessage = (message: string) => {
+    let shown = message;
+    for (const [key, name] of unitNames) {
+      shown = shown.replaceAll(`“${key}”`, `“${name}”`).replaceAll(`unit ${key}`, `unit ${name}`);
+    }
+    return shown;
+  };
   const chosenUnits = selectedPieceKeys.filter((k) => !byKey.has(k) && assembly.res.units.has(k));
-  const cardOperations = (getValues('operations') ?? []) as CardOperation[];
   const shapedPieces = pieces.flatMap((piece) => {
     const found = pieceShapes?.get(pieceRefKey(piece.lineKey));
     return found ? [{ pieceLineKey: piece.lineKey, shapes: [found.piece] }] : [];
@@ -4088,7 +3865,11 @@ function OperationEditor({
       work: workValue,
       workCatalog,
       zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
-      pieceNames: selectedPieceKeys.map((k) => byKey.get(k)?.name ?? `▣ ${k}`),
+      pieceNames: selectedPieceKeys.map(
+        (k) =>
+          byKey.get(k)?.name ??
+          `▣ ${unitDisplayName({ key: k, outputUnitName: assembly.res.units.get(k)?.name })}`,
+      ),
       note: noteValue,
     }) || 'new step';
   // A key that no longer resolves (its piece was deleted on the PATTERNS tab, or an older card
@@ -5617,10 +5398,10 @@ function OperationEditor({
         {chosenUnits.map((k) => (
           <Chip
             key={`u:${k}`}
-            title={`unit ${k}: ${assembly.res.units.get(k)?.leaves.length ?? 0} pieces inside`}
+            title={`unit ${unitDisplayName({ key: k, outputUnitName: assembly.res.units.get(k)?.name })}: ${assembly.res.units.get(k)?.leaves.length ?? 0} pieces inside`}
             onRemove={() => removePieceKey(k)}
           >
-            ▣ {k}
+            ▣ {unitDisplayName({ key: k, outputUnitName: assembly.res.units.get(k)?.name })}
           </Chip>
         ))}
         {chosenGhosts.map((ghostKey) => {
@@ -5694,7 +5475,7 @@ function OperationEditor({
           <div className='flex flex-col gap-0.5'>
             {stepViolations.map((v, i) => (
               <Text key={`${v.rule}:${v.detail}:${i}`} size='micro'>
-                {v.message}
+                {ownerViolationMessage(v.message)}
               </Text>
             ))}
           </div>
@@ -5706,7 +5487,6 @@ function OperationEditor({
         inputKeys={selectedPieceKeys}
         pieces={pieces}
         assembly={assembly}
-        onRename={onRenameUnit}
         onDissolve={onDissolveUnit}
         onEdit={onEdit}
       />
@@ -7327,12 +7107,18 @@ export function OperationsField({
     if (!available.includes(key)) {
       const eater = res.consumedBy.get(key);
       const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
+      const inputName =
+        pieces.find((piece) => piece.lineKey === key)?.name ??
+        unitDisplayName({ key, outputUnitName: res.units.get(key)?.name });
+      const intoName = into
+        ? unitDisplayName({ key: into, outputUnitName: res.units.get(into)?.name })
+        : '';
       refuseGesture(
         `STEP ${index + 1}`,
         'input refused',
-        into
-          ? `“${key}” is already inside unit ${into} at this step — it cannot be taken again`
-          : `“${key}” is not on the table yet at this step`,
+        intoName
+          ? `“${inputName}” is already inside unit ${intoName} at this step — it cannot be taken again`
+          : `“${inputName}” is not on the table yet at this step`,
       );
       return;
     }
@@ -7634,7 +7420,7 @@ export function OperationsField({
         fieldId,
         unitKey,
         unitName,
-        label: dissolveLabel(unitKey),
+        label: dissolveLabel(unitKey, unitName),
       }),
     );
   };
@@ -7663,88 +7449,6 @@ export function OperationsField({
       cur[s.at] = key;
       setValue(`operations.${s.index}.inputKeys`, cur, { shouldDirty: true });
     }
-  };
-
-  /**
-   * ПЕРЕИМЕНОВАНИЕ УЗЛА — АТОМАРНАЯ ПЕРЕЗАПИСЬ ПОТРЕБИТЕЛЕЙ. Недостающая половина того, что
-   * задумано схемой: шапка `0307_assembly_units.sql` дословно обещает «переименование кода —
-   * атомарная перезапись потребителей в том же сохранении, поэтому внешней durable-идентичности
-   * узлу не нужно». Идентичность узла и есть его код, и переписыватель — единственное, что делает
-   * это решение верным.
-   *
-   * ЖЕСТ ОДИН, ЗАПИСЬ ОДНА, СЛОВО ОДНО. Три вида мест (см. `planUnitRename`) переписываются
-   * вместе; в историю ложится ОДНА запись, инвертирующая все три разом — человек сделал один
-   * поступок, и ⌘Z обязано вернуть его целиком, а не третями.
-   */
-  const renameUnit = (stepIndex: number, next: string): RenameOutcome => {
-    if (frozen) return { ok: false, why: FROZEN_REFUSAL }; // гейт первой строкой, как у всех мутаторов
-    const formOps = ((getValues('operations') ?? []) as UnitKeyRow[]) ?? [];
-    // ВЕСЬ РАЗБОР — В ЧИСТОМ МОДУЛЕ, а здесь только его исполнение. Пока лестница условий жила
-    // тут, удостоверяла её лишь копия, написанная в пробе истории, — и копия успела разойтись с
-    // оригиналом на две ветки. `unitRenameAct` покрыт `scripts/assembly-rename-probe.mjs`.
-    const act = unitRenameAct(formOps, stepIndex, next, pieces);
-    if (act.kind === 'noop') return { ok: true }; // побайтно то же самое: жеста не было
-    if (act.kind === 'refuse') {
-      // ОТКАЗ — СЛОВАМИ ДВИЖКА И БЕЗ ЕДИНОЙ ЗАПИСИ: возвратом, и поле с набранным кодом
-      // показывает его под собой (useUnitCodeAct) — тоста нет.
-      return { ok: false, why: act.why };
-    }
-    if (act.kind === 'dissolve') {
-      // ПУСТОЙ КЛЮЧ — ЭТО НЕ ПЕРЕИМЕНОВАНИЕ, А РАСТВОРЕНИЕ, и ведёт оно в СУЩЕСТВУЮЩИЙ мутатор.
-      // Второй растворитель рядом с первым разошёлся бы с ним ровно так же, как разошёлся чип
-      // редактора: тот писал в форму сам и не клал записи в историю.
-      dissolveUnit(stepIndex);
-      return { ok: true };
-    }
-    // `to`, А НЕ `next`: вердикт отдаёт ключ НОРМАЛИЗОВАННЫМ (подрезанным), потому что подрезанным
-    // он и уедет на провод. Записать сюда набранное значило бы развести тождество ключа на экране
-    // и тождество ключа на сервере — см. `unitRenameAct`.
-    const { from, to, plan } = act;
-    // АДРЕСА СВЕРЯЮТСЯ ДО ПЕРВОЙ ЗАПИСИ. Без `fieldId` записи истории нет, а жест без отмены
-    // хуже отказа: пусть лучше не состоится ничего, чем состоится неотменяемое.
-    const outputs: RenameOutputSite[] = [];
-    const inputs: RenameInputSite[] = [];
-    for (const i of plan.outputs) {
-      const id = fields[i]?.id;
-      if (!id)
-        return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
-      outputs.push({ index: i, fieldId: id });
-    }
-    for (const s of plan.inputs) {
-      const id = fields[s.index]?.id;
-      if (!id)
-        return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
-      for (const at of s.at) inputs.push({ index: s.index, fieldId: id, at });
-    }
-
-    rewriteUnitKeySites({ outputs, inputs }, to);
-    // РУЧНАЯ ПОЗИЦИЯ НОДЫ ЕДЕТ ВМЕСТЕ С КЛЮЧОМ, и едет ДО записи истории: `restore` отдаёт
-    // обратную пачку по своему синхронному снимку оверрайдов, и другой возможности узнать «где
-    // нода стояла до жеста» у записи нет. По тому же снимку (`peek`, а не `pos` из рендера)
-    // считается и прямая пачка — иначе половины разошлись бы на кадр. Пустая пачка законна: ноду
-    // могли ни разу не двигать, и выдумывать ей позицию значит приколотить её навсегда.
-    const posForward = renamePosEdits(prefs.peek(), from, to);
-    const posBack = prefs.restore(posForward);
-    setHistory(
-      record(history.current, {
-        kind: 'rename',
-        index: stepIndex,
-        fieldId: fields[stepIndex]?.id ?? '',
-        from,
-        to,
-        outputs,
-        inputs,
-        posBack,
-        posForward,
-        label: renameLabel(from, to),
-      }),
-    );
-    setRenamedUnit({ from, to });
-    // Жест подтверждён уходом фокуса — и этот же уход сейчас дёрнет седьмую точку сброса. Щит
-    // ровно на один такт: иначе запись, только что легшая, умрёт до первого ⌘Z.
-    settleGesture();
-    // The count is promised under the field before Enter; the renamed node is the receipt.
-    return { ok: true };
   };
 
   /**
@@ -8626,10 +8330,6 @@ export function OperationsField({
                   onDropPiece={addInputToOperation}
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
-                  // ОДИН МУТАТОР НА ОБЕ ПОВЕРХНОСТИ: тот же экземпляр, что уезжает в док фулскрина
-                  // ниже. Второй «переименовать», написанный для второго экрана, разошёлся бы с
-                  // первым молча — ровно то, от чего стережёт R3.
-                  onRenameUnit={renameUnit}
                   onDissolveUnit={dissolveUnit}
                   mediaUrls={operationMediaUrls}
                   frozen={frozen}
@@ -8738,9 +8438,6 @@ export function OperationsField({
                 onDropPiece={addInputToOperation}
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
-                // ТЕ ЖЕ ЭКЗЕМПЛЯРЫ, что у инлайнового редактора выше, и это весь смысл R3: поле
-                // кода узла стоит на двух поверхностях, а переписыватель ссылок — один.
-                onRenameUnit={renameUnit}
                 onDissolveUnit={dissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
@@ -8811,7 +8508,10 @@ export function OperationsField({
         frontier={frontierForCreate}
         unitKeys={new Set(grouping.res.units.keys())}
         pieceKeys={new Set(pieces.map((p) => p.lineKey))}
-        labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+        labelOf={(k) =>
+          pieces.find((p) => p.lineKey === k)?.name ??
+          unitDisplayName({ key: k, outputUnitName: grouping.res.units.get(k)?.name })
+        }
         unitOfPlanned={unitOfPlanned}
         pieceOfPlanned={pieceOfPlanned}
         onCloseAutoFocus={restoreScreenFocus}

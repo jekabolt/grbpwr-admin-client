@@ -1,4 +1,5 @@
 import { common_TechCardOperationType } from 'api/proto-http/admin';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Chip,
@@ -141,7 +142,7 @@ export function AssemblyCreateDialog({
   unitKeys: Set<string>;
   /** Ключи деталей — второе полукольцо того же пространства имён. */
   pieceKeys: Set<string>;
-  /** Человеческое имя ноды: имя детали или код узла. */
+  /** Owner-facing node name: piece name or unit display name. */
   labelOf: (key: string) => string;
   /**
    * В КАКОЙ УЗЕЛ ПОПАДЁТ ШАГ С ТАКИМ СОСТАВОМ, если создать его прямо сейчас. Пусто — «вне узлов».
@@ -185,8 +186,6 @@ export function AssemblyCreateDialog({
   const [workToken, setWorkToken] = useState('');
   const [kindExtraWrites, setKindExtraWrites] = useState<Record<string, string>>({});
   const [produces, setProduces] = useState<'process' | 'unit' | 'absorb'>('process');
-  const [unitKey, setUnitKey] = useState('');
-  const [unitKeyTouched, setUnitKeyTouched] = useState(false);
   const [unitName, setUnitName] = useState('');
   // POSITION & RESULT are folded (R2.5): the gesture already chose both. Reset on every open.
   const [moreOpen, setMoreOpen] = useState(false);
@@ -214,8 +213,6 @@ export function AssemblyCreateDialog({
             ? 'unit'
             : 'process',
     );
-    setUnitKey('');
-    setUnitKeyTouched(false);
     setUnitName('');
     setMoreOpen(false);
   }, [prefill]);
@@ -252,30 +249,13 @@ export function AssemblyCreateDialog({
     return s;
   }, [piecesOnWire, unitsOnWire]);
 
-  // Код предлагается от ЗОНЫ и переигрывается, пока автор его не тронул руками: зона выбирается
-  // раньше, и код, застывший на «UNIT» после выбора зоны, был бы предложением мимо.
-  useEffect(() => {
-    if (!open || produces !== 'unit' || unitKeyTouched) return;
-    setUnitKey(suggestUnitCode(zone, taken));
-  }, [open, produces, zone, taken, unitKeyTouched]);
+  // Internal identity follows the zone and occupied namespace automatically. It is never an
+  // owner-facing question: changing either input simply derives the next collision-free key.
+  const unitKey = useMemo(() => suggestUnitCode(zone, taken), [zone, taken]);
 
   const distinct = useMemo(() => Array.from(new Set(inputs)), [inputs]);
   const canBeUnit = distinct.length >= 2;
   const absorbInto = prefill?.absorbInto ?? '';
-
-  // Правило 6 и «второй производитель» — те же отказы, что в открытом шаге, теми же словами.
-  const codeProblem = (() => {
-    if (produces !== 'unit') return '';
-    const code = unitKey.trim();
-    if (!code) return 'a unit needs a code — that is what every other step calls it by';
-    if (piecesOnWire.has(code))
-      return `the key “${code}” is taken by a piece — pieces and units share one namespace`;
-    if (unitsOnWire.has(code))
-      return `unit “${code}” already exists — a second producer of the same unit is impossible`;
-    if (new TextEncoder().encode(code).length > 64)
-      return "the code is longer than 64 bytes — that won't fit the column";
-    return '';
-  })();
 
   // Машинку ДОСПРАШИВАЕТ только тот вид, чей якорь не машинка (отстрочка): у остальных машинных
   // видов машинка и ЕСТЬ вид, и второй вопрос про неё был бы вопросом о том, что уже отвечено.
@@ -350,17 +330,17 @@ export function AssemblyCreateDialog({
     // переживает соседний жест, который эту деталь съел, и «обработка · 1» по ней родила бы шаг,
     // который движок и сервер отвергнут. Диалог, обещающий валидный шаг, обязан это ловить.
     const dead = distinct.find((k) => !frontier.includes(k));
-    if (dead) return `“${dead}” is no longer on the table — it can't be taken as an input`;
+    if (dead) return `“${labelOf(dead)}” is no longer on the table — it can't be taken as an input`;
     // Поглощение теряет смысл, если поглощаемый узел сняли из входов: получился бы ВТОРОЙ
     // производитель живого узла, а не его дособирание.
     if (produces === 'absorb') {
       if (!distinct.includes(absorbInto)) {
-        return `unit ${absorbInto} has been removed from the inputs — you can only add to what the step takes`;
+        return `unit ${labelOf(absorbInto)} has been removed from the inputs — you can only add to what the step takes`;
       }
       // Поглощение — тоже сборка узла, и правило 3 на него распространяется: `GARMENT → GARMENT`
       // не дособирает ничего, движок отвечает too-few-inputs.
       if (distinct.length < 2) {
-        return `there is nothing to add to ${absorbInto} with — take at least one more input into the step`;
+        return `there is nothing to add to ${labelOf(absorbInto)} with — take at least one more input into the step`;
       }
     }
     if (!work) return 'pick what kind of step this is';
@@ -377,7 +357,7 @@ export function AssemblyCreateDialog({
     if (produces === 'unit' && !canBeUnit) {
       return 'a unit made of a single input is processing, not a unit: take at least two inputs';
     }
-    return codeProblem;
+    return '';
   })();
 
   // РЕЗУЛЬТАТ ЖЕСТА, СОБРАННЫЙ ОДИН РАЗ. Его же читает и предупреждение о принадлежности, и
@@ -439,7 +419,7 @@ export function AssemblyCreateDialog({
     const onto = `◌ this step will not appear on ▣ ${labelOf(ontoPiece)}`;
     if (!distinct.includes(ontoPiece)) return `${onto} — it no longer takes it`;
     if (draft.outputUnitKey) {
-      return `${onto} — it assembles ▣ ${draft.outputUnitKey}, and that is a row of the unit`;
+      return `${onto} — it assembles ▣ ${unitDisplayName({ key: unitKey, outputUnitName: unitName })}, and that is a row of the unit`;
     }
     return `${onto} — a step on more than one piece belongs to none of them`;
   })();
@@ -447,8 +427,8 @@ export function AssemblyCreateDialog({
   const belongProblem = holds
     ? ''
     : lands
-      ? `◌ this step will not belong to ▣ ${prefill!.intoUnit} — it lands in ▣ ${lands}`
-      : `◌ this step will not belong to ▣ ${prefill!.intoUnit} — nothing it takes leads there`;
+      ? `◌ this step will not belong to ▣ ${labelOf(prefill!.intoUnit!)} — it lands in ▣ ${labelOf(lands)}`
+      : `◌ this step will not belong to ▣ ${labelOf(prefill!.intoUnit!)} — nothing it takes leads there`;
 
   const submit = () => {
     if (problem) return;
@@ -631,9 +611,9 @@ export function AssemblyCreateDialog({
             {[
               prefill?.at !== undefined ? `step ${(prefill.at + 1) * 10}` : 'at the end',
               produces === 'unit'
-                ? `▣ ${unitKey.trim() || 'new unit'}`
+                ? `▣ ${unitDisplayName({ key: unitKey, outputUnitName: unitName })}`
                 : produces === 'absorb'
-                  ? `add to ▣ ${absorbInto}`
+                  ? `add to ▣ ${labelOf(absorbInto)}`
                   : 'processing',
             ].join(' · ')}
             <FoldCaret open={moreOpen} />
@@ -649,7 +629,7 @@ export function AssemblyCreateDialog({
                 предупреждением — и диалог сообщал бы обе новости сразу, а верна из них одна. */}
                 <Text size='micro' variant='label'>
                   {prefill.intoUnit && holds
-                    ? `step ${(prefill.at + 1) * 10}, inside ▣ ${prefill.intoUnit}`
+                    ? `step ${(prefill.at + 1) * 10}, inside ▣ ${labelOf(prefill.intoUnit)}`
                     : `step ${(prefill.at + 1) * 10}`}
                 </Text>
                 {/* ЧЕРНИЛАМИ, А НЕ СЕРЫМ, И БЕЗ КРАСНОГО: красный занят ошибкой, а это не ошибка —
@@ -678,24 +658,14 @@ export function AssemblyCreateDialog({
                   <Chip
                     dashed={produces !== 'absorb'}
                     onClick={() => setProduces('absorb')}
-                    title='add to an existing unit — it keeps its own code'
+                    title='keeps its name'
                   >
-                    add to ▣ {absorbInto}
+                    add to ▣ {labelOf(absorbInto)}
                   </Chip>
                 )}
               </ChipRow>
               {produces === 'unit' && (
                 <div className='mt-1 flex flex-col gap-1'>
-                  <Input
-                    name='assemblyUnitKey'
-                    value={unitKey}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      setUnitKeyTouched(true);
-                      setUnitKey(e.target.value);
-                    }}
-                    placeholder='unit code'
-                    maxLength={64}
-                  />
                   <Input
                     name='assemblyUnitName'
                     value={unitName}

@@ -99,7 +99,7 @@ console.log('подписи жестов — номер ЭКРАННЫЙ, (i + 1
 
 is('первый шаг — 10', appendLabel(0), 'create step 10');
 is('девятый шаг — 90', appendLabel(8), 'create step 90');
-is('растворение называет узел', dissolveLabel('SHELL'), 'dissolve ▣ SHELL');
+is('растворение называет узел', dissolveLabel('SHELL'), 'dissolve ▣ Shell');
 // ВСТАВКА НАЗЫВАЕТСЯ СВОИМ ГЛАГОЛОМ: «create step 50» и «insert step 50» — разные обещания, и
 // второе честнее там, где следом за отменой поедут назад номера всех следующих шагов.
 is('вставка называет себя вставкой', insertLabel(4), 'insert step 50');
@@ -122,11 +122,11 @@ is(
     fieldId: 'r3',
     unitKey: 'SHELL',
     unitName: 'корпус',
-    label: dissolveLabel('SHELL'),
+    label: dissolveLabel('SHELL', 'корпус'),
   }),
-  'undo — dissolve ▣ SHELL',
+  'undo — dissolve ▣ корпус',
 );
-is('переименование называет ОБА ключа', renameLabel('SHELL', 'BODY'), 'rename ▣ SHELL → BODY');
+is('переименование называет ОБА узла', renameLabel('SHELL', 'BODY'), 'rename ▣ Shell → Body');
 // «rename ▣ SHELL» не отличает «сейчас вернётся SHELL» от «сейчас вернётся BODY»: чип обязан
 // называть то, что произойдёт по нажатию, а не то, чего жест касался.
 is(
@@ -143,7 +143,7 @@ is(
     posForward: [],
     label: renameLabel('SHELL', 'BODY'),
   }),
-  'undo — rename ▣ SHELL → BODY',
+  'undo — rename ▣ Shell → Body',
 );
 is(
   'чип называет жест раскладки',
@@ -167,7 +167,13 @@ no('move — не формовая', isFormEntry({ kind: 'move' }));
 // --- resolvePending -------------------------------------------------------------------------------
 console.log('\nresolvePending — дозаполнение id вторым тактом');
 
-const pending = { kind: 'append', index: 2, expectedLength: 3, row: row('SHELL'), label: appendLabel(2) };
+const pending = {
+  kind: 'append',
+  index: 2,
+  expectedLength: 3,
+  row: row('SHELL'),
+  label: appendLabel(2),
+};
 
 // ДЛИНА СОВПАЛА: append состоялся, и строка по адресу — та самая новая.
 is('совпавшая длина дозаполняет id', resolvePending(pending, rows('r1', 'r2', 'r3')), {
@@ -189,7 +195,11 @@ is('пустой массив — сброс', resolvePending(pending, []), null
 is('снимок ДО append (та самая ловушка) — сброс', resolvePending(pending, rows('r1', 'r2')), null);
 
 // Строка по адресу есть, но без id (битое состояние) — тоже сброс, а не запись с undefined.
-is('строка без id — сброс', resolvePending(pending, [{ id: 'r1' }, { id: 'r2' }, { id: '' }]), null);
+is(
+  'строка без id — сброс',
+  resolvePending(pending, [{ id: 'r1' }, { id: 'r2' }, { id: '' }]),
+  null,
+);
 
 // Первый шаг карточки: append в пустой массив.
 is(
@@ -385,7 +395,10 @@ yes('узел растворён — отмена честна', canUndo(DIS, ro
 
 // ШАГУ ВЕРНУЛИ ВЫХОД — руками или новым жестом. Вернуть поверх старый код значит переписать чужую
 // работу, а не отменить свою.
-no('шаг снова собирает узел', canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'BODY' : '')));
+no(
+  'шаг снова собирает узел',
+  canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'BODY' : '')),
+);
 no(
   'шагу вернули ТОТ ЖЕ код',
   canUndo(DIS, rows('r1', 'r2', 'r3'), (i) => (i === 1 ? 'SHELL' : '')),
@@ -435,10 +448,12 @@ const REN = {
 const R3 = rows('r1', 'r2', 'r3');
 /** Карточка ПОСЛЕ жеста: везде новый ключ. */
 const outNew = (i) => (i === 0 || i === 1 ? 'BODY' : '');
-const inNew = (i) => (i === 1 ? ['BODY', 'SLEEVES'] : i === 2 ? ['COLLAR', 'BODY'] : ['FRONT', 'BACK']);
+const inNew = (i) =>
+  i === 1 ? ['BODY', 'SLEEVES'] : i === 2 ? ['COLLAR', 'BODY'] : ['FRONT', 'BACK'];
 /** Карточка ПОСЛЕ отмены: везде старый. */
 const outOld = (i) => (i === 0 || i === 1 ? 'SHELL' : '');
-const inOld = (i) => (i === 1 ? ['SHELL', 'SLEEVES'] : i === 2 ? ['COLLAR', 'SHELL'] : ['FRONT', 'BACK']);
+const inOld = (i) =>
+  i === 1 ? ['SHELL', 'SLEEVES'] : i === 2 ? ['COLLAR', 'SHELL'] : ['FRONT', 'BACK'];
 
 yes('все места на месте — отмена честна', canUndo(REN, R3, outNew, inNew));
 
@@ -551,12 +566,20 @@ const E = (n) => ({ kind: 'move', back: [], forward: [], label: `m${n}` });
   is('и положил её в возврат', peekRedo(h2).label, 'm2');
   const h3 = undoStep(h2);
   is('второй шаг назад', peekUndo(h3), null);
-  is('возврат накопил оба', h3.redo.map((e) => e.label), ['m2', 'm1']);
+  is(
+    'возврат накопил оба',
+    h3.redo.map((e) => e.label),
+    ['m2', 'm1'],
+  );
 
   const h4 = redoStep(h3);
   is('шаг вперёд вернул ближайший', peekUndo(h4).label, 'm1');
   is('и снял его с возврата', peekRedo(h4).label, 'm2');
-  is('вперёд до конца', redoStep(h4).undo.map((e) => e.label), ['m1', 'm2']);
+  is(
+    'вперёд до конца',
+    redoStep(h4).undo.map((e) => e.label),
+    ['m1', 'm2'],
+  );
 
   // НОВЫЙ ЖЕСТ ГАСИТ ВОЗВРАТ. После него «вперёд» ведёт уже не туда, откуда ушли.
   const h5 = record(h3, E(9));
@@ -567,9 +590,17 @@ const E = (n) => ({ kind: 'move', back: [], forward: [], label: `m${n}` });
   // тактом, и запись кладётся отдельно от самого жеста. Гаси она возврат — ⇧⌘Z, нажатое трижды,
   // вернуло бы один жест и молча забыло два.
   const h6 = pushUndo(h3, E(7));
-  is('pushUndo не тронул возврат', h6.redo.map((e) => e.label), ['m2', 'm1']);
+  is(
+    'pushUndo не тронул возврат',
+    h6.redo.map((e) => e.label),
+    ['m2', 'm1'],
+  );
   is('pushUndo положил вершину', peekUndo(h6).label, 'm7');
-  is('dropRedoTop снял вершину возврата', dropRedoTop(h3).redo.map((e) => e.label), ['m2']);
+  is(
+    'dropRedoTop снял вершину возврата',
+    dropRedoTop(h3).redo.map((e) => e.label),
+    ['m2'],
+  );
 }
 
 // --- глубина --------------------------------------------------------------------------------------
@@ -598,10 +629,26 @@ console.log('\nсброс по роду — формовые умирают, р�
   const D = { kind: 'dissolve', index: 0, fieldId: 'r1', unitKey: 'X', unitName: '', label: 'd' };
   const h = { undo: [A, M, D], redo: [A, M] };
 
-  is('dropForm оставил только раскладку', dropForm(h).undo.map((e) => e.kind), ['move']);
-  is('dropForm вычистил и возврат', dropForm(h).redo.map((e) => e.kind), ['move']);
-  is('dropMove оставил только форму', dropMove(h).undo.map((e) => e.kind), ['append', 'dissolve']);
-  is('dropMove вычистил и возврат', dropMove(h).redo.map((e) => e.kind), ['append']);
+  is(
+    'dropForm оставил только раскладку',
+    dropForm(h).undo.map((e) => e.kind),
+    ['move'],
+  );
+  is(
+    'dropForm вычистил и возврат',
+    dropForm(h).redo.map((e) => e.kind),
+    ['move'],
+  );
+  is(
+    'dropMove оставил только форму',
+    dropMove(h).undo.map((e) => e.kind),
+    ['append', 'dissolve'],
+  );
+  is(
+    'dropMove вычистил и возврат',
+    dropMove(h).redo.map((e) => e.kind),
+    ['append'],
+  );
 
   // ТОТ ЖЕ ОБЪЕКТ, КОГДА СБРАСЫВАТЬ НЕЧЕГО. Седьмую точку сброса дёргает КАЖДЫЙ `focusin` в доке:
   // новая история на каждое касание поля означала бы ре-рендер редактора шага на каждое касание.
@@ -746,7 +793,12 @@ function stand(initialIds = [], pieces = []) {
      */
     rename(index, next) {
       if (frozen) return { ok: false, why: 'frozen' };
-      const act = unitRenameAct(api.card.map((r) => ({ outputUnitKey: r.out, inputKeys: r.ins })), index, next, pieces);
+      const act = unitRenameAct(
+        api.card.map((r) => ({ outputUnitKey: r.out, inputKeys: r.ins })),
+        index,
+        next,
+        pieces,
+      );
       if (act.kind === 'noop') return { ok: true };
       if (act.kind === 'dissolve') {
         api.dissolve(index);
@@ -1199,7 +1251,7 @@ function chain() {
   is('цепочка ниже не тронута', s.card[3].ins, ['BODY', 'COLLAR']);
   is('успех произнесён с числом шагов', s.said.at(-1), 'renamed SHELL → CARCASS in 2 steps');
   is('жест — ОДНА запись, а не три', s.history.undo.length, 1);
-  is('и чип называет оба ключа', s.undoName, 'undo — rename ▣ SHELL → CARCASS');
+  is('и чип называет оба узла', s.undoName, 'undo — rename ▣ Shell → Carcass');
   s.undo();
   is('одно нажатие ⌘Z вернуло ВСЁ разом', j(s.card), before);
   is('и сделало это одной записью', s.history.undo.length, 0);
@@ -1218,11 +1270,24 @@ function chain() {
   is('ВЫХОД ПОГЛОТИТЕЛЯ — тоже', s.card[2].out, 'TORSO');
   is('и его вход', s.card[2].ins, ['TORSO', 'POCKET']);
   is('вход следующего узла', s.card[3].ins, ['TORSO', 'COLLAR']);
-  is('старого кода не осталось нигде', s.card.filter((r) => r.out === 'BODY' || r.ins.includes('BODY')).length, 0);
+  is(
+    'старого кода не осталось нигде',
+    s.card.filter((r) => r.out === 'BODY' || r.ins.includes('BODY')).length,
+    0,
+  );
   is('число шагов считает ВСЕ три вида мест', s.said.at(-1), 'renamed BODY → TORSO in 3 steps');
   s.undo();
   is('⌘Z вернул и поглотителя', s.card[2].out, 'BODY');
-  is('и все ссылки', j(s.card.map((r) => r.ins)), j([['FRONT', 'BACK'], ['SHELL', 'SLEEVE'], ['BODY', 'POCKET'], ['BODY', 'COLLAR']]));
+  is(
+    'и все ссылки',
+    j(s.card.map((r) => r.ins)),
+    j([
+      ['FRONT', 'BACK'],
+      ['SHELL', 'SLEEVE'],
+      ['BODY', 'POCKET'],
+      ['BODY', 'COLLAR'],
+    ]),
+  );
 }
 
 {
@@ -1441,10 +1506,20 @@ console.log('\nПОВТОР ПОСЛЕ СОХРАНЕНИЯ — обе стор�
   // страховочный: щит повтора у ОБОИХ родов после ресета отвечает «можно», потому что длина
   // сошлась. Держит только то, что записей к этому моменту уже нет.
   const APP = { kind: 'append', index: 1, fieldId: 'old', row: {}, label: appendLabel(1) };
-  const INS2 = { kind: 'insert', index: 0, fieldId: 'old', row: {}, lengthAfter: 2, label: insertLabel(0) };
+  const INS2 = {
+    kind: 'insert',
+    index: 0,
+    fieldId: 'old',
+    row: {},
+    lengthAfter: 2,
+    label: insertLabel(0),
+  };
   yes('append: длина после ресета сошлась — щит пропускает', canRedo(APP, rows('n1'), noUnits));
   yes('insert: та же длина, тот же ответ', canRedo(INS2, rows('n1'), noUnits));
-  no('а отмену тех же записей щит по fieldId останавливает', canUndo(APP, rows('n1', 'n2'), noUnits));
+  no(
+    'а отмену тех же записей щит по fieldId останавливает',
+    canUndo(APP, rows('n1', 'n2'), noUnits),
+  );
 }
 
 {
@@ -1470,7 +1545,11 @@ console.log('\nзаморозка — гейт ПО РОДУ, а не скопо
   s.move([{ key: 'SHELL', at: { x: 40, y: 40 } }]);
   s.freeze(true); // карточку выпустили, пока фулскрин открыт
 
-  is('формовые записи умерли при выпуске', s.history.undo.filter((e) => e.kind !== 'move').length, 0);
+  is(
+    'формовые записи умерли при выпуске',
+    s.history.undo.filter((e) => e.kind !== 'move').length,
+    0,
+  );
   is('раскладочная пережила выпуск', s.history.undo.length, 1);
   is('чип называет её', s.undoName, 'undo — move 1 node');
 
@@ -1525,7 +1604,8 @@ for (const name of RESETS) {
   s.create('SHELL');
   s.move([{ key: 'SHELL', at: { x: 1, y: 2 } }]);
   checks++;
-  if (s.history.undo.length !== 2) fail(`${name}: записи до сброса`, 'сбрасывать нечего, случай пуст');
+  if (s.history.undo.length !== 2)
+    fail(`${name}: записи до сброса`, 'сбрасывать нечего, случай пуст');
   s.clearForm(); // ← это и есть точка сброса
   is(`${name} убивает формовую запись`, s.history.undo.filter((e) => e.kind !== 'move').length, 0);
   is(`${name} НЕ трогает раскладочную`, s.history.undo.length, 1);
@@ -1600,7 +1680,11 @@ console.log('\nсброс раскладки против переименова
   s.rename(0, 'CARCASS');
   s.clearForm();
   is('формовых записей не осталось', s.history.undo.filter((e) => e.kind !== 'move').length, 0);
-  is('раскладочная жива', s.history.undo.map((e) => e.kind), ['move']);
+  is(
+    'раскладочная жива',
+    s.history.undo.map((e) => e.kind),
+    ['move'],
+  );
   s.undo();
   is('⌘Z отменил перестановку, а не переименование', s.card[1].ins, ['CARCASS', 'SLEEVE']);
   // Оверрайд остался под НОВЫМ кодом — там, куда его законно увёз жест, который никто не отменял.
@@ -1611,19 +1695,37 @@ console.log('\nсброс раскладки против переименова
 {
   // ДОГОВОР ОБ ИДЕНТИЧНОСТИ ОБЪЕКТА НЕ СЛОМАН: снимать нечего — тот же объект, без ре-рендера.
   const noPos = record(emptyHistory(), {
-    kind: 'rename', index: 0, fieldId: 'f1', from: 'A', to: 'B',
-    outputs: [], inputs: [], posBack: [], posForward: [], label: renameLabel('A', 'B'),
+    kind: 'rename',
+    index: 0,
+    fieldId: 'f1',
+    from: 'A',
+    to: 'B',
+    outputs: [],
+    inputs: [],
+    posBack: [],
+    posForward: [],
+    label: renameLabel('A', 'B'),
   });
   yes('переименование без раскладочной половины отдаёт тот же объект', dropMove(noPos) === noPos);
   const withPos = record(emptyHistory(), {
-    kind: 'rename', index: 0, fieldId: 'f1', from: 'A', to: 'B',
-    outputs: [], inputs: [],
-    posBack: [{ key: 'A', at: { x: 1, y: 1 } }], posForward: [{ key: 'B', at: { x: 1, y: 1 } }],
+    kind: 'rename',
+    index: 0,
+    fieldId: 'f1',
+    from: 'A',
+    to: 'B',
+    outputs: [],
+    inputs: [],
+    posBack: [{ key: 'A', at: { x: 1, y: 1 } }],
+    posForward: [{ key: 'B', at: { x: 1, y: 1 } }],
     label: renameLabel('A', 'B'),
   });
   const stripped = dropMove(withPos);
   no('а с половиной — новый', stripped === withPos);
-  is('половина снята с обеих сторон', [stripped.undo[0].posBack, stripped.undo[0].posForward], [[], []]);
+  is(
+    'половина снята с обеих сторон',
+    [stripped.undo[0].posBack, stripped.undo[0].posForward],
+    [[], []],
+  );
   is('а формовая часть цела', [stripped.undo[0].from, stripped.undo[0].to], ['A', 'B']);
 }
 
@@ -1675,10 +1777,7 @@ console.log('\nсброс раскладки против переименова
     'append: mediaCleared взведён после записи — нет',
     skeletonCanUndo(app, st([N, N, D, D, D], { mediaCleared: true })),
   );
-  no(
-    'append: дефект добавлен — нет',
-    skeletonCanUndo(app, st([N, N, D, D, D], { issues: [30] })),
-  );
+  no('append: дефект добавлен — нет', skeletonCanUndo(app, st([N, N, D, D, D], { issues: [30] })));
   // Ревью Codex P2: правка поля ВНЕ прежних тринадцати (припуск) — всё равно правка пачки.
   no(
     'append: припуск на строке пачки поправлен, метка ещё стоит — всё равно нет',
@@ -1693,7 +1792,10 @@ console.log('\nсброс раскладки против переименова
     'отпечаток: undefined/null ключа = нет ключа, порядок ключей не важен',
     operationRowPrint({ b: [1], a: undefined, c: null }) === operationRowPrint({ b: [1] }),
   );
-  no('отпечаток: любое поле шага — факт', operationRowPrint({ x: '' }) === operationRowPrint({ x: '1' }));
+  no(
+    'отпечаток: любое поле шага — факт',
+    operationRowPrint({ x: '' }) === operationRowPrint({ x: '1' }),
+  );
   yes(
     'append: метка draft старого шага — не факт, отмена жива',
     skeletonCanUndo(app, st([{ draft: true }, N, D, D, D])),
@@ -1703,19 +1805,27 @@ console.log('\nсброс раскладки против переименова
   yes('replace: повтор при длине снимка «до»', skeletonCanRedo(rep, 4));
   no('replace: повтор при другой длине — нет', skeletonCanRedo(rep, 3));
   yes('append: повтор при длине = from', skeletonCanRedo(app, 2));
-  no('canUndo без строк каркас не пускает', canUndo(app, [], () => ''));
-  yes('canRedo каркаса = skeletonCanRedo', canRedo(app, [{ id: 'a' }, { id: 'b' }], () => ''));
-  is('подпись', [skeletonLabel('replace', 36), skeletonLabel('append', 1)], [
-    'apply skeleton · 36 steps',
-    'append skeleton · 1 step',
-  ]);
+  no(
+    'canUndo без строк каркас не пускает',
+    canUndo(app, [], () => ''),
+  );
+  yes(
+    'canRedo каркаса = skeletonCanRedo',
+    canRedo(app, [{ id: 'a' }, { id: 'b' }], () => ''),
+  );
+  is(
+    'подпись',
+    [skeletonLabel('replace', 36), skeletonLabel('append', 1)],
+    ['apply skeleton · 36 steps', 'append skeleton · 1 step'],
+  );
   no('каркас — формовая запись: dropForm его хоронит', isFormEntry(app) === false);
   is('dropForm хоронит каркас', dropForm(record(emptyHistory(), app)).undo.length, 0);
   const h = record(record(emptyHistory(), rec('append', 0, 1)), app);
-  is('dropUndoTop снимает только вершину, возврат не трогает', [
-    dropUndoTop(h).undo.length,
-    dropUndoTop(h).redo.length,
-  ], [1, 0]);
+  is(
+    'dropUndoTop снимает только вершину, возврат не трогает',
+    [dropUndoTop(h).undo.length, dropUndoTop(h).redo.length],
+    [1, 0],
+  );
   is('undoTitle называет пачку', undoTitle(app), 'undo — append skeleton · 3 steps');
 }
 

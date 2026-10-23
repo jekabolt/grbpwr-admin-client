@@ -429,7 +429,11 @@ head('раскладка — переименование не имеет пра
     { key: 'SHELL', at: null },
     { key: 'CARCASS', at: { x: 400, y: 300 } },
   ]);
-  is('чужие ноды не тронуты', e.some((x) => x.key === 'GARMENT'), false);
+  is(
+    'чужие ноды не тронуты',
+    e.some((x) => x.key === 'GARMENT'),
+    false,
+  );
 }
 {
   // НОДУ НЕ ДВИГАЛИ — и выдумывать ей позицию нельзя: приколоченная инверсией нода навсегда
@@ -474,7 +478,10 @@ head('раскладка — переименование не имеет пра
 
 head('выделение — нода не делась никуда, у неё другое имя');
 {
-  is('ключ перенесён', renamePicked(['SHELL', 'COLLAR'], 'SHELL', 'CARCASS'), ['CARCASS', 'COLLAR']);
+  is('ключ перенесён', renamePicked(['SHELL', 'COLLAR'], 'SHELL', 'CARCASS'), [
+    'CARCASS',
+    'COLLAR',
+  ]);
   is('порядок выбора не сдвинут', renamePicked(['COLLAR', 'SHELL'], 'SHELL', 'CARCASS'), [
     'COLLAR',
     'CARCASS',
@@ -492,15 +499,13 @@ head('структура — расчёт живёт в одном экземп�
 {
   const src = (p) => readFileSync(resolve(root, p), 'utf8');
   const field = src('src/components/managers/tech-card/components/operations-field.tsx');
-  yes(
-    'мутатор берёт расчёт из модуля',
-    /import \{[^}]*unitRenameAct[^}]*\} from '\.\/assembly-rename'/.test(field),
-  );
   is(
-    'и своей копии планировщика не держит',
-    /function planUnitRename/.test(field),
+    'ручной мутатор ключа из редактора удалён',
+    /import \{[^}]*unitRenameAct[^}]*\} from '\.\/assembly-rename'/.test(field),
     false,
   );
+  is('поля «Unit code» в редакторе нет', /unit code/i.test(field), false);
+  is('и своей копии планировщика не держит', /function planUnitRename/.test(field), false);
   yes(
     'проба истории тянет тот же расчёт',
     /assembly-rename/.test(src('scripts/last-mutation-probe-entry.ts')),
@@ -539,12 +544,18 @@ head('структура — расчёт живёт в одном экземп�
     yes('инлайн: перенос стоит выше чистки — в том же апдейтере', remap > 0 && remap < prune);
     // ВЕСТЬ СЪЕДАЕТСЯ: без обнуления рефа чистка применяла бы давнее переименование на каждом
     // последующем свипе, и выбор ноды, заведённой со старым кодом, молча уезжал бы на новый.
-    yes('инлайн: весть съедается, а не читается заново', /pendingRename\.current = null;/.test(inline));
+    yes(
+      'инлайн: весть съедается, а не читается заново',
+      /pendingRename\.current = null;/.test(inline),
+    );
     // Деп-массив спрашивается СОСТАВОМ, а не строкой: надмножество законно (Т10 дописала туда
     // раскладку), а вот пропажа любого из двух означала бы, что эффект не проснётся на своём
     // событии.
     const deps = inline.slice(tail + 3, inline.indexOf(']', tail) + 1);
-    yes('инлайн: и весть, и свип держат эффект', /\bres\b/.test(deps) && /\brenamedUnit\b/.test(deps));
+    yes(
+      'инлайн: и весть, и свип держат эффект',
+      /\bres\b/.test(deps) && /\brenamedUnit\b/.test(deps),
+    );
   }
 
   const hist = src('scripts/last-mutation-probe.mjs');

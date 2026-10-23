@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   Fragment,
   useEffect,
@@ -30,7 +31,7 @@ import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
 import { UnitGlyph, useUnitPicture } from './unit-silhouette';
-import { UnitNameInput } from './unit-block';
+import { InlineUnitName } from './unit-block';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // ПРЕЗЕНТАЦИОННЫЙ РЕНДЕР НОД СХЕМЫ СБОРКИ — боксы узлов, хвост, провода, глифы.
@@ -43,9 +44,9 @@ import type { PieceShapeMap } from './use-piece-shapes';
 //
 // ЧЕГО ЗДЕСЬ НЕТ И НЕ ДОЛЖНО БЫТЬ:
 //
-//   • МУТАТОРОВ И ФОРМЫ. Ни `useFieldArray`, ни `useFormContext`, ни `setValue`: всё, что пишет в
-//     карточку, живёт в `operations-field.tsx` в одном экземпляре (R3), а схема собирает ЖЕСТ и
-//     передаёт его наверх. Модуль чистый на запись целиком.
+//   • ЛОКАЛЬНЫХ МУТАТОРОВ ФОРМЫ. Имя узла редактирует общий `InlineUnitName` из
+//     `unit-block.tsx`; он сам знает канонического первого producer-а. Остальная запись карточки
+//     по-прежнему живёт в `operations-field.tsx`, а схема собирает жесты и передаёт их наверх.
 //   • REF-ОВ ЖЕСТА. `justDragged`, `dragRef`, `clickGuard`, автоскролл — общая механика ОДНОГО
 //     полотна, и она остаётся в родителе. Заведи вьюшка свой клик-гард — клик-эхо после драга
 //     начнёт открывать шаг, и дифф при этом останется «переносом».
@@ -237,7 +238,10 @@ export function compositionParts(
   const inputs = directInputs.get(key) ?? [];
   const named: NodeToken[] = inputs
     .filter((i) => i.kind === 'unit')
-    .map((i) => (units.has(i.key) ? { text: `▣ ${i.key}`, to: i.key } : { text: `▣ ${i.key}` }));
+    .map((i) => {
+      const name = unitDisplayName({ key: i.key, outputUnitName: units.get(i.key)?.name });
+      return units.has(i.key) ? { text: `▣ ${name}`, to: i.key } : { text: `▣ ${name}` };
+    });
   const pieces = inputs.filter((i) => i.kind === 'piece').length;
   // ДЕТАЛИ ОСТАЮТСЯ ЧИСЛОМ И ССЫЛКОЙ НЕ СТАНОВЯТСЯ: числу некуда вести. Это честно и менять
   // этого не надо — имена деталей в подвал не влезают, а их плитки видно рядом.
@@ -323,7 +327,7 @@ function NodeTokens({
             // МЕСТО НАЗЫВАЕТСЯ СЛОВАМИ ТОЙ ПОВЕРХНОСТИ, ГДЕ ТОКЕН СТОИТ. Раньше здесь стояло
             // «on the canvas» на обеих: в инлайне полотна нет вовсе — там прокручиваемая
             // коробка, — и подсказка обещала место, которого человек не найдёт.
-            title={`go to ▣ ${p.to} ${surfaceWords}`}
+            title={`go to ${p.text} ${surfaceWords}`}
           >
             {p.text}
           </span>
@@ -1073,6 +1077,13 @@ export function UnitBoxView({
   const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
   // Пиктограмма узла (полоса C) — только когда каркас её поставил; иначе шапка как была.
   const picture = useUnitPicture(box.key);
+  const displayName = unitDisplayName({ key: b.key, outputUnitName: b.name });
+  const absorbedIntoName = b.absorbedInto
+    ? unitDisplayName({
+        key: b.absorbedInto,
+        outputUnitName: units.get(b.absorbedInto)?.name,
+      })
+    : '';
   return (
     <div>
       <div
@@ -1126,11 +1137,11 @@ export function UnitBoxView({
           // отнимая у коробки строки, это подсказка, которую и открывают вопросом «а что будет,
           // если я сюда нажму». В фулскрине то же самое повторяет справка по клавишам; у инлайна
           // справки нет вовсе, и здесь эта строка — единственная.
-          title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
+          title={`▣ ${displayName}${
             terminal
               ? ' · finished garment'
               : b.absorbedInto
-                ? ` · goes into ▣ ${b.absorbedInto}`
+                ? ` · goes into ▣ ${absorbedIntoName}`
                 : ' · break'
           }\n${
             b.steps.length === 1
@@ -1142,30 +1153,31 @@ export function UnitBoxView({
               две строки и высота не менялись; клики уходят в шапку (подсказка — её). */}
           {picture && (
             <span className='pointer-events-none absolute top-0.5 left-1'>
-              <UnitGlyph picture={picture} name={b.name || box.key} boxClassName='mr-0 h-7 w-7' />
+              <UnitGlyph picture={picture} name={displayName} boxClassName='mr-0 h-7 w-7' />
             </span>
           )}
-          {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
-              шагах, и делить строку с чем-либо ему нельзя: раньше имя теснило ключ,
-              ключ теснил состояние, и двухсловный «ДВА РУКАВА» уезжал поверх шага. */}
-          <Text
-            size='micro'
-            variant='uppercase'
-            tracking='label'
-            component='span'
-            className='block w-full truncate font-bold'
-          >
-            {isPicked ? '✓ ' : ''}▣ {box.key}
-          </Text>
-          {/* ВТОРАЯ СТРОКА — ИМЯ И СОСТОЯНИЕ СЛОВОМ. «✓», «→GARMENT» и «✕» требовали
-              держать в голове словарь из трёх значков; строкой хватает места сказать
-              это словом. Красным — только разрыв: сборка не сошлась, и это ошибка,
-              а не оттенок. */}
-          <span className='flex w-full items-center gap-1 overflow-hidden'>
-            <UnitNameInput
+          {/* ПЕРВАЯ СТРОКА — ОДНО ИМЯ УЗЛА. Явное имя побеждает код, код остаётся fallback;
+              один клик по самому слову меняет его, а остальная шапка открывает узел. */}
+          <span className='flex w-full min-w-0 items-center gap-1'>
+            <Text
+              size='micro'
+              variant='uppercase'
+              tracking='label'
+              component='span'
+              className='shrink-0 font-bold'
+            >
+              {isPicked ? '✓ ' : ''}▣
+            </Text>
+            <InlineUnitName
               block={b}
-              className='h-4 min-h-0 min-w-0 flex-1 py-0 text-micro leading-none'
+              className='text-micro font-bold uppercase tracking-label'
+              inputClassName='text-micro font-bold uppercase tracking-label leading-none'
             />
+          </span>
+          {/* ВТОРАЯ СТРОКА — СОСТОЯНИЕ СЛОВОМ. «✓», «→GARMENT» и «✕» требовали держать
+              в голове словарь из трёх значков. Красным — только разрыв: сборка не сошлась,
+              и это ошибка, а не оттенок. */}
+          <span className='flex w-full items-center gap-1 overflow-hidden'>
             {/* ПУСТОЙ НАБОР КУСКОВ — ЭТО ОТСУТСТВИЕ СТРОКИ, А НЕ ПУСТАЯ СТРОКА, и проверка
                 стоит ЗДЕСЬ, а не внутри `NodeTokens`. Поглощённый узел состоянием больше не
                 говорит ничего (см. `stateParts`), и оставь мы `Text` стоять — в правой части
@@ -1571,6 +1583,7 @@ export function TileView({
   stepProps,
   onAddOperation,
   onGoToUnit,
+  unitNameOf,
   orphanBoard,
 }: {
   tile: TileLayout;
@@ -1607,6 +1620,8 @@ export function TileView({
   onAddOperation?: () => void;
   /** Перейти к узлу, который деталь съел. Пусто у свободной: вести некуда. */
   onGoToUnit?: () => void;
+  /** Owner-facing name of the unit that consumed the piece. */
+  unitNameOf: (key: string) => string;
   /** Контролы сироты принадлежат форме выше; вьюшка только раскладывает их на полотне. */
   orphanBoard?: OrphanBoardState;
 }) {
@@ -1645,8 +1660,12 @@ export function TileView({
             // не напечатано вовсе, а 52 пикселя строки для него не дадут. Значит тот же
             // токен, только в форме чипа: слова и глиф — один в один, чтобы две записи
             // одного перехода не читались как два разных.
-            <Chip nonForm onClick={onGoToUnit} title={`go to ▣ ${t.into} ${surfaceWords}`}>
-              → ▣ {t.into}
+            <Chip
+              nonForm
+              onClick={onGoToUnit}
+              title={`go to ▣ ${unitNameOf(t.into!)} ${surfaceWords}`}
+            >
+              → ▣ {unitNameOf(t.into!)}
             </Chip>
           )}
           {addable && (
@@ -1671,7 +1690,13 @@ export function TileView({
         // подсказки обещала съеденной плитке «open the step that consumed it»: один орган,
         // два противоположных смысла, и выбор между ними по невидимому на глаз состоянию.
         // Ровно тот перегруз, который с бокса уже снят; навигация переехала на чип.
-        title={orphan ? name : t.state === 'free' ? `${name} · free` : `${name} · ▣ ${t.into}`}
+        title={
+          orphan
+            ? name
+            : t.state === 'free'
+              ? `${name} · free`
+              : `${name} · ▣ ${unitNameOf(t.into!)}`
+        }
       >
         {/* ГОЛОВА — САМА ДЕТАЛЬ, и она же PICK-ЗОНА плитки. Орган переехал с внешней коробки
             сюда ровно по образцу бокса узла: строки под головой — уже кнопки шагов, и оставь

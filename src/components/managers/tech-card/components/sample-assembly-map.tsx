@@ -15,6 +15,7 @@ import {
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { decimalToInput } from 'utils/decimal';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 
 // ---------------------------------------------------------------------------
 // ASSEMBLY MAP — the sketch and the operation list, joined.
@@ -55,6 +56,8 @@ type FormOperation = {
   calloutNumber?: number;
   operationNumber?: number;
   inputKeys?: string[];
+  outputUnitKey?: string;
+  outputUnitName?: string;
 };
 
 type FormCallout = {
@@ -149,6 +152,16 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
   const { data: workshop } = useWorkshopSettings();
   const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as FormOperation[];
+  const unitNameByKey = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const operation of operations) {
+      const key = operation.outputUnitKey?.trim() ?? '';
+      if (key && !names.has(key)) {
+        names.set(key, unitDisplayName({ key, outputUnitName: operation.outputUnitName }));
+      }
+    }
+    return names;
+  }, [operations]);
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
 
@@ -274,7 +287,10 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
           {operations.map((o, i) => {
             // Неизвестный ключ — узел: показываем его меткой, а не выбрасываем. Иначе шаг,
             // собирающий два узла, отрисовался бы вовсе без состава.
-            const names = (o.inputKeys ?? []).map((k) => pieceNameByKey.get(k) ?? `▣ ${k}`);
+            const names = (o.inputKeys ?? []).map(
+              (k) =>
+                pieceNameByKey.get(k) ?? `▣ ${unitNameByKey.get(k) ?? unitDisplayName({ key: k })}`,
+            );
             const spec = specLine(o, names, {
               card: cardAllowanceMm,
               workshop: shopAllowanceMm,

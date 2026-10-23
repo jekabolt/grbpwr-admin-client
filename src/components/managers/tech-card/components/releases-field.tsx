@@ -17,6 +17,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { Fragment, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -329,6 +330,13 @@ function SnapshotOperations({
   // непустом списке шагов.
   const { catalog: workCatalog } = useOperationWorkCatalog();
   if (ops.length === 0) return null;
+  const unitNameByKey = new Map<string, string>();
+  for (const operation of ops) {
+    const key = (operation.outputUnitKey ?? '').trim();
+    if (key && !unitNameByKey.has(key)) {
+      unitNameByKey.set(key, unitDisplayName({ key, outputUnitName: operation.outputUnitName }));
+    }
+  }
   // Вход шага — деталь ИЛИ узел, и читать надо union: релиз, подписанный до Ф1, поля 46 не несёт
   // и говорит о деталях старой проекцией. Ключ, не совпавший ни с одной деталью снапшота, есть
   // ссылка на узел — так его и печатаем.
@@ -345,7 +353,7 @@ function SnapshotOperations({
         const piece = pieces.find((pc) => pc.lineKey === k);
         // Деталь без имени — всё ещё деталь: показываем её ключ, а не выдаём за узел.
         if (piece) return piece.name?.trim() || k;
-        return legacy ? k : `▣ ${k}`;
+        return legacy ? k : `▣ ${unitNameByKey.get(k) ?? unitDisplayName({ key: k })}`;
       })
       .filter(Boolean)
       .join(' + ');
@@ -355,8 +363,7 @@ function SnapshotOperations({
   const outputOf = (o: common_TechCardOperation): string => {
     const key = (o.outputUnitKey ?? '').trim();
     if (!key) return '';
-    const name = (o.outputUnitName ?? '').trim();
-    return name ? `▣ ${key} · ${name}` : `▣ ${key}`;
+    return `▣ ${unitNameByKey.get(key) ?? unitDisplayName({ key, outputUnitName: o.outputUnitName })}`;
   };
   return (
     <>
@@ -707,7 +714,8 @@ export function ReleasesField({
             <Button
               type='button'
               variant='underline'
-              size='xs' className='text-labelColor hover:text-textColor'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
               disabled={gate.saving}
               loading={gate.saving}
               onClick={onCreate}

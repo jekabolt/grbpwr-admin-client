@@ -1,4 +1,5 @@
 import { assemblySweep } from './assembly-frontier';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import type {
   AssemblyPiece,
   AssemblyResult,
@@ -37,7 +38,10 @@ import type {
 /** ЭКРАННЫЙ номер шага: рельс и боксы подписаны десятками, порядковый отправил бы не туда. */
 const stepNo = (i: number) => (i + 1) * 10;
 
-const unit = (key: string) => `▣ ${key}`;
+const unit = (steps: AssemblyStep[], key: string) => {
+  const producer = steps.find((step) => step.outputUnitKey === key);
+  return `▣ ${unitDisplayName({ key, outputUnitName: producer?.outputUnitName })}`;
+};
 
 /** «step 20», «steps 20 and 30», «steps 20, 30 and 40». */
 function stepList(idx: number[]): string {
@@ -254,7 +258,7 @@ export function assemblyFaults(steps: AssemblyStep[], res: AssemblyResult): Map<
       orphans: [],
       // СЛЕДСТВИЕ ГОВОРИТ, ЧЕГО ЖДЁТ И КТО ВИНОВАТ. «input doesn't exist» здесь — ложь по сути:
       // вход существует, он просто не собрался выше.
-      message: `waiting for ${waitingFor.map(unit).join(', ')} · ${stepList(causes)} ${
+      message: `waiting for ${waitingFor.map((key) => unit(steps, key)).join(', ')} · ${stepList(causes)} ${
         causes.length > 1 ? 'are' : 'is'
       } broken`,
     });
@@ -274,7 +278,7 @@ export function assemblyFaults(steps: AssemblyStep[], res: AssemblyResult): Map<
     f.orphans.sort((a, b) => a - b);
     f.message = `${f.message} · ${stepList(f.orphans)} depend${
       f.orphans.length > 1 ? '' : 's'
-    } on ${unit(key)}`;
+    } on ${unit(steps, key)}`;
   });
 
   return faults;
@@ -383,7 +387,7 @@ export function assemblyPrice(
     parts.push(`${lead} will break ${stepList(breaks)}`);
     if (unitsLost.length === 0 && held.length > 0) {
       parts.push(
-        `but ${held.map(unit).join(', ')} still ${held.length > 1 ? 'assemble' : 'assembles'}`,
+        `but ${held.map((key) => unit(after, key)).join(', ')} still ${held.length > 1 ? 'assemble' : 'assembles'}`,
       );
     }
   }
@@ -422,5 +426,5 @@ export function dissolvePrice(
   const after = steps.map((s, i) =>
     i === stepIndex ? { ...s, outputUnitKey: '', outputUnitName: '' } : s,
   );
-  return assemblyPrice(pieces, steps, after, `dissolving ${unit(key)}`);
+  return assemblyPrice(pieces, steps, after, `dissolving ${unit(steps, key)}`);
 }

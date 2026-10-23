@@ -20,6 +20,8 @@
 // совпадает с одним из входов-УЗЛОВ (GARMENT + HEM → GARMENT). ОБРАБОТКА — шаг с пустым выходным
 // ключом: ничего не собирает, его входы остаются доступными следующим шагам.
 
+import { unitDisplayName } from 'lib/assembly-unit-name';
+
 export type AssemblyInputKind = 'piece' | 'unit';
 
 export type OperationInput = {
@@ -109,7 +111,10 @@ export type AssemblyResult = {
  * Сравнение ПОБАЙТНОЕ: никаких toLowerCase и trim. «SHELL» и «Shell» — два разных узла, ровно
  * как в колонке с utf8mb4_bin.
  */
-export function classifyAssemblyInputs(pieceKeys: Set<string>, rawKeys: string[]): OperationInput[] {
+export function classifyAssemblyInputs(
+  pieceKeys: Set<string>,
+  rawKeys: string[],
+): OperationInput[] {
   return rawKeys.map((key) => ({ kind: pieceKeys.has(key) ? 'piece' : 'unit', key }));
 }
 
@@ -151,8 +156,19 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
   // искать опечатку там, где переставлены шаги.
   const firstProducer = new Map<string, number>();
   steps.forEach((s, i) => {
-    if (s.outputUnitKey && !firstProducer.has(s.outputUnitKey)) firstProducer.set(s.outputUnitKey, i);
+    if (s.outputUnitKey && !firstProducer.has(s.outputUnitKey))
+      firstProducer.set(s.outputUnitKey, i);
   });
+
+  const unitName = (key: string) => {
+    const producedAt = firstProducer.get(key);
+    return unitDisplayName({
+      key,
+      outputUnitName: producedAt === undefined ? undefined : steps[producedAt]?.outputUnitName,
+    });
+  };
+  const inputName = (key: string) =>
+    pieceName.get(key)?.trim() || (isPiece(key) ? key : unitName(key));
 
   const known = (key: string) => isPiece(key) || res.units.has(key);
   const filterLive = () => order.filter((k) => live.get(k));
@@ -167,7 +183,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: '',
-        message: `the unit name “${s.outputUnitName}” is typed in, but there is no key: the step assembles nothing`,
+        message: `the unit name “${s.outputUnitName}” is typed in, but the step assembles nothing`,
       });
     }
 
@@ -200,7 +216,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
                   step: i,
                   input: j,
                   key: input.key,
-                  message: `“${input.key}” is this step's own output: a unit appears after the step, not before it`,
+                  message: `“${unitName(input.key)}” is this step's own output: a unit appears after the step, not before it`,
                 }
               : {
                   rule: AssemblyRule.frontier,
@@ -208,7 +224,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
                   step: i,
                   input: j,
                   key: input.key,
-                  message: `unit “${input.key}” appears only at step ${humanStep(at)} — it can't be an input any earlier`,
+                  message: `unit “${unitName(input.key)}” appears only at step ${humanStep(at)} — it can't be an input any earlier`,
                 },
           );
           return;
@@ -219,7 +235,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
           step: i,
           input: j,
           key: input.key,
-          message: `input “${input.key}” doesn't exist: there is no such piece and no such unit`,
+          message: `input “${inputName(input.key)}” doesn't exist: there is no such piece and no such unit`,
         });
         return;
       }
@@ -235,18 +251,18 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
             step: i,
             input: j,
             key: input.key,
-            message: `input “${input.key}” is no longer on the table`,
+            message: `input “${inputName(input.key)}” is no longer on the table`,
           });
           return;
         }
-        const eaterUnit = steps[eater]?.outputUnitKey || '?';
+        const eaterUnit = steps[eater]?.outputUnitKey;
         res.violations.push({
           rule: AssemblyRule.singleUse,
           detail: 'consumed-earlier',
           step: i,
           input: j,
           key: input.key,
-          message: `“${input.key}” is already consumed by step ${humanStep(eater)} and sits inside unit ${eaterUnit}`,
+          message: `“${inputName(input.key)}” is already consumed by step ${humanStep(eater)}${eaterUnit ? ` and sits inside unit ${unitName(eaterUnit)}` : ''}`,
         });
         return;
       }
@@ -268,7 +284,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: `the unit key “${out}” is taken by piece “${shown}”: pieces and units share one namespace`,
+        message: `this unit conflicts with piece “${shown}”`,
       });
       return;
     }
@@ -280,7 +296,8 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: 'a unit made of a single input is processing, not a unit: a join needs at least two different inputs',
+        message:
+          'a unit made of a single input is processing, not a unit: a join needs at least two different inputs',
       });
       return;
     }
@@ -302,7 +319,7 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
         step: i,
         input: -1,
         key: out,
-        message: `unit “${out}” is already produced by step ${humanStep(prev.producedAt)}${advice}`,
+        message: `unit “${unitName(out)}” is already produced by step ${humanStep(prev.producedAt)}${advice}`,
       });
       // Узел НЕ переписывается: сохранённое замыкание остаётся честным.
       return;
@@ -321,10 +338,18 @@ export function assemblySweep(pieces: AssemblyPiece[], steps: AssemblyStep[]): A
     if (absorb && prev) {
       prev.absorbedAt.push(i);
       prev.leaves = acc;
-      if (!prev.name) prev.name = s.outputUnitName;
+      // The name belongs to `producedAt`. `normalizeUnitNames` on the backend clears names from
+      // absorbing steps, so borrowing one here made the live header read a value that disappeared
+      // after save + reload. An empty first-producer name deliberately falls back to the unit key.
       res.units.set(out, prev);
     } else {
-      res.units.set(out, { key: out, name: s.outputUnitName, producedAt: i, absorbedAt: [], leaves: acc });
+      res.units.set(out, {
+        key: out,
+        name: s.outputUnitName,
+        producedAt: i,
+        absorbedAt: [],
+        leaves: acc,
+      });
       order.push(out);
     }
     leaves.set(out, acc);
@@ -352,6 +377,8 @@ export function assemblyReleaseCheck(
 
   const out: AssemblyViolation[] = [];
   const terminals = res.frontier.filter((k) => res.units.has(k));
+  const unitName = (key: string) =>
+    unitDisplayName({ key, outputUnitName: res.units.get(key)?.name });
 
   if (terminals.length === 0) {
     out.push({
@@ -360,7 +387,7 @@ export function assemblyReleaseCheck(
       step: -1,
       input: -1,
       key: '',
-      message: 'the assembly doesn\'t converge: not a single finished unit at the end',
+      message: "the assembly doesn't converge: not a single finished unit at the end",
     });
   } else if (terminals.length > 1) {
     out.push({
@@ -369,7 +396,7 @@ export function assemblyReleaseCheck(
       step: -1,
       input: -1,
       key: '',
-      message: `there must be exactly one terminal unit, and there are ${terminals.length}: ${terminals.join(', ')}`,
+      message: `there must be exactly one terminal unit, and there are ${terminals.length}: ${terminals.map(unitName).join(', ')}`,
     });
   }
 
@@ -378,7 +405,9 @@ export function assemblyReleaseCheck(
   if (terminals.length !== 1) return out;
 
   const reached = new Set(res.units.get(terminals[0])?.leaves ?? []);
-  const orphans = pieces.filter((p) => p.lineKey && !reached.has(p.lineKey)).map((p) => p.name || p.lineKey);
+  const orphans = pieces
+    .filter((p) => p.lineKey && !reached.has(p.lineKey))
+    .map((p) => p.name || p.lineKey);
   if (orphans.length > 0) {
     out.push({
       rule: AssemblyRule.converges,

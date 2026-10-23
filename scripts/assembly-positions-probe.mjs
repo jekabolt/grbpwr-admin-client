@@ -18,9 +18,23 @@ const root = resolve(here, '..');
 const entry = resolve(root, 'scripts/assembly-positions-probe-entry.ts');
 
 const outfile = resolve(tmpdir(), `assembly-positions-${process.pid}.mjs`);
-await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent' });
-const { assemblySweep, classifyAssemblyInputs, assemblyBlocks, assemblyLayout, applyOverrides, hitNode, combineVerdict } =
-  await import(pathToFileURL(outfile).href);
+await build({
+  entryPoints: [entry],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  outfile,
+  logLevel: 'silent',
+});
+const {
+  assemblySweep,
+  classifyAssemblyInputs,
+  assemblyBlocks,
+  assemblyLayout,
+  applyOverrides,
+  hitNode,
+  combineVerdict,
+} = await import(pathToFileURL(outfile).href);
 
 let checks = 0;
 const failed = new Set();
@@ -168,18 +182,28 @@ const B = fixture(
 {
   const box = A.layout.boxes[0];
   const tile = A.layout.tiles[0];
-  is('hit: центр бокса', hitNode(A.layout, box.x + box.w / 2, box.y + box.h / 2), { kind: 'box', key: box.key });
+  is('hit: центр бокса', hitNode(A.layout, box.x + box.w / 2, box.y + box.h / 2), {
+    kind: 'box',
+    key: box.key,
+  });
   is('hit: центр плитки', hitNode(A.layout, tile.x + tile.w / 2, tile.y + tile.h / 2), {
     kind: 'tile',
     key: tile.key,
   });
-  is('hit: хвостовой бокс — обычная цель с пустым ключом', hitNode(A.layout, A.layout.tail.x + 5, A.layout.tail.y + 5), {
-    kind: 'box',
-    key: '',
-  });
+  is(
+    'hit: хвостовой бокс — обычная цель с пустым ключом',
+    hitNode(A.layout, A.layout.tail.x + 5, A.layout.tail.y + 5),
+    {
+      kind: 'box',
+      key: '',
+    },
+  );
   is('hit: пустое место — ничего', hitNode(A.layout, 5, A.layout.height - 5), null);
   // Границы включительны с обеих сторон: рука, попавшая ровно в край, попала в ноду.
-  is('hit: левый верхний угол плитки', hitNode(A.layout, tile.x, tile.y), { kind: 'tile', key: tile.key });
+  is('hit: левый верхний угол плитки', hitNode(A.layout, tile.x, tile.y), {
+    kind: 'tile',
+    key: tile.key,
+  });
   is('hit: правый нижний угол плитки', hitNode(A.layout, tile.x + tile.w, tile.y + tile.h), {
     kind: 'tile',
     key: tile.key,
@@ -220,16 +244,22 @@ const B = fixture(
 {
   const v = (a, b) => combineVerdict(a, b, B.res, B.steps);
   is('вердикт: две свободные детали — сшить', v('SL', 'CF'), { ok: true });
-  is('вердикт: деталь на живой узел — поглощение узлом', v('SL', 'SHELL'), { ok: true, absorbInto: 'SHELL' });
+  is('вердикт: деталь на живой узел — поглощение узлом', v('SL', 'SHELL'), {
+    ok: true,
+    absorbInto: 'SHELL',
+  });
   is('вердикт: узел на деталь — новый узел, не поглощение', v('SHELL', 'SL'), { ok: true });
-  is('вердикт: узел на узел — поглощение ЦЕЛЬЮ', v('SHELL', 'HOOD'), { ok: true, absorbInto: 'HOOD' });
+  is('вердикт: узел на узел — поглощение ЦЕЛЬЮ', v('SHELL', 'HOOD'), {
+    ok: true,
+    absorbInto: 'HOOD',
+  });
   is('вердикт: тащим съеденное — отказ с причиной', v('FR', 'SL'), {
     ok: false,
-    reason: '“FR” is already consumed by step 10 and sits inside unit SHELL',
+    reason: '“FR” is already consumed by step 10 and sits inside unit корпус',
   });
   is('вердикт: цель съедена — отказ с причиной', v('SL', 'HD'), {
     ok: false,
-    reason: '“HD” is already consumed by step 20 and sits inside unit HOOD',
+    reason: '“HD” is already consumed by step 20 and sits inside unit капюшон',
   });
   // Не отказ, а отсутствие жеста: объяснять нечего, и снекбар был бы шумом.
   is('вердикт: нода сама на себя — жеста нет', v('SL', 'SL'), null);

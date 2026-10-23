@@ -27,6 +27,7 @@
 import { useMemo } from 'react';
 
 import { cn } from 'lib/utility';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { Chip, ChipRow, Text, ViewSwitch, FoldCaret } from 'ui';
 
 import { ClothSwatch } from './cloth-hatch';
@@ -514,6 +515,7 @@ export function AssemblyShelf({
                       found={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
                       picked={selection.has(p.lineKey)}
                       addMode={addMode}
+                      unitNameOf={unitNameOf}
                       onClick={() => clickTile(p.lineKey)}
                       onPointerDown={
                         onTilePointerDown
@@ -636,7 +638,8 @@ function InlineKey({ entries }: { entries: KeyEntry[] }) {
 /**
  * Заголовок группы.
  *
- * Режим unit — ключ узла и его имя (`▣ SHELL · shell`), ведущая группа называется `on the table`.
+ * Режим unit — то же единственное видимое имя узла, что в его шапке.
+ * Ведущая группа называется `on the table`.
  * Режим cloth — образец, назначение и артикул (`▣ main · 4412 navy twill`). ИМЯ АРТИКУЛА РЕЖЕТСЯ,
  * КОД — НИКОГДА: по коду артикул опознают, имя — украшение, и обрезанный код превратил бы заголовок
  * в загадку.
@@ -658,16 +661,11 @@ function GroupHead({
         </Head>
       );
     }
-    const name = unitNameOf(group.unitKey).trim();
+    const displayName = unitNameOf(group.unitKey).trim() || unitDisplayName({ key: group.unitKey });
     return (
-      <Head title={`unit ▣ ${group.unitKey}${name ? ` — ${name}` : ''} · ${count}`}>
-        <UnitHeadGlyph unitKey={group.unitKey} name={name} />
-        {/* КЛЮЧ И ИМЯ ОБА, даже когда имя — это ключ строчными: ключ пишут в поле «produces», имя
-            даёт человек, и совпадают они не всегда. Прятать имя по совпадению значило бы заводить
-            правило, которое молча перестаёт работать, как только имя разошлось с ключом. Ключ
-            обрезке не подлежит — режется имя. */}
-        <span className='shrink-0 uppercase'>▣ {group.unitKey}</span>
-        {name && <span className='min-w-0 truncate normal-case'>· {name}</span>}
+      <Head title={`unit ▣ ${displayName} · ${count}`}>
+        <UnitHeadGlyph unitKey={group.unitKey} name={displayName} />
+        <span className='min-w-0 truncate uppercase'>▣ {displayName}</span>
       </Head>
     );
   }
@@ -697,7 +695,13 @@ function GroupHead({
  */
 function UnitHeadGlyph({ unitKey, name }: { unitKey: string; name: string }) {
   const picture = useUnitPicture(unitKey);
-  return <UnitGlyph picture={picture} name={name || unitKey} boxClassName='mr-0 h-4 w-6' />;
+  return (
+    <UnitGlyph
+      picture={picture}
+      name={name || unitDisplayName({ key: unitKey })}
+      boxClassName='mr-0 h-4 w-6'
+    />
+  );
 }
 
 /** Общая коробка заголовка группы: 10px прописными над волосяной линией. */
@@ -728,6 +732,7 @@ function ShelfTile({
   found,
   picked,
   addMode,
+  unitNameOf,
   onClick,
   onPointerDown,
 }: {
@@ -737,13 +742,17 @@ function ShelfTile({
   found: FoundPiece | null;
   picked: boolean;
   addMode: null | { stepIndex: number; stepLabel: string; frontier: ReadonlySet<string> };
+  unitNameOf: (key: string) => string;
   onClick: () => void;
   onPointerDown?: (e: React.PointerEvent) => void;
 }) {
   const eligible = !addMode || addMode.frontier.has(piece.lineKey);
+  const intoName = piece.into
+    ? unitNameOf(piece.into).trim() || unitDisplayName({ key: piece.into })
+    : '';
   const second =
-    axis === 'unit' ? tileClothWord(piece.cloth.state) : piece.into ? `▣ ${piece.into}` : 'free';
-  const where = piece.into ? `in ▣ ${piece.into}` : 'on the table';
+    axis === 'unit' ? tileClothWord(piece.cloth.state) : intoName ? `▣ ${intoName}` : 'free';
+  const where = intoName ? `in ▣ ${intoName}` : 'on the table';
   const title = eligible
     ? `${piece.name} — ${clothPhrase(piece.cloth)} — ${where}`
     : `${piece.name} — not on the frontier of step ${addMode?.stepLabel ?? ''}: it has already gone into a unit`;

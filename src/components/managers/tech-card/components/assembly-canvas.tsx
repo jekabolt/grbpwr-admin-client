@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { refuseGesture } from './refuse-gesture';
 import {
   forwardRef,
@@ -1560,7 +1561,10 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     }
     return okV;
   })();
-  const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
+  const unitNameOf = (key: string) =>
+    unitDisplayName({ key, outputUnitName: res.units.get(key)?.name });
+  const nameOfNode = (key: string) =>
+    res.units.has(key) ? `▣ ${unitNameOf(key)}` : pieceNameOf(key);
 
   /**
    * ОДНО ПРЕДЛОЖЕНИЕ О ВЫДЕЛЕНИИ — и подсказка маркизы, и полоса выбора зовут именно его.
@@ -1594,7 +1598,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
     }
     if (!drag?.started || !verdict) return '';
     if (!verdict.ok) return verdict.reason;
-    if (verdict.absorbInto) return `release: add to ▣ ${verdict.absorbInto}`;
+    if (verdict.absorbInto) return `release: add to ▣ ${unitNameOf(verdict.absorbInto)}`;
     const held = drag.items.map((i) => nameOfNode(i.key)).join(' + ');
     return `release: join ${held} + ${nameOfNode(target!.key)}`;
   })();
@@ -1657,7 +1661,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
   };
   const unitClothLine = (key: string): string => {
     const line = clothLine(res.units.get(key)?.leaves ?? []);
-    return line ? `${key} — ${line}` : '';
+    return line ? `${unitNameOf(key)} — ${line}` : '';
   };
 
   const directInputs = directInputsOf(blocks, steps);
@@ -1856,6 +1860,7 @@ export const AssemblyCanvas = forwardRef<CanvasHandle, AssemblyCanvasProps>(func
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
                 }
+                unitNameOf={unitNameOf}
                 orphanBoard={orphanBoard}
               />
             );

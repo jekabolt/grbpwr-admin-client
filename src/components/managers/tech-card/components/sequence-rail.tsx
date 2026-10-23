@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/sortable';
 import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { clearReview, nextMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -514,6 +515,12 @@ export function SequenceRail({
     const next = nextMarkedOperation(nextOperations, index);
     if (next >= 0) onSelect(next);
   };
+  const unitNameByKey = new Map(
+    [...headerBefore.values()].map(({ block }) => [
+      block.key,
+      unitDisplayName({ key: block.key, outputUnitName: block.name }),
+    ]),
+  );
 
   const startsUnheadedLooseRun = (index: number) =>
     grouped &&
@@ -553,6 +560,7 @@ export function SequenceRail({
                     smv={headerBefore.get(index)!.smv}
                     terminal={headerBefore.get(index)!.terminal}
                     className='mt-0'
+                    unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
                   />
                 )}
                 <RailStep
