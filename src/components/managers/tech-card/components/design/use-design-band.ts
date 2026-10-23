@@ -12,6 +12,7 @@ import {
 import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { useUndoHistory } from '../undo-history';
 import { settleRunLedger } from './generation/run-ledger';
 import { configureRunCap } from './generation/run-state';
 import { applyRows } from './quiz-model';
@@ -326,6 +327,7 @@ export function cardOnScreen(card: number): boolean {
 
 export function useDesignWrites(techCardId?: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   const key = designKeys.band(techCardId ?? 0);
 
   const invalidate = useCallback(() => {
@@ -431,7 +433,7 @@ export function useDesignWrites(techCardId?: number) {
   );
 
   const registerUpload = useMutation({
-    mutationFn: (
+    mutationFn: async (
       input: {
         clientRequestId: string;
         items: DesignUploadItem[];
@@ -439,15 +441,19 @@ export function useDesignWrites(techCardId?: number) {
         expectedSlotRev?: number;
         newDetailName?: string;
       } & SilentWrite,
-    ) =>
-      adminService.RegisterDesignUpload({
+    ) => {
+      const ready = await undoHistory.barrier('design-upload');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before uploading');
+      return adminService.RegisterDesignUpload({
         techCardId: techCardId ?? 0,
         clientRequestId: input.clientRequestId,
         items: input.items,
         target: input.target,
         expectedSlotRev: input.expectedSlotRev ?? 0,
         newDetailName: input.newDetailName ?? '',
-      }),
+      });
+    },
     onMutate,
     onSuccess: invalidateWritten,
     onError: onSlotError,
@@ -475,7 +481,12 @@ export function useDesignWrites(techCardId?: number) {
   });
 
   const deleteDetailSlot = useMutation({
-    mutationFn: (slotId: number) => adminService.DeleteDesignDetailSlot({ slotId }),
+    mutationFn: async (slotId: number) => {
+      const ready = await undoHistory.barrier('detail-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteDesignDetailSlot({ slotId });
+    },
     onMutate,
     onSuccess: invalidateWritten,
     onError,

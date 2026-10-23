@@ -11,6 +11,7 @@ import {
   useTechCardFittings,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMemo } from 'react';
+import { useUndoHistory } from './undo-history';
 import { devExpenseKeys } from './useStyleReadViews';
 
 // Samples (сэмплы) of a tech card (new-flow NF-04). A sample is one sewn prototype; its `number`
@@ -148,8 +149,14 @@ export function useAddSampleSubstitution(sampleId: number) {
 
 export function useDeleteSampleSubstitution(sampleId: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   return useMutation({
-    mutationFn: (id: number) => adminService.DeleteSampleSubstitution({ id }),
+    mutationFn: async (id: number) => {
+      const ready = await undoHistory.barrier('sample-substitution-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteSampleSubstitution({ id });
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: substitutionKeys.list(sampleId) }),
   });
 }
@@ -198,8 +205,14 @@ export function useSampleDeletionPreview() {
  */
 export function useDeleteSample(techCardId: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   return useMutation({
-    mutationFn: (id: number) => adminService.DeleteSample({ id, dryRun: false }),
+    mutationFn: async (id: number) => {
+      const ready = await undoHistory.barrier('sample-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteSample({ id, dryRun: false });
+    },
     // ЧТО ИНВАЛИДИРУЕМ — по словарю самого вердикта (каскад / сироты), а не «на всякий случай».
     onSuccess: () =>
       Promise.all([

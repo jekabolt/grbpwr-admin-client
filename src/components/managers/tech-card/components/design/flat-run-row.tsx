@@ -15,6 +15,7 @@ import { Button, CalloutBox, Chip, Text, Select } from 'ui';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
+import { useUndoHistory } from '../undo-history';
 
 import {
   flushAllowsRun,
@@ -584,6 +585,7 @@ export function FlatRunRow({
 
   /** СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05). */
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const input = useFlatInput(techCardId);
   const busy = input.run !== null;
   /** A flat run of this card is drawing (D5): GENERATE pending until it ends. */
@@ -737,7 +739,7 @@ export function FlatRunRow({
       }
       let saved: FlushResult;
       try {
-        saved = await autosave.flush('flat');
+        saved = await undoHistory.barrier('flat');
       } catch {
         saved = 'error';
       }
@@ -787,7 +789,7 @@ export function FlatRunRow({
         qc,
         card,
         form,
-        flush: () => autosave.flush('flat'),
+        flush: () => undoHistory.barrier('flat'),
         ask: (signal) =>
           abortableAdminService(signal).PreviewDesignRunInputs({
             techCardId: card,

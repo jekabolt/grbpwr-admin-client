@@ -63,6 +63,7 @@ import {
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
+import { useUndoHistory } from '../undo-history';
 import {
   COLORWAY_NONE,
   benchKindOf,
@@ -2223,6 +2224,7 @@ export function ArtifactsPanel({
      Повторное нажатие во время прогона — отмена (соединение рвётся, `abortableAdminService`).
      Новый прогон заменяет непринятые призраки; поставленные рукой указания не трогаются. */
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const [suggestions, setSuggestions] = useState<CalloutSuggestion[]>([]);
   /**
    * Набор прогона целиком — основа раскладки по полям. ✓ и ✕ убирают строку, но НЕ место: принятое
@@ -2293,7 +2295,7 @@ export function ArtifactsPanel({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await autosave.flush('suggest-callouts');
+        flushed = await undoHistory.barrier('suggest-callouts');
       } catch {
         flushed = 'error';
       }

@@ -4,6 +4,7 @@ import type { common_TechCardAnnotation } from 'api/proto-http/admin';
 import { notify } from 'lib/stores/store';
 import { useCallback, useMemo } from 'react';
 
+import { useUndoHistory } from '../../undo-history';
 import { designKeys } from '../use-design-band';
 
 /**
@@ -16,6 +17,7 @@ import { designKeys } from '../use-design-band';
  */
 export function useAssetWrites(techCardId: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   const key = designKeys.band(techCardId);
 
   /* RETURNED, NOT FIRED AND FORGOTTEN (Codex r2 of TF2/TF4): a write's `onSuccess` hands this
@@ -81,7 +83,12 @@ export function useAssetWrites(techCardId: number) {
    * чужих флэтах, отвечая OK.
    */
   const deleteAsset = useMutation({
-    mutationFn: (assetId: number) => adminService.DeleteDesignAsset({ techCardId, assetId }),
+    mutationFn: async (assetId: number) => {
+      const ready = await undoHistory.barrier('asset-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteDesignAsset({ techCardId, assetId });
+    },
     onSuccess: invalidate,
     onError,
   });
@@ -118,8 +125,12 @@ export function useAssetWrites(techCardId: number) {
   });
 
   const deletePlacement = useMutation({
-    mutationFn: (placementId: number) =>
-      adminService.DeleteDesignAssetPlacement({ techCardId, placementId }),
+    mutationFn: async (placementId: number) => {
+      const ready = await undoHistory.barrier('asset-placement-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteDesignAssetPlacement({ techCardId, placementId });
+    },
     onSuccess: invalidate,
     onError,
   });

@@ -38,6 +38,7 @@ import {
   upsertDetailText,
 } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
+import { useUndoHistory } from '../../undo-history';
 import { anyDirty } from '../../useTechCardAutosave';
 import {
   flushAllowsRun,
@@ -415,6 +416,7 @@ export function ConstructionDraft({
      дебаунса). Провайдера нет (стенд, создание карточки) — контракт отвечает `off`, и дверь
      ведёт себя как до волны: гейт «save the card first» по грязной доске остаётся в силе. */
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   /**
    * ПРОГОН ЭТОЙ КАРТОЧКИ — фаза, ключ идемпотентности, отказ сохранения, ответ, ждущий органа,
    * заведение слотов. В сторе по ключу карточки, а не здесь: орган умирает от смены шага, вкладки
@@ -650,7 +652,7 @@ export function ConstructionDraft({
     patchRun(card, { phase: 'saving', refused: null });
     let flushed: FlushResult;
     try {
-      flushed = await autosave.flush('draft');
+      flushed = await undoHistory.barrier('draft');
     } catch {
       // Контракт отвечает исходом, а не исключением; брошенное всё равно читается отказом, а не
       // разрешением платить.

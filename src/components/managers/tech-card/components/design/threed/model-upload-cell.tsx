@@ -18,6 +18,7 @@ import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 import { InertDoor } from '../bench-slot';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
+import { useUndoHistory } from '../../undo-history';
 import {
   MODEL_FILE_ACCEPT,
   isGlbFile,
@@ -162,6 +163,7 @@ export type BringOwnModel = {
  */
 export function useBringOwnModel(techCardId: number): BringOwnModel {
   const { registerUpload } = useDesignWrites(techCardId);
+  const undoHistory = useUndoHistory();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<'' | 'sending' | 'filing'>('');
   const [dragging, setDragging] = useState(false);
@@ -271,6 +273,11 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
   /** ОТПРАВИТЬ ПАРУ — одним запросом, с превью или без. */
   const send = useCallback(async () => {
     if (!staged.model || busy) return;
+    const ready = await undoHistory.barrier('model-upload');
+    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') {
+      setError('save the card before uploading');
+      return;
+    }
     setError(null);
     setFiled(null);
     setBusy('sending');
@@ -293,7 +300,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
       return;
     }
     await fileOnCard(mediaId, requestId);
-  }, [staged, busy, fileOnCard]);
+  }, [staged, busy, fileOnCard, undoHistory]);
 
   const discard = () => {
     setStaged(NOTHING);

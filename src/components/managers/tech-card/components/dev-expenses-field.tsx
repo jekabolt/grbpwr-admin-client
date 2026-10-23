@@ -32,6 +32,7 @@ import { HelpMark, noFx } from './costing-vocab';
 import { SamplePicker } from './sample-picker';
 import { sampleKeys, useSamples } from './useSamples';
 import { devExpenseKeys } from './useStyleReadViews';
+import { useUndoHistory } from './undo-history';
 
 // The server's kind vocabulary — these strings travel to the API — and its operator-facing face.
 // The label map is used in all three places a kind is shown (the breakdown list, the ledger column,
@@ -78,8 +79,14 @@ export function useAddDevExpense(techCardId: number) {
 
 export function useDeleteDevExpense(techCardId: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   return useMutation({
-    mutationFn: (id: number) => adminService.DeleteTechCardDevExpense({ id }),
+    mutationFn: async (id: number) => {
+      const ready = await undoHistory.barrier('expense-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteTechCardDevExpense({ id });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: devExpenseKeys.list(techCardId) });
       qc.invalidateQueries({ queryKey: sampleKeys.all });

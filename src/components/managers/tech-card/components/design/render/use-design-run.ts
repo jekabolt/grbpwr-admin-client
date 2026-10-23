@@ -9,6 +9,7 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { notify } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
+import { useUndoHistory } from '../../undo-history';
 import { clearBenchChoice, unstickPin } from '../generation/bench-store';
 import {
   isAborted,
@@ -148,7 +149,7 @@ export type StartRunState = {
    * `onStarted` — the per-call one, for a consequence that belongs to the screen that pressed and
    * to nothing else (FABRIC RENDER's IN WORDS): the rules are on `StartRunCallbacks.onStarted`.
    */
-  start: (input: StartRunInput, opts?: StartRunCallbacks) => void;
+  start: (input: StartRunInput, opts?: StartRunCallbacks) => Promise<void>;
   /**
    * A press is out. With a `scope` this reads the mutation cache, not this component: a form that
    * was left and reopened while its run was starting is still «starting…».
@@ -207,6 +208,7 @@ export function useStartDesignRun(
 ): StartRunState {
   const scope = opts?.scope ?? '';
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   /**
@@ -339,8 +341,10 @@ export function useStartDesignRun(
   });
 
   const start = useCallback(
-    (input: StartRunInput, opts?: StartRunCallbacks) => {
+    async (input: StartRunInput, opts?: StartRunCallbacks) => {
       if (!techCardId || techCardId <= 0) return;
+      const ready = await undoHistory.barrier(`generate:${input.kind}`);
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
       // THE WIRE OBJECT IS BUILT ONCE, AND THE FINGERPRINT IS TAKEN OF IT (r2 N2): every field that
       // reaches the server is in it — the card (the server scopes its idempotency by it), `rerun_of`
       // («run 7 again» is not «run this») — and nothing that does not.
@@ -388,7 +392,7 @@ export function useStartDesignRun(
           : undefined,
       );
     },
-    [techCardId, mutation, scope],
+    [techCardId, mutation, scope, undoHistory],
   );
 
   const dismissRefusal = useCallback(() => setRefusal(null), []);

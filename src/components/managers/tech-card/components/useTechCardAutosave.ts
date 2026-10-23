@@ -1141,6 +1141,8 @@ export function isSaveShortcut(
 }
 
 export type AutosaveController = AutosaveApi & {
+  /** Wait only for the save already on the wire; unlike flush, this never starts a new save. */
+  whenSettled: () => Promise<void>;
   /**
    * При `error`: упала запись (`failed`), панель менялась, пока писалась (`restaged`, O-60 r4), или
    * сервер отказал самому телу (`refused`, D-66).
@@ -1228,6 +1230,14 @@ export function useTechCardAutosaveController(opts: {
   optsRef.current = opts;
   const [state, setState] = useState<MachineState>({ status: opts.enabled ? 'idle' : 'off' });
   const machineRef = useRef<AutosaveMachine | null>(null);
+  const settleWaiters = useRef(new Set<() => void>());
+  const onMachineState = (next: MachineState) => {
+    setState(next);
+    if (next.status === 'saving') return;
+    const waiting = [...settleWaiters.current];
+    settleWaiters.current.clear();
+    waiting.forEach((resolve) => resolve());
+  };
   // R-9: every gesture of the operator on the page, counted (capture phase, so a panel that stops
   // propagation is still heard). A panel re-staged with no gesture behind it is echoing its own commit.
   // m5: heard on the page's root (see `gestureProps`), trusted events only.
@@ -1283,7 +1293,7 @@ export function useTechCardAutosaveController(opts: {
       validate: () => optsRef.current.validate(),
       save: (mode, reason) => optsRef.current.save(mode, reason),
       countErrors: () => optsRef.current.countErrors(),
-      onState: setState,
+      onState: onMachineState,
       onComplete: (reason) => optsRef.current.onComplete?.(reason),
       operatorGen: () => gestures.current,
       armAtCreation: personBehind,
@@ -1300,6 +1310,9 @@ export function useTechCardAutosaveController(opts: {
       // человек (m7).
       if (personBehind()) void m.flush('unmount');
       m.dispose();
+      const waiting = [...settleWaiters.current];
+      settleWaiters.current.clear();
+      waiting.forEach((resolve) => resolve());
       if (machineRef.current === m) machineRef.current = null;
     };
   }, []);
@@ -1389,6 +1402,11 @@ export function useTechCardAutosaveController(opts: {
       message: state.message,
       cause: state.cause,
       refusal: refusalOf(state),
+      whenSettled: () => {
+        const machine = machineRef.current;
+        if (!machine || machine.state().status !== 'saving') return Promise.resolve();
+        return new Promise<void>((resolve) => settleWaiters.current.add(resolve));
+      },
       refusalNow: () => {
         const live = machineRef.current?.state();
         return live ? refusalOf(live) : undefined;

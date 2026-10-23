@@ -6,6 +6,7 @@ import { useFormContext } from 'react-hook-form';
 import { Button, Chip, ChipRow, Pill, Text, Textarea } from 'ui';
 
 import type { TechCardFormData } from '../schema';
+import { useUndoHistory } from '../undo-history';
 import { InertDoor } from './bench-slot';
 import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { Counter } from './core';
@@ -177,6 +178,7 @@ export function MoodQuiz({
   const { generate, save } = useDesignQuizWrites(card || undefined);
   const { draftIdea } = useGenerationWrites(card || undefined);
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const record = useDraftMemory((s) => s.record);
 
@@ -314,7 +316,7 @@ export function MoodQuiz({
       // Сервер читает СОХРАНЁННУЮ карточку: сперва автосейв.
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await autosave.flush('quiz');
+        flushed = await undoHistory.barrier('quiz');
       } catch {
         flushed = 'error';
       }
@@ -529,7 +531,7 @@ export function MoodQuiz({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await autosave.flush('quiz-apply');
+        flushed = await undoHistory.barrier('quiz-apply');
       } catch {
         flushed = 'error';
       }

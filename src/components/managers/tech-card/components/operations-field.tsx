@@ -9,7 +9,16 @@ import {
 import { notify } from 'lib/stores/store';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { ROUTES } from 'constants/routes';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -8100,8 +8109,38 @@ export function OperationsField({
     clearFormHistory();
   }, [fsOpen, clearFormHistory]);
 
+  const routeHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.altKey)
+      return;
+    const target = event.target as HTMLElement;
+    const nativeTextInput =
+      target instanceof HTMLInputElement &&
+      ![
+        'button',
+        'checkbox',
+        'color',
+        'file',
+        'hidden',
+        'image',
+        'radio',
+        'range',
+        'reset',
+        'submit',
+      ].includes(target.type);
+    if (nativeTextInput || target instanceof HTMLTextAreaElement || target.isContentEditable)
+      return;
+    const undo = (event.metaKey || event.ctrlKey) && event.code === 'KeyZ' && !event.shiftKey;
+    const redo =
+      ((event.metaKey || event.ctrlKey) && event.code === 'KeyZ' && event.shiftKey) ||
+      (event.ctrlKey && !event.metaKey && event.code === 'KeyY');
+    if (!undo && !redo) return;
+    event.preventDefault();
+    if (undo) undoGesture();
+    else redoGesture();
+  };
+
   return (
-    <div className='space-y-2.5'>
+    <div className='space-y-2.5' data-history-owner='construction' onKeyDown={routeHistoryKey}>
       <SectionHeader
         title='operations'
         question='assembly order'

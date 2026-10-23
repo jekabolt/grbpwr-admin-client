@@ -15,6 +15,7 @@ import { waitlistKeys } from 'components/managers/waitlist/components/useWaitlis
 // здесь был бы вторым наблюдателем полосы ради инвалидации — то есть лишним запросом на каждой
 // мутации рецепта.
 import { designKeys } from './design/use-design-band';
+import { useUndoHistory } from './undo-history';
 import { sampleKeys } from './useSamples';
 import { styleReadViewKeys } from './useStyleReadViews';
 
@@ -200,14 +201,20 @@ export function useColorwayDeletionPreview() {
  */
 export function useDeleteColorway(techCardId: number) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       colorwayId,
       expectedVersion,
     }: {
       colorwayId: number;
       expectedVersion: number;
-    }) => adminService.DeleteColorwayByID({ colorwayId, expectedVersion, dryRun: false }),
+    }) => {
+      const ready = await undoHistory.barrier('colourway-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+        throw new Error('save the card before deleting');
+      return adminService.DeleteColorwayByID({ colorwayId, expectedVersion, dryRun: false });
+    },
     onSuccess: () =>
       Promise.all([
         // Сама карточка: из неё исчезает колорвей целиком — плитка, его строки рецепта

@@ -170,6 +170,12 @@ import {
 } from './save-history';
 import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
+import {
+  UndoHistoryProvider,
+  useTechCardUndoHistory,
+  type UndoHistoryApi,
+  type UndoHistoryCaptureProps,
+} from './undo-history';
 import { consumeReuploadSnapshot, peekReuploadSnapshot } from './nesting/reupload-session';
 import {
   decideAutoStage,
@@ -466,23 +472,96 @@ function FormWithAutosave({
   form,
   autosave,
   gestures,
+  undoHistory,
+  historyCapture,
   children,
 }: {
   form: UseFormReturn<TechCardFormData>;
   autosave: AutosaveApi;
   /** m5: the operator's gestures, heard on the page's own root (portals of the page included). */
   gestures: GestureProps;
+  undoHistory: UndoHistoryApi;
+  historyCapture: UndoHistoryCaptureProps;
   children: React.ReactNode;
 }) {
   return (
     <Form {...form}>
       <AutosaveContext.Provider value={autosave}>
-        {/* `contents`: an element for the capture handlers, no box — the page's layout is unchanged. */}
-        <div className='contents' {...gestures}>
-          {children}
-        </div>
+        <UndoHistoryProvider value={undoHistory}>
+          {/* `contents`: an element for the capture handlers, no box — the page's layout is unchanged. */}
+          <div
+            className='contents'
+            data-tech-card-history-root=''
+            onBlurCapture={historyCapture.onBlurCapture}
+            onChangeCapture={(event) => {
+              gestures.onChangeCapture(event);
+              historyCapture.onChangeCapture(event);
+            }}
+            onClickCapture={historyCapture.onClickCapture}
+            onCutCapture={(event) => {
+              gestures.onCutCapture(event);
+              historyCapture.onCutCapture(event);
+            }}
+            onDropCapture={(event) => {
+              gestures.onDropCapture(event);
+              historyCapture.onDropCapture(event);
+            }}
+            onFocusCapture={historyCapture.onFocusCapture}
+            onInputCapture={(event) => {
+              gestures.onInputCapture(event);
+              historyCapture.onInputCapture(event);
+            }}
+            onKeyDownCapture={(event) => {
+              gestures.onKeyDownCapture(event);
+              historyCapture.onKeyDownCapture(event);
+            }}
+            onKeyUpCapture={historyCapture.onKeyUpCapture}
+            onPasteCapture={(event) => {
+              gestures.onPasteCapture(event);
+              historyCapture.onPasteCapture(event);
+            }}
+            onPointerDownCapture={(event) => {
+              gestures.onPointerDownCapture(event);
+              historyCapture.onPointerDownCapture(event);
+            }}
+            onPointerUpCapture={historyCapture.onPointerUpCapture}
+          >
+            {children}
+          </div>
+        </UndoHistoryProvider>
       </AutosaveContext.Provider>
     </Form>
+  );
+}
+
+function UndoRedoControls({ history }: { history: UndoHistoryApi }) {
+  const undoTitle = history.undoLabel ? `undo ${history.undoLabel}` : 'undo';
+  const redoTitle = history.redoLabel ? `redo ${history.redoLabel}` : 'redo';
+  return (
+    <div className='flex items-center gap-2'>
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        disabled={!history.canUndo}
+        title={undoTitle}
+        aria-label={undoTitle}
+        onClick={() => void history.undo()}
+      >
+        undo
+      </Button>
+      <Button
+        type='button'
+        variant='underline'
+        size='xs'
+        disabled={!history.canRedo}
+        title={redoTitle}
+        aria-label={redoTitle}
+        onClick={() => void history.redo()}
+      >
+        redo
+      </Button>
+    </div>
   );
 }
 
@@ -710,6 +789,7 @@ export function TechCardForm({
   // written — a write that was already on its way to the wire (the check before it awaited) included.
   const conflictOpen = useRef(false);
   const openConflict = () => {
+    undoHistory.api.clear();
     conflictOpen.current = true;
     setConflict(true);
   };
@@ -1312,6 +1392,9 @@ export function TechCardForm({
     // fact, dirt nobody can write (mn-3) — is not what their write moved: the body is rebased onto
     // theirs and the queue is kept.
     if (bodyWorkOf(form) && ownBodyVersion.current !== v) return 'conflict';
+    // A refetch of the body version this page just wrote is not a history boundary. A genuinely
+    // foreign body is: even a pristine form must not replay old patches over the newly adopted card.
+    if (ownBodyVersion.current !== v) undoHistory.api.clear();
     rebaseOnto(fresh);
     adopt(fresh);
     lastBody.current = null;
@@ -1364,6 +1447,7 @@ export function TechCardForm({
       return 'failed';
     }
     if (!fresh) return 'failed';
+    undoHistory.api.clear();
     // ревью mn-2: typed while the read was on the wire — the merge below would keep each typed key
     // WHOLE, with their card as its baseline, and the next write would put that key back over theirs
     // (another row of the same list). Nothing about that is quiet: the decision.
@@ -2383,6 +2467,9 @@ export function TechCardForm({
       }
       return;
     }
+    // Archiving colourways and changing purpose are one-way server actions. Nothing from the
+    // editable card may be replayed across that boundary.
+    undoHistory.api.clear();
     // Held across the check, the archive loop AND the save that follows: this path bypasses
     // form.handleSubmit, so `isSubmitting` never rises, and the dialog's own button, the history's
     // restore and the fullscreen's doors read `converting` to stay shut while the flip PUT is in flight.
@@ -2959,6 +3046,9 @@ export function TechCardForm({
         return;
       }
     }
+    // Approval/release changes the lifecycle the editable history belongs to. The pre-flush above
+    // has made the ordinary work durable; cut both stacks before writing the lifecycle transition.
+    undoHistory.api.clear();
     approvalAttempt.current = { next, landed: false };
     form.setValue('approvalState', next, { shouldDirty: true });
     let landed = false;
@@ -3017,6 +3107,12 @@ export function TechCardForm({
     onComplete: afterQuiescentSave,
     // M2: a style fact is work only through the style panel's queue — the body never writes it.
     bodyWork: () => bodyWorkOf(form),
+  });
+  const undoHistory = useTechCardUndoHistory({
+    scope: numId ?? clientRequestId.current,
+    enabled: autosaveEnabled,
+    form,
+    autosave,
   });
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
@@ -3266,7 +3362,13 @@ export function TechCardForm({
   );
 
   return (
-    <FormWithAutosave form={form} autosave={autosave} gestures={autosave.gestureProps}>
+    <FormWithAutosave
+      form={form}
+      autosave={autosave}
+      gestures={autosave.gestureProps}
+      undoHistory={undoHistory.api}
+      historyCapture={undoHistory.captureProps}
+    >
       {/* ONE AUTOSAVE FOR THE WHOLE PAGE. The studio's organs read it through `useTechCardAutosave()`
           (design/autosave-contract.ts): the construction draft asks for a save after its autoFill,
           GENERATE awaits `flush()` before a paid run. The provider wraps the header too, so the chip
@@ -3300,29 +3402,32 @@ export function TechCardForm({
             {isEditMode && frozen ? (
               <Pill tone='ok'>released · frozen</Pill>
             ) : autosaveEnabled ? (
-              <SaveStatusChip
-                status={autosave.status}
-                lastSavedAt={autosave.lastSavedAt}
-                errorsCount={autosave.errorsCount}
-                message={autosave.message}
-                cause={autosave.cause}
-                refusal={autosave.refusal}
-                // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
-                bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
-                staged={staging.changes}
-                history={history.entries}
-                currentText={textSnapshotOf(form.getValues())}
-                canRestore={!saving && !converting}
-                // O-60 / D-59: the chip never saves. Opening it over `invalid` is the «show me»: what the
-                // quiet check found goes onto its fields (M-02), and the popover's first line is the walk
-                // to the first of them.
-                firstError={formErrorRows[0]}
-                onRevealError={revealError}
-                onOpenDetails={publishQuietIssues}
-                onConfirmSwitch={() => openConvert()}
-                onOpenConflict={() => setConflict(true)}
-                onRestore={restoreHistory}
-              />
+              <>
+                <UndoRedoControls history={undoHistory.api} />
+                <SaveStatusChip
+                  status={autosave.status}
+                  lastSavedAt={autosave.lastSavedAt}
+                  errorsCount={autosave.errorsCount}
+                  message={autosave.message}
+                  cause={autosave.cause}
+                  refusal={autosave.refusal}
+                  // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
+                  bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
+                  staged={staging.changes}
+                  history={history.entries}
+                  currentText={textSnapshotOf(form.getValues())}
+                  canRestore={!saving && !converting}
+                  // O-60 / D-59: the chip never saves. Opening it over `invalid` is the «show me»: what the
+                  // quiet check found goes onto its fields (M-02), and the popover's first line is the walk
+                  // to the first of them.
+                  firstError={formErrorRows[0]}
+                  onRevealError={revealError}
+                  onOpenDetails={publishQuietIssues}
+                  onConfirmSwitch={() => openConvert()}
+                  onOpenConflict={openConflict}
+                  onRestore={restoreHistory}
+                />
+              </>
             ) : null}
             {isEditMode && numId && (
               <>
@@ -3618,7 +3723,7 @@ export function TechCardForm({
           refusal={autosave.refusal}
           firstError={formErrorRows[0]}
           onRevealError={revealError}
-          onOpenConflict={() => setConflict(true)}
+          onOpenConflict={openConflict}
         />
       )}
 

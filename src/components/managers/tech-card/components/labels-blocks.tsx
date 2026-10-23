@@ -20,6 +20,7 @@ import { KindPicker } from './kind-picker';
 import { LabelCard, type CardField, type CardRow } from './label-card';
 import { LABEL_NOTE_MAX, LABEL_SIZE_MAX, LABEL_TEXT_MAX } from './labels-schema';
 import type { TechCardFormData } from './schema';
+import { useUndoHistory } from './undo-history';
 import {
   foldingMethodOptions,
   garmentLabelKinds,
@@ -131,6 +132,7 @@ function KeyedCards({
   // the library map stays the last fallback for media picked before a save / refetch.
   const libraryMap = useMediaMap();
   const uploadMedia = useUploadMedia({ silent: true });
+  const undoHistory = useUndoHistory();
   const [cache, setCache] = useState<Map<number, common_MediaFull>>(new Map());
   const [viewer, setViewer] = useState<{
     key: string;
@@ -184,6 +186,10 @@ function KeyedCards({
     const before = liveIds(viewer.key);
     if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
       throw new Error('slot changed');
+
+    const ready = await undoHistory.barrier('label-upload');
+    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off')
+      throw new Error('save the card before uploading');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;

@@ -58,6 +58,7 @@ import {
   type ScopeDirection,
 } from '../bom-purpose';
 import type { TechCardFormData } from '../schema';
+import { useUndoHistory } from '../undo-history';
 
 const NestingModal = lazy(() =>
   import('./nesting-modal').then((m) => ({ default: m.NestingModal })),
@@ -189,6 +190,7 @@ export function MarkersSection({
   techCardId: number;
   canEdit: boolean;
 }) {
+  const undoHistory = useUndoHistory();
   // ТОЛЬКО КАРТОЧНЫЕ РАСКЛАДКИ (Ф4.2). Раскройные маркеры прогонов приезжают в том же поле
   // `techCard.markers` — отдельного списка у клиента нет, — и этот экран ими не заведует: их
   // видно на странице прогона, у них нет самостоятельной жизни, и удалять/назначать нормой их
@@ -437,6 +439,8 @@ export function MarkersSection({
     if (!deleting) return;
     setDeleteBusy(true);
     try {
+      const ready = await undoHistory.barrier('marker-delete');
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
       await adminService.DeleteTechCardMarker({ id: deleting.id });
       // The row leaving the list is the receipt.
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });

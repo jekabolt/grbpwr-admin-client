@@ -25,6 +25,7 @@ import { useFormContext } from 'react-hook-form';
 import { kindLabel } from '../../bom-kind';
 import { bornBomLine, patchBomLine } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
+import { useUndoHistory } from '../../undo-history';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
@@ -204,6 +205,7 @@ function MaterialBench({
     typeof useFormContext<TechCardFormData>
   > | null;
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
 
   const cwId = colorway?.colorwayId ?? 0;
   const cwName = colorway ? colorwayLabel(colorway) : '';
@@ -866,6 +868,10 @@ function MaterialBench({
         return;
       }
       const ids = unusedHardwareIds(fresh, held, cutting, Date.now());
+      if (ids.length > 0) {
+        const ready = await undoHistory.barrier('hardware-delete');
+        if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
+      }
       for (const assetId of ids) {
         await adminService.DeleteDesignAsset({ techCardId, assetId });
       }

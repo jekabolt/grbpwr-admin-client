@@ -171,6 +171,7 @@ import type { FollowUpJob } from './pattern-import/follow-up';
 import { AutopilotPill } from './pattern-import/autopilot/view';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
+import { useUndoHistory } from './undo-history';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
@@ -651,6 +652,7 @@ export function PatternsField({
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const subscribeGeneration = useCallback(
     (listener: () => void) => subscribeFusingSheetGeneration(techCardId, listener),
     [techCardId],
@@ -2999,6 +3001,11 @@ export function PatternsField({
       say('not applied', 'error');
       return false;
     }
+    const ready = await undoHistory.barrier('dxf-reupload');
+    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') {
+      say('save the card before replacing the file', 'error');
+      return false;
+    }
 
     let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
     beginReupload(ask.scopeKey, ask.outcome.rowId);
@@ -3072,6 +3079,8 @@ export function PatternsField({
   }
 
   async function confirmDelete(rowId: string) {
+    const ready = await undoHistory.barrier('dxf-delete');
+    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return;
     // A non-DXF row: by its index, as the old × did.
     if (rowId.startsWith('#')) {
       const at = Number(rowId.slice(1));
@@ -3169,6 +3178,8 @@ export function PatternsField({
   // `delete` of an old version (live or removed sheet): permanent, DeleteTechCardPatternRevision.
   async function deleteRevision(v: SheetVersion): Promise<boolean> {
     if (!techCardId || v.historyId <= 0) return false;
+    const ready = await undoHistory.barrier('pattern-revision-delete');
+    if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return false;
     const stored =
       queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
     try {
@@ -4397,7 +4408,7 @@ export function PatternsField({
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
-              save: (reason) => autosave.flush(reason),
+              save: (reason) => undoHistory.barrier(reason),
               // A sheet replaced in place: its save archives the old file with a card snapshot.
               onReplaced: (list) =>
                 list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),

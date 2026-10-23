@@ -11,6 +11,7 @@ import type {
 import { notify } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useUndoHistory } from '../../undo-history';
 import { cardOnScreen, designKeys, useDesignWrites, type WriteContext } from '../use-design-band';
 import {
   fingerprintDigest,
@@ -240,11 +241,14 @@ const FLAT_LEDGER_SCOPE = 'flat';
 
 export function useStartRun(techCardId?: number): StartRunState {
   const { startRun } = useGenerationWrites(techCardId);
+  const undoHistory = useUndoHistory();
 
   const start = useCallback(
     async (input: StartRunInput, onStarted?: () => void): Promise<RunRefusal | null> => {
       const card = techCardId ?? 0;
       if (card <= 0) return null;
+      const ready = await undoHistory.barrier(`generate:${input.kind}`);
+      if (ready !== 'ok' && ready !== 'nothing' && ready !== 'off') return null;
       // THE FINGERPRINT IS TAKEN OF THE WIRE OBJECT (`render/run-ledger.ts`) — built here field for
       // field as `startRun` sends it, minus the key, so what is fingerprinted and what departs cannot
       // drift apart. The saved prompt is part of the intent too (review round 3, m6), but is not on
@@ -310,7 +314,7 @@ export function useStartRun(techCardId?: number): StartRunState {
       onStarted?.();
       return null;
     },
-    [techCardId, startRun],
+    [techCardId, startRun, undoHistory],
   );
 
   // `isPending` is gone (review round 3, nit): nobody read it — the flat row's «starting…» comes
