@@ -207,6 +207,37 @@ export function main() {
   const holeRadius = Math.hypot(holePoints[0].x - holeCentre.x, holePoints[0].y - holeCentre.y);
   near(holeRadius / 50, ZONE_HOLE_SEED_RATIO, 0.005);
 
+  // A saved spline zone writes every material island and cut-out as an independent closed layer-1
+  // contour. The largest outer is the block's cut; the second outer and the hole are cutLoops.
+  const threeRingZone = splineZone(sharpRing(10, 10, 90, 90).points, {
+    islands: [sharpRing(110, 15, 190, 85)],
+    holes: [sharpRing(30, 30, 50, 50)],
+  });
+  const threeRingSheets = buildFusingSheets({
+    techCardId: 1,
+    style: 'THREE-RINGS',
+    baseSizeId: 1,
+    bomLines: [{ bomLineKey: 'f1', code: 'F1', label: 'fuse' }],
+    pieces: [
+      {
+        identity: 'ZONE_3',
+        displayName: 'three rings',
+        piecesPerGarment: 1,
+        ungraded: true,
+        fuse: { ...spec(threeRingZone), bomLineKey: 'f1' } as PieceFuseSpec,
+        sizes: [{ sizeToken: 'BASE', sizeId: 1, rank: 1, outline: splitContour }],
+      },
+    ],
+  });
+  assert.deepEqual(threeRingSheets.skippedSizes, []);
+  assert.equal(threeRingSheets.sheets.length, 1);
+  const closedLayerOneContours = (
+    threeRingSheets.sheets[0].dxfText
+      .replaceAll('\r', '')
+      .match(/  0\nPOLYLINE\n  8\n1\n 66\n1\n 70\n1\n/g) ?? []
+  ).length;
+  assert.equal(closedLayerOneContours, 3, 'main + island + hole are three closed DXF contours');
+
   // A genuinely broad free pocket still seeds a round part, but never below the visible minimum.
   const pocketZone = splineZone(sharpRing(10, 10, 80, 90).points);
   const pocketPart = addZoneIsland(pocketZone, splitContour, 'main');

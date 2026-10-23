@@ -73,6 +73,28 @@ export function deriveFusePanelMode(
   return spec.mode === 'whole' && mappedToOwnerFile ? 'file' : spec.mode;
 }
 
+/**
+ * Moves the editor to one panel mode and removes geometry owned by every other mode. FILE is the
+ * stored FULL mode plus an owner-file alias, so it also has no strip or zone draft of its own.
+ */
+export function fuseSpecForPanelMode(
+  spec: PieceFuseSpec,
+  mode: FusePanelMode,
+  fileBomLineKey = spec.bomLineKey,
+): PieceFuseSpec {
+  if (!mode) return blankFuse();
+  const nextMode: FuseMode = mode === 'file' ? 'whole' : mode;
+  const staying = mode !== 'file' && spec.mode === nextMode;
+  return {
+    ...spec,
+    mode: nextMode,
+    bomLineKey: mode === 'file' ? fileBomLineKey.trim() : spec.bomLineKey,
+    widthMm: nextMode === 'strip' && staying ? spec.widthMm : null,
+    edges: nextMode === 'strip' && staying ? spec.edges.map((edge) => ({ ...edge })) : [],
+    zone: nextMode === 'zone' && staying ? spec.zone : null,
+  };
+}
+
 export type FuseGeometryInput = {
   outline: PtMm[];
   spec: PieceFuseSpec;

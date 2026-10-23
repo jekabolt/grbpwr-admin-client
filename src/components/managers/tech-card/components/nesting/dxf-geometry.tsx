@@ -27,6 +27,8 @@
 // размеров, и формы деталей, и миниатюры листов: обе панели вкладки просят одну и ту же пачку.
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
+import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
+import { generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import type { ConversionManifest } from 'lib/pattern-import/types';
@@ -36,6 +38,7 @@ import type { PieceClothState } from '../piece-cloth';
 import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { resolveFuse, type PieceFuseSpec } from './fuse-spec';
 import { NO_DXF_DOWNLOADED, sheetDownloadFailed } from './dxf-warnings';
 import {
   aliasIdentity,
@@ -450,16 +453,21 @@ export function SheetThumb({
   scopeKey,
   className,
   limit = 24,
+  fuseByIdentity,
+  requiredSeamAllowanceMm = null,
 }: {
   index: DxfIndex;
   scopeKey: string;
   className?: string;
   limit?: number;
+  fuseByIdentity?: ReadonlyMap<string, PieceFuseSpec>;
+  requiredSeamAllowanceMm?: number | null;
 }) {
+  const fuseClipPrefix = hatchId('fuse-thumb', useId());
   const shapes = useMemo(() => {
     // Один размер на миниатюру, иначе градация нарисует один и тот же силуэт пять раз внахлёст.
     // Берём срединный — тот же выбор, что у контура детали.
-    const picked: PieceDTO[] = [];
+    const picked: Array<{ identity: string; piece: PieceDTO }> = [];
     for (const [key, bySize] of index.byKey) {
       if (!key.startsWith(`${scopeKey}|`)) continue;
       const sizes = [...bySize.keys()].sort(
@@ -468,7 +476,7 @@ export function SheetThumb({
       const list = bySize.get(sizes[Math.floor((sizes.length - 1) / 2)]) ?? [];
       const onLayer = list.filter((p) => (p.layer ?? '') === index.contourLayer);
       const drawn = (onLayer.length > 0 ? onLayer : list)[0];
-      if (drawn) picked.push(drawn);
+      if (drawn) picked.push({ identity: key.slice(scopeKey.length + 1), piece: drawn });
     }
     return picked.slice(0, limit);
   }, [index, scopeKey, limit]);
@@ -483,15 +491,50 @@ export function SheetThumb({
   //
   // Контур приходит нормализованным к собственному bbox (poly: origin в углу bbox детали), так
   // что сдвиг по X — это и есть всё размещение, а vy() кладёт деталь на нулевую линию снизу.
-  const gap = Math.max(...shapes.map((s) => s.bboxW)) * 0.12;
-  const height = Math.max(...shapes.map((s) => s.bboxH), 1);
+  const gap = Math.max(...shapes.map(({ piece }) => piece.bboxW)) * 0.12;
+  const height = Math.max(...shapes.map(({ piece }) => piece.bboxH), 1);
   let x = 0;
-  const placed = shapes.map((p) => {
+  const placed = shapes.map(({ identity, piece }) => {
     const at = x;
-    x += p.bboxW + gap;
-    return { p, at };
+    x += piece.bboxW + gap;
+    return { identity, piece, at };
   });
   const total = Math.max(x - gap, 1);
+  const sourceByIdentity = new Map(shapes.map(({ identity, piece }) => [identity, piece]));
+
+  const areaPath = (piece: PieceDTO, identity: string, at: number): string | null => {
+    const spec = fuseByIdentity?.get(identity);
+    if (!spec?.mode || spec.mode === 'whole') return null;
+    if (spec.mode === 'zone' && spec.zone && 'dxfPieceKey' in spec.zone) {
+      const source = sourceByIdentity.get(normBlock(spec.zone.dxfPieceKey).toLowerCase());
+      if (!source) return null;
+      const sx = at + piece.bboxW / 2 - source.bboxW / 2;
+      const sy = piece.bboxH / 2 - source.bboxH / 2;
+      return `M ${source.poly.map((point) => `${sx + point.x} ${vy(sy + point.y)}`).join(' L ')} Z`;
+    }
+    try {
+      const resolved = resolveFuse(spec, requiredSeamAllowanceMm);
+      const previewSpec =
+        spec.mode === 'strip' && spec.widthMm == null
+          ? { ...spec, widthMm: resolved.widthMm }
+          : spec;
+      const polygons = generateFuseGeometry({
+        outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
+        spec: previewSpec,
+        seamAllowanceMm: requiredSeamAllowanceMm,
+        darts: fusingDartPolygons(piece),
+      });
+      return polygons
+        .flatMap((polygon) => [polygon.outer, ...polygon.holes])
+        .map(
+          (loop) =>
+            `M ${loop.map((point) => `${at + point.x / 10} ${vy(point.y / 10)}`).join(' L ')} Z`,
+        )
+        .join(' ');
+    } catch {
+      return null;
+    }
+  };
 
   return (
     <svg
@@ -502,16 +545,78 @@ export function SheetThumb({
       role='img'
       aria-label={`piece silhouettes: ${shapes.length}`}
     >
-      {placed.map(({ p, at }, i) => (
-        <polygon
-          key={i}
-          points={p.poly.map((pt) => `${pt.x + at},${vy(pt.y)}`).join(' ')}
-          fill='none'
-          stroke='#111111'
-          strokeWidth={total / 260 || 0.01}
-          strokeLinejoin='round'
-        />
-      ))}
+      {placed.map(({ identity, piece, at }, i) => {
+        const points = piece.poly.map((point) => `${point.x + at},${vy(point.y)}`).join(' ');
+        const fuse = fuseByIdentity?.get(identity);
+        const fused = !!fuse?.mode;
+        const area = fused ? areaPath(piece, identity, at) : null;
+        const clipId = `${fuseClipPrefix}-${i}`;
+        const tagSize = height * 0.15;
+        const tagX = at + piece.bboxW - tagSize * 1.2;
+        const tagY = -piece.bboxH + tagSize * 0.25;
+        return (
+          <g key={i}>
+            <clipPath id={clipId}>
+              <polygon points={points} />
+            </clipPath>
+            {fused && (
+              <polygon
+                points={points}
+                fill='none'
+                stroke='var(--color-warning)'
+                strokeOpacity={0.16}
+                strokeWidth={6}
+                vectorEffect='non-scaling-stroke'
+                strokeLinejoin='round'
+              />
+            )}
+            <polygon
+              points={points}
+              fill='var(--color-warning)'
+              fillOpacity={0.12}
+              stroke='var(--color-warning)'
+              strokeOpacity={fused ? 1 : 0.8}
+              strokeWidth={fused ? 2.5 : 1}
+              vectorEffect='non-scaling-stroke'
+              strokeLinejoin='round'
+            />
+            {area && (
+              <path
+                d={area}
+                clipPath={`url(#${clipId})`}
+                fill='var(--color-warning)'
+                fillOpacity={0.28}
+                fillRule='evenodd'
+                stroke='var(--color-warning)'
+                strokeWidth={2.5}
+                vectorEffect='non-scaling-stroke'
+                strokeLinejoin='round'
+              />
+            )}
+            {fused && (
+              <g aria-label='fused piece'>
+                <rect
+                  x={tagX}
+                  y={tagY}
+                  width={tagSize}
+                  height={tagSize}
+                  fill='var(--color-warning)'
+                />
+                <text
+                  x={tagX + tagSize / 2}
+                  y={tagY + tagSize * 0.72}
+                  fill='var(--color-bgColor)'
+                  fontSize={tagSize * 0.64}
+                  fontWeight={700}
+                  textAnchor='middle'
+                >
+                  F
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }

@@ -10,6 +10,42 @@ import type { StagedChange } from '../useTechCardStaging';
 export const FUSING_SHEETS_KEY = 'fusingSheets';
 export const FUSING_SHEETS_ORDER = 90;
 
+export type FusingSheetGenerationState = {
+  phase: 'idle' | 'generating' | 'generated' | 'error';
+  at: number;
+  run: number;
+};
+
+const IDLE_GENERATION: FusingSheetGenerationState = { phase: 'idle', at: 0, run: 0 };
+const generationByCard = new Map<number, FusingSheetGenerationState>();
+const generationListeners = new Map<number, Set<() => void>>();
+
+function publishGeneration(techCardId: number, state: FusingSheetGenerationState) {
+  generationByCard.set(techCardId, state);
+  for (const listener of generationListeners.get(techCardId) ?? []) listener();
+}
+
+/** The lifecycle of the real staged generator, for the PATTERNS slot-card overlay. */
+export function getFusingSheetGenerationState(
+  techCardId: number | undefined,
+): FusingSheetGenerationState {
+  return techCardId ? generationByCard.get(techCardId) ?? IDLE_GENERATION : IDLE_GENERATION;
+}
+
+export function subscribeFusingSheetGeneration(
+  techCardId: number | undefined,
+  listener: () => void,
+): () => void {
+  if (!techCardId) return () => undefined;
+  const listeners = generationListeners.get(techCardId) ?? new Set<() => void>();
+  listeners.add(listener);
+  generationListeners.set(techCardId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) generationListeners.delete(techCardId);
+  };
+}
+
 // A partial rebuild (skipped pieces or sizes) is a warning toast. A FAILED one is a toast AND a
 // failure of the change: it stays staged and the next save retries it — swallowed, the queue called
 // the save complete and the form's baseline already held the new fuse inputs, so nothing would ever
@@ -24,6 +60,8 @@ export function fusingSheetsChange(
     label: 'fusing DXF',
     order: FUSING_SHEETS_ORDER,
     commit: async () => {
+      const run = getFusingSheetGenerationState(techCardId).run + 1;
+      publishGeneration(techCardId, { phase: 'generating', at: Date.now(), run });
       try {
         const r = await regenerateFusingSheets(techCardId);
         if (r.lockVersion !== undefined) onWrote?.(r.lockVersion);
@@ -43,7 +81,9 @@ export function fusingSheetsChange(
             text: `${r.skippedSizes.length} sizes skipped`,
             detail: r.skippedSizes.map((x) => `${x.piece} ${x.size}: ${x.reason}`).join('\n'),
           });
+        publishGeneration(techCardId, { phase: 'generated', at: Date.now(), run });
       } catch (error) {
+        publishGeneration(techCardId, { phase: 'error', at: Date.now(), run });
         notify({
           sev: 'error',
           subject: 'FUSING DXF',

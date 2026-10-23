@@ -12,6 +12,7 @@ export {
   DEFAULT_INSET_MM,
   blankFuse,
   deriveFusePanelMode,
+  fuseSpecForPanelMode,
   readFuseSpec,
   writeFuseFields,
   type FuseDarts,

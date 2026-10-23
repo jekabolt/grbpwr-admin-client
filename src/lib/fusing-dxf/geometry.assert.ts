@@ -61,8 +61,10 @@ import {
   deriveFusePanelMode,
   fuseFieldsFromWire,
   fuseFieldsToWire,
+  fuseSpecForPanelMode,
   fuseSpecFromPiece,
   readFuseSpec,
+  type FusePanelMode,
   writeFuseFields,
 } from './types';
 
@@ -147,6 +149,49 @@ export async function main() {
   assert.equal(deriveFusePanelMode(spec(), true), 'file');
   assert.equal(deriveFusePanelMode(spec({ mode: 'strip' }), true), 'strip');
   assert.equal(deriveFusePanelMode(spec({ mode: '' }), true), '');
+
+  // Every cross-mode move drops the source mode's private draft. FILE persists as FULL plus its
+  // owner-file alias, so it is subject to the same clearing rule.
+  const draftZone: NonNullable<PieceFuseSpec['zone']> = { rect: [10, 10, 40, 50] };
+  const panelModes: FusePanelMode[] = ['', 'whole', 'strip', 'zone', 'file'];
+  const sourceByMode: Record<FusePanelMode, PieceFuseSpec> = {
+    '': spec({
+      mode: '',
+      widthMm: 18,
+      edges: [{ edge: 1, startMm: 2, endMm: 3 }],
+      zone: draftZone,
+    }),
+    whole: spec({ widthMm: 18, edges: [{ edge: 1, startMm: 2, endMm: 3 }], zone: draftZone }),
+    strip: spec({ mode: 'strip', widthMm: 18, edges: [{ edge: 1, startMm: 2, endMm: 3 }] }),
+    zone: spec({ mode: 'zone', zone: draftZone }),
+    file: spec({
+      mode: 'whole',
+      widthMm: 18,
+      edges: [{ edge: 1, startMm: 2, endMm: 3 }],
+      zone: draftZone,
+    }),
+  };
+  for (const from of panelModes) {
+    for (const to of panelModes) {
+      if (from === to) continue;
+      const next = fuseSpecForPanelMode(sourceByMode[from], to, 'IL-FILE');
+      assert.equal(next.mode, to === 'file' ? 'whole' : to, `${from || 'no'} → ${to || 'no'} mode`);
+      assert.equal(next.widthMm, null, `${from || 'no'} → ${to || 'no'} width`);
+      assert.deepEqual(next.edges, [], `${from || 'no'} → ${to || 'no'} edges`);
+      assert.equal(next.zone, null, `${from || 'no'} → ${to || 'no'} zone`);
+      if (to === 'file') assert.equal(next.bomLineKey, 'IL-FILE');
+    }
+  }
+  assert.deepEqual(
+    fuseSpecForPanelMode(sourceByMode.strip, 'strip').edges,
+    sourceByMode.strip.edges,
+    'staying in STRIP keeps its draft',
+  );
+  assert.equal(
+    fuseSpecForPanelMode(sourceByMode.zone, 'zone').zone,
+    sourceByMode.zone.zone,
+    'staying in ZONE keeps its draft',
+  );
 
   const sizeTokens = new Set(['xs', 's', 'm']);
   const mainBlocks = [

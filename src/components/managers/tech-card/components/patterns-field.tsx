@@ -46,7 +46,16 @@ import {
   type ReconcileScope,
 } from 'lib/dxf-reconcile';
 import type { NotifyInput } from 'lib/stores/store-types';
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -117,7 +126,7 @@ import {
   withoutGenerated,
   writeBindings,
 } from './form-writers';
-import { sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
+import { normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-code';
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
@@ -141,6 +150,7 @@ import { useUnsavedAreaSource } from './piece-areas';
 import { serverKeyOfScope } from './piece-areas-state';
 import { markerColorways, materialThicknessMm } from './nesting/colorway-widths';
 import {
+  aliasIdentity,
   splitPiecesBySize,
   useDictionarySizeTokens,
   useFileSizeRun,
@@ -215,6 +225,12 @@ import {
   type SheetRevisionRef,
 } from './nesting/reupload-session';
 import { PatternDropZone } from './pattern-drop-zone';
+import {
+  getFusingSheetGenerationState,
+  subscribeFusingSheetGeneration,
+} from './nesting/fusing-sheets-stage';
+import { readFuseSpec, type PieceFuseSpec } from './nesting/fuse-spec';
+import type { PieceMatchApplyResult } from './nesting/piece-match-modal';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
 // nothing loads until someone actually opens a раскладка.
@@ -412,6 +428,42 @@ type ReuploadFeedback =
       marked: number;
     };
 
+type PieceSaveFeedback = {
+  materialScopeKey: string;
+  interliningLineKeys: string[];
+  baselineSavedAt?: number;
+  generationBaselineRun: number;
+  save: { phase: 'saving' | 'saved' | 'error' | 'hidden'; at?: number; fading?: boolean };
+  generation: {
+    phase: 'generating' | 'generated' | 'error' | 'hidden';
+    at?: number;
+    fading?: boolean;
+  };
+};
+
+type SlotState = { label: string; tone: 'attention' | 'ok' | 'warn'; fading?: boolean };
+
+function slotTime(at: number): string {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function SlotStateOverlay({ state }: { state: SlotState | null }) {
+  if (!state) return null;
+  return (
+    <span
+      role='status'
+      className={cn(
+        'pointer-events-none absolute right-1.5 top-1.5 z-10 inline-flex transition-opacity duration-200 ease-out motion-reduce:transition-none',
+        state.fading && 'opacity-0',
+      )}
+    >
+      <Pill tone={state.tone} className='min-h-[22px] bg-bgColor py-0.5 text-nano'>
+        {state.label}
+      </Pill>
+    </span>
+  );
+}
+
 // Rows of the card as the DXF re-upload reads and writes them (nesting/dxf-reupload.ts).
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number] & {
   lineKey: string;
@@ -601,6 +653,13 @@ export function PatternsField({
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
+  const subscribeGeneration = useCallback(
+    (listener: () => void) => subscribeFusingSheetGeneration(techCardId, listener),
+    [techCardId],
+  );
+  const readGeneration = useCallback(() => getFusingSheetGenerationState(techCardId), [techCardId]);
+  const generationState = useSyncExternalStore(subscribeGeneration, readGeneration, readGeneration);
+  const [pieceSaveFeedback, setPieceSaveFeedback] = useState<PieceSaveFeedback | null>(null);
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
@@ -614,14 +673,9 @@ export function PatternsField({
   // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
   const season = (useWatch({ control, name: 'season' }) ?? '') as string;
   // Детали кроя карточки — мастеру импорта, чтобы ИИ не привязал имя к чужой детали (Codex C10).
-  const cardPieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
-    lineKey?: string;
-    name?: string;
-    cutSymmetry?: string;
-    piecesPerGarment?: number;
-    fused?: boolean;
-    fusingMode?: string;
-  }>;
+  const cardPieces = (useWatch({ control, name: 'pieces' }) ?? []) as NonNullable<
+    TechCardFormData['pieces']
+  >;
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
   // Эталон припуска карточки — в предзаполнение раскладки, тем же порядком, что у планировщика.
   const cardSeamRaw = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
@@ -630,6 +684,118 @@ export function PatternsField({
     return Number.isFinite(n) ? n : null;
   })();
   const cardName = (useWatch({ control, name: 'name' }) ?? '') as string;
+
+  useEffect(() => {
+    setPieceSaveFeedback((current) => {
+      if (!current || current.save.phase === 'hidden' || current.save.phase === 'saved')
+        return current;
+      const saved =
+        autosave.lastSavedAt != null && autosave.lastSavedAt !== current.baselineSavedAt;
+      if ((autosave.status === 'saved' || autosave.status === 'idle') && saved) {
+        return { ...current, save: { phase: 'saved', at: autosave.lastSavedAt } };
+      }
+      if (current.save.phase === 'error') return current;
+      if (
+        autosave.status === 'invalid' ||
+        autosave.status === 'needs-confirm' ||
+        autosave.status === 'conflict' ||
+        autosave.status === 'error' ||
+        autosave.status === 'off'
+      ) {
+        return { ...current, save: { phase: 'error' } };
+      }
+      if (autosave.status === 'dirty' || autosave.status === 'saving') {
+        return { ...current, save: { phase: 'saving' } };
+      }
+      return current;
+    });
+  }, [autosave.lastSavedAt, autosave.status]);
+
+  useEffect(() => {
+    setPieceSaveFeedback((current) => {
+      if (!current || generationState.run <= current.generationBaselineRun) return current;
+      if (generationState.phase === 'generated') {
+        return {
+          ...current,
+          generation: { phase: 'generated', at: generationState.at },
+        };
+      }
+      if (generationState.phase === 'error') {
+        return { ...current, generation: { phase: 'error' } };
+      }
+      if (
+        generationState.phase === 'generating' &&
+        current.generation.phase !== 'error' &&
+        current.generation.phase !== 'hidden'
+      ) {
+        return { ...current, generation: { phase: 'generating' } };
+      }
+      return current;
+    });
+  }, [generationState]);
+
+  useEffect(() => {
+    if (pieceSaveFeedback?.save.phase !== 'saved') return;
+    const at = pieceSaveFeedback.save.at;
+    const fadeTimer = window.setTimeout(
+      () =>
+        setPieceSaveFeedback((current) =>
+          current?.save.phase === 'saved' && current.save.at === at
+            ? { ...current, save: { ...current.save, fading: true } }
+            : current,
+        ),
+      3_800,
+    );
+    const hideTimer = window.setTimeout(
+      () =>
+        setPieceSaveFeedback((current) =>
+          current?.save.phase === 'saved' && current.save.at === at
+            ? { ...current, save: { phase: 'hidden' } }
+            : current,
+        ),
+      4_000,
+    );
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [pieceSaveFeedback?.save.at, pieceSaveFeedback?.save.phase]);
+
+  useEffect(() => {
+    if (pieceSaveFeedback?.generation.phase !== 'generated') return;
+    const at = pieceSaveFeedback.generation.at;
+    const fadeTimer = window.setTimeout(
+      () =>
+        setPieceSaveFeedback((current) =>
+          current?.generation.phase === 'generated' && current.generation.at === at
+            ? { ...current, generation: { ...current.generation, fading: true } }
+            : current,
+        ),
+      3_800,
+    );
+    const hideTimer = window.setTimeout(
+      () =>
+        setPieceSaveFeedback((current) =>
+          current?.generation.phase === 'generated' && current.generation.at === at
+            ? { ...current, generation: { phase: 'hidden' } }
+            : current,
+        ),
+      4_000,
+    );
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [pieceSaveFeedback?.generation.at, pieceSaveFeedback?.generation.phase]);
+
+  useEffect(() => {
+    if (
+      pieceSaveFeedback?.save.phase === 'hidden' &&
+      pieceSaveFeedback.generation.phase === 'hidden'
+    ) {
+      setPieceSaveFeedback(null);
+    }
+  }, [pieceSaveFeedback]);
 
   const sizeById = useSizeNames();
   const preferredShapeSizeTokens = useMemo(
@@ -1063,6 +1229,29 @@ export function PatternsField({
   const geometry = useDxfGeometry(allDxfFiles, armed);
   const dxfIndex = useDxfIndex(geometry.data);
   const bundle = geometry.data;
+  const thumbnailFuseByScope = useMemo(() => {
+    const out = new Map<string, Map<string, PieceFuseSpec>>();
+    if (!dxfIndex) return out;
+    const piecesByKey = new Map(
+      cardPieces.map((piece) => [(piece.lineKey ?? '').trim().toLowerCase(), piece]),
+    );
+    for (const group of scopeGroups) {
+      const fuseByIdentity = new Map<string, PieceFuseSpec>();
+      for (const alias of pieceDxfAliases) {
+        if (!aliasInScope(alias, group.scope, linkSet)) continue;
+        const piece = piecesByKey.get((alias.pieceLineKey ?? '').trim().toLowerCase());
+        if (!piece?.fused) continue;
+        const fuse = readFuseSpec(piece);
+        if (!fuse.mode) continue;
+        const identity = normBlock(
+          aliasIdentity(alias.blockName ?? '', dxfIndex.split),
+        ).toLowerCase();
+        if (identity) fuseByIdentity.set(identity, fuse);
+      }
+      if (fuseByIdentity.size > 0) out.set(group.scope.key, fuseByIdentity);
+    }
+    return out;
+  }, [cardPieces, dxfIndex, linkSet, pieceDxfAliases, scopeGroups]);
 
   const contourPiecesByScope = useMemo(() => {
     const out = new Map<string, PieceDTO[]>();
@@ -2568,9 +2757,31 @@ export function PatternsField({
     setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(entries) });
   };
 
-  const closePieces = (applied = false) => {
+  const closePieces = (applied = false, result?: PieceMatchApplyResult) => {
+    const beginFeedback = () => {
+      if (!matching || !result?.fusingTouched) return;
+      setPieceSaveFeedback((current) => {
+        const sameMaterial = current?.materialScopeKey === matching.scope.key;
+        const sameInterlining = current?.interliningLineKeys.some((lineKey) =>
+          result.fusingBomLineKeys.includes(lineKey),
+        );
+        return {
+          materialScopeKey: matching.scope.key,
+          interliningLineKeys: result.fusingBomLineKeys,
+          baselineSavedAt: autosave.lastSavedAt,
+          generationBaselineRun: getFusingSheetGenerationState(techCardId).run,
+          save:
+            sameMaterial && current?.save.phase === 'error' ? current.save : { phase: 'saving' },
+          generation:
+            sameInterlining && current?.generation.phase === 'error'
+              ? current.generation
+              : { phase: 'generating' },
+        };
+      });
+    };
     const replacement = matching?.replacement;
     if (!applied || !replacement) {
+      if (applied) beginFeedback();
       setMatching(null);
       return;
     }
@@ -2597,6 +2808,7 @@ export function PatternsField({
     setValue(`patterns.${at}.uploadedAt`, '', keep);
     armReuploadSnapshot(techCardId, replacement.row.url, replacement.replacedUrl);
     setAreasArmed(true);
+    beginFeedback();
     setMatching(null);
     autosave.request('dxf-reupload');
   };
@@ -3722,6 +3934,48 @@ export function PatternsField({
         },
       },
     }));
+    const saveState = (() => {
+      if (!pieceSaveFeedback || pieceSaveFeedback.materialScopeKey !== key) return null;
+      switch (pieceSaveFeedback.save.phase) {
+        case 'saving':
+          return { label: 'SAVING…', tone: 'attention' } satisfies SlotState;
+        case 'saved':
+          return pieceSaveFeedback.save.at
+            ? ({
+                label: `SAVED ${slotTime(pieceSaveFeedback.save.at)}`,
+                tone: 'ok',
+                fading: pieceSaveFeedback.save.fading,
+              } satisfies SlotState)
+            : null;
+        case 'error':
+          return { label: 'NOT SAVED', tone: 'warn' } satisfies SlotState;
+        default:
+          return null;
+      }
+    })();
+    const generationTarget = pieceSaveFeedback?.interliningLineKeys.some((lineKey) =>
+      g.scope.lines.some((line) => line.lineKey === lineKey),
+    );
+    const generationStateForSlot = (() => {
+      if (!pieceSaveFeedback || !generationTarget) return null;
+      switch (pieceSaveFeedback.generation.phase) {
+        case 'generating':
+          return { label: 'GENERATING…', tone: 'attention' } satisfies SlotState;
+        case 'generated':
+          return pieceSaveFeedback.generation.at
+            ? ({
+                label: `GENERATED ${slotTime(pieceSaveFeedback.generation.at)}`,
+                tone: 'ok',
+                fading: pieceSaveFeedback.generation.fading,
+              } satisfies SlotState)
+            : null;
+        case 'error':
+          return { label: 'DXF ERROR', tone: 'warn' } satisfies SlotState;
+        default:
+          return null;
+      }
+    })();
+    const slotState = generationStateForSlot ?? saveState;
     const tileName = (
       <span className='flex min-w-0 items-center justify-between gap-1'>
         <span className='truncate'>{label}</span>
@@ -3746,14 +4000,17 @@ export function PatternsField({
       </>
     );
     const empty = (
-      <PatternDropZone
-        interactive={active && canUpload && !busy}
-        disabled={!canUpload || busy}
-        className={cn('h-[84px]', canUpload && !busy && 'group-hover/slot:border-textColor')}
-        onClick={() => openPicker(key)}
-      >
-        {emptyContents}
-      </PatternDropZone>
+      <div className='relative'>
+        <PatternDropZone
+          interactive={active && canUpload && !busy}
+          disabled={!canUpload || busy}
+          className={cn('h-[84px]', canUpload && !busy && 'group-hover/slot:border-textColor')}
+          onClick={() => openPicker(key)}
+        >
+          {emptyContents}
+        </PatternDropZone>
+        <SlotStateOverlay state={slotState} />
+      </div>
     );
     const drawing =
       dxfIndex && blocks > 0 ? (
@@ -3763,7 +4020,14 @@ export function PatternsField({
             hasDxf && canUpload && !busy && 'hover:border-textColor',
           )}
         >
-          <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
+          <SheetThumb
+            index={dxfIndex}
+            scopeKey={key}
+            className='h-full w-full'
+            fuseByIdentity={thumbnailFuseByScope.get(key)}
+            requiredSeamAllowanceMm={cardSeamAllowanceMm}
+          />
+          <SlotStateOverlay state={slotState} />
           {flight && <Progress value={62} className='absolute inset-x-0 bottom-0 h-0.5' />}
         </div>
       ) : (
@@ -3773,6 +4037,7 @@ export function PatternsField({
             label={geometry.isError ? 'parse error' : dxfIndex ? 'no shapes found' : 'parsing…'}
             className='h-[84px] w-full'
           />
+          <SlotStateOverlay state={slotState} />
           {flight && <Progress value={62} className='absolute inset-x-0 bottom-0 h-0.5' />}
         </div>
       );
@@ -3888,7 +4153,10 @@ export function PatternsField({
         {media}
         {canEdit && (
           <div
-            className='absolute right-px top-px bg-bgColor md:opacity-0 md:group-hover/slot:opacity-100 md:group-focus-within/slot:opacity-100'
+            className={cn(
+              'absolute right-px bg-bgColor md:opacity-0 md:group-hover/slot:opacity-100 md:group-focus-within/slot:opacity-100',
+              slotState ? 'top-8' : 'top-px',
+            )}
             onClick={(event) => event.stopPropagation()}
           >
             {confirmScopeKey === key ? (
