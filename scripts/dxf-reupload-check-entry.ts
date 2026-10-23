@@ -57,6 +57,7 @@ export {
   CREATE_PIECE_CHOICE,
   pieceMatchActionDisabled,
 } from 'components/managers/tech-card/components/nesting/piece-match-auto';
+export { planOldPieceOps } from 'components/managers/tech-card/components/nesting/old-pieces-ops';
 
 export {
   IDENTICAL,

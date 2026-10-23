@@ -40,7 +40,6 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import {
   pieceShapeReferences,
   type NewAliasSeed,
-  type NewJoinSeed,
   type NewPieceSeed,
   type ParsedSheetLite,
   type PieceShapeReference,
@@ -215,7 +214,6 @@ import {
   type RestoreOutcome,
   type SheetRevisionRef,
 } from './nesting/reupload-session';
-import { rowFromStep } from './operations-field';
 import { PatternDropZone } from './pattern-drop-zone';
 
 // The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
@@ -1772,13 +1770,6 @@ export function PatternsField({
     scopeKey: string,
     type: string,
   ): ReuploadDeps<FormPiece, FormAlias, FormOp> {
-    const park = getValues('construction.equipmentDefaults');
-    const ctx = {
-      machines: park?.machines ?? [],
-      presses: park?.presses ?? [],
-      defaultSeamClass: getValues('construction.defaultSeamClass') ?? '',
-      bomLines: getValues('bomItems') ?? [],
-    };
     const parse: ReuploadDeps<FormPiece, FormAlias, FormOp>['parse'] = async (files) => {
       const client = new NestingWorkerClient();
       try {
@@ -1849,25 +1840,6 @@ export function PatternsField({
         fabricPurpose: seed.fabricPurpose,
         blockName: seed.blockName,
         pieceLineKey: seed.pieceLineKey,
-      }),
-      // The split's join: an ordinary machine join, written by the same writer as a skeleton step.
-      makeJoin: (seed: NewJoinSeed<FormOp>): FormOp => ({
-        ...rowFromStep(
-          {
-            inputs: seed.inputKeys,
-            outputUnitKey: seed.outputUnitKey,
-            outputUnitName: seed.outputUnitName,
-            operationType: 'MACHINE',
-            zone: seed.before.zone ?? '',
-            seams: [],
-            confidence: 1,
-            reason: '',
-            source: 'geometry',
-          },
-          ctx,
-        ),
-        draft: false,
-        review: '',
       }),
     };
   }
@@ -2078,7 +2050,7 @@ export function PatternsField({
     setValue('pieces', out.pieces, { shouldDirty: true });
     setValue('pieceDxfAliases', out.aliases, { shouldDirty: true });
     setValue('operations', out.operations, { shouldDirty: true });
-    // A split's join renumbers the steps after it: issues follow their step (remapIssues' rule).
+    // Preservation apply keeps operation indexes stable, so issue references stay on their steps.
     const issueNumbers = out.issueNumbers;
     (getValues('issues') ?? []).forEach((iss, ii) => {
       const next = issueNumbers[ii];

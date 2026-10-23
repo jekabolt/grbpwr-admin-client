@@ -1,8 +1,8 @@
 // ПЕРЕЗАЛИВ DXF В СЛОТ, ГДЕ ЛИСТ УЖЕ ЕСТЬ (L4a, 21.10).
 //
-// Разрешённый план применяется сразу: `reconcile` → `applyPlan` → новые детали, алиасы и шаги
-// (с метками `review`). Если хотя бы один блок остался без решения, файл передаётся существующему
-// PieceMatchModal и карточка не меняется до его SAVE.
+// Разрешённый план применяется сразу: `reconcile` → `applyPlan` → новые детали, алиасы и метки
+// `review`. Структура шагов не меняется. Если хотя бы один блок остался без решения, файл
+// передаётся существующему PieceMatchModal и карточка не меняется до его SAVE.
 //
 // Единицы и размеры НЕ спрашиваются: файл без $INSUNITS получает единицы заменяемого листа, а строка
 // листа сохраняет свой size_id. Просмотр деталей после замены не открывается.
@@ -23,7 +23,6 @@ import {
   type CardOperation,
   type CardPiece,
   type NewAliasSeed,
-  type NewJoinSeed,
   type NewPieceSeed,
   type ParsedSheetLite,
   type ReconcileInput,
@@ -40,6 +39,7 @@ import {
 } from 'lib/nesting/dxf/insunits';
 import type { TechCardSeamWire } from 'lib/seams';
 import { splitBlockSize } from './block-code';
+import { planOldPieceOps } from './old-pieces-ops';
 
 /** Причина снимка карточки при первом сохранении после перезалива (UpdateTechCardRequest). */
 export const REUPLOAD_SNAPSHOT_REASON = 'dxf-reupload';
@@ -90,7 +90,6 @@ export type ReuploadDeps<P extends CardPiece, A extends CardAlias, O extends Car
    */
   makePiece: (seed: NewPieceSeed, from?: P) => P;
   makeAlias: (seed: NewAliasSeed) => A;
-  makeJoin: (seed: NewJoinSeed<O>) => O;
 };
 
 export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends CardOperation> = {
@@ -119,7 +118,7 @@ export type ReuploadCard<P extends CardPiece, A extends CardAlias, O extends Car
    * НИКОГДА не уходит в первую заливку: не нашлась строка — отказ 'target'.
    */
   target?: string;
-  /** дефекты карточки: их номера шагов переезжают за вставленным join (remapIssueNumbers) */
+  /** дефекты карточки: номера сохраняются, пока сохраняется структура operations */
   issues?: readonly { operationNumber?: number }[];
   /**
    * подтверждённые швы карточки (сохранённые + оптимистичные стора, провод TechCardSeam): по ним
@@ -203,7 +202,7 @@ export type ReuploadOutcome<P extends CardPiece, A extends CardAlias, O extends 
       replacedUrl: string;
       /** sheetRowId заменённой строки — форма ищет строку по нему */
       rowId: string;
-      /** новые issues[].operationNumber по порядку `card.issues` (join сдвигает номера) */
+      /** issues[].operationNumber по порядку `card.issues`; preservation apply keeps them stable */
       issueNumbers: number[];
       row: SheetPatch;
       pieces: P[];
@@ -477,6 +476,22 @@ export async function reuploadSheet<
     const deletion = card.planDelete(rowId, knownBlocks);
     if (!deletion || deletion.rowUrl !== rows[t].r.url)
       return { kind: 'refused', why: 'sweep', detail: 'delete plan' };
+    // A foreign replacement may reuse the explicit sheet-deletion plan for pieces, aliases and
+    // seams, but never for assembly. Keep every step at its original index with its original
+    // inputs/output unit; a reference to a removed piece gets the clearable remapped review mark.
+    const remainingPieceKeys = new Set(deletion.pieces.map((piece) => piece.lineKey));
+    const gonePieceKeys = new Set(
+      card.pieces
+        .map((piece) => piece.lineKey)
+        .filter((pieceKey) => pieceKey && !remainingPieceKeys.has(pieceKey)),
+    );
+    const operationPlan = planOldPieceOps(card.operations, gonePieceKeys);
+    const preservingDeletion: ReuploadDeletePlan<P, A, O> = {
+      ...deletion,
+      operations: operationPlan.operations,
+      issueNumbers: (card.issues ?? []).map((issue) => issue.operationNumber ?? 0),
+      counts: { ...deletion.counts, steps: 0 },
+    };
     const sizeTokens = new Set(card.sizeTokens);
     return {
       kind: 'foreign',
@@ -495,11 +510,11 @@ export async function reuploadSheet<
           .filter(Boolean),
       ).size,
       loss: {
-        pieces: deletion.counts.pieces,
-        steps: deletion.counts.steps,
-        seams: deletion.removedSeamIds.length,
+        pieces: preservingDeletion.counts.pieces,
+        steps: 0,
+        seams: preservingDeletion.removedSeamIds.length,
       },
-      deletion,
+      deletion: preservingDeletion,
     };
   };
 
@@ -591,7 +606,6 @@ export async function reuploadSheet<
     mintKey: deps.mintKey,
     makePiece: (seed) => deps.makePiece(seed, originOf.get(lower(seed.identity))),
     makeAlias: deps.makeAlias,
-    makeJoin: deps.makeJoin,
     setReview: (op, review) => ({ ...op, review }),
   });
   if (result.refused?.reason === 'noop') return { kind: 'noop', rowIndex: rows[t].i };

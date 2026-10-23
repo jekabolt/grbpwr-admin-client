@@ -206,7 +206,6 @@ async function main() {
       mintKey: () => `mint-${++minted}`,
       makePiece: (seed) => seed,
       makeAlias: (seed) => seed,
-      makeJoin: (seed) => seed.before,
     },
   );
   assert(
@@ -244,7 +243,6 @@ async function main() {
     mintKey: () => 'must-not-mint',
     makePiece: (seed) => seed,
     makeAlias: (seed) => seed,
-    makeJoin: (seed) => seed.before,
   });
   assert(
     'AUTO applies a shape-only proposal',
@@ -254,6 +252,64 @@ async function main() {
       shapeApplied.aliases.some(
         (alias) => alias.blockName === 'RENAMED_PANEL' && alias.pieceLineKey === 'piece-old',
       ),
+  );
+  const authored = [
+    {
+      title: 'join panels',
+      inputKeys: ['piece-old', 'piece-pck-l'],
+      outputUnitKey: 'PANEL',
+      outputUnitName: 'Panel',
+      smv: '2.4',
+    },
+    {
+      title: 'finish panel',
+      inputKeys: ['PANEL'],
+      outputUnitKey: 'BODY',
+      outputUnitName: 'Body',
+      smv: '1.1',
+    },
+    {
+      title: 'panel callout',
+      inputKeys: ['BODY'],
+      outputUnitKey: '',
+      outputUnitName: '',
+      media: [{ annotations: [{ pieceLineKey: 'piece-old' }] }],
+    },
+  ];
+  const pieceDelete = M.planOldPieceOps(authored, new Set(['piece-old']));
+  const withoutReview = (operation) => {
+    const { review: _review, ...rest } = operation;
+    return rest;
+  };
+  assert(
+    'piece matcher Save/AUTO keeps operation count, order, joins and output units',
+    JSON.stringify(pieceDelete.operations.map(withoutReview)) === JSON.stringify(authored) &&
+      pieceDelete.operations[0].review === 'remapped' &&
+      pieceDelete.operations[1] === authored[1] &&
+      pieceDelete.operations[2].review === 'remapped',
+  );
+  const identityRemap = M.planOldPieceOps(
+    authored,
+    new Set(['piece-old']),
+    new Map([['piece-old', 'piece-successor']]),
+  );
+  const ambiguousRemap = M.planOldPieceOps(
+    authored,
+    new Set(['piece-old', 'piece-pck-l']),
+    new Map([
+      ['piece-old', 'piece-successor'],
+      ['piece-pck-l', 'piece-successor'],
+    ]),
+  );
+  assert(
+    'piece matcher only permits a 1:1 in-place piece-key remap',
+    JSON.stringify(identityRemap.operations[0].inputKeys) ===
+      JSON.stringify(['piece-successor', 'piece-pck-l']) &&
+      identityRemap.operations[0].outputUnitKey === 'PANEL' &&
+      identityRemap.operations[1] === authored[1] &&
+      identityRemap.operations.length === authored.length &&
+      JSON.stringify(ambiguousRemap.operations[0].inputKeys) ===
+        JSON.stringify(authored[0].inputKeys),
   );
   assert(
     'AUTO is disabled by the same blocking guard as SAVE',

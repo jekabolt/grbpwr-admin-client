@@ -546,13 +546,6 @@ function deps() {
       cutSymmetry: s.cutSymmetry,
     }),
     makeAlias: (s) => ({ id: `al-new-${s.blockName}`, ...s }),
-    makeJoin: (s) => ({
-      title: `join ${s.outputUnitName}`,
-      inputKeys: s.inputKeys,
-      outputUnitKey: s.outputUnitKey,
-      outputUnitName: s.outputUnitName,
-      zoneOf: s.before.title,
-    }),
     setReview: (op, review) => ({ ...op, review }),
   };
 }
@@ -647,59 +640,26 @@ function gates(M, data) {
     const g = 'apply-invariants';
     const { input, res } = r;
     is(g, res.refused?.reason ?? null, refused, `${name}: отказ`);
-    // Шаги не теряются; добавляются только join разреза — ровно перед первым шагом с деталью.
-    const joins = res.joins ?? [];
-    yes(
+    // A DXF reconciliation may only change review metadata on operations. Count, order, inputs,
+    // joins/output units, annotations and every authored field stay byte-for-byte equivalent.
+    is(g, res.operations.length, input.operations.length, `${name}: число шагов`);
+    is(g, res.joins ?? [], [], `${name}: сгенерированные joins`);
+    is(
       g,
-      res.operations.length === input.operations.length + joins.length,
-      `${name}: шагов ${res.operations.length} из ${input.operations.length} + join ${joins.length}`,
+      res.opIndexOf,
+      input.operations.map((_, index) => index),
+      `${name}: порядок шагов`,
     );
-    const joinAt = new Set(joins.map((j) => j.opIndex));
-    const pieceKeys = new Set(res.pieces.map((p) => p.lineKey));
-    for (const j of joins) {
-      const op = res.operations[j.opIndex];
-      is(g, op?.inputKeys, [j.parentKey, ...j.partKeys], `${name}: входы join ${j.unitName}`);
-      is(
-        g,
-        [op?.outputUnitKey, op?.outputUnitName],
-        [j.unitKey, j.unitName],
-        `${name}: выход join`,
-      );
-      if (name !== 'g4-split' && name !== 'split-join')
-        is(g, op?.review, 'split', `${name}: метка join`);
-      yes(g, !pieceKeys.has(j.unitKey), `${name}: узел join ${j.unitKey} — ключ детали`);
-      const next = res.operations[j.opIndex + 1];
-      yes(
-        g,
-        !!next && (next.inputKeys ?? []).includes(j.unitKey),
-        `${name}: join ${j.unitName} не прямо перед первым шагом с деталью`,
-      );
-      yes(
-        g,
-        res.operations.slice(0, j.opIndex).every((o) => !(o.inputKeys ?? []).includes(j.parentKey)),
-        `${name}: деталь ${j.parentKey} входом раньше join`,
-      );
-    }
-    let src = 0;
-    res.operations.forEach((op, i) => {
-      if (joinAt.has(i)) return;
-      const was = input.operations[src++];
-      if (!was) return;
-      let want = was.inputKeys;
-      for (const j of joins)
-        if (j.opIndex < i) want = want.map((k) => (k === j.parentKey ? j.unitKey : k));
-      const paired = res.addedPieceKeys.filter(
-        (k) => (op.inputKeys ?? []).includes(k) && !(want ?? []).includes(k),
-      );
-      is(
-        g,
-        (op.inputKeys ?? []).filter((k) => !paired.includes(k)),
-        want,
-        `${name}: входы шага ${i}`,
-      );
-      is(g, op.media ?? null, was.media ?? null, `${name}: аннотации шага ${i}`);
-      is(g, op.outputUnitKey, was.outputUnitKey, `${name}: выход шага ${i}`);
-    });
+    const withoutReview = (operation) => {
+      const { review: _review, ...authored } = operation;
+      return authored;
+    };
+    is(
+      g,
+      res.operations.map(withoutReview),
+      input.operations.map(withoutReview),
+      `${name}: структура шагов`,
+    );
     const scopeKey = input.scope.fabricPurpose || input.scope.bomLineKey;
     const foreignIn = input.aliases.filter((a) => (a.fabricPurpose || a.bomLineKey) !== scopeKey);
     const foreignOut = res.aliases.filter((a) => (a.fabricPurpose || a.bomLineKey) !== scopeKey);
@@ -722,19 +682,11 @@ function gates(M, data) {
         `${name}: алиас ${a.blockName} → нет детали ${a.pieceLineKey}`,
       );
     const before = new Set(input.pieces.map((p) => p.lineKey));
-    const swapped = new Set(joins.map((j) => j.parentKey));
-    for (const op of input.operations) {
-      for (const k of op.inputKeys ?? [])
-        if (before.has(k)) yes(g, keys.has(k), `${name}: деталь-вход ${k} исчезла`);
-    }
-    for (const k of swapped) yes(g, keys.has(k), `${name}: разрезанная деталь ${k} исчезла`);
-    if (!res.refused)
-      is(
-        g,
-        M.sweepOf(res).map((v) => v.detail),
-        [],
-        `${name}: assemblySweep после`,
-      );
+    input.operations.forEach((operation, index) => {
+      const dangling = (operation.inputKeys ?? []).some((key) => before.has(key) && !keys.has(key));
+      if (dangling)
+        is(g, res.operations[index]?.review, 'remapped', `${name}: dangling review ${index}`);
+    });
     yes(
       g,
       new Set(res.reviews.map((x) => x.opIndex)).size === res.reviews.length,
@@ -880,7 +832,7 @@ function gates(M, data) {
     is(g, r.res.reviews, [], 'меток нет');
   });
 
-  // ── g4-split: BP → BP_U + BP_D; деталь — за большей частью, join ▣ BP перед первым шагом ──
+  // ── g4-split: BP → BP_U + BP_D; pieces change, assembly stays authored ───────────────────
   guard('g4-split', () => {
     const g = 'g4-split';
     const r = runCase(M, {
@@ -890,7 +842,7 @@ function gates(M, data) {
     });
     invariants(g, r);
     manifestTiers(g, r.plan, manifests[g]);
-    is(g, markOf(r), {}, 'чистый разрез без метки');
+    is(g, markOf(r), { [K('BP')]: 'split' }, 'existing BP step is marked for review');
     const row = rowBy(r.plan, 'BP');
     const big = row.links.find((l) => l.pieceLineKey === K('BP'));
     const small = row.links.find((l) => l.pieceLineKey === null);
@@ -915,22 +867,16 @@ function gates(M, data) {
       'часть наследует ×2 зеркально',
     );
     is(g, r.res.reshapedPieceKeys, [K('BP')], '«Конструкция» BP протухла');
-    // L5: ОДИН join [BP, часть] → ▣ BP перед первым шагом с BP; чистый разрез без метки.
-    is(
+    is(g, r.res.joins, [], 'split does not generate a join');
+    is(g, r.res.operations.length, r.input.operations.length, 'step count is preserved');
+    is(g, r.res.operations[0].inputKeys, r.input.operations[0].inputKeys, 'BP inputs stay put');
+    yes(
       g,
-      r.res.joins.map((j) => [j.opIndex, j.parentKey, j.partKeys, j.unitKey, j.unitName]),
-      [[0, K('BP'), [r.res.addedPieceKeys[0]], 'BP', 'BP']],
-      'join разреза',
+      r.res.operations.every(
+        (operation) => !(operation.inputKeys ?? []).includes(r.res.addedPieceKeys[0]),
+      ),
+      'new split part remains unplaced',
     );
-    is(g, r.res.operations.length, r.input.operations.length + 1, 'шагов +1');
-    is(
-      g,
-      r.res.operations.map((o) => o.review ?? ''),
-      r.res.operations.map(() => ''),
-      'join без метки',
-    );
-    is(g, r.res.operations[0].smv, '', 'без SMV других join — пусто');
-    is(g, r.res.operations[1].inputKeys, ['BP', K('BP_1')], 'первый шаг берёт ▣ BP');
   });
 
   // ── g4-merge: BP_U + BP_D → BP; поглощённая остаётся призраком ────────────────────────────
@@ -1154,7 +1100,7 @@ function gates(M, data) {
     );
   });
 
-  // ── L5 fix 3: two equally good split pairs — the split keeps its mark ─────────────────────
+  // ── L5 fix 3: two equally good split pairs mark the existing authored step ───────────────
   guard('split-ambiguous', () => {
     const g = 'split-ambiguous';
     const isU = blocksOf(M, S.g4split, 'BP_U');
@@ -1171,9 +1117,9 @@ function gates(M, data) {
     is(g, rowBy(r.plan, 'BP')?.tier, 'split', 'still a split');
     is(
       g,
-      r.res.joins.map((j) => r.res.operations[j.opIndex]?.review ?? ''),
+      r.res.reviews.map((review) => review.review),
       ['split'],
-      'ambiguous split join is marked',
+      'ambiguous split marks the existing step',
     );
   });
 
@@ -1232,7 +1178,7 @@ function gates(M, data) {
     }
   });
 
-  // ── L5 mirror pair: a new opposite-hand block joins every step of its proven mate ─────────
+  // ── L5 mirror pair: a new opposite-hand block stays out of authored steps ─────────────────
   guard('mirror-pair-place', () => {
     const g = 'mirror-pair-place';
     const old = dropIdentity(M, S.base, 'FP_R');
@@ -1243,10 +1189,9 @@ function gates(M, data) {
     const mateStep = r.res.operations.find((o) => (o.inputKeys ?? []).includes(K('FP_L')));
     yes(
       g,
-      !!mateStep && (mateStep.inputKeys ?? []).includes(added),
-      'new mirror is in the mate step',
+      !!mateStep && !(mateStep.inputKeys ?? []).includes(added),
+      'new mirror remains unplaced',
     );
-    is(g, M.sweepOf(r.res), [], 'pair placement keeps assembly valid');
   });
 
   // ── две одинаковые формы: переименованный блок узнаётся по месту на листе ────────────────
@@ -1621,7 +1566,7 @@ function gates(M, data) {
     is(g, plain.res.addedPieceKeys, [], 'без otherSheets — новая деталь не заводится');
   });
 
-  // ── сторож сборки: план, удаляющий деталь со ссылками, отказывается целиком ───────────────
+  // ── удалённая деталь: authored assembly survives and gets a clearable review mark ─────────
   guard('sweep-guard', () => {
     const g = 'sweep-guard';
     const tamper = (plan) => {
@@ -1630,27 +1575,17 @@ function gates(M, data) {
       return plan;
     };
     const r = runCase(M, { old: S.base, neu: S.gCombo, tamper });
-    is(g, r.res.refused?.reason, 'sweep', 'отказ по сборке');
-    yes(
-      g,
-      r.res.violations.some((v) => v.rule === 1 && v.key === K('CLR_3')),
-      `нарушение названо: ${JSON.stringify(r.res.violations.map((v) => [v.rule, v.detail, v.key]))}`,
-    );
-    yes(
-      g,
-      r.res.pieces.length === r.input.pieces.length &&
-        r.res.pieces.every((p, i) => p === r.input.pieces[i]),
-      'детали как были',
-    );
-    yes(
-      g,
-      r.res.operations.every((o, i) => o === r.input.operations[i]),
-      'шаги как были',
-    );
-    is(g, r.res.reviews, [], 'меток нет');
+    invariants(g, r);
+    is(g, r.res.refused, null, 'replacement is not refused for authored assembly');
+    yes(g, !r.res.pieces.some((piece) => piece.lineKey === K('CLR_3')), 'piece is removed');
+    r.input.operations.forEach((operation, index) => {
+      if (!(operation.inputKeys ?? []).includes(K('CLR_3'))) return;
+      is(g, r.res.operations[index].inputKeys, operation.inputKeys, `dangling inputs ${index}`);
+      is(g, r.res.operations[index].review, 'remapped', `dangling review ${index}`);
+    });
   });
 
-  // ── разрез посреди цепочки: join встаёт ровно перед первым шагом с деталью ────────────────
+  // ── разрез посреди цепочки: no generated join, no rewritten consumer ─────────────────────
   guard('split-join', () => {
     const g = 'split-join';
     const spec = {
@@ -1671,63 +1606,53 @@ function gates(M, data) {
     const r = runCase(M, { old: S.base, neu: S.g4split, card });
     invariants(g, r);
     const part = r.res.addedPieceKeys[0];
+    is(g, r.res.joins, [], 'split does not generate a join');
     is(
       g,
-      r.res.joins.map((j) => [j.opIndex, j.parentKey, j.partKeys, j.unitKey, j.unitName]),
-      [[1, K('BP'), [part], 'BP', 'BP']],
-      'join перед обработкой BP',
-    );
-    is(
-      g,
-      r.res.operations.map((o) => [o.title, o.inputKeys, o.review ?? '']),
-      [
-        ['join 1', [K('BP_1'), K('BP_2')], ''],
-        ['join BP', [K('BP'), part], ''],
-        ['overlock BP', ['BP'], ''],
-        ['join 2', ['u1', 'BP'], ''],
-        ...r.input.operations.slice(3).map((o) => [o.title, o.inputKeys, '']),
-      ],
-      'шаги после разреза',
-    );
-    is(g, r.res.operations[1].zoneOf, 'overlock BP', 'join знает шаг, перед которым встал');
-    is(g, r.res.operations[1].smv, '2.4', 'join получил медиану SMV других join');
-    is(
-      g,
-      r.res.operations[3].media,
+      r.res.operations[2].media,
       [{ annotations: [{ pieceLineKey: K('BP') }] }],
       'выноска осталась на детали',
     );
-    is(g, r.res.reviews, [], 'чистый split без метки');
+    is(
+      g,
+      r.res.reviews.map((review) => [review.opIndex, review.review]),
+      [
+        [1, 'split'],
+        [2, 'split'],
+      ],
+      'existing BP steps are marked',
+    );
+    yes(
+      g,
+      r.res.operations.every((operation) => !(operation.inputKeys ?? []).includes(part)),
+      'new part remains unplaced',
+    );
     is(
       g,
       r.res.pieces.find((p) => p.lineKey === K('BP'))?.name,
       rowBy(r.plan, 'BP')?.links.find((l) => l.pieceLineKey === K('BP'))?.identity,
-      'деталь BP переименована за большей частью, узел держит старое имя',
+      'piece BP follows the larger part',
     );
 
-    // имя узла занято выходом другого шага → код с суффиксом
+    // A colliding authored output unit is untouched because no generated unit is minted.
     const taken = structuredClone(card);
     taken.operations = taken.operations.map((o) =>
       o.outputUnitKey === 'u8' ? { ...o, outputUnitKey: 'BP' } : o,
     );
     const r2 = runCase(M, { old: S.base, neu: S.g4split, card: taken });
-    is(
-      g,
-      r2.res.joins.map((j) => j.unitKey),
-      ['BP-2'],
-      'код узла уникален',
-    );
+    invariants(`${g} output collision`, r2);
+    is(g, r2.res.operations.at(-1).outputUnitKey, 'BP', 'authored output unit is preserved');
 
-    // старое нарушение ПОСЛЕ join (повтор входа в последнем шаге) — не новое, не отказ
+    // An existing violation is neither repaired nor expanded by reconciliation.
     const dirty = structuredClone(card);
     const last = dirty.operations.at(-1);
     last.inputKeys = [...last.inputKeys, last.inputKeys.at(-1)];
     yes(g, M.sweepOf(dirty).length > 0, 'грязная фикстура грязная');
     const r3 = runCase(M, { old: S.base, neu: S.g4split, card: dirty });
-    is(g, r3.res.refused?.reason ?? null, null, 'старое нарушение после join — не отказ');
-    is(g, r3.res.joins.length, 1, 'join при старом нарушении');
+    invariants(`${g} existing violation`, r3);
+    is(g, r3.res.joins.length, 0, 'no join on an already invalid card');
 
-    // BP ни в одном входе (только выноска) — join нет, меток нет, часть — новая деталь
+    // BP only in an annotation: the annotation stays put and the existing step is marked.
     const loose = runCase(M, {
       old: S.base,
       neu: S.g4split,
@@ -1740,8 +1665,8 @@ function gates(M, data) {
     is(
       g,
       [loose.res.joins.length, loose.res.reviews.length, loose.res.addedPieceKeys.length],
-      [0, 0, 1],
-      'без входа: join/метки/новые',
+      [0, 1, 1],
+      'annotation only: joins/reviews/new pieces',
     );
   });
 

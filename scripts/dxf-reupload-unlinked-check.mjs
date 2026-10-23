@@ -90,11 +90,6 @@ async function main() {
       cutSymmetry: seed.cutSymmetry,
     }),
     makeAlias: (seed) => ({ ...seed }),
-    makeJoin: (seed) => ({
-      inputKeys: seed.inputKeys,
-      outputUnitKey: seed.outputUnitKey,
-      outputUnitName: seed.outputUnitName,
-    }),
   };
   const guarded = M.applyPlan(input, plan, applyDeps);
   assert(
@@ -256,7 +251,6 @@ async function main() {
         return seed;
       },
       makeAlias: (seed) => seed,
-      makeJoin: (seed) => seed.before,
     },
   );
   assert(

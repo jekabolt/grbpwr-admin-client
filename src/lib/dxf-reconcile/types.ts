@@ -6,22 +6,20 @@
 //
 // Поток: старый лист scope уже разобран, новый файл разобран тем же worker'ом →
 // `reconcile(input)` строит план (ярусы по деталям + сводка для чипа «что изменилось») →
-// `applyPlan(input, plan, deps)` детерминированно отдаёт новые pieces/aliases/operations, список
-// review-меток и нарушения assemblySweep. Нарушение, которого не было ДО, отказывает применение
-// целиком; форма не трогается.
+// `applyPlan(input, plan, deps)` детерминированно отдаёт новые pieces/aliases и тот же ряд
+// operations с review-метками. Сборка не достраивается и не переписывается: её порядок, входы и
+// выходные узлы принадлежат только явному Apply панели каркаса.
 //
 // Правила исхода:
 //   · то же имя, форма поменялась → новая форма принята, шаги с деталью (входом или аннотацией)
 //     получают review 'reshaped', «Конструкция» по детали протухает (reshapedPieceKeys);
 //   · деталь пропала и на неё есть ссылки → остаётся призраком (алиас снят), её шаги — 'orphan';
 //     без ссылок — удаляется молча. Шаг не удаляется НИКОГДА;
-//   · разрез → деталь идёт за большей частью, остальные части — новые детали; перед первым шагом,
-//     где деталь стоит входом, вставляется ОДИН обычный шаг join (вход: деталь + части, выход —
-//     узел ▣ под старым именем детали). Чистый разрез даёт join без метки, сомнительный сохраняет
-//     'split'; шаги, где была деталь, берут узел вместо неё. Единственный случай, когда applyPlan
-//     добавляет шаг и переписывает входы. Деталь не стоит ни в одном входе — join нет,
-//     метки нет, части — просто новые детали; слияние → без автоматики: деталь идёт за новым блоком,
-//     поглощённая остаётся призраком/удаляется по правилу выше, шаги обеих — 'remapped';
+//   · разрез → деталь идёт за большей частью, остальные части — новые детали, а существующие шаги
+//     детали получают 'split'. Никакой join не вставляется и входы не меняются; части остаются в
+//     списке «+N в сборку» до явного действия технолога. Слияние → без автоматики: деталь идёт за
+//     новым блоком, поглощённая остаётся призраком/удаляется по правилу выше, шаги обеих —
+//     'remapped';
 //   · перепривязка по форме с неполной уверенностью (две одинаковые формы, заметная разница) →
 //     'remapped';
 //   · переименование по форме, новые детали, L/R-пара → одна деталь ×2 — молча. Новые детали в
@@ -178,7 +176,7 @@ export type NewLink = {
   pieceLineKey: string | null;
   /** имя новой детали (идентичность, уникализированная по карте); '' у существующей */
   name: string;
-  /** A proven new L/R mate is inserted beside this existing piece in every one of its steps. */
+  /** A proven new L/R mate is reported as a new piece; assembly placement stays explicit. */
   placeWithPieceKey?: string;
 };
 
@@ -188,7 +186,7 @@ export type RowReview = {
   pieceKeys: string[];
   /** Seam-aware reshape marks only the operations that actually join the broken seam. */
   operationIndexes?: number[];
-  /** A clean split still creates its join, but the join is not marked. Default: true. */
+  /** Legacy planner hint; apply always preserves the operation structure. */
   mark?: boolean;
 };
 
@@ -287,7 +285,7 @@ export type Review = 'reshaped' | 'remapped' | 'split' | 'orphan';
  * orphan > split > remapped > reshaped (REVIEW_RANK в defaults.ts).
  */
 export type ReviewMark = {
-  /** индекс шага в РЕЗУЛЬТАТЕ (operations после вставки join разреза; без разреза = входной) */
+  /** индекс шага в результате; он всегда равен входному индексу */
   opIndex: number;
   review: Review;
   /** детали, из-за которых метка, в порядке деталей карточки */
@@ -308,26 +306,10 @@ export type NewAliasSeed = ReconcileScope & {
   pieceLineKey: string;
 };
 
-/** Шаг join разреза: собирает деталь и её части обратно в узел под старым именем детали. */
-export type NewJoinSeed<O extends CardOperation = CardOperation> = {
-  /** [деталь, части…] — деталь первой, части в порядке строки плана */
-  inputKeys: string[];
-  /** ключ узла: из старого имени, не совпадает ни с деталью, ни с выходом другого шага */
-  outputUnitKey: string;
-  /** старое имя детали (до переименования за большей частью) */
-  outputUnitName: string;
-  /** Median SMV of the card's other join steps, or ''. */
-  smv: string;
-  /** шаг, перед которым встаёт join (первый, где деталь стоит входом) — откуда взять зону и т.п. */
-  before: O;
-};
-
 export type ApplyDeps<P extends CardPiece, A extends CardAlias, O extends CardOperation> = {
   mintKey: () => string;
   makePiece: (seed: NewPieceSeed) => P;
   makeAlias: (seed: NewAliasSeed) => A;
-  /** Строка шага join разреза (без метки — метку ставит setReview). */
-  makeJoin: (seed: NewJoinSeed<O>) => O;
   /** Ставит review на шаг. Без неё метки только в списке `reviews`. */
   setReview?: (op: O, review: Review) => O;
 };
@@ -336,7 +318,7 @@ export type ApplyRefusal =
   | { reason: 'noop' }
   | { reason: 'foreign' }
   | { reason: 'unresolved' }
-  /** применение дало нарушение сборки, которого не было до — названо шагом */
+  /** Legacy refusal kept for serialized probe compatibility; preservation apply does not emit it. */
   | { reason: 'sweep'; violations: AssemblyViolation[] };
 
 export type ApplyResult<P extends CardPiece, A extends CardAlias, O extends CardOperation> = {
@@ -345,20 +327,19 @@ export type ApplyResult<P extends CardPiece, A extends CardAlias, O extends Card
   aliases: A[];
   operations: O[];
   reviews: ReviewMark[];
-  /** нарушения assemblySweep ПОСЛЕ, которых не было ДО (непусто ⇒ refused.reason === 'sweep') */
+  /** Legacy diagnostic; preservation apply always returns an empty list. */
   violations: AssemblyViolation[];
   /**
-   * индекс шага входа → индекс в результате (join разреза сдвигает следующие). По нему форма
-   * переносит ссылки дефектов на номера шагов (issues[].operationNumber) тем же правилом, что и
-   * OperationsField.remapIssues.
+   * Индекс шага входа → индекс в результате. Preservation apply returns the identity map, so issue
+   * references are never renumbered by a DXF re-upload.
    */
   opIndexOf: number[];
   /**
-   * все новые детали этой заливки. Части разреза сразу стоят входом join — чип «+N в сборку»
-   * считает по факту (unplacedPieceKeys в marks.ts), а не по этому списку.
+   * Все новые детали этой заливки. Они не вставляются в operations; «+N в сборку» считает их по
+   * факту (unplacedPieceKeys в marks.ts).
    */
   addedPieceKeys: string[];
-  /** вставленные join разреза: индекс в результате, деталь, части, узел */
+  /** Legacy diagnostic; always empty because only the skeleton panel may create joins. */
   joins: SplitJoin[];
   /** форма изменилась — «Конструкция» по этим деталям протухла */
   reshapedPieceKeys: string[];
