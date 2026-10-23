@@ -470,6 +470,10 @@ function labelOf(row?: PatternRow): string {
   return row?.name || row?.filename || '(unnamed)';
 }
 
+function fileNameOf(row?: PatternRow): string {
+  return row?.filename || patternSheetName(row ?? {});
+}
+
 const isGeneratedFusingRow = (row: PatternRow): boolean =>
   (row.name ?? '').startsWith(GENERATED_FUSING_NAME_PREFIX);
 
@@ -3549,6 +3553,35 @@ export function PatternsField({
     });
   }
 
+  function occupiedFileLine(ask: OccupiedAsk): string {
+    if (ask.kind === 'files') {
+      const current = slotOccupant(ask.scopeKey, ask.target);
+      return `${ask.files.map((file) => file.name).join(' + ')} → ${fileNameOf(current)}`;
+    }
+
+    const rows = (getValues('patterns') ?? []) as PatternRow[];
+    if (ask.kind === 'move') {
+      const incoming = rows.find((row) => sheetRowId(row) === ask.rowId);
+      const current = slotOccupant(ask.scopeKey);
+      return `${fileNameOf(incoming)} → ${fileNameOf(current)}`;
+    }
+
+    const sourceScope = scopeOfKey(ask.scopeKey);
+    const source = sourceScope ? slotOccupant(sourceScope.key) : undefined;
+    if (!sourceScope) return `${fileNameOf(source)} → ${fileNameOf()}`;
+    const lineKeys = new Set(sourceScope.lines.map((line) => line.lineKey));
+    const items = (getValues('bomItems') ?? []) as BomLine[];
+    const nextItems = items.map((line) =>
+      lineKeys.has(line.lineKey?.trim() ?? '') ? { ...line, purpose: ask.nextPurpose } : line,
+    );
+    const targetScope = scopeOfLine(
+      fabricScopes(clothLines(nextItems)),
+      sourceScope.lines[0]?.lineKey ?? '',
+    );
+    const current = targetScope ? slotOccupant(targetScope.key) : undefined;
+    return `${fileNameOf(source)} → ${fileNameOf(current)}`;
+  }
+
   // Плитка слота живёт дроп-зоной: файлы на неё идут в роутер, перетащенный лист — в moveSheetTo.
   const dropProps = (key: string) =>
     canUpload && (uploading[key] ?? 0) === 0
@@ -4435,10 +4468,10 @@ export function PatternsField({
         title='occupied slot'
         confirmLabel='replace'
         width='sm'
-        headerActions={
+        footerActions={
           <Button
             variant='secondary'
-            size='xs'
+            size='sm'
             onClick={() => {
               if (occupiedAsk) void chooseOccupied(occupiedAsk, 'merge');
             }}
@@ -4447,7 +4480,9 @@ export function PatternsField({
           </Button>
         }
       >
-        <></>
+        <Text className='break-all tabular-nums'>
+          {occupiedAsk ? occupiedFileLine(occupiedAsk) : ''}
+        </Text>
       </ConfirmationModal>
 
       <ConfirmationModal
