@@ -10,6 +10,7 @@ import {
   Combobox,
   DotsHorizontalIcon,
   EmptyCell,
+  GroupLabel,
   Input,
   Select,
   Text,
@@ -34,7 +35,24 @@ import {
   type FusePanelMode,
   type PieceFuseSpec,
 } from './fuse-spec';
-import { allCorners, isDrawnZone, withCorners, type ZoneBus } from './fuse-zone';
+import { zoneRingsMm, ZONE_MAX_HOLES, ZONE_MAX_OUTER_RINGS } from 'lib/fusing-dxf/geometry';
+import {
+  addZoneHole,
+  addZoneIsland,
+  allCorners,
+  deleteZoneRing,
+  isDrawnZone,
+  isSplineZone,
+  outerRefForHole,
+  seedZone,
+  splineZone,
+  withCorners,
+  zonePoints,
+  zoneRingLabel,
+  zoneRingRefs,
+  type ZoneBus,
+  type ZoneRingRef,
+} from './fuse-zone';
 import { PatternDropZone } from '../pattern-drop-zone';
 
 export type InterliningLine = {
@@ -391,7 +409,7 @@ export function FuseFields({
   );
 }
 
-/** ZONE: the clipped area, all points sharp / round, undo, back to the full-fill seed. */
+/** ZONE variant C: ruled rings, selected-ring curve tools, and one shared undo stack. */
 function ZoneRow({
   spec,
   ci,
@@ -410,9 +428,32 @@ function ZoneRow({
   useSyncExternalStore(bus.subscribe, bus.version);
   const area = bus.area(ci);
   const drawn = isDrawnZone(spec.zone);
+  const spline = isSplineZone(spec.zone)
+    ? spec.zone
+    : drawn
+      ? splineZone(zonePoints(spec.zone))
+      : null;
+  const refs = zoneRingRefs(spline);
+  const requested = bus.selected(ci);
+  const selected: ZoneRingRef = refs.includes(requested) ? requested : 'main';
+  const ringAreas = bus.ringAreas(ci);
+  const contour = bus.contour(ci) ?? [];
   const canUndo = bus.canUndo(ci);
-  const write = (zone: PieceFuseSpec['zone']) => {
-    bus.push(ci, spec.zone);
+  useEffect(() => {
+    if (requested !== selected) bus.select(ci, selected);
+  }, [bus, ci, requested, selected]);
+  const valid = (zone: PieceFuseSpec['zone']) => {
+    if (!isSplineZone(zone)) return true;
+    try {
+      zoneRingsMm(zone, contour);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const write = (zone: PieceFuseSpec['zone'], nextSelected: ZoneRingRef = selected) => {
+    if (!valid(zone)) return;
+    bus.commit(ci, spec.zone, selected, nextSelected);
     onChange({ ...spec, zone });
   };
   const chip = (label: string, on: boolean, off: boolean, onClick: () => void) => (
@@ -427,29 +468,130 @@ function ZoneRow({
       {label}
     </Chip>
   );
+  const addHole = () => {
+    if (!spline || contour.length < 3) return;
+    const added = addZoneHole(spline, selected, contour);
+    if (added) write(added.zone, added.ref);
+  };
+  const addIsland = () => {
+    if (!spline || contour.length < 3) return;
+    const added = addZoneIsland(spline, contour, selected);
+    if (added) write(added.zone, added.ref);
+  };
+  const reset = () => {
+    if (!spline || contour.length < 3) return;
+    if (selected === 'main') {
+      const seeded = seedZone(contour);
+      if (seeded) write(seeded, 'main');
+      return;
+    }
+    const without = deleteZoneRing(spline, selected);
+    if (!without) return;
+    if (selected.startsWith('hole:')) {
+      const owner = outerRefForHole(spline, selected, contour);
+      const seeded = owner && addZoneHole(without, owner, contour);
+      if (seeded) write(seeded.zone, seeded.ref);
+      return;
+    }
+    const seeded = addZoneIsland(without, contour);
+    if (seeded) write(seeded.zone, seeded.ref);
+  };
   return (
-    <FuseField
-      label='zone'
-      error={drawn && area === null}
-      door={
-        <Text size='micro' component='span' data-zone-area={area ?? ''}>
-          {area != null ? `${Math.round(area)} cm²` : <EmptyCell />}
-        </Text>
-      }
-    >
-      <div className='grid grid-cols-2 gap-1'>
-        {chip('sharp', drawn && allCorners(spec.zone, true), !drawn, () =>
-          write(withCorners(spec.zone, true)),
+    <div data-zone-area={area ?? ''} aria-invalid={drawn && area === null ? true : undefined}>
+      <GroupLabel
+        className={drawn && area === null ? '[&>span]:text-error' : undefined}
+        action={
+          <div className='flex gap-3'>
+            <Button
+              variant='underline'
+              size='xs'
+              disabled={
+                readOnly ||
+                !spline ||
+                contour.length < 3 ||
+                selected.startsWith('hole:') ||
+                spline.holes.length >= ZONE_MAX_HOLES
+              }
+              onClick={addHole}
+            >
+              + hole
+            </Button>
+            <Button
+              variant='underline'
+              size='xs'
+              disabled={
+                readOnly ||
+                !spline ||
+                contour.length < 3 ||
+                1 + spline.islands.length >= ZONE_MAX_OUTER_RINGS
+              }
+              onClick={addIsland}
+            >
+              + part
+            </Button>
+          </div>
+        }
+      >
+        rings
+      </GroupLabel>
+      <div className='divide-y divide-hairline'>
+        {refs.map((ref) => {
+          const selectedRow = ref === selected;
+          const ringArea = ringAreas[ref];
+          return (
+            <Button
+              key={ref}
+              aria-label={zoneRingLabel(spline, ref)}
+              aria-pressed={selectedRow}
+              className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
+                selectedRow
+                  ? 'bg-textColor text-bgColor'
+                  : 'bg-bgColor text-textColor hover:bg-pageBg'
+              }`}
+              disabled={readOnly}
+              onClick={() => bus.select(ci, ref)}
+            >
+              <span aria-hidden>{ref.startsWith('hole:') ? '◇' : '◆'}</span>
+              <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
+              <span className='tabular-nums'>
+                {ringArea != null ? `${Math.round(ringArea)} cm²` : <EmptyCell />}
+              </span>
+            </Button>
+          );
+        })}
+      </div>
+      <GroupLabel
+        action={
+          selected !== 'main' ? (
+            <Button
+              variant='underline'
+              size='xs'
+              disabled={readOnly}
+              onClick={() => {
+                const next = deleteZoneRing(spline, selected);
+                if (next) write(next, 'main');
+              }}
+            >
+              delete
+            </Button>
+          ) : undefined
+        }
+      >
+        {zoneRingLabel(spline, selected)}
+      </GroupLabel>
+      <div className='grid grid-cols-4 gap-1'>
+        {chip('sharp', drawn && allCorners(spline, true, selected), !drawn, () =>
+          write(withCorners(spline, true, selected)),
         )}
-        {chip('round', drawn && allCorners(spec.zone, false), !drawn, () =>
-          write(withCorners(spec.zone, false)),
+        {chip('round', drawn && allCorners(spline, false, selected), !drawn, () =>
+          write(withCorners(spline, false, selected)),
         )}
         {chip('undo', false, !canUndo, () => {
-          const prev = bus.pop(ci);
+          const prev = bus.undo(ci);
           if (prev) onChange({ ...spec, zone: prev.zone });
         })}
-        {chip('reset', false, !drawn, () => write(null))}
+        {chip('reset', false, !drawn || contour.length < 3, reset)}
       </div>
-    </FuseField>
+    </div>
   );
 }

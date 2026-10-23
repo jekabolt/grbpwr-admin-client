@@ -12,7 +12,7 @@ import { writeScopes } from 'lib/pattern-import/write';
 import { edgeRunsOf } from './edge-runs';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry, signedArea } from './geometry';
 import { ZONE_ON_CONTOUR_MM, projectOnRing } from './spline';
-import type { FusePolygon, PieceFuseSpec } from './types';
+import type { FusePolygon, FuseSpline, PieceFuseSpec } from './types';
 
 export type FusingBomLine = {
   bomLineKey: string;
@@ -224,20 +224,26 @@ export function mapFuseSpecToSize(
     } catch {
       // generateFuseGeometry owns the inset refusal; the points then map proportionally only.
     }
+    const mapSpline = (spline: FuseSpline, followContour: boolean): FuseSpline => ({
+      points: spline.points.map((point) => {
+        const mapped = mapPointBetweenOutlines(point, from, to);
+        const onContour =
+          followContour &&
+          baseInset &&
+          targetInset &&
+          projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
+        return {
+          ...point,
+          ...(onContour ? projectOnRing(mapped, targetInset!).p : mapped),
+        };
+      }),
+    });
     return {
       ...source,
       zone: {
-        spline: {
-          points: source.zone.spline.points.map((point) => {
-            const mapped = mapPointBetweenOutlines(point, from, to);
-            const onContour =
-              baseInset && targetInset && projectOnRing(point, baseInset).d <= ZONE_ON_CONTOUR_MM;
-            return {
-              ...point,
-              ...(onContour ? projectOnRing(mapped, targetInset!).p : mapped),
-            };
-          }),
-        },
+        spline: mapSpline(source.zone.spline, true),
+        islands: source.zone.islands.map((island) => mapSpline(island, true)),
+        holes: source.zone.holes.map((hole) => mapSpline(hole, false)),
       },
     };
   }

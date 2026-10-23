@@ -4,8 +4,9 @@
 // on the last touched one) removes it, min 3. Empty piece/zone drags are deliberately inert so the
 // sheet does not pan or create a rectangle. ⌘Z undoes. Finger-size handles on touch.
 // Coordinates: the sheet's SVG space (cm, Y down); the zone itself is piece-local mm, Y up.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ZONE_ON_CONTOUR_MM } from 'lib/fusing-dxf/spline';
+import { zoneRingsMm } from 'lib/fusing-dxf/geometry';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import type { FuseZone } from 'lib/fusing-dxf/types';
 import type { PieceFuseSpec } from './fuse-spec';
@@ -13,11 +14,13 @@ import {
   insertZonePoint,
   isDrawnZone,
   removeZonePoint,
-  splineZone,
-  zoneOutline,
-  zonePoints,
+  withZoneRingPoints,
+  zoneRingOutline,
+  zoneRingPoints,
+  zoneRingRefs,
   type ZoneBus,
   type ZonePoint,
+  type ZoneRingRef,
 } from './fuse-zone';
 
 const INK = 'var(--color-warning)';
@@ -96,9 +99,15 @@ export function FuseZoneEditor({
   const L = (s: Pt) => ({ x: (s.x - ox) * 10, y: (-s.y - oy) * 10 });
   const zone = spec.zone;
   const drawn = isDrawnZone(zone);
-  const mm = zonePoints(zone);
+  useSyncExternalStore(bus?.subscribe ?? (() => () => {}), bus?.version ?? (() => 0));
+  const refs = zoneRingRefs(zone);
+  const requested = bus?.selected(ci) ?? 'main';
+  const selected: ZoneRingRef = refs.includes(requested) ? requested : 'main';
+  const outerSelected = selected === 'main' || selected.startsWith('island:');
+  const mm = zoneRingPoints(zone, selected);
   const pts = mm.map(W);
-  const outlineMm = drawn ? zoneOutline(zone, inner.map(L)) : null;
+  const contourMm = inner.map(L);
+  const outlineMm = drawn ? zoneRingOutline(zone, selected, contourMm) : null;
   const ring = outlineMm ? outlineMm.ring.map(W) : [];
   const drag = useRef<Drag | null>(null);
   /** The last touched point (Backspace / Delete removes it). */
@@ -113,26 +122,43 @@ export function FuseZoneEditor({
   const R = (coarse ? 9 : 6) * px;
   const HIT = (coarse ? 22 : 12) * px;
 
-  useEffect(() => setPicked(null), [ci]);
-  const latest = useRef({ spec, onChange, bus, picked });
-  latest.current = { spec, onChange, bus, picked };
+  useEffect(() => setPicked(null), [ci, selected]);
+  useEffect(() => {
+    if (requested !== selected) bus?.select(ci, selected);
+  }, [bus, ci, requested, selected]);
+  const latest = useRef({ spec, onChange, bus, picked, selected, contourMm });
+  latest.current = { spec, onChange, bus, picked, selected, contourMm };
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
-      const { spec: s, onChange: set, bus: b, picked: i } = latest.current;
+      const {
+        spec: s,
+        onChange: set,
+        bus: b,
+        picked: i,
+        selected: ringRef,
+        contourMm: contour,
+      } = latest.current;
       if ((e.key === 'Backspace' || e.key === 'Delete') && i != null && !e.metaKey && !e.ctrlKey) {
         if (!isDrawnZone(s.zone)) return;
-        const next = removeZonePoint(zonePoints(s.zone), i);
+        const next = removeZonePoint(zoneRingPoints(s.zone, ringRef), i);
         e.preventDefault();
         if (!next) return;
-        b?.push(ci, s.zone);
-        set({ ...s, zone: splineZone(next) });
+        const nextZone = withZoneRingPoints(s.zone, ringRef, next);
+        if (!nextZone) return;
+        try {
+          zoneRingsMm(nextZone, contour);
+        } catch {
+          return;
+        }
+        b?.commit(ci, s.zone, ringRef, ringRef);
+        set({ ...s, zone: nextZone });
         setPicked(null);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
-      const prev = b?.pop(ci);
+      const prev = b?.undo(ci);
       if (!prev) return;
       e.preventDefault();
       set({ ...s, zone: prev.zone });
@@ -147,9 +173,20 @@ export function FuseZoneEditor({
     const n = nearestOn(q, inner);
     return !inside(q, inner) || n.d < 8 * px ? n.p : q;
   };
-  const snapped = (q: Pt) => inner.length >= 3 && nearestOn(q, inner).d <= ZONE_ON_CONTOUR_MM / 10;
-  const begin = () => bus?.push(ci, zone);
-  const write = (next: ZonePoint[]) => onChange({ ...spec, zone: splineZone(next) });
+  const snapped = (q: Pt) =>
+    outerSelected && inner.length >= 3 && nearestOn(q, inner).d <= ZONE_ON_CONTOUR_MM / 10;
+  const write = (next: ZonePoint[], remember = true) => {
+    const nextZone = withZoneRingPoints(zone, selected, next);
+    if (!nextZone) return false;
+    try {
+      zoneRingsMm(nextZone, contourMm);
+    } catch {
+      return false;
+    }
+    if (remember) bus?.commit(ci, zone, selected, selected);
+    onChange({ ...spec, zone: nextZone });
+    return true;
+  };
 
   const down = (e: React.PointerEvent, d: Drag) => {
     e.stopPropagation();
@@ -163,11 +200,9 @@ export function FuseZoneEditor({
     const q = svgPoint(e);
     if (d.t === 'pt') {
       if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
-      if (!d.moved) begin();
-      d.moved = true;
       const next = mm.slice();
       next[d.i] = { ...L(keep(q)), corner: mm[d.i].corner };
-      write(next);
+      if (write(next, !d.moved)) d.moved = true;
     }
   };
   /** A tap without a drag; true when it completes a double tap on the same key. */
@@ -189,14 +224,12 @@ export function FuseZoneEditor({
       const double = tapped(`pt-${d.i}`);
       if (double) {
         // The first tap may have toggled sharp / round; remove the point from the zone before it.
-        const next = removeZonePoint(zonePoints(double.before), d.i);
+        const next = removeZonePoint(zoneRingPoints(double.before, selected), d.i);
         if (next) {
-          if (double.before === zone) begin();
-          write(next);
+          write(next, double.before === zone);
           setPicked(null);
         }
       } else {
-        begin();
         write(mm.map((p, i) => (i === d.i ? { ...p, corner: !p.corner } : p)));
       }
     } else if (d.t === 'side' && d.side != null) {
@@ -205,7 +238,6 @@ export function FuseZoneEditor({
         const side = sideAt(at);
         const next = side && insertZonePoint(mm, side.side, L(keep(side.p)));
         if (next) {
-          begin();
           write(next);
           setPicked(side.side + 1);
         }
@@ -235,6 +267,25 @@ export function FuseZoneEditor({
         style={{ cursor: 'default', touchAction: 'none' }}
         onPointerDown={onPad}
       />
+      {refs
+        .filter((ref) => ref !== selected)
+        .map((ref) => {
+          const passive = zoneRingOutline(zone, ref, contourMm).ring.map(W);
+          return passive.length >= 3 ? (
+            <polygon
+              key={ref}
+              points={str(passive)}
+              data-zone-ring={ref}
+              fill='transparent'
+              stroke='transparent'
+              strokeWidth={HIT}
+              vectorEffect='non-scaling-stroke'
+              style={{ cursor: 'pointer', touchAction: 'none' }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => bus?.select(ci, ref)}
+            />
+          ) : null;
+        })}
       {drawn && ring.length >= 3 && (
         <polygon
           points={str(ring)}
@@ -244,6 +295,7 @@ export function FuseZoneEditor({
           strokeWidth={2 * HIT}
           style={{ cursor: 'crosshair', touchAction: 'none' }}
           onPointerDown={(e) => {
+            bus?.select(ci, selected);
             const q = svgPoint(e);
             svgAt.current = q;
             const side = sideAt(q);

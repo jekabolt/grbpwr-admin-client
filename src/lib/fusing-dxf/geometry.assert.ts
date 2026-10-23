@@ -356,7 +356,11 @@ export async function main() {
     fusingMode: 'TECH_CARD_PIECE_FUSING_MODE_ZONE' as const,
     fusingWidthMm: undefined,
     fusingBomLineKey: 'IL-2',
-    fusingZone: { rect: { x0: d('1'), y0: d('2'), x1: d('30'), y1: d('40.5') } },
+    fusingZone: {
+      rect: { x0: d('1'), y0: d('2'), x1: d('30'), y1: d('40.5') },
+      holes: [],
+      islands: [],
+    },
     fusingInsetMm: d('5'),
     fusingInsetNet: true,
     fusingGrain: 'bias',
@@ -392,7 +396,7 @@ export async function main() {
   // Leaving strip clears edges on the wire as a PRESENT empty list (absent would keep them).
   const cleared = fuseFieldsToWire(writeFuseFields({ ...stripSpec, mode: 'whole' }));
   assert.deepEqual(cleared.fusingEdges, { items: [] });
-  assert.deepEqual(cleared.fusingZone, {});
+  assert.deepEqual(cleared.fusingZone, { holes: [], islands: [] });
 
   const whole = generateFuseGeometry({ outline, spec: spec() });
   assert.equal(whole.length, 1);
@@ -567,7 +571,83 @@ export async function main() {
       return [p, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, corner: false }];
     });
   const splineZone = (points: { x: number; y: number; corner?: boolean }[]) =>
-    spec({ mode: 'zone', zone: { spline: { points } } });
+    spec({ mode: 'zone', zone: { spline: { points }, holes: [], islands: [] } });
+  const ring = (x0: number, y0: number, x1: number, y1: number) => ({
+    points: corners(x0, y0, x1, y1),
+  });
+  const ringsSpec = spec({
+    mode: 'zone',
+    insetMm: 0,
+    zone: {
+      spline: ring(10, 10, 30, 20),
+      islands: [ring(50, 10, 60, 20)],
+      // This cut-out belongs to the separate part, not the main outer.
+      holes: [ring(52, 12, 56, 15)],
+    },
+  });
+  const ringsGeometry = generateFuseGeometry({ outline, spec: ringsSpec });
+  assert.equal(ringsGeometry.length, 2, 'a separate part remains a second outer polygon');
+  near(fuseAreaMm2(ringsGeometry), 200 + 100 - 12, 1e-9);
+  assert.equal(
+    ringsGeometry.reduce((count, polygon) => count + polygon.holes.length, 0),
+    1,
+    'a hole strictly inside a separate part is valid',
+  );
+  assert.throws(
+    () =>
+      generateFuseGeometry({
+        outline,
+        spec: spec({
+          mode: 'zone',
+          insetMm: 0,
+          zone: {
+            spline: ring(10, 10, 30, 20),
+            islands: [ring(25, 12, 35, 18)],
+            holes: [],
+          },
+        }),
+      }),
+    /outer rings overlap, touch, or nest/,
+    'overlapping parts are rejected',
+  );
+  const ringsFields = writeFuseFields(ringsSpec);
+  const ringsWire = fuseFieldsToWire(ringsFields);
+  assert.equal(ringsWire.fusingZone?.holes?.length, 1);
+  assert.equal(ringsWire.fusingZone?.islands?.length, 1);
+  assert.deepEqual(
+    readFuseSpec({ ...ringsFields, ...fuseFieldsFromWire(ringsWire) }),
+    ringsSpec,
+    'all rings survive the form/wire round trip',
+  );
+  const mappedRings = mapFuseSpecToSize(ringsSpec, outline, rectangle(200, 160));
+  assert.ok(mappedRings.zone && 'spline' in mappedRings.zone);
+  if (mappedRings.zone && 'spline' in mappedRings.zone) {
+    near(mappedRings.zone.spline.points[1].x, 60);
+    near(mappedRings.zone.islands[0].points[0].x, 100);
+    near(mappedRings.zone.holes[0].points[0].x, 104);
+  }
+  const ringsDxf = buildFusingSheets({
+    techCardId: 7,
+    style: 'JKT-042',
+    baseSizeId: 2,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'G700', label: 'woven fusible' }],
+    pieces: [
+      {
+        identity: 'FRONT',
+        displayName: 'front',
+        piecesPerGarment: 1,
+        ungraded: false,
+        fuse: ringsSpec,
+        sizes: [{ sizeToken: 'M', sizeId: 2, rank: 1, outline }],
+      },
+    ],
+  });
+  assert.equal(ringsDxf.skippedSizes.length, 0);
+  assert.equal(
+    ringsDxf.sheets[0].dxfText.split(/\r?\n/).filter((line) => line === 'POLYLINE').length,
+    3,
+    'the DXF writes the main outer, separate part, and hole as three closed contours',
+  );
   const goldenSpline = [
     { x: 0, y: 0, corner: false },
     { x: 100, y: 0, corner: false },
@@ -620,7 +700,10 @@ export async function main() {
     genericEven,
     'a generic even spline keeps its points unchanged',
   );
-  const genericSharp = withCorners({ spline: { points: genericEven } }, true);
+  const genericSharp = withCorners(
+    { spline: { points: genericEven }, holes: [], islands: [] },
+    true,
+  );
   assert.ok(
     genericSharp &&
       'spline' in genericSharp &&
@@ -693,6 +776,8 @@ export async function main() {
             { x: 0, y: 40, corner: true },
           ],
         },
+        holes: [],
+        islands: [],
       }),
     FuseGeometryError,
     'a bow tie is refused',
@@ -713,6 +798,8 @@ export async function main() {
     () =>
       zoneRingMm({
         spline: { points: endpointTouch.map((point) => ({ ...point, corner: true })) },
+        holes: [],
+        islands: [],
       }),
     FuseGeometryError,
     'a sharp endpoint touch is refused after flattening',
@@ -729,7 +816,12 @@ export async function main() {
     'an adjacent collinear reversal is refused',
   );
   assert.throws(
-    () => zoneRingMm({ spline: { points: corners(0, 0, 10, 10).slice(0, 2) } }),
+    () =>
+      zoneRingMm({
+        spline: { points: corners(0, 0, 10, 10).slice(0, 2) },
+        holes: [],
+        islands: [],
+      }),
     FuseGeometryError,
   );
   const clampRing = rectangle(10, 10);

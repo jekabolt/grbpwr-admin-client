@@ -10,11 +10,14 @@ import {
   type FlatZone,
 } from 'lib/fusing-dxf/spline';
 import { EDGE_CORNER_TURN_DEG } from 'lib/fusing-dxf/edge-runs';
+import { ZONE_MAX_HOLES, ZONE_MAX_OUTER_RINGS, zoneRingsMm } from 'lib/fusing-dxf/geometry';
 import type { PtMm } from 'lib/pattern-import/types';
-import type { FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
+import type { FuseSpline, FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
 export type ZonePoint = { x: number; y: number; corner: boolean };
 type DrawnZone = Exclude<FuseZone, { dxfPieceKey: string }>;
+type SplineZone = Extract<FuseZone, { spline: FuseSpline }>;
+export type ZoneRingRef = 'main' | `hole:${number}` | `island:${number}`;
 
 // Stored points are rounded to 0.1 mm: a straight mid can sit up to ~0.07 mm off its midpoint.
 const STRAIGHT_MM = 0.08;
@@ -23,11 +26,45 @@ const RING_EPSILON = 1e-9;
 export const ZONE_SEED_MAX_POINTS = 24;
 /** Arc sampled on each side of a vertex when deciding whether it is a physical corner. */
 export const ZONE_SEED_CORNER_WINDOW_MM = 5;
+/** Width removed when a full outer ring is split into two fuse parts. */
+export const ZONE_PART_GAP_MM = 10;
+/** A free pocket narrower than this is treated as split clearance, not room for another part. */
+export const ZONE_PART_MIN_FREE_RADIUS_MM = 15;
+/** A free pocket must also be material relative to the selected outer. */
+export const ZONE_PART_MIN_FREE_RATIO = 0.05;
+/** Smallest separately stored outer; it must render as at least 1 cm² in the rings list. */
+export const ZONE_PART_MIN_RING_AREA_MM2 = 100;
+/** A new hole uses this share of the largest free inscribed radius. */
+export const ZONE_HOLE_SEED_RATIO = 0.18;
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const midOf = (a: ZonePoint, b: ZonePoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 export const isDrawnZone = (z: FuseZone | null | undefined): z is DrawnZone =>
   !!z && !('dxfPieceKey' in z);
+export const isSplineZone = (z: FuseZone | null | undefined): z is SplineZone =>
+  !!z && 'spline' in z;
+
+const ringIndex = (ref: ZoneRingRef, kind: 'hole' | 'island') => {
+  const match = ref.match(new RegExp(`^${kind}:(\\d+)$`));
+  return match ? Number(match[1]) : -1;
+};
+
+export function zoneRingRefs(z: FuseZone | null | undefined): ZoneRingRef[] {
+  if (!isSplineZone(z)) return isDrawnZone(z) ? ['main'] : [];
+  return [
+    'main',
+    ...z.holes.map((_, index) => `hole:${index}` as const),
+    ...z.islands.map((_, index) => `island:${index}` as const),
+  ];
+}
+
+export function zoneRingLabel(z: FuseZone | null | undefined, ref: ZoneRingRef): string {
+  if (ref === 'main') return 'main';
+  const hole = ringIndex(ref, 'hole');
+  if (hole >= 0) return `hole ${hole + 1}`;
+  const island = ringIndex(ref, 'island');
+  return `part ${(isSplineZone(z) ? z.holes.length : 0) + island + 1}`;
+}
 
 /** Rect+ structure: exactly the editor's eight slots, with mid slots never marked as corners. */
 export const isRectPlus = (pts: readonly ZonePoint[]) =>
@@ -70,6 +107,15 @@ export function zonePoints(z: FuseZone | null | undefined): ZonePoint[] {
   return z.spline.points.map((p) => ({ x: p.x, y: p.y, corner: !!p.corner }));
 }
 
+export function zoneRingPoints(z: FuseZone | null | undefined, ref: ZoneRingRef): ZonePoint[] {
+  if (ref === 'main') return zonePoints(z);
+  if (!isSplineZone(z)) return [];
+  const hole = ringIndex(ref, 'hole');
+  const island = ringIndex(ref, 'island');
+  const spline = hole >= 0 ? z.holes[hole] : island >= 0 ? z.islands[island] : undefined;
+  return (spline?.points ?? []).map((p) => ({ x: p.x, y: p.y, corner: !!p.corner }));
+}
+
 /** Editor points → the stored zone: an untouched rectangle stays `rect`, the rest is a spline. */
 export function storedZone(pts: readonly ZonePoint[]): DrawnZone {
   if (isRectPlus(pts) && pts.every((p, i) => (i % 2 === 0 ? p.corner : straightMid(pts, i)))) {
@@ -96,9 +142,65 @@ export function storedZone(pts: readonly ZonePoint[]): DrawnZone {
 }
 
 /** Editor points → a spline even when they still happen to form a legacy axis-aligned rectangle. */
-export function splineZone(pts: readonly ZonePoint[]): DrawnZone {
+export function splineZone(
+  pts: readonly ZonePoint[],
+  rings: Pick<SplineZone, 'holes' | 'islands'> = { holes: [], islands: [] },
+): SplineZone {
   const points: FuseSplinePoint[] = pts.map((p) => ({ x: r1(p.x), y: r1(p.y), corner: p.corner }));
-  return { spline: { points } };
+  return { spline: { points }, holes: rings.holes, islands: rings.islands };
+}
+
+const splineOfPoints = (pts: readonly ZonePoint[]): FuseSpline => ({
+  points: pts.map((p) => ({ x: r1(p.x), y: r1(p.y), corner: p.corner })),
+});
+
+/** Replaces one ring without touching the others; editing a legacy rect promotes it to a spline. */
+export function withZoneRingPoints(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  pts: readonly ZonePoint[],
+): SplineZone | null {
+  if (ref === 'main')
+    return splineZone(pts, isSplineZone(z) ? { holes: z.holes, islands: z.islands } : undefined);
+  if (!isSplineZone(z)) return null;
+  const hole = ringIndex(ref, 'hole');
+  if (hole >= 0 && hole < z.holes.length)
+    return {
+      ...z,
+      holes: z.holes.map((ring, index) => (index === hole ? splineOfPoints(pts) : ring)),
+    };
+  const island = ringIndex(ref, 'island');
+  if (island >= 0 && island < z.islands.length)
+    return {
+      ...z,
+      islands: z.islands.map((ring, index) => (index === island ? splineOfPoints(pts) : ring)),
+    };
+  return null;
+}
+
+export function deleteZoneRing(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+): SplineZone | null {
+  if (!isSplineZone(z) || ref === 'main') return null;
+  const hole = ringIndex(ref, 'hole');
+  if (hole >= 0 && hole < z.holes.length)
+    return { ...z, holes: z.holes.filter((_, index) => index !== hole) };
+  const island = ringIndex(ref, 'island');
+  if (island >= 0 && island < z.islands.length) {
+    const removed = zoneRingOutline(z, ref).ring;
+    return {
+      ...z,
+      islands: z.islands.filter((_, index) => index !== island),
+      // Holes owned by this material patch disappear with it; retaining them would make the flat
+      // wire list invalid because they would no longer have exactly one outer owner.
+      holes: z.holes.filter((_, index) => {
+        const hole = zoneRingOutline(z, `hole:${index}`).ring;
+        return !hole.length || !pointInOrOnRing(hole[0], removed);
+      }),
+    };
+  }
+  return null;
 }
 
 type ArcCorner = { index: number; at: number; turn: number };
@@ -236,8 +338,17 @@ export function zoneOutline(
   z: FuseZone | null | undefined,
   contourMm?: readonly PtMm[] | null,
 ): FlatZone {
-  const pts = zonePoints(z);
-  return flattenZoneSides(pts, isDrawnZone(z) && 'spline' in z ? contourMm : null);
+  return zoneRingOutline(z, 'main', contourMm);
+}
+
+export function zoneRingOutline(
+  z: FuseZone | null | undefined,
+  ref: ZoneRingRef,
+  contourMm?: readonly PtMm[] | null,
+): FlatZone {
+  const pts = zoneRingPoints(z, ref);
+  const outer = ref === 'main' || ref.startsWith('island:');
+  return flattenZoneSides(pts, isSplineZone(z) && outer ? contourMm : null);
 }
 
 /** A round point inserted after control point `side` (on that side); null at the point cap. */
@@ -257,13 +368,25 @@ export function removeZonePoint(pts: readonly ZonePoint[], i: number): ZonePoint
 }
 
 /** Every corner slot sharp (sharp=true) or every point round. */
-export function withCorners(z: FuseZone | null | undefined, sharp: boolean): DrawnZone | null {
-  const pts = zonePoints(z);
+export function withCorners(
+  z: FuseZone | null | undefined,
+  sharp: boolean,
+  ref: ZoneRingRef = 'main',
+): DrawnZone | null {
+  const pts = zoneRingPoints(z, ref);
   if (!pts.length) return null;
-  return splineZone(pts.map((p) => ({ ...p, corner: sharp })));
+  return withZoneRingPoints(
+    z,
+    ref,
+    pts.map((p) => ({ ...p, corner: sharp })),
+  );
 }
-export const allCorners = (z: FuseZone | null | undefined, sharp: boolean) => {
-  const pts = zonePoints(z);
+export const allCorners = (
+  z: FuseZone | null | undefined,
+  sharp: boolean,
+  ref: ZoneRingRef = 'main',
+) => {
+  const pts = zoneRingPoints(z, ref);
   return pts.length > 0 && pts.every((p) => p.corner === sharp);
 };
 
@@ -322,15 +445,426 @@ export function clampZoneTransform<T extends XY>(
   return points.map((point) => transform(point, low));
 }
 
+const distanceToRing = (point: XY, ring: readonly XY[]) => {
+  let best = Infinity;
+  for (let index = 0; index < ring.length; index++) {
+    const a = ring[index];
+    const b = ring[(index + 1) % ring.length];
+    const ab = { x: b.x - a.x, y: b.y - a.y };
+    const length2 = ab.x * ab.x + ab.y * ab.y;
+    const t =
+      length2 > 0
+        ? Math.max(0, Math.min(1, ((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) / length2))
+        : 0;
+    best = Math.min(best, Math.hypot(point.x - a.x - ab.x * t, point.y - a.y - ab.y * t));
+  }
+  return best;
+};
+
+/** Approximate pole of inaccessibility for a free region, refined from a regular search grid. */
+function largestFreeCircle(
+  container: readonly XY[],
+  forbidden: readonly (readonly XY[])[],
+): { centre: XY; radius: number } | null {
+  if (container.length < 3) return null;
+  const xs = container.map((point) => point.x);
+  const ys = container.map((point) => point.y);
+  const box = {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+  const clearance = (point: XY) => {
+    if (!pointInOrOnRing(point, container)) return -Infinity;
+    if (forbidden.some((ring) => pointInOrOnRing(point, ring))) return -Infinity;
+    return Math.min(
+      distanceToRing(point, container),
+      ...forbidden.map((ring) => distanceToRing(point, ring)),
+    );
+  };
+  let best: { centre: XY; radius: number } = { centre: container[0], radius: -Infinity };
+  const consider = (centre: XY) => {
+    const radius = clearance(centre);
+    if (Number.isFinite(radius) && radius > best.radius) best = { centre, radius };
+  };
+  consider({
+    x: container.reduce((sum, point) => sum + point.x, 0) / container.length,
+    y: container.reduce((sum, point) => sum + point.y, 0) / container.length,
+  });
+  const divisions = 28;
+  for (let y = 0; y <= divisions; y++) {
+    for (let x = 0; x <= divisions; x++) {
+      consider({
+        x: box.minX + ((box.maxX - box.minX) * x) / divisions,
+        y: box.minY + ((box.maxY - box.minY) * y) / divisions,
+      });
+    }
+  }
+  if (!Number.isFinite(best.radius)) return null;
+  let step = Math.max(box.maxX - box.minX, box.maxY - box.minY) / divisions;
+  for (let pass = 0; pass < 7; pass++) {
+    const origin: XY = { ...best.centre };
+    for (const dx of [-step, 0, step])
+      for (const dy of [-step, 0, step]) consider({ x: origin.x + dx, y: origin.y + dy });
+    step /= 2;
+  }
+  return best;
+}
+
+function roundSeed(
+  circle: { centre: XY; radius: number },
+  radiusOf: (freeRadius: number) => number,
+): FuseSpline | null {
+  // Four round controls produce a compact, circle-like Catmull-Rom loop. Leave a wide clearance
+  // margin for the curve's overshoot and the wire's 0.1 mm rounding.
+  const radius = radiusOf(circle.radius);
+  if (!(radius >= 1)) return null;
+  const { x, y } = circle.centre;
+  return splineOfPoints([
+    { x: x + radius, y, corner: false },
+    { x, y: y + radius, corner: false },
+    { x: x - radius, y, corner: false },
+    { x, y: y - radius, corner: false },
+  ]);
+}
+
+const ringCentroid = (ring: readonly XY[]): XY => {
+  let crossSum = 0;
+  let xSum = 0;
+  let ySum = 0;
+  for (let index = 0; index < ring.length; index++) {
+    const point = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    const cross = point.x * next.y - next.x * point.y;
+    crossSum += cross;
+    xSum += (point.x + next.x) * cross;
+    ySum += (point.y + next.y) * cross;
+  }
+  if (Math.abs(crossSum) > RING_EPSILON)
+    return { x: xSum / (3 * crossSum), y: ySum / (3 * crossSum) };
+  return {
+    x: ring.reduce((sum, point) => sum + point.x, 0) / ring.length,
+    y: ring.reduce((sum, point) => sum + point.y, 0) / ring.length,
+  };
+};
+
+/** Principal direction of the outline, independent of a rotated pattern piece's sheet axes. */
+const longAxis = (ring: readonly XY[], centre: XY): XY => {
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  for (const point of ring) {
+    const dx = point.x - centre.x;
+    const dy = point.y - centre.y;
+    xx += dx * dx;
+    xy += dx * dy;
+    yy += dy * dy;
+  }
+  const angle = Math.atan2(2 * xy, xx - yy) / 2;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+};
+
+const along = (point: XY, centre: XY, axis: XY) =>
+  (point.x - centre.x) * axis.x + (point.y - centre.y) * axis.y;
+
+type SplitVertex = XY & { source: number | null; cut: boolean };
+
+/** Clips one polygon against one side of a line perpendicular to its long axis. */
+function clipAt(
+  flat: FlatZone,
+  centre: XY,
+  axis: XY,
+  limit: number,
+  keepBelow: boolean,
+): SplitVertex[] {
+  const inside = (value: number) =>
+    keepBelow ? value <= limit + RING_EPSILON : value >= limit - RING_EPSILON;
+  const out: SplitVertex[] = [];
+  const push = (point: SplitVertex) => {
+    const previous = out[out.length - 1];
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) <= RING_EPSILON) {
+      previous.source ??= point.source;
+      previous.cut ||= point.cut;
+      return;
+    }
+    out.push(point);
+  };
+  const { ring, side } = flat;
+  for (let index = 0; index < ring.length; index++) {
+    const a = ring[index];
+    const b = ring[(index + 1) % ring.length];
+    const av = along(a, centre, axis);
+    const bv = along(b, centre, axis);
+    const aInside = inside(av);
+    const bInside = inside(bv);
+    if (aInside)
+      push({
+        ...a,
+        source: side[index] !== side[(index - 1 + side.length) % side.length] ? side[index] : null,
+        cut: Math.abs(av - limit) <= STRAIGHT_MM,
+      });
+    if (aInside === bInside) continue;
+    const t = (limit - av) / (bv - av);
+    push({
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      source: null,
+      cut: true,
+    });
+  }
+  if (
+    out.length > 1 &&
+    Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= RING_EPSILON
+  ) {
+    const last = out.pop()!;
+    out[0].source ??= last.source;
+    out[0].cut ||= last.cut;
+  }
+  return out;
+}
+
+/** Removes the least significant non-cut vertices until the stored spline fits its hard cap. */
+function limitSplitPoints(points: ZonePoint[], cutAt: number, centre: XY, axis: XY): ZonePoint[] {
+  const result = [...points];
+  while (result.length > SPLINE_MAX_POINTS) {
+    let remove = -1;
+    let smallest = Infinity;
+    for (let index = 0; index < result.length; index++) {
+      const point = result[index];
+      if (Math.abs(along(point, centre, axis) - cutAt) <= STRAIGHT_MM) continue;
+      const previous = result[(index - 1 + result.length) % result.length];
+      const next = result[(index + 1) % result.length];
+      const significance = Math.abs(orientation(previous, point, next));
+      if (significance < smallest) {
+        smallest = significance;
+        remove = index;
+      }
+    }
+    if (remove < 0) return [];
+    result.splice(remove, 1);
+  }
+  return result;
+}
+
+/**
+ * Rebuilds a clipped half from the selected ring's controls, not its tessellated display outline.
+ * The two intersections become sharp controls and a midpoint pins the new cut edge straight. Any
+ * old cut midpoint is a source control, so a later split also keeps the earlier gap open.
+ */
+function splitSpline(
+  ring: readonly SplitVertex[],
+  source: readonly ZonePoint[],
+  cutAt: number,
+  centre: XY,
+  axis: XY,
+): FuseSpline | null {
+  if (ring.length < SPLINE_MIN_POINTS) return null;
+  const rounded = ring
+    .filter((point) => point.source != null || point.cut)
+    .map((point) => ({
+      x: r1(point.x),
+      y: r1(point.y),
+      corner: point.source == null ? true : source[point.source]?.corner !== false,
+      cut: point.cut,
+    }))
+    .filter(
+      (point, index, points) =>
+        index === 0 ||
+        Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) > RING_EPSILON,
+    );
+  if (
+    rounded.length > 1 &&
+    Math.hypot(
+      rounded[0].x - rounded[rounded.length - 1].x,
+      rounded[0].y - rounded[rounded.length - 1].y,
+    ) <= RING_EPSILON
+  )
+    rounded.pop();
+  const points: ZonePoint[] = [];
+  for (let index = 0; index < rounded.length; index++) {
+    const point = rounded[index];
+    const next = rounded[(index + 1) % rounded.length];
+    points.push({ x: point.x, y: point.y, corner: point.corner });
+    if (point.cut && next.cut) {
+      points.push({
+        ...midOf({ x: point.x, y: point.y, corner: true }, { x: next.x, y: next.y, corner: true }),
+        corner: true,
+      });
+    }
+  }
+  const limited = limitSplitPoints(points, cutAt, centre, axis);
+  return limited.length >= SPLINE_MIN_POINTS ? splineOfPoints(limited) : null;
+}
+
+/**
+ * Splits the selected outer into two rings separated by a transverse strip. The midpoint stored on
+ * each new cut edge keeps that edge straight: its endpoints may sit on the piece contour, but the
+ * midpoint does not, so the contour-follow rule cannot close the gap around the other half.
+ */
+function splitZoneOuter(
+  z: SplineZone,
+  outerRef: ZoneRingRef,
+  contourMm: readonly PtMm[],
+): { zone: SplineZone; ref: ZoneRingRef } | null {
+  if (outerRef !== 'main' && !outerRef.startsWith('island:')) return null;
+  const selectedFlat = zoneRingOutline(z, outerRef, contourMm);
+  const selected = selectedFlat.ring;
+  if (selected.length < SPLINE_MIN_POINTS) return null;
+  const source = zoneRingPoints(z, outerRef);
+  const centre = ringCentroid(selected);
+  const axis = longAxis(selected, centre);
+  const extents = selected.map((point) => along(point, centre, axis));
+  const span = Math.max(...extents) - Math.min(...extents);
+  const gap = Math.min(ZONE_PART_GAP_MM, span / 3);
+  if (!(gap >= 2)) return null;
+  const low = -gap / 2;
+  const high = gap / 2;
+  const lowerRing = clipAt(selectedFlat, centre, axis, low, true);
+  const upperRing = clipAt(selectedFlat, centre, axis, high, false);
+  const lower = splitSpline(lowerRing, source, low, centre, axis);
+  const upper = splitSpline(upperRing, source, high, centre, axis);
+  if (!lower || !upper) return null;
+
+  const keptHoles = z.holes.filter((_, index) => {
+    const ref = `hole:${index}` as const;
+    if (outerRefForHole(z, ref, contourMm) !== outerRef) return true;
+    const ring = zoneRingOutline(z, ref).ring;
+    if (ring.length < SPLINE_MIN_POINTS) return false;
+    const coordinates = ring.map((point) => along(point, centre, axis));
+    const belongsLower =
+      Math.max(...coordinates) < low - RING_EPSILON &&
+      ring.every((point) => pointInOrOnRing(point, lowerRing));
+    const belongsUpper =
+      Math.min(...coordinates) > high + RING_EPSILON &&
+      ring.every((point) => pointInOrOnRing(point, upperRing));
+    return belongsLower || belongsUpper;
+  });
+  const islandIndex = ringIndex(outerRef, 'island');
+  const islands =
+    outerRef === 'main'
+      ? [...z.islands, upper]
+      : [...z.islands.map((ring, index) => (index === islandIndex ? lower : ring)), upper];
+  const zone: SplineZone = {
+    ...z,
+    spline: outerRef === 'main' ? lower : z.spline,
+    holes: keptHoles,
+    islands,
+  };
+  try {
+    zoneRingsMm(zone, contourMm);
+  } catch {
+    return null;
+  }
+  return { zone, ref: `island:${islands.length - 1}` };
+}
+
+export function outerRefForHole(
+  z: FuseZone | null | undefined,
+  holeRef: ZoneRingRef,
+  contourMm?: readonly PtMm[] | null,
+): ZoneRingRef | null {
+  if (!isSplineZone(z) || !holeRef.startsWith('hole:')) return null;
+  const hole = zoneRingOutline(z, holeRef).ring;
+  if (!hole.length) return null;
+  const outers = zoneRingRefs(z).filter((ref) => ref === 'main' || ref.startsWith('island:'));
+  return (
+    outers.find((ref) => pointInOrOnRing(hole[0], zoneRingOutline(z, ref, contourMm).ring)) ?? null
+  );
+}
+
+/** Adds a small round cut-out in the selected outer ring's largest free area. */
+export function addZoneHole(
+  z: FuseZone | null | undefined,
+  outerRef: ZoneRingRef,
+  contourMm?: readonly PtMm[] | null,
+): { zone: SplineZone; ref: ZoneRingRef } | null {
+  if (
+    !isSplineZone(z) ||
+    z.holes.length >= ZONE_MAX_HOLES ||
+    (outerRef !== 'main' && !outerRef.startsWith('island:'))
+  )
+    return null;
+  const outer = zoneRingOutline(z, outerRef, contourMm).ring;
+  const holes = z.holes
+    .map((_, index) => zoneRingOutline(z, `hole:${index}`).ring)
+    .filter((ring) => ring.length >= 3 && pointInOrOnRing(ring[0], outer));
+  const circle = largestFreeCircle(outer, holes);
+  const hole = circle && roundSeed(circle, (freeRadius) => freeRadius * ZONE_HOLE_SEED_RATIO);
+  if (!hole) return null;
+  const index = z.holes.length;
+  return { zone: { ...z, holes: [...z.holes, hole] }, ref: `hole:${index}` };
+}
+
+/** Adds a small disjoint outer ring in the largest free part of the inset piece. */
+export function addZoneIsland(
+  z: FuseZone | null | undefined,
+  contourMm: readonly PtMm[],
+  selectedOuter: ZoneRingRef = 'main',
+): { zone: SplineZone; ref: ZoneRingRef } | null {
+  if (!isSplineZone(z) || 1 + z.islands.length >= ZONE_MAX_OUTER_RINGS) return null;
+  const outerRefs = ['main' as const, ...z.islands.map((_, index) => `island:${index}` as const)];
+  const outers = outerRefs.map((ref) => zoneRingOutline(z, ref, contourMm).ring);
+  const circle = largestFreeCircle(contourMm, outers);
+  const selected = zoneRingOutline(z, selectedOuter, contourMm).ring;
+  const areaOf = (ring: readonly XY[]) => {
+    let twice = 0;
+    for (let index = 0; index < ring.length; index++) {
+      const point = ring[index];
+      const next = ring[(index + 1) % ring.length];
+      twice += point.x * next.y - next.x * point.y;
+    }
+    return Math.abs(twice / 2);
+  };
+  const freeArea = Math.max(
+    0,
+    areaOf(contourMm) - outers.reduce((sum, ring) => sum + areaOf(ring), 0),
+  );
+  const selectedArea = areaOf(selected);
+  const usablePocket =
+    circle &&
+    circle.radius >= ZONE_PART_MIN_FREE_RADIUS_MM &&
+    freeArea >= selectedArea * ZONE_PART_MIN_FREE_RATIO;
+  const island = usablePocket && roundSeed(circle, (freeRadius) => Math.min(12, freeRadius * 0.5));
+  if (island) {
+    const ringArea = areaOf(flattenZoneSides(island.points).ring);
+    const index = z.islands.length;
+    const zone = { ...z, islands: [...z.islands, island] };
+    if (ringArea >= ZONE_PART_MIN_RING_AREA_MM2) {
+      try {
+        zoneRingsMm(zone, contourMm);
+        return { zone, ref: `island:${index}` };
+      } catch {
+        // The pocket can be broad but topologically unavailable (for example, inside an outer).
+      }
+    }
+  }
+  return splitZoneOuter(z, selectedOuter, contourMm);
+}
+
 // ---------- the per-dialog bus: canvas ↔ panel ----------
 export type ZoneBus = {
   /** cm² of the clipped zone; null = the zone is invalid; undefined = not measured (not on canvas). */
   area: (ci: string) => number | null | undefined;
   setArea: (ci: string, cm2: number | null | undefined) => void;
-  /** Push the zone as it is before a change. */
-  push: (ci: string, zone: FuseZone | null) => void;
-  /** The zone before the last change, or undefined when there is nothing to undo. */
-  pop: (ci: string) => { zone: FuseZone | null } | undefined;
+  ringAreas: (ci: string) => Partial<Record<ZoneRingRef, number | null>>;
+  setRingAreas: (
+    ci: string,
+    areas: Partial<Record<ZoneRingRef, number | null>> | undefined,
+  ) => void;
+  contour: (ci: string) => readonly PtMm[] | undefined;
+  setContour: (ci: string, contour: readonly PtMm[] | undefined) => void;
+  selected: (ci: string) => ZoneRingRef;
+  select: (ci: string, ref: ZoneRingRef) => void;
+  /** Records one complete zone mutation and changes ring selection in the same history event. */
+  commit: (
+    ci: string,
+    zone: FuseZone | null,
+    selected?: ZoneRingRef,
+    nextSelected?: ZoneRingRef,
+  ) => void;
+  /** Restores the selection attached to the previous zone and returns that zone. */
+  undo: (ci: string) => { zone: FuseZone | null; selected: ZoneRingRef } | undefined;
   canUndo: (ci: string) => boolean;
   subscribe: (fn: () => void) => () => void;
   version: () => number;
@@ -338,7 +872,10 @@ export type ZoneBus = {
 
 export function createZoneBus(): ZoneBus {
   const areas = new Map<string, number | null>();
-  const hist = new Map<string, (FuseZone | null)[]>();
+  const ringAreaMap = new Map<string, Partial<Record<ZoneRingRef, number | null>>>();
+  const contours = new Map<string, readonly PtMm[]>();
+  const selections = new Map<string, ZoneRingRef>();
+  const hist = new Map<string, { zone: FuseZone | null; selected: ZoneRingRef }[]>();
   const subs = new Set<() => void>();
   let v = 0;
   const bump = () => {
@@ -353,16 +890,62 @@ export function createZoneBus(): ZoneBus {
       else areas.set(ci, cm2);
       bump();
     },
-    push: (ci, zone) => {
-      hist.set(ci, [...(hist.get(ci) ?? []), zone].slice(-50));
+    ringAreas: (ci) => ringAreaMap.get(ci) ?? {},
+    setRingAreas: (ci, next) => {
+      const previous = ringAreaMap.get(ci);
+      if (next === undefined) {
+        if (!previous) return;
+        ringAreaMap.delete(ci);
+      } else {
+        const same =
+          previous &&
+          Object.keys(previous).length === Object.keys(next).length &&
+          Object.entries(next).every(([key, value]) => previous[key as ZoneRingRef] === value);
+        if (same) return;
+        ringAreaMap.set(ci, next);
+      }
       bump();
     },
-    pop: (ci) => {
+    contour: (ci) => contours.get(ci),
+    setContour: (ci, contour) => {
+      if (contour === undefined) {
+        if (!contours.has(ci)) return;
+        contours.delete(ci);
+      } else {
+        const previous = contours.get(ci);
+        if (
+          previous?.length === contour.length &&
+          contour.every(
+            (point, index) => point.x === previous[index].x && point.y === previous[index].y,
+          )
+        )
+          return;
+        contours.set(
+          ci,
+          contour.map((point) => ({ ...point })),
+        );
+      }
+      bump();
+    },
+    selected: (ci) => selections.get(ci) ?? 'main',
+    select: (ci, ref) => {
+      if ((selections.get(ci) ?? 'main') === ref) return;
+      selections.set(ci, ref);
+      bump();
+    },
+    commit: (ci, zone, selected, nextSelected) => {
+      const previousSelected = selected ?? selections.get(ci) ?? 'main';
+      hist.set(ci, [...(hist.get(ci) ?? []), { zone, selected: previousSelected }].slice(-50));
+      selections.set(ci, nextSelected ?? previousSelected);
+      bump();
+    },
+    undo: (ci) => {
       const st = hist.get(ci) ?? [];
       if (!st.length) return undefined;
       hist.set(ci, st.slice(0, -1));
+      selections.set(ci, st[st.length - 1].selected);
       bump();
-      return { zone: st[st.length - 1] };
+      return st[st.length - 1];
     },
     canUndo: (ci) => (hist.get(ci) ?? []).length > 0,
     subscribe: (fn) => {

@@ -2,10 +2,19 @@ import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import { offsetContour, OFFSET_SCALE } from 'lib/pattern-import/semantics/offset';
 import type { PtMm } from 'lib/pattern-import/types';
 import { edgeRunsOf, extendPolyline, stripBandPolygons, trimEdgeRun } from './edge-runs';
-import { SPLINE_MAX_POINTS, SPLINE_MIN_POINTS, flattenZone, ringSelfIntersects } from './spline';
-import type { FuseGeometryInput, FusePolygon, FuseZone, PieceFuseSpec } from './types';
+import {
+  SPLINE_MAX_POINTS,
+  SPLINE_MIN_POINTS,
+  flattenZone,
+  ringSelfIntersects,
+  ringStrictlyInside,
+  ringsOverlap,
+} from './spline';
+import type { FuseGeometryInput, FusePolygon, FuseSpline, FuseZone, PieceFuseSpec } from './types';
 
 const EPS = 1e-7;
+export const ZONE_MAX_OUTER_RINGS = 16;
+export const ZONE_MAX_HOLES = 16;
 
 export class FuseGeometryError extends Error {}
 export class FuseTopologyError extends FuseGeometryError {}
@@ -201,7 +210,11 @@ export function zoneRingMm(
       { x: x0, y: y1 },
     ]);
   }
-  const points = zone.spline.points;
+  return splineRingMm(zone.spline, contour);
+}
+
+function splineRingMm(spline: FuseSpline, contour?: readonly PtMm[] | null): PtMm[] {
+  const points = spline.points;
   if (points.length < SPLINE_MIN_POINTS || points.length > SPLINE_MAX_POINTS)
     throw new FuseGeometryError(
       `zone spline needs ${SPLINE_MIN_POINTS}..${SPLINE_MAX_POINTS} points, has ${points.length}`,
@@ -211,6 +224,54 @@ export function zoneRingMm(
   const flattened = flattenZone(points, contour);
   if (ringSelfIntersects(flattened)) throw new FuseGeometryError('zone spline crosses itself');
   return cleanRing(flattened);
+}
+
+export type FuseZoneRings = { outers: PtMm[][]; holes: PtMm[][] };
+
+/**
+ * Flattens and validates the complete spline topology with the backend's rules. Outer rings may
+ * follow the inset contour; cut-outs never do because they must remain strictly inside an outer.
+ */
+export function zoneRingsMm(
+  zone: Exclude<FuseZone, { rect: [number, number, number, number] } | { dxfPieceKey: string }>,
+  contour?: readonly PtMm[] | null,
+): FuseZoneRings {
+  const outerCount = 1 + zone.islands.length;
+  if (outerCount > ZONE_MAX_OUTER_RINGS)
+    throw new FuseGeometryError(`zone has too many outer rings (${outerCount})`);
+  if (zone.holes.length > ZONE_MAX_HOLES)
+    throw new FuseGeometryError(`zone has too many holes (${zone.holes.length})`);
+
+  // The server validates the stored Catmull-Rom rings, before the editor-only contour-follow rule
+  // is applied. Keep this first pass operation-for-operation equivalent to that contract.
+  const storedOuters = [splineRingMm(zone.spline)];
+  for (const island of zone.islands) {
+    const ring = splineRingMm(island);
+    if (storedOuters.some((other) => ringsOverlap(ring, other)))
+      throw new FuseGeometryError('zone outer rings overlap, touch, or nest');
+    storedOuters.push(ring);
+  }
+
+  const holes: PtMm[][] = [];
+  for (const hole of zone.holes) {
+    const ring = splineRingMm(hole);
+    const owners = storedOuters.filter((outer) => ringStrictlyInside(ring, outer));
+    if (owners.length !== 1)
+      throw new FuseGeometryError('zone hole is not strictly inside exactly one outer ring');
+    if (holes.some((other) => ringsOverlap(ring, other)))
+      throw new FuseGeometryError('zone holes overlap or touch');
+    holes.push(ring);
+  }
+
+  const area =
+    storedOuters.reduce((sum, ring) => sum + Math.abs(signedArea(ring)), 0) -
+    holes.reduce((sum, ring) => sum + Math.abs(signedArea(ring)), 0);
+  if (!(area > EPS)) throw new FuseGeometryError('zone holes remove the whole fusing zone');
+  const outers = [
+    splineRingMm(zone.spline, contour),
+    ...zone.islands.map((island) => splineRingMm(island, contour)),
+  ];
+  return { outers, holes };
 }
 
 /** Pure fuse geometry in piece-local millimetres. */
@@ -243,10 +304,17 @@ export function generateFuseGeometry(input: FuseGeometryInput): FusePolygon[] {
       const zone = input.spec.zone;
       if (!zone) throw new FuseGeometryError('zone mode has no zone');
       if (!('dxfPieceKey' in zone)) {
-        // The drawn zone (rect or flattened spline) is clipped to the inset contour.
-        polygons = polygonsOf(
-          Clipper.Intersect([toPath(zoneRingMm(zone, inset))], [toPath(inset)], FillRule.NonZero),
-        );
+        // The drawn zone is clipped to the inset contour. Spline holes keep their opposite winding
+        // so Clipper preserves them as closed cut-outs; disjoint outers survive as separate polygons.
+        const rings =
+          'rect' in zone
+            ? { outers: [zoneRingMm(zone, inset)], holes: [] }
+            : zoneRingsMm(zone, inset);
+        const subjects = [
+          ...rings.outers.map((ring) => toPath(cleanRing(ring))),
+          ...rings.holes.map((ring) => toPath(cleanRing(ring, true))),
+        ];
+        polygons = polygonsOf(Clipper.Intersect(subjects, [toPath(inset)], FillRule.NonZero));
       } else {
         if (!input.zoneOutline)
           throw new FuseGeometryError(`DXF zone “${zone.dxfPieceKey}” was not resolved`);
