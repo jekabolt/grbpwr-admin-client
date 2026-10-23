@@ -118,12 +118,14 @@ import { createReady } from './create-ready';
 import { parseSeasonToSku } from './season-util';
 import { TechCardFittings } from './tech-card-fittings';
 import {
+  acceptOperationDrops,
   auditOperationPresence,
   contradictsScreen,
   hasPresenceLoss,
   mergeOperationsAfterSave,
   type PresenceAudit,
 } from './operations-presence';
+import { fusingOverrideText, fusingSaveOverrides } from './fusing-override';
 import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
 import {
@@ -1555,14 +1557,28 @@ export function TechCardForm({
     type OpRow = NonNullable<TechCardFormData['operations']>[number];
     const sentOps = (sent.operations ?? []) as OpRow[];
     const readOps = (server.operations ?? []) as OpRow[];
-    const merged = mergeOperationsAfterSave(
+    const rawOperationAudit = auditOperationPresence(
+      sentOps as unknown as Record<string, unknown>[],
+      readOps as unknown as Record<string, unknown>[],
+    );
+    const fuseOverrides = fusingSaveOverrides(
       sentOps,
       readOps,
-      auditOperationPresence(
-        sentOps as unknown as Record<string, unknown>[],
-        readOps as unknown as Record<string, unknown>[],
-      ),
+      rawOperationAudit.pairs,
+      server.pieces ?? [],
     );
+    const operationAudit = acceptOperationDrops(
+      rawOperationAudit,
+      fuseOverrides.map((override) => override.manualIndex),
+    );
+    if (fuseOverrides.length > 0) {
+      notify({
+        sev: 'warn',
+        subject: cardSubject(),
+        text: fusingOverrideText(fuseOverrides),
+      });
+    }
+    const merged = mergeOperationsAfterSave(sentOps, readOps, operationAudit);
     return done(
       {
         ...sent,

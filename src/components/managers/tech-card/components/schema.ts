@@ -84,6 +84,8 @@ import { sectionShort } from './bom-line-picker';
 import { LABEL_PART_UNSPECIFIED } from '../care-labels/label-parts';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { AGE_GROUP_NEW_CARD, AGE_GROUP_UNSET, AGE_GROUP_VALUES } from './tech-card-options';
+import { assemblyBlocks, compactAssemblyBlockOrder } from './assembly-blocks';
+import { assemblySweep, classifyAssemblyInputs } from './assembly-frontier';
 import {
   UNSET_CUT_SYMMETRY,
   UNSET_FUSING_MODE,
@@ -934,7 +936,7 @@ const pressProfileSchema = z.object({
 
 const constructionSchema = z
   .object({
-    defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_SS_PLAIN'),
     defaultStitchesPerCm: z.string().optional().default(''),
     hemFinish: z.string().optional().default(''),
     notes: z.string().optional().default(''),
@@ -2035,7 +2037,7 @@ const costingSchema = z.object({
 });
 
 export const emptyConstruction: z.input<typeof constructionSchema> = {
-  defaultSeamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+  defaultSeamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
   defaultStitchesPerCm: '',
   hemFinish: '',
   notes: '',
@@ -3188,6 +3190,41 @@ export function mapFormToTechCardInsert(
   // сохранение: предикат пустоты спрашивает его для каждого ряда, а сами списки за время одного
   // маппинга не меняются.
   const referencedCallouts = referencedCalloutNumbers(data);
+  // НОМЕРА ОПЕРАЦИЙ СТАВИТ СЕРВЕР ПО ПОЗИЦИИ, а блоки узлов — клиентская проекция. Поэтому
+  // разреженный узел `[12, 24, 59]` без этой сборки неизбежно сохранялся как 130, 250, 600:
+  // operationNumber ниже ничего не решает, сервер его намеренно пересчитывает. Пишем каждый узел
+  // непрерывно и той же перестановкой перевозим ссылки дефектов ниже.
+  const sourceOperations = data.operations ?? [];
+  const sequencePieces = (data.pieces ?? [])
+    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
+    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
+  const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
+  const sequenceSteps = sourceOperations.map((operation) => ({
+    inputs: classifyAssemblyInputs(
+      sequencePieceKeys,
+      (operation.inputKeys ?? []).map((key) => key.trim()).filter(Boolean),
+    ),
+    outputUnitKey: operation.outputUnitKey?.trim() || '',
+    outputUnitName: operation.outputUnitName?.trim() || '',
+    assemblyBlockDetached: !!operation.assemblyBlockDetached,
+  }));
+  const sequenceResult = assemblySweep(sequencePieces, sequenceSteps);
+  const operationOrder =
+    sequenceResult.violations.length === 0
+      ? compactAssemblyBlockOrder(
+          assemblyBlocks(sequenceSteps, sequenceResult),
+          sourceOperations.length,
+        )
+      : sourceOperations.map((_, index) => index);
+  const operationWriteIndex = new Map<number, number>();
+  operationOrder.forEach((oldIndex, newIndex) => operationWriteIndex.set(oldIndex, newIndex));
+  const operationNumberForWrite = (number: number): number => {
+    if (!number || number % 10 !== 0) return number;
+    const oldIndex = number / 10 - 1;
+    if (oldIndex < 0 || oldIndex >= sourceOperations.length) return number;
+    const nextIndex = operationWriteIndex.get(oldIndex);
+    return nextIndex === undefined ? number : (nextIndex + 1) * 10;
+  };
   // B-01 · a reference to a BOM line this payload does not carry never leaves. The server refuses
   // an unknown line_key by name and fails the WHOLE save with it (resolveBomRef), and no screen can
   // show such a key to take it off: the operation's chip row offers only existing lines, the fabric
@@ -3665,7 +3702,8 @@ export function mapFormToTechCardInsert(
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
     construction: mapConstructionOut(data.construction, !!original?.construction),
-    operations: (data.operations ?? []).map((o, i) => {
+    operations: operationOrder.map((sourceIndex, i) => {
+      const o = sourceOperations[sourceIndex];
       // Only lines this payload carries: a dangling key fails the whole save (B-01, liveBomKey).
       const opBomKeys = (o.bomLineKeys ?? []).map((k) => liveBomKey(k)).filter(Boolean);
       // An override goes out ONLY when it is set. An empty control means «inherit the card
@@ -3963,7 +4001,7 @@ export function mapFormToTechCardInsert(
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
     costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({
-      operationNumber: i.operationNumber || 0,
+      operationNumber: operationNumberForWrite(i.operationNumber || 0),
       calloutNumber: i.calloutNumber || 0,
       raisedBy: i.raisedBy?.trim() || '',
       severity: (i.severity || 'TECH_CARD_ISSUE_SEVERITY_UNKNOWN') as common_TechCardIssueSeverity,

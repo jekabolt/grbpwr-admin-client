@@ -133,6 +133,7 @@ import {
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
+import { autoFuseRefusal, operationStepNumber } from './fusing-override';
 import { operationMoveMembership } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
@@ -332,6 +333,7 @@ function reviewDxfPack(
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
 const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
+const PLAIN_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_SS_PLAIN';
 const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
 const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
 // The unset member of each equipment vocabulary. In this feature UNSET NEVER MEANS ZERO — it means
@@ -1016,11 +1018,12 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
       : {}),
   });
   const seam = (ctx.defaultSeamClass ?? '').trim();
+  const joinSeam = !seam || seam === NONE_SEAM_CLASS ? PLAIN_SEAM_CLASS : seam;
   const join = isMachine && step.inputs.filter((k) => k.trim()).length >= 2;
   const materials = autoStepMaterialKeys(row, ctx.bomLines ?? []);
   return {
     ...row,
-    ...(join && seam && seam !== NONE_SEAM_CLASS ? { seamClass: seam } : {}),
+    ...(join ? { seamClass: joinSeam } : {}),
     ...(materials.length ? { bomLineKeys: [...row.bomLineKeys, ...materials] } : {}),
     draft: true,
   };
@@ -7121,11 +7124,28 @@ export function OperationsField({
     if (cur.includes(key)) return;
 
     const formOps = (getValues('operations') ?? []) as Array<{
+      operationType?: string;
+      operationNumber?: number;
+      draft?: boolean;
       inputKeys?: string[];
       outputUnitKey?: string;
       outputUnitName?: string;
       assemblyBlockDetached?: boolean;
     }>;
+    const autoFuse = autoFuseRefusal(
+      formOps,
+      (getValues('pieces') ?? []) as Array<{ lineKey?: string; fused?: boolean }>,
+      index,
+      key,
+    );
+    if (autoFuse) {
+      refuseGesture(
+        `STEP ${operationStepNumber(index)}`,
+        `auto fuse ${autoFuse.autoStepNumber}`,
+        pieces.find((piece) => piece.lineKey === key)?.name ?? key,
+      );
+      return;
+    }
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
     const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const steps = formOps.map((o) => ({

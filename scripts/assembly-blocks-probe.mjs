@@ -25,9 +25,15 @@ await build({
   outfile,
   logLevel: 'silent',
 });
-const { assemblySweep, classifyAssemblyInputs, assemblyBlocks, assemblyLayout } = await import(
-  pathToFileURL(outfile).href
-);
+const {
+  assemblySweep,
+  classifyAssemblyInputs,
+  assemblyBlocks,
+  compactAssemblyBlockOrder,
+  assemblyLayout,
+  mapFormToTechCardInsert,
+  techCardDefaultData,
+} = await import(pathToFileURL(outfile).href);
 
 const failed = new Set();
 const fail = (name, msg) => {
@@ -35,6 +41,9 @@ const fail = (name, msg) => {
   console.log(`FAIL  ${name}\n      ${msg}`);
 };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const ck = (ok, name, msg) => {
+  if (!ok) fail(name, msg);
+};
 
 function run(name, pieces, rawSteps, expect) {
   const p = pieces.map((k) => ({ lineKey: k, name: `деталь ${k}` }));
@@ -189,5 +198,83 @@ run(
   },
 );
 
-console.log(`\n${7 - failed.size}/7 кейсов прошло`);
+console.log('\nзапись собирает операции юнита подряд и перевозит ссылку дефекта');
+{
+  const pieces = ['A', 'B', 'C', 'D'].map((lineKey) => ({ lineKey, name: `piece ${lineKey}` }));
+  const raw = [
+    { id: 'collar-fuse', in: ['A'] },
+    { id: 'sleeve-fuse', in: ['C'] },
+    { id: 'collar-gather', in: ['B'] },
+    { id: 'sleeve-join', in: ['C', 'D'], out: 'SLEEVE' },
+    { id: 'collar-join', in: ['A', 'B'], out: 'COLLAR' },
+    { id: 'collar-press', in: ['COLLAR'] },
+    { id: 'garment-join', in: ['COLLAR', 'SLEEVE'], out: 'GARMENT' },
+  ];
+  const keys = new Set(pieces.map((piece) => piece.lineKey));
+  const steps = raw.map((step) => ({
+    inputs: classifyAssemblyInputs(keys, step.in),
+    outputUnitKey: step.out ?? '',
+    outputUnitName: '',
+  }));
+  const res = assemblySweep(pieces, steps);
+  const order = compactAssemblyBlockOrder(assemblyBlocks(steps, res), steps.length);
+  ck(
+    eq(order, [0, 2, 4, 5, 1, 3, 6]),
+    'COLLAR 10/30/50/60 становится непрерывным 10/20/30/40',
+    JSON.stringify(order),
+  );
+
+  const operation = (step) => ({
+    operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+    zone: 'TECH_CARD_GARMENT_ZONE_OUTER',
+    inputKeys: step.in,
+    outputUnitKey: step.out ?? '',
+    outputUnitName: '',
+    note: step.id,
+  });
+  const sent = mapFormToTechCardInsert({
+    ...techCardDefaultData,
+    pieces,
+    operations: raw.map(operation),
+    issues: [{ operationNumber: 50, description: 'join issue' }],
+  });
+  ck(
+    eq(
+      (sent.operations ?? []).map((step) => step.note),
+      order.map((index) => raw[index].id),
+    ),
+    'маппер пишет настоящий payload в порядке блоков',
+    JSON.stringify((sent.operations ?? []).map((step) => step.note)),
+  );
+  ck(
+    sent.issues?.[0]?.operationNumber === 30,
+    'issue с прежней операции 50 следует за collar-join на 30',
+    JSON.stringify(sent.issues?.[0]),
+  );
+
+  const dependentRaw = [
+    { in: ['C'] },
+    { in: ['A'] },
+    { in: ['A', 'B'], out: 'CHILD' },
+    { in: ['C', 'CHILD'], out: 'PARENT' },
+  ];
+  const dependentSteps = dependentRaw.map((step) => ({
+    inputs: classifyAssemblyInputs(keys, step.in),
+    outputUnitKey: step.out ?? '',
+    outputUnitName: '',
+  }));
+  const dependentResult = assemblySweep(pieces, dependentSteps);
+  const dependentOrder = compactAssemblyBlockOrder(
+    assemblyBlocks(dependentSteps, dependentResult),
+    dependentSteps.length,
+  );
+  const reordered = dependentOrder.map((index) => dependentSteps[index]);
+  ck(
+    eq(dependentOrder, [1, 2, 0, 3]) && assemblySweep(pieces, reordered).violations.length === 0,
+    'дочерний юнит целиком идёт раньше зависимого родителя',
+    JSON.stringify(dependentOrder),
+  );
+}
+
+console.log(`\n${11 - failed.size}/11 кейсов прошло`);
 if (failed.size) process.exitCode = 1;

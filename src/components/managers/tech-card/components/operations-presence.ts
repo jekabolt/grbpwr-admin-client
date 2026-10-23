@@ -1,5 +1,6 @@
 import { violationReason } from 'utils/field-errors';
 
+import { FUSING_OPERATION_TYPE as FUSING, isServerManagedFusingStep } from './fusing-override';
 import { operationFieldNames } from './schema';
 
 // АУДИТ ПРИСУТСТВИЯ — «Я ОТПРАВИЛ ЭТО ЗАПОЛНЕННЫМ; ВЕРНУЛОСЬ ЛИ ОНО ЗАПОЛНЕННЫМ».
@@ -111,10 +112,30 @@ export type PresenceAudit = {
   losses: PresenceLoss[];
   // Which read step each sent step came back as: `pairs[sentIndex] = readIndex`, -1 for none.
   pairs: number[];
+  // Sent rows the current server intentionally removed. They must not be restored by the
+  // version-skew safety merge when another, unrelated field really was lost in the same save.
+  acceptedDrops?: number[];
 };
 
 export function hasPresenceLoss(audit: PresenceAudit): boolean {
   return audit.losses.length > 0 || audit.sentSteps !== audit.readSteps;
+}
+
+/** Accept server-owned row deletions without weakening the audit for any other operation. */
+export function acceptOperationDrops(
+  audit: PresenceAudit,
+  sentIndices: readonly number[],
+): PresenceAudit {
+  const accepted = new Set(sentIndices.filter((index) => audit.pairs[index] === -1));
+  if (accepted.size === 0) return audit;
+  return {
+    ...audit,
+    sentSteps: Math.max(0, audit.sentSteps - accepted.size),
+    losses: audit.losses.filter((loss) => !accepted.has(loss.step)),
+    acceptedDrops: [...new Set([...(audit.acceptedDrops ?? []), ...accepted])].sort(
+      (a, b) => a - b,
+    ),
+  };
 }
 
 type OpLike = Record<string, unknown>;
@@ -125,9 +146,7 @@ type OpLike = Record<string, unknown>;
 // the order, links pieces into them, deletes the empty ones and renumbers the rest. Such a step is
 // a draft FUSING step. Its appearing, moving, relinking or disappearing is the server doing its job,
 // never a fact this form lost — so it is left out of the count and of the field check.
-const FUSING = 'TECH_CARD_OPERATION_TYPE_FUSING';
-export const isServerManagedStep = (op: OpLike | undefined): boolean =>
-  !!op && op.operationType === FUSING && op.draft === true;
+export const isServerManagedStep = isServerManagedFusingStep;
 
 // Fields of a FUSING step the reconciliation rewrites on purpose (a piece unfused is unlinked from
 // its step) — on a reviewed Fusing step they are not audited either.
@@ -250,6 +269,7 @@ export function mergeOperationsAfterSave<T extends OpLike>(
   audit: PresenceAudit,
 ): { operations: T[]; audit: PresenceAudit } {
   if (!hasPresenceLoss(audit)) return { operations: [...read], audit };
+  const acceptedDrops = new Set(audit.acceptedDrops ?? []);
   const sentOfRead = new Map<number, number>();
   audit.pairs.forEach((r, s) => {
     if (r >= 0) sentOfRead.set(r, s);
@@ -267,7 +287,7 @@ export function mergeOperationsAfterSave<T extends OpLike>(
     // still returns — kept, it would come back into the form settled as clean.
     .filter((e) => e.sent >= 0 || isServerManagedStep(e.op));
   sent.forEach((op, s) => {
-    if (audit.pairs[s] >= 0 || isServerManagedStep(op)) return;
+    if (audit.pairs[s] >= 0 || acceptedDrops.has(s) || isServerManagedStep(op)) return;
     // After the nearest sent predecessor already placed; at the front of the operator's steps if
     // there is none.
     let at = -1;
