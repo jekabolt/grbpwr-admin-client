@@ -30,6 +30,7 @@ import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { PieceTile } from './piece-silhouette';
 import { UnitGlyph, useUnitPicture } from './unit-silhouette';
+import { UnitNameInput } from './unit-block';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // ПРЕЗЕНТАЦИОННЫЙ РЕНДЕР НОД СХЕМЫ СБОРКИ — боксы узлов, хвост, провода, глифы.
@@ -1152,17 +1153,11 @@ export function UnitBoxView({
               держать в голове словарь из трёх значков; строкой хватает места сказать
               это словом. Красным — только разрыв: сборка не сошлась, и это ошибка,
               а не оттенок. */}
-          <span className='flex w-full items-baseline gap-1 overflow-hidden'>
-            {b.name && (
-              <Text
-                size='nano'
-                variant='label'
-                component='span'
-                className='min-w-0 shrink truncate'
-              >
-                {b.name}
-              </Text>
-            )}
+          <span className='flex w-full items-center gap-1 overflow-hidden'>
+            <UnitNameInput
+              block={b}
+              className='h-4 min-h-0 min-w-0 flex-1 py-0 text-micro leading-none'
+            />
             {/* ПУСТОЙ НАБОР КУСКОВ — ЭТО ОТСУТСТВИЕ СТРОКИ, А НЕ ПУСТАЯ СТРОКА, и проверка
                 стоит ЗДЕСЬ, а не внутри `NodeTokens`. Поглощённый узел состоянием больше не
                 говорит ничего (см. `stateParts`), и оставь мы `Text` стоять — в правой части

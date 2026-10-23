@@ -26,6 +26,8 @@
 // генерируемые id, а третье вдобавок закрывает ветку раскладки «узлов нет вовсе» (`real.length
 // === 0`), которой в золоте тоже не было.
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { ReactNode } from 'react';
+import { FormProvider, useForm } from 'react-hook-form';
 
 import { AssemblyCanvas } from '../src/components/managers/tech-card/components/assembly-canvas';
 import { AssemblySchematic } from '../src/components/managers/tech-card/components/assembly-schematic';
@@ -65,6 +67,7 @@ import type {
 import type { PosOverrides } from '../src/components/managers/tech-card/components/assembly-positions';
 import type { FoundPiece } from '../src/components/managers/tech-card/components/nesting/dxf-geometry';
 import type { PieceShapeMap } from '../src/components/managers/tech-card/components/use-piece-shapes';
+import type { TechCardFormData } from '../src/components/managers/tech-card/components/schema';
 
 type RawStep = { in?: string[]; out?: string; name?: string };
 
@@ -289,72 +292,99 @@ const nameOf = (pieces: AssemblyPiece[]) => (key: string) =>
 const labelFrom = (labels: string[]) => (i: number) => labels[i] ?? 'step';
 const noop = () => {};
 
+/** The real canvas lives under the tech-card form; the probe supplies the same name fields. */
+function FormFixture({
+  frozen,
+  raw,
+  children,
+}: {
+  frozen: boolean;
+  raw: RawStep[];
+  children: ReactNode;
+}) {
+  const form = useForm<TechCardFormData>({
+    defaultValues: {
+      approvalState: frozen
+        ? 'TECH_CARD_APPROVAL_STATE_RELEASED'
+        : 'TECH_CARD_APPROVAL_STATE_DRAFT',
+      operations: raw.map((step) => ({ outputUnitName: step.name ?? '' })),
+    },
+  });
+  return <FormProvider {...form}>{children}</FormProvider>;
+}
+
 /** Разметка обоих полотен при заданной заморозке. */
 export function renderSchematic(frozen: boolean): string {
   return renderToStaticMarkup(
     <>
-      <AssemblySchematic
-        blocks={converged.blocks}
-        steps={converged.steps}
-        res={converged.res}
-        labelOf={labelFrom(CONVERGED_LABELS)}
-        pieceNameOf={nameOf(CONVERGED_PIECES)}
-        onPickStep={noop}
-        onCreate={noop}
-        onDissolve={noop}
-        pieceShapes={CONVERGED_SHAPES}
-        cloth={CONVERGED_CLOTH}
-        smvOfBlock={CONVERGED_SMV}
-        tailSmv=''
-        positions={CONVERGED_POSITIONS}
-        onMove={noop}
-        onResetPositions={noop}
-        renamedUnit={null}
-        frozen={frozen}
-      />
-      <AssemblySchematic
-        blocks={broken.blocks}
-        steps={broken.steps}
-        res={broken.res}
-        labelOf={labelFrom(BROKEN_LABELS)}
-        pieceNameOf={nameOf(BROKEN_PIECES)}
-        onPickStep={noop}
-        onCreate={noop}
-        onDissolve={noop}
-        // Карты нет вовсе: у карточки без колорвея вопрос про ткань не задавался, и разметка
-        // обязана отличаться от «ключа в карте нет».
-        pieceShapes={new Map<string, FoundPiece | null>()}
-        cloth={null}
-        smvOfBlock={BROKEN_SMV}
-        tailSmv=''
-        positions={{}}
-        onMove={noop}
-        onResetPositions={noop}
-        renamedUnit={null}
-        frozen={frozen}
-      />
+      <FormFixture frozen={frozen} raw={CONVERGED_STEPS}>
+        <AssemblySchematic
+          blocks={converged.blocks}
+          steps={converged.steps}
+          res={converged.res}
+          labelOf={labelFrom(CONVERGED_LABELS)}
+          pieceNameOf={nameOf(CONVERGED_PIECES)}
+          onPickStep={noop}
+          onCreate={noop}
+          onDissolve={noop}
+          pieceShapes={CONVERGED_SHAPES}
+          cloth={CONVERGED_CLOTH}
+          smvOfBlock={CONVERGED_SMV}
+          tailSmv=''
+          positions={CONVERGED_POSITIONS}
+          onMove={noop}
+          onResetPositions={noop}
+          renamedUnit={null}
+          frozen={frozen}
+        />
+      </FormFixture>
+      <FormFixture frozen={frozen} raw={BROKEN_STEPS}>
+        <AssemblySchematic
+          blocks={broken.blocks}
+          steps={broken.steps}
+          res={broken.res}
+          labelOf={labelFrom(BROKEN_LABELS)}
+          pieceNameOf={nameOf(BROKEN_PIECES)}
+          onPickStep={noop}
+          onCreate={noop}
+          onDissolve={noop}
+          // Карты нет вовсе: у карточки без колорвея вопрос про ткань не задавался, и разметка
+          // обязана отличаться от «ключа в карте нет».
+          pieceShapes={new Map<string, FoundPiece | null>()}
+          cloth={null}
+          smvOfBlock={BROKEN_SMV}
+          tailSmv=''
+          positions={{}}
+          onMove={noop}
+          onResetPositions={noop}
+          renamedUnit={null}
+          frozen={frozen}
+        />
+      </FormFixture>
       {/* ТРЕТЬЕ ПОЛОТНО — РАДИ ХВОСТА. Единственное, где хвостовой бокс вообще существует: в
           первых двух все обработки уехали на плитки своих деталей, а пустого хвоста не бывает.
           Ручных позиций нет — строка «layout: manual» тоже обязана отсутствовать. */}
-      <AssemblySchematic
-        blocks={tailed.blocks}
-        steps={tailed.steps}
-        res={tailed.res}
-        labelOf={labelFrom(TAIL_LABELS)}
-        pieceNameOf={nameOf(TAIL_PIECES)}
-        onPickStep={noop}
-        onCreate={noop}
-        onDissolve={noop}
-        pieceShapes={TAIL_SHAPES}
-        cloth={TAIL_CLOTH}
-        smvOfBlock={new Map<string, string>()}
-        tailSmv={TAIL_SMV}
-        positions={{}}
-        onMove={noop}
-        onResetPositions={noop}
-        renamedUnit={null}
-        frozen={frozen}
-      />
+      <FormFixture frozen={frozen} raw={TAIL_STEPS}>
+        <AssemblySchematic
+          blocks={tailed.blocks}
+          steps={tailed.steps}
+          res={tailed.res}
+          labelOf={labelFrom(TAIL_LABELS)}
+          pieceNameOf={nameOf(TAIL_PIECES)}
+          onPickStep={noop}
+          onCreate={noop}
+          onDissolve={noop}
+          pieceShapes={TAIL_SHAPES}
+          cloth={TAIL_CLOTH}
+          smvOfBlock={new Map<string, string>()}
+          tailSmv={TAIL_SMV}
+          positions={{}}
+          onMove={noop}
+          onResetPositions={noop}
+          renamedUnit={null}
+          frozen={frozen}
+        />
+      </FormFixture>
     </>,
   );
 }
@@ -373,27 +403,29 @@ export function renderSchematic(frozen: boolean): string {
 export function renderCanvas(fixture: 'converged' | 'tail', openStep: number | null): string {
   const c = fixture === 'tail' ? tailed : converged;
   return renderToStaticMarkup(
-    <AssemblyCanvas
-      blocks={c.blocks}
-      steps={c.steps}
-      res={c.res}
-      labelOf={labelFrom(fixture === 'tail' ? TAIL_LABELS : CONVERGED_LABELS)}
-      pieceNameOf={nameOf(fixture === 'tail' ? TAIL_PIECES : CONVERGED_PIECES)}
-      onPickStep={noop}
-      openStep={openStep}
-      onCreate={noop}
-      onDissolve={noop}
-      pieceShapes={fixture === 'tail' ? TAIL_SHAPES : CONVERGED_SHAPES}
-      cloth={fixture === 'tail' ? TAIL_CLOTH : CONVERGED_CLOTH}
-      smvOfBlock={fixture === 'tail' ? new Map<string, string>() : CONVERGED_SMV}
-      tailSmv={fixture === 'tail' ? TAIL_SMV : ''}
-      positions={{}}
-      onMove={noop}
-      frozen={false}
-      picked={[]}
-      onPicked={noop}
-      onHint={noop}
-    />,
+    <FormFixture frozen={false} raw={fixture === 'tail' ? TAIL_STEPS : CONVERGED_STEPS}>
+      <AssemblyCanvas
+        blocks={c.blocks}
+        steps={c.steps}
+        res={c.res}
+        labelOf={labelFrom(fixture === 'tail' ? TAIL_LABELS : CONVERGED_LABELS)}
+        pieceNameOf={nameOf(fixture === 'tail' ? TAIL_PIECES : CONVERGED_PIECES)}
+        onPickStep={noop}
+        openStep={openStep}
+        onCreate={noop}
+        onDissolve={noop}
+        pieceShapes={fixture === 'tail' ? TAIL_SHAPES : CONVERGED_SHAPES}
+        cloth={fixture === 'tail' ? TAIL_CLOTH : CONVERGED_CLOTH}
+        smvOfBlock={fixture === 'tail' ? new Map<string, string>() : CONVERGED_SMV}
+        tailSmv={fixture === 'tail' ? TAIL_SMV : ''}
+        positions={{}}
+        onMove={noop}
+        frozen={false}
+        picked={[]}
+        onPicked={noop}
+        onHint={noop}
+      />
+    </FormFixture>,
   );
 }
 

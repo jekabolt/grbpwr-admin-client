@@ -1,8 +1,51 @@
 import { cn } from 'lib/utility';
-import { Text } from 'ui';
+import { useId } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
+import { Input, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
+import type { TechCardFormData } from './schema';
 import { UnitGlyph, useUnitPicture } from './unit-silhouette';
+
+/** The block name is the name on its first producing operation; every view edits that one fact. */
+export function UnitNameInput({ block, className }: { block: AssemblyBlock; className?: string }) {
+  const id = useId();
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const name = (useWatch({
+    control,
+    name: `operations.${block.producedAt}.outputUnitName`,
+  }) ?? '') as string;
+  const frozen =
+    useWatch({ control, name: 'approvalState' }) === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+
+  return (
+    <Input
+      name={`unit-name-${id}`}
+      value={name}
+      placeholder='unit name'
+      aria-label={`unit name for ${block.key}`}
+      maxLength={255}
+      disabled={frozen}
+      autoComplete='off'
+      className={className}
+      onPointerDown={(event: React.PointerEvent<HTMLInputElement>) => event.stopPropagation()}
+      onClick={(event: React.MouseEvent<HTMLInputElement>) => event.stopPropagation()}
+      onDoubleClick={(event: React.MouseEvent<HTMLInputElement>) => event.stopPropagation()}
+      onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+        event.stopPropagation();
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        event.currentTarget.blur();
+      }}
+      onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+        setValue(`operations.${block.producedAt}.outputUnitName`, event.target.value, {
+          shouldDirty: true,
+          shouldTouch: true,
+        })
+      }
+    />
+  );
+}
 
 // Шапка блока подсборки в рельсе.
 //
@@ -30,7 +73,7 @@ export function UnitBlockHeader({
   return (
     <div
       className={cn(
-        'mt-1.5 flex items-baseline gap-1.5 border-t border-textColor px-1 pt-1 first:mt-0',
+        'mt-1.5 flex items-center gap-1.5 border-t border-textColor px-1 pt-1 first:mt-0',
         isTail && 'border-dashed border-borderColor',
       )}
     >
@@ -48,11 +91,7 @@ export function UnitBlockHeader({
       >
         {isTail ? '◌ outside units' : `▣ ${block.key}`}
       </Text>
-      {!isTail && block.name && (
-        <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
-          {block.name}
-        </Text>
-      )}
+      {!isTail && <UnitNameInput block={block} className='min-w-0 flex-1 text-micro' />}
       {/* СОСТОЯНИЕ УЗЛА НАЗЫВАЕТСЯ СЛОВОМ, а не выводится читателем из отсутствия чего-то.
           Три состояния, и они разные: изделие (единственный живой узел), ушёл в другой узел
           (нормальная середина сборки) и разрыв (живой, но не единственный — сборка не сошлась). */}
