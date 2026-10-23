@@ -165,11 +165,13 @@ export function FuseFields({
   }, [derivedMode, line]);
   const shownLineKey = fileOpen ? fileLineKey : line;
   const shownLine = lines.find((candidate) => candidate.key === shownLineKey);
-  const cur: FusePanelMode | null = !fused
-    ? ''
-    : derivedMode === 'file' && shownLineKey === line
-      ? 'file'
-      : spec.mode || null;
+  const cur: FusePanelMode | null = fileOpen
+    ? 'file'
+    : !fused
+      ? ''
+      : derivedMode === 'file' && shownLineKey === line
+        ? 'file'
+        : spec.mode || null;
   const set = (d: Partial<PieceFuseSpec>) => onChange({ ...spec, ...d });
   const setMode = (m: FuseMode) => {
     if (!m) return onChange(blankFuse());
