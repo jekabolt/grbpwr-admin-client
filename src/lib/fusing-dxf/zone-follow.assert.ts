@@ -226,7 +226,7 @@ export function main() {
   const sleeveSplitRings = zoneRingsMm(splitSleeve.zone, sleeveInset);
   assert.equal(sleeveSplitRings.outers.length, 2);
   assert.ok(
-    ['main', splitSleeve.ref].every((ref) =>
+    (['main' as const, splitSleeve.ref]).every((ref) =>
       zoneRingOutline(splitSleeve.zone, ref, sleeveInset).follows.some(Boolean),
     ),
     'both sleeve halves retain contour-following outer sides',
