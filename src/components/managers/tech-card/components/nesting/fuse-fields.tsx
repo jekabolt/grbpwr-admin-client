@@ -476,7 +476,7 @@ function ZoneRow({
   };
   const addIsland = () => {
     if (!spline || contour.length < 3) return;
-    const added = addZoneIsland(spline, contour);
+    const added = addZoneIsland(spline, contour, selected);
     if (added) write(added.zone, added.ref);
   };
   const reset = () => {

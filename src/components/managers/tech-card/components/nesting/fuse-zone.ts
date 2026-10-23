@@ -10,7 +10,7 @@ import {
   type FlatZone,
 } from 'lib/fusing-dxf/spline';
 import { EDGE_CORNER_TURN_DEG } from 'lib/fusing-dxf/edge-runs';
-import { ZONE_MAX_HOLES, ZONE_MAX_OUTER_RINGS } from 'lib/fusing-dxf/geometry';
+import { ZONE_MAX_HOLES, ZONE_MAX_OUTER_RINGS, zoneRingsMm } from 'lib/fusing-dxf/geometry';
 import type { PtMm } from 'lib/pattern-import/types';
 import type { FuseSpline, FuseSplinePoint, FuseZone } from 'lib/fusing-dxf/types';
 
@@ -26,6 +26,10 @@ const RING_EPSILON = 1e-9;
 export const ZONE_SEED_MAX_POINTS = 24;
 /** Arc sampled on each side of a vertex when deciding whether it is a physical corner. */
 export const ZONE_SEED_CORNER_WINDOW_MM = 5;
+/** Width removed when a full outer ring is split into two fuse parts. */
+export const ZONE_PART_GAP_MM = 10;
+/** A new hole uses this share of the largest free inscribed radius. */
+export const ZONE_HOLE_SEED_RATIO = 0.18;
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const midOf = (a: ZonePoint, b: ZonePoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
@@ -502,10 +506,13 @@ function largestFreeCircle(
   return best;
 }
 
-function roundSeed(circle: { centre: XY; radius: number }): FuseSpline | null {
+function roundSeed(
+  circle: { centre: XY; radius: number },
+  radiusOf: (freeRadius: number) => number,
+): FuseSpline | null {
   // Four round controls produce a compact, circle-like Catmull-Rom loop. Leave a wide clearance
   // margin for the curve's overshoot and the wire's 0.1 mm rounding.
-  const radius = Math.min(12, circle.radius * 0.25);
+  const radius = radiusOf(circle.radius);
   if (!(radius >= 1)) return null;
   const { x, y } = circle.centre;
   return splineOfPoints([
@@ -514,6 +521,195 @@ function roundSeed(circle: { centre: XY; radius: number }): FuseSpline | null {
     { x: x - radius, y, corner: false },
     { x, y: y - radius, corner: false },
   ]);
+}
+
+const ringCentroid = (ring: readonly XY[]): XY => {
+  let crossSum = 0;
+  let xSum = 0;
+  let ySum = 0;
+  for (let index = 0; index < ring.length; index++) {
+    const point = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    const cross = point.x * next.y - next.x * point.y;
+    crossSum += cross;
+    xSum += (point.x + next.x) * cross;
+    ySum += (point.y + next.y) * cross;
+  }
+  if (Math.abs(crossSum) > RING_EPSILON)
+    return { x: xSum / (3 * crossSum), y: ySum / (3 * crossSum) };
+  return {
+    x: ring.reduce((sum, point) => sum + point.x, 0) / ring.length,
+    y: ring.reduce((sum, point) => sum + point.y, 0) / ring.length,
+  };
+};
+
+/** Principal direction of the outline, independent of a rotated pattern piece's sheet axes. */
+const longAxis = (ring: readonly XY[], centre: XY): XY => {
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  for (const point of ring) {
+    const dx = point.x - centre.x;
+    const dy = point.y - centre.y;
+    xx += dx * dx;
+    xy += dx * dy;
+    yy += dy * dy;
+  }
+  const angle = Math.atan2(2 * xy, xx - yy) / 2;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+};
+
+const along = (point: XY, centre: XY, axis: XY) =>
+  (point.x - centre.x) * axis.x + (point.y - centre.y) * axis.y;
+
+/** Clips one polygon against one side of a line perpendicular to its long axis. */
+function clipAt(
+  ring: readonly XY[],
+  centre: XY,
+  axis: XY,
+  limit: number,
+  keepBelow: boolean,
+): XY[] {
+  const inside = (value: number) =>
+    keepBelow ? value <= limit + RING_EPSILON : value >= limit - RING_EPSILON;
+  const out: XY[] = [];
+  for (let index = 0; index < ring.length; index++) {
+    const a = ring[index];
+    const b = ring[(index + 1) % ring.length];
+    const av = along(a, centre, axis);
+    const bv = along(b, centre, axis);
+    const aInside = inside(av);
+    const bInside = inside(bv);
+    if (aInside) out.push({ ...a });
+    if (aInside === bInside) continue;
+    const t = (limit - av) / (bv - av);
+    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  }
+  return out.filter(
+    (point, index, points) =>
+      index === 0 ||
+      Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) > RING_EPSILON,
+  );
+}
+
+/** Removes the least significant non-cut vertices until the stored spline fits its hard cap. */
+function limitSplitPoints(points: ZonePoint[], cutAt: number, centre: XY, axis: XY): ZonePoint[] {
+  const result = [...points];
+  while (result.length > SPLINE_MAX_POINTS) {
+    let remove = -1;
+    let smallest = Infinity;
+    for (let index = 0; index < result.length; index++) {
+      const point = result[index];
+      if (Math.abs(along(point, centre, axis) - cutAt) <= STRAIGHT_MM) continue;
+      const previous = result[(index - 1 + result.length) % result.length];
+      const next = result[(index + 1) % result.length];
+      const significance = Math.abs(orientation(previous, point, next));
+      if (significance < smallest) {
+        smallest = significance;
+        remove = index;
+      }
+    }
+    if (remove < 0) return [];
+    result.splice(remove, 1);
+  }
+  return result;
+}
+
+/** Turns a clipped half into sharp controls and pins a midpoint onto its straight cut edge. */
+function splitSpline(ring: readonly XY[], cutAt: number, centre: XY, axis: XY): FuseSpline | null {
+  if (ring.length < SPLINE_MIN_POINTS) return null;
+  const rounded = ring
+    .map((point) => ({ x: r1(point.x), y: r1(point.y) }))
+    .filter(
+      (point, index, points) =>
+        index === 0 ||
+        Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) > RING_EPSILON,
+    );
+  if (
+    rounded.length > 1 &&
+    Math.hypot(
+      rounded[0].x - rounded[rounded.length - 1].x,
+      rounded[0].y - rounded[rounded.length - 1].y,
+    ) <= RING_EPSILON
+  )
+    rounded.pop();
+  const points: ZonePoint[] = [];
+  for (let index = 0; index < rounded.length; index++) {
+    const point = rounded[index];
+    const next = rounded[(index + 1) % rounded.length];
+    points.push({ ...point, corner: true });
+    if (
+      Math.abs(along(point, centre, axis) - cutAt) <= STRAIGHT_MM &&
+      Math.abs(along(next, centre, axis) - cutAt) <= STRAIGHT_MM
+    ) {
+      points.push({
+        ...midOf({ ...point, corner: true }, { ...next, corner: true }),
+        corner: true,
+      });
+    }
+  }
+  const limited = limitSplitPoints(points, cutAt, centre, axis);
+  return limited.length >= SPLINE_MIN_POINTS ? splineOfPoints(limited) : null;
+}
+
+/**
+ * Splits the selected outer into two rings separated by a transverse strip. The midpoint stored on
+ * each new cut edge keeps that edge straight: its endpoints may sit on the piece contour, but the
+ * midpoint does not, so the contour-follow rule cannot close the gap around the other half.
+ */
+function splitZoneOuter(
+  z: SplineZone,
+  outerRef: ZoneRingRef,
+  contourMm: readonly PtMm[],
+): { zone: SplineZone; ref: ZoneRingRef } | null {
+  if (outerRef !== 'main' && !outerRef.startsWith('island:')) return null;
+  const selected = zoneRingOutline(z, outerRef, contourMm).ring;
+  if (selected.length < SPLINE_MIN_POINTS) return null;
+  const centre = ringCentroid(selected);
+  const axis = longAxis(selected, centre);
+  const extents = selected.map((point) => along(point, centre, axis));
+  const span = Math.max(...extents) - Math.min(...extents);
+  const gap = Math.min(ZONE_PART_GAP_MM, span / 3);
+  if (!(gap >= 2)) return null;
+  const low = -gap / 2;
+  const high = gap / 2;
+  const lowerRing = clipAt(selected, centre, axis, low, true);
+  const upperRing = clipAt(selected, centre, axis, high, false);
+  const lower = splitSpline(lowerRing, low, centre, axis);
+  const upper = splitSpline(upperRing, high, centre, axis);
+  if (!lower || !upper) return null;
+
+  const keptHoles = z.holes.filter((_, index) => {
+    const ref = `hole:${index}` as const;
+    if (outerRefForHole(z, ref, contourMm) !== outerRef) return true;
+    const ring = zoneRingOutline(z, ref).ring;
+    if (ring.length < SPLINE_MIN_POINTS) return false;
+    const coordinates = ring.map((point) => along(point, centre, axis));
+    const belongsLower =
+      Math.max(...coordinates) < low - RING_EPSILON &&
+      ring.every((point) => pointInOrOnRing(point, lowerRing));
+    const belongsUpper =
+      Math.min(...coordinates) > high + RING_EPSILON &&
+      ring.every((point) => pointInOrOnRing(point, upperRing));
+    return belongsLower || belongsUpper;
+  });
+  const islandIndex = ringIndex(outerRef, 'island');
+  const islands =
+    outerRef === 'main'
+      ? [...z.islands, upper]
+      : [...z.islands.map((ring, index) => (index === islandIndex ? lower : ring)), upper];
+  const zone: SplineZone = {
+    ...z,
+    spline: outerRef === 'main' ? lower : z.spline,
+    holes: keptHoles,
+    islands,
+  };
+  try {
+    zoneRingsMm(zone, contourMm);
+  } catch {
+    return null;
+  }
+  return { zone, ref: `island:${islands.length - 1}` };
 }
 
 export function outerRefForHole(
@@ -547,7 +743,7 @@ export function addZoneHole(
     .map((_, index) => zoneRingOutline(z, `hole:${index}`).ring)
     .filter((ring) => ring.length >= 3 && pointInOrOnRing(ring[0], outer));
   const circle = largestFreeCircle(outer, holes);
-  const hole = circle && roundSeed(circle);
+  const hole = circle && roundSeed(circle, (freeRadius) => freeRadius * ZONE_HOLE_SEED_RATIO);
   if (!hole) return null;
   const index = z.holes.length;
   return { zone: { ...z, holes: [...z.holes, hole] }, ref: `hole:${index}` };
@@ -557,16 +753,19 @@ export function addZoneHole(
 export function addZoneIsland(
   z: FuseZone | null | undefined,
   contourMm: readonly PtMm[],
+  selectedOuter: ZoneRingRef = 'main',
 ): { zone: SplineZone; ref: ZoneRingRef } | null {
   if (!isSplineZone(z) || 1 + z.islands.length >= ZONE_MAX_OUTER_RINGS) return null;
   const outers = ['main' as const, ...z.islands.map((_, index) => `island:${index}` as const)].map(
     (ref) => zoneRingOutline(z, ref, contourMm).ring,
   );
   const circle = largestFreeCircle(contourMm, outers);
-  const island = circle && roundSeed(circle);
-  if (!island) return null;
-  const index = z.islands.length;
-  return { zone: { ...z, islands: [...z.islands, island] }, ref: `island:${index}` };
+  const island = circle && roundSeed(circle, (freeRadius) => Math.min(12, freeRadius * 0.25));
+  if (island) {
+    const index = z.islands.length;
+    return { zone: { ...z, islands: [...z.islands, island] }, ref: `island:${index}` };
+  }
+  return splitZoneOuter(z, selectedOuter, contourMm);
 }
 
 // ---------- the per-dialog bus: canvas ↔ panel ----------
