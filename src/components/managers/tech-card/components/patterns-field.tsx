@@ -3185,7 +3185,7 @@ export function PatternsField({
           expectedLockVersion: autosave.getBaseLockVersion(),
         });
         const fresh = response.techCard;
-        if (!fresh) throw new Error('the updated card was not returned');
+        if (!fresh) throw new Error('no card returned');
 
         // Move both synchronous sources of the next CAS before waitThenCut releases the hold. The
         // refetch is only a background refresh; a failed refresh cannot put autosave behind again.

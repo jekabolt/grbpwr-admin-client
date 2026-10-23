@@ -3160,7 +3160,7 @@ export function TechCardForm({
         expectedLockVersion: claimVersion(),
       });
       const fresh = response.techCard;
-      if (!fresh) throw new Error('the restored card was not returned');
+      if (!fresh) throw new Error('no card returned');
 
       staging.clear();
       undoHistory.api.clear();
@@ -3195,14 +3195,14 @@ export function TechCardForm({
         leaveFullscreen();
         openConflict();
         autosave.settleExternal(
-          { outcome: 'conflict', message: 'another editor saved this card meanwhile' },
+          { outcome: 'conflict', message: 'saved elsewhere' },
           'version-restore',
         );
       } else {
         reportFailure(
           {
             text: 'not restored',
-            detail: techCardErrorMessage(error, 'the version could not be restored'),
+            detail: techCardErrorMessage(error, 'restore failed'),
           },
           false,
         );

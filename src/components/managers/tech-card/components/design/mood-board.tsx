@@ -885,7 +885,7 @@ export function MoodBoard({
     const card = techCardId;
     let saved: FlushResult;
     try {
-      saved = await undoHistory.flushThenCut('moodboard: a picture off the board');
+      saved = await undoHistory.flushThenCut('moodboard picture');
     } catch {
       saved = 'error';
     }
