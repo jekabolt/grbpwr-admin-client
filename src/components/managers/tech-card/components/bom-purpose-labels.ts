@@ -14,6 +14,7 @@ export const PURPOSE_LABEL: Record<string, string> = {
   TECH_CARD_BOM_PURPOSE_INTERFACING: 'canvas / interfacing',
   TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
   TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast / facing',
+  TECH_CARD_BOM_PURPOSE_BINDING: 'binding',
   TECH_CARD_BOM_PURPOSE_MESH: 'mesh / second layer',
   TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };

@@ -73,7 +73,7 @@ const SECTION_LABEL: Record<string, string> = Object.fromEntries(
 
 // НАЗНАЧЕНИЕ labels, kept local on purpose. The canonical map lives in the tech-card editor's
 // bom-purpose.ts, which reaches the form schema through bom-line-picker — importing it here would
-// drag the whole card editor into the list route's chunk to render eight words.
+// drag the whole card editor into the list route's chunk to render nine words.
 const PURPOSE_LABEL: Record<string, string> = {
   TECH_CARD_BOM_PURPOSE_MAIN: 'main material',
   TECH_CARD_BOM_PURPOSE_LINING: 'lining',
@@ -81,6 +81,7 @@ const PURPOSE_LABEL: Record<string, string> = {
   TECH_CARD_BOM_PURPOSE_INTERFACING: 'canvas / interfacing',
   TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
   TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast / facing',
+  TECH_CARD_BOM_PURPOSE_BINDING: 'binding',
   TECH_CARD_BOM_PURPOSE_MESH: 'mesh / second layer',
   TECH_CARD_BOM_PURPOSE_OTHER: 'other',
 };
