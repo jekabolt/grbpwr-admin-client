@@ -93,6 +93,7 @@
     "lay:header": "node scripts/lay-header-probe.mjs",
     "view:switch": "node scripts/view-switch-probe.mjs",
     "cloth:pieces": "node scripts/piece-cloth-probe.mjs",
+    "piece:shape-selection": "node scripts/piece-shape-selection-probe.mjs",
     "assembly:views": "node scripts/assembly-views-probe.mjs",
     "skeleton:union": "node scripts/assembly-skeleton/union-probe.mjs",
     "pom:check": "node scripts/pom/check.mjs",

@@ -9,6 +9,7 @@
 import {
   fabricScopes,
   isRollGoodsSection,
+  isInterliningScope,
   bindingScopes,
   scopeKeyOfBinding,
   type FabricScope,
@@ -66,6 +67,9 @@ export function pieceBlockRefs(
 ): Map<string, PieceBlockRef[]> {
   const m = new Map<string, PieceBlockRef[]>();
   const links = bindingScopes(scopes, aliases);
+  const interliningScopes = new Set(
+    scopes.filter((scope) => isInterliningScope(scope)).map((scope) => scope.key),
+  );
   for (const a of aliases) {
     const key = pieceRefKey(a.pieceLineKey ?? '');
     const block = (a.blockName ?? '').trim();
@@ -73,7 +77,17 @@ export function pieceBlockRefs(
     const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, links);
     const list = m.get(key) ?? [];
     if (!list.some((r) => r.scopeKey === scopeKey && r.block === block)) {
-      list.push({ scopeKey, block });
+      const ref = { scopeKey, block };
+      // Generated fusing sheets link their sub-piece back to the garment piece. findPiece takes the
+      // first live ref, so an interlining row returned first by the backend would otherwise replace
+      // the garment outline in every silhouette. Keep fuse geometry only as the fallback for a
+      // genuinely interlining-only piece, while preserving stored order inside both groups.
+      const firstInterlining = list.findIndex((r) => interliningScopes.has(r.scopeKey));
+      if (!interliningScopes.has(scopeKey) && firstInterlining >= 0) {
+        list.splice(firstInterlining, 0, ref);
+      } else {
+        list.push(ref);
+      }
     }
     m.set(key, list);
   }
