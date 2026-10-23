@@ -90,7 +90,7 @@ const sequenceDividerId = (at: number) => `sequence-divider:${at}`;
 export function CardSeamStandard() {
   const { control } = useFormContext<TechCardFormData>();
   return (
-    <div className='mb-1.5 grid grid-cols-1 items-center gap-2 border-b border-textColor bg-pageBg px-2 py-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'>
+    <div className='mb-1.5 grid grid-cols-1 items-center gap-2 border-b border-textColor bg-pageBg px-2 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
       <span className='min-w-0'>
         <Text size='control' component='span' className='block font-bold uppercase'>
           Card standard
@@ -406,7 +406,7 @@ function RailStep({
             if (key) onDropPiece(index, key);
           }}
           className={cn(
-            'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 border bg-bgColor pr-1.5 transition-colors sm:grid-cols-[auto_minmax(0,2fr)_minmax(0,1fr)]',
+            'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 border bg-bgColor pr-1.5 transition-colors sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]',
             hasError || assemblyBroken || marked || linked
               ? 'border-error'
               : selected || over || mapLit
