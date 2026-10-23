@@ -334,6 +334,36 @@ export const SEAM_CLASS_LABELS: Record<common_TechCardSeamClass, string> = {
 export const seamClassOptions: Array<{ value: common_TechCardSeamClass; label: string }> =
   optionsFrom(SEAM_CLASS_LABELS);
 
+const UNKNOWN_SEAM_CLASS: common_TechCardSeamClass = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
+const ORNAMENTAL_SEAM_CLASS: common_TechCardSeamClass = 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH';
+
+/** UNKNOWN on an operation is storage for “use the card standard”, never an empty seam. */
+export const seamClassInherits = (value?: string): boolean =>
+  !(value ?? '').trim() || value === UNKNOWN_SEAM_CLASS;
+
+/** Resolve a stored operation value for every reading surface; writes keep the original UNKNOWN. */
+export function effectiveSeamClass(
+  operationValue?: string,
+  cardDefault?: string,
+): common_TechCardSeamClass {
+  if (!seamClassInherits(operationValue)) {
+    return operationValue as common_TechCardSeamClass;
+  }
+  const standard = (cardDefault ?? '').trim();
+  return (standard || UNKNOWN_SEAM_CLASS) as common_TechCardSeamClass;
+}
+
+/** The card standard cannot be ornamental; a saved legacy value stays visible but disabled. */
+export function cardSeamClassOptions(
+  current?: string,
+): Array<{ value: common_TechCardSeamClass; label: string; disabled?: boolean }> {
+  return seamClassOptions
+    .filter(({ value }) => value !== ORNAMENTAL_SEAM_CLASS || current === ORNAMENTAL_SEAM_CLASS)
+    .map((option) =>
+      option.value === ORNAMENTAL_SEAM_CLASS ? { ...option, disabled: true } : option,
+    );
+}
+
 // КЛАСС ШВА СЛОВАМИ — '' у UNKNOWN («наследовать») и у токена, о котором этот бандл ничего не знает.
 // Ровно та же форма, что у `attachmentKindLabel` ниже, и по тем же двум доводам: строку эту зовут
 // экраны, держащие перечисления СТРОКАМИ формы, а сырой «TECH_CARD_SEAM_CLASS_…» на глазах хуже

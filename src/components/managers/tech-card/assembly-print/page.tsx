@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Chip, ChipRow, Input, Text } from 'ui';
-import { operationHeading, zoneLabel } from '../components/operation-options';
+import { effectiveSeamClass, operationHeading, zoneLabel } from '../components/operation-options';
 import type { WorkCatalog } from '../components/operation-work';
 import { pieceRefKey } from '../components/piece-block-refs';
 import { mapTechCardToForm, type TechCardFormData } from '../components/schema';
@@ -116,7 +116,7 @@ function printInput(
       operationHeading({
         operationType: o.operationType,
         machineType: o.machineType,
-        seamClass: o.seamClass,
+        seamClass: effectiveSeamClass(o.seamClass, insert?.construction?.defaultSeamClass),
         work: o.work,
         workCatalog,
         zone: o.zone,

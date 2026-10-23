@@ -1,8 +1,6 @@
-import { useWatch } from 'react-hook-form';
-import { ComboField, DecimalField, SelectField } from 'ui';
+import { ComboField, DecimalField } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { EquipmentParkField } from './equipment-park';
-import { seamClassOptions } from './operation-options';
 
 import { hemFinishOptions } from './tech-card-options';
 
@@ -11,25 +9,9 @@ import { hemFinishOptions } from './tech-card-options';
 // Guided combos, not closed sets. The fold (and opening it on a server or client error, so
 // revealField finds the control) belongs to the STANDARDS block in construction-tab.tsx.
 export function ConstructionField() {
-  const defaultSeamClass = useWatch({ name: 'construction.defaultSeamClass' });
-  const defaultSeamClassOptions = seamClassOptions
-    .filter(
-      ({ value }) =>
-        value !== 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' ||
-        defaultSeamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH',
-    )
-    .map((option) =>
-      option.value === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' ? { ...option, disabled: true } : option,
-    );
-
   return (
     <>
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
-        <SelectField
-          name='construction.defaultSeamClass'
-          label='default seam class'
-          items={defaultSeamClassOptions}
-        />
         <DecimalField
           name='construction.defaultStitchesPerCm'
           label='default stitch density (st/cm)'

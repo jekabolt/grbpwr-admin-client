@@ -6,7 +6,7 @@ import {
   type OperationKind,
   type OperationKindStep,
 } from './operation-kinds';
-import { seamClassLabel, zoneLabel } from './operation-options';
+import { effectiveSeamClass, seamClassLabel, zoneLabel } from './operation-options';
 import {
   SLIT_OVERCAST_WORK,
   enumToMachineToken,
@@ -212,10 +212,17 @@ export function worksForMachine(catalog: WorkCatalog, machineEnum: string): Work
  * обязана сказать то же, что говорит редактор шага сегодня («non-standard combination — <тип>»,
  * `operations-field.tsx`), и сказать это СВОИМ словарём: третья копия фразы жила бы здесь.
  */
-export function printedName(catalog: WorkCatalog, step: RatifyStep): string {
+export function printedName(
+  catalog: WorkCatalog,
+  step: RatifyStep,
+  defaultSeamClass?: string,
+): string {
   const naming = workNaming(catalog, step.work);
   if (naming.kind !== 'derived') return naming.text;
-  const kind = kindOf(step);
+  const kind = kindOf({
+    ...step,
+    seamClass: effectiveSeamClass(step.seamClass, defaultSeamClass),
+  });
   return kind ? kindLabelOf(kind) : '';
 }
 
@@ -379,7 +386,12 @@ const classify = (catalog: WorkCatalog, step: RatifyStep): Verdict => {
  * оборваться и честно сказать «неполон», и печатать «узел SHELL» вместо списка деталей — решение
  * панели, а не классификатора. Арность входов, на которой стоят ярусы, спуска не требует.
  */
-const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): string[] => {
+const evidenceOf = (
+  step: RatifyStep,
+  tier: RatifyTier,
+  printedNow: string,
+  defaultSeamClass?: string,
+): string[] => {
   const out: string[] = [];
   if (tier === 'contradiction' && printedNow) out.push(`printed as "${printedNow}"`);
 
@@ -388,7 +400,7 @@ const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): str
   const inputs = n === 0 ? 'no inputs recorded' : n === 1 ? '1 input' : `${n} inputs`;
   out.push(unit ? `${inputs} · produces unit "${unit}"` : inputs);
 
-  const cls = seamClassLabel(step.seamClass);
+  const cls = seamClassLabel(effectiveSeamClass(step.seamClass, defaultSeamClass));
   if (cls) out.push(`seam class: ${cls}`);
 
   const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
@@ -404,10 +416,21 @@ const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): str
 };
 
 /** Одна строка панели. `index` — позиция шага в `operations` формы, с нуля. */
-export function ratifyStep(step: RatifyStep, index: number, catalog: WorkCatalog): RatifyRow {
-  const printedNow = printedName(catalog, step);
+export function ratifyStep(
+  step: RatifyStep,
+  index: number,
+  catalog: WorkCatalog,
+  defaultSeamClass?: string,
+): RatifyRow {
+  const printedNow = printedName(catalog, step, defaultSeamClass);
   const { tier, proposals } = classify(catalog, step);
-  return { index, tier, printedNow, evidence: evidenceOf(step, tier, printedNow), proposals };
+  return {
+    index,
+    tier,
+    printedNow,
+    evidence: evidenceOf(step, tier, printedNow, defaultSeamClass),
+    proposals,
+  };
 }
 
 /**
@@ -417,6 +440,10 @@ export function ratifyStep(step: RatifyStep, index: number, catalog: WorkCatalog
  * контекста «а как названы соседи»; ярус `named` для того и заведён, чтобы такую строку было чем
  * приглушить.
  */
-export function ratifyCard(steps: readonly RatifyStep[], catalog: WorkCatalog): RatifyRow[] {
-  return steps.map((step, i) => ratifyStep(step, i, catalog));
+export function ratifyCard(
+  steps: readonly RatifyStep[],
+  catalog: WorkCatalog,
+  defaultSeamClass?: string,
+): RatifyRow[] {
+  return steps.map((step, i) => ratifyStep(step, i, catalog, defaultSeamClass));
 }

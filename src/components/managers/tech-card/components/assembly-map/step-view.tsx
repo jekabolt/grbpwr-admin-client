@@ -17,7 +17,7 @@ import {
 import { useMemo } from 'react';
 import { GroupLabel, Pill, Row, Text } from 'ui';
 import { machineTypeLabel, PRESS_EQUIPMENT_LABELS } from '../equipment-options';
-import { operationHeading, zoneLabel } from '../operation-options';
+import { effectiveSeamClass, operationHeading, zoneLabel } from '../operation-options';
 import type { WorkCatalog } from '../operation-work';
 import { UnitGlyph, UnitTile, useUnitPictures } from '../unit-silhouette';
 import { PairShape } from './pair-shape';
@@ -67,7 +67,7 @@ export function StepView({
     operationHeading({
       operationType: op.operationType as common_TechCardOperationType,
       machineType: op.machineType as common_TechCardMachineType,
-      seamClass: op.seamClass,
+      seamClass: effectiveSeamClass(op.seamClass, model.defaultSeamClass),
       work: op.work,
       workCatalog,
       zone: undefined,

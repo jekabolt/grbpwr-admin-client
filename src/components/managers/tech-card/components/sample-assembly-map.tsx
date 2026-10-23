@@ -7,6 +7,7 @@ import { TechCardFormData } from './schema';
 import {
   attachmentKindLabel,
   densityText,
+  effectiveSeamClass,
   operationHeading,
   seamAllowanceText,
   seamClassLabel,
@@ -94,11 +95,12 @@ function specLine(
   o: FormOperation,
   pieceNames: string[],
   /** Ступени припуска НАД шагом — стандарт карточки и стандарт цеха. */
-  standards: { card?: string; workshop?: string },
+  standards: { card?: string; workshop?: string; seamClass?: string },
 ): string {
+  const seamClass = effectiveSeamClass(o.seamClass, standards.seamClass);
   return [
     pieceNames.join(' + '),
-    seamClassLabel(o.seamClass),
+    seamClassLabel(seamClass),
     // ПЛОТНОСТЬ И ДЛИНА — ОДНИМ СОСТАВИТЕЛЕМ (`densityText`), ровно по той же причине, что и фраза
     // отстрочки двумя строками ниже. Здесь стояла ручная сборка, и она теряла ВТОРУЮ ПОЛОВИНУ
     // чтения: длина стежка в мм не хранится нигде — она считается как `10 / плотность`, и формула
@@ -121,7 +123,7 @@ function specLine(
       card: standards.card,
       workshop: standards.workshop,
       operationType: o.operationType,
-      seamClass: o.seamClass,
+      seamClass,
     }),
     // ВСЯ СТРОЧКА ОДНИМ СОСТАВИТЕЛЕМ (`topstitchLine`) — включая СУЩЕСТВИТЕЛЬНОЕ И РЯДЫ. Фразу
     // «где строчить» карта звала общей и раньше, а слово «topstitch» приклеивала сама — и вместе с
@@ -149,6 +151,9 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
   // приложение и один ключ запроса, тот же, что уже прочитал редактор рядом: второго обращения к
   // сети здесь нет, а не приехал ответ — ступень просто молчит, как молчала бы пустая.
   const cardAllowanceMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
+  const cardSeamClass = useWatch({ control, name: 'construction.defaultSeamClass' }) as
+    | string
+    | undefined;
   const { data: workshop } = useWorkshopSettings();
   const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as FormOperation[];
@@ -294,6 +299,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
             const spec = specLine(o, names, {
               card: cardAllowanceMm,
               workshop: shopAllowanceMm,
+              seamClass: cardSeamClass,
             });
             const t = Number(o.smv ?? '');
             return (
@@ -317,7 +323,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                       >[0]['machineType'],
                       // ...а вид — из класса шва: у отстрочки якорь именно там, и без него карта
                       // называла бы её «join» рядом с редактором, который зовёт её «Topstitch».
-                      seamClass: o.seamClass,
+                      seamClass: effectiveSeamClass(o.seamClass, cardSeamClass),
                       // ...а названная работа бьёт обе выведенные лестницы (R8): шаг, которому
                       // назначили работу, зовётся здесь её подписью — той же, что в рельсе и на
                       // печатном листе.

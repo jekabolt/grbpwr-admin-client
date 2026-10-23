@@ -91,6 +91,7 @@ import {
   zipperApplicationLabel,
   effectiveMachineSettings,
   effectivePressSettings,
+  effectiveSeamClass,
   operationHeading,
   operationTypeOptionsFor,
   seamAllowanceText,
@@ -237,7 +238,7 @@ import {
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
-import { SequenceRail } from './sequence-rail';
+import { CardSeamStandard, SequenceRail } from './sequence-rail';
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
@@ -333,7 +334,6 @@ function reviewDxfPack(
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
 const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
-const PLAIN_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_SS_PLAIN';
 const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
 const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
 // The unset member of each equipment vocabulary. In this feature UNSET NEVER MEANS ZERO — it means
@@ -997,8 +997,8 @@ export function skeletonZoneOf(step: Pick<SkeletonStep, 'zone'>): string {
 /**
  * A skeleton step → the row it becomes. Goes through `rowFromCreate`, so a skeleton step and a step
  * made in the create dialog are the same kind of row: nothing in the data says where it came from.
- * A machine join takes the card's default seam class (23-AUTO #6) — the same value the step would
- * inherit, now written so the row says it. Work and SMV stay empty: SMV comes with the work
+ * A machine join stores UNKNOWN: the card standard is resolved when the row is read, so changing
+ * the standard changes every inheriting join. Work and SMV stay empty: SMV comes with the work
  * (`prefillForWork`), and the skeleton names no work.
  */
 export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): OperationRow {
@@ -1017,13 +1017,11 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
       ? { pressEquipment: skeletonPressOf(operationType, ctx).pressEquipment }
       : {}),
   });
-  const seam = (ctx.defaultSeamClass ?? '').trim();
-  const joinSeam = !seam || seam === NONE_SEAM_CLASS ? PLAIN_SEAM_CLASS : seam;
   const join = isMachine && step.inputs.filter((k) => k.trim()).length >= 2;
   const materials = autoStepMaterialKeys(row, ctx.bomLines ?? []);
   return {
     ...row,
-    ...(join ? { seamClass: joinSeam } : {}),
+    ...(join ? { seamClass: NONE_SEAM_CLASS } : {}),
     ...(materials.length ? { bomLineKeys: [...row.bomLineKeys, ...materials] } : {}),
     draft: true,
   };
@@ -2317,6 +2315,9 @@ function useStepInference(
   own: { zone: boolean; thread?: string; press: boolean },
 ): StepInference {
   const ops = useWatch({ name: 'operations' }) as InferenceStep[] | undefined;
+  const defaultSeamClass = useWatch({ name: 'construction.defaultSeamClass' }) as
+    | string
+    | undefined;
   const aliases = (useWatch({ name: 'pieceDxfAliases' }) ?? []) as InferenceAlias[];
   const { zone: ownZone, thread: ownThread, press: ownPress } = own;
   return useMemo(() => {
@@ -2334,6 +2335,7 @@ function useStepInference(
       return stripped;
     });
     const card: InferenceCard = {
+      defaultSeamClass,
       pieces: pieces.map((p) => ({ lineKey: p.lineKey, name: p.name })),
       bomLines,
       aliases,
@@ -2343,7 +2345,18 @@ function useStepInference(
     // ТОЛЬКО ОТКРЫТЫЙ ШАГ, а не вся карточка: редактор смонтирован в единственном экземпляре, а
     // сто двадцать шесть выводов на каждое нажатие клавиши — это не подсказка, а тормоз.
     return inferStep(card, index);
-  }, [ops, aliases, pieces, bomLines, parkPresses, index, ownZone, ownThread, ownPress]);
+  }, [
+    ops,
+    defaultSeamClass,
+    aliases,
+    pieces,
+    bomLines,
+    parkPresses,
+    index,
+    ownZone,
+    ownThread,
+    ownPress,
+  ]);
 }
 
 /**
@@ -2498,6 +2511,11 @@ function OperationEditor({
   const noteValue = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ??
     NONE_SEAM_CLASS) as string;
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? NONE_SEAM_CLASS) as string;
+  const effectiveSeam = effectiveSeamClass(seamClass, cardSeamClass);
   const seamAllowanceMm = (useWatch({ control, name: `operations.${index}.seamAllowanceMm` }) ??
     '') as string;
   const stitchesPerCm = (useWatch({ control, name: `operations.${index}.stitchesPerCm` }) ??
@@ -2742,7 +2760,7 @@ function OperationEditor({
     topstitchRows > 0;
   const showTopstitchWidth = showTopstitch && topstitchModeTakesWidth(topstitchMode);
   const showNeedleGauge = showNeedleFacts && needleCount >= 2;
-  const showBindingStyle = showStitching && seamClass === BOUND_SEAM_CLASS;
+  const showBindingStyle = showStitching && effectiveSeam === BOUND_SEAM_CLASS;
   const showPitch = showPlacement && placementCount >= 2;
   const showFoldback = showHardware && isHardwareStep && attachMethod === THREADED_HARDWARE;
   const showAirTemperature = showWeld && onMachine(SEAM_TAPING);
@@ -3345,7 +3363,7 @@ function OperationEditor({
   const resolvedKind = kindOf({
     operationType: opType,
     machineType,
-    seamClass,
+    seamClass: effectiveSeam,
     attachMethod,
     coverageMode,
     labelAttachStitch,
@@ -3635,7 +3653,7 @@ function OperationEditor({
       const rk = kindOf({
         operationType: r.operationType as string,
         machineType: r.machineType as string,
-        seamClass: r.seamClass as string,
+        seamClass: effectiveSeamClass(r.seamClass as string, cardSeamClass),
         attachMethod: r.attachMethod as string,
         coverageMode: r.coverageMode as string,
         labelAttachStitch: r.labelAttachStitch as string,
@@ -3882,7 +3900,7 @@ function OperationEditor({
       machineType: machineType as common_TechCardMachineType,
       // ЯКОРЬ ВИДА едет в композитор: без него отстрочка на одноигольной называлась бы «join»
       // здесь и «Topstitch» в пикере на два сантиметра выше.
-      seamClass,
+      seamClass: effectiveSeam,
       // ...А НАЗВАННАЯ РАБОТА БЬЁТ И ЕГО (R8). Именно здесь оставался остаток R6: шаг с классом шва
       // отстрочки, которому назначили работу без пункта, звался отстрочкой во всех заголовках,
       // пока пикер на два сантиметра выше называл его выбранной работой.
@@ -4500,13 +4518,13 @@ function OperationEditor({
   // там называет подпись поля, — а в бегущей строке рядом с «6 mm from the edge» голое число
   // читается в тех единицах, в которых читатель работает.
   const seamSummaryText = [
-    seamClassLabel(seamClass),
+    seamClassLabel(effectiveSeam),
     seamAllowanceText({
       own: seamAllowanceMm,
       card: cardAllowanceMm,
       workshop: shopAllowanceMm,
       operationType: opType,
-      seamClass,
+      seamClass: effectiveSeam,
     }),
     seamSecuringLabel(seamSecuring),
   ]
@@ -4517,7 +4535,7 @@ function OperationEditor({
   // три таких строки подряд учат не читать сводки вовсе.
   const showSeamSummary =
     showSewingOverrides &&
-    (isMachineStep || seamClass !== NONE_SEAM_CLASS || seamAllowanceMm.trim() !== '');
+    (isMachineStep || effectiveSeam !== NONE_SEAM_CLASS || seamAllowanceMm.trim() !== '');
 
   // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
   // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
@@ -6093,6 +6111,10 @@ export function OperationsField({
   // подписка на строку рельса означала бы сто двадцать шесть подписок на карточке свалки, и
   // каталог обязан приехать сюда, а не в каждую строку.
   const { catalog: workCatalog } = useOperationWorkCatalog();
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? NONE_SEAM_CLASS) as string;
 
   // ПАНЕЛЬ РАТИФИКАЦИИ — ОДНО СОСТОЯНИЕ ОТКРЫТОСТИ И НИ ОДНОГО СВОЕГО МУТАТОРА (то же правило, что
   // у фулскрина сборки, R3): `useFieldArray` по операциям существует в единственном экземпляре —
@@ -7856,7 +7878,10 @@ export function OperationsField({
         typeof operationHeading
       >[0]['operationType'],
       machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
-      seamClass: getValues(`operations.${i}.seamClass`) as string,
+      seamClass: effectiveSeamClass(
+        getValues(`operations.${i}.seamClass`) as string,
+        cardSeamClass,
+      ),
       // Схема сборки называет шаг тем же словом, что рельс: работа названа — её подпись (R8).
       work: getValues(`operations.${i}.work`) as string,
       workCatalog,
@@ -8161,6 +8186,10 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
+      {!fsOpen &&
+        fields.length === 0 &&
+        unplacedReuploadedKeys.length === 0 &&
+        effectiveMode !== 'schematic' && <CardSeamStandard />}
       {fsOpen ? null : fields.length === 0 &&
         unplacedReuploadedKeys.length === 0 &&
         effectiveMode !== 'schematic' ? (
@@ -8194,7 +8223,7 @@ export function OperationsField({
         <div>
           {/* ЗАГОЛОВОК ГРУППЫ ВЫНЕСЕН ИЗ КОЛОНКИ, КОТОРАЯ МЕНЯЕТ ШИРИНУ. Он жил внутри неё, а
               переключатель вида сидел в правом слоте — то есть был прижат к правому краю
-              контейнера шириной то 320px (список), то во всю секцию (схема). Одно нажатие
+              контейнера шириной то 520px (список), то во всю секцию (схема). Одно нажатие
               перебрасывало орган через полэкрана, и второе приходилось искать глазами. Здесь же
               он был `sticky` только в списке: у прокрученной страницы переключение роняло
               заголовок с прилипшей строки обратно в поток, то есть двигало его и по вертикали.
@@ -8261,7 +8290,7 @@ export function OperationsField({
             <div
               className={cn(
                 'w-full',
-                effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+                effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[520px] lg:shrink-0',
               )}
             >
               {effectiveMode === 'schematic' ? (
@@ -8344,7 +8373,7 @@ export function OperationsField({
                 ref={editorRef}
                 data-step-editor='1'
                 // K-12 · ВТОРАЯ КОЛОНКА ОБЯЗАНА УМЕТЬ СЖИМАТЬСЯ. Коробка стояла БЕЗ ЕДИНОГО
-                // класса рядом с рельсом `lg:w-[320px] lg:shrink-0`, то есть её flex-минимум
+                // класса рядом с рельсом `lg:w-[520px] lg:shrink-0`, то есть её flex-минимум
                 // разрешался в `min-width: auto` = min-content ВСЕГО редактора шага. Пока
                 // min-content уже колонки, это незаметно (замерено: на окне 1280 редактор 768px
                 // при доступных 768, на 1024 — 512 при 512, переполнения нет), но защиты не было

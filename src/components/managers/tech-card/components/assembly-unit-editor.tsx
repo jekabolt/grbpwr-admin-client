@@ -9,7 +9,7 @@ import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult } from './assembly-frontier';
 import { stateWord } from './assembly-node-views';
 import { type FoundPiece } from './nesting/dxf-geometry';
-import { operationHeading } from './operation-options';
+import { effectiveSeamClass, operationHeading } from './operation-options';
 import type { WorkCatalog } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { pieceRefKey } from './piece-block-refs';
@@ -349,6 +349,10 @@ function UnitStepRow({
     '') as string;
   // Тот же якорь вида, что у рельса: два способа назвать шаг — это два разных имени одного шага.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? '') as string;
   // ...и та же названная работа: два способа назвать шаг — это два разных имени одного шага.
   const work = (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
@@ -372,7 +376,7 @@ function UnitStepRow({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
-      seamClass,
+      seamClass: effectiveSeamClass(seamClass, cardSeamClass),
       work,
       workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],

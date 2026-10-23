@@ -17,6 +17,7 @@ import type { SeamKind } from '../design/seam-icons';
 import { machineTypeLabel, stitchTypeNumber } from '../equipment-options';
 import {
   attachmentKindLabel,
+  effectiveSeamClass,
   pressActionLabel,
   pressTowardLabel,
   seamClassLabel,
@@ -127,7 +128,8 @@ export function sewnStrip(ops: readonly SewnOp[], i: number, card: SewnCard): Se
 
   // 1. Разрез шва.
   const ownCls = set(op.seamClass) ? op.seamClass! : '';
-  const stdCls = !ownCls && set(card.defaultSeamClass) ? card.defaultSeamClass! : '';
+  const resolvedCls = effectiveSeamClass(op.seamClass, card.defaultSeamClass);
+  const stdCls = !ownCls && set(resolvedCls) ? resolvedCls : '';
   const cls = ownCls || stdCls;
 
   // 2. Стежок: номер — только однозначный.

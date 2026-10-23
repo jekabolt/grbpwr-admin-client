@@ -187,6 +187,7 @@ import {
   densityText,
   effectiveMachineSettings,
   effectivePressSettings,
+  effectiveSeamClass,
   machineProfileSummary,
   legacyMachineFact,
   operationHeading,
@@ -2991,7 +2992,11 @@ export function TechPackDocument({
                       const materials = resolveOpMaterials(o);
                       // ИМЯ ШАГА СЧИТАЕТСЯ ОДИН РАЗ: его читает и сама строка, и условие ниже,
                       // решающее, не станет ли заметка вторым экземпляром самой себя.
-                      const stepName = operationTypeText(o, workCatalog);
+                      const seamClass = effectiveSeamClass(
+                        o.seamClass,
+                        tc.construction?.defaultSeamClass,
+                      );
+                      const stepName = operationTypeText({ ...o, seamClass }, workCatalog);
                       // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
                       // только собственное значение шага, то есть корректно унаследованная от
                       // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,
@@ -3046,7 +3051,7 @@ export function TechPackDocument({
                         card: cardAllowance,
                         workshop: shopAllowance,
                         operationType: o.operationType,
-                        seamClass: o.seamClass,
+                        seamClass,
                       });
                       // «НИКТО НЕ НАЗВАЛ» ГОВОРИТСЯ ВСЛУХ — но только там, где лестница вообще
                       // применима, и это РАЗНИЦА БУМАГИ С ЭКРАНОМ, а не остаток своей лестницы.
@@ -3112,7 +3117,7 @@ export function TechPackDocument({
                                 следующим шагам. */}
                             <td className={TD}>{opOutput(o) || '—'}</td>
                             <td className={TD}>
-                              <div>{seamClassLabel(o.seamClass) || '—'}</div>
+                              <div>{seamClassLabel(seamClass) || '—'}</div>
                               <div className='font-medium'>{allowanceCell}</div>
                               {detail && <div className='text-labelColor'>{detail}</div>}
                             </td>

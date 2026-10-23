@@ -197,6 +197,10 @@ export function OperationsRatifyPanel(props: RatifyPanelProps) {
 function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: RatifyPanelProps) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationRow[];
+  const defaultSeamClass = useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) as string | undefined;
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     lineKey?: string;
     kind?: string;
@@ -224,8 +228,9 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
       ratifyCard(
         operations.map((o) => toRatifyStep(o, bomKindByKey)),
         catalog,
+        defaultSeamClass,
       ),
-    [operations, bomKindByKey, catalog],
+    [operations, bomKindByKey, catalog, defaultSeamClass],
   );
 
   /**

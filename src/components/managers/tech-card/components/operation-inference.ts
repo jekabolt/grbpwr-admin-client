@@ -44,6 +44,7 @@ import { UNSET_PURPOSE, bindingScopes, scopeKeyOfBinding } from './bom-purpose';
 // фолдится только шов «деталь ↔ связка», потому что только через него пишут чужие руки.
 import { pieceRefKey, rollGoodsScopes } from './piece-block-refs';
 import { kindOf } from './operation-kinds';
+import { effectiveSeamClass } from './operation-options';
 import { isMachineStepType, isPressStepType, pressProfileFitsStep } from './equipment-options';
 
 // ─── вход: снимок карточки, ровно те поля, по которым что-то выводится ──────────────────────────
@@ -95,6 +96,7 @@ export type InferenceStep = {
 };
 
 export type InferenceCard = {
+  defaultSeamClass?: string;
   pieces: InferencePiece[];
   bomLines: InferenceBomLine[];
   aliases: InferenceAlias[];
@@ -454,12 +456,16 @@ function stepBomKinds(step: InferenceStep, bomByKey: Map<string, InferenceBomLin
 }
 
 /** Вид шага сегодня — вычисляемый, как везде на карточке (своей колонки у него ещё нет). */
-export function stepKindId(step: InferenceStep, bomByKey: Map<string, InferenceBomLine>): string {
+export function stepKindId(
+  step: InferenceStep,
+  bomByKey: Map<string, InferenceBomLine>,
+  defaultSeamClass?: string,
+): string {
   return (
     kindOf({
       operationType: step.operationType,
       machineType: step.machineType,
-      seamClass: step.seamClass,
+      seamClass: effectiveSeamClass(step.seamClass, defaultSeamClass),
       attachMethod: step.attachMethod,
       coverageMode: step.coverageMode,
       labelAttachStitch: step.labelAttachStitch,
@@ -517,8 +523,12 @@ function nameOpinion(leaves: string[], idx: CardIndex): SourceOpinion {
 }
 
 /** ОБЛАСТЬ ПО ВИДУ РАБОТЫ. До появления оси `work` источник живёт на вычисляемом виде. */
-function workOpinion(step: InferenceStep, idx: CardIndex): SourceOpinion {
-  const zone = KIND_ZONE_DRAFT[stepKindId(step, idx.bomByKey)];
+function workOpinion(
+  step: InferenceStep,
+  idx: CardIndex,
+  defaultSeamClass?: string,
+): SourceOpinion {
+  const zone = KIND_ZONE_DRAFT[stepKindId(step, idx.bomByKey, defaultSeamClass)];
   return { id: 'work', zones: zone ? [zone] : [] };
 }
 
@@ -534,7 +544,9 @@ function inferZoneWith(card: InferenceCard, index: number, idx: CardIndex): Zone
   const byPieces: SourceOpinion[] = descent.complete
     ? [fabricOpinion(descent.pieces, idx), nameOpinion(descent.pieces, idx)]
     : [];
-  const sources = [...byPieces, workOpinion(step, idx)].filter((s) => s.zones.length > 0);
+  const sources = [...byPieces, workOpinion(step, idx, card.defaultSeamClass)].filter(
+    (s) => s.zones.length > 0,
+  );
 
   const verdict = arbitrate(sources);
   const reason: ZoneInference['reason'] = verdict.value
@@ -593,7 +605,7 @@ function inferThreadWith(
     .map((b) => (b.lineKey ?? '').trim());
   if (threads.length === 0) return { lineKey: '', candidates: [], reason: 'no-data' };
 
-  const kindId = stepKindId(step, idx.bomByKey);
+  const kindId = stepKindId(step, idx.bomByKey, card.defaultSeamClass);
   const preferred = kindId ? KIND_THREAD_PREFERENCE[kindId] : undefined;
   const narrowed = preferred
     ? threads.filter((k) => idx.bomByKey.get(k)?.kind === preferred)
@@ -707,14 +719,14 @@ function smvHintWith(
 ): SmvHint {
   const step = card.steps[index] ?? {};
   if ((step.smv ?? '').trim()) return { smv: '', fromStep: 0 };
-  const kind = stepKindId(step, idx.bomByKey);
+  const kind = stepKindId(step, idx.bomByKey, card.defaultSeamClass);
   if (!kind) return { smv: '', fromStep: 0 };
 
   for (let j = index - 1; j >= 0; j--) {
     const prev = card.steps[j];
     const value = (prev?.smv ?? '').trim();
     if (!value) continue;
-    if (stepKindId(prev, idx.bomByKey) !== kind) continue;
+    if (stepKindId(prev, idx.bomByKey, card.defaultSeamClass) !== kind) continue;
     return { smv: value, fromStep: j + 1 };
   }
   const fromCatalog = (catalogByKind[kind] ?? '').trim();
