@@ -28,6 +28,12 @@ export const ZONE_SEED_MAX_POINTS = 24;
 export const ZONE_SEED_CORNER_WINDOW_MM = 5;
 /** Width removed when a full outer ring is split into two fuse parts. */
 export const ZONE_PART_GAP_MM = 10;
+/** A free pocket narrower than this is treated as split clearance, not room for another part. */
+export const ZONE_PART_MIN_FREE_RADIUS_MM = 15;
+/** A free pocket must also be material relative to the selected outer. */
+export const ZONE_PART_MIN_FREE_RATIO = 0.05;
+/** Smallest separately stored outer; it must render as at least 1 cm² in the rings list. */
+export const ZONE_PART_MIN_RING_AREA_MM2 = 100;
 /** A new hole uses this share of the largest free inscribed radius. */
 export const ZONE_HOLE_SEED_RATIO = 0.18;
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -562,17 +568,29 @@ const longAxis = (ring: readonly XY[], centre: XY): XY => {
 const along = (point: XY, centre: XY, axis: XY) =>
   (point.x - centre.x) * axis.x + (point.y - centre.y) * axis.y;
 
+type SplitVertex = XY & { source: number | null; cut: boolean };
+
 /** Clips one polygon against one side of a line perpendicular to its long axis. */
 function clipAt(
-  ring: readonly XY[],
+  flat: FlatZone,
   centre: XY,
   axis: XY,
   limit: number,
   keepBelow: boolean,
-): XY[] {
+): SplitVertex[] {
   const inside = (value: number) =>
     keepBelow ? value <= limit + RING_EPSILON : value >= limit - RING_EPSILON;
-  const out: XY[] = [];
+  const out: SplitVertex[] = [];
+  const push = (point: SplitVertex) => {
+    const previous = out[out.length - 1];
+    if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) <= RING_EPSILON) {
+      previous.source ??= point.source;
+      previous.cut ||= point.cut;
+      return;
+    }
+    out.push(point);
+  };
+  const { ring, side } = flat;
   for (let index = 0; index < ring.length; index++) {
     const a = ring[index];
     const b = ring[(index + 1) % ring.length];
@@ -580,16 +598,30 @@ function clipAt(
     const bv = along(b, centre, axis);
     const aInside = inside(av);
     const bInside = inside(bv);
-    if (aInside) out.push({ ...a });
+    if (aInside)
+      push({
+        ...a,
+        source: side[index] !== side[(index - 1 + side.length) % side.length] ? side[index] : null,
+        cut: Math.abs(av - limit) <= STRAIGHT_MM,
+      });
     if (aInside === bInside) continue;
     const t = (limit - av) / (bv - av);
-    out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    push({
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      source: null,
+      cut: true,
+    });
   }
-  return out.filter(
-    (point, index, points) =>
-      index === 0 ||
-      Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) > RING_EPSILON,
-  );
+  if (
+    out.length > 1 &&
+    Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= RING_EPSILON
+  ) {
+    const last = out.pop()!;
+    out[0].source ??= last.source;
+    out[0].cut ||= last.cut;
+  }
+  return out;
 }
 
 /** Removes the least significant non-cut vertices until the stored spline fits its hard cap. */
@@ -615,11 +647,27 @@ function limitSplitPoints(points: ZonePoint[], cutAt: number, centre: XY, axis: 
   return result;
 }
 
-/** Turns a clipped half into sharp controls and pins a midpoint onto its straight cut edge. */
-function splitSpline(ring: readonly XY[], cutAt: number, centre: XY, axis: XY): FuseSpline | null {
+/**
+ * Rebuilds a clipped half from the selected ring's controls, not its tessellated display outline.
+ * The two intersections become sharp controls and a midpoint pins the new cut edge straight. Any
+ * old cut midpoint is a source control, so a later split also keeps the earlier gap open.
+ */
+function splitSpline(
+  ring: readonly SplitVertex[],
+  source: readonly ZonePoint[],
+  cutAt: number,
+  centre: XY,
+  axis: XY,
+): FuseSpline | null {
   if (ring.length < SPLINE_MIN_POINTS) return null;
   const rounded = ring
-    .map((point) => ({ x: r1(point.x), y: r1(point.y) }))
+    .filter((point) => point.source != null || point.cut)
+    .map((point) => ({
+      x: r1(point.x),
+      y: r1(point.y),
+      corner: point.source == null ? true : source[point.source]?.corner !== false,
+      cut: point.cut,
+    }))
     .filter(
       (point, index, points) =>
         index === 0 ||
@@ -637,13 +685,10 @@ function splitSpline(ring: readonly XY[], cutAt: number, centre: XY, axis: XY): 
   for (let index = 0; index < rounded.length; index++) {
     const point = rounded[index];
     const next = rounded[(index + 1) % rounded.length];
-    points.push({ ...point, corner: true });
-    if (
-      Math.abs(along(point, centre, axis) - cutAt) <= STRAIGHT_MM &&
-      Math.abs(along(next, centre, axis) - cutAt) <= STRAIGHT_MM
-    ) {
+    points.push({ x: point.x, y: point.y, corner: point.corner });
+    if (point.cut && next.cut) {
       points.push({
-        ...midOf({ ...point, corner: true }, { ...next, corner: true }),
+        ...midOf({ x: point.x, y: point.y, corner: true }, { x: next.x, y: next.y, corner: true }),
         corner: true,
       });
     }
@@ -663,8 +708,10 @@ function splitZoneOuter(
   contourMm: readonly PtMm[],
 ): { zone: SplineZone; ref: ZoneRingRef } | null {
   if (outerRef !== 'main' && !outerRef.startsWith('island:')) return null;
-  const selected = zoneRingOutline(z, outerRef, contourMm).ring;
+  const selectedFlat = zoneRingOutline(z, outerRef, contourMm);
+  const selected = selectedFlat.ring;
   if (selected.length < SPLINE_MIN_POINTS) return null;
+  const source = zoneRingPoints(z, outerRef);
   const centre = ringCentroid(selected);
   const axis = longAxis(selected, centre);
   const extents = selected.map((point) => along(point, centre, axis));
@@ -673,10 +720,10 @@ function splitZoneOuter(
   if (!(gap >= 2)) return null;
   const low = -gap / 2;
   const high = gap / 2;
-  const lowerRing = clipAt(selected, centre, axis, low, true);
-  const upperRing = clipAt(selected, centre, axis, high, false);
-  const lower = splitSpline(lowerRing, low, centre, axis);
-  const upper = splitSpline(upperRing, high, centre, axis);
+  const lowerRing = clipAt(selectedFlat, centre, axis, low, true);
+  const upperRing = clipAt(selectedFlat, centre, axis, high, false);
+  const lower = splitSpline(lowerRing, source, low, centre, axis);
+  const upper = splitSpline(upperRing, source, high, centre, axis);
   if (!lower || !upper) return null;
 
   const keptHoles = z.holes.filter((_, index) => {
@@ -756,14 +803,41 @@ export function addZoneIsland(
   selectedOuter: ZoneRingRef = 'main',
 ): { zone: SplineZone; ref: ZoneRingRef } | null {
   if (!isSplineZone(z) || 1 + z.islands.length >= ZONE_MAX_OUTER_RINGS) return null;
-  const outers = ['main' as const, ...z.islands.map((_, index) => `island:${index}` as const)].map(
-    (ref) => zoneRingOutline(z, ref, contourMm).ring,
-  );
+  const outerRefs = ['main' as const, ...z.islands.map((_, index) => `island:${index}` as const)];
+  const outers = outerRefs.map((ref) => zoneRingOutline(z, ref, contourMm).ring);
   const circle = largestFreeCircle(contourMm, outers);
-  const island = circle && roundSeed(circle, (freeRadius) => Math.min(12, freeRadius * 0.25));
+  const selected = zoneRingOutline(z, selectedOuter, contourMm).ring;
+  const areaOf = (ring: readonly XY[]) => {
+    let twice = 0;
+    for (let index = 0; index < ring.length; index++) {
+      const point = ring[index];
+      const next = ring[(index + 1) % ring.length];
+      twice += point.x * next.y - next.x * point.y;
+    }
+    return Math.abs(twice / 2);
+  };
+  const freeArea = Math.max(
+    0,
+    areaOf(contourMm) - outers.reduce((sum, ring) => sum + areaOf(ring), 0),
+  );
+  const selectedArea = areaOf(selected);
+  const usablePocket =
+    circle &&
+    circle.radius >= ZONE_PART_MIN_FREE_RADIUS_MM &&
+    freeArea >= selectedArea * ZONE_PART_MIN_FREE_RATIO;
+  const island = usablePocket && roundSeed(circle, (freeRadius) => Math.min(12, freeRadius * 0.5));
   if (island) {
+    const ringArea = areaOf(flattenZoneSides(island.points).ring);
     const index = z.islands.length;
-    return { zone: { ...z, islands: [...z.islands, island] }, ref: `island:${index}` };
+    const zone = { ...z, islands: [...z.islands, island] };
+    if (ringArea >= ZONE_PART_MIN_RING_AREA_MM2) {
+      try {
+        zoneRingsMm(zone, contourMm);
+        return { zone, ref: `island:${index}` };
+      } catch {
+        // The pocket can be broad but topologically unavailable (for example, inside an outer).
+      }
+    }
   }
   return splitZoneOuter(z, selectedOuter, contourMm);
 }
@@ -782,10 +856,15 @@ export type ZoneBus = {
   setContour: (ci: string, contour: readonly PtMm[] | undefined) => void;
   selected: (ci: string) => ZoneRingRef;
   select: (ci: string, ref: ZoneRingRef) => void;
-  /** Push the zone as it is before a change. */
-  push: (ci: string, zone: FuseZone | null, selected?: ZoneRingRef) => void;
-  /** The zone before the last change, or undefined when there is nothing to undo. */
-  pop: (ci: string) => { zone: FuseZone | null; selected: ZoneRingRef } | undefined;
+  /** Records one complete zone mutation and changes ring selection in the same history event. */
+  commit: (
+    ci: string,
+    zone: FuseZone | null,
+    selected?: ZoneRingRef,
+    nextSelected?: ZoneRingRef,
+  ) => void;
+  /** Restores the selection attached to the previous zone and returns that zone. */
+  undo: (ci: string) => { zone: FuseZone | null; selected: ZoneRingRef } | undefined;
   canUndo: (ci: string) => boolean;
   subscribe: (fn: () => void) => () => void;
   version: () => number;
@@ -854,20 +933,17 @@ export function createZoneBus(): ZoneBus {
       selections.set(ci, ref);
       bump();
     },
-    push: (ci, zone, selected) => {
-      hist.set(
-        ci,
-        [
-          ...(hist.get(ci) ?? []),
-          { zone, selected: selected ?? selections.get(ci) ?? 'main' },
-        ].slice(-50),
-      );
+    commit: (ci, zone, selected, nextSelected) => {
+      const previousSelected = selected ?? selections.get(ci) ?? 'main';
+      hist.set(ci, [...(hist.get(ci) ?? []), { zone, selected: previousSelected }].slice(-50));
+      selections.set(ci, nextSelected ?? previousSelected);
       bump();
     },
-    pop: (ci) => {
+    undo: (ci) => {
       const st = hist.get(ci) ?? [];
       if (!st.length) return undefined;
       hist.set(ci, st.slice(0, -1));
+      selections.set(ci, st[st.length - 1].selected);
       bump();
       return st[st.length - 1];
     },

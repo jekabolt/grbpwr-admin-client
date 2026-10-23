@@ -5,6 +5,7 @@ import {
   addZoneHole,
   addZoneIsland,
   createZoneBus,
+  deleteZoneRing,
   insertZonePoint,
   removeZonePoint,
   seedZone,
@@ -14,6 +15,7 @@ import {
   zoneRingOutline,
   ZONE_HOLE_SEED_RATIO,
   ZONE_PART_GAP_MM,
+  ZONE_PART_MIN_RING_AREA_MM2,
   ZONE_SEED_MAX_POINTS,
   type ZonePoint,
 } from 'components/managers/tech-card/components/nesting/fuse-zone';
@@ -184,13 +186,6 @@ export function main() {
   assert.equal(splitWithHoles.zone.holes.length, 1, 'a hole crossing the gap is dropped');
   assert.doesNotThrow(() => zoneRingsMm(splitWithHoles.zone, splitContour));
 
-  // The panel pushes the unsplit zone before writing; one undo restores it and its selection.
-  const bus = createZoneBus();
-  bus.push('split-assert', full, 'main');
-  bus.select('split-assert', split.ref);
-  const undone = bus.pop('split-assert');
-  assert.deepEqual(undone, { zone: full, selected: 'main' }, 'undo restores the full-fill seed');
-
   // A new cut-out is four round points at 18% of the outer's largest free inscribed radius.
   const addedHole = addZoneHole(full, 'main', splitContour);
   assert.ok(addedHole);
@@ -212,6 +207,20 @@ export function main() {
   const holeRadius = Math.hypot(holePoints[0].x - holeCentre.x, holePoints[0].y - holeCentre.y);
   near(holeRadius / 50, ZONE_HOLE_SEED_RATIO, 0.005);
 
+  // A genuinely broad free pocket still seeds a round part, but never below the visible minimum.
+  const pocketZone = splineZone(sharpRing(10, 10, 80, 90).points);
+  const pocketPart = addZoneIsland(pocketZone, splitContour, 'main');
+  assert.ok(pocketPart);
+  assert.ok(
+    pocketPart.zone.islands[0].points.some((point) => !point.corner),
+    'usable free space seeds a round part instead of splitting the selected outer',
+  );
+  assert.ok(
+    Math.abs(signedArea(zoneRingOutline(pocketPart.zone, pocketPart.ref, splitContour).ring)) >=
+      ZONE_PART_MIN_RING_AREA_MM2,
+    'a seeded part respects the minimum part area',
+  );
+
   const sleeveOutline = noisySleeveOutline();
   const sleeveInset = fuseInsetRingMm(sleeveOutline, s0, null);
   const noisySleeve = seedZone(sleeveInset);
@@ -226,7 +235,7 @@ export function main() {
   const sleeveSplitRings = zoneRingsMm(splitSleeve.zone, sleeveInset);
   assert.equal(sleeveSplitRings.outers.length, 2);
   assert.ok(
-    (['main' as const, splitSleeve.ref]).every((ref) =>
+    ['main' as const, splitSleeve.ref].every((ref) =>
       zoneRingOutline(splitSleeve.zone, ref, sleeveInset).follows.some(Boolean),
     ),
     'both sleeve halves retain contour-following outer sides',
@@ -236,6 +245,55 @@ export function main() {
       ring.points.every((point) => point.corner),
     ),
     'the new cut sides use sharp controls',
+  );
+  assert.ok(
+    [splitSleeve.zone.spline, splitSleeve.zone.islands[0]].every(
+      (ring) => ring.points.length <= noisySleeve.spline.points.length + 3,
+    ),
+    'each sleeve half keeps source corners plus only its two cut endpoints and cut midpoint',
+  );
+
+  // The 10 mm split clearance is not a usable free pocket. A second + part therefore splits the
+  // selected half instead of planting a tiny round ring inside that gap.
+  const splitSleeveAgain = addZoneIsland(splitSleeve.zone, sleeveInset, splitSleeve.ref);
+  assert.ok(splitSleeveAgain, 'a second + part splits the selected sleeve half');
+  assert.notDeepEqual(
+    splitSleeveAgain.zone.islands[0],
+    splitSleeve.zone.islands[0],
+    'the selected outer is replaced by one of its split halves',
+  );
+  const twiceSplitRings = zoneRingsMm(splitSleeveAgain.zone, sleeveInset);
+  assert.equal(twiceSplitRings.outers.length, 3);
+  assert.ok(
+    twiceSplitRings.outers.every(
+      (ring) => Math.abs(signedArea(ring)) >= ZONE_PART_MIN_RING_AREA_MM2,
+    ),
+    'a second split never creates an outer below the minimum part area',
+  );
+
+  // Split, split, undo, undo is one zone-wide history regardless of which ring was selected.
+  const bus = createZoneBus();
+  const historyKey = 'split-assert';
+  bus.commit(historyKey, noisySleeve, 'main', splitSleeve.ref);
+  bus.commit(historyKey, splitSleeve.zone, splitSleeve.ref, splitSleeveAgain.ref);
+  assert.deepEqual(bus.undo(historyKey), {
+    zone: splitSleeve.zone,
+    selected: splitSleeve.ref,
+  });
+  assert.deepEqual(
+    bus.undo(historyKey),
+    { zone: noisySleeve, selected: 'main' },
+    'two undos restore the original unsplit zone',
+  );
+  assert.equal(bus.canUndo(historyKey), false);
+
+  const deletedPart = deleteZoneRing(splitSleeve.zone, splitSleeve.ref);
+  assert.ok(deletedPart);
+  bus.commit(historyKey, splitSleeve.zone, splitSleeve.ref, 'main');
+  assert.deepEqual(
+    bus.undo(historyKey),
+    { zone: splitSleeve.zone, selected: splitSleeve.ref },
+    'undo after delete restores the removed ring and its selection',
   );
   const sleevePoints = zonePoints(noisySleeve);
   const sleeveCentre = sleevePoints.reduce(

@@ -453,8 +453,7 @@ function ZoneRow({
   };
   const write = (zone: PieceFuseSpec['zone'], nextSelected: ZoneRingRef = selected) => {
     if (!valid(zone)) return;
-    bus.push(ci, spec.zone, selected);
-    bus.select(ci, nextSelected);
+    bus.commit(ci, spec.zone, selected, nextSelected);
     onChange({ ...spec, zone });
   };
   const chip = (label: string, on: boolean, off: boolean, onClick: () => void) => (
@@ -588,11 +587,8 @@ function ZoneRow({
           write(withCorners(spline, false, selected)),
         )}
         {chip('undo', false, !canUndo, () => {
-          const prev = bus.pop(ci);
-          if (prev) {
-            bus.select(ci, prev.selected);
-            onChange({ ...spec, zone: prev.zone });
-          }
+          const prev = bus.undo(ci);
+          if (prev) onChange({ ...spec, zone: prev.zone });
         })}
         {chip('reset', false, !drawn || contour.length < 3, reset)}
       </div>

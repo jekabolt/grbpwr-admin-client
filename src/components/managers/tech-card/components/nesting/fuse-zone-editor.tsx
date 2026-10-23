@@ -152,16 +152,15 @@ export function FuseZoneEditor({
         } catch {
           return;
         }
-        b?.push(ci, s.zone, ringRef);
+        b?.commit(ci, s.zone, ringRef, ringRef);
         set({ ...s, zone: nextZone });
         setPicked(null);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
-      const prev = b?.pop(ci);
+      const prev = b?.undo(ci);
       if (!prev) return;
       e.preventDefault();
-      b?.select(ci, prev.selected);
       set({ ...s, zone: prev.zone });
     };
     window.addEventListener('keydown', k);
@@ -176,8 +175,7 @@ export function FuseZoneEditor({
   };
   const snapped = (q: Pt) =>
     outerSelected && inner.length >= 3 && nearestOn(q, inner).d <= ZONE_ON_CONTOUR_MM / 10;
-  const begin = () => bus?.push(ci, zone, selected);
-  const write = (next: ZonePoint[]) => {
+  const write = (next: ZonePoint[], remember = true) => {
     const nextZone = withZoneRingPoints(zone, selected, next);
     if (!nextZone) return false;
     try {
@@ -185,6 +183,7 @@ export function FuseZoneEditor({
     } catch {
       return false;
     }
+    if (remember) bus?.commit(ci, zone, selected, selected);
     onChange({ ...spec, zone: nextZone });
     return true;
   };
@@ -201,11 +200,9 @@ export function FuseZoneEditor({
     const q = svgPoint(e);
     if (d.t === 'pt') {
       if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
-      if (!d.moved) begin();
-      d.moved = true;
       const next = mm.slice();
       next[d.i] = { ...L(keep(q)), corner: mm[d.i].corner };
-      write(next);
+      if (write(next, !d.moved)) d.moved = true;
     }
   };
   /** A tap without a drag; true when it completes a double tap on the same key. */
@@ -229,12 +226,10 @@ export function FuseZoneEditor({
         // The first tap may have toggled sharp / round; remove the point from the zone before it.
         const next = removeZonePoint(zoneRingPoints(double.before, selected), d.i);
         if (next) {
-          if (double.before === zone) begin();
-          write(next);
+          write(next, double.before === zone);
           setPicked(null);
         }
       } else {
-        begin();
         write(mm.map((p, i) => (i === d.i ? { ...p, corner: !p.corner } : p)));
       }
     } else if (d.t === 'side' && d.side != null) {
@@ -243,7 +238,6 @@ export function FuseZoneEditor({
         const side = sideAt(at);
         const next = side && insertZonePoint(mm, side.side, L(keep(side.p)));
         if (next) {
-          begin();
           write(next);
           setPicked(side.side + 1);
         }
