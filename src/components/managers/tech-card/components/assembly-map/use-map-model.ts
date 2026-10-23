@@ -4,6 +4,7 @@
 import { readMap, type MapRead, type MapStep } from 'lib/assembly-skeleton/map';
 import { readablePieceName } from 'lib/assembly-skeleton/names';
 import type { SeamGraph } from 'lib/assembly-skeleton/types';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { useMemo, useRef } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useCardSeamGraph } from '../card-unit-pictures';
@@ -68,7 +69,9 @@ export function useMapModel(): MapModel {
     const m = new Map<string, string>();
     for (const o of ops) {
       const k = (o?.outputUnitKey ?? '').trim();
-      if (k && !m.has(k)) m.set(k, (o?.outputUnitName ?? '').trim() || k);
+      if (k && !m.has(k)) {
+        m.set(k, unitDisplayName({ key: k, outputUnitName: o?.outputUnitName }));
+      }
     }
     return m;
   }, [ops]);
@@ -96,7 +99,7 @@ export function useMapModel(): MapModel {
     sewnOf,
     ops,
     pieceName: (k) => pieceNames.get(k) || read?.geoms.get(k)?.name || k,
-    unitName: (k) => unitNames.get(k) ?? k,
+    unitName: (k) => unitNames.get(k) ?? unitDisplayName({ key: k }),
     isUnit: (k) => unitNames.has(k),
     firstMachine,
   };

@@ -2,7 +2,8 @@
 // Проверка перезалива DXF (L4a): ВЕСЬ путь загрузки — `reuploadSheet` из панели выкроек
 // (nesting/dxf-reupload.ts: скачать старый лист → разобрать → reconcile → applyPlan → загрузить) —
 // в node, на golden-листах против карточки формы card 69 (шаги 10/20 — перекрой BP_2 и FP_R,
-// 30/40 — призрак CLR_3, разрез BP — join перед «back»). Печатает таблицу шагов с метками.
+// 30/40 — призрак CLR_3, разрез BP). Печатает таблицу шагов с метками и proves that re-upload
+// never changes authored assembly structure.
 //
 //   node scripts/dxf-reupload-check.mjs
 //
@@ -151,13 +152,6 @@ function makeDeps(M, store, log, faults = {}) {
       blockName: s.blockName,
       pieceLineKey: s.pieceLineKey,
     }),
-    makeJoin: (s) => ({
-      title: `join ${s.outputUnitName}`,
-      inputKeys: s.inputKeys,
-      outputUnitKey: s.outputUnitKey,
-      outputUnitName: s.outputUnitName,
-      review: '',
-    }),
   };
 }
 
@@ -215,6 +209,15 @@ function table(title, res) {
 }
 
 const reviewsOf = (ops) => ops.map((o) => o.review || '');
+const authoredOperations = (operations) =>
+  operations.map((operation) => {
+    const { review: _review, ...authored } = operation;
+    return authored;
+  });
+function operationsPreserved(tag, before, after) {
+  is(tag, after.length, before.length, 'operation count is preserved');
+  is(tag, authoredOperations(after), authoredOperations(before), 'order, inputs and outputs stay');
+}
 
 // ─── прогон ──────────────────────────────────────────────────────────────────────────────────
 
@@ -534,7 +537,6 @@ async function main() {
       mintKey: helpers.mintKey,
       makePiece: helpers.makePiece,
       makeAlias: helpers.makeAlias,
-      makeJoin: helpers.makeJoin,
       setReview: (op, review) => ({ ...op, review }),
     });
     table('g-combo · library with card seams', { ...result, result });
@@ -547,40 +549,38 @@ async function main() {
     is(tag, result.reviews.length, 2, 'marks ≤ 2');
   }
 
-  // ── g4-split: BP → BP_U + BP_D; clean join before «back», no mark ─────────────────────────
+  // ── g4-split: BP → BP_U + BP_D; pieces change, authored assembly does not ────────────────
   {
     const tag = 'g4-split';
-    // дефекты: 50 («back») и 60 едут за join, 15 — не позиционный, стоит
+    // Defects stay on the same numbered steps because no operation is inserted or moved.
     const issues = [{ operationNumber: 50 }, { operationNumber: 60 }, { operationNumber: 15 }];
     const { out } = await run({ name: 'g4-split.dxf', bytes: B.g4split }, { extra: { issues } });
-    if (out.kind === 'applied') is(tag, out.issueNumbers, [60, 70, 15], 'issues за join');
+    if (out.kind === 'applied') is(tag, out.issueNumbers, [50, 60, 15], 'issue numbers stay');
     is(tag, out.kind, 'applied', 'исход');
     if (out.kind === 'applied') {
       table('g4-split · base → g4-split.dxf (card 69 shape)', out);
-      is(tag, out.operations.length, card.operations.length + 1, 'шагов +1');
-      is(
-        tag,
-        out.result.joins.map((j) => [j.opIndex, j.parentKey, j.unitName]),
-        [[4, K('BP'), 'BP']],
-        'join перед «back» (50), ▣ BP',
-      );
+      operationsPreserved(tag, card.operations, out.operations);
+      is(tag, out.result.joins, [], 'no generated join');
       is(
         tag,
         reviewsOf(out.operations),
-        ['', '', '', '', '', '', '', '', '', ''],
-        'join без метки',
+        ['', '', '', '', 'split', '', '', '', ''],
+        'existing back step is marked',
       );
-      const j = out.result.joins[0];
-      is(tag, out.operations[5].inputKeys, [j?.unitKey, 'YOKE'], '«back» берёт ▣ BP');
+      const jump = M.markJumpParams(new URLSearchParams(), out.operations);
       is(
         tag,
-        M.markJumpParams(new URLSearchParams(), out.operations),
-        null,
-        'нет перехода к метке',
+        jump && [jump.get('tab'), jump.get('opi')],
+        ['construction', '4'],
+        'jump points to the authored back step',
       );
-      is(tag, out.operations[4].smv ?? '', '', 'нет других SMV — join пустой');
-      is(tag, out.result.opIndexOf, [0, 1, 2, 3, 5, 6, 7, 8, 9], 'старый индекс → новый');
-      const parts = new Set(j?.partKeys ?? []);
+      is(
+        tag,
+        out.result.opIndexOf,
+        card.operations.map((_, index) => index),
+        'index map is identity',
+      );
+      const parts = new Set(out.result.addedPieceKeys);
       is(
         tag,
         out.pieces.filter((p) => parts.has(p.lineKey)).map((p) => p.bornFrom),
@@ -591,6 +591,13 @@ async function main() {
         tag,
         out.pieces.filter((p) => !parts.has(p.lineKey) && p.bornFrom).length === 0,
         'прочие детали ни от кого не рождены',
+      );
+      yes(
+        tag,
+        out.operations.every((operation) =>
+          (operation.inputKeys ?? []).every((key) => !parts.has(key)),
+        ),
+        'split parts remain unplaced',
       );
       yes(
         tag,
@@ -674,7 +681,7 @@ async function main() {
       is(
         tag,
         [out.rowIndex, out.pieceCount, out.loss, log.uploads.length],
-        [0, 4, { pieces: 9, steps: 9, seams: 1 }, 0],
+        [0, 4, { pieces: 9, steps: 0, seams: 1 }, 0],
         'исход несёт новые детали и точные потери, файл ещё не загружен',
       );
       is(
@@ -688,6 +695,23 @@ async function main() {
       const row = await M.uploadForeignSheet(out, upload);
       const replace = M.planForeignReplacement(out, row);
       if (replace.kind === 'replace') {
+        operationsPreserved(tag, before.operations, replace.operations);
+        is(
+          tag,
+          replace.operations.map((operation) => operation.review || ''),
+          [
+            'remapped',
+            'remapped',
+            'remapped',
+            'remapped',
+            'remapped',
+            '',
+            'remapped',
+            'remapped',
+            '',
+          ],
+          'steps with removed piece inputs are marked',
+        );
         const patterns = before.patterns.map((r, i) =>
           i === replace.rowIndex ? { ...r, ...replace.row } : r,
         );

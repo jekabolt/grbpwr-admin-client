@@ -94,7 +94,7 @@ import { CanvasSegments, PieceSheet, type PieceMark } from './piece-sheet';
 import { FuseFields, type InterliningLine } from './fuse-fields';
 import { FuseOverlay } from './fuse-overlay';
 import { createZoneBus, isDrawnZone, seedZone } from './fuse-zone';
-import { fusingSheetsChange } from './fusing-sheets-stage';
+import { fusingSheetsChange, fusingSignature, hasFusedPiece } from './fusing-sheets-stage';
 import {
   blankFuse,
   fuseLineOf,
@@ -741,6 +741,11 @@ function planPieceUpdates(
   return { updates, unchanged };
 }
 
+export type PieceMatchApplyResult = {
+  fusingTouched: boolean;
+  fusingBomLineKeys: string[];
+};
+
 export function PieceMatchModal({
   files,
   scope,
@@ -797,7 +802,7 @@ export function PieceMatchModal({
   // Optional override: the caller may already know the card cannot be edited (no write right).
   // A RELEASED card is detected here on its own either way.
   readOnly?: boolean;
-  onClose: (applied?: boolean) => void;
+  onClose: (applied?: boolean, result?: PieceMatchApplyResult) => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { data: cardRead } = useTechCard(techCardId);
@@ -1757,16 +1762,28 @@ export function PieceMatchModal({
     const target = newTargetOf(state.row);
     return target.kind === 'piece' ? pieceEdits[target.key]?.fuse : newEdits[target.key]?.fuse;
   };
+  const effectiveFuseOf = (ci: string): PieceFuseSpec | undefined => {
+    const edited = editedFuseOf(ci);
+    if (edited) return edited;
+    const state = stateOf(ci);
+    if (state.kind !== 'existing') return undefined;
+    const piece = (pieces ?? []).find(
+      (candidate) =>
+        (candidate.lineKey ?? '').trim().toLowerCase() === state.key.trim().toLowerCase(),
+    );
+    return piece?.fused ? readFuseSpec(storedFuseOf(piece)) : undefined;
+  };
   // Regeneration evaluates the same stored zone against every size. Refuse this dialog's apply if
-  // any contour that will receive an edited drawn zone clips to no positive area; otherwise the
-  // generator catches the error later by silently skipping only that size.
-  const invalidEditedZone = contourPieces.some((piece) => {
-    const editedFuse = editedFuseOf(ciOf(piece));
-    if (editedFuse?.mode !== 'zone' || !isDrawnZone(editedFuse.zone)) return false;
+  // any contour that will receive a drawn zone clips to no positive area; otherwise the generator
+  // catches the error later by silently skipping only that size. Stored invalid zones count too: an
+  // unrelated edit must not be allowed to re-save one and leave its generated sheet incomplete.
+  const invalidZone = contourPieces.some((piece) => {
+    const fuse = effectiveFuseOf(ciOf(piece));
+    if (fuse?.mode !== 'zone' || !isDrawnZone(fuse.zone)) return false;
     try {
       const polygons = generateFuseGeometry({
         outline: piece.poly.map((point) => ({ x: point.x * 10, y: point.y * 10 })),
-        spec: editedFuse,
+        spec: fuse,
         seamAllowanceMm: requiredSeamAllowanceMm,
         darts: fusingDartPolygons(piece),
       });
@@ -1862,9 +1879,12 @@ export function PieceMatchModal({
   }, [selected, blockCounts, rowByCi, mineByBlock]);
 
   function apply(rowsToApply: readonly BlockRow[] = rows) {
-    if (invalidEditedZone) return;
+    if (invalidZone) return;
     setSaving(true);
     try {
+      const fusingBeforeValues = getValues();
+      const fusingBefore = fusingSignature(fusingBeforeValues);
+      const hadFusedPiece = hasFusedPiece(fusingBeforeValues);
       // Read at commit time, not from the render-time snapshot: the operator can have added or
       // renamed a piece in the table behind this dialog while it was open.
       const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
@@ -1972,20 +1992,14 @@ export function PieceMatchModal({
       // к уходящей детали), набор живых ключей (по нему отсеиваются её алиасы) и сама запись
       // массива. Каскад на сервере (строки рецепта, замеренные площади) сработает при
       // СОХРАНЕНИИ карточки, не здесь.
-      // Ссылки на деталь снимаются ДО того, как она исчезнет, — тот же контракт, что у
-      // pieces-tab.removePiece: операция, всё ещё называющая удалённую деталь, роняет сохранение
-      // на сервере (operations[N].piece_line_key: no cut-piece "…") и откатывает всю транзакцию —
-      // по ключу, которого оператор не видит, в строке, которую он не трогал. Выноски при этом
-      // НЕ трогаются: выноска — номер на эскизе, она переживает деталь.
-      // Сверка входов ПОБАЙТНАЯ, как у removePiece и classifyAssemblyInputs: снимаются сырые ключи
-      // ровно тех деталей, что ушли из массива выше. Свёрнутый `dropped` для входов не годится —
-      // деталь «ABC» и узел «abc» два разных входа, и удаление детали снимало бы заодно чужой узел.
+      // Сборка не следует за удалением автоматически. Сырые ключи ушедших деталей остаются на тех
+      // же позициях входов, joins и выходные узлы не меняются, а затронутый шаг получает review
+      // `remapped`. Так потеря видима технологу и не превращается в молчаливо другую сборку.
+      // Сверка входов ПОБАЙТНАЯ: деталь «ABC» и узел «abc» — разные входы.
       const goneKeys = new Set(
         all.map((p) => p.lineKey ?? '').filter((k) => k && dropped.has(k.trim().toLowerCase())),
       );
       if (goneKeys.size > 0) {
-        // Шов, оставшийся меньше чем с двумя входами, растворяется или уходит (old-pieces-ops):
-        // иначе карточка не сохраняется по join-arity в шаге, которого оператор не трогал.
         const operations = (getValues('operations') ?? []) as NonNullable<
           TechCardFormData['operations']
         >;
@@ -2305,18 +2319,54 @@ export function PieceMatchModal({
       // The fusible sheets follow the fuse markup. Staged behind the card body: the header's save
       // writes the pieces first, then this rebuilds the DXFs off the stored card. A failed rebuild
       // is a toast — the pieces stay saved.
-      const fuseTouched = [...Object.values(pieceEdits), ...Object.values(newEdits)].some(
-        (ed) => ed.fuse !== undefined,
-      );
-      if ((fuseTouched || !!interlining) && staging && techCardId)
-        staging.stage(fusingSheetsChange(techCardId));
+      const fusingAfterValues = getValues();
+      const rebuildFusing =
+        !!interlining ||
+        (fusingBefore !== fusingSignature(fusingAfterValues) &&
+          (hadFusedPiece || hasFusedPiece(fusingAfterValues)));
+      if (rebuildFusing && staging && techCardId) staging.stage(fusingSheetsChange(techCardId));
       if (interlining) {
         const skipped = new Set(
           rowsToApply.filter((row) => row.choice === SKIP).map((row) => row.block),
         );
         interlining.onReview(skipped);
       }
-      onClose(true);
+      const affectedFusingLines = new Set<string>();
+      const previousInterliningLineKeys = currentBom
+        .filter((item) => item.section === INTERLINING_SECTION && item.lineKey?.trim())
+        .map((item) => item.lineKey!.trim());
+      const rememberFuseLine = (
+        spec: PieceFuseSpec | undefined,
+        lineKeys = interliningLineKeys,
+      ) => {
+        if (!spec?.mode) return;
+        const lineKey = fuseLineOf(spec, lineKeys).trim();
+        if (lineKey) affectedFusingLines.add(lineKey);
+      };
+      for (const piece of live) {
+        const pieceKey = (piece.lineKey ?? '').trim().toLowerCase();
+        const edit = committedPieceEdits[pieceKey];
+        if (edit?.fuse === undefined) continue;
+        rememberFuseLine(readFuseSpec(storedFuseOf(piece)), previousInterliningLineKeys);
+        rememberFuseLine(edit.fuse);
+      }
+      for (const edit of Object.values(committedNewEdits)) {
+        if (edit.fuse !== undefined) rememberFuseLine(edit.fuse);
+      }
+      for (const piece of all) {
+        if (piece.fused)
+          rememberFuseLine(readFuseSpec(storedFuseOf(piece)), previousInterliningLineKeys);
+      }
+      for (const piece of (fusingAfterValues.pieces ?? []) as NonNullable<
+        TechCardFormData['pieces']
+      >) {
+        if (piece.fused) rememberFuseLine(readFuseSpec(storedFuseOf(piece)));
+      }
+      if (interlining?.slotLineKey) affectedFusingLines.add(interlining.slotLineKey);
+      onClose(true, {
+        fusingTouched: rebuildFusing,
+        fusingBomLineKeys: [...affectedFusingLines],
+      });
     } finally {
       setSaving(false);
     }
@@ -2448,7 +2498,7 @@ export function PieceMatchModal({
   const canSave = changed && !readOnly;
   // Until every dispute is settled there is nothing valid to save: the server would reject the
   // whole card.
-  const blocked = unresolvedCollapses.length > 0 || invalidEditedZone;
+  const blocked = unresolvedCollapses.length > 0 || invalidZone;
   const actionDisabled = pieceMatchActionDisabled(canSave, saving, blocked);
   const applyAuto = () => {
     if (actionDisabled) return;
@@ -2576,8 +2626,11 @@ export function PieceMatchModal({
   const ownerFileLinesOfPiece = (pieceLineKey: string): string[] => {
     const pieceKey = pieceLineKey.trim().toLowerCase();
     if (!pieceKey) return [];
+    const dropped = new Set(
+      (pieceEdits[pieceKey]?.dropFileBomLineKeys ?? []).map((key) => key.trim()),
+    );
     return interlinings.flatMap((line) => {
-      if (!line.ownerFileName) return [];
+      if (!line.ownerFileName || dropped.has(line.key)) return [];
       const lineScope = scopes.find((candidate) => candidate.key === line.key);
       if (!lineScope) return [];
       return (aliases ?? []).some(
@@ -2690,7 +2743,7 @@ export function PieceMatchModal({
   };
   // Zoomed onto the selected piece: it is fused with a mode and the zoom was not left.
   const zoomed = (() => {
-    if (!selected || zoomOut === selected) return null;
+    if (interlining || !selected || zoomOut === selected) return null;
     const f = fuseOfCi(selected);
     return f?.mode ? selected : null;
   })();
@@ -2788,7 +2841,7 @@ export function PieceMatchModal({
     // A piece, panel «Fold»: NAME · FUSING (phone: docked above the footer) · GRAIN + UNGRADED ·
     // NOTE.
     const fuse = vals.fuse ?? readFuseSpec(vals);
-    const fuseFields = (
+    const fuseFields = interlining ? null : (
       <FuseFields
         key={ci}
         spec={fuse}
@@ -2837,9 +2890,11 @@ export function PieceMatchModal({
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
           />
         </PanelField>
-        <div className='hidden sm:block' {...anchor('fusingMode')}>
-          {fuseFields}
-        </div>
+        {fuseFields && (
+          <div className='hidden sm:block' {...anchor('fusingMode')}>
+            {fuseFields}
+          </div>
+        )}
         <div className='grid grid-cols-2 items-end gap-2'>
           <PanelField label='grain'>
             <div {...anchor('grainline')}>
@@ -2950,7 +3005,9 @@ export function PieceMatchModal({
                 // Zoomed: everything but the piece being fused steps back.
                 markOf={(p) => (zoomed && ciOf(p) !== zoomed ? 'unnamed' : markOf(p))}
                 labelOf={labelOf}
-                selectedKey={selected}
+                selectedKey={
+                  interlining || (selected && fuseOfCi(selected)?.mode) ? null : selected
+                }
                 onPick={(key) => {
                   if (pickingOldPieces) return;
                   // Zone mode: a block that is not a piece (the patternmaker's fusible shape)
@@ -2969,18 +3026,22 @@ export function PieceMatchModal({
                 }}
                 focus={zoomFocus}
                 onFit={() => setZoomOut(selected)}
-                overlay={(px) => (
-                  <FuseOverlay
-                    px={px}
-                    pieces={sheetPieces}
-                    ciOf={ciOf}
-                    sel={zoomed}
-                    fuseOf={fuseOfCi}
-                    onChange={setFuse}
-                    zoneBus={zoneBus}
-                    requiredSeamAllowanceMm={requiredSeamAllowanceMm}
-                  />
-                )}
+                overlay={
+                  interlining
+                    ? undefined
+                    : (px) => (
+                        <FuseOverlay
+                          px={px}
+                          pieces={sheetPieces}
+                          ciOf={ciOf}
+                          sel={zoomed}
+                          fuseOf={fuseOfCi}
+                          onChange={setFuse}
+                          zoneBus={zoneBus}
+                          requiredSeamAllowanceMm={requiredSeamAllowanceMm}
+                        />
+                      )
+                }
                 tall
                 bare
                 topLeft={

@@ -28,6 +28,7 @@ import {
   type AssemblyStep,
   type AssemblyViolation,
 } from '../components/assembly-frontier';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 
 export type PrintPiece = { lineKey: string; name: string };
 
@@ -114,8 +115,6 @@ export type PrintModel = {
 };
 
 const upper = (s: string) => s.trim().toUpperCase();
-/** Ключ узла словами: разделители → пробелы, капс. */
-const keyWords = (key: string) => upper(key.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' '));
 const dedupe = (keys: string[]) => [...new Set(keys)];
 
 export function assemblyPrintModel(input: PrintCardInput): PrintModel {
@@ -155,13 +154,11 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
   const unitBase = (key: string): string => {
     const b = byKey.get(key);
     const decl = declaredAt.get(key);
-    const born = b ? b.producedAt : decl;
-    return (
-      upper(b?.name ?? '') ||
-      upper(decl === undefined ? '' : steps[decl].outputUnitName) ||
-      keyWords(key) ||
-      // Ключ из одних разделителей («---») словами пуст — тогда хотя бы шаг рождения.
-      (born === undefined ? 'UNNAMED UNIT' : `UNIT FROM STEP ${numberOf(born) ?? born + 1}`)
+    return upper(
+      unitDisplayName({
+        key,
+        outputUnitName: b?.name ?? (decl === undefined ? '' : steps[decl].outputUnitName),
+      }),
     );
   };
   const nameCount = new Map<string, number>();
@@ -249,12 +246,16 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
   // Отказы движка — СВОИМИ словами: сообщение движка адресовано редактору и называет шаги
   // позицией в массиве, а узлы и детали — ключами; на бумаге шаг — это его номер, а ключей нет.
   const nameOfKey = (k: string) =>
-    pieceKeys.has(k) ? pieceName(k) : res.units.has(k) ? displayName(k) : `“${k}”`;
+    pieceKeys.has(k)
+      ? pieceName(k)
+      : res.units.has(k)
+        ? displayName(k)
+        : `“${upper(unitDisplayName({ key: k }))}”`;
   const stepNo = (i: number | undefined) => (i == null ? '?' : String(numberOf(i) ?? i + 1));
   const paperMessage = (v: AssemblyViolation): string => {
     switch (v.detail) {
       case 'shadow-name':
-        return 'a unit name is typed in but there is no unit key — the step assembles nothing';
+        return 'a unit name is typed in but the step assembles nothing';
       case 'duplicate-input':
         return `${nameOfKey(v.key)} is listed twice in the same step`;
       case 'unknown-key':
@@ -271,7 +272,7 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
       case 'off-frontier':
         return `${nameOfKey(v.key)} is no longer on the table`;
       case 'key-is-piece':
-        return `the unit key is taken by piece ${nameOfKey(v.key)}`;
+        return `this unit conflicts with piece ${nameOfKey(v.key)}`;
       case 'too-few-inputs':
         return 'a join needs at least two different inputs — nothing was made';
       case 'second-producer':

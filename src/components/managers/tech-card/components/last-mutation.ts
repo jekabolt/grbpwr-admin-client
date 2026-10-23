@@ -1,3 +1,5 @@
+import { unitDisplayName } from 'lib/assembly-unit-name';
+
 // ИСТОРИЯ ЖЕСТОВ — чистая половина отмены. Глубина здесь БОЛЬШЕ ОДНОЙ: ⌘Z несколько раз подряд,
 // ⇧⌘Z обратно.
 //
@@ -500,16 +502,16 @@ export function insertLabel(index: number): string {
 }
 
 /** Подпись жеста растворения. */
-export function dissolveLabel(unitKey: string): string {
-  return `dissolve ▣ ${unitKey}`;
+export function dissolveLabel(unitKey: string, unitName?: string): string {
+  return `dissolve ▣ ${unitDisplayName({ key: unitKey, outputUnitName: unitName })}`;
 }
 
 /**
  * Подпись жеста переименования. НАЗЫВАЕТ ОБА КЛЮЧА: «rename ▣ SHELL» не отличает «сейчас вернётся
  * SHELL» от «сейчас вернётся BODY», а чип обязан называть то, что произойдёт по нажатию.
  */
-export function renameLabel(from: string, to: string): string {
-  return `rename ▣ ${from} → ${to}`;
+export function renameLabel(from: string, to: string, fromName?: string, toName?: string): string {
+  return `rename ▣ ${unitDisplayName({ key: from, outputUnitName: fromName })} → ${unitDisplayName({ key: to, outputUnitName: toName })}`;
 }
 
 /**

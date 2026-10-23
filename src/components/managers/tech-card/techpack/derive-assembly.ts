@@ -21,8 +21,8 @@ import {
   topstitchPhrase,
   zoneLabel,
 } from 'components/managers/tech-card/components/operation-options';
-import { tidyUnitName } from 'lib/assembly-skeleton/names';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   contourSig,
   frameOf,
@@ -882,7 +882,7 @@ function wordsOf(
     ctx.input.pieces.get(k)?.name || ins?.pieces?.find((p) => p.lineKey === k)?.name || k;
   const nameOf = (x: Input) =>
     x.kind === 'unit'
-      ? ctx.unitName.get(x.key) ?? cap(x.key)
+      ? ctx.unitName.get(x.key) ?? unitDisplayName({ key: x.key })
       : x.kind === 'piece'
         ? pieceName(x.key)
         : x.key;
@@ -943,7 +943,7 @@ function wordsOf(
     tech,
     verb: VERB[tech],
     ins: op.ins.map(nameOf),
-    out: op.out ? ctx.unitName.get(op.out) ?? cap(op.out) : undefined,
+    out: op.out ? ctx.unitName.get(op.out) ?? unitDisplayName({ key: op.out }) : undefined,
     line,
     tool,
     mc,
@@ -981,8 +981,14 @@ export function deriveAssembly(input: AssemblyInput): AssemblyModel {
   const opByN = new Map(ops.map((o) => [o.n, o]));
 
   const unitName = new Map<string, string>();
-  for (const o of ops)
-    if (o.out) unitName.set(o.out, cap(tidyUnitName((o.raw.outputUnitName || o.out).trim())));
+  for (const o of ops) {
+    if (o.out && !unitName.has(o.out)) {
+      unitName.set(
+        o.out,
+        cap(unitDisplayName({ key: o.out, outputUnitName: o.raw.outputUnitName })),
+      );
+    }
+  }
 
   const words = new Map<number, OpWords>();
   for (const op of ops) {

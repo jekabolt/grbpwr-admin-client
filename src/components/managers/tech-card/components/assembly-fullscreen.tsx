@@ -1,4 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { refuseGesture } from './refuse-gesture';
 import {
@@ -26,7 +27,8 @@ import { renamePicked, type UnitRenameNotice } from './assembly-rename';
 import type { CreatePrefill } from './assembly-create-dialog';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { AssemblyShelf, type ShelfFilter } from './assembly-shelf';
-import { AssemblyUnitEditor, unitDockTitle } from './assembly-unit-editor';
+import { AssemblyUnitEditor, unitDockFacts } from './assembly-unit-editor';
+import { InlineUnitName } from './unit-block';
 import type { PieceCloth } from './piece-cloth';
 import type { TechCardFormData } from './schema';
 import { ResetLayoutModal } from './assembly-schematic';
@@ -225,8 +227,8 @@ export type AssemblyFullscreenProps = {
    * глушит, и пояс с подтяжками дешевле одного тихого дописывания в выпущенную карточку.
    */
   addInputToOperation: (index: number, key: string) => void;
-  /** Потребитель — Ф6в (перестановка шагов в списке). */
-  moveOperation: (from: number, to: number) => void;
+  /** Потребитель — Ф6в (перестановка шагов и снятие шага с графа через границу блока). */
+  moveOperation: (from: number, to: number, standalone?: boolean) => void;
   /**
    * РЕЛЬС РЕЖИМА СПИСКА — ТЕ ЖЕ ДАННЫЕ И ТЕ ЖЕ КОЛБЭКИ, ЧТО У ИНЛАЙНА, и приезжают они пропами по
    * той же причине, по какой приезжает пропом всё остальное: `useFieldArray('operations')`
@@ -242,6 +244,8 @@ export type AssemblyFullscreenProps = {
   railMarked: boolean;
   /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним (`useRailGrouping`). */
   railHeaderBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Все шаги вне узлов, включая поздние прогоны без собственной шапки. */
+  railLooseSteps: ReadonlySet<number>;
   /** Шаги с незаполненным обязательным полем. */
   railErrorIndices: ReadonlySet<number>;
   /** Шаги, ломающие сборочный граф. */
@@ -468,6 +472,7 @@ export function AssemblyFullscreen({
   railFields,
   railMarked,
   railHeaderBefore,
+  railLooseSteps,
   railErrorIndices,
   railBrokenSteps,
   activePin,
@@ -679,7 +684,10 @@ export function AssemblyFullscreen({
   }, [res, steps]);
 
   const intoOf = useCallback((lineKey: string) => intoByPiece.get(lineKey) ?? null, [intoByPiece]);
-  const unitNameOf = useCallback((key: string) => res.units.get(key)?.name ?? '', [res]);
+  const unitNameOf = useCallback(
+    (key: string) => unitDisplayName({ key, outputUnitName: res.units.get(key)?.name }),
+    [res],
+  );
 
   /**
    * Порядок групп полки = порядок боксов полотна. `Map` фронтира хранит порядок вставки, а он и
@@ -1321,7 +1329,13 @@ export function AssemblyFullscreen({
 
   const findRows = useMemo(() => {
     const rows: { key: string; label: string; sub: string }[] = [];
-    for (const [key, unit] of res.units) rows.push({ key, label: `▣ ${key}`, sub: unit.name });
+    for (const [key, unit] of res.units) {
+      rows.push({
+        key,
+        label: `▣ ${unitDisplayName({ key, outputUnitName: unit.name })}`,
+        sub: '',
+      });
+    }
     if ((blocks.find((b) => b.key === '')?.steps.length ?? 0) > 0) {
       rows.push({ key: '', label: '◌ outside units', sub: 'steps outside any unit' });
     }
@@ -1921,6 +1935,7 @@ export function AssemblyFullscreen({
                       // список, второе слагаемое инлайнового условия здесь тождественно истинно.
                       grouped={railMarked}
                       headerBefore={railHeaderBefore}
+                      looseSteps={railLooseSteps}
                       selectedIndex={selectedIndex}
                       // ТОЛЬКО ВЫБОР, БЕЗ `setDockStep`: редактор стоит в колонке справа, и
                       // открытый заодно док положил бы те же поля на экран дважды. `onPickStep`
@@ -2090,13 +2105,25 @@ export function AssemblyFullscreen({
                   {/* ПОДПИСЬ НАЗЫВАЕТ РОЛЬ, а не всегда шаг. ВЕРХНЯЯ ГРАНИЦА ОБЯЗАТЕЛЬНА:
                       `selected` родителя всегда ≥ 0 (useState(0)), и на карточке без операций `]`
                       подписывал бы док «step 10» по строке, которой нет. */}
-                  {dock?.role === 'unit'
-                    ? dockUnit
-                      ? unitDockTitle(dockUnit, smvOfBlock.get(dockUnit.key) ?? '')
-                      : `▣ ${dock.unitKey}`
-                    : selectedIndex >= 0 && selectedIndex < steps.length
-                      ? `step ${(selectedIndex + 1) * 10} · ${labelOf(selectedIndex)}`
-                      : 'no step open'}
+                  {dock?.role === 'unit' ? (
+                    dockUnit ? (
+                      <>
+                        ▣{' '}
+                        <InlineUnitName
+                          block={dockUnit}
+                          className='font-bold uppercase tracking-label'
+                          inputClassName='text-micro font-bold uppercase tracking-label'
+                        />{' '}
+                        · {unitDockFacts(dockUnit, smvOfBlock.get(dockUnit.key) ?? '')}
+                      </>
+                    ) : (
+                      `▣ ${unitDisplayName({ key: dock.unitKey })}`
+                    )
+                  ) : selectedIndex >= 0 && selectedIndex < steps.length ? (
+                    `step ${(selectedIndex + 1) * 10} · ${labelOf(selectedIndex)}`
+                  ) : (
+                    'no step open'
+                  )}
                 </Text>
                 <span className='ml-auto flex items-center gap-1'>
                   {/* В РЕЖИМЕ УЗЛА СПРАВА СТОИТ ВОЗВРАТ, А НЕ «+ NEW OPERATION». Второй чип тут
@@ -2186,7 +2213,8 @@ export function AssemblyFullscreen({
                     // подменить содержимое редактором шага значило бы ответить не на тот вопрос:
                     // человек смотрит на узел, а увидел бы поля постороннего шага.
                     <Text size='micro' variant='label'>
-                      ▣ {dock.unitKey} is not a unit any more — it was dissolved or renamed
+                      ▣ {unitDisplayName({ key: dock.unitKey })} is not a unit any more — it was
+                      dissolved or removed
                     </Text>
                   )
                 ) : selectedIndex >= 0 && selectedIndex < steps.length ? (

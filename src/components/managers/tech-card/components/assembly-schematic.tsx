@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { refuseGesture } from './refuse-gesture';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow, ConfirmationModal, Text } from 'ui';
@@ -252,8 +253,11 @@ export function AssemblySchematic({
     });
   }, [auto, res, renamedUnit]);
 
-  /** Человеческое имя ноды: имя детали или код узла. */
-  const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
+  const unitNameOf = (key: string) =>
+    unitDisplayName({ key, outputUnitName: res.units.get(key)?.name });
+  /** Человеческое имя ноды: имя детали или отображаемое имя узла. */
+  const nameOfNode = (key: string) =>
+    res.units.has(key) ? `▣ ${unitNameOf(key)}` : pieceNameOf(key);
 
   /**
    * Состояние детали. Ключа в карте НЕТ = рецепт про эту деталь молчит, и это `unbound` — тот же
@@ -289,7 +293,7 @@ export function AssemblySchematic({
    */
   const unitClothLine = (key: string): string => {
     const line = clothLine(res.units.get(key)?.leaves ?? []);
-    return line ? `${key} — ${line}` : '';
+    return line ? `${unitNameOf(key)} — ${line}` : '';
   };
 
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -660,7 +664,7 @@ export function AssemblySchematic({
   const hint = (() => {
     if (!verdict) return '';
     if (!verdict.ok) return verdict.reason;
-    if (verdict.absorbInto) return `release: add to ▣ ${verdict.absorbInto}`;
+    if (verdict.absorbInto) return `release: add to ▣ ${unitNameOf(verdict.absorbInto)}`;
     return `release: join ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
   })();
 
@@ -913,6 +917,7 @@ export function AssemblySchematic({
                 onGoToUnit={
                   t.state === 'eaten' && t.into ? clickGuard(() => goToNode(t.into)) : undefined
                 }
+                unitNameOf={unitNameOf}
                 orphanBoard={orphanBoard}
               />
             );

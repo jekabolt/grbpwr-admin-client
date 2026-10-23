@@ -16,6 +16,7 @@ import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 // РЕДАКТОР ОПЕРАЦИЙ УЗЛА — ВТОРАЯ РОЛЬ ДОКА.
@@ -67,7 +68,12 @@ const RAIL_MEASURE = 720;
 export function unitDockTitle(block: AssemblyBlock, smv: string): string {
   const n = block.steps.length;
   const steps = `${n} ${n === 1 ? 'step' : 'steps'}`;
-  return `▣ ${block.key} · ${steps}${smv ? ` · ${smv} min` : ''}`;
+  return `▣ ${unitDisplayName({ key: block.key, outputUnitName: block.name })} · ${steps}${smv ? ` · ${smv} min` : ''}`;
+}
+
+export function unitDockFacts(block: AssemblyBlock, smv: string): string {
+  const n = block.steps.length;
+  return `${n} ${n === 1 ? 'step' : 'steps'}${smv ? ` · ${smv} min` : ''}`;
 }
 
 /** Экранный номер шага. Номера позиционные всюду: сервер пересчитывает их при сохранении. */
@@ -119,6 +125,7 @@ export function AssemblyUnitEditor({
   for (const b of blocks) for (const i of b.steps) blockOfIndex.set(i, b.key);
 
   const eatenAt = res.consumedBy.get(block.key);
+  const displayName = unitDisplayName({ key: block.key, outputUnitName: block.name });
   const rows = block.steps;
 
   /** Разрыв между двумя соседними строками узла: сколько чужих шагов стоит между ними и чьи они. */
@@ -180,12 +187,12 @@ export function AssemblyUnitEditor({
               <InsertSlot
                 at={at}
                 afterNumber={stepNumber(index)}
-                unitKey={block.key}
+                unitName={displayName}
                 offered={offered}
                 gap={gap}
                 note={
                   sayNotYet
-                    ? `▣ ${block.key} appears at step ${stepNumber(block.producedAt)}`
+                    ? `▣ ${displayName} appears at step ${stepNumber(block.producedAt)}`
                     : ''
                 }
                 onInsert={onInsert}
@@ -200,7 +207,7 @@ export function AssemblyUnitEditor({
         <InsertSlot
           at={rows[rows.length - 1] + 1}
           afterNumber={stepNumber(rows[rows.length - 1])}
-          unitKey={block.key}
+          unitName={displayName}
           offered
           gap=''
           note=''
@@ -218,16 +225,9 @@ export function AssemblyUnitEditor({
               ? ` takes it at step ${stepNumber(eatenAt)}`
               : ''}
           </Text>
-          {block.name && (
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='ml-auto shrink-0 truncate'
-            >
-              {block.name}
-            </Text>
-          )}
+          <Text size='micro' variant='label' component='span' className='ml-auto shrink-0 truncate'>
+            {displayName}
+          </Text>
         </div>
       )}
     </div>
@@ -251,7 +251,7 @@ export function AssemblyUnitEditor({
 function InsertSlot({
   at,
   afterNumber,
-  unitKey,
+  unitName,
   offered,
   gap,
   note,
@@ -260,7 +260,7 @@ function InsertSlot({
   at: number;
   /** Номер шага, ПОСЛЕ которого встанет новый: точка вставки означает позицию сразу за ним. */
   afterNumber: number;
-  unitKey: string;
+  unitName: string;
   offered: boolean;
   /** Разрыв: чужие шаги, стоящие между этими двумя строками узла. Пусто — разрыва нет. */
   gap: string;
@@ -288,7 +288,7 @@ function InsertSlot({
       type='button'
       onClick={() => onInsert(at)}
       aria-label={`insert a step after step ${afterNumber}`}
-      title={`a new step right after ${afterNumber}, inside ▣ ${unitKey} — you pick what it does`}
+      title={`a new step right after ${afterNumber}, inside ▣ ${unitName} — you pick what it does`}
       className='group relative flex h-[18px] w-full items-center gap-1.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
     >
       {words && (

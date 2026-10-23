@@ -41,6 +41,7 @@ const GOLDEN = {
 // системной временной папки node_modules не виден вовсе — тот же приём, что в
 // `annotation-shape-probe.mjs`.
 const outfile = resolve(root, `scripts/.assembly-views-${process.pid}.mjs`);
+const cssOutfile = outfile.replace(/\.mjs$/, '.css');
 await build({
   entryPoints: [resolve(root, 'scripts/assembly-views-probe-entry.tsx')],
   bundle: true,
@@ -87,8 +88,10 @@ try {
   mod = await import(pathToFileURL(outfile).href);
 } finally {
   // finally, а не следующей строкой: упавший бандл иначе остаётся в репозитории и попадает
-  // соседу в `git status` мусором с чужим pid в имени.
+  // соседу в `git status` мусором с чужим pid в имени. Esbuild выносит импортированный CSS
+  // в соседний файл, поэтому оба артефакта живут и умирают вместе.
   rmSync(outfile, { force: true });
+  rmSync(cssOutfile, { force: true });
 }
 
 /**
@@ -158,7 +161,11 @@ console.log('golden-разметка полного AssemblySchematic');
 for (const frozen of ['false', 'true']) {
   const path = GOLDEN[frozen];
   if (!existsSync(path)) {
-    ck(false, `frozen=${frozen}: golden на месте`, `нет файла ${relative(root, path)} — сними --capture`);
+    ck(
+      false,
+      `frozen=${frozen}: golden на месте`,
+      `нет файла ${relative(root, path)} — сними --capture`,
+    );
     continue;
   }
   const want = readFileSync(path, 'utf8');
@@ -181,12 +188,12 @@ for (const frozen of ['false', 'true']) {
 console.log('\nсостав фикстуры');
 const f = mod.fixtureFacts;
 ck(
-  JSON.stringify(f.convergedBlockKeys) === JSON.stringify(['SHELL', 'HOOD', 'GARMENT', '']),
+  JSON.stringify(f.convergedBlockKeys) === JSON.stringify(['SHELL', 'HOOD', 'OUTER', '']),
   'сошедшийся граф: три узла и хвост',
   JSON.stringify(f.convergedBlockKeys),
 );
 ck(
-  JSON.stringify(f.convergedLiveUnits) === JSON.stringify(['GARMENT']),
+  JSON.stringify(f.convergedLiveUnits) === JSON.stringify(['OUTER']),
   'сошедшийся граф: ровно один терминал (иначе «✓ garment» в снимке нет)',
   JSON.stringify(f.convergedLiveUnits),
 );
@@ -196,7 +203,11 @@ ck(
   'разорванный граф: два живых узла (иначе «✕ break» в снимке нет)',
   JSON.stringify(f.brokenLiveUnits),
 );
-ck(f.brokenViolations.length === 0, 'разорванный граф валиден по проходу', f.brokenViolations.join(', '));
+ck(
+  f.brokenViolations.length === 0,
+  'разорванный граф валиден по проходу',
+  f.brokenViolations.join(', '),
+);
 // ТРЕТЬЕ ПОЛОТНО — ЕДИНСТВЕННОЕ, ГДЕ ХВОСТ ВООБЩЕ ЕСТЬ. Стоит ему выродиться (появись в нём узел,
 // или окажись обработка над ОДНОЙ деталью), шаг уехал бы на плитку, хвоста не стало бы — и его
 // разметка перестала бы проверяться, оставив снимок зелёным.
@@ -259,7 +270,7 @@ for (const frozen of ['false', 'true']) {
   // «✕ break» — что сборка не сошлась, и ни ту, ни другую полотно не дублирует ничем.
   ck(!s.includes('→ '), `frozen=${frozen}: строки «→ ▣ ИМЯ» в боксе нет вовсе`);
   ck(
-    s.includes('· goes into ▣ GARMENT'),
+    s.includes('· goes into ▣ Garment'),
     `frozen=${frozen}: куда ушёл узел, по-прежнему сказано — в подсказке шапки`,
   );
   ck(s.includes('✕ break'), `frozen=${frozen}: разрыв назван словом`);
@@ -268,10 +279,14 @@ for (const frozen of ['false', 'true']) {
   // способ СМОТРЕТЬ, а смотреть на RELEASED разрешено (R10). Разъедься эти два снимка по числу
   // токенов — и половина навигации умирала бы ровно там, где карточку только и читают.
   const tk = tokensIn(s);
-  // ДВА — И ВОТ КАКИЕ: подвал GARMENT («← ▣ SHELL + ▣ HOOD + 2 pieces»). Было четыре, пока
+  // ДВА — И ВОТ КАКИЕ: подвал OUTER («← ▣ SHELL + ▣ HOOD + 2 pieces»). Было четыре, пока
   // строку состояния поглощённого узла печатали шапки SHELL и HOOD; строки не стало — не стало и
   // её токенов. ПОДВАЛ НЕ ТРОНУТ: «из чего собран» — свой вопрос, и его ссылки остаются.
-  ck(tk.length === 2, `frozen=${frozen}: два токена-ссылки в снимке — оба из подвала`, JSON.stringify(tk));
+  ck(
+    tk.length === 2,
+    `frozen=${frozen}: два токена-ссылки в снимке — оба из подвала`,
+    JSON.stringify(tk),
+  );
   ck(
     tk.every((t) => t.text === `▣ ${t.to}`),
     `frozen=${frozen}: текст токена и его адресат — одно и то же имя`,
@@ -322,32 +337,46 @@ for (const frozen of ['false', 'true']) {
   // Смоук Ф1: штриховка ткани доезжает до снимка. Без неё «перенос ничего не сломал» проверялось бы
   // на разметке, где штриховки нет вовсе.
   ck(/<pattern /.test(s), `frozen=${frozen}: паттерны штриховки ткани в разметке`);
-  ck(s.includes("role=\"button\""), `frozen=${frozen}: органы полотна — div с ролью кнопки`);
+  ck(s.includes('role="button"'), `frozen=${frozen}: органы полотна — div с ролью кнопки`);
 }
-// ПОКОЙНАЯ РАЗМЕТКА ПОД ЗАМОРОЗКОЙ ТА ЖЕ, КРОМЕ ПОЛЕЙ ИМЕНИ, И ЭТО ПРОВЕРЯЕТСЯ.
+// В ПОКОЕ ИМЯ — ТЕКСТ, НЕ ПОЛЕ. Поле появляется только после одного клика по имени, чего статический
+// снимок намеренно не симулирует. На RELEASED имя теряет подсказку и hover-подчёркивание:
+// это единственная разница покойной шапки, потому что редактирование там недоступно.
 //
 // Раньше здесь стояло обратное — «frozen меняет разметку» и «кликабельных органов меньше», — и
 // стояло справедливо: голова плитки под заморозкой роли не получала вовсе, а у свободной детали
 // пропадала и на драфте, стоило её съесть. Обе развилки сняты (Т10 и Т9в): в ПОКОЕ по ноде можно
 // делать ровно одно — выделить её, а выделение это ПРЕЗЕНТАЦИЯ, и смотреть на RELEASED разрешено
 // (R10). Всё, что заморозка отнимает, живёт в ховер-полосе и в этот снимок не попадает ни байтом.
-//
-// Имя теперь настоящее поле. В портале фулскрина внешний `<fieldset disabled>` до него не доходит,
-// поэтому заморозка обязана доехать собственным `disabled`; это единственное разрешённое отличие.
-const unitNameFields = (html) => [...html.matchAll(/aria-label="unit name for [^"]*"/g)].length;
-const disabledUnitNameFields = (html) =>
-  [...html.matchAll(/aria-label="unit name for [^"]*"[^>]* disabled=""/g)].length;
-const withoutDisabled = (html) => html.replaceAll(' disabled=""', '');
-ck(unitNameFields(shots.false) === 5, 'имя каждого из пяти узлов — настоящее поле');
+const unitNames = (html) => [...html.matchAll(/data-unit-name="[^"]*"/g)].length;
+const unitNameFields = (html) => [...html.matchAll(/data-unit-name-input="[^"]*"/g)].length;
+const renameHints = (html) => [...html.matchAll(/title="click to rename the unit"/g)].length;
 ck(
-  disabledUnitNameFields(shots.false) === 0 && disabledUnitNameFields(shots.true) === 5,
-  'поля имён доступны на draft и выключены на released',
+  unitNames(shots.false) === 5 && unitNames(shots.true) === 5,
+  'пять узлов показывают имя текстом и на draft, и на released',
 );
 ck(
-  withoutDisabled(shots.false) === withoutDisabled(shots.true),
-  'кроме disabled у полей имён frozen разметку не меняет',
-  `длины ${shots.false.length} и ${shots.true.length}`,
+  unitNameFields(shots.false) === 0 && unitNameFields(shots.true) === 0,
+  'в покое нет ни одного always-visible поля имени',
 );
+ck(
+  renameHints(shots.false) === 5 && renameHints(shots.true) === 0,
+  'один клик обещан только на draft',
+);
+for (const frozen of ['false', 'true']) {
+  const named = shots[frozen].match(
+    /data-unit-name="OUTER"[^>]*class="([^"]*)"[^>]*>([^<]*)<\/span>/,
+  );
+  ck(
+    named?.[2] === 'Garment' && named[1].split(/\s+/).includes('uppercase'),
+    `frozen=${frozen}: ключ OUTER в шапке показан хранимым именем GARMENT`,
+    named ? JSON.stringify({ classes: named[1], text: named[2] }) : 'шапка OUTER не найдена',
+  );
+  ck(
+    !shots[frozen].includes('>▣ OUTER</span>'),
+    `frozen=${frozen}: рядом с GARMENT нет второй видимой подписи ▣ OUTER`,
+  );
+}
 // `<button>` под внешним `<fieldset disabled>` карточки мёртв (R4): шапки, строки шагов и плитки
 // обязаны остаться div-ами. Проверка накрывает ИСХОДНЫЙ рендер — полоса действий узла живёт под
 // наведением, её чипы в снимок не попадают вовсе и сверяются построчно на ревью диффа.
@@ -372,6 +401,8 @@ const {
   directInputsOf,
   buildWires,
   makeRowY,
+  unitDisplayName,
+  unitNameProducerIndex,
   METRICS,
 } = views;
 
@@ -430,7 +461,10 @@ console.log('\nstateWord — две ветки говорят, третья мо
   ck(stateWord(blk('X', [0]), false) === '✕ break', 'разрыв');
   // Терминал СИЛЬНЕЕ поглощения: узел, съеденный кем-то и при этом единственный живой, — это
   // невозможное состояние, и порядок веток решает, каким словом схема о нём скажет.
-  ck(stateWord(blk('S', [0], { absorbedInto: 'G' }), true) === '✓ garment', 'терминал бьёт поглощение');
+  ck(
+    stateWord(blk('S', [0], { absorbedInto: 'G' }), true) === '✓ garment',
+    'терминал бьёт поглощение',
+  );
 }
 
 console.log('\nstateParts — ни одного адресата: строка-дубль провода снята');
@@ -449,7 +483,10 @@ console.log('\nstateParts — ни одного адресата: строка-�
     [blk('S', [0], { absorbedInto: 'G' }), false],
     [blk('X', [0]), false],
   ]) {
-    ck(partsText(stateParts(b, t)) === stateWord(b, t), `склейка кусков = строка («${stateWord(b, t)}»)`);
+    ck(
+      partsText(stateParts(b, t)) === stateWord(b, t),
+      `склейка кусков = строка («${stateWord(b, t)}»)`,
+    );
   }
 }
 
@@ -509,7 +546,11 @@ console.log('\nunitHeadTarget — клик по шапке: одна опера�
       // узла, а не выделение и не чужой шаг.
       const t = trace();
       unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, undefined)();
-      ck(eq(t.log, ['step:2']), 'инлайн, две операции → первая операция узла', JSON.stringify(t.log));
+      ck(
+        eq(t.log, ['step:2']),
+        'инлайн, две операции → первая операция узла',
+        JSON.stringify(t.log),
+      );
     }
     {
       const t = trace();
@@ -525,7 +566,11 @@ console.log('\nunitHeadTarget — клик по шапке: одна опера�
     {
       const t = trace();
       unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, t.open)(true);
-      ck(eq(t.log, ['sel:GARMENT']), 'полотно + модификатор → ТОЛЬКО выделение', JSON.stringify(t.log));
+      ck(
+        eq(t.log, ['sel:GARMENT']),
+        'полотно + модификатор → ТОЛЬКО выделение',
+        JSON.stringify(t.log),
+      );
     }
     {
       const t = trace();
@@ -546,7 +591,11 @@ console.log('\nunitHeadTarget — клик по шапке: одна опера�
       // который про модификатор не знает.
       const t = trace();
       unitHeadOpen(blk('GARMENT', [2, 3]), t.sel, t.pick, t.open)();
-      ck(eq(t.log, ['unit:GARMENT']), 'без модификатора — по-прежнему операции узла', JSON.stringify(t.log));
+      ck(
+        eq(t.log, ['unit:GARMENT']),
+        'без модификатора — по-прежнему операции узла',
+        JSON.stringify(t.log),
+      );
     }
   }
 }
@@ -556,7 +605,10 @@ console.log('\nшапка узла на обеих поверхностях — 
   const src = (rel) => readFileSync(resolve(root, rel), 'utf8');
   const surfaces = [
     ['assembly-canvas.tsx', 'src/components/managers/tech-card/components/assembly-canvas.tsx'],
-    ['assembly-schematic.tsx', 'src/components/managers/tech-card/components/assembly-schematic.tsx'],
+    [
+      'assembly-schematic.tsx',
+      'src/components/managers/tech-card/components/assembly-schematic.tsx',
+    ],
   ];
   // ОБРАБОТЧИКОВ В СТАТИЧЕСКОЙ РАЗМЕТКЕ НЕТ ВОВСЕ — golden к ним слеп по построению, и слепоту
   // эту закрывает чтение исходника: клик по шапке обязан идти через общий `unitHeadOpen` на
@@ -593,14 +645,190 @@ console.log('\nшапка узла на обеих поверхностях — 
   ck(!/steps · \{/.test(nv), 'assembly-node-views.tsx: чипа «steps · N» в ховер-полосе больше нет');
 }
 
+console.log('\nunit name gesture — one click on the text, parent gestures everywhere else');
+{
+  const src = (rel) => readFileSync(resolve(root, rel), 'utf8');
+  const unitBlock = src('src/components/managers/tech-card/components/unit-block.tsx');
+  const inlineName =
+    unitBlock.match(
+      /export function InlineUnitName[\s\S]*?\/\*\* The labelled PRODUCES control/,
+    )?.[0] ?? '';
+
+  ck(
+    inlineName.includes("title={frozen ? undefined : 'click to rename the unit'}"),
+    'подсказка обещает один клик',
+  );
+  ck(
+    /onPointerDown=\{[\s\S]*?event\.stopPropagation\(\)[\s\S]*?\}/.test(inlineName),
+    'имя не запускает drag родителя',
+  );
+  ck(
+    /onClick=\{[\s\S]*?event\.stopPropagation\(\);[\s\S]*?setEditing\(true\);[\s\S]*?\}/.test(
+      inlineName,
+    ),
+    'один клик по имени гасит клик родителя и открывает поле',
+  );
+  ck(!inlineName.includes('onDoubleClick={frozen'), 'вход в редактор больше не ждёт double-click');
+  ck(
+    inlineName.includes("'inline-block min-w-0 max-w-full truncate align-bottom'"),
+    'хит-зона равна тексту имени, а не свободному месту строки',
+  );
+
+  const headerFiles = [
+    'src/components/managers/tech-card/components/unit-block.tsx',
+    'src/components/managers/tech-card/components/assembly-node-views.tsx',
+    'src/components/managers/tech-card/components/assembly-fullscreen.tsx',
+  ];
+  const headerCalls = headerFiles.flatMap(
+    (rel) => src(rel).match(/<InlineUnitName[\s\S]*?\/>/g) ?? [],
+  );
+  ck(
+    headerCalls.length === 3,
+    'список, общая нода схемы/полотна и fullscreen-док используют один InlineUnitName',
+    String(headerCalls.length),
+  );
+  ck(
+    headerCalls.every((call) => !/className='[^']*\bflex-1\b/.test(call)),
+    'ни одна шапка не растягивает клик имени на свободную ширину',
+    JSON.stringify(headerCalls),
+  );
+  for (const rel of [
+    'src/components/managers/tech-card/components/assembly-schematic.tsx',
+    'src/components/managers/tech-card/components/assembly-canvas.tsx',
+  ]) {
+    ck(
+      src(rel).includes('<UnitBoxView'),
+      `${rel.split('/').at(-1)}: имя живёт в общей шапке UnitBoxView`,
+    );
+  }
+
+  const operationsField = src('src/components/managers/tech-card/components/operations-field.tsx');
+  const createDialog = src(
+    'src/components/managers/tech-card/components/assembly-create-dialog.tsx',
+  );
+  ck(
+    !operationsField.includes('useUnitCodeAct') && !/unit code/i.test(operationsField),
+    'PRODUCES больше не показывает и не редактирует внутренний ключ',
+  );
+  ck(
+    !createDialog.includes('assemblyUnitKey') && !/unit code/i.test(createDialog),
+    'новая операция генерирует ключ без вопроса владельцу',
+  );
+  ck(
+    createDialog.includes('suggestUnitCode(zone, taken)'),
+    'диалог использует существующий collision-safe генератор ключей',
+  );
+}
+
+console.log('\nunit names — one first-producer fact survives the three save/reload shapes');
+{
+  const buildCase = mod.engine?.buildCase;
+  ck(typeof unitDisplayName === 'function', 'видимое имя вынесено общим fallback-правилом');
+  ck(typeof unitNameProducerIndex === 'function', 'канонический адрес имени вынесен функцией');
+  ck(typeof buildCase === 'function', 'энтри отдаёт конвейер для round-trip имени');
+
+  if (
+    typeof unitDisplayName === 'function' &&
+    typeof unitNameProducerIndex === 'function' &&
+    typeof buildCase === 'function'
+  ) {
+    ck(
+      unitDisplayName({ key: 'OUTER', outputUnitName: 'Garment' }) === 'Garment',
+      'хранимое имя Garment побеждает ключ OUTER во всех шапках',
+    );
+    ck(
+      unitDisplayName({ key: 'MAIN-COLLAR', suggestedName: 'Main collar' }) === 'Main collar',
+      'человеческая подсказка каркаса побеждает внутренний ключ',
+    );
+    ck(
+      unitDisplayName({ key: 'POCKET-2' }) === 'Pocket 2',
+      'последний fallback человечит внутренний ключ',
+    );
+    const pieces = ['A', 'B', 'C', 'D'].map((lineKey) => ({ lineKey, name: `piece ${lineKey}` }));
+    const reloadAfterRename = (raw, key, openedAt, next) => {
+      const before = buildCase(pieces, raw);
+      const producedAt = unitNameProducerIndex(before.res, key, openedAt);
+      const sent = raw.map((s, i) => ({
+        ...s,
+        // То же, что normalizeUnitNames: факт остаётся на первом производителе, на поглощениях
+        // дубликат очищается. JSON round-trip здесь отделяет перечитанное от исходных объектов.
+        name: i === producedAt ? next : s.out === key ? undefined : s.name,
+      }));
+      const reloaded = buildCase(pieces, JSON.parse(JSON.stringify(sent)));
+      const block = reloaded.blocks.find((b) => b.key === key);
+      return {
+        producedAt,
+        stored: sent.map((s) => s.name ?? ''),
+        shown: unitDisplayName({ key: block.key, outputUnitName: block.name }),
+      };
+    };
+
+    const tail = reloadAfterRename([{ in: ['A', 'B'], out: 'TAIL' }], 'TAIL', 0, 'Tail unit');
+    ck(
+      tail.producedAt === 0 && tail.shown === 'Tail unit',
+      'хвостовой terminal без потребителя переименован и перечитан',
+      JSON.stringify(tail),
+    );
+
+    const consumedRaw = [
+      { in: ['A', 'B'], out: 'CHILD' },
+      { in: ['CHILD', 'C'], out: 'GARMENT', name: 'Garment' },
+    ];
+    const consumed = reloadAfterRename(consumedRaw, 'CHILD', 0, 'Inner unit');
+    ck(
+      consumed.producedAt === 0 && consumed.shown === 'Inner unit',
+      'узел, который следующий блок поглотил, переименован и перечитан',
+      JSON.stringify(consumed),
+    );
+
+    const absorbedRaw = [
+      { in: ['A', 'B'], out: 'BODY' },
+      { in: ['BODY', 'C'], out: 'BODY', name: 'duplicate on absorption' },
+    ];
+    const derived = buildCase(pieces, absorbedRaw);
+    const derivedBlock = derived.blocks.find((b) => b.key === 'BODY');
+    ck(
+      unitDisplayName({ key: derivedBlock.key, outputUnitName: derivedBlock.name }) === 'Body',
+      'пустой first producer показывает derived fallback, не имя поглощения',
+      JSON.stringify(derivedBlock),
+    );
+    ck(
+      unitNameProducerIndex(derived.res, 'BODY', 1) === 0,
+      'поле на поглощающем шаге адресует первого производителя',
+    );
+    const renamedDerived = reloadAfterRename(absorbedRaw, 'BODY', 1, 'Main body');
+    ck(
+      renamedDerived.shown === 'Main body' &&
+        JSON.stringify(renamedDerived.stored) === JSON.stringify(['Main body', '']),
+      'derived имя становится override первого производителя, дубль очищен',
+      JSON.stringify(renamedDerived),
+    );
+    const cleared = reloadAfterRename(absorbedRaw, 'BODY', 1, '');
+    ck(
+      cleared.shown === 'Body' && cleared.stored.every((x) => x === ''),
+      'пустое сохранение очищает override и возвращает derived fallback',
+      JSON.stringify(cleared),
+    );
+  }
+}
+
 console.log('\npieceAddPrefill — обработка детали идёт ЗА ближайшим блоком, а не в конец листа');
 {
-  const { pieceAddPrefill } = views;
+  const { pieceAddPrefill, unitAddPrefill } = views;
   const buildCase = mod.engine?.buildCase;
   const assemblyLayout = mod.engine?.assemblyLayout;
   ck(typeof pieceAddPrefill === 'function', 'позиция шага на плитке вынесена функцией');
-  ck(typeof buildCase === 'function' && typeof assemblyLayout === 'function', 'энтри отдаёт конвейер и раскладку');
-  if (typeof pieceAddPrefill === 'function' && typeof buildCase === 'function' && assemblyLayout) {
+  ck(typeof unitAddPrefill === 'function', 'позиция шага в объединённом блоке вынесена функцией');
+  ck(
+    typeof buildCase === 'function' && typeof assemblyLayout === 'function',
+    'энтри отдаёт конвейер и раскладку',
+  );
+  if (
+    typeof pieceAddPrefill === 'function' &&
+    typeof unitAddPrefill === 'function' &&
+    typeof buildCase === 'function' &&
+    assemblyLayout
+  ) {
     /**
      * КАРТОЧКА ВЛАДЕЛЬЦА: девять шагов (10…90), свободная деталь FL. Узел ▣ OUTER собирается
      * шагами 10 и 20 — «до того как соединить аутер и фл было 10 и 20, значит всё что с фл это
@@ -644,6 +872,12 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
     };
 
     const base = assemblyLayout(c.blocks, c.steps, c.res);
+    const inOuter = unitAddPrefill(outer, c.res);
+    ck(
+      inOuter?.at === 2,
+      'регрессия объединённого блока: после шагов 10 и 20 новый получает номер 30',
+      JSON.stringify(inOuter),
+    );
     const nearOuter = pieceAddPrefill('FL', c.steps, c.res, c.blocks, nextTo(base, 'FL', 'OUTER'));
     ck(
       nearOuter?.at === 2,
@@ -677,21 +911,93 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
 
     // ГРАНИЦА 1: сборки нет вовсе. Ближайшего блока не существует, «до сборки» не значит ничего,
     // и конец листа правилен — единственный случай, где он правилен.
-    const bare = buildCase([{ lineKey: 'FL', name: 'free' }, { lineKey: 'A', name: 'a' }], [
-      { in: ['FL', 'A'] },
-      { in: ['A'] },
-    ]);
+    const bare = buildCase(
+      [
+        { lineKey: 'FL', name: 'free' },
+        { lineKey: 'A', name: 'a' },
+      ],
+      [{ in: ['FL', 'A'] }, { in: ['A'] }],
+    );
     const bareLayout = assemblyLayout(bare.blocks, bare.steps, bare.res);
     ck(bareLayout.boxes.length === 0, 'фикстура границы 1 действительно без единого блока');
     const bareAt = pieceAddPrefill('FL', bare.steps, bare.res, bare.blocks, bareLayout);
     ck(bareAt?.at === bare.steps.length, 'блоков нет → конец листа', JSON.stringify(bareAt));
+
+    // САМОСТОЯТЕЛЬНАЯ ДЕТАЛЬ — СВОЙ БЛОК. Её строки 10 и 30 уже нарисованы на одной плитке;
+    // чужие строки 40 и 50 после них не имеют права утащить новую операцию в общий хвост.
+    const standalone = buildCase(
+      [
+        { lineKey: 'PLCK_L', name: 'left placket' },
+        { lineKey: 'OTHER', name: 'other' },
+      ],
+      [
+        { in: ['PLCK_L'] },
+        { in: ['OTHER'] },
+        { in: ['PLCK_L'] },
+        { in: ['OTHER'] },
+        { in: ['OTHER'] },
+      ],
+    );
+    const standaloneLayout = assemblyLayout(standalone.blocks, standalone.steps, standalone.res);
+    const standaloneAt = pieceAddPrefill(
+      'PLCK_L',
+      standalone.steps,
+      standalone.res,
+      standalone.blocks,
+      standaloneLayout,
+    );
+    ck(
+      standaloneAt?.at === 3,
+      'самостоятельная PLCK_L: после своих 10 и 30 новая получает 40, не общий хвост 60',
+      JSON.stringify(standaloneAt),
+    );
+
+    // ФЬЮЗИНГ НИЗКО, ОСТАЛЬНЫЕ ОПЕРАЦИИ ВЫШЕ — случай PLCK_L со снимка. В проекции сборки вид
+    // операции намеренно не участвует: шаг 110 — обычная строка детали с точки зрения порядка.
+    // После её следующей собственной строки 180 новая получает 190; брать первый совпавший (110)
+    // или конец всего листа (400) одинаково неверно.
+    const fusedRows = Array.from({ length: 39 }, () => ({ in: ['OTHER'] }));
+    fusedRows[10] = { in: ['PLCK_L'] }; // 110 · fusing
+    fusedRows[17] = { in: ['PLCK_L'] }; // 180 · later processing
+    const fused = buildCase(
+      [
+        { lineKey: 'PLCK_L', name: 'left placket' },
+        { lineKey: 'OTHER', name: 'other' },
+      ],
+      fusedRows,
+    );
+    const fusedLayout = assemblyLayout(fused.blocks, fused.steps, fused.res);
+    ck(
+      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing) ===
+        JSON.stringify([10, 17]),
+      'плитка fused PLCK_L считает своими и фьюзинг 110, и обработку 180',
+      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing),
+    );
+    const fusedAt = pieceAddPrefill(
+      'PLCK_L',
+      fused.steps,
+      fused.res,
+      fused.blocks,
+      fusedLayout,
+    );
+    ck(
+      fusedAt?.at === 18 && (fusedAt.at + 1) * 10 === 190,
+      'fused PLCK_L: последняя своя операция 180 → новая 190, не хвост 400',
+      JSON.stringify(fusedAt),
+    );
 
     // ГРАНИЦА 2: у детали УЖЕ есть свои обработки — новая не смеет прыгнуть перед ними. Обработка
     // FL стоит шагом 70 (индекс 6), а ближайший блок OUTER кончается на индексе 1: побеждает пол
     // собственных обработок.
     const withOwn = buildCase(PIECES, [...STEPS.slice(0, 6), { in: ['FL'] }, ...STEPS.slice(6)]);
     const ownLayout = assemblyLayout(withOwn.blocks, withOwn.steps, withOwn.res);
-    const ownAt = pieceAddPrefill('FL', withOwn.steps, withOwn.res, withOwn.blocks, nextTo(ownLayout, 'FL', 'OUTER'));
+    const ownAt = pieceAddPrefill(
+      'FL',
+      withOwn.steps,
+      withOwn.res,
+      withOwn.blocks,
+      nextTo(ownLayout, 'FL', 'OUTER'),
+    );
     ck(
       ownAt?.at === 7,
       'своя обработка на индексе 6 → позиция 7, а не 2: новая строка не прыгает перед старой',
@@ -713,7 +1019,11 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
         if (!frontier.includes(t.key)) illegal += 1;
       }
     }
-    ck(illegal === 0, `все выведенные позиции законны по фронтиру (проверено ${checked})`, String(illegal));
+    ck(
+      illegal === 0,
+      `все выведенные позиции законны по фронтиру (проверено ${checked})`,
+      String(illegal),
+    );
 
     // НЕГАТИВНЫЙ: у СЪЕДЕННОЙ детали правило прежнее — прямо перед тем, кто её съел.
     const eatenAt = pieceAddPrefill('A', c.steps, c.res, c.blocks, base);
@@ -730,7 +1040,10 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
     );
 
     // ДЕТАЛИ НЕТ НА СТОЛЕ — вставки нет вовсе; щит остаётся на месте.
-    ck(pieceAddPrefill('NOPE', c.steps, c.res, c.blocks, base) === null, 'детали нет на столе — вставки нет');
+    ck(
+      pieceAddPrefill('NOPE', c.steps, c.res, c.blocks, base) === null,
+      'детали нет на столе — вставки нет',
+    );
   }
 }
 
@@ -756,11 +1069,21 @@ console.log('\ndirectInputsOf — дедуп, свой ключ, порядок 
   ];
   const blocks = [blk('SHELL', [0, 1, 2])];
   const got = directInputsOf(blocks, steps).get('SHELL');
-  ck(eq(got.map((i) => i.key), ['FR', 'BK', 'SL', 'HOOD']), 'порядок первого вхождения, свой ключ выброшен, дублей нет', JSON.stringify(got));
+  ck(
+    eq(
+      got.map((i) => i.key),
+      ['FR', 'BK', 'SL', 'HOOD'],
+    ),
+    'порядок первого вхождения, свой ключ выброшен, дублей нет',
+    JSON.stringify(got),
+  );
   // РОД ВХОДА ДОЕЗЖАЕТ ЦЕЛЫМ. Выброси его здесь — и `compositionParts` начнёт угадывать род
   // заново «есть ли ключ среди состоявшихся узлов», а на битой ссылке угадает деталью.
   ck(
-    eq(got.map((i) => i.kind), ['piece', 'piece', 'piece', 'unit']),
+    eq(
+      got.map((i) => i.kind),
+      ['piece', 'piece', 'piece', 'unit'],
+    ),
     'род входа, каким его назвал движок, едет вместе с ключом',
     JSON.stringify(got),
   );
@@ -790,16 +1113,28 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
     ['BROKEN', inp(['piece', 'FR'], ['unit', 'LOST'], ['piece', 'BK'])],
   ]);
   ck(
-    compositionOf('G', di, units) === '← ▣ SHELL + ▣ HOOD + 2 pieces',
+    compositionOf('G', di, units) === '← ▣ Shell + ▣ Hood + 2 pieces',
     'узлы поимённо, детали числом',
     compositionOf('G', di, units),
   );
-  ck(compositionOf('ONE', di, units) === '← 1 piece', 'единственное число', compositionOf('ONE', di, units));
-  ck(compositionOf('UNITS', di, units) === '← ▣ SHELL', 'без деталей — без счётчика', compositionOf('UNITS', di, units));
-  ck(compositionOf('NONE', di, units) === '', 'пустой вход — пустая строка', compositionOf('NONE', di, units));
+  ck(
+    compositionOf('ONE', di, units) === '← 1 piece',
+    'единственное число',
+    compositionOf('ONE', di, units),
+  );
+  ck(
+    compositionOf('UNITS', di, units) === '← ▣ Shell',
+    'без деталей — без счётчика',
+    compositionOf('UNITS', di, units),
+  );
+  ck(
+    compositionOf('NONE', di, units) === '',
+    'пустой вход — пустая строка',
+    compositionOf('NONE', di, units),
+  );
   ck(compositionOf('MISSING', di, units) === '', 'ключа нет в карте — пустая строка');
   ck(
-    compositionOf('BROKEN', di, units) === '← ▣ LOST + 2 pieces',
+    compositionOf('BROKEN', di, units) === '← ▣ Lost + 2 pieces',
     'битая ссылка на узел названа именем и в детали НЕ записана',
     compositionOf('BROKEN', di, units),
   );
@@ -827,8 +1162,11 @@ console.log('\ncompositionOf — узлы поимённо, детали чис�
   ck(eq(to(compositionParts('ONE', di, units)), []), 'состав из одних деталей ссылок не даёт');
   // Орган, который иногда работает, а иногда нет, — тот самый перегруз, ради снятия которого
   // токен и заведён: бокса с ключом `LOST` на полотне нет, вести некуда, ссылкой не становится.
-  ck(eq(to(compositionParts('BROKEN', di, units)), []), 'битая ссылка ОРГАНОМ не стала — вести некуда',
-     JSON.stringify(compositionParts('BROKEN', di, units)));
+  ck(
+    eq(to(compositionParts('BROKEN', di, units)), []),
+    'битая ссылка ОРГАНОМ не стала — вести некуда',
+    JSON.stringify(compositionParts('BROKEN', di, units)),
+  );
   ck(eq(compositionParts('NONE', di, units), []), 'пустой вход — ни одного куска');
   for (const k of ['G', 'ONE', 'UNITS', 'NONE', 'MISSING', 'BROKEN']) {
     ck(
@@ -846,8 +1184,16 @@ console.log('\nmakeRowY — строка бокса, а не бокс');
   const layout = { byKey: new Map([['S', box]]), tail: undefined, tiles: [], tailSteps: [] };
   const blocks = [blk('S', [3, 7, 9])];
   const rowY = makeRowY(blocks, layout);
-  ck(rowY('S', 3) === 40 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2, 'первая строка', String(rowY('S', 3)));
-  ck(rowY('S', 9) === 40 + HEAD_H + 2 + 2 * LINE_H + LINE_H / 2, 'третья строка', String(rowY('S', 9)));
+  ck(
+    rowY('S', 3) === 40 + HEAD_H + 2 + 0 * LINE_H + LINE_H / 2,
+    'первая строка',
+    String(rowY('S', 3)),
+  );
+  ck(
+    rowY('S', 9) === 40 + HEAD_H + 2 + 2 * LINE_H + LINE_H / 2,
+    'третья строка',
+    String(rowY('S', 9)),
+  );
   ck(rowY('S', 5) === 40 + HEAD_H / 2, 'шага нет в блоке — центр шапки', String(rowY('S', 5)));
   ck(rowY('NOPE', 3) === 0, 'бокса нет в раскладке — 0', String(rowY('NOPE', 3)));
 
@@ -882,8 +1228,26 @@ console.log('\nbuildWires — из правого края источника в
 {
   const shell = { key: 'SHELL', x: 0, y: 0, w: 180, h: 60 };
   const garment = { key: 'GARMENT', x: 400, y: 100, w: 180, h: 60 };
-  const tile = { key: 'FR', x: -60, y: 10, w: 52, h: 48, state: 'eaten', into: 'SHELL', consumers: [0] };
-  const free = { key: 'FLAP', x: -60, y: 200, w: 64, h: 48, state: 'free', into: '', consumers: [1] };
+  const tile = {
+    key: 'FR',
+    x: -60,
+    y: 10,
+    w: 52,
+    h: 48,
+    state: 'eaten',
+    into: 'SHELL',
+    consumers: [0],
+  };
+  const free = {
+    key: 'FLAP',
+    x: -60,
+    y: 200,
+    w: 64,
+    h: 48,
+    state: 'free',
+    into: '',
+    consumers: [1],
+  };
   const steps = [
     step(
       [
@@ -915,7 +1279,11 @@ console.log('\nbuildWires — из правого края источника в
 
   const byKeyOf = new Map(wires.map((w) => [w.key, w]));
   ck(byKeyOf.has('SHELL->GARMENT:1'), 'формат ключа провода узла', [...byKeyOf.keys()].join(', '));
-  ck(byKeyOf.has('tile:FR->SHELL:0'), 'формат ключа провода детали', [...byKeyOf.keys()].join(', '));
+  ck(
+    byKeyOf.has('tile:FR->SHELL:0'),
+    'формат ключа провода детали',
+    [...byKeyOf.keys()].join(', '),
+  );
 
   const uw = byKeyOf.get('SHELL->GARMENT:1');
   ck(uw.from === 'SHELL' && uw.to === 'GARMENT', 'провод помнит свои концы');
@@ -924,11 +1292,18 @@ console.log('\nbuildWires — из правого края источника в
     'провод выходит из середины правого края источника',
     uw.d,
   );
-  ck(uw.d.endsWith(`${garment.x},${rowY('GARMENT', 1)}`), 'провод приходит в СТРОКУ потребителя', uw.d);
+  ck(
+    uw.d.endsWith(`${garment.x},${rowY('GARMENT', 1)}`),
+    'провод приходит в СТРОКУ потребителя',
+    uw.d,
+  );
   ck(uw.faint === undefined, 'провод узла не бледный', String(uw.faint));
 
   ck(byKeyOf.get('tile:FR->SHELL:0').faint === false, 'деталь вошла в этот узел — полный провод');
-  ck(byKeyOf.get('tile:FLAP->GARMENT:1').faint === true, 'деталь только обработана — бледный провод');
+  ck(
+    byKeyOf.get('tile:FLAP->GARMENT:1').faint === true,
+    'деталь только обработана — бледный провод',
+  );
 
   // Съедена ДРУГИМ узлом, а обработана этим: связь есть, но полной её называть нельзя.
   const elsewhere = {
@@ -942,7 +1317,11 @@ console.log('\nbuildWires — из правого края источника в
     consumers: [0],
   };
   const w2 = buildWires(blocks, steps, { ...layout, tiles: [elsewhere] }, rowY);
-  ck(w2[w2.length - 1].faint === true, 'съедена не здесь — бледный провод', JSON.stringify(w2[w2.length - 1]));
+  ck(
+    w2[w2.length - 1].faint === true,
+    'съедена не здесь — бледный провод',
+    JSON.stringify(w2[w2.length - 1]),
+  );
 
   // Бокса нет в раскладке — провод не рисуется вовсе, а не целится в нули.
   const noBox = buildWires(
@@ -1050,7 +1429,11 @@ console.log('\nподсветка шага, открытого в доке');
 {
   const cf = mod.canvasFacts;
   ck(cf.unitStep >= 0, 'фикстура: есть шаг, нарисованный строкой узла', `index=${cf.unitStep}`);
-  ck(cf.tileStep >= 0, 'фикстура: есть обработка, нарисованная строкой на плитке', `index=${cf.tileStep}`);
+  ck(
+    cf.tileStep >= 0,
+    'фикстура: есть обработка, нарисованная строкой на плитке',
+    `index=${cf.tileStep}`,
+  );
   ck(cf.tailStep >= 0, 'фикстура: есть шаг, нарисованный строкой хвоста', `index=${cf.tailStep}`);
 
   /** Подсвеченные строки целиком: сам `div` и его содержимое (вложенных div в строке нет). */
@@ -1082,7 +1465,11 @@ console.log('\nподсветка шага, открытого в доке');
       `мест ${JSON.stringify(places)}, подсвечено ${rows.length}`,
     );
     for (const [whole, inner] of rows) {
-      ck(whole.includes('bg-textColor'), `${where}: подсвеченная строка инвертирована`, whole.slice(0, 160));
+      ck(
+        whole.includes('bg-textColor'),
+        `${where}: подсвеченная строка инвертирована`,
+        whole.slice(0, 160),
+      );
       // ХВОСТ КЛАССА, А НЕ КЛАСС ЦЕЛИКОМ: в разметке `&` уезжает как `&amp;`, и напиши мы здесь
       // готовую строку `[&amp;_*]:…` — сканер tailwind нашёл бы её в ЭТОМ файле и завёл в
       // production-CSS мёртвое правило под несуществующий класс. Хвост кандидатом не является.

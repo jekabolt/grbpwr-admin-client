@@ -6,14 +6,7 @@
 // geometry (lib/fusing-dxf generateFuseGeometry), so what is drawn is what is cut; its clipped
 // area goes to the panel through the zone bus. Coordinates: the sheet's own SVG space — cm, Y down.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  edgeRunsOf,
-  extendPolyline,
-  pointOnEdgeRun,
-  projectPointToEdgeRun,
-  stripBandPolygons,
-  trimEdgeRun,
-} from 'lib/fusing-dxf/edge-runs';
+import { edgeRunsOf, pointOnEdgeRun, projectPointToEdgeRun } from 'lib/fusing-dxf/edge-runs';
 import { fusingDartPolygons } from 'lib/fusing-dxf/darts';
 import { fuseAreaMm2, fuseInsetRingMm, generateFuseGeometry } from 'lib/fusing-dxf/geometry';
 import type { FusePolygon } from 'lib/fusing-dxf/types';
@@ -72,22 +65,27 @@ function svgPoint(e: React.PointerEvent) {
   return { x: r.x, y: r.y };
 }
 
-/** A drawn zone's fusible geometry, piece-local mm. */
-type ZoneFill = { polys: FusePolygon[]; status: 'ok' | 'invalid' | 'unknown' };
+/** The generator's fusible geometry, piece-local mm. */
+type FuseFill = { polys: FusePolygon[]; status: 'ok' | 'invalid' | 'unknown' };
 const mm10 = (q: Pt) => ({ x: q.x * 10, y: q.y * 10 });
 const cm10 = (q: Pt) => ({ x: q.x / 10, y: q.y / 10 });
-function zoneFillOf(
+function fuseFillOf(
   p: PieceDTO,
   f: PieceFuseSpec,
   requiredSeamAllowanceMm: number | null,
-): ZoneFill | null {
-  if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
+): FuseFill | null {
+  if (!f.mode || (f.mode === 'zone' && !isDrawnZone(f.zone))) return null;
   if (f.insetNet && !Number.isFinite(requiredSeamAllowanceMm))
     return { polys: [], status: 'unknown' };
   try {
+    // An empty width keeps the old 10 mm preview only until the operator chooses a real width.
+    // Once chosen, this is exactly the same spec and geometry function used by the DXF builder.
+    const resolved = resolveFuse(f, requiredSeamAllowanceMm);
+    const previewSpec =
+      f.mode === 'strip' && f.widthMm == null ? { ...f, widthMm: resolved.widthMm } : f;
     const polys = generateFuseGeometry({
       outline: p.poly.map(mm10),
-      spec: f,
+      spec: previewSpec,
       seamAllowanceMm: requiredSeamAllowanceMm,
       darts: fusingDartPolygons(p),
     });
@@ -123,16 +121,16 @@ export function FuseOverlay({
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [handle, setHandle] = useState<{ edge: number; end: 's' | 'e' } | null>(null);
-  // Fill cache: a zone's geometry per piece object, keyed by what the geometry reads.
-  const fills = useRef(new WeakMap<PieceDTO, Map<string, ZoneFill | null>>());
+  // Fill cache: generator geometry per piece object, keyed by everything the geometry reads.
+  const fills = useRef(new WeakMap<PieceDTO, Map<string, FuseFill | null>>());
   const fillOf = (p: PieceDTO, f: PieceFuseSpec) => {
-    if (f.mode !== 'zone' || !isDrawnZone(f.zone)) return null;
-    const key = JSON.stringify([f.zone, f.insetNet, f.insetMm, f.darts, requiredSeamAllowanceMm]);
+    if (!f.mode || (f.mode === 'zone' && !isDrawnZone(f.zone))) return null;
+    const key = JSON.stringify([f, requiredSeamAllowanceMm]);
     let m = fills.current.get(p);
     if (!m) fills.current.set(p, (m = new Map()));
     if (!m.has(key)) {
       if (m.size > 64) m.clear();
-      m.set(key, zoneFillOf(p, f, requiredSeamAllowanceMm));
+      m.set(key, fuseFillOf(p, f, requiredSeamAllowanceMm));
     }
     return m.get(key) ?? null;
   };
@@ -192,7 +190,6 @@ export function FuseOverlay({
     const clip = `fuse-clip-${p.id}`;
     const mask = `fuse-mask-${p.id}`;
     const insetMm = r.insetMm ?? 0;
-    const D = (insetMm + r.widthMm) / 10;
     const holes =
       insetKnown && r.darts === 'cut' ? darts.map((d) => offsetPoly(d, -insetMm / 10)) : [];
     // Drawn zone (rect / spline): stored piece-local mm, Y up → sheet cm, Y down.
@@ -233,7 +230,13 @@ export function FuseOverlay({
         dxf = src.poly.map((q) => `${sx + q.x},${-(sy + q.y)}`).join(' ');
       }
     }
-    const op = faint ? 0.16 : 0.32;
+    const minX = Math.min(...pts.map((point) => point.x));
+    const maxX = Math.max(...pts.map((point) => point.x));
+    const minY = Math.min(...pts.map((point) => point.y));
+    const maxY = Math.max(...pts.map((point) => point.y));
+    const tagSize = 14 * px;
+    const tagX = Math.max(minX, maxX - tagSize - 4 * px);
+    const tagY = Math.min(maxY - tagSize, minY + 4 * px);
     return (
       <g key={`fuse-${p.id}`} pointerEvents='none' data-fuse-on={ciOf(p)}>
         <clipPath id={clip}>
@@ -245,47 +248,32 @@ export function FuseOverlay({
             <polygon key={i} points={str(h)} fill='black' />
           ))}
         </mask>
-        <g clipPath={`url(#${clip})`} mask={`url(#${mask})`} fill={INK} fillOpacity={op}>
-          {insetKnown && f.mode === 'whole' && <polygon points={str(inner)} />}
-          {insetKnown &&
-            f.mode === 'strip' &&
-            f.edges.flatMap((edge) => {
-              const run = runs[edge.edge];
-              if (!run) return [];
-              const previous =
-                runs.length > 1
-                  ? f.edges.find(
-                      (candidate) => candidate.edge === (edge.edge - 1 + runs.length) % runs.length,
-                    )
-                  : undefined;
-              const next =
-                runs.length > 1
-                  ? f.edges.find((candidate) => candidate.edge === (edge.edge + 1) % runs.length)
-                  : undefined;
-              const points = extendPolyline(
-                trimEdgeRun(run, edge.startMm / 10, edge.endMm / 10),
-                edge.startMm <= 0 && previous && previous.endMm <= 0 ? D : 0,
-                edge.endMm <= 0 && next && next.startMm <= 0 ? D : 0,
-              );
-              return stripBandPolygons(points, insetMm / 10, D, sign).map((band, index) => (
-                <polygon key={`${edge.edge}-${index}`} points={str(band)} data-strip={edge.edge} />
-              ));
-            })}
-          {zoneRings.length > 0 && !fillPath && fill?.status !== 'unknown' && (
-            <path
-              d={zoneRings
-                .map(
-                  ({ points }) =>
-                    `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')} Z`,
-                )
-                .join(' ')}
-              fillRule='evenodd'
-            />
-          )}
+        <g clipPath={`url(#${clip})`} mask={`url(#${mask})`} fill={INK} fillOpacity={0.28}>
           {dxf && <polygon points={dxf} />}
         </g>
+        {dxf && (
+          <polygon
+            points={dxf}
+            clipPath={`url(#${clip})`}
+            fill='none'
+            stroke={INK}
+            strokeWidth={1}
+            vectorEffect='non-scaling-stroke'
+            strokeLinejoin='round'
+          />
+        )}
         {fillPath && (
-          <path d={fillPath} fill={INK} fillOpacity={op} fillRule='evenodd' data-zone-fill='' />
+          <path
+            d={fillPath}
+            fill={INK}
+            fillOpacity={0.28}
+            fillRule='evenodd'
+            stroke={INK}
+            strokeWidth={1}
+            vectorEffect='non-scaling-stroke'
+            strokeLinejoin='round'
+            data-zone-fill=''
+          />
         )}
         {!faint && f.mode && insetKnown && (
           <polygon
@@ -337,7 +325,7 @@ export function FuseOverlay({
                 data-zone-line=''
                 fill='none'
                 stroke={fill?.status === 'invalid' ? 'var(--color-error)' : INK}
-                strokeWidth={1.5}
+                strokeWidth={1}
                 vectorEffect='non-scaling-stroke'
                 clipPath={`url(#${clip})`}
               />
@@ -353,6 +341,19 @@ export function FuseOverlay({
             vectorEffect='non-scaling-stroke'
           />
         )}
+        <g aria-label='fused piece'>
+          <rect x={tagX} y={tagY} width={tagSize} height={tagSize} fill={INK} />
+          <text
+            x={tagX + tagSize / 2}
+            y={tagY + tagSize * 0.72}
+            fill={PAPER}
+            fontSize={9 * px}
+            fontWeight={700}
+            textAnchor='middle'
+          >
+            F
+          </text>
+        </g>
       </g>
     );
   };
@@ -361,7 +362,7 @@ export function FuseOverlay({
   const pts = g?.pts ?? [];
   const padOn = !!g && sf!.mode === 'zone';
   // The selected zone's clipped area → the panel (cm²; null = invalid; undefined = not a drawn zone).
-  const selFill = sp && sf ? fillOf(sp, sf) : null;
+  const selFill = sp && sf?.mode === 'zone' ? fillOf(sp, sf) : null;
   const selArea = selFill
     ? selFill.status === 'ok'
       ? fuseAreaMm2(selFill.polys) / 100 || null
@@ -449,7 +450,8 @@ export function FuseOverlay({
         edgesOn &&
         g!.runs.map((run) => {
           const i = run.index;
-          const on = sf.edges.some((edge) => edge.edge === i);
+          const implicitAll = sf.edges.length === 0;
+          const on = implicitAll || sf.edges.some((edge) => edge.edge === i);
           return (
             <g key={`edge-${i}`}>
               {(on || hover === i) && (
@@ -458,7 +460,7 @@ export function FuseOverlay({
                   points={str(run.points)}
                   fill='none'
                   stroke={INK}
-                  strokeWidth={on ? 3 : 2}
+                  strokeWidth={1}
                   strokeDasharray={on ? undefined : '4 3'}
                   vectorEffect='non-scaling-stroke'
                   strokeLinecap='round'
@@ -481,7 +483,10 @@ export function FuseOverlay({
                   onChange(sel, {
                     ...sf,
                     edges: on
-                      ? cur.filter((x) => x.edge !== i)
+                      ? (implicitAll
+                          ? g!.runs.map(({ index }) => ({ edge: index, startMm: 0, endMm: 0 }))
+                          : cur
+                        ).filter((x) => x.edge !== i)
                       : [...cur, { edge: i, startMm: 0, endMm: 0 }].sort((x, y) => x.edge - y.edge),
                   });
                 }}
@@ -520,7 +525,7 @@ export function FuseOverlay({
                   height={hs}
                   fill={PAPER}
                   stroke={INK}
-                  strokeWidth={1.5}
+                  strokeWidth={1}
                   vectorEffect='non-scaling-stroke'
                   style={{ cursor: 'grab' }}
                   onPointerDown={(e) => {

@@ -68,6 +68,8 @@ import type { PosOverrides } from '../src/components/managers/tech-card/componen
 import type { FoundPiece } from '../src/components/managers/tech-card/components/nesting/dxf-geometry';
 import type { PieceShapeMap } from '../src/components/managers/tech-card/components/use-piece-shapes';
 import type { TechCardFormData } from '../src/components/managers/tech-card/components/schema';
+import { unitDisplayName } from '../src/lib/assembly-unit-name';
+import { unitNameProducerIndex } from '../src/components/managers/tech-card/components/unit-block';
 
 type RawStep = { in?: string[]; out?: string; name?: string };
 
@@ -140,9 +142,10 @@ const CONVERGED_STEPS: RawStep[] = [
   { in: ['FR'] },
   { in: ['FR', 'BK'], out: 'SHELL', name: 'shell' },
   { in: ['SHELL', 'SL'], out: 'SHELL' },
-  // Узел без имени: вторая строка шапки обязана остаться без спана имени вовсе.
+  // Узел без имени: видимым именем остаётся его стабильный код.
   { in: ['HD', 'LN'], out: 'HOOD' },
-  { in: ['SHELL', 'HOOD'], out: 'GARMENT', name: 'garment' },
+  // Ключ нарочно НЕ равен имени: golden должен видеть GARMENT, а не OUTER.
+  { in: ['SHELL', 'HOOD'], out: 'OUTER', name: 'Garment' },
   { in: ['FLAP'] },
 ];
 
@@ -184,7 +187,7 @@ const CONVERGED_SHAPES: PieceShapeMap = new Map<string, FoundPiece | null>([
 const CONVERGED_SMV = new Map<string, string>([
   ['SHELL', '8.4'],
   ['HOOD', '3.2'],
-  ['GARMENT', '21.75'],
+  ['OUTER', '21.75'],
   ['', '1.5'],
 ]);
 
@@ -225,11 +228,7 @@ const TAIL_PIECES: AssemblyPiece[] = [
   { lineKey: 'LBL', name: 'care label' },
 ];
 
-const TAIL_STEPS: RawStep[] = [
-  { in: ['TAPE'] },
-  { in: ['TAPE', 'TRIM'] },
-  { in: ['TRIM', 'LBL'] },
-];
+const TAIL_STEPS: RawStep[] = [{ in: ['TAPE'] }, { in: ['TAPE', 'TRIM'] }, { in: ['TRIM', 'LBL'] }];
 
 const TAIL_LABELS = [
   'fuse the binding tape',
@@ -477,11 +476,14 @@ export const views = {
   directInputsOf,
   buildWires,
   makeRowY,
+  unitDisplayName,
+  unitNameProducerIndex,
   METRICS: SCHEMATIC_METRICS,
-  // Клик по шапке узла и позиция шага, добавленного на плитку детали, — см. пояснение у
+  // Клик по шапке узла и позиции шагов, добавленных в бокс или на плитку, — см. пояснение у
   // namespace-импорта выше.
   unitHeadTarget: (nodeViews as Record<string, unknown>).unitHeadTarget,
   unitHeadOpen: (nodeViews as Record<string, unknown>).unitHeadOpen,
+  unitAddPrefill: (nodeViews as Record<string, unknown>).unitAddPrefill,
   pieceAddPrefill: (nodeViews as Record<string, unknown>).pieceAddPrefill,
 };
 

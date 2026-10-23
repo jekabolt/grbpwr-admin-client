@@ -1,4 +1,5 @@
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { BoxLayout, SchematicLayout, TileLayout } from './assembly-layout';
 
 // Слой ручных позиций и жестов схемы: «куда встала нода», «что под курсором», «можно ли соединить».
@@ -164,8 +165,13 @@ export function combineVerdict(
     const eater = res.consumedBy.get(key);
     if (eater === undefined) return null;
     const into = steps[eater]?.outputUnitKey ?? '';
-    const where = into ? ` and sits inside unit ${into}` : '';
-    return `“${key}” is already consumed by step ${(eater + 1) * 10}${where}`;
+    const where = into
+      ? ` and sits inside unit ${unitDisplayName({ key: into, outputUnitName: res.units.get(into)?.name })}`
+      : '';
+    const shown = res.units.has(key)
+      ? `▣ ${unitDisplayName({ key, outputUnitName: res.units.get(key)?.name })}`
+      : key;
+    return `“${shown}” is already consumed by step ${(eater + 1) * 10}${where}`;
   };
 
   const dragEaten = eatenReason(dragKey);

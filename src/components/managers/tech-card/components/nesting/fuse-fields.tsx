@@ -27,6 +27,7 @@ import {
   fuseIncomplete,
   fuseLineOf,
   fuseOffDefault,
+  fuseSpecForPanelMode,
   isMmText,
   mmOfText,
   type FuseDarts,
@@ -192,18 +193,14 @@ export function FuseFields({
         : spec.mode || null;
   const set = (d: Partial<PieceFuseSpec>) => onChange({ ...spec, ...d });
   const setMode = (m: FuseMode) => {
-    if (!m) return onChange(blankFuse());
-    onChange({
-      ...spec,
-      mode: m,
-      edges: m === 'strip' ? spec.edges : [],
-      zone: m === 'zone' ? spec.zone : null,
-    });
+    onChange(m ? fuseSpecForPanelMode(spec, m) : blankFuse());
   };
   const chooseMode = (mode: FusePanelMode) => {
     if (mode === 'file') {
       setFileOpen(true);
-      if (!fileLineKey) setFileLineKey(line || lines[0]?.key || '');
+      const nextLineKey = fileLineKey || line || lines[0]?.key || '';
+      setFileLineKey(nextLineKey);
+      onChange(fuseSpecForPanelMode(spec, mode, nextLineKey));
       return;
     }
     if (derivedMode === 'file' && line) onLeaveFile?.(line);
@@ -218,7 +215,8 @@ export function FuseFields({
         label='fusing'
         error={fused && !on}
         door={
-          on && (
+          on &&
+          !fileOpen && (
             <Button
               type='button'
               aria-label='more'
@@ -275,12 +273,17 @@ export function FuseFields({
                 if (x === ADD_SLOT) {
                   if (fileOpen) {
                     const added = onAddFileSlot?.();
-                    if (added) setFileLineKey(added);
+                    if (added) {
+                      setFileLineKey(added);
+                      onChange(fuseSpecForPanelMode(spec, 'file', added));
+                    }
                   } else onAddSlot();
                   return;
                 }
-                if (fileOpen) setFileLineKey(x);
-                else set({ bomLineKey: x });
+                if (fileOpen) {
+                  setFileLineKey(x);
+                  onChange(fuseSpecForPanelMode(spec, 'file', x));
+                } else set({ bomLineKey: x });
               }}
             />
           </FuseField>
@@ -353,7 +356,7 @@ export function FuseFields({
           )}
         </FuseField>
       )}
-      {spec.mode === 'zone' && ci && zoneBus && (
+      {!fileOpen && spec.mode === 'zone' && ci && zoneBus && (
         <ZoneRow
           spec={spec}
           ci={ci}
@@ -363,7 +366,7 @@ export function FuseFields({
           onChange={onChange}
         />
       )}
-      {on && more && (
+      {on && !fileOpen && more && (
         <div className='grid grid-cols-3 items-end gap-2'>
           <FuseField label='inset mm'>
             <Combobox
@@ -439,6 +442,7 @@ function ZoneRow({
   const ringAreas = bus.ringAreas(ci);
   const contour = bus.contour(ci) ?? [];
   const canUndo = bus.canUndo(ci);
+  const zoneInvalid = drawn && area === null;
   useEffect(() => {
     if (requested !== selected) bus.select(ci, selected);
   }, [bus, ci, requested, selected]);
@@ -497,9 +501,9 @@ function ZoneRow({
     if (seeded) write(seeded.zone, seeded.ref);
   };
   return (
-    <div data-zone-area={area ?? ''} aria-invalid={drawn && area === null ? true : undefined}>
+    <div data-zone-area={area ?? ''} aria-invalid={zoneInvalid ? true : undefined}>
       <GroupLabel
-        className={drawn && area === null ? '[&>span]:text-error' : undefined}
+        className={zoneInvalid ? '[&>span]:text-error' : undefined}
         action={
           <div className='flex gap-3'>
             <Button
@@ -538,20 +542,26 @@ function ZoneRow({
         {refs.map((ref) => {
           const selectedRow = ref === selected;
           const ringArea = ringAreas[ref];
+          const ringInvalid = zoneInvalid || ringArea === null;
           return (
             <Button
               key={ref}
               aria-label={zoneRingLabel(spline, ref)}
               aria-pressed={selectedRow}
+              aria-invalid={ringInvalid || undefined}
               className={`grid min-h-7 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 px-1.5 py-1 text-left text-micro uppercase tracking-label ${
-                selectedRow
-                  ? 'bg-textColor text-bgColor'
-                  : 'bg-bgColor text-textColor hover:bg-pageBg'
+                selectedRow && ringInvalid
+                  ? 'bg-error text-bgColor'
+                  : selectedRow
+                    ? 'bg-textColor text-bgColor'
+                    : ringInvalid
+                      ? 'bg-bgColor text-error hover:bg-pageBg'
+                      : 'bg-bgColor text-textColor hover:bg-pageBg'
               }`}
               disabled={readOnly}
               onClick={() => bus.select(ci, ref)}
             >
-              <span aria-hidden>{ref.startsWith('hole:') ? '◇' : '◆'}</span>
+              <span aria-hidden>{ringInvalid ? '!' : ref.startsWith('hole:') ? '◇' : '◆'}</span>
               <span className='truncate'>{zoneRingLabel(spline, ref)}</span>
               <span className='tabular-nums'>
                 {ringArea != null ? `${Math.round(ringArea)} cm²` : <EmptyCell />}

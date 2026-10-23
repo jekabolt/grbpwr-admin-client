@@ -105,6 +105,7 @@ import { useAllModels } from 'components/managers/models/components/useModelQuer
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   approvalStateLabel,
   formatTechCardDate,
@@ -756,7 +757,7 @@ export function TechPackDocument({
       if (b.steps.length === 0) continue;
       out.push({
         key: b.key,
-        label: b.name ? `▣ ${b.key} · ${b.name}` : `▣ ${b.key}`,
+        label: `▣ ${unitDisplayName({ key: b.key, outputUnitName: b.name })}`,
         // СОСТАВ УЗЛА — то, ради чего блок и печатают: швея видит, из чего собирается эта
         // подсборка, не листая обратно к списку деталей.
         sub: b.leaves.length ? `from: ${b.leaves.map(nameOf).join(' + ')}` : '',
@@ -1526,6 +1527,14 @@ export function TechPackDocument({
   // деталь ИЛИ узел, и шаг, сшивающий два узла, по одной проекции напечатался бы вовсе без
   // состава. Фолбэк на piece_line_keys оставлен для архивных снапшотов: они отданы ровно так,
   // как были записаны, и поля 46 у них нет.
+  const unitNameByKey = new Map<string, string>();
+  for (const operation of tc.operations ?? []) {
+    const key = (operation.outputUnitKey ?? '').trim();
+    if (key && !unitNameByKey.has(key)) {
+      unitNameByKey.set(key, unitDisplayName({ key, outputUnitName: operation.outputUnitName }));
+    }
+  }
+
   const opParts = (o: { pieceLineKeys?: string[]; inputKeys?: string[] }): string[] => {
     const pieces = tc.pieces ?? [];
     // Источник ключей решает, что означает ненайденный ключ: в union'е это ссылка на узел, а в
@@ -1538,7 +1547,7 @@ export function TechPackDocument({
         if (!k) return '';
         const piece = pieces.find((pc) => pc.lineKey === k);
         if (piece) return piece.name?.trim() || k;
-        return legacy ? k : `▣ ${k}`;
+        return legacy ? k : `▣ ${unitNameByKey.get(k) ?? unitDisplayName({ key: k })}`;
       })
       .filter(Boolean);
   };
@@ -1548,8 +1557,7 @@ export function TechPackDocument({
   const opOutput = (o: { outputUnitKey?: string; outputUnitName?: string }): string => {
     const key = (o.outputUnitKey ?? '').trim();
     if (!key) return '';
-    const name = (o.outputUnitName ?? '').trim();
-    return name ? `▣ ${key} · ${name}` : `▣ ${key}`;
+    return `▣ ${unitNameByKey.get(key) ?? unitDisplayName({ key, outputUnitName: o.outputUnitName })}`;
   };
 
   // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);

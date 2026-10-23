@@ -30,6 +30,7 @@ import { orderTemplate } from 'lib/assembly-skeleton/skeleton';
 import { namesIn } from 'lib/assembly-skeleton/skeleton/build-skeleton';
 import { replayExisting } from 'lib/assembly-skeleton/skeleton/existing';
 import { unitLeaves } from 'lib/assembly-skeleton/union';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   SKELETON,
   type SeamCandidate,
@@ -122,7 +123,7 @@ import type { PieceShapes } from './use-piece-shapes';
 /**
  * A unit's pictogram (lane C) — for the unit a step makes and for an earlier unit it takes as an
  * input. Returns null when the unit has no picture (no contours); the line then shows the plain
- * «▣ key» tile.
+ * «▣ name» tile.
  */
 export type RenderUnit = (unitKey: string, name: string, proposal: SkeletonProposal) => ReactNode;
 
@@ -717,13 +718,25 @@ function AssemblySkeletonPanel({
 
   const unitName = useMemo(() => {
     const m = new Map<string, string>();
-    for (const o of operations)
-      if (o.outputUnitKey) m.set(o.outputUnitKey, o.outputUnitName || o.outputUnitKey);
-    for (const s of proposal?.steps ?? [])
-      if (s.outputUnitKey) m.set(s.outputUnitKey, s.outputUnitName || s.outputUnitKey);
+    for (const o of operations) {
+      if (o.outputUnitKey && !m.has(o.outputUnitKey)) {
+        m.set(
+          o.outputUnitKey,
+          unitDisplayName({ key: o.outputUnitKey, outputUnitName: o.outputUnitName }),
+        );
+      }
+    }
+    for (const s of proposal?.steps ?? []) {
+      if (s.outputUnitKey && !m.has(s.outputUnitKey)) {
+        m.set(
+          s.outputUnitKey,
+          unitDisplayName({ key: s.outputUnitKey, suggestedName: s.outputUnitName }),
+        );
+      }
+    }
     return m;
   }, [operations, proposal]);
-  const nameOf = (k: string) => pieceName.get(k) ?? unitName.get(k) ?? k;
+  const nameOf = (k: string) => pieceName.get(k) ?? unitName.get(k) ?? unitDisplayName({ key: k });
 
   // Which steps the switch leaves in: «press open after joins» is on by default and switchable.
   const shown = (s: SkeletonStep) => pressOpen || s.operationType !== 'PRESS_OPEN';
@@ -1394,7 +1407,10 @@ function AssemblySkeletonPanel({
                           renderUnit && s.outputUnitKey
                             ? renderUnit(
                                 s.outputUnitKey,
-                                s.outputUnitName || s.outputUnitKey,
+                                unitDisplayName({
+                                  key: s.outputUnitKey,
+                                  suggestedName: s.outputUnitName,
+                                }),
                                 proposal,
                               )
                             : null
@@ -1698,7 +1714,7 @@ function SkeletonLine({
   violations: string[];
   singleRefusal: string;
   unitSlot: ReactNode;
-  /** An earlier unit taken as an input, drawn as its pictogram; null → the plain «▣ key» tile. */
+  /** An earlier unit taken as an input, drawn as its pictogram; null → the plain name tile. */
   unitInput?: (unitKey: string) => ReactNode;
   /** How many pieces an earlier unit holds (a unit above the pictogram cap is said, not blank). */
   unitSize?: (unitKey: string) => number;
@@ -1772,7 +1788,7 @@ function SkeletonLine({
               // Too many pieces for a glyph (the pictograms stop at 16): said, not left blank.
               <span
                 className='relative flex size-14 shrink-0 flex-col items-center justify-center border border-dashed border-borderColor bg-bgColor pb-3'
-                title={`${nameOf(k)} (${k}): ${unitSize!(k)} pieces, too many for a pictogram`}
+                title={`${nameOf(k)}: ${unitSize!(k)} pieces, too many for a pictogram`}
                 data-skeleton-unit-big={k}
               >
                 <Text size='control' component='span' className='font-bold tabular-nums'>
@@ -1782,14 +1798,14 @@ function SkeletonLine({
                   pieces
                 </Text>
                 <span className='absolute inset-x-0 bottom-0 truncate px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase'>
-                  ▣ {k}
+                  ▣ {nameOf(k)}
                 </span>
               </span>
             ) : (
-              // Unit codes are short and the schematic prints them with «▣» — the same mark here.
+              // The same single display name and unit mark used throughout the assembly views.
               <PieceTile
                 found={null}
-                name={`▣ ${k}`}
+                name={`▣ ${nameOf(k)}`}
                 className='bg-bgColor outline outline-1 -outline-offset-1 outline-borderColor'
               />
             )}
@@ -1800,8 +1816,10 @@ function SkeletonLine({
       <Text size='control' component='span' className='min-w-[9rem] flex-1'>
         {step.outputUnitKey ? (
           <>
-            → <b>{step.outputUnitName || step.outputUnitKey}</b>{' '}
-            <span className='text-labelColor'>{step.outputUnitKey}</span>
+            →{' '}
+            <b>
+              {unitDisplayName({ key: step.outputUnitKey, suggestedName: step.outputUnitName })}
+            </b>
           </>
         ) : (
           <span className='text-labelColor'>processing — stays on the table</span>

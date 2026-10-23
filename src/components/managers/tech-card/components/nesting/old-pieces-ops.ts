@@ -1,65 +1,93 @@
 // Что делать с шагами сборки, когда старые детали уходят с карточки.
 //
-// Раньше применение просто снимало ключ детали со входов: шов «P_old + MP_old» оставался без
-// входов, движок сборки отвечал join-arity, и карточка переставала сохраняться — по шагу, которого
-// оператор не трогал. Теперь шов, который задело удаление и у которого осталось меньше двух входов:
-//   · один вход   → растворяется: становится обработкой этого входа (время, машина, SMV живут),
-//                   а следующие шаги вместо узла берут этот самый вход — он и был узлом;
-//   · ноль входов → удаляется, а ключ его узла снимается со следующих шагов.
-// Обработки (шаг без узла) не удаляются: обработка без детали — допустимый общий шаг.
-// Узел появляется раньше своих потребителей, поэтому хватает одного прохода по порядку.
-// Сверка ключей ПОБАЙТНАЯ, как у removePiece и classifyAssemblyInputs.
+// НИЧЕГО со структурой сборки: ни снятия входа, ни растворения/удаления join, ни подстановки его
+// узла в следующие шаги. Каркас сборки принадлежит технологу и переписывается только явным Apply
+// панели каркаса. Ссылка на ушедшую деталь остаётся видимой в том же месте и получает существующую
+// метку `remapped`, которую оператор разбирает и снимает в рельсе сборки. `orphan` здесь неверен:
+// он предназначен для живой детали-призрака и не снимается кнопкой review.
+//
+// Единственная допустимая правка входа — переданный вызывающим доказанный successor: один старый
+// ключ становится одним новым ключом на той же позиции. Карта обязана быть 1:1; неоднозначная
+// подстановка не применяется, ссылка остаётся как есть и получает `remapped`. Сверка ключей
+// ПОБАЙТНАЯ, как у removePiece и
+// classifyAssemblyInputs.
 
 type OpRow = {
   inputKeys?: string[];
   outputUnitKey?: string;
   outputUnitName?: string;
+  media?: { annotations?: { pieceLineKey?: string; pieceLineKeys?: string[] }[] }[];
+  review?: string;
 };
 
 export type OldPieceOpsPlan<T extends OpRow> = {
   operations: T[];
   changed: boolean;
-  removed: number;
-  dissolved: number;
+  marked: number;
+  remapped: number;
 };
 
 export function planOldPieceOps<T extends OpRow>(
-  operations: T[],
-  goneKeys: Set<string>,
+  operations: readonly T[],
+  goneKeys: ReadonlySet<string>,
+  successors: ReadonlyMap<string, string> = new Map(),
 ): OldPieceOpsPlan<T> {
-  // ключ → чем его заменить ('' = снять)
-  const subst = new Map<string, string>();
-  for (const k of goneKeys) subst.set(k, '');
-  const out: T[] = [];
-  let changed = false;
-  let removed = 0;
-  let dissolved = 0;
-
-  for (const o of operations) {
-    const before = (o.inputKeys ?? []).filter(Boolean);
-    const after: string[] = [];
-    for (const k of before) {
-      const v = subst.has(k) ? subst.get(k)! : k;
-      if (v && !after.includes(v)) after.push(v);
-    }
-    const hit = after.length !== before.length || after.some((k, i) => k !== before[i]);
-    if (!hit) {
-      out.push(o);
-      continue;
-    }
-    changed = true;
-    const unit = (o.outputUnitKey ?? '').trim();
-    const own = after.filter((k) => k !== unit);
-    if (!unit || own.length >= 2) {
-      out.push({ ...o, inputKeys: after });
-    } else if (own.length === 1) {
-      subst.set(unit, own[0]);
-      dissolved++;
-      out.push({ ...o, inputKeys: own, outputUnitKey: '', outputUnitName: '' });
-    } else {
-      subst.set(unit, '');
-      removed++;
-    }
+  // Only a byte-exact, injective old → new map is safe. Two old pieces claiming one successor are
+  // not a 1:1 identity remap, so both stay dangling for review.
+  const targetCounts = new Map<string, number>();
+  for (const [from, rawTo] of successors) {
+    const to = rawTo.trim();
+    if (!goneKeys.has(from) || !to || to === from) continue;
+    targetCounts.set(to, (targetCounts.get(to) ?? 0) + 1);
   }
-  return { operations: out, changed, removed, dissolved };
+  const successorOf = (key: string): string | null => {
+    const to = successors.get(key)?.trim() ?? '';
+    return to && to !== key && targetCounts.get(to) === 1 ? to : null;
+  };
+
+  let changed = false;
+  let marked = 0;
+  let remapped = 0;
+  const out = operations.map((operation) => {
+    const before = operation.inputKeys ?? [];
+    // An annotation is also a step → piece reference. It is left untouched (the only permitted
+    // key rewrite is inside inputs), but it still raises the same review mark when its piece left.
+    let dangling =
+      operation.media?.some((media) =>
+        media.annotations?.some(
+          (annotation) =>
+            (!!annotation.pieceLineKey && goneKeys.has(annotation.pieceLineKey.trim())) ||
+            annotation.pieceLineKeys?.some((key) => goneKeys.has(key.trim())),
+        ),
+      ) ?? false;
+    let mapped = false;
+    const inputKeys = before.map((key) => {
+      if (!goneKeys.has(key)) return key;
+      const successor = successorOf(key);
+      if (!successor) {
+        dangling = true;
+        return key;
+      }
+      mapped = true;
+      remapped++;
+      return successor;
+    });
+    if (!dangling && !mapped) return operation;
+
+    // Preserve a stronger existing split/orphan mark; otherwise use the ordinary mark that the
+    // sequence rail clears after the operator reviews this unchanged step.
+    const previousReview = operation.review?.trim() ?? '';
+    const review =
+      previousReview === 'orphan' || previousReview === 'split' ? previousReview : 'remapped';
+    const reviewChanged = operation.review !== review;
+    if (reviewChanged) marked++;
+    changed = changed || mapped || reviewChanged;
+    return {
+      ...operation,
+      ...(mapped ? { inputKeys } : {}),
+      ...(reviewChanged ? { review } : {}),
+    };
+  });
+
+  return { operations: out, changed, marked, remapped };
 }

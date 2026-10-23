@@ -148,6 +148,14 @@ function subtractDarts(
 
 function selectedEdges(spec: PieceFuseSpec, edgeCount: number) {
   const selected = new Map<number, (typeof spec.edges)[number]>();
+  // An omitted picker answer means the strip follows the whole cut edge. Keeping that default in
+  // the shared generator makes the modal preview and the generated interlining DXF agree.
+  if (spec.edges.length === 0) {
+    for (let edge = 0; edge < edgeCount; edge++) {
+      selected.set(edge, { edge, startMm: 0, endMm: 0 });
+    }
+    return selected;
+  }
   for (const edge of spec.edges) {
     if (!Number.isInteger(edge.edge) || edge.edge < 0 || edge.edge >= edgeCount)
       throw new FuseTopologyError(`edge ${edge.edge} is outside a ${edgeCount}-run outline`);
@@ -162,7 +170,6 @@ function stripPaths(outline: readonly PtMm[], spec: PieceFuseSpec, insetMm: numb
     throw new FuseGeometryError('strip width must be greater than zero');
   const runs = edgeRunsOf(outline);
   const edges = selectedEdges(spec, runs.length);
-  if (!edges.size) throw new FuseGeometryError('strip mode has no selected edges');
   const bands: Path64[] = [];
   for (const [index, edge] of edges) {
     const run = runs[index];

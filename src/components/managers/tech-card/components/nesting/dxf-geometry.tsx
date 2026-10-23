@@ -483,13 +483,13 @@ export function SheetThumb({
   //
   // Контур приходит нормализованным к собственному bbox (poly: origin в углу bbox детали), так
   // что сдвиг по X — это и есть всё размещение, а vy() кладёт деталь на нулевую линию снизу.
-  const gap = Math.max(...shapes.map((s) => s.bboxW)) * 0.12;
-  const height = Math.max(...shapes.map((s) => s.bboxH), 1);
+  const gap = Math.max(...shapes.map((piece) => piece.bboxW)) * 0.12;
+  const height = Math.max(...shapes.map((piece) => piece.bboxH), 1);
   let x = 0;
-  const placed = shapes.map((p) => {
+  const placed = shapes.map((piece) => {
     const at = x;
-    x += p.bboxW + gap;
-    return { p, at };
+    x += piece.bboxW + gap;
+    return { piece, at };
   });
   const total = Math.max(x - gap, 1);
 
@@ -502,16 +502,23 @@ export function SheetThumb({
       role='img'
       aria-label={`piece silhouettes: ${shapes.length}`}
     >
-      {placed.map(({ p, at }, i) => (
-        <polygon
-          key={i}
-          points={p.poly.map((pt) => `${pt.x + at},${vy(pt.y)}`).join(' ')}
-          fill='none'
-          stroke='#111111'
-          strokeWidth={total / 260 || 0.01}
-          strokeLinejoin='round'
-        />
-      ))}
+      {placed.map(({ piece, at }, i) => {
+        const points = piece.poly.map((point) => `${point.x + at},${vy(point.y)}`).join(' ');
+        return (
+          <g key={i}>
+            <polygon
+              points={points}
+              fill='var(--color-warning)'
+              fillOpacity={0.12}
+              stroke='var(--color-warning)'
+              strokeOpacity={0.8}
+              strokeWidth={1}
+              vectorEffect='non-scaling-stroke'
+              strokeLinejoin='round'
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 }

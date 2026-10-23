@@ -1,9 +1,12 @@
 import {
   closestCenter,
+  type CollisionDetection,
   DndContext,
   DragEndEvent,
   KeyboardSensor,
+  pointerWithin,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -15,6 +18,7 @@ import {
 } from '@dnd-kit/sortable';
 import { common_TechCardMachineType } from 'api/proto-http/admin';
 import { clearReview, nextMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -68,6 +72,42 @@ const RAIL_GLYPH = `mr-0.5 size-4 ${SILHOUETTE_INK}`;
 // Шаг может соединять и шесть деталей — тогда от заголовка не осталось бы ничего. Три силуэта
 // отвечают на «про какой это узел», остальное досказывает заголовок: он перечисляет их все.
 const RAIL_GLYPH_LIMIT = 3;
+
+const sequenceCollisionDetection: CollisionDetection = (args) => {
+  const underPointer = pointerWithin(args);
+  return underPointer.length > 0 ? underPointer : closestCenter(args);
+};
+
+const sequenceDividerId = (at: number) => `sequence-divider:${at}`;
+
+// Разделитель — отдельная цель, а не сортируемая строка. Строка означает «поставить рядом»;
+// разделитель означает «поставить сюда И снять со сборочного графа». Смешать их одним id значило
+// бы снова сделать принадлежность к узлу случайным побочным эффектом позиции.
+function SequenceDivider({ at, visible = false }: { at: number; visible?: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: sequenceDividerId(at),
+    data: { sequenceDividerAt: at },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      aria-hidden='true'
+      data-sequence-divider={at}
+      data-drop-active={isOver ? '1' : undefined}
+      className='relative h-1.5 shrink-0'
+    >
+      <span
+        className={cn(
+          'pointer-events-none absolute inset-x-0 top-1/2 border-t border-textColor opacity-0 transition-opacity motion-reduce:transition-none',
+          visible && 'opacity-100',
+          isOver && 'border-t-2',
+          isOver && 'opacity-100',
+        )}
+      />
+    </div>
+  );
+}
 
 // ── the sequence rail ────────────────────────────────────────────────────────────────────────
 // One 26px line per assembly step, so twenty operations read as an ORDER instead of as twenty
@@ -394,6 +434,7 @@ export function SequenceRail({
   fields,
   grouped,
   headerBefore,
+  looseSteps,
   selectedIndex,
   onSelect,
   errorIndices,
@@ -417,6 +458,8 @@ export function SequenceRail({
   grouped: boolean;
   /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним (`useRailGrouping`). */
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Индексы шагов вне узлов: поздний отдельный прогон закрывает предыдущий блок своей чертой. */
+  looseSteps: ReadonlySet<number>;
   selectedIndex: number;
   onSelect: (index: number) => void;
   errorIndices: ReadonlySet<number>;
@@ -427,7 +470,7 @@ export function SequenceRail({
   pieceShapes: PieceShapeMap;
   onHoverPin: (n: number | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
-  onMoveOperation: (from: number, to: number) => void;
+  onMoveOperation: (from: number, to: number, standalone?: boolean) => void;
   readPieceDrag: (dt: DataTransfer) => string;
   /** Каталог работ на весь рельс — одна подписка у владельца, отсюда в каждую строку. Обязателен,
    * как аргументы композитора: «рельс без каталога» — решение вызывателя, а не забытый проп. */
@@ -444,10 +487,20 @@ export function SequenceRail({
   );
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (!over) return;
     const from = fields.findIndex((f) => f.id === active.id);
+    if (from < 0) return;
+    const dividerAt = over.data.current?.sequenceDividerAt;
+    if (typeof dividerAt === 'number') {
+      // `dividerAt` — адрес ДО удаления исходной строки. Если она стоит выше цели, удаление
+      // сдвигает адрес на один; тот же расчёт держит края 0 / length настоящими целями.
+      const to = Math.min(fields.length - 1, Math.max(0, dividerAt - (from < dividerAt ? 1 : 0)));
+      onMoveOperation(from, to, true);
+      return;
+    }
+    if (active.id === over.id) return;
     const to = fields.findIndex((f) => f.id === over.id);
-    if (from < 0 || to < 0) return;
+    if (to < 0) return;
     onMoveOperation(from, to);
   };
   const acceptReview = (index: number) => {
@@ -462,45 +515,76 @@ export function SequenceRail({
     const next = nextMarkedOperation(nextOperations, index);
     if (next >= 0) onSelect(next);
   };
+  const unitNameByKey = new Map(
+    [...headerBefore.values()].map(({ block }) => [
+      block.key,
+      unitDisplayName({ key: block.key, outputUnitName: block.name }),
+    ]),
+  );
+
+  const startsUnheadedLooseRun = (index: number) =>
+    grouped &&
+    index > 0 &&
+    looseSteps.has(index) &&
+    !looseSteps.has(index - 1) &&
+    !headerBefore.has(index);
+  const hasDividerBefore = (index: number) =>
+    grouped && (index === 0 || headerBefore.has(index) || startsUnheadedLooseRun(index));
+  // Разделители входят в геометрию сортировки, хотя сами не перетаскиваются. Иначе при наведении
+  // на их id `SortableContext` получал `overIndex = -1`, снимал все transform и строки ниже
+  // схлопывались обратно прямо под перетаскиваемым шагом.
+  const sortableItems = fields.flatMap((field, index) =>
+    hasDividerBefore(index) ? [sequenceDividerId(index), field.id] : [field.id],
+  );
+  if (grouped) sortableItems.push(sequenceDividerId(fields.length));
 
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={sequenceCollisionDetection}
       modifiers={[restrictToVerticalAxis]}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
         <div className='flex flex-col gap-0.5'>
-          {fields.map((f, index) => (
-            <Fragment key={f.id}>
-              {grouped && headerBefore.has(index) && (
-                <UnitBlockHeader
-                  block={headerBefore.get(index)!.block}
-                  smv={headerBefore.get(index)!.smv}
-                  terminal={headerBefore.get(index)!.terminal}
+          {fields.map((f, index) => {
+            // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
+            // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
+            const startsLooseRun = startsUnheadedLooseRun(index);
+            return (
+              <Fragment key={f.id}>
+                {hasDividerBefore(index) && <SequenceDivider at={index} visible={startsLooseRun} />}
+                {grouped && headerBefore.has(index) && (
+                  <UnitBlockHeader
+                    block={headerBefore.get(index)!.block}
+                    smv={headerBefore.get(index)!.smv}
+                    terminal={headerBefore.get(index)!.terminal}
+                    className='mt-0'
+                    unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
+                  />
+                )}
+                <RailStep
+                  uid={f.id}
+                  index={index}
+                  selected={index === selectedIndex}
+                  onSelect={() => onSelect(index)}
+                  hasError={errorIndices.has(index)}
+                  assemblyBroken={brokenSteps.has(index)}
+                  activePin={activePin}
+                  activeBom={activeBom}
+                  pieceShapes={pieceShapes}
+                  onHoverPin={onHoverPin}
+                  onDropPiece={onDropPiece}
+                  readPieceDrag={readPieceDrag}
+                  workCatalog={workCatalog}
+                  draft={draftIds?.has(f.id) ?? false}
+                  onReviewed={onReviewed ? () => onReviewed(index) : undefined}
+                  onReviewAccepted={() => acceptReview(index)}
                 />
-              )}
-              <RailStep
-                uid={f.id}
-                index={index}
-                selected={index === selectedIndex}
-                onSelect={() => onSelect(index)}
-                hasError={errorIndices.has(index)}
-                assemblyBroken={brokenSteps.has(index)}
-                activePin={activePin}
-                activeBom={activeBom}
-                pieceShapes={pieceShapes}
-                onHoverPin={onHoverPin}
-                onDropPiece={onDropPiece}
-                readPieceDrag={readPieceDrag}
-                workCatalog={workCatalog}
-                draft={draftIds?.has(f.id) ?? false}
-                onReviewed={onReviewed ? () => onReviewed(index) : undefined}
-                onReviewAccepted={() => acceptReview(index)}
-              />
-            </Fragment>
-          ))}
+              </Fragment>
+            );
+          })}
+          {grouped && <SequenceDivider at={fields.length} />}
         </div>
       </SortableContext>
     </DndContext>

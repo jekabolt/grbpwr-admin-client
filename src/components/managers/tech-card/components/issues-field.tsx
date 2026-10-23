@@ -15,6 +15,7 @@ import {
   FoldCaret,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
+import { unitDisplayName } from 'lib/assembly-unit-name';
 import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
@@ -264,8 +265,20 @@ export function IssuesField() {
     zone?: string;
     note?: string;
     inputKeys?: string[];
+    outputUnitKey?: string;
+    outputUnitName?: string;
   }>;
   const formPieces = useFormPieces();
+  const unitNameByKey = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const operation of operations) {
+      const key = operation.outputUnitKey?.trim() ?? '';
+      if (key && !names.has(key)) {
+        names.set(key, unitDisplayName({ key, outputUnitName: operation.outputUnitName }));
+      }
+    }
+    return names;
+  }, [operations]);
   // Каталог работ — одной подпиской на весь список жалоб: ссылка «join · подол» обязана называть
   // шаг тем же словом, каким его зовёт рельс, иначе жалоба указывает на соседний шаг.
   const { catalog: workCatalog } = useOperationWorkCatalog();
@@ -295,11 +308,13 @@ export function IssuesField() {
         // отбросить его (как делал .filter(Boolean) на именах) значило бы назвать джойн
         // «SHELL + HOOD» пустой строкой — то есть скрыть от автора именно то, что шаг собирает.
         pieceNames: (o.inputKeys ?? []).map(
-          (k) => formPieces.find((p) => p.lineKey === k)?.name ?? `▣ ${k}`,
+          (k) =>
+            formPieces.find((p) => p.lineKey === k)?.name ??
+            `▣ ${unitNameByKey.get(k) ?? unitDisplayName({ key: k })}`,
         ),
         note: o.note,
       }),
-    [formPieces, workCatalog],
+    [formPieces, unitNameByKey, workCatalog],
   );
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
     number?: number;

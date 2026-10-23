@@ -260,7 +260,7 @@ head('цена растворения — цепь падает');
   is('ломаются оба шага ниже', p.breaks, [1, 2]);
   is('и нижний только осиротеет', p.orphans, [2]);
   is('два узла перестают собираться', p.unitsLost, ['BODY', 'GARMENT']);
-  is('цена сказана словами', p.summary, 'dissolving ▣ SHELL will break steps 20 and 30');
+  is('цена сказана словами', p.summary, 'dissolving ▣ Shell will break steps 20 and 30');
 }
 
 head('цена растворения — джойн из трёх входов выживает');
@@ -284,7 +284,7 @@ head('цена растворения — джойн из трёх входов 
   is(
     'и приятное сказано вслух вместе с ценой',
     p.summary,
-    'dissolving ▣ SHELL will break step 20, but ▣ BODY still assembles, and front, back no longer reach any unit',
+    'dissolving ▣ Shell will break step 20, but ▣ Body still assembles, and front, back no longer reach any unit',
   );
 }
 
@@ -316,7 +316,7 @@ head('цена растворения — ломать нечего');
   // сам жест, а не его цена; пересказать человеку его же намерение значит завести шум там, где
   // строка обязана молчать.
   is('входы растворённого узла потерей не считаются', p.piecesDropped, []);
-  is('так и сказано', p.summary, 'dissolving ▣ CUFFS breaks nothing that works today');
+  is('так и сказано', p.summary, 'dissolving ▣ Cuffs breaks nothing that works today');
   is('а на шаге без узла жеста нет вовсе', dissolvePrice(PIECES, [step(['FRONT'])], 0), null);
 }
 
@@ -335,7 +335,7 @@ head('цена называет и то, что жест чинит');
   is(
     'и об этом сказано вместе с починкой',
     p.summary,
-    'dissolving ▣ SHELL breaks nothing that works today, and front, back no longer reach any unit, and step 20 stops being broken',
+    'dissolving ▣ Shell breaks nothing that works today, and front, back no longer reach any unit, and step 20 stops being broken',
   );
 }
 
@@ -362,10 +362,16 @@ head('цена — тот же расчёт, а не второй');
     step(['SHELL', 'SLEEVE'], 'BODY'),
     step(['BODY', 'POCKET'], 'GARMENT'),
   ];
-  const after = chain.map((s, i) => (i === 0 ? { ...s, outputUnitKey: '', outputUnitName: '' } : s));
+  const after = chain.map((s, i) =>
+    i === 0 ? { ...s, outputUnitKey: '', outputUnitName: '' } : s,
+  );
   const hand = faultsOf(after);
   const p = dissolvePrice(PIECES, chain, 0);
-  is('ломаются ровно изъяны карточки-после', p.breaks, [...hand.keys()].sort((a, b) => a - b));
+  is(
+    'ломаются ровно изъяны карточки-после',
+    p.breaks,
+    [...hand.keys()].sort((a, b) => a - b),
+  );
   is(
     'и сироты те же',
     p.orphans,
@@ -376,7 +382,11 @@ head('цена — тот же расчёт, а не второй');
   // которой жест не делает. У узла с именем разница видна сразу.
   const named = chain.map((s, i) => (i === 0 ? { ...s, outputUnitName: 'shell' } : s));
   const half = named.map((s, i) => (i === 0 ? { ...s, outputUnitKey: '' } : s));
-  is('имя без ключа — лишний шаг в цене', assemblyPrice(PIECES, named, half, 'x').breaks, [0, 1, 2]);
+  is(
+    'имя без ключа — лишний шаг в цене',
+    assemblyPrice(PIECES, named, half, 'x').breaks,
+    [0, 1, 2],
+  );
   is('а растворение целиком его не даёт', dissolvePrice(PIECES, named, 0).breaks, [1, 2]);
 }
 
@@ -386,7 +396,10 @@ head('структура — расчёт один и слова чужие');
 {
   const src = (p) => readFileSync(resolve(root, p), 'utf8');
   const code = src('src/components/managers/tech-card/components/assembly-cause.ts');
-  yes('цена ходит через движок', /import \{ assemblySweep \} from '\.\/assembly-frontier'/.test(code));
+  yes(
+    'цена ходит через движок',
+    /import \{ assemblySweep \} from '\.\/assembly-frontier'/.test(code),
+  );
   yes('и зовёт его на карточке-после', /assemblySweep\(pieces, after\)/.test(code));
   is('своих нарушений модуль не производит', /violations\.push\(|AssemblyRule/.test(code), false);
   is('React и DOM сюда не заходят', /from 'react'|document\./.test(code), false);

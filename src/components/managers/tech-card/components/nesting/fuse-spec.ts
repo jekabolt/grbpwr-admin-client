@@ -12,6 +12,7 @@ export {
   DEFAULT_INSET_MM,
   blankFuse,
   deriveFusePanelMode,
+  fuseSpecForPanelMode,
   readFuseSpec,
   writeFuseFields,
   type FuseDarts,
@@ -41,9 +42,8 @@ export const DART_ITEMS: { value: FuseDarts; label: string }[] = [
   { value: 'fuse', label: 'fuse over' },
 ];
 
-/** The fused pieces whose spec is not finished: a strip with no edge, a zone with no zone. */
-export const fuseIncomplete = (s: PieceFuseSpec) =>
-  (s.mode === 'strip' && s.edges.length === 0) || (s.mode === 'zone' && !s.zone);
+/** The fused pieces whose spec is not finished. An edge-less strip follows the whole outline. */
+export const fuseIncomplete = (s: PieceFuseSpec) => s.mode === 'zone' && !s.zone;
 
 /** Any «more» field off its default — the fold opens by itself. */
 export const fuseOffDefault = (s: PieceFuseSpec) =>
