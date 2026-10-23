@@ -363,9 +363,14 @@ export function deriveBlockSizes(
     for (const t of sizeTails) freq.set(t, (freq.get(t) ?? 0) + 1);
   }
   if (freq.size === 0) return new Map();
-  // Токен, встречающийся заметно реже самого частого, к размерному ряду не относится.
+  // Токен, встречающийся заметно реже самого частого, к размерному ряду не относится. Один
+  // graded stem is a complete (and common for interlining) file on its own: SL_R_XS…SL_R_XL
+  // gives every real size a frequency of one. Requiring two stems in that case erased the whole
+  // grade and turned its five blocks into five unrelated ungraded pieces. The per-stem gate above
+  // already requires at least two dictionary size tails, so accepting frequency one when there is
+  // only one graded stem does not turn FP_L / FP_R into sizes (R is not a size, leaving one tail).
   const max = Math.max(...freq.values());
-  const need = Math.max(2, max / 2);
+  const need = max === 1 ? 1 : Math.max(2, max / 2);
   const sizeSet = new Set([...freq].filter(([, n]) => n >= need).map(([t]) => t));
 
   const out = new Map<string, string>();

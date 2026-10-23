@@ -171,6 +171,76 @@ function routeOf(piece: FusingSourcePiece, lines: readonly FusingBomLine[]): Fus
 const zoneKey = (identity: string, size: string) =>
   `${normBlock(identity).toLowerCase()}|${size.trim().toLowerCase()}`;
 
+function mapPointBetweenOutlines(
+  point: PtMm,
+  from: ReturnType<typeof bbox>,
+  to: ReturnType<typeof bbox>,
+): PtMm {
+  const fromWidth = from.maxX - from.minX;
+  const fromHeight = from.maxY - from.minY;
+  const toWidth = to.maxX - to.minX;
+  const toHeight = to.maxY - to.minY;
+  return {
+    x: fromWidth > 0 ? to.minX + ((point.x - from.minX) / fromWidth) * toWidth : to.minX,
+    y: fromHeight > 0 ? to.minY + ((point.y - from.minY) / fromHeight) * toHeight : to.minY,
+  };
+}
+
+/**
+ * Maps base-size markup onto one graded outline. Widths and insets remain physical millimetres;
+ * positions follow the grade. Drawn zones use the two outlines' local frames, while strip trims
+ * keep the same fraction of their selected edge run.
+ */
+export function mapFuseSpecToSize(
+  source: PieceFuseSpec,
+  baseOutline: readonly PtMm[],
+  targetOutline: readonly PtMm[],
+): PieceFuseSpec {
+  if (source.mode === 'zone' && source.zone && !('dxfPieceKey' in source.zone)) {
+    const from = bbox(baseOutline);
+    const to = bbox(targetOutline);
+    if ('rect' in source.zone) {
+      const a = mapPointBetweenOutlines(
+        { x: source.zone.rect[0], y: source.zone.rect[1] },
+        from,
+        to,
+      );
+      const b = mapPointBetweenOutlines(
+        { x: source.zone.rect[2], y: source.zone.rect[3] },
+        from,
+        to,
+      );
+      return { ...source, zone: { rect: [a.x, a.y, b.x, b.y] } };
+    }
+    return {
+      ...source,
+      zone: {
+        spline: {
+          points: source.zone.spline.points.map((point) => ({
+            ...point,
+            ...mapPointBetweenOutlines(point, from, to),
+          })),
+        },
+      },
+    };
+  }
+  if (source.mode === 'strip' && source.edges.length > 0) {
+    const from = edgeRunsOf(baseOutline);
+    const to = edgeRunsOf(targetOutline);
+    // generateFuseGeometry owns the topology refusal and its actionable error text.
+    if (from.length !== to.length) return source;
+    return {
+      ...source,
+      edges: source.edges.map((edge) => {
+        const fromLength = from[edge.edge]?.length ?? 0;
+        const ratio = fromLength > 0 ? (to[edge.edge]?.length ?? fromLength) / fromLength : 1;
+        return { ...edge, startMm: edge.startMm * ratio, endMm: edge.endMm * ratio };
+      }),
+    };
+  }
+  return source;
+}
+
 /** Pure source-piece → one all-size DXF per used interlining BOM line. */
 export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingSheetsResult {
   const warnings: string[] = [];
@@ -214,6 +284,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
       const sizes: PieceSizeSpec[] = [];
       for (const sourceSize of ordered) {
         try {
+          const sizedFuse = mapFuseSpecToSize(fuse, base.outline, sourceSize.outline);
           const reference =
             fuse.zone && 'dxfPieceKey' in fuse.zone
               ? zoneOutlines.get(zoneKey(fuse.zone.dxfPieceKey, sourceSize.sizeToken)) ??
@@ -221,7 +292,7 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
               : undefined;
           const polygons = generateFuseGeometry({
             outline: sourceSize.outline,
-            spec: fuse,
+            spec: sizedFuse,
             seamAllowanceMm: sourcePiece.seamAllowanceMm,
             darts: sourceSize.darts,
             zoneOutline: reference,
@@ -267,7 +338,11 @@ export function buildFusingSheets(input: BuildFusingSheetsInput): BuildFusingShe
         allowance: { meaning: 'cut', allowanceMm: 0, origin: 'operator', evidence: [] },
         fabrics: [line.bomLineKey],
         fused: true,
-        ungraded: sourcePiece.ungraded,
+        // A stale card checkbox must not collapse a real source grade to the base contour. The
+        // writer emits only one `_UNI` block for an ungraded spec, so five parsed garment outlines
+        // otherwise became the reported one-block / not-graded generated sheet. A genuinely
+        // ungraded source still has one outline and keeps its UNI contract.
+        ungraded: sourcePiece.ungraded && sizes.length === 1,
         sizes,
       });
     }

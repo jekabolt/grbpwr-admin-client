@@ -2367,9 +2367,13 @@ export function PatternsField({
     const interlining = g.scope.lines.some(
       (line) => line.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
     );
-    const entries = interlining
+    const ownerEntries = interlining
       ? g.entries.filter((entry) => !isGeneratedFusingRow(entry.row))
-      : g.entries;
+      : [];
+    // Owner drawings are the editable source of truth when present. A generated-only slot still
+    // has a real sheet to inspect: filtering generated rows unconditionally passed [] to the
+    // parser, leaving the PIECES · INTERLINING modal as a header and footer with no body.
+    const entries = interlining && ownerEntries.length > 0 ? ownerEntries : g.entries;
     setMatching({ scope: g.scope, fabricName: scopeLabel(g.scope), files: filesOf(entries) });
   };
 
@@ -3495,6 +3499,7 @@ export function PatternsField({
           key={key}
           className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
           data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
+          onClickCapture={() => setSelectedKey(key)}
           {...dropProps(key)}
         >
           <Tile
@@ -3592,6 +3597,7 @@ export function PatternsField({
         key={key}
         className={cn('group/slot', dragging && 'outline outline-2 outline-textColor')}
         data-field={`patterns.slot.${g.scope.lines[0]?.lineKey ?? key}`}
+        onClickCapture={() => setSelectedKey(key)}
         {...dropProps(key)}
       >
         <Tile

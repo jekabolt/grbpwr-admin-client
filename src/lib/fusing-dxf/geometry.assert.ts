@@ -28,6 +28,7 @@ import {
   areaReadKeysOfScope,
   scopeAreaState,
 } from 'components/managers/tech-card/components/piece-areas-state';
+import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import {
   linesHeldByLegacyLinks,
   nextFusingAliases,
@@ -36,7 +37,7 @@ import {
   sameAliasSet,
 } from './aliases';
 import { fusingDartPolygons } from './darts';
-import { buildFusingSheets } from './dxf';
+import { buildFusingSheets, mapFuseSpecToSize } from './dxf';
 import {
   EDGE_CORNER_TURN_DEG,
   edgeRunsOf,
@@ -166,6 +167,31 @@ export async function main() {
   assert.equal(canonical[0].identity, 'BP_U');
   assert.equal(canonical[0].pieceLineKey, 'piece-bp');
   assert.equal(canonical[0].previouslyBound, false, 'an automatic main-sheet match stays pending');
+
+  const ownerGradeTokens = new Set(['xs', 's', 'm', 'l', 'xl']);
+  const ownerGrade = ['XS', 'S', 'M', 'L', 'XL'].map((size, index) =>
+    dxfPiece(1100 + index, `SL_R_${size}`, 100 + index),
+  );
+  const ownerSplit = splitPiecesBySize(ownerGrade, ownerGradeTokens);
+  assert.deepEqual(
+    ownerSplit.groups.map((group) => ({
+      size: group.size,
+      identity: ownerSplit.codeById.get(group.pieces[0].id)?.identity,
+    })),
+    ['XS', 'S', 'M', 'L', 'XL'].map((size) => ({ size, identity: 'SL_R' })),
+    'one graded interlining piece is split into five sizes of one SL_R identity',
+  );
+  const ownerMatch = matchInterliningImport({
+    blocks: ownerGrade,
+    mainBlocks: ownerGrade,
+    mainAliases: [{ blockName: 'SL_R', pieceLineKey: 'piece-sl-r' }],
+    pieces: [{ lineKey: 'piece-sl-r', name: 'sleeve right' }],
+    sizeTokens: ownerGradeTokens,
+  });
+  assert.equal(ownerMatch.length, 1);
+  assert.equal(ownerMatch[0].identity, 'SL_R');
+  assert.equal(ownerMatch[0].blocks.length, 5);
+  assert.equal(ownerMatch[0].pieceLineKey, 'piece-sl-r');
 
   const carried = matchInterliningImport({
     blocks: [dxfPiece(1014, 'bp-u-fuse-xs', 70)],
@@ -789,6 +815,55 @@ export async function main() {
   assert.equal(dxf.sheets[0].filename, 'jkt-042-fusing-g700.dxf');
   assert.deepEqual(dxf.sheets[0].blocks, ['FRONT_S', 'FRONT_M']);
   assert.deepEqual(dxf.sheets[0].aliases, [{ identity: 'FRONT', blockName: 'FRONT' }]);
+
+  const gradedOutlines = ['XS', 'S', 'M', 'L', 'XL'].map((sizeToken, rank) => ({
+    sizeToken,
+    sizeId: rank + 1,
+    rank,
+    outline: rectangle(80 + rank * 10, 60 + rank * 5),
+  }));
+  const proportionalZone = spec({ mode: 'zone', zone: { rect: [8, 6, 40, 30] } });
+  const mappedZone = mapFuseSpecToSize(
+    proportionalZone,
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
+  );
+  assert.deepEqual(
+    mappedZone.zone,
+    { rect: [12, 8, 60, 40] },
+    'a drawn zone keeps its proportional position in the target-size outline',
+  );
+  const mappedStrip = mapFuseSpecToSize(
+    spec({ mode: 'strip', widthMm: 12, edges: [{ edge: 0, startMm: 8, endMm: 16 }] }),
+    gradedOutlines[0].outline,
+    gradedOutlines[4].outline,
+  );
+  assert.deepEqual(
+    mappedStrip.edges,
+    [{ edge: 0, startMm: 12, endMm: 24 }],
+    'strip trim positions keep their fraction of the graded edge',
+  );
+  const gradedSheet = buildFusingSheets({
+    techCardId: 71,
+    style: 'FW28-001',
+    baseSizeId: 3,
+    bomLines: [{ bomLineKey: 'IL-1', code: 'interlining', label: 'interlining' }],
+    pieces: [
+      {
+        identity: 'SL_R',
+        displayName: 'sleeve right',
+        piecesPerGarment: 1,
+        ungraded: true,
+        fuse: proportionalZone,
+        sizes: gradedOutlines,
+      },
+    ],
+  });
+  assert.deepEqual(
+    gradedSheet.sheets[0].blocks,
+    ['SL_R_XS', 'SL_R_S', 'SL_R_M', 'SL_R_L', 'SL_R_XL'],
+    'the generator emits every graded size for the interlining piece',
+  );
 
   // The rebuild owns the links of a scope only generated sheets hold: stale and hand-made rows there
   // go, the new ones come. A scope an uploaded sheet also holds is never touched (fail closed):
