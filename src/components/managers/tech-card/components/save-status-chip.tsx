@@ -1,10 +1,14 @@
 import { useRef, useState } from 'react';
 import type { AutosaveStatus } from './design/autosave-contract';
-import { GroupLabel, Pill, GenericPopover, Button, Text } from 'ui';
-import { sameText, TEXT_SECTION_LABEL, type HistoryEntry, type TextSnapshot } from './save-history';
+import { GroupLabel, Pill, GenericPopover, Text } from 'ui';
 import type { FormErrorRow } from './stage-progress';
 import type { MachineState } from './useTechCardAutosave';
 import type { StagedChange } from './useTechCardStaging';
+import {
+  VersionHistoryList,
+  useTechCardSnapshots,
+  type CurrentTechCardVersion,
+} from './version-history';
 
 /**
  * ═══ СТАТУС СОХРАНЕНИЯ — ЧИП, КОТОРЫЙ НИКОГДА НЕ СОХРАНЯЕТ (волна 25.09 · T21 → 27.09 · O-60, D-59) ═══
@@ -23,17 +27,17 @@ import type { StagedChange } from './useTechCardStaging';
  *                                    таймеру нет — та же запись получила бы тот же отказ; она уходит
  *                                    снова со следующей правкой. Поповер — слова сервера как есть.
  * У этих состояний ОДНА дверь: щелчок по всему чипу раскрывает поповер — что ждёт записи, причина,
- * ИСТОРИЯ (откат текста к любому из последних сохранений). При `invalid` раскрытие — жест «покажи»:
+ * ВЕРСИИ (серверные снимки всей карточки). При `invalid` раскрытие — жест «покажи»:
  * ошибки тихой проверки выходят на поля (M-02), а ПЕРВАЯ строка поповера ведёт к первому полю
  * (→ вкладка) тем же путём, что строка предупреждений.
  *
  * Два состояния — не запись, а РЕШЕНИЕ человека, и слово чипа ведёт прямо к нему:
- *   unsaved · confirm the switch › — синий: смена purpose на auxiliary дошла до записи неподтверждённой
+ *   unsaved · confirm switch       — синий: смена purpose на auxiliary дошла до записи неподтверждённой
  *                                    (подтверждение, которое не смогло записать карточку). Сама смена
  *                                    подтверждается в момент жеста, в диалоге перевода; здесь —
  *                                    страховка, и щелчок открывает ДИАЛОГ;
  *   conflict                       — красный: щелчок снова открывает модалку конфликта.
- * У этих двух `▾` рядом остаётся дверью того же поповера.
+ * Пока одно из этих решений стоит, версии не подменяют его прямую дверь.
  *
  * ⌘S — невидимый явный flush: подсказки о нём здесь нет, органа на экране тоже.
  * Цвет никогда не несёт состояние один: у каждого тона своё слово (DESIGN.md, Monochrome Rule).
@@ -74,7 +78,7 @@ function describe(
       };
     }
     case 'needs-confirm':
-      return { label: 'unsaved · confirm the switch ›', tone: 'attention' };
+      return { label: 'unsaved · confirm switch', tone: 'attention' };
     case 'conflict':
       return { label: 'conflict', tone: 'warn' };
     case 'error':
@@ -151,8 +155,8 @@ export function SaveStatusChip({
   refusal,
   bodyDirty,
   staged,
-  history,
-  currentText,
+  techCardId,
+  currentVersion,
   canRestore,
   firstError,
   onRevealError,
@@ -174,8 +178,8 @@ export function SaveStatusChip({
   refusal?: string;
   bodyDirty: boolean;
   staged: StagedChange[];
-  history: HistoryEntry[];
-  currentText: TextSnapshot;
+  techCardId: number;
+  currentVersion: CurrentTechCardVersion;
   canRestore: boolean;
   /** `invalid`: the first field that holds the write — the popover's first line walks to it. */
   firstError?: FormErrorRow;
@@ -186,12 +190,11 @@ export function SaveStatusChip({
   /** `needs-confirm`: open the purpose-switch dialog. A dialog, never a write (D-59). */
   onConfirmSwitch: () => void;
   onOpenConflict: () => void;
-  onRestore: (entry: HistoryEntry) => void;
+  onRestore: (snapshotId: number) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   // The walk closes the popover and moves focus to the field; the popover must not take it back.
   const walking = useRef(false);
-  if (status === 'off') return null;
   const { label, tone } = describe(status, lastSavedAt, errorsCount, cause);
 
   // A DECISION, never a save: the word itself leads to it. In every other state the whole chip is the
@@ -205,31 +208,43 @@ export function SaveStatusChip({
   const walk = status === 'invalid' ? firstError : undefined;
 
   const pendingCount = staged.length + (bodyDirty ? 1 : 0);
-  const rows = [...history].reverse();
+  const versions = useTechCardSnapshots(techCardId, open && !decision);
+  const versionRows = versions.data?.pages.flatMap((page) => page.items ?? []) ?? [];
+
+  if (status === 'off') return null;
+
+  // The two decision states keep their direct doors. The ordinary save chip has no arrow-only
+  // appendage: its whole labelled surface opens versions, exactly as it reads.
+  if (decision) {
+    return (
+      <button
+        type='button'
+        onClick={decision.run}
+        title={decision.title}
+        className={`flex items-stretch ${FOCUS}`}
+        data-save-status={status}
+      >
+        <Pill tone={tone} className='cursor-pointer hover:bg-pageBg'>
+          {label}
+        </Pill>
+      </button>
+    );
+  }
 
   return (
     <div className='inline-flex items-stretch' data-save-status={status}>
-      {decision && (
-        <button
-          type='button'
-          onClick={decision.run}
-          title={decision.title}
-          className={`flex items-stretch ${FOCUS}`}
-        >
-          <Pill tone={tone} className='cursor-pointer hover:bg-pageBg'>
-            {label}
-          </Pill>
-        </button>
-      )}
       <GenericPopover
-        title='saving'
-        className='w-[300px]'
+        title='versions'
+        noTail
+        className='version-popover'
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
           if (next) onOpenDetails?.();
         }}
         contentProps={{
+          align: 'end',
+          sideOffset: typeof window !== 'undefined' && window.innerWidth < 768 ? 98 : 6,
           onCloseAutoFocus: (e) => {
             if (!walking.current) return;
             walking.current = false;
@@ -237,13 +252,12 @@ export function SaveStatusChip({
           },
         }}
         triggerProps={{
-          className: `flex items-stretch ${decision ? '-ml-px' : ''} ${FOCUS}`,
-          'aria-label': decision ? 'saving details and history' : `${label}, details and history`,
+          className: `flex items-stretch ${FOCUS}`,
+          'aria-label': `${label}, versions`,
         }}
         openElement={
-          <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-pageBg'>
-            {!decision && <span>{label}</span>}
-            <span aria-hidden>▾</span>
+          <Pill tone={tone} className='cursor-pointer hover:bg-pageBg' data-save-chip>
+            {label}
           </Pill>
         }
       >
@@ -268,13 +282,15 @@ export function SaveStatusChip({
                 </Text>
               </span>
               <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
-                → {walk.tab}
+                {walk.tab}
               </Text>
             </button>
           )}
-          <Text size='micro' variant='label' component='p'>
-            {saveSentence(status, message, errorsCount, cause, refusal)}
-          </Text>
+          {status !== 'saved' && status !== 'idle' ? (
+            <Text size='micro' variant='label' component='p'>
+              {saveSentence(status, message, errorsCount, cause, refusal)}
+            </Text>
+          ) : null}
 
           {pendingCount > 0 && (
             <div>
@@ -301,56 +317,17 @@ export function SaveStatusChip({
             </div>
           )}
 
-          <div>
-            <GroupLabel flush>history</GroupLabel>
-            {rows.length === 0 ? (
-              <Text size='micro' variant='label' component='p' className='py-1'>
-                nothing saved yet in this browser
-              </Text>
-            ) : (
-              <ol className='flex flex-col'>
-                {rows.map((e) => {
-                  const current = sameText(e.values, currentText);
-                  const what =
-                    e.kind === 'opened'
-                      ? 'as opened'
-                      : e.sections.map((s) => TEXT_SECTION_LABEL[s]).join(', ') || 'saved';
-                  return (
-                    <li
-                      key={`${e.at}-${e.lockVersion}`}
-                      className='flex items-baseline gap-2 border-b border-hairline py-1 last:border-b-0'
-                    >
-                      <Text size='micro' className='shrink-0'>
-                        {formatSavedAt(e.at)}
-                      </Text>
-                      <Text size='micro' variant='label' className='min-w-0 flex-1 truncate'>
-                        {what}
-                      </Text>
-                      {current ? (
-                        <Text size='nano' variant='label' className='shrink-0 uppercase'>
-                          current
-                        </Text>
-                      ) : (
-                        <Button
-                          type='button'
-                          variant='underline'
-                          size='xs'
-                          className='shrink-0'
-                          disabled={!canRestore}
-                          onClick={() => onRestore(e)}
-                        >
-                          restore
-                        </Button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-            <Text size='micro' variant='label' component='p' className='pt-1'>
-              text sections only; panels with their own RPC are not covered
-            </Text>
-          </div>
+          <VersionHistoryList
+            items={versionRows}
+            current={currentVersion}
+            canRestore={canRestore}
+            loading={versions.isLoading}
+            failed={versions.isError}
+            hasMore={versions.hasNextPage}
+            loadingMore={versions.isFetchingNextPage}
+            onMore={() => void versions.fetchNextPage()}
+            onRestore={onRestore}
+          />
         </div>
       </GenericPopover>
     </div>

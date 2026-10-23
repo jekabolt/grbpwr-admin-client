@@ -11249,9 +11249,33 @@ export type UpdateTechCardRequest = {
   // Non-empty only for an atomic, history-worthy rewrite such as DXF reconciliation. The server
   // stores the pre-update card snapshot and a matching revision-journal line in the same transaction.
   snapshotReason: string | undefined;
+  // UUID minted when the edit screen opens. Non-empty ordinary saves coalesce their pre-images into
+  // one autosave snapshot per server-side five-minute bucket; absent keeps legacy save behaviour.
+  saveSessionId: string | undefined;
 };
 
 export type UpdateTechCardResponse = {};
+
+export type ListTechCardSnapshotsRequest = {
+  techCardId: number | undefined;
+  pageSize: number | undefined;
+  beforeSnapshotId: number | undefined;
+};
+
+export type TechCardSnapshotListItem = {
+  snapshotId: number | undefined;
+  lockVersion: number | undefined;
+  reason: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  authorLabel: string | undefined;
+  changes: string[] | undefined;
+  pinned: boolean | undefined;
+};
+
+export type ListTechCardSnapshotsResponse = {
+  items: TechCardSnapshotListItem[] | undefined;
+  nextBeforeSnapshotId: number | undefined;
+};
 
 export type RestoreTechCardSnapshotRequest = {
   techCardId: number | undefined;
@@ -19929,8 +19953,13 @@ export interface AdminService {
   GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
   // UpdateTechCard updates a tech card, replacing its nested sections.
   UpdateTechCard(request: UpdateTechCardRequest): Promise<UpdateTechCardResponse>;
-  // RestoreTechCardSnapshot brings a card back to one of its own snapshots
-  // (TechCardPatternRevision.snapshot_id). One transaction: the current card is snapshotted first
+  // ListTechCardSnapshots returns the light server-side save history, newest first. The current
+  // card is not repeated here: clients render it as their own top row from GetTechCard.
+  ListTechCardSnapshots(
+    request: ListTechCardSnapshotsRequest,
+  ): Promise<ListTechCardSnapshotsResponse>;
+  // RestoreTechCardSnapshot brings a card back to any one of its own snapshots, including autosave
+  // history and TechCardPatternRevision.snapshot_id rows. One transaction: the current card is snapshotted first
   // (reason «restore:<snapshot_id>»), then rewritten through the UpdateTechCard write path. Approval,
   // sign-offs, stage, style number, category and measurement unit stay as they are now. Errors:
   // NotFound (no such snapshot on this card), Aborted (expected_lock_version is stale),
@@ -26653,6 +26682,38 @@ export function createAdminServiceClient(handler: RequestHandler): AdminService 
           method: 'UpdateTechCard',
         },
       ) as Promise<UpdateTechCardResponse>;
+    },
+    ListTechCardSnapshots(request) {
+      // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error('missing required field request.tech_card_id');
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/snapshots`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.pageSize) {
+        queryParams.push(`pageSize=${encodeURIComponent(request.pageSize.toString())}`);
+      }
+      if (request.beforeSnapshotId) {
+        queryParams.push(
+          `beforeSnapshotId=${encodeURIComponent(request.beforeSnapshotId.toString())}`,
+        );
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join('&')}`;
+      }
+      return handler(
+        {
+          path: uri,
+          method: 'GET',
+          body,
+        },
+        {
+          service: 'AdminService',
+          method: 'ListTechCardSnapshots',
+        },
+      ) as Promise<ListTechCardSnapshotsResponse>;
     },
     RestoreTechCardSnapshot(request) {
       // eslint-disable-line @typescript-eslint/no-unused-vars

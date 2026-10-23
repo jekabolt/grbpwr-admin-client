@@ -756,6 +756,7 @@ export function PieceMatchModal({
   colorways,
   pieceAreaScopes,
   techCardId,
+  saveSessionId,
   knownPieceShapes,
   preferredShapeSizeTokens,
   interlining,
@@ -785,6 +786,7 @@ export function PieceMatchModal({
   pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
   // Карточка этой формы: размеры из манифеста ДРУГОЙ карточки сами в ряд не пишутся (F14f).
   techCardId?: number;
+  saveSessionId?: string;
   /** Geometry of live pieces from every card DXF already parsed by the parent. */
   knownPieceShapes?: readonly PieceShapeReference[];
   /** Dictionary tokens of the base/sample size, preferred when both blocks contain it. */
@@ -2324,7 +2326,8 @@ export function PieceMatchModal({
         !!interlining ||
         (fusingBefore !== fusingSignature(fusingAfterValues) &&
           (hadFusedPiece || hasFusedPiece(fusingAfterValues)));
-      if (rebuildFusing && staging && techCardId) staging.stage(fusingSheetsChange(techCardId));
+      if (rebuildFusing && staging && techCardId)
+        staging.stage(fusingSheetsChange(techCardId, undefined, saveSessionId));
       if (interlining) {
         const skipped = new Set(
           rowsToApply.filter((row) => row.choice === SKIP).map((row) => row.block),

@@ -54,6 +54,7 @@ export function subscribeFusingSheetGeneration(
 export function fusingSheetsChange(
   techCardId: number,
   onWrote?: (lockVersion: number) => void,
+  saveSessionId?: string,
 ): StagedChange {
   return {
     key: FUSING_SHEETS_KEY,
@@ -63,7 +64,7 @@ export function fusingSheetsChange(
       const run = getFusingSheetGenerationState(techCardId).run + 1;
       publishGeneration(techCardId, { phase: 'generating', at: Date.now(), run });
       try {
-        const r = await regenerateFusingSheets(techCardId);
+        const r = await regenerateFusingSheets(techCardId, saveSessionId);
         if (r.lockVersion !== undefined) onWrote?.(r.lockVersion);
         // L5: the warnings were dropped — a piece fused with no interlining chosen built no sheet,
         // and the rebuild ended with no request and no word.

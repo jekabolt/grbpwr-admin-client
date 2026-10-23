@@ -617,6 +617,7 @@ const DBL_MS = 250;
 
 export function PatternsField({
   techCardId,
+  saveSessionId,
   active,
   canEdit = true,
   canPublishIndex = true,
@@ -624,6 +625,7 @@ export function PatternsField({
   headerEl,
 }: {
   techCardId?: number;
+  saveSessionId?: string;
   // The block header's action slot: counts and warnings are portalled there.
   headerEl?: HTMLElement | null;
   // Вкладка PATTERNS открыта. Без явного ответа обойтись нельзя: карточка монтирует ВСЕ вкладки
@@ -4970,6 +4972,7 @@ export function PatternsField({
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
+            saveSessionId={saveSessionId}
             knownPieceShapes={knownPieceShapes}
             preferredShapeSizeTokens={preferredShapeSizeTokens}
             interlining={matchingInterlining}
