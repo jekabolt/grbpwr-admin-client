@@ -225,8 +225,8 @@ export type AssemblyFullscreenProps = {
    * глушит, и пояс с подтяжками дешевле одного тихого дописывания в выпущенную карточку.
    */
   addInputToOperation: (index: number, key: string) => void;
-  /** Потребитель — Ф6в (перестановка шагов в списке). */
-  moveOperation: (from: number, to: number) => void;
+  /** Потребитель — Ф6в (перестановка шагов и снятие шага с графа через границу блока). */
+  moveOperation: (from: number, to: number, standalone?: boolean) => void;
   /**
    * РЕЛЬС РЕЖИМА СПИСКА — ТЕ ЖЕ ДАННЫЕ И ТЕ ЖЕ КОЛБЭКИ, ЧТО У ИНЛАЙНА, и приезжают они пропами по
    * той же причине, по какой приезжает пропом всё остальное: `useFieldArray('operations')`
@@ -242,6 +242,8 @@ export type AssemblyFullscreenProps = {
   railMarked: boolean;
   /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним (`useRailGrouping`). */
   railHeaderBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Все шаги вне узлов, включая поздние прогоны без собственной шапки. */
+  railLooseSteps: ReadonlySet<number>;
   /** Шаги с незаполненным обязательным полем. */
   railErrorIndices: ReadonlySet<number>;
   /** Шаги, ломающие сборочный граф. */
@@ -468,6 +470,7 @@ export function AssemblyFullscreen({
   railFields,
   railMarked,
   railHeaderBefore,
+  railLooseSteps,
   railErrorIndices,
   railBrokenSteps,
   activePin,
@@ -1921,6 +1924,7 @@ export function AssemblyFullscreen({
                       // список, второе слагаемое инлайнового условия здесь тождественно истинно.
                       grouped={railMarked}
                       headerBefore={railHeaderBefore}
+                      looseSteps={railLooseSteps}
                       selectedIndex={selectedIndex}
                       // ТОЛЬКО ВЫБОР, БЕЗ `setDockStep`: редактор стоит в колонке справа, и
                       // открытый заодно док положил бы те же поля на экран дважды. `onPickStep`

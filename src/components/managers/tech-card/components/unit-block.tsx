@@ -60,12 +60,14 @@ export function UnitBlockHeader({
   block,
   smv,
   terminal,
+  className,
 }: {
   block: AssemblyBlock;
   /** Σ SMV шагов блока; пусто, если ни у одного не задано. */
   smv: string;
   /** Этот узел — готовое изделие (единственный живой). */
   terminal: boolean;
+  className?: string;
 }) {
   const isTail = block.key === '';
   // Глиф узла (полоса C): только когда каркас поставил пиктограмму, иначе строка как была.
@@ -75,6 +77,7 @@ export function UnitBlockHeader({
       className={cn(
         'mt-1.5 flex items-center gap-1.5 border-t border-textColor px-1 pt-1 first:mt-0',
         isTail && 'border-dashed border-borderColor',
+        className,
       )}
     >
       <UnitGlyph

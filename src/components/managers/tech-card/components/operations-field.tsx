@@ -1350,6 +1350,8 @@ type RailGrouping = {
   res: ReturnType<typeof assemblySweep>;
   /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним. */
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Все шаги вне узлов, включая поздние прогоны без собственной шапки. */
+  looseSteps: Set<number>;
   /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
   marked: boolean;
   /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
@@ -1435,6 +1437,7 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
     return {
       broken,
       headerBefore,
+      looseSteps: new Set(grouped.loose.steps),
       smvOfBlock,
       tailSmv,
       marked: grouped.blocks.length > 0,
@@ -6501,7 +6504,7 @@ export function OperationsField({
     setSelected(index + 1);
   };
 
-  const moveOperation = (from: number, to: number) => {
+  const moveOperation = (from: number, to: number, standalone = false) => {
     // ГЕЙТ С ОТКАЗОМ СЛОВАМИ, а не молчанием: ручка ⠿ рельса в СПИСКЕ ФУЛСКРИНА — настоящая
     // <button> в портале, вне обоих fieldset (внешнего карточки и докового), и на выпущенной
     // карточке жест перетаскивания честно начинается и доезжает досюда — строка прыгала бы
@@ -6510,22 +6513,43 @@ export function OperationsField({
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
-    if (from === to) return;
+    if (from === to && !standalone) return;
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const clearsLastStoredUnit =
+      standalone &&
+      !!operations[from]?.outputUnitKey?.trim() &&
+      operations.every((operation, index) =>
+        index === from ? true : !(operation?.outputUnitKey ?? '').trim(),
+      );
     // (3/10) САМАЯ ДОРОГАЯ ИЗ ДЕСЯТИ: после перестановки `removeOperation(index)` удалил бы ЧУЖОЙ
     // шаг. Guard по `fieldId` это ловит и сам, но отказ словами лучше отказа по совпадению.
     clearFormHistory();
-    remapIssues((old) => {
-      if (old === from) return to;
-      if (from < to) return old > from && old <= to ? old - 1 : old;
-      return old >= to && old < from ? old + 1 : old;
-    });
-    move(from, to);
-    setSelected((s) => {
-      if (s === from) return to;
-      if (from < s && s <= to) return s - 1;
-      if (to <= s && s < from) return s + 1;
-      return s;
-    });
+    if (from !== to) {
+      remapIssues((old) => {
+        if (old === from) return to;
+        if (from < to) return old > from && old <= to ? old - 1 : old;
+        return old >= to && old < from ? old + 1 : old;
+      });
+      move(from, to);
+      setSelected((s) => {
+        if (s === from) return to;
+        if (from < s && s <= to) return s - 1;
+        if (to <= s && s < from) return s + 1;
+        return s;
+      });
+    }
+    if (standalone) {
+      // Принадлежность блоку НЕ ХРАНИТСЯ полем: assemblyBlocks выводит её из входов и выхода.
+      // Поэтому дроп на границу снимает именно участие шага в графе, а не рисует исключение над
+      // прежними данными. Все производственные поля строки остаются на месте.
+      setValue(`operations.${to}.inputKeys`, [], { shouldDirty: true });
+      setValue(`operations.${to}.outputUnitKey`, '', { shouldDirty: true });
+      setValue(`operations.${to}.outputUnitName`, '', { shouldDirty: true });
+      // Сервер защищает полное снятие сохранённой разметки отдельным флагом. Без него перенос
+      // последнего производящего шага выглядел бы правильно в форме, но был бы отвергнут записью.
+      if (clearsLastStoredUnit && storedHasUnits)
+        setValue('assemblyCleared', true, { shouldDirty: true });
+    }
   };
 
   // append here (this field array owns the rendered list) when the panel requests it. The request
@@ -8517,6 +8541,7 @@ export function OperationsField({
                     fields={fields}
                     grouped={grouped}
                     headerBefore={grouping.headerBefore}
+                    looseSteps={grouping.looseSteps}
                     selectedIndex={selectedIndex}
                     onSelect={(index) => setSelected(index)}
                     errorIndices={errorIndices}
@@ -8656,6 +8681,7 @@ export function OperationsField({
           railFields={fields}
           railMarked={grouping.marked}
           railHeaderBefore={grouping.headerBefore}
+          railLooseSteps={grouping.looseSteps}
           railErrorIndices={errorIndices}
           railBrokenSteps={brokenSteps}
           activePin={activePin}
