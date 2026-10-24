@@ -20,6 +20,7 @@ import type {
   OperationInput,
 } from './assembly-frontier';
 import {
+  processedPieceOf,
   SCHEMATIC_METRICS,
   type BoxLayout,
   type HiddenPiecesDoorLayout,
@@ -590,9 +591,9 @@ export function unitAddPrefill(b: AssemblyBlock, res: AssemblyResult): CreatePre
  *
  *   1. У ДЕТАЛИ УЖЕ ЕСТЬ СВОИ ОБРАБОТКИ — это и есть её блок, поэтому новая встаёт сразу после
  *      последней из них. Ближайший чужой блок и конец листа больше этого ответа не перебивают.
- *      Список берётся из `TileLayout.processing`, то есть из ТОГО ЖЕ правила, которое рисует
- *      строки на плитке; фьюзинг на 110 и последующая обработка на 180 дают следующую позицию 190,
- *      а не 120 и не хвост 400.
+ *      Список берётся через `processedPieceOf`, то есть из ТОГО ЖЕ правила, которое наполняет
+ *      `TileLayout.processing`; фьюзинг на 110 и последующая обработка на 180 дают следующую
+ *      позицию 190, а не 120 и не хвост 400.
  *   2. БЛОКОВ И СВОИХ СТРОК НЕТ ВОВСЕ — ближайшего не существует, и «до сборки» не значит
  *      ничего, потому что сборки нет. Только тогда конец листа правилен.
  *   3. ЗАКОННОСТЬ ПРОВЕРЯЕТ ДВИЖОК, А НЕ ПРАВИЛО: `frontierBefore[at]` обязан содержать ключ
@@ -637,6 +638,48 @@ export function pieceAddPrefill(
   return { inputKeys: [pieceKey], intent: 'process', at, ontoPiece: pieceKey };
 }
 
+/** Последняя строка, которая действительно рисуется на плитке этой детали. */
+function lastPieceProcess(pieceKey: string, steps: AssemblyStep[]): number {
+  return steps.reduce(
+    (last, step, index) => (processedPieceOf(step) === pieceKey ? index : last),
+    -1,
+  );
+}
+
+/**
+ * ПОЗИЦИЯ ДЛЯ ЛЮБОГО ВХОДА СОЗДАНИЯ, КОТОРЫЙ УЖЕ НАЗВАЛ ОДНУ ЦЕЛЬ.
+ *
+ * Плиточный и блочный `+ operation` приносили `at` сами, но выбор на полотне, общий диалог и
+ * пустая строка списка приносили только `inputKeys`. Из-за этого один и тот же Press вставлялся
+ * внутрь блока из ховер-полосы и в глобальный хвост из любого другого входа. Явную позицию не
+ * переигрываем; без неё узнаём тот же блок или ту же плитку и ставим сразу после её последней
+ * строки. Деталь без единой строки здесь не угадываем по геометрии: её плиточная дверь уже несёт
+ * решение `pieceAddPrefill`, а общий вход не обещал соседний блок.
+ */
+export function targetAddPrefill(
+  prefill: CreatePrefill,
+  steps: AssemblyStep[],
+  res: AssemblyResult,
+  blocks: AssemblyBlock[],
+): CreatePrefill {
+  if (prefill.at !== undefined || prefill.intent !== 'process') return prefill;
+  const keys = [...new Set(prefill.inputKeys.map((key) => key.trim()).filter(Boolean))];
+  if (keys.length !== 1) return prefill;
+  const key = keys[0];
+
+  if (res.units.has(key)) {
+    const block = blocks.find((candidate) => candidate.key === key);
+    const placed = block ? unitAddPrefill(block, res) : null;
+    return placed ? { ...prefill, at: placed.at, intoUnit: key } : prefill;
+  }
+
+  const ownLast = lastPieceProcess(key, steps);
+  if (ownLast < 0) return prefill;
+  const at = ownLast + 1;
+  const frontier = res.frontierBefore[at] ?? res.frontier;
+  return frontier.includes(key) ? { ...prefill, at, ontoPiece: key } : prefill;
+}
+
 /** Сырая позиция по правилу — без проверки законности. Вынесена ради читаемости, зовётся один раз. */
 function piecePrefillAt(
   pieceKey: string,
@@ -648,15 +691,12 @@ function piecePrefillAt(
   const eaten = res.consumedBy.get(pieceKey);
   if (eaten !== undefined) return eaten;
 
-  // ГРАНИЦА 1: последняя строка, НАРИСОВАННАЯ на этой плитке. `processing` уже посчитан общим
-  // `processedPieceOf`: шаг ничего не собирает и обрабатывает одну эту деталь. Повторять здесь
-  // условие по `inputs` означало бы завести второе мнение о составе блока и снова потерять
-  // самостоятельную деталь. `max`, а не первый/последний элемент на доверии: низкий фьюзинг не
-  // должен победить более позднюю обработку даже на повреждённой, несортированной раскладке.
-  const ownLast = (layout.tileByKey.get(pieceKey)?.processing ?? []).reduce(
-    (last, index) => Math.max(last, index),
-    -1,
-  );
+  // ГРАНИЦА 1: последняя строка, НАРИСОВАННАЯ на этой плитке. `lastPieceProcess` читает общее
+  // правило `processedPieceOf`: шаг ничего не собирает и обрабатывает одну эту деталь. Повторять
+  // здесь условие по `inputs` означало бы завести второе мнение и снова потерять самостоятельную
+  // деталь. Полный проход, а не первый совпавший: низкий фьюзинг не должен победить более позднюю
+  // обработку даже на повреждённой последовательности.
+  const ownLast = lastPieceProcess(pieceKey, steps);
   if (ownLast >= 0) return ownLast + 1;
 
   const tile = layout.tiles.find((t) => t.key === pieceKey);

@@ -216,6 +216,7 @@ import {
 } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import { type UnitRenameNotice } from './assembly-rename';
+import { targetAddPrefill } from './assembly-node-views';
 import {
   appendLabel,
   canRedo,
@@ -6194,6 +6195,9 @@ export function OperationsField({
   const history = useRef<Hist>(emptyHistory<OperationFormValue>());
   const [histView, setHistView] = useState<Hist>(history.current);
   const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
+  // Пустой `+ operation` ещё не знает своего места. Первый назначенный вход знает, и только пока
+  // строку не двигали явно, он вправе поставить её за последней операцией своей цели.
+  const placeBlankOnFirstInput = useRef(new Set<string>());
   // ИНВЕРСИЯ ИДЁТ ЧЕРЕЗ ТЕ ЖЕ МУТАТОРЫ, А ОНИ САМИ — ТОЧКИ СБРОСА. `removeOperation` гасит формовую
   // историю (массив поехал), и отмена создания, зовущая его, стёрла бы всю остальную историю
   // первым же ⌘Z. Флаг поднят ровно на синхронное время применения записи.
@@ -6298,6 +6302,7 @@ export function OperationsField({
   useEffect(() => {
     const sub = watch((_, { name }) => {
       if (name) return;
+      placeBlankOnFirstInput.current.clear();
       clearFormHistory();
     });
     return () => sub.unsubscribe();
@@ -6326,6 +6331,8 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
+    const historyKey = getValues(`operations.${index}.historyKey`);
+    if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
@@ -6356,6 +6363,7 @@ export function OperationsField({
     const operations = (getValues('operations') ?? []) as OperationFormValue[];
     const operation = operations[from];
     if (!operation) return;
+    if (operation.historyKey) placeBlankOnFirstInput.current.delete(operation.historyKey);
     const membership = operationMoveMembership(
       operation,
       standalone,
@@ -7059,6 +7067,22 @@ export function OperationsField({
   // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
   // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
   const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  // ВСЕ ОРГАНЫ СОЗДАНИЯ ВХОДЯТ ЧЕРЕЗ ЭТУ ДВЕРЬ. Ховер-полоса уже несёт явный `at`; выбор одной
+  // детали или одного узла раньше нёс только состав и потому дописывал тот же шаг в общий хвост.
+  const openCreate = useCallback(
+    (prefill: CreatePrefill | null) =>
+      setPendingCreate(
+        prefill
+          ? targetAddPrefill(
+              prefill,
+              grouping.schematicSteps,
+              grouping.res,
+              grouping.schematicBlocks,
+            )
+          : null,
+      ),
+    [grouping.schematicSteps, grouping.res, grouping.schematicBlocks],
+  );
   const editorRef = useRef<HTMLDivElement>(null);
   // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
   // никакая заморозка разметки его не гасит.
@@ -7160,6 +7184,7 @@ export function OperationsField({
     if (cur.includes(key)) return;
 
     const formOps = (getValues('operations') ?? []) as Array<{
+      historyKey?: string;
       operationType?: string;
       operationNumber?: number;
       draft?: boolean;
@@ -7216,8 +7241,20 @@ export function OperationsField({
     // который движок отклонил, ничего не менял и гасить чужую отмену не вправе. Массив при
     // добавлении входа тот же, `fieldId` на месте — guard пропустил бы, — а устаревший ⌘Z снёс бы
     // шаг ВМЕСТЕ с только что добавленной деталью.
+    const historyKey = formOps[index]?.historyKey ?? '';
+    const placeNow = cur.length === 0 && placeBlankOnFirstInput.current.has(historyKey);
+    const placed = placeNow
+      ? targetAddPrefill(
+          { inputKeys: [key], intent: 'process' },
+          grouping.schematicSteps,
+          grouping.res,
+          grouping.schematicBlocks,
+        )
+      : null;
+    if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory();
     setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
+    if (placed?.at !== undefined && placed.at !== index) moveOperation(index, placed.at);
   };
 
   // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
@@ -7256,8 +7293,10 @@ export function OperationsField({
     // (5/10) Пустой шаг — не жест полотна: отменять его ⌘Z нечего, а старая запись после него
     // указывала бы на шаг, стоящий уже не там.
     clearFormHistory();
+    const row = newOperationRow();
+    placeBlankOnFirstInput.current.add(row.historyKey);
     setSelected(fields.length);
-    append(newOperationRow());
+    append(row);
   };
 
   const openNextReview = (operations: CardOperation[], afterIndex: number) => {
@@ -7321,8 +7360,15 @@ export function OperationsField({
   const addReuploadedPiece = (pieceKey: string) => {
     if (frozen || !pieceKey) return;
     clearFormHistory();
-    const at = fields.length;
-    append(newOperationRow({ inputKeys: [pieceKey], review: '', draft: false }));
+    const placed = targetAddPrefill(
+      { inputKeys: [pieceKey], intent: 'process' },
+      grouping.schematicSteps,
+      grouping.res,
+      grouping.schematicBlocks,
+    );
+    const at = Math.min(Math.max(placed.at ?? fields.length, 0), fields.length);
+    remapIssues((old) => (old >= at ? old + 1 : old));
+    insert(at, newOperationRow({ inputKeys: [pieceKey], review: '', draft: false }));
     setSelected(at);
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
@@ -7489,7 +7535,15 @@ export function OperationsField({
    * `insert` из RHF молча кладёт строку в конец; клампом это делается явно и одинаково для всех.
    */
   const appendStep = (r: CreateResult) => {
-    const at = pendingCreate?.at;
+    const inferred = r.outputUnitKey
+      ? undefined
+      : targetAddPrefill(
+          { inputKeys: r.inputKeys, intent: 'process' },
+          grouping.schematicSteps,
+          grouping.res,
+          grouping.schematicBlocks,
+        ).at;
+    const at = pendingCreate?.at ?? inferred;
     insertStepAt(at === undefined ? fields.length : Math.min(Math.max(at, 0), fields.length), r);
   };
 
@@ -8345,7 +8399,7 @@ export function OperationsField({
                   labelOf={labelOfStep}
                   pieceNameOf={pieceNameOf}
                   onPickStep={pickStepInline}
-                  onCreate={setPendingCreate}
+                  onCreate={openCreate}
                   pieceShapes={pieceShapes}
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
@@ -8492,7 +8546,7 @@ export function OperationsField({
           renamedUnit={renamedUnit}
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
-          setPendingCreate={setPendingCreate}
+          setPendingCreate={openCreate}
           dissolveUnit={dissolveUnit}
           addInputToOperation={addInputToOperation}
           // `addOperation` ФУЛСКРИНУ БОЛЬШЕ НЕ ОТДАЁТСЯ. Его «+ new operation» ведёт в диалог

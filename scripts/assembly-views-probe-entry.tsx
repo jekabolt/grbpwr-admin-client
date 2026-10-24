@@ -485,6 +485,7 @@ export const views = {
   unitHeadOpen: (nodeViews as Record<string, unknown>).unitHeadOpen,
   unitAddPrefill: (nodeViews as Record<string, unknown>).unitAddPrefill,
   pieceAddPrefill: (nodeViews as Record<string, unknown>).pieceAddPrefill,
+  targetAddPrefill: (nodeViews as Record<string, unknown>).targetAddPrefill,
 };
 
 /**
