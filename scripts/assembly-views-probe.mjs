@@ -814,17 +814,29 @@ console.log('\nunit names — one first-producer fact survives the three save/re
 
 console.log('\npieceAddPrefill — обработка детали идёт ЗА ближайшим блоком, а не в конец листа');
 {
-  const { pieceAddPrefill, unitAddPrefill } = views;
+  const { pieceAddPrefill, targetAddPrefill, unitAddPrefill } = views;
   const buildCase = mod.engine?.buildCase;
   const assemblyLayout = mod.engine?.assemblyLayout;
   ck(typeof pieceAddPrefill === 'function', 'позиция шага на плитке вынесена функцией');
+  ck(typeof targetAddPrefill === 'function', 'все входы создания используют позицию цели');
   ck(typeof unitAddPrefill === 'function', 'позиция шага в объединённом блоке вынесена функцией');
+  const operationsFieldSource = readFileSync(
+    resolve(root, 'src/components/managers/tech-card/components/operations-field.tsx'),
+    'utf8',
+  );
+  ck(
+    operationsFieldSource.includes('onCreate={openCreate}') &&
+      operationsFieldSource.includes('setPendingCreate={openCreate}') &&
+      (operationsFieldSource.match(/targetAddPrefill\(/g) ?? []).length >= 4,
+    'общий расчёт подключён к схеме, фулскрину, диалогу и быстрым путям',
+  );
   ck(
     typeof buildCase === 'function' && typeof assemblyLayout === 'function',
     'энтри отдаёт конвейер и раскладку',
   );
   if (
     typeof pieceAddPrefill === 'function' &&
+    typeof targetAddPrefill === 'function' &&
     typeof unitAddPrefill === 'function' &&
     typeof buildCase === 'function' &&
     assemblyLayout
@@ -968,22 +980,66 @@ console.log('\npieceAddPrefill — обработка детали идёт ЗА
     );
     const fusedLayout = assemblyLayout(fused.blocks, fused.steps, fused.res);
     ck(
-      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing) ===
-        JSON.stringify([10, 17]),
+      JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing) === JSON.stringify([10, 17]),
       'плитка fused PLCK_L считает своими и фьюзинг 110, и обработку 180',
       JSON.stringify(fusedLayout.tileByKey.get('PLCK_L')?.processing),
     );
-    const fusedAt = pieceAddPrefill(
-      'PLCK_L',
-      fused.steps,
-      fused.res,
-      fused.blocks,
-      fusedLayout,
-    );
+    const fusedAt = pieceAddPrefill('PLCK_L', fused.steps, fused.res, fused.blocks, fusedLayout);
     ck(
       fusedAt?.at === 18 && (fusedAt.at + 1) * 10 === 190,
       'fused PLCK_L: последняя своя операция 180 → новая 190, не хвост 400',
       JSON.stringify(fusedAt),
+    );
+
+    // ДВА СЦЕНАРИЯ ВЛАДЕЛЬЦА В ИХ НАСТОЯЩИХ ЧИСЛАХ. Здесь зовётся не плиточная дверь, которая
+    // уже умела передавать `at`, а общий вход создания: именно через него выбор на полотне и
+    // пустой «new operation» раньше теряли позицию и дописывали строку в глобальный хвост.
+    const ownerPieceRows = [
+      { in: ['SLEEVE'] }, // 10 · automatic fusing on the standalone sleeve
+      { in: ['A', 'B'], out: 'BODY', name: 'body' },
+      ...Array.from({ length: 66 }, () => ({ in: ['BODY'] })),
+    ];
+    const ownerPiece = buildCase(
+      [
+        { lineKey: 'SLEEVE', name: 'sleeve' },
+        { lineKey: 'A', name: 'front' },
+        { lineKey: 'B', name: 'back' },
+      ],
+      ownerPieceRows,
+    );
+    const ownerPiecePrefill = targetAddPrefill(
+      { inputKeys: ['SLEEVE'], intent: 'process' },
+      ownerPiece.steps,
+      ownerPiece.res,
+      ownerPiece.blocks,
+    );
+    ck(
+      ownerPiece.steps.length === 68 &&
+        ownerPiecePrefill?.at === 1 &&
+        (ownerPiecePrefill.at + 1) * 10 === 20,
+      'owner: standalone sleeve fusing 10 + press → 20, not 690',
+      JSON.stringify(ownerPiecePrefill),
+    );
+
+    const beforeBlock = Array.from({ length: 13 }, () => ({ in: ['OTHER'] }));
+    const ownerBlock = buildCase(
+      [
+        { lineKey: 'A', name: 'front' },
+        { lineKey: 'B', name: 'back' },
+        { lineKey: 'OTHER', name: 'other' },
+      ],
+      [...beforeBlock, { in: ['A', 'B'], out: 'SLEEVE', name: 'sleeve' }],
+    );
+    const ownerBlockPrefill = targetAddPrefill(
+      { inputKeys: ['SLEEVE'], intent: 'process' },
+      ownerBlock.steps,
+      ownerBlock.res,
+      ownerBlock.blocks,
+    );
+    ck(
+      ownerBlockPrefill?.at === 14 && (ownerBlockPrefill.at + 1) * 10 === 150,
+      'owner: block ending 140 + press → 150',
+      JSON.stringify(ownerBlockPrefill),
     );
 
     // ГРАНИЦА 2: у детали УЖЕ есть свои обработки — новая не смеет прыгнуть перед ними. Обработка

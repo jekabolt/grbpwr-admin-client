@@ -276,5 +276,58 @@ console.log('\nзапись собирает операции юнита под�
   );
 }
 
-console.log(`\n${11 - failed.size}/11 кейсов прошло`);
+console.log('\nзапись сохраняет локальный следующий номер детали и блока');
+{
+  const operation = (
+    note,
+    inputKeys,
+    outputUnitKey = '',
+    operationType = 'TECH_CARD_OPERATION_TYPE_PRESS',
+  ) => ({
+    operationType,
+    zone: 'TECH_CARD_GARMENT_ZONE_OUTER',
+    inputKeys,
+    outputUnitKey,
+    outputUnitName: '',
+    note,
+  });
+
+  const pieceOperations = [
+    operation('sleeve-fusing', ['SLEEVE'], '', 'TECH_CARD_OPERATION_TYPE_FUSING'),
+    operation('sleeve-press', ['SLEEVE']),
+    operation('body-join', ['A', 'B'], 'BODY'),
+    ...Array.from({ length: 66 }, (_, i) => operation(`body-${i}`, ['BODY'])),
+  ];
+  const pieceSent = mapFormToTechCardInsert({
+    ...techCardDefaultData,
+    pieces: ['SLEEVE', 'A', 'B'].map((lineKey) => ({ lineKey, name: lineKey })),
+    operations: pieceOperations,
+  });
+  const piecePress = pieceSent.operations?.find((step) => step.note === 'sleeve-press');
+  ck(
+    pieceOperations.length === 69 && piecePress?.operationNumber === 20,
+    'owner: standalone sleeve fusing 10 + press сохраняется как 20',
+    JSON.stringify(piecePress?.operationNumber),
+  );
+
+  const blockOperations = [
+    ...Array.from({ length: 13 }, (_, i) => operation(`other-${i}`, ['OTHER'])),
+    operation('sleeve-join', ['A', 'B'], 'SLEEVE'),
+    operation('sleeve-press', ['SLEEVE']),
+    ...Array.from({ length: 53 }, (_, i) => operation(`tail-${i}`, ['OTHER'])),
+  ];
+  const blockSent = mapFormToTechCardInsert({
+    ...techCardDefaultData,
+    pieces: ['A', 'B', 'OTHER'].map((lineKey) => ({ lineKey, name: lineKey })),
+    operations: blockOperations,
+  });
+  const blockPress = blockSent.operations?.find((step) => step.note === 'sleeve-press');
+  ck(
+    blockOperations.length === 68 && blockPress?.operationNumber === 150,
+    'owner: block ending 140 + press сохраняется как 150',
+    JSON.stringify(blockPress?.operationNumber),
+  );
+}
+
+console.log(`\n${13 - failed.size}/13 кейсов прошло`);
 if (failed.size) process.exitCode = 1;
