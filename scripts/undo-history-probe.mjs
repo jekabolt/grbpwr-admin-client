@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const outfile = resolve(tmpdir(), `undo-history-${process.pid}.mjs`);
+process.env.TZ = 'Europe/Warsaw';
 await build({
   entryPoints: [resolve(here, 'undo-history-probe-entry.ts')],
   bundle: true,
@@ -15,6 +16,20 @@ await build({
   platform: 'node',
   target: 'node20',
   outfile,
+  alias: Object.fromEntries(
+    [
+      'api',
+      'components',
+      'constants',
+      'context',
+      'hooks',
+      'lib',
+      'styles',
+      'types',
+      'ui',
+      'utils',
+    ].map((name) => [name, resolve(root, 'src', name)]),
+  ),
   logLevel: 'silent',
 });
 
@@ -153,6 +168,41 @@ state = history.recordUndoStep(state, { count: 2 }, { count: 3 }, 'count');
 state = history.historyBarrier(state);
 same('a barrier clears both stacks', [state.undo.length, state.redo.length], [0, 0]);
 
+const restoredRow = {
+  snapshotId: 51,
+  reason: 'restore:23',
+  createdAt: '2026-10-24T00:02:00Z',
+  changes: ['restored 23.10 23:37'],
+};
+same(
+  'restore labels use the loaded target time in the viewer timezone',
+  history.restoredLabel(restoredRow, [
+    restoredRow,
+    { snapshotId: 23, createdAt: '2026-10-23T23:37:00Z' },
+  ]),
+  'restored 24/10 01:37',
+);
+same(
+  'restore labels convert the server UTC fallback and cross the year boundary without an id',
+  [
+    history.restoredLabel(restoredRow, [restoredRow]),
+    history.restoredLabel(
+      {
+        snapshotId: 52,
+        reason: 'restore:22',
+        createdAt: '2027-01-01T00:02:00Z',
+        changes: ['restored 31.12 23:37'],
+      },
+      [],
+    ),
+    history.restoredLabel(
+      { snapshotId: 53, reason: 'restore:987654', createdAt: '2026-10-24T00:02:00Z' },
+      [],
+    ),
+  ],
+  ['restored 24/10 01:37', 'restored 01/01 00:37', 'restored'],
+);
+
 state = history.recordUndoStep(
   history.emptyUndoHistory(),
   { note: '' },
@@ -247,9 +297,7 @@ same(
     !waitBody.includes('autosave.flush') &&
     autosaveSource.includes('optsRef.current.paused || writeHolds.current > 0') &&
     autosaveSource.includes('if (deps.isPaused()) {\n      skippedWhilePaused = true;') &&
-    autosaveSource.includes(
-      'getBaseLockVersion: () => optsRef.current.getBaseLockVersion()',
-    ) &&
+    autosaveSource.includes('getBaseLockVersion: () => optsRef.current.getBaseLockVersion()') &&
     formSource.includes('getBaseLockVersion: () => base.current.version') &&
     revisionDeleteBody.includes("undoHistory.waitThenCut('pattern-revision-delete'") &&
     revisionDeleteBody.includes('expectedLockVersion: autosave.getBaseLockVersion()') &&

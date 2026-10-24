@@ -35,6 +35,12 @@ function validDate(value: string | undefined, fallback: Date): Date {
   return Number.isNaN(date.getTime()) ? fallback : date;
 }
 
+function parsedDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function dayKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
@@ -51,12 +57,16 @@ function timeLabel(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+function numericDateLabel(date: Date): string {
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
+}
+
 function authorLabel(value: string | undefined): string {
   const label = value?.trim() || 'you';
   return label.includes('@') ? label.slice(0, label.indexOf('@')) : label;
 }
 
-/** Server labels stay server labels; the chip merely enforces its three-word visual budget. */
+/** Ordinary server labels stay server labels; the chip merely enforces its three-word budget. */
 export function shortVersionChanges(values: readonly string[] | undefined, fallback = 'saved') {
   const out: string[] = [];
   let words = 0;
@@ -84,9 +94,51 @@ type VersionRow = {
   current: boolean;
 };
 
-function restoredLabel(reason: string | undefined, changes: readonly string[] | undefined) {
-  if (!/^restore:\d+$/i.test(reason?.trim() ?? '')) return null;
-  return shortVersionChanges(changes, 'restored');
+function utcDate(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): Date | null {
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute
+    ? date
+    : null;
+}
+
+function restoredDateFromChanges(
+  changes: readonly string[] | undefined,
+  restoreCreatedAt: string | undefined,
+): Date | null {
+  const match = (changes ?? [])
+    .map((change) => /^restored\s+(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})$/i.exec(change.trim()))
+    .find((value) => value !== null);
+  const restoreDate = parsedDate(restoreCreatedAt);
+  if (!match || !restoreDate) return null;
+
+  const [, day, month, hour, minute] = match;
+  const parts = [day, month, hour, minute].map(Number);
+  const restoreYear = restoreDate.getUTCFullYear();
+  let date = utcDate(restoreYear, parts[1], parts[0], parts[2], parts[3]);
+  if (!date || date.getTime() > restoreDate.getTime()) {
+    date = utcDate(restoreYear - 1, parts[1], parts[0], parts[2], parts[3]);
+  }
+  return date;
+}
+
+export function restoredLabel(item: TechCardSnapshotListItem, items: TechCardSnapshotListItem[]) {
+  const match = /^restore:(\d+)$/i.exec(item.reason?.trim() ?? '');
+  if (!match) return null;
+  const target = items.find((candidate) => candidate.snapshotId === Number(match[1]));
+  const date =
+    parsedDate(target?.createdAt) ?? restoredDateFromChanges(item.changes, item.createdAt);
+  if (!date) return 'restored';
+  return `restored ${numericDateLabel(date)} ${timeLabel(date)}`;
 }
 
 function rowsOf(
@@ -110,8 +162,7 @@ function rowsOf(
       date: validDate(item.createdAt, currentDate),
       author: authorLabel(item.authorLabel),
       changes:
-        restoredLabel(item.reason, item.changes) ??
-        shortVersionChanges(item.changes, item.reason || 'saved'),
+        restoredLabel(item, items) ?? shortVersionChanges(item.changes, item.reason || 'saved'),
       pinned: !!item.pinned,
       current: false,
     })),

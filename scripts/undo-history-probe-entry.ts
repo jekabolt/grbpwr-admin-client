@@ -11,3 +11,4 @@ export {
   redoHistoryStep,
   undoHistoryStep,
 } from '../src/components/managers/tech-card/components/undo-history-core';
+export { restoredLabel } from '../src/components/managers/tech-card/components/version-history';
