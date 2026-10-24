@@ -1,6 +1,8 @@
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
+// @ts-ignore - plain JS helper shared with the Vercel serverless function (api/media-proxy.js)
+import { proxyMedia } from './api/media-proxy.js';
 // @ts-ignore - plain JS helper shared with the Vercel serverless function (api/translate.js)
 import { translateFields } from './api/_openrouter.js';
 
@@ -44,8 +46,8 @@ function translateApiPlugin(apiKey?: string, model?: string) {
   };
 }
 
-/** Dev-only: proxies image fetches to bypass CORS when cropping files.grbpwr.com images */
-function mediaProxyPlugin() {
+/** Dev-only: uses the production proxy implementation so its security and byte semantics match. */
+function mediaProxyPlugin(allowedHosts?: string) {
   return {
     name: 'media-proxy',
     apply: 'serve' as const,
@@ -55,17 +57,7 @@ function mediaProxyPlugin() {
           try {
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const targetUrl = url.searchParams.get('url');
-            if (!targetUrl?.startsWith('http')) {
-              res.statusCode = 400;
-              res.end('Invalid url param');
-              return;
-            }
-            const resp = await fetch(targetUrl, { headers: { Accept: 'image/*' } });
-            if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
-            res.statusCode = resp.status;
-            resp.headers.forEach((v, k) => res.setHeader(k, v));
-            const buf = await resp.arrayBuffer();
-            res.end(Buffer.from(buf));
+            await proxyMedia(targetUrl, res, allowedHosts);
           } catch (e) {
             res.statusCode = 502;
             res.end('Proxy fetch failed');
@@ -83,7 +75,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      mediaProxyPlugin(),
+      mediaProxyPlugin(env.MEDIA_PROXY_ALLOWED_HOSTS),
       translateApiPlugin(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL),
       react({
         // Only treat .tsx/.jsx as component modules so constants and utils don't trigger Fast Refresh warnings

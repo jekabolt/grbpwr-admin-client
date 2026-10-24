@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "test:media-proxy": "node --test tests/media-proxy.test.js",
     "build": "vite build",
     "build:check": "tsc && vite build",
     "check:expand": "node --experimental-strip-types scripts/check-expand-drag.ts",
