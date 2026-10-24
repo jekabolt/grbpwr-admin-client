@@ -333,6 +333,7 @@ const ECHO_AWARE = {
  */
 export async function regenerateFusingSheets(
   techCardId: number,
+  saveSessionId?: string,
 ): Promise<RegenerateFusingSheetsResult> {
   if (!Number.isInteger(techCardId) || techCardId <= 0)
     throw new Error('techCardId must be positive');
@@ -590,6 +591,7 @@ export async function regenerateFusingSheets(
       },
       expectedLockVersion: stored.lockVersion,
       snapshotReason: 'Regenerate generated fusing DXF sheets',
+      saveSessionId,
     });
   }
   return {

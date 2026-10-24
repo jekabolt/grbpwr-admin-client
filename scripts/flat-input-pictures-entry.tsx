@@ -359,6 +359,8 @@ function Input() {
   const autosave: AutosaveApi = {
     ...saving,
     request: () => {},
+    getBaseLockVersion: () => 0,
+    adoptBase: () => {},
     flush: async () => {
       window.__flushes = (window.__flushes ?? 0) + 1;
       return 'nothing';

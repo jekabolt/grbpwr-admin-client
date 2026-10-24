@@ -104,7 +104,7 @@ export type OperationKind = {
   /**
    * ПУНКТ СПРАШИВАЕТ «НА ЧЁМ» — суженным списком машинок, СРАЗУ И НА ВИДУ.
    *
-   * Только у отстрочки: её якорь — класс шва, а не машинка (`seam_class = OS_TOPSTITCH`), но
+   * Только у отстрочки: её якорь — записанный `topstitch_mode`, а не машинка, но
    * машинку шаг MACHINE обязан нести (сервер отвергает MACHINE без неё). Молча угадать её нельзя —
    * поэтому вопрос стоит рядом с именем пункта, а не в створке.
    */
@@ -158,6 +158,15 @@ export type OperationKind = {
 const M = 'TECH_CARD_OPERATION_TYPE_MACHINE' as const;
 const mt = (s: string) => `TECH_CARD_MACHINE_TYPE_${s}` as common_TechCardMachineType;
 
+/** Машины, на которых режим отстрочки имеет смысл и опознаёт пункт A2. */
+const TOPSTITCH_MACHINES = [
+  mt('LOCKSTITCH'),
+  mt('LOCKSTITCH_DOUBLE_NEEDLE'),
+  mt('CHAINSTITCH'),
+  mt('COVERSTITCH'),
+  mt('HANDSTITCH_IMITATION'),
+] as const;
+
 /** Общие семейства машинного шва — их несёт любой MACHINE, какая бы машинка ни стояла. */
 const SEW: readonly StepBlock[] = ['stitching', 'placement'];
 /** Цикловой автомат: тройка «отверстие / усилитель / стежки цикла» плюс своя программа. */
@@ -171,72 +180,271 @@ const CYCLE: readonly StepBlock[] = ['stitching', 'placement', 'hardware', 'fast
  */
 export const OPERATION_KINDS: readonly OperationKind[] = [
   // --- A. швы и строчки -------------------------------------------------------------------------
-  { id: 'A1', family: 'A', label: 'Join — lockstitch', verb: M, writes: { machineType: mt('LOCKSTITCH') }, featured: SEW },
+  {
+    id: 'A1',
+    family: 'A',
+    label: 'Join — lockstitch',
+    verb: M,
+    writes: { machineType: mt('LOCKSTITCH') },
+    featured: SEW,
+  },
   {
     id: 'A2',
     family: 'A',
     label: 'Topstitch',
     headingVerb: 'topstitch',
     verb: M,
-    // ЯКОРЬ ВИДА — КЛАСС ШВА, А НЕ МАШИНКА, и это решение, а не удобство. Технолог законно
-    // переставит отстрочку с одноигольной на двухигольную — и вид обязан остаться отстрочкой.
-    // Поле, которого смена машинки не касается, ровно одно: `seam_class`.
-    writes: { seamClass: 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' },
-    askMachine: [
-      mt('LOCKSTITCH'),
-      mt('LOCKSTITCH_DOUBLE_NEEDLE'),
-      mt('CHAINSTITCH'),
-      mt('COVERSTITCH'),
-      mt('HANDSTITCH_IMITATION'),
-    ],
+    // ЯКОРЬ ВИДА — РЕЖИМ ОТСТРОЧКИ. Класс шва остаётся UNKNOWN и наследует стандарт
+    // карточки: краевая отстрочка — это обычный шов плюс отдельная строчка, а не декоративный OS.
+    writes: { topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE' },
+    askMachine: TOPSTITCH_MACHINES,
     defaultMachine: mt('LOCKSTITCH'),
     bomKinds: ['TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'],
     featured: SEW,
   },
-  { id: 'A3', family: 'A', label: 'Overlock / serge', verb: M, writes: { machineType: mt('OVERLOCK') }, bomKinds: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'], featured: SEW },
-  { id: 'A4', family: 'A', label: 'Coverstitch', verb: M, writes: { machineType: mt('COVERSTITCH') }, featured: SEW },
-  { id: 'A5', family: 'A', label: 'Coverlock', rare: true, verb: M, writes: { machineType: mt('COVERLOCK') }, featured: SEW },
-  { id: 'A6', family: 'A', label: 'Chainstitch', verb: M, writes: { machineType: mt('CHAINSTITCH') }, featured: SEW },
-  { id: 'A7', family: 'A', label: 'Blindhem', verb: M, writes: { machineType: mt('BLINDSTITCH') }, featured: SEW },
-  { id: 'A8', family: 'A', label: 'Zigzag', verb: M, writes: { machineType: mt('ZIGZAG') }, featured: SEW },
-  { id: 'A9', family: 'A', label: 'AMF hand-stitch imitation', rare: true, verb: M, writes: { machineType: mt('HANDSTITCH_IMITATION') }, featured: SEW },
-  { id: 'A10', family: 'A', label: 'Machine — other (see note)', rare: true, verb: M, writes: { machineType: mt('OTHER') }, featured: SEW },
+  {
+    id: 'A3',
+    family: 'A',
+    label: 'Overlock / serge',
+    verb: M,
+    writes: { machineType: mt('OVERLOCK') },
+    bomKinds: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'],
+    featured: SEW,
+  },
+  {
+    id: 'A4',
+    family: 'A',
+    label: 'Coverstitch',
+    verb: M,
+    writes: { machineType: mt('COVERSTITCH') },
+    featured: SEW,
+  },
+  {
+    id: 'A5',
+    family: 'A',
+    label: 'Coverlock',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('COVERLOCK') },
+    featured: SEW,
+  },
+  {
+    id: 'A6',
+    family: 'A',
+    label: 'Chainstitch',
+    verb: M,
+    writes: { machineType: mt('CHAINSTITCH') },
+    featured: SEW,
+  },
+  {
+    id: 'A7',
+    family: 'A',
+    label: 'Blindhem',
+    verb: M,
+    writes: { machineType: mt('BLINDSTITCH') },
+    featured: SEW,
+  },
+  {
+    id: 'A8',
+    family: 'A',
+    label: 'Zigzag',
+    verb: M,
+    writes: { machineType: mt('ZIGZAG') },
+    featured: SEW,
+  },
+  {
+    id: 'A9',
+    family: 'A',
+    label: 'AMF hand-stitch imitation',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('HANDSTITCH_IMITATION') },
+    featured: SEW,
+  },
+  {
+    id: 'A10',
+    family: 'A',
+    label: 'Machine — other (see note)',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('OTHER') },
+    featured: SEW,
+  },
 
   // --- B. края и вложенные детали ---------------------------------------------------------------
-  { id: 'B1', family: 'B', label: 'Bind / tape edge', verb: M, writes: { machineType: mt('BINDING_TAPING') }, bomKinds: ['TECH_CARD_BOM_KIND_BINDING', 'TECH_CARD_BOM_KIND_TAPE', 'TECH_CARD_BOM_KIND_PIPING'], featured: SEW },
-  { id: 'B2', family: 'B', label: 'Attach elastic', verb: M, writes: { machineType: mt('ELASTIC_ATTACH') }, bomKinds: ['TECH_CARD_BOM_KIND_ELASTIC'], featured: SEW },
-  { id: 'B3', family: 'B', label: 'Set zip', verb: M, writes: { machineType: mt('ZIPPER_SETTING') }, bomKinds: ['TECH_CARD_BOM_KIND_ZIPPER'], featured: ['stitching', 'placement', 'fastening'] },
-  { id: 'B4', family: 'B', label: 'Gather / ease', verb: M, writes: { machineType: mt('GATHERING') }, featured: SEW },
+  {
+    id: 'B1',
+    family: 'B',
+    label: 'Bind / tape edge',
+    verb: M,
+    writes: { machineType: mt('BINDING_TAPING') },
+    bomKinds: [
+      'TECH_CARD_BOM_KIND_BINDING',
+      'TECH_CARD_BOM_KIND_TAPE',
+      'TECH_CARD_BOM_KIND_PIPING',
+    ],
+    featured: SEW,
+  },
+  {
+    id: 'B2',
+    family: 'B',
+    label: 'Attach elastic',
+    verb: M,
+    writes: { machineType: mt('ELASTIC_ATTACH') },
+    bomKinds: ['TECH_CARD_BOM_KIND_ELASTIC'],
+    featured: SEW,
+  },
+  {
+    id: 'B3',
+    family: 'B',
+    label: 'Set zip',
+    verb: M,
+    writes: { machineType: mt('ZIPPER_SETTING') },
+    bomKinds: ['TECH_CARD_BOM_KIND_ZIPPER'],
+    featured: ['stitching', 'placement', 'fastening'],
+  },
+  {
+    id: 'B4',
+    family: 'B',
+    label: 'Gather / ease',
+    verb: M,
+    writes: { machineType: mt('GATHERING') },
+    featured: SEW,
+  },
   // B5 — МЕРДЖ-ПУНКТ С СИЛЬНЫМ ДОВОДОМ: `label_attach_stitch` не имеет машинного гейта вовсе, то
   // есть законен на любом MACHINE, — и сегодня до него нельзя добраться, не догадавшись открыть
   // створку «differs from standard». Пункт делает существующее поле достижимым, не добавляя ни
   // колонки.
-  { id: 'B5', family: 'B', label: 'Attach label', verb: M, writes: { machineType: mt('LOCKSTITCH') }, pendingResolve: 'A1', featured: SEW },
+  {
+    id: 'B5',
+    family: 'B',
+    label: 'Attach label',
+    verb: M,
+    writes: { machineType: mt('LOCKSTITCH') },
+    pendingResolve: 'A1',
+    featured: SEW,
+  },
 
   // --- C. цикловые машины и вышивка -------------------------------------------------------------
-  { id: 'C1', family: 'C', label: 'Buttonhole', verb: M, writes: { machineType: mt('BUTTONHOLE') }, bomKinds: ['TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'], featured: CYCLE },
-  { id: 'C2', family: 'C', label: 'Button attach', verb: M, writes: { machineType: mt('BUTTON_ATTACH') }, bomKinds: ['TECH_CARD_BOM_KIND_BUTTON', 'TECH_CARD_BOM_KIND_SNAP'], featured: CYCLE },
-  { id: 'C3', family: 'C', label: 'Bartack', verb: M, writes: { machineType: mt('BARTACK') }, featured: CYCLE },
+  {
+    id: 'C1',
+    family: 'C',
+    label: 'Buttonhole',
+    verb: M,
+    writes: { machineType: mt('BUTTONHOLE') },
+    bomKinds: ['TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'],
+    featured: CYCLE,
+  },
+  {
+    id: 'C2',
+    family: 'C',
+    label: 'Button attach',
+    verb: M,
+    writes: { machineType: mt('BUTTON_ATTACH') },
+    bomKinds: ['TECH_CARD_BOM_KIND_BUTTON', 'TECH_CARD_BOM_KIND_SNAP'],
+    featured: CYCLE,
+  },
+  {
+    id: 'C3',
+    family: 'C',
+    label: 'Bartack',
+    verb: M,
+    writes: { machineType: mt('BARTACK') },
+    featured: CYCLE,
+  },
   // C4 — ПРИЗНАННЫЙ ПРОБЕЛ: у вышивки нет ни ссылки на дизайн, ни числа стежков, ни пялец, ни
   // стабилизатора отдельным полем. Обходится существующим: дизайн — снимок шага с выносками,
   // стабилизатор и нить — строки BOM, которые пункт и ставит первыми.
-  { id: 'C4', family: 'C', label: 'Embroidery', verb: M, writes: { machineType: mt('EMBROIDERY') }, bomKinds: ['TECH_CARD_BOM_KIND_EMBROIDERY_THREAD', 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER'], featured: SEW },
+  {
+    id: 'C4',
+    family: 'C',
+    label: 'Embroidery',
+    verb: M,
+    writes: { machineType: mt('EMBROIDERY') },
+    bomKinds: ['TECH_CARD_BOM_KIND_EMBROIDERY_THREAD', 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER'],
+    featured: SEW,
+  },
 
   // --- D. автоматы. В парке на бете их нет; пункты нужны ТОТАЛЬНОСТИ РЕЗОЛВА -----------------
-  { id: 'D1', family: 'D', label: 'Patch-pocket automat', rare: true, verb: M, writes: { machineType: mt('PATCH_POCKET_AUTO') }, featured: SEW },
-  { id: 'D2', family: 'D', label: 'Welt-pocket automat', rare: true, verb: M, writes: { machineType: mt('WELT_POCKET_AUTO') }, featured: SEW },
-  { id: 'D3', family: 'D', label: 'Template automat', rare: true, verb: M, writes: { machineType: mt('TEMPLATE_AUTO') }, featured: SEW },
-  { id: 'D4', family: 'D', label: 'Collar / cuff automat', rare: true, verb: M, writes: { machineType: mt('COLLAR_CUFF_AUTO') }, featured: SEW },
-  { id: 'D5', family: 'D', label: 'Sleeve-setting automat', rare: true, verb: M, writes: { machineType: mt('SLEEVE_SETTING_AUTO') }, featured: SEW },
-  { id: 'D6', family: 'D', label: 'Waistband automat', rare: true, verb: M, writes: { machineType: mt('WAISTBAND_AUTO') }, featured: SEW },
+  {
+    id: 'D1',
+    family: 'D',
+    label: 'Patch-pocket automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('PATCH_POCKET_AUTO') },
+    featured: SEW,
+  },
+  {
+    id: 'D2',
+    family: 'D',
+    label: 'Welt-pocket automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('WELT_POCKET_AUTO') },
+    featured: SEW,
+  },
+  {
+    id: 'D3',
+    family: 'D',
+    label: 'Template automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('TEMPLATE_AUTO') },
+    featured: SEW,
+  },
+  {
+    id: 'D4',
+    family: 'D',
+    label: 'Collar / cuff automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('COLLAR_CUFF_AUTO') },
+    featured: SEW,
+  },
+  {
+    id: 'D5',
+    family: 'D',
+    label: 'Sleeve-setting automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('SLEEVE_SETTING_AUTO') },
+    featured: SEW,
+  },
+  {
+    id: 'D6',
+    family: 'D',
+    label: 'Waistband automat',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('WAISTBAND_AUTO') },
+    featured: SEW,
+  },
 
   // --- E. сварка и проклейка --------------------------------------------------------------------
   // На этих двух машинках сервер отвергает ДЕСЯТЬ ниточно-игольных полей: нитки, игла, номер иглы,
   // натяжение и заметка, ширина стежка, гейдж, число игл, закрепка, шаг рядов. `fullness_ratio`
   // намеренно НЕ отвергнут — обе машины подают материал. Поэтому створка «differs from standard»
   // показывает у них только профиль, и это не недосмотр.
-  { id: 'E1', family: 'E', label: 'Tape seam (hot air)', rare: true, verb: M, writes: { machineType: mt('SEAM_TAPING') }, bomKinds: ['TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE'], featured: ['stitching', 'placement', 'weld'] },
-  { id: 'E2', family: 'E', label: 'Ultrasonic weld', rare: true, verb: M, writes: { machineType: mt('ULTRASONIC_WELDER') }, featured: ['stitching', 'placement', 'weld'] },
+  {
+    id: 'E1',
+    family: 'E',
+    label: 'Tape seam (hot air)',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('SEAM_TAPING') },
+    bomKinds: ['TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE'],
+    featured: ['stitching', 'placement', 'weld'],
+  },
+  {
+    id: 'E2',
+    family: 'E',
+    label: 'Ultrasonic weld',
+    rare: true,
+    verb: M,
+    writes: { machineType: mt('ULTRASONIC_WELDER') },
+    featured: ['stitching', 'placement', 'weld'],
+  },
 
   // --- F. установка фурнитуры -------------------------------------------------------------------
   //
@@ -251,12 +459,64 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // здесь было бы ровно тем, чего §5.2 запрещает. Он же принимает `prong_clinch` и `crimp`:
   // контрол «held on by *» стоит на виду, и зубцы — это F1 с переключённым методом, а не другая
   // работа.
-  { id: 'F0', family: 'F', label: 'Set hardware', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', featured: ['placement', 'hardware'] },
-  { id: 'F1', family: 'F', pendingResolve: 'F0', label: 'Snap / press stud', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_SNAP'], featured: ['placement', 'hardware'] },
-  { id: 'F2', family: 'F', pendingResolve: 'F0', label: 'Rivet / burr', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_RIVET'], featured: ['placement', 'hardware'] },
-  { id: 'F3', family: 'F', pendingResolve: 'F0', label: 'Eyelet / grommet', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' }, bomKinds: ['TECH_CARD_BOM_KIND_EYELET'], featured: ['placement', 'hardware'] },
-  { id: 'F4', family: 'F', label: 'Buckle / slider (threaded)', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED' }, bomKinds: ['TECH_CARD_BOM_KIND_BUCKLE', 'TECH_CARD_BOM_KIND_STRAP_ADJUSTER', 'TECH_CARD_BOM_KIND_RING'], featured: ['placement', 'hardware'] },
-  { id: 'F5', family: 'F', label: 'Attach hardware — sewn', verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET', writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_SEW' }, featured: ['placement', 'hardware'] },
+  {
+    id: 'F0',
+    family: 'F',
+    label: 'Set hardware',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    featured: ['placement', 'hardware'],
+  },
+  {
+    id: 'F1',
+    family: 'F',
+    pendingResolve: 'F0',
+    label: 'Snap / press stud',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' },
+    bomKinds: ['TECH_CARD_BOM_KIND_SNAP'],
+    featured: ['placement', 'hardware'],
+  },
+  {
+    id: 'F2',
+    family: 'F',
+    pendingResolve: 'F0',
+    label: 'Rivet / burr',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' },
+    bomKinds: ['TECH_CARD_BOM_KIND_RIVET'],
+    featured: ['placement', 'hardware'],
+  },
+  {
+    id: 'F3',
+    family: 'F',
+    pendingResolve: 'F0',
+    label: 'Eyelet / grommet',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET' },
+    bomKinds: ['TECH_CARD_BOM_KIND_EYELET'],
+    featured: ['placement', 'hardware'],
+  },
+  {
+    id: 'F4',
+    family: 'F',
+    label: 'Buckle / slider (threaded)',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED' },
+    bomKinds: [
+      'TECH_CARD_BOM_KIND_BUCKLE',
+      'TECH_CARD_BOM_KIND_STRAP_ADJUSTER',
+      'TECH_CARD_BOM_KIND_RING',
+    ],
+    featured: ['placement', 'hardware'],
+  },
+  {
+    id: 'F5',
+    family: 'F',
+    label: 'Attach hardware — sewn',
+    verb: 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET',
+    writes: { attachMethod: 'TECH_CARD_HARDWARE_ATTACH_METHOD_SEW' },
+    featured: ['placement', 'hardware'],
+  },
 
   // --- G. ВТО -----------------------------------------------------------------------------------
   //
@@ -277,15 +537,83 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // одному пункту» — ручная комбинация, токен новее бандла; шаг ВТО без приёма не таков: глагол
   // законен, пункт у него есть, не сказано ровно одно слово. Ответить `undefined` значило бы
   // объявить нестандартной каждую доволновую строку ВТО и увести её из семейства G.
-  { id: 'G0', family: 'G', label: 'Press (action not recorded)', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', stateOnly: true, featured: ['pressSettings'] },
-  { id: 'G1', family: 'G', label: 'Press flat', collapsedLabel: 'Press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT', featured: ['pressSettings'] },
-  { id: 'G2', family: 'G', label: 'Press to one side', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE', featured: ['pressSettings'] },
-  { id: 'G3', family: 'G', label: 'Press open', verb: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN', featured: ['pressSettings'] },
-  { id: 'G4', family: 'G', label: 'Steam', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_STEAM', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER' }, featured: ['pressSettings'] },
-  { id: 'G5', family: 'G', label: 'Final press', verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_FINAL', featured: ['pressSettings'] },
-  { id: 'G6', family: 'G', label: 'Ease in', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_EASE_IN', featured: ['pressSettings'] },
-  { id: 'G7', family: 'G', label: 'Stretch', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_STRETCH', featured: ['pressSettings'] },
-  { id: 'G8', family: 'G', label: 'Mould', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_PRESS', pressAction: 'TECH_CARD_PRESS_ACTION_MOULD', writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY' }, featured: ['pressSettings'] },
+  {
+    id: 'G0',
+    family: 'G',
+    label: 'Press (action not recorded)',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    stateOnly: true,
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G1',
+    family: 'G',
+    label: 'Press flat',
+    collapsedLabel: 'Press',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G2',
+    family: 'G',
+    label: 'Press to one side',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G3',
+    family: 'G',
+    label: 'Press open',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G4',
+    family: 'G',
+    label: 'Steam',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_STEAM',
+    writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAMER' },
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G5',
+    family: 'G',
+    label: 'Final press',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_FINAL',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G6',
+    family: 'G',
+    label: 'Ease in',
+    rare: true,
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_EASE_IN',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G7',
+    family: 'G',
+    label: 'Stretch',
+    rare: true,
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_STRETCH',
+    featured: ['pressSettings'],
+  },
+  {
+    id: 'G8',
+    family: 'G',
+    label: 'Mould',
+    rare: true,
+    verb: 'TECH_CARD_OPERATION_TYPE_PRESS',
+    pressAction: 'TECH_CARD_PRESS_ACTION_MOULD',
+    writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY' },
+    featured: ['pressSettings'],
+  },
   {
     id: 'G9',
     family: 'G',
@@ -293,7 +621,8 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
     verb: 'TECH_CARD_OPERATION_TYPE_FUSING',
     writes: { pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS' },
     featured: ['pressSettings'],
-    pointer: 'how the fusible is laid — whole, allowance only, or a strip — lives on the PIECE, not on this step',
+    pointer:
+      'how the fusible is laid — whole, allowance only, or a strip — lives on the PIECE, not on this step',
   },
 
   // --- H. печать --------------------------------------------------------------------------------
@@ -302,12 +631,41 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
   // он и так стоит видимым контролом (дискриминатор глагола). При `laser_engrave` сервер отвергает
   // и блок печати, и все семь полей ВТО — предикат `isLaserPrint` у клиента уже есть, второго
   // такого пикер не заводит.
-  { id: 'H1', family: 'H', label: 'Print / transfer', verb: 'TECH_CARD_OPERATION_TYPE_PRINT', bomKinds: ['TECH_CARD_BOM_KIND_PRINT', 'TECH_CARD_BOM_KIND_HEAT_TRANSFER', 'TECH_CARD_BOM_KIND_FOIL'], featured: ['placement', 'print', 'pressSettings'] },
+  {
+    id: 'H1',
+    family: 'H',
+    label: 'Print / transfer',
+    verb: 'TECH_CARD_OPERATION_TYPE_PRINT',
+    bomKinds: [
+      'TECH_CARD_BOM_KIND_PRINT',
+      'TECH_CARD_BOM_KIND_HEAT_TRANSFER',
+      'TECH_CARD_BOM_KIND_FOIL',
+    ],
+    featured: ['placement', 'print', 'pressSettings'],
+  },
 
   // --- I. отделка и финиш -----------------------------------------------------------------------
-  { id: 'I1', family: 'I', label: 'Trim allowance', verb: 'TECH_CARD_OPERATION_TYPE_TRIM', featured: ['trim'] },
-  { id: 'I2', family: 'I', label: 'Thread trim (tails)', verb: 'TECH_CARD_OPERATION_TYPE_THREAD_TRIM', featured: ['threadTrim'] },
-  { id: 'I3', family: 'I', label: 'Clean', verb: 'TECH_CARD_OPERATION_TYPE_CLEAN', featured: ['clean'] },
+  {
+    id: 'I1',
+    family: 'I',
+    label: 'Trim allowance',
+    verb: 'TECH_CARD_OPERATION_TYPE_TRIM',
+    featured: ['trim'],
+  },
+  {
+    id: 'I2',
+    family: 'I',
+    label: 'Thread trim (tails)',
+    verb: 'TECH_CARD_OPERATION_TYPE_THREAD_TRIM',
+    featured: ['threadTrim'],
+  },
+  {
+    id: 'I3',
+    family: 'I',
+    label: 'Clean',
+    verb: 'TECH_CARD_OPERATION_TYPE_CLEAN',
+    featured: ['clean'],
+  },
   // I4 / I5 — ДВА СЛОВА ВЛАДЕЛЬЦА, ОДНА МОДЕЛЬ. Глагол один (`INSPECT`), разводит их `coverage_mode`,
   // и в контракте он прямо описан как то, что отделяет межоперационный контроль от финального.
   // Значения `each_unit` и `first_output` пунктов не получают: контрол на виду, заголовок дописывает
@@ -333,13 +691,46 @@ export const OPERATION_KINDS: readonly OperationKind[] = [
     // размера партии, то есть это факт ПРОГОНА). Пока листа нет — пометка вместо пустоты.
     pointer: 'there is no AQL plan on this card yet — state the level and the sample in the note',
   },
-  { id: 'I6', family: 'I', label: 'Fold', verb: 'TECH_CARD_OPERATION_TYPE_FOLD', featured: [], pointer: 'the fold pattern and the pack mode live on the PACKAGING tab' },
-  { id: 'I7', family: 'I', label: 'Pack', verb: 'TECH_CARD_OPERATION_TYPE_PACK', featured: [], pointer: 'polybag, carton and units per bag live on the PACKAGING tab' },
-  { id: 'I8', family: 'I', label: 'Wet process', rare: true, verb: 'TECH_CARD_OPERATION_TYPE_WET_PROCESS', featured: ['wetProcess'] },
+  {
+    id: 'I6',
+    family: 'I',
+    label: 'Fold',
+    verb: 'TECH_CARD_OPERATION_TYPE_FOLD',
+    featured: [],
+    pointer: 'the fold pattern and the pack mode live on the PACKAGING tab',
+  },
+  {
+    id: 'I7',
+    family: 'I',
+    label: 'Pack',
+    verb: 'TECH_CARD_OPERATION_TYPE_PACK',
+    featured: [],
+    pointer: 'polybag, carton and units per bag live on the PACKAGING tab',
+  },
+  {
+    id: 'I8',
+    family: 'I',
+    label: 'Wet process',
+    rare: true,
+    verb: 'TECH_CARD_OPERATION_TYPE_WET_PROCESS',
+    featured: ['wetProcess'],
+  },
 
   // --- J. аварийные выходы ----------------------------------------------------------------------
-  { id: 'J1', family: 'J', label: 'Hand work', verb: 'TECH_CARD_OPERATION_TYPE_HANDWORK', featured: [] },
-  { id: 'J2', family: 'J', label: 'Other (see note)', verb: 'TECH_CARD_OPERATION_TYPE_OTHER', featured: [] },
+  {
+    id: 'J1',
+    family: 'J',
+    label: 'Hand work',
+    verb: 'TECH_CARD_OPERATION_TYPE_HANDWORK',
+    featured: [],
+  },
+  {
+    id: 'J2',
+    family: 'J',
+    label: 'Other (see note)',
+    verb: 'TECH_CARD_OPERATION_TYPE_OTHER',
+    featured: [],
+  },
 ];
 
 export const OPERATION_KIND_BY_ID: ReadonlyMap<string, OperationKind> = new Map(
@@ -538,6 +929,7 @@ export type OperationKindStep = {
   machineType?: string;
   pressEquipment?: string;
   seamClass?: string;
+  topstitchMode?: string;
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
@@ -548,6 +940,26 @@ export type OperationKindStep = {
 };
 
 const NONE = (v?: string) => !v || v.endsWith('_UNKNOWN');
+
+/**
+ * ЕДИНСТВЕННАЯ ИДЕНТИЧНОСТЬ A2.
+ *
+ * Новая запись опознаётся по названному `topstitch_mode` на машине A2. Двухигольная
+ * прямострочка остаётся безусловным A2. `OS_TOPSTITCH` — только односторонний легаси-декодер:
+ * старые строки читаются как Topstitch, но пикер больше не пишет декоративный класс за человека.
+ */
+export function isTopstitchStep(step: OperationKindStep): boolean {
+  const verb = (step.operationType ?? '') as common_TechCardOperationType;
+  if (verb === 'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE') return true;
+  if (verb !== M) return false;
+
+  const machine = (step.machineType ?? '') as common_TechCardMachineType;
+  if (machine === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE') return true;
+  if (!(TOPSTITCH_MACHINES as readonly common_TechCardMachineType[]).includes(machine)) {
+    return false;
+  }
+  return !NONE(step.topstitchMode) || step.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH';
+}
 
 /**
  * МАШИНКА → ПУНКТ. Тотальная карта над контрактом, и в этом весь смысл её формы: машинка,
@@ -678,6 +1090,7 @@ const byId = (id: string): OperationKind | undefined => OPERATION_KIND_BY_ID.get
 export function kindOf(step: OperationKindStep): OperationKind | undefined {
   const verb = (step.operationType ?? '') as common_TechCardOperationType;
   if (NONE(verb)) return undefined;
+  if (isTopstitchStep(step)) return byId('A2');
 
   // 1. Глаголы, у которых пункты разводит ДИСКРИМИНАТОР.
   if (verb === 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET') {
@@ -715,16 +1128,6 @@ export function kindOf(step: OperationKindStep): OperationKind | undefined {
   // 3. MACHINE — вторая ось, с тремя уточнениями перед ней.
   if (verb === 'TECH_CARD_OPERATION_TYPE_MACHINE') {
     const machine = (step.machineType ?? '') as common_TechCardMachineType;
-    if (machine === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE') return byId('A2');
-    if (
-      step.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' &&
-      (machine === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH' ||
-        machine === 'TECH_CARD_MACHINE_TYPE_CHAINSTITCH' ||
-        machine === 'TECH_CARD_MACHINE_TYPE_COVERSTITCH' ||
-        machine === 'TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION')
-    ) {
-      return byId('A2');
-    }
     if (!NONE(step.labelAttachStitch) && machine === 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH') {
       return byId('B5');
     }
@@ -764,7 +1167,7 @@ export function kindWrites(k: OperationKind, machineForAsk?: string): Record<str
     out.machineType =
       picked && (k.askMachine as readonly string[]).includes(picked)
         ? picked
-        : (k.defaultMachine ?? k.askMachine[0]);
+        : k.defaultMachine ?? k.askMachine[0];
   }
   if (PRESS_ACTION_IN_CONTRACT && k.pressAction) out.pressAction = k.pressAction;
   return out;
@@ -773,8 +1176,8 @@ export function kindWrites(k: OperationKind, machineForAsk?: string): Record<str
 /**
  * ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ, — единственное, что выбор пункта имеет право снять.
  *
- * Пара «имя поля → пусто». Сегодня в ней одна строка, и это не заготовка на вырост: `seam_class`
- * — ЕДИНСТВЕННОЕ поле, которое пункт (`A2`) пишет как СВОЮ ЛИЧНОСТЬ, а не как ось шага. Глагол и
+ * Пара «имя поля → пусто». `topstitch_mode` — нынешний якорь A2; `seam_class` остаётся рядом как
+ * легаси-якорь старых строк. Пикер больше не пишет OS, но должен уметь снять свой старый след. Глагол и
  * машинка сюда не входят никогда: шаг `MACHINE` обязан нести машинку, и снять её значит родить
  * заведомо несохраняемый шаг.
  *
@@ -785,6 +1188,7 @@ export function kindWrites(k: OperationKind, machineForAsk?: string): Record<str
  * пикер написал.
  */
 const KIND_ANCHOR_FIELDS: ReadonlyArray<readonly [OperationFormStringField, string]> = [
+  ['topstitchMode', 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'],
   ['seamClass', 'TECH_CARD_SEAM_CLASS_UNKNOWN'],
 ];
 
@@ -820,20 +1224,24 @@ export function kindClears(
   k: OperationKind,
   step: OperationKindStep,
 ): Partial<Record<OperationFormStringField, string>> {
-  const out: Partial<Record<OperationFormStringField, string>> = {};
   const answers = (id?: string) => !!id && (id === k.id || id === k.pendingResolve);
-  if (answers(kindOf(step)?.id)) return out;
+  if (answers(kindOf(step)?.id)) return {};
+
+  const candidates: Partial<Record<OperationFormStringField, string>> = {};
   for (const [field, empty] of KIND_ANCHOR_FIELDS) {
     // Пункт, который сам заявляет этот якорь, снимать его не может по построению.
     if (k.writes && field in k.writes) continue;
     const current = (step as Record<string, unknown>)[field];
     if (typeof current !== 'string' || NONE(current)) continue;
     if (answers(kindOf({ ...step, [field]: empty } as OperationKindStep)?.id)) {
-      out[field] = empty;
-      return out;
+      return { [field]: empty };
     }
+    candidates[field] = empty;
   }
-  return out;
+
+  // Строка может нести оба следа: OS от старого пикера и mode от нового. Каждый по отдельности
+  // продолжает давать A2, поэтому после минимальных одиночных проб нужна одна совместная.
+  return answers(kindOf({ ...step, ...candidates })?.id) ? candidates : {};
 }
 
 /**

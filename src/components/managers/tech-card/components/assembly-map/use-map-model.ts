@@ -24,6 +24,7 @@ export type MapModel = {
   isUnit: (key: string) => boolean;
   /** Первый машинный шаг — карта показывает его, пока ничего не выбрано (D2). */
   firstMachine: number | null;
+  defaultSeamClass?: string;
   /** «Как шьют» шага `i` — поле шага, стандарт карточки или пустой слот (sewn.ts). */
   sewnOf: (index: number) => SewnTile[];
 };
@@ -102,5 +103,6 @@ export function useMapModel(): MapModel {
     unitName: (k) => unitNames.get(k) ?? unitDisplayName({ key: k }),
     isUnit: (k) => unitNames.has(k),
     firstMachine,
+    defaultSeamClass: construction?.defaultSeamClass,
   };
 }

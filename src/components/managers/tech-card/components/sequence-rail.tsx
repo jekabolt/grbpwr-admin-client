@@ -22,12 +22,19 @@ import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, Text, EmptyCell } from 'ui';
+import { Button, EmptyCell, FormField, FormItem, FormMessage, Select, Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import type { AssemblyBlock } from './assembly-blocks';
 import { type FoundPiece } from './nesting/dxf-geometry';
-import { operationHeading } from './operation-options';
+import { isMachineStepType } from './equipment-options';
+import {
+  cardSeamClassOptions,
+  effectiveSeamClass,
+  operationHeading,
+  seamClassInherits,
+  seamClassOptions,
+} from './operation-options';
 import type { WorkCatalog } from './operation-work';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
@@ -80,6 +87,114 @@ const sequenceCollisionDetection: CollisionDetection = (args) => {
 
 const sequenceDividerId = (at: number) => `sequence-divider:${at}`;
 
+export function CardSeamStandard() {
+  const { control } = useFormContext<TechCardFormData>();
+  return (
+    <div className='mb-1.5 grid grid-cols-1 items-center gap-2 border-b border-textColor bg-pageBg px-2 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
+      <span className='min-w-0'>
+        <Text size='control' component='span' className='block font-bold uppercase'>
+          Card standard
+        </Text>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          ISO 4916
+        </Text>
+      </span>
+      <FormField
+        control={control}
+        name='construction.defaultSeamClass'
+        render={({ field, fieldState }) => (
+          <FormItem>
+            <Select
+              name='construction.defaultSeamClass'
+              items={cardSeamClassOptions(field.value as string)}
+              placeholder='Card standard'
+              value={field.value as string}
+              onValueChange={field.onChange}
+              invalid={!!fieldState.error}
+              size='sm'
+            />
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  );
+}
+
+function OperationSeamClass({
+  index,
+  operationType,
+  cardSeamClass,
+  frozen,
+}: {
+  index: number;
+  operationType: string;
+  cardSeamClass: string;
+  frozen: boolean;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  if (!isMachineStepType(operationType)) {
+    return (
+      <div className='col-span-2 px-1 pb-1 text-labelColor sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:p-0 sm:text-center'>
+        <EmptyCell />
+      </div>
+    );
+  }
+  return (
+    <FormField
+      control={control}
+      name={`operations.${index}.seamClass`}
+      render={({ field, fieldState }) => {
+        const raw = field.value as string;
+        const inherited = seamClassInherits(raw);
+        return (
+          <FormItem className='col-span-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-1 pb-1 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:p-0'>
+            <Select
+              name={`operations.${index}.seamClass`}
+              items={seamClassOptions}
+              placeholder='Seam class'
+              value={effectiveSeamClass(raw, cardSeamClass)}
+              onValueChange={field.onChange}
+              invalid={!!fieldState.error}
+              readOnly={frozen}
+              size='sm'
+              renderValue={(_, item) => (
+                <span className='block min-w-0 truncate text-left'>{item?.label}</span>
+              )}
+              className={cn(
+                'min-w-0',
+                inherited ? 'text-labelColor' : 'border-textColor text-textColor',
+              )}
+            />
+            <span className='flex items-center gap-2 whitespace-nowrap'>
+              {!inherited && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  disabled={frozen}
+                  onClick={() => field.onChange('TECH_CARD_SEAM_CLASS_UNKNOWN')}
+                  className='p-0 text-labelColor hover:text-textColor'
+                >
+                  Reset
+                </Button>
+              )}
+              <Text
+                size='nano'
+                variant={inherited ? 'label' : undefined}
+                component='span'
+                className='uppercase tracking-label'
+              >
+                {inherited ? 'Standard' : 'Override'}
+              </Text>
+            </span>
+            <FormMessage className='col-span-2' />
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
 // Разделитель — отдельная цель, а не сортируемая строка. Строка означает «поставить рядом»;
 // разделитель означает «поставить сюда И снять со сборочного графа». Смешать их одним id значило
 // бы снова сделать принадлежность к узлу случайным побочным эффектом позиции.
@@ -126,6 +241,7 @@ function RailStep({
   onDropPiece,
   readPieceDrag,
   workCatalog,
+  cardSeamClass,
   draft = false,
   onReviewed,
   onReviewAccepted,
@@ -161,6 +277,8 @@ function RailStep({
    * на одном экране из семи. `undefined` пишется вслух.
    */
   workCatalog: WorkCatalog | undefined;
+  /** Card-level ISO 4916 value used only to render UNKNOWN rows effectively. */
+  cardSeamClass: string;
   /**
    * Шаг записал каркас сборки, и его ещё никто не проверил — поле шага `draft` (0410): переживает
    * перезагрузку и видно всей команде.
@@ -180,6 +298,10 @@ function RailStep({
   // Класс шва — ЯКОРЬ ВИДА, и рельсу он нужен по той же причине, по какой нужен машинный тип:
   // без него отстрочка на одноигольной читалась бы «join» в списке и «Topstitch» в открытом шаге.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  const topstitchMode = (useWatch({
+    control,
+    name: `operations.${index}.topstitchMode`,
+  }) ?? '') as Parameters<typeof operationHeading>[0]['topstitchMode'];
   // РАБОТА — НАЗВАННОЕ ИМЯ ШАГА, и оно бьёт обе выведенные лестницы выше. Без этой подписки шаг,
   // которому назначили работу, продолжал бы зваться в рельсе выведенным словом, пока пикер в
   // открытом редакторе называет его выбранным, — тот самый остаток, ради которого R8 и заведена.
@@ -239,6 +361,7 @@ function RailStep({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
       seamClass,
+      topstitchMode,
       work,
       workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
@@ -288,7 +411,7 @@ function RailStep({
             if (key) onDropPiece(index, key);
           }}
           className={cn(
-            'flex items-center gap-1 border bg-bgColor pr-1.5 transition-colors',
+            'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 border bg-bgColor pr-1.5 transition-colors sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]',
             hasError || assemblyBroken || marked || linked
               ? 'border-error'
               : selected || over || mapLit
@@ -330,7 +453,10 @@ function RailStep({
             // его, потому что textContent строки склеил бы четыре разных факта в одну строку и
             // «имя не то» стало бы неотличимо от «номер не тот».
             data-rail-step={index}
-            className='flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className={cn(
+              'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+              ((acceptable && selected) || draft) && 'pr-10',
+            )}
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
@@ -392,6 +518,12 @@ function RailStep({
               {smvMin > 0 ? smvMin.toFixed(1) : <EmptyCell />}
             </Text>
           </span>
+          <OperationSeamClass
+            index={index}
+            operationType={opType}
+            cardSeamClass={cardSeamClass}
+            frozen={frozen}
+          />
           {/* ЧИП DRAFT — КНОПКА РЯДОМ СО СТРОКОЙ, А НЕ ВНУТРИ НЕЁ: строка сама `role='button'`
               (открыть шаг), и вложенный орган был бы кнопкой в кнопке. Нативная кнопка, как ручка
               перетаскивания: «проверено» — правка, и в `<fieldset disabled>` выпущенной карточки
@@ -403,7 +535,7 @@ function RailStep({
               data-rail-review={index}
               aria-label={`accept review for step ${opNumber}`}
               title='accept review'
-              className='shrink-0 border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
+              className='col-start-2 row-start-1 shrink-0 justify-self-end border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
             >
               <span className='text-nano uppercase'>ok</span>
             </Button>
@@ -414,7 +546,7 @@ function RailStep({
               data-rail-draft={index}
               aria-label={`step ${opNumber} is a draft from the assembly skeleton: mark it reviewed`}
               title='written by the assembly skeleton and not reviewed yet. Click to mark it reviewed; changing the step does it too'
-              className='shrink-0 border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
+              className='col-start-2 row-start-1 shrink-0 justify-self-end border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
             >
               <span className='text-nano uppercase'>draft</span>
             </button>
@@ -483,7 +615,11 @@ export function SequenceRail({
   /** «Проверено» по клику на чип draft строки `index`. */
   onReviewed?: (index: number) => void;
 }) {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? 'TECH_CARD_SEAM_CLASS_UNKNOWN') as string;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -548,57 +684,61 @@ export function SequenceRail({
   if (grouped) sortableItems.push(sequenceDividerId(fields.length));
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={sequenceCollisionDetection}
-      modifiers={[restrictToVerticalAxis]}
-      onDragEnd={handleDragEnd}
-    >
-      <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
-        <div className='flex flex-col gap-0.5'>
-          {fields.map((f, index) => {
-            // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
-            // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
-            const startsLooseRun = startsUnheadedLooseRun(index);
-            const startsStandalone = startsStandaloneRun(index);
-            return (
-              <Fragment key={f.id}>
-                {hasDividerBefore(index) && (
-                  <SequenceDivider at={index} visible={startsLooseRun || startsStandalone} />
-                )}
-                {grouped && headerBefore.has(index) && (
-                  <UnitBlockHeader
-                    block={headerBefore.get(index)!.block}
-                    smv={headerBefore.get(index)!.smv}
-                    terminal={headerBefore.get(index)!.terminal}
-                    className='mt-0'
-                    unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
+    <>
+      <CardSeamStandard />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={sequenceCollisionDetection}
+        modifiers={[restrictToVerticalAxis]}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
+          <div className='flex flex-col gap-0.5'>
+            {fields.map((f, index) => {
+              // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
+              // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
+              const startsLooseRun = startsUnheadedLooseRun(index);
+              const startsStandalone = startsStandaloneRun(index);
+              return (
+                <Fragment key={f.id}>
+                  {hasDividerBefore(index) && (
+                    <SequenceDivider at={index} visible={startsLooseRun || startsStandalone} />
+                  )}
+                  {grouped && headerBefore.has(index) && (
+                    <UnitBlockHeader
+                      block={headerBefore.get(index)!.block}
+                      smv={headerBefore.get(index)!.smv}
+                      terminal={headerBefore.get(index)!.terminal}
+                      className='mt-0'
+                      unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
+                    />
+                  )}
+                  <RailStep
+                    uid={f.id}
+                    index={index}
+                    selected={index === selectedIndex}
+                    onSelect={() => onSelect(index)}
+                    hasError={errorIndices.has(index)}
+                    assemblyBroken={brokenSteps.has(index)}
+                    activePin={activePin}
+                    activeBom={activeBom}
+                    pieceShapes={pieceShapes}
+                    onHoverPin={onHoverPin}
+                    onDropPiece={onDropPiece}
+                    readPieceDrag={readPieceDrag}
+                    workCatalog={workCatalog}
+                    cardSeamClass={cardSeamClass}
+                    draft={draftIds?.has(f.id) ?? false}
+                    onReviewed={onReviewed ? () => onReviewed(index) : undefined}
+                    onReviewAccepted={() => acceptReview(index)}
                   />
-                )}
-                <RailStep
-                  uid={f.id}
-                  index={index}
-                  selected={index === selectedIndex}
-                  onSelect={() => onSelect(index)}
-                  hasError={errorIndices.has(index)}
-                  assemblyBroken={brokenSteps.has(index)}
-                  activePin={activePin}
-                  activeBom={activeBom}
-                  pieceShapes={pieceShapes}
-                  onHoverPin={onHoverPin}
-                  onDropPiece={onDropPiece}
-                  readPieceDrag={readPieceDrag}
-                  workCatalog={workCatalog}
-                  draft={draftIds?.has(f.id) ?? false}
-                  onReviewed={onReviewed ? () => onReviewed(index) : undefined}
-                  onReviewAccepted={() => acceptReview(index)}
-                />
-              </Fragment>
-            );
-          })}
-          {grouped && <SequenceDivider at={fields.length} />}
-        </div>
-      </SortableContext>
-    </DndContext>
+                </Fragment>
+              );
+            })}
+            {grouped && <SequenceDivider at={fields.length} />}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </>
   );
 }

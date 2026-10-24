@@ -16,6 +16,7 @@ import {
 import {
   mapFormToTechCardInsert,
   mapTechCardToForm,
+  operationWriteOrder,
   operationFieldNames,
   techCardDefaultData,
   type TechCardFormData,
@@ -31,6 +32,10 @@ export function toWire(ops: Op[]): common_TechCardInsert {
   return mapFormToTechCardInsert(data);
 }
 
+export function formToWire(values: Partial<TechCardFormData>): common_TechCardInsert {
+  return mapFormToTechCardInsert({ ...techCardDefaultData, ...values } as TechCardFormData);
+}
+
 export function readBack(insert: common_TechCardInsert): Op[] {
   const form = mapTechCardToForm({ techCard: insert } as unknown as common_TechCard);
   return (form.operations ?? []) as unknown as Op[];
@@ -40,6 +45,7 @@ export {
   auditOperationPresence,
   hasPresenceLoss,
   isPresent,
+  operationWriteOrder,
   operationFieldNames,
   operationPresenceFields,
   PRESENCE_NOT_AUDITED,

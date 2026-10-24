@@ -117,6 +117,7 @@ function printInput(
         operationType: o.operationType,
         machineType: o.machineType,
         seamClass: o.seamClass,
+        topstitchMode: o.topstitch?.mode,
         work: o.work,
         workCatalog,
         zone: o.zone,

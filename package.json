@@ -102,6 +102,7 @@
     "hatch:markup": "node scripts/hatch-markup-probe.mjs",
     "canvas:view": "node scripts/canvas-view-probe.mjs",
     "undo:record": "node scripts/last-mutation-probe.mjs",
+    "undo:history": "node scripts/undo-history-probe.mjs",
     "prefs:schematic": "node scripts/schematic-prefs-probe.mjs",
     "step:inference": "node scripts/operation-inference-probe.mjs",
     "picker:coverage": "node scripts/picker-coverage-probe.mjs",

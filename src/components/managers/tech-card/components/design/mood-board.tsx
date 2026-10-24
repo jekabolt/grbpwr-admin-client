@@ -37,6 +37,7 @@ import {
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
+import { useUndoHistory } from '../undo-history';
 import { CalloutRail, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { GROUP_SEAM } from './core';
@@ -884,7 +885,7 @@ export function MoodBoard({
     const card = techCardId;
     let saved: FlushResult;
     try {
-      saved = await autosave.flush('moodboard: a picture off the board');
+      saved = await undoHistory.flushThenCut('moodboard picture');
     } catch {
       saved = 'error';
     }
@@ -1105,6 +1106,7 @@ export function MoodBoard({
   // пустое: набранное за время прогона не перетирается. Отказ говорит `onError` мутации (снэкбар).
   const { draftIdea: describeRun } = useGenerationWrites(techCardId);
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const [describing, setDescribing] = useState(false);
   // T48: ссылка в плейсхолдере — только у пустого поля, при картинках на доске и не в чтении.
   const canDescribe = !readOnly && !conceptValue.trim() && items.length > 0;
@@ -1115,7 +1117,7 @@ export function MoodBoard({
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
-        flushed = await autosave.flush('describe');
+        flushed = await undoHistory.flushThenCut('describe');
       } catch {
         flushed = 'error';
       }

@@ -228,10 +228,7 @@ export type WorkNaming =
   /** Работы нет — имя выводится по-старому, из глагола с машинкой. */
   | { kind: 'derived' };
 
-export function workNaming(
-  catalog: WorkCatalog | undefined,
-  work: string | undefined,
-): WorkNaming {
+export function workNaming(catalog: WorkCatalog | undefined, work: string | undefined): WorkNaming {
   const token = (work ?? '').trim();
   if (!token) return { kind: 'derived' };
   const label = catalog?.byToken.get(token)?.label?.trim();
@@ -339,9 +336,7 @@ const bundleItem = (k: OperationKind, sort: number): WorkItem | undefined => {
     stage: `fam_${k.family}`,
     label: kindLabelOf(k),
     machineMode,
-    defaultMachine: asked.length
-      ? enumToMachineToken(k.defaultMachine ?? '') || asked[0]
-      : fixed,
+    defaultMachine: asked.length ? enumToMachineToken(k.defaultMachine ?? '') || asked[0] : fixed,
     machines: asked.length ? asked : fixed ? [fixed] : [],
     // СИНОНИМОВ У СНИМКА НЕТ. Это цена деградации, названная вслух: русские слова живут на
     // сервере, и класть их в бандл ради оффлайна значило бы завести второй словарь поиска.
@@ -445,10 +440,7 @@ export const SLIT_OVERCAST_WORK = 'slit_overcast';
  * (`machines: ['zigzag', 'buttonhole']` у пункта ниже), так что машинка на вопрос «что режут»
  * ответить не может в принципе — на петельном автомате режут и петлю, и прорезь.
  */
-export function cutLengthNoun(
-  catalog: WorkCatalog | undefined,
-  work: string | undefined,
-): string {
+export function cutLengthNoun(catalog: WorkCatalog | undefined, work: string | undefined): string {
   const n = workNaming(catalog, work);
   if (n.kind === 'derived') return 'buttonhole';
   if (n.token === SLIT_OVERCAST_WORK) return 'slit';
@@ -588,7 +580,6 @@ export const BUNDLED_WORK_CATALOG: WorkCatalog = (() => {
     smvHints: new Map(),
   };
 })();
-
 
 // --- ДЕФОЛТЫ: ИМЕНА И ЗНАЧЕНИЯ -------------------------------------------------------------------
 
@@ -811,7 +802,7 @@ export type StepSnapshot = OperationKindStep & {
 /**
  * НАМЕРЕНИЕ ЗАПИСИ, РАЗДЕЛЁННОЕ ПО ПРИРОДЕ ФАКТОВ, а не сваленное в одну карту:
  *
- * `writes` — ЛИЧНОСТЬ РАБОТЫ: глагол и машинка из каталога, класс шва отстрочки, метод крепления,
+ * `writes` — ЛИЧНОСТЬ РАБОТЫ: глагол и машинка из каталога, режим отстрочки, метод крепления,
  *            под-глагол ВТО. Само поле `work` сюда НЕ входит — его пишет вызыватель, потому что
  *            оно едет и тогда, когда пункта у работы нет вовсе;
  * `clears` — ЯКОРЬ ЧУЖОГО ПУНКТА, который пикер сам же когда-то и написал. Пусто в подавляющем
@@ -869,6 +860,7 @@ export function workApplication(input: {
     operationType: writes.operationType ?? current.operationType,
     machineType: writes.machineType ?? current.machineType,
     seamClass: writes.seamClass ?? current.seamClass,
+    topstitchMode: writes.topstitchMode ?? current.topstitchMode,
     attachMethod: writes.attachMethod ?? current.attachMethod,
     coverageMode: writes.coverageMode ?? current.coverageMode,
     labelAttachStitch: writes.labelAttachStitch ?? current.labelAttachStitch,

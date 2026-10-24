@@ -9,7 +9,16 @@ import {
 import { notify } from 'lib/stores/store';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { ROUTES } from 'constants/routes';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -51,6 +60,7 @@ import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-tex
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { revealField } from 'utils/field-errors';
 import { isDxfUrl } from 'utils/pattern';
+import { ulid } from 'utils/ulid';
 import {
   // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
   // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
@@ -91,6 +101,7 @@ import {
   zipperApplicationLabel,
   effectiveMachineSettings,
   effectivePressSettings,
+  effectiveSeamClass,
   operationHeading,
   operationTypeOptionsFor,
   seamAllowanceText,
@@ -237,7 +248,7 @@ import {
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
-import { SequenceRail } from './sequence-rail';
+import { CardSeamStandard, SequenceRail } from './sequence-rail';
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
@@ -333,7 +344,6 @@ function reviewDxfPack(
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
 const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
-const PLAIN_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_SS_PLAIN';
 const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
 const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
 // The unset member of each equipment vocabulary. In this feature UNSET NEVER MEANS ZERO — it means
@@ -745,6 +755,7 @@ const LINKABLE_SECTION_LABEL: Record<string, string> = {
 // indistinguishable from «it defaulted to 4», and the card stops being able to say which steps
 // genuinely differ.
 export const emptyOperation = {
+  historyKey: '',
   operationNumber: 0,
   operationType: NONE_OP_TYPE,
   // РАБОТА (0330) — пустая строка, и это ЗАКОННОЕ состояние, а не заготовка. Новый шаг вида не
@@ -853,6 +864,10 @@ type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 /** A step row exactly as the field array holds it. */
 export type OperationRow = typeof emptyOperation;
 
+function newOperationRow(overrides: Partial<OperationRow> = {}): OperationRow {
+  return { ...emptyOperation, historyKey: ulid(), ...overrides };
+}
+
 /**
  * THE ONE DEFINITION OF «A FILLED STEP THIS SCREEN WRITES». The create dialog's result and the
  * skeleton's step both land here: a second spread of `emptyOperation` next to this one would drift
@@ -861,8 +876,7 @@ export type OperationRow = typeof emptyOperation;
  * Pure: no form, no history, no position. The caller decides where the row goes.
  */
 export function rowFromCreate(r: CreateResult): OperationRow {
-  return {
-    ...emptyOperation,
+  return newOperationRow({
     inputKeys: r.inputKeys,
     outputUnitKey: r.outputUnitKey,
     outputUnitName: r.outputUnitName,
@@ -886,7 +900,7 @@ export function rowFromCreate(r: CreateResult): OperationRow {
     ...(Object.fromEntries(
       Object.entries(r.kindWrites ?? {}).filter(([k]) => k in emptyOperation),
     ) as Partial<OperationRow>),
-  };
+  });
 }
 
 /**
@@ -997,8 +1011,8 @@ export function skeletonZoneOf(step: Pick<SkeletonStep, 'zone'>): string {
 /**
  * A skeleton step → the row it becomes. Goes through `rowFromCreate`, so a skeleton step and a step
  * made in the create dialog are the same kind of row: nothing in the data says where it came from.
- * A machine join takes the card's default seam class (23-AUTO #6) — the same value the step would
- * inherit, now written so the row says it. Work and SMV stay empty: SMV comes with the work
+ * A machine join stores UNKNOWN: the card standard is resolved when the row is read, so changing
+ * the standard changes every inheriting join. Work and SMV stay empty: SMV comes with the work
  * (`prefillForWork`), and the skeleton names no work.
  */
 export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): OperationRow {
@@ -1017,13 +1031,11 @@ export function rowFromStep(step: SkeletonStep, ctx: SkeletonRowContext): Operat
       ? { pressEquipment: skeletonPressOf(operationType, ctx).pressEquipment }
       : {}),
   });
-  const seam = (ctx.defaultSeamClass ?? '').trim();
-  const joinSeam = !seam || seam === NONE_SEAM_CLASS ? PLAIN_SEAM_CLASS : seam;
   const join = isMachine && step.inputs.filter((k) => k.trim()).length >= 2;
   const materials = autoStepMaterialKeys(row, ctx.bomLines ?? []);
   return {
     ...row,
-    ...(join ? { seamClass: joinSeam } : {}),
+    ...(join ? { seamClass: NONE_SEAM_CLASS } : {}),
     ...(materials.length ? { bomLineKeys: [...row.bomLineKeys, ...materials] } : {}),
     draft: true,
   };
@@ -2317,6 +2329,9 @@ function useStepInference(
   own: { zone: boolean; thread?: string; press: boolean },
 ): StepInference {
   const ops = useWatch({ name: 'operations' }) as InferenceStep[] | undefined;
+  const defaultSeamClass = useWatch({ name: 'construction.defaultSeamClass' }) as
+    | string
+    | undefined;
   const aliases = (useWatch({ name: 'pieceDxfAliases' }) ?? []) as InferenceAlias[];
   const { zone: ownZone, thread: ownThread, press: ownPress } = own;
   return useMemo(() => {
@@ -2334,6 +2349,7 @@ function useStepInference(
       return stripped;
     });
     const card: InferenceCard = {
+      defaultSeamClass,
       pieces: pieces.map((p) => ({ lineKey: p.lineKey, name: p.name })),
       bomLines,
       aliases,
@@ -2343,7 +2359,18 @@ function useStepInference(
     // ТОЛЬКО ОТКРЫТЫЙ ШАГ, а не вся карточка: редактор смонтирован в единственном экземпляре, а
     // сто двадцать шесть выводов на каждое нажатие клавиши — это не подсказка, а тормоз.
     return inferStep(card, index);
-  }, [ops, aliases, pieces, bomLines, parkPresses, index, ownZone, ownThread, ownPress]);
+  }, [
+    ops,
+    defaultSeamClass,
+    aliases,
+    pieces,
+    bomLines,
+    parkPresses,
+    index,
+    ownZone,
+    ownThread,
+    ownPress,
+  ]);
 }
 
 /**
@@ -2498,6 +2525,11 @@ function OperationEditor({
   const noteValue = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ??
     NONE_SEAM_CLASS) as string;
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? NONE_SEAM_CLASS) as string;
+  const effectiveSeam = effectiveSeamClass(seamClass, cardSeamClass);
   const seamAllowanceMm = (useWatch({ control, name: `operations.${index}.seamAllowanceMm` }) ??
     '') as string;
   const stitchesPerCm = (useWatch({ control, name: `operations.${index}.stitchesPerCm` }) ??
@@ -2742,7 +2774,7 @@ function OperationEditor({
     topstitchRows > 0;
   const showTopstitchWidth = showTopstitch && topstitchModeTakesWidth(topstitchMode);
   const showNeedleGauge = showNeedleFacts && needleCount >= 2;
-  const showBindingStyle = showStitching && seamClass === BOUND_SEAM_CLASS;
+  const showBindingStyle = showStitching && effectiveSeam === BOUND_SEAM_CLASS;
   const showPitch = showPlacement && placementCount >= 2;
   const showFoldback = showHardware && isHardwareStep && attachMethod === THREADED_HARDWARE;
   const showAirTemperature = showWeld && onMachine(SEAM_TAPING);
@@ -2897,12 +2929,8 @@ function OperationEditor({
     ),
     textState('attachmentSizeMm', 'attachment size, mm', attachmentSizeMm, showAttachmentSize),
     // ШОВ И ПЛОТНОСТЬ (ревью шва Ф4+Ф5+Ф7). Четвёрка «seam & stitch» прячется у ВТО-шага, пока он
-    // её не несёт, — но отказ сервера бывает и на ПУСТОМ её поле: пара Ф3 «режим отстрочки ↔ класс
-    // шва» отвечает `seam_class: required` на шаг, где режим остался, а класс не назван. Вне этой
-    // таблицы такой отказ был невидим: контрола нет, остатка нет (поле пустое), а створке его
-    // чинить нечем. Строкой ОСТАТКА четвёрка не бывает по построению — любое её заполненное
-    // значение само открывает секцию (`showSewingOverrides`), — поэтому здесь она даёт только
-    // catch-строки.
+    // её не несёт. UNKNOWN у класса шва законно наследует стандарт карточки даже при названном
+    // topstitch mode; сам mode открывает секцию и даёт контролу свой именованный путь ошибки.
     enumState(
       'seamClass',
       'seam class',
@@ -3346,6 +3374,7 @@ function OperationEditor({
     operationType: opType,
     machineType,
     seamClass,
+    topstitchMode,
     attachMethod,
     coverageMode,
     labelAttachStitch,
@@ -3485,7 +3514,7 @@ function OperationEditor({
    * ровно по гейту сервера, а не по короткому списку пункта.
    *
    * ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЯКОРЬ, КОТОРЫЙ ПИКЕР САМ И ПОСТАВИЛ (`kindClears`, спрошенный
-   * писателем). Без него правило оборачивалось против себя: оставшийся `seam_class` перехватывал
+   * писателем). Без него правило оборачивалось против себя: оставшийся `topstitch_mode` или легаси-OS перехватывал
    * резолв, и пять пунктов не брались ВОВСЕ — то есть выбор человека стирался целиком ради поля,
    * которое человек не заполнял.
    */
@@ -3530,6 +3559,7 @@ function OperationEditor({
         machineType,
         pressEquipment,
         seamClass,
+        topstitchMode,
         attachMethod,
         coverageMode,
         labelAttachStitch,
@@ -3636,6 +3666,7 @@ function OperationEditor({
         operationType: r.operationType as string,
         machineType: r.machineType as string,
         seamClass: r.seamClass as string,
+        topstitchMode: r.topstitchMode as string,
         attachMethod: r.attachMethod as string,
         coverageMode: r.coverageMode as string,
         labelAttachStitch: r.labelAttachStitch as string,
@@ -3880,9 +3911,10 @@ function OperationEditor({
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
-      // ЯКОРЬ ВИДА едет в композитор: без него отстрочка на одноигольной называлась бы «join»
+      // Оба сырых входа едут в общий резолв: mode якорит новые A2, OS читает легаси-строки.
       // здесь и «Topstitch» в пикере на два сантиметра выше.
       seamClass,
+      topstitchMode,
       // ...А НАЗВАННАЯ РАБОТА БЬЁТ И ЕГО (R8). Именно здесь оставался остаток R6: шаг с классом шва
       // отстрочки, которому назначили работу без пункта, звался отстрочкой во всех заголовках,
       // пока пикер на два сантиметра выше называл его выбранной работой.
@@ -4500,13 +4532,13 @@ function OperationEditor({
   // там называет подпись поля, — а в бегущей строке рядом с «6 mm from the edge» голое число
   // читается в тех единицах, в которых читатель работает.
   const seamSummaryText = [
-    seamClassLabel(seamClass),
+    seamClassLabel(effectiveSeam),
     seamAllowanceText({
       own: seamAllowanceMm,
       card: cardAllowanceMm,
       workshop: shopAllowanceMm,
       operationType: opType,
-      seamClass,
+      seamClass: effectiveSeam,
     }),
     seamSecuringLabel(seamSecuring),
   ]
@@ -4517,7 +4549,7 @@ function OperationEditor({
   // три таких строки подряд учат не читать сводки вовсе.
   const showSeamSummary =
     showSewingOverrides &&
-    (isMachineStep || seamClass !== NONE_SEAM_CLASS || seamAllowanceMm.trim() !== '');
+    (isMachineStep || effectiveSeam !== NONE_SEAM_CLASS || seamAllowanceMm.trim() !== '');
 
   // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
   // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
@@ -4643,10 +4675,10 @@ function OperationEditor({
           className={selectNoGrow}
         />
         {/* «НА ЧЁМ» — СУЖЕННЫЙ СПИСОК И ДРУГОЕ СЛОВО НАД НИМ, когда вид якорится не машинкой.
-            У отстрочки якорь — класс шва (`OS_TOPSTITCH`), а машинку шаг MACHINE обязан нести:
+            У отстрочки якорь — названный mode, а машинку шаг MACHINE обязан нести:
             сервер отвергает MACHINE без неё. Поэтому пункт машинку ставит, но не угадывает молча —
             вопрос стоит здесь, на виду, раскрытым. И смена машинки внутри списка вид НЕ меняет:
-            переставил одноигольную на двухигольную — `seam_class` не тронулся, вид прежний. */}
+            переставил одноигольную на двухигольную — `topstitch_mode` не тронулся, вид прежний. */}
         {isMachineStep && (
           <SelectField
             name={`operations.${index}.machineType`}
@@ -6093,6 +6125,10 @@ export function OperationsField({
   // подписка на строку рельса означала бы сто двадцать шесть подписок на карточке свалки, и
   // каталог обязан приехать сюда, а не в каждую строку.
   const { catalog: workCatalog } = useOperationWorkCatalog();
+  const cardSeamClass = (useWatch({
+    control,
+    name: 'construction.defaultSeamClass',
+  }) ?? NONE_SEAM_CLASS) as string;
 
   // ПАНЕЛЬ РАТИФИКАЦИИ — ОДНО СОСТОЯНИЕ ОТКРЫТОСТИ И НИ ОДНОГО СВОЕГО МУТАТОРА (то же правило, что
   // у фулскрина сборки, R3): `useFieldArray` по операциям существует в единственном экземпляре —
@@ -6304,7 +6340,7 @@ export function OperationsField({
     if (frozen) return;
     clearFormHistory(); // (2/10)
     remapIssues((old) => (old > index ? old + 1 : old));
-    insert(index + 1, { ...emptyOperation });
+    insert(index + 1, newOperationRow());
     setSelected(index + 1);
   };
 
@@ -6368,7 +6404,7 @@ export function OperationsField({
   useEffect(() => {
     if (!addRequest) return;
     clearFormHistory(); // (4/10) шаг дописала ПАНЕЛЬ, а не жест полотна
-    append({ ...emptyOperation });
+    append(newOperationRow());
     setSelected(fields.length);
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7221,7 +7257,7 @@ export function OperationsField({
     // указывала бы на шаг, стоящий уже не там.
     clearFormHistory();
     setSelected(fields.length);
-    append({ ...emptyOperation });
+    append(newOperationRow());
   };
 
   const openNextReview = (operations: CardOperation[], afterIndex: number) => {
@@ -7286,7 +7322,7 @@ export function OperationsField({
     if (frozen || !pieceKey) return;
     clearFormHistory();
     const at = fields.length;
-    append({ ...emptyOperation, inputKeys: [pieceKey], review: '', draft: false });
+    append(newOperationRow({ inputKeys: [pieceKey], review: '', draft: false }));
     setSelected(at);
     requestAnimationFrame(() =>
       editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
@@ -7857,6 +7893,9 @@ export function OperationsField({
       >[0]['operationType'],
       machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
       seamClass: getValues(`operations.${i}.seamClass`) as string,
+      topstitchMode: getValues(`operations.${i}.topstitchMode`) as Parameters<
+        typeof operationHeading
+      >[0]['topstitchMode'],
       // Схема сборки называет шаг тем же словом, что рельс: работа названа — её подпись (R8).
       work: getValues(`operations.${i}.work`) as string,
       workCatalog,
@@ -8075,8 +8114,38 @@ export function OperationsField({
     clearFormHistory();
   }, [fsOpen, clearFormHistory]);
 
+  const routeHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.altKey)
+      return;
+    const target = event.target as HTMLElement;
+    const nativeTextInput =
+      target instanceof HTMLInputElement &&
+      ![
+        'button',
+        'checkbox',
+        'color',
+        'file',
+        'hidden',
+        'image',
+        'radio',
+        'range',
+        'reset',
+        'submit',
+      ].includes(target.type);
+    if (nativeTextInput || target instanceof HTMLTextAreaElement || target.isContentEditable)
+      return;
+    const undo = (event.metaKey || event.ctrlKey) && event.code === 'KeyZ' && !event.shiftKey;
+    const redo =
+      ((event.metaKey || event.ctrlKey) && event.code === 'KeyZ' && event.shiftKey) ||
+      (event.ctrlKey && !event.metaKey && event.code === 'KeyY');
+    if (!undo && !redo) return;
+    event.preventDefault();
+    if (undo) undoGesture();
+    else redoGesture();
+  };
+
   return (
-    <div className='space-y-2.5'>
+    <div className='space-y-2.5' data-history-owner='construction' onKeyDown={routeHistoryKey}>
       <SectionHeader
         title='operations'
         question='assembly order'
@@ -8161,6 +8230,10 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
+      {!fsOpen &&
+        fields.length === 0 &&
+        unplacedReuploadedKeys.length === 0 &&
+        effectiveMode !== 'schematic' && <CardSeamStandard />}
       {fsOpen ? null : fields.length === 0 &&
         unplacedReuploadedKeys.length === 0 &&
         effectiveMode !== 'schematic' ? (
@@ -8194,7 +8267,7 @@ export function OperationsField({
         <div>
           {/* ЗАГОЛОВОК ГРУППЫ ВЫНЕСЕН ИЗ КОЛОНКИ, КОТОРАЯ МЕНЯЕТ ШИРИНУ. Он жил внутри неё, а
               переключатель вида сидел в правом слоте — то есть был прижат к правому краю
-              контейнера шириной то 320px (список), то во всю секцию (схема). Одно нажатие
+              контейнера шириной то 520px (список), то во всю секцию (схема). Одно нажатие
               перебрасывало орган через полэкрана, и второе приходилось искать глазами. Здесь же
               он был `sticky` только в списке: у прокрученной страницы переключение роняло
               заголовок с прилипшей строки обратно в поток, то есть двигало его и по вертикали.
@@ -8261,7 +8334,7 @@ export function OperationsField({
             <div
               className={cn(
                 'w-full',
-                effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+                effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[520px] lg:shrink-0',
               )}
             >
               {effectiveMode === 'schematic' ? (
@@ -8344,7 +8417,7 @@ export function OperationsField({
                 ref={editorRef}
                 data-step-editor='1'
                 // K-12 · ВТОРАЯ КОЛОНКА ОБЯЗАНА УМЕТЬ СЖИМАТЬСЯ. Коробка стояла БЕЗ ЕДИНОГО
-                // класса рядом с рельсом `lg:w-[320px] lg:shrink-0`, то есть её flex-минимум
+                // класса рядом с рельсом `lg:w-[520px] lg:shrink-0`, то есть её flex-минимум
                 // разрешался в `min-width: auto` = min-content ВСЕГО редактора шага. Пока
                 // min-content уже колонки, это незаметно (замерено: на окне 1280 редактор 768px
                 // при доступных 768, на 1024 — 512 при 512, переполнения нет), но защиты не было

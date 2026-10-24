@@ -28,6 +28,7 @@ import { InertDoor } from './design/bench-slot';
 import { cardFactsContext } from './design/core/card-facts';
 import { isBoardRow } from './design/core/mood-gate';
 import { useCardFacts } from './design/head/card-facts-form';
+import { useUndoHistory } from './undo-history';
 import { GROUP_SEAM } from './design/core';
 import { DraftedField } from './design/core/drafted-field';
 import { draftedKey, useDrafted } from './design/drafted-contract';
@@ -144,6 +145,7 @@ export function DetailsEditor({
   // session cache of just-picked media so thumbnails show before a reload
   const [cache, setCache] = useState<Map<number, string>>(new Map());
   const uploadMedia = useUploadMedia({ silent: true });
+  const undoHistory = useUndoHistory();
   // the reference strip opened in the shared viewer (null = closed). Each aspect
   // browses its own images, so we stash the built item list alongside the index.
   const [viewer, setViewer] = useState<{
@@ -245,6 +247,8 @@ export function DetailsEditor({
     const before = liveIds(viewer.key);
     if (targetIndex < 0 || !sourceId || before[targetIndex] !== sourceId)
       throw new Error('slot changed');
+
+    undoHistory.cut('detail-upload');
 
     const uploaded = await uploadMedia.mutateAsync(dataUrl);
     const newId = uploaded.id;

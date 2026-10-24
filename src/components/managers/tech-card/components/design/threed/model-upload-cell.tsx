@@ -18,6 +18,7 @@ import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 import { InertDoor } from '../bench-slot';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
+import { useUndoHistory } from '../../undo-history';
 import {
   MODEL_FILE_ACCEPT,
   isGlbFile,
@@ -162,7 +163,9 @@ export type BringOwnModel = {
  */
 export function useBringOwnModel(techCardId: number): BringOwnModel {
   const { registerUpload } = useDesignWrites(techCardId);
+  const undoHistory = useUndoHistory();
   const inputRef = useRef<HTMLInputElement>(null);
+  const sendInFlight = useRef(false);
   const [busy, setBusy] = useState<'' | 'sending' | 'filing'>('');
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,10 +273,14 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
 
   /** ОТПРАВИТЬ ПАРУ — одним запросом, с превью или без. */
   const send = useCallback(async () => {
-    if (!staged.model || busy) return;
+    if (!staged.model || busy || sendInFlight.current) return;
+    // The mutex and visible busy state rise before any await. Two clicks in one React frame can no
+    // longer upload the same bytes twice.
+    sendInFlight.current = true;
+    setBusy('sending');
+    undoHistory.cut('model-upload');
     setError(null);
     setFiled(null);
-    setBusy('sending');
     let mediaId = 0;
     const requestId = newClientRequestId();
     try {
@@ -290,10 +297,15 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
       const message = modelUploadErrorMessage(e);
       setError(message);
       setBusy('');
+      sendInFlight.current = false;
       return;
     }
-    await fileOnCard(mediaId, requestId);
-  }, [staged, busy, fileOnCard]);
+    try {
+      await fileOnCard(mediaId, requestId);
+    } finally {
+      sendInFlight.current = false;
+    }
+  }, [staged, busy, fileOnCard, undoHistory]);
 
   const discard = () => {
     setStaged(NOTHING);

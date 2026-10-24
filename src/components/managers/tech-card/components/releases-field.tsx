@@ -462,10 +462,9 @@ function SnapshotOperations({
                     // the machine. operationHeading reads both, so a frozen release keeps the verb
                     // it was signed with.
                     machineType: o.machineType,
-                    // Класс шва — якорь вида отстрочки, и снапшот несёт его наравне с машинкой:
-                    // выпущенная карточка обязана называть шаг тем же словом, каким его называла
-                    // живая.
+                    // Снапшот несёт оба сырых входа общего резолва: mode для новых A2 и OS для легаси.
                     seamClass: o.seamClass,
+                    topstitchMode: o.topstitch?.mode,
                     // Работа снапшота, если она в нём есть: подписанный шаг обязан называться на
                     // экране архива тем же словом, что на бумаге того же релиза (R8).
                     work: o.work,

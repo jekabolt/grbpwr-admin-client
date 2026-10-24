@@ -7,6 +7,7 @@ import { inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { extractFieldViolations } from 'utils/field-errors';
 import { SAMPLE_STAGING_PREFIX } from './sample-options';
 import { todayISO } from './sample-panels';
+import { useUndoHistory } from './undo-history';
 import { sampleKeys, useDeleteSample } from './useSamples';
 import { useTechCardStaging } from './useTechCardStaging';
 import { wireInt } from './wire-int';
@@ -95,6 +96,7 @@ export function useDeleteUnfitted(techCardId: number) {
   const del = useDeleteSample(techCardId);
   const [deletingId, setDeletingId] = useState(0);
   const staging = useTechCardStaging();
+  const undoHistory = useUndoHistory();
 
   const deleteUnfitted = async (
     sampleId: number,
@@ -128,6 +130,7 @@ export function useDeleteUnfitted(techCardId: number) {
         qc.invalidateQueries({ queryKey: sampleKeys.all });
         return false;
       }
+      undoHistory.cut('sample-delete');
       const batches = batchesOf(await outstandingOf(sampleId));
       for (const batch of batches) {
         // A later batch failing stops here: the sample is NOT deleted, the error names it.

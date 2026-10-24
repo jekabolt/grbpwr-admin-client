@@ -22,6 +22,7 @@ import {
   UndoRow,
 } from 'ui';
 import { decimalToInput } from 'utils/decimal';
+import { useUndoHistory } from './undo-history';
 import { failureClassOfError, serverSentenceOf } from './useTechCardAutosave';
 
 /** A colour write that failed off-screen (a row action): the inbox, with RETRY when it can help. */
@@ -129,8 +130,12 @@ export function useUpsertOutputVariant(techCardId: number) {
 
 export function useDeleteOutputVariant(techCardId: number) {
   const invalidate = useVariantInvalidation(techCardId);
+  const undoHistory = useUndoHistory();
   return useMutation({
-    mutationFn: (id: number) => adminService.DeleteTechCardOutputVariant({ id }),
+    mutationFn: async (id: number) => {
+      undoHistory.cut('output-variant-delete');
+      return adminService.DeleteTechCardOutputVariant({ id });
+    },
     onSuccess: invalidate,
   });
 }

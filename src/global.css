@@ -178,6 +178,18 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
   }
 }
 
+/* The save-chip version list fills a phone header with the shell's 10px gutters, then settles at
+   the owner-approved compact desktop width. Kept as one named surface so the popover never turns
+   into a drawer at either breakpoint. */
+.version-popover {
+  width: calc(100vw - 1.25rem);
+}
+@media (min-width: 48rem) {
+  .version-popover {
+    width: 22.5rem;
+  }
+}
+
 @layer utilities {
   .no-scroll-bar {
     scrollbar-width: none;

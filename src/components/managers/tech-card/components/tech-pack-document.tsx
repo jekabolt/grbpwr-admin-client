@@ -187,6 +187,7 @@ import {
   densityText,
   effectiveMachineSettings,
   effectivePressSettings,
+  effectiveSeamClass,
   machineProfileSummary,
   legacyMachineFact,
   operationHeading,
@@ -518,6 +519,7 @@ const operationTypeText = (
     operationType?: common_TechCardOperationType;
     machineType?: common_TechCardMachineType;
     seamClass?: common_TechCardSeamClass;
+    topstitchMode?: common_TechCardTopstitch['mode'];
     work?: string;
     /** Заметка — ПОСЛЕДНЯЯ ступень имени, и только у двух глаголов она до неё доходит. См. ниже. */
     note?: string;
@@ -530,19 +532,19 @@ const operationTypeText = (
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       work: o.work,
       workCatalog,
       pieceNames: [],
     });
   }
   if (isMachineStepType(v)) {
-    // КЛАСС ШВА ЕДЕТ В КОМПОЗИТОР, потому что у отстрочки якорь вида именно там: без него бумага
-    // напечатала бы «join» на строчке, которую экран называет «topstitch», — а бумага и есть та
-    // единственная копия карточки, что стоит у машины.
+    // ОБА СЫРЫХ ВХОДА ВИДА ЕДУТ В КОМПОЗИТОР: mode якорит новые A2, OS читает легаси-строки.
     return operationHeading({
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       // РАБОТЫ ЗДЕСЬ ЗАВЕДОМО НЕТ — ветка выше её перехватила, — и `undefined` написан вслух,
       // потому что композитор требует ответа: «называю по-старому» обязано быть решением, а не
       // забытым аргументом.
@@ -2991,7 +2993,14 @@ export function TechPackDocument({
                       const materials = resolveOpMaterials(o);
                       // ИМЯ ШАГА СЧИТАЕТСЯ ОДИН РАЗ: его читает и сама строка, и условие ниже,
                       // решающее, не станет ли заметка вторым экземпляром самой себя.
-                      const stepName = operationTypeText(o, workCatalog);
+                      const seamClass = effectiveSeamClass(
+                        o.seamClass,
+                        tc.construction?.defaultSeamClass,
+                      );
+                      const stepName = operationTypeText(
+                        { ...o, topstitchMode: o.topstitch?.mode },
+                        workCatalog,
+                      );
                       // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
                       // только собственное значение шага, то есть корректно унаследованная от
                       // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,
@@ -3046,7 +3055,7 @@ export function TechPackDocument({
                         card: cardAllowance,
                         workshop: shopAllowance,
                         operationType: o.operationType,
-                        seamClass: o.seamClass,
+                        seamClass,
                       });
                       // «НИКТО НЕ НАЗВАЛ» ГОВОРИТСЯ ВСЛУХ — но только там, где лестница вообще
                       // применима, и это РАЗНИЦА БУМАГИ С ЭКРАНОМ, а не остаток своей лестницы.
@@ -3112,7 +3121,7 @@ export function TechPackDocument({
                                 следующим шагам. */}
                             <td className={TD}>{opOutput(o) || '—'}</td>
                             <td className={TD}>
-                              <div>{seamClassLabel(o.seamClass) || '—'}</div>
+                              <div>{seamClassLabel(seamClass) || '—'}</div>
                               <div className='font-medium'>{allowanceCell}</div>
                               {detail && <div className='text-labelColor'>{detail}</div>}
                             </td>

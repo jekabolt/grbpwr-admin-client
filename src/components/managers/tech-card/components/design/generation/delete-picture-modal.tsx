@@ -5,6 +5,7 @@ import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { ConfirmationModal, Text } from 'ui';
 
+import { useUndoHistory } from '../../undo-history';
 import { refusalReason } from '../head/use-draft-idea';
 import { designKeys } from '../use-design-band';
 
@@ -132,6 +133,7 @@ export function useDeletePicture(
   siblings?: readonly common_DesignPicture[],
 ) {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
   const [open, setOpen] = useState(false);
   const pictureId = picture.id ?? 0;
   const pieces = descendantsOf(siblings ?? [], pictureId);
@@ -141,7 +143,10 @@ export function useDeletePicture(
      picture that was leaving. The success path waits for the band to be read again, so the tile
      is already gone (or the menu still busy) when the question closes. */
   const remove = useMutation({
-    mutationFn: () => deleteDesignPicture(pictureId),
+    mutationFn: async () => {
+      undoHistory.cut('picture-delete');
+      return deleteDesignPicture(pictureId);
+    },
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
     },

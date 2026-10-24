@@ -19,6 +19,7 @@ import { toWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
 import { useCallback, useMemo, useRef } from 'react';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
+import { useUndoHistory } from '../undo-history';
 import { buildReview, type Review } from './review-model';
 import {
   hydrateSeams,
@@ -90,6 +91,7 @@ export type SeamWrites = {
 
 export function useSeamWrites(cardId: number | undefined, frozen: boolean): SeamWrites {
   const qc = useQueryClient();
+  const undoHistory = useUndoHistory();
 
   const settle = useCallback(
     (
@@ -203,8 +205,9 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
   );
 
   const remove = useCallback(
-    (rows: StoredSeam[]) =>
-      run(
+    async (rows: StoredSeam[]) => {
+      undoHistory.cut('seam-delete');
+      return run(
         Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
         () =>
           adminService.DeleteTechCardSeams({
@@ -212,8 +215,9 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
             seamKeys: rows.map((r) => r.seamKey),
           }),
         'removal',
-      ),
-    [cardId, run],
+      );
+    },
+    [cardId, run, undoHistory],
   );
 
   return { upsert, remove, frozen };

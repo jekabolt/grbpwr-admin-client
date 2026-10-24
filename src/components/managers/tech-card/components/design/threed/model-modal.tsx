@@ -7,6 +7,7 @@ import { formatBytes } from 'utils/pattern';
 import { RENDER_SHEET_ORDER, benchName } from '../render/model';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { viewLabel } from '../views';
+import { useUndoHistory } from '../../undo-history';
 import { useModelCard } from './model-index';
 import { ModelViewer, type ModelFacts, type ModelViewerApi } from './model-viewer';
 import type { WireUploadItem } from './wire';
@@ -137,6 +138,7 @@ export function ThreedModelModal({
    */
   const targetName = colorwayId > 0 ? colorwayLabel.trim() || `#${colorwayId}` : benchName();
   const { registerUpload } = useDesignWrites(card);
+  const undoHistory = useUndoHistory();
   const apiRef = useRef<ModelViewerApi | null>(null);
   const [busy, setBusy] = useState<'' | 'shooting' | 'sending' | 'filing'>('');
   /**
@@ -190,6 +192,7 @@ export function ThreedModelModal({
   async function takeSnapshot(mode: 'angle' | 'sides') {
     const api = apiRef.current;
     if (!api || snapshotInert) return;
+    undoHistory.cut('model-snapshot-upload');
     const requestId = newClientRequestId();
     let mediaId = 0;
     try {

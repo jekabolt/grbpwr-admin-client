@@ -349,6 +349,10 @@ function UnitStepRow({
     '') as string;
   // Тот же якорь вида, что у рельса: два способа назвать шаг — это два разных имени одного шага.
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ?? '') as string;
+  const topstitchMode = (useWatch({
+    control,
+    name: `operations.${index}.topstitchMode`,
+  }) ?? '') as Parameters<typeof operationHeading>[0]['topstitchMode'];
   // ...и та же названная работа: два способа назвать шаг — это два разных имени одного шага.
   const work = (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
@@ -373,6 +377,7 @@ function UnitStepRow({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
       seamClass,
+      topstitchMode,
       work,
       workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],

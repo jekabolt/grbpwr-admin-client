@@ -68,6 +68,7 @@ export function StepView({
       operationType: op.operationType as common_TechCardOperationType,
       machineType: op.machineType as common_TechCardMachineType,
       seamClass: op.seamClass,
+      topstitchMode: op.topstitchMode as Parameters<typeof operationHeading>[0]['topstitchMode'],
       work: op.work,
       workCatalog,
       zone: undefined,

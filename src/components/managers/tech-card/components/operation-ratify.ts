@@ -1,12 +1,13 @@
 import { common_TechCardGarmentZone } from 'api/proto-http/admin';
 import {
   KIND_WORK_TOKEN,
+  isTopstitchStep,
   kindLabelOf,
   kindOf,
   type OperationKind,
   type OperationKindStep,
 } from './operation-kinds';
-import { seamClassLabel, zoneLabel } from './operation-options';
+import { effectiveSeamClass, seamClassLabel, zoneLabel } from './operation-options';
 import {
   SLIT_OVERCAST_WORK,
   enumToMachineToken,
@@ -293,21 +294,21 @@ const joinTier = (catalog: WorkCatalog): Verdict => {
  *    стоит ДО класса шва и до выборки по машинке нарочно: обе ветки ниже спрашивают каталог про
  *    машинку, которой не назвали, получают пусто и объявляли это дырой каталога.
  * 4. Шаг не машинный — отвечает его собственный пункт, если каталог знает его работу.
- * 5. КЛАСС ШВА ЗАПИСАН. Он старше вывода: это ответ человека, лежащий в своей колонке.
- *    · пункт пишет ИМЕННО ЭТОТ класс как свою личность (отстрочка, `A2` → `OS_TOPSTITCH`) — запись
- *      однозначна, предложение одно;
+ * 5. ОТСТРОЧКА НАЗВАНА общим предикатом A2: mode, двухигольная машина или легаси-OS дают
+ *    одно предложение, а обычный SS ему не мешает.
+ * 6. КЛАСС ШВА ЗАПИСАН. Он старше вывода: это ответ человека, лежащий в своей колонке.
  *    · класс — `LS_LAPPED` на свалочном пункте с двумя входами: это ровно та пара, которую
  *      предлагает ярус A, и предложить её ещё раз законно;
  *    · иначе — ДЫРА КАТАЛОГА. `ef_hem_turned` говорит «подгиб, сложенный вдвое», а работы «подгиб
  *      на прямострочке» в каталоге нет вовсе, и `kindOf` печатает такой строке «Join — lockstitch»,
  *      что почти наверняка ложь. Экран показывает класс шва и молчит.
- * 6. ЗАПИСЬ ОТВЕЧАЕТ СВЕРХ ДВУХ ОСЕЙ — спрашиваем РЕЗОЛВ ДВАЖДЫ: на шаге как есть и на шаге,
+ * 7. ЗАПИСЬ ОТВЕЧАЕТ СВЕРХ ДВУХ ОСЕЙ — спрашиваем РЕЗОЛВ ДВАЖДЫ: на шаге как есть и на шаге,
  *    оставленном при глаголе и машинке. Разные ответы значат, что сработал дискриминатор (шов
  *    этикетки → «пришить этикетку»), то есть запись САМА назвала работу. Второй список
  *    дискриминаторов здесь разошёлся бы с первым молча — тем же приёмом спрашивает себя `kindClears`.
- * 7. СВАЛОЧНЫЙ ПУНКТ. Два и более входа — ярус A; иначе РАСХОЖДЕНИЕ: карточка печатает «join», а
+ * 8. СВАЛОЧНЫЙ ПУНКТ. Два и более входа — ярус A; иначе РАСХОЖДЕНИЕ: карточка печатает «join», а
  *    граф сборки говорит «один вход».
- * 8. Прочие машинки — всё, что каталог допускает на этой машинке. Оверлок даёт одну работу, зигзаг
+ * 9. Прочие машинки — всё, что каталог допускает на этой машинке. Оверлок даёт одну работу, зигзаг
  *    две; прямострочка сюда не доходит НИКОГДА (её забрало правило 7), и это не случайность: на ней
  *    каталог допускает четыре работы, и четыре кнопки на восьмидесяти строках были бы не
  *    предложением, а шумом.
@@ -349,9 +350,12 @@ const classify = (catalog: WorkCatalog, step: RatifyStep): Verdict => {
   // ратифицировать напечатанное там, где именно оно и вызывает сомнение.
   const joinable = inputs >= 2;
 
+  // Отстрочку называет общий предикат: mode, двухигольная машина и легаси-OS дают один ответ.
+  // Обычный SS на таком шаге больше не превращает его в дыру каталога.
+  if (isTopstitchStep(step)) return oneOrGap(ownProposal(catalog, kind));
+
   const seamClass = (step.seamClass ?? '').trim();
   if (!unset(seamClass)) {
-    if (kind?.writes?.seamClass === seamClass) return oneOrGap(ownProposal(catalog, kind));
     if (seamClass === LAPPED_SEAM_CLASS && kind?.id === DUMP_KIND_ID && joinable) {
       return joinTier(catalog);
     }
@@ -379,7 +383,12 @@ const classify = (catalog: WorkCatalog, step: RatifyStep): Verdict => {
  * оборваться и честно сказать «неполон», и печатать «узел SHELL» вместо списка деталей — решение
  * панели, а не классификатора. Арность входов, на которой стоят ярусы, спуска не требует.
  */
-const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): string[] => {
+const evidenceOf = (
+  step: RatifyStep,
+  tier: RatifyTier,
+  printedNow: string,
+  defaultSeamClass?: string,
+): string[] => {
   const out: string[] = [];
   if (tier === 'contradiction' && printedNow) out.push(`printed as "${printedNow}"`);
 
@@ -388,7 +397,7 @@ const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): str
   const inputs = n === 0 ? 'no inputs recorded' : n === 1 ? '1 input' : `${n} inputs`;
   out.push(unit ? `${inputs} · produces unit "${unit}"` : inputs);
 
-  const cls = seamClassLabel(step.seamClass);
+  const cls = seamClassLabel(effectiveSeamClass(step.seamClass, defaultSeamClass));
   if (cls) out.push(`seam class: ${cls}`);
 
   const zone = zoneLabel(step.zone as common_TechCardGarmentZone);
@@ -404,10 +413,21 @@ const evidenceOf = (step: RatifyStep, tier: RatifyTier, printedNow: string): str
 };
 
 /** Одна строка панели. `index` — позиция шага в `operations` формы, с нуля. */
-export function ratifyStep(step: RatifyStep, index: number, catalog: WorkCatalog): RatifyRow {
+export function ratifyStep(
+  step: RatifyStep,
+  index: number,
+  catalog: WorkCatalog,
+  defaultSeamClass?: string,
+): RatifyRow {
   const printedNow = printedName(catalog, step);
   const { tier, proposals } = classify(catalog, step);
-  return { index, tier, printedNow, evidence: evidenceOf(step, tier, printedNow), proposals };
+  return {
+    index,
+    tier,
+    printedNow,
+    evidence: evidenceOf(step, tier, printedNow, defaultSeamClass),
+    proposals,
+  };
 }
 
 /**
@@ -417,6 +437,10 @@ export function ratifyStep(step: RatifyStep, index: number, catalog: WorkCatalog
  * контекста «а как названы соседи»; ярус `named` для того и заведён, чтобы такую строку было чем
  * приглушить.
  */
-export function ratifyCard(steps: readonly RatifyStep[], catalog: WorkCatalog): RatifyRow[] {
-  return steps.map((step, i) => ratifyStep(step, i, catalog));
+export function ratifyCard(
+  steps: readonly RatifyStep[],
+  catalog: WorkCatalog,
+  defaultSeamClass?: string,
+): RatifyRow[] {
+  return steps.map((step, i) => ratifyStep(step, i, catalog, defaultSeamClass));
 }

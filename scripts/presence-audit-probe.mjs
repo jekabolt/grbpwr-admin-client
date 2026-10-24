@@ -29,6 +29,7 @@
 //                                                           цитата В обязана покраснеть
 //   node scripts/presence-audit-probe.mjs --mutate-blind    сверка перестаёт копить потери —
 //                                                           цитата А обязана покраснеть
+//   node scripts/presence-audit-probe.mjs --functional-only без необязательной проверки DOM
 //
 // РЕЗУЛЬТАТ ПРОГОНА МУТАЦИЙ (2026-08-22, ветка feat/operation-kinds-ui):
 //   --mutate-values → 5 провалов: канонизированные пары (fusible_patch→patch, '4.0'→'4',
@@ -59,6 +60,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MUTATE_VALUES = process.argv.includes('--mutate-values');
 const MUTATE_BLIND = process.argv.includes('--mutate-blind');
+const FUNCTIONAL_ONLY = process.argv.includes('--functional-only');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -110,6 +112,8 @@ const {
   operationFieldNames,
   operationPresenceFields,
   PRESENCE_NOT_AUDITED,
+  formToWire,
+  operationWriteOrder,
   toWire,
   readBack,
 } = await import(pathToFileURL(outfile).href);
@@ -223,6 +227,66 @@ head('цитата Б — целый круг: ни одного расхожд�
   ck(!hasPresenceLoss(audit), 'дописанное сервером расхождением не считается');
 }
 
+head('цитата Б2 — аудит следует за порядком операций в payload');
+
+{
+  // Реальная перестановка маппера: строки COLLAR разбросаны по форме, а в full-replace payload
+  // собираются подряд. Старый вызов аудита сравнивал `operations` формы с этим новым порядком,
+  // оставлял collar-join без пары и открывал красный баннер на каждом сохранении.
+  const pieces = ['A', 'B', 'C', 'D'].map((lineKey) => ({
+    lineKey,
+    name: `piece ${lineKey}`,
+  }));
+  const raw = [
+    { id: 'collar-fuse', inputKeys: ['A'] },
+    { id: 'sleeve-fuse', inputKeys: ['C'] },
+    { id: 'collar-gather', inputKeys: ['B'] },
+    { id: 'sleeve-join', inputKeys: ['C', 'D'], outputUnitKey: 'SLEEVE' },
+    { id: 'collar-join', inputKeys: ['A', 'B'], outputUnitKey: 'COLLAR' },
+    { id: 'collar-press', inputKeys: ['COLLAR'] },
+    {
+      id: 'garment-join',
+      inputKeys: ['COLLAR', 'SLEEVE'],
+      outputUnitKey: 'GARMENT',
+    },
+  ];
+  const operations = raw.map((step, index) => ({
+    operationNumber: (index + 1) * 10,
+    operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+    zone: 'TECH_CARD_GARMENT_ZONE_OUTER',
+    inputKeys: step.inputKeys,
+    outputUnitKey: step.outputUnitKey ?? '',
+    outputUnitName: '',
+    note: step.id,
+  }));
+  const form = { pieces, operations };
+  const wire = formToWire(form);
+  const order = operationWriteOrder(form);
+  const sent = order.map((sourceIndex) => operations[sourceIndex]);
+  const server = readBack(wire);
+
+  ck(order.join(',') === '0,2,4,5,1,3,6', 'fixture exercises the mapper reorder', order.join(','));
+  ck(
+    hasPresenceLoss(auditOperationPresence(operations, server)),
+    'unordered comparison reproduces the old false banner',
+  );
+  const reorderedAudit = auditOperationPresence(sent, server);
+  ck(
+    !hasPresenceLoss(reorderedAudit),
+    'reordered operations do not open the banner',
+    paths(reorderedAudit).join(', '),
+  );
+
+  const dropped = clone(wire);
+  delete dropped.operations[2].note;
+  const droppedAudit = auditOperationPresence(sent, readBack(dropped));
+  ck(
+    hasPresenceLoss(droppedAudit) && paths(droppedAudit).join(',') === 'operations.2.note',
+    'a genuinely dropped field still opens the banner',
+    paths(droppedAudit).join(', '),
+  );
+}
+
 // ─── ЦИТАТА В: канонизация сервера НЕ даёт ложной тревоги ────────────────────────────────────────
 head('цитата В — АНТИ-ЛОЖНОЕ СРАБАТЫВАНИЕ: канонизированные пары молчат');
 
@@ -271,14 +335,19 @@ head('цитата Г — один источник списка полей с �
     audited.filter((n) => !all.includes(n)).join(', '),
   );
   const missing = all.filter((n) => !audited.includes(n) && !PRESENCE_NOT_AUDITED.has(n));
-  ck(missing.length === 0, 'каждое поле схемы под аудитом, кроме поимённо исключённых', missing.join(', '));
+  ck(
+    missing.length === 0,
+    'каждое поле схемы под аудитом, кроме поимённо исключённых',
+    missing.join(', '),
+  );
   // Пин ПАРАМИ, а не счётом (дисциплина «хвосты дайджеста парами»): каждое исключение названо, и
-  // новое не проскочит под старым числом. Кроме серверного номера шага здесь четыре ЗАКОННЫХ
-  // молчаливых снятия сервера — деташ ключей парка, имя узла у поглощающего шага, деташ ссылки на
-  // удалённую выноску (см. комментарии в самом PRESENCE_NOT_AUDITED и цитату Е ниже).
+  // новое не проскочит под старым числом. Client-only historyKey никогда не едет на сервер; кроме
+  // него и серверного номера шага здесь четыре ЗАКОННЫХ молчаливых снятия сервера — деташ ключей
+  // парка, имя узла у поглощающего шага, деташ ссылки на удалённую выноску (см. комментарии в самом
+  // PRESENCE_NOT_AUDITED и цитату Е ниже).
   ck(
     [...PRESENCE_NOT_AUDITED].sort().join(',') ===
-      'calloutNumber,machineProfileKey,operationNumber,outputUnitName,pressProfileKey',
+      'calloutNumber,historyKey,machineProfileKey,operationNumber,outputUnitName,pressProfileKey',
     'исключения перечислены поимённо, и лишних нет',
     [...PRESENCE_NOT_AUDITED].join(', '),
   );
@@ -306,7 +375,11 @@ head('цитата Е — законный серверный деташ не с
   // узла унесено на первого производителя. Сам узел (outputUnitKey) на месте.
   const server = { ...clone(sent), machineProfileKey: '', calloutNumber: 0, outputUnitName: '' };
   const audit = auditOperationPresence([sent], [server]);
-  ck(!hasPresenceLoss(audit), 'деташ ключа, выноски и имени узла — молчание', paths(audit).join(', '));
+  ck(
+    !hasPresenceLoss(audit),
+    'деташ ключа, выноски и имени узла — молчание',
+    paths(audit).join(', '),
+  );
 }
 {
   // Граница исключения: потерю самого УЗЛА аудит по-прежнему называет — outputUnitKey не исключён.
@@ -373,11 +446,15 @@ function resolvePlaywright() {
   }
 }
 
-const pwEntry = resolvePlaywright();
+const pwEntry = FUNCTIONAL_ONLY ? null : resolvePlaywright();
 const mod = pwEntry ? await import(pwEntry) : null;
 const chromium = mod?.chromium ?? mod?.default?.chromium;
 if (!chromium) {
-  console.log('  ..  playwright не найден — половина «живой DOM» пропущена (это не отказ)');
+  console.log(
+    FUNCTIONAL_ONLY
+      ? '  ..  functional-only — половина «живой DOM» пропущена (это не отказ)'
+      : '  ..  playwright не найден — половина «живой DOM» пропущена (это не отказ)',
+  );
 } else {
   const bundleFile = resolve(tmpdir(), `save-banners-presence-${process.pid}.js`);
   await esbuild({

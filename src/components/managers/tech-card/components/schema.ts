@@ -1282,6 +1282,10 @@ export function operationFieldNames(): string[] {
 
 const operationSchema = z
   .object({
+    // Client-only row identity for in-session undo. It is preserved through reconciliation and
+    // deliberately omitted by mapFormToTechCardInsert; operationNumber is server-owned and changes
+    // whenever the server inserts a generated Fusing step or renumbers the sequence.
+    historyKey: z.string().min(1).default(ulid),
     // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
     // («Node is required») is why: a mandatory field with free input has no right answer, so the
     // operator invents one and no two cards say the same thing the same way.
@@ -1913,28 +1917,14 @@ const operationSchema = z
       }
     }
 
-    // F11 (0328): КЛАСС ШВА И БЛОК ОТСТРОЧКИ ГОВОРЯТ ОБ ОДНОМ ШАГЕ, И ТЕПЕРЬ ОНИ СВЯЗАНЫ.
-    // `os_topstitch` — не класс наравне с прочими, а утверждение «соединительного шва у этого шага
-    // нет, есть только отделочная строчка»; соседний блок говорит, ГДЕ она лежит.
-    //
-    // ВТОРАЯ ПОЛОВИНА ВАЖНЕЕ ПЕРВОЙ: НЕНАЗВАННЫЙ класс НАСЛЕДУЕТ умолчание карточки, а оно бывает
-    // `ss_plain`, — то есть чисто декоративная отстрочка, у которой заполнили только блок, МОЛЧА
-    // объявлялась стачным швом и уезжала такой в подпись и на печатный лист. Наследование от ответа
-    // здесь не отличить ничем, поэтому шаг обязан сказать одно из двух.
+    // Декоративный OS без режима не говорит, где идёт строчка. Обратное больше не верно:
+    // названный topstitch mode законно живёт при UNKNOWN на строке и наследует обычный класс шва карточки.
     if (o.seamClass === 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' && !stepEnumSet(o.topstitchMode)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['topstitchMode'],
         message:
           'a topstitch seam class says the step has no joining seam, only a decorative line — say WHERE that line runs, or pick the seam class the step actually makes',
-      });
-    }
-    if (stepEnumSet(o.topstitchMode) && !stepEnumSet(o.seamClass)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['seamClass'],
-        message:
-          'an unnamed seam class inherits the card default, and this step is topstitched — name the class it makes, or set «topstitch» to say it makes no joining seam at all',
       });
     }
 
@@ -2764,6 +2754,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
+      historyKey: ulid(),
       // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
       // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
@@ -3154,6 +3145,33 @@ function estUsageOut(raw?: string): googletype_Decimal | undefined {
   return { value: normalizeDecimalInput(raw) };
 }
 
+/** The exact source-row order used by the full-replace operations payload. */
+export function operationWriteOrder(
+  data: Pick<TechCardFormData, 'operations' | 'pieces'>,
+): number[] {
+  const sourceOperations = data.operations ?? [];
+  const sequencePieces = (data.pieces ?? [])
+    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
+    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
+  const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
+  const sequenceSteps = sourceOperations.map((operation) => ({
+    inputs: classifyAssemblyInputs(
+      sequencePieceKeys,
+      (operation.inputKeys ?? []).map((key) => key.trim()).filter(Boolean),
+    ),
+    outputUnitKey: operation.outputUnitKey?.trim() || '',
+    outputUnitName: operation.outputUnitName?.trim() || '',
+    assemblyBlockDetached: !!operation.assemblyBlockDetached,
+  }));
+  const sequenceResult = assemblySweep(sequencePieces, sequenceSteps);
+  return sequenceResult.violations.length === 0
+    ? compactAssemblyBlockOrder(
+        assemblyBlocks(sequenceSteps, sequenceResult),
+        sourceOperations.length,
+      )
+    : sourceOperations.map((_, index) => index);
+}
+
 export function mapFormToTechCardInsert(
   data: TechCardFormData,
   original?: common_TechCardInsert,
@@ -3195,27 +3213,7 @@ export function mapFormToTechCardInsert(
   // operationNumber ниже ничего не решает, сервер его намеренно пересчитывает. Пишем каждый узел
   // непрерывно и той же перестановкой перевозим ссылки дефектов ниже.
   const sourceOperations = data.operations ?? [];
-  const sequencePieces = (data.pieces ?? [])
-    .filter((piece) => !isBlankPiece(piece) && !!piece.lineKey?.trim())
-    .map((piece) => ({ lineKey: piece.lineKey!.trim(), name: piece.name?.trim() || '' }));
-  const sequencePieceKeys = new Set(sequencePieces.map((piece) => piece.lineKey));
-  const sequenceSteps = sourceOperations.map((operation) => ({
-    inputs: classifyAssemblyInputs(
-      sequencePieceKeys,
-      (operation.inputKeys ?? []).map((key) => key.trim()).filter(Boolean),
-    ),
-    outputUnitKey: operation.outputUnitKey?.trim() || '',
-    outputUnitName: operation.outputUnitName?.trim() || '',
-    assemblyBlockDetached: !!operation.assemblyBlockDetached,
-  }));
-  const sequenceResult = assemblySweep(sequencePieces, sequenceSteps);
-  const operationOrder =
-    sequenceResult.violations.length === 0
-      ? compactAssemblyBlockOrder(
-          assemblyBlocks(sequenceSteps, sequenceResult),
-          sourceOperations.length,
-        )
-      : sourceOperations.map((_, index) => index);
+  const operationOrder = operationWriteOrder(data);
   const operationWriteIndex = new Map<number, number>();
   operationOrder.forEach((oldIndex, newIndex) => operationWriteIndex.set(oldIndex, newIndex));
   const operationNumberForWrite = (number: number): number => {

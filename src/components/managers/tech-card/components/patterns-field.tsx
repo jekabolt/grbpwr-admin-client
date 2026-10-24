@@ -171,6 +171,7 @@ import type { FollowUpJob } from './pattern-import/follow-up';
 import { AutopilotPill } from './pattern-import/autopilot/view';
 import { useTechCardAutosave } from './design/autosave-contract';
 import { TechCardFormData } from './schema';
+import { useUndoHistory } from './undo-history';
 import { useAutoPieceAreas } from './use-auto-piece-areas';
 import { useUniPrefill } from './use-uni-prefill';
 import { drawingFromDxf } from 'lib/pattern-export/drawing';
@@ -616,6 +617,7 @@ const DBL_MS = 250;
 
 export function PatternsField({
   techCardId,
+  saveSessionId,
   active,
   canEdit = true,
   canPublishIndex = true,
@@ -623,6 +625,7 @@ export function PatternsField({
   headerEl,
 }: {
   techCardId?: number;
+  saveSessionId?: string;
   // The block header's action slot: counts and warnings are portalled there.
   headerEl?: HTMLElement | null;
   // Вкладка PATTERNS открыта. Без явного ответа обойтись нельзя: карточка монтирует ВСЕ вкладки
@@ -651,6 +654,7 @@ export function PatternsField({
   const [params, setParams] = useSearchParams();
   // The import wizard's apply ends in the card's own save (F7): the page has no save button.
   const autosave = useTechCardAutosave();
+  const undoHistory = useUndoHistory();
   const subscribeGeneration = useCallback(
     (listener: () => void) => subscribeFusingSheetGeneration(techCardId, listener),
     [techCardId],
@@ -2999,6 +3003,7 @@ export function PatternsField({
       say('not applied', 'error');
       return false;
     }
+    undoHistory.cut('dxf-reupload');
 
     let uploaded: Awaited<ReturnType<typeof uploadForeignSheet<FormPiece, FormAlias, FormOp>>>;
     beginReupload(ask.scopeKey, ask.outcome.rowId);
@@ -3072,6 +3077,7 @@ export function PatternsField({
   }
 
   async function confirmDelete(rowId: string) {
+    undoHistory.cut('dxf-delete');
     // A non-DXF row: by its index, as the old × did.
     if (rowId.startsWith('#')) {
       const at = Number(rowId.slice(1));
@@ -3169,23 +3175,31 @@ export function PatternsField({
   // `delete` of an old version (live or removed sheet): permanent, DeleteTechCardPatternRevision.
   async function deleteRevision(v: SheetVersion): Promise<boolean> {
     if (!techCardId || v.historyId <= 0) return false;
-    const stored =
-      queryClient.getQueryData<common_TechCard>(techCardKeys.detail(techCardId)) ?? cardRead;
-    try {
-      await adminService.DeleteTechCardPatternRevision({
-        techCardId,
-        historyId: v.historyId,
-        expectedLockVersion: stored?.lockVersion ?? 0,
-      });
-      // Re-read like restore: the delete answer has no pattern_viewer_token.
-      await queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
-      return true;
-    } catch (e) {
-      console.error('pattern revision delete failed', e);
-      const said = e instanceof Error ? e.message.trim() : '';
-      useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
-      return false;
-    }
+    return undoHistory.waitThenCut('pattern-revision-delete', async () => {
+      try {
+        // The hold has waited for an older body write to finish its reconciliation. Its live edit
+        // base has moved even when the query invalidation that follows that write has not.
+        const response = await adminService.DeleteTechCardPatternRevision({
+          techCardId,
+          historyId: v.historyId,
+          expectedLockVersion: autosave.getBaseLockVersion(),
+        });
+        const fresh = response.techCard;
+        if (!fresh) throw new Error('no card returned');
+
+        // Move both synchronous sources of the next CAS before waitThenCut releases the hold. The
+        // refetch is only a background refresh; a failed refresh cannot put autosave behind again.
+        autosave.adoptBase(fresh);
+        queryClient.setQueryData(techCardKeys.detail(techCardId), fresh);
+        void queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+        return true;
+      } catch (e) {
+        console.error('pattern revision delete failed', e);
+        const said = e instanceof Error ? e.message.trim() : '';
+        useSnackBarStore.getState().showMessage(said || 'not deleted', 'error');
+        return false;
+      }
+    });
   }
 
   // A removed sheet's restore: the card snapshot frozen by the save that deleted it.
@@ -4397,7 +4411,7 @@ export function PatternsField({
               storageSizeId,
               // read at commit time: the BOM may have been sorted while the wizard was open
               scopeOf: liveScopeOf,
-              save: (reason) => autosave.flush(reason),
+              save: (reason) => undoHistory.flushThenCut(reason),
               // A sheet replaced in place: its save archives the old file with a card snapshot.
               onReplaced: (list) =>
                 list.forEach((r) => armReuploadSnapshot(techCardId, r.newUrl, r.oldUrl)),
@@ -4965,6 +4979,7 @@ export function PatternsField({
             colorways={cardRead?.colorways}
             pieceAreaScopes={cardRead?.pieceAreaScopes}
             techCardId={techCardId}
+            saveSessionId={saveSessionId}
             knownPieceShapes={knownPieceShapes}
             preferredShapeSizeTokens={preferredShapeSizeTokens}
             interlining={matchingInterlining}

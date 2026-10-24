@@ -83,6 +83,7 @@ export type InferenceStep = {
   operationType?: string;
   machineType?: string;
   seamClass?: string;
+  topstitchMode?: string;
   attachMethod?: string;
   coverageMode?: string;
   labelAttachStitch?: string;
@@ -95,6 +96,7 @@ export type InferenceStep = {
 };
 
 export type InferenceCard = {
+  defaultSeamClass?: string;
   pieces: InferencePiece[];
   bomLines: InferenceBomLine[];
   aliases: InferenceAlias[];
@@ -347,9 +349,7 @@ function descendToPieces(
 
   walk(steps[index]?.inputKeys ?? [], index, 0);
 
-  const ordered = [...leaves].sort(
-    (a, b) => (pieceOrder.get(a) ?? 0) - (pieceOrder.get(b) ?? 0),
-  );
+  const ordered = [...leaves].sort((a, b) => (pieceOrder.get(a) ?? 0) - (pieceOrder.get(b) ?? 0));
   return { pieces: ordered, dangling: [...dangling].sort(), complete, unitsExpanded };
 }
 
@@ -460,6 +460,7 @@ export function stepKindId(step: InferenceStep, bomByKey: Map<string, InferenceB
       operationType: step.operationType,
       machineType: step.machineType,
       seamClass: step.seamClass,
+      topstitchMode: step.topstitchMode,
       attachMethod: step.attachMethod,
       coverageMode: step.coverageMode,
       labelAttachStitch: step.labelAttachStitch,
@@ -572,15 +573,10 @@ export function inferThread(card: InferenceCard, index: number): ThreadInference
   return inferThreadWith(card, index, indexCard(card));
 }
 
-function inferThreadWith(
-  card: InferenceCard,
-  index: number,
-  idx: CardIndex,
-): ThreadInference {
+function inferThreadWith(card: InferenceCard, index: number, idx: CardIndex): ThreadInference {
   const step = card.steps[index] ?? {};
   const type = step.operationType ?? '';
-  const eats =
-    isMachineStepType(type) || type === 'TECH_CARD_OPERATION_TYPE_HANDWORK';
+  const eats = isMachineStepType(type) || type === 'TECH_CARD_OPERATION_TYPE_HANDWORK';
   if (!eats) return { lineKey: '', candidates: [], reason: 'not-a-thread-step' };
 
   const linked = (step.bomLineKeys ?? []).map((k) => (k ?? '').trim()).filter(Boolean);
@@ -595,9 +591,7 @@ function inferThreadWith(
 
   const kindId = stepKindId(step, idx.bomByKey);
   const preferred = kindId ? KIND_THREAD_PREFERENCE[kindId] : undefined;
-  const narrowed = preferred
-    ? threads.filter((k) => idx.bomByKey.get(k)?.kind === preferred)
-    : [];
+  const narrowed = preferred ? threads.filter((k) => idx.bomByKey.get(k)?.kind === preferred) : [];
   const pool = narrowed.length > 0 ? narrowed : threads;
 
   return pool.length === 1
@@ -641,8 +635,7 @@ export function inferPress(card: InferenceCard, index: number): PressInference {
   if (!isPressStepType(type)) {
     return { pressEquipment: '', profileKey: '', candidates: [], reason: 'not-a-press-step' };
   }
-  const set =
-    !!(step.pressEquipment ?? '') && step.pressEquipment !== NONE_PRESS_EQUIPMENT;
+  const set = !!(step.pressEquipment ?? '') && step.pressEquipment !== NONE_PRESS_EQUIPMENT;
   if (set || (step.pressProfileKey ?? '').trim()) {
     return { pressEquipment: '', profileKey: '', candidates: [], reason: 'already-set' };
   }
@@ -752,5 +745,4 @@ export function inferStep(
 }
 
 /** Зона у шага не заполнена — только в это состояние вообще что-то подставляется. */
-export const zoneIsUnset = (zone?: string): boolean =>
-  !(zone ?? '').trim() || zone === NONE_ZONE;
+export const zoneIsUnset = (zone?: string): boolean => !(zone ?? '').trim() || zone === NONE_ZONE;
