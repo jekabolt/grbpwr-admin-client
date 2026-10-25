@@ -1,6 +1,7 @@
 import { authService } from 'api/api';
 import { ROUTES } from 'constants/routes';
 import { Field, Formik } from 'formik';
+import { setObservedUser } from 'lib/observability';
 import { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Input, Text, GrbpwrMark } from 'ui';
@@ -28,6 +29,7 @@ export const LoginBlock: FC = () => {
       const response = await authService.Login(values);
       if (!response.authToken) throw new Error('Invalid credentials');
       localStorage.setItem('authToken', response.authToken);
+      setObservedUser(values.username);
       navigate(ROUTES.main, { replace: true });
     } catch (e) {
       const msg =

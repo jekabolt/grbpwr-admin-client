@@ -1,3 +1,4 @@
+import { reportApiError } from 'lib/observability';
 import { createAdminServiceClient } from './proto-http/admin';
 import { createAuthServiceClient } from './proto-http/auth';
 import { createFrontendServiceClient } from './proto-http/frontend';
@@ -13,7 +14,11 @@ interface ProtoMetaParams {
   method: string;
 }
 
-const send = async ({ path, method, body }: RequestHandlerParams, signal?: AbortSignal) => {
+const send = async (
+  { path, method, body }: RequestHandlerParams,
+  signal?: AbortSignal,
+  meta?: ProtoMetaParams,
+) => {
   const authToken = localStorage.getItem('authToken');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -60,6 +65,11 @@ const send = async ({ path, method, body }: RequestHandlerParams, signal?: Abort
       const err = new Error(msg) as Error & { status?: number; details?: unknown[] };
       err.status = response.status;
       err.details = details;
+      reportApiError(err, {
+        route: meta ? `${meta.service}.${meta.method}` : path.split('?')[0],
+        status: response.status,
+        method,
+      });
       throw err;
     }
 
@@ -72,10 +82,8 @@ const send = async ({ path, method, body }: RequestHandlerParams, signal?: Abort
   }
 };
 
-export const requestHandler = (
-  params: RequestHandlerParams,
-  // { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
-) => send(params);
+export const requestHandler = (params: RequestHandlerParams, meta?: ProtoMetaParams) =>
+  send(params, undefined, meta);
 
 /**
  * The admin client whose calls `signal` cancels: the generated client takes no `AbortSignal` of its
@@ -83,7 +91,7 @@ export const requestHandler = (
  * the connection is closed, not merely ignored.
  */
 export const abortableAdminService = (signal: AbortSignal) =>
-  createAdminServiceClient((params) => send(params, signal));
+  createAdminServiceClient((params, meta) => send(params, signal, meta));
 
 export const frontendService = createFrontendServiceClient(requestHandler);
 export const adminService = createAdminServiceClient(requestHandler);
