@@ -6,6 +6,18 @@ import { proxyMedia } from './api/media-proxy.js';
 // @ts-ignore - plain JS helper shared with the Vercel serverless function (api/translate.js)
 import { translateFields } from './api/_openrouter.js';
 
+const PRODUCTION_BACKEND_HOST = 'backend.grbpwr.com';
+
+function isProductionBackend(value?: string) {
+  if (!value) return false;
+
+  try {
+    return new URL(value).hostname.replace(/\.$/, '') === PRODUCTION_BACKEND_HOST;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Dev-only: serves POST /api/translate locally (production uses the Vercel
  * function at api/translate.js). Registered as a pre-middleware so it runs
@@ -70,8 +82,19 @@ function mediaProxyPlugin(allowedHosts?: string) {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const apiProxyTarget = env.VITE_API_BASE_URL || 'http://localhost:3999';
+
+  if (
+    command === 'serve' &&
+    env.ALLOW_PROD_BACKEND !== '1' &&
+    [env.VITE_SERVER_URL, apiProxyTarget].some(isProductionBackend)
+  ) {
+    throw new Error(
+      'Local dev refused: backend.grbpwr.com is production; set ALLOW_PROD_BACKEND=1 to override.',
+    );
+  }
 
   return {
     plugins: [
@@ -108,7 +131,7 @@ export default defineConfig(({ mode }) => {
       port: 4040,
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:3999',
+          target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
         },

@@ -68,10 +68,13 @@ Create a `.env` in the repo root. The app reads Vite-prefixed variables:
 Example:
 
 ```dotenv
-VITE_SERVER_URL="https://api.example.com"
+VITE_SERVER_URL="https://backend-beta.grbpwr.com"
 ```
 
-> Note: `.env.example` historically shipped a stale `REACT_APP_SERVER_URL` key. The runtime reads `VITE_SERVER_URL` — use that.
+Local development defaults to the beta backend. Vite refuses to start the dev server when either
+`VITE_SERVER_URL` or `VITE_API_BASE_URL` targets `backend.grbpwr.com`; for an intentional exception,
+start it with `ALLOW_PROD_BACKEND=1`. Production builds are not subject to this local-development
+guard.
 
 ## Scripts
 
