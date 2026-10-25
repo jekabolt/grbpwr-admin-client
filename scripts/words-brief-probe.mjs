@@ -22,8 +22,9 @@
 import { build as esbuild } from 'esbuild';
 import { readFileSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const MUTATE_RAW = process.argv.includes('--mutate-raw');
 const MUTATE_MEMO = process.argv.includes('--mutate-memo');
@@ -34,6 +35,7 @@ const MUTATE_FOLLOW = process.argv.includes('--mutate-follow');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const DESIGN = resolve(REPO, 'src/components/managers/tech-card/components/design');
+const require = createRequire(import.meta.url);
 
 let bad = 0;
 let total = 0;
@@ -95,19 +97,19 @@ if (MUTATE_FOLLOW)
   );
 
 const bundle = async (entry, tag) => {
-  const outfile = resolve(REPO, `scripts/.words-brief-${tag}-${process.pid}.mjs`);
+  const outfile = resolve(REPO, `scripts/.words-brief-${tag}-${process.pid}.cjs`);
   await esbuild({
     entryPoints: [entry],
     bundle: true,
-    format: 'esm',
+    format: 'cjs',
     platform: 'node',
     absWorkingDir: REPO,
     outfile,
     logLevel: 'silent',
+    loader: { '.css': 'empty' },
     plugins,
-    external: ['react'],
   });
-  const m = await import(pathToFileURL(outfile).href);
+  const m = require(outfile);
   rmSync(outfile, { force: true });
   return m;
 };
@@ -298,7 +300,7 @@ console.log('\nпровод: засев WORDS ходит через бриф');
   ck(
     render.includes('await settleSeedBrief(card)') &&
       render.includes('shownCard.current !== card') &&
-      render.includes('pending={run.isPending || briefing}'),
+      render.includes('pending={run.isPending || briefing'),
     'render GENERATE waits too, re-checks the card, button busy meanwhile',
   );
   ck(

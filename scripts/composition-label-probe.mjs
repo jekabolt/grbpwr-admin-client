@@ -113,6 +113,10 @@ const gitShow = (rel) =>
 function aliasPath(spec, resolveDir) {
   if (spec.startsWith('@/')) return resolve(src, spec.slice(2));
   if (spec.startsWith('.')) return resolve(resolveDir, spec);
+  // The historical comparison commit predates the care-icon move. The artwork bytes are the
+  // same; only its repository home changed.
+  if (spec.startsWith('ui/icons/care/'))
+    return resolve(src, 'components/shared/care-icons', spec.slice('ui/icons/care/'.length));
   return resolve(src, spec);
 }
 
@@ -141,6 +145,9 @@ async function load({ entry, mutant, base }) {
       {
         name: 'assets-and-mutants',
         setup(b) {
+          b.onResolve({ filter: /^ui\/icons\/care\/.*\.svg$/ }, (args) => ({
+            path: aliasPath(args.path, args.resolveDir),
+          }));
           // Vite-запросы `?raw` (текст файла) и `?url` (адрес — пробе не нужен, шрифты читаются с диска).
           b.onResolve({ filter: /\?(raw|url)$/ }, (args) => {
             const [spec, kind] = args.path.split('?');

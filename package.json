@@ -125,8 +125,8 @@
     "patimport:dxf-nested": "node scripts/pattern-import/dxf-nested.mjs",
     "patimport:answers": "node scripts/pattern-import/answers.mjs",
     "patimport:clean": "node scripts/pattern-import/clean.mjs",
-    "fix": "yarn lint && yarn format",
-    "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
+    "fix": "yarn lint --fix && yarn format",
+    "lint": "node scripts/lint.mjs",
     "lint:design": "node scripts/design-ratchet.mjs",
     "design:sync": "node scripts/design-sync.mjs",
     "design:check": "node scripts/design-sync.mjs --check",
@@ -179,7 +179,9 @@
     "patimport:gradep2": "node scripts/pattern-import/gradep2.mjs",
     "patimport:leaks2": "node scripts/pattern-import/leaks2.mjs",
     "seams:score": "node scripts/seams-score/score.mjs",
-    "doll:shape": "node scripts/doll/shape.mjs"
+    "doll:shape": "node scripts/doll/shape.mjs",
+    "pretest": "vite build",
+    "test": "vitest run scripts/probes.test.ts --maxWorkers=1 --maxConcurrency=4"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
@@ -209,7 +211,8 @@
     "sass": "^1.71.1",
     "tailwindcss": "^4.0.9",
     "typescript": "^5.4.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "3.2.7"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

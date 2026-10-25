@@ -1,0 +1,25 @@
+{
+  "prettierDifferingFiles": 182,
+  "rules": {
+    "@typescript-eslint/ban-ts-comment": 10,
+    "@typescript-eslint/no-empty-object-type": 160,
+    "@typescript-eslint/no-explicit-any": 335,
+    "@typescript-eslint/no-non-null-asserted-optional-chain": 1,
+    "@typescript-eslint/no-unused-expressions": 31,
+    "@typescript-eslint/no-unused-vars": 207,
+    "no-control-regex": 2,
+    "no-extra-boolean-cast": 1,
+    "no-fallthrough": 1,
+    "no-irregular-whitespace": 1,
+    "no-redeclare": 7,
+    "no-regex-spaces": 1,
+    "no-undef": 981,
+    "no-unsafe-finally": 1,
+    "no-useless-escape": 9,
+    "react/jsx-key": 148,
+    "react/no-children-prop": 1,
+    "react/no-unescaped-entities": 186,
+    "react/no-unknown-property": 1,
+    "react/prop-types": 118
+  }
+}
