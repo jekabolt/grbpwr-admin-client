@@ -13,3 +13,4 @@ export type {
 } from './op-icon';
 export { CLASS_KIND, SEAM_KINDS, SM_KIND } from './seam-kinds';
 export type { SeamKindDefinition, SeamKindToken } from './seam-kinds';
+export { opIconCardOf, opIconInputOf } from './adapter';

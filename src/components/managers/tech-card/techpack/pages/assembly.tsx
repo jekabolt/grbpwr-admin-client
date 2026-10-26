@@ -9,7 +9,7 @@ import { DataTable, HeaderNote, SectionHeader } from 'ui';
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
 
-import { KEYS_CSS, KeyArt, Legend, Line, StopBox, Svg } from '../assembly-keys';
+import { KEYS_CSS, KeyArt, Legend, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
 import {
   fmtDelta,
   joinSvg,
@@ -113,17 +113,20 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
     const [, , vw, vh] = r.pic.viewBox.split(' ').map(Number);
     const k = Math.min(d.joinW / vw, d.joinH / vh);
     return (
-      <Svg
-        m={r.pic}
-        w={Math.round(vw * k)}
-        h={Math.max(d.keyH, Math.round(vh * k))}
-        label={`${r.n} ${r.words.verb}`}
-      />
+      <div className='asm-joinpic'>
+        <Svg
+          m={r.pic}
+          w={Math.round(vw * k)}
+          h={Math.max(d.keyH, Math.round(vh * k))}
+          label={`${r.n} ${r.words.verb}`}
+        />
+        <KeyArt icon={r.words.icon} w={18} h={14} className='asm-badge' />
+      </div>
     );
   }
   return (
     <div className='asm-pic'>
-      <KeyArt tech={r.words.tech} w={d.keyW} h={d.keyH} />
+      <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} />
       {r.sil && <Svg m={r.sil} w={d.keyW} h={d.keyH} />}
     </div>
   );
@@ -183,7 +186,7 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
         )}
         {r.card?.turn && (
           <div className='asm-turn'>
-            <KeyArt tech='turn' w={24} h={18} />
+            <KeyArt icon={TURN_KEY} w={24} h={18} />
             <span>Turn out</span>
           </div>
         )}

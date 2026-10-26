@@ -22,6 +22,12 @@ import {
   topstitchPhrase,
   zoneLabel,
 } from 'components/managers/tech-card/components/operation-options';
+import {
+  opIcon,
+  opIconCardOf,
+  opIconInputOf,
+  type OpIcon,
+} from 'components/managers/tech-card/op-icons';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
@@ -110,6 +116,8 @@ export type SeamMetric = {
 /** The words of one operation, identical wherever it is printed. */
 export type OpWords = {
   tech: Tech;
+  /** The op's key drawing from the shared registry. */
+  icon: OpIcon;
   verb: string;
   ins: string[];
   out?: string;
@@ -1196,8 +1204,20 @@ function wordsOf(
       detail = `${zone} edge`;
     return `${circled(index)} ${left || 'edge'} ↔ ${right || 'fold'}${detail ? ` · ${detail}` : ''}`;
   });
+  const icon = opIcon(opIconInputOf(o), opIconCardOf(ins));
+  if (icon.missing) {
+    const gap: Gap = {
+      code: 'pdf_icon_missing',
+      refs: [`op:${op.n}`],
+      label: 'icon',
+      section: '06',
+      target: { tab: 'construction', op: op.n },
+    };
+    line.push({ t: 'icon', gap: ctx.sink?.add(gap) ?? gap });
+  }
   return {
     tech,
+    icon,
     verb: VERB[tech],
     ins: op.ins.map(nameOf),
     out: op.out ? ctx.unitName.get(op.out) ?? unitDisplayName({ key: op.out }) : undefined,
