@@ -1,5 +1,4 @@
 import { ADMIN_GROUP, ROUTES } from 'constants/routes';
-import { setObservedUser } from 'lib/observability';
 import { cn } from 'lib/utility';
 import { FC, ReactNode, useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -21,7 +20,6 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
-    setObservedUser(null);
     navigate(ROUTES.login, { replace: true });
   };
 

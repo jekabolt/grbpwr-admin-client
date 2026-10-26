@@ -63,8 +63,3 @@ export function reportApiError(error: unknown, ctx: ApiErrorContext) {
   if (ctx.status < 500 || ctx.status > 599) return;
   call((m) => m.captureApiError(error, ctx));
 }
-
-/** Who was signed in when an error happened. null clears it (logout). */
-export function setObservedUser(username: string | null | undefined) {
-  call((m) => m.setUser(username || null));
-}

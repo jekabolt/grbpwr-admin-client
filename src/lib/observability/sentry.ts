@@ -3,6 +3,7 @@
 import * as Sentry from '@sentry/react';
 import type { ErrorInfo } from 'react';
 import type { ApiErrorContext } from './index';
+import { scrubEnvelope } from './scrub';
 
 const PROD_BACKEND_HOST = 'backend.grbpwr.com';
 
@@ -16,17 +17,12 @@ function environment(): 'prod' | 'beta' {
   }
 }
 
-// The admin JWT carries the username in `sub`; reading it restores the user after a reload.
-function usernameFromStoredToken(): string | null {
-  try {
-    const token = localStorage.getItem('authToken');
-    if (!token) return null;
-    const { sub } = JSON.parse(atob(token.split('.')[1])) as { sub?: unknown };
-    return typeof sub === 'string' && sub ? sub : null;
-  } catch {
-    return null;
-  }
-}
+// Default integrations that stay off:
+// - Breadcrumbs: fetch/xhr and history breadcrumbs keep full URLs, and admin API calls carry
+//   email=, q=, search= and name= in the query; clicks keep element attributes. The on-error
+//   replay already shows what led to the error.
+// - BrowserSession: a session envelope on every page load and navigation, with no error in it.
+const OFF = new Set(['Breadcrumbs', 'BrowserSession']);
 
 export function init(dsn: string) {
   Sentry.init({
@@ -42,17 +38,20 @@ export function init(dsn: string) {
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 1.0,
     integrations: (defaults) => [
-      // The API wrapper logs every response to the console; as breadcrumbs that is only noise.
-      ...defaults.filter((i) => i.name !== 'Breadcrumbs'),
-      Sentry.breadcrumbsIntegration({ console: false }),
+      ...defaults.filter((i) => !OFF.has(i.name)),
       Sentry.replayIntegration({
         maskAllInputs: true,
-        maskAllText: false,
+        maskAllText: true,
+        // Plain JSON segments, so the transport below can scrub page URLs out of them.
+        useCompression: false,
       }),
     ],
+    // Every envelope is scrubbed on its way out (./scrub): no query strings, no email addresses.
+    transport: (options) => {
+      const inner = Sentry.makeFetchTransport(options);
+      return { ...inner, send: (envelope) => inner.send(scrubEnvelope(envelope)) };
+    },
   });
-  const username = usernameFromStoredToken();
-  if (username) setUser(username);
 }
 
 export function captureBoundaryError(error: unknown, info: ErrorInfo) {
@@ -67,10 +66,4 @@ export function captureApiError(error: unknown, { route, status, method }: ApiEr
     // One issue per failing RPC and status, not one per error message text.
     fingerprint: ['api-5xx', route, String(status)],
   });
-}
-
-export function setUser(username: string | null) {
-  Sentry.setUser(
-    username ? (username.includes('@') ? { username, email: username } : { username }) : null,
-  );
 }
