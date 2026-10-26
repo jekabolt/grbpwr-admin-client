@@ -6,7 +6,11 @@ import { sha256Hex } from './analysis-identity.ts';
 // assembly-schema checks) it cannot recompute either, so the client must mint them the same way:
 //
 //   key         = code "@" join(",", sort(dedupe(normalize(refs)))) ["#" subject]
-//   fingerprint = hex(sha256(title 0x00 detail 0x00 fp8_1 fp8_2 …))[:16]
+//   fingerprint = hex(sha256(mask(title) 0x00 mask(detail) 0x00 fp8_1 fp8_2 …))[:16]
+//
+// Inside a key a step is ALWAYS "opfp:<fp8>.<k>" — its shape and its ordinal among the steps of that
+// shape — so renumbering keeps the key; mask() takes the step numbers of the refs out of the text,
+// so renumbering keeps the fingerprint too.
 //
 // Pure and synchronous (sha256Hex is plain TypeScript), so a render never draws a list without
 // identity. Both sides assert the same golden vectors: scripts/finding-seen-check.ts here,
@@ -20,6 +24,18 @@ export const FINGERPRINT_LEN = 16;
 
 /** The code a client finding may use: snake_case. The server refuses a key without it. */
 export const FINDING_CODE = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * The namespaces of findings the browser computes. The server accepts a mark only for its own audit
+ * codes or a code in one of these (techcardanalysis.ClientCodePrefixes) and keeps none of its codes
+ * here, so a prefix is all the client needs to know.
+ */
+export const CLIENT_CODE_PREFIXES = ['pdf_', 'asm_'] as const;
+
+/** Whether `code` may key a client finding: snake_case in a client namespace. */
+export function isClientFindingCode(code: string): boolean {
+  return FINDING_CODE.test(code) && CLIENT_CODE_PREFIXES.some((p) => code.startsWith(p));
+}
 
 /** operation_number → fp8, as GetTechCardConstructionAuditResponse.operationFingerprints. */
 export type OpFingerprints = Readonly<Record<string, string>> | undefined;
@@ -50,16 +66,37 @@ function opNumberOf(ref: string): number | null {
 }
 
 /**
- * operation_number → the token that stands for that step INSIDE a key: "opfp:<fp8>" when no other
- * step of the card has the same fp8. A step that shares its shape keeps "op:<n>".
+ * operation_number → the token that stands for that step INSIDE a key: ALWAYS "opfp:<fp8>.<k>", k
+ * the 1-based ordinal of the step among the card's steps of the same fp8, by operation number. A
+ * unique shape is ".1" from the start, so a later step of the same shape never moves an earlier key.
  */
 export function opKeyTokens(opFingerprints: OpFingerprints): Map<number, string> {
-  const fps = Object.entries(opFingerprints ?? {});
-  const count = new Map<string, number>();
-  for (const [, fp] of fps) count.set(fp, (count.get(fp) ?? 0) + 1);
+  const steps = Object.entries(opFingerprints ?? {})
+    .filter(([, fp]) => !!fp)
+    .map(([n, fp]) => [Number(n), fp] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const ordinal = new Map<string, number>();
   const out = new Map<number, string>();
-  for (const [n, fp] of fps) if (fp && count.get(fp) === 1) out.set(Number(n), `opfp:${fp}`);
+  for (const [n, fp] of steps) {
+    const k = (ordinal.get(fp) ?? 0) + 1;
+    ordinal.set(fp, k);
+    out.set(n, `opfp:${fp}.${k}`);
+  }
   return out;
+}
+
+/** Steps replaced by their token, deduplicated, sorted by code point (= Go's byte order). */
+function normalizeRefs(refs: readonly string[], tokens: Map<number, string>): string[] {
+  const norm: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of refs) {
+    const n = opNumberOf(raw);
+    const r = (n !== null && tokens.get(n)) || raw;
+    if (seen.has(r)) continue;
+    seen.add(r);
+    norm.push(r);
+  }
+  return norm.sort(byCodePoint);
 }
 
 /**
@@ -74,25 +111,68 @@ export function findingKey(
   opts: { subject?: string; opFingerprints?: OpFingerprints; tokens?: Map<number, string> } = {},
 ): string {
   const tokens = opts.tokens ?? opKeyTokens(opts.opFingerprints);
-  const norm: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of refs) {
-    const n = opNumberOf(raw);
-    const r = (n !== null && tokens.get(n)) || raw;
-    if (seen.has(r)) continue;
-    seen.add(r);
-    norm.push(r);
-  }
-  norm.sort(byCodePoint);
-  let key = `${code}@${norm.join(',')}`;
+  let key = `${code}@${normalizeRefs(refs, tokens).join(',')}`;
   if (opts.subject) key += `#${opts.subject}`;
   if (byteLength(key) <= KEY_BODY_BYTES) return key;
   return `${code}@sha256:${sha256Hex(key).slice(0, 32)}`;
 }
 
+const isDigit = (c: number) => c >= 48 && c <= 57;
+const isWord = (c: number) =>
+  isDigit(c) || (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c === 95;
+const DOT = 46;
+const COMMA = 44;
+
 /**
- * The fingerprint of the text the reader sees: title, detail and the shape (fp8) of every step the
- * refs name that the card still has. Change any of them and a «seen» mark stops counting.
+ * `text` with every whole-word number that equals the number of a step the refs name ("op:010"
+ * names 10) replaced by "#". A number is a maximal run of ASCII digits, with "." or "," joining
+ * further digit runs ("12.5", "1,200" never match a step); whole-word means no ASCII letter, digit
+ * or "_" right before or after it. Same scan as the server's MaskOpNumbers: a UTF-16 unit is ASCII
+ * exactly when the UTF-8 byte is, so a non-Latin letter is a boundary on both sides.
+ */
+export function maskOpNumbers(text: string, refs: readonly string[] = []): string {
+  const nums = new Set<string>();
+  for (const r of refs) {
+    const n = opNumberOf(r);
+    if (n !== null) nums.add(String(n));
+  }
+  if (nums.size === 0) return text;
+  let out = '';
+  let last = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (!isDigit(text.charCodeAt(i))) {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < text.length && isDigit(text.charCodeAt(i))) i++;
+    while (
+      i + 1 < text.length &&
+      (text.charCodeAt(i) === DOT || text.charCodeAt(i) === COMMA) &&
+      isDigit(text.charCodeAt(i + 1))
+    ) {
+      i++;
+      while (i < text.length && isDigit(text.charCodeAt(i))) i++;
+    }
+    if (
+      (start > 0 && isWord(text.charCodeAt(start - 1))) ||
+      (i < text.length && isWord(text.charCodeAt(i)))
+    ) {
+      continue;
+    }
+    if (nums.has(text.slice(start, i))) {
+      out += `${text.slice(last, start)}#`;
+      last = i;
+    }
+  }
+  return last === 0 ? text : out + text.slice(last);
+}
+
+/**
+ * The fingerprint of the text the reader sees: title, detail (step numbers masked) and the shape
+ * (fp8) of every step the refs name that the card still has. Change any of them — but not a number
+ * of a step — and a «seen» mark stops counting.
  */
 export function findingFingerprint(
   title: string,
@@ -110,7 +190,9 @@ export function findingFingerprint(
     if (fp !== undefined) fps.push(fp);
   }
   fps.sort(byCodePoint);
-  return sha256Hex(`${title}\u0000${detail}\u0000${fps.join('')}`).slice(0, FINGERPRINT_LEN);
+  const t = maskOpNumbers(title, refs);
+  const d = maskOpNumbers(detail, refs);
+  return sha256Hex(`${t}\u0000${d}\u0000${fps.join('')}`).slice(0, FINGERPRINT_LEN);
 }
 
 /** Whether `key` has the shape the server accepts (code@…, at most MAX_FINDING_KEY_BYTES). */
@@ -120,28 +202,46 @@ export function isValidFindingKey(key: string): boolean {
 }
 
 /**
- * Keys for a whole list, with the server's safety net for two findings that still share a key:
- * "~<hash8(title)>", and a running ".n" when even the titles agree. A check that hits this routinely
- * should pass a `subject` instead.
+ * What the collision net hashes (the server's findingIdentity): hex(sha256("fk1" 0x00 ‖ code ‖
+ * subject ‖ masked title ‖ each normalized ref))[:16], every field as <UTF-8 byte length>":"<field>.
+ * The length prefixes make it injective; the masked title keeps it still under renumbering.
+ */
+export function findingIdentity(
+  code: string,
+  subject: string,
+  title: string,
+  refs: readonly string[],
+  tokens: Map<number, string>,
+): string {
+  const field = (f: string) => `${byteLength(f)}:${f}`;
+  const parts = [code, subject, maskOpNumbers(title, refs), ...normalizeRefs(refs, tokens)];
+  return sha256Hex(`fk1\u0000${parts.map(field).join('')}`).slice(0, FINGERPRINT_LEN);
+}
+
+/**
+ * Keys for a whole list, with the server's safety net for two findings that still share a key: a
+ * key held by one finding is reserved first; each finding of a shared key gets "~<identity16>", then
+ * a running ".n" from 2 while that is taken. Unique over the whole list. An item with an empty
+ * `code` gets no key and takes no part. A check that hits the net routinely should pass a `subject`.
  */
 export function assignFindingKeys(
   items: readonly { code: string; refs?: readonly string[]; subject?: string; title: string }[],
   opFingerprints?: OpFingerprints,
 ): string[] {
   const tokens = opKeyTokens(opFingerprints);
-  const keys = items.map((f) => findingKey(f.code, f.refs, { subject: f.subject, tokens }));
-  const groups = new Map<string, number[]>();
-  keys.forEach((k, i) => groups.set(k, [...(groups.get(k) ?? []), i]));
-  for (const idx of groups.values()) {
-    if (idx.length < 2) continue;
-    const used = new Map<string, number>();
-    for (const i of idx) {
-      let k = `${keys[i]}~${sha256Hex(items[i].title).slice(0, 8)}`;
-      const n = (used.get(k) ?? 0) + 1;
-      used.set(k, n);
-      if (n > 1) k += `.${n}`;
-      keys[i] = k;
-    }
-  }
-  return keys;
+  const keys = items.map((f) =>
+    f.code ? findingKey(f.code, f.refs, { subject: f.subject, tokens }) : '',
+  );
+  const count = new Map<string, number>();
+  for (const k of keys) if (k) count.set(k, (count.get(k) ?? 0) + 1);
+  const taken = new Set(keys.filter((k) => count.get(k) === 1));
+  return keys.map((k, i) => {
+    if (!k || count.get(k) === 1) return k;
+    const f = items[i];
+    const base = `${k}~${findingIdentity(f.code, f.subject ?? '', f.title, f.refs ?? [], tokens)}`;
+    let out = base;
+    for (let n = 2; taken.has(out); n++) out = `${base}.${n}`;
+    taken.add(out);
+    return out;
+  });
 }

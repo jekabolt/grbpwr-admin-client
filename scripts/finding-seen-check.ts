@@ -9,8 +9,11 @@ import type { TechCardAnalysisFinding } from '../src/api/proto-http/admin/index.
 import {
   assignFindingKeys,
   findingFingerprint,
+  findingIdentity,
   findingKey,
+  isClientFindingCode,
   isValidFindingKey,
+  maskOpNumbers,
   opKeyTokens,
 } from '../src/components/managers/tech-card/components/finding-key.ts';
 import {
@@ -115,12 +118,13 @@ test('keys and fingerprints match the server byte for byte', () => {
   const vectors: [string, string][] = [
     [
       findingKey('pdf_sa_missing', ['seam:side', 'op:10', 'seam:hem', 'op:10'], { opFingerprints }),
-      'pdf_sa_missing@opfp:aaaaaaaa,seam:hem,seam:side',
+      'pdf_sa_missing@opfp:aaaaaaaa.1,seam:hem,seam:side',
     ],
-    [findingKey('pdf_sa_missing', ['op:20'], { tokens }), 'pdf_sa_missing@op:20'],
+    [findingKey('pdf_sa_missing', ['op:20'], { tokens }), 'pdf_sa_missing@opfp:bbbbbbbb.1'],
+    [findingKey('pdf_sa_missing', ['op:30'], { tokens }), 'pdf_sa_missing@opfp:bbbbbbbb.2'],
     [
       findingKey('pdf_sa_missing', ['op:010', 'op:+10'], { tokens }),
-      'pdf_sa_missing@opfp:aaaaaaaa',
+      'pdf_sa_missing@opfp:aaaaaaaa.1',
     ],
     [
       findingKey('pdf_sa_missing', ['op:x', 'op:99999999999'], { tokens }),
@@ -149,6 +153,30 @@ test('keys and fingerprints match the server byte for byte', () => {
       'c13246480eda69ca',
     ],
     [findingFingerprint('Нет припуска', ''), 'c3de5ec904f08a99'],
+    // Step numbers in the text are masked: the same defect under new numbers hashes alike.
+    [
+      findingFingerprint('Operation 20: no SA', 'Ops 10, 20 — шаг 10.', ['op:20', 'op:10'], {
+        '10': 'bbbbbbbb',
+        '20': 'aaaaaaaa',
+      }),
+      '9129f8c1af5d3ffa',
+    ],
+    [
+      findingFingerprint('Operation 7: no SA', 'Ops 3, 7 — шаг 3.', ['op:7', 'op:3'], {
+        '3': 'bbbbbbbb',
+        '7': 'aaaaaaaa',
+      }),
+      '9129f8c1af5d3ffa',
+    ],
+    [
+      maskOpNumbers('Operation 20, op:10, a20, 20.5, 1,20, Шаг20 (20)', [
+        'op:20',
+        'op:010',
+        'card',
+      ]),
+      'Operation #, op:#, a20, 20.5, 1,20, Шаг# (#)',
+    ],
+    [findingIdentity('c', '', 'T', ['bom:A'], new Map()), '7730bec869d428a5'],
   ];
   vectors.forEach(([got, want], i) => assert.equal(got, want, `vector ${i}`));
   assert.deepEqual(
@@ -157,11 +185,45 @@ test('keys and fingerprints match the server byte for byte', () => {
       { code: 'c', title: 'B', refs: ['card'] },
       { code: 'c', title: 'B', refs: ['card'] },
     ]),
-    ['c@card~559aead0', 'c@card~df7e70e5', 'c@card~df7e70e5.2'],
+    ['c@card~b3a895749906c3c2', 'c@card~30179dd4f82ce934', 'c@card~30179dd4f82ce934.2'],
+  );
+  // A ref that spells the net's own suffix: the plain key is reserved, the twins step around it.
+  assert.deepEqual(
+    assignFindingKeys([
+      { code: 'c', title: 'T', refs: ['bom:A'] },
+      { code: 'c', title: 'T', refs: ['bom:A'] },
+      { code: 'c', title: 'T', refs: ['bom:A~7730bec869d428a5'] },
+    ]),
+    ['c@bom:A~7730bec869d428a5.2', 'c@bom:A~7730bec869d428a5.3', 'c@bom:A~7730bec869d428a5'],
   );
   assert.equal(isValidFindingKey('pdf_sa_missing@seam:hem'), true);
   assert.equal(isValidFindingKey('Pdf@card'), false);
   assert.equal(isValidFindingKey('card'), false);
+});
+
+test('a step token does not depend on other steps', () => {
+  const alone = opKeyTokens({ '10': 'aaaaaaaa' }).get(10);
+  assert.equal(alone, 'opfp:aaaaaaaa.1');
+  const others: Record<string, string>[] = [
+    { '10': 'aaaaaaaa', '20': 'aaaaaaaa' },
+    { '10': 'aaaaaaaa', '20': 'bbbbbbbb' },
+    { '5': 'cccccccc', '10': 'aaaaaaaa', '20': 'cccccccc' },
+    { '10': 'aaaaaaaa', '30': 'aaaaaaaa', '40': 'dddddddd' },
+  ];
+  for (const more of others) {
+    assert.equal(opKeyTokens(more).get(10), alone, JSON.stringify(more));
+  }
+  // Ordinals go by operation number.
+  assert.equal(opKeyTokens({ '100': 'aaaaaaaa', '9': 'aaaaaaaa' }).get(9), 'opfp:aaaaaaaa.1');
+});
+
+test('only pdf_* and asm_* are client codes', () => {
+  for (const ok of ['pdf_sa_missing', 'asm_edge_missing', 'pdf_']) {
+    assert.equal(isClientFindingCode(ok), true, ok);
+  }
+  for (const bad of ['', 'k', 'edge_missing', 'smv_missing', 'pdfx_a', 'PDF_x', 'pdf', 'asm-x']) {
+    assert.equal(isClientFindingCode(bad), false, bad);
+  }
 });
 
 test('a client finding is seen only when the stored mark matches key and fingerprint', () => {
@@ -172,7 +234,7 @@ test('a client finding is seen only when the stored mark matches key and fingerp
     title: 'no SA',
     detail: 'hem',
   };
-  const key = 'pdf_sa_missing@opfp:aaaaaaaa,seam:hem';
+  const key = 'pdf_sa_missing@opfp:aaaaaaaa.1,seam:hem';
   const fp = findingFingerprint('no SA', 'hem', ['op:10', 'seam:hem'], opFingerprints);
 
   const [unmarked] = resolveClientFindings([gap], {
@@ -210,6 +272,26 @@ test('a client finding is seen only when the stored mark matches key and fingerp
   const [bad] = resolveClientFindings([{ code: 'PDF gap', title: 'x' }], undefined);
   assert.equal(bad.key, '');
   assert.equal(canMarkSeen(bad), false);
+
+  // Outside pdf_* / asm_*: no key either, and it does not push a real one into the collision net.
+  const [bare, real] = resolveClientFindings(
+    [
+      { code: 'edge_missing', refs: ['card'], title: 'x' },
+      { code: 'pdf_x', refs: ['card'], title: 'x' },
+    ],
+    undefined,
+  );
+  assert.equal(bare.key, '');
+  assert.equal(canMarkSeen(bare), false);
+  assert.equal(real.key, 'pdf_x@card');
+
+  // Renumbered steps (same shapes, same order): the mark still holds.
+  const [renumbered] = resolveClientFindings(
+    [{ code: 'pdf_sa_missing', refs: ['op:15', 'seam:hem'], title: 'no SA', detail: 'hem' }],
+    { operationFingerprints: { '15': 'aaaaaaaa' }, seenMarks: [mark] },
+  );
+  assert.equal(renumbered.key, key);
+  assert.equal(isSeen(renumbered), true);
 
   assert.deepEqual(resolveClientFindings(undefined, undefined), []);
 });

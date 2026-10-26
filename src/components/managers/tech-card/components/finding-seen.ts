@@ -2,7 +2,12 @@ import type {
   GetTechCardConstructionAuditResponse,
   TechCardAnalysisFinding,
 } from 'api/proto-http/admin';
-import { assignFindingKeys, findingFingerprint, isValidFindingKey } from './finding-key.ts';
+import {
+  assignFindingKeys,
+  findingFingerprint,
+  isClientFindingCode,
+  isValidFindingKey,
+} from './finding-key.ts';
 
 // «SEEN» MARKS ON MACHINE FINDINGS (SetTechCardFindingSeen). Not every finding has to be fixed; a
 // seen one leaves the count and the list until its text changes — the server decides that by the
@@ -59,9 +64,9 @@ export function openFindingCount(
 // list, the same «seen» marks and the same count. The server stores their marks without being able
 // to recompute them and hands them back in `seenMarks`; the match (key AND fingerprint) is made here.
 
-/** One finding computed in the browser. `code` is snake_case and never one of the server's codes. */
+/** One finding computed in the browser. `code` is snake_case in a client namespace: pdf_*, asm_*. */
 export type ClientFinding = {
-  /** Stable kind, e.g. 'pdf_sa_missing'. Renaming it un-sees every mark of that kind. */
+  /** Stable kind, e.g. 'pdf_sa_missing', 'asm_edge_missing'. Renaming it un-sees its marks. */
   code: string;
   /** Sigils it points at: 'op:12', 'seam:<seam_key>', 'unit:<key>', 'piece:<name>', 'card'. */
   refs?: string[];
@@ -81,7 +86,8 @@ type AuditMarks = Pick<GetTechCardConstructionAuditResponse, 'seenMarks' | 'oper
 /**
  * Client findings as audit findings: key and fingerprint minted like the server's, `seen` / who /
  * when from the stored mark when key and fingerprint both match. Without the audit (not loaded,
- * failed) every one is unseen. A code that is not snake_case gets no key — shown, never markable.
+ * failed) every one is unseen. A code outside pdf_* / asm_* gets no key — shown, never markable
+ * (the server refuses its mark).
  */
 export function resolveClientFindings(
   findings: readonly ClientFinding[] | undefined,
@@ -90,7 +96,10 @@ export function resolveClientFindings(
   const list = findings ?? [];
   if (list.length === 0) return [];
   const opFingerprints = audit?.operationFingerprints;
-  const keys = assignFindingKeys(list, opFingerprints);
+  const keys = assignFindingKeys(
+    list.map((f) => (isClientFindingCode(f.code) ? f : { ...f, code: '' })),
+    opFingerprints,
+  );
   const marks = new Map((audit?.seenMarks ?? []).map((m) => [m.key ?? '', m]));
   return list.map((f, i) => {
     const key = isValidFindingKey(keys[i]) ? keys[i] : '';
