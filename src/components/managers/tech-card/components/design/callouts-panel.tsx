@@ -102,14 +102,19 @@ function createClickTraps() {
 }
 
 export type CalloutsPanelOptions = {
-  /** Сколько указаний в панели: без предпочтения пустая панель свёрнута, полоска пишет число. */
-  count: number;
+  /** Сколько указаний в панели: без предпочтения пустая панель свёрнута, полоска пишет число.
+   *  `null` — число неизвестно, полоска пишет одно имя. */
+  count: number | null;
   /** Ключ удержания «раскрыто на сеанс» — карточка: на соседней удержание не действует. */
   holdKey: number;
   /** Узел панели — владелец может слушать на нём свои просьбы (`FIELD_REVEAL_EVENT`). */
   panelRef: RefObject<HTMLDivElement | null>;
   /** Основа ключа предпочтений; без неё — ключ мудборда. */
   prefsBase?: string;
+  /** Свёрнутость без предпочтения, если она не зависит от числа (карта сборки: свёрнута всегда). */
+  defaultCollapsed?: boolean;
+  /** Постоянная ширина открытой панели — без жеста ширины (`resizable={false}` у компонента). */
+  fixedWidth?: number;
 };
 
 export function useCalloutsPanel({
@@ -117,6 +122,8 @@ export function useCalloutsPanel({
   holdKey,
   panelRef,
   prefsBase = CALLOUTS_PREFS_KEY,
+  defaultCollapsed,
+  fixedWidth,
 }: CalloutsPanelOptions) {
   /* ═══ ПАНЕЛЬ CALLOUTS — ШИРИНА, СВЁРНУТОСТЬ, РАЗДЕЛИТЕЛЬ (волна 25.09, D-11/D-12, T12/T13) ═══════
      Владелец: панель указаний занимала 340px всегда — и на пустой доске тоже. Теперь:
@@ -137,7 +144,11 @@ export function useCalloutsPanel({
      на соседней карточке раскрытие не действует с первого же кадра, без эффекта-сброса. */
   const [heldFor, setHeldFor] = useState<number | null>(null);
   const heldOpen = heldFor === holdKey;
-  const collapsed = !heldOpen && calloutsCollapsed(calloutPrefs.collapsed, count);
+  const collapsed =
+    !heldOpen &&
+    (defaultCollapsed !== undefined
+      ? (calloutPrefs.collapsed ?? defaultCollapsed)
+      : calloutsCollapsed(calloutPrefs.collapsed, count ?? 0));
   /* ПАНЕЛЬ, СВЁРНУТАЯ ПРЕДПОЧТЕНИЕМ, ТОЖЕ РАСКРЫВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (раунд 3, m5). Якорь
      `callouts.N.description` стоит под `hidden={collapsed}`: раскрытая доска (`setOpen` выше) его не
      покажет, пока свёрнута сама панель, — и дверь с отказом по полю снова молчала бы. Раскрытие — на
@@ -162,7 +173,7 @@ export function useCalloutsPanel({
     ro.observe(row);
     return () => ro.disconnect();
   }, []);
-  const panelW = clampCalloutsWidth(calloutPrefs.w, rowW);
+  const panelW = fixedWidth ?? clampCalloutsWidth(calloutPrefs.w, rowW);
   const resizeTo = (w: number) => setCalloutPrefs({ w: clampCalloutsWidth(w, rowW) });
 
   /* ФОКУС ЕДЕТ ЗА ДВЕРЬЮ — та же беда, что у свёрнутой `Section`: шеврон и полоска — два разных
@@ -371,6 +382,11 @@ export function CalloutsPanel({
   note,
   where,
   className,
+  side = 'right',
+  label = 'callouts',
+  resizable = true,
+  bare = false,
+  openClassName = 'lg:sticky lg:top-gutter lg:w-[var(--cw)] lg:self-start',
   children,
 }: {
   panel: CalloutsPanelState;
@@ -384,6 +400,16 @@ export function CalloutsPanel({
   where: string;
   /** Шов блока `callouts`. */
   className?: string;
+  /** С какой стороны ряда стоит панель: шевроны смотрят к её краю. */
+  side?: 'left' | 'right';
+  /** Имя на полоске и в подписях для чтеца. */
+  label?: string;
+  /** Без жеста ширины: ни разделителя, ни ручки на полоске (ширина — `fixedWidth` хука). */
+  resizable?: boolean;
+  /** Без своей шапки `Section`: дети рисуют шапку сами и ставят в неё `PanelCollapseDoor`. */
+  bare?: boolean;
+  /** Классы открытой панели от `lg` (липкость, ширина). */
+  openClassName?: string;
   children: ReactNode;
 }) {
   const {
@@ -402,11 +428,11 @@ export function CalloutsPanel({
     settle,
     resizeTo,
     setCollapsed,
-    collapseDoor,
     expandDoor,
   } = panel;
   const open = !hidden;
   const data = (part: string) => ({ [`data-${tag}-callouts${part}`]: '' });
+  const left = side === 'left';
   return (
     <>
       {/* ═══ РАЗДЕЛИТЕЛЬ ДОСКИ И ПАНЕЛИ (волна 25.09, D-11) ═══════════════════════════════════
@@ -419,58 +445,61 @@ export function CalloutsPanel({
 
         O-58: СТОИТ И ПРИ СВЁРНУТОЙ ПАНЕЛИ — рядом с полоской, той же хваткой; жест ширины
         захватывается здесь, откуда бы ни начался (см. шапку жеста). Свёрнутая панель — ширина 0
-        для `aria-valuenow`; ← из неё раскрывает на полу, → на полу сворачивает. */}
-      <div
-        ref={separator}
-        role='separator'
-        aria-orientation='vertical'
-        aria-label='resize the callouts panel'
-        aria-controls={panelId}
-        aria-valuenow={collapsed ? 0 : panelW}
-        aria-valuemin={0}
-        aria-valuemax={calloutsMaxWidth(rowW)}
-        tabIndex={0}
-        hidden={!open}
-        {...data('-resize')}
-        data-dragging={dragging || undefined}
-        className='group relative hidden w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-textColor lg:-mx-4 lg:block'
-        onPointerDown={(e) => grab(e, false)}
-        onPointerMove={follow}
-        onPointerUp={release}
-        onPointerCancel={release}
-        onLostPointerCapture={release}
-        onKeyDown={(e) => {
-          // Посреди жеста указателя стрелки — по-прежнему клавиши разделителя, но молчат: ширину
-          // ведёт рука, и шаг клавиши её следующее движение отменило бы от своей точки отсчёта.
-          if (drag.current && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-            e.preventDefault();
-            return;
-          }
-          if (e.key === 'ArrowLeft') {
-            if (collapsed) settle(false, CALLOUTS_MIN_W);
-            else resizeTo(panelW + CALLOUTS_KEY_STEP);
-          } else if (e.key === 'ArrowRight') {
-            // Свёрнутая панель — край шкалы: делать нечего, но клавиша по-прежнему разделителя, а
-            // не страницы, которая иначе поехала бы вбок (ревью Codex r3).
-            if (!collapsed) {
-              if (panelW <= CALLOUTS_MIN_W) settle(true);
-              else resizeTo(panelW - CALLOUTS_KEY_STEP);
+        для `aria-valuenow`; ← из неё раскрывает на полу, → на полу сворачивает.
+        T11: панель без жеста ширины (`resizable={false}`) его не ставит. */}
+      {resizable && (
+        <div
+          ref={separator}
+          role='separator'
+          aria-orientation='vertical'
+          aria-label={`resize the ${label} panel`}
+          aria-controls={panelId}
+          aria-valuenow={collapsed ? 0 : panelW}
+          aria-valuemin={0}
+          aria-valuemax={calloutsMaxWidth(rowW)}
+          tabIndex={0}
+          hidden={!open}
+          {...data('-resize')}
+          data-dragging={dragging || undefined}
+          className='group relative hidden w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-textColor lg:-mx-4 lg:block'
+          onPointerDown={(e) => grab(e, false)}
+          onPointerMove={follow}
+          onPointerUp={release}
+          onPointerCancel={release}
+          onLostPointerCapture={release}
+          onKeyDown={(e) => {
+            // Посреди жеста указателя стрелки — по-прежнему клавиши разделителя, но молчат: ширину
+            // ведёт рука, и шаг клавиши её следующее движение отменило бы от своей точки отсчёта.
+            if (drag.current && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+              e.preventDefault();
+              return;
             }
-          } else return;
-          e.preventDefault();
-        }}
-      >
-        {/* Линия перетаскивания — на всю высоту ряда, только пока тянут. */}
-        <span
-          aria-hidden
-          className='pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-textColor group-data-[dragging]:block'
-        />
-        {/* Хватка: липкая, чтобы её было видно и у длинной ленты кадров. */}
-        <span
-          aria-hidden
-          className='pointer-events-none sticky top-gutter mx-auto block h-8 w-0.5 bg-borderColor transition-colors duration-150 group-hover:bg-textColor group-focus-visible:bg-textColor group-data-[dragging]:bg-textColor motion-reduce:transition-none'
-        />
-      </div>
+            if (e.key === 'ArrowLeft') {
+              if (collapsed) settle(false, CALLOUTS_MIN_W);
+              else resizeTo(panelW + CALLOUTS_KEY_STEP);
+            } else if (e.key === 'ArrowRight') {
+              // Свёрнутая панель — край шкалы: делать нечего, но клавиша по-прежнему разделителя, а
+              // не страницы, которая иначе поехала бы вбок (ревью Codex r3).
+              if (!collapsed) {
+                if (panelW <= CALLOUTS_MIN_W) settle(true);
+                else resizeTo(panelW - CALLOUTS_KEY_STEP);
+              }
+            } else return;
+            e.preventDefault();
+          }}
+        >
+          {/* Линия перетаскивания — на всю высоту ряда, только пока тянут. */}
+          <span
+            aria-hidden
+            className='pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-textColor group-data-[dragging]:block'
+          />
+          {/* Хватка: липкая, чтобы её было видно и у длинной ленты кадров. */}
+          <span
+            aria-hidden
+            className='pointer-events-none sticky top-gutter mx-auto block h-8 w-0.5 bg-borderColor transition-colors duration-150 group-hover:bg-textColor group-focus-visible:bg-textColor group-data-[dragging]:bg-textColor motion-reduce:transition-none'
+          />
+        </div>
+      )}
 
       {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (B-9) — ТОТ ЖЕ ОРГАН, что стоит справа от листа в ARTIFACTS, и
         теперь буквально тот же: заголовок `callouts`, счётчик пилюлей, строка на указание,
@@ -496,9 +525,7 @@ export function CalloutsPanel({
         style={{ '--cw': `${panelW}px` } as React.CSSProperties}
         className={cn(
           'min-w-0 lg:shrink-0',
-          collapsed
-            ? 'lg:w-[28px] lg:self-stretch'
-            : 'lg:sticky lg:top-gutter lg:w-[var(--cw)] lg:self-start',
+          collapsed ? 'lg:w-[28px] lg:self-stretch' : openClassName,
         )}
       >
         {collapsed && (
@@ -517,7 +544,7 @@ export function CalloutsPanel({
             ref={expandDoor}
             role='button'
             tabIndex={0}
-            onPointerDown={(e) => grab(e, true)}
+            onPointerDown={resizable ? (e) => grab(e, true) : undefined}
             // `click` жеста сюда не доходит (его съедает ловушка отпускания); доходит щелчок без
             // нажатия — клавиатуры, ассистивной техники, ниже `lg` — обычный. Посреди жеста
             // `click` — чужой (второго пальца), а не двери.
@@ -527,9 +554,12 @@ export function CalloutsPanel({
             onKeyDown={onDoorKey(() => setCollapsed(false))}
             aria-expanded={false}
             aria-controls={panelId}
-            aria-label={`expand the callouts panel · ${count} ${where}`}
+            aria-label={`expand the ${label} panel${count != null ? ` · ${count} ${where}` : ''}`}
             {...data('-strip')}
-            className='group flex w-full cursor-pointer items-center justify-between gap-2 border border-borderColor bg-bgColor px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor lg:relative lg:h-full lg:cursor-col-resize lg:touch-none lg:flex-col lg:justify-center lg:px-0 lg:py-8'
+            className={cn(
+              'group flex w-full cursor-pointer items-center justify-between gap-2 border border-borderColor bg-bgColor px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor lg:relative lg:h-full lg:flex-col lg:justify-center lg:px-0 lg:py-8',
+              resizable && 'lg:cursor-col-resize lg:touch-none',
+            )}
           >
             <Text
               size='micro'
@@ -539,47 +569,80 @@ export function CalloutsPanel({
               {...data('-label')}
               className='whitespace-nowrap text-labelColor group-hover:text-textColor lg:sticky lg:top-gutter lg:bottom-gutter lg:[writing-mode:vertical-rl]'
             >
-              callouts · {count}
+              {label}
+              {count != null ? ` · ${count}` : ''}
             </Text>
             <Arrow
               aria-hidden
-              className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:absolute lg:left-1/2 lg:top-2.5 lg:-translate-x-1/2 lg:-rotate-90'
+              className={cn(
+                'shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:absolute lg:left-1/2 lg:top-2.5 lg:-translate-x-1/2',
+                left ? 'lg:rotate-90' : 'lg:-rotate-90',
+              )}
             />
           </span>
         )}
-        <div hidden={collapsed} className='contents'>
-          <Section
-            title='callouts'
-            action={
-              <span className='flex items-center gap-2'>
-                {note}
-                <span
-                  ref={collapseDoor}
-                  role='button'
-                  tabIndex={0}
-                  onClick={() => setCollapsed(true)}
-                  onKeyDown={onDoorKey(() => setCollapsed(true))}
-                  aria-expanded
-                  aria-controls={panelId}
-                  aria-label='collapse the callouts panel'
-                  {...data('-collapse')}
-                  className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                >
-                  {/* Тот же знак, что у каждой свёртки админки, повёрнутый к краю, куда панель
-                    уходит: вправо от `lg`, вверх ниже. */}
-                  <Arrow
-                    aria-hidden
-                    className='shrink-0 text-labelColor group-hover:text-textColor lg:rotate-90'
-                  />
-                </span>
-              </span>
-            }
-            className={className}
-          >
+        {bare ? (
+          <div hidden={collapsed} className={className}>
             {children}
-          </Section>
-        </div>
+          </div>
+        ) : (
+          <div hidden={collapsed} className='contents'>
+            <Section
+              title={label}
+              action={
+                <span className='flex items-center gap-2'>
+                  {note}
+                  <PanelCollapseDoor panel={panel} tag={tag} side={side} label={label} />
+                </span>
+              }
+              className={className}
+            >
+              {children}
+            </Section>
+          </div>
+        )}
       </div>
     </>
+  );
+}
+
+/**
+ * ШЕВРОН «СВЕРНУТЬ» — дверь из шапки панели. Вынесен, чтобы панель без своей шапки (`bare`, карта
+ * сборки на CONSTRUCTION) ставила ТОТ ЖЕ орган в шапку своего блока. Знак повёрнут к краю, куда
+ * панель уходит: к её стороне от `lg`, вверх ниже.
+ */
+export function PanelCollapseDoor({
+  panel,
+  tag,
+  side = 'right',
+  label = 'callouts',
+}: {
+  panel: CalloutsPanelState;
+  tag: string;
+  side?: 'left' | 'right';
+  label?: string;
+}) {
+  const { panelId, setCollapsed, collapseDoor } = panel;
+  return (
+    <span
+      ref={collapseDoor}
+      role='button'
+      tabIndex={0}
+      onClick={() => setCollapsed(true)}
+      onKeyDown={onDoorKey(() => setCollapsed(true))}
+      aria-expanded
+      aria-controls={panelId}
+      aria-label={`collapse the ${label} panel`}
+      {...{ [`data-${tag}-callouts-collapse`]: '' }}
+      className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+    >
+      <Arrow
+        aria-hidden
+        className={cn(
+          'shrink-0 text-labelColor group-hover:text-textColor',
+          side === 'left' ? 'lg:-rotate-90' : 'lg:rotate-90',
+        )}
+      />
+    </span>
   );
 }

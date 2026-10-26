@@ -2,7 +2,7 @@ import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Canvas,
@@ -34,6 +34,9 @@ import { useCardCategoryNames } from './skeleton-card-inputs';
 import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamsDoor } from './assembly-seams/seams-door';
+import { useSeamReview } from './assembly-seams/use-seam-decisions';
+import { CalloutsPanel, PanelCollapseDoor, useCalloutsPanel } from './design/callouts-panel';
+import { ASSEMBLY_MAP_PREFS_KEY } from './design/use-callouts-prefs';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -653,19 +656,18 @@ export function ConstructionTab({
           categoryNames={categoryNames}
         >
           <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-            <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
-              <AssemblyMap
-                sketch={
-                  <ConstructionSketch
-                    mediaById={mediaById}
-                    activePin={pin.active}
-                    onActivePinChange={pin.setActive}
-                  />
-                }
-              />
-              <SeamsDoor techCard={techCard} frozen={frozen} shapes={pieceShapes.shapeByKey} />
-              <PieceLegend />
-            </div>
+            <AssemblyColumn
+              techCard={techCard}
+              frozen={frozen}
+              shapes={pieceShapes.shapeByKey}
+              sketch={
+                <ConstructionSketch
+                  mediaById={mediaById}
+                  activePin={pin.active}
+                  onActivePinChange={pin.setActive}
+                />
+              }
+            />
 
             <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
               {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
@@ -757,5 +759,61 @@ export function ConstructionTab({
         </CardUnitPicturesProvider>
       </ActiveStepProvider>
     </div>
+  );
+}
+
+/** Ширина открытой колонки карты сборки — та же, что до свёртки. */
+const ASSEMBLY_COLUMN_W = 320;
+
+/**
+ * КОЛОНКА КАРТЫ СБОРКИ — СВОРАЧИВАЕТСЯ, КАК ПАНЕЛЬ CALLOUTS СТУДИИ (T11). Тот же орган
+ * (`CalloutsPanel`), только слева и без жеста ширины: свёрнутая — полоска «assembly map · N», где
+ * N — швы, которые ещё решать; открытая — прежние 320px (карта, SEAMS, PIECE CODES), шеврон ‹ в
+ * шапке карты. Без предпочтения колонка свёрнута. Правая колонка не меняется — только шире.
+ *
+ * Свёрнутая колонка ПРЯЧЕТСЯ АТРИБУТОМ, а не размонтируется: `SeamsDoor` гидрирует стор решений
+ * швов при монтировании, и без него N на полоске не узнать (и граф швов карты, пиктограмм и куклы
+ * читает тот же стор). Число неизвестно (нет графа) — полоска пишет одно имя.
+ */
+function AssemblyColumn({
+  techCard,
+  frozen,
+  shapes,
+  sketch,
+}: {
+  techCard: common_TechCard | undefined;
+  frozen: boolean;
+  shapes: PieceShapes['shapeByKey'];
+  sketch: ReactNode;
+}) {
+  const { review } = useSeamReview();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panel = useCalloutsPanel({
+    count: review ? review.counts.decide : null,
+    holdKey: techCard?.id ?? 0,
+    panelRef,
+    prefsBase: ASSEMBLY_MAP_PREFS_KEY,
+    defaultCollapsed: true,
+    fixedWidth: ASSEMBLY_COLUMN_W,
+  });
+  return (
+    <CalloutsPanel
+      panel={panel}
+      tag='amap'
+      where='seams to decide'
+      side='left'
+      label='assembly map'
+      resizable={false}
+      bare
+      openClassName='lg:sticky lg:top-36 lg:w-[var(--cw)] lg:self-start'
+      className='w-full space-y-2.5'
+    >
+      <AssemblyMap
+        sketch={sketch}
+        action={<PanelCollapseDoor panel={panel} tag='amap' side='left' label='assembly map' />}
+      />
+      <SeamsDoor techCard={techCard} frozen={frozen} shapes={shapes} />
+      <PieceLegend />
+    </CalloutsPanel>
   );
 }

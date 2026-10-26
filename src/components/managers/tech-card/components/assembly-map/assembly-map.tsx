@@ -52,7 +52,8 @@ function readView(id: string | undefined): MapView {
   }
 }
 
-export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
+// `action` — орган в шапке блока: шеврон, сворачивающий колонку карты (construction-tab).
+export function AssemblyMap({ sketch, action }: { sketch: ReactNode; action?: ReactNode }) {
   const { id } = useParams<{ id: string }>();
   const [view, setView] = useState<MapView>(() => readView(id));
   useEffect(() => {
@@ -74,6 +75,7 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
         <SectionHeader
           title='sketch — assembly map'
           question='— hovering an operation lights its pin, and the other way round'
+          action={action}
         />
         {sketch}
       </section>
@@ -140,7 +142,7 @@ export function AssemblyMap({ sketch }: { sketch: ReactNode }) {
       onKeyDown={onKeyDown}
       aria-label='assembly map — ↑ / ↓ walk the steps'
     >
-      <SectionHeader title='assembly map' question={QUESTION[view]} />
+      <SectionHeader title='assembly map' question={QUESTION[view]} action={action} />
       <div className='mb-2.5'>
         <ViewSwitch<MapView>
           label='assembly map view'

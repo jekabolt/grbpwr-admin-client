@@ -48,6 +48,9 @@ export const CALLOUTS_PREFS_KEY = 'plm.techcard.moodboard.callouts';
  */
 export const SHEET_CALLOUTS_PREFS_KEY = 'plm.techcard.sheet.callouts';
 
+/** Колонка карты сборки на CONSTRUCTION (карта, SEAMS, PIECE CODES) — своя свёрнутость. */
+export const ASSEMBLY_MAP_PREFS_KEY = 'plm.techcard.construction.assemblymap';
+
 /** Ключ предпочтений этой учётной записи; `null`, пока она не известна. */
 export function calloutsPrefsKey(
   owner: string | null | undefined,
