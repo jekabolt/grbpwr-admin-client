@@ -8469,7 +8469,7 @@ export function OperationsField({
                 // правильно — construction-tab.tsx:764 (`min-w-0 … lg:flex-1`); здесь просто
                 // забыли. `lg:flex-1` вешается ТОЛЬКО в режиме списка: в схематичном ряд стоит
                 // колонкой, и там `flex-1` растягивал бы высоту, а не ширину.
-                className={cn('min-w-0', effectiveMode === 'list' && 'lg:flex-1')}
+                className={cn('min-w-0 scroll-mt-20', effectiveMode === 'list' && 'lg:flex-1')}
               >
                 <OperationEditor
                   // Keyed on the row's identity AND its position: both of the editor's "skip the first
