@@ -424,7 +424,7 @@ function RailStep({
             type='button'
             aria-label={`reorder step ${opNumber}`}
             {...dragHandleProps}
-            className='shrink-0 cursor-grab touch-none select-none px-1 py-1 leading-none text-labelColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='col-start-1 row-start-1 shrink-0 cursor-grab touch-none select-none px-1 py-1 leading-none text-labelColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             ⠿
           </button>
@@ -433,6 +433,9 @@ function RailStep({
               открывался только первый шаг (он выбран по умолчанию), а остальные двенадцать
               прочитать было нельзя вовсе — при том что строка подсвечивалась на наведении и
               выглядела нажимаемой. Перетаскивание строки рядом остаётся кнопкой: это правка. */}
+          {/* ЯЧЕЙКА ЗАДАНА ЯВНО. Чип draft/ok и колонка шва стоят в первой строке грида явно, и
+              авто-раскладка обходит занятые ячейки — без `col-start-2 row-start-1` строка шага
+              уезжала во вторую строку грида, а чип с колонкой шва висели над пустым местом. */}
           <span
             role='button'
             tabIndex={0}
@@ -453,10 +456,9 @@ function RailStep({
             // его, потому что textContent строки склеил бы четыре разных факта в одну строку и
             // «имя не то» стало бы неотличимо от «номер не тот».
             data-rail-step={index}
-            className={cn(
-              'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-              ((acceptable && selected) || draft) && 'pr-10',
-            )}
+            // Место под чип draft/ok держит КАЖДАЯ строка, а не только помеченная: иначе колонка
+            // времени у строк с чипом съезжала влево и столбец шёл ступеньками.
+            className='col-start-2 row-start-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 pr-11 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
