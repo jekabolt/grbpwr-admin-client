@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { grainDisplaySegment } from './grain-display';
+import { grainDisplaySegment, labelBesideGrain } from './grain-display';
 
 const inside = (p: { x: number; y: number }, ring: readonly { x: number; y: number }[]) => {
   let hit = false;
@@ -84,5 +84,32 @@ describe('grainDisplaySegment', () => {
     expect(hit!.a.y).toBeGreaterThan(0);
     expect(inside(hit!.a, ring)).toBe(true);
     expect(inside(hit!.b, ring)).toBe(true);
+  });
+});
+
+describe('labelBesideGrain', () => {
+  const rect = [
+    { x: 0, y: 0 },
+    { x: 20, y: 0 },
+    { x: 20, y: 40 },
+    { x: 0, y: 40 },
+  ];
+  const grain = { a: { x: 10, y: 5 }, b: { x: 10, y: 35 } };
+  const box = { dir: { x: 1, y: 0 }, halfW: 3, halfH: 0.5 };
+
+  it('moves a centred label across the arrow until the box clears it', () => {
+    const p = labelBesideGrain({ x: 10, y: 20 }, grain, box, 0.2, rect);
+    expect(Math.abs(p.x - 10)).toBeCloseTo(3.2);
+    expect(p.y).toBeCloseTo(20);
+  });
+
+  it('keeps a label that already clears the arrow', () => {
+    expect(labelBesideGrain({ x: 15, y: 20 }, grain, box, 0.2, rect)).toEqual({ x: 15, y: 20 });
+  });
+
+  it('tries the other side when the first leaves the piece', () => {
+    const narrow = rect.map((p) => ({ x: p.x === 20 ? 11 : p.x, y: p.y }));
+    const p = labelBesideGrain({ x: 10.5, y: 20 }, grain, box, 0.2, narrow);
+    expect(p.x).toBeCloseTo(6.8);
   });
 });

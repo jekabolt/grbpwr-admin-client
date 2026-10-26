@@ -248,3 +248,41 @@ export function grainArrowGeometry(
     heads: [head(segment.a, u), head(segment.b, { x: -u.x, y: -u.y })],
   };
 }
+
+/** A text box: unit reading direction and half sizes along / across it. */
+export type LabelBox = { dir: Pt; halfW: number; halfH: number };
+
+/**
+ * Moves a label centre off the grain arrow, across it, just far enough that the box clears the
+ * shaft by `gap`. The side the centre already leans to wins; the other side is tried when that one
+ * leaves `ring`. A label that does not touch the arrow, or fits on neither side, stays put.
+ */
+export function labelBesideGrain(
+  centre: Pt,
+  segment: GrainSegment,
+  box: LabelBox,
+  gap: number,
+  ring?: readonly Pt[],
+): Pt {
+  const len = Math.hypot(segment.b.x - segment.a.x, segment.b.y - segment.a.y);
+  if (len < EPS) return centre;
+  const u = { x: (segment.b.x - segment.a.x) / len, y: (segment.b.y - segment.a.y) / len };
+  const n = { x: -u.y, y: u.x };
+  const across = { x: -box.dir.y, y: box.dir.x };
+  const reach = (axis: Pt) =>
+    Math.abs(dot(box.dir, axis)) * box.halfW + Math.abs(dot(across, axis)) * box.halfH;
+  const rel = { x: centre.x - segment.a.x, y: centre.y - segment.a.y };
+  const t = dot(rel, u);
+  const alongReach = reach(u);
+  if (t < -alongReach || t > len + alongReach) return centre;
+  const s = dot(rel, n);
+  const need = reach(n) + gap;
+  if (Math.abs(s) >= need) return centre;
+  const lean = s >= 0 ? 1 : -1;
+  for (const side of [lean, -lean]) {
+    const shift = side * need - s;
+    const p = { x: centre.x + n.x * shift, y: centre.y + n.y * shift };
+    if (!ring || inRing(p, ring)) return p;
+  }
+  return centre;
+}

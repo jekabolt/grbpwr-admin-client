@@ -13,6 +13,7 @@ import { area } from 'lib/nesting/geom/polygon';
 import {
   grainArrowGeometry,
   grainDisplaySegment,
+  labelBesideGrain,
   type GrainSegment,
 } from 'lib/nesting/geom/grain-display';
 import type { NestResult, PieceDTO, Pt, Unit } from 'lib/nesting/types';
@@ -164,6 +165,16 @@ function pushGrain(segs: Seg[], segment: GrainSegment, headLengthCm = 0.3) {
   for (const head of arrow.heads) segs.push({ kind: 'line', closed: true, pts: head, fill: true });
 }
 
+// The default label is 9 pt (3.175 mm), centred, horizontal; its width is estimated per glyph.
+const LABEL_EM_CM = 0.3175;
+
+function labelAt(poly: readonly Pt[], s: string, grain: GrainSegment | null): Pt {
+  const at = centroid(poly);
+  if (!grain) return at;
+  const box = { dir: { x: 1, y: 0 }, halfW: s.length * 0.3 * LABEL_EM_CM, halfH: LABEL_EM_CM / 2 };
+  return labelBesideGrain(at, grain, box, 0.2, poly);
+}
+
 function samePoint(a: Pt, b: Pt): boolean {
   return Math.hypot(a.x - b.x, a.y - b.y) <= 1e-6;
 }
@@ -229,12 +240,10 @@ export function drawingFromDxf(
     }
     if (!cut) continue;
     segs.push({ kind: 'cut', closed: true, pts: cut.poly });
-    if (grain) {
-      const segment = grainDisplaySegment([cut.poly], grain);
-      if (segment) pushGrain(segs, segment);
-    }
+    const segment = grain ? grainDisplaySegment([cut.poly], grain) : null;
+    if (segment) pushGrain(segs, segment);
     const label = (g.blockName ?? '').trim();
-    if (label) labels.push({ at: centroid(cut.poly), s: label });
+    if (label) labels.push({ at: labelAt(cut.poly, label, segment), s: label });
   }
   if (parsed.unitGuessed)
     warnings.push(`the file declares no units — read as ${parsed.unit}; check the test square`);
@@ -283,15 +292,12 @@ export function drawingFromMarker(
     for (const c of dto.inner ?? [])
       if (c.pts.length >= 2 && c.layer !== dto.displayGrain?.layer)
         segs.push({ kind: 'line', closed: c.closed, pts: placedPoly(c.pts, pl) });
-    if (dto.displayGrain) {
-      const local = grainDisplaySegment([dto.poly], dto.displayGrain);
-      if (local)
-        pushGrain(segs, {
-          a: placedPoly([local.a], pl)[0],
-          b: placedPoly([local.b], pl)[0],
-        });
-    }
-    labels.push({ at: centroid(poly), s: dto.name });
+    const local = dto.displayGrain ? grainDisplaySegment([dto.poly], dto.displayGrain) : null;
+    const placed = local
+      ? { a: placedPoly([local.a], pl)[0], b: placedPoly([local.b], pl)[0] }
+      : null;
+    if (placed) pushGrain(segs, placed);
+    labels.push({ at: labelAt(poly, dto.name, placed), s: dto.name });
   }
   return normalize(segs, labels, false, title, []);
 }
