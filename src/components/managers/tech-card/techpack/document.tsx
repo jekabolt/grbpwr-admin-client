@@ -24,7 +24,7 @@ import { deriveAssembly, type AssemblyModel } from './derive-assembly';
 import { deriveLabels } from './derive-labels';
 import { deriveMeasurementsPage } from './derive-measurements';
 import { derivePieces } from './derive-pieces';
-import { collectPdfGaps } from './gaps';
+import { collectPdfGaps, type Gap } from './gaps';
 import type { QcSeamDelta } from './derive-qc';
 import { AssemblyPage } from './pages/assembly';
 import { ColourwaysContent, ColourwaysPage } from './pages/colourways';
@@ -89,6 +89,7 @@ export function TechpackDocument({
   revision,
   patternViewerToken,
   onDataStatus,
+  onGaps,
 }: {
   techCard: common_TechCard;
   orient: PrintOrient;
@@ -99,6 +100,8 @@ export function TechpackDocument({
   /** The public pattern viewer token behind the pattern QR codes. */
   patternViewerToken?: string;
   onDataStatus?: (deps: PrintDep[]) => void;
+  /** The red marks this document prints (`collectPdfGaps`), each time the list changes. */
+  onGaps?: (gaps: Gap[]) => void;
 }) {
   const ins = techCard.techCard;
   const { dictionary } = useDictionary();
@@ -210,6 +213,9 @@ export function TechpackDocument({
       labelPlacement,
     ],
   );
+  useEffect(() => {
+    onGaps?.(pdfGaps);
+  }, [pdfGaps, onGaps]);
 
   const [laidOut, setLaidOut] = useState(false);
   const { label: geoLabel, status: geoStatus } = geometry.dep;

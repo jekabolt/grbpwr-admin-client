@@ -1493,6 +1493,8 @@ const operationSchema = z
     outputUnitKey: z.string().optional().default(''),
     // Имя узла. Живёт на первом производящем шаге; поглощающие могут не повторять.
     outputUnitName: z.string().optional().default(''),
+    // Seams this step sews, in order: card seam keys (TechCard.seams). Set by the step's picker.
+    seamKeys: z.array(z.string()).default([]),
     // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
     // went with the break — the chip row was always the real answer.
     bomLineKeys: z.array(z.string()).default([]),
@@ -2821,6 +2823,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
+      seamKeys: (o.seamKeys ?? []).filter(Boolean),
       bomLineKeys: (o.bomLineKeys ?? []).filter((key) => !!key && bomSectionByKey.has(key.trim())),
       // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
       // тип на проводе, в форме и в БД — круговой рейс без округлений.
@@ -3763,6 +3766,9 @@ export function mapFormToTechCardInsert(
     // Full-replace operations must always declare that this bundle carries the stored block
     // membership override; otherwise an older payload could silently clear detached rows.
     operationBlockMembershipAware: true,
+    // Step seams (op.seamKeys) travel on every save; without the flag the server refuses a write
+    // over a card whose steps hold seams.
+    operationSeamsAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3923,6 +3929,8 @@ export function mapFormToTechCardInsert(
         inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
+        // Carried through unchanged (dedup only): the server refuses a key the card does not hold.
+        seamKeys: [...new Set((o.seamKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         bomLineKeys: opBomKeys,
         // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
         // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие

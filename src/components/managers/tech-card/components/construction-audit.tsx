@@ -44,6 +44,10 @@ import {
   type ClientFinding,
 } from './finding-seen';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
+import { PdfGapsGroup, type GapRow } from './pdf-gaps-group';
+import type { Gap } from '../techpack/gaps';
+import { gapNav, gapsToClientFindings } from '../techpack/gap-findings';
+import { revealField } from 'utils/field-errors';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
 // a report ABOUT. Advisory throughout: nothing here disables a control or refuses a save.
@@ -107,6 +111,9 @@ function refTarget(ref: string): RefTarget | null {
       return { tab: 'patterns' };
     case 'bom':
       return { tab: 'bom' };
+    // a step's stored seam (PDF gaps): the construction tab, where the steps and their seams are
+    case 'seam':
+      return { tab: 'construction' };
     default:
       return null;
   }
@@ -781,6 +788,7 @@ export function ConstructionAudit({
   frozen = false,
   operationCount,
   extraFindings,
+  gaps,
 }: {
   techCardId?: number;
   /**
@@ -810,6 +818,12 @@ export function ConstructionAudit({
    * server's (finding-key.ts). Pass a memoised array — a new one each render re-derives the list.
    */
   extraFindings?: readonly ClientFinding[];
+  /**
+   * The tech pack's gaps (techpack/gaps.ts `collectPdfGaps`, the same inputs as the PDF). Each is a
+   * client finding — counted and «seen» like the rest — listed in their own «pdf gaps» group with a
+   * door to where it is fixed. Pass a memoised array.
+   */
+  gaps?: readonly Gap[];
 }) {
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
@@ -856,10 +870,18 @@ export function ConstructionAudit({
   };
 
   // Client findings are resolved against the same response: its seen marks and step shapes.
-  const clientFindings = useMemo(
-    () => resolveClientFindings(extraFindings, data),
-    [extraFindings, data],
+  // The gaps go first, so the first `gaps.length` resolved findings are theirs, in order.
+  const gapList = useMemo(() => gaps ?? [], [gaps]);
+  const allExtra = useMemo(
+    () => [...gapsToClientFindings(gapList), ...(extraFindings ?? [])],
+    [gapList, extraFindings],
   );
+  const clientFindings = useMemo(() => resolveClientFindings(allExtra, data), [allExtra, data]);
+  const gapRows = useMemo<GapRow[]>(
+    () => gapList.map((gap, i) => ({ gap, finding: clientFindings[i] })).filter((r) => r.finding),
+    [gapList, clientFindings],
+  );
+  const gapFindings = useMemo(() => new Set(gapRows.map((r) => r.finding)), [gapRows]);
   const findings = useMemo(
     () => [...(data?.findings ?? []), ...clientFindings],
     [data?.findings, clientFindings],
@@ -908,6 +930,23 @@ export function ConstructionAudit({
     const target = refTarget(r);
     if (!target || !onGoTab) return;
     onGoTab(target.tab, target.extra);
+  };
+  // A PDF gap's door: the tab (+ step / BOM line / picker), then the field or block in view once
+  // the tab has painted.
+  const goGap = (gap: Gap) => {
+    if (!onGoTab) return;
+    const nav = gapNav(gap.target);
+    onGoTab(nav.tab, nav.extra);
+    if (!nav.reveal && !nav.scroll) return;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (nav.reveal) revealField(nav.reveal);
+        else if (nav.scroll)
+          document
+            .querySelector(nav.scroll)
+            ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }),
+    );
   };
 
   // FILING, BOTH PATHS. `modelSlug` is passed by the AI block and by nothing else — that is what
@@ -1228,36 +1267,50 @@ export function ConstructionAudit({
               cannot be stale against them: its anchors and the map are the same instant. Amber and
               the grey «not found» belong to the MODEL half, whose findings were minted seconds or
               minutes ago against a card that may since have moved. */}
-          {(openFindings.length > 0 || (showSeen && seenFindings.length > 0)) && (
+          {(openFindings.some((f) => !gapFindings.has(f)) ||
+            (showSeen && seenFindings.some((f) => !gapFindings.has(f)))) && (
             <div className='border-t border-hairline'>
-              {openFindings.map((f, i) => (
-                <Finding
-                  key={f.key || `open-${i}`}
-                  finding={f}
-                  onGo={goRef}
-                  onFile={fileAsIssue}
-                  frozen={frozen}
-                  filing={addIssue.isPending}
-                  onSeen={canMark && canMarkSeen(f) ? () => markSeen(f, true) : undefined}
-                  seenBusy={!!seenBusyKey && seenBusyKey === f.key}
-                />
-              ))}
-              {showSeen &&
-                seenFindings.map((f, i) => (
+              {openFindings
+                .filter((f) => !gapFindings.has(f))
+                .map((f, i) => (
                   <Finding
-                    key={f.key || `seen-${i}`}
+                    key={f.key || `open-${i}`}
                     finding={f}
                     onGo={goRef}
                     onFile={fileAsIssue}
                     frozen={frozen}
                     filing={addIssue.isPending}
-                    seenLine={seenByLine(f)}
-                    onUnseen={canMark ? () => markSeen(f, false) : undefined}
+                    onSeen={canMark && canMarkSeen(f) ? () => markSeen(f, true) : undefined}
                     seenBusy={!!seenBusyKey && seenBusyKey === f.key}
                   />
                 ))}
+              {showSeen &&
+                seenFindings
+                  .filter((f) => !gapFindings.has(f))
+                  .map((f, i) => (
+                    <Finding
+                      key={f.key || `seen-${i}`}
+                      finding={f}
+                      onGo={goRef}
+                      onFile={fileAsIssue}
+                      frozen={frozen}
+                      filing={addIssue.isPending}
+                      seenLine={seenByLine(f)}
+                      onUnseen={canMark ? () => markSeen(f, false) : undefined}
+                      seenBusy={!!seenBusyKey && seenBusyKey === f.key}
+                    />
+                  ))}
             </div>
           )}
+
+          <PdfGapsGroup
+            rows={gapRows}
+            showSeen={showSeen}
+            onGo={goGap}
+            onSeen={canMark ? markSeen : undefined}
+            seenBusyKey={seenBusyKey ?? undefined}
+            renderRef={(r) => <RefChip refString={r} onGo={goRef} />}
+          />
 
           {notChecked.length > 0 && (
             <div ref={notCheckedRef} className='space-y-px' data-not-checked>

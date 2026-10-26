@@ -18,10 +18,12 @@ import {
 import { ROUTES } from 'constants/routes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { BackLink, Button, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
+import { BackLink, Button, Pill, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
 import { TechpackDocument } from './techpack/document';
+import { gapsToClientFindings } from './techpack/gap-findings';
+import type { Gap } from './techpack/gaps';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -146,7 +148,9 @@ export function TechCardPrint() {
   // excluded). Only for the LIVE card: the audit reads the card as it is now, and a frozen
   // revision printed from a release is not what it describes. Client findings (the PDF gaps) join
   // this count through the hook's second argument.
-  const audit = useOpenFindingCount(numId, undefined, !releaseId);
+  const [gaps, setGaps] = useState<Gap[]>([]);
+  const gapFindings = useMemo(() => gapsToClientFindings(gaps), [gaps]);
+  const audit = useOpenFindingCount(numId, gapFindings, !releaseId);
   const openFindings = releaseId ? 0 : audit.count;
 
   const scope = useMemo(() => {
@@ -271,6 +275,10 @@ export function TechCardPrint() {
           >
             save as pdf
           </Button>
+          {/* Never blocks the print: the gaps are red on the paper too. */}
+          {!releaseId && gaps.length > 0 && (
+            <Pill tone='warn' title='pdf gaps'>{`${gaps.length} gaps`}</Pill>
+          )}
         </div>
       </div>
 
@@ -345,6 +353,7 @@ export function TechCardPrint() {
               }
               patternViewerToken={printData?.patternViewerToken ?? ''}
               onDataStatus={setDocDeps}
+              onGaps={setGaps}
             />
           )}
         </div>

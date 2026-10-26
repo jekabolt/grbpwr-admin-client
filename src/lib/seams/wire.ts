@@ -60,6 +60,7 @@ const anchorToWire = (a: EdgeAnchor): TechCardSeamAnchorWire => {
     rangeTo: whole ? 0 : a.range[1],
     edgeHint: a.edgeHint,
     contourSig: a.contourSig,
+    ...(a.placement ? { placement: { ...a.placement } } : {}),
   };
 };
 
@@ -77,6 +78,16 @@ const anchorFromWire = (w: TechCardSeamAnchorWire): EdgeAnchor => {
     range: from === 0 && to === 0 ? [0, 1] : [from, to],
     edgeHint: w.edgeHint ?? '',
     contourSig: w.contourSig ?? '',
+    ...(w.placement
+      ? {
+          placement: {
+            xMm: w.placement.xMm ?? 0,
+            yMm: w.placement.yMm ?? 0,
+            rotDeg: w.placement.rotDeg ?? 0,
+            flip: !!w.placement.flip,
+          },
+        }
+      : {}),
   };
 };
 

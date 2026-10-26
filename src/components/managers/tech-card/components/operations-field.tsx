@@ -262,6 +262,7 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { StepSeamsRow } from './step-seams/step-seams-row';
 import type { PieceShapeMap } from './use-piece-shapes';
 import {
   rankOrphanBlocks,
@@ -5974,6 +5975,7 @@ function OperationEditor({
           enhance='note'
         />
       </div>
+      <StepSeamsRow index={index} />
     </div>
   );
 }
