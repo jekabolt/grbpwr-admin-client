@@ -62,6 +62,21 @@ const keyOf = (pl: Placement) => `${pl.pieceId}|${pl.instance}`;
 // одна занятость листа, крупные первыми, долевая/хвост «×N (90°, mirror)». Разница одна: кегль
 // задаётся в ЭКРАННЫХ пикселях текущего масштаба, а не от ширины ткани, поэтому при приближении
 // подпись остаётся читаемой, а не растёт вместе с деталью.
+// Полуширина полосы вокруг стрелки долевой, в экранных px: наконечник + воздух до подписи.
+const GRAIN_CLEAR_PX = 6;
+
+function grainClearance([a, b]: readonly Pt[], half: number): Pt[] {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const nx = (-(b.y - a.y) / len) * half;
+  const ny = ((b.x - a.x) / len) * half;
+  return [
+    { x: a.x + nx, y: a.y + ny },
+    { x: b.x + nx, y: b.y + ny },
+    { x: b.x - nx, y: b.y - ny },
+    { x: a.x - nx, y: a.y - ny },
+  ];
+}
+
 function planScreenLabels(
   placements: readonly Placement[],
   byId: ReadonlyMap<number, PieceDTO>,
@@ -100,6 +115,11 @@ function planScreenLabels(
     if (Math.max(maxX - minX, maxY - minY) * pxPerCm < LABEL_HIDE_PX) continue;
     const oriented = piece.grain == null && piece.originX == null;
     const marks = [pl.rot ? `${pl.rot}°` : '', pl.flipped ? 'mirror' : ''].filter(Boolean);
+    // Стрелка долевой идёт через центр детали — подпись встаёт рядом, а не поверх неё.
+    const grain = piece.displayGrain ? grainDisplaySegment([piece.poly], piece.displayGrain) : null;
+    const avoid = grain
+      ? [grainClearance(placedPoly([grain.a, grain.b], pl), GRAIN_CLEAR_PX / pxPerCm)]
+      : [];
     out.set(
       keyOf(pl),
       planLabel({
@@ -113,6 +133,7 @@ function planScreenLabels(
         preferredAngleDeg: oriented ? (pl.rot % 180 === 0 ? 0 : 90) : null,
         space,
         selfKey: keyOf(pl),
+        avoid,
       }),
     );
   }

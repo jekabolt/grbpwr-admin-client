@@ -516,6 +516,9 @@ export type PlanLabelOptions = {
   space?: LabelSpace;
   // Ключ собственного контура в `space` — иначе деталь спотыкалась бы о саму себя.
   selfKey?: string | number;
+  // Что подпись не должна задевать НА СВОЕЙ детали (стрелка долевой по центру). В отличие от
+  // `space`, якорь их не прощает: подпись отходит вбок от стрелки, а не ложится на неё.
+  avoid?: readonly (readonly Pt[])[];
 };
 
 const SIZE_STEPS = 5;
@@ -594,7 +597,15 @@ export function planLabel(o: PlanLabelOptions): LabelPlan {
   };
 
   const obstacleHit = (box: LabelBox) =>
-    o.space ? !o.space.isFree(box, o.selfKey, anchor) : false;
+    (o.avoid ?? []).some((poly) => poly.length >= 3 && boxHitsPoly(box, poly)) ||
+    (o.space ? !o.space.isFree(box, o.selfKey, anchor) : false);
+  // Со стрелкой по центру якорь занят: первыми пробуются строки сразу над и под ним.
+  const bandYs = (a: number, h: number) => {
+    const base = ysAt(a);
+    if (!o.avoid?.length) return base;
+    const y0 = anchorAt(a).y;
+    return [base[0], y0 + h * 1.1, y0 - h * 1.1, y0 + h * 2.2, y0 - h * 2.2, ...base.slice(1)];
+  };
 
   // Кегль ВНЕШНИМ циклом, текст внутренним: «крупнее, но короче» лучше, чем «полностью, но
   // вполовину мельче». При обратном порядке вариант с суффиксом успевал спуститься на самый
@@ -606,7 +617,7 @@ export function planLabel(o: PlanLabelOptions): LabelPlan {
       for (const a of angles) {
         const pr = polyAt(a);
         const ar = anchorAt(a);
-        for (const yc of ysAt(a)) {
+        for (const yc of bandYs(a, h)) {
           const spans = bandSpans(pr, yc, h);
           if (spans.length === 0) continue;
           // Полоса, куда попадает якорь; иначе — ближайшая достаточно широкая.
