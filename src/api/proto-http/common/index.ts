@@ -3408,6 +3408,13 @@ export type TechCardOperation = {
   review: string | undefined;
   // Keeps a piece-processing step between assembly blocks without making it part of either block.
   assemblyBlockDetached: boolean | undefined;
+  // The seams this step sews, as TechCardSeam.seam_key, in the order the step sews them (the seam
+  // numbers 1, 2, … on the step picture). Empty = not marked: the client falls back to guessing.
+  // Every key must name a seam stored on THIS card (UpsertTechCardSeams first), else the save is
+  // refused with InvalidArgument; deleting a seam drops its key from every step in the same
+  // transaction. Written only with operation_seams_aware (128). Enters no section digest: the seams
+  // themselves are outside every digest and outside lock_version.
+  seamKeys: string[] | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4155,6 +4162,10 @@ export type TechCardInsert = {
   operationReviewAware: boolean | undefined;
   // Declares support for TechCardOperation.assembly_block_detached on full-replace writes.
   operationBlockMembershipAware: boolean | undefined;
+  // Declares support for TechCardOperation.seam_keys on full-replace writes. Without it a write that
+  // carries seam_keys, or that would replace a card whose steps carry them, is refused
+  // (FailedPrecondition) instead of silently unmarking the steps. Transport, not content.
+  operationSeamsAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -4583,6 +4594,10 @@ export type TechCardSeamAnchor = {
   // 'BP#3+4') and the piece contour's signature then.
   edgeHint: string | undefined;
   contourSig: string | undefined;
+  // Hand placement of THIS anchor's piece on the host piece («Place by hand») when the target is an
+  // inner line or a free spot rather than an edge (edge_hint "i<k>" names inner line k). Absent =
+  // the client places the piece geometrically.
+  placement: TechCardSeamPlacement | undefined;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
@@ -4590,6 +4605,16 @@ export type TechCardSeamAnchor = {
 export type TechCardSeamSample = {
   u: number | undefined;
   v: number | undefined;
+};
+
+// TechCardSeamPlacement is where a part piece sits on its host piece: millimetres in the host
+// piece's frame with the origin at the host bbox's min corner, then a rotation and a mirror of the
+// part piece.
+export type TechCardSeamPlacement = {
+  xMm: number | undefined;
+  yMm: number | undefined;
+  rotDeg: number | undefined;
+  flip: boolean | undefined;
 };
 
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.
