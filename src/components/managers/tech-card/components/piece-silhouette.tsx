@@ -166,7 +166,7 @@ export function PieceSilhouette({
   if (!found) return null;
   const title = pieceShapeTitle(found);
   // Без рамки (глиф при имени, не контрол); outlineOnly гасит внутреннюю геометрию, нечитаемую
-  // в этом размере. Долевая — нейтральная стрелка и сама пропадает ниже 24px. SVG letterbox-ится
+  // в этом размере, и долевую тоже. SVG letterbox-ится
   // в бокс сам (meet).
   return (
     <span title={title} className={cn('mr-1.5 inline-flex h-7 w-10 shrink-0', boxClassName)}>
