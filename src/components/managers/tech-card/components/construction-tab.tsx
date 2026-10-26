@@ -36,6 +36,7 @@ import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamsDoor } from './assembly-seams/seams-door';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { gapSubjects } from '../techpack/gap-findings';
 import { usePdfGaps } from '../techpack/use-pdf-gaps';
 import { useSeamReview } from './assembly-seams/use-seam-decisions';
 import { CalloutsPanel, PanelCollapseDoor, useCalloutsPanel } from './design/callouts-panel';
@@ -621,6 +622,7 @@ export function ConstructionTab({
   const pdfGaps = usePdfGaps(print.data?.techCard, {
     patternViewerToken: print.data?.patternViewerToken,
   });
+  const gapSubject = useMemo(() => gapSubjects(print.data?.techCard), [print.data?.techCard]);
   const categoryNames = useCardCategoryNames();
   const skeleton = useSkeletonDoor({
     frozen,
@@ -697,6 +699,7 @@ export function ConstructionTab({
                 // несохранённых правок.
                 operationCount={(techCard?.techCard?.operations ?? []).length}
                 gaps={pdfGaps ?? undefined}
+                gapSubject={gapSubject}
               />
               <CardStandards />
               <StepSeamsProvider techCard={techCard} frozen={frozen}>

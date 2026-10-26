@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { gapNav, gapsToClientFindings } from './gap-findings';
+import type { common_TechCard } from 'api/proto-http/admin';
+import { gapNav, gapSubjects, gapsToClientFindings } from './gap-findings';
 import type { Gap } from './gaps';
 
 const gap = (over: Partial<Gap>): Gap =>
@@ -51,5 +52,30 @@ describe('gapNav', () => {
     expect(gapNav({ tab: 'cover', field: 'name' })).toEqual({ tab: 'studio', reveal: 'name' });
     expect(gapNav({ tab: 'cover', field: 'fabrics' })).toEqual({ tab: 'bom' });
     expect(gapNav({ tab: 'measurements' })).toEqual({ tab: 'sizes' });
+  });
+});
+
+describe('gapSubjects', () => {
+  const card = {
+    techCard: {
+      bomItems: [{ lineKey: 'SHELL', name: 'cotton poplin' }, { lineKey: 'LINING' }],
+      pieces: [{ lineKey: 'fp_l' }, { lineKey: '01KZVT1QZWB5DX4YDRW3W4QNW1', name: 'yoke' }],
+    },
+  } as unknown as common_TechCard;
+  const name = gapSubjects(card);
+  it('names the BOM line, falling back to its key', () => {
+    expect(name(gap({ target: { tab: 'materials', bomLine: 'SHELL', field: 'width' } }))).toBe(
+      'cotton poplin',
+    );
+    expect(name(gap({ target: { tab: 'patterns', bomLine: 'LINING', field: 'marker' } }))).toBe(
+      'LINING',
+    );
+  });
+  it('names the piece code, else its name; nothing for a step', () => {
+    expect(name(gap({ target: { tab: 'pieces', piece: 'fp_l', field: 'qty' } }))).toBe('FP_L');
+    expect(
+      name(gap({ target: { tab: 'pieces', piece: '01KZVT1QZWB5DX4YDRW3W4QNW1', field: 'code' } })),
+    ).toBe('yoke');
+    expect(name(gap({}))).toBe('');
   });
 });

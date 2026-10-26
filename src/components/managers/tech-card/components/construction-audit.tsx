@@ -789,6 +789,7 @@ export function ConstructionAudit({
   operationCount,
   extraFindings,
   gaps,
+  gapSubject,
 }: {
   techCardId?: number;
   /**
@@ -824,6 +825,8 @@ export function ConstructionAudit({
    * door to where it is fixed. Pass a memoised array.
    */
   gaps?: readonly Gap[];
+  /** The BOM line / piece a gap row names (`gapSubjects` of the same card). */
+  gapSubject?: (gap: Gap) => string;
 }) {
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
@@ -1310,6 +1313,7 @@ export function ConstructionAudit({
             onSeen={canMark ? markSeen : undefined}
             seenBusyKey={seenBusyKey ?? undefined}
             renderRef={(r) => <RefChip refString={r} onGo={goRef} />}
+            subjectOf={gapSubject}
           />
 
           {notChecked.length > 0 && (

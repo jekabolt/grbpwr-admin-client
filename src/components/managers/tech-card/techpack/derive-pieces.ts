@@ -65,7 +65,7 @@ const INTERNAL_PIECE_ID =
   /^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i;
 
 /** A line key is useful as identity, but only a human-authored key is useful as a printed code. */
-const pieceCode = (lineKey?: string): string => {
+export const pieceCode = (lineKey?: string): string => {
   const value = clean(lineKey);
   return INTERNAL_PIECE_ID.test(value) ? '' : value.toUpperCase();
 };

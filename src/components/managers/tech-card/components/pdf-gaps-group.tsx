@@ -20,6 +20,7 @@ export function PdfGapsGroup({
   onSeen,
   seenBusyKey,
   renderRef,
+  subjectOf,
 }: {
   rows: readonly GapRow[];
   showSeen: boolean;
@@ -28,6 +29,8 @@ export function PdfGapsGroup({
   onSeen?: (f: TechCardAnalysisFinding, seen: boolean) => void;
   seenBusyKey?: string;
   renderRef: (ref: string) => ReactNode;
+  /** The BOM line / piece a gap is about — named in the row. */
+  subjectOf?: (gap: Gap) => string;
 }) {
   const open = rows.filter((r) => !isSeen(r.finding));
   const shown = showSeen ? rows : open;
@@ -39,6 +42,7 @@ export function PdfGapsGroup({
         const seen = isSeen(finding);
         const busy = !!seenBusyKey && seenBusyKey === finding.key;
         const markable = !!onSeen && !!(finding.key ?? '').trim();
+        const subject = subjectOf?.(gap) ?? '';
         return (
           <div
             key={gapKey(gap)}
@@ -49,6 +53,7 @@ export function PdfGapsGroup({
             <Text size='control' className='min-w-0'>
               <span className='text-labelColor'>{gapSection(gap)}</span>
               {` · ${gap.label}`}
+              {subject && <span data-gap-subject=''>{` · ${subject}`}</span>}
             </Text>
             {gap.refs
               .filter((r) => r.startsWith('op:'))

@@ -5,7 +5,10 @@
 // Seen marks: the finding's key is card-polish's `findingKey(code, refs)` (finding-seen.ts), so a
 // gap marked seen stays seen across reloads and is left out of the paper's open count.
 
+import type { common_TechCard } from 'api/proto-http/admin';
 import type { ClientFinding } from '../components/finding-seen';
+import { pieceCode } from './derive-pieces';
+import { bomRefs, clean, pieceKey } from './derive-shared';
 import type { Gap, GapTarget } from './gaps';
 
 /** The PDF's section names by number (document.tsx TOC). */
@@ -22,6 +25,28 @@ export const GAP_SECTION: Readonly<Record<string, string>> = {
 };
 export const gapSection = (g: Pick<Gap, 'section'>) =>
   GAP_SECTION[g.section] ?? (g.section || 'pdf');
+
+/**
+ * What a gap row names after its label: the BOM line's name for a materials / patterns gap, the
+ * piece code for a cut-pieces one. The PDF's own label stays as printed (parity with paper).
+ */
+export function gapSubjects(card?: common_TechCard): (g: Gap) => string {
+  const bom = new Map(
+    (card ? bomRefs(card) : []).map((r) => [r.key, clean(r.item.name) || r.key] as const),
+  );
+  // A piece by its printed code; a piece without one (the gap may be exactly that) by its name.
+  const piece = new Map(
+    (card?.techCard?.pieces ?? []).map(
+      (p, i) => [pieceKey(p, i), pieceCode(p.lineKey) || clean(p.name) || pieceKey(p, i)] as const,
+    ),
+  );
+  return (g) => {
+    if (g.target.bomLine) return bom.get(g.target.bomLine) ?? g.target.bomLine;
+    if (g.target.tab === 'pieces' && g.target.piece)
+      return piece.get(g.target.piece) ?? g.target.piece;
+    return '';
+  };
+}
 
 /** Client findings for the audit / the print count: one per gap, in the PDF's order. */
 export function gapsToClientFindings(gaps: readonly Gap[]): ClientFinding[] {
