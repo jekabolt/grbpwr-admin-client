@@ -11403,8 +11403,21 @@ export type GetTechCardConstructionAuditResponse = {
   // refused. False = show the Analyze button disabled with a quiet reason, do not call it.
   aiEnabled: boolean | undefined;
   // unseen_count — findings of this response that are not seen (seen == false). The number the
-  // header and the badges show.
+  // header and the badges show, before the client adds its own unseen client findings.
   unseenCount: number | undefined;
+  // seen_marks — the stored marks of CLIENT findings: every mark whose key code is not one the
+  // server computes (pdf_*, the assembly-schema checks). The server cannot recompute those, so it
+  // hands the marks back as they are; the client counts its finding as seen when the key AND the
+  // fingerprint match. Marks of server codes never appear here — they ride on their finding.
+  seenMarks: TechCardFindingSeenMark[] | undefined;
+};
+
+// TechCardFindingSeenMark — one stored «seen» mark, as SetTechCardFindingSeen wrote it.
+export type TechCardFindingSeenMark = {
+  key: string | undefined;
+  fingerprint: string | undefined;
+  seenBy: string | undefined;
+  seenAt: wellKnownTimestamp | undefined;
 };
 
 // AnalyzeTechCardConstructionRequest — which saved card to run the model over. As with the audit,
@@ -11479,7 +11492,8 @@ export type AddTechCardIssueResponse = {
 // SetTechCardFindingSeenRequest — key and fingerprint exactly as the audit sent them.
 export type SetTechCardFindingSeenRequest = {
   techCardId: number | undefined;
-  // key — TechCardAnalysisFinding.key, <= 512 bytes. Required.
+  // key — TechCardAnalysisFinding.key, or a client finding's key built the same way:
+  // "<snake_case code>@…", valid UTF-8, <= 512 bytes. Required. Only the shape is checked.
   key: string | undefined;
   // fingerprint — TechCardAnalysisFinding.fingerprint (16 hex). Required when seen=true.
   fingerprint: string | undefined;
@@ -20086,11 +20100,12 @@ export interface AdminService {
   // release. Issues sit OUTSIDE the CONSTRUCTION digest, so this call cannot disturb a signature —
   // that is what makes the narrow path safe rather than merely convenient.
   AddTechCardIssue(request: AddTechCardIssueRequest): Promise<AddTechCardIssueResponse>;
-  // SetTechCardFindingSeen marks (seen=true) or unmarks (seen=false) ONE machine finding of the
+  // SetTechCardFindingSeen marks (seen=true) or unmarks (seen=false) ONE finding of the
   // construction audit as seen — not every finding has to be fixed. The mark is stored under the
-  // finding's key with the fingerprint the client saw; the audit reports it as seen only while the
-  // fingerprint still matches. Idempotent both ways; works on a released card (a mark is not card
-  // content). Classified wr(tech_cards).
+  // finding's key with the fingerprint the client saw; it counts only while the fingerprint still
+  // matches. Any well-formed key is accepted, including a CLIENT finding the server never computes
+  // (its mark comes back in GetTechCardConstructionAuditResponse.seen_marks). Idempotent both ways;
+  // works on a released card (a mark is not card content). Classified wr(tech_cards).
   SetTechCardFindingSeen(
     request: SetTechCardFindingSeenRequest,
   ): Promise<SetTechCardFindingSeenResponse>;

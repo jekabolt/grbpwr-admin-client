@@ -1,4 +1,4 @@
-// node --experimental-strip-types scripts/finding-seen-check.ts
+// yarn check:finding-seen  (node --experimental-strip-types --test scripts/finding-seen-check.ts)
 //
 // The client's share of the «seen» rule (finding-seen.ts): which findings leave the list and the
 // count, and what the badges show for a server that does or does not send unseen_count.
@@ -7,9 +7,17 @@ import { test } from 'node:test';
 
 import type { TechCardAnalysisFinding } from '../src/api/proto-http/admin/index.ts';
 import {
+  assignFindingKeys,
+  findingFingerprint,
+  findingKey,
+  isValidFindingKey,
+  opKeyTokens,
+} from '../src/components/managers/tech-card/components/finding-key.ts';
+import {
   canMarkSeen,
   isSeen,
   openFindingCount,
+  resolveClientFindings,
   seenByLine,
   splitBySeen,
 } from '../src/components/managers/tech-card/components/finding-seen.ts';
@@ -97,4 +105,132 @@ test('the seen title names who and when', () => {
     seenByLine(finding({ seen: true, seenBy: 'boris', seenAt: 'nope' })),
     'seen · boris',
   );
+});
+
+// THE SAME VECTORS AS THE SERVER (grbpwr-manager TestFindingKeyGoldenVectors). The browser mints
+// the keys of its own findings; one byte of disagreement and a mark never matches.
+test('keys and fingerprints match the server byte for byte', () => {
+  const opFingerprints = { '10': 'aaaaaaaa', '20': 'bbbbbbbb', '30': 'bbbbbbbb' };
+  const tokens = opKeyTokens(opFingerprints);
+  const vectors: [string, string][] = [
+    [
+      findingKey('pdf_sa_missing', ['seam:side', 'op:10', 'seam:hem', 'op:10'], { opFingerprints }),
+      'pdf_sa_missing@opfp:aaaaaaaa,seam:hem,seam:side',
+    ],
+    [findingKey('pdf_sa_missing', ['op:20'], { tokens }), 'pdf_sa_missing@op:20'],
+    [
+      findingKey('pdf_sa_missing', ['op:010', 'op:+10'], { tokens }),
+      'pdf_sa_missing@opfp:aaaaaaaa',
+    ],
+    [
+      findingKey('pdf_sa_missing', ['op:x', 'op:99999999999'], { tokens }),
+      'pdf_sa_missing@op:99999999999,op:x',
+    ],
+    [findingKey('pdf_x', ['card'], { subject: 'front', tokens }), 'pdf_x@card#front'],
+    [findingKey('pdf_x', [], { tokens }), 'pdf_x@'],
+    [
+      findingKey('pdf_x', ['unit:😀', 'unit:\uE000', 'unit:é', 'unit:z'], { tokens }),
+      'pdf_x@unit:z,unit:é,unit:\uE000,unit:😀',
+    ],
+    [
+      findingKey('unit_key_case_collision', ['unit:' + 'ю'.repeat(400)]),
+      'unit_key_case_collision@sha256:e6a9631642ae8f89e851d719927f7f76',
+    ],
+    [
+      findingFingerprint(
+        'Seam allowance missing',
+        'Side seam has no SA',
+        ['op:20', 'op:10', 'seam:hem'],
+        {
+          '10': 'bbbbbbbb',
+          '20': 'aaaaaaaa',
+        },
+      ),
+      'c13246480eda69ca',
+    ],
+    [findingFingerprint('Нет припуска', ''), 'c3de5ec904f08a99'],
+  ];
+  vectors.forEach(([got, want], i) => assert.equal(got, want, `vector ${i}`));
+  assert.deepEqual(
+    assignFindingKeys([
+      { code: 'c', title: 'A', refs: ['card'] },
+      { code: 'c', title: 'B', refs: ['card'] },
+      { code: 'c', title: 'B', refs: ['card'] },
+    ]),
+    ['c@card~559aead0', 'c@card~df7e70e5', 'c@card~df7e70e5.2'],
+  );
+  assert.equal(isValidFindingKey('pdf_sa_missing@seam:hem'), true);
+  assert.equal(isValidFindingKey('Pdf@card'), false);
+  assert.equal(isValidFindingKey('card'), false);
+});
+
+test('a client finding is seen only when the stored mark matches key and fingerprint', () => {
+  const opFingerprints = { '10': 'aaaaaaaa' };
+  const gap = {
+    code: 'pdf_sa_missing',
+    refs: ['op:10', 'seam:hem'],
+    title: 'no SA',
+    detail: 'hem',
+  };
+  const key = 'pdf_sa_missing@opfp:aaaaaaaa,seam:hem';
+  const fp = findingFingerprint('no SA', 'hem', ['op:10', 'seam:hem'], opFingerprints);
+
+  const [unmarked] = resolveClientFindings([gap], {
+    operationFingerprints: opFingerprints,
+    seenMarks: [],
+  });
+  assert.equal(unmarked.key, key);
+  assert.equal(unmarked.fingerprint, fp);
+  assert.equal(unmarked.source, 'client');
+  assert.equal(canMarkSeen(unmarked), true);
+  assert.equal(isSeen(unmarked), false);
+
+  const mark = { key, fingerprint: fp, seenBy: 'anna', seenAt: '2026-10-26T09:30:00Z' };
+  const [seen] = resolveClientFindings([gap], {
+    operationFingerprints: opFingerprints,
+    seenMarks: [mark],
+  });
+  assert.equal(isSeen(seen), true);
+  assert.equal(seen.seenBy, 'anna');
+
+  // The text moved since the mark: unseen again.
+  const [moved] = resolveClientFindings([{ ...gap, detail: 'hem and cuff' }], {
+    operationFingerprints: opFingerprints,
+    seenMarks: [mark],
+  });
+  assert.equal(isSeen(moved), false);
+  assert.equal(moved.seenBy, undefined);
+
+  // No audit yet: every client finding is open, still markable.
+  const [noAudit] = resolveClientFindings([gap], undefined);
+  assert.equal(isSeen(noAudit), false);
+  assert.equal(canMarkSeen(noAudit), true);
+
+  // A code the server would refuse gets no key: shown, never markable.
+  const [bad] = resolveClientFindings([{ code: 'PDF gap', title: 'x' }], undefined);
+  assert.equal(bad.key, '');
+  assert.equal(canMarkSeen(bad), false);
+
+  assert.deepEqual(resolveClientFindings(undefined, undefined), []);
+});
+
+test('the count adds the unseen client findings to the server count', () => {
+  const opFingerprints = { '10': 'aaaaaaaa' };
+  const gaps = [
+    { code: 'pdf_sa_missing', refs: ['seam:hem'], title: 'no SA' },
+    { code: 'pdf_sa_missing', refs: ['seam:side'], title: 'no SA' },
+  ];
+  const fp = findingFingerprint('no SA', '', ['seam:hem'], opFingerprints);
+  const client = resolveClientFindings(gaps, {
+    operationFingerprints: opFingerprints,
+    seenMarks: [
+      { key: 'pdf_sa_missing@seam:hem', fingerprint: fp, seenBy: 'anna', seenAt: undefined },
+    ],
+  });
+  const server = [finding({ seen: false }), finding({ seen: false }), finding({ seen: true })];
+  assert.equal(openFindingCount({ findings: server, unseenCount: 2 }, client), 3);
+  assert.equal(openFindingCount({ findings: server, unseenCount: undefined }, client), 3);
+  // No audit at all (failed): the client findings alone.
+  assert.equal(openFindingCount(undefined, client), 1);
+  assert.equal(openFindingCount(undefined), 0);
 });

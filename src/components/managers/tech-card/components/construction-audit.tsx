@@ -36,7 +36,13 @@ import {
   type AutosaveStatus,
 } from './design/autosave-contract';
 import { assignUids, loadAnalysis, saveAnalysis, StoredAnalysis } from './analysis-identity';
-import { canMarkSeen, seenByLine, splitBySeen } from './finding-seen';
+import {
+  canMarkSeen,
+  resolveClientFindings,
+  seenByLine,
+  splitBySeen,
+  type ClientFinding,
+} from './finding-seen';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
@@ -774,6 +780,7 @@ export function ConstructionAudit({
   onGoTab,
   frozen = false,
   operationCount,
+  extraFindings,
 }: {
   techCardId?: number;
   /**
@@ -797,6 +804,12 @@ export function ConstructionAudit({
   frozen?: boolean;
   /** Steps on the SAVED card — for the in-flight line. Missing = say it without a number. */
   operationCount?: number;
+  /**
+   * Findings the BROWSER computes (the PDF gaps, pdf_*; the assembly-schema checks). They join the
+   * machine list, its «seen» marks and every count here; the key and fingerprint are minted like the
+   * server's (finding-key.ts). Pass a memoised array — a new one each render re-derives the list.
+   */
+  extraFindings?: readonly ClientFinding[];
 }) {
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
@@ -842,14 +855,22 @@ export function ConstructionAudit({
     saveAnalysis(techCardId, next);
   };
 
-  const findings = data?.findings ?? [];
+  // Client findings are resolved against the same response: its seen marks and step shapes.
+  const clientFindings = useMemo(
+    () => resolveClientFindings(extraFindings, data),
+    [extraFindings, data],
+  );
+  const findings = useMemo(
+    () => [...(data?.findings ?? []), ...clientFindings],
+    [data?.findings, clientFindings],
+  );
   const notChecked = (data?.notChecked ?? []).filter((n) => !!n?.trim());
   // EVERY NUMBER ON THIS PANEL COUNTS THE OPEN (UNSEEN) ONES. The list and its headline are cut from
   // the same split, so they cannot disagree; a seen finding comes back on its own when its text
   // changes, because the server stops matching the mark.
   const { open: openFindings, seen: seenFindings } = useMemo(
-    () => splitBySeen(data?.findings),
-    [data?.findings],
+    () => splitBySeen(findings),
+    [findings],
   );
 
   // Counted in a declared order first, then whatever else arrived, in the order it arrived — an

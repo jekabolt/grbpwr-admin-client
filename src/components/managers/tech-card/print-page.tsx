@@ -12,14 +12,13 @@ import { depStatus, usePrintReady, type PrintDep } from 'components/managers/pri
 import { useTechCardRelease } from 'components/managers/tech-card/components/useSamples';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import {
-  useTechCardConstructionAudit,
+  useOpenFindingCount,
   useTechCardPrint,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
-import { openFindingCount } from './components/finding-seen';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
 import { TechpackDocument } from './techpack/document';
@@ -145,9 +144,10 @@ export function TechCardPrint() {
 
   // OPEN FINDINGS ON PAPER — the same audit query as the card, counted the same way (seen ones
   // excluded). Only for the LIVE card: the audit reads the card as it is now, and a frozen
-  // revision printed from a release is not what it describes.
-  const audit = useTechCardConstructionAudit(numId, !releaseId);
-  const openFindings = !releaseId && !audit.isError ? openFindingCount(audit.data) : 0;
+  // revision printed from a release is not what it describes. Client findings (the PDF gaps) join
+  // this count through the hook's second argument.
+  const audit = useOpenFindingCount(numId, undefined, !releaseId);
+  const openFindings = releaseId ? 0 : audit.count;
 
   const scope = useMemo(() => {
     const card = snapshot ?? techCard;

@@ -6,7 +6,13 @@ import {
   common_TechCardInsert,
   common_TechCardStage,
 } from 'api/proto-http/admin';
+import {
+  openFindingCount,
+  resolveClientFindings,
+  type ClientFinding,
+} from 'components/managers/tech-card/components/finding-seen';
 import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
+import { useMemo } from 'react';
 
 export type TechCardFilter = {
   stage?: common_TechCardStage;
@@ -173,6 +179,28 @@ export function useTechCardConstructionAudit(techCardId: number | undefined, act
 
 export const constructionAuditKey = (techCardId: number) =>
   [...techCardKeys.detail(techCardId), 'construction-audit'] as const;
+
+const NO_CLIENT_FINDINGS: readonly ClientFinding[] = [];
+
+/**
+ * THE OPEN-FINDINGS NUMBER outside the audit panel (the PDF): the audit's unseen findings plus the
+ * unseen CLIENT findings passed in (pdf_*, assembly-schema), matched against the stored marks — the
+ * same count the panel's header shows for the same `extra`. Pass a stable (memoised) array. A failed
+ * audit counts the client findings alone, all of them unseen.
+ */
+export function useOpenFindingCount(
+  techCardId: number | undefined,
+  extra: readonly ClientFinding[] = NO_CLIENT_FINDINGS,
+  active = true,
+) {
+  const audit = useTechCardConstructionAudit(techCardId, active);
+  const client = useMemo(() => resolveClientFindings(extra, audit.data), [extra, audit.data]);
+  return {
+    count: openFindingCount(audit.isError ? undefined : audit.data, client),
+    isLoading: audit.isLoading,
+    isError: audit.isError,
+  };
+}
 
 // SEEN MARKS (SetTechCardFindingSeen). A mark is a note about the audit, not card content, so it
 // invalidates the audit alone — never the card detail, whose refetch would re-seed the form. The
