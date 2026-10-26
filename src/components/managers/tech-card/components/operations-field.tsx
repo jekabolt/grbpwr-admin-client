@@ -404,6 +404,7 @@ const BUTTONHOLE_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE';
 const BARTACK_MACHINE = 'TECH_CARD_MACHINE_TYPE_BARTACK';
 const BUTTON_ATTACH_MACHINE = 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH';
 const ZIPPER_MACHINE = 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING';
+const BINDING_MACHINE = 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING';
 // КЛАСС ШВА «ОКАНТОВОЧНЫЙ» — ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ (0328). Окантовочная машинка говорит «это
 // окантовка» во второй раз и обязательным спутником не является: кант притачивают и на
 // прямострочке, и до F22 такая окантовка своё исполнение назвать не могла.
@@ -2779,7 +2780,11 @@ function OperationEditor({
     topstitchRows > 0;
   const showTopstitchWidth = showTopstitch && topstitchModeTakesWidth(topstitchMode);
   const showNeedleGauge = showNeedleFacts && needleCount >= 2;
-  const showBindingStyle = showStitching && effectiveSeam === BOUND_SEAM_CLASS;
+  // A step on the binding machine is a binding step even before its class says «bound»: the
+  // binding tiles are the only control that writes that class, so gating them on it alone left
+  // the «Bind / tape edge» kind (which writes the machine, not the class) showing join tiles.
+  const showBindingStyle =
+    showStitching && (effectiveSeam === BOUND_SEAM_CLASS || onMachine(BINDING_MACHINE));
   const showPitch = showPlacement && placementCount >= 2;
   const showFoldback = showHardware && isHardwareStep && attachMethod === THREADED_HARDWARE;
   const showAirTemperature = showWeld && onMachine(SEAM_TAPING);
