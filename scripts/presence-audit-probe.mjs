@@ -118,6 +118,8 @@ const {
   readBack,
 } = await import(pathToFileURL(outfile).href);
 rmSync(outfile, { force: true });
+// esbuild also writes the CSS the bundle imports next to it; without this every run leaves a .css behind.
+rmSync(outfile.replace(/\.mjs$/, '.css'), { force: true });
 
 // Шаг ВТО с фактами четырёх родов: словарные токены, децималы-строки, число, булево «сухим»,
 // список ссылок. Каждый род ломается по-своему, и присутствие у каждого выглядит иначе.
