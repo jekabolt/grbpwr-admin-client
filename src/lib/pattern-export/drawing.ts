@@ -10,6 +10,11 @@ import { parseDxf } from 'lib/nesting/dxf/parse';
 import { groupToPieces } from 'lib/nesting/dxf/pieces';
 import { expandGroups } from 'lib/nesting/dxf/transform';
 import { area } from 'lib/nesting/geom/polygon';
+import {
+  grainArrowGeometry,
+  grainDisplaySegment,
+  type GrainSegment,
+} from 'lib/nesting/geom/grain-display';
 import type { NestResult, PieceDTO, Pt, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS, placedPoly } from 'lib/nesting/types';
 
@@ -26,6 +31,8 @@ export type DrawingStroke = {
   pts: [number, number][];
   /** Dash pattern, mm (on, off, …) — a PLT line type; DXF and marker lines are solid. */
   dash?: number[];
+  /** Closed vector shape filled by the PDF renderer (grain arrowheads). */
+  fill?: boolean;
   /** Non-rendered source identity, used by geometry probes to keep piece strokes grouped. */
   pieceKey?: string;
 };
@@ -56,7 +63,7 @@ export type PatternDrawing = {
   warnings: string[];
 };
 
-type Seg = { kind: StrokeKind; closed: boolean; pts: Pt[] };
+type Seg = { kind: StrokeKind; closed: boolean; pts: Pt[]; fill?: boolean };
 
 /** Absolute cm (Y up, any origin) → mm frame (Y down, origin top-left). */
 function normalize(
@@ -87,6 +94,7 @@ function normalize(
       kind: s.kind,
       closed: s.closed,
       pts: s.pts.map((p) => [X(p.x), Y(p.y)] as [number, number]),
+      ...(s.fill ? { fill: true } : {}),
     })),
     labels: labels.map((l) => ({ x: X(l.at.x), y: Y(l.at.y), s: l.s })),
     title,
@@ -116,6 +124,49 @@ function centroid(poly: readonly Pt[]): Pt {
 }
 
 const stripExt = (name: string) => name.replace(/\.[^.]+$/, '');
+
+function grainLayerOf(pieces: readonly ReturnType<typeof groupToPieces>[number][]): string {
+  const perBlock = new Map<string, ReturnType<typeof groupToPieces>[number]['grain']>();
+  for (const piece of pieces) {
+    if (!piece.blockName || perBlock.has(piece.blockName)) continue;
+    perBlock.set(piece.blockName, piece.grain);
+  }
+  const stats = new Map<string, { one: number; seen: number; lengths: number[] }>();
+  for (const grains of perBlock.values()) {
+    const byLayer = new Map<string, typeof grains>();
+    for (const grain of grains)
+      byLayer.set(grain.layer, [...(byLayer.get(grain.layer) ?? []), grain]);
+    for (const [layer, hits] of byLayer) {
+      const stat = stats.get(layer) ?? { one: 0, seen: 0, lengths: [] };
+      stat.seen++;
+      if (hits.length === 1) {
+        stat.one++;
+        stat.lengths.push(hits[0].lengthCm);
+      }
+      stats.set(layer, stat);
+    }
+  }
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  };
+  const best = [...stats.entries()].sort(
+    (a, b) =>
+      b[1].one - a[1].one || median(b[1].lengths) - median(a[1].lengths) || b[1].seen - a[1].seen,
+  )[0];
+  return best && best[1].one > 0 && best[1].one * 2 >= best[1].seen ? best[0] : '';
+}
+
+function pushGrain(segs: Seg[], segment: GrainSegment, headLengthCm = 0.3) {
+  const arrow = grainArrowGeometry(segment, headLengthCm);
+  if (!arrow) return;
+  segs.push({ kind: 'line', closed: false, pts: [arrow.shaft.a, arrow.shaft.b] });
+  for (const head of arrow.heads) segs.push({ kind: 'line', closed: true, pts: head, fill: true });
+}
+
+function samePoint(a: Pt, b: Pt): boolean {
+  return Math.hypot(a.x - b.x, a.y - b.y) <= 1e-6;
+}
 
 /**
  * A DXF sheet exactly as drawn. Every chain of every expanded block is drawn as a thin line (that
@@ -147,12 +198,14 @@ export function drawingFromDxf(
       }`,
     );
   warnings.push(...expandNotes);
+  const prepared = groups.map((group) => ({
+    group,
+    raws: groupToPieces(group, NEST_DEFAULTS.tolChain, warnings),
+  }));
+  const grainLayer = grainLayerOf(prepared.flatMap((entry) => entry.raws));
   const segs: Seg[] = [];
   const labels: { at: Pt; s: string }[] = [];
-  for (const g of groups) {
-    for (const c of g.chains)
-      segs.push({ kind: c.notch ? 'notch' : 'line', closed: c.closed, pts: c.pts });
-    const raws = groupToPieces(g, NEST_DEFAULTS.tolChain, warnings);
+  for (const { group: g, raws } of prepared) {
     let cut: (typeof raws)[number] | null = null;
     let best = -1;
     for (const r of raws) {
@@ -162,8 +215,24 @@ export function drawingFromDxf(
         cut = r;
       }
     }
+    const grains = cut?.grain.filter((grain) => grain.layer === grainLayer) ?? [];
+    const grain = g.blockName != null && grains.length === 1 ? grains[0] : null;
+    for (const c of g.chains) {
+      const isGrain =
+        grain &&
+        c.layer === grainLayer &&
+        !c.closed &&
+        c.pts.length >= 2 &&
+        samePoint(c.pts[0], grain.a) &&
+        samePoint(c.pts[1], grain.b);
+      if (!isGrain) segs.push({ kind: c.notch ? 'notch' : 'line', closed: c.closed, pts: c.pts });
+    }
     if (!cut) continue;
     segs.push({ kind: 'cut', closed: true, pts: cut.poly });
+    if (grain) {
+      const segment = grainDisplaySegment([cut.poly], grain);
+      if (segment) pushGrain(segs, segment);
+    }
     const label = (g.blockName ?? '').trim();
     if (label) labels.push({ at: centroid(cut.poly), s: label });
   }
@@ -212,8 +281,16 @@ export function drawingFromMarker(
     const poly = placedPoly(dto.poly, pl);
     segs.push({ kind: 'cut', closed: true, pts: poly });
     for (const c of dto.inner ?? [])
-      if (c.pts.length >= 2)
+      if (c.pts.length >= 2 && c.layer !== dto.displayGrain?.layer)
         segs.push({ kind: 'line', closed: c.closed, pts: placedPoly(c.pts, pl) });
+    if (dto.displayGrain) {
+      const local = grainDisplaySegment([dto.poly], dto.displayGrain);
+      if (local)
+        pushGrain(segs, {
+          a: placedPoly([local.a], pl)[0],
+          b: placedPoly([local.b], pl)[0],
+        });
+    }
     labels.push({ at: centroid(poly), s: dto.name });
   }
   return normalize(segs, labels, false, title, []);

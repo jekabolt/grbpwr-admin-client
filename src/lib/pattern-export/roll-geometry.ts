@@ -1,4 +1,4 @@
-import { grainAngleOf } from 'lib/nesting/geom/grain-orient';
+import { grainAngleOf, grainCandidateOf } from 'lib/nesting/geom/grain-orient';
 import { convexHull, gapOctagon } from 'lib/nesting/geom/convex';
 import { fromPath64, toPath64 } from 'lib/nesting/geom/clipper';
 import { offsetOutward } from 'lib/nesting/geom/offset';
@@ -70,8 +70,17 @@ function minimumRectangleAxisDeg(piece: PieceDTO): number {
   return Math.abs(degrees) < 1e-8 ? 0 : degrees;
 }
 
-function rotatePiece(piece: PieceDTO, axisDeg: number): PieceDTO {
-  if (Math.abs(axisDeg) < 1e-8) return { ...piece, grain: undefined };
+function rotatePiece(piece: PieceDTO, axisDeg: number, grainLayer: string): PieceDTO {
+  const candidate = grainCandidateOf(piece, grainLayer);
+  const sourceGrain =
+    candidate && piece.originX != null && piece.originY != null
+      ? {
+          layer: grainLayer,
+          a: { x: candidate.a.x - piece.originX, y: candidate.a.y - piece.originY },
+          b: { x: candidate.b.x - piece.originX, y: candidate.b.y - piece.originY },
+        }
+      : undefined;
+  if (Math.abs(axisDeg) < 1e-8) return { ...piece, grain: undefined, displayGrain: sourceGrain };
   const angle = (-axisDeg * Math.PI) / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -93,6 +102,13 @@ function rotatePiece(piece: PieceDTO, axisDeg: number): PieceDTO {
     bboxW: bb.maxX - bb.minX,
     bboxH: bb.maxY - bb.minY,
     areaCm2: area(poly),
+    displayGrain: sourceGrain
+      ? {
+          layer: sourceGrain.layer,
+          a: local(rotate(sourceGrain.a)),
+          b: local(rotate(sourceGrain.b)),
+        }
+      : undefined,
     originX: undefined,
     originY: undefined,
     grain: undefined,
@@ -110,7 +126,7 @@ export function straightenRollPiece(piece: PieceDTO, grainLayer: string): Straig
   const grain = grainAngleOf(piece, grainLayer);
   const source = grain == null ? 'rectangle' : 'grain';
   const axisDeg = grain ?? minimumRectangleAxisDeg(piece);
-  return { piece: rotatePiece(piece, axisDeg), axisDeg, source };
+  return { piece: rotatePiece(piece, axisDeg, grainLayer), axisDeg, source };
 }
 
 function centroid(poly: readonly Pt[]): Pt {

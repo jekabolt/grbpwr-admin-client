@@ -7976,7 +7976,11 @@ export function OperationsField({
         aria-label={`add ${pieceName} to assembly`}
       >
         <span className='flex min-w-0 items-center gap-1'>
-          <PieceSilhouette found={shape} boxClassName={`m-0 size-4 ${SILHOUETTE_INK}`} />
+          <PieceSilhouette
+            found={shape}
+            boxClassName={`m-0 size-4 ${SILHOUETTE_INK}`}
+            boxPx={{ w: 16, h: 16 }}
+          />
           <span className='truncate'>{pieceName}</span>
         </span>
       </AddDoor>

@@ -162,7 +162,13 @@ export function PieceList({
             >
               <span className='flex h-12 w-full items-center justify-center bg-bgColor p-1'>
                 {found ? (
-                  <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+                  <PieceShape
+                    piece={found.piece}
+                    grainLayer={found.grainLayer ?? found.piece.manifest?.grainLayer ?? ''}
+                    outlineOnly
+                    hatchW={40}
+                    hatchH={40}
+                  />
                 ) : (
                   // ДЕТАЛЬ БЕЗ КОНТУРА НАЗЫВАЕТСЯ ТАК ВСЛУХ, и это не косметика: пока она
                   // назначена этой ткани, расчёт «по выкройкам» ОТКАЗЫВАЕТ целиком (площадь
@@ -170,7 +176,8 @@ export function PieceList({
                   // диалога через два экрана.
                   <Text size='nano' variant='label' component='span' className='text-center'>
                     not
-                    <br />in the patterns
+                    <br />
+                    in the patterns
                   </Text>
                 )}
               </span>
@@ -243,8 +250,8 @@ export function PieceMultiPicker({
       </ChipRow>
       {dangling.length > 0 && (
         <Text size='micro' className='text-error'>
-          {dangling.length} {dangling.length === 1 ? 'piece' : 'pieces'} deleted on the PATTERNS
-          tab — pick again
+          {dangling.length} {dangling.length === 1 ? 'piece' : 'pieces'} deleted on the PATTERNS tab
+          — pick again
         </Text>
       )}
       {hint && (

@@ -13,6 +13,8 @@
 // `inner` (dxf/pieces.ts puts every chain not on the contour's own layer there).
 import type { NestResult, PieceDTO, Pt } from 'lib/nesting/types';
 import { placedPoly } from 'lib/nesting/types';
+import { grainArrowGeometry, grainDisplaySegment } from 'lib/nesting/geom/grain-display';
+import type { DrawingStroke } from './drawing';
 import type { PlotDrawing, PlotPolyline, PlotRole, PlotText } from './hpgl';
 
 /** AAMA/ASTM notch layer (lib/nesting/dxf/notch.ts NOTCH_LAYER; not imported: worker-only module). */
@@ -230,4 +232,86 @@ export function plotFromMarker(
   }
   if (missing) warnings.push(`${missing} placement(s) refer to pieces that are not in the parse`);
   return { polylines, texts, warnings };
+}
+
+/**
+ * PDF-only recovery for a PLT, whose pen stream no longer carries DXF layer names. The longest
+ * qualifying two-point internal line already lying on each cut contour is treated as its grain;
+ * plotter export stays byte-for-byte on the neutral PlotDrawing path above.
+ */
+export function withPdfGrainArrows(source: readonly DrawingStroke[]): DrawingStroke[] {
+  const replaced = new Set<DrawingStroke>();
+  const arrows: DrawingStroke[] = [];
+  for (const cut of source.filter((stroke) => stroke.kind === 'cut' && stroke.closed)) {
+    const ring = cut.pts.map(([x, y]) => ({ x, y }));
+    if (ring.length < 3) continue;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const point of ring) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+    const extent = Math.hypot(maxX - minX, maxY - minY);
+    let best: {
+      stroke: DrawingStroke;
+      segment: NonNullable<ReturnType<typeof grainDisplaySegment>>;
+      length: number;
+    } | null = null;
+    for (const stroke of source) {
+      if (
+        replaced.has(stroke) ||
+        stroke.kind !== 'line' ||
+        stroke.closed ||
+        stroke.pts.length !== 2
+      )
+        continue;
+      const segment = {
+        a: { x: stroke.pts[0][0], y: stroke.pts[0][1] },
+        b: { x: stroke.pts[1][0], y: stroke.pts[1][1] },
+      };
+      const length = Math.hypot(segment.b.x - segment.a.x, segment.b.y - segment.a.y);
+      if (length < Math.max(20, extent * 0.25)) continue;
+      const fitted = grainDisplaySegment([ring], segment);
+      if (!fitted) continue;
+      const ux = (segment.b.x - segment.a.x) / length;
+      const uy = (segment.b.y - segment.a.y) / length;
+      const sourceMid = {
+        x: (segment.a.x + segment.b.x) / 2,
+        y: (segment.a.y + segment.b.y) / 2,
+      };
+      const fittedMid = {
+        x: (fitted.a.x + fitted.b.x) / 2,
+        y: (fitted.a.y + fitted.b.y) / 2,
+      };
+      const offset = Math.abs((fittedMid.x - sourceMid.x) * -uy + (fittedMid.y - sourceMid.y) * ux);
+      if (offset > Math.max(1, extent * 0.02)) continue;
+      const fittedLength = Math.hypot(fitted.b.x - fitted.a.x, fitted.b.y - fitted.a.y);
+      if (!best || fittedLength > best.length)
+        best = { stroke, segment: fitted, length: fittedLength };
+    }
+    if (!best) continue;
+    const arrow = grainArrowGeometry(best.segment, 3);
+    if (!arrow) continue;
+    replaced.add(best.stroke);
+    arrows.push({
+      kind: 'line',
+      closed: false,
+      pts: [
+        [arrow.shaft.a.x, arrow.shaft.a.y],
+        [arrow.shaft.b.x, arrow.shaft.b.y],
+      ],
+    });
+    for (const head of arrow.heads)
+      arrows.push({
+        kind: 'line',
+        closed: true,
+        fill: true,
+        pts: head.map((point) => [point.x, point.y] as [number, number]),
+      });
+  }
+  return [...source.filter((stroke) => !replaced.has(stroke)), ...arrows];
 }

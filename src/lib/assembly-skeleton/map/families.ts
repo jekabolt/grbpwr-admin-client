@@ -10,6 +10,7 @@ import type { EdgeId, PieceGeom, Pt2 } from '../types';
 import { resolveEdge } from '../union/layout';
 import { bboxOf, along, pieceNotchesLocal, polyLen, type MapNotch } from './frame';
 import type { MapRead } from './step-seams';
+import { mapGrainLayer, mapGrainSegment } from './grain';
 
 export type PieceEdgeMark = {
   id: EdgeId;
@@ -28,6 +29,7 @@ export type PieceMapPicture = {
   w: number;
   h: number;
   outline: Pt2[];
+  grain?: [Pt2, Pt2];
   /** Sewn edges only; the rest of the outline is «not sewn in any step». */
   edges: PieceEdgeMark[];
   notches: MapNotch[];
@@ -60,6 +62,7 @@ export function piecePicture(
   g: PieceGeom,
   stepsOf: (id: EdgeId) => number[],
   ids: readonly EdgeId[],
+  grainLayer = '',
 ): PieceMapPicture {
   const B = bboxOf(g.rs);
   const flip = (p: Pt2): Pt2 => [p[0] - B.x0, B.y1 - p[1]];
@@ -81,6 +84,7 @@ export function piecePicture(
     w: B.x1 - B.x0,
     h: B.y1 - B.y0,
     outline: g.rs.map(flip),
+    grain: mapGrainSegment(g, grainLayer)?.map(flip) as [Pt2, Pt2] | undefined,
     edges,
     notches: pieceNotchesLocal(g).map((n) => ({
       at: flip(n.at),
@@ -107,6 +111,7 @@ export function pieceFamilies(read: MapRead): PieceFamily[] {
   const seen = new Set<string>();
   const out: PieceFamily[] = [];
   const pieces = read.graph.pieces.filter((p) => p.rs.length >= 3);
+  const grainLayer = mapGrainLayer(pieces);
   const byKey = new Map(pieces.map((p) => [p.pieceKey, p]));
   for (const p of pieces) {
     if (seen.has(p.pieceKey)) continue;
@@ -155,7 +160,7 @@ export function pieceFamilies(read: MapRead): PieceFamily[] {
       tag,
       name: handless(leader.name),
       first: all.length ? Math.min(...all) : Infinity,
-      picture: piecePicture(leader, stepsOf, [...steps.keys()]),
+      picture: piecePicture(leader, stepsOf, [...steps.keys()], grainLayer),
     });
   }
   return out.sort((a, b) => (a.first === b.first ? 0 : a.first < b.first ? -1 : 1));

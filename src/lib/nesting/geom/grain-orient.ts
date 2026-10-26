@@ -12,15 +12,19 @@
 // так что импорт её в UI не тащит ни clipper, ни dxf-parser.
 import type { PieceDTO } from '../types';
 
-// Угол долевой детали на выбранном слое, или null если однозначно определить нельзя.
-export function grainAngleOf(piece: PieceDTO, layer: string): number | null {
+export function grainCandidateOf(piece: PieceDTO, layer: string) {
   if (!layer) return null;
   // У деталей из «россыпи» (файл без блоков) кандидаты — общие на весь чертёж: там нет
   // подетальной долевой, и один случайный отрезок развернул бы весь лист.
   if (!piece.blockName) return null;
   const hits = (piece.grain ?? []).filter((c) => c.layer === layer);
   // Ровно один — иначе непонятно, какой из отрезков долевая, и молча выбирать нельзя.
-  return hits.length === 1 ? hits[0].angleDeg : null;
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Угол долевой детали на выбранном слое, или null если однозначно определить нельзя.
+export function grainAngleOf(piece: PieceDTO, layer: string): number | null {
+  return grainCandidateOf(piece, layer)?.angleDeg ?? null;
 }
 
 export type OrientResult = {
@@ -35,15 +39,24 @@ export function orientToGrain(pieces: readonly PieceDTO[], layer: string): Orien
   const missing: string[] = [];
   let rotated = 0;
   for (const p of pieces) {
-    const angle = grainAngleOf(p, layer);
-    if (angle == null) {
+    const candidate = grainCandidateOf(p, layer);
+    if (!candidate) {
       missing.push(p.name);
       out.push(p);
       continue;
     }
+    const angle = candidate.angleDeg;
+    const localGrain =
+      p.originX != null && p.originY != null
+        ? {
+            layer,
+            a: { x: candidate.a.x - p.originX, y: candidate.a.y - p.originY },
+            b: { x: candidate.b.x - p.originX, y: candidate.b.y - p.originY },
+          }
+        : undefined;
     // Уже вдоль полосы — не трогаем, чтобы не плодить дребезг тригонометрии на ровном месте.
     if (Math.abs(angle) < 1e-9) {
-      out.push(p);
+      out.push({ ...p, displayGrain: localGrain });
       continue;
     }
     const rad = (-angle * Math.PI) / 180;
@@ -79,6 +92,19 @@ export function orientToGrain(pieces: readonly PieceDTO[], layer: string): Orien
       })),
       bboxW: maxX - minX,
       bboxH: maxY - minY,
+      displayGrain: localGrain
+        ? {
+            layer,
+            a: {
+              x: localGrain.a.x * cos - localGrain.a.y * sin - minX,
+              y: localGrain.a.x * sin + localGrain.a.y * cos - minY,
+            },
+            b: {
+              x: localGrain.b.x * cos - localGrain.b.y * sin - minX,
+              y: localGrain.b.x * sin + localGrain.b.y * cos - minY,
+            },
+          }
+        : undefined,
       // Повёрнутая деталь больше НЕ лежит на своём месте в чертеже. Снимаем координаты, чтобы
       // её случайно не нарисовали на листе: пустое место честнее неверного.
       originX: undefined,

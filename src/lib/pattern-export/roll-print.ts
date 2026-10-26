@@ -7,6 +7,7 @@
 // signatures only; the engine fills in the bodies.
 import type { ExportDeps, ExportResult } from './formats';
 import type { PatternDrawing } from './drawing';
+import { grainArrowGeometry, grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import { PDF_PAGE_LIMIT_MM, renderPdf, type PdfPlan } from './dxf-pdf';
 import { bounds } from 'lib/nesting/geom/polygon';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
@@ -457,13 +458,45 @@ function drawingFromRollPlacements(
     const outline = placedPoly(piece.poly, placement).map(pagePoint);
     strokes.push({ kind: 'cut', closed: true, pts: outline, pieceKey });
     for (const path of piece.inner ?? []) {
-      if (path.pts.length < 2) continue;
+      if (path.pts.length < 2 || path.layer === piece.displayGrain?.layer) continue;
       strokes.push({
         kind: 'line',
         closed: path.closed,
         pts: placedPoly(path.pts, placement).map(pagePoint),
         pieceKey,
       });
+    }
+    if (piece.displayGrain) {
+      const local = grainDisplaySegment([piece.poly], piece.displayGrain);
+      if (local) {
+        const placed = placedPoly([local.a, local.b], placement).map(pagePoint);
+        const arrow = grainArrowGeometry(
+          {
+            a: { x: placed[0][0], y: placed[0][1] },
+            b: { x: placed[1][0], y: placed[1][1] },
+          },
+          3,
+        );
+        if (arrow) {
+          strokes.push({
+            kind: 'line',
+            closed: false,
+            pts: [
+              [arrow.shaft.a.x, arrow.shaft.a.y],
+              [arrow.shaft.b.x, arrow.shaft.b.y],
+            ],
+            pieceKey,
+          });
+          for (const head of arrow.heads)
+            strokes.push({
+              kind: 'line',
+              closed: true,
+              fill: true,
+              pts: head.map((point) => [point.x, point.y] as [number, number]),
+              pieceKey,
+            });
+        }
+      }
     }
     const [x, y] = polygonCentroid(outline);
     labels.push({

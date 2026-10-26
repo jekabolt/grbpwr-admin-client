@@ -27,11 +27,13 @@
 // размеров, и формы деталей, и миниатюры листов: обе панели вкладки просят одну и ту же пачку.
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
+import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import type { ConversionManifest } from 'lib/pattern-import/types';
-import { memo, useId, useMemo } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { clothPatternDefs, hatchId } from '../cloth-hatch';
+import { GrainArrow } from '../grain-arrow';
 import type { PieceClothState } from '../piece-cloth';
 import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
@@ -226,6 +228,7 @@ export type FoundPiece = {
   size: string;
   instances: number;
   layer: string;
+  grainLayer?: string;
   sizes: string[];
   /**
    * Every contour of this block in this size from the file `piece` came from, one per layer (cut
@@ -280,6 +283,7 @@ export function findPiece(
       size,
       instances: Math.max(...perFile.values()),
       layer: drawn[0].layer ?? '',
+      grainLayer: index.grainLayer,
       sizes,
       layers: list.filter((p) => p.fileIndex === drawn[0].fileIndex),
     };
@@ -352,6 +356,33 @@ export const PieceShape = memo(function PieceShape({
       : [];
   const ox = piece.originX ?? 0;
   const oy = piece.originY ?? 0;
+  const grainCandidate = grain.length === 1 ? grain[0] : null;
+  const grainSegment = useMemo(
+    () =>
+      grainCandidate
+        ? grainDisplaySegment([piece.poly], {
+            a: { x: grainCandidate.a.x - ox, y: grainCandidate.a.y - oy },
+            b: { x: grainCandidate.b.x - ox, y: grainCandidate.b.y - oy },
+          })
+        : null,
+    [grainCandidate, piece.poly, ox, oy],
+  );
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!grainSegment || (hatchW && hatchH) || typeof ResizeObserver === 'undefined') return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const measure = () => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) setMeasured({ w: rect.width, h: rect.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, [grainSegment, hatchW, hatchH]);
 
   // id паттерна — на ИНСТАНС компонента, не на роль и не на деталь. `url(#id)` резолвится
   // документо-глобально в ПЕРВЫЙ подходящий def, а `u` считается из viewBox конкретной детали —
@@ -361,16 +392,16 @@ export const PieceShape = memo(function PieceShape({
   // `xMidYMid meet` вписывает viewBox в бокс по МЕНЬШЕЙ из двух долей — она и есть число
   // CSS-пикселей на user unit; `u` обратно ей. Перепутать оси здесь = увести шаг решётки на
   // десятки процентов по аспекту детали.
-  const px = Math.min(
-    (hatchW && hatchW > 0 ? hatchW : HATCH_BOX_FALLBACK.w) / box.w,
-    (hatchH && hatchH > 0 ? hatchH : HATCH_BOX_FALLBACK.h) / box.h,
-  );
+  const renderW = hatchW && hatchW > 0 ? hatchW : measured?.w || HATCH_BOX_FALLBACK.w;
+  const renderH = hatchH && hatchH > 0 ? hatchH : measured?.h || HATCH_BOX_FALLBACK.h;
+  const px = Math.min(renderW / box.w, renderH / box.h);
   // Роли без знака (`unbound`, и любая будущая `flat`) отдают null — и путь ниже уходит на
   // сегодняшнюю разметку буква в букву, без единого лишнего узла.
   const patternDefs = hatchRole ? clothPatternDefs(patternId, hatchRole, 1 / (px || 1)) : null;
 
   return (
     <svg
+      ref={svgRef}
       xmlns='http://www.w3.org/2000/svg'
       viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
       className={className ?? 'block h-full w-full'}
@@ -424,14 +455,13 @@ export const PieceShape = memo(function PieceShape({
       )}
       {/* Ровно один отрезок = то, что ориентация считает долевой (см. grain.ts). Несколько —
           значит слой несёт не только её, и показывать «долевую» было бы выдумкой. */}
-      {grain.length === 1 && (
-        <line
-          x1={grain[0].a.x - ox}
-          y1={vy(grain[0].a.y - oy)}
-          x2={grain[0].b.x - ox}
-          y2={vy(grain[0].b.y - oy)}
-          stroke='#c22222'
-          strokeWidth={box.w / 160 || 0.01}
+      {grainSegment && Math.min(renderW, renderH) >= 24 && (
+        <GrainArrow
+          segment={{
+            a: { x: grainSegment.a.x, y: vy(grainSegment.a.y) },
+            b: { x: grainSegment.b.x, y: vy(grainSegment.b.y) },
+          }}
+          pxPerUnit={px}
         />
       )}
     </svg>

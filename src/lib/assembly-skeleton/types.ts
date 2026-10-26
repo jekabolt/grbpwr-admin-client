@@ -126,6 +126,9 @@ export type PieceGeom = {
   rect: boolean;
   areaMm2: number;
   perimMm: Mm;
+  /** Source grain candidates, normalized into this piece frame and converted to millimetres. */
+  grain?: { layer: string; a: Pt2; b: Pt2 }[];
+  declaredGrainLayer?: string;
   twinOf: { key: string; kind: 'mirror' | 'identical' }[];
   /** Internal marks of the piece, classified (geometry/marks.ts); seam-line copies left out. */
   marks?: PieceMark[];

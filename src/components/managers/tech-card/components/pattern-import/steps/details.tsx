@@ -7,6 +7,7 @@
 // are accepted only from the overview that shows every one of them on its piece — "review N"
 // opens it, "accept these N" there applies them (two clicks, nothing accepted unseen).
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import type {
   AllowanceDecision,
   FoldAsk,
@@ -22,6 +23,7 @@ import type {
 } from 'lib/pattern-import/types';
 import { PATIMPORT } from 'lib/pattern-import/types';
 import { cn } from 'lib/utility';
+import { GrainArrow } from '../../grain-arrow';
 import {
   BackLink,
   Button,
@@ -2035,10 +2037,13 @@ export function DetailsStep({
                         );
                       })}
                       {proposals.map((g) => {
+                        const family = families.find((f) => f.seed === g.seed);
+                        const outline = family?.candidates[family.candidates.length - 1]?.outer;
+                        if (!outline?.length) return null;
                         const m = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
                         return (
                           <g key={g.seed}>
-                            <GrainMark a={g.a} b={g.b} unit={unit} tone={SHEET_INK.blue} dashed />
+                            <GrainMark a={g.a} b={g.b} outline={outline} unit={unit} dashed />
                             <text
                               x={m.x + unit * 10}
                               y={vy(m.y)}
@@ -2229,16 +2234,16 @@ export function DetailsStep({
                             <GrainMark
                               a={selGrain.a}
                               b={selGrain.b}
+                              outline={selOuter}
                               unit={unit}
-                              tone={inputs.operatorGrain[sel] ? SHEET_INK.blue : SHEET_INK.red}
                             />
                           )}
                           {selProposal && (
                             <GrainMark
                               a={selProposal.a}
                               b={selProposal.b}
+                              outline={selOuter}
                               unit={unit}
-                              tone={SHEET_INK.blue}
                               dashed
                             />
                           )}
@@ -2672,38 +2677,28 @@ function MarkBox({ n }: { n: number }) {
 function GrainMark({
   a,
   b,
+  outline,
   unit,
-  tone,
   dashed,
 }: {
   a: PtMm;
   b: PtMm;
+  outline: readonly PtMm[];
   unit: number;
-  tone: string;
   /** A1: a proposal, not yet the piece's grain. */
   dashed?: boolean;
 }) {
-  const ang = Math.atan2(vy(b.y) - vy(a.y), b.x - a.x);
-  const h = unit * 10;
-  const tip = (p: PtMm, dir: number) => {
-    const x = p.x;
-    const y = vy(p.y);
-    return `${x},${y} ${x - h * Math.cos(ang - dir * 0.4) * dir},${y - h * Math.sin(ang - dir * 0.4) * dir} ${x - h * Math.cos(ang + dir * 0.4) * dir},${y - h * Math.sin(ang + dir * 0.4) * dir}`;
-  };
+  const segment = grainDisplaySegment([outline], { a, b });
+  if (!segment) return null;
   return (
-    <g pointerEvents='none'>
-      <line
-        x1={a.x}
-        y1={vy(a.y)}
-        x2={b.x}
-        y2={vy(b.y)}
-        stroke={tone}
-        strokeWidth={unit * 1.8}
-        strokeDasharray={dashed ? `${unit * 8} ${unit * 5}` : undefined}
-      />
-      <polygon points={tip(b, 1)} fill={tone} />
-      <polygon points={tip(a, -1)} fill={tone} />
-    </g>
+    <GrainArrow
+      segment={{
+        a: { x: segment.a.x, y: vy(segment.a.y) },
+        b: { x: segment.b.x, y: vy(segment.b.y) },
+      }}
+      pxPerUnit={1 / unit}
+      dashed={dashed}
+    />
   );
 }
 

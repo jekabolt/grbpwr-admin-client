@@ -5,6 +5,7 @@
 // Номер — ДВЕРЬ: наведение светит шаг в рельсе, щелчок выбирает его (липко) и открывает в рельсе.
 import type { PieceMapPicture } from 'lib/assembly-skeleton/map';
 import { Fragment, memo } from 'react';
+import { GrainArrow } from '../grain-arrow';
 
 const NUM_PX = 9;
 const NUM_GAP_PX = 8;
@@ -113,6 +114,15 @@ export const PieceMapShape = memo(function PieceMapShape({
         vectorEffect='non-scaling-stroke'
         strokeLinejoin='round'
       />
+      {picture.grain && (
+        <GrainArrow
+          segment={{
+            a: { x: picture.grain[0][0], y: picture.grain[0][1] },
+            b: { x: picture.grain[1][0], y: picture.grain[1][1] },
+          }}
+          pxPerUnit={px}
+        />
+      )}
       {picture.notches.map((n, i) => (
         <line
           key={i}

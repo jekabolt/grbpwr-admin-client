@@ -13,6 +13,7 @@ import { unionPicture } from '../union/picture';
 import { bboxOf, centroidOf, edgeNotchesLocal, edgesOf, framer, type MapNotch } from './frame';
 import { seamEdgeIds, type MapRead } from './step-seams';
 import { pieceKeyOf, resolveEdge } from '../union/layout';
+import { mapGrainLayer, mapGrainSegment } from './grain';
 
 export type PairShape = {
   pieceKey: string;
@@ -20,6 +21,7 @@ export type PairShape = {
   input: number;
   /** Closed outline, y down, mm from the picture's top-left. */
   pts: Pt2[];
+  grain?: [Pt2, Pt2];
   /** Identical layers drawn as this one shape. */
   count: number;
   hung: boolean;
@@ -86,6 +88,7 @@ export function pairPicture(read: MapRead, i: number, opts: PairOptions = {}): P
   if (pic.shapes.length === 0) return null;
   const { x0, y1 } = layout.bbox;
   const T = new Map(layout.placements.map((p) => [p.pieceKey, p.T]));
+  const grainLayer = mapGrainLayer(read.graph.pieces);
 
   const sides: PairSide[] = [];
   for (const c of sew)
@@ -128,7 +131,18 @@ export function pairPicture(read: MapRead, i: number, opts: PairOptions = {}): P
   };
   const shapes: PairShape[] = pic.shapes.map((s) => {
     const k = inputOf.get(s.pieceKey) ?? -1;
-    return { pieceKey: s.pieceKey, input: k, pts: s.pts.map(mv(k)), count: s.count, hung: s.hung };
+    const geom = read.geoms.get(s.pieceKey);
+    const transform = T.get(s.pieceKey);
+    const F = transform ? framer(transform, x0, y1) : null;
+    const grain = geom && F ? mapGrainSegment(geom, grainLayer)?.map(F.pt) : undefined;
+    return {
+      pieceKey: s.pieceKey,
+      input: k,
+      pts: s.pts.map(mv(k)),
+      grain: grain?.map(mv(k)) as [Pt2, Pt2] | undefined,
+      count: s.count,
+      hung: s.hung,
+    };
   });
   for (const s of sides) {
     const m = mv(s.input);
@@ -138,7 +152,10 @@ export function pairPicture(read: MapRead, i: number, opts: PairOptions = {}): P
   // Re-origin at the top-left of what is drawn.
   const B = bboxOf(shapes.flatMap((s) => s.pts));
   const o = (p: Pt2): Pt2 => [p[0] - B.x0, p[1] - B.y0];
-  for (const s of shapes) s.pts = s.pts.map(o);
+  for (const s of shapes) {
+    s.pts = s.pts.map(o);
+    if (s.grain) s.grain = s.grain.map(o) as [Pt2, Pt2];
+  }
   for (const s of sides) {
     s.pts = s.pts.map(o);
     s.notches = s.notches.map((n) => ({ at: o(n.at), inward: n.inward }));

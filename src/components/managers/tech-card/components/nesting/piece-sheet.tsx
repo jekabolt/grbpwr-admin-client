@@ -9,10 +9,12 @@
 // которой считается раскладка и заводятся детали, так что показанное и сопоставляемое не могут
 // разойтись. Вьювер красивее, но он ничего не знает про детали.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
 import type { BoxMm } from 'lib/pattern-import/types';
 import { GenericPopover, Text } from 'ui';
+import { GrainArrow } from '../grain-arrow';
 import { BodySilhouette } from './body-silhouette';
 import { outlineGeo } from './sheet-outline-geo';
 import { useSheetViewPrefs, type SheetViewPrefs } from './sheet-view-prefs';
@@ -645,27 +647,22 @@ export function PieceSheet({
                 // чем она пользуется, иначе проверка проверяла бы не то.
                 if (g.length !== 1) return null;
                 const { a, b } = g[0];
+                const ox = p.originX!;
+                const oy = p.originY!;
+                const segment = grainDisplaySegment(
+                  [p.poly.map((point) => ({ x: point.x + ox, y: point.y + oy }))],
+                  { a, b },
+                );
+                if (!segment) return null;
                 return (
-                  <g key={`g${p.id}`} pointerEvents='none'>
-                    <line
-                      x1={a.x}
-                      y1={vy(a.y)}
-                      x2={b.x}
-                      y2={vy(b.y)}
-                      stroke={DROP_RED}
-                      strokeWidth={box.w / 400 || 0.01}
-                    />
-                    {/* Засечки на концах: без них короткая линия читается как случайный штрих. */}
-                    {[a, b].map((pt, i) => (
-                      <circle
-                        key={i}
-                        cx={pt.x}
-                        cy={vy(pt.y)}
-                        r={box.w / 300 || 0.01}
-                        fill={DROP_RED}
-                      />
-                    ))}
-                  </g>
+                  <GrainArrow
+                    key={`g${p.id}`}
+                    segment={{
+                      a: { x: segment.a.x, y: vy(segment.a.y) },
+                      b: { x: segment.b.x, y: vy(segment.b.y) },
+                    }}
+                    pxPerUnit={1 / px}
+                  />
                 );
               })
             : null}

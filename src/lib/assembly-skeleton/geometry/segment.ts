@@ -356,6 +356,21 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
     rect,
     areaMm2: Math.abs(signedArea(loop)),
     perimMm: polyLength(loop, true),
+    grain:
+      input.piece.originX != null && input.piece.originY != null
+        ? (input.piece.grain ?? []).map((grain) => ({
+            layer: grain.layer,
+            a: [
+              (grain.a.x - input.piece.originX!) * MM_PER_CM,
+              (grain.a.y - input.piece.originY!) * MM_PER_CM,
+            ],
+            b: [
+              (grain.b.x - input.piece.originX!) * MM_PER_CM,
+              (grain.b.y - input.piece.originY!) * MM_PER_CM,
+            ],
+          }))
+        : undefined,
+    declaredGrainLayer: input.piece.manifest?.grainLayer,
     twinOf: [],
   };
   // P2 step 0: the internal marks, read against this sewing line (03-P2-DESIGN §2).

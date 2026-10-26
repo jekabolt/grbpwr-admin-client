@@ -20,10 +20,12 @@ import {
   type ReactNode,
 } from 'react';
 import { Text } from 'ui';
+import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import type { FabricDirection, Placement, PieceDTO, Pt, RotationDeg } from 'lib/nesting/types';
 import { allowedRotations, placedPoly } from 'lib/nesting/types';
 import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
 import { rotatedBounds } from 'lib/nesting/geom/clearance';
+import { GrainArrow } from '../grain-arrow';
 
 const FILL = '#f2f2f2';
 const FILL_SELECTED = '#e4e9f2';
@@ -470,6 +472,9 @@ export function LayoutEditor({
         const at = drag?.index === index ? drag : pl;
         const bad = violating.has(index);
         const on = selected === index;
+        const grain = piece.displayGrain
+          ? grainDisplaySegment([piece.poly], piece.displayGrain)
+          : null;
         return (
           // ДОГОВОР О РАЗМЕЩЕНИИ, выраженный матрицами SVG (lib/nesting/types.ts):
           //     placed(p) = R(rot) · M^flipped · p + (x, y),   M: (x, y) ↦ (−x, y)
@@ -504,26 +509,43 @@ export function LayoutEditor({
                 тем же transform'ом, что и контур, поэтому остаются на своих местах при
                 любом повороте и перетаскивании. Раскройщик режет по маркеру — маркер без
                 надсечек неполон. */}
-            {(piece.inner ?? []).map((c, k) => {
-              const pts = c.pts.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ');
-              const Tag = c.closed ? 'polygon' : 'polyline';
-              return (
-                <Tag
-                  key={k}
-                  points={pts}
-                  fill='none'
-                  stroke={STROKE}
-                  strokeWidth={0.75}
-                  vectorEffect='non-scaling-stroke'
-                />
-              );
-            })}
+            {(piece.inner ?? [])
+              .filter((c) => c.layer !== piece.displayGrain?.layer)
+              .map((c, k) => {
+                const pts = c.pts.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ');
+                const Tag = c.closed ? 'polygon' : 'polyline';
+                return (
+                  <Tag
+                    key={k}
+                    points={pts}
+                    fill='none'
+                    stroke={STROKE}
+                    strokeWidth={0.75}
+                    vectorEffect='non-scaling-stroke'
+                  />
+                );
+              })}
+            {grain && Math.min(piece.bboxW, piece.bboxH) * settledS >= 24 && (
+              <GrainArrow segment={grain} pxPerUnit={settledS} />
+            )}
           </g>
         );
       }),
     // Обработчики замыкают placements/drag/editable/onChange — они в зависимостях.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [placements, byId, drag, selected, violating, pointsById, editable, onChange, marginCm, W],
+    [
+      placements,
+      byId,
+      drag,
+      selected,
+      violating,
+      pointsById,
+      editable,
+      onChange,
+      marginCm,
+      W,
+      settledS,
+    ],
   );
 
   // Подписи — отдельным слоем поверх всех контуров. Кегль задан в см от «осевшего» масштаба,

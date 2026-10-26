@@ -5,6 +5,7 @@
 // Координаты наружу не отдаются (01-PLAN §5): это пиктограмма, не чертёж.
 import type { PairPicture } from 'lib/assembly-skeleton/map';
 import { memo } from 'react';
+import { GrainArrow } from '../grain-arrow';
 
 const NAME_PX = 9;
 const NOTCH_PX = 9;
@@ -115,6 +116,15 @@ export const PairShape = memo(function PairShape({
               vectorEffect='non-scaling-stroke'
               strokeLinejoin='round'
             />
+            {s.grain && (
+              <GrainArrow
+                segment={{
+                  a: { x: s.grain[0][0], y: s.grain[0][1] },
+                  b: { x: s.grain[1][0], y: s.grain[1][1] },
+                }}
+                pxPerUnit={1 / u}
+              />
+            )}
           </g>
         );
       })}

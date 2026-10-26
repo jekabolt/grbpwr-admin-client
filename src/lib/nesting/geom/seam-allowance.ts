@@ -84,6 +84,13 @@ export function applySeamAllowance(input: readonly PieceDTO[], allowanceCm: numb
           pts: c.pts.map((q) => ({ x: q.x - dx, y: q.y - dy })),
         })),
       ],
+      displayGrain: p.displayGrain
+        ? {
+            ...p.displayGrain,
+            a: { x: p.displayGrain.a.x - dx, y: p.displayGrain.a.y - dy },
+            b: { x: p.displayGrain.b.x - dx, y: p.displayGrain.b.y - dy },
+          }
+        : undefined,
       bboxW: bb.maxX - dx,
       bboxH: bb.maxY - dy,
       areaCm2: area(poly),
