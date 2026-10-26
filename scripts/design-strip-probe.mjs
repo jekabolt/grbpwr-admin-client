@@ -82,8 +82,10 @@ const dieNotRun = (why) => {
 // ── МУТАЦИИ ──────────────────────────────────────────────────────────────────────────────────────
 const GALLERY_FIX = `          gallery={gallery}`;
 const GALLERY_BROKEN = `          gallery={undefined}`;
-const ASPECT_FIX = `          aspect={FRAME_ASPECT}`;
-const ASPECT_BROKEN = `          aspect='1/1'`;
+// 77d663427 (O-63): кадр стал пропом ячейки с умолчанием — `aspect = FRAME_ASPECT` в параметрах,
+// а в разметку едет `aspect={aspect}`. Стенд `aspect` не передаёт, поэтому ломается умолчание.
+const ASPECT_FIX = `  aspect = FRAME_ASPECT,`;
+const ASPECT_BROKEN = `  aspect = '1/1',`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'strip-mutation',
@@ -225,12 +227,41 @@ const visibleZoomWords = await page.evaluate(() =>
 );
 ck(visibleZoomWords === 0, 'слова «zoom» на плитках нет', `найдено ${visibleZoomWords}`);
 if (hasZoom) {
+  // МЕРА — ВНУТРЕННОСТЬ РАМКИ, А НЕ ЕЁ ВНЕШНИЙ КРАЙ. Поверхность — `absolute inset-0`, то есть
+  // по построению коробка ВНУТРИ рамки плитки, и картинка лежит там же. Прежняя мера сравнивала её
+  // с внешним краем плитки с допуском 2px — допуск молча съедал рамку 1px с каждой стороны и
+  // краснел на выделенной плитке (`selected` → `border-2`, у a1 `emphasis`), где рамка 2px. Эта
+  // проверка ни разу не шла зелёной: с 2dbd3ddec стенд не монтировался вовсе (нет QueryClient).
+  // Теперь: поверхность совпадает с коробкой внутри рамки (±1px, без допуска на рамку) И картинка
+  // целиком лежит под ней — ни одного пикселя снимка мимо двери зума.
   const cover = await page.locator(zoomSel).evaluate((n) => {
-    const tile = n.closest('[data-picture-tile]').getBoundingClientRect();
+    const tileEl = n.closest('[data-picture-tile]');
+    const t = tileEl.getBoundingClientRect();
+    const cs = getComputedStyle(tileEl);
+    const [bl, br, bt, bb] = [
+      cs.borderLeftWidth,
+      cs.borderRightWidth,
+      cs.borderTopWidth,
+      cs.borderBottomWidth,
+    ].map(parseFloat);
+    const inner = { x: t.x + bl, y: t.y + bt, w: t.width - bl - br, h: t.height - bt - bb };
     const r = n.getBoundingClientRect();
-    return Math.abs(r.width - tile.width) <= 2 && Math.abs(r.height - tile.height) <= 2;
+    const im = tileEl.querySelector('img')?.getBoundingClientRect();
+    const near = (a, b) => Math.abs(a - b) <= 1;
+    const fitsInner =
+      near(r.x, inner.x) && near(r.y, inner.y) && near(r.width, inner.w) && near(r.height, inner.h);
+    const picUnder =
+      !!im &&
+      im.x >= r.x - 0.5 &&
+      im.y >= r.y - 0.5 &&
+      im.right <= r.right + 0.5 &&
+      im.bottom <= r.bottom + 0.5;
+    return {
+      ok: fitsInner && picUnder,
+      d: `поверхность ${r.width}×${r.height}, внутри рамки ${inner.w}×${inner.h} (рамка ${bl}px), картинка ${im ? `${im.width}×${im.height}` : 'нет'}`,
+    };
   });
-  ck(cover, 'поверхность-зум накрывает кадр целиком');
+  ck(cover.ok, 'поверхность-зум накрывает кадр целиком', cover.d);
   const focusable = await page.locator(zoomSel).evaluate((n) => n.tabIndex >= 0 && !n.closest('[aria-hidden="true"]'));
   ck(focusable, 'поверхность-зум в табе и видна читалке');
 }

@@ -1,5 +1,5 @@
 {
-    "buildCommand": "vite build",
+    "buildCommand": "yarn build:check",
     "installCommand": "yarn install",
     "rewrites": [
         {

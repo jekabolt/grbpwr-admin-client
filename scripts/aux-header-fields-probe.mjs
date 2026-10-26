@@ -76,18 +76,10 @@ const dieNotRun = (why) => {
 // ── МУТАЦИИ ──────────────────────────────────────────────────────────────────────────────────────
 // Ветка монтажа мутируется В САМОМ СТЕНДЕ: она и есть предмет спора (план предлагал именно
 // `{!isAux && …}`), а живёт она на карточке, которую стенд воспроизводит один в один.
-const UNMOUNT_FIX = `        {isAux ? (
-          <StyleFactsField styleId={7} canEdit hideFitCare />
-        ) : (
-          <Section title='style facts — fit / care (shared by all colourways)'>
-            <StyleFactsField styleId={7} canEdit />
-          </Section>
-        )}`;
-const UNMOUNT_BROKEN = `        {!isAux && (
-          <Section title='style facts — fit / care (shared by all colourways)'>
-            <StyleFactsField styleId={7} canEdit />
-          </Section>
-        )}`;
+// U-2 (18ef993ae, владелец): карточка монтирует панель БЕЗ ветки — всегда и всегда спрятанной.
+// Плановая поломка та же: монтаж под `{!isAux && …}`, то есть у aux писателя нет вовсе.
+const UNMOUNT_FIX = `        <StyleFactsField styleId={7} canEdit hideFitCare />`;
+const UNMOUNT_BROKEN = `        {!isAux && <StyleFactsField styleId={7} canEdit hideFitCare />}`;
 // КРУГ 20, B-27: ГЕЙТ КАТЕГОРИИ ПЕРЕЕХАЛ ИЗ ОБЁРТКИ В ВЫЗЫВАЮЩЕГО, И МУТАЦИЯ ЗА НИМ.
 // Была `{!hideCategory && <CategoryBrowser />}` внутри `header-meta-fields.tsx` — той самой
 // обёртки `HeaderMetaFields`, которую B-27 снёс, разведя её поля по двум блокам карточки.
@@ -95,12 +87,14 @@ const UNMOUNT_BROKEN = `        {!isAux && (
 // в стенде — его точка входа), поэтому и ломается он там же. Ломается ровно тем же способом:
 // условие снимается, браузер категорий рисуется ВСЕГДА, и цитата про aux обязана покраснеть.
 const CATEGORY_FIX = `        {!isAux && (
-          <Section title='category'>
+          <Section title='general information'>
+            <GeneralInfoFit />
             <CategoryBrowser />
           </Section>
         )}`;
 const CATEGORY_BROKEN = `        {(
-          <Section title='category'>
+          <Section title='general information'>
+            <GeneralInfoFit />
             <CategoryBrowser />
           </Section>
         )}`;
@@ -253,9 +247,23 @@ head('ЦИТАТА 0 — ЯКОРЬ: карточка монтирует пан�
     resolve(REPO, 'src/components/managers/tech-card/components/index.tsx'),
     'utf8',
   );
+  // U-2 (18ef993ae, прямое указание владельца: care убран из полосы, fit уехал в классификацию):
+  // тернарника `{isAux ? (<StyleFactsField hideFitCare/>) : (<видимая панель/>)}` больше нет —
+  // панель смонтирована БЕЗУСЛОВНО и спрятана на любой карте. Тот же вопрос в новой форме: монтаж
+  // ровно один, `hideFitCare` стоит голым пропом (не `hideFitCare={isAux}`), и прямо перед тегом
+  // (комментарии JSX сняты) — соседний JSX, а не условие (`&&`, `?`, `(`).
+  const mounts = card.match(/<StyleFactsField\b[\s\S]*?\/>/g) ?? [];
+  const beforeMount = card
+    .slice(0, card.indexOf('<StyleFactsField'))
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .trimEnd();
   ck(
-    /\{isAux \? \(\s*<StyleFactsField[\s\S]{0,400}?hideFitCare/.test(card),
+    mounts.length === 1 &&
+      /\shideFitCare(?!\s*=)/.test(mounts[0]) &&
+      beforeMount.endsWith('>') &&
+      !beforeMount.endsWith('=>'),
     'панель монтируется ВСЕГДА и прячется пропом hideFitCare',
+    `${mounts.length} монтаж(а); перед тегом: «${beforeMount.slice(-40).replace(/\s+/g, ' ')}»`,
   );
   ck(
     !/\{!isAux &&[\s\S]{0,200}?<StyleFactsField/.test(card),
@@ -268,8 +276,21 @@ head('ЦИТАТА 0 — ЯКОРЬ: карточка монтирует пан�
     resolve(REPO, 'src/components/managers/tech-card/components/construction-general-info.tsx'),
     'utf8',
   );
+  // B6 (3e34aa61a): строка фактов GENERAL INFORMATION стала компонентом `StyleFacts` — печать
+  // значений и сторона правки (`FitCell` + `CategoryBrowser`). Гейт `{!isAux && …}` теперь стоит
+  // над ним, поэтому проверка требует ДВУХ вещей: гейт над `<StyleFacts`, и оба органа живут
+  // ТОЛЬКО внутри `function StyleFacts` — иначе гейт сторожил бы обёртку, а не браузер.
+  const sfStart = general.indexOf('\nfunction StyleFacts(');
+  const sfEnd = general.indexOf('\nfunction ', sfStart + 1);
+  const inside = (re) => {
+    const at = [...general.matchAll(re)].map((m) => m.index);
+    return at.length > 0 && at.every((i) => i > sfStart && (sfEnd < 0 || i < sfEnd));
+  };
   ck(
-    /\{!isAux && \([\s\S]{0,200}?<CategoryBrowser \/>/.test(general),
+    /\{!isAux && \(\s*<StyleFacts\b/.test(general) &&
+      sfStart >= 0 &&
+      inside(/<CategoryBrowser\b/g) &&
+      inside(/<FitCell\b/g),
     'браузер категорий гейтится тем же живым isAux',
   );
 }
@@ -321,7 +342,9 @@ head('ЦИТАТА В — AUX: спрятанная панель ВСЁ ЕЩЁ �
   );
 }
 
-head('ЦИТАТА Г — SELLABLE: та же запись работает и с видимой панелью (контроль)');
+// U-2: видимой панели больше нет ни на одной карте — контроль стал «та же СКРЫТАЯ панель пишет и
+// на sellable», то есть запись не зависит от назначения карты.
+head('ЦИТАТА Г — SELLABLE: та же запись работает и здесь (контроль; панель спрятана и тут, U-2)');
 {
   await mount(false);
   await page.evaluate(() => window.__aux.dirtyBrand());

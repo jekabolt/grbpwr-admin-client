@@ -108,6 +108,8 @@ const { emptyOp, toWire, readBack, operationFieldNames } = await import(
   pathToFileURL(outfile).href
 );
 rmSync(outfile, { force: true });
+// esbuild кладёт рядом и CSS импортов бандла — без этого каждый прогон оставлял scripts/.step-roundtrip-*.css.
+rmSync(outfile.replace(/\.mjs$/, '.css'), { force: true });
 
 const T = {
   MACHINE: 'TECH_CARD_OPERATION_TYPE_MACHINE',
@@ -491,6 +493,8 @@ const FILLED = {
   pressToward: T.TOWARD_FRONT,
   outputUnitKey: 'SHELL',
   outputUnitName: 'shell unit',
+  review: 'reshaped',
+  assemblyBlockDetached: true,
   // ЧЕРНОВИК КАРКАСА (0410): `true` нарочно — дефолт `false` круг довёз бы и пустым маппером.
   draft: true,
 };
@@ -498,6 +502,7 @@ const FILLED = {
 // Поля, которые эта проба НЕ ведёт, и почему. Список ЗАКРЫТЫЙ: всё остальное обязано быть в
 // фикстуре, иначе проверка покрытия ниже назовёт забытое поимённо.
 const NOT_A_STEP_FACT = new Set([
+  'historyKey', // client-only identity: deliberately regenerated on every read from the wire
   'operationNumber', // позиционный, сервер авторитетен: маппер пересчитывает его на записи
   'inputKeys', // ссылки на детали/узлы — круг у них свой (сборка), и он не про потерю факта шага
   'bomLineKeys', // то же: ссылки на строки BOM
@@ -560,6 +565,7 @@ const EFFECT_WRITE_WHITELIST = new Map([
   ['pressEquipment', 'R5: подсказанный утюг — единственный профиль процесса в парке'],
   ['pressProfileKey', 'R5: ключ профиля едет ПАРОЙ с оборудованием, иначе сервер отвергнет'],
   ['draft', '0410: метка «не проверено» снимается ПОСЛЕ правки строки человеком — факт шага не стирается'],
+  ['review', '0422: метка перезалива снимается осознанной правкой помеченного шага'],
 ]);
 
 /** Поля, которым подстановка разрешена — и только с `shouldDirty: false`. */

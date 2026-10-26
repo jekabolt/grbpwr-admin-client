@@ -248,7 +248,8 @@ await shot('28-thinking');
 await page.waitForSelector('[data-callout-suggestion]');
 await page.waitForTimeout(200);
 const l1 = await log();
-const iFlush = l1.indexOf('flush:suggest-callouts');
+// Сейв идёт через историю правок (bab51d76c): undo-history.tsx `flushThenCut` → `history:<reason>`.
+const iFlush = l1.indexOf('flush:history:suggest-callouts');
 const iAsk = l1.findIndex((x) => x.includes('suggest-callouts') && x.startsWith('fetch:'));
 check('сейв карточки ДО запроса', iFlush >= 0 && iAsk > iFlush, JSON.stringify(l1.slice(-4)));
 check('запрос: карточка и оба карточных флэта', asked[0]?.techCardId === 7 && JSON.stringify(asked[0]?.mediaIds) === '[11,12]', JSON.stringify(asked[0]));

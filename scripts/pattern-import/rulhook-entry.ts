@@ -465,7 +465,22 @@ export async function sectionShapeKink(o: { check: Check; pdf: string | null }) 
   for (let t = 0; t < 4 && stop; t++) {
     const step = api().session.step;
     if (step === 'pieces' && /set aside/.test(stop)) api().reviewAsides();
-    else if (step === 'meaning' && /seam line\?/.test(stop)) {
+    else if (step === 'meaning' && /which back: high \/ low\?/.test(stop)) {
+      const i = api().inputs;
+      const overrides = { ...i.overrides };
+      for (const ask of api().session.semantics?.notchVariantAsks ?? []) {
+        const pick = ask.suggested ?? ask.options[0]?.key;
+        if (pick)
+          overrides[ask.seed] = {
+            ...(overrides[ask.seed] ?? {}),
+            notchVariant: pick,
+          };
+      }
+      await k.dispatch({
+        type: 'semantics',
+        input: api().semanticsInput({ ...i, overrides }),
+      });
+    } else if (step === 'meaning' && /seam line\?/.test(stop)) {
       const i = api().inputs;
       await k.dispatch({
         type: 'semantics',

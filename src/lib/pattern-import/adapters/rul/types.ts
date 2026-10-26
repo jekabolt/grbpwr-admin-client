@@ -17,8 +17,10 @@ export type RulTable = {
   mmPerUnit: number;
   /** `GRADE RULE TABLE:` name. */
   name: string;
-  /** Size names in grade order, as written. */
+  /** Logical size names in grade order (a repeated sample breakpoint is collapsed). */
   sizes: string[];
+  /** Exact SIZE LIST when a vendor sample breakpoint had to be collapsed. */
+  declaredSizes?: string[];
   /** `SAMPLE SIZE:` as written, and its index in `sizes`. */
   sample: string;
   sampleIndex: number;

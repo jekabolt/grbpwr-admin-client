@@ -123,7 +123,9 @@ declare global {
 const probe: StepNameProbe = {} as StepNameProbe;
 window.__stepName = probe;
 
-let qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } } });
+let qc = new QueryClient({
+  defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+});
 
 // Последнее, что документ сказал о своей готовности. Держится модульной переменной, а не состоянием
 // React: гейт печати читает `onDataStatus` из соседнего компонента, и проба обязана читать ровно то
@@ -257,17 +259,21 @@ function Harness({ ops, card }: { ops: Op[]; card?: Op }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          <form>
-            <OperationsField />
-            {/* КАРТА ПРИМЕРКИ ЖИВЁТ В ТОЙ ЖЕ ФОРМЕ, что и рельс: на карточке она стоит на вкладке
+        {/* `OperationsField` reads the size names through `useDxfIndex` (2951ebdb4): the provider
+            stands here as on the card; with no auth token it fetches nothing. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            <form>
+              <OperationsField />
+              {/* КАРТА ПРИМЕРКИ ЖИВЁТ В ТОЙ ЖЕ ФОРМЕ, что и рельс: на карточке она стоит на вкладке
                 семплов и читает те же строки контекстом. Второй React-корень контекст формы не
                 делит — поэтому она рисуется здесь, рядом, а не отдельным корнем. */}
-            <div id='map'>
-              <SampleAssemblyMap />
-            </div>
-          </form>
-        </FormProvider>
+              <div id='map'>
+                <SampleAssemblyMap />
+              </div>
+            </form>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

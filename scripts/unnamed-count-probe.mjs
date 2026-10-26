@@ -29,6 +29,10 @@
 //   --mutate-zeroline → 2 провала, ровно цитата Б: число осталось верным везде, но ноль перестал
 //                     прятать строку. Цитаты А и В зелёные — доказательство, что Б стоит отдельно
 //                     и стережёт именно молчание, а не арифметику.
+// ПОВТОР 2026-10-26, после переезда строки в предупреждения шапки (de5ed2fe1): --mutate-countall →
+//   те же 5 провалов; --mutate-zeroline → 1 провал, фраза «0 of 10 steps not named» в поповере.
+//   Узел Б зелёный по устройству: `data-unnamed-steps={unnamed || undefined}` на нуле атрибута не
+//   несёт, так что молчание стережёт теперь проверка фразы — она и читает пункты поповера.
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -86,17 +90,18 @@ const outfile = resolve(tmpdir(), `unnamed-count-${process.pid}.js`);
 // Первая — та, о которой просит гейт: СЧИТАТЬ НЕ ТО. В счёт идут все шаги подряд, включая
 // названные. Это самый правдоподобный промах (`n + 1` вместо предиката) и самый вредный: число
 // выглядит настоящим и завышает масштаб ровно на долю сделанной работы.
-const COUNTALL_FIX = `  const unnamed = operations.reduce(
-    (n, o) => n + (((o?.work ?? '') as string).trim() ? 0 : 1),
-    0,
-  );`;
+// Строки обеих мутаций переписаны под нынешний исходник: счёт стал одной строкой, а «ноль прячет
+// строку» с de5ed2fe1 — это `if (unnamed > 0)` перед пунктом предупреждений (см. ниже про переезд).
+const COUNTALL_FIX = `  const unnamed = operations.reduce((n, o) => n + (((o?.work ?? '') as string).trim() ? 0 : 1), 0);`;
 const COUNTALL_BROKEN = `  const unnamed = operations.reduce((n) => n + 1, 0);`;
 // Вторая — адверсарная: НОЛЬ ПЕРЕСТАЁТ ПРЯТАТЬ СТРОКУ. Соблазн выглядит доброжелательно
 // («пусть счётчик всегда на месте, чтобы глаз знал, где смотреть»), а на деле вешает над
 // исправной карточкой отчёт о нуле — и учит пролистывать то самое место, где однажды появится
 // настоящее число.
-const ZEROLINE_FIX = `  if (!unnamed) return null;`;
-const ZEROLINE_BROKEN = `  if (false) return null;`;
+const ZEROLINE_FIX = `  if (unnamed > 0) {
+    items.push({`;
+const ZEROLINE_BROKEN = `  if (true) {
+    items.push({`;
 
 const patcher = (filter, pairs, loader) => ({
   name: 'unnamed-count-mutation',
@@ -237,17 +242,53 @@ async function mount(steps) {
   await page.waitForTimeout(400);
 }
 
+// СТРОКА ПЕРЕЕХАЛА В ПРЕДУПРЕЖДЕНИЯ ШАПКИ — намеренно, de5ed2fe1 (tabs-lite, «less noise»): строка
+// «kind — 8 of 10 steps not named yet» над рельсом стала пунктом `HeaderWarnings` «8 of 10 steps
+// not named» — за дверью «! N warnings» в шапке блока. Узел `[data-unnamed-steps]` остался (несёт
+// число, и только когда оно не ноль), а слова живут в поповере. Поэтому строка читается, ОТКРЫВ
+// поповер: в закрытом её нет никогда, и «фразы нет» без открытия было бы зеленью по построению.
+const PHRASE = /not named/g;
+/** Тексты пунктов ВСЕХ поповеров «! N warnings» на экране (каждый открывается и закрывается). */
+async function warningItems() {
+  const triggers = page.locator('button[aria-haspopup="dialog"][aria-label^="! "]');
+  const out = [];
+  for (let i = 0; i < (await triggers.count()); i++) {
+    await triggers.nth(i).click();
+    await page.waitForSelector('[role="dialog"] li', { timeout: 3000 });
+    out.push(
+      ...(await page.evaluate(() =>
+        [...document.querySelectorAll('[role="dialog"] li')].map((li) =>
+          (li.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        ),
+      )),
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+  }
+  return out;
+}
 /** Все узлы счётчика на экране — их количество и есть проверка «одна строка, а не по шагу». */
-const counters = () =>
-  page.evaluate(() =>
-    [...document.querySelectorAll('[data-unnamed-steps]')].map((n) => ({
-      attr: n.getAttribute('data-unnamed-steps'),
-      text: (n.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    })),
+const counters = async () => {
+  const attrs = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-unnamed-steps]')].map((n) =>
+      n.getAttribute('data-unnamed-steps'),
+    ),
   );
-/** Сколько раз фраза встречается во ВСЁМ дереве — ловит по-шаговое ворчание мимо селектора. */
-const phraseHits = () =>
-  page.evaluate(() => ((document.body.innerText ?? '').match(/not named yet/g) ?? []).length);
+  const lines = (await warningItems()).filter((t) => t.match(PHRASE));
+  return attrs.map((attr, i) => ({ attr, text: lines[i] }));
+};
+/**
+ * Сколько раз фраза встречается во ВСЁМ дереве — ловит по-шаговое ворчание мимо селектора: всё,
+ * что видно при закрытых поповерах, плюс пункты каждого поповера предупреждений.
+ */
+const phraseHits = async () => {
+  const outside = await page.evaluate(
+    (re) => ((document.body.innerText ?? '').match(new RegExp(re, 'g')) ?? []).length,
+    PHRASE.source,
+  );
+  const inside = (await warningItems()).reduce((n, t) => n + (t.match(PHRASE) ?? []).length, 0);
+  return outside + inside;
+};
 
 // ── А: 10 шагов, 8 без работы ────────────────────────────────────────────────────────────────────
 head('А — 10 шагов, 8 без работы');
@@ -256,7 +297,7 @@ let c = await counters();
 ck(c.length === 1, 'счётчик на экране РОВНО ОДИН', `узлов: ${c.length}`);
 ck(c[0]?.attr === '8', 'счётчик считает 8', `attr = ${c[0]?.attr}`);
 ck(
-  c[0]?.text === 'kind — 8 of 10 steps not named yet',
+  c[0]?.text === '8 of 10 steps not named',
   'строка называет и долю, и целое',
   `«${c[0]?.text}»`,
 );
@@ -274,7 +315,7 @@ head('Б — работа есть у всех десяти: строки нет
 await mount(TEN_ALL_NAMED);
 c = await counters();
 ck(c.length === 0, 'узла счётчика НЕТ', `узлов: ${c.length}`);
-ck((await phraseHits()) === 0, 'фразы «not named yet» на экране нет вовсе');
+ck((await phraseHits()) === 0, 'фразы «not named» на экране нет вовсе — и в предупреждениях тоже');
 
 // ── В: пустота из пробелов и незнакомый токен ────────────────────────────────────────────────────
 head('В — пустота это пустая строка, а незнакомый токен — название');
@@ -288,7 +329,7 @@ head('единственный шаг — единственное число');
 await mount(ONE_BLANK);
 c = await counters();
 ck(
-  c[0]?.text === 'kind — 1 of 1 step not named yet',
+  c[0]?.text === '1 of 1 step not named',
   'на одном шаге строка говорит «step», а не «steps»',
   `«${c[0]?.text}»`,
 );

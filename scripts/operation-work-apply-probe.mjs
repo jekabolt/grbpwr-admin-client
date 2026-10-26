@@ -171,24 +171,29 @@ const head = (s) => console.log(`\n${s}`);
 // М6 — БЕЗУСЛОВНОЕ СНЯТИЕ КЛАССА ШВА. Ровно то, чем `kindClears` НЕ является: она спрашивает
 // резолв и снимает якорь только если снятие ДЕЙСТВИТЕЛЬНО делает выбранный пункт ответом. Мутация
 // выкидывает обе проверки — и «шаг уже отвечает этим пунктом», и «снятие помогает».
+// Тело `kindClears` переписано в f55805d93 (совместная проба нескольких якорей: OS от старого
+// пикера + mode от нового); строки мутации сняты с нового тела, смысл мутации тот же.
 const CLEAR_FIX = `  const answers = (id?: string) => !!id && (id === k.id || id === k.pendingResolve);
-  if (answers(kindOf(step)?.id)) return out;
+  if (answers(kindOf(step)?.id)) return {};
+
+  const candidates: Partial<Record<OperationFormStringField, string>> = {};
   for (const [field, empty] of KIND_ANCHOR_FIELDS) {
     // Пункт, который сам заявляет этот якорь, снимать его не может по построению.
     if (k.writes && field in k.writes) continue;
     const current = (step as Record<string, unknown>)[field];
     if (typeof current !== 'string' || NONE(current)) continue;
     if (answers(kindOf({ ...step, [field]: empty } as OperationKindStep)?.id)) {
-      out[field] = empty;
-      return out;
+      return { [field]: empty };
     }
+    candidates[field] = empty;
   }`;
-const CLEAR_BROKEN = `  for (const [field, empty] of KIND_ANCHOR_FIELDS) {
+const CLEAR_BROKEN = `  const answers = (id?: string) => !!id && (id === k.id || id === k.pendingResolve);
+  const candidates: Partial<Record<OperationFormStringField, string>> = {};
+  for (const [field, empty] of KIND_ANCHOR_FIELDS) {
     if (k.writes && field in k.writes) continue;
     const current = (step as Record<string, unknown>)[field];
     if (typeof current !== 'string' || NONE(current)) continue;
-    out[field] = empty;
-    return out;
+    return { [field]: empty };
   }`;
 
 // М8 — СТОЯЩАЯ НА ШАГЕ МАШИНКА ИГНОРИРУЕТСЯ. «Смена работы не переставляет шаг на другую машину»
@@ -892,6 +897,36 @@ console.log(
     `(${DOM_BATTERY.length} случаев живого стенда) · слепок: коммит ${BASELINE.commit}`,
 );
 
+// ─── НАМЕРЕННЫЙ ДРЕЙФ ПОСЛЕ a9ca7819: ВЫПИСАН ПОИМЁННО И ТОЧНЫМИ ЗНАЧЕНИЯМИ ─────────────────────
+//
+// Слепок остаётся деревом a9ca7819 — переснимать его другим коммитом значило бы потерять само
+// доказательство экстракции R7-Б. Но с тех пор `src/` НАМЕРЕННО поменял строку шага ровно двумя
+// способами, и ни один из них к экстракции отношения не имеет:
+//   1. у строки появились четыре поля, и выбор работы их НЕ пишет — они обязаны стоять в своих
+//      пустых значениях и ДО, и ПОСЛЕ нажатия: `draft` (c39f6b856, черновик скелета),
+//      `review` (43be1e9f5, метки перезаливки DXF), `assemblyBlockDetached` (0fc96f0c3, отвязка
+//      шага от узла, mockup-ok), `historyKey` (f01f908ae, отмена ревью);
+//   2. «Topstitch» опознаётся режимом, а не классом шва (f55805d93, «Picking Topstitch writes
+//      topstitch mode=edge instead of ornamental seam class»): пикер пишет `topstitchMode = EDGE`
+//      и класс шва НЕ трогает — шаг держит тот, что на нём стоял.
+// Слепок проецируется через эти два правила, и дальше сравнение ПОБАЙТНОЕ, как и было: любое
+// другое расхождение, в том числе иное значение нового поля или иной класс шва у отстрочки,
+// по-прежнему красное.
+const DRIFT_FIELDS = { assemblyBlockDetached: false, draft: false, historyKey: '', review: '' };
+const TOPSTITCH_WORK = 'topstitch';
+function projectBaseline(snapshot, { token, stateBefore, found } = {}) {
+  const o = JSON.parse(snapshot);
+  for (const [f, v] of Object.entries(DRIFT_FIELDS)) {
+    if (f in o) dieNotRun(`слепок уже несёт поле ${f} — проекция дрейфа устарела`);
+    o[f] = v;
+  }
+  if (token === TOPSTITCH_WORK && found) {
+    o.topstitchMode = 'TECH_CARD_TOPSTITCH_MODE_EDGE';
+    o.seamClass = JSON.parse(stateBefore).seamClass;
+  }
+  return compact(o);
+}
+
 // ─── Ц-РАВЕНСТВО: ЖИВОЙ РЕДАКТОР ДО И ПОСЛЕ ЭКСТРАКЦИИ ─────────────────────────────────────────
 head('Ц-РАВЕНСТВО · та же батарея через тот же редактор: дерево коммита против рабочего');
 const liveOut = resolve(tmpdir(), `op-apply-live-${process.pid}.js`);
@@ -901,9 +936,9 @@ const live = await runBattery(liveBundle, CATALOG_NO_DEFAULTS);
 ck(live.errors.length === 0, 'страница не бросила ни одной ошибки', live.errors[0] ?? '');
 ck(live.drift.length === 0, 'стенд детерминирован: снимок ДО зависит только от состояния', live.drift.join(', '));
 ck(
-  canon(live.fields) === canon(BASELINE.fields),
-  'список полей строки шага тот же',
-  `${live.fields?.length} против ${BASELINE.fields?.length}`,
+  canon(live.fields) === canon([...BASELINE.fields, ...Object.keys(DRIFT_FIELDS)].sort()),
+  'список полей строки шага тот же — плюс ровно четыре намеренно добавленных',
+  `${live.fields?.length} против ${BASELINE.fields?.length} + ${Object.keys(DRIFT_FIELDS).length}`,
 );
 
 /** Построчное объяснение расхождения двух снимков — чтобы КРАСНАЯ называла поле, а не «не совпало». */
@@ -921,8 +956,9 @@ const explain = (a, b) => {
   let same = 0;
   const shown = [];
   for (const key of Object.keys(BASELINE.before)) {
-    if (BASELINE.before[key] === live.before[key]) same++;
-    else shown.push(`${key} (ДО) — ${explain(BASELINE.before[key], live.before[key]).slice(0, 4).join('; ')}`);
+    const was = projectBaseline(BASELINE.before[key]);
+    if (was === live.before[key]) same++;
+    else shown.push(`${key} (ДО) — ${explain(was, live.before[key]).slice(0, 4).join('; ')}`);
   }
   ck(
     same === STATES.length,
@@ -940,7 +976,12 @@ const explain = (a, b) => {
   let sameAfter = 0;
   let fixedAfter = 0;
   for (const key of Object.keys(BASELINE.after)) {
-    const was = BASELINE.after[key];
+    const [stateKey, token] = key.split(' · ');
+    const was = projectBaseline(BASELINE.after[key], {
+      token,
+      stateBefore: BASELINE.before[stateKey],
+      found: BASELINE.found[key],
+    });
     const now = live.after[key];
     if (now === undefined) {
       shown.push(`${key} — случай пропал из живого прогона`);

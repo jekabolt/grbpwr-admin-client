@@ -1,0 +1,4 @@
+# SHRINK-ONLY ratchet for asserting probes that are red on beta HEAD because of a product bug.
+# A listed probe still runs: if it fails the gate reports it and stays green, if it passes the gate
+# prints «можно убрать из known-red: …» — then delete the line. Any unlisted failure is red.
+# Never add a line to make a new failure green; one line per probe: `<path> — <why it is red>`.

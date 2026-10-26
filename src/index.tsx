@@ -9,6 +9,7 @@ import { Shipping } from 'components/managers/shipping';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { ContextProvider } from 'context';
+import { initObservability, observabilityEnabled, reportBoundaryError } from 'lib/observability';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -380,9 +381,13 @@ if (!container) throw new Error('Root element not found');
 
 const root = createRoot(container);
 
-root.render(
+const app = (
   <StrictMode>
-    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => (window.location.href = '/')}>
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onError={reportBoundaryError}
+      onReset={() => (window.location.href = '/')}
+    >
       <ContextProvider>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
@@ -544,5 +549,14 @@ root.render(
         </QueryClientProvider>
       </ContextProvider>
     </ErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
 );
+
+// With a DSN, error reporting starts before the first render so a crash on boot is caught too.
+// The wait is capped: a slow or blocked Sentry chunk must not hold the app back.
+if (observabilityEnabled) {
+  const cap = new Promise((resolve) => setTimeout(resolve, 3000));
+  Promise.race([initObservability(), cap]).then(() => root.render(app));
+} else {
+  root.render(app);
+}

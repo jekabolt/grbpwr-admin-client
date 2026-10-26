@@ -1,0 +1,39 @@
+name: Check
+
+on:
+  pull_request:
+    branches: [beta, master]
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # composition-label and operation-work-apply probes build an old commit's tree
+          # (`git show <sha>:path`); a depth-1 clone has no such object.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+      # step-roundtrip-probe shells out to the ast-grep binary; pinned to the local version (0.45.1).
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.45.1 && ast-grep --version
+      - name: Run quality gate
+        run: ./scripts/ci-check.sh

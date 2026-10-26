@@ -47,7 +47,7 @@ function unionMembers(typeName) {
     .split('\n')
     .map((l) => l.replace(/\/\/.*$/, ''))
     .join('\n');
-  return [...body.matchAll(/"([A-Z][A-Z0-9_]*)"/g)].map((m) => m[1]);
+  return [...body.matchAll(/['"]([A-Z][A-Z0-9_]*)['"]/g)].map((m) => m[1]);
 }
 
 let checks = 0;

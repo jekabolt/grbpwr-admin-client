@@ -172,27 +172,69 @@ export function parseRul(bytes: ArrayBuffer, name = 'the RUL'): RulTable {
       .replace(/(\d)[^\p{L}\p{N}.,]+(?=\d)/gu, '$1/')
       .replace(/[^\p{L}\p{N}.,/]+/gu, '')
       .toUpperCase();
-  if (new Set(sizeList.map(canon)).size !== sizeList.length)
-    throw refuse(`${name}: the SIZE LIST names a size twice (${sizeList.join(' ')})`);
   const sample = head['SAMPLE SIZE'];
   if (!sample) throw refuse(`${name} has no SAMPLE SIZE`);
-  const sampleIndex = sizeList.findIndex((s) => s.toUpperCase() === sample.toUpperCase());
-  if (sampleIndex < 0)
+  const sampleKey = canon(sample);
+  const sampleIndices = sizeList.flatMap((size, index) =>
+    canon(size) === sampleKey ? [index] : [],
+  );
+  if (!sampleIndices.length)
     throw refuse(
       `${name}: the SAMPLE SIZE ${sample} is not in the SIZE LIST (${sizeList.join(' ')})`,
     );
+  const counts = new Map<string, number>();
+  sizeList.forEach((size) => counts.set(canon(size), (counts.get(canon(size)) ?? 0) + 1));
+  const repeatedOther = [...counts].find(([key, count]) => count > 1 && key !== sampleKey);
+  if (repeatedOther)
+    throw refuse(`${name}: the SIZE LIST names a size twice (${sizeList.join(' ')})`);
   if (!rules.size) throw refuse(`${name} defines no RULE: DELTA`);
   for (const [id, pairs] of rules) {
     if (pairs.length !== sizeList.length)
       throw refuse(
         `${name}: rule ${id} has ${pairs.length} dx,dy pairs for ${sizeList.length} sizes`,
       );
-    const s = pairs[sampleIndex];
-    if (Math.abs(s.dx) > 1e-9 || Math.abs(s.dy) > 1e-9)
+    const zero = sampleIndices.find((index) => {
+      const s = pairs[index];
+      return Math.abs(s.dx) <= 1e-9 && Math.abs(s.dy) <= 1e-9;
+    });
+    if (zero === undefined) {
+      const s = pairs[sampleIndices[0]];
       throw refuse(
-        `${name}: rule ${id} moves the sample size ${sample} by ${s.dx},${s.dy} — the deltas are not measured from the sample, and no other convention is read`,
+        sampleIndices.length === 1
+          ? `${name}: rule ${id} moves the sample size ${sample} by ${s.dx},${s.dy} — the deltas are not measured from the sample, and no other convention is read`
+          : `${name}: rule ${id} has no 0,0 column for the repeated sample size ${sample}`,
       );
+    }
+    // Grafis writes the sample breakpoint twice and, per rule, places 0,0 in the occurrence that
+    // belongs to that rule's grade range. They are one logical size: keep its zero column and drop
+    // the other occurrence. Arbitrary duplicate sizes remain invalid above.
+    if (sampleIndices.length > 1) {
+      const normalized: RulDelta[] = [];
+      let wroteSample = false;
+      pairs.forEach((pair, index) => {
+        if (!sampleIndices.includes(index)) normalized.push(pair);
+        else if (!wroteSample) {
+          normalized.push({ dx: 0, dy: 0 });
+          wroteSample = true;
+        }
+      });
+      rules.set(id, normalized);
+    }
   }
+  const declaredSizes = [...sizeList];
+  if (sampleIndices.length > 1) {
+    let kept = false;
+    sizeList = sizeList.filter((_, index) => {
+      if (!sampleIndices.includes(index)) return true;
+      if (kept) return false;
+      kept = true;
+      return true;
+    });
+    warnings.push(
+      `the SIZE LIST repeats sample ${sample} ${sampleIndices.length} times: read as one breakpoint size`,
+    );
+  }
+  const sampleIndex = sizeList.findIndex((s) => canon(s) === sampleKey);
   return {
     version: banner,
     product: head['PRODUCT'] ?? null,
@@ -202,6 +244,7 @@ export function parseRul(bytes: ArrayBuffer, name = 'the RUL'): RulTable {
     ...u,
     name: head['GRADE RULE TABLE'] ?? '',
     sizes: sizeList,
+    ...(sampleIndices.length > 1 ? { declaredSizes } : {}),
     sample: sizeList[sampleIndex],
     sampleIndex,
     breaks: [],

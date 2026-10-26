@@ -93,6 +93,8 @@ await esbuild({
 });
 const M = await import(pathToFileURL(outfile).href);
 rmSync(outfile, { force: true });
+// esbuild also writes the CSS the bundle imports next to it; without this every run leaves a .css behind.
+rmSync(outfile.replace(/\.mjs$/, '.css'), { force: true });
 
 const CARD = 41;
 const store = M.useDraftMemory;

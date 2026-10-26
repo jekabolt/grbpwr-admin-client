@@ -50,8 +50,12 @@ const MUTATIONS = {
     from: "      if (e.key === 'Enter' && !typing && !placing && selected !== null && byKey.has(selected)) {",
     to: '      if (false) {',
   },
-  // R18: след выбора рисуется и у фигуры С РУЧКАМИ — второй сигнал выбора поверх ручек.
-  trace: { file: /annotation\/surface\.tsx$/, from: 'dim(selectedCallout.key) || handlesVisible) return null;', to: 'dim(selectedCallout.key)) return null;' },
+  // R43: дыхание выбора снова снято у фигуры С РУЧКАМИ (правило R18) — выбор мерки говорят одни ручки.
+  trace: {
+    file: /annotation\/surface\.tsx$/,
+    from: 'if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;',
+    to: 'if (hideCallouts || !selectedCallout || dim(selectedCallout.key) || handlesVisible) return null;',
+  },
   // ⌘Z снова сравнивается по НАПЕЧАТАННОЙ букве: на кириллице и греческом откат умирает.
   keyz: { file: /annotation\/surface\.tsx$/, from: "e.code === 'KeyZ'", to: "e.key === 'z'" },
   // Штрих снова копится в буфере вместо записи в форму: Save отправляет карточку без нарисованного.
@@ -319,6 +323,11 @@ const run = async (name, fn) => {
 
 const browser = await chromium.launch();
 
+// ВЫХОД ИЗ УВЕЛИЧЕННОГО ВИДА. С b5edd852f окно указаний — общий просмотрщик (`MediaViewer` в режиме
+// `callouts`), своего диалога с «close the zoomed view» у него больше нет. У просмотрщика два
+// «Close viewer»: «← back» в телефонной строке (`lg:hidden`) и крестик в шапке — берётся ВИДИМЫЙ.
+const CLOSE_ZOOM = '[data-media-viewer] [aria-label="Close viewer"]:visible';
+
 // ── 1. Backspace удаляет ВЫБРАННОЕ, и клик не крадёт фокус ───────────────────────────────────────
 // Дверь в увеличенный вид (T12): двойной клик по самому снимку первой плитки — в точке, где под
 // указателем действительно картинка, а не выноска (иначе жест честно ничего не откроет).
@@ -437,13 +446,15 @@ await run('3 enter-edit', async () => {
 // ── 4. Выбранное видно ──────────────────────────────────────────────────────────────────────────
 await run('4 highlight', async () => {
   const { ctx, page } = await fresh(browser);
-  // R18 (владелец: «внешний контур выделения не должен показываться»): рамки по габаритам нет НИКОГДА;
-  // выбор фигуры с якорями показывают ручки, а не рамка и не второй след.
+  // R18 (владелец: «внешний контур выделения не должен показываться»): рамки по габаритам нет НИКОГДА.
+  // R43 (9a26d923f, владелец: «можно сделать некое дыхание обводки»): выбор фигуры с якорями — ручки
+  // ПЛЮС мягкое дыхание по самой линии (`data-selection-trace`); прежнее «ручки и без следа» снято.
   check('4a до выбора ни рамки, ни следа', (await page.$$('[data-marquee], [data-selection-trace]')).length === 0);
   await page.click('span[title="four"]'); // dim, два якоря
   check('4b у выбранной фигуры с якорями внешней рамки нет', (await page.$$('[data-marquee]')).length === 0);
   const handles = await page.$$('span[title^="drag — move the point"]');
-  check('4c выбор показан ручками (2 на мерке), без следа', handles.length === 2 && (await page.$$('[data-selection-trace]')).length === 0, `ручек ${handles.length}`);
+  const traces = (await page.$$('[data-selection-trace]')).length;
+  check('4c выбор показан ручками (2 на мерке) и одним дыханием по линии (R43)', handles.length === 2 && traces === 1, `ручек ${handles.length}, следов ${traces}`);
   await page.click('span[title="one"]'); // пин
   check(
     '4d выбранный пин помечен, и ни рамки, ни следа у него нет',
@@ -551,7 +562,9 @@ await run('5x ink commit by tool change', async () => {
   await page.click('span[title*="press and drag"]');
   await drawTwoStrokes(page);
   check('5h штрихи уже в форме до всякого конца сессии', (await state(page)).callouts.filter((c) => c.kind === 'ink').length === 1);
-  await page.click('span[title*="a numbered point"]'); // чип «pin»
+  // Смена инструмента — чипом «leader». Чипа «pin» в палитре больше нет по слову владельца
+  // («пин в принципе можно убрать тк это тоже самое что и label», `kinds.ts`, `inPalette: false`).
+  await page.click('[data-tool="label"]');
   await page.waitForTimeout(80);
   const s = await state(page);
   check('5i смена инструмента закрыла сессию, фигура одна', s.callouts.filter((c) => c.kind === 'ink').length === 1, `ink ${s.callouts.filter((c) => c.kind === 'ink').length}`);
@@ -565,18 +578,29 @@ await run('5z ink commit on zoom close', async () => {
   await page.click('[role="dialog"] span[title*="press and drag"]');
   const img = await page.$('[role="dialog"] img');
   const r = await img.boundingBox();
-  await stroke(page, [
-    { x: r.x + r.width * 0.3, y: r.y + r.height * 0.3 },
-    { x: r.x + r.width * 0.4, y: r.y + r.height * 0.35 },
-    { x: r.x + r.width * 0.5, y: r.y + r.height * 0.3 },
-  ]);
-  await stroke(page, [
+  // ШТРИХ НАЧИНАЕТСЯ НА ПУСТОМ МЕСТЕ СНИМКА. С B-8a (8b668f800) поставленное живо и под взведённым
+  // инструментом: нажатие на маркер не рисует, а ТАЩИТ его. Прежний первый штрих начинался ровно на
+  // пине №1 (0.3, 0.3) — замерено: пин уехал в (0.5, 0.3), штрих не записан, и «разделитель» мерил
+  // один штрих. Поэтому первый штрих идёт выше пина, и начало обоих проверяется до жеста.
+  const a = [
+    { x: r.x + r.width * 0.3, y: r.y + r.height * 0.12 },
+    { x: r.x + r.width * 0.4, y: r.y + r.height * 0.17 },
+    { x: r.x + r.width * 0.5, y: r.y + r.height * 0.12 },
+  ];
+  const b = [
     { x: r.x + r.width * 0.3, y: r.y + r.height * 0.6 },
     { x: r.x + r.width * 0.4, y: r.y + r.height * 0.65 },
     { x: r.x + r.width * 0.5, y: r.y + r.height * 0.6 },
-  ]);
+  ];
+  const free = await page.evaluate(
+    (pts) => pts.map((p) => document.elementFromPoint(p.x, p.y) === document.querySelector('[role="dialog"] img')),
+    [a[0], b[0]],
+  );
+  if (!free.every(Boolean)) throw new Error(`начало штриха в зуме легло на выноску: ${JSON.stringify(free)}`);
+  await stroke(page, a);
+  await stroke(page, b);
   check('5j в зуме штрихи тоже уезжают в форму сразу', (await state(page)).callouts.filter((c) => c.kind === 'ink').length === 1);
-  await page.click('[aria-label="close the zoomed view"]');
+  await page.click(CLOSE_ZOOM);
   await page.waitForTimeout(120);
   const s = await state(page);
   const ink = s.callouts.filter((c) => c.kind === 'ink');
@@ -602,7 +626,7 @@ await run('14 zoom-door', async () => {
   const opened = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
   check('14b двойной клик по снимку открывает увеличенный вид', opened);
   if (opened) {
-    await page.click('[aria-label="close the zoomed view"]');
+    await page.click(CLOSE_ZOOM);
     await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
   }
   // Взвод инструмента — чипом следа (чип «pin» в этом стенде не кликается и до T12: 5x красна на
@@ -625,7 +649,7 @@ await run('14d dblclick rule', async () => {
   check('14d без инструмента двойной клик открывает зум', opened);
   check('14e и ничего не записал', (await count()) === n0, `было ${n0} стало ${await count()}`);
   if (opened) {
-    await page.click('[aria-label="close the zoomed view"]');
+    await page.click(CLOSE_ZOOM);
     await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
   }
   // Две свободные точки снимка — заранее: второй двойной клик идёт СРАЗУ за первым, без замеров.
@@ -669,7 +693,7 @@ await run('14k keyboard door', async () => {
     return page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
   };
   const close = async () => {
-    await page.click('[aria-label="close the zoomed view"]');
+    await page.click(CLOSE_ZOOM);
     await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
   };
   const enter = await open('Enter');
@@ -727,7 +751,7 @@ await run('8 zoom-editor', async () => {
   const onPage = await page.$$eval('textarea', (n) => n.length);
   check('8a редактор рисуется ВНУТРИ диалога', inDialog === 1, `textarea в диалоге: ${inDialog}`);
   check('8b и второго под модалкой нет', onPage === inDialog, `всего textarea на странице: ${onPage}`);
-  await page.click('[aria-label="close the zoomed view"]');
+  await page.click(CLOSE_ZOOM);
   await page.waitForTimeout(120);
   const back = await page.$$eval('textarea', (n) => n.length);
   check('8c после закрытия редактор вернулся на страницу', back === 1, `textarea: ${back}`);
@@ -867,6 +891,11 @@ await run('9i intake guard', async () => {
 });
 
 // ── 10. Карусель заворачивает с первого нажатия ─────────────────────────────────────────────────
+// Кнопок ‹ › на ленте указаний больше нет (T68, 80b5821e2, слово владельца) — `FocusedAnnotator`
+// листается прокруткой и `rail.step` не зовёт. Заворот живёт в том же `useRailScroll` у ленты сторон
+// (`parts-canvas.tsx`, клавиши ←/→); стенд монтирует ровно эту связку под `probe.railhook`, и нажатие
+// здесь — клавиша →, как там. Мутация `rail` (порог `max - by / 2`) по-прежнему смотрит сюда.
+const RAIL = '[aria-label="rail hook"]';
 await run('10 rail wrap', async () => {
   // ХОЛОСТОЕ НАЖАТИЕ БЫВАЕТ НЕ ПРИ ЛЮБОЙ ШИРИНЕ. Рельса со snap-mandatory отдыхает только в
   // снап-точках, и интересен ровно случай «от последней снап-точки до конца осталось меньше
@@ -874,9 +903,9 @@ await run('10 rail wrap', async () => {
   // окна подбираем так, чтобы этот случай существовал, — иначе проба зелена ни о чём.
   let found = null;
   for (let w = 460; w <= 900 && !found; w += 10) {
-    const { ctx, page } = await fresh(browser, {}, w);
-    const m = await page.evaluate(() => {
-      const el = document.querySelector('[aria-label="probe images"]');
+    const { ctx, page } = await fresh(browser, { 'probe.railhook': '1' }, w);
+    const m = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
       const max = el.scrollWidth - el.clientWidth;
       const card = el.firstElementChild.getBoundingClientRect().width + 8;
       if (max <= 1) return null;
@@ -891,7 +920,7 @@ await run('10 rail wrap', async () => {
       el.scrollLeft = last;
       const rest = el.scrollLeft;
       return { max, card, rest, gap: max - rest };
-    });
+    }, RAIL);
     if (m && m.rest > 5 && m.gap > 2 && m.gap < m.card / 2) found = { w, m, ctx, page };
     else await ctx.close();
   }
@@ -899,10 +928,10 @@ await run('10 rail wrap', async () => {
     found ? `ширина ${found.w}, ${JSON.stringify(found.m)}` : 'такого положения не нашлось');
   if (!found) return;
   const { page, ctx } = found;
-  await page.click('[aria-label="next view"]');
+  await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(700);
-  const left = await page.$eval('[aria-label="probe images"]', (el) => el.scrollLeft);
-  check('10b одно нажатие ›› завернуло в начало, а не проехало сливер',
+  const left = await page.$eval(RAIL, (el) => el.scrollLeft);
+  check('10b одно нажатие → завернуло в начало, а не проехало сливер',
     left < 5, `scrollLeft=${left} (было ${Math.round(found.m.rest)}, max=${Math.round(found.m.max)}, карта ${Math.round(found.m.card)})`);
   await ctx.close();
 });
@@ -910,12 +939,22 @@ await run('10 rail wrap', async () => {
 // ── 11. Переключатель вида ──────────────────────────────────────────────────────────────────────
 await run('11 viewswitch', async () => {
   const { ctx, page } = await fresh(browser, {}, 520);
-  check('11a в ленте стрелки есть', (await page.$$('[aria-label="next view"]')).length === 1);
+  // Стрелок ‹ › у ленты нет (T68, 80b5821e2, слово владельца): лента листается ПРОКРУТКОЙ. Поэтому
+  // положительный контроль «лента — это лента» — сама прокрутка: рельса прокручивается вбок и ей есть
+  // куда. Иначе 11b/11c ниже были бы зелены и на рельсе, которая и в ленте не листалась.
+  const scrollOf = () =>
+    page.$eval('[aria-label="probe images"]', (el) => ({
+      auto: getComputedStyle(el).overflowX === 'auto',
+      over: el.scrollWidth - el.clientWidth,
+    }));
+  const strip = await scrollOf();
+  check('11a в ленте ряд листается прокруткой', strip.auto && strip.over > 1, JSON.stringify(strip));
   await page.click('[role="radio"][aria-checked="false"]');
   await page.waitForTimeout(120);
   const cls = await page.$eval('[aria-label="probe images"]', (el) => el.className);
   check('11b в гриде рельса переносит строки', cls.includes('flex-wrap') && !cls.includes('overflow-x-auto'), cls);
-  check('11c и стрелок больше нет', (await page.$$('[aria-label="next view"]')).length === 0);
+  const grid = await scrollOf();
+  check('11c и листать вбок больше нечего', !grid.auto && grid.over <= 1, JSON.stringify(grid));
   const stored = await page.evaluate(() => localStorage.getItem('probe.rail'));
   check('11d выбор записан в предпочтения', stored === 'grid', `stored=${stored}`);
   await ctx.close();

@@ -145,7 +145,7 @@ if (!mt) {
 }
 console.log(`     шаблон из исходника: ${mt[1]}`);
 // eslint-disable-next-line no-new-func
-const renderTransform = new Function('live', 'pl', 'return `' + mt[1] + '`');
+const renderTransform = new Function('at', 'pl', 'return `' + mt[1] + '`');
 
 // SVG affine algebra, written from the spec. [a c e / b d f / 0 0 1], point-column convention.
 const MUL = (A, B) => ({

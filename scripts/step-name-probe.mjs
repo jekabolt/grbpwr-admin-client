@@ -536,6 +536,7 @@ const SECOND_FIX = `    return operationHeading({
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       work: o.work,
       workCatalog,
       pieceNames: [],
@@ -564,9 +565,9 @@ const RELEASELIVE_BROKEN = `  work: o.work || (o.fastening?.cutLengthMm ? 'slit_
 // пятой мутации, — «заметка написана человеком, значит она главнее», — только человек написал ещё
 // и работу, а композитор про обе знает и порядок им уже назначил.
 const NOTEFIRST_FIX = `  const labelOfStep = (i: number) =>
-    operationHeading({`;
+    (operationHeading({`;
 const NOTEFIRST_BROKEN = `  const labelOfStep = (i: number) =>
-    ((getValues(\`operations.\${i}.note\`) as string) || '').trim() ||
+    (((getValues(\`operations.\${i}.note\`) as string) || '').trim() ||
     operationHeading({`;
 // Седьмая — плановая: КАРТА ПРИМЕРКИ СНОВА СОБИРАЕТ ПЛОТНОСТЬ РУКАМИ. Это в точности то, как
 // строка выглядела до правки, и соблазн здесь даже не в «своей копии», а в её незаметности:
@@ -637,8 +638,8 @@ const SA_GATE_BROKEN = ``;
 // печатным листом, и та же цена: две поверхности одной карточки называют одно поле разными словами,
 // а увидеть это можно только положив их рядом. Верхний регистр выбран нарочно — он выглядит
 // стилем, а не расхождением, и именно поэтому такую копию не замечают.
-const SEAMCLASS_FIX = `    seamClassLabel(o.seamClass),`;
-const SEAMCLASS_BROKEN = `    seamClassLabel(o.seamClass).toUpperCase(),`;
+const SEAMCLASS_FIX = `    seamClassLabel(seamClass),`;
+const SEAMCLASS_BROKEN = `    seamClassLabel(seamClass).toUpperCase(),`;
 // Четырнадцатая — адверсарная, ЖИВАЯ ПОЛОВИНА РАЗВИЛКИ: общий ярлык «сводится» с архивным и начинает
 // печатать СЫРОЙ ТОКЕН вместо пустоты. Правка выглядит бережной («не терять данные»), а на живом
 // экране означает `TECH_CARD_SEAM_CLASS_…` на глазах у технолога — и хуже пустоты именно тем, что
@@ -647,15 +648,15 @@ const SEAMCLASS_BROKEN = `    seamClassLabel(o.seamClass).toUpperCase(),`;
 const LIVECLASS_FIX = `export const seamClassLabel = (v?: string): string =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''
-    : (SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '');`;
+    : SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '';`;
 const LIVECLASS_BROKEN = `export const seamClassLabel = (v?: string): string =>
   !v ? '' : (SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? v);`;
 // Пятнадцатая — адверсарная, АРХИВНАЯ ПОЛОВИНА ТОЙ ЖЕ РАЗВИЛКИ, и вместе они и есть её защита. Тут
 // «сведение» идёт в другую сторону: архив получает фолбэк живого экрана и подписанная строка молча
 // ПРОПАДАЕТ. Одна мутация без другой оставила бы половину развилки без сторожа — и следующий
 // исполнитель «починил» бы расхождение в ту сторону, которая не покраснела.
-const RELEASECLASS_FIX = `    : (seamClassOptions.find((o) => o.value === v)?.label ?? v);`;
-const RELEASECLASS_BROKEN = `    : (seamClassOptions.find((o) => o.value === v)?.label ?? '');`;
+const RELEASECLASS_FIX = `    : seamClassOptions.find((o) => o.value === v)?.label ?? v;`;
+const RELEASECLASS_BROKEN = `    : seamClassOptions.find((o) => o.value === v)?.label ?? '';`;
 
 
 // --- ПЕРЕПИСЬ ПЕЧАТНОГО ЛИСТА: СЕМЬ МУТАЦИЙ -----------------------------------------------------
@@ -665,8 +666,8 @@ const RELEASECLASS_BROKEN = `    : (seamClassOptions.find((o) => o.value === v)?
 // СВЕРКОЙ бумаги с экраном, а не константой в пробе.
 const SHEET_ZONE_FIX = `<div>{zoneLabel(o.zone) || '—'}</div>`;
 const SHEET_ZONE_BROKEN = `<div>{(zoneLabel(o.zone) || '—').toUpperCase()}</div>`;
-const SHEET_CLASS_FIX = `<div>{seamClassLabel(o.seamClass) || '—'}</div>`;
-const SHEET_CLASS_BROKEN = `<div>{(seamClassLabel(o.seamClass) || '—').toUpperCase()}</div>`;
+const SHEET_CLASS_FIX = `<div>{seamClassLabel(seamClass) || '—'}</div>`;
+const SHEET_CLASS_BROKEN = `<div>{(seamClassLabel(seamClass) || '—').toUpperCase()}</div>`;
 // Возврат ВЕТКИ, а не текста: лист снова спрашивает словарь процессов ПРЕССА — тот, что отвечает
 // «для какого процесса написан профиль», — и дублирование опять зовётся «fusing».
 const SHEET_FUSING_FIX = `  if (isPressStepType(v) || (v && WAVE_VERBS.has(v)))`;
@@ -768,7 +769,14 @@ const patcher = (filter, pairs, loader) => ({
   },
 });
 
-const plugins = [];
+// care-labels' Vite asset imports (font `?url`, mark/icons `?raw`): the stand never draws a label.
+const plugins = [{
+  name: 'vite-url-stub',
+  setup(b) {
+    b.onResolve({ filter: /\?(raw|url)$/ }, (a) => ({ path: a.path, namespace: 'url-stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'url-stub' }, () => ({ contents: 'export default "";', loader: 'js' }));
+  },
+}];
 if (MUTATE_NOWORK)
   plugins.push(patcher(/operation-options\.ts$/, [[NOWORK_FIX, NOWORK_BROKEN]], 'ts'));
 if (MUTATE_GUESS) plugins.push(patcher(/operation-work\.ts$/, [[GUESS_FIX, GUESS_BROKEN]], 'ts'));
@@ -1523,10 +1531,14 @@ async function sheetNames(count = STEPS.length) {
   // ЖДЁМ ПОСЛЕДНЮЮ СТРОКУ ИМЕННО ЭТОГО СТЕНДА. Индекс был зашит числом, и на стенде с другим
   // числом шагов ожидание молча выбирало таймаут: двадцать секунд простоя на каждый вызов и
   // чтение недорисованного листа в награду.
+  // Playwright's order is (fn, arg, options): with the options passed second, `n` was the options
+  // object, the selector never matched and every call idled the default 30 s before the catch.
   await page
-    .waitForFunction((n) => !!document.querySelector(`#sheet [data-sheet-step="${n}"]`), {
-      timeout: 20000,
-    }, count - 1)
+    .waitForFunction(
+      (n) => !!document.querySelector(`#sheet [data-sheet-step="${n}"]`),
+      count - 1,
+      { timeout: 20000 },
+    )
     .catch(() => {});
   return page.evaluate(() =>
     [...document.querySelectorAll('#sheet [data-sheet-step]')].map((n) =>
@@ -1666,8 +1678,10 @@ ck(!!spec0 && spec0.length > 0, 'строка спецификации под и
 // ТОЧНЫМ РАВЕНСТВОМ, а не подстрокой: у этого шага из спецификации заполнена ОДНА плотность, так
 // что узел обязан состоять ровно из её чтения. Подстрока пропустила бы и лишнее слово рядом, и
 // переезд половины чтения в соседний узел.
+// The step names no seam class, so it reads the card standard — plain seam since d744699e4, and
+// every reading surface resolves it (62640326d, `effectiveSeamClass`): the class leads the line.
 ck(
-  spec0?.[0] === '4 st/cm (2.5 mm)',
+  spec0?.[0] === 'SS — plain seam · 4 st/cm (2.5 mm)',
   'плотность и длина стежка — ОДНИМ чтением, тем же составителем, что на листе',
   String(spec0?.[0]),
 );
@@ -1894,15 +1908,17 @@ ck(saOwnMap?.[0] === saOwnEditor, 'две поверхности — ОДНА с
 // О.2 — ПОТЕРЯННЫЙ ФАКТ. Шаг припуска не переопределяет, и обе поверхности обязаны назвать
 // карточный стандарт — С ЕДИНИЦЕЙ и с источником.
 const saCardMap = await mapSpec(1);
+// The step names no seam class, so it reads the card standard — plain seam since d744699e4, and
+// every reading surface resolves it (62640326d, `effectiveSeamClass`): the class leads the line.
 ck(
-  saCardMap?.[0] === 'allowance 12 mm (card)',
+  saCardMap?.[0] === 'SS — plain seam · allowance 12 mm (card)',
   'УНАСЛЕДОВАННЫЙ припуск виден на карте примерки — он и был потерян',
   String(saCardMap?.[0]),
 );
 await openStep(1);
 const saCardEditor = await editorSeam();
 ck(
-  saCardEditor === 'allowance 12 mm (card)',
+  saCardEditor === 'SS — plain seam · allowance 12 mm (card)',
   'и в редакторе — тем же чтением, С МИЛЛИМЕТРАМИ',
   saCardEditor,
 );
@@ -1947,13 +1963,13 @@ await mount(SEAM_STEPS, { requiredSeamAllowanceMm: '' });
 ck(pageErrors.length === 0, 'стенд цеховой ступени смонтировался без исключений', pageErrors[0] ?? '');
 const saShopMap = await mapSpec(1);
 ck(
-  saShopMap?.[0] === 'allowance 15 mm (workshop)',
+  saShopMap?.[0] === 'SS — plain seam · allowance 15 mm (workshop)',
   'карта примерки доходит до ЦЕХОВОЙ ступени и называет её источник',
   String(saShopMap?.[0]),
 );
 await openStep(1);
 const saShopEditor = await editorSeam();
-ck(saShopEditor === 'allowance 15 mm (workshop)', 'редактор — тем же чтением', saShopEditor);
+ck(saShopEditor === 'SS — plain seam · allowance 15 mm (workshop)', 'редактор — тем же чтением', saShopEditor);
 ck(saShopMap?.[0] === saShopEditor, 'две поверхности — ОДНА строка', `${saShopMap?.[0]} / ${saShopEditor}`);
 // И СОБСТВЕННОЕ ЗНАЧЕНИЕ ПО-ПРЕЖНЕМУ БЬЁТ ОБЕ СТУПЕНИ — иначе «лестница работает» означало бы
 // всего лишь «нижняя ступень громче верхней».
@@ -2010,9 +2026,11 @@ ck(
 
 // Р.2 — СВЕРКА ДВУХ ПОВЕРХНОСТЕЙ. Главная цитата секции: она запрещает расхождение, а не проверяет
 // сегодняшний текст. Читаются лист и карта примерки ОДНОГО стенда, одного шага.
+// The sheet prints the (inherited) class and the allowance as two lines of one cell, the map as
+// one line joined by ` · `: the same reading is both lines of the cell, in order.
 const mapShop = (await mapSpec(1))?.[0];
 ck(
-  sheetShop?.[1] === mapShop,
+  `${sheetShop?.[0]} · ${sheetShop?.[1]}` === mapShop,
   'лист и карта примерки говорят про этот шаг ОДНО И ТО ЖЕ',
   `лист: ${sheetShop?.[1]} / карта: ${mapShop}`,
 );
@@ -2095,7 +2113,13 @@ ck(clsMap === clsEditor, 'и это ОДНА подпись, а не две со
 head('П (продолжение). незнакомый класс: живые экраны молчат, ПОДПИСАННЫЙ документ печатает токен');
 pageErrors.length = 0;
 shopAllowance = '';
-await mount(SEAM_STEPS, { requiredSeamAllowanceMm: '' });
+// …и БЕЗ КАРТОЧНОГО СТАНДАРТА КЛАССА: с d744699e4 новая карточка стоит на plain seam, и UNKNOWN
+// шага читает его (62640326d). «Класс не назван нигде» остался у карточки, сохранённой до этого
+// (UNKNOWN грузится как есть, schema.ts `mapTechCardToForm`) — её стенд и монтирует.
+await mount(SEAM_STEPS, {
+  requiredSeamAllowanceMm: '',
+  construction: { defaultSeamClass: UNKNOWN_CLASS },
+});
 ck(pageErrors.length === 0, 'стенд развилки смонтировался без исключений', pageErrors[0] ?? '');
 
 // ТОЧНЫМ РАВЕНСТВОМ С ЯКОРЕМ: узел обязан состоять РОВНО из лапки. Так одно чтение отвечает сразу

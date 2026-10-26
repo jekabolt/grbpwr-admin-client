@@ -1,8 +1,24 @@
 import react from '@vitejs/plugin-react';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+import { execSync } from 'child_process';
 import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type PluginOption } from 'vite';
+// @ts-ignore - plain JS helper shared with the Vercel serverless function (api/media-proxy.js)
+import { proxyMedia } from './api/media-proxy.js';
 // @ts-ignore - plain JS helper shared with the Vercel serverless function (api/translate.js)
 import { translateFields } from './api/_openrouter.js';
+
+const PRODUCTION_BACKEND_HOST = 'backend.grbpwr.com';
+
+function isProductionBackend(value?: string) {
+  if (!value) return false;
+
+  try {
+    return new URL(value).hostname.replace(/\.$/, '') === PRODUCTION_BACKEND_HOST;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Dev-only: serves POST /api/translate locally (production uses the Vercel
@@ -13,7 +29,9 @@ function translateApiPlugin(apiKey?: string, model?: string) {
   return {
     name: 'translate-api',
     apply: 'serve' as const,
-    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
+    configureServer(server: {
+      middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void };
+    }) {
       server.middlewares.use(async (req, res, next) => {
         if (req.method === 'POST' && req.url?.startsWith('/api/translate')) {
           const sendJson = (status: number, payload: unknown) => {
@@ -44,28 +62,20 @@ function translateApiPlugin(apiKey?: string, model?: string) {
   };
 }
 
-/** Dev-only: proxies image fetches to bypass CORS when cropping files.grbpwr.com images */
-function mediaProxyPlugin() {
+/** Dev-only: uses the production proxy implementation so its security and byte semantics match. */
+function mediaProxyPlugin(allowedHosts?: string) {
   return {
     name: 'media-proxy',
     apply: 'serve' as const,
-    configureServer(server: { middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void } }) {
+    configureServer(server: {
+      middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void };
+    }) {
       server.middlewares.use(async (req, res, next) => {
         if (req.url?.startsWith('/media-proxy?')) {
           try {
             const url = new URL(req.url!, `http://${req.headers.host}`);
             const targetUrl = url.searchParams.get('url');
-            if (!targetUrl?.startsWith('http')) {
-              res.statusCode = 400;
-              res.end('Invalid url param');
-              return;
-            }
-            const resp = await fetch(targetUrl, { headers: { Accept: 'image/*' } });
-            if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
-            res.statusCode = resp.status;
-            resp.headers.forEach((v, k) => res.setHeader(k, v));
-            const buf = await resp.arrayBuffer();
-            res.end(Buffer.from(buf));
+            await proxyMedia(targetUrl, res, allowedHosts);
           } catch (e) {
             res.statusCode = 502;
             res.end('Proxy fetch failed');
@@ -78,18 +88,72 @@ function mediaProxyPlugin() {
   };
 }
 
-export default defineConfig(({ mode }) => {
+/** Release = git sha. Vercel exposes it as VERCEL_GIT_COMMIT_SHA; a local build asks git. */
+function gitRelease(env: Record<string, string>) {
+  const fromEnv = (env.SENTRY_RELEASE || env.VERCEL_GIT_COMMIT_SHA || '').trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Source maps go to Sentry only from a build that has SENTRY_AUTH_TOKEN (plus SENTRY_ORG and
+ * SENTRY_PROJECT). Without it the plugin is not added: nothing is uploaded and no map is emitted.
+ * With it the maps are 'hidden' (no sourceMappingURL in the bundle) and deleted after upload.
+ */
+function sentrySourceMaps(env: Record<string, string>, release: string): PluginOption[] {
+  const { SENTRY_AUTH_TOKEN: authToken, SENTRY_ORG: org, SENTRY_PROJECT: project } = env;
+  if (!authToken) return [];
+  if (!org || !project) {
+    console.warn('[sentry] SENTRY_AUTH_TOKEN is set without SENTRY_ORG/SENTRY_PROJECT: no upload');
+    return [];
+  }
+  // The plugin's own return type is a structural stub, not vite's Plugin.
+  return sentryVitePlugin({
+    org,
+    project,
+    authToken,
+    telemetry: false,
+    release: { name: release || undefined, inject: false },
+    sourcemaps: { filesToDeleteAfterUpload: ['./dist/**/*.map'] },
+  }) as unknown as PluginOption[];
+}
+
+export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const sentryOn = Boolean(env.VITE_SENTRY_DSN?.trim());
+  const release = sentryOn ? gitRelease(env) : '';
+  const sentryPlugins = sentryOn && command === 'build' ? sentrySourceMaps(env, release) : [];
+  const apiProxyTarget = env.VITE_API_BASE_URL || 'http://localhost:3999';
+
+  if (
+    command === 'serve' &&
+    env.ALLOW_PROD_BACKEND !== '1' &&
+    [env.VITE_SERVER_URL, apiProxyTarget].some(isProductionBackend)
+  ) {
+    throw new Error(
+      'Local dev refused: backend.grbpwr.com is production; set ALLOW_PROD_BACKEND=1 to override.',
+    );
+  }
 
   return {
     plugins: [
-      mediaProxyPlugin(),
+      mediaProxyPlugin(env.MEDIA_PROXY_ALLOWED_HOSTS),
       translateApiPlugin(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL),
       react({
         // Only treat .tsx/.jsx as component modules so constants and utils don't trigger Fast Refresh warnings
         include: /\.(tsx|jsx)$/,
       }),
+      ...sentryPlugins,
     ],
+    define: {
+      __APP_RELEASE__: JSON.stringify(release),
+    },
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
       alias: {
@@ -116,7 +180,7 @@ export default defineConfig(({ mode }) => {
       port: 4040,
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:3999',
+          target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
         },
@@ -129,7 +193,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: false,
+      sourcemap: sentryPlugins.length > 0 ? ('hidden' as const) : false,
       minify: 'esbuild',
       chunkSizeWarningLimit: 1000,
       rollupOptions: {

@@ -279,8 +279,14 @@ ck(await has('[data-residue-strip]'), 'полоса остатков нарис�
 // диве: селектор не склеивает его с ними.
 {
   const cap = ((await page.locator('[data-residue-strip] > p').first().textContent()) ?? '').trim();
-  ck(cap.includes('on this line'), 'подпись говорит про СТРОКУ спецификации', cap);
-  ck(cap.includes('section and purpose'), 'и называет причину этого экрана: секцию и назначение', cap);
+  // de5ed2fe1 («explanatory texts removed», правило владельца «никаких пояснялок в UI, подпись
+  // 1–3 слова») сократил подпись BOM с фразы «set on this line, but its section and purpose show
+  // no control for them — the values below are still sent on save…» до слова экрана
+  // `saved, no control here`. Вопрос тот же — подпись СВОЯ и называет два факта этого экрана:
+  // значение сохраняется (было «still sent on save») и контрола для него ЗДЕСЬ нет (было «its
+  // section and purpose show no control»). Чужое слово («step») по-прежнему под запретом ниже.
+  ck(cap.includes('saved'), 'подпись говорит, что значение СОХРАНЯЕТСЯ', cap);
+  ck(cap.includes('no control here'), 'и называет причину этого экрана: здесь нет контрола', cap);
   ck(!cap.includes('step'), 'и не произносит слова чужого экрана («step»)', cap);
 }
 ck(await has(RES('purpose')), 'назначение стоит строкой остатка');

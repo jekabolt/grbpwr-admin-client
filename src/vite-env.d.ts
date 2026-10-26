@@ -29,7 +29,12 @@ interface ImportMetaEnv {
   readonly VITE_PATTERN_IMPORT_STUB?: string;
   /** 'stub' turns the AI namer off on the real worker (no paid calls, no names). */
   readonly VITE_PATTERN_IMPORT_AI?: string;
+  /** Sentry DSN (public by design). Unset: Sentry is never loaded and no request is sent. */
+  readonly VITE_SENTRY_DSN?: string;
 }
+
+/** Git sha of the build, baked in by vite.config.ts only when VITE_SENTRY_DSN is set; else ''. */
+declare const __APP_RELEASE__: string;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

@@ -65,6 +65,7 @@ await esbuild({
   entryPoints: [resolve(REPO, 'src/components/managers/tech-card/components/schema.ts')],
   bundle: true,
   platform: 'neutral',
+  mainFields: ['module', 'main'],
   format: 'esm',
   target: 'es2022',
   outfile,

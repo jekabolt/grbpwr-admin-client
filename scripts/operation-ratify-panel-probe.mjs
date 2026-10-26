@@ -761,8 +761,63 @@ async function mount(ops, { frozen = false, mode = 'list', bom = [] } = {}) {
   }
 }
 
+// ДВЕРЬ ПАНЕЛИ ПЕРЕЕХАЛА В ПРЕДУПРЕЖДЕНИЯ ШАПКИ — намеренно, de5ed2fe1 (tabs-lite, «less noise»):
+// строка-счётчик и чип «ratify …» стали ОДНИМ пунктом `HeaderWarnings` («9 of 12 steps not named»),
+// а жест — его действием «ratify names»: кнопкой внутри поповера «! N warnings», с aria-label
+// «<пункт>: ratify names». На выпущенной карточке пункт остаётся, действия у него нет
+// (`action: frozen ? undefined : …`). Поэтому дверь считается, ОТКРЫВ поповер счётчика: в закрытом
+// поповере её нет никогда, и «0» без открытия было бы ложной зеленью.
+const RATIFY_DOOR = 'button[aria-label$=": ratify names"]';
+const WARN_TRIGGER = '[data-unnamed-steps] button[aria-haspopup="dialog"]';
+//
+// ВЫПУЩЕННАЯ КАРТОЧКА: `lift`. Поповер живёт ВНУТРИ внешнего `<fieldset disabled>` (стенд повторяет
+// экран), и его триггер — нативная кнопка, то есть на выпуске он мёртв, и список не открыть вовсе.
+// «Двери нет» тогда зеленело бы над закрытым поповером при ЛЮБОМ коде пункта — ровно та
+// неразличимость «кнопки нет» и «кнопка мертва», от которой стенд и ставит fieldset. Поэтому на
+// выпуске проба снимает `disabled` с fieldset ТОЛЬКО на время чтения списка (карточка остаётся
+// выпущенной пропом `frozen`, который и решает, есть ли у пункта действие) и возвращает его назад.
+/** Двери в поповере счётчика: число и подпись. -1 — поповер не открылся (а значит, и не проверено). */
+async function ratifyDoors({ keepOpen = false, lift = false } = {}) {
+  if ((await page.locator(WARN_TRIGGER).count()) === 0) return { count: 0, label: null };
+  const trigger = page.locator(WARN_TRIGGER).first();
+  const lifted = lift
+    ? await trigger.evaluate((el) => {
+        const fs = el.closest('fieldset[disabled]');
+        if (!fs) return false;
+        fs.removeAttribute('disabled');
+        return true;
+      })
+    : false;
+  const restore = async () => {
+    if (!lifted) return;
+    await trigger.evaluate((el) => el.closest('fieldset')?.setAttribute('disabled', ''));
+  };
+  if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+    const opened = await trigger
+      .click({ timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!opened) {
+      await restore();
+      return { count: -1, label: 'поповер предупреждений не открылся' };
+    }
+    await page.waitForSelector('[role="dialog"]', { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(100);
+  }
+  const doors = page.locator(RATIFY_DOOR);
+  const count = await doors.count();
+  const label = count ? await doors.first().getAttribute('aria-label') : null;
+  if (!keepOpen || lifted) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+  }
+  await restore();
+  return { count, label };
+}
+
 const openPanel = async () => {
-  await page.locator('[data-ratify-open-panel]').first().click();
+  await ratifyDoors({ keepOpen: true });
+  await page.locator(RATIFY_DOOR).first().click();
   await page.waitForSelector('[data-ratify-panel]', { timeout: 10000 });
   await page.waitForTimeout(150);
 };
@@ -863,16 +918,16 @@ ck(
   'счётчик считает 9 из 12',
   String(await page.locator('[data-unnamed-steps]').first().getAttribute('data-unnamed-steps')),
 );
-ck(
-  (await page.locator('[data-ratify-open-panel]').count()) === 1,
-  'кнопка открытия панели РОВНО ОДНА',
-  String(await page.locator('[data-ratify-open-panel]').count()),
-);
-ck(
-  (await text('[data-ratify-open-panel]')) === 'ratify …',
-  'подпись кнопки',
-  String(await text('[data-ratify-open-panel]')),
-);
+{
+  const door = await ratifyDoors();
+  ck(door.count === 1, 'кнопка открытия панели РОВНО ОДНА', String(door.count));
+  // Подпись — действие пункта предупреждений (de5ed2fe1), а не прежний чип «ratify …».
+  ck(
+    door.label === '9 of 12 steps not named: ratify names',
+    'подпись кнопки',
+    String(door.label),
+  );
+}
 ck(
   (await page.locator('[data-ratify-panel]').count()) === 0,
   'до нажатия панели на экране НЕТ',
@@ -881,7 +936,7 @@ ck(
 await mount(TWELVE_ALL_NAMED);
 ck((await page.locator('[data-unnamed-steps]').count()) === 0, 'названы все — счётчика нет вовсе');
 ck(
-  (await page.locator('[data-ratify-open-panel]').count()) === 0,
+  (await ratifyDoors()).count === 0,
   'и кнопки нет вместе с ним: открывать нечего',
 );
 
@@ -891,10 +946,14 @@ ck(
   (await page.locator('[data-unnamed-steps]').count()) === 1,
   'на выпущенной карточке счётчик ЕСТЬ — это факт, а не задача',
 );
-ck(
-  (await page.locator('[data-ratify-open-panel]').count()) === 0,
-  'а кнопки НЕТ: панель пишет, в выпущенную карточку писать нельзя',
-);
+{
+  const door = await ratifyDoors({ lift: true });
+  ck(
+    door.count === 0,
+    'а кнопки НЕТ: панель пишет, в выпущенную карточку писать нельзя',
+    String(door.label ?? door.count),
+  );
+}
 
 // ─── Ц14: ВСЯ КАРТОЧКА, В ПОРЯДКЕ ОПЕРАЦИЙ ─────────────────────────────────────────────────────
 head('Ц14 · панель рисует ВСЕ строки в порядке номеров, названные — приглушённо');
@@ -921,8 +980,10 @@ ck(
   'номера позиционные, как на рельсе и на бумаге',
   numbers.join(' '),
 );
+// Слова шапки сократил de5ed2fe1 («modals rebuilt to one action, no paragraphs»): «steps … yet»
+// ушло, масштаб «9 of 12» — тот же, что у счётчика.
 ck(
-  (await text('[data-ratify-count]')) === '9 of 12 steps not named yet',
+  (await text('[data-ratify-count]')) === '9 of 12 not named',
   'шапка панели называет тот же масштаб, что и счётчик',
   String(await text('[data-ratify-count]')),
 );
@@ -1042,6 +1103,14 @@ ck(
 );
 
 // ─── Ц15 + Ц16: НАЖАТИЕ МЕНЯЕТ РОВНО РАБОТУ ────────────────────────────────────────────────────
+//
+// ИМЯ ОТСТРОЧКИ — ЭТО ЕЁ РЕЖИМ, намеренно с f55805d93 («Topstitch is identified by its mode, seam
+// class inherits the standard»): писатель кладёт к `work: topstitch` режим `edge` как ЛИЧНОСТЬ
+// пункта — так же, как ярус A кладёт к работе класс шва (Ц16). Это не дефолт вида и не заполнение
+// шага: тот же ответ писатель отдаёт и строке шага (ЦПИСАТЕЛЬ сверяет вызов). Для всех прочих работ
+// цитата прежняя — ровно {work}.
+const TOPSTITCH_EDGE = 'TECH_CARD_TOPSTITCH_MODE_EDGE';
+const nameFieldsOf = (work) => (work === 'topstitch' ? 'topstitchMode,work' : 'work');
 head('Ц15 · нажатие первого предложения меняет в форме РОВНО {work} — на КАЖДОЙ прод-форме');
 // КАТАЛОГ ЗДЕСЬ — С ДЕФОЛТАМИ, И ЭТО НЕСУЩЕЕ. «Изменилось ровно одно поле» на каталоге, у которого
 // подставлять нечего, было бы зеленью над пустой популяцией: у семи работ фикстуры дефолты есть, и
@@ -1070,11 +1139,20 @@ let savable = 0;
 for (const i of withProposal) {
   const after = await snapshot(i);
   const changed = diffFields(before15[i], after);
+  const v = JSON.parse(after);
+  const expect = nameFieldsOf(v.work);
   ck(
-    changed.join(',') === 'work',
-    `${nameAt(i)}: изменилось ровно одно поле — work`,
+    changed.join(',') === expect,
+    `${nameAt(i)}: изменились ровно поля имени — ${expect}`,
     changed.join(',') || '<ничего>',
   );
+  if (v.work === 'topstitch') {
+    ck(
+      v.topstitchMode === TOPSTITCH_EDGE,
+      `${nameAt(i)}: и режим отстрочки — тот, что и есть имя`,
+      String(v.topstitchMode),
+    );
+  }
 }
 
 head('Ц16 · нажатие второго предложения яруса A меняет РОВНО {work, seamClass}');
@@ -1258,9 +1336,15 @@ await openPanel();
   await page.keyboard.press('Enter');
   await page.waitForTimeout(200);
   const changed = diffFields(before, await snapshot(target));
-  ck(changed.join(',') === 'work', 'Enter записал ровно работу', changed.join(',') || '<ничего>');
+  // F4 — отстрочка: её имя несёт режим (f55805d93, см. Ц15), так что «ровно работа» = {work, mode}.
+  ck(
+    changed.join(',') === nameFieldsOf('topstitch'),
+    'Enter записал ровно работу',
+    changed.join(',') || '<ничего>',
+  );
   const v = JSON.parse(await snapshot(target));
   ck(v.work === 'topstitch', 'и записал ПЕРВОЕ предложение строки', String(v.work));
+  ck(v.topstitchMode === TOPSTITCH_EDGE, 'и режим — тот, что и есть имя', String(v.topstitchMode));
   const nowAt = await page.evaluate(() => document.activeElement?.getAttribute('data-ratify-row'));
   ck(nowAt === String(target + 1), 'фокус ушёл на следующую строку', String(nowAt));
 }
@@ -1348,7 +1432,7 @@ await mount(TWELVE, { mode: 'schematic' });
   );
   ck((await page.locator('[data-rail-step]').count()) === 0, 'рельса со строками в схеме нет');
   ck(
-    (await page.locator('[data-ratify-open-panel]').count()) === 1,
+    (await ratifyDoors()).count === 1,
     'кнопка ратификации на месте и в схеме: счётчик стоит НАД обоими режимами',
   );
   await openPanel();
@@ -1393,10 +1477,15 @@ await openPanel();
   await page.evaluate(() => window.__ratifyPanel.freeze());
   await page.waitForTimeout(300);
 
-  ck(
-    (await page.locator('[data-ratify-open-panel]').count()) === 0,
-    'карточка выпущена: кнопки открытия панели больше нет',
-  );
+  {
+    // Поповер открывается только когда модалки панели нет; не открылся — это -1 и красная.
+    const door = await ratifyDoors({ lift: true });
+    ck(
+      door.count === 0,
+      'карточка выпущена: кнопки открытия панели больше нет',
+      String(door.label ?? door.count),
+    );
+  }
   ck(
     (await page.locator('[data-ratify-panel]').count()) === 0,
     'и САМА ПАНЕЛЬ ушла вслед за своей кнопкой — мёртвого органа на экране не осталось',
@@ -1617,14 +1706,17 @@ await openPanel();
     );
     ck(times === 1, `строка ${i}: и во всей строке заметка встречается РОВНО ОДИН раз`, String(times));
   }
+  // Класс шва в фактах — ДЕЙСТВУЮЩИЙ, с унаследованным стандартом карточки: намеренно с 62640326d
+  // («card seam standard pinned in operations, rows show Standard/Override»). Стенд несёт стандарт
+  // по умолчанию — SS, plain seam. Заметки среди фактов по-прежнему нет.
   ck(
-    (await text('[data-ratify-evidence="0"]')) === '1 input · zone: pocket',
+    (await text('[data-ratify-evidence="0"]')) === '1 input · seam class: SS — plain seam · zone: pocket',
     'факты записи строки 0 названы целиком — заметки среди них нет',
     String(await text('[data-ratify-evidence="0"]')),
   );
   ck(
     (await text('[data-ratify-evidence="1"]')) ===
-      '2 inputs · produces unit "LEft front panel with pockets" · zone: pocket',
+      '2 inputs · produces unit "LEft front panel with pockets" · seam class: SS — plain seam · zone: pocket',
     'и строки 1 — тоже целиком',
     String(await text('[data-ratify-evidence="1"]')),
   );
