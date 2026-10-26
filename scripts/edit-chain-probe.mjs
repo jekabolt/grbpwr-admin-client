@@ -368,6 +368,7 @@ if (!chromium || !CSS) {
             return Promise.resolve({});
           } });
           export const requestHandler = () => Promise.resolve({});
+          export const abortableAdminService = () => adminService;
           export const authService = new Proxy({}, { get: () => nope });
           export const frontendService = new Proxy({}, { get: () => nope });
           export default { adminService, authService, frontendService };

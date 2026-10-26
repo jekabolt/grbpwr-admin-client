@@ -270,10 +270,18 @@ await pick(F('pressAction'), 'press to one side');
 ck(await has(F('pressToward')), 'при «press to one side» направление ПОЯВИЛОСЬ');
 
 const towardItems = await optionsOf(F('pressToward'));
+// 12 ЧЛЕНОВ, А НЕ 13: `press_toward.SIDE` («toward the side seam») снят из словаря и пикера НАМЕРЕННО
+// в 4e8979fe7 («пятнадцать ложных расщеплений ушли из пикеров», сервер 0327/0328) — через восемь
+// часов после того, как эта проба была написана. Снятый пункт не должен вернуться в список.
 ck(
-  (towardItems ?? []).length === 14,
-  'в списке направлений 14 строк (13 членов + «не указано»)',
+  (towardItems ?? []).length === 13,
+  'в списке направлений 13 строк (12 членов + «не указано»)',
   String((towardItems ?? []).length),
+);
+ck(
+  !(towardItems ?? []).some((s) => /side seam/i.test(s)),
+  'снятое «toward the side seam» в список не вернулось',
+  (towardItems ?? []).find((s) => /side seam/i.test(s)) ?? '—',
 );
 ck(
   (towardItems ?? []).includes('onto the body, toward the armhole'),

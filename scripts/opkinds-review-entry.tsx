@@ -79,7 +79,11 @@ function Harness({ op }: { op: Op }) {
     return true;
   };
   probe.wire = () => {
-    const insert = mapFormToTechCardInsert(methods.getValues() as TechCardFormData, undefined, true);
+    const insert = mapFormToTechCardInsert(
+      methods.getValues() as TechCardFormData,
+      undefined,
+      true,
+    );
     return (insert.operations ?? [])[0] as unknown as Op;
   };
   probe.sheet = (o?: Op) => {
@@ -89,11 +93,15 @@ function Harness({ op }: { op: Op }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          <form>
-            <OperationsField />
-          </form>
-        </FormProvider>
+        {/* `OperationsField` reads the size names through `useDxfIndex` (2951ebdb4): the provider
+            stands here as on the card; with no auth token it fetches nothing. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            <form>
+              <OperationsField />
+            </form>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

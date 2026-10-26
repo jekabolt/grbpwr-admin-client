@@ -2,10 +2,6 @@
 scripts/annotation-canvas-probe.mjs
 scripts/artwork-print-probe.mjs
 scripts/artwork-warp-probe.mjs
-scripts/assembly-doll-ui/probe.mjs
-scripts/assembly-seams-ui/probe.mjs
-scripts/assembly-skeleton/map-probe.mjs
-scripts/assembly-skeleton/ui-probe.mjs
 scripts/assembly-views-probe.mjs
 scripts/aux-header-fields-probe.mjs
 scripts/bench-choice-probe.mjs
@@ -23,8 +19,6 @@ scripts/create-ready-probe.mjs
 scripts/design-callout-pos-probe.mjs
 scripts/design-strip-probe.mjs
 scripts/detail-slot-door-probe.mjs
-scripts/dxf-cascade-probe.mjs
-scripts/dxf-reconcile-probe.mjs
 scripts/edit-chain-probe.mjs
 scripts/flat-ask-probe.mjs
 scripts/focused-tile-anatomy-probe.mjs

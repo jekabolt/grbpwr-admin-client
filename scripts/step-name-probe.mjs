@@ -768,7 +768,14 @@ const patcher = (filter, pairs, loader) => ({
   },
 });
 
-const plugins = [];
+// care-labels' Vite asset imports (font `?url`, mark/icons `?raw`): the stand never draws a label.
+const plugins = [{
+  name: 'vite-url-stub',
+  setup(b) {
+    b.onResolve({ filter: /\?(raw|url)$/ }, (a) => ({ path: a.path, namespace: 'url-stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'url-stub' }, () => ({ contents: 'export default "";', loader: 'js' }));
+  },
+}];
 if (MUTATE_NOWORK)
   plugins.push(patcher(/operation-options\.ts$/, [[NOWORK_FIX, NOWORK_BROKEN]], 'ts'));
 if (MUTATE_GUESS) plugins.push(patcher(/operation-work\.ts$/, [[GUESS_FIX, GUESS_BROKEN]], 'ts'));
@@ -1523,10 +1530,14 @@ async function sheetNames(count = STEPS.length) {
   // ЖДЁМ ПОСЛЕДНЮЮ СТРОКУ ИМЕННО ЭТОГО СТЕНДА. Индекс был зашит числом, и на стенде с другим
   // числом шагов ожидание молча выбирало таймаут: двадцать секунд простоя на каждый вызов и
   // чтение недорисованного листа в награду.
+  // Playwright's order is (fn, arg, options): with the options passed second, `n` was the options
+  // object, the selector never matched and every call idled the default 30 s before the catch.
   await page
-    .waitForFunction((n) => !!document.querySelector(`#sheet [data-sheet-step="${n}"]`), {
-      timeout: 20000,
-    }, count - 1)
+    .waitForFunction(
+      (n) => !!document.querySelector(`#sheet [data-sheet-step="${n}"]`),
+      count - 1,
+      { timeout: 20000 },
+    )
     .catch(() => {});
   return page.evaluate(() =>
     [...document.querySelectorAll('#sheet [data-sheet-step]')].map((n) =>
@@ -1666,8 +1677,10 @@ ck(!!spec0 && spec0.length > 0, 'строка спецификации под и
 // ТОЧНЫМ РАВЕНСТВОМ, а не подстрокой: у этого шага из спецификации заполнена ОДНА плотность, так
 // что узел обязан состоять ровно из её чтения. Подстрока пропустила бы и лишнее слово рядом, и
 // переезд половины чтения в соседний узел.
+// The step names no seam class, so it reads the card standard — plain seam since d744699e4, and
+// every reading surface resolves it (62640326d, `effectiveSeamClass`): the class leads the line.
 ck(
-  spec0?.[0] === '4 st/cm (2.5 mm)',
+  spec0?.[0] === 'SS — plain seam · 4 st/cm (2.5 mm)',
   'плотность и длина стежка — ОДНИМ чтением, тем же составителем, что на листе',
   String(spec0?.[0]),
 );
@@ -1894,15 +1907,17 @@ ck(saOwnMap?.[0] === saOwnEditor, 'две поверхности — ОДНА с
 // О.2 — ПОТЕРЯННЫЙ ФАКТ. Шаг припуска не переопределяет, и обе поверхности обязаны назвать
 // карточный стандарт — С ЕДИНИЦЕЙ и с источником.
 const saCardMap = await mapSpec(1);
+// The step names no seam class, so it reads the card standard — plain seam since d744699e4, and
+// every reading surface resolves it (62640326d, `effectiveSeamClass`): the class leads the line.
 ck(
-  saCardMap?.[0] === 'allowance 12 mm (card)',
+  saCardMap?.[0] === 'SS — plain seam · allowance 12 mm (card)',
   'УНАСЛЕДОВАННЫЙ припуск виден на карте примерки — он и был потерян',
   String(saCardMap?.[0]),
 );
 await openStep(1);
 const saCardEditor = await editorSeam();
 ck(
-  saCardEditor === 'allowance 12 mm (card)',
+  saCardEditor === 'SS — plain seam · allowance 12 mm (card)',
   'и в редакторе — тем же чтением, С МИЛЛИМЕТРАМИ',
   saCardEditor,
 );
@@ -1947,13 +1962,13 @@ await mount(SEAM_STEPS, { requiredSeamAllowanceMm: '' });
 ck(pageErrors.length === 0, 'стенд цеховой ступени смонтировался без исключений', pageErrors[0] ?? '');
 const saShopMap = await mapSpec(1);
 ck(
-  saShopMap?.[0] === 'allowance 15 mm (workshop)',
+  saShopMap?.[0] === 'SS — plain seam · allowance 15 mm (workshop)',
   'карта примерки доходит до ЦЕХОВОЙ ступени и называет её источник',
   String(saShopMap?.[0]),
 );
 await openStep(1);
 const saShopEditor = await editorSeam();
-ck(saShopEditor === 'allowance 15 mm (workshop)', 'редактор — тем же чтением', saShopEditor);
+ck(saShopEditor === 'SS — plain seam · allowance 15 mm (workshop)', 'редактор — тем же чтением', saShopEditor);
 ck(saShopMap?.[0] === saShopEditor, 'две поверхности — ОДНА строка', `${saShopMap?.[0]} / ${saShopEditor}`);
 // И СОБСТВЕННОЕ ЗНАЧЕНИЕ ПО-ПРЕЖНЕМУ БЬЁТ ОБЕ СТУПЕНИ — иначе «лестница работает» означало бы
 // всего лишь «нижняя ступень громче верхней».
@@ -2010,9 +2025,11 @@ ck(
 
 // Р.2 — СВЕРКА ДВУХ ПОВЕРХНОСТЕЙ. Главная цитата секции: она запрещает расхождение, а не проверяет
 // сегодняшний текст. Читаются лист и карта примерки ОДНОГО стенда, одного шага.
+// The sheet prints the (inherited) class and the allowance as two lines of one cell, the map as
+// one line joined by ` · `: the same reading is both lines of the cell, in order.
 const mapShop = (await mapSpec(1))?.[0];
 ck(
-  sheetShop?.[1] === mapShop,
+  `${sheetShop?.[0]} · ${sheetShop?.[1]}` === mapShop,
   'лист и карта примерки говорят про этот шаг ОДНО И ТО ЖЕ',
   `лист: ${sheetShop?.[1]} / карта: ${mapShop}`,
 );
@@ -2095,7 +2112,13 @@ ck(clsMap === clsEditor, 'и это ОДНА подпись, а не две со
 head('П (продолжение). незнакомый класс: живые экраны молчат, ПОДПИСАННЫЙ документ печатает токен');
 pageErrors.length = 0;
 shopAllowance = '';
-await mount(SEAM_STEPS, { requiredSeamAllowanceMm: '' });
+// …и БЕЗ КАРТОЧНОГО СТАНДАРТА КЛАССА: с d744699e4 новая карточка стоит на plain seam, и UNKNOWN
+// шага читает его (62640326d). «Класс не назван нигде» остался у карточки, сохранённой до этого
+// (UNKNOWN грузится как есть, schema.ts `mapTechCardToForm`) — её стенд и монтирует.
+await mount(SEAM_STEPS, {
+  requiredSeamAllowanceMm: '',
+  construction: { defaultSeamClass: UNKNOWN_CLASS },
+});
 ck(pageErrors.length === 0, 'стенд развилки смонтировался без исключений', pageErrors[0] ?? '');
 
 // ТОЧНЫМ РАВЕНСТВОМ С ЯКОРЕМ: узел обязан состоять РОВНО из лапки. Так одно чтение отвечает сразу

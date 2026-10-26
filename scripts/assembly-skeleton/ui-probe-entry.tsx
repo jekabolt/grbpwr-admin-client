@@ -16,6 +16,7 @@ import { useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm, useWatch, type UseFormReturn } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { SectionHeader } from 'ui/components/section-header';
 
 import {
@@ -47,15 +48,18 @@ import {
 } from 'components/managers/tech-card/components/operations-field';
 import { pieceRefKey } from 'components/managers/tech-card/components/piece-block-refs';
 import type { PieceCloth } from 'components/managers/tech-card/components/piece-cloth';
+import { auditOperationPresence } from 'components/managers/tech-card/components/operations-presence';
 import {
   mapFormToTechCardInsert,
   mapTechCardToForm,
+  operationWriteOrder,
   techCardDefaultData,
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
 import { settleFormAfterSave } from 'components/managers/tech-card/components/useTechCardAutosave';
 import type { PieceShapes } from 'components/managers/tech-card/components/use-piece-shapes';
+import { ulid } from 'utils/ulid';
 
 // ── fixtures: a tee ─────────────────────────────────────────────────────────────────────────────
 
@@ -578,8 +582,11 @@ function Harness({ m }: { m: Mount }) {
         name: p.name,
         piecesPerGarment: 1,
       })) as unknown as TechCardFormData['pieces'],
+      // f01f908ae: every row the form holds has a client-only `historyKey` (newOperationRow and the
+      // read mapper mint one; the schema refuses ''), the undo shield compares it.
       operations: (m.ops ?? []).map((o) => ({
         ...emptyOperation,
+        historyKey: ulid(),
         ...o,
       })) as unknown as TechCardFormData['operations'],
       ...(m.bom ? { bomItems: m.bom as unknown as TechCardFormData['bomItems'] } : {}),
@@ -607,23 +614,28 @@ function Harness({ m }: { m: Mount }) {
   });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <AutosaveContext.Provider
-          value={{ ...AUTOSAVE_OFF, status: 'idle', request: (r) => void requests.push(r) }}
-        >
-          <SkeletonProviderContext.Provider value={m.noProvider ? null : provider}>
-            <SkeletonAIAskContext.Provider
-              value={m.ai === 'fail' ? stubAIRefusing : m.ai ? stubAI : null}
-            >
-              <FormProvider {...methods}>
-                <form className='bg-pageBg p-6'>
-                  <Stand m={m} />
-                </form>
-              </FormProvider>
-            </SkeletonAIAskContext.Provider>
-          </SkeletonProviderContext.Provider>
-        </AutosaveContext.Provider>
-      </MemoryRouter>
+      {/* OperationsField → useDxfIndex → useDictionarySizeTokens читает словарь размеров (46545d5e8,
+          общий разбор DXF): без провайдера дерево падает «useDictionary must be used within a
+          DictionaryProvider». Без токена провайдер ничего не запрашивает. */}
+      <DictionaryProvider>
+        <MemoryRouter initialEntries={['/tech-cards/1']}>
+          <AutosaveContext.Provider
+            value={{ ...AUTOSAVE_OFF, status: 'idle', request: (r) => void requests.push(r) }}
+          >
+            <SkeletonProviderContext.Provider value={m.noProvider ? null : provider}>
+              <SkeletonAIAskContext.Provider
+                value={m.ai === 'fail' ? stubAIRefusing : m.ai ? stubAI : null}
+              >
+                <FormProvider {...methods}>
+                  <form className='bg-pageBg p-6'>
+                    <Stand m={m} />
+                  </form>
+                </FormProvider>
+              </SkeletonAIAskContext.Provider>
+            </SkeletonProviderContext.Provider>
+          </AutosaveContext.Provider>
+        </MemoryRouter>
+      </DictionaryProvider>
     </QueryClientProvider>
   );
 }
@@ -691,6 +703,20 @@ window.__sk = {
     const before = structuredClone(f.getValues());
     const insert = mapFormToTechCardInsert(f.getValues(), undefined, true);
     const server = mapTechCardToForm({ id: 1, techCard: insert } as never);
-    settleFormAfterSave(f, before, { values: server, server });
+    // f01f908ae: the read mints fresh client-only `historyKey`s; index.tsx carries the sent key onto
+    // each paired row before it settles («Carry the sent key onto each paired manual row»). Same
+    // pairing here (write order → presence audit), otherwise every settle reads as a new card.
+    type OpRow = NonNullable<TechCardFormData['operations']>[number];
+    const sourceSentOps = (before.operations ?? []) as OpRow[];
+    const sentOps = operationWriteOrder(before).map((i) => sourceSentOps[i]);
+    const readOps = [...(server.operations ?? [])] as OpRow[];
+    auditOperationPresence(
+      sentOps as unknown as Record<string, unknown>[],
+      readOps as unknown as Record<string, unknown>[],
+    ).pairs.forEach((readIndex, sentIndex) => {
+      if (readIndex < 0 || !readOps[readIndex] || !sentOps[sentIndex]?.historyKey) return;
+      readOps[readIndex] = { ...readOps[readIndex], historyKey: sentOps[sentIndex].historyKey };
+    });
+    settleFormAfterSave(f, before, { values: { ...server, operations: readOps }, server });
   },
 };

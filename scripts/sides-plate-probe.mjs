@@ -71,6 +71,8 @@ const stubNetwork = {
       contents: `
         const nope = () => Promise.resolve({});
         export const adminService = new Proxy({}, { get: () => nope });
+        export const abortableAdminService = () => adminService;
+        export const requestHandler = () => Promise.resolve({});
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         export default { adminService, authService, frontendService };

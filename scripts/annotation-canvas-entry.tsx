@@ -13,12 +13,17 @@
 //       все разом, и сторож скрытой вкладки проверяется только так;
 //   `window.__dropView` — снять кадр с листа ПОСРЕДИ жеста перетаскивания: исходный узел
 //       размонтирован, `dragend` доставлять некому, и виден второй рубеж сторожа залипшего жеста.
+//   `probe.railhook` (localStorage) — рельса с заворотом на НАСТОЯЩЕМ `useRailScroll` (см. `RailHook`).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AnnotationEditor } from 'components/managers/tech-card/annotation/editor';
 import type { ShapePoint, SurfaceCallout, PenStyle } from 'components/managers/tech-card/annotation/surface';
-import { FocusedAnnotator, type FocusedView } from 'components/managers/tech-card/annotation/focused-annotator';
+import {
+  FocusedAnnotator,
+  useRailScroll,
+  type FocusedView,
+} from 'components/managers/tech-card/annotation/focused-annotator';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 type C = {
@@ -94,6 +99,38 @@ function Neighbour() {
   );
 }
 
+// ЗАВОРОТ РЕЛЬСЫ — НА ЕГО ПОСЛЕДНЕМ ПОТРЕБИТЕЛЕ. Стрелки ‹ › с ленты указаний сняты по слову
+// владельца (T68, 80b5821e2): `FocusedAnnotator` больше не зовёт `rail.step` вовсе, лента листается
+// прокруткой. Сам заворот (`useRailScroll.step`, порог «меньше полукарты — сразу в начало») жив и
+// работает в ленте сторон (`parts-canvas.tsx`), где его зовут клавиши ←/→ окна. Здесь — ровно та же
+// связка: настоящий хук на рельсе с разметкой ленты (`snap-x snap-mandatory`, плитки `snap-start`,
+// `gap-2`) и ←/→ на window. Только под флагом `probe.railhook`: остальным пробам раскладка не меняется.
+function RailHook() {
+  const rail = useRailScroll(4);
+  const step = useRef(rail.step);
+  step.current = rail.step;
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      step.current(e.key === 'ArrowRight' ? 1 : -1);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+  return (
+    <div
+      ref={rail.ref}
+      aria-label='rail hook'
+      className='flex items-start gap-2 py-1 snap-x snap-mandatory overflow-x-auto'
+    >
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className='shrink-0 snap-start' style={{ width: 225, height: 300, background: '#ddd' }} />
+      ))}
+    </div>
+  );
+}
+
 function Harness() {
   const [order, setOrder] = useState<number[]>([11, 22, 33]);
   const [kinds, setKinds] = useState<Record<number, string>>({ 11: 'front', 22: 'back', 33: 'detail' });
@@ -155,6 +192,7 @@ function Harness() {
           <Neighbour />
         </div>
       )}
+      {localStorage.getItem('probe.railhook') === '1' && <RailHook />}
       <FocusedAnnotator
         layout='grid'
         views={views}

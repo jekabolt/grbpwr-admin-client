@@ -57,7 +57,9 @@ const pic = (id: number, runId: number, kind: string, extra: Partial<common_Desi
     ...extra,
   }) as common_DesignPicture;
 
-const STAMP = '2026-10-03T10:00:00Z';
+// A live run started a moment ago, inside its cap: past the cap the `cancel` corner stands in plain
+// sight (owner 05.10, 50fc2579a), and a fixed date turns every «in flight» run here into a stuck one.
+const STAMP = new Date(Date.now() - 12_000).toISOString();
 const run = (id: number, kind: string, extra: Partial<common_DesignRun> = {}): common_DesignRun =>
   ({
     id,

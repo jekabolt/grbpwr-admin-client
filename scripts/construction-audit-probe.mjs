@@ -48,14 +48,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
-const SCRATCH =
-  '/private/tmp/claude-501/-Users-jekabolt-go-src-github-com-jekabolt/bedb1cec-7c30-47c5-a5f0-92bb7aea38d0/scratchpad';
+// Bundles and the optional shot go to the OS temp dir (was a hard-coded, long-gone session scratchpad:
+// on another machine esbuild would have to create /private/tmp/claude-501/…). SCRATCH= overrides.
+const SCRATCH = process.env.SCRATCH ?? resolve(tmpdir(), 'construction-audit-probe');
 
 // ─── MUTATION FLAGS ────────────────────────────────────────────────────────────────────────────
 // An UNKNOWN --mutate flag means NO mutation was applied, and the run would then print a perfectly
@@ -228,28 +229,28 @@ const CHIP_BROKEN = `  return (
 // The LIVE card's filer. It writes into the form, so it stays a form organ — the mutation turns it
 // into a span, which on a live card changes nothing a user could feel and everything about whether
 // the rule survives to the next release.
+// Якорь — источник после d203803cb (квитанция `done` на самой кнопке).
 const FILER_FIX = `  return (
     <Button
       type='button'
       variant='underline'
       size='xs'
       className='shrink-0'
-      onClick={() => onFile()}
+      done={filed.on && 'filed'}
+      onClick={() => onFile(filed.flash)}
     >
       file as issue
     </Button>
   );`;
 const FILER_BROKEN = `  return (
-    <Chip nonForm dashed className='shrink-0' onClick={() => onFile()}>
+    <Chip nonForm dashed className='shrink-0' onClick={() => onFile(filed.flash)}>
       file as issue
     </Chip>
   );`;
 
+// Якорь — текст после de5ed2fe1.
 const ERROR_FIX = `        <CalloutBox tone='error'>
-          <Text size='micro'>
-            the construction audit could not be run — this is not a clean card, it is a report that
-            did not arrive.
-          </Text>
+          <Text size='micro'>the audit did not run · not a clean card</Text>
         </CalloutBox>`;
 const ERROR_BROKEN = `        <Text size='micro' variant='label' tracking='label' className='uppercase'>
           no findings — every check this run ran came back clean
@@ -1196,6 +1197,9 @@ ck(
 // СЧЁТЧИК ОБНУЛЁН ПОСЛЕ ПОСТАНОВКИ, и утверждение сузилось ровно на это: раскрыть сам блок теперь
 // нужно (он аккордеон, как соседний «generate operations»), а ВНУТРИ отчёта второй складки нет.
 // «Не проверено» — не находка, и именно поэтому его прячут первым; здесь оно не спрятано.
+// КРАСНОЕ С de5ed2fe1 (tabs-lite) — И ЭТО НЕ ПРОБА УСТАРЕЛА: список завёрнут в закрытый <details>, а шапка
+// самого construction-audit.tsx (THE `notChecked` LIST IS NOT A DISCLOSURE … «renders always, expanded»)
+// осталась прежней. Утверждения ниже не ослаблены — решает владелец.
 head('2. «not checked this run» is visible without a click INSIDE the report');
 ck(clicks === 0, 'nothing has been clicked inside the report on this mount', `clicks=${clicks}`);
 const nc = await page.evaluate((lines) => {
@@ -1243,7 +1247,12 @@ ck(
   NOT_CHECKED.every((l) => textNC.includes(norm(l))),
   'every not-checked line is in the panel’s RENDERED text (innerText, not textContent)',
 );
-ck(textNC.includes('not checked this run'), 'the «not checked this run» heading is on screen');
+// ЗАГОЛОВОК ПЕРЕПИСАН, НЕ УБРАН: «not checked this run» → «not checked · N» (de5ed2fe1, tabs-lite,
+// copy). Счёт в заголовке обязан совпасть с числом строк под ним.
+ck(
+  textNC.includes(`not checked · ${NOT_CHECKED.length}`),
+  `the «not checked · ${NOT_CHECKED.length}» heading is on screen`,
+);
 
 // ═══ 3. the headline agrees with the list ══════════════════════════════════════════════════════
 head('3. the headline count agrees with what is drawn (unknown severity included)');
@@ -1338,6 +1347,17 @@ await inject();
   // The FIRST finding's filer: refs op:460 → operationNumber 460.
   await pick('file as issue', 0);
   await clickHit();
+  // ОПЕРАТОРУ СООБЩАЕТ САМ ОРГАН, А НЕ ТОСТ (d203803cb, notifications [copy-ok][mockup-ok]: «receipts
+  // at the control»). Кнопка держит «filed ✓» 1.5 s (`useDoneFlash`), поэтому квитанция снимается
+  // сразу после нажатия. Невидимый размерный span ВСЕГДА содержит «filed ✓», так что читается
+  // `data-done` кнопки и её aria-live span — он заполнен только в состоянии «готово».
+  const toldLive = await page.evaluate(() => {
+    const btn = document.querySelector('[data-probe-hit]')?.closest('button');
+    return {
+      done: btn?.getAttribute('data-done') ?? null,
+      live: window.norm2(btn?.querySelector('[aria-live]')?.textContent),
+    };
+  });
   const after = await issues();
   const added = after[after.length - 1];
   ck(after.length === before.length + 1, 'exactly one issue was appended', `${before.length} → ${after.length}`);
@@ -1404,12 +1424,20 @@ await inject();
     d.slice(-60),
   );
   ck((await gone()).length === 0, 'filing did NOT navigate', JSON.stringify(await gone()));
-  ck((await alerts()).some((m) => /filed on the issues tab/i.test(m)), 'the operator was told');
+  ck(
+    toldLive.done === 'true' && toldLive.live === 'filed ✓',
+    'the operator was told — the pressed filer reads «filed ✓» at the control',
+    JSON.stringify(toldLive),
+  );
   const filer = await anchor('file as issue');
+  // С d203803cb `Button done=…` кладёт подпись во вложенные span (подпись / размер / aria-live), так что
+  // лист «file as issue» — span ВНУТРИ кнопки. Проверяется, что его владелец — нативная <button>.
   ck(
     filer.n >= 1 &&
-      (await page.evaluate(() => window.findLeaf('file as issue')[0].tagName.toLowerCase())) ===
-        'button',
+      (await page.evaluate(
+        () =>
+          window.findLeaf('file as issue')[0].closest('[data-probe-panel] button')?.tagName.toLowerCase() ?? '',
+      )) === 'button',
     'on a LIVE card the filer is a native <button> — it writes into the form, so the fieldset owns it',
   );
 }
@@ -1447,6 +1475,11 @@ await inject();
   const beforeIssues = (await issues()).length;
   if (filer.n === 1) await clickHit();
   await page.waitForTimeout(200);
+  // Квитанция на самом чипе (d203803cb): «filed ✓» после ответа сервера, на 1.5 s — снимается сразу.
+  const toldFrozen = await page.evaluate(() => ({
+    hit: window.norm2(document.querySelector('[data-probe-hit]')?.textContent),
+    receipts: window.findLeaf('filed ✓').length,
+  }));
   const filed = await issueCalls();
   ck(
     filed.length === 1 && filed[0]?.techCardId === 42,
@@ -1473,7 +1506,11 @@ await inject();
     'and wrote NOTHING into the form — a frozen card can never be saved',
     `issues=${(await issues()).length}`,
   );
-  ck((await alerts()).some((m) => /filed on the issues tab/i.test(m)), 'the operator was told');
+  ck(
+    toldFrozen.hit === 'filed ✓' && toldFrozen.receipts === 1,
+    'the operator was told — the pressed chip reads «filed ✓»',
+    JSON.stringify(toldFrozen),
+  );
 }
 
 // ═══ 7. the error state and the empty state are different screens ══════════════════════════════
@@ -1491,7 +1528,12 @@ const emptyBox = await page.evaluate(() => {
   const cs = getComputedStyle(el);
   return { border: cs.borderTopWidth, color: cs.borderTopColor };
 });
-const emptyNotChecked = emptyText.includes('not checked this run');
+// «not checked this run» → «not checked · N» (de5ed2fe1, copy). При раскрытом списке заголовок и строки
+// жили в одном div, и заголовок означал строки; теперь заголовок — <summary>, поэтому «перечисляет»
+// проверяется по самим строкам в отрисованном тексте.
+const emptyNotChecked =
+  emptyText.includes(`not checked · ${NOT_CHECKED.length}`) &&
+  NOT_CHECKED.every((l) => emptyText.includes(norm(l)));
 
 await mount({ stub: BROKEN });
 await inject();
@@ -1499,7 +1541,8 @@ const errText = await panelText();
 const errBox = await page.evaluate(() => {
   const root = document.querySelector('[data-probe-panel]');
   const hits = [...root.querySelectorAll('div')].filter((n) =>
-    window.norm2(n.textContent).includes('could not be run'),
+    // «could not be run — …» → «the audit did not run · not a clean card» (de5ed2fe1, copy).
+    window.norm2(n.textContent).includes('the audit did not run'),
   );
   const el = hits[hits.length - 1];
   if (!el) return null;
@@ -1508,7 +1551,7 @@ const errBox = await page.evaluate(() => {
 });
 ck(emptyText.includes('no findings'), 'the empty state says every check came back clean');
 ck(emptyNotChecked, 'the empty state STILL lists what was not checked — the only honest content on it');
-ck(errText.includes('could not be run'), 'the error state says the report did not arrive');
+ck(errText.includes('the audit did not run'), 'the error state says the report did not arrive');
 ck(!errText.includes('no findings'), 'the error state does NOT read as clean', errText.slice(0, 120));
 ck(emptyText !== errText, 'the two screens are not the same screen');
 ck(
@@ -1527,7 +1570,8 @@ head('8. the query is gated — no id, or the tab not open, and nothing leaves')
 await mount({ stub: OK, techCardId: null });
 ck((await netCalls()).length === 0, 'an unsaved card makes no request', JSON.stringify(await netCalls()));
 ck(
-  (await panelText()).includes('the audit reads the saved card'),
+  // «the audit reads the saved card — save this one first…» → «save the card to run the audit» (de5ed2fe1).
+  (await panelText()).includes('save the card to run the audit'),
   'and says so instead of pretending to load',
 );
 await mount({ stub: OK, active: false });
@@ -1662,8 +1706,10 @@ await inject();
   await page.waitForTimeout(700);
   await inject();
   const t = await panelText();
+  // «the client stopped waiting after N s. That is THIS SCREEN giving up…» → «stopped waiting after N s ·
+  // the run may have finished: re-run» (de5ed2fe1, copy). Первое лицо и «прогон мог закончиться» остались.
   ck(
-    t.includes('the client stopped waiting'),
+    t.includes('stopped waiting after') && t.includes('the run may have finished'),
     'when the budget fires, the panel says THE CLIENT gave up',
     t.slice(0, 240),
   );
@@ -1684,7 +1730,7 @@ await inject();
   const t = await panelText();
   ck(t.includes('refused'), 'a refused run carries the SERVER’s own words to the screen', t.slice(-200));
   ck(
-    !t.includes('the client stopped waiting'),
+    !t.includes('stopped waiting'),
     'and is NOT reported as the client’s own budget firing',
     t.slice(-200),
   );
@@ -1724,7 +1770,8 @@ await inject();
   await pressAnalyze();
   const ai = await aiText();
   ck(
-    ai.includes('5 findings dropped') && ai.includes('3 whose anchors') && ai.includes('2 contradicting'),
+    // «3 whose anchors resolved nowhere…» → «3 unanchored» (de5ed2fe1, copy).
+    ai.includes('5 findings dropped') && ai.includes('3 unanchored') && ai.includes('2 contradicting'),
     'a run that discarded findings SAYS SO — without it, a gutted run looks like a small one',
     ai.slice(0, 300),
   );

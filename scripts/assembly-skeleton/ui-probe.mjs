@@ -29,7 +29,7 @@
 //   B  apply all accepted → N rows; rules 1–3/6/7 clean; zod clean; MACHINE rows carry a machine;
 //      autosave asked with 'skeleton'; rail marks the rows «draft»; a touch takes one mark off
 //   C  apply this step + ambiguous variant + a guess unticked by default
-//   D  existing steps: append numbers after them; replace needs a second, confirming press
+//   D  existing steps: append numbers after them; replace is one press, what goes said beside it
 //   E  shut doors: released card, no engine — disabled and saying why in words; a card with no
 //      DXF has NO header door at all (owner 09.10: silent, like the silhouette line), the reason
 //      only in the empty-state door
@@ -442,11 +442,14 @@ await page.route('http://stub.invalid/**', (route) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: '{"works":[]}' }),
 );
 
-async function mount(m) {
+// `ready` — what proves the stand is up. A door by default; a RELEASED card with steps has none at
+// all since tabs-lite (de5ed2fe1: the header drops its door when the header already names the reason,
+// and the empty state is not drawn over steps), so that mount waits for the field itself.
+async function mount(m, { ready = '[data-skeleton-door]' } = {}) {
   await page.goto('http://probe.local/');
   await page.addScriptTag({ content: bundle });
   await page.evaluate((mm) => window.__sk.mount(mm), m);
-  await page.waitForSelector('[data-skeleton-door]', { timeout: 20000 });
+  await page.waitForSelector(ready, { timeout: 20000 });
   await page.waitForTimeout(300);
 }
 const shot = async (name, el) => {
@@ -459,8 +462,18 @@ const ops = () => page.evaluate(() => window.__sk.ops());
 const requests = () => page.evaluate(() => window.__sk.autosaveRequests());
 const isDirty = () => page.evaluate(() => window.__sk.form().formState.isDirty);
 // The auto ↔ manual switch (07 §5). The panel opens in auto; the switch outlives a close.
+// THE SWITCH SITS BEHIND «options». tabs-lite (de5ed2fe1; 01-TASKS S2 «options folded») put the
+// template line, «press open» and the auto switch under a closed `options` FoldCaret in the panel —
+// state of the panel itself, so every fresh panel opens it again. Opened here, before any of them is read.
+const openOptions = async () => {
+  if (await page.locator('[data-skeleton-auto]').count()) return;
+  await page
+    .locator('[data-skeleton-panel] button[aria-expanded="false"]', { hasText: 'options' })
+    .click();
+};
 const setAuto = async (on) => {
   const want = on ? 'on' : 'off';
+  await openOptions();
   await page.waitForSelector('[data-skeleton-auto]', { timeout: 5000 });
   if ((await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === want) return;
   await page.click('[data-skeleton-auto]');
@@ -744,10 +757,9 @@ head('M — the draft mark is stored on the step: reload keeps it, edit or click
 {
   // A released card: the chip is there, but «reviewed» is an edit and does nothing.
   const reloaded = await page.evaluate(() => window.__sk.reloadedOps());
-  await mount({ ops: reloaded, frozen: true });
-  await page.click(
-    '[role="radiogroup"][aria-label="sequence view"] [role="radio"]:has-text("list")',
-  );
+  const SEQUENCE_VIEW = '[role="radiogroup"][aria-label="sequence view"]';
+  await mount({ ops: reloaded, frozen: true }, { ready: SEQUENCE_VIEW });
+  await page.click(`${SEQUENCE_VIEW} [role="radio"]:has-text("list")`);
   await page.waitForSelector('[data-rail-step="0"]', { timeout: 5000 });
   const n = await page.locator('[data-rail-draft]').count();
   await page.locator('[data-rail-draft]').first().click({ force: true });
@@ -825,7 +837,9 @@ const U_OWN = [
   });
   const before = await ops();
   await openPanel('header', 'replace');
-  await page.click('[data-skeleton-apply-all]');
+  // ONE PRESS REPLACES since tabs-lite (de5ed2fe1, assembly-skeleton-panel.tsx: «said beside the one
+  // apply (no second confirm: the applied steps are drafts and the apply is undoable)»). What goes is
+  // said BEFORE the press, in the footer beside the apply. A second press would replace again.
   await page.click('[data-skeleton-apply-all]');
   await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
   ck(
@@ -1194,14 +1208,14 @@ const U_OWN = [
     'control: the open step shows the thread as a marked suggestion',
   );
   await openPanel('header', 'replace');
-  await page.click('[data-skeleton-apply-all]');
+  // ONE PRESS REPLACES since tabs-lite (de5ed2fe1, assembly-skeleton-panel.tsx: «said beside the one
+  // apply (no second confirm: the applied steps are drafts and the apply is undoable)»). What goes is
+  // said BEFORE the press, in the footer beside the apply. A second press would replace again.
+  // RETARGETED: the confirmation and its «undo is available until the next save» went with the second
+  // press. The equivalent now: the line says what goes before the press, and the apply is offered back.
   {
     const t = await page.locator('[data-skeleton-replace-loses]').innerText();
-    ck(
-      /undo is available until the next save/.test(t),
-      'the replace confirmation says how long undo lives',
-      t,
-    );
+    ck(/removes 1 step\b/.test(t), 'the replace says what goes beside the one apply', t);
   }
   await page.click('[data-skeleton-apply-all]');
   await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
@@ -1215,6 +1229,10 @@ const U_OWN = [
   await page.click('[data-rail-step="1"]');
   await page.waitForTimeout(300);
   await openPanel('header');
+  ck(
+    (await page.locator('[data-skeleton-undo]').count()) === 1,
+    'and the replace is offered back as «undo»',
+  );
   await page.click('[data-skeleton-undo]');
   await page.waitForSelector('[data-skeleton-undone]', { timeout: 5000 });
   await page.waitForTimeout(300);
@@ -1285,6 +1303,8 @@ await page.click('[data-skeleton-door="empty"]');
 await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
 {
   const stepsShown = await page.locator('[data-skeleton-step]').count();
+  // The mode switch sits behind the «options» fold since tabs-lite (de5ed2fe1); read it there.
+  await openOptions();
   ck(
     (await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on',
     'the panel opens in auto mode',
@@ -1431,6 +1451,7 @@ await page.waitForSelector('[data-skeleton-step="0"]', { timeout: 5000 });
 {
   const acc = (i) =>
     page.locator(`[data-skeleton-step="${i}"]`).getAttribute('data-skeleton-accepted');
+  await openOptions(); // behind the «options» fold since de5ed2fe1
   ck((await page.getAttribute('[data-skeleton-auto]', 'data-skeleton-auto')) === 'on', 'auto mode');
   ck(
     (await acc(2)) === '0' && (await acc(3)) === '0' && (await acc(4)) === '0',
@@ -1579,8 +1600,9 @@ ck(
 );
 {
   const t = await page.locator('[data-skeleton-mode="replace"]').innerText();
+  // Copy shortened in tabs-lite (de5ed2fe1): «Goes when you apply: …» → «removes …», same fact.
   ck(
-    /replace the 2 steps/i.test(t) && /goes when you apply: 2 steps/i.test(t),
+    /replace the 2 steps/i.test(t) && /removes 2 steps\b/i.test(t),
     'the replace choice says what goes',
     t.replace(/\s+/g, ' '),
   );
@@ -1595,15 +1617,27 @@ ck(
   'append numbers start after step 20',
 );
 await page.click('[data-skeleton-mode="replace"]');
-await page.click('[data-skeleton-apply-all]');
-ck((await ops()).length === 2, 'replace: the first press only asks to confirm');
+// ONE PRESS REPLACES since tabs-lite (de5ed2fe1, assembly-skeleton-panel.tsx: «said beside the one
+// apply (no second confirm: the applied steps are drafts and the apply is undoable)»). What goes is
+// said BEFORE the press, in the footer beside the apply. A second press would replace again.
+// RETARGETED from «the first press only asks to confirm»: before the one press nothing is written and
+// the footer says what goes; the press itself replaces.
+await page.waitForSelector('[data-skeleton-replace-loses]', { timeout: 5000 });
+{
+  const t = await page.locator('[data-skeleton-replace-loses]').innerText();
+  ck(
+    (await ops()).length === 2 && /removes 2 steps\b/.test(t),
+    'replace: nothing is written before the press, and what goes is said beside it',
+    t,
+  );
+}
 await shot('d-replace-confirm', '[data-skeleton-panel]');
 await page.click('[data-skeleton-apply-all]');
 await page.waitForSelector('[data-skeleton-applied]', { timeout: 5000 });
 r = await ops();
 ck(
   r.length === 5 && r[0].outputUnitKey === 'SHOULDERS',
-  'confirmed replace: the five proposal rows only',
+  'one press replaces: the five proposal rows only',
   `rows ${r.length}`,
 );
 await closePanel();
@@ -1630,13 +1664,23 @@ for (const [m, why, name] of [
   [{ noProvider: true }, /not connected/, 'no engine'],
 ]) {
   await mount(m);
+  // A RELEASED CARD: NO HEADER DOOR SINCE tabs-lite (de5ed2fe1, assembly-skeleton-panel.tsx `door()`:
+  // «nor while the header already names the reason: a released card …» → null). The shut door that is
+  // left is the empty state's, and it still has to say why in words.
+  const where = name === 'released card' ? 'empty' : 'header';
+  if (where === 'empty')
+    ck(
+      (await page.locator('[data-skeleton-door="header"]').count()) === 0 &&
+        (await page.locator('[data-skeleton-why="header"]').count()) === 0,
+      `${name}: the header carries no door and no second reason`,
+    );
   ck(
-    await page.locator('[data-skeleton-door="header"]').isDisabled(),
-    `${name}: the header door is disabled`,
+    await page.locator(`[data-skeleton-door="${where}"]`).isDisabled(),
+    `${name}: the ${where === 'empty' ? 'empty-state' : 'header'} door is disabled`,
   );
   const w =
     (await page
-      .locator('[data-skeleton-why="header"]')
+      .locator(`[data-skeleton-why="${where}"]`)
       .textContent()
       .catch(() => '')) ?? '';
   ck(why.test(w), `${name}: says why in words`, w);
@@ -1706,7 +1750,9 @@ await mount({
   ],
 });
 await openPanel('header', 'replace');
-await page.click('[data-skeleton-apply-all]');
+// ONE PRESS REPLACES since tabs-lite (de5ed2fe1, assembly-skeleton-panel.tsx: «said beside the one
+// apply (no second confirm: the applied steps are drafts and the apply is undoable)»). What goes is
+// said BEFORE the press, in the footer beside the apply. A second press would replace again.
 {
   const t =
     (await page
@@ -1741,8 +1787,8 @@ await mount({
   ],
 });
 await openPanel('header', 'replace');
-await page.click('[data-skeleton-apply-all]');
 {
+  // Before the one press (see D).
   const t =
     (await page
       .locator('[data-skeleton-replace-loses]')

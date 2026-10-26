@@ -10,6 +10,11 @@ import {
   AutosaveContext,
   type AutosaveApi,
 } from 'components/managers/tech-card/components/design/autosave-contract';
+import {
+  UndoHistoryProvider,
+  useTechCardUndoHistory,
+} from 'components/managers/tech-card/components/undo-history';
+import type { AutosaveController } from 'components/managers/tech-card/components/useTechCardAutosave';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { useEditHistory } from 'components/managers/tech-card/annotation/history';
 
@@ -46,6 +51,30 @@ const autosave: AutosaveApi = {
     return 'ok';
   },
 };
+// ИСТОРИЯ ПРАВОК (bab51d76c). С undo/redo сейв перед подсказкой идёт через неё:
+// `undoHistory.flushThenCut('suggest-callouts')` → `autosave.flush('history:suggest-callouts')`. Без
+// провайдера контекст по умолчанию (`OFF`) отвечает 'off' и не сохраняет ничего, поэтому стенд
+// поднимает НАСТОЯЩИЙ `useTechCardUndoHistory`, как index.tsx, поверх того же журнального flush.
+const noop = () => {};
+const controller: AutosaveController = {
+  ...autosave,
+  whenSettled: async () => {},
+  holdWrites: () => noop,
+  refusalNow: () => undefined,
+  savesNow: () => true,
+  saveNow: (reason) => autosave.flush(reason),
+  resolveConflict: noop,
+  settleExternal: noop,
+  gestureProps: {
+    onInputCapture: noop,
+    onChangeCapture: noop,
+    onKeyDownCapture: noop,
+    onPointerDownCapture: noop,
+    onPasteCapture: noop,
+    onCutCapture: noop,
+    onDropCapture: noop,
+  },
+};
 // Сеть: всякий fetch пишется в журнал (порядок «сейв → запрос»).
 const realFetch = window.fetch.bind(window);
 window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
@@ -70,9 +99,17 @@ function Panel() {
     } as never,
   });
   (window as unknown as { __form: unknown }).__form = form;
+  const undoHistory = useTechCardUndoHistory({
+    scope: 7,
+    enabled: true,
+    form: form as never,
+    autosave: controller,
+  });
   return (
     <FormProvider {...form}>
-      <WithHistory />
+      <UndoHistoryProvider value={undoHistory.api}>
+        <WithHistory />
+      </UndoHistoryProvider>
     </FormProvider>
   );
 }

@@ -273,6 +273,13 @@ async function bundleWith(mutantId) {
   const outfile = resolve(tmpdir(), `opkinds-review-${process.pid}-${mutantId ?? 0}.js`);
   const m = mutantId ? MUTATIONS[mutantId] : null;
   if (mutantId && !m) throw new Error(`мутации ${mutantId} нет`);
+  const viteUrlStub = {
+    name: 'vite-url-stub',
+    setup(b) {
+      b.onResolve({ filter: /\?(raw|url)$/ }, (a) => ({ path: a.path, namespace: 'url-stub' }));
+      b.onLoad({ filter: /.*/, namespace: 'url-stub' }, () => ({ contents: 'export default "";', loader: 'js' }));
+    },
+  };
   const plugin = m && {
     name: 'review-mutation',
     setup(b) {
@@ -297,7 +304,8 @@ async function bundleWith(mutantId) {
     absWorkingDir: REPO,
     jsx: 'automatic',
     loader: { '.svg': 'text', '.png': 'dataurl', '.woff2': 'dataurl' },
-    plugins: plugin ? [plugin] : [],
+    // care-labels' Vite asset imports (font `?url`, mark/icons `?raw`): the stand never draws a label.
+    plugins: [viteUrlStub, ...(plugin ? [plugin] : [])],
     define: {
       'import.meta.env.VITE_SERVER_URL': '"http://stub.invalid"',
       'import.meta.env': '{"VITE_SERVER_URL":"http://stub.invalid","MODE":"production"}',
@@ -580,7 +588,13 @@ async function run(bundle) {
   ck((await kindLabel()) === 'Join — lockstitch', 'шаг без якоря — «Join — lockstitch»', await kindLabel());
   ck(await pickKind('Topstitch'), 'пункт «Topstitch» выбран');
   const vTop = await values();
-  ck(vTop.seamClass === T.TOPSTITCH, '«Topstitch» ПОСТАВИЛ свой якорь', String(vTop.seamClass));
+  // ЯКОРЬ ОТСТРОЧКИ — РЕЖИМ, А НЕ КЛАСС (f55805d93): «Topstitch» пишет topstitch mode = edge, а
+  // класс шва оставляет наследовать стандарт карточки; `os_topstitch` читается только у старых строк.
+  ck(
+    vTop.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+    '«Topstitch» ПОСТАВИЛ свой якорь (режим отстрочки)',
+    `${vTop.topstitchMode} / ${vTop.seamClass}`,
+  );
   const rowTop = await sheetRow();
   ck(/topstitch/i.test(rowTop?.operation ?? ''), 'и лист зовёт шаг отстрочкой', rowTop?.operation ?? '');
 
@@ -1134,9 +1148,11 @@ async function run(bundle) {
     (await f11({ seamClass: OS, topstitchMode: TS.EDGE }, 'topstitchMode')).length === 0,
     'F11: класс «отстрочка» С режимом законен',
   );
+  // ВТОРАЯ ПОЛОВИНА F11 СНЯТА НАМЕРЕННО (f55805d93, schema.ts): «Topstitch» теперь и есть режим
+  // при UNKNOWN-классе, а UNKNOWN читается стандартом карточки. Проверяется новое правило.
   ck(
-    (await f11({ topstitchMode: TS.EDGE }, 'seamClass')).length === 1,
-    'F11: режим при НЕНАЗВАННОМ классе отвергнут — иначе он молча наследует умолчание карточки',
+    (await f11({ topstitchMode: TS.EDGE }, 'seamClass')).length === 0,
+    'F11: режим при НЕНАЗВАННОМ классе законен — класс наследует стандарт карточки',
   );
   const namedPlain = await f11({ seamClass: PLAIN, topstitchMode: TS.EDGE }, 'seamClass');
   ck(

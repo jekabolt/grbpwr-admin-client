@@ -13,6 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
 
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import {
   OperationsField,
   emptyOperation,
@@ -125,11 +126,15 @@ function Harness({ ops }: { ops: Record<string, unknown>[] }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          <form>
-            <OperationsField />
-          </form>
-        </FormProvider>
+        {/* Как на карточке (src/index.tsx): с a58f0b84f дерево шагов зовёт `useFileSizeRun`, а он —
+            `useDictionary`. Без токена провайдер ничего не запрашивает. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            <form>
+              <OperationsField />
+            </form>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

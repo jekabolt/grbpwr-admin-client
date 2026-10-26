@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { MemoryRouter } from 'react-router-dom';
 
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { OperationsField } from 'components/managers/tech-card/components/operations-field';
 import {
   techCardDefaultData,
@@ -57,29 +58,33 @@ function Harness({ card }: { card: Record<string, unknown> }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          {/* layout.tsx:80 — КОРОБКА СТРАНИЦЫ. Она и есть то, что не имеет права ехать вбок. */}
-          <div className='h-full px-2.5 pt-26 print:h-full print:pt-0' data-page-body='1'>
-            {/* page.tsx:44 */}
-            <div className='flex flex-col gap-6'>
-              {/* index.tsx:1847 — рельс 150px + содержимое */}
-              <div className='grid gap-2.5 pt-3 lg:grid-cols-[150px_1fr]'>
-                {/* index.tsx:1850 — рельс. Себя он клипает сам (overflow-y-auto). */}
-                <aside className='top-16 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
-                  <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
-                    <span className='text-control uppercase'>construction</span>
-                  </div>
-                </aside>
-                {/* index.tsx:1910 / :1911 — последние коробки с min-w-0 */}
-                <form className='min-w-0 pb-24'>
-                  <fieldset className='m-0 min-w-0 border-0 p-0'>
-                    <OperationsField />
-                  </fieldset>
-                </form>
+        {/* Как на карточке (src/index.tsx): с a58f0b84f дерево шагов зовёт `useFileSizeRun`, а он —
+            `useDictionary`. Без токена провайдер ничего не запрашивает. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            {/* layout.tsx:80 — КОРОБКА СТРАНИЦЫ. Она и есть то, что не имеет права ехать вбок. */}
+            <div className='h-full px-2.5 pt-26 print:h-full print:pt-0' data-page-body='1'>
+              {/* page.tsx:44 */}
+              <div className='flex flex-col gap-6'>
+                {/* index.tsx:1847 — рельс 150px + содержимое */}
+                <div className='grid gap-2.5 pt-3 lg:grid-cols-[150px_1fr]'>
+                  {/* index.tsx:1850 — рельс. Себя он клипает сам (overflow-y-auto). */}
+                  <aside className='top-16 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
+                    <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
+                      <span className='text-control uppercase'>construction</span>
+                    </div>
+                  </aside>
+                  {/* index.tsx:1910 / :1911 — последние коробки с min-w-0 */}
+                  <form className='min-w-0 pb-24'>
+                    <fieldset className='m-0 min-w-0 border-0 p-0'>
+                      <OperationsField />
+                    </fieldset>
+                  </form>
+                </div>
               </div>
             </div>
-          </div>
-        </FormProvider>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

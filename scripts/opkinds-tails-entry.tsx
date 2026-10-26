@@ -80,11 +80,15 @@ function Harness({ op }: { op: Op }) {
   return (
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          <form>
-            <OperationsField />
-          </form>
-        </FormProvider>
+        {/* Как на карточке (src/index.tsx): с a58f0b84f дерево шагов зовёт `useFileSizeRun`, а он —
+            `useDictionary`. Без токена провайдер ничего не запрашивает. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            <form>
+              <OperationsField />
+            </form>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );

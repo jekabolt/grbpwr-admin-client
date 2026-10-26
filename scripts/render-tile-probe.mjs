@@ -77,6 +77,8 @@ const stubNetwork = {
       contents: `
         const nope = () => Promise.resolve({});
         export const adminService = new Proxy({}, { get: () => nope });
+        export const abortableAdminService = () => adminService;
+        export const requestHandler = () => Promise.resolve({});
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         export default { adminService, authService, frontendService };
@@ -327,7 +329,8 @@ try {
     JSON.stringify(line),
   );
   const X = `${P('held')} button[aria-label^="unmark render 13"]`;
-  check('U3 held: ✕ in the frame', (await has(X)) && (await text(X)) === '✕');
+  // The ✕ corner is the shared `Close` primitive now, which draws `×` (a2c6d8d8d, [primitive-ok]).
+  check('U3 held: × in the frame', (await has(X)) && (await text(X)) === '×');
   if (await has(X)) {
     await page.hover(`${P('held')} [data-picture-tile]`);
     await page.click(X);

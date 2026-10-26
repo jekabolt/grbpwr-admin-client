@@ -83,6 +83,7 @@ const stubNetwork = {
           window.__calls.push({ name: 'requestHandler', body: req });
           return Promise.resolve({});
         };
+        export const abortableAdminService = () => adminService;
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         export default { adminService, authService, frontendService };

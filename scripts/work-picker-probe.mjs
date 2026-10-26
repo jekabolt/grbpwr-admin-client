@@ -447,6 +447,7 @@ const T = {
   OVERLOCK: 'TECH_CARD_MACHINE_TYPE_OVERLOCK',
   ZONE: 'TECH_CARD_GARMENT_ZONE_FRONT',
   TOPSTITCH_SEAM: 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH',
+  TOPSTITCH_EDGE: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
   SEAM_UNSET: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
 };
 
@@ -719,7 +720,12 @@ head('Г. выбор пишет РАБОТУ и ЛИЧНОСТЬ');
   ck(await pickWork('topstitch'), 'работа «Topstitch» выбирается');
   const v = await values();
   ck(v.work === 'topstitch', 'в строку шага записана РАБОТА', String(v.work));
-  ck(v.seamClass === T.TOPSTITCH_SEAM, 'и личность пункта — класс шва', String(v.seamClass));
+  // ЛИЧНОСТЬ ОТСТРОЧКИ — РЕЖИМ, А НЕ КЛАСС ШВА: с f55805d93 («Topstitch is identified by its mode,
+  // seam class inherits the standard») пикер пишет `topstitch_mode = edge`, а класс шва не трогает —
+  // он наследует стандарт карточки. Легаси-строки с os_topstitch по-прежнему читаются как Topstitch
+  // (раздел Д монтирует именно такие).
+  ck(v.topstitchMode === T.TOPSTITCH_EDGE, 'и личность пункта — режим отстрочки', String(v.topstitchMode));
+  ck(v.seamClass === T.SEAM_UNSET, 'а класс шва не записан — он наследует стандарт', String(v.seamClass));
   ck(v.operationType === T.MACHINE, 'глагол из каталога', String(v.operationType));
   ck((await triggerText()).includes('Topstitch'), 'пикер показывает имя ИЗ КАТАЛОГА', await triggerText());
 }
@@ -737,10 +743,11 @@ head('Г. выбор пишет РАБОТУ и ЛИЧНОСТЬ');
   // нет, ни того ни другого не выразить — значит снимать нечего, и «на всякий случай» здесь
   // было бы ровно тем стиранием, которого фаза «перестать терять» не допускает. Факт остаётся
   // видимым контролом на экране: сломаться можно, исчезнуть нельзя.
+  // Якорь, оставленный отстрочкой, — её режим (f55805d93), а не класс шва.
   ck(
-    v.seamClass === T.TOPSTITCH_SEAM,
+    v.topstitchMode === T.TOPSTITCH_EDGE,
     'чужой якорь НЕ стёрт — он остался видимым фактом, а не исчез молча',
-    String(v.seamClass),
+    String(v.topstitchMode),
   );
   ck(
     (await triggerText()).includes('Moscow'),
@@ -757,10 +764,22 @@ head('Г. выбор пишет РАБОТУ и ЛИЧНОСТЬ');
   ck(v.work === '', 'работа снята', String(v.work));
   ck(v.operationType === before.operationType, 'глагол не тронут', String(v.operationType));
   ck(v.machineType === before.machineType, 'машинка не тронута', String(v.machineType));
+  // ФРАЗА «derived from what is recorded» СНЯТА НАМЕРЕННО в de5ed2fe1 («explanatory texts removed
+  // across … construction», правило владельца «без поясняющего текста в UI»). Равноценный факт на
+  // экране остался: пикер больше не несёт маркер сохранённой работы (`data-step-work`), а имя в
+  // триггере — выведенное из записанного, не пустое и не каталожное имя снятой работы.
   ck(
-    (await page.locator(`[data-work-derived="0"]`).count()) === 1,
-    'и экран говорит, что имя теперь ВЫВЕДЕНО, а не сохранено',
+    (await page.locator(`${KIND}[data-step-work]`).count()) === 0,
+    'и экран больше не отмечает шаг сохранённой работой',
   );
+  {
+    const t = await triggerText();
+    ck(
+      t !== '' && t !== 'kind of operation' && !t.includes('Moscow'),
+      'а имя в триггере — ВЫВЕДЕННОЕ из записанного',
+      t || 'пусто',
+    );
+  }
 }
 
 // ── З. КЛАВИАТУРА НЕ ВЫБИРАЕТ ВСЛЕПУЮ ───────────────────────────────────────────────────────────
@@ -832,8 +851,18 @@ head('Ж. суженный список «на чём» и гоуст нормы
     .first()
     .getAttribute('placeholder');
   ck(hint === 'last: 2.4', 'в пустом поле нормы стоит гоуст из каталога', String(hint));
+  // ВРЕМЯ ТЕПЕРЬ ПИШЕТСЯ ЗНАЧЕНИЕМ С МЕТКОЙ ИСТОЧНИКА — намеренно, 23-AUTO #6 (tabs-lite,
+  // de5ed2fe1: «SMV from smvHint as a value with a `catalog` chip»; в коде — «TIME, A REAL VALUE»
+  // в `prefillForWork`). Прежнее «гоуст, никогда не значение» перевёрнуто владельцем; равноценная
+  // проверка — значение из каталога И метка «time · catalog», которой его можно снять.
   const v = await values();
-  ck(v.smv === '', 'и это ГОУСТ, а не значение — поле осталось пустым', `«${v.smv}»`);
+  ck(v.smv === '2.4', 'и это ЗНАЧЕНИЕ из каталога, записанное в поле', `«${v.smv}»`);
+  {
+    const chips = await page.$$eval('[data-work-prefill="0"] [data-prefill-field]', (ns) =>
+      ns.map((n) => `${n.getAttribute('data-prefill-field')}:${n.getAttribute('data-prefill-source')}`),
+    );
+    ck(chips.includes('smv:catalog'), 'и метка называет источник — каталог', chips.join(' | ') || 'меток нет');
+  }
 }
 
 // ── В. НЕЗНАКОМЫЙ ТОКЕН ─────────────────────────────────────────────────────────────────────────

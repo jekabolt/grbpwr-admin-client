@@ -85,3 +85,12 @@ scripts/upload-queue-probe.mjs — loose: no node:assert import, assert(...) cal
 scripts/vector-strokes-probe.mjs — loose: no node:assert import, assert(...) call, process.exit(1), or throw new Error
 scripts/view-switch-probe.mjs — loose: no node:assert import, assert(...) call, process.exit(1), or throw new Error
 scripts/viewer-modes-probe.mjs — loose: no node:assert import, assert(...) call, process.exit(1), or throw new Error
+
+# Asserting probes that read workspace data OUTSIDE the repo (../tmp/plans corpus, prod-run stands).
+# GitHub CI checks out the repo alone, so the data can never be there; run them by hand next to the corpus.
+scripts/assembly-doll-ui/probe.mjs — loose: reads ../tmp/plans/assembly-from-pattern/prod-run/SS26-005.stand.json
+scripts/assembly-seams-ui/probe.mjs — loose: reads ../tmp/plans/assembly-from-pattern/prod-run/*.stand.json
+scripts/dxf-cascade-probe.mjs — loose: reads ../tmp/plans/pdf-to-dxf/corpus/dxf-clo/allsizes-merged.dxf
+scripts/dxf-reconcile-probe.mjs — loose: reads ../tmp/plans/dxf-reupload-reconcile/golden and ../tmp/plans/pdf-to-dxf corpus
+scripts/assembly-skeleton/ui-probe.mjs — loose: sections K and G read ../tmp/plans/assembly-from-pattern/probe/data/ss26-005-shirt.dxf and ../tmp/plans/pdf-to-dxf/corpus/dxf-clo/blazer.dxf (owner patterns, not for a public repo)
+scripts/assembly-skeleton/map-probe.mjs — loose: reads ../tmp/plans …/ss26-005-shirt.dxf and prod-run/*.stand.json; without them it exits 0 having checked nothing (a false green in CI)

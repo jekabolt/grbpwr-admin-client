@@ -6,6 +6,12 @@
 // вовсе — с одним блоком «свой просмотрщик» и «общий» неразличимы.
 //
 // Компоненты НАСТОЯЩИЕ, из репозитория: подменять здесь нечего, сеть эти органы не трогают.
+//
+// ПРОВАЙДЕР ЗАПРОСОВ — потому что его требует сама галерея: `PictureGalleryProvider` держит дверь
+// «завести новой картинкой» через `useDesignWrites` (`useQueryClient()`, 2dbd3ddec), и без
+// `QueryClientProvider` дерево падает на монтаже («No QueryClient set»). Без `techCardId` эта
+// дверь закрыта, запросов стенд не шлёт — клиент только даёт хукам контекст, как карточке.
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
@@ -28,28 +34,31 @@ window.__strip = probe;
 probe.mount = (strips) => {
   const el = document.getElementById('root')!;
   el.innerHTML = '';
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   createRoot(el).render(
-    <PictureGalleryProvider>
-      <div style={{ width: 900 }}>
-        {strips.map((s) => (
-          <div key={s.key} data-strip={s.key}>
-            <Strip>
-              {s.cells.map((c) => (
-                <div key={c.id} data-cell={c.id} className='contents'>
-                  <StripCell
-                    src={c.src}
-                    alt={c.alt}
-                    badge={c.badge}
-                    emphasis={c.emphasis}
-                    gallery={{ src: c.src, thumbnail: c.src, type: 'image', alt: c.alt }}
-                    lines={['line one', 'line two']}
-                  />
-                </div>
-              ))}
-            </Strip>
-          </div>
-        ))}
-      </div>
-    </PictureGalleryProvider>,
+    <QueryClientProvider client={qc}>
+      <PictureGalleryProvider>
+        <div style={{ width: 900 }}>
+          {strips.map((s) => (
+            <div key={s.key} data-strip={s.key}>
+              <Strip>
+                {s.cells.map((c) => (
+                  <div key={c.id} data-cell={c.id} className='contents'>
+                    <StripCell
+                      src={c.src}
+                      alt={c.alt}
+                      badge={c.badge}
+                      emphasis={c.emphasis}
+                      gallery={{ src: c.src, thumbnail: c.src, type: 'image', alt: c.alt }}
+                      lines={['line one', 'line two']}
+                    />
+                  </div>
+                ))}
+              </Strip>
+            </div>
+          ))}
+        </div>
+      </PictureGalleryProvider>
+    </QueryClientProvider>,
   );
 };

@@ -19,6 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # composition-label and operation-work-apply probes build an old commit's tree
+          # (`git show <sha>:path`); a depth-1 clone has no such object.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22

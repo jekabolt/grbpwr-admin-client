@@ -419,8 +419,10 @@ head('ЦИТАТА Б — выбор пункта РЕАЛЬНО сужает л
     const x = document.querySelector('[aria-label="remove"]');
     return x?.parentElement ? (x.parentElement.innerText || '').trim() : '';
   });
+  // Глиф крестика — у примитива `Close` (a2c6d8d8d «one Close × primitive», 115 мест): `×`
+  // (U+00D7) вместо прежнего рукописного `✕` (U+2715). Срезается ровно глиф примитива.
   ck(
-    chip.replace(/\s*✕\s*$/, '').trim() === 'AW24',
+    chip.replace(/\s*×\s*$/, '').trim() === 'AW24',
     'активный фильтр стал снимаемым чипом с именем коллекции',
     `«${chip}»`,
   );

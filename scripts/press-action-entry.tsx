@@ -20,6 +20,7 @@ import {
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
 import { offeredKinds, kindLabelOf } from 'components/managers/tech-card/components/operation-kinds';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 
 type Ops = NonNullable<TechCardFormData['operations']>;
 
@@ -65,11 +66,15 @@ function Harness({ op }: { op: Record<string, unknown> }) {
   return (
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/tech-cards/1']}>
-        <FormProvider {...methods}>
-          <form>
-            <OperationsField />
-          </form>
-        </FormProvider>
+        {/* Как на карточке (src/index.tsx): с a58f0b84f дерево шагов зовёт `useFileSizeRun`, а он —
+            `useDictionary`. Без токена провайдер ничего не запрашивает. */}
+        <DictionaryProvider>
+          <FormProvider {...methods}>
+            <form>
+              <OperationsField />
+            </form>
+          </FormProvider>
+        </DictionaryProvider>
       </MemoryRouter>
     </QueryClientProvider>
   );
