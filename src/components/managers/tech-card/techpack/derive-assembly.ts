@@ -614,9 +614,9 @@ function bindSeams(seams: AsmSeam[], joins: Op[]): Map<number, AsmSeam[]> {
 
 type SeamCatalog = { byKey: ReadonlyMap<string, AsmSeam>; guessed: ReadonlyMap<number, AsmSeam[]> };
 
-/** The one compatibility accessor for operation.seamKeys. */
+/** Seams of one step: the stored op.seamKeys, else the guess. */
 export function seamsOfOp(op: common_TechCardOperation, card: SeamCatalog): AsmSeam[] {
-  const keys = (op as { seamKeys?: string[] }).seamKeys ?? [];
+  const keys = op.seamKeys ?? [];
   return keys.length
     ? keys.flatMap((key) => {
         const seam = card.byKey.get(key);
