@@ -95,13 +95,13 @@ export const SEAM_KINDS = [
   {
     token: 'open_topstitched',
     seamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
-    label: 'Open seam, topstitched both sides',
+    label: 'Open seam, top-stitched both sides',
     group: 'Decorative',
   },
   {
     token: 'topstitch_closed',
     seamClass: 'TECH_CARD_SEAM_CLASS_LS_LAPPED',
-    label: 'Closed topstitched seam',
+    label: 'Closed top-stitched seam',
     group: 'Decorative',
   },
   {
@@ -173,7 +173,7 @@ export const SEAM_KINDS = [
   {
     token: 'edge_overlock',
     seamClass: 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW',
-    label: 'Overlocked edge',
+    label: 'Overlock edge',
     group: 'Other',
   },
   {
@@ -227,7 +227,7 @@ export const SEAM_KINDS = [
   {
     token: 'cover_hem',
     seamClass: 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED',
-    label: 'Coverstitch hem',
+    label: 'Cover-stitch hem',
     group: 'Other',
   },
   {

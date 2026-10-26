@@ -40,7 +40,7 @@ export function IconTile({
         tracking='label'
         variant={inverted ? 'selected' : 'uppercase'}
         component='span'
-        className='mt-1 block w-full truncate text-center'
+        className='mt-1 line-clamp-3 w-full break-words text-center leading-tight'
       >
         {label}
       </Text>
