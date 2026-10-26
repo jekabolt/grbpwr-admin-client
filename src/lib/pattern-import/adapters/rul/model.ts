@@ -39,6 +39,12 @@ export type PieceBlock = {
   pieceLabel: string | null;
 };
 
+/** Conservative piece-name alias used by the RUL packer when sizes split between `X` / `X_MAIN`. */
+export function normalizedRulPieceName(value: string): string {
+  const normalized = value.trim().replace(/([_-])MAIN$/i, '');
+  return normalized || value.trim();
+}
+
 /** `# <rule>[, <alternate grade reference>]` (D6673 §4.3.1.4). */
 const RULE_TEXT = /^#\s*([^,\s][^,]*?)\s*(?:,.*)?$/;
 const LABEL = /^\s*([A-Za-z][A-Za-z .]{0,30}?)\s*:\s*(.*?)\s*$/;

@@ -7,7 +7,7 @@ import { notify } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button, GenericPopover } from 'ui';
 import { downloadFile } from 'lib/pattern-export/download';
-import { downloadPatternExport, downloadPlotExport } from './download';
+import { downloadPatternExport, downloadPlotExport, downloadRulExport } from './download';
 
 /** The plotter input (pens per role, plotter-sized labels) and the file's name, built on demand. */
 export type PlotSource = () => Promise<{ plot: PlotDrawing; title: string }>;
@@ -30,16 +30,16 @@ export function PatternExportItems({
   only?: readonly ExportFormatId[];
   /** Given → the «PLT · plotter» item is shown. */
   plot?: PlotSource;
-  /** Given → the «DXF · original» item is shown first. */
+  /** Given → the «DXF graded» and «DXF + RUL» items are shown first. */
   original?: OriginalSource;
   disabled?: boolean;
   title?: string;
   onDone?: () => void;
 }) {
-  const [busy, setBusy] = useState<ExportFormatId | 'dxf' | null>(null);
+  const [busy, setBusy] = useState<ExportFormatId | 'dxf-graded' | 'dxf-rul' | null>(null);
   const saveOriginal = async () => {
     if (!original) return;
-    setBusy('dxf');
+    setBusy('dxf-graded');
     try {
       const { blob, fileName } = await original();
       downloadFile(blob, fileName);
@@ -47,10 +47,28 @@ export function PatternExportItems({
     } catch (e) {
       notify({
         sev: 'error',
-        subject: 'DOWNLOAD DXF',
+        subject: 'EXPORT DXF GRADED',
         text: 'not downloaded',
         detail: e instanceof Error ? e.message : String(e),
         action: { label: 'retry', onClick: () => void saveOriginal() },
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const saveRul = async () => {
+    if (!original) return;
+    setBusy('dxf-rul');
+    try {
+      await downloadRulExport(original, title);
+      onDone?.();
+    } catch (e) {
+      notify({
+        sev: 'error',
+        subject: 'EXPORT DXF + RUL',
+        text: 'not exported',
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: 'retry', onClick: () => void saveRul() },
       });
     } finally {
       setBusy(null);
@@ -90,15 +108,24 @@ export function PatternExportItems({
   return (
     <>
       {original && (
-        <Button
-          type='button'
-          variant='underline'
-          disabled={disabled || busy !== null}
-          title={title || 'the uploaded file as is'}
-          onClick={() => void saveOriginal()}
-        >
-          {busy === 'dxf' ? 'DXF · original…' : 'DXF · original'}
-        </Button>
+        <>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={disabled || busy !== null}
+            onClick={() => void saveOriginal()}
+          >
+            {busy === 'dxf-graded' ? 'DXF graded…' : 'DXF graded'}
+          </Button>
+          <Button
+            type='button'
+            variant='underline'
+            disabled={disabled || busy !== null}
+            onClick={() => void saveRul()}
+          >
+            {busy === 'dxf-rul' ? 'DXF + RUL…' : 'DXF + RUL'}
+          </Button>
+        </>
       )}
       {EXPORT_FORMATS.filter((f) => (f.id !== 'plt' || plot) && (!only || only.includes(f.id))).map(
         (f) => (

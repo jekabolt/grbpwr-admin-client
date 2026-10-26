@@ -413,8 +413,8 @@ function sectionC(t: RulTable) {
       /moves the sample size/,
     ],
     [
-      'a size listed twice',
-      R(SPEC_RUL.replace('SIZE LIST: 34 36 38 40', 'SIZE LIST: 34 36 36 40')),
+      'a non-sample size listed twice',
+      R(SPEC_RUL.replace('SIZE LIST: 34 36 38 40', 'SIZE LIST: 34 36 38 38')),
       /twice/,
     ],
     [
@@ -931,7 +931,7 @@ async function sectionE() {
   const cases: [string, string, string, number | null][] = [
     ['CLO', 'W_SS_Graded.dxf', 'W_SS_Graded.rul', 6],
     ['Richpeace (ENGLISH)', 'S350.dxf', 'S350.rul', 9],
-    ['Grafis (SIZE LIST names 40 twice)', 'neay.dxf', 'neay.rul', null],
+    ['Grafis (repeated sample breakpoint)', 'neay.dxf', 'neay.rul', 14],
   ];
   for (const [who, d, r, n] of cases) {
     const go = async () => {
@@ -962,6 +962,15 @@ async function sectionE() {
         seg.presegmented && seg.sizes.length === n,
         `${seg.sizes.map((s) => s.token).join(' ')} · ${seg.identities.length} identities · ${JSON.stringify({ ...ex.stats, ungradedPieces: ex.stats.ungradedPieces.length })} · ${ex.warnings.join(' | ').slice(0, 300)}`,
       );
+      if (who.startsWith('Grafis')) {
+        check(
+          'E',
+          `${who}: every piece expands in every logical size`,
+          ex.blocks.length === ex.stats.pieces * ex.sizes.length,
+          `${ex.blocks.length}/${ex.stats.pieces * ex.sizes.length} piece-size blocks`,
+        );
+        continue;
+      }
       // areas grow away from the sample (sign sanity on real data)
       const area = (pts: { x: number; y: number }[]) =>
         Math.abs(

@@ -190,19 +190,26 @@ function gradePiece(
   // `# -1` is CLO's "no rule here" (a curve point); every other id is a rule the table must define
   const real = (r: number) => r !== -1;
   // 1 · rule texts → bindings by place
-  const anyLayer = new PointIndex<{ rule: number; layer: string; e: number }>(eps);
+  const anyLayer = new PointIndex<{ rule: number; layer: string; e: number; x: number; y: number }>(
+    eps,
+  );
   const bindings: { rule: number; layer: string; x: number; y: number; used: boolean }[] = [];
   ents.forEach((m, e) => {
     if (m.kind !== 'rule' || !m.slots.length) return;
     const s = m.slots[0];
     bindings.push({ rule: m.rule!, layer: m.layer, x: s.x, y: s.y, used: false });
-    anyLayer.add(s.x, s.y, { rule: m.rule!, layer: m.layer, e });
+    anyLayer.add(s.x, s.y, { rule: m.rule!, layer: m.layer, e, x: s.x, y: s.y });
   });
   const ruleAt = (m: ModelEntity, x: number, y: number): number | null | undefined => {
     // undefined = no text here; null = `# -1` (explicitly none); number = the rule.
     // The text of the entity's own layer wins, then its partner line's (a quality-validation copy
     // follows the line it copies), then the boundary, the sew line, the internal lines, any other.
-    const here = anyLayer.near(x, y);
+    const near = anyLayer.near(x, y);
+    const nearest = Math.min(...near.map((b) => Math.hypot(b.x - x, b.y - y)));
+    // A point and its rule text normally coincide exactly. Prefer that nearest text when another
+    // ruled point is also inside the legacy 0.01 mm vendor tolerance (our writer may separate two
+    // formerly coincident points by up to 0.02 mm).
+    const here = near.filter((b) => Math.hypot(b.x - x, b.y - y) <= nearest + 1e-7);
     if (!here.length) return undefined;
     const rank = (l: string) => {
       if (l === m.layer) return 0;

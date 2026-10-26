@@ -42,3 +42,24 @@ export async function downloadPlotExport(
   downloadFile(res.blob, res.fileName);
   return res.warnings;
 }
+
+/** The stored all-size DXF as an AAMA base DXF + RUL pair in one ZIP, or the DXF itself when it cannot be. */
+export async function downloadRulExport(
+  original: () => Promise<{ blob: Blob; fileName: string }>,
+  title?: string,
+): Promise<string[]> {
+  const [{ exportDxfRulArchive }, source] = await Promise.all([
+    import('lib/pattern-export/rul'),
+    original(),
+  ]);
+  let res;
+  try {
+    res = await exportDxfRulArchive(await source.blob.arrayBuffer(), source.fileName, title);
+  } catch {
+    // Not expressible as one RUL table (one size, a piece missing in a size): the graded DXF as is.
+    downloadFile(source.blob, source.fileName);
+    return [];
+  }
+  downloadFile(res.blob, res.fileName);
+  return res.warnings;
+}
