@@ -102,6 +102,7 @@ import {
   effectiveMachineSettings,
   effectivePressSettings,
   effectiveSeamClass,
+  operationHasSeam,
   operationHeading,
   operationTypeOptionsFor,
   seamAllowanceText,
@@ -4532,14 +4533,16 @@ function OperationEditor({
   // чем к числу успевала пристать единица. Плейсхолдер поля так и печатает — и правильно, единицу
   // там называет подпись поля, — а в бегущей строке рядом с «6 mm from the edge» голое число
   // читается в тех единицах, в которых читатель работает.
+  // Есть ли у шага шов — по его СОБСТВЕННОМУ классу: карточный стандарт есть у всех шагов.
+  const hasSeam = operationHasSeam(opType, seamClass);
   const seamSummaryText = [
-    seamClassLabel(effectiveSeam),
+    hasSeam ? seamClassLabel(effectiveSeam) : '',
     seamAllowanceText({
       own: seamAllowanceMm,
       card: cardAllowanceMm,
       workshop: shopAllowanceMm,
       operationType: opType,
-      seamClass: effectiveSeam,
+      seamClass,
     }),
     seamSecuringLabel(seamSecuring),
   ]
@@ -4548,9 +4551,7 @@ function OperationEditor({
   // Сводка шва — там, где шов есть. У подрезки, чистки и упаковки строка «seam · припуск 10 мм
   // (карточка)» верна и бессмысленна: она называет карточный стандарт, а не факт этого шага, — и
   // три таких строки подряд учат не читать сводки вовсе.
-  const showSeamSummary =
-    showSewingOverrides &&
-    (isMachineStep || effectiveSeam !== NONE_SEAM_CLASS || seamAllowanceMm.trim() !== '');
+  const showSeamSummary = showSewingOverrides && (hasSeam || seamAllowanceMm.trim() !== '');
 
   // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
   // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited

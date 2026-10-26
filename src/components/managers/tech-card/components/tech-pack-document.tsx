@@ -188,6 +188,7 @@ import {
   effectiveMachineSettings,
   effectivePressSettings,
   effectiveSeamClass,
+  operationHasSeam,
   machineProfileSummary,
   legacyMachineFact,
   operationHeading,
@@ -2993,10 +2994,10 @@ export function TechPackDocument({
                       const materials = resolveOpMaterials(o);
                       // ИМЯ ШАГА СЧИТАЕТСЯ ОДИН РАЗ: его читает и сама строка, и условие ниже,
                       // решающее, не станет ли заметка вторым экземпляром самой себя.
-                      const seamClass = effectiveSeamClass(
-                        o.seamClass,
-                        tc.construction?.defaultSeamClass,
-                      );
+                      // Карточный класс шва — только шагу, у которого шов есть (не упаковке).
+                      const seamClass = operationHasSeam(o.operationType, o.seamClass)
+                        ? effectiveSeamClass(o.seamClass, tc.construction?.defaultSeamClass)
+                        : undefined;
                       const stepName = operationTypeText(
                         { ...o, topstitchMode: o.topstitch?.mode },
                         workCatalog,
@@ -3055,7 +3056,7 @@ export function TechPackDocument({
                         card: cardAllowance,
                         workshop: shopAllowance,
                         operationType: o.operationType,
-                        seamClass,
+                        seamClass: o.seamClass,
                       });
                       // «НИКТО НЕ НАЗВАЛ» ГОВОРИТСЯ ВСЛУХ — но только там, где лестница вообще
                       // применима, и это РАЗНИЦА БУМАГИ С ЭКРАНОМ, а не остаток своей лестницы.

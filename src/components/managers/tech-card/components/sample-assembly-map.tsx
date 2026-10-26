@@ -8,6 +8,7 @@ import {
   attachmentKindLabel,
   densityText,
   effectiveSeamClass,
+  operationHasSeam,
   operationHeading,
   seamAllowanceText,
   seamClassLabel,
@@ -97,7 +98,10 @@ function specLine(
   /** Ступени припуска НАД шагом — стандарт карточки и стандарт цеха. */
   standards: { card?: string; workshop?: string; seamClass?: string },
 ): string {
-  const seamClass = effectiveSeamClass(o.seamClass, standards.seamClass);
+  // Карточный класс шва называет шов шага, у которого шов ЕСТЬ; упаковке его не приписывают.
+  const seamClass = operationHasSeam(o.operationType, o.seamClass)
+    ? effectiveSeamClass(o.seamClass, standards.seamClass)
+    : undefined;
   return [
     pieceNames.join(' + '),
     seamClassLabel(seamClass),
@@ -123,7 +127,7 @@ function specLine(
       card: standards.card,
       workshop: standards.workshop,
       operationType: o.operationType,
-      seamClass,
+      seamClass: o.seamClass,
     }),
     // ВСЯ СТРОЧКА ОДНИМ СОСТАВИТЕЛЕМ (`topstitchLine`) — включая СУЩЕСТВИТЕЛЬНОЕ И РЯДЫ. Фразу
     // «где строчить» карта звала общей и раньше, а слово «topstitch» приклеивала сама — и вместе с

@@ -341,6 +341,14 @@ const ORNAMENTAL_SEAM_CLASS: common_TechCardSeamClass = 'TECH_CARD_SEAM_CLASS_OS
 export const seamClassInherits = (value?: string): boolean =>
   !(value ?? '').trim() || value === UNKNOWN_SEAM_CLASS;
 
+/**
+ * Does the step have a seam at all? A machine step always does; any other verb only when the step
+ * itself names a class. Pass the step's OWN stored value, never `effectiveSeamClass`: the card
+ * standard answers «which seam», and every step has it — packing included.
+ */
+export const operationHasSeam = (operationType?: string, rawSeamClass?: string): boolean =>
+  isMachineStepType(operationType) || !seamClassInherits(rawSeamClass);
+
 /** Resolve a stored operation value for every reading surface; writes keep the original UNKNOWN. */
 export function effectiveSeamClass(
   operationValue?: string,
@@ -822,11 +830,14 @@ export function seamAllowanceReading(o: {
    * где оно написано, каким бы глаголом шаг ни был. Молчать о записанном — потеря, а не порядок.
    */
   operationType?: string;
-  /** Второй вход того же гейта: у шага с НАЗВАННЫМ классом шва шов есть по определению. */
+  /**
+   * Второй вход того же гейта: у шага с НАЗВАННЫМ классом шва шов есть по определению. СОБСТВЕННЫЙ
+   * класс шага, а не `effectiveSeamClass`: карточный стандарт есть у всех, и упаковка с ним
+   * печатала «allowance 12 mm (card)».
+   */
   seamClass?: string;
 }): SeamAllowanceReading {
-  const cls = (o.seamClass ?? '').trim();
-  const inherits = isMachineStepType(o.operationType) || (cls !== '' && !cls.endsWith('_UNKNOWN'));
+  const inherits = operationHasSeam(o.operationType, o.seamClass);
   // `.trim() !== ''`, А НЕ TRUTHY: «0» — ЗАКОННЫЙ припуск («кроить по линии»), и по truthy он
   // провалился бы на ступень ниже, подменив назначенный ноль карточным стандартом. Печатный лист
   // отличает отсутствие поля от нуля по этой же причине и теми же словами.
