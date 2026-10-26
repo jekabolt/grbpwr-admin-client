@@ -164,10 +164,32 @@ export function useTechCardPrint(id: number | undefined) {
 // into the save handler at all.
 export function useTechCardConstructionAudit(techCardId: number | undefined, active: boolean) {
   return useQuery({
-    queryKey: [...techCardKeys.detail(techCardId!), 'construction-audit'],
+    queryKey: constructionAuditKey(techCardId!),
     queryFn: () => adminService.GetTechCardConstructionAudit({ techCardId: techCardId! }),
     enabled: !!techCardId && active,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export const constructionAuditKey = (techCardId: number) =>
+  [...techCardKeys.detail(techCardId), 'construction-audit'] as const;
+
+// SEEN MARKS (SetTechCardFindingSeen). A mark is a note about the audit, not card content, so it
+// invalidates the audit alone — never the card detail, whose refetch would re-seed the form. The
+// returned promise keeps the mutation pending until the re-read lands: the row leaves the list
+// once, with the count, instead of flickering between «saved» and «re-read».
+export function useSetTechCardFindingSeen() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { techCardId: number; key: string; fingerprint: string; seen: boolean }) =>
+      adminService.SetTechCardFindingSeen({
+        techCardId: v.techCardId,
+        key: v.key,
+        fingerprint: v.fingerprint,
+        seen: v.seen,
+      }),
+    onSuccess: (_data, v) =>
+      queryClient.invalidateQueries({ queryKey: constructionAuditKey(v.techCardId) }),
   });
 }
 

@@ -11363,11 +11363,27 @@ export type TechCardAnalysisFinding = {
   // confidence — model: "certain" | "likely" | "needs_owner". Machine: "" for a deterministic fact,
   // "heuristic" for a guess that is allowed to be wrong and carries a badge saying so.
   confidence: string | undefined;
+  // code — the stable snake_case kind of a MACHINE finding, one per rule (A1..C9). "" on model
+  // findings. A client must treat an unknown code as text.
+  code: string | undefined;
+  // key — the finding's identity across audit runs: code "@" sorted(refs) ["#" subject], with a
+  // step anchored by its shape ("opfp:<fp8>") where that shape is unique on the card. Opaque to the
+  // client: echo it to SetTechCardFindingSeen. "" on model findings (they cannot be marked).
+  key: string | undefined;
+  // fingerprint — 16 hex chars of the text the reader sees (title, detail, shapes of the named
+  // steps). Echoed to SetTechCardFindingSeen; a mark counts only while it still matches.
+  fingerprint: string | undefined;
+  // seen — a seen mark exists AND its fingerprint matches this finding. A mark made on older text
+  // does not count: the finding is unseen again.
+  seen: boolean | undefined;
+  // seen_by / seen_at — who marked it and when; set only when seen.
+  seenBy: string | undefined;
+  seenAt: wellKnownTimestamp | undefined;
 };
 
 // GetTechCardConstructionAuditResponse is one machine-layer run. Everything in it is recomputed
-// from the stored card; nothing is remembered between runs, which is why there are no dismissals
-// here — a machine finding disappears when its cause disappears.
+// from the stored card; the only thing remembered between runs is a «seen» mark per finding key
+// (SetTechCardFindingSeen) — a finding still disappears only when its cause disappears.
 export type GetTechCardConstructionAuditResponse = {
   // findings — machine findings only (source="machine"). On a card in `draft` the whole readiness
   // class arrives ALREADY COLLAPSED into a single "Not yet ready for release: …" finding: on a
@@ -11386,6 +11402,9 @@ export type GetTechCardConstructionAuditResponse = {
   // without it the client could only learn that AI is unavailable by pressing Analyze and being
   // refused. False = show the Analyze button disabled with a quiet reason, do not call it.
   aiEnabled: boolean | undefined;
+  // unseen_count — findings of this response that are not seen (seen == false). The number the
+  // header and the badges show.
+  unseenCount: number | undefined;
 };
 
 // AnalyzeTechCardConstructionRequest — which saved card to run the model over. As with the audit,
@@ -11456,6 +11475,19 @@ export type AddTechCardIssueRequest = {
 export type AddTechCardIssueResponse = {
   issueId: number | undefined;
 };
+
+// SetTechCardFindingSeenRequest — key and fingerprint exactly as the audit sent them.
+export type SetTechCardFindingSeenRequest = {
+  techCardId: number | undefined;
+  // key — TechCardAnalysisFinding.key, <= 512 bytes. Required.
+  key: string | undefined;
+  // fingerprint — TechCardAnalysisFinding.fingerprint (16 hex). Required when seen=true.
+  fingerprint: string | undefined;
+  // seen — true marks, false removes the mark.
+  seen: boolean | undefined;
+};
+
+export type SetTechCardFindingSeenResponse = {};
 
 // OperationWorkCatalogItem — одна работа каталога.
 // ВСЁ СТРОКАМИ-ТОКЕНАМИ, НИ ОДНОГО ENUM. Словарь работ — данные, а не контракт: он растёт
@@ -20054,6 +20086,14 @@ export interface AdminService {
   // release. Issues sit OUTSIDE the CONSTRUCTION digest, so this call cannot disturb a signature —
   // that is what makes the narrow path safe rather than merely convenient.
   AddTechCardIssue(request: AddTechCardIssueRequest): Promise<AddTechCardIssueResponse>;
+  // SetTechCardFindingSeen marks (seen=true) or unmarks (seen=false) ONE machine finding of the
+  // construction audit as seen — not every finding has to be fixed. The mark is stored under the
+  // finding's key with the fingerprint the client saw; the audit reports it as seen only while the
+  // fingerprint still matches. Idempotent both ways; works on a released card (a mark is not card
+  // content). Classified wr(tech_cards).
+  SetTechCardFindingSeen(
+    request: SetTechCardFindingSeenRequest,
+  ): Promise<SetTechCardFindingSeenResponse>;
   // КАТАЛОГ РАБОТ (видов операций) — СЕРВЕРНЫЕ ДАННЫЕ, ОТДАВАЕМЫЕ ОДНИМ ЗАПРОСОМ.
   // Пункты, их синонимы поиска (RU/EN), допустимые машинки, глобальные дефолты свойств и подсказки
   // нормы времени приезжают вместе, потому что порознь они бесполезны: пикер работ рисуется целиком
@@ -26995,6 +27035,27 @@ export function createAdminServiceClient(handler: RequestHandler): AdminService 
           method: 'AddTechCardIssue',
         },
       ) as Promise<AddTechCardIssueResponse>;
+    },
+    SetTechCardFindingSeen(request) {
+      // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/construction/finding-seen`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join('&')}`;
+      }
+      return handler(
+        {
+          path: uri,
+          method: 'POST',
+          body,
+        },
+        {
+          service: 'AdminService',
+          method: 'SetTechCardFindingSeen',
+        },
+      ) as Promise<SetTechCardFindingSeenResponse>;
     },
     GetOperationWorkCatalog(request) {
       // eslint-disable-line @typescript-eslint/no-unused-vars

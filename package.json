@@ -13,6 +13,7 @@
     "build": "vite build",
     "build:check": "tsc && vite build",
     "check:expand": "node --experimental-strip-types scripts/check-expand-drag.ts",
+    "check:finding-seen": "node --experimental-strip-types --test scripts/finding-seen-check.ts",
     "test:ui-kit": "playwright test",
     "fusing:dxf": "node scripts/fusing-dxf/test.mjs",
     "preview": "vite preview",

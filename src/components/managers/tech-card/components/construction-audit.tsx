@@ -8,8 +8,11 @@ import {
   ANALYZE_CLIENT_BUDGET_MS,
   useAddTechCardIssue,
   useAnalyzeTechCardConstruction,
+  useSetTechCardFindingSeen,
   useTechCardConstructionAudit,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -33,6 +36,7 @@ import {
   type AutosaveStatus,
 } from './design/autosave-contract';
 import { assignUids, loadAnalysis, saveAnalysis, StoredAnalysis } from './analysis-identity';
+import { canMarkSeen, seenByLine, splitBySeen } from './finding-seen';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
@@ -438,6 +442,10 @@ function Finding({
   resolveOp,
   runFingerprints,
   dirty = false,
+  seenLine,
+  onSeen,
+  onUnseen,
+  seenBusy = false,
 }: {
   finding: TechCardAnalysisFinding;
   onGo?: (r: string) => void;
@@ -467,6 +475,16 @@ function Finding({
   runFingerprints?: Record<string, string>;
   /** The form has unsaved changes — gates the form half of the note. */
   dirty?: boolean;
+  /**
+   * MACHINE FINDINGS ONLY — the server «seen» mark (SetTechCardFindingSeen). `seenLine` set = the
+   * row is a seen one, shown on request: dimmed, who/when in its title. `onSeen` / `onUnseen` are
+   * the one control; neither is passed to a reader without write access or to a keyless finding.
+   */
+  seenLine?: string;
+  onSeen?: () => void;
+  onUnseen?: () => void;
+  /** This row's mark is being written and re-read. */
+  seenBusy?: boolean;
 }) {
   const severity = (finding.severity ?? '').trim();
   const category = (finding.category ?? '').trim();
@@ -517,8 +535,14 @@ function Finding({
     );
   }
 
+  const seenToggle = onSeen ?? onUnseen;
+
   return (
-    <div className='border-b border-hairline py-2 last:border-b-0'>
+    <div
+      className={`border-b border-hairline py-2 last:border-b-0${seenLine ? ' opacity-60' : ''}`}
+      title={seenLine}
+      data-finding-seen={seenLine ? '' : undefined}
+    >
       <ChipRow>
         {severity && (
           <Chip tone={SEVERITY_IS_LOUD.has(severity) ? 'error' : 'default'}>{severity}</Chip>
@@ -585,6 +609,14 @@ function Finding({
             separately put «dismiss» in the middle of the row, reading as a third anchor rather than
             as the other half of the pair it belongs to. */}
         <div className='ml-auto flex shrink-0 items-center gap-2'>
+          {/* `nonForm`, like «file as issue» on a frozen card: a mark is a note about the audit,
+              not card content, so it is set on a RELEASED card too — whose fieldset would kill a
+              native button. The gate is write access, checked by the caller. */}
+          {seenToggle && (
+            <Chip nonForm dashed disabled={seenBusy} onClick={seenToggle}>
+              {seenBusy ? '…' : onSeen ? 'seen' : 'unmark'}
+            </Chip>
+          )}
           {onDismiss && (
             <Chip
               nonForm
@@ -770,6 +802,9 @@ export function ConstructionAudit({
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
   const analyze = useAnalyzeTechCardConstruction();
   const addIssue = useAddTechCardIssue();
+  const setSeen = useSetTechCardFindingSeen();
+  const { canWrite } = usePermissions();
+  const canMark = canWrite(SECTION.techCards);
 
   const [grouping, setGrouping] = useState<Grouping>('severity');
   // РАСКРЫТИЕ УПРАВЛЯЕМОЕ РАДИ ОДНОГО: ШАПКА СЧИТАЕТ ТОЛЬКО ПОКА ЗАКРЫТО. Счёт в шапке существует
@@ -777,6 +812,21 @@ export function ConstructionAudit({
   // РАСКРЫТЫМ блоком тот же счёт — просто вторая копия строки, которая и так стоит первой строкой
   // отчёта; две копии одного числа умеют разойтись, одна не умеет.
   const [auditOpen, setAuditOpen] = useState(false);
+  // SEEN ROWS ARE HIDDEN UNTIL ASKED FOR. Not deleted from view for good: «seen · N» brings them
+  // back, dimmed, with the way to unmark.
+  const [showSeen, setShowSeen] = useState(false);
+  // «N not checked» in the folded header opens the block AND brings the list into view: the click
+  // bubbles to the header (which opens it), this flag says where to land once it has.
+  const notCheckedRef = useRef<HTMLDivElement>(null);
+  const landOnNotChecked = useRef(false);
+  useEffect(() => {
+    if (!auditOpen || !landOnNotChecked.current) return;
+    landOnNotChecked.current = false;
+    const raf = requestAnimationFrame(() =>
+      notCheckedRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+    );
+    return () => cancelAnimationFrame(raf);
+  }, [auditOpen]);
   // THE LAST RUN LIVES IN sessionStorage, and the component is only its reader. F5 must not burn a
   // run that cost money and forty seconds; nothing here may outlive the session.
   const [stored, setStored] = useState<StoredAnalysis>(() => loadAnalysis(techCardId));
@@ -794,11 +844,18 @@ export function ConstructionAudit({
 
   const findings = data?.findings ?? [];
   const notChecked = (data?.notChecked ?? []).filter((n) => !!n?.trim());
+  // EVERY NUMBER ON THIS PANEL COUNTS THE OPEN (UNSEEN) ONES. The list and its headline are cut from
+  // the same split, so they cannot disagree; a seen finding comes back on its own when its text
+  // changes, because the server stops matching the mark.
+  const { open: openFindings, seen: seenFindings } = useMemo(
+    () => splitBySeen(data?.findings),
+    [data?.findings],
+  );
 
   // Counted in a declared order first, then whatever else arrived, in the order it arrived — an
   // unfamiliar severity has to appear in the headline too, or the headline disagrees with the list.
   const counts = new Map<string, number>();
-  for (const f of findings) {
+  for (const f of openFindings) {
     const s = (f.severity ?? '').trim() || 'finding';
     counts.set(s, (counts.get(s) ?? 0) + 1);
   }
@@ -807,6 +864,24 @@ export function ConstructionAudit({
     ...[...counts.keys()].filter((s) => !SEVERITY_ORDER.includes(s)),
   ];
   const summary = ordered.map((s) => plural(counts.get(s) ?? 0, s)).join(' · ');
+
+  const markSeen = (f: TechCardAnalysisFinding, seen: boolean) => {
+    if (!techCardId || !canMarkSeen(f)) return;
+    setSeen.mutate(
+      { techCardId, key: f.key!, fingerprint: f.fingerprint!, seen },
+      {
+        onError: (e: unknown) =>
+          notify({
+            sev: 'error',
+            subject: 'AUDIT',
+            text: seen ? 'not marked' : 'not unmarked',
+            detail: e instanceof Error ? e.message : undefined,
+            action: { label: 'retry', onClick: () => markSeen(f, seen) },
+          }),
+      },
+    );
+  };
+  const seenBusyKey = setSeen.isPending ? setSeen.variables?.key : undefined;
 
   const goRef = (r: string) => {
     const target = refTarget(r);
@@ -1025,8 +1100,24 @@ export function ConstructionAudit({
     </Text>
   ) : (
     <>
-      {/* Clean says nothing: a folded block with no count IS the all-clear. */}
-      {findings.length > 0 && <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>}
+      {/* Clean says nothing: a folded block with no count IS the all-clear. Seen findings are not
+          counted — that is what marking them is for. */}
+      {openFindings.length > 0 && <Pill tone='warn'>{plural(openFindings.length, 'finding')}</Pill>}
+      {/* WHAT THE RUN NEVER LOOKED AT IS SAID FOLDED TOO — a bare header over a clean list would read
+          «checked and clean». A click lands on the list (the header opens the block). */}
+      {notChecked.length > 0 && (
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          data-not-checked-count
+          onClick={() => {
+            landOnNotChecked.current = true;
+          }}
+        >
+          {notChecked.length} not checked
+        </Text>
+      )}
       {inFlight ? (
         <Pill tone='attention'>analyzing…</Pill>
       ) : run ? (
@@ -1087,9 +1178,27 @@ export function ConstructionAudit({
         <Placeholder label='auditing the saved assembly' className='h-8' />
       ) : (
         <div className='flex flex-col gap-2'>
-          <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            {findings.length === 0 ? 'no findings' : summary}
-          </Text>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              {findings.length === 0
+                ? 'no findings'
+                : openFindings.length === 0
+                  ? 'no open findings'
+                  : summary}
+            </Text>
+            {seenFindings.length > 0 && (
+              <Chip
+                nonForm
+                quiet
+                className='ml-auto'
+                selected={showSeen}
+                pressed={showSeen}
+                onClick={() => setShowSeen((v) => !v)}
+              >
+                seen · {seenFindings.length}
+              </Chip>
+            )}
+          </div>
 
           {/* Порядок сервера — как пришёл. Он ранжирован там, и пересортировка на клиенте развела
               бы два отчёта об одном прогоне. */}
@@ -1098,23 +1207,39 @@ export function ConstructionAudit({
               cannot be stale against them: its anchors and the map are the same instant. Amber and
               the grey «not found» belong to the MODEL half, whose findings were minted seconds or
               minutes ago against a card that may since have moved. */}
-          {findings.length > 0 && (
+          {(openFindings.length > 0 || (showSeen && seenFindings.length > 0)) && (
             <div className='border-t border-hairline'>
-              {findings.map((f, i) => (
+              {openFindings.map((f, i) => (
                 <Finding
-                  key={i}
+                  key={f.key || `open-${i}`}
                   finding={f}
                   onGo={goRef}
                   onFile={fileAsIssue}
                   frozen={frozen}
                   filing={addIssue.isPending}
+                  onSeen={canMark && canMarkSeen(f) ? () => markSeen(f, true) : undefined}
+                  seenBusy={!!seenBusyKey && seenBusyKey === f.key}
                 />
               ))}
+              {showSeen &&
+                seenFindings.map((f, i) => (
+                  <Finding
+                    key={f.key || `seen-${i}`}
+                    finding={f}
+                    onGo={goRef}
+                    onFile={fileAsIssue}
+                    frozen={frozen}
+                    filing={addIssue.isPending}
+                    seenLine={seenByLine(f)}
+                    onUnseen={canMark ? () => markSeen(f, false) : undefined}
+                    seenBusy={!!seenBusyKey && seenBusyKey === f.key}
+                  />
+                ))}
             </div>
           )}
 
           {notChecked.length > 0 && (
-            <div className='space-y-px'>
+            <div ref={notCheckedRef} className='space-y-px' data-not-checked>
               <Text size='micro' variant='label' tracking='label' className='uppercase'>
                 not checked · {notChecked.length}
               </Text>
