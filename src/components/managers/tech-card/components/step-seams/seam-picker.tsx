@@ -1,6 +1,6 @@
 // THE STEP'S SEAM PICKER (assembly-schema T8, mockup M1 «Opacity», owner OK 26.10). The step's input
 // pieces large, with their codes; every edge and every inner line is a door. Clicks collect side A
-// (blue) and side B (orange) — with two or more inputs the side is the input's, with one it is the
+// (highlight) and side B (ink) — with two or more inputs the side is the input's, with one it is the
 // A / B switch — and nothing is stored until «pair» (or Enter): then the pair becomes ONE card seam
 // (composite when a side holds several runs, surface when one side is an inner line) and its key
 // goes onto the step, after the ones already there. A suggestion by length / notches is applied
@@ -415,9 +415,8 @@ export default function SeamPicker({
       >
         <path
           d={d(piece.cut, true)}
-          fill={PIECE_INK.fill}
+          style={{ fill: PIECE_INK.fill, stroke: PIECE_INK.line }}
           fillOpacity={0.75}
-          stroke={PIECE_INK.line}
           strokeWidth={1}
           vectorEffect='non-scaling-stroke'
         />
@@ -485,7 +484,7 @@ export default function SeamPicker({
           x={cx}
           y={cy}
           fontSize={font}
-          fill={PIECE_INK.code}
+          style={{ fill: PIECE_INK.code }}
           textAnchor='middle'
           dominantBaseline='central'
           pointerEvents='none'
