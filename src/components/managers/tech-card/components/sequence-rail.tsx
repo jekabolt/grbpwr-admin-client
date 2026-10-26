@@ -40,6 +40,7 @@ import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { kindFitsClass, StepIconCell } from './step-icon-tiles';
 import { UnitBlockHeader } from './unit-block';
 import { useActiveStepStore, useIsActiveStep, useMapPickNonce } from './assembly-map/active-step';
 import type { PieceShapeMap } from './use-piece-shapes';
@@ -132,7 +133,14 @@ function OperationSeamClass({
   cardSeamClass: string;
   frozen: boolean;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  // A seam kind belongs to one class: moving the class off it drops the kind in the same edit.
+  const setSeamClass = (next: string, onChange: (value: string) => void) => {
+    onChange(next);
+    const kind = (getValues(`operations.${index}.seamKind`) ?? '').trim();
+    if (!kindFitsClass(kind, next))
+      setValue(`operations.${index}.seamKind`, '', { shouldDirty: true });
+  };
   if (!isMachineStepType(operationType)) {
     return (
       <div className='col-span-2 px-1 pb-1 text-labelColor sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:p-0 sm:text-center'>
@@ -154,7 +162,7 @@ function OperationSeamClass({
               items={seamClassOptions}
               placeholder='Seam class'
               value={effectiveSeamClass(raw, cardSeamClass)}
-              onValueChange={field.onChange}
+              onValueChange={(next) => setSeamClass(next, field.onChange)}
               invalid={!!fieldState.error}
               readOnly={frozen}
               size='sm'
@@ -172,7 +180,7 @@ function OperationSeamClass({
                   variant='underline'
                   size='xs'
                   disabled={frozen}
-                  onClick={() => field.onChange('TECH_CARD_SEAM_CLASS_UNKNOWN')}
+                  onClick={() => setSeamClass('TECH_CARD_SEAM_CLASS_UNKNOWN', field.onChange)}
                   className='p-0 text-labelColor hover:text-textColor'
                 >
                   Reset
@@ -460,6 +468,7 @@ function RailStep({
             // времени у строк с чипом съезжала влево и столбец шёл ступеньками.
             className='col-start-2 row-start-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 pr-11 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
+            <StepIconCell index={index} />
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
             </Text>

@@ -14,3 +14,10 @@ export type {
 export { CLASS_KIND, SEAM_KINDS, SM_KIND } from './seam-kinds';
 export type { SeamKindDefinition, SeamKindToken } from './seam-kinds';
 export { opIconCardOf, opIconInputOf } from './adapter';
+export {
+  isWorkVariant,
+  WORK_VARIANTS,
+  workVariantIconKey,
+  workVariantLabel,
+  workVariantsOf,
+} from './work-variants';

@@ -119,6 +119,7 @@ import {
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
 // остался бы на поле, которого нет на экране.
 import { SLIT_OVERCAST_WORK } from './operation-work';
+import { FOUR_HOLE_PATTERNS, SEAM_KIND_BINDING_STYLE, seamKindDef } from './step-icon-tiles/rules';
 import { z } from 'zod';
 import {
   blankFuse,
@@ -1304,6 +1305,10 @@ const operationSchema = z
     // человек, автоматического переписывания нет ни на одной стороне. Такая строка продолжает жить
     // по старой деривации (`kindOf`) — двоекодье переходного периода.
     work: z.string().optional().default(''),
+    // Seam construction (0436) and the variant of the work: raw string tokens, '' = unset. Same
+    // reasoning as `work`: an unknown token must survive the round trip untouched.
+    seamKind: z.string().optional().default(''),
+    workVariant: z.string().optional().default(''),
 
     // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
     operationNumber: z.number().optional().default(0),
@@ -1461,6 +1466,8 @@ const operationSchema = z
       .default('TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'),
     bartackLengthMm: z.string().optional().default(''), // мм, 1..40
     attachPattern: z.string().optional().default('TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'),
+    // Holes of the button sewn on (0436): 2 | 4, 0 = unset.
+    buttonHoles: z.number().optional().default(0),
     zipperApplication: z.string().optional().default('TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'),
 
     // S14 / S17 — дельта, живёт в блоке строчки: бейка при явном binding_taping, шов этикетки при
@@ -1770,6 +1777,60 @@ const operationSchema = z
       'zipperApplication',
       'a zipper application is a zipper-setting machine setting — name that machine on the step, or clear it',
     );
+    // ДЫРКИ ПУГОВИЦЫ (0436) — настройка той же пришивной машинки, что и рисунок, и две дырки
+    // креста, квадрата и U не дают (сервер: needs_four_holes). Зеркало, чтобы отказ встал на плитке.
+    const stepHoles = o.buttonHoles ?? 0;
+    if (stepHoles !== 0 && stepHoles !== 2 && stepHoles !== 4) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['buttonHoles'],
+        message: 'a button has 2 or 4 holes',
+      });
+    }
+    needsMachineType(
+      stepHoles !== 0,
+      ['TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH'],
+      'buttonHoles',
+      'button holes are a button-attach machine setting — name that machine on the step, or clear them',
+    );
+    if (stepHoles === 2 && FOUR_HOLE_PATTERNS.has(o.attachPattern ?? '')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['attachPattern'],
+        message: 'a two-hole button takes one bar — pick parallel, or four holes',
+      });
+    }
+    // ВИД ШВА (0436): класс шага обязан быть ЯВНЫМ и равным классу вида, окантовка несёт своё
+    // сложение (needs_seam_class / contradicts_seam_kind). Токен новее бандла не судим — его судит
+    // сервер. Отказ ставится на вид: плитки — единственный контрол, где его можно починить.
+    const stepKind = (o.seamKind ?? '').trim();
+    const kindDef = stepKind ? seamKindDef(stepKind) : undefined;
+    if (kindDef && (o.seamClass ?? '') !== kindDef.seamClass) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seamKind'],
+        message: 'this seam kind belongs to another seam class — pick it again, or clear it',
+      });
+    } else if (
+      kindDef &&
+      stepKind in SEAM_KIND_BINDING_STYLE &&
+      (o.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN') !== SEAM_KIND_BINDING_STYLE[stepKind]
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['seamKind'],
+        message: 'the binding fold disagrees with this kind — pick the kind again',
+      });
+    }
+    // ВАРИАНТ БЕЗ РАБОТЫ (needs_work). «Не та работа» (not_for_work) не зеркалится: карта
+    // вариантов только растёт, и бандл старше сервера отверг бы законный вариант.
+    if ((o.workVariant ?? '').trim() && !(o.work ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['workVariant'],
+        message: 'a type needs its work — name the work, or clear the type',
+      });
+    }
     // Горячий воздух есть ТОЛЬКО у проклейки шва: ультразвук греет сам материал, воздуха у него нет.
     needsMachineType(
       !!o.airTemperatureC,
@@ -2776,6 +2837,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // version»), а сохранение вернёт нетронутым. Погасить незнакомое здесь значило бы стереть
       // разметку владельца обновлением бандла.
       work: (o.work ?? '').trim(),
+      // Raw tokens like `work`: an unknown value is kept and saved back as it came.
+      seamKind: (o.seamKind ?? '').trim(),
+      workVariant: (o.workVariant ?? '').trim(),
       smv: decimalToInput(o.smv),
       draft: !!o.draft,
       review: (o.review ?? '').trim(),
@@ -2857,6 +2921,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         o.fastening?.buttonholeOrientation || 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN',
       bartackLengthMm: decimalToInput(o.fastening?.bartackLengthMm),
       attachPattern: o.fastening?.attachPattern || 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN',
+      buttonHoles: o.fastening?.buttonHoles || 0,
       zipperApplication: o.fastening?.zipperApplication || 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN',
       bindingStyle: o.stitching?.bindingStyle || 'TECH_CARD_BINDING_STYLE_UNKNOWN',
       labelAttachStitch: o.stitching?.labelAttachStitch || 'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN',
@@ -3686,6 +3751,8 @@ export function mapFormToTechCardInsert(
     // ТРАНСПОРТ, а не содержание: в дайджест секции не входит — объявить его не значит просрочить
     // подпись.
     operationWorkAware: true,
+    // Same shield for seamKind / workVariant / fastening.buttonHoles (0436): this bundle carries all three.
+    operationSeamKindAware: true,
     // ШЕСТОЙ — черновик каркаса (0410). Ставится ВСЕГДА: этот бандл везёт `draft` каждого шага, и
     // `false` здесь — «проверено», а не «не знаю про поле». Без флага сервер отказывает записи
     // поверх карточки с draft-шагами (старая вкладка стёрла бы метки полной заменой).
@@ -3844,6 +3911,7 @@ export function mapFormToTechCardInsert(
         bartackLengthMm: optionalDecimal(o.bartackLengthMm),
         attachPattern: (o.attachPattern ||
           'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN') as common_TechCardButtonAttachPattern,
+        buttonHoles: o.buttonHoles || 0,
         zipperApplication: (o.zipperApplication ||
           'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN') as common_TechCardZipperApplication,
       }));
@@ -3896,6 +3964,10 @@ export function mapFormToTechCardInsert(
         // буквально. Именно поэтому щит явный, а не выведенный из присутствия поля: иначе «снял
         // вид с единственной размеченной строки» было бы неотличимо от «сохраняет старый бандл».
         work: (o.work ?? '').trim(),
+        // Seam kind and work variant ride every write as they stand, '' included (= cleared),
+        // under `operationSeamKindAware`.
+        seamKind: (o.seamKind ?? '').trim(),
+        workVariant: (o.workVariant ?? '').trim(),
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
         // DRAFT rides every write as it stands: a reviewed step must reach the server as false.
         draft: !!o.draft,

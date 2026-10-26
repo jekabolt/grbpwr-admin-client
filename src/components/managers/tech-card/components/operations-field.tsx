@@ -65,13 +65,10 @@ import {
   // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
   // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
   // и того же токена, — а расходятся они молча и обнаруживаются в цеху.
-  BUTTON_ATTACH_PATTERN_LABELS,
-  BINDING_STYLE_LABELS,
   HOLE_PREP_LABELS,
   LABEL_ATTACH_STITCH_LABELS,
   PEEL_MODE_LABELS,
   PRESS_ACTION_LABELS,
-  PRESS_TOWARD_LABELS,
   REINFORCEMENT_LABELS,
   SEAM_SECURING_LABELS,
   ZIPPER_APPLICATION_LABELS,
@@ -251,6 +248,14 @@ import {
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
 import { CardSeamStandard, SequenceRail } from './sequence-rail';
+import {
+  ButtonAttachTiles,
+  PressTowardTiles,
+  SeamKindTiles,
+  StepHeaderIcon,
+  TopstitchRowTiles,
+  WorkVariantTiles,
+} from './step-icon-tiles';
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
@@ -632,6 +637,10 @@ export const CORE_STEP_FIELDS = new Set([
   // этих полях не должен раскрывать фолд, в котором нужного контрола нет.
   'outputUnitKey',
   'outputUnitName',
+  // Icon tiles (0436) sit in the core editor, so their refusals must not open the fold either.
+  'seamKind',
+  'workVariant',
+  'buttonHoles',
   // ШЕСТЬ ДИСКРИМИНАТОРОВ ВОЛНЫ 0324 — по одному на глагол, и все шестеро REQUIRED. Они стоят в
   // ядре сетки (STEP_DISCRIMINATORS), значит и здесь: попади любой из них в этот фолд, его
   // серверный или зодовский отказ раскрывал бы аккордеон, в котором контрола нет вовсе.
@@ -678,16 +687,6 @@ const PIECE_DND_PREFIX = 'grbpwr-piece:';
 // Keep a Radix select from ballooning when its selected option is long: clip the value span (the
 // trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
-
-// 1..4 rows of topstitching; 0 = unset. Past four it is decoration nobody sews and, more to the
-// point, a typo that reaches the printed sheet as an instruction.
-const TOPSTITCH_ROW_OPTIONS = [
-  { value: 0, label: '— rows —' },
-  { value: 1, label: '1' },
-  { value: 2, label: '2' },
-  { value: 3, label: '3' },
-  { value: 4, label: '4' },
-];
 
 // The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
 // «что соединяют»: roll goods (fabric / lining / insulation) reach a step through inputKeys —
@@ -763,6 +762,8 @@ export const emptyOperation = {
   // РАБОТА (0330) — пустая строка, и это ЗАКОННОЕ состояние, а не заготовка. Новый шаг вида не
   // несёт, пока человек его не назвал; до тех пор шаг живёт по старой деривации (`kindOf`).
   work: '',
+  workVariant: '',
+  seamKind: '',
   zone: NONE_ZONE,
   calloutNumber: 0, // 0 = no sketch pin linked
   smv: '',
@@ -842,6 +843,7 @@ export const emptyOperation = {
   buttonholeOrientation: NONE_BUTTONHOLE_ORIENTATION,
   bartackLengthMm: '',
   attachPattern: NONE_ATTACH_PATTERN,
+  buttonHoles: 0,
   zipperApplication: NONE_ZIPPER_APPLICATION,
   bindingStyle: NONE_BINDING_STYLE,
   labelAttachStitch: NONE_LABEL_ATTACH,
@@ -4583,6 +4585,7 @@ function OperationEditor({
       )}
     >
       <div className='mb-2.5 flex flex-wrap items-center gap-2 border-b border-borderColor pb-1'>
+        <StepHeaderIcon index={index} />
         <Text size='default' component='h4' className='font-bold tabular-nums'>
           {opNumber}
         </Text>
@@ -4924,6 +4927,11 @@ function OperationEditor({
         caption='set on this step, but its current kind shows no control for it — the values below are still sent on save, and any refusal lands here'
         onClear={clearResidueField}
       />
+      <WorkVariantTiles index={index} />
+      <SeamKindTiles
+        index={index}
+        family={showBindingStyle ? 'bind' : showStitching ? 'join' : null}
+      />
 
       {/* ОТСТРОЧКА — ТРИ ПОЛЯ, ПОДНЯТЫЕ ИЗ СТВОРКИ. Наследовать им неоткуда (ни профиль машинки, ни
           карточные дефолты про отступ и число рядов не говорят), значит по правилу раздела им
@@ -4980,13 +4988,7 @@ function OperationEditor({
                 этой же карточке зовутся и строчки отстрочки (здесь), и соседние строчки, между
                 которыми меряется «spacing between stitch rows» в игольном блоке ниже. Это те же
                 самые ряды, но живут они в двух разных блоках, и связать их обязана подпись. */}
-              <SelectField
-                name={`operations.${index}.topstitchRows`}
-                label='rows of topstitching'
-                items={TOPSTITCH_ROW_OPTIONS}
-                valueAsNumber
-                className={selectNoGrow}
-              />
+              <TopstitchRowTiles index={index} className='col-span-full' />
             </>
           )}
         </div>
@@ -5065,14 +5067,6 @@ function OperationEditor({
               maxDecimals={2}
               placeholder='1.0'
             />
-            {showBindingStyle && (
-              <SelectField
-                name={`operations.${index}.bindingStyle`}
-                label='binding fold'
-                items={stepEnumOptions(BINDING_STYLE_LABELS, '— not stated —', bindingStyle)}
-                className={selectNoGrow}
-              />
-            )}
             <SelectField
               name={`operations.${index}.labelAttachStitch`}
               label='label stitched'
@@ -5134,18 +5128,6 @@ function OperationEditor({
                 placeholder='7'
               />
             )}
-            {showAttachPattern && (
-              <SelectField
-                name={`operations.${index}.attachPattern`}
-                label='button pattern'
-                items={stepEnumOptions(
-                  BUTTON_ATTACH_PATTERN_LABELS,
-                  '— not stated —',
-                  attachPattern,
-                )}
-                className={selectNoGrow}
-              />
-            )}
             {showZipper && (
               <SelectField
                 name={`operations.${index}.zipperApplication`}
@@ -5161,6 +5143,12 @@ function OperationEditor({
           </div>
         </>
       )}
+      <ButtonAttachTiles
+        index={index}
+        show={showAttachPattern}
+        bomLines={bomLines}
+        frozen={frozen}
+      />
 
       {/* W — сварка и проклейка: две машинки, соединяющие теплом, а не ниткой. */}
       {showWeld && (
@@ -5340,14 +5328,7 @@ function OperationEditor({
               items={stepEnumOptions(PRESS_ACTION_LABELS, '— not stated —', pressAction)}
               className={selectNoGrow}
             />
-            {showPressToward && (
-              <SelectField
-                name={`operations.${index}.pressToward`}
-                label='allowance goes *'
-                items={stepEnumOptions(PRESS_TOWARD_LABELS, '— which way —', pressToward)}
-                className={selectNoGrow}
-              />
-            )}
+            {showPressToward && <PressTowardTiles index={index} className='col-span-full' />}
           </div>
         </>
       )}

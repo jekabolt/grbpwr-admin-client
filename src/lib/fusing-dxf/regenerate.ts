@@ -321,6 +321,8 @@ const ECHO_AWARE = {
   mediaAware: true,
   operationKindsAware: true,
   operationWorkAware: true,
+  // The stored operations ride verbatim, seamKind / workVariant / fastening.buttonHoles included.
+  operationSeamKindAware: true,
   operationDraftAware: true,
   operationReviewAware: true,
   bomQtyAware: true,
