@@ -164,8 +164,7 @@ export function grainDisplaySegment(
 
   let offset = 0;
   const through = lineIntervals(pieceMid, u, rings);
-  let interval =
-    through.find((iv) => iv.t0 <= EPS && iv.t1 >= -EPS) ?? longest(through);
+  let interval = through.find((iv) => iv.t0 <= EPS && iv.t1 >= -EPS) ?? longest(through);
   if (!interval) {
     const projections = rings
       .flatMap((ring) => ring)

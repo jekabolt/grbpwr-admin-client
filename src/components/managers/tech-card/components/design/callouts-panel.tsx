@@ -147,7 +147,7 @@ export function useCalloutsPanel({
   const collapsed =
     !heldOpen &&
     (defaultCollapsed !== undefined
-      ? (calloutPrefs.collapsed ?? defaultCollapsed)
+      ? calloutPrefs.collapsed ?? defaultCollapsed
       : calloutsCollapsed(calloutPrefs.collapsed, count ?? 0));
   /* ПАНЕЛЬ, СВЁРНУТАЯ ПРЕДПОЧТЕНИЕМ, ТОЖЕ РАСКРЫВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (раунд 3, m5). Якорь
      `callouts.N.description` стоит под `hidden={collapsed}`: раскрытая доска (`setOpen` выше) его не
