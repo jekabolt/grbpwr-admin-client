@@ -1,6 +1,7 @@
 import { GrbpwrMark, GroupLabel, Pill, Row } from 'ui';
 import { KV } from 'components/managers/print/sheet';
 import { deriveCover, type CoverDeriveOptions } from '../derive-cover';
+import type { Gap } from '../gaps';
 import { Missing, statusTone, TechpackDrawing } from './bits';
 import { TechpackSheet, type TechpackPageProps } from '../sheet';
 
@@ -10,6 +11,7 @@ export type TechpackTocItem = { n: string; title: string };
 type CoverPageProps = TechpackPageProps &
   CoverDeriveOptions & {
     toc: TechpackTocItem[];
+    pdfGaps?: readonly Gap[];
   };
 
 const glossary: Array<[string, string]> = [
@@ -42,6 +44,7 @@ export function CoverPage({
   toc,
   sampleSizeName,
   revisionLabel,
+  pdfGaps = [],
 }: CoverPageProps) {
   const model = deriveCover(techCard, { sampleSizeName, revisionLabel });
   const land = orient === 'land';
@@ -66,7 +69,7 @@ export function CoverPage({
           model.approval ? (
             <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
           ) : (
-            <Missing name='status' />
+            model.gaps.status && <Missing gap={model.gaps.status} />
           )
         }
       />
@@ -76,7 +79,7 @@ export function CoverPage({
           model.sampleSize ? (
             <span className='uppercase'>{model.sampleSize}</span>
           ) : (
-            <Missing name='sample size' />
+            model.gaps.sampleSize && <Missing gap={model.gaps.sampleSize} />
           )
         }
       />
@@ -96,7 +99,7 @@ export function CoverPage({
                 ))}
             </>
           ) : (
-            <Missing name='pieces' />
+            model.gaps.pieces && <Missing gap={model.gaps.pieces} />
           )
         }
       />
@@ -109,27 +112,31 @@ export function CoverPage({
               <span className='text-labelColor'> · {model.assemblies} assemblies</span>
             </>
           ) : (
-            <Missing name='operations' />
+            model.gaps.operations && <Missing gap={model.gaps.operations} />
           )
         }
       />
-      <KV k='fabrics' v={fabrics || <Missing name='fabrics' />} />
+      <KV k='fabrics' v={fabrics || (model.gaps.fabrics && <Missing gap={model.gaps.fabrics} />)} />
       {model.buttons.length ? (
         <KV
           k='buttons'
           v={
             <>
-              {model.buttonTotal || <Missing name='qty' />}
+              {model.buttonTotal ||
+                (model.gaps.buttonQty && <Missing gap={model.gaps.buttonQty} />)}
               {buttonFacts && <span className='text-labelColor'> · {buttonFacts}</span>}
             </>
           }
         />
       ) : null}
-      <KV k='colourways' v={model.colorways.length || <Missing name='colourways' />} />
-      {/* «! 12 · p2 p5 p15»: the red marks of the other sheets, counted once they are laid out */}
-      <div data-missing-row='' hidden>
-        <KV k='missing' v={<span className='font-bold text-error' data-missing-summary='' />} />
-      </div>
+      <KV
+        k='colourways'
+        v={
+          model.colorways.length ||
+          (model.gaps.colourways && <Missing gap={model.gaps.colourways} />)
+        }
+      />
+      {pdfGaps.length > 0 && <KV k='missing' v={`${pdfGaps.length} gaps`} />}
       {model.revision && <KV k='revision' v={model.revision} />}
     </div>
   );
@@ -172,7 +179,7 @@ export function CoverPage({
                 {model.brand} · tech pack
               </div>
               <h1 className='text-statBig font-bold uppercase leading-tight'>
-                {model.name || <Missing name='name' />}
+                {model.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
               </h1>
               <div className='text-control'>
                 {uniqueLine([model.gender, model.collection, model.season])}
@@ -188,7 +195,7 @@ export function CoverPage({
             {model.approval ? (
               <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
             ) : (
-              <Missing name='status' />
+              model.gaps.status && <Missing gap={model.gaps.status} />
             )}
             {model.revision && <div className='font-semibold'>{model.revision}</div>}
             <div className='text-labelColor'>
@@ -196,7 +203,7 @@ export function CoverPage({
               {model.sampleSize ? (
                 <span className='uppercase'>{model.sampleSize}</span>
               ) : (
-                <Missing name='size' />
+                model.gaps.sampleSize && <Missing gap={model.gaps.sampleSize} />
               )}
             </div>
           </div>
@@ -207,8 +214,18 @@ export function CoverPage({
         <div className='flex min-h-0 flex-1 gap-8'>
           <div className='flex min-w-0 flex-1 flex-col gap-4'>
             <div className='flex flex-1 items-center justify-center gap-4 border border-borderColor'>
-              <TechpackDrawing media={model.front} name='front' height={325} />
-              <TechpackDrawing media={model.back} name='back' height={325} />
+              <TechpackDrawing
+                media={model.front}
+                name='front'
+                height={325}
+                missingGap={model.gaps.front}
+              />
+              <TechpackDrawing
+                media={model.back}
+                name='back'
+                height={325}
+                missingGap={model.gaps.back}
+              />
             </div>
             {summary}
           </div>
@@ -220,8 +237,18 @@ export function CoverPage({
       ) : (
         <div className='flex min-h-0 flex-1 flex-col gap-4'>
           <div className='flex items-center justify-center gap-2 border border-borderColor py-2'>
-            <TechpackDrawing media={model.front} name='front' height={325} />
-            <TechpackDrawing media={model.back} name='back' height={325} />
+            <TechpackDrawing
+              media={model.front}
+              name='front'
+              height={325}
+              missingGap={model.gaps.front}
+            />
+            <TechpackDrawing
+              media={model.back}
+              name='back'
+              height={325}
+              missingGap={model.gaps.back}
+            />
           </div>
           <div className='grid grid-cols-2 gap-x-8'>
             {summary}

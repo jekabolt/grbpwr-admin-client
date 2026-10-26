@@ -22,6 +22,7 @@ import {
   type SvgMarkup,
 } from '../derive-assembly';
 import { BODY_PX, TechpackSheet } from '../sheet';
+import { Gap } from '../gaps';
 
 const ASM_CSS = String.raw`
 .asm-cols { display: grid; min-height: 0; flex: 1 1 0; column-gap: 24px; }
@@ -29,11 +30,11 @@ const ASM_CSS = String.raw`
 .asm-cols[data-orient=port] { grid-template-columns: minmax(0, 1fr); }
 .asm-col { min-width: 0; min-height: 0; overflow: hidden; }
 .asm-table table { table-layout: fixed; }
-.asm-table td { padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; overflow-wrap: anywhere; }
+.asm-table td { padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; }
 .asm-table th { font-size: 10px !important; }
 .asm-mc { color: var(--color-labelColor); }
-.asm-xref { margin-top: 2px; font-weight: 700; white-space: nowrap; }
-.asm-table td.asm-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.asm-table td.asm-n { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; }
+.asm-seams { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-pic { display: flex; gap: 4px; align-items: flex-start; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
@@ -46,8 +47,8 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 40, pic: 124, tool: 112, joinW: 120, joinH: 100, keyW: 48, keyH: 42 },
-  port: { n: 44, pic: 160, tool: 140, joinW: 156, joinH: 112, keyW: 60, keyH: 50 },
+  land: { n: 46, tool: 112, joinW: 142, joinH: 112, keyW: 48, keyH: 42 },
+  port: { n: 48, tool: 140, joinW: 190, joinH: 150, keyW: 60, keyH: 50 },
 } as const;
 
 /** Edge letters in the table thumbnails: half the letter box, px. */
@@ -60,7 +61,7 @@ function Cols({ orient }: { orient: PrintOrient }) {
   return (
     <colgroup>
       <col style={{ width: d.n }} />
-      <col style={{ width: d.pic + 12 }} />
+      <col style={{ width: '29%' }} />
       <col />
       <col style={{ width: d.tool }} />
     </colgroup>
@@ -91,7 +92,7 @@ function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
           <span className={m.bad ? 'asm-delta-line asm-delta-bad' : 'asm-delta-line'}>
             <i className='asm-letter'>{m.letter}</i>
             {fmtDelta(m.delta ?? 0)}
-            {m.bad && ' !'}
+            {m.gap && <Gap gap={m.gap} />}
           </span>
           {m.bad && (
             <>
@@ -129,11 +130,14 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
 }
 
 function SegLine({ seg, className }: { seg: Seg; className?: string }) {
-  return <div className={seg.bad ? 'tpa-bad' : className}>{seg.t}</div>;
+  return <div className={className}>{seg.gap ? <Gap gap={seg.gap} /> : seg.t}</div>;
 }
 
 function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   const w = r.words;
+  const cardGaps = (r.card?.gaps ?? []).filter(
+    (gap) => !r.card?.metrics.some((metric) => metric.gap === gap),
+  );
   return (
     <tr data-op={r.n}>
       <td className='asm-n'>{r.n}</td>
@@ -150,7 +154,33 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
             </>
           )}
         </div>
-        <Line segs={w.line} />
+        <Line segs={w.line.filter((segment) => !segment.gap)} />
+        {w.line.some((segment) => segment.gap) && (
+          <div>
+            {w.line.flatMap((segment, index) =>
+              segment.gap ? (
+                <Fragment key={`${segment.gap.code}-${index}`}>
+                  {index > 0 && ' · '}
+                  <Gap gap={segment.gap} />
+                </Fragment>
+              ) : (
+                []
+              ),
+            )}
+          </div>
+        )}
+        {cardGaps.map((gap) => (
+          <div key={`${gap.code}-${gap.refs.join('-')}`}>
+            <Gap gap={gap} />
+          </div>
+        ))}
+        {w.seams.length > 0 && (
+          <div className='asm-seams'>
+            {w.seams.map((seam) => (
+              <div key={seam}>{seam}</div>
+            ))}
+          </div>
+        )}
         {r.card?.turn && (
           <div className='asm-turn'>
             <KeyArt tech='turn' w={24} h={18} />
@@ -163,11 +193,6 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
           <SegLine key={t.t} seg={t} />
         ))}
         {w.mc && <SegLine seg={w.mc} className='asm-mc' />}
-        {r.card && (
-          <div className='asm-xref' data-xref={r.n}>
-            → p.00
-          </div>
-        )}
         <Delta metrics={r.card?.metrics ?? []} />
       </td>
     </tr>
@@ -280,7 +305,7 @@ export function AssemblyPage({
     return (
       <TechpackSheet orient={orient} docline={docline}>
         <SectionHeader title={title} />
-        <b className='tpa-bad'>! operations</b>
+        {model.emptyGap && <Gap gap={model.emptyGap} />}
       </TechpackSheet>
     );
   }

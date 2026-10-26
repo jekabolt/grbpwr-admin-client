@@ -11,6 +11,7 @@ import {
 import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
 import { Missing } from './bits';
 import { QrFigure } from './figures';
+import type { Gap } from '../gaps';
 
 type ContentProps = {
   techCard: common_TechCard;
@@ -33,6 +34,7 @@ type QrItem = {
   value?: string;
   label: string;
   sub?: string;
+  gap?: Gap;
 };
 
 const number = (value: number | undefined, digits = 2): string =>
@@ -81,6 +83,7 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
       ]
         .filter(Boolean)
         .join(' · '),
+      gap: pattern.qrGap,
     })),
     ...model.markers
       .filter((marker) => marker.id)
@@ -89,8 +92,9 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
         value: marker.qrValue,
         label: marker.label,
         sub: 'layout viewer',
+        gap: marker.gap,
       })),
-    ...(model.patterns.length === 0 ? [{ key: 'missing-pattern', label: '! pattern' }] : []),
+    ...(model.emptyGap ? [{ key: 'missing-pattern', label: 'pattern', gap: model.emptyGap }] : []),
     ...(labelsQr
       ? [{ key: 'labels', value: labelsQr, label: 'label artwork', sub: 'care labels' }]
       : []),
@@ -115,7 +119,7 @@ function PatternsHeader({
       title={continuedTitle(n, 'patterns & marker', continued)}
       action={
         model.missing.length > 0 ? (
-          <HeaderNote tone='warn'>! {model.missing.join(' · ! ')}</HeaderNote>
+          <HeaderNote tone='warn'>{model.missing.length} gaps</HeaderNote>
         ) : (
           <HeaderNote>scan · read-only</HeaderNote>
         )
@@ -128,7 +132,14 @@ function QrGrid({ qrs, size }: { qrs: readonly QrItem[]; size: number }) {
   return (
     <div className='grid shrink-0 grid-cols-2 gap-3'>
       {qrs.map((qr) => (
-        <QrFigure key={qr.key} size={size} value={qr.value} label={qr.label} sub={qr.sub} />
+        <QrFigure
+          key={qr.key}
+          size={size}
+          value={qr.value}
+          label={qr.label}
+          sub={qr.sub}
+          gap={qr.gap}
+        />
       ))}
     </div>
   );
@@ -167,11 +178,11 @@ function ConsumptionTable({ markers }: { markers: readonly TechpackMarkerRow[] }
                 {marker.missing === 'marker' ? <EmptyCell /> : number(marker.utilizationPct, 1)}
               </td>
               <td>
-                {marker.perGarment.length > 0 ? (
-                  marker.perGarment.map((value) => <div key={value}>{value}</div>)
-                ) : marker.missing ? (
-                  <Missing name={marker.missing} />
-                ) : null}
+                {marker.perGarment.length > 0
+                  ? marker.perGarment.map((value) => <div key={value}>{value}</div>)
+                  : marker.missing
+                    ? marker.gap && <Missing gap={marker.gap} />
+                    : null}
               </td>
             </tr>
           ))}
@@ -195,7 +206,7 @@ function LayoutGrid({ pictures, land }: { pictures: readonly TechpackMarkerRow[]
                   dangerouslySetInnerHTML={{ __html: marker.layoutSvg }}
                 />
               ) : (
-                <Missing name='layout' />
+                marker.gap && <Missing gap={marker.gap} />
               )}
             </div>
             <figcaption className='mt-1 text-micro uppercase text-labelColor'>

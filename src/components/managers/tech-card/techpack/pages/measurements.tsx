@@ -7,6 +7,7 @@ import {
   type TechpackMeasurement,
 } from '../derive-measurements';
 import { TechnicalDrawing } from './figures';
+import { Missing } from './bits';
 import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
 
 type Props = {
@@ -62,8 +63,7 @@ export function MeasurementsPage({
   const land = orient === 'land';
   // port: two flats side by side are ~340px wide each, so the panel need not be taller
   const figureHeight = land ? 340 : 400;
-  const gaps = model.rows.filter((row) => row.missing).length;
-  const flag = model.rows.length === 0 ? 'measurements' : gaps ? String(gaps) : '';
+  const rowGaps = model.rows.flatMap((row) => (row.gap ? [row.gap] : []));
   const paginationKey = `${techCard.id ?? 0}:${orient}:${model.rows.length}:${release}`;
   const { contentRef, overflow } = useTechpackOverflow(paginationKey);
 
@@ -80,11 +80,12 @@ export function MeasurementsPage({
             title={continuedTitle(n, 'measurements', continued)}
             action={
               <HeaderNote>
-                {flag && (
-                  <span className='font-bold text-error' data-missing={gaps ? String(gaps) : ''}>
-                    ! {flag} ·{' '}
+                {model.gaps.measurements && <Missing gap={model.gaps.measurements} />}
+                {rowGaps.map((gap) => (
+                  <span key={`${gap.code}-${gap.refs.join('-')}`} className='mr-1'>
+                    <Missing gap={gap} />
                   </span>
-                )}
+                ))}
                 {model.unit}
                 {model.sampleSize ? ` · sample ${model.sampleSize}` : ''}
               </HeaderNote>
@@ -95,15 +96,11 @@ export function MeasurementsPage({
             className='flex items-center justify-center gap-6 border border-borderColor px-4'
             style={{ height: figureHeight }}
           >
-            {model.views.length > 0 ? (
-              model.views.map((view) => (
-                <TechnicalDrawing key={view.side} view={view} height={figureHeight - 28} />
-              ))
-            ) : (
-              <span className='font-bold uppercase text-error' data-missing=''>
-                ! drawing
-              </span>
-            )}
+            {model.views.length > 0
+              ? model.views.map((view) => (
+                  <TechnicalDrawing key={view.side} view={view} height={figureHeight - 28} />
+                ))
+              : model.gaps.drawing && <Missing gap={model.gaps.drawing} />}
           </div>
           {rows.length > 0 && (
             <div className={land ? 'mt-4 grid grid-cols-2 gap-x-8' : 'mt-4'}>

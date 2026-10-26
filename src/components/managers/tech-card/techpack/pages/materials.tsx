@@ -72,24 +72,24 @@ function MaterialsBody({
                         <Swatch colour={fabric.swatch} /> <b>{fabric.key}</b>
                       </td>
                       <td data-align='left'>
-                        {[fabric.name, fabric.colour].filter(Boolean).join(' · ') || (
-                          <Missing name='material' />
-                        )}
+                        {[fabric.name, fabric.colour].filter(Boolean).join(' · ') ||
+                          (fabric.gaps.material && <Missing gap={fabric.gaps.material} />)}
                         <div className='text-micro uppercase text-labelColor'>{fabric.role}</div>
                       </td>
                       <td data-align='left'>{fabric.composition}</td>
                       <td className='whitespace-nowrap'>
-                        {fabric.widthCm == null ? (
-                          <Missing name='width' />
-                        ) : (
-                          `${formatNumber(fabric.widthCm)} cm`
-                        )}
+                        {fabric.widthCm == null
+                          ? fabric.gaps.width && <Missing gap={fabric.gaps.width} />
+                          : `${formatNumber(fabric.widthCm)} cm`}
                       </td>
                       <td>{fabric.weightGsm == null ? null : formatNumber(fabric.weightGsm, 0)}</td>
-                      <td>{fabric.pieceCount || <Missing name='pieces' />}</td>
+                      <td>
+                        {fabric.pieceCount ||
+                          (fabric.gaps.pieces && <Missing gap={fabric.gaps.pieces} />)}
+                      </td>
                       <td className='whitespace-nowrap'>
                         {fabric.consumptionM == null ? (
-                          <Missing name='marker' />
+                          fabric.gaps.marker && <Missing gap={fabric.gaps.marker} />
                         ) : (
                           <>
                             {formatNumber(fabric.consumptionM, 2)} m
@@ -107,17 +107,13 @@ function MaterialsBody({
                   ))}
                   {!model.fabrics.length && (
                     <tr>
-                      <td>
-                        <Missing name='fabrics' />
-                      </td>
+                      <td>{model.gaps.fabrics && <Missing gap={model.gaps.fabrics} />}</td>
                       <td colSpan={7} />
                     </tr>
                   )}
                   {model.missingInterlining.length > 0 && (
                     <tr>
-                      <td>
-                        <Missing name='interlining' />
-                      </td>
+                      <td>{model.gaps.interlining && <Missing gap={model.gaps.interlining} />}</td>
                       <td data-align='left' colSpan={7} className='text-labelColor'>
                         {model.missingInterlining.join(' · ')}
                       </td>
@@ -150,7 +146,9 @@ function MaterialsBody({
                     <td className='whitespace-nowrap'>
                       <Swatch colour={thread.swatch} /> {thread.colour}
                     </td>
-                    <td data-align='left'>{thread.name || <Missing name='article' />}</td>
+                    <td data-align='left'>
+                      {thread.name || (thread.articleGap && <Missing gap={thread.articleGap} />)}
+                    </td>
                     <td data-align='left'>{thread.composition}</td>
                     <td data-align='left'>{thread.supplier}</td>
                   </tr>
@@ -182,6 +180,7 @@ function MaterialsBody({
                     y: 50,
                     hasPosition: false,
                     onFront: false,
+                    gaps: item.emptyGaps,
                   },
                 ];
             return (
@@ -211,22 +210,25 @@ function MaterialsBody({
                               {spot.pin}
                             </span>
                           ) : (
-                            <Missing name='pin' />
+                            spot.gaps?.pin && <Missing gap={spot.gaps.pin} />
                           )}
                         </td>
-                        <td data-align='left'>{spot.where || <Missing name='placement' />}</td>
+                        <td data-align='left'>
+                          {spot.where ||
+                            (spot.gaps?.placement && <Missing gap={spot.gaps.placement} />)}
+                        </td>
                         <td>
-                          {spot.operationNumbers.length ? (
-                            spot.operationNumbers.join(' · ')
-                          ) : (
-                            <Missing name='operation' />
-                          )}
+                          {spot.operationNumbers.length
+                            ? spot.operationNumbers.join(' · ')
+                            : spot.gaps?.operation && <Missing gap={spot.gaps.operation} />}
                         </td>
                         <td data-align='left' className='text-labelColor'>
                           {spot.source}
                         </td>
                         <td>
-                          {spot.qty == null ? <Missing name='qty' /> : formatNumber(spot.qty, 2)}
+                          {spot.qty == null
+                            ? spot.gaps?.qty && <Missing gap={spot.gaps.qty} />
+                            : formatNumber(spot.qty, 2)}
                         </td>
                       </tr>
                     ))}
@@ -237,7 +239,9 @@ function MaterialsBody({
                         <td />
                         <td />
                         <td>
-                          {item.qty == null ? <Missing name='qty' /> : formatNumber(item.qty, 2)}
+                          {item.qty == null
+                            ? item.qtyGap && <Missing gap={item.qtyGap} />
+                            : formatNumber(item.qty, 2)}
                         </td>
                       </TotalRow>
                     )}
@@ -258,6 +262,7 @@ function MaterialsBody({
               }))}
               height={land ? 560 : 300}
               caption='front · trims'
+              missingGap={model.gaps.front}
             />
           </div>
         )}

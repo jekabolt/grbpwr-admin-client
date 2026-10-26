@@ -115,6 +115,7 @@ function cloth(ins: Ins, piece: NonNullable<Ins['pieces']>[number]): ClothState 
 export function buildAssemblyPieces(
   techCard: common_TechCard,
   found: ReadonlyMap<string, FoundPiece>,
+  grainLayer = '',
 ): { pieces: Map<string, AsmPiece>; grainDeg: Map<string, number> } {
   const ins = techCard.techCard;
   const pieces = new Map<string, AsmPiece>();
@@ -153,8 +154,12 @@ export function buildAssemblyPieces(
     const cutArea = loops[0]?.a ?? 0;
     const inner: Pt[][] = [];
     const notch: Pt[][] = [];
+    const grainLayers = new Set(
+      grainLayer ? [grainLayer] : (dto.grain ?? []).map((line) => line.layer).filter(Boolean),
+    );
     for (const l of dto.inner ?? []) {
       if (l.pts.length < 2) continue;
+      if (grainLayers.has(l.layer)) continue;
       const pts = draw(l.pts);
       if (l.layer === NOTCH_LAYER) {
         notch.push(pts);
@@ -222,7 +227,7 @@ export function useAssemblyGeometry(techCard: common_TechCard): AssemblyGeometry
       if (key) shapeByKey?.set(pieceRefKey(key), f);
     }
     return {
-      ...buildAssemblyPieces(techCard, found),
+      ...buildAssemblyPieces(techCard, found, index?.grainLayer),
       shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' },
     };
   }, [techCard, ins?.pieces, index, refs]);

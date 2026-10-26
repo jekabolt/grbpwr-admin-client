@@ -14,6 +14,7 @@ import {
   rollGoods,
   technicalMedia,
 } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type CoverDeriveOptions = {
   sampleSizeName?: string;
@@ -30,7 +31,11 @@ export function cardStatus(techCard: common_TechCard): string {
   return clean(card?.status) || (approval === '—' ? '' : approval) || (stage === '—' ? '' : stage);
 }
 
-export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptions = {}) {
+export function deriveCover(
+  techCard: common_TechCard,
+  options: CoverDeriveOptions = {},
+  sink?: GapSink,
+) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
   const fabrics = refs.filter(rollGoods);
@@ -62,6 +67,42 @@ export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptio
       spec: clean(ref.item.spec),
     };
   });
+  const add = (code: string, label: string, field: string): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [`field:${field}`],
+      label,
+      section: '00',
+      target: { tab: 'cover', field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
+  const gaps = {
+    status: !status ? add('pdf_status_missing', 'status', 'status') : undefined,
+    sampleSize: !(clean(options.sampleSizeName) || card?.baseSampleSizeId)
+      ? add('pdf_sample_size_missing', 'sample size', 'sample size')
+      : undefined,
+    pieces: !pieces.length ? add('pdf_pieces_missing', 'pieces', 'pieces') : undefined,
+    operations: !operations.length
+      ? add('pdf_operations_missing', 'operations', 'operations')
+      : undefined,
+    fabrics: !fabrics.length ? add('pdf_fabrics_missing', 'fabrics', 'fabrics') : undefined,
+    buttonQty:
+      buttons.length && !buttonFacts.some((button) => button.qty)
+        ? add('pdf_button_qty_missing', 'qty', 'button qty')
+        : undefined,
+    colourways:
+      !colorways.length && !bomColourway
+        ? add('pdf_colourways_missing', 'colourways', 'colourways')
+        : undefined,
+    name: !clean(card?.name) ? add('pdf_name_missing', 'name', 'name') : undefined,
+    front: !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_FRONT')
+      ? add('pdf_front_flat_missing', 'front flat', 'front flat')
+      : undefined,
+    back: !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK')
+      ? add('pdf_back_flat_missing', 'back flat', 'back flat')
+      : undefined,
+  };
 
   return {
     brand: clean(card?.brand) || 'GRBPWR',
@@ -92,5 +133,6 @@ export function deriveCover(techCard: common_TechCard, options: CoverDeriveOptio
     buttons: buttonFacts,
     buttonTotal: buttonFacts.reduce((sum, button) => sum + (button.qty ?? 0), 0),
     colorways: colorways.length ? colorways.map(colorwayName) : bomColourway ? [bomColourway] : [],
+    gaps,
   };
 }

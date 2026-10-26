@@ -266,11 +266,15 @@ export const KEYS_CSS = String.raw`
 .tpa-fw { fill: var(--color-bgColor); }
 .tpa-fh { fill: var(--color-hairline); }
 .tpa-fp { fill: var(--color-pageBg); }
+.tpa-asm-old { fill: var(--color-textColor); fill-opacity: .14; }
+.tpa-asm-new { fill: var(--color-textColor); fill-opacity: .22; }
+.tpa-asm-code { fill: var(--color-textColor); font-family: FeatureMono, monospace; font-weight: 700; paint-order: stroke; stroke: var(--color-bgColor); stroke-width: 2px; stroke-linejoin: round; }
+.tpa-asm-unit { fill: var(--color-labelColor); font-family: FeatureMono, monospace; paint-order: stroke; stroke: var(--color-bgColor); stroke-width: 2px; stroke-linejoin: round; }
 .tpa-bad { color: var(--color-error); font-weight: 700; }
 .asm-delta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 2px; white-space: nowrap; }
 .asm-delta-line { display: inline-flex; align-items: center; gap: 4px; }
 .asm-delta-bad { color: var(--color-error); font-weight: 700; }
-.asm-letter { display: inline-flex; width: 3.4mm; height: 3.4mm; align-items: center; justify-content: center; flex: none; background: var(--color-textColor); color: var(--color-bgColor); font-size: 10px; font-style: normal; font-weight: 700; line-height: 1; }
+.asm-letter { display: inline-flex; width: 3.4mm; height: 3.4mm; align-items: center; justify-content: center; flex: none; border-radius: 50%; background: var(--color-textColor); color: var(--color-bgColor); font-size: 10px; font-style: normal; font-weight: 700; line-height: 1; }
 .asm-stop-in { display: flex; flex-direction: column; gap: 2px; }
 .asm-slot { display: flex; align-items: flex-end; gap: 6px; margin-top: 4px; }
 .asm-slot i { display: inline-block; flex: 1 1 auto; min-width: 20mm; height: 0; border-bottom: 1px solid var(--color-textColor); }
@@ -278,8 +282,13 @@ export const KEYS_CSS = String.raw`
 .asm-legend { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--color-hairline); color: var(--color-labelColor); font-size: 11px; line-height: 1.2; }
 .asm-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .asm-sw { display: inline-block; width: 4mm; height: 3mm; border: 1px solid var(--color-textColor); background: var(--color-bgColor); }
-.asm-sw.asm-sw-h { background: var(--color-hairline); }
-.asm-sw.asm-sw-d { border-style: dashed; background: var(--color-pageBg); }
+.asm-sw.asm-sw-old { background: color-mix(in srgb, var(--color-textColor) 14%, var(--color-bgColor)); }
+.asm-sw.asm-sw-new { background: color-mix(in srgb, var(--color-textColor) 22%, var(--color-bgColor)); border-width: 1.5px; }
+.asm-sw.asm-sw-top { background: color-mix(in srgb, var(--color-textColor) 22%, var(--color-bgColor)); border-width: 2px; }
+.asm-overlap { position: relative; display: inline-block; width: 5mm; height: 3.5mm; }
+.asm-overlap::before, .asm-overlap::after { content: ''; position: absolute; width: 3.6mm; height: 2.8mm; border: 1px solid var(--color-textColor); background: color-mix(in srgb, var(--color-textColor) 20%, var(--color-bgColor)); }
+.asm-overlap::before { left: 0; top: 0; }
+.asm-overlap::after { right: 0; bottom: 0; }
 `;
 
 /** The one blocking check: what, who unblocks it, where to sign it off. */
@@ -302,40 +311,31 @@ export function Legend() {
   return (
     <div className='asm-legend'>
       <span>
-        <i className='asm-sw asm-sw-h' /> sewn
+        <i className='asm-sw asm-sw-old' /> sewn
       </span>
       <span>
-        <i className='asm-sw' /> new
+        <i className='asm-sw asm-sw-new' /> new
       </span>
       <span>
-        <i className='asm-sw asm-sw-d' /> hidden
+        <i className='asm-overlap' /> overlap
       </span>
       <span>
-        <svg width='16' height='12' aria-hidden viewBox='0 0 16 12'>
-          <defs>
-            <pattern
-              id='tpk-lg-h'
-              width='4'
-              height='4'
-              patternUnits='userSpaceOnUse'
-              patternTransform='rotate(45)'
-            >
-              <line x1='0' y1='0' x2='0' y2='4' className='tpa-sl' strokeWidth='1' />
-            </pattern>
-          </defs>
-          <rect x='.5' y='.5' width='15' height='11' fill='url(#tpk-lg-h)' className='tpa-s' />
+        <i className='asm-sw asm-sw-top' /> on top
+      </span>
+      <span>
+        <svg width='22' height='12' aria-hidden viewBox='0 0 22 12'>
+          <path d='M1 6h20' className='tpa-s' strokeWidth='2.2' strokeLinecap='round' />
         </svg>
-        wrong side
+        seam
       </span>
       <span>
-        <svg width='26' height='10' aria-hidden viewBox='0 0 26 10'>
-          <path d='M1 5h24' className='tpa-s' strokeWidth='4' />
-          <path d='M1 5h24' className='tpa-sw' strokeWidth='1.2' strokeDasharray='3 2' />
+        <svg width='22' height='12' aria-hidden viewBox='0 0 22 12'>
+          <path d='M1 6h20' className='tpa-s' strokeWidth='2' strokeDasharray='3 2' />
         </svg>
-        sew edge
+        hidden seam
       </span>
       <span>
-        <i className='asm-letter'>a</i> edge pair
+        <i className='asm-letter'>1</i> pair no.
       </span>
     </div>
   );

@@ -6,6 +6,7 @@ import type { MeasurementRow } from '../derive-measurements';
 import { deriveQcSignoffPage, type QcCheck, type QcSeamDelta } from '../derive-qc';
 import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
 import { statusTone } from './bits';
+import { Gap } from '../gaps';
 
 type Props = {
   techCard: common_TechCard;
@@ -74,14 +75,7 @@ export function QcSignoffPage({
         <tbody>
           {checks.map((check) => (
             <tr key={check.key}>
-              <td
-                data-align='left'
-                className={check.missing ? 'font-bold text-error' : undefined}
-                data-missing={check.missing ? '' : undefined}
-              >
-                {check.missing && '! '}
-                {check.what}
-              </td>
+              <td data-align='left'>{check.gap ? <Gap gap={check.gap} /> : check.what}</td>
               <td className='tabular-nums text-labelColor'>{check.op || <EmptyCell />}</td>
               <td>
                 <CheckBox />

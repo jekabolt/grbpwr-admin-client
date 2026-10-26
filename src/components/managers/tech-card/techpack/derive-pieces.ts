@@ -16,6 +16,7 @@ import {
   pieceKey,
   rollGoods,
 } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type TechpackPieceGeometry = {
   shapeByKey: ReadonlyMap<string, FoundPiece | null> | null;
@@ -100,12 +101,26 @@ function pairTiles<T extends { key: string; name: string }>(pieces: readonly T[]
 
 export type PiecesModel = ReturnType<typeof derivePieces>;
 
-export function derivePieces(techCard: common_TechCard, geometry?: TechpackPieceGeometry) {
+export function derivePieces(
+  techCard: common_TechCard,
+  geometry?: TechpackPieceGeometry,
+  sink?: GapSink,
+) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
   const primary = techCard.colorways?.[0];
   const sourcePieces = card?.pieces ?? [];
   const rollRefs = refs.filter(rollGoods);
+  const add = (code: string, label: string, field: string, piece?: string): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [piece ? `piece:${piece}` : '', `field:${field}`].filter(Boolean),
+      label,
+      section: '02',
+      target: { tab: 'pieces', piece, field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
   const groups = [
     ...rollRefs.map((ref, index) => ({ ref, key: ref.key, label: alphaKey(index) })),
     { ref: null, key: 'unassigned', label: '!' },
@@ -116,11 +131,13 @@ export function derivePieces(techCard: common_TechCard, geometry?: TechpackPiece
         if ((ref?.key ?? 'unassigned') !== group.key) return [];
         const shape = geometry?.shapeByKey?.get(pieceRefKey(clean(piece.lineKey))) ?? null;
         const qty = piece.piecesPerGarment ?? null;
+        const code = pieceCode(piece.lineKey);
+        const pieceRef = clean(piece.lineKey) || `piece-${index + 1}`;
         return [
           {
             key: pieceKey(piece, index),
             name: clean(piece.name),
-            code: pieceCode(piece.lineKey),
+            code,
             qty,
             grainline: grainlineText(piece.grainline),
             symmetry: cutSymmetryPrintCaption(piece.cutSymmetry, piece.piecesPerGarment),
@@ -129,11 +146,14 @@ export function derivePieces(techCard: common_TechCard, geometry?: TechpackPiece
             box: drawBox(shape),
             areaM2: shape && qty != null ? (shape.piece.areaCm2 * qty) / 10_000 : null,
             missing: [
-              !clean(piece.name) && 'name',
-              qty == null && 'qty',
-              !ref && 'material',
-              geometry?.shapeByKey && !shape && 'dxf',
-            ].filter((value): value is string => Boolean(value)),
+              !clean(piece.name) && add('pdf_piece_name_missing', 'name', 'name', pieceRef),
+              !code && add('asm_piece_no_code', 'code', 'code', pieceRef),
+              qty == null && add('pdf_piece_qty_missing', 'qty', 'qty', pieceRef),
+              !ref && add('pdf_piece_material_missing', 'material', 'material', pieceRef),
+              geometry?.shapeByKey &&
+                !shape &&
+                add('pdf_piece_dxf_missing', 'dxf', 'dxf', pieceRef),
+            ].filter((value): value is Gap => Boolean(value)),
           },
         ];
       });
@@ -191,5 +211,6 @@ export function derivePieces(techCard: common_TechCard, geometry?: TechpackPiece
     pieceCount: sourcePieces.length,
     panelCount: sourcePieces.reduce((sum, piece) => sum + (piece.piecesPerGarment ?? 0), 0),
     hasGeometry: Boolean(geometry?.shapeByKey),
+    emptyGap: !sourcePieces.length ? add('pdf_pieces_missing', 'pieces', 'pieces') : undefined,
   };
 }

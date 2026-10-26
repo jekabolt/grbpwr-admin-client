@@ -25,6 +25,7 @@ import {
   materialRole,
   rollGoods as isRollGoods,
 } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type TechpackPatternGroup = {
   key: string;
@@ -35,6 +36,7 @@ export type TechpackPatternGroup = {
   version?: number;
   sizes: string;
   qrValue?: string;
+  qrGap?: Gap;
 };
 
 export type TechpackMarkerRow = {
@@ -53,12 +55,14 @@ export type TechpackMarkerRow = {
   qrValue?: string;
   layoutSvg?: string;
   missing?: 'marker' | 'layout' | 'link';
+  gap?: Gap;
 };
 
 export type PatternsMarkerModel = {
   patterns: TechpackPatternGroup[];
   markers: TechpackMarkerRow[];
   missing: string[];
+  emptyGap?: Gap;
 };
 
 type PatternInput = {
@@ -181,12 +185,28 @@ function markerLayoutSvg(marker: common_TechCardMarker): string | undefined {
   }
 }
 
-export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerModel {
+export function derivePatternsMarkerPage(input: PatternInput, sink?: GapSink): PatternsMarkerModel {
   const { techCard } = input;
   const tc = techCard.techCard;
   const sizeNames = input.sizeNames ?? {};
   const patternOrigin = trimOrigin(input.patternOrigin);
   const markerOrigin = trimOrigin(input.markerOrigin);
+  const add = (
+    code: string,
+    label: string,
+    field: string,
+    refs: string[] = [],
+    bomLine?: string,
+  ): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [...refs, bomLine ? `bom:${bomLine}` : '', `field:${field}`].filter(Boolean),
+      label,
+      section: '04',
+      target: { tab: 'patterns', bomLine, field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
   const patternSheets = (tc?.patterns ?? []).filter((pattern) => pattern.url?.trim());
   const rollGoods: RollGoodsLine[] = (tc?.bomItems ?? [])
     .filter((item) => isRollGoodsSection(item.section) && item.lineKey)
@@ -221,6 +241,10 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
       : 'unbound';
     const versionStamp = sheets.reduce((sum, sheet) => sum + (sheet.version ?? 0), 0);
     const maxVersion = sheets.reduce((max, sheet) => Math.max(max, sheet.version ?? 0), 0);
+    const qrValue =
+      input.patternViewerToken && patternOrigin
+        ? `${patternOrigin}/p/${input.patternViewerToken}?g=${encodeURIComponent(wireKey)}&v=${versionStamp}&n=${sheets.length}`
+        : undefined;
     patterns.push({
       key: wireKey,
       code: alphaLabel(index),
@@ -229,10 +253,10 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
       pieceCount: scope ? scopePieceCount(techCard, scope, links) : undefined,
       version: maxVersion || undefined,
       sizes: groupSizeLine(sheets, tc?.sizeIds ?? [], sizeNames),
-      qrValue:
-        input.patternViewerToken && patternOrigin
-          ? `${patternOrigin}/p/${input.patternViewerToken}?g=${encodeURIComponent(wireKey)}&v=${versionStamp}&n=${sheets.length}`
-          : undefined,
+      qrValue,
+      qrGap: !qrValue
+        ? add('pdf_pattern_qr_missing', 'qr', 'pattern qr', [`field:pattern ${wireKey}`])
+        : undefined,
     });
   };
   for (const scope of scopes) addPattern(scope, sheetsByScope.get(scope.key) ?? []);
@@ -253,6 +277,12 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
     const layout = id ? layoutsById.get(id) : undefined;
     const usedLengthCm = decimalNumber(summary.usedLengthCm);
     const fabric = fabricOf(summary.bomLineKey);
+    const missing =
+      !id || !techCard.id || !markerOrigin
+        ? 'link'
+        : input.includeLayouts && !layout
+          ? 'layout'
+          : undefined;
     return {
       key: id ? String(id) : `marker-${index}`,
       id,
@@ -272,12 +302,16 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
           ? `${markerOrigin}/tech-cards/${techCard.id}/markers/${id}/view`
           : undefined,
       layoutSvg: input.includeLayouts && layout ? markerLayoutSvg(layout) : undefined,
-      missing:
-        !id || !techCard.id || !markerOrigin
-          ? 'link'
-          : input.includeLayouts && !layout
-            ? 'layout'
-            : undefined,
+      missing,
+      gap: missing
+        ? add(
+            `pdf_marker_${missing}_missing`,
+            missing,
+            missing,
+            [`field:marker ${id ?? index + 1}`],
+            summary.bomLineKey,
+          )
+        : undefined,
     };
   });
 
@@ -288,6 +322,7 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
     const cut = pieces.filter(
       (piece, index) => materialForPiece(refs, primary, piece, index)?.key === fabric.ref.key,
     );
+    const gap = add('pdf_marker_missing', 'marker', 'marker', [], fabric.ref.key);
     markers.push({
       key: `missing-${fabric.ref.key}`,
       label: `${fabric.code} ${materialRole(fabric.ref)}`,
@@ -299,6 +334,7 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
       netM2: input.netM2ByLine?.[fabric.ref.key],
       perGarment: [],
       missing: 'marker',
+      gap,
     });
   }
 
@@ -310,5 +346,11 @@ export function derivePatternsMarkerPage(input: PatternInput): PatternsMarkerMod
     ...(markers.some((marker) => marker.missing === 'marker') ? ['marker'] : []),
     ...(markers.some((marker) => marker.missing === 'layout') ? ['layout'] : []),
   ];
-  return { patterns, markers, missing };
+  return {
+    patterns,
+    markers,
+    missing,
+    emptyGap:
+      patternSheets.length === 0 ? add('pdf_patterns_missing', 'pattern', 'patterns') : undefined,
+  };
 }
