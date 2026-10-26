@@ -8,7 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Chip, ChipRow, Text } from 'ui';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import type { TechCardFormData } from '../schema';
-import { pairInk, pairNo } from './palette';
+import { PairNo } from './pair-no';
 import { useStepSeams } from './step-seams-context';
 import { rowWords } from './step-seams-model';
 
@@ -73,7 +73,7 @@ export function StepSeamsRow({ index }: { index: number }) {
               onRemove={frozen ? undefined : () => drop(key)}
               title={row ? undefined : 'seam not on card'}
             >
-              <span style={{ color: pairInk(i) }}>{pairNo(i)}</span>
+              <PairNo i={i} />
               {row ? rowWords(row, nameOf) : `#${key.slice(-6)}`}
             </Chip>
           );

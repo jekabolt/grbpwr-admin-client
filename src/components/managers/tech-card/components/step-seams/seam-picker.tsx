@@ -26,7 +26,8 @@ import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
 import { rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import type { TechCardFormData } from '../schema';
-import { PIECE_INK, SIDE_INK, pairInk, pairNo } from './palette';
+import { PairNo } from './pair-no';
+import { PAIR_INK, PIECE_INK, SIDE_INK } from './palette';
 import { useStepSeams } from './step-seams-context';
 import {
   deltaMm,
@@ -181,10 +182,10 @@ export default function SeamPicker({
   const pairs = useMemo(() => keys.map((key) => ({ key, row: byKey.get(key) })), [keys, byKey]);
   const inkOf = useMemo(() => {
     const m = new Map<TargetId, string>();
-    pairs.forEach(({ row }, i) => {
+    pairs.forEach(({ row }) => {
       if (!row) return;
       for (const a of [...row.sideA, ...row.sideB])
-        for (const t of targetsOfAnchor(a)) if (!m.has(t)) m.set(t, pairInk(i));
+        for (const t of targetsOfAnchor(a)) if (!m.has(t)) m.set(t, PAIR_INK);
     });
     return m;
   }, [pairs]);
@@ -307,6 +308,24 @@ export default function SeamPicker({
 
   // ── «place»: the part follows the pointer over its host (mm in the drawing frame) ──
   const svgRef = useRef<SVGSVGElement>(null);
+  // The drawing's on-screen width (meet: the narrower of width and height-scaled width). Client
+  // box, not the bounding rect — the dialog's open animation scales the latter. A callback ref, so
+  // a remounted <svg> is observed too.
+  const [svgPx, setSvgPx] = useState(0);
+  const sizeObs = useRef<ResizeObserver | null>(null);
+  const svgEl = useCallback((svg: SVGSVGElement | null) => {
+    svgRef.current = svg;
+    sizeObs.current?.disconnect();
+    sizeObs.current = null;
+    if (!svg || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const vb = svg.viewBox.baseVal;
+      if (!vb?.width || !vb.height) return;
+      setSvgPx(Math.min(svg.clientWidth / vb.width, svg.clientHeight / vb.height) * vb.width);
+    });
+    ro.observe(svg);
+    sizeObs.current = ro;
+  }, []);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const toMm = (e: PointerEvent) => {
     const svg = svgRef.current;
@@ -340,8 +359,12 @@ export default function SeamPicker({
   const status = keys.length ? `${keys.length} seam${keys.length === 1 ? '' : 's'}` : 'no seam';
   const loading = geo.dep.status === 'pending';
   const drawn = layout.at.size > 0;
-  const pad = Math.max(layout.w, layout.h) * 0.04 + 10;
-  const font = Math.max(layout.w, layout.h) / 45;
+  const pad = Math.max(layout.w, layout.h) * 0.02 + 8;
+  const vbW = layout.w + 2 * pad;
+  const vbH = layout.h + 2 * pad;
+  // Piece codes stay ≥ 12 screen px whatever the zoom: viewBox units per screen px × 12.
+  const fontMin = svgPx > 40 ? (12 * vbW) / svgPx : 0;
+  const font = Math.max(Math.max(layout.w, layout.h) / 45, fontMin);
 
   const readout = (() => {
     if (hover && !sel.a.length && !sel.b.length)
@@ -406,7 +429,7 @@ export default function SeamPicker({
               <path
                 d={d(line)}
                 fill='none'
-                stroke={on ? edgeColour(id) : PIECE_INK.inner}
+                style={{ stroke: on ? edgeColour(id) : PIECE_INK.inner }}
                 strokeWidth={on || hover === id ? 3 : 1}
                 strokeDasharray={on ? undefined : '4 3'}
                 vectorEffect='non-scaling-stroke'
@@ -436,7 +459,7 @@ export default function SeamPicker({
               <path
                 d={d(pts)}
                 fill='none'
-                stroke={edgeColour(e.id)}
+                style={{ stroke: edgeColour(e.id) }}
                 strokeWidth={on ? 3.5 : hover === e.id ? 3 : 1.2}
                 strokeLinecap='round'
                 vectorEffect='non-scaling-stroke'
@@ -504,7 +527,7 @@ export default function SeamPicker({
           onKeyDown={onKeyDown}
         >
           <Dialog.Title className='sr-only'>{`op ${op?.operationNumber ?? ''} seams`}</Dialog.Title>
-          <Dialog.Description className='sr-only'>pick the edges this step sews</Dialog.Description>
+          <Dialog.Description className='sr-only'>pick edges</Dialog.Description>
 
           <div className='flex flex-wrap items-center gap-2'>
             <Text size='small' tracking='section' className='uppercase'>
@@ -518,7 +541,7 @@ export default function SeamPicker({
             </div>
           </div>
 
-          <div className='flex min-h-0 flex-1 flex-col gap-3 border border-borderColor bg-bgColor p-3'>
+          <div className='flex min-h-0 flex-col gap-3 border border-borderColor bg-bgColor p-3'>
             {groups.length < 2 && (
               <ViewSwitch
                 value={chosen}
@@ -534,9 +557,10 @@ export default function SeamPicker({
               <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
             ) : (
               <svg
-                ref={svgRef}
-                viewBox={`${-pad} ${-pad} ${layout.w + 2 * pad} ${layout.h + 2 * pad}`}
-                className='h-[55vh] w-full touch-none select-none'
+                ref={svgEl}
+                viewBox={`${-pad} ${-pad} ${vbW} ${vbH}`}
+                className='block max-h-[60vh] w-full shrink-0 touch-none select-none'
+                style={{ aspectRatio: `${vbW} / ${vbH}` }}
                 preserveAspectRatio='xMidYMid meet'
                 onPointerMove={(e) => {
                   const g = drag.current;
@@ -632,7 +656,7 @@ export default function SeamPicker({
                       className='flex items-center gap-2 border-b border-hairline py-1'
                       data-seam-pair-row={key}
                     >
-                      <span style={{ color: pairInk(i) }}>{pairNo(i)}</span>
+                      <PairNo i={i} />
                       <Text size='control' className='min-w-0 flex-1 truncate'>
                         {row ? rowWords(row, nameOf) : `#${key.slice(-6)}`}
                       </Text>
