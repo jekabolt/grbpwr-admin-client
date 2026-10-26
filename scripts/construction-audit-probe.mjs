@@ -156,7 +156,7 @@ const DETAIL_BROKEN = `      {null}`;
 const NOTCHECKED_FIX = `          {notChecked.length > 0 && (
             <div className='space-y-px'>
               <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                not checked this run
+                not checked · {notChecked.length}
               </Text>
               {notChecked.map((n, i) => (
                 <Text key={i} size='micro' variant='label'>
@@ -167,7 +167,7 @@ const NOTCHECKED_FIX = `          {notChecked.length > 0 && (
           )}`;
 const NOTCHECKED_COLLAPSED = `          {notChecked.length > 0 && (
             <details className='space-y-px'>
-              <summary className='text-micro uppercase tracking-label'>not checked this run</summary>
+              <summary className='text-micro uppercase tracking-label'>not checked · {notChecked.length}</summary>
               {notChecked.map((n, i) => (
                 <Text key={i} size='micro' variant='label'>
                   · {n}
@@ -178,7 +178,7 @@ const NOTCHECKED_COLLAPSED = `          {notChecked.length > 0 && (
 const NOTCHECKED_GONE = `          {false && notChecked.length > 0 && (
             <div className='space-y-px'>
               <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                not checked this run
+                not checked · {notChecked.length}
               </Text>
               {notChecked.map((n, i) => (
                 <Text key={i} size='micro' variant='label'>
@@ -1187,10 +1187,10 @@ ck(
 // СЧЁТЧИК ОБНУЛЁН ПОСЛЕ ПОСТАНОВКИ, и утверждение сузилось ровно на это: раскрыть сам блок теперь
 // нужно (он аккордеон, как соседний «generate operations»), а ВНУТРИ отчёта второй складки нет.
 // «Не проверено» — не находка, и именно поэтому его прячут первым; здесь оно не спрятано.
-// КРАСНОЕ С de5ed2fe1 (tabs-lite) — И ЭТО НЕ ПРОБА УСТАРЕЛА: список завёрнут в закрытый <details>, а шапка
-// самого construction-audit.tsx (THE `notChecked` LIST IS NOT A DISCLOSURE … «renders always, expanded»)
-// осталась прежней. Утверждения ниже не ослаблены — решает владелец.
-head('2. «not checked this run» is visible without a click INSIDE the report');
+// de5ed2fe1 (tabs-lite) завернул список в закрытый <details> против шапки самого construction-audit.tsx
+// (THE `notChecked` LIST IS NOT A DISCLOSURE … «renders always, expanded»); владелец решил — список снова
+// раскрыт всегда, заголовок «not checked · N» остался. `--mutate-notchecked-collapsed` — та форма.
+head('2. «not checked · N» is visible without a click INSIDE the report');
 ck(clicks === 0, 'nothing has been clicked inside the report on this mount', `clicks=${clicks}`);
 const nc = await page.evaluate((lines) => {
   const root = document.querySelector('[data-probe-panel]');
@@ -1518,9 +1518,8 @@ const emptyBox = await page.evaluate(() => {
   const cs = getComputedStyle(el);
   return { border: cs.borderTopWidth, color: cs.borderTopColor };
 });
-// «not checked this run» → «not checked · N» (de5ed2fe1, copy). При раскрытом списке заголовок и строки
-// жили в одном div, и заголовок означал строки; теперь заголовок — <summary>, поэтому «перечисляет»
-// проверяется по самим строкам в отрисованном тексте.
+// «not checked this run» → «not checked · N» (de5ed2fe1, copy). «Перечисляет» проверяется по самим
+// строкам в отрисованном тексте, а не по заголовку: заголовок без строк — та же тишина.
 const emptyNotChecked =
   emptyText.includes(`not checked · ${NOT_CHECKED.length}`) &&
   NOT_CHECKED.every((l) => emptyText.includes(norm(l)));

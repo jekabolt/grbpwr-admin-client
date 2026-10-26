@@ -21,7 +21,6 @@ import {
   ChipRow,
   GroupLabel,
   Pill,
-  FoldCaret,
   Placeholder,
   Text,
   ViewSwitch,
@@ -1115,17 +1114,16 @@ export function ConstructionAudit({
           )}
 
           {notChecked.length > 0 && (
-            <details className='group space-y-px'>
-              <summary className='inline-flex cursor-pointer list-none items-center text-micro uppercase tracking-label text-labelColor'>
+            <div className='space-y-px'>
+              <Text size='micro' variant='label' tracking='label' className='uppercase'>
                 not checked · {notChecked.length}
-                <FoldCaret open='details' />
-              </summary>
+              </Text>
               {notChecked.map((n, i) => (
                 <Text key={i} size='micro' variant='label'>
                   · {n}
                 </Text>
               ))}
-            </details>
+            </div>
           )}
 
           {/* ═══ AI REVIEW — its own block, with its own header, status and footer ═══ */}
