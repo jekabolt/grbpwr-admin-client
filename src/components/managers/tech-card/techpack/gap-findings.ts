@@ -44,8 +44,11 @@ export type GapNav = {
   scroll?: string;
 };
 
-/** Construction fields fixed in the step's seam picker. */
-const PICK_FIELDS = new Set(['seam', 'edge', 'inner target', 'seam length']);
+/**
+ * Construction fields fixed in the step's seam picker. Not «edge»: a bind step's edge is its zone,
+ * a hand step's is its note — both on the step card itself.
+ */
+const PICK_FIELDS = new Set(['seam', 'inner target', 'seam length']);
 
 /** A field that lives on another tab than the section that printed it (cover, QC). */
 function byField(field: string): GapNav | null {

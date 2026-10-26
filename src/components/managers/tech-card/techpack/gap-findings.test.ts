@@ -30,6 +30,10 @@ describe('gapNav', () => {
       tab: 'construction',
       extra: { op: '560', pick: '560' },
     });
+    expect(gapNav({ tab: 'construction', op: 90, field: 'edge' })).toEqual({
+      tab: 'construction',
+      extra: { op: '90' },
+    });
     expect(gapNav({ tab: 'construction', op: 12, field: 'machine' })).toEqual({
       tab: 'construction',
       extra: { op: '12' },
