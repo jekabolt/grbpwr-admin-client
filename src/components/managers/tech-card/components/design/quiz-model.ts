@@ -189,6 +189,7 @@ export function clarifyOf(
   if (!hit) return null;
   return {
     id: `clarify_${q.id ?? ''}`.slice(0, 64),
+    spots: [],
     category: q.category,
     part: q.part,
     family: q.family,
@@ -217,6 +218,7 @@ function edgeExceptionsOf(q: DesignQuizQuestion): DesignQuizQuestion {
     .slice(0, 6);
   return {
     id: followUpId(q),
+    spots: [],
     category: q.category,
     part: 'whole',
     family: q.family,

@@ -3,89 +3,89 @@
 // @ts-nocheck
 
 export type MetricsGranularity =
-  | 'METRICS_GRANULARITY_UNSPECIFIED'
-  | 'METRICS_GRANULARITY_DAY'
-  | 'METRICS_GRANULARITY_WEEK'
-  | 'METRICS_GRANULARITY_MONTH';
+  | "METRICS_GRANULARITY_UNSPECIFIED"
+  | "METRICS_GRANULARITY_DAY"
+  | "METRICS_GRANULARITY_WEEK"
+  | "METRICS_GRANULARITY_MONTH";
 export type CompareMode =
-  | 'COMPARE_MODE_UNSPECIFIED'
-  | 'COMPARE_MODE_NONE'
-  | 'COMPARE_MODE_PREVIOUS_PERIOD'
-  | 'COMPARE_MODE_SAME_PERIOD_LAST_YEAR';
+  | "COMPARE_MODE_UNSPECIFIED"
+  | "COMPARE_MODE_NONE"
+  | "COMPARE_MODE_PREVIOUS_PERIOD"
+  | "COMPARE_MODE_SAME_PERIOD_LAST_YEAR";
 export type MetricsSection =
-  | 'METRICS_SECTION_UNSPECIFIED'
-  | 'METRICS_SECTION_BUSINESS'
-  | 'METRICS_SECTION_FUNNEL'
-  | 'METRICS_SECTION_OOS_IMPACT'
-  | 'METRICS_SECTION_PAYMENT_FAILURES'
-  | 'METRICS_SECTION_WEB_VITALS'
-  | 'METRICS_SECTION_USER_JOURNEYS'
-  | 'METRICS_SECTION_SESSION_DURATION'
-  | 'METRICS_SECTION_DEVICE_FUNNEL'
-  | 'METRICS_SECTION_PRODUCT_ENGAGEMENT'
-  | 'METRICS_SECTION_FORM_ERRORS'
-  | 'METRICS_SECTION_EXCEPTIONS'
-  | 'METRICS_SECTION_NOT_FOUND'
-  | 'METRICS_SECTION_HERO_FUNNEL'
-  | 'METRICS_SECTION_SIZE_CONFIDENCE'
-  | 'METRICS_SECTION_PAYMENT_RECOVERY'
-  | 'METRICS_SECTION_CHECKOUT_TIMINGS'
-  | 'METRICS_SECTION_COHORT_RETENTION'
-  | 'METRICS_SECTION_ORDER_SEQUENCE'
-  | 'METRICS_SECTION_ENTRY_PRODUCTS'
-  | 'METRICS_SECTION_REVENUE_PARETO'
-  | 'METRICS_SECTION_SPENDING_CURVE'
-  | 'METRICS_SECTION_CATEGORY_LOYALTY'
-  | 'METRICS_SECTION_INVENTORY_HEALTH'
-  | 'METRICS_SECTION_SIZE_RUN_EFFICIENCY'
-  | 'METRICS_SECTION_SLOW_MOVERS'
-  | 'METRICS_SECTION_RETURN_ANALYSIS'
-  | 'METRICS_SECTION_SIZE_ANALYTICS'
-  | 'METRICS_SECTION_DEAD_STOCK'
-  | 'METRICS_SECTION_PRODUCT_TREND'
-  | 'METRICS_SECTION_ADD_TO_CART_RATE'
-  | 'METRICS_SECTION_BROWSER_BREAKDOWN'
-  | 'METRICS_SECTION_NEWSLETTER'
-  | 'METRICS_SECTION_ABANDONED_CART'
-  | 'METRICS_SECTION_CAMPAIGN_ATTRIBUTION'
-  | 'METRICS_SECTION_TIME_ON_PAGE'
-  | 'METRICS_SECTION_PRODUCT_ZOOM'
-  | 'METRICS_SECTION_IMAGE_SWIPES'
-  | 'METRICS_SECTION_SIZE_GUIDE_CLICKS'
-  | 'METRICS_SECTION_DETAILS_EXPANSION'
-  | 'METRICS_SECTION_NOTIFY_ME_INTENT'
-  | 'METRICS_SECTION_GEOGRAPHY'
-  | 'METRICS_SECTION_CUSTOMER_SEGMENTATION'
-  | 'METRICS_SECTION_RFM'
-  | 'METRICS_SECTION_SELL_THROUGH_BY_DROP'
-  | 'METRICS_SECTION_MARGIN_BY_STYLE'
-  | 'METRICS_SECTION_COGS_STRUCTURE'
-  | 'METRICS_SECTION_INVENTORY_VALUATION'
-  | 'METRICS_SECTION_ORDER_VALUE_BANDS'
-  | 'METRICS_SECTION_DELIVERY'
-  | 'METRICS_SECTION_FORECAST'
-  | 'METRICS_SECTION_PROFITABILITY';
+  | "METRICS_SECTION_UNSPECIFIED"
+  | "METRICS_SECTION_BUSINESS"
+  | "METRICS_SECTION_FUNNEL"
+  | "METRICS_SECTION_OOS_IMPACT"
+  | "METRICS_SECTION_PAYMENT_FAILURES"
+  | "METRICS_SECTION_WEB_VITALS"
+  | "METRICS_SECTION_USER_JOURNEYS"
+  | "METRICS_SECTION_SESSION_DURATION"
+  | "METRICS_SECTION_DEVICE_FUNNEL"
+  | "METRICS_SECTION_PRODUCT_ENGAGEMENT"
+  | "METRICS_SECTION_FORM_ERRORS"
+  | "METRICS_SECTION_EXCEPTIONS"
+  | "METRICS_SECTION_NOT_FOUND"
+  | "METRICS_SECTION_HERO_FUNNEL"
+  | "METRICS_SECTION_SIZE_CONFIDENCE"
+  | "METRICS_SECTION_PAYMENT_RECOVERY"
+  | "METRICS_SECTION_CHECKOUT_TIMINGS"
+  | "METRICS_SECTION_COHORT_RETENTION"
+  | "METRICS_SECTION_ORDER_SEQUENCE"
+  | "METRICS_SECTION_ENTRY_PRODUCTS"
+  | "METRICS_SECTION_REVENUE_PARETO"
+  | "METRICS_SECTION_SPENDING_CURVE"
+  | "METRICS_SECTION_CATEGORY_LOYALTY"
+  | "METRICS_SECTION_INVENTORY_HEALTH"
+  | "METRICS_SECTION_SIZE_RUN_EFFICIENCY"
+  | "METRICS_SECTION_SLOW_MOVERS"
+  | "METRICS_SECTION_RETURN_ANALYSIS"
+  | "METRICS_SECTION_SIZE_ANALYTICS"
+  | "METRICS_SECTION_DEAD_STOCK"
+  | "METRICS_SECTION_PRODUCT_TREND"
+  | "METRICS_SECTION_ADD_TO_CART_RATE"
+  | "METRICS_SECTION_BROWSER_BREAKDOWN"
+  | "METRICS_SECTION_NEWSLETTER"
+  | "METRICS_SECTION_ABANDONED_CART"
+  | "METRICS_SECTION_CAMPAIGN_ATTRIBUTION"
+  | "METRICS_SECTION_TIME_ON_PAGE"
+  | "METRICS_SECTION_PRODUCT_ZOOM"
+  | "METRICS_SECTION_IMAGE_SWIPES"
+  | "METRICS_SECTION_SIZE_GUIDE_CLICKS"
+  | "METRICS_SECTION_DETAILS_EXPANSION"
+  | "METRICS_SECTION_NOTIFY_ME_INTENT"
+  | "METRICS_SECTION_GEOGRAPHY"
+  | "METRICS_SECTION_CUSTOMER_SEGMENTATION"
+  | "METRICS_SECTION_RFM"
+  | "METRICS_SECTION_SELL_THROUGH_BY_DROP"
+  | "METRICS_SECTION_MARGIN_BY_STYLE"
+  | "METRICS_SECTION_COGS_STRUCTURE"
+  | "METRICS_SECTION_INVENTORY_VALUATION"
+  | "METRICS_SECTION_ORDER_VALUE_BANDS"
+  | "METRICS_SECTION_DELIVERY"
+  | "METRICS_SECTION_FORECAST"
+  | "METRICS_SECTION_PROFITABILITY";
 export type AlertSeverity =
-  | 'ALERT_SEVERITY_UNSPECIFIED'
-  | 'ALERT_SEVERITY_INFO'
-  | 'ALERT_SEVERITY_WARNING'
-  | 'ALERT_SEVERITY_CRITICAL';
+  | "ALERT_SEVERITY_UNSPECIFIED"
+  | "ALERT_SEVERITY_INFO"
+  | "ALERT_SEVERITY_WARNING"
+  | "ALERT_SEVERITY_CRITICAL";
 // RefundReason is the canonical, structured refund/return reason used by the return-analysis
 // breakdown. Keys mirror the historical free-text buckets.
 export type RefundReason =
-  | 'REFUND_REASON_UNSPECIFIED'
-  | 'REFUND_REASON_WRONG_SIZE'
-  | 'REFUND_REASON_NOT_AS_DESCRIBED'
-  | 'REFUND_REASON_DEFECTIVE'
-  | 'REFUND_REASON_CHANGED_MIND'
-  | 'REFUND_REASON_OTHER';
+  | "REFUND_REASON_UNSPECIFIED"
+  | "REFUND_REASON_WRONG_SIZE"
+  | "REFUND_REASON_NOT_AS_DESCRIBED"
+  | "REFUND_REASON_DEFECTIVE"
+  | "REFUND_REASON_CHANGED_MIND"
+  | "REFUND_REASON_OTHER";
 // LibraryFileSort is the grid's sort order for the columns that are not time.
 // UNKNOWN keeps the default (by created_at, direction from order_factor), which
 // is what a library is normally read by.
 export type LibraryFileSort =
-  | 'LIBRARY_FILE_SORT_UNKNOWN'
-  | 'LIBRARY_FILE_SORT_NAME'
-  | 'LIBRARY_FILE_SORT_SIZE';
+  | "LIBRARY_FILE_SORT_UNKNOWN"
+  | "LIBRARY_FILE_SORT_NAME"
+  | "LIBRARY_FILE_SORT_SIZE";
 // LibraryFilePersonRole is the CAPACITY a person is on record for a file in.
 // «Файлы Паши» is TWO questions, and answering them as one loses the difference
 // that matters:
@@ -102,27 +102,27 @@ export type LibraryFilePersonRole =
   // UNKNOWN is «в любой роли»: uploaded OR owns. It is the default because that
   // is what «где он числится» means — a person looking for what a colleague has
   // to do with a file does not yet know in which of the two ways.
-  | 'LIBRARY_FILE_PERSON_ROLE_UNKNOWN'
-  | 'LIBRARY_FILE_PERSON_ROLE_UPLOADED'
-  | 'LIBRARY_FILE_PERSON_ROLE_OWNER';
+  | "LIBRARY_FILE_PERSON_ROLE_UNKNOWN"
+  | "LIBRARY_FILE_PERSON_ROLE_UPLOADED"
+  | "LIBRARY_FILE_PERSON_ROLE_OWNER";
 // EnhanceTextMode is what the rewrite should do. UNKNOWN is refused
 // (InvalidArgument) — there is no default mode.
 export type EnhanceTextMode =
-  | 'ENHANCE_TEXT_MODE_UNKNOWN'
+  | "ENHANCE_TEXT_MODE_UNKNOWN"
   // Fix spelling and grammar, make it clearer and better organised; roughly the
   // same length, every fact kept.
-  | 'ENHANCE_TEXT_MODE_IMPROVE'
+  | "ENHANCE_TEXT_MODE_IMPROVE"
   // Add concrete, plausible detail a garment technologist would want; every fact
   // kept; at most twice the length.
-  | 'ENHANCE_TEXT_MODE_EXPAND'
+  | "ENHANCE_TEXT_MODE_EXPAND"
   // Keep only what matters; at most half the length.
-  | 'ENHANCE_TEXT_MODE_SHORTEN'
+  | "ENHANCE_TEXT_MODE_SHORTEN"
   // Rewrite as a concise image-generation prompt (O-50): the garment type
   // first, then silhouette, construction, material, colour and finish facts as
   // comma-separated descriptors; every fact kept, none added; no marketing
   // words, no negations (what the garment does NOT have is left out — an image
   // model draws what a prompt names). Same language as the input.
-  | 'ENHANCE_TEXT_MODE_PROMPT'
+  | "ENHANCE_TEXT_MODE_PROMPT"
   // Rewrite ONE field of an image tool (the PLAYGROUND prompt fields' «Improve»)
   // as a short, concrete, visual phrase for that field. The tool and the field
   // come from `workflow` / `field_key` and the SERVER'S OWN table (the same one
@@ -135,36 +135,36 @@ export type EnhanceTextMode =
   // other field: InvalidArgument on `field`, `steer_takes_other`), and STEER
   // without a known workflow/field pair is InvalidArgument (`workflow` /
   // `field_key`, `required` or `unknown`).
-  | 'ENHANCE_TEXT_MODE_STEER';
+  | "ENHANCE_TEXT_MODE_STEER";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
 // the system prompt, so nothing the request carries can become an instruction.
 // UNKNOWN is refused (InvalidArgument).
 export type EnhanceTextField =
-  | 'ENHANCE_TEXT_FIELD_UNKNOWN'
-  | 'ENHANCE_TEXT_FIELD_DESCRIPTION'
-  | 'ENHANCE_TEXT_FIELD_NOTE'
-  | 'ENHANCE_TEXT_FIELD_WORDS'
-  | 'ENHANCE_TEXT_FIELD_SILHOUETTE'
-  | 'ENHANCE_TEXT_FIELD_FABRIC'
-  | 'ENHANCE_TEXT_FIELD_OTHER'
-  | 'ENHANCE_TEXT_FIELD_RENDER_WORDS';
+  | "ENHANCE_TEXT_FIELD_UNKNOWN"
+  | "ENHANCE_TEXT_FIELD_DESCRIPTION"
+  | "ENHANCE_TEXT_FIELD_NOTE"
+  | "ENHANCE_TEXT_FIELD_WORDS"
+  | "ENHANCE_TEXT_FIELD_SILHOUETTE"
+  | "ENHANCE_TEXT_FIELD_FABRIC"
+  | "ENHANCE_TEXT_FIELD_OTHER"
+  | "ENHANCE_TEXT_FIELD_RENDER_WORDS";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
-  | 'STYLE_COST_PRICE_SOURCE_UNKNOWN'
-  | 'STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT'
-  | 'STYLE_COST_PRICE_SOURCE_CATALOG_LATEST'
-  | 'STYLE_COST_PRICE_SOURCE_NONE';
+  | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
+  | "STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT"
+  | "STYLE_COST_PRICE_SOURCE_CATALOG_LATEST"
+  | "STYLE_COST_PRICE_SOURCE_NONE";
 // TrendGranularity defines time bucket size for trend analysis
 export type TrendGranularity =
-  | 'TREND_GRANULARITY_DAILY'
-  | 'TREND_GRANULARITY_WEEKLY'
-  | 'TREND_GRANULARITY_MONTHLY';
+  | "TREND_GRANULARITY_DAILY"
+  | "TREND_GRANULARITY_WEEKLY"
+  | "TREND_GRANULARITY_MONTHLY";
 export type TierCode =
-  | 'TIER_CODE_MEMBER'
-  | 'TIER_CODE_PLUS'
-  | 'TIER_CODE_PLUS_PLUS'
-  | 'TIER_CODE_HACKER';
+  | "TIER_CODE_MEMBER"
+  | "TIER_CODE_PLUS"
+  | "TIER_CODE_PLUS_PLUS"
+  | "TIER_CODE_HACKER";
 // The degree of one check. FOUR, not a bool, and the load-bearing one is UNKNOWN.
 // UNKNOWN is «THE SERVER HAS NO INSTRUMENT TO ANSWER», not «the data is bad». It NEVER blocks, in
 // any mode, and it is NEVER counted as passed. Blocking on it would punish the operator for a phase
@@ -176,25 +176,29 @@ export type TierCode =
 // the norm is not fit) and is therefore a BLOCKER. «There is no size index» is the ABSENCE OF AN
 // INSTRUMENT and is therefore UNKNOWN.
 export type ProductionRunReadinessSeverity =
-  | 'PRODUCTION_RUN_READINESS_SEVERITY_UNSPECIFIED'
-  | 'PRODUCTION_RUN_READINESS_SEVERITY_OK'
-  | 'PRODUCTION_RUN_READINESS_SEVERITY_UNKNOWN'
-  | 'PRODUCTION_RUN_READINESS_SEVERITY_WARNING'
-  | 'PRODUCTION_RUN_READINESS_SEVERITY_BLOCKER';
+  | "PRODUCTION_RUN_READINESS_SEVERITY_UNSPECIFIED"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_OK"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_UNKNOWN"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_WARNING"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_BLOCKER";
 // Where the coverage figure came from. Always NORM today. Ф4.6 switches the requirement from the
 // norm to the lays, and this field exists precisely so that switch is VISIBLE rather than guessed at
 // from the magnitude of the number.
 export type ProductionRunCoverageSource =
-  | 'PRODUCTION_RUN_COVERAGE_SOURCE_UNSPECIFIED'
-  | 'PRODUCTION_RUN_COVERAGE_SOURCE_NORM'
-  | 'PRODUCTION_RUN_COVERAGE_SOURCE_LAYS'
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_UNSPECIFIED"
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_NORM"
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_LAYS"
   // Ф4.6. A row keyed by ARTICLE may collect BOTH: one slot is covered by lays, another is not yet,
   // and the two share an article. Silently picking one of the two sources would lie in the very
   // signature the field exists to carry. A CONTRIBUTION is never MIXED — a contribution is one slot.
-  | 'PRODUCTION_RUN_COVERAGE_SOURCE_MIXED';
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_MIXED";
 // AccessLevel is the level of access an account has to a section. WRITE implies READ.
-export type AccessLevel = 'ACCESS_LEVEL_UNSPECIFIED' | 'ACCESS_LEVEL_READ' | 'ACCESS_LEVEL_WRITE';
-export type GetDictionaryRequest = {};
+export type AccessLevel =
+  | "ACCESS_LEVEL_UNSPECIFIED"
+  | "ACCESS_LEVEL_READ"
+  | "ACCESS_LEVEL_WRITE";
+export type GetDictionaryRequest = {
+};
 
 export type GetDictionaryResponse = {
   dictionary: common_Dictionary | undefined;
@@ -228,8 +232,8 @@ export type common_Dictionary = {
   revisions: common_DictionaryRevision[] | undefined;
   categorySizeSystems: common_CategorySizeSystem[] | undefined;
   careSymbols: common_CareSymbol[] | undefined;
-  // Id of the hidden system tech card that owns model-photo cutout runs (StartDesignRun kind
-  // cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
+  // Id of the hidden system tech card that owns model-photo framing runs (StartDesignRun kind
+  // extend and cutout on library photos). Admin-only: set by the admin GetDictionary, 0 on the storefront.
   // The card never appears in tech card lists, search or counts and cannot be edited or deleted.
   modelPhotoTechCardId: number | undefined;
 };
@@ -256,17 +260,17 @@ export type common_OrderStatus = {
 };
 
 export type common_OrderStatusEnum =
-  | 'ORDER_STATUS_ENUM_UNKNOWN'
-  | 'ORDER_STATUS_ENUM_PLACED'
-  | 'ORDER_STATUS_ENUM_AWAITING_PAYMENT'
-  | 'ORDER_STATUS_ENUM_CONFIRMED'
-  | 'ORDER_STATUS_ENUM_SHIPPED'
-  | 'ORDER_STATUS_ENUM_DELIVERED'
-  | 'ORDER_STATUS_ENUM_CANCELLED'
-  | 'ORDER_STATUS_ENUM_PENDING_RETURN'
-  | 'ORDER_STATUS_ENUM_REFUND_IN_PROGRESS'
-  | 'ORDER_STATUS_ENUM_REFUNDED'
-  | 'ORDER_STATUS_ENUM_PARTIALLY_REFUNDED';
+  | "ORDER_STATUS_ENUM_UNKNOWN"
+  | "ORDER_STATUS_ENUM_PLACED"
+  | "ORDER_STATUS_ENUM_AWAITING_PAYMENT"
+  | "ORDER_STATUS_ENUM_CONFIRMED"
+  | "ORDER_STATUS_ENUM_SHIPPED"
+  | "ORDER_STATUS_ENUM_DELIVERED"
+  | "ORDER_STATUS_ENUM_CANCELLED"
+  | "ORDER_STATUS_ENUM_PENDING_RETURN"
+  | "ORDER_STATUS_ENUM_REFUND_IN_PROGRESS"
+  | "ORDER_STATUS_ENUM_REFUNDED"
+  | "ORDER_STATUS_ENUM_PARTIALLY_REFUNDED";
 // PaymentMethod represents the payment_method table
 export type common_PaymentMethod = {
   id: number | undefined;
@@ -275,11 +279,11 @@ export type common_PaymentMethod = {
 };
 
 export type common_PaymentMethodNameEnum =
-  | 'PAYMENT_METHOD_NAME_ENUM_UNKNOWN'
-  | 'PAYMENT_METHOD_NAME_ENUM_CARD'
-  | 'PAYMENT_METHOD_NAME_ENUM_CARD_TEST'
-  | 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE'
-  | 'PAYMENT_METHOD_NAME_ENUM_CASH';
+  | "PAYMENT_METHOD_NAME_ENUM_UNKNOWN"
+  | "PAYMENT_METHOD_NAME_ENUM_CARD"
+  | "PAYMENT_METHOD_NAME_ENUM_CARD_TEST"
+  | "PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE"
+  | "PAYMENT_METHOD_NAME_ENUM_CASH";
 export type common_ShipmentCarrier = {
   id: number | undefined;
   shipmentCarrier: common_ShipmentCarrierInsert | undefined;
@@ -361,12 +365,12 @@ export type googletype_Decimal = {
 };
 
 export type common_ShippingRegion =
-  | 'SHIPPING_REGION_UNKNOWN'
-  | 'SHIPPING_REGION_AFRICA'
-  | 'SHIPPING_REGION_AMERICAS'
-  | 'SHIPPING_REGION_ASIA_PACIFIC'
-  | 'SHIPPING_REGION_EUROPE'
-  | 'SHIPPING_REGION_MIDDLE_EAST';
+  | "SHIPPING_REGION_UNKNOWN"
+  | "SHIPPING_REGION_AFRICA"
+  | "SHIPPING_REGION_AMERICAS"
+  | "SHIPPING_REGION_ASIA_PACIFIC"
+  | "SHIPPING_REGION_EUROPE"
+  | "SHIPPING_REGION_MIDDLE_EAST";
 export type common_Size = {
   id: number | undefined;
   name: string | undefined;
@@ -377,11 +381,11 @@ export type common_Size = {
 };
 
 export type common_SizeSkuSystem =
-  | 'SIZE_SKU_SYSTEM_UNKNOWN'
-  | 'SIZE_SKU_SYSTEM_APPAREL'
-  | 'SIZE_SKU_SYSTEM_SHOE'
-  | 'SIZE_SKU_SYSTEM_COMPOSITE_TA'
-  | 'SIZE_SKU_SYSTEM_COMPOSITE_BO';
+  | "SIZE_SKU_SYSTEM_UNKNOWN"
+  | "SIZE_SKU_SYSTEM_APPAREL"
+  | "SIZE_SKU_SYSTEM_SHOE"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_TA"
+  | "SIZE_SKU_SYSTEM_COMPOSITE_BO";
 export type common_Collection = {
   name: string | undefined;
   countMen: number | undefined;
@@ -644,7 +648,10 @@ export type ListObjectsPagedRequest = {
   orderFactor: common_OrderFactor | undefined;
 };
 
-export type common_OrderFactor = 'ORDER_FACTOR_UNKNOWN' | 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC';
+export type common_OrderFactor =
+  | "ORDER_FACTOR_UNKNOWN"
+  | "ORDER_FACTOR_ASC"
+  | "ORDER_FACTOR_DESC";
 export type ListObjectsPagedResponse = {
   list: common_MediaFull[] | undefined;
 };
@@ -653,7 +660,8 @@ export type DeleteFromBucketRequest = {
   id: number | undefined;
 };
 
-export type DeleteFromBucketResponse = {};
+export type DeleteFromBucketResponse = {
+};
 
 // MonthCount is one calendar month (UTC) and how many items fall in it.
 export type MonthCount = {
@@ -664,13 +672,15 @@ export type MonthCount = {
 
 // ListMediaMonthsRequest carries no filter on purpose: ListObjectsPaged has none, and the
 // counts must describe exactly the list they index.
-export type ListMediaMonthsRequest = {};
+export type ListMediaMonthsRequest = {
+};
 
 export type ListMediaMonthsResponse = {
   months: MonthCount[] | undefined;
 };
 
-export type ListMediaFacetsRequest = {};
+export type ListMediaFacetsRequest = {
+};
 
 export type MediaFacetRow = {
   isVideo: boolean | undefined;
@@ -833,11 +843,11 @@ export type common_ColorwayDevelopmentInsert = {
 
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type common_TechCardLabDipStatus =
-  | 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
-  | 'TECH_CARD_LAB_DIP_STATUS_PENDING'
-  | 'TECH_CARD_LAB_DIP_STATUS_SUBMITTED'
-  | 'TECH_CARD_LAB_DIP_STATUS_APPROVED'
-  | 'TECH_CARD_LAB_DIP_STATUS_REJECTED';
+  | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
+  | "TECH_CARD_LAB_DIP_STATUS_PENDING"
+  | "TECH_CARD_LAB_DIP_STATUS_SUBMITTED"
+  | "TECH_CARD_LAB_DIP_STATUS_APPROVED"
+  | "TECH_CARD_LAB_DIP_STATUS_REJECTED";
 // TechCardColorwayUsage is one material use inside a colourway: which catalog article
 // (bom_item_index) goes on which garment part (placement), the colour it takes HERE, and
 // how much is consumed (per-garment and/or per-size). The BOM is a pure article catalog;
@@ -1084,28 +1094,28 @@ export type StylePatch = {
 };
 
 export type common_SeasonEnum =
-  | 'SEASON_ENUM_UNKNOWN'
-  | 'SEASON_ENUM_SS'
-  | 'SEASON_ENUM_FW'
-  | 'SEASON_ENUM_PF'
-  | 'SEASON_ENUM_RC';
+  | "SEASON_ENUM_UNKNOWN"
+  | "SEASON_ENUM_SS"
+  | "SEASON_ENUM_FW"
+  | "SEASON_ENUM_PF"
+  | "SEASON_ENUM_RC";
 export type common_GenderEnum =
-  | 'GENDER_ENUM_UNKNOWN'
-  | 'GENDER_ENUM_MALE'
-  | 'GENDER_ENUM_FEMALE'
-  | 'GENDER_ENUM_UNISEX';
+  | "GENDER_ENUM_UNKNOWN"
+  | "GENDER_ENUM_MALE"
+  | "GENDER_ENUM_FEMALE"
+  | "GENDER_ENUM_UNISEX";
 // AgeGroupEnum is the style's target age group — a style fact like target_gender (0366).
 // Stored on the tech_card row as a lowercase token (adult/teen/kids/toddler/baby) and written only
 // through UpdateStyle (StylePatch.age_group). UNKNOWN is the absence of a value on the wire: a read
 // emits it for a style whose age group is not set (NULL — every style predating 0366 until someone
 // picks one) or holds a token this build cannot map; a write naming age_group refuses it.
 export type common_AgeGroupEnum =
-  | 'AGE_GROUP_ENUM_UNKNOWN'
-  | 'AGE_GROUP_ENUM_ADULT'
-  | 'AGE_GROUP_ENUM_TEEN'
-  | 'AGE_GROUP_ENUM_KIDS'
-  | 'AGE_GROUP_ENUM_TODDLER'
-  | 'AGE_GROUP_ENUM_BABY';
+  | "AGE_GROUP_ENUM_UNKNOWN"
+  | "AGE_GROUP_ENUM_ADULT"
+  | "AGE_GROUP_ENUM_TEEN"
+  | "AGE_GROUP_ENUM_KIDS"
+  | "AGE_GROUP_ENUM_TODDLER"
+  | "AGE_GROUP_ENUM_BABY";
 export type UpdateStyleRequest = {
   styleId: number | undefined;
   patch: StylePatch | undefined;
@@ -1127,11 +1137,11 @@ export type GetColorwaysPagedRequest = {
 };
 
 export type common_SortFactor =
-  | 'SORT_FACTOR_UNKNOWN'
-  | 'SORT_FACTOR_CREATED_AT'
-  | 'SORT_FACTOR_UPDATED_AT'
-  | 'SORT_FACTOR_NAME'
-  | 'SORT_FACTOR_PRICE';
+  | "SORT_FACTOR_UNKNOWN"
+  | "SORT_FACTOR_CREATED_AT"
+  | "SORT_FACTOR_UPDATED_AT"
+  | "SORT_FACTOR_NAME"
+  | "SORT_FACTOR_PRICE";
 export type common_FilterConditions = {
   from: string | undefined;
   to: string | undefined;
@@ -1155,11 +1165,11 @@ export type common_FilterConditions = {
 // DB tinyint + entity.ColorwayStatus. UNKNOWN is rejected on write; an unknown read value fails closed
 // (the colourway is not shown). Only ACTIVE is exposed publicly.
 export type common_ColorwayLifecycleStatus =
-  | 'COLORWAY_LIFECYCLE_STATUS_UNKNOWN'
-  | 'COLORWAY_LIFECYCLE_STATUS_DRAFT'
-  | 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'
-  | 'COLORWAY_LIFECYCLE_STATUS_HIDDEN'
-  | 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
+  | "COLORWAY_LIFECYCLE_STATUS_UNKNOWN"
+  | "COLORWAY_LIFECYCLE_STATUS_DRAFT"
+  | "COLORWAY_LIFECYCLE_STATUS_ACTIVE"
+  | "COLORWAY_LIFECYCLE_STATUS_HIDDEN"
+  | "COLORWAY_LIFECYCLE_STATUS_ARCHIVED";
 export type GetColorwaysPagedResponse = {
   colorways: common_Colorway[] | undefined;
   total: number | undefined;
@@ -1304,9 +1314,9 @@ export type common_Variant = {
 
 // VariantLifecycleStatus is the stored lifecycle of a variant (R2). Variants archive, never delete.
 export type common_VariantLifecycleStatus =
-  | 'VARIANT_LIFECYCLE_STATUS_UNKNOWN'
-  | 'VARIANT_LIFECYCLE_STATUS_ACTIVE'
-  | 'VARIANT_LIFECYCLE_STATUS_ARCHIVED';
+  | "VARIANT_LIFECYCLE_STATUS_UNKNOWN"
+  | "VARIANT_LIFECYCLE_STATUS_ACTIVE"
+  | "VARIANT_LIFECYCLE_STATUS_ARCHIVED";
 export type common_ColorwayTag = {
   id: number | undefined;
   colorwayId: number | undefined;
@@ -1327,10 +1337,10 @@ export type ColorwayCostInfo = {
 // ColorwayCostSource records where a colourway's COGS came from (R4), separating cost provenance from
 // the owning style relation.
 export type common_ColorwayCostSource =
-  | 'COLORWAY_COST_SOURCE_UNKNOWN'
-  | 'COLORWAY_COST_SOURCE_MANUAL'
-  | 'COLORWAY_COST_SOURCE_STYLE'
-  | 'COLORWAY_COST_SOURCE_PRODUCTION_RUN';
+  | "COLORWAY_COST_SOURCE_UNKNOWN"
+  | "COLORWAY_COST_SOURCE_MANUAL"
+  | "COLORWAY_COST_SOURCE_STYLE"
+  | "COLORWAY_COST_SOURCE_PRODUCTION_RUN";
 export type SyncColorwayCostFromOwningStyleRequest = {
   colorwayId: number | undefined;
   expectedVersion: number | undefined;
@@ -1353,7 +1363,8 @@ export type ArchiveColorwayByIDRequest = {
   expectedVersion: number | undefined;
 };
 
-export type ArchiveColorwayByIDResponse = {};
+export type ArchiveColorwayByIDResponse = {
+};
 
 export type DeleteColorwayByIDRequest = {
   colorwayId: number | undefined;
@@ -1437,34 +1448,35 @@ export type UpdateVariantStockRequest = {
 };
 
 export type common_StockAdjustmentMode =
-  | 'STOCK_ADJUSTMENT_MODE_UNSPECIFIED'
-  | 'STOCK_ADJUSTMENT_MODE_SET'
-  | 'STOCK_ADJUSTMENT_MODE_ADJUST';
+  | "STOCK_ADJUSTMENT_MODE_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_MODE_SET"
+  | "STOCK_ADJUSTMENT_MODE_ADJUST";
 export type common_StockAdjustmentDirection =
-  | 'STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED'
-  | 'STOCK_ADJUSTMENT_DIRECTION_INCREASE'
-  | 'STOCK_ADJUSTMENT_DIRECTION_DECREASE';
+  | "STOCK_ADJUSTMENT_DIRECTION_UNSPECIFIED"
+  | "STOCK_ADJUSTMENT_DIRECTION_INCREASE"
+  | "STOCK_ADJUSTMENT_DIRECTION_DECREASE";
 export type common_StockChangeReason =
-  | 'STOCK_CHANGE_REASON_UNSPECIFIED'
+  | "STOCK_CHANGE_REASON_UNSPECIFIED"
   // admin_new_product reasons
-  | 'STOCK_CHANGE_REASON_INITIAL_STOCK'
+  | "STOCK_CHANGE_REASON_INITIAL_STOCK"
   // manual_adjustment reasons
-  | 'STOCK_CHANGE_REASON_STOCK_COUNT'
-  | 'STOCK_CHANGE_REASON_DAMAGE'
-  | 'STOCK_CHANGE_REASON_LOSS'
-  | 'STOCK_CHANGE_REASON_FOUND'
-  | 'STOCK_CHANGE_REASON_CORRECTION'
-  | 'STOCK_CHANGE_REASON_RESERVED_RELEASE'
-  | 'STOCK_CHANGE_REASON_OTHER'
+  | "STOCK_CHANGE_REASON_STOCK_COUNT"
+  | "STOCK_CHANGE_REASON_DAMAGE"
+  | "STOCK_CHANGE_REASON_LOSS"
+  | "STOCK_CHANGE_REASON_FOUND"
+  | "STOCK_CHANGE_REASON_CORRECTION"
+  | "STOCK_CHANGE_REASON_RESERVED_RELEASE"
+  | "STOCK_CHANGE_REASON_OTHER"
   // order_reserved reasons
-  | 'STOCK_CHANGE_REASON_ORDER'
+  | "STOCK_CHANGE_REASON_ORDER"
   // order_custom_reserved reasons
-  | 'STOCK_CHANGE_REASON_CUSTOM_ORDER'
+  | "STOCK_CHANGE_REASON_CUSTOM_ORDER"
   // order_returned reasons
-  | 'STOCK_CHANGE_REASON_RETURN_TO_STOCK'
+  | "STOCK_CHANGE_REASON_RETURN_TO_STOCK"
   // order_cancelled reasons
-  | 'STOCK_CHANGE_REASON_ORDER_CANCELLED';
-export type UpdateVariantStockResponse = {};
+  | "STOCK_CHANGE_REASON_ORDER_CANCELLED";
+export type UpdateVariantStockResponse = {
+};
 
 // Variant CRUD (R2). A variant is created at zero stock, its size is immutable, and it is archived
 // (never deleted) so the frozen order/stock references stay valid. expected_*_version echoes the
@@ -1501,7 +1513,8 @@ export type ArchiveVariantRequest = {
   expectedVersion: number | undefined;
 };
 
-export type ArchiveVariantResponse = {};
+export type ArchiveVariantResponse = {
+};
 
 // B-grade seconds surface (0251). B variants live on the SAME colourway as their A siblings
 // (product_size.grade='B', '-B'-suffixed SKU, own stock) and are minted only by the production
@@ -1526,7 +1539,8 @@ export type SetVariantPriceRequest = {
   prices: common_ColorwayPriceInsert[] | undefined;
 };
 
-export type SetVariantPriceResponse = {};
+export type SetVariantPriceResponse = {
+};
 
 // Style size chart (R5, full-replace). The chart is style-owned (tech_card_size_measurement) and shares
 // the style's tech_card.lock_version; there is no separate chart version.
@@ -1593,7 +1607,8 @@ export type RelinkDraftColorwayRequest = {
   expectedTargetStyleVersion: number | undefined;
 };
 
-export type RelinkDraftColorwayResponse = {};
+export type RelinkDraftColorwayResponse = {
+};
 
 export type CloneStyleForSeasonRequest = {
   sourceStyleId: number | undefined;
@@ -1636,7 +1651,8 @@ export type SetColorwayCustomsRequest = {
   customs: ColorwayCustoms | undefined;
 };
 
-export type SetColorwayCustomsResponse = {};
+export type SetColorwayCustomsResponse = {
+};
 
 export type ListColorsRequest = {
   includeArchived: boolean | undefined;
@@ -1820,14 +1836,14 @@ export type ListStockChangeHistoryRequest = {
 };
 
 export type common_StockChangeSource =
-  | 'STOCK_CHANGE_SOURCE_UNSPECIFIED'
-  | 'STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT'
-  | 'STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT'
-  | 'STOCK_CHANGE_SOURCE_ORDER_PAID'
-  | 'STOCK_CHANGE_SOURCE_ORDER_CUSTOM'
-  | 'STOCK_CHANGE_SOURCE_ORDER_RETURNED'
-  | 'STOCK_CHANGE_SOURCE_ORDER_CANCELLED'
-  | 'STOCK_CHANGE_SOURCE_PRODUCTION_RECEIVED';
+  | "STOCK_CHANGE_SOURCE_UNSPECIFIED"
+  | "STOCK_CHANGE_SOURCE_ADMIN_NEW_PRODUCT"
+  | "STOCK_CHANGE_SOURCE_MANUAL_ADJUSTMENT"
+  | "STOCK_CHANGE_SOURCE_ORDER_PAID"
+  | "STOCK_CHANGE_SOURCE_ORDER_CUSTOM"
+  | "STOCK_CHANGE_SOURCE_ORDER_RETURNED"
+  | "STOCK_CHANGE_SOURCE_ORDER_CANCELLED"
+  | "STOCK_CHANGE_SOURCE_PRODUCTION_RECEIVED";
 export type ListStockChangeHistoryResponse = {
   changes: common_StockChange[] | undefined;
   total: number | undefined;
@@ -1916,7 +1932,8 @@ export type DeleteProductMediaRequest = {
   mediaId: number | undefined;
 };
 
-export type DeleteProductMediaResponse = {};
+export type DeleteProductMediaResponse = {
+};
 
 export type AddPromoRequest = {
   promo: common_PromoCodeInsert | undefined;
@@ -1933,7 +1950,8 @@ export type common_PromoCodeInsert = {
   voucher: boolean | undefined;
 };
 
-export type AddPromoResponse = {};
+export type AddPromoResponse = {
+};
 
 export type UpdatePromoCodeRequest = {
   // The promo to update, identified by promo.code. The mutable fields are replaced in place; the
@@ -1941,7 +1959,8 @@ export type UpdatePromoCodeRequest = {
   promo: common_PromoCodeInsert | undefined;
 };
 
-export type UpdatePromoCodeResponse = {};
+export type UpdatePromoCodeResponse = {
+};
 
 export type ListPromosRequest = {
   limit: number | undefined;
@@ -1962,13 +1981,15 @@ export type DeletePromoCodeRequest = {
   code: string | undefined;
 };
 
-export type DeletePromoCodeResponse = {};
+export type DeletePromoCodeResponse = {
+};
 
 export type DisablePromoCodeRequest = {
   code: string | undefined;
 };
 
-export type DisablePromoCodeResponse = {};
+export type DisablePromoCodeResponse = {
+};
 
 export type GetOrderByUUIDRequest = {
   orderUuid: string | undefined;
@@ -2151,25 +2172,25 @@ export type common_OrderReview = {
 };
 
 export type common_DeliverySpeedEnum =
-  | 'DELIVERY_SPEED_ENUM_UNKNOWN'
-  | 'DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED'
-  | 'DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED'
-  | 'DELIVERY_SPEED_ENUM_AS_EXPECTED'
-  | 'DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED'
-  | 'DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED';
+  | "DELIVERY_SPEED_ENUM_UNKNOWN"
+  | "DELIVERY_SPEED_ENUM_MUCH_FASTER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_FASTER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_AS_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_SLOWER_THAN_EXPECTED"
+  | "DELIVERY_SPEED_ENUM_MUCH_SLOWER_THAN_EXPECTED";
 export type common_PackagingConditionEnum =
-  | 'PACKAGING_CONDITION_ENUM_UNKNOWN'
-  | 'PACKAGING_CONDITION_ENUM_DAMAGED'
-  | 'PACKAGING_CONDITION_ENUM_ACCEPTABLE'
-  | 'PACKAGING_CONDITION_ENUM_GOOD'
-  | 'PACKAGING_CONDITION_ENUM_EXCELLENT';
+  | "PACKAGING_CONDITION_ENUM_UNKNOWN"
+  | "PACKAGING_CONDITION_ENUM_DAMAGED"
+  | "PACKAGING_CONDITION_ENUM_ACCEPTABLE"
+  | "PACKAGING_CONDITION_ENUM_GOOD"
+  | "PACKAGING_CONDITION_ENUM_EXCELLENT";
 export type common_ProductRatingEnum =
-  | 'PRODUCT_RATING_ENUM_UNKNOWN'
-  | 'PRODUCT_RATING_ENUM_POOR'
-  | 'PRODUCT_RATING_ENUM_FAIR'
-  | 'PRODUCT_RATING_ENUM_GOOD'
-  | 'PRODUCT_RATING_ENUM_VERY_GOOD'
-  | 'PRODUCT_RATING_ENUM_EXCELLENT';
+  | "PRODUCT_RATING_ENUM_UNKNOWN"
+  | "PRODUCT_RATING_ENUM_POOR"
+  | "PRODUCT_RATING_ENUM_FAIR"
+  | "PRODUCT_RATING_ENUM_GOOD"
+  | "PRODUCT_RATING_ENUM_VERY_GOOD"
+  | "PRODUCT_RATING_ENUM_EXCELLENT";
 // Item-level review (product rating, fit, recommendation)
 export type common_OrderItemReview = {
   id: number | undefined;
@@ -2181,12 +2202,12 @@ export type common_OrderItemReview = {
 };
 
 export type common_FitScaleEnum =
-  | 'FIT_SCALE_ENUM_UNKNOWN'
-  | 'FIT_SCALE_ENUM_RUNS_SMALL'
-  | 'FIT_SCALE_ENUM_SLIGHTLY_SMALL'
-  | 'FIT_SCALE_ENUM_TRUE_TO_SIZE'
-  | 'FIT_SCALE_ENUM_SLIGHTLY_LARGE'
-  | 'FIT_SCALE_ENUM_RUNS_LARGE';
+  | "FIT_SCALE_ENUM_UNKNOWN"
+  | "FIT_SCALE_ENUM_RUNS_SMALL"
+  | "FIT_SCALE_ENUM_SLIGHTLY_SMALL"
+  | "FIT_SCALE_ENUM_TRUE_TO_SIZE"
+  | "FIT_SCALE_ENUM_SLIGHTLY_LARGE"
+  | "FIT_SCALE_ENUM_RUNS_LARGE";
 // OrderStripeDetails carries admin-only financial and Stripe metadata for an order.
 // It is NOT part of the customer-facing order (kept off common.Order/common.Payment,
 // which the storefront shares) and is attached only to admin responses. All amounts
@@ -2214,7 +2235,8 @@ export type SetTrackingNumberRequest = {
   trackingCode: string | undefined;
 };
 
-export type SetTrackingNumberResponse = {};
+export type SetTrackingNumberResponse = {
+};
 
 export type ListOrdersRequest = {
   status: common_OrderStatusEnum | undefined;
@@ -2232,7 +2254,8 @@ export type ListOrdersResponse = {
   total: number | undefined;
 };
 
-export type GetOrdersOverviewRequest = {};
+export type GetOrdersOverviewRequest = {
+};
 
 export type GetOrdersOverviewResponse = {
   statusCounts: { [key: string]: number } | undefined;
@@ -3468,7 +3491,8 @@ export type AlertSettings = {
   targetMarginPct: number | undefined;
 };
 
-export type GetAlertSettingsRequest = {};
+export type GetAlertSettingsRequest = {
+};
 
 export type GetAlertSettingsResponse = {
   settings: AlertSettings | undefined;
@@ -3478,7 +3502,8 @@ export type UpsertAlertSettingsRequest = {
   settings: AlertSettings | undefined;
 };
 
-export type UpsertAlertSettingsResponse = {};
+export type UpsertAlertSettingsResponse = {
+};
 
 export type RefundOrderRequest = {
   orderUuid: string | undefined;
@@ -3501,19 +3526,22 @@ export type RefundOrderRequest = {
   disposition: string | undefined;
 };
 
-export type RefundOrderResponse = {};
+export type RefundOrderResponse = {
+};
 
 export type DeliveredOrderRequest = {
   orderUuid: string | undefined;
 };
 
-export type DeliveredOrderResponse = {};
+export type DeliveredOrderResponse = {
+};
 
 export type CancelOrderRequest = {
   orderUuid: string | undefined;
 };
 
-export type CancelOrderResponse = {};
+export type CancelOrderResponse = {
+};
 
 export type AddOrderCommentRequest = {
   orderUuid: string | undefined;
@@ -3604,26 +3632,26 @@ export type common_HeroEntityInsert = {
 };
 
 export type common_HeroType =
-  | 'HERO_TYPE_UNKNOWN'
-  | 'HERO_TYPE_SINGLE'
-  | 'HERO_TYPE_DOUBLE'
-  | 'HERO_TYPE_MAIN'
-  | 'HERO_TYPE_FEATURED_PRODUCTS'
-  | 'HERO_TYPE_FEATURED_PRODUCTS_TAG'
-  | 'HERO_TYPE_FEATURED_ARCHIVE'
-  | 'HERO_TYPE_EMBED'
-  | 'HERO_TYPE_DROP'
-  | 'HERO_TYPE_LAST_CHANCE'
-  | 'HERO_TYPE_MARQUEE'
-  | 'HERO_TYPE_NEW_ARRIVALS'
-  | 'HERO_TYPE_SLIDESHOW'
-  | 'HERO_TYPE_MOSAIC'
-  | 'HERO_TYPE_SPLIT'
-  | 'HERO_TYPE_VIDEO'
-  | 'HERO_TYPE_PRODUCT_SPOTLIGHT'
-  | 'HERO_TYPE_NEWSLETTER'
-  | 'HERO_TYPE_STATEMENT'
-  | 'HERO_TYPE_LOOKBOOK';
+  | "HERO_TYPE_UNKNOWN"
+  | "HERO_TYPE_SINGLE"
+  | "HERO_TYPE_DOUBLE"
+  | "HERO_TYPE_MAIN"
+  | "HERO_TYPE_FEATURED_PRODUCTS"
+  | "HERO_TYPE_FEATURED_PRODUCTS_TAG"
+  | "HERO_TYPE_FEATURED_ARCHIVE"
+  | "HERO_TYPE_EMBED"
+  | "HERO_TYPE_DROP"
+  | "HERO_TYPE_LAST_CHANCE"
+  | "HERO_TYPE_MARQUEE"
+  | "HERO_TYPE_NEW_ARRIVALS"
+  | "HERO_TYPE_SLIDESHOW"
+  | "HERO_TYPE_MOSAIC"
+  | "HERO_TYPE_SPLIT"
+  | "HERO_TYPE_VIDEO"
+  | "HERO_TYPE_PRODUCT_SPOTLIGHT"
+  | "HERO_TYPE_NEWSLETTER"
+  | "HERO_TYPE_STATEMENT"
+  | "HERO_TYPE_LOOKBOOK";
 export type common_HeroSingleInsert = {
   media: common_HeroMedia | undefined;
   exploreLink: string | undefined;
@@ -3788,11 +3816,11 @@ export type common_HeroLookbookInsert = {
 // requires the frontend GetHero to know the viewer (auth → tier); until then it
 // is carried through and may be applied client-side.
 export type common_HeroAudience =
-  | 'HERO_AUDIENCE_UNKNOWN'
-  | 'HERO_AUDIENCE_ALL'
-  | 'HERO_AUDIENCE_GUESTS'
-  | 'HERO_AUDIENCE_MEMBERS'
-  | 'HERO_AUDIENCE_TIER';
+  | "HERO_AUDIENCE_UNKNOWN"
+  | "HERO_AUDIENCE_ALL"
+  | "HERO_AUDIENCE_GUESTS"
+  | "HERO_AUDIENCE_MEMBERS"
+  | "HERO_AUDIENCE_TIER";
 export type common_NavFeaturedInsert = {
   men: common_NavFeaturedEntityInsert | undefined;
   women: common_NavFeaturedEntityInsert | undefined;
@@ -3810,7 +3838,8 @@ export type common_NavFeaturedEntityInsertTranslation = {
   exploreText: string | undefined;
 };
 
-export type AddHeroResponse = {};
+export type AddHeroResponse = {
+};
 
 export type UpsertEmailSegmentRequest = {
   id: number | undefined;
@@ -3839,7 +3868,10 @@ export type common_SegmentNode = {
   values: string[] | undefined;
 };
 
-export type common_SegmentOp = 'SEGMENT_OP_UNKNOWN' | 'SEGMENT_OP_AND' | 'SEGMENT_OP_OR';
+export type common_SegmentOp =
+  | "SEGMENT_OP_UNKNOWN"
+  | "SEGMENT_OP_AND"
+  | "SEGMENT_OP_OR";
 export type UpsertEmailSegmentResponse = {
   id: number | undefined;
 };
@@ -3852,7 +3884,8 @@ export type GetEmailSegmentResponse = {
   segment: common_EmailSegment | undefined;
 };
 
-export type ListEmailSegmentsRequest = {};
+export type ListEmailSegmentsRequest = {
+};
 
 export type ListEmailSegmentsResponse = {
   segments: common_EmailSegment[] | undefined;
@@ -3862,7 +3895,8 @@ export type DeleteEmailSegmentRequest = {
   id: number | undefined;
 };
 
-export type DeleteEmailSegmentResponse = {};
+export type DeleteEmailSegmentResponse = {
+};
 
 export type PreviewEmailSegmentRequest = {
   segment: common_EmailSegment | undefined;
@@ -3893,10 +3927,10 @@ export type common_EmailCampaignInsert = {
 };
 
 export type common_EmailCampaignTopic =
-  | 'EMAIL_CAMPAIGN_TOPIC_UNKNOWN'
-  | 'EMAIL_CAMPAIGN_TOPIC_NEWSLETTER'
-  | 'EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS'
-  | 'EMAIL_CAMPAIGN_TOPIC_EVENTS';
+  | "EMAIL_CAMPAIGN_TOPIC_UNKNOWN"
+  | "EMAIL_CAMPAIGN_TOPIC_NEWSLETTER"
+  | "EMAIL_CAMPAIGN_TOPIC_NEW_ARRIVALS"
+  | "EMAIL_CAMPAIGN_TOPIC_EVENTS";
 // EmailBlock is an ordered, typed campaign-body block. Exactly the payload that
 // corresponds to type should be populated.
 export type common_EmailBlock = {
@@ -3919,19 +3953,19 @@ export type common_EmailBlock = {
 
 // EmailBlockType identifies the payload carried by an EmailBlock.
 export type common_EmailBlockType =
-  | 'EMAIL_BLOCK_TYPE_UNKNOWN'
-  | 'EMAIL_BLOCK_TYPE_HEADER'
-  | 'EMAIL_BLOCK_TYPE_IMAGE_LINK'
-  | 'EMAIL_BLOCK_TYPE_RICH_TEXT'
-  | 'EMAIL_BLOCK_TYPE_PRODUCT_CARD'
-  | 'EMAIL_BLOCK_TYPE_PRODUCT_GRID'
-  | 'EMAIL_BLOCK_TYPE_CTA_BUTTON'
-  | 'EMAIL_BLOCK_TYPE_DIVIDER'
-  | 'EMAIL_BLOCK_TYPE_SPACER'
-  | 'EMAIL_BLOCK_TYPE_TWO_COLUMN'
-  | 'EMAIL_BLOCK_TYPE_SOCIAL_LINKS'
-  | 'EMAIL_BLOCK_TYPE_COUNTDOWN'
-  | 'EMAIL_BLOCK_TYPE_VIDEO_THUMB';
+  | "EMAIL_BLOCK_TYPE_UNKNOWN"
+  | "EMAIL_BLOCK_TYPE_HEADER"
+  | "EMAIL_BLOCK_TYPE_IMAGE_LINK"
+  | "EMAIL_BLOCK_TYPE_RICH_TEXT"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_CARD"
+  | "EMAIL_BLOCK_TYPE_PRODUCT_GRID"
+  | "EMAIL_BLOCK_TYPE_CTA_BUTTON"
+  | "EMAIL_BLOCK_TYPE_DIVIDER"
+  | "EMAIL_BLOCK_TYPE_SPACER"
+  | "EMAIL_BLOCK_TYPE_TWO_COLUMN"
+  | "EMAIL_BLOCK_TYPE_SOCIAL_LINKS"
+  | "EMAIL_BLOCK_TYPE_COUNTDOWN"
+  | "EMAIL_BLOCK_TYPE_VIDEO_THUMB";
 export type common_EmailHeaderBlock = {
   logoMediaId: number | undefined;
   // logo_position controls the brand logo alignment: left | center | right (default center).
@@ -3945,7 +3979,8 @@ export type common_EmailImageLinkBlock = {
   aspect: string | undefined;
 };
 
-export type common_EmailRichTextBlock = {};
+export type common_EmailRichTextBlock = {
+};
 
 export type common_EmailProductCardBlock = {
   productId: number | undefined;
@@ -4023,9 +4058,9 @@ export type common_ABConfig = {
 };
 
 export type common_ABDimension =
-  | 'AB_DIMENSION_UNKNOWN'
-  | 'AB_DIMENSION_SUBJECT'
-  | 'AB_DIMENSION_CONTENT';
+  | "AB_DIMENSION_UNKNOWN"
+  | "AB_DIMENSION_SUBJECT"
+  | "AB_DIMENSION_CONTENT";
 export type common_EmailCampaignVariant = {
   id: number | undefined;
   label: string | undefined;
@@ -4041,13 +4076,13 @@ export type common_SubjectTranslation = {
 };
 
 export type common_EmailCampaignStatus =
-  | 'EMAIL_CAMPAIGN_STATUS_UNKNOWN'
-  | 'EMAIL_CAMPAIGN_STATUS_DRAFT'
-  | 'EMAIL_CAMPAIGN_STATUS_SCHEDULED'
-  | 'EMAIL_CAMPAIGN_STATUS_SENDING'
-  | 'EMAIL_CAMPAIGN_STATUS_PAUSED'
-  | 'EMAIL_CAMPAIGN_STATUS_SENT'
-  | 'EMAIL_CAMPAIGN_STATUS_CANCELLED';
+  | "EMAIL_CAMPAIGN_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_STATUS_DRAFT"
+  | "EMAIL_CAMPAIGN_STATUS_SCHEDULED"
+  | "EMAIL_CAMPAIGN_STATUS_SENDING"
+  | "EMAIL_CAMPAIGN_STATUS_PAUSED"
+  | "EMAIL_CAMPAIGN_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_STATUS_CANCELLED";
 export type UpsertEmailCampaignResponse = {
   id: number | undefined;
 };
@@ -4103,7 +4138,8 @@ export type DeleteEmailCampaignRequest = {
   id: number | undefined;
 };
 
-export type DeleteEmailCampaignResponse = {};
+export type DeleteEmailCampaignResponse = {
+};
 
 export type RenderCampaignPreviewRequest = {
   campaignId?: number;
@@ -4133,13 +4169,15 @@ export type SendTestEmailRequest = {
   toEmails: string[] | undefined;
 };
 
-export type SendTestEmailResponse = {};
+export type SendTestEmailResponse = {
+};
 
 export type SendCampaignNowRequest = {
   id: number | undefined;
 };
 
-export type SendCampaignNowResponse = {};
+export type SendCampaignNowResponse = {
+};
 
 export type AutoTranslateEmailCampaignRequest = {
   id: number | undefined;
@@ -4157,25 +4195,29 @@ export type ScheduleCampaignRequest = {
   scheduleAt: number | undefined;
 };
 
-export type ScheduleCampaignResponse = {};
+export type ScheduleCampaignResponse = {
+};
 
 export type PauseCampaignRequest = {
   id: number | undefined;
 };
 
-export type PauseCampaignResponse = {};
+export type PauseCampaignResponse = {
+};
 
 export type ResumeCampaignRequest = {
   id: number | undefined;
 };
 
-export type ResumeCampaignResponse = {};
+export type ResumeCampaignResponse = {
+};
 
 export type CancelCampaignRequest = {
   id: number | undefined;
 };
 
-export type CancelCampaignResponse = {};
+export type CancelCampaignResponse = {
+};
 
 export type GetCampaignDispatchStatusRequest = {
   id: number | undefined;
@@ -4279,15 +4321,15 @@ export type common_EmailCampaignRecipient = {
 };
 
 export type common_EmailCampaignCohort =
-  | 'EMAIL_CAMPAIGN_COHORT_UNKNOWN'
-  | 'EMAIL_CAMPAIGN_COHORT_AB'
-  | 'EMAIL_CAMPAIGN_COHORT_REMAINDER';
+  | "EMAIL_CAMPAIGN_COHORT_UNKNOWN"
+  | "EMAIL_CAMPAIGN_COHORT_AB"
+  | "EMAIL_CAMPAIGN_COHORT_REMAINDER";
 export type common_EmailCampaignRecipientStatus =
-  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN'
-  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING'
-  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT'
-  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED'
-  | 'EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED';
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_UNKNOWN"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_PENDING"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SENT"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_FAILED"
+  | "EMAIL_CAMPAIGN_RECIPIENT_STATUS_SKIPPED";
 export type AddArchiveRequest = {
   archiveInsert: common_ArchiveInsert | undefined;
 };
@@ -4323,15 +4365,15 @@ export type common_ArchiveItemInsert = {
 // Blocks may repeat and appear in any order; only the archive thumbnail, title
 // (heading translation) and tag are mandatory — every timeline block is optional.
 export type common_ArchiveItemType =
-  | 'ARCHIVE_ITEM_TYPE_UNKNOWN'
-  | 'ARCHIVE_ITEM_TYPE_MAIN_MEDIA'
-  | 'ARCHIVE_ITEM_TYPE_MEDIA_LINE'
-  | 'ARCHIVE_ITEM_TYPE_TEXT'
-  | 'ARCHIVE_ITEM_TYPE_EMBED'
-  | 'ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION'
-  | 'ARCHIVE_ITEM_TYPE_PRODUCT'
-  | 'ARCHIVE_ITEM_TYPE_PRODUCTS_TAG'
-  | 'ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL';
+  | "ARCHIVE_ITEM_TYPE_UNKNOWN"
+  | "ARCHIVE_ITEM_TYPE_MAIN_MEDIA"
+  | "ARCHIVE_ITEM_TYPE_MEDIA_LINE"
+  | "ARCHIVE_ITEM_TYPE_TEXT"
+  | "ARCHIVE_ITEM_TYPE_EMBED"
+  | "ARCHIVE_ITEM_TYPE_MEDIA_WITH_CAPTION"
+  | "ARCHIVE_ITEM_TYPE_PRODUCT"
+  | "ARCHIVE_ITEM_TYPE_PRODUCTS_TAG"
+  | "ARCHIVE_ITEM_TYPE_PRODUCTS_MANUAL";
 export type common_ArchiveMainMediaInsert = {
   mediaId: number | undefined;
   aspectRatio: common_ArchiveMediaAspectRatio | undefined;
@@ -4341,11 +4383,11 @@ export type common_ArchiveMainMediaInsert = {
 // MAIN_MEDIA uses 16X9 / 2X1 / 1X1 (or UNKNOWN — e.g. a video that carries its
 // own dimensions); MEDIA_LINE and MEDIA_WITH_CAPTION use 3X4 / 1X1.
 export type common_ArchiveMediaAspectRatio =
-  | 'ARCHIVE_MEDIA_ASPECT_RATIO_UNKNOWN'
-  | 'ARCHIVE_MEDIA_ASPECT_RATIO_16X9'
-  | 'ARCHIVE_MEDIA_ASPECT_RATIO_2X1'
-  | 'ARCHIVE_MEDIA_ASPECT_RATIO_1X1'
-  | 'ARCHIVE_MEDIA_ASPECT_RATIO_3X4';
+  | "ARCHIVE_MEDIA_ASPECT_RATIO_UNKNOWN"
+  | "ARCHIVE_MEDIA_ASPECT_RATIO_16X9"
+  | "ARCHIVE_MEDIA_ASPECT_RATIO_2X1"
+  | "ARCHIVE_MEDIA_ASPECT_RATIO_1X1"
+  | "ARCHIVE_MEDIA_ASPECT_RATIO_3X4";
 export type common_ArchiveMediaLineInsert = {
   mediaIds: number[] | undefined;
   aspectRatio: common_ArchiveMediaAspectRatio | undefined;
@@ -4493,13 +4535,15 @@ export type common_ArchiveProductsManualFull = {
   translations: common_ArchiveItemTranslation[] | undefined;
 };
 
-export type UpdateArchiveResponse = {};
+export type UpdateArchiveResponse = {
+};
 
 export type DeleteArchiveByIdRequest = {
   id: number | undefined;
 };
 
-export type DeleteArchiveByIdResponse = {};
+export type DeleteArchiveByIdResponse = {
+};
 
 export type GetArchivesPagedRequest = {
   limit: number | undefined;
@@ -4537,32 +4581,32 @@ export type common_ModelMeasurement = {
 // BodyMeasurementName enumerates the body-measurement types captured for a fit
 // model. It is intentionally separate from the garment MeasurementName dictionary.
 export type common_BodyMeasurementName =
-  | 'BODY_MEASUREMENT_NAME_UNKNOWN'
+  | "BODY_MEASUREMENT_NAME_UNKNOWN"
   // Torso
-  | 'BODY_MEASUREMENT_NAME_CHEST'
-  | 'BODY_MEASUREMENT_NAME_UNDER_BUST'
-  | 'BODY_MEASUREMENT_NAME_WAIST'
-  | 'BODY_MEASUREMENT_NAME_HIGH_HIP'
-  | 'BODY_MEASUREMENT_NAME_HIP'
-  | 'BODY_MEASUREMENT_NAME_NECK_BASE'
+  | "BODY_MEASUREMENT_NAME_CHEST"
+  | "BODY_MEASUREMENT_NAME_UNDER_BUST"
+  | "BODY_MEASUREMENT_NAME_WAIST"
+  | "BODY_MEASUREMENT_NAME_HIGH_HIP"
+  | "BODY_MEASUREMENT_NAME_HIP"
+  | "BODY_MEASUREMENT_NAME_NECK_BASE"
   // Arms
-  | 'BODY_MEASUREMENT_NAME_ACROSS_SHOULDER'
-  | 'BODY_MEASUREMENT_NAME_SLEEVE_LENGTH'
-  | 'BODY_MEASUREMENT_NAME_BICEP'
-  | 'BODY_MEASUREMENT_NAME_WRIST'
+  | "BODY_MEASUREMENT_NAME_ACROSS_SHOULDER"
+  | "BODY_MEASUREMENT_NAME_SLEEVE_LENGTH"
+  | "BODY_MEASUREMENT_NAME_BICEP"
+  | "BODY_MEASUREMENT_NAME_WRIST"
   // Legs
-  | 'BODY_MEASUREMENT_NAME_INSEAM'
-  | 'BODY_MEASUREMENT_NAME_THIGH'
-  | 'BODY_MEASUREMENT_NAME_KNEE'
-  | 'BODY_MEASUREMENT_NAME_CALF'
-  | 'BODY_MEASUREMENT_NAME_ANKLE'
+  | "BODY_MEASUREMENT_NAME_INSEAM"
+  | "BODY_MEASUREMENT_NAME_THIGH"
+  | "BODY_MEASUREMENT_NAME_KNEE"
+  | "BODY_MEASUREMENT_NAME_CALF"
+  | "BODY_MEASUREMENT_NAME_ANKLE"
   // Vertical / lengths
-  | 'BODY_MEASUREMENT_NAME_HEIGHT'
-  | 'BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT'
-  | 'BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST'
+  | "BODY_MEASUREMENT_NAME_HEIGHT"
+  | "BODY_MEASUREMENT_NAME_HPS_TO_WAIST_FRONT"
+  | "BODY_MEASUREMENT_NAME_CB_NECK_TO_WAIST"
   // Widths (front / back)
-  | 'BODY_MEASUREMENT_NAME_ACROSS_FRONT'
-  | 'BODY_MEASUREMENT_NAME_ACROSS_BACK';
+  | "BODY_MEASUREMENT_NAME_ACROSS_FRONT"
+  | "BODY_MEASUREMENT_NAME_ACROSS_BACK";
 export type AddModelResponse = {
   id: number | undefined;
 };
@@ -4603,13 +4647,15 @@ export type UpdateModelRequest = {
   model: common_ModelInsert | undefined;
 };
 
-export type UpdateModelResponse = {};
+export type UpdateModelResponse = {
+};
 
 export type DeleteModelRequest = {
   id: number | undefined;
 };
 
-export type DeleteModelResponse = {};
+export type DeleteModelResponse = {
+};
 
 export type AddFittingRequest = {
   fitting: common_FittingInsert | undefined;
@@ -4654,17 +4700,17 @@ export type common_FittingInsert = {
 
 // FittingStatus is the lifecycle state of a fitting session.
 export type common_FittingStatus =
-  | 'FITTING_STATUS_UNKNOWN'
-  | 'FITTING_STATUS_PLANNED'
-  | 'FITTING_STATUS_DONE'
-  | 'FITTING_STATUS_CANCELLED';
+  | "FITTING_STATUS_UNKNOWN"
+  | "FITTING_STATUS_PLANNED"
+  | "FITTING_STATUS_DONE"
+  | "FITTING_STATUS_CANCELLED";
 // FittingVerdict is the outcome of a fitting session.
 export type common_FittingVerdict =
-  | 'FITTING_VERDICT_UNKNOWN'
-  | 'FITTING_VERDICT_PENDING'
-  | 'FITTING_VERDICT_APPROVED'
-  | 'FITTING_VERDICT_NEEDS_REWORK'
-  | 'FITTING_VERDICT_REJECTED';
+  | "FITTING_VERDICT_UNKNOWN"
+  | "FITTING_VERDICT_PENDING"
+  | "FITTING_VERDICT_APPROVED"
+  | "FITTING_VERDICT_NEEDS_REWORK"
+  | "FITTING_VERDICT_REJECTED";
 // FittingSizeInsert is one size tried in a fitting, with an optional per-size note.
 export type common_FittingSizeInsert = {
   sizeId: number | undefined;
@@ -4766,24 +4812,24 @@ export type common_FittingCallout = {
 // СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
 // примерке — им нужно будет лишь своё поле, а не свой формат выноски.
 export type common_TechCardAnnotationKind =
-  | 'TECH_CARD_ANNOTATION_KIND_UNKNOWN'
+  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
   // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
-  | 'TECH_CARD_ANNOTATION_KIND_PIN'
+  | "TECH_CARD_ANNOTATION_KIND_PIN"
   // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
-  | 'TECH_CARD_ANNOTATION_KIND_LABEL'
+  | "TECH_CARD_ANNOTATION_KIND_LABEL"
   // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
-  | 'TECH_CARD_ANNOTATION_KIND_DIM'
+  | "TECH_CARD_ANNOTATION_KIND_DIM"
   // 2 точки. Скобка над участком; текст — что с этим участком делать.
-  | 'TECH_CARD_ANNOTATION_KIND_BRACKET'
+  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
   // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
-  | 'TECH_CARD_ANNOTATION_KIND_MULTI'
+  | "TECH_CARD_ANNOTATION_KIND_MULTI"
   // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
   // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
   // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
   // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
   // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
   // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
-  | 'TECH_CARD_ANNOTATION_KIND_ARC'
+  | "TECH_CARD_ANNOTATION_KIND_ARC"
   // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
   // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
   // порок ткани и участок дублирования имеют форму пятна.
@@ -4791,14 +4837,14 @@ export type common_TechCardAnnotationKind =
   // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
   // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
   // предательски на печати.
-  | 'TECH_CARD_ANNOTATION_KIND_POLYGON'
+  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
   // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
   // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
   // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
   // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
   // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
   // здесь потолок, а не норма.
-  | 'TECH_CARD_ANNOTATION_KIND_INK';
+  | "TECH_CARD_ANNOTATION_KIND_INK";
 // Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
 // карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
 // тип на обе системы координат карточки.
@@ -4812,15 +4858,15 @@ export type common_TechCardAnnotationPoint = {
 // (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
 // пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
 export type common_TechCardAnnotationColor =
-  | 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN'
-  | 'TECH_CARD_ANNOTATION_COLOR_RED'
-  | 'TECH_CARD_ANNOTATION_COLOR_BLUE'
-  | 'TECH_CARD_ANNOTATION_COLOR_GREEN'
-  | 'TECH_CARD_ANNOTATION_COLOR_ORANGE'
+  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
+  | "TECH_CARD_ANNOTATION_COLOR_RED"
+  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
+  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
+  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
   // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
   // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
   // на белом листе видно контур, а на чёрном снимке — саму линию.
-  | 'TECH_CARD_ANNOTATION_COLOR_WHITE';
+  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
 // Наконечник линии — ЧЕМ КОНЧАЕТСЯ отрезок или кривая. Ось, отдельная от вида: до круга 18 в
 // наборе стояли ДВА вида, различавшихся только концами (`DIM` — засечки, `BRACKET` — скобки),
 // и человек выбирал между ними как между разными инструментами, хотя рисовал одну и ту же линию.
@@ -4837,11 +4883,11 @@ export type common_TechCardAnnotationColor =
 // ПРИВОДИТ поле к UNSPECIFIED, а не отвергает карточку, — по тому же доводу, что и `filled`
 // у не-полигона: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже.
 export type common_TechCardAnnotationCaps =
-  | 'TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED'
-  | 'TECH_CARD_ANNOTATION_CAPS_TICK'
-  | 'TECH_CARD_ANNOTATION_CAPS_BRACKET'
-  | 'TECH_CARD_ANNOTATION_CAPS_BULLET'
-  | 'TECH_CARD_ANNOTATION_CAPS_ARROW';
+  | "TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED"
+  | "TECH_CARD_ANNOTATION_CAPS_TICK"
+  | "TECH_CARD_ANNOTATION_CAPS_BRACKET"
+  | "TECH_CARD_ANNOTATION_CAPS_BULLET"
+  | "TECH_CARD_ANNOTATION_CAPS_ARROW";
 // FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
 // change CATEGORY; zone + piece_ids are the structured LOCATION (which replace the front's misuse of
 // target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
@@ -4913,13 +4959,15 @@ export type UpdateFittingRequest = {
   expectedLockVersion: number | undefined;
 };
 
-export type UpdateFittingResponse = {};
+export type UpdateFittingResponse = {
+};
 
 export type DeleteFittingRequest = {
   id: number | undefined;
 };
 
-export type DeleteFittingResponse = {};
+export type DeleteFittingResponse = {
+};
 
 export type DraftFittingEditsRequest = {
   fittingId: number | undefined;
@@ -4970,7 +5018,8 @@ export type UpdateSampleRequest = {
   expectedLockVersion: number | undefined;
 };
 
-export type UpdateSampleResponse = {};
+export type UpdateSampleResponse = {
+};
 
 export type AddSampleSubstitutionRequest = {
   substitution: common_SampleSubstitutionInsert | undefined;
@@ -5019,7 +5068,8 @@ export type DeleteSampleSubstitutionRequest = {
   id: number | undefined;
 };
 
-export type DeleteSampleSubstitutionResponse = {};
+export type DeleteSampleSubstitutionResponse = {
+};
 
 export type AddFittingChangeRequestRequest = {
   changeRequest: common_FittingChangeRequestInsert | undefined;
@@ -5057,13 +5107,15 @@ export type UpdateFittingChangeRequestRequest = {
   changeRequest: common_FittingChangeRequestInsert | undefined;
 };
 
-export type UpdateFittingChangeRequestResponse = {};
+export type UpdateFittingChangeRequestResponse = {
+};
 
 export type DeleteFittingChangeRequestRequest = {
   id: number | undefined;
 };
 
-export type DeleteFittingChangeRequestResponse = {};
+export type DeleteFittingChangeRequestResponse = {
+};
 
 // ListOpenFittingChangeRequests returns the OPEN structured remarks from a style's earlier rounds — the
 // carry-over view shown when opening the next round (task 2). before_round scopes to items raised
@@ -5271,11 +5323,11 @@ export type common_TaskInsert = {
 };
 
 export type common_TaskPriority =
-  | 'TASK_PRIORITY_UNKNOWN'
-  | 'TASK_PRIORITY_LOW'
-  | 'TASK_PRIORITY_MEDIUM'
-  | 'TASK_PRIORITY_HIGH'
-  | 'TASK_PRIORITY_URGENT';
+  | "TASK_PRIORITY_UNKNOWN"
+  | "TASK_PRIORITY_LOW"
+  | "TASK_PRIORITY_MEDIUM"
+  | "TASK_PRIORITY_HIGH"
+  | "TASK_PRIORITY_URGENT";
 // TaskMediaAnnotations — указания одной прикреплённой картинки.
 // ТА ЖЕ СТРУКТУРА, ЧТО НА ЭСКИЗЕ ТЕХ-КАРТЫ И НА СНИМКЕ ШАГА СБОРКИ: `TechCardAnnotation`, вместе с
 // её видами, точками, цветом и пунктиром. Имя историческое — примитив указания в системе ОДИН (см.
@@ -5347,21 +5399,21 @@ export type common_TechCardAnnotation = {
 // before board ids keep working: requests accept either the enum or a board_id (board_id wins);
 // responses fill the enum for a seeded board and UNKNOWN for a custom one. Do not extend.
 export type common_TaskBoard =
-  | 'TASK_BOARD_UNKNOWN'
-  | 'TASK_BOARD_DEVELOPMENT'
-  | 'TASK_BOARD_DESIGN'
-  | 'TASK_BOARD_MARKETING'
-  | 'TASK_BOARD_PRODUCTION'
-  | 'TASK_BOARD_SOURCING'
-  | 'TASK_BOARD_CONTENT';
+  | "TASK_BOARD_UNKNOWN"
+  | "TASK_BOARD_DEVELOPMENT"
+  | "TASK_BOARD_DESIGN"
+  | "TASK_BOARD_MARKETING"
+  | "TASK_BOARD_PRODUCTION"
+  | "TASK_BOARD_SOURCING"
+  | "TASK_BOARD_CONTENT";
 // TaskStatus is the kanban column. A drag between columns is a status change.
 export type common_TaskStatus =
-  | 'TASK_STATUS_UNKNOWN'
-  | 'TASK_STATUS_BACKLOG'
-  | 'TASK_STATUS_TODO'
-  | 'TASK_STATUS_IN_PROGRESS'
-  | 'TASK_STATUS_REVIEW'
-  | 'TASK_STATUS_DONE';
+  | "TASK_STATUS_UNKNOWN"
+  | "TASK_STATUS_BACKLOG"
+  | "TASK_STATUS_TODO"
+  | "TASK_STATUS_IN_PROGRESS"
+  | "TASK_STATUS_REVIEW"
+  | "TASK_STATUS_DONE";
 export type AddTaskResponse = {
   id: number | undefined;
 };
@@ -5472,10 +5524,10 @@ export type common_TaskLink = {
 // RELATES симметрична и нормализуется при записи (меньший id первым), поэтому дубль (A,B)+(B,A)
 // невыразим схемой, а не только кодом.
 export type common_TaskLinkKind =
-  | 'TASK_LINK_KIND_UNKNOWN'
-  | 'TASK_LINK_KIND_BLOCKS'
-  | 'TASK_LINK_KIND_BLOCKED_BY'
-  | 'TASK_LINK_KIND_RELATES';
+  | "TASK_LINK_KIND_UNKNOWN"
+  | "TASK_LINK_KIND_BLOCKS"
+  | "TASK_LINK_KIND_BLOCKED_BY"
+  | "TASK_LINK_KIND_RELATES";
 // LibraryFile is one file in the shared library.
 // The three url fields are minted per response and expire — they are never
 // persisted, which is why this message lives in admin.proto rather than common.*
@@ -5727,13 +5779,15 @@ export type UpdateLibraryFileRequest = {
   newTopics: string[] | undefined;
 };
 
-export type UpdateLibraryFileResponse = {};
+export type UpdateLibraryFileResponse = {
+};
 
 export type DeleteLibraryFileRequest = {
   id: number | undefined;
 };
 
-export type DeleteLibraryFileResponse = {};
+export type DeleteLibraryFileResponse = {
+};
 
 export type ListFileTopicsRequest = {
   // include_archived brings the archived topics back into the answer. Default
@@ -5769,7 +5823,8 @@ export type RenameFileTopicRequest = {
   description: string | undefined;
 };
 
-export type RenameFileTopicResponse = {};
+export type RenameFileTopicResponse = {
+};
 
 export type DeleteFileTopicRequest = {
   id: number | undefined;
@@ -6117,7 +6172,8 @@ export type DeleteAccountSpecialtyRequest = {
   name: string | undefined;
 };
 
-export type DeleteAccountSpecialtyResponse = {};
+export type DeleteAccountSpecialtyResponse = {
+};
 
 // LibraryFileTask is one task row AS THE FILE CARD DRAWS IT: the #id pill, the
 // title, the column, who is on it and when it is due. Deliberately not
@@ -6157,14 +6213,16 @@ export type AttachLibraryFileToTaskRequest = {
   taskId: number | undefined;
 };
 
-export type AttachLibraryFileToTaskResponse = {};
+export type AttachLibraryFileToTaskResponse = {
+};
 
 export type DetachLibraryFileFromTaskRequest = {
   fileId: number | undefined;
   taskId: number | undefined;
 };
 
-export type DetachLibraryFileFromTaskResponse = {};
+export type DetachLibraryFileFromTaskResponse = {
+};
 
 // LibraryFileComment is one remark in a file's discussion.
 export type LibraryFileComment = {
@@ -6217,7 +6275,8 @@ export type DeleteLibraryFileCommentRequest = {
   id: number | undefined;
 };
 
-export type DeleteLibraryFileCommentResponse = {};
+export type DeleteLibraryFileCommentResponse = {
+};
 
 // LibraryFilePublicLink is the state of the ONE public link a file may carry.
 // The url is our own route plus an HMAC token, not a bucket url: the object
@@ -6504,7 +6563,8 @@ export type UpdateTaskRequest = {
   task: common_TaskInsert | undefined;
 };
 
-export type UpdateTaskResponse = {};
+export type UpdateTaskResponse = {
+};
 
 export type MoveTaskRequest = {
   id: number | undefined;
@@ -6515,15 +6575,18 @@ export type MoveTaskRequest = {
   boardId: number | undefined;
 };
 
-export type MoveTaskResponse = {};
+export type MoveTaskResponse = {
+};
 
 export type DeleteTaskRequest = {
   id: number | undefined;
 };
 
-export type DeleteTaskResponse = {};
+export type DeleteTaskResponse = {
+};
 
-export type ListTaskBoardsRequest = {};
+export type ListTaskBoardsRequest = {
+};
 
 export type ListTaskBoardsResponse = {
   boards: common_TaskBoardEntry[] | undefined;
@@ -6574,7 +6637,8 @@ export type DeleteTaskBoardRequest = {
   moveToId: number | undefined;
 };
 
-export type DeleteTaskBoardResponse = {};
+export type DeleteTaskBoardResponse = {
+};
 
 export type ListTasksRequest = {
   // Legacy enum board filter; TASK_BOARD_UNKNOWN = all boards. board_id wins when set.
@@ -6691,13 +6755,15 @@ export type ArchiveTaskRequest = {
   id: number | undefined;
 };
 
-export type ArchiveTaskResponse = {};
+export type ArchiveTaskResponse = {
+};
 
 export type UnarchiveTaskRequest = {
   id: number | undefined;
 };
 
-export type UnarchiveTaskResponse = {};
+export type UnarchiveTaskResponse = {
+};
 
 export type AddTaskChecklistItemRequest = {
   taskId: number | undefined;
@@ -6713,20 +6779,23 @@ export type SetTaskChecklistItemDoneRequest = {
   isDone: boolean | undefined;
 };
 
-export type SetTaskChecklistItemDoneResponse = {};
+export type SetTaskChecklistItemDoneResponse = {
+};
 
 export type DeleteTaskChecklistItemRequest = {
   id: number | undefined;
 };
 
-export type DeleteTaskChecklistItemResponse = {};
+export type DeleteTaskChecklistItemResponse = {
+};
 
 export type SetTaskParentRequest = {
   id: number | undefined;
   parentTaskId: number | undefined;
 };
 
-export type SetTaskParentResponse = {};
+export type SetTaskParentResponse = {
+};
 
 export type AddTaskLinkRequest = {
   taskId: number | undefined;
@@ -6734,7 +6803,8 @@ export type AddTaskLinkRequest = {
   kind: common_TaskLinkKind | undefined;
 };
 
-export type AddTaskLinkResponse = {};
+export type AddTaskLinkResponse = {
+};
 
 export type DeleteTaskLinkRequest = {
   taskId: number | undefined;
@@ -6742,13 +6812,15 @@ export type DeleteTaskLinkRequest = {
   kind: common_TaskLinkKind | undefined;
 };
 
-export type DeleteTaskLinkResponse = {};
+export type DeleteTaskLinkResponse = {
+};
 
 export type DeleteTaskCommentRequest = {
   id: number | undefined;
 };
 
-export type DeleteTaskCommentResponse = {};
+export type DeleteTaskCommentResponse = {
+};
 
 export type GetFulfillmentBoardRequest = {
   deliveredLimit: number | undefined;
@@ -6769,10 +6841,10 @@ export type common_FulfillmentColumnCards = {
 // FulfillmentColumn is a lane on the fulfillment board. Unlike TaskStatus (free
 // kanban columns), each column is bound to a concrete order status.
 export type common_FulfillmentColumn =
-  | 'FULFILLMENT_COLUMN_UNKNOWN'
-  | 'FULFILLMENT_COLUMN_TO_FULFILL'
-  | 'FULFILLMENT_COLUMN_SHIPPED'
-  | 'FULFILLMENT_COLUMN_DELIVERED';
+  | "FULFILLMENT_COLUMN_UNKNOWN"
+  | "FULFILLMENT_COLUMN_TO_FULFILL"
+  | "FULFILLMENT_COLUMN_SHIPPED"
+  | "FULFILLMENT_COLUMN_DELIVERED";
 // FulfillmentCard is one tile on the board: the compact order plus its annotation
 // summary. Full order detail + full annotation come from GetFulfillmentCard.
 export type common_FulfillmentCard = {
@@ -6822,14 +6894,16 @@ export type SetFulfillmentAssigneeRequest = {
   assignee: string | undefined;
 };
 
-export type SetFulfillmentAssigneeResponse = {};
+export type SetFulfillmentAssigneeResponse = {
+};
 
 export type SetFulfillmentNotesRequest = {
   orderUuid: string | undefined;
   notes: string | undefined;
 };
 
-export type SetFulfillmentNotesResponse = {};
+export type SetFulfillmentNotesResponse = {
+};
 
 export type AddFulfillmentChecklistItemRequest = {
   orderUuid: string | undefined;
@@ -6845,26 +6919,30 @@ export type SetFulfillmentChecklistItemDoneRequest = {
   isDone: boolean | undefined;
 };
 
-export type SetFulfillmentChecklistItemDoneResponse = {};
+export type SetFulfillmentChecklistItemDoneResponse = {
+};
 
 export type DeleteFulfillmentChecklistItemRequest = {
   id: number | undefined;
 };
 
-export type DeleteFulfillmentChecklistItemResponse = {};
+export type DeleteFulfillmentChecklistItemResponse = {
+};
 
 export type ShipFulfillmentOrderRequest = {
   orderUuid: string | undefined;
   trackingCode: string | undefined;
 };
 
-export type ShipFulfillmentOrderResponse = {};
+export type ShipFulfillmentOrderResponse = {
+};
 
 export type MarkFulfillmentDeliveredRequest = {
   orderUuid: string | undefined;
 };
 
-export type MarkFulfillmentDeliveredResponse = {};
+export type MarkFulfillmentDeliveredResponse = {
+};
 
 // ShippingParcel is the physical parcel a label is generated for. Weight is in
 // grams; dimensions are whole centimetres (0 = unknown, omitted from the label).
@@ -6932,7 +7010,8 @@ export type VoidShippingLabelRequest = {
   orderUuid: string | undefined;
 };
 
-export type VoidShippingLabelResponse = {};
+export type VoidShippingLabelResponse = {
+};
 
 export type SchedulePickupRequest = {
   carrierCode: string | undefined;
@@ -6977,7 +7056,8 @@ export type PaymentMethodAllowance = {
   allow: boolean | undefined;
 };
 
-export type UpdateSettingsResponse = {};
+export type UpdateSettingsResponse = {
+};
 
 // WorkshopSettings is the singleton shop-floor configuration (workshop_settings, 0272).
 export type WorkshopSettings = {
@@ -7045,7 +7125,8 @@ export type WorkshopSettings = {
   countryOfOrigin?: string;
 };
 
-export type GetWorkshopSettingsRequest = {};
+export type GetWorkshopSettingsRequest = {
+};
 
 export type GetWorkshopSettingsResponse = {
   settings: WorkshopSettings | undefined;
@@ -7118,7 +7199,8 @@ export type UpsertPaymentMethodFeesRequest = {
   fees: PaymentMethodFee[] | undefined;
 };
 
-export type UpsertPaymentMethodFeesResponse = {};
+export type UpsertPaymentMethodFeesResponse = {
+};
 
 export type SetShipmentActualCostRequest = {
   orderUuid: string | undefined;
@@ -7126,9 +7208,11 @@ export type SetShipmentActualCostRequest = {
   returnShippingCost: googletype_Decimal | undefined;
 };
 
-export type SetShipmentActualCostResponse = {};
+export type SetShipmentActualCostResponse = {
+};
 
-export type GetBackgroundHeroColorRequest = {};
+export type GetBackgroundHeroColorRequest = {
+};
 
 export type GetBackgroundHeroColorResponse = {
   // CSS color string (e.g. "#0a0a0a", "rgb(0,0,0)"). Empty if unset.
@@ -7140,7 +7224,8 @@ export type SetBackgroundHeroColorRequest = {
   color: string | undefined;
 };
 
-export type SetBackgroundHeroColorResponse = {};
+export type SetBackgroundHeroColorResponse = {
+};
 
 export type AddShipmentCarrierRequest = {
   carrier: string | undefined;
@@ -7171,13 +7256,15 @@ export type UpdateShipmentCarrierRequest = {
   autoDeliverAfterHours: number | undefined;
 };
 
-export type UpdateShipmentCarrierResponse = {};
+export type UpdateShipmentCarrierResponse = {
+};
 
 export type DeleteShipmentCarrierRequest = {
   id: number | undefined;
 };
 
-export type DeleteShipmentCarrierResponse = {};
+export type DeleteShipmentCarrierResponse = {
+};
 
 export type GetSupportTicketsPagedRequest = {
   limit: number | undefined;
@@ -7194,18 +7281,18 @@ export type GetSupportTicketsPagedRequest = {
 };
 
 export type common_SupportTicketStatus =
-  | 'SUPPORT_TICKET_STATUS_UNKNOWN'
-  | 'SUPPORT_TICKET_STATUS_SUBMITTED'
-  | 'SUPPORT_TICKET_STATUS_IN_PROGRESS'
-  | 'SUPPORT_TICKET_STATUS_WAITING_CUSTOMER'
-  | 'SUPPORT_TICKET_STATUS_RESOLVED'
-  | 'SUPPORT_TICKET_STATUS_CLOSED';
+  | "SUPPORT_TICKET_STATUS_UNKNOWN"
+  | "SUPPORT_TICKET_STATUS_SUBMITTED"
+  | "SUPPORT_TICKET_STATUS_IN_PROGRESS"
+  | "SUPPORT_TICKET_STATUS_WAITING_CUSTOMER"
+  | "SUPPORT_TICKET_STATUS_RESOLVED"
+  | "SUPPORT_TICKET_STATUS_CLOSED";
 export type common_SupportTicketPriority =
-  | 'SUPPORT_TICKET_PRIORITY_UNKNOWN'
-  | 'SUPPORT_TICKET_PRIORITY_LOW'
-  | 'SUPPORT_TICKET_PRIORITY_MEDIUM'
-  | 'SUPPORT_TICKET_PRIORITY_HIGH'
-  | 'SUPPORT_TICKET_PRIORITY_URGENT';
+  | "SUPPORT_TICKET_PRIORITY_UNKNOWN"
+  | "SUPPORT_TICKET_PRIORITY_LOW"
+  | "SUPPORT_TICKET_PRIORITY_MEDIUM"
+  | "SUPPORT_TICKET_PRIORITY_HIGH"
+  | "SUPPORT_TICKET_PRIORITY_URGENT";
 export type GetSupportTicketsPagedResponse = {
   tickets: common_SupportTicket[] | undefined;
   totalCount: number | undefined;
@@ -7259,7 +7346,8 @@ export type UpdateSupportTicketStatusRequest = {
   internalNotes?: string;
 };
 
-export type UpdateSupportTicketStatusResponse = {};
+export type UpdateSupportTicketStatusResponse = {
+};
 
 export type UpdateSupportTicketRequest = {
   id: number | undefined;
@@ -7268,7 +7356,8 @@ export type UpdateSupportTicketRequest = {
   internalNotes?: string;
 };
 
-export type UpdateSupportTicketResponse = {};
+export type UpdateSupportTicketResponse = {
+};
 
 // InventoryTargetInsert is an admin-supplied per-SKU reorder target. Each threshold is
 // optional — 0 means "no trigger on that dimension" (stored as NULL).
@@ -7284,7 +7373,8 @@ export type UpsertInventoryTargetsRequest = {
   targets: InventoryTargetInsert[] | undefined;
 };
 
-export type UpsertInventoryTargetsResponse = {};
+export type UpsertInventoryTargetsResponse = {
+};
 
 // StyleProductionSummary aggregates the plan-vs-fact of a style's production runs (task 09) into
 // one overview. planned_cost_base is Σ(planned_unit_cost × planned_qty) over the runs; actual is
@@ -7431,10 +7521,10 @@ export type StyleCutListPiece = {
 // stitches_per_cm и все overrides шага. Связь с эталоном при этом не теряется, а укрепляется:
 // раньше эталон читал только один из двух режимов.
 export type common_TechCardPieceFusingMode =
-  | 'TECH_CARD_PIECE_FUSING_MODE_UNKNOWN'
-  | 'TECH_CARD_PIECE_FUSING_MODE_FULL'
-  | 'TECH_CARD_PIECE_FUSING_MODE_STRIP'
-  | 'TECH_CARD_PIECE_FUSING_MODE_ZONE';
+  | "TECH_CARD_PIECE_FUSING_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_MODE_FULL"
+  | "TECH_CARD_PIECE_FUSING_MODE_STRIP"
+  | "TECH_CARD_PIECE_FUSING_MODE_ZONE";
 // TechCardPieceCutSymmetry — КАК деталь кроится (миграция 0275). Не количество: количество целиком
 // живёт в pieces_per_garment (0266 свернула туда зеркальное удвоение), и ни одно значение отсюда
 // ничего не умножает. Вернуть множитель нельзя: тех-пак печатает pieces_per_garment и НИКОГДА total,
@@ -7446,10 +7536,10 @@ export type common_TechCardPieceFusingMode =
 // контур симметричен сам себе, а отражение симметричного контура конгруэнтно ему. «Со сгибом и нужна
 // дважды» (манжеты) = FOLD + pieces_per_garment = 2.
 export type common_TechCardPieceCutSymmetry =
-  | 'TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN'
-  | 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL'
-  | 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED'
-  | 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD';
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_FOLD";
 export type GetStyleCutListRequest = {
   techCardId: number | undefined;
 };
@@ -7602,7 +7692,8 @@ export type UpsertChannelSpendRequest = {
   spend: ChannelSpendInsert[] | undefined;
 };
 
-export type UpsertChannelSpendResponse = {};
+export type UpsertChannelSpendResponse = {
+};
 
 // OpexLineInsert is one operating-expense line item (NF-08). Amount is in `currency`; it is folded
 // to the base currency server-side via the manual costing FX rates (left uncosted, and excluded
@@ -7656,13 +7747,15 @@ export type UpsertOpexLinesRequest = {
   lines: OpexLineInsert[] | undefined;
 };
 
-export type UpsertOpexLinesResponse = {};
+export type UpsertOpexLinesResponse = {
+};
 
 export type DeleteOpexLineRequest = {
   id: number | undefined;
 };
 
-export type DeleteOpexLineResponse = {};
+export type DeleteOpexLineResponse = {
+};
 
 export type ListOpexLinesRequest = {
   monthFrom: string | undefined;
@@ -7707,7 +7800,8 @@ export type ArchiveOpexRecurringRequest = {
   id: number | undefined;
 };
 
-export type ArchiveOpexRecurringResponse = {};
+export type ArchiveOpexRecurringResponse = {
+};
 
 export type ListOpexRecurringRequest = {
   includeArchived: boolean | undefined;
@@ -7751,7 +7845,8 @@ export type ArchiveEmployeeRequest = {
   id: number | undefined;
 };
 
-export type ArchiveEmployeeResponse = {};
+export type ArchiveEmployeeResponse = {
+};
 
 export type ListEmployeesRequest = {
   includeArchived: boolean | undefined;
@@ -7776,7 +7871,8 @@ export type DeleteOrderReviewRequest = {
   orderId: number | undefined;
 };
 
-export type DeleteOrderReviewResponse = {};
+export type DeleteOrderReviewResponse = {
+};
 
 export type GetProductReviewsPagedRequest = {
   productId: number | undefined;
@@ -7854,20 +7950,23 @@ export type SetMemberStatusRequest = {
   status: string | undefined;
 };
 
-export type SetMemberStatusResponse = {};
+export type SetMemberStatusResponse = {
+};
 
 export type SoftDeleteMemberRequest = {
   userId: number | undefined;
 };
 
-export type SoftDeleteMemberResponse = {};
+export type SoftDeleteMemberResponse = {
+};
 
 export type HardEraseMemberRequest = {
   userId: number | undefined;
   confirm: boolean | undefined;
 };
 
-export type HardEraseMemberResponse = {};
+export type HardEraseMemberResponse = {
+};
 
 export type TierHistoryEntry = {
   id: number | undefined;
@@ -7896,7 +7995,8 @@ export type SendMemberEmailRequest = {
   ctaUrl: string | undefined;
 };
 
-export type SendMemberEmailResponse = {};
+export type SendMemberEmailResponse = {
+};
 
 export type TierConfigEntry = {
   tierCode: TierCode | undefined;
@@ -7911,7 +8011,8 @@ export type TierConfigEntry = {
   welcomePackSlots: number | undefined;
 };
 
-export type GetTierConfigRequest = {};
+export type GetTierConfigRequest = {
+};
 
 export type GetTierConfigResponse = {
   entries: TierConfigEntry[] | undefined;
@@ -7960,9 +8061,11 @@ export type RevokeHackerInviteRequest = {
   inviteId: number | undefined;
 };
 
-export type RevokeHackerInviteResponse = {};
+export type RevokeHackerInviteResponse = {
+};
 
-export type ListHackerAccountsRequest = {};
+export type ListHackerAccountsRequest = {
+};
 
 export type ListHackerAccountsResponse = {
   members: Member[] | undefined;
@@ -8329,6 +8432,13 @@ export type common_TechCardInsert = {
   // carries seam_keys, or that would replace a card whose steps carry them, is refused
   // (FailedPrecondition) instead of silently unmarking the steps. Transport, not content.
   operationSeamsAware: boolean | undefined;
+  // Declares support for TechCardOperation.seam_kind (72), TechCardOperation.work_variant (73) and
+  // TechCardOperationFastening.button_holes (7) on full-replace writes — the 0436 icon fields.
+  // Same semantics as operation_work_aware (116): without it a write that carries any of them, or
+  // that would replace a card whose steps carry any of them, is refused (FailedPrecondition,
+  // «update the admin») instead of silently erasing them. Server paths set it explicitly. The flag
+  // does not filter parsing. Transport, not content: enters no section digest.
+  operationSeamKindAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -8336,35 +8446,35 @@ export type common_TechCardInsert = {
 // overrode the proposal (the value then passes the strict format validator). UNKNOWN defaults to
 // GENERATED on write.
 export type common_StyleNumberSource =
-  | 'STYLE_NUMBER_SOURCE_UNKNOWN'
-  | 'STYLE_NUMBER_SOURCE_GENERATED'
-  | 'STYLE_NUMBER_SOURCE_MANUAL';
+  | "STYLE_NUMBER_SOURCE_UNKNOWN"
+  | "STYLE_NUMBER_SOURCE_GENERATED"
+  | "STYLE_NUMBER_SOURCE_MANUAL";
 // TechCardStage is the development stage of a tech pack: prototype, fit sample,
 // salesman sample, pre-production, production.
 export type common_TechCardStage =
-  | 'TECH_CARD_STAGE_UNKNOWN'
-  | 'TECH_CARD_STAGE_PROTO'
-  | 'TECH_CARD_STAGE_FIT'
-  | 'TECH_CARD_STAGE_SMS'
-  | 'TECH_CARD_STAGE_PP'
-  | 'TECH_CARD_STAGE_PROD'
-  | 'TECH_CARD_STAGE_IDEA';
+  | "TECH_CARD_STAGE_UNKNOWN"
+  | "TECH_CARD_STAGE_PROTO"
+  | "TECH_CARD_STAGE_FIT"
+  | "TECH_CARD_STAGE_SMS"
+  | "TECH_CARD_STAGE_PP"
+  | "TECH_CARD_STAGE_PROD"
+  | "TECH_CARD_STAGE_IDEA";
 // TechCardApprovalState is the gating release state of a tech card, orthogonal to
 // TechCardStage (which tracks development progress). A factory must only receive a
 // card in the RELEASED state.
 export type common_TechCardApprovalState =
-  | 'TECH_CARD_APPROVAL_STATE_UNKNOWN'
-  | 'TECH_CARD_APPROVAL_STATE_DRAFT'
-  | 'TECH_CARD_APPROVAL_STATE_IN_REVIEW'
-  | 'TECH_CARD_APPROVAL_STATE_APPROVED'
-  | 'TECH_CARD_APPROVAL_STATE_RELEASED'
-  | 'TECH_CARD_APPROVAL_STATE_OBSOLETE';
+  | "TECH_CARD_APPROVAL_STATE_UNKNOWN"
+  | "TECH_CARD_APPROVAL_STATE_DRAFT"
+  | "TECH_CARD_APPROVAL_STATE_IN_REVIEW"
+  | "TECH_CARD_APPROVAL_STATE_APPROVED"
+  | "TECH_CARD_APPROVAL_STATE_RELEASED"
+  | "TECH_CARD_APPROVAL_STATE_OBSOLETE";
 // TechCardMeasurementUnit is the unit for the card's geometry (callout dimensions).
 // Metric only — the brand works in cm and mm, never inches.
 export type common_TechCardMeasurementUnit =
-  | 'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN'
-  | 'TECH_CARD_MEASUREMENT_UNIT_CM'
-  | 'TECH_CARD_MEASUREMENT_UNIT_MM';
+  | "TECH_CARD_MEASUREMENT_UNIT_UNKNOWN"
+  | "TECH_CARD_MEASUREMENT_UNIT_CM"
+  | "TECH_CARD_MEASUREMENT_UNIT_MM";
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type common_TechCardMediaItem = {
   mediaId: number | undefined;
@@ -8377,24 +8487,24 @@ export type common_TechCardMediaItem = {
 
 // TechCardMediaKind classifies a tech-card sketch image.
 export type common_TechCardMediaKind =
-  | 'TECH_CARD_MEDIA_KIND_UNKNOWN'
-  | 'TECH_CARD_MEDIA_KIND_FRONT'
-  | 'TECH_CARD_MEDIA_KIND_BACK'
-  | 'TECH_CARD_MEDIA_KIND_DETAIL'
-  | 'TECH_CARD_MEDIA_KIND_LINING'
-  | 'TECH_CARD_MEDIA_KIND_PREVIEW'
-  | 'TECH_CARD_MEDIA_KIND_MOODBOARD'
-  | 'TECH_CARD_MEDIA_KIND_REFERENCE'
-  | 'TECH_CARD_MEDIA_KIND_SWATCH'
+  | "TECH_CARD_MEDIA_KIND_UNKNOWN"
+  | "TECH_CARD_MEDIA_KIND_FRONT"
+  | "TECH_CARD_MEDIA_KIND_BACK"
+  | "TECH_CARD_MEDIA_KIND_DETAIL"
+  | "TECH_CARD_MEDIA_KIND_LINING"
+  | "TECH_CARD_MEDIA_KIND_PREVIEW"
+  | "TECH_CARD_MEDIA_KIND_MOODBOARD"
+  | "TECH_CARD_MEDIA_KIND_REFERENCE"
+  | "TECH_CARD_MEDIA_KIND_SWATCH"
   // Side views. The DESIGN band's view matrix has four silhouette sides, and without these two a
   // side flat has nowhere to be filed — it would have to masquerade as DETAIL and stop being a
   // side. This EXTENDS the existing vocabulary; it is not a second axis.
-  | 'TECH_CARD_MEDIA_KIND_SIDE_L'
-  | 'TECH_CARD_MEDIA_KIND_SIDE_R'
+  | "TECH_CARD_MEDIA_KIND_SIDE_L"
+  | "TECH_CARD_MEDIA_KIND_SIDE_R"
   // An ACCEPTED render — a rendered image promoted into category='technical', i.e. one that leaves
   // the studio and goes out with the card. The pair (category='technical', kind=RENDER) is what
   // says «this is a render and it is official»; there is no separate artifact_role column.
-  | 'TECH_CARD_MEDIA_KIND_RENDER';
+  | "TECH_CARD_MEDIA_KIND_RENDER";
 // TechCardCallout is a numbered detail note pointing at the technical sketch.
 // ГЕОМЕТРИЯ (kind/points/color) ДОПИСАНА, А НЕ ЗАВЕДЕНА РЯДОМ. Указания на карточном эскизе и
 // указания на снимке шага — одно и то же ремесло: мерка между двумя точками, скобка над участком,
@@ -8681,24 +8791,24 @@ export type common_TechCardBomItem = {
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
 export type common_TechCardBomSection =
-  | 'TECH_CARD_BOM_SECTION_UNKNOWN'
-  | 'TECH_CARD_BOM_SECTION_FABRIC'
-  | 'TECH_CARD_BOM_SECTION_LINING'
-  | 'TECH_CARD_BOM_SECTION_INTERLINING'
-  | 'TECH_CARD_BOM_SECTION_INSULATION'
-  | 'TECH_CARD_BOM_SECTION_HARDWARE'
-  | 'TECH_CARD_BOM_SECTION_THREAD'
-  | 'TECH_CARD_BOM_SECTION_LABEL'
-  | 'TECH_CARD_BOM_SECTION_PACKAGING'
-  | 'TECH_CARD_BOM_SECTION_TRIM'
-  | 'TECH_CARD_BOM_SECTION_DECORATION'
-  | 'TECH_CARD_BOM_SECTION_OTHER';
+  | "TECH_CARD_BOM_SECTION_UNKNOWN"
+  | "TECH_CARD_BOM_SECTION_FABRIC"
+  | "TECH_CARD_BOM_SECTION_LINING"
+  | "TECH_CARD_BOM_SECTION_INTERLINING"
+  | "TECH_CARD_BOM_SECTION_INSULATION"
+  | "TECH_CARD_BOM_SECTION_HARDWARE"
+  | "TECH_CARD_BOM_SECTION_THREAD"
+  | "TECH_CARD_BOM_SECTION_LABEL"
+  | "TECH_CARD_BOM_SECTION_PACKAGING"
+  | "TECH_CARD_BOM_SECTION_TRIM"
+  | "TECH_CARD_BOM_SECTION_DECORATION"
+  | "TECH_CARD_BOM_SECTION_OTHER";
 // TechCardFabricDirection is the cutting layout a fabric requires.
 export type common_TechCardFabricDirection =
-  | 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
-  | 'TECH_CARD_FABRIC_DIRECTION_ANY'
-  | 'TECH_CARD_FABRIC_DIRECTION_ONE_WAY'
-  | 'TECH_CARD_FABRIC_DIRECTION_TWO_WAY';
+  | "TECH_CARD_FABRIC_DIRECTION_UNKNOWN"
+  | "TECH_CARD_FABRIC_DIRECTION_ANY"
+  | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
+  | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
 // TechCardBomPurpose is НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR, on its own axis
 // beside `section` (0265). Several lines legitimately share one purpose; that IS the point, the
 // field exists to name a SUBSET of fabrics ("the lining ones", "the contrast ones").
@@ -8712,16 +8822,16 @@ export type common_TechCardFabricDirection =
 // before 0265 is UNSET on purpose: section='fabric' is exactly where pocket-bag, contrast and mesh
 // hide today, so a backfill would have labelled them MAIN confidently and wrongly.
 export type common_TechCardBomPurpose =
-  | 'TECH_CARD_BOM_PURPOSE_UNSET'
-  | 'TECH_CARD_BOM_PURPOSE_MAIN'
-  | 'TECH_CARD_BOM_PURPOSE_LINING'
-  | 'TECH_CARD_BOM_PURPOSE_POCKETING'
-  | 'TECH_CARD_BOM_PURPOSE_INTERFACING'
-  | 'TECH_CARD_BOM_PURPOSE_INSULATION'
-  | 'TECH_CARD_BOM_PURPOSE_CONTRAST'
-  | 'TECH_CARD_BOM_PURPOSE_MESH'
-  | 'TECH_CARD_BOM_PURPOSE_OTHER'
-  | 'TECH_CARD_BOM_PURPOSE_BINDING';
+  | "TECH_CARD_BOM_PURPOSE_UNSET"
+  | "TECH_CARD_BOM_PURPOSE_MAIN"
+  | "TECH_CARD_BOM_PURPOSE_LINING"
+  | "TECH_CARD_BOM_PURPOSE_POCKETING"
+  | "TECH_CARD_BOM_PURPOSE_INTERFACING"
+  | "TECH_CARD_BOM_PURPOSE_INSULATION"
+  | "TECH_CARD_BOM_PURPOSE_CONTRAST"
+  | "TECH_CARD_BOM_PURPOSE_MESH"
+  | "TECH_CARD_BOM_PURPOSE_OTHER"
+  | "TECH_CARD_BOM_PURPOSE_BINDING";
 // MaterialUnit is the closed vocabulary a material quantity is measured in (Ф5а.3), mirroring
 // entity.MaterialUnit. Before it, every unit was free text and every consumer compared raw strings:
 // the production material plan carried a private metre synonym set (m/м/meter/meters/metre/metres)
@@ -8734,18 +8844,18 @@ export type common_TechCardBomPurpose =
 // set of rows reporting UNKNOWN is precisely the list of units that still need a human. A client
 // must therefore never treat UNKNOWN as "no unit" or as "clear the unit".
 export type common_MaterialUnit =
-  | 'MATERIAL_UNIT_UNKNOWN'
-  | 'MATERIAL_UNIT_M'
-  | 'MATERIAL_UNIT_CM'
-  | 'MATERIAL_UNIT_MM'
-  | 'MATERIAL_UNIT_M2'
-  | 'MATERIAL_UNIT_G'
-  | 'MATERIAL_UNIT_KG'
-  | 'MATERIAL_UNIT_PCS'
-  | 'MATERIAL_UNIT_PAIR'
-  | 'MATERIAL_UNIT_SET'
-  | 'MATERIAL_UNIT_CONE'
-  | 'MATERIAL_UNIT_ROLL';
+  | "MATERIAL_UNIT_UNKNOWN"
+  | "MATERIAL_UNIT_M"
+  | "MATERIAL_UNIT_CM"
+  | "MATERIAL_UNIT_MM"
+  | "MATERIAL_UNIT_M2"
+  | "MATERIAL_UNIT_G"
+  | "MATERIAL_UNIT_KG"
+  | "MATERIAL_UNIT_PCS"
+  | "MATERIAL_UNIT_PAIR"
+  | "MATERIAL_UNIT_SET"
+  | "MATERIAL_UNIT_CONE"
+  | "MATERIAL_UNIT_ROLL";
 // TechCardBomKind is ЧТО ЭТО ЗА ПОЗИЦИЯ — the mirror image of TechCardBomPurpose (0265). Purpose
 // says what the garment uses a ROLL-GOODS line FOR; kind says what a NON-roll-goods line IS. The
 // two never meet on the same row: purpose is legal only on fabric/lining/interlining/insulation,
@@ -8774,83 +8884,83 @@ export type common_MaterialUnit =
 // * такая же по виду декоративная клёпка, которая ничего не держит → STUD, decoration;
 // * шнур → DRAWCORD, trim (продаётся метражом); его фиксатор → CORD_STOPPER, hardware (штучный).
 export type common_TechCardBomKind =
-  | 'TECH_CARD_BOM_KIND_UNSET'
+  | "TECH_CARD_BOM_KIND_UNSET"
   // ФУРНИТУРА — section=hardware. Countable fittings; the garment stops working without them.
-  | 'TECH_CARD_BOM_KIND_ZIPPER'
-  | 'TECH_CARD_BOM_KIND_ZIPPER_SLIDER'
-  | 'TECH_CARD_BOM_KIND_BUTTON'
-  | 'TECH_CARD_BOM_KIND_SNAP'
-  | 'TECH_CARD_BOM_KIND_RIVET'
-  | 'TECH_CARD_BOM_KIND_EYELET'
-  | 'TECH_CARD_BOM_KIND_HOOK_AND_BAR'
-  | 'TECH_CARD_BOM_KIND_SNAP_HOOK'
-  | 'TECH_CARD_BOM_KIND_BUCKLE'
-  | 'TECH_CARD_BOM_KIND_STRAP_ADJUSTER'
-  | 'TECH_CARD_BOM_KIND_RING'
+  | "TECH_CARD_BOM_KIND_ZIPPER"
+  | "TECH_CARD_BOM_KIND_ZIPPER_SLIDER"
+  | "TECH_CARD_BOM_KIND_BUTTON"
+  | "TECH_CARD_BOM_KIND_SNAP"
+  | "TECH_CARD_BOM_KIND_RIVET"
+  | "TECH_CARD_BOM_KIND_EYELET"
+  | "TECH_CARD_BOM_KIND_HOOK_AND_BAR"
+  | "TECH_CARD_BOM_KIND_SNAP_HOOK"
+  | "TECH_CARD_BOM_KIND_BUCKLE"
+  | "TECH_CARD_BOM_KIND_STRAP_ADJUSTER"
+  | "TECH_CARD_BOM_KIND_RING"
   // ТОЛЬКО пуговица-палочка (дафлкот). «Толстовочный фиксатор» — это CORD_STOPPER, и до 0327 он
   // стоял в обоих комментариях сразу: классический синоним из списка, собранного в двух местах.
-  | 'TECH_CARD_BOM_KIND_TOGGLE'
-  | 'TECH_CARD_BOM_KIND_CORD_STOPPER'
-  | 'TECH_CARD_BOM_KIND_CORD_END'
-  | 'TECH_CARD_BOM_KIND_MAGNET'
-  | 'TECH_CARD_BOM_KIND_CHAIN'
+  | "TECH_CARD_BOM_KIND_TOGGLE"
+  | "TECH_CARD_BOM_KIND_CORD_STOPPER"
+  | "TECH_CARD_BOM_KIND_CORD_END"
+  | "TECH_CARD_BOM_KIND_MAGNET"
+  | "TECH_CARD_BOM_KIND_CHAIN"
   // ОТДЕЛОЧНЫЕ МАТЕРИАЛЫ — section=trim. Soft goods sold by length; they keep their wastage gross-up.
-  | 'TECH_CARD_BOM_KIND_ELASTIC'
-  | 'TECH_CARD_BOM_KIND_DRAWCORD'
-  | 'TECH_CARD_BOM_KIND_BINDING'
-  | 'TECH_CARD_BOM_KIND_TAPE'
-  | 'TECH_CARD_BOM_KIND_PIPING'
-  | 'TECH_CARD_BOM_KIND_WEBBING'
-  | 'TECH_CARD_BOM_KIND_HOOK_LOOP'
-  | 'TECH_CARD_BOM_KIND_BONING'
-  | 'TECH_CARD_BOM_KIND_LACE'
-  | 'TECH_CARD_BOM_KIND_RIBBING'
+  | "TECH_CARD_BOM_KIND_ELASTIC"
+  | "TECH_CARD_BOM_KIND_DRAWCORD"
+  | "TECH_CARD_BOM_KIND_BINDING"
+  | "TECH_CARD_BOM_KIND_TAPE"
+  | "TECH_CARD_BOM_KIND_PIPING"
+  | "TECH_CARD_BOM_KIND_WEBBING"
+  | "TECH_CARD_BOM_KIND_HOOK_LOOP"
+  | "TECH_CARD_BOM_KIND_BONING"
+  | "TECH_CARD_BOM_KIND_LACE"
+  | "TECH_CARD_BOM_KIND_RIBBING"
   // ДЕКОР — section=decoration. Applied ONTO the garment; nothing here holds anything together.
-  | 'TECH_CARD_BOM_KIND_PRINT'
-  | 'TECH_CARD_BOM_KIND_EMBROIDERY'
-  | 'TECH_CARD_BOM_KIND_APPLIQUE'
-  | 'TECH_CARD_BOM_KIND_PATCH'
-  | 'TECH_CARD_BOM_KIND_HEAT_TRANSFER'
-  | 'TECH_CARD_BOM_KIND_RHINESTONE'
-  | 'TECH_CARD_BOM_KIND_SEQUIN'
-  | 'TECH_CARD_BOM_KIND_STUD'
-  | 'TECH_CARD_BOM_KIND_FOIL'
-  | 'TECH_CARD_BOM_KIND_LASER'
+  | "TECH_CARD_BOM_KIND_PRINT"
+  | "TECH_CARD_BOM_KIND_EMBROIDERY"
+  | "TECH_CARD_BOM_KIND_APPLIQUE"
+  | "TECH_CARD_BOM_KIND_PATCH"
+  | "TECH_CARD_BOM_KIND_HEAT_TRANSFER"
+  | "TECH_CARD_BOM_KIND_RHINESTONE"
+  | "TECH_CARD_BOM_KIND_SEQUIN"
+  | "TECH_CARD_BOM_KIND_STUD"
+  | "TECH_CARD_BOM_KIND_FOIL"
+  | "TECH_CARD_BOM_KIND_LASER"
   // НИТКИ — section=thread. Split by the JOB the thread does, which is what picks the machine.
-  | 'TECH_CARD_BOM_KIND_SEWING_THREAD'
-  | 'TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'
-  | 'TECH_CARD_BOM_KIND_OVERLOCK_THREAD'
-  | 'TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'
-  | 'TECH_CARD_BOM_KIND_EMBROIDERY_THREAD'
-  | 'TECH_CARD_BOM_KIND_ELASTIC_THREAD'
+  | "TECH_CARD_BOM_KIND_SEWING_THREAD"
+  | "TECH_CARD_BOM_KIND_TOPSTITCH_THREAD"
+  | "TECH_CARD_BOM_KIND_OVERLOCK_THREAD"
+  | "TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD"
+  | "TECH_CARD_BOM_KIND_EMBROIDERY_THREAD"
+  | "TECH_CARD_BOM_KIND_ELASTIC_THREAD"
   // УПАКОВКА — section=packaging. Spellings deliberately match TechCardAuxSubtype wherever the two
   // name the SAME object (sticker / dust_bag / garment_case / hanger), so an auxiliary card that
   // MAKES the item and the BOM line that CONSUMES it read as one word. The three that differ do so
   // because the object differs: HANGTAG_STRING is the string, not the aux HANGTAG it hangs;
   // INSERT_CARD is a printed card, narrower than the aux INSERT; CARTON is the outer shipping box
   // (TechCardPackaging.units_per_box / box_marking), not the aux BOX the customer receives.
-  | 'TECH_CARD_BOM_KIND_POLYBAG'
-  | 'TECH_CARD_BOM_KIND_CARTON'
-  | 'TECH_CARD_BOM_KIND_HANGER'
-  | 'TECH_CARD_BOM_KIND_HANGTAG_STRING'
-  | 'TECH_CARD_BOM_KIND_STICKER'
-  | 'TECH_CARD_BOM_KIND_TISSUE'
-  | 'TECH_CARD_BOM_KIND_DUST_BAG'
-  | 'TECH_CARD_BOM_KIND_GARMENT_CASE'
-  | 'TECH_CARD_BOM_KIND_INSERT_CARD'
+  | "TECH_CARD_BOM_KIND_POLYBAG"
+  | "TECH_CARD_BOM_KIND_CARTON"
+  | "TECH_CARD_BOM_KIND_HANGER"
+  | "TECH_CARD_BOM_KIND_HANGTAG_STRING"
+  | "TECH_CARD_BOM_KIND_STICKER"
+  | "TECH_CARD_BOM_KIND_TISSUE"
+  | "TECH_CARD_BOM_KIND_DUST_BAG"
+  | "TECH_CARD_BOM_KIND_GARMENT_CASE"
+  | "TECH_CARD_BOM_KIND_INSERT_CARD"
   // ДРУГОЕ — the ONLY value legal in EVERY eligible section (including section=other, which has no
   // kinds of its own). Its meaning lives in the separate kind_note, never in a shadow value on one
   // of the 55 real kinds — the same containment chk_bom_item_purpose_note gives назначению.
-  | 'TECH_CARD_BOM_KIND_OTHER'
+  | "TECH_CARD_BOM_KIND_OTHER"
   // ДОБАВЛЕНО ВОЛНОЙ ВИДОВ ОПЕРАЦИЙ, строго append'ом — ПОСЛЕ OTHER. Порядок членов enum'а секции
   // не задаёт: домашнюю секцию вида держит bomKindHomeSection в entity, и вид без записи там для
   // валидации не существует вовсе.
-  | 'TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE'
+  | "TECH_CARD_BOM_KIND_SEAM_SEALING_TAPE"
   // 54 — ДЫРА: номер обещан отложенному `wet_chemical` фазы расширяемых свойств. НЕ занимать.
   // Стабилизатор под вышивку живёт в section=DECORATION, а НЕ в interlining: interlining — рулонная
   // секция, а рулонные секции видов не принимают вовсе. Клиентский пикер обязан предлагать этот вид
   // только в декоре; на паре «вид ↔ секция» стор откажет.
-  | 'TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER'
+  | "TECH_CARD_BOM_KIND_EMBROIDERY_STABILIZER"
   // ДОБАВЛЕНО ВОЛНОЙ СЧЁТНЫХ НОРМ (0335), тем же append'ом в хвост. Оба — section=packaging.
   // SPARE_KIT_BAG — пакетик, в котором запасная фурнитура едет с изделием. Не оттенок POLYBAG: у
   // него есть собственное поведение, которого нет ни у одного соседа — его наличие связано с
@@ -8860,11 +8970,11 @@ export type common_TechCardBomKind =
   // ОБА ЧЛЕНА ПАРЫ ПИШУТСЯ ОДНИМ СЛОВОМ — правило блока выше: расходятся только те пары, у которых
   // предметы разные (HANGTAG_STRING — шнурок, а не ярлык; INSERT_CARD — карточка, а не вкладыш;
   // CARTON — транспортный короб, а не коробка покупателю). Здесь предмет один — тот самый пакетик.
-  | 'TECH_CARD_BOM_KIND_SPARE_KIT_BAG'
+  | "TECH_CARD_BOM_KIND_SPARE_KIT_BAG"
   // TOTE_BAG закрывает асимметрию, жившую с 0255: TECH_CARD_AUX_SUBTYPE_TOTE_BAG = 12 был, а
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
-  | 'TECH_CARD_BOM_KIND_TOTE_BAG';
+  | "TECH_CARD_BOM_KIND_TOTE_BAG";
 // TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
 // BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
 // рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
@@ -8875,15 +8985,15 @@ export type common_TechCardBomKind =
 // в отличие от UNSPECIFIED, которое ленту не исключает.
 // Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
 export type common_TechCardBomLabelPart =
-  | 'TECH_CARD_BOM_LABEL_PART_UNSPECIFIED'
-  | 'TECH_CARD_BOM_LABEL_PART_SHELL'
-  | 'TECH_CARD_BOM_LABEL_PART_BODY_LINING'
-  | 'TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING'
-  | 'TECH_CARD_BOM_LABEL_PART_POCKET_LINING'
-  | 'TECH_CARD_BOM_LABEL_PART_HOOD_LINING'
-  | 'TECH_CARD_BOM_LABEL_PART_FILLING'
-  | 'TECH_CARD_BOM_LABEL_PART_TRIM'
-  | 'TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL';
+  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
+  | "TECH_CARD_BOM_LABEL_PART_SHELL"
+  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_FILLING"
+  | "TECH_CARD_BOM_LABEL_PART_TRIM"
+  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
 // TechCardConstruction holds the card's DEFAULTS — the values an operation inherits when it does
 // not override them. Until the operations break it was a block of free-text notes that nothing
 // inherited (the editor said so out loud: «общие параметры по умолчанию, конкретные задавайте в
@@ -8922,22 +9032,22 @@ export type common_TechCardConstruction = {
 // server stores the unset value and never materialises the inherited one, so «the technologist
 // chose this» stays distinguishable from «it defaulted».
 export type common_TechCardSeamClass =
-  | 'TECH_CARD_SEAM_CLASS_UNKNOWN'
-  | 'TECH_CARD_SEAM_CLASS_SS_PLAIN'
-  | 'TECH_CARD_SEAM_CLASS_SS_FRENCH'
-  | 'TECH_CARD_SEAM_CLASS_LS_LAPPED'
-  | 'TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED'
-  | 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW'
-  | 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED'
-  | 'TECH_CARD_SEAM_CLASS_EF_FACED'
-  | 'TECH_CARD_SEAM_CLASS_BS_BOUND'
-  | 'TECH_CARD_SEAM_CLASS_FS_FLAT'
+  | "TECH_CARD_SEAM_CLASS_UNKNOWN"
+  | "TECH_CARD_SEAM_CLASS_SS_PLAIN"
+  | "TECH_CARD_SEAM_CLASS_SS_FRENCH"
+  | "TECH_CARD_SEAM_CLASS_LS_LAPPED"
+  | "TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED"
+  | "TECH_CARD_SEAM_CLASS_EF_HEM_RAW"
+  | "TECH_CARD_SEAM_CLASS_EF_HEM_TURNED"
+  | "TECH_CARD_SEAM_CLASS_EF_FACED"
+  | "TECH_CARD_SEAM_CLASS_BS_BOUND"
+  | "TECH_CARD_SEAM_CLASS_FS_FLAT"
   // ОТДЕЛОЧНАЯ СТРОЧКА — не класс шва наравне с прочими, а утверждение «соединительного шва у
   // этого шага нет». ТРЕБУЕТ непустого TechCardTopstitch.mode (правило Go), и обратно: непустой
   // mode при НЕНАЗВАННОМ классе отвергается — неназванный класс наследует умолчание карточки, и
   // чисто декоративная строчка молча объявлялась бы стачным швом.
-  | 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH'
-  | 'TECH_CARD_SEAM_CLASS_OTHER';
+  | "TECH_CARD_SEAM_CLASS_OS_TOPSTITCH"
+  | "TECH_CARD_SEAM_CLASS_OTHER";
 // TechCardEquipmentDefaults wraps the two profile lists, and the WRAPPER IS THE PRESENCE SIGNAL —
 // which is the whole reason it exists rather than two bare repeated fields on the construction:
 // absent (nil)  — the payload did not speak about equipment (an older bundle), so the server
@@ -8986,80 +9096,80 @@ export type common_TechCardMachineProfile = {
 // reason: without it the migration of the legacy `double_needle` operation type would have
 // collapsed irreversibly into the plain lockstitch and lost the fact somebody recorded.
 export type common_TechCardMachineType =
-  | 'TECH_CARD_MACHINE_TYPE_UNKNOWN'
-  | 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH'
+  | "TECH_CARD_MACHINE_TYPE_UNKNOWN"
+  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH"
   // Двухигольная прямострочная. ТРЕБУЕТ needle_count = 2 (правило Go): машина и число игл — один
   // факт, и до этого правила были законны все четыре комбинации, включая «двухигольная, игл 1».
   // Член ОСТАЁТСЯ живым, хотя двухигольность выразима числом: он единственная цель канонизации
   // замороженного легаси-глагола DOUBLE_NEEDLE, и снятие сломало бы чтение старых строк. Из пикера
   // он убран — писать двухигольность полагается прямострочкой с needle_count = 2.
-  | 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE'
-  | 'TECH_CARD_MACHINE_TYPE_OVERLOCK'
-  | 'TECH_CARD_MACHINE_TYPE_COVERSTITCH'
-  | 'TECH_CARD_MACHINE_TYPE_COVERLOCK'
-  | 'TECH_CARD_MACHINE_TYPE_CHAINSTITCH'
-  | 'TECH_CARD_MACHINE_TYPE_BLINDSTITCH'
-  | 'TECH_CARD_MACHINE_TYPE_ZIGZAG'
-  | 'TECH_CARD_MACHINE_TYPE_BARTACK'
-  | 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE'
-  | 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH'
-  | 'TECH_CARD_MACHINE_TYPE_EMBROIDERY'
-  | 'TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION'
-  | 'TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH'
-  | 'TECH_CARD_MACHINE_TYPE_BINDING_TAPING'
-  | 'TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING'
-  | 'TECH_CARD_MACHINE_TYPE_GATHERING'
-  | 'TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO'
-  | 'TECH_CARD_MACHINE_TYPE_OTHER'
+  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE"
+  | "TECH_CARD_MACHINE_TYPE_OVERLOCK"
+  | "TECH_CARD_MACHINE_TYPE_COVERSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_COVERLOCK"
+  | "TECH_CARD_MACHINE_TYPE_CHAINSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_BLINDSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_ZIGZAG"
+  | "TECH_CARD_MACHINE_TYPE_BARTACK"
+  | "TECH_CARD_MACHINE_TYPE_BUTTONHOLE"
+  | "TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_MACHINE_TYPE_EMBROIDERY"
+  | "TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION"
+  | "TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH"
+  | "TECH_CARD_MACHINE_TYPE_BINDING_TAPING"
+  | "TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING"
+  | "TECH_CARD_MACHINE_TYPE_GATHERING"
+  | "TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_OTHER"
   // СВАРКА И ПРОКЛЕЙКА — иглы и нитки тут нет вовсе. Легаси-двойника среди 1..9
   // TechCardOperationType у них нет, поэтому в компат-канонизацию они не входят: шаг пишется как
   // (MACHINE, этот тип), ровно как coverlock сегодня. Ниточно-игольные overrides шага
   // (thread_count, needle_type, needle_size_nm, thread_tension, stitch_width_mm) при этих двух
   // типах отвергаются: у сварного шва их нет.
-  | 'TECH_CARD_MACHINE_TYPE_SEAM_TAPING'
-  | 'TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER';
+  | "TECH_CARD_MACHINE_TYPE_SEAM_TAPING"
+  | "TECH_CARD_MACHINE_TYPE_ULTRASONIC_WELDER";
 // TechCardNeedleType is the needle point, the fact that decides whether a knit is pierced or
 // pushed aside. UNKNOWN = inherit (profile → nothing), never «universal by default».
 export type common_TechCardNeedleType =
-  | 'TECH_CARD_NEEDLE_TYPE_UNKNOWN'
-  | 'TECH_CARD_NEEDLE_TYPE_UNIVERSAL'
-  | 'TECH_CARD_NEEDLE_TYPE_BALLPOINT'
-  | 'TECH_CARD_NEEDLE_TYPE_STRETCH'
-  | 'TECH_CARD_NEEDLE_TYPE_JEANS'
-  | 'TECH_CARD_NEEDLE_TYPE_LEATHER'
-  | 'TECH_CARD_NEEDLE_TYPE_MICROTEX'
-  | 'TECH_CARD_NEEDLE_TYPE_EMBROIDERY'
-  | 'TECH_CARD_NEEDLE_TYPE_OTHER';
+  | "TECH_CARD_NEEDLE_TYPE_UNKNOWN"
+  | "TECH_CARD_NEEDLE_TYPE_UNIVERSAL"
+  | "TECH_CARD_NEEDLE_TYPE_BALLPOINT"
+  | "TECH_CARD_NEEDLE_TYPE_STRETCH"
+  | "TECH_CARD_NEEDLE_TYPE_JEANS"
+  | "TECH_CARD_NEEDLE_TYPE_LEATHER"
+  | "TECH_CARD_NEEDLE_TYPE_MICROTEX"
+  | "TECH_CARD_NEEDLE_TYPE_EMBROIDERY"
+  | "TECH_CARD_NEEDLE_TYPE_OTHER";
 // TechCardBedType is the machine's bed. It is the IDENTITY of a machine, not a setting of a step —
 // which is why it lives on the profile only and has deliberately no override on the operation:
 // a different bed is a different machine, so the step changes machine_type instead.
 export type common_TechCardBedType =
-  | 'TECH_CARD_BED_TYPE_UNKNOWN'
-  | 'TECH_CARD_BED_TYPE_FLATBED'
-  | 'TECH_CARD_BED_TYPE_CYLINDER_BED'
-  | 'TECH_CARD_BED_TYPE_POST_BED'
-  | 'TECH_CARD_BED_TYPE_FEED_OFF_ARM'
-  | 'TECH_CARD_BED_TYPE_OTHER';
+  | "TECH_CARD_BED_TYPE_UNKNOWN"
+  | "TECH_CARD_BED_TYPE_FLATBED"
+  | "TECH_CARD_BED_TYPE_CYLINDER_BED"
+  | "TECH_CARD_BED_TYPE_POST_BED"
+  | "TECH_CARD_BED_TYPE_FEED_OFF_ARM"
+  | "TECH_CARD_BED_TYPE_OTHER";
 // TechCardAutomationLevel is an ORDERED SCALE, and therefore has NO `OTHER`: a scale with an
 // «other» member is no longer a scale. Like bed_type it is machine identity, profile-only.
 export type common_TechCardAutomationLevel =
-  | 'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN'
-  | 'TECH_CARD_AUTOMATION_LEVEL_BASIC'
-  | 'TECH_CARD_AUTOMATION_LEVEL_SEMI_AUTO'
-  | 'TECH_CARD_AUTOMATION_LEVEL_AUTO';
+  | "TECH_CARD_AUTOMATION_LEVEL_UNKNOWN"
+  | "TECH_CARD_AUTOMATION_LEVEL_BASIC"
+  | "TECH_CARD_AUTOMATION_LEVEL_SEMI_AUTO"
+  | "TECH_CARD_AUTOMATION_LEVEL_AUTO";
 // TechCardThreadTension is a CLOSED SCALE relative to the machine's normal setting, plus a free
 // thread_tension_note for the numbers a particular machine wants. A raw dial number was rejected
 // deliberately: it means nothing across two machines of the same class.
 export type common_TechCardThreadTension =
-  | 'TECH_CARD_THREAD_TENSION_UNKNOWN'
-  | 'TECH_CARD_THREAD_TENSION_LOOSER'
-  | 'TECH_CARD_THREAD_TENSION_NORMAL'
-  | 'TECH_CARD_THREAD_TENSION_TIGHTER';
+  | "TECH_CARD_THREAD_TENSION_UNKNOWN"
+  | "TECH_CARD_THREAD_TENSION_LOOSER"
+  | "TECH_CARD_THREAD_TENSION_NORMAL"
+  | "TECH_CARD_THREAD_TENSION_TIGHTER";
 // TechCardAttachmentKind is the folder / guide / presser foot the step runs with.
 // THERE IS A `NONE` NOW, AND IT IS NOT A SPELLING OF UNKNOWN. The old comment here said the
 // opposite — «none» and «not specified» are the same fact — and it was TRUE for as long as this
@@ -9071,19 +9181,19 @@ export type common_TechCardThreadTension =
 // machine with a unison / top feed — a property of the TRANSPORT, not a snap-on foot an operator
 // fits per step. If it is ever needed it belongs next to bed_type on the machine, not here.
 export type common_TechCardAttachmentKind =
-  | 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'
-  | 'TECH_CARD_ATTACHMENT_KIND_BINDER'
-  | 'TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER'
-  | 'TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE'
-  | 'TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT'
-  | 'TECH_CARD_ATTACHMENT_KIND_OTHER'
-  | 'TECH_CARD_ATTACHMENT_KIND_TEFLON_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_ROLLER_FOOT'
-  | 'TECH_CARD_ATTACHMENT_KIND_NONE';
+  | "TECH_CARD_ATTACHMENT_KIND_UNKNOWN"
+  | "TECH_CARD_ATTACHMENT_KIND_BINDER"
+  | "TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER"
+  | "TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE"
+  | "TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT"
+  | "TECH_CARD_ATTACHMENT_KIND_OTHER"
+  | "TECH_CARD_ATTACHMENT_KIND_TEFLON_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ROLLER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_NONE";
 // TechCardPressProfile is the ВТО twin of TechCardMachineProfile: one press / iron / steamer of the
 // card, with the settings a step inherits. Same durable-key rules.
 export type common_TechCardPressProfile = {
@@ -9105,13 +9215,13 @@ export type common_TechCardPressProfile = {
 // TechCardPressEquipment is the «on what» of a ВТО step (PRESS / PRESS_OPEN / FUSING), the press
 // side of the same second axis TechCardMachineType covers for sewing.
 export type common_TechCardPressEquipment =
-  | 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
-  | 'TECH_CARD_PRESS_EQUIPMENT_IRON'
-  | 'TECH_CARD_PRESS_EQUIPMENT_PRESS'
-  | 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS'
-  | 'TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY'
-  | 'TECH_CARD_PRESS_EQUIPMENT_STEAMER'
-  | 'TECH_CARD_PRESS_EQUIPMENT_OTHER';
+  | "TECH_CARD_PRESS_EQUIPMENT_UNKNOWN"
+  | "TECH_CARD_PRESS_EQUIPMENT_IRON"
+  | "TECH_CARD_PRESS_EQUIPMENT_PRESS"
+  | "TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS"
+  | "TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY"
+  | "TECH_CARD_PRESS_EQUIPMENT_STEAMER"
+  | "TECH_CARD_PRESS_EQUIPMENT_OTHER";
 // TechCardOperationType says WHAT a step does. It used to mix that with the machine class, which
 // is why 1-9 read like a machine list: a step could not say «прострочить» without also committing
 // to a stitch class in the same value, and «на чём» had no field of its own. The second axis is
@@ -9124,48 +9234,48 @@ export type common_TechCardPressEquipment =
 // TechCardOperation); FOLD и PACK не несут ни одного поля — у них нет ни машины, ни настроек,
 // только место и время.
 export type common_TechCardOperationType =
-  | 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
+  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
   // 1-9 ARE LEGACY AND LIVE FOREVER. They are still ACCEPTED on write (canonicalised into
   // (MACHINE, machine_type) before anything else sees them) but never EMITTED on read.
   // The symbols themselves can never be deleted: a release snapshot is immutable protojson holding
   // these very names, and removing a member would make such a snapshot parse «successfully» while
   // silently losing what the step was. A cleanup phase for them was considered and cancelled.
-  | 'TECH_CARD_OPERATION_TYPE_LOCKSTITCH'
-  | 'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE'
-  | 'TECH_CARD_OPERATION_TYPE_OVERLOCK'
-  | 'TECH_CARD_OPERATION_TYPE_COVERSTITCH'
-  | 'TECH_CARD_OPERATION_TYPE_CHAINSTITCH'
-  | 'TECH_CARD_OPERATION_TYPE_BLINDHEM'
-  | 'TECH_CARD_OPERATION_TYPE_BARTACK'
-  | 'TECH_CARD_OPERATION_TYPE_BUTTONHOLE'
-  | 'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH'
-  | 'TECH_CARD_OPERATION_TYPE_FUSING'
-  | 'TECH_CARD_OPERATION_TYPE_HANDWORK'
-  | 'TECH_CARD_OPERATION_TYPE_OTHER'
-  | 'TECH_CARD_OPERATION_TYPE_MACHINE'
-  | 'TECH_CARD_OPERATION_TYPE_PRESS'
-  | 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN'
-  | 'TECH_CARD_OPERATION_TYPE_HARDWARE_SET'
-  | 'TECH_CARD_OPERATION_TYPE_PRINT'
-  | 'TECH_CARD_OPERATION_TYPE_TRIM'
-  | 'TECH_CARD_OPERATION_TYPE_THREAD_TRIM'
-  | 'TECH_CARD_OPERATION_TYPE_CLEAN'
-  | 'TECH_CARD_OPERATION_TYPE_INSPECT'
-  | 'TECH_CARD_OPERATION_TYPE_FOLD'
-  | 'TECH_CARD_OPERATION_TYPE_PACK'
-  | 'TECH_CARD_OPERATION_TYPE_WET_PROCESS';
+  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
+  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
+  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
+  | "TECH_CARD_OPERATION_TYPE_BARTACK"
+  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
+  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_OPERATION_TYPE_FUSING"
+  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
+  | "TECH_CARD_OPERATION_TYPE_OTHER"
+  | "TECH_CARD_OPERATION_TYPE_MACHINE"
+  | "TECH_CARD_OPERATION_TYPE_PRESS"
+  | "TECH_CARD_OPERATION_TYPE_PRESS_OPEN"
+  | "TECH_CARD_OPERATION_TYPE_HARDWARE_SET"
+  | "TECH_CARD_OPERATION_TYPE_PRINT"
+  | "TECH_CARD_OPERATION_TYPE_TRIM"
+  | "TECH_CARD_OPERATION_TYPE_THREAD_TRIM"
+  | "TECH_CARD_OPERATION_TYPE_CLEAN"
+  | "TECH_CARD_OPERATION_TYPE_INSPECT"
+  | "TECH_CARD_OPERATION_TYPE_FOLD"
+  | "TECH_CARD_OPERATION_TYPE_PACK"
+  | "TECH_CARD_OPERATION_TYPE_WET_PROCESS";
 // TechCardPressCloth is what sits between the iron and the cloth.
 // NONE IS NOT UNKNOWN HERE, and that is the point: with inheritance in play, «не указано» means
 // «take the card profile's answer», so without an explicit NONE a step could never CANCEL the
 // profile's press cloth. The same argument added NONE to TechCardAttachmentKind.
 export type common_TechCardPressCloth =
-  | 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
-  | 'TECH_CARD_PRESS_CLOTH_NONE'
-  | 'TECH_CARD_PRESS_CLOTH_PRESS_CLOTH'
-  | 'TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH'
-  | 'TECH_CARD_PRESS_CLOTH_TEFLON_SHEET'
-  | 'TECH_CARD_PRESS_CLOTH_OTHER'
-  | 'TECH_CARD_PRESS_CLOTH_SILICONE_PAPER';
+  | "TECH_CARD_PRESS_CLOTH_UNKNOWN"
+  | "TECH_CARD_PRESS_CLOTH_NONE"
+  | "TECH_CARD_PRESS_CLOTH_PRESS_CLOTH"
+  | "TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH"
+  | "TECH_CARD_PRESS_CLOTH_TEFLON_SHEET"
+  | "TECH_CARD_PRESS_CLOTH_OTHER"
+  | "TECH_CARD_PRESS_CLOTH_SILICONE_PAPER";
 export type common_TechCardOperation = {
   // --- core: what, where, with what, how long -------------------------------------------------
   operationNumber: number | undefined;
@@ -9341,6 +9451,26 @@ export type common_TechCardOperation = {
   // transaction. Written only with operation_seams_aware (128). Enters no section digest: the seams
   // themselves are outside every digest and outside lock_version.
   seamKeys: string[] | undefined;
+  // КОНСТРУКЦИЯ ШВА (0436) — какой именно шов в пределах класса seam_class: закрытый список
+  // entity.SeamKindTokens (сейчас 38 токенов, например bound_open, lapped_closed_a, moscow_hem).
+  // Строка, а не enum: устаревший бандл protojson молча выронил бы незнакомый член enum'а.
+  // Пусто = не указано = NULL; сервер НИКОГДА не выводит и не дописывает вид (по seam_class он не
+  // однозначен), иконку без вида клиент выводит при чтении сам.
+  // ПРАВИЛА ЗАПИСИ (именованные FieldViolation): незнакомый токен — отказ на
+  // `operations[N].seam_kind`; при заданном виде seam_class обязан быть ЯВНЫМ и равным классу вида
+  // (`operations[N].seam_class`, needs_seam_class); bound_tape / bound_open / bound_closed требуют
+  // binding_style raw / single_fold / double_fold, bound_frame — binding_style пустой
+  // (`operations[N].binding_style`, contradicts_seam_kind). Пишется только с
+  // operation_seam_kind_aware (129). В дайджест — условной парой "seam_kind" хвоста "stitching"
+  // (только токен).
+  seamKind: string | undefined;
+  // ВАРИАНТ РАБОТЫ (0436) — исполнение внутри одной работы `work` (66), закрытая карта
+  // entity.WorkVariants[work] (например set_zip → open_end | two_way | magnetic | faced). Вариант
+  // НИКОГДА не меняет глагол: другое действие оператора — это другая работа. Пусто = не указано.
+  // Вариант без работы — отказ; вариант, которого у этой работы нет, — отказ
+  // `operations[N].work_variant` с кодом not_for_work. Пишется только с operation_seam_kind_aware
+  // (129). В дайджест — условной парой "work_variant" хвоста "work".
+  workVariant: string | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
@@ -9356,24 +9486,24 @@ export type common_TechCardOperation = {
 // NUMBERS ARE NOT REPACKED: OTHER stays 4 because it is already on the wire, and the areas take
 // 5..17 after it. Reading order (bands, then areas, then other) lives in GarmentZoneTokens.
 export type common_TechCardGarmentZone =
-  | 'TECH_CARD_GARMENT_ZONE_UNKNOWN'
-  | 'TECH_CARD_GARMENT_ZONE_OUTER'
-  | 'TECH_CARD_GARMENT_ZONE_LINING'
-  | 'TECH_CARD_GARMENT_ZONE_INTERLINING'
-  | 'TECH_CARD_GARMENT_ZONE_OTHER'
-  | 'TECH_CARD_GARMENT_ZONE_SLEEVE'
-  | 'TECH_CARD_GARMENT_ZONE_COLLAR'
-  | 'TECH_CARD_GARMENT_ZONE_NECKLINE'
-  | 'TECH_CARD_GARMENT_ZONE_ARMHOLE'
-  | 'TECH_CARD_GARMENT_ZONE_SHOULDER'
-  | 'TECH_CARD_GARMENT_ZONE_CHEST'
-  | 'TECH_CARD_GARMENT_ZONE_WAIST'
-  | 'TECH_CARD_GARMENT_ZONE_HIP'
-  | 'TECH_CARD_GARMENT_ZONE_HEM'
-  | 'TECH_CARD_GARMENT_ZONE_POCKET'
-  | 'TECH_CARD_GARMENT_ZONE_CLOSURE'
-  | 'TECH_CARD_GARMENT_ZONE_BACK'
-  | 'TECH_CARD_GARMENT_ZONE_FRONT';
+  | "TECH_CARD_GARMENT_ZONE_UNKNOWN"
+  | "TECH_CARD_GARMENT_ZONE_OUTER"
+  | "TECH_CARD_GARMENT_ZONE_LINING"
+  | "TECH_CARD_GARMENT_ZONE_INTERLINING"
+  | "TECH_CARD_GARMENT_ZONE_OTHER"
+  | "TECH_CARD_GARMENT_ZONE_SLEEVE"
+  | "TECH_CARD_GARMENT_ZONE_COLLAR"
+  | "TECH_CARD_GARMENT_ZONE_NECKLINE"
+  | "TECH_CARD_GARMENT_ZONE_ARMHOLE"
+  | "TECH_CARD_GARMENT_ZONE_SHOULDER"
+  | "TECH_CARD_GARMENT_ZONE_CHEST"
+  | "TECH_CARD_GARMENT_ZONE_WAIST"
+  | "TECH_CARD_GARMENT_ZONE_HIP"
+  | "TECH_CARD_GARMENT_ZONE_HEM"
+  | "TECH_CARD_GARMENT_ZONE_POCKET"
+  | "TECH_CARD_GARMENT_ZONE_CLOSURE"
+  | "TECH_CARD_GARMENT_ZONE_BACK"
+  | "TECH_CARD_GARMENT_ZONE_FRONT";
 // TechCardTopstitch is the three answers that used to share one string.
 // БЛОК И КЛАСС ШВА СВЯЗАНЫ ПРАВИЛОМ. Непустой mode требует НАЗВАННОГО seam_class: либо назван класс,
 // который шаг делает, либо объявлен OS_TOPSTITCH («соединительного шва нет вовсе»). Иначе
@@ -9409,16 +9539,16 @@ export type common_TechCardTopstitch = {
 // EDGE меряли от одного края, число просто стало свойством EDGE, а колонка ширины не тронута.
 // Релизов с этим полем — 0, подписей — 0, поэтому ни один отпечаток перенос не сдвинул.
 export type common_TechCardTopstitchMode =
-  | 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
+  | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
   // В КРАЙ / НА ОТСТУПЕ ОТ КРАЯ: точка отсчёта — КРАЙ ДЕТАЛИ. width_mm здесь ОПЦИОНАЛЬНА:
   // заполнена — отступ от края в мм, пуста — строчка идёт вплотную к краю.
-  | 'TECH_CARD_TOPSTITCH_MODE_EDGE'
+  | "TECH_CARD_TOPSTITCH_MODE_EDGE"
   // В ШОВ («в канавку»): строчка ложится в сам шов, ширины у неё нет — width_mm отвергается.
-  | 'TECH_CARD_TOPSTITCH_MODE_IN_DITCH'
+  | "TECH_CARD_TOPSTITCH_MODE_IN_DITCH"
   // ПАРАЛЛЕЛЬНО ШВУ: width_mm здесь REQUIRED и значит ОТСТУП ОТ ЛИНИИ ШВА. От EDGE отличается
   // точкой отсчёта: у EDGE это край детали, здесь — шов. Два разных факта под одним числом
   // разошлись бы на печати молча, поэтому это отдельный режим, а не примечание к EDGE.
-  | 'TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM';
+  | "TECH_CARD_TOPSTITCH_MODE_PARALLEL_TO_SEAM";
 // Одна картинка операции со своими выносками. Картинка ОПЕРАЦИОННАЯ: она принадлежит шагу, а не
 // карточке, и вложенность делает невалидную ссылку невыразимой — в отличие от карточных выносок,
 // которые операция адресует НОМЕРОМ, а номер позиционный и переживает пересортировку шагов плохо.
@@ -9434,12 +9564,12 @@ export type common_TechCardOperationMedia = {
 // second_press_sec и весь ВТО-блок шага. SCREEN носителя тоже не имеет, и peel_mode при нём
 // отвергается (0327) — но прижим у шелкографии бывает, поэтому весь ВТО-блок при ней законен.
 export type common_TechCardPrintMethod =
-  | 'TECH_CARD_PRINT_METHOD_UNKNOWN'
-  | 'TECH_CARD_PRINT_METHOD_SCREEN'
-  | 'TECH_CARD_PRINT_METHOD_DTF'
-  | 'TECH_CARD_PRINT_METHOD_HEAT_TRANSFER'
-  | 'TECH_CARD_PRINT_METHOD_FOIL'
-  | 'TECH_CARD_PRINT_METHOD_LASER_ENGRAVE'
+  | "TECH_CARD_PRINT_METHOD_UNKNOWN"
+  | "TECH_CARD_PRINT_METHOD_SCREEN"
+  | "TECH_CARD_PRINT_METHOD_DTF"
+  | "TECH_CARD_PRINT_METHOD_HEAT_TRANSFER"
+  | "TECH_CARD_PRINT_METHOD_FOIL"
+  | "TECH_CARD_PRINT_METHOD_LASER_ENGRAVE"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
@@ -9447,7 +9577,7 @@ export type common_TechCardPrintMethod =
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
   // ВЫШИВКИ В ПРИМЕРАХ НЕТ НАМЕРЕННО: вышивка — это МАШИНА (machine_type = embroidery), а не
   // метод печати, и вторым написанием она была ровно так же, как press_action = open.
-  | 'TECH_CARD_PRINT_METHOD_OTHER';
+  | "TECH_CARD_PRINT_METHOD_OTHER";
 // Параметры строчки. Только operation_type = MACHINE.
 export type common_TechCardOperationStitching = {
   // Игл в строчке, шт; 1..12; 0 = не указано. При machine_type = LOCKSTITCH_DOUBLE_NEEDLE
@@ -9473,32 +9603,32 @@ export type common_TechCardOperationStitching = {
 // Закрепка концов строчки. NONE — явное «без закрепки»: так шьётся то, что дальше поймается
 // другим швом, и это не то же самое, что «не указано».
 export type common_TechCardSeamSecuring =
-  | 'TECH_CARD_SEAM_SECURING_UNKNOWN'
-  | 'TECH_CARD_SEAM_SECURING_NONE'
-  | 'TECH_CARD_SEAM_SECURING_BACKTACK'
-  | 'TECH_CARD_SEAM_SECURING_CONDENSED'
-  | 'TECH_CARD_SEAM_SECURING_LATCHED';
+  | "TECH_CARD_SEAM_SECURING_UNKNOWN"
+  | "TECH_CARD_SEAM_SECURING_NONE"
+  | "TECH_CARD_SEAM_SECURING_BACKTACK"
+  | "TECH_CARD_SEAM_SECURING_CONDENSED"
+  | "TECH_CARD_SEAM_SECURING_LATCHED";
 // Как сложена бейка. ISO-класс шва при этом НЕ расщепляется: BS_BOUND остаётся одним классом, а
 // это его исполнение — иначе один факт отвечал бы на два вопроса, как когда-то `seam_type`.
 // ВЕДУЩЕЕ ПОЛЕ ОКАНТОВКИ — ИМЕННО seam_class = BS_BOUND, и только при нём это поле законно.
 // Машина (binding_taping) и окантовыватель (attachment_kind = BINDER) говорят «это окантовка»
 // во второй и в третий раз и обязательными спутниками не являются.
 export type common_TechCardBindingStyle =
-  | 'TECH_CARD_BINDING_STYLE_UNKNOWN'
-  | 'TECH_CARD_BINDING_STYLE_RAW'
-  | 'TECH_CARD_BINDING_STYLE_SINGLE_FOLD'
-  | 'TECH_CARD_BINDING_STYLE_DOUBLE_FOLD';
+  | "TECH_CARD_BINDING_STYLE_UNKNOWN"
+  | "TECH_CARD_BINDING_STYLE_RAW"
+  | "TECH_CARD_BINDING_STYLE_SINGLE_FOLD"
+  | "TECH_CARD_BINDING_STYLE_DOUBLE_FOLD";
 // Схема пришивания этикетки. Сама этикетка — строкой BOM (bom_line_keys), здесь только шов; тип
 // фолда этикетки — свойство артикула, а не шага.
 export type common_TechCardLabelAttachStitch =
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK'
-  | 'TECH_CARD_LABEL_ATTACH_STITCH_OTHER';
+  | "TECH_CARD_LABEL_ATTACH_STITCH_UNKNOWN"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_FOUR_SIDES"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_TOP_BOTTOM"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_TWO_SIDES_LEFT_RIGHT"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_ONE_EDGE"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_CAUGHT_IN_SEAM"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_CORNERS_TACK"
+  | "TECH_CARD_LABEL_ATTACH_STITCH_OTHER";
 // Сколько раз и с каким шагом операция повторяется на изделии: кнопки, петли, закрепки, принты.
 // operation_type = MACHINE | HARDWARE_SET | PRINT.
 export type common_TechCardOperationPlacement = {
@@ -9532,33 +9662,33 @@ export type common_TechCardOperationHardware = {
 // Способ КРЕПЛЕНИЯ фурнитуры — дискриминатор шага HARDWARE_SET: поле REQUIRED, и UNKNOWN на таком
 // шаге отвергается. Отвечает «как ставим», а не «что ставим»: что — это kind строки BOM.
 export type common_TechCardHardwareAttachMethod =
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN'
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_SEW'
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH'
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET'
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP'
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED'
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_UNKNOWN"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_SEW"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRONG_CLINCH"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_PRESS_SET"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_CRIMP"
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_THREADED"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | 'TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER';
+  | "TECH_CARD_HARDWARE_ATTACH_METHOD_OTHER";
 // Подготовка отверстия под фурнитуру — ось «готовим отверстие ОТДЕЛЬНЫМ ШАГОМ или нет».
 export type common_TechCardHolePrep =
-  | 'TECH_CARD_HOLE_PREP_UNKNOWN'
-  | 'TECH_CARD_HOLE_PREP_NONE'
-  | 'TECH_CARD_HOLE_PREP_AWL_PIERCE'
-  | 'TECH_CARD_HOLE_PREP_PUNCH';
+  | "TECH_CARD_HOLE_PREP_UNKNOWN"
+  | "TECH_CARD_HOLE_PREP_NONE"
+  | "TECH_CARD_HOLE_PREP_AWL_PIERCE"
+  | "TECH_CARD_HOLE_PREP_PUNCH";
 // Усилитель под фурнитурой, петлёй или закрепкой. Здесь только СПОСОБ; сам материал усилителя —
 // строкой BOM, а не тенью в этом поле.
 export type common_TechCardReinforcement =
-  | 'TECH_CARD_REINFORCEMENT_UNKNOWN'
-  | 'TECH_CARD_REINFORCEMENT_NONE'
-  | 'TECH_CARD_REINFORCEMENT_TAPE'
-  | 'TECH_CARD_REINFORCEMENT_SEAM_CATCH'
-  | 'TECH_CARD_REINFORCEMENT_OTHER'
-  | 'TECH_CARD_REINFORCEMENT_PATCH';
+  | "TECH_CARD_REINFORCEMENT_UNKNOWN"
+  | "TECH_CARD_REINFORCEMENT_NONE"
+  | "TECH_CARD_REINFORCEMENT_TAPE"
+  | "TECH_CARD_REINFORCEMENT_SEAM_CATCH"
+  | "TECH_CARD_REINFORCEMENT_OTHER"
+  | "TECH_CARD_REINFORCEMENT_PATCH";
 // Печать и нанесение. Только operation_type = PRINT; сам МЕТОД лежит полем 51 TechCardOperation,
 // потому что он REQUIRED, а обязательное поле не прячут внутрь необязательного сообщения.
 // Все три поля отвергаются при print_method = LASER_ENGRAVE: у гравировки нет ни носителя, ни
@@ -9571,10 +9701,10 @@ export type common_TechCardOperationPrint = {
 
 // Съём носителя после прижима.
 export type common_TechCardPeelMode =
-  | 'TECH_CARD_PEEL_MODE_UNKNOWN'
-  | 'TECH_CARD_PEEL_MODE_HOT'
-  | 'TECH_CARD_PEEL_MODE_WARM'
-  | 'TECH_CARD_PEEL_MODE_COLD';
+  | "TECH_CARD_PEEL_MODE_UNKNOWN"
+  | "TECH_CARD_PEEL_MODE_HOT"
+  | "TECH_CARD_PEEL_MODE_WARM"
+  | "TECH_CARD_PEEL_MODE_COLD";
 // Сварка и проклейка. Только MACHINE с ЯВНЫМ machine_type = seam_taping | ultrasonic_welder; тип,
 // разрешённый через machine_profile_key, здесь НЕ засчитывается — правило шага, а не профиля.
 export type common_TechCardOperationWeld = {
@@ -9594,19 +9724,19 @@ export type common_TechCardOperationTrim = {
 
 // Что именно делает шаг TRIM — дискриминатор: поле REQUIRED, UNKNOWN на таком шаге отвергается.
 export type common_TechCardTrimAction =
-  | 'TECH_CARD_TRIM_ACTION_UNKNOWN'
-  | 'TECH_CARD_TRIM_ACTION_TRIM_EVEN'
-  | 'TECH_CARD_TRIM_ACTION_GRADE_LAYERS'
-  | 'TECH_CARD_TRIM_ACTION_CLIP_CONCAVE'
-  | 'TECH_CARD_TRIM_ACTION_NOTCH_CONVEX'
-  | 'TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL'
-  | 'TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE'
+  | "TECH_CARD_TRIM_ACTION_UNKNOWN"
+  | "TECH_CARD_TRIM_ACTION_TRIM_EVEN"
+  | "TECH_CARD_TRIM_ACTION_GRADE_LAYERS"
+  | "TECH_CARD_TRIM_ACTION_CLIP_CONCAVE"
+  | "TECH_CARD_TRIM_ACTION_NOTCH_CONVEX"
+  | "TECH_CARD_TRIM_ACTION_CORNER_DIAGONAL"
+  | "TECH_CARD_TRIM_ACTION_TURN_AND_SHAPE"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | 'TECH_CARD_TRIM_ACTION_OTHER';
+  | "TECH_CARD_TRIM_ACTION_OTHER";
 // Чистка концов ниток. Только operation_type = THREAD_TRIM.
 export type common_TechCardOperationThreadTrim = {
   // Допустимый хвост нитки, мм; 1..10 (типовой стандарт цеха <= 3); unset = стандарт цеха.
@@ -9622,15 +9752,15 @@ export type common_TechCardOperationClean = {
 // растворитель, пар, щётка) — отложено: у цеха на это пока один ответ, и поле сегодня записывало
 // бы одно и то же.
 export type common_TechCardCleaningKind =
-  | 'TECH_CARD_CLEANING_KIND_UNKNOWN'
-  | 'TECH_CARD_CLEANING_KIND_SPOT_CLEAN'
-  | 'TECH_CARD_CLEANING_KIND_DUST_LINT'
+  | "TECH_CARD_CLEANING_KIND_UNKNOWN"
+  | "TECH_CARD_CLEANING_KIND_SPOT_CLEAN"
+  | "TECH_CARD_CLEANING_KIND_DUST_LINT"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | 'TECH_CARD_CLEANING_KIND_OTHER';
+  | "TECH_CARD_CLEANING_KIND_OTHER";
 // Контроль качества. Только operation_type = INSPECT.
 export type common_TechCardOperationInspect = {
   coverageMode: common_TechCardInspectCoverage | undefined;
@@ -9640,31 +9770,31 @@ export type common_TechCardOperationInspect = {
 // ОДИН вопрос — сколько изделий смотрим: все (EACH_UNIT) или выборку, и по какому правилу
 // (SAMPLE_PER_BUNDLE, AQL_PLAN).
 export type common_TechCardInspectCoverage =
-  | 'TECH_CARD_INSPECT_COVERAGE_UNKNOWN'
-  | 'TECH_CARD_INSPECT_COVERAGE_EACH_UNIT'
-  | 'TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE'
-  | 'TECH_CARD_INSPECT_COVERAGE_AQL_PLAN'
+  | "TECH_CARD_INSPECT_COVERAGE_UNKNOWN"
+  | "TECH_CARD_INSPECT_COVERAGE_EACH_UNIT"
+  | "TECH_CARD_INSPECT_COVERAGE_SAMPLE_PER_BUNDLE"
+  | "TECH_CARD_INSPECT_COVERAGE_AQL_PLAN"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | 'TECH_CARD_INSPECT_COVERAGE_OTHER';
+  | "TECH_CARD_INSPECT_COVERAGE_OTHER";
 // Вид мокрой обработки — дискриминатор шага WET_PROCESS: REQUIRED, UNKNOWN отвергается. Носитель —
 // TechCardOperation.wet_process_kind (поле 61), а не блок: семейство из одного факта не нуждается
 // в сообщении вокруг него.
 export type common_TechCardWetProcessKind =
-  | 'TECH_CARD_WET_PROCESS_KIND_UNKNOWN'
-  | 'TECH_CARD_WET_PROCESS_KIND_RINSE'
-  | 'TECH_CARD_WET_PROCESS_KIND_ENZYME'
-  | 'TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE'
-  | 'TECH_CARD_WET_PROCESS_KIND_SOFTENER'
+  | "TECH_CARD_WET_PROCESS_KIND_UNKNOWN"
+  | "TECH_CARD_WET_PROCESS_KIND_RINSE"
+  | "TECH_CARD_WET_PROCESS_KIND_ENZYME"
+  | "TECH_CARD_WET_PROCESS_KIND_GARMENT_DYE"
+  | "TECH_CARD_WET_PROCESS_KIND_SOFTENER"
   // «Прочее» — ВЫХОД ОБЯЗАТЕЛЬНОГО ДИСКРИМИНАТОРА (0325). Без него отсутствие своего приёма
   // не оставляет поле пустым, а заставляет технолога выбрать ЧУЖОЙ: поле REQUIRED, UNKNOWN
   // отвергается, а значение уходит в подписанный хвост дайджеста, в релизный снапшот и на
   // печатный лист. Отличить «выбрал за неимением своего» от честного ответа было бы уже нечем.
   // ЧТО ИМЕННО — прозой в note шага: своего свободного текста у дискриминаторов нет и не нужно.
-  | 'TECH_CARD_WET_PROCESS_KIND_OTHER';
+  | "TECH_CARD_WET_PROCESS_KIND_OTHER";
 // Петли, закрепки, пуговицы, молнии. Только MACHINE, и каждое поле — при своём ЯВНОМ machine_type
 // (резолв через machine_profile_key не засчитывается нигде).
 // REQUIRED тут НЕТ НИ ОДНОГО, в отличие от дискриминаторов новых глаголов: эти глаголы и машинки
@@ -9681,43 +9811,52 @@ export type common_TechCardOperationFastening = {
   bartackLengthMm: googletype_Decimal | undefined;
   attachPattern: common_TechCardButtonAttachPattern | undefined;
   zipperApplication: common_TechCardZipperApplication | undefined;
+  // Число отверстий пуговицы на шаге: 2 | 4; 0 = не указано (хранится NULL). Только при ЯВНОМ
+  // machine_type = button_attach. 2 при attach_pattern CROSS_X / SQUARE / U_SHAPE — отказ
+  // needs_four_holes. Клиент копирует значение из артикула BOM-строки (MaterialHardwareAttrs.
+  // button_holes) только пока здесь 0; сервер не выводит и не пересчитывает. Пишется только с
+  // operation_seam_kind_aware (129). В дайджест — парой "button_holes" хвоста "fastening".
+  buttonHoles: number | undefined;
 };
 
 // Форма петли. Обтачной петли здесь нет и не будет: она не форма, а несколько швейных шагов.
 export type common_TechCardButtonholeStyle =
-  | 'TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN'
-  | 'TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT'
-  | 'TECH_CARD_BUTTONHOLE_STYLE_EYELET'
-  | 'TECH_CARD_BUTTONHOLE_STYLE_ROUND_END'
-  | 'TECH_CARD_BUTTONHOLE_STYLE_OTHER';
+  | "TECH_CARD_BUTTONHOLE_STYLE_UNKNOWN"
+  | "TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT"
+  | "TECH_CARD_BUTTONHOLE_STYLE_EYELET"
+  | "TECH_CARD_BUTTONHOLE_STYLE_ROUND_END"
+  | "TECH_CARD_BUTTONHOLE_STYLE_OTHER";
 // Направление петли на изделии. Точное МЕСТО петли — выноской на снимке шага, а не полем: место
 // это координата, и полем оно выражается ровно один раз — неправильно.
 export type common_TechCardButtonholeOrientation =
-  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'
-  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL'
-  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL'
-  | 'TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED';
-// Рисунок пришивания пуговицы. Согласованность с числом отверстий — мягкое предупреждение формы,
-// а не отказ сохранения: число отверстий это свойство артикула из строки BOM, и оно может прийти
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL"
+  | "TECH_CARD_BUTTONHOLE_ORIENTATION_ANGLED";
+// Рисунок пришивания пуговицы. Число отверстий живёт на самом шаге (fastening.button_holes, 0436),
+// и противоречие ВНУТРИ шага — жёсткий отказ: 2 отверстия при CROSS_X / SQUARE / U_SHAPE отвергаются
+// на `operations[N].fastening.attach_pattern` с кодом needs_four_holes (с двумя отверстиями пришивают
+// только одной перемычкой = PARALLEL, или OTHER + note). Расхождение шага с артикулом строки BOM
+// (MaterialHardwareAttrs.button_holes) остаётся мягким предупреждением формы: артикул может прийти
 // позже самого шага.
 export type common_TechCardButtonAttachPattern =
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X'
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL'
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE'
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE'
-  | 'TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER';
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE"
+  | "TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER";
 // Метод втачивания молнии — закрытый список ИСПОЛНЕНИЙ, то есть того, как закрыта лента. Ни МЕСТА,
 // ни свойств самого артикула здесь нет: место — это zone шага, разъёмность — свойство молнии из
 // строки BOM.
 export type common_TechCardZipperApplication =
-  | 'TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'
-  | 'TECH_CARD_ZIPPER_APPLICATION_CENTERED'
-  | 'TECH_CARD_ZIPPER_APPLICATION_LAPPED'
-  | 'TECH_CARD_ZIPPER_APPLICATION_INVISIBLE'
-  | 'TECH_CARD_ZIPPER_APPLICATION_EXPOSED'
-  | 'TECH_CARD_ZIPPER_APPLICATION_FLY'
-  | 'TECH_CARD_ZIPPER_APPLICATION_OTHER';
+  | "TECH_CARD_ZIPPER_APPLICATION_UNKNOWN"
+  | "TECH_CARD_ZIPPER_APPLICATION_CENTERED"
+  | "TECH_CARD_ZIPPER_APPLICATION_LAPPED"
+  | "TECH_CARD_ZIPPER_APPLICATION_INVISIBLE"
+  | "TECH_CARD_ZIPPER_APPLICATION_EXPOSED"
+  | "TECH_CARD_ZIPPER_APPLICATION_FLY"
+  | "TECH_CARD_ZIPPER_APPLICATION_OTHER";
 // ВТО: ЧТО ИМЕННО делаем и КУДА лёг припуск. operation_type = PRESS целиком; на PRESS_OPEN
 // законно только action = OPEN (или пусто); на FUSING, PRINT и любом другом глаголе отвергается.
 // БЛОК, а не два плоских поля на проводе, — довод тот же, что у десяти блоков волны 0324:
@@ -9744,15 +9883,15 @@ export type common_TechCardOperationPress = {
 // отпечатки. Конвенция «пикер пишет глагол и press_action не пишет вовсе» держалась ровно до
 // первого технолога, которому пикер предлагал обе строки подряд.
 export type common_TechCardPressAction =
-  | 'TECH_CARD_PRESS_ACTION_UNKNOWN'
-  | 'TECH_CARD_PRESS_ACTION_PRESS_FLAT'
-  | 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE'
-  | 'TECH_CARD_PRESS_ACTION_STEAM'
-  | 'TECH_CARD_PRESS_ACTION_FINAL'
-  | 'TECH_CARD_PRESS_ACTION_EASE_IN'
-  | 'TECH_CARD_PRESS_ACTION_STRETCH'
-  | 'TECH_CARD_PRESS_ACTION_MOULD'
-  | 'TECH_CARD_PRESS_ACTION_OTHER';
+  | "TECH_CARD_PRESS_ACTION_UNKNOWN"
+  | "TECH_CARD_PRESS_ACTION_PRESS_FLAT"
+  | "TECH_CARD_PRESS_ACTION_TO_ONE_SIDE"
+  | "TECH_CARD_PRESS_ACTION_STEAM"
+  | "TECH_CARD_PRESS_ACTION_FINAL"
+  | "TECH_CARD_PRESS_ACTION_EASE_IN"
+  | "TECH_CARD_PRESS_ACTION_STRETCH"
+  | "TECH_CARD_PRESS_ACTION_MOULD"
+  | "TECH_CARD_PRESS_ACTION_OTHER";
 // КУДА лёг припуск. СОБСТВЕННЫЙ словарь, а НЕ переиспользование TechCardGarmentZone: «вверх»,
 // «вниз» и «к центру» зонами не являются, а второе поле зонного типа на шаге, у которого уже есть
 // zone, — это ровно ловушка «два ключа под одним именем».
@@ -9760,19 +9899,19 @@ export type common_TechCardPressAction =
 // ровно один. Законен ТОЛЬКО при press_action = TO_ONE_SIDE и там ОБЯЗАТЕЛЕН — обязательность,
 // которая не может стать ретроактивной: значения TO_ONE_SIDE ни одна сохранённая строка не имеет.
 export type common_TechCardPressToward =
-  | 'TECH_CARD_PRESS_TOWARD_UNKNOWN'
-  | 'TECH_CARD_PRESS_TOWARD_FRONT'
-  | 'TECH_CARD_PRESS_TOWARD_BACK'
-  | 'TECH_CARD_PRESS_TOWARD_UP'
-  | 'TECH_CARD_PRESS_TOWARD_DOWN'
-  | 'TECH_CARD_PRESS_TOWARD_TOWARD_CENTER'
-  | 'TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER'
-  | 'TECH_CARD_PRESS_TOWARD_SLEEVE'
-  | 'TECH_CARD_PRESS_TOWARD_BODY'
-  | 'TECH_CARD_PRESS_TOWARD_FACING'
-  | 'TECH_CARD_PRESS_TOWARD_SHELL'
-  | 'TECH_CARD_PRESS_TOWARD_LINING'
-  | 'TECH_CARD_PRESS_TOWARD_OTHER';
+  | "TECH_CARD_PRESS_TOWARD_UNKNOWN"
+  | "TECH_CARD_PRESS_TOWARD_FRONT"
+  | "TECH_CARD_PRESS_TOWARD_BACK"
+  | "TECH_CARD_PRESS_TOWARD_UP"
+  | "TECH_CARD_PRESS_TOWARD_DOWN"
+  | "TECH_CARD_PRESS_TOWARD_TOWARD_CENTER"
+  | "TECH_CARD_PRESS_TOWARD_AWAY_FROM_CENTER"
+  | "TECH_CARD_PRESS_TOWARD_SLEEVE"
+  | "TECH_CARD_PRESS_TOWARD_BODY"
+  | "TECH_CARD_PRESS_TOWARD_FACING"
+  | "TECH_CARD_PRESS_TOWARD_SHELL"
+  | "TECH_CARD_PRESS_TOWARD_LINING"
+  | "TECH_CARD_PRESS_TOWARD_OTHER";
 // СКОЛЬКО ЕДИНИЦ АРТИКУЛА ТРАТИТ ЭТОТ ШАГ — число, навешенное на связь шага со строкой BOM
 // (tech_card_operation_bom.qty_per_garment, 0334). «Этот шаг ставит 6 пуговиц на изделие».
 // РАЗРЕЖЁННЫЙ КЛЮЧЕВОЙ СПИСОК, А НЕ ПАРАЛЛЕЛЬНЫЙ `repeated Decimal` РЯДОМ С bom_line_keys (23).
@@ -9814,15 +9953,15 @@ export type common_TechCardLabel = {
 
 // TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
 export type common_TechCardLabelType =
-  | 'TECH_CARD_LABEL_TYPE_UNKNOWN'
-  | 'TECH_CARD_LABEL_TYPE_MAIN'
-  | 'TECH_CARD_LABEL_TYPE_SIZE'
-  | 'TECH_CARD_LABEL_TYPE_CARE'
-  | 'TECH_CARD_LABEL_TYPE_ORIGIN'
-  | 'TECH_CARD_LABEL_TYPE_FLAG'
-  | 'TECH_CARD_LABEL_TYPE_HANGTAG'
-  | 'TECH_CARD_LABEL_TYPE_BARCODE'
-  | 'TECH_CARD_LABEL_TYPE_SPECIAL';
+  | "TECH_CARD_LABEL_TYPE_UNKNOWN"
+  | "TECH_CARD_LABEL_TYPE_MAIN"
+  | "TECH_CARD_LABEL_TYPE_SIZE"
+  | "TECH_CARD_LABEL_TYPE_CARE"
+  | "TECH_CARD_LABEL_TYPE_ORIGIN"
+  | "TECH_CARD_LABEL_TYPE_FLAG"
+  | "TECH_CARD_LABEL_TYPE_HANGTAG"
+  | "TECH_CARD_LABEL_TYPE_BARCODE"
+  | "TECH_CARD_LABEL_TYPE_SPECIAL";
 // TechCardPackaging holds the packaging spec (Sheet «Этикетки и упаковка»).
 export type common_TechCardPackaging = {
   foldingMethod: string | undefined;
@@ -9945,16 +10084,16 @@ export type common_TechCardIssue = {
 
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type common_TechCardIssueSeverity =
-  | 'TECH_CARD_ISSUE_SEVERITY_UNKNOWN'
-  | 'TECH_CARD_ISSUE_SEVERITY_LOW'
-  | 'TECH_CARD_ISSUE_SEVERITY_MEDIUM'
-  | 'TECH_CARD_ISSUE_SEVERITY_HIGH';
+  | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
+  | "TECH_CARD_ISSUE_SEVERITY_LOW"
+  | "TECH_CARD_ISSUE_SEVERITY_MEDIUM"
+  | "TECH_CARD_ISSUE_SEVERITY_HIGH";
 // TechCardIssueStatus is the resolution state of a flagged issue.
 export type common_TechCardIssueStatus =
-  | 'TECH_CARD_ISSUE_STATUS_UNKNOWN'
-  | 'TECH_CARD_ISSUE_STATUS_OPEN'
-  | 'TECH_CARD_ISSUE_STATUS_RESOLVED'
-  | 'TECH_CARD_ISSUE_STATUS_WONTFIX';
+  | "TECH_CARD_ISSUE_STATUS_UNKNOWN"
+  | "TECH_CARD_ISSUE_STATUS_OPEN"
+  | "TECH_CARD_ISSUE_STATUS_RESOLVED"
+  | "TECH_CARD_ISSUE_STATUS_WONTFIX";
 // TechCardSizeQuantity is the TYPICAL calculation batch for a size — «типовой тираж для
 // калькуляции» (plan 13 §2). It amortises development cost and prefills a new run's grid; it is
 // NOT a real production batch — the run's own plan lines are the batch (a run may be bigger,
@@ -9993,20 +10132,20 @@ export type common_TechCardSignoff = {
 // replacements on update (like ColorwayNew).
 // TechCardSignoffSection is the sheet a sign-off covers.
 export type common_TechCardSignoffSection =
-  | 'TECH_CARD_SIGNOFF_SECTION_UNKNOWN'
-  | 'TECH_CARD_SIGNOFF_SECTION_DESIGN'
-  | 'TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION'
-  | 'TECH_CARD_SIGNOFF_SECTION_MATERIALS'
-  | 'TECH_CARD_SIGNOFF_SECTION_COLOUR'
-  | 'TECH_CARD_SIGNOFF_SECTION_LABELS'
-  | 'TECH_CARD_SIGNOFF_SECTION_PACKAGING'
-  | 'TECH_CARD_SIGNOFF_SECTION_COSTING';
+  | "TECH_CARD_SIGNOFF_SECTION_UNKNOWN"
+  | "TECH_CARD_SIGNOFF_SECTION_DESIGN"
+  | "TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION"
+  | "TECH_CARD_SIGNOFF_SECTION_MATERIALS"
+  | "TECH_CARD_SIGNOFF_SECTION_COLOUR"
+  | "TECH_CARD_SIGNOFF_SECTION_LABELS"
+  | "TECH_CARD_SIGNOFF_SECTION_PACKAGING"
+  | "TECH_CARD_SIGNOFF_SECTION_COSTING";
 // TechCardSignoffState is the sign-off decision for a section.
 export type common_TechCardSignoffState =
-  | 'TECH_CARD_SIGNOFF_STATE_UNKNOWN'
-  | 'TECH_CARD_SIGNOFF_STATE_PENDING'
-  | 'TECH_CARD_SIGNOFF_STATE_APPROVED'
-  | 'TECH_CARD_SIGNOFF_STATE_REJECTED';
+  | "TECH_CARD_SIGNOFF_STATE_UNKNOWN"
+  | "TECH_CARD_SIGNOFF_STATE_PENDING"
+  | "TECH_CARD_SIGNOFF_STATE_APPROVED"
+  | "TECH_CARD_SIGNOFF_STATE_REJECTED";
 // TechCardSizePattern is a downloadable выкройка (cut pattern) file for one material slot of a
 // tech card. A material slot holds at most ONE pattern file. Its binding is fabric_purpose (trimmed,
 // lowercase), otherwise the legacy bom_line_key (trimmed, uppercase); rows with neither are unbound
@@ -10275,36 +10414,36 @@ export type common_TechCardPieceFusingSplinePoint = {
 // TechCardPurpose is the numeric enum form of a style's purpose (R6). Replaces the free-text
 // `purpose` field; UNKNOWN is rejected on write.
 export type common_TechCardPurpose =
-  | 'TECH_CARD_PURPOSE_UNKNOWN'
-  | 'TECH_CARD_PURPOSE_SELLABLE'
-  | 'TECH_CARD_PURPOSE_AUXILIARY';
+  | "TECH_CARD_PURPOSE_UNKNOWN"
+  | "TECH_CARD_PURPOSE_SELLABLE"
+  | "TECH_CARD_PURPOSE_AUXILIARY";
 // TechCardAuxSubtype sub-classifies an AUXILIARY card (purpose=auxiliary) into the concrete kind of
 // non-sold item it produces (WS7). UNKNOWN=0 means unset — a sellable card, or an auxiliary card not yet
 // classified (stored NULL). Only meaningful with purpose=auxiliary.
 export type common_TechCardAuxSubtype =
-  | 'TECH_CARD_AUX_SUBTYPE_UNKNOWN'
-  | 'TECH_CARD_AUX_SUBTYPE_BRAND_LABEL'
-  | 'TECH_CARD_AUX_SUBTYPE_CARE_LABEL'
-  | 'TECH_CARD_AUX_SUBTYPE_SIZE_LABEL'
-  | 'TECH_CARD_AUX_SUBTYPE_HANGTAG'
-  | 'TECH_CARD_AUX_SUBTYPE_STICKER'
-  | 'TECH_CARD_AUX_SUBTYPE_DUST_BAG'
-  | 'TECH_CARD_AUX_SUBTYPE_BOX'
-  | 'TECH_CARD_AUX_SUBTYPE_INSERT'
-  | 'TECH_CARD_AUX_SUBTYPE_HANGER'
-  | 'TECH_CARD_AUX_SUBTYPE_OTHER'
+  | "TECH_CARD_AUX_SUBTYPE_UNKNOWN"
+  | "TECH_CARD_AUX_SUBTYPE_BRAND_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_CARE_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_SIZE_LABEL"
+  | "TECH_CARD_AUX_SUBTYPE_HANGTAG"
+  | "TECH_CARD_AUX_SUBTYPE_STICKER"
+  | "TECH_CARD_AUX_SUBTYPE_DUST_BAG"
+  | "TECH_CARD_AUX_SUBTYPE_BOX"
+  | "TECH_CARD_AUX_SUBTYPE_INSERT"
+  | "TECH_CARD_AUX_SUBTYPE_HANGER"
+  | "TECH_CARD_AUX_SUBTYPE_OTHER"
   // кофр — the carrier a garment travels/hangs in. Its own sub-type rather than a dust bag: it is
   // cut, sewn and costed as its own item, and an assembly bill names which of the two ships.
-  | 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE'
+  | "TECH_CARD_AUX_SUBTYPE_GARMENT_CASE"
   // шоппер — the carrier the customer takes the purchase away in and keeps using. Its own sub-type
   // rather than a dust bag: it is cut, sewn and costed as its own item, and an assembly bill names
   // which carrier ships.
-  | 'TECH_CARD_AUX_SUBTYPE_TOTE_BAG'
+  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG"
   // пакетик с запасной фурнитурой, сшитый своими силами (0335). Пакетик и покупают готовым, и шьют
   // сами, и ветвления это не создаёт: в обеих ветках он остаётся ОДНОЙ строкой спецификации с
   // kind=SPARE_KIT_BAG, а этот подтип отвечает на другой вопрос — что производит вспомогательная
   // карточка. Без него свой пакетик уезжает в ..._OTHER, где перестаёт отличаться от чего угодно.
-  | 'TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG';
+  | "TECH_CARD_AUX_SUBTYPE_SPARE_KIT_BAG";
 // TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field
 // from an ABSENT one, and these aliases follow the pattern-binding precedent — a stale client that
 // predates the feature must not wipe mappings it never saw. Message ABSENT → the server carries the
@@ -10417,14 +10556,14 @@ export type AssignTechCardRoleRequest = {
 // designer/constructor/technologist/approved_by strings; approval is the APPROVER role plus a
 // server-stamped journal event, not a free-text name.
 export type common_TechCardRole =
-  | 'TECH_CARD_ROLE_UNKNOWN'
-  | 'TECH_CARD_ROLE_DESIGNER'
-  | 'TECH_CARD_ROLE_CONSTRUCTOR'
-  | 'TECH_CARD_ROLE_TECHNOLOGIST'
-  | 'TECH_CARD_ROLE_PATTERN_MAKER'
-  | 'TECH_CARD_ROLE_GRADER'
-  | 'TECH_CARD_ROLE_APPROVER'
-  | 'TECH_CARD_ROLE_OTHER';
+  | "TECH_CARD_ROLE_UNKNOWN"
+  | "TECH_CARD_ROLE_DESIGNER"
+  | "TECH_CARD_ROLE_CONSTRUCTOR"
+  | "TECH_CARD_ROLE_TECHNOLOGIST"
+  | "TECH_CARD_ROLE_PATTERN_MAKER"
+  | "TECH_CARD_ROLE_GRADER"
+  | "TECH_CARD_ROLE_APPROVER"
+  | "TECH_CARD_ROLE_OTHER";
 export type AssignTechCardRoleResponse = {
   assignment: common_TechCardRoleAssignment | undefined;
 };
@@ -10446,13 +10585,15 @@ export type RemoveTechCardRoleAssignmentRequest = {
   id: number | undefined;
 };
 
-export type RemoveTechCardRoleAssignmentResponse = {};
+export type RemoveTechCardRoleAssignmentResponse = {
+};
 
 export type ExitTechCardGuideRequest = {
   techCardId: number | undefined;
 };
 
-export type ExitTechCardGuideResponse = {};
+export type ExitTechCardGuideResponse = {
+};
 
 export type ListTechCardRoleAssignmentsRequest = {
   techCardId: number | undefined;
@@ -10462,7 +10603,8 @@ export type ListTechCardRoleAssignmentsResponse = {
   assignments: common_TechCardRoleAssignment[] | undefined;
 };
 
-export type ListAdminsRequest = {};
+export type ListAdminsRequest = {
+};
 
 export type ListAdminsResponse = {
   admins: AdminRef[] | undefined;
@@ -11110,9 +11252,9 @@ export type common_TechCardMarkerCompositionEntry = {
 export type common_TechCardMarkerPieceSetStatus =
   // No fingerprint recorded (a раскладка taken before Ф3), or one cannot be computed today.
   // NEVER read this as «changed».
-  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN'
-  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES'
-  | 'TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED';
+  | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
+  | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
+  | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
 // TechCardPieceAreaScope — площади деталей ОДНОГО скоупа ткани, с вердиктом об устаревании.
 // Скоуп, а не карточка: после T4 одна деталь законно кроится из нескольких слоёв материала, и у
 // подкладочной версии свой контур и своя площадь. Ключ тот же, что у привязок блоков (0267) и у
@@ -11189,34 +11331,34 @@ export type common_TechCardSeam = {
 
 // TechCardSeamStatus is the technologist's decision on a seam.
 export type common_TechCardSeamStatus =
-  | 'TECH_CARD_SEAM_STATUS_UNKNOWN'
-  | 'TECH_CARD_SEAM_STATUS_CONFIRMED'
-  | 'TECH_CARD_SEAM_STATUS_REJECTED';
+  | "TECH_CARD_SEAM_STATUS_UNKNOWN"
+  | "TECH_CARD_SEAM_STATUS_CONFIRMED"
+  | "TECH_CARD_SEAM_STATUS_REJECTED";
 // TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
 // walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
 // closure (zip / button front) that is NOT sewn shut.
 export type common_TechCardSeamKind =
-  | 'TECH_CARD_SEAM_KIND_UNKNOWN'
-  | 'TECH_CARD_SEAM_KIND_EDGE'
-  | 'TECH_CARD_SEAM_KIND_PARTIAL'
-  | 'TECH_CARD_SEAM_KIND_COMPOSITE'
-  | 'TECH_CARD_SEAM_KIND_SURFACE'
-  | 'TECH_CARD_SEAM_KIND_CLOSURE';
+  | "TECH_CARD_SEAM_KIND_UNKNOWN"
+  | "TECH_CARD_SEAM_KIND_EDGE"
+  | "TECH_CARD_SEAM_KIND_PARTIAL"
+  | "TECH_CARD_SEAM_KIND_COMPOSITE"
+  | "TECH_CARD_SEAM_KIND_SURFACE"
+  | "TECH_CARD_SEAM_KIND_CLOSURE";
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.
 export type common_TechCardSeamDirection =
-  | 'TECH_CARD_SEAM_DIRECTION_UNKNOWN'
-  | 'TECH_CARD_SEAM_DIRECTION_REVERSED'
-  | 'TECH_CARD_SEAM_DIRECTION_SAME';
+  | "TECH_CARD_SEAM_DIRECTION_UNKNOWN"
+  | "TECH_CARD_SEAM_DIRECTION_REVERSED"
+  | "TECH_CARD_SEAM_DIRECTION_SAME";
 // TechCardSeamSource is where the seam came from before a person decided on it. AI is reserved.
 export type common_TechCardSeamSource =
-  | 'TECH_CARD_SEAM_SOURCE_UNKNOWN'
-  | 'TECH_CARD_SEAM_SOURCE_GRAPH'
-  | 'TECH_CARD_SEAM_SOURCE_DOLL'
-  | 'TECH_CARD_SEAM_SOURCE_ORDER'
-  | 'TECH_CARD_SEAM_SOURCE_MANUAL'
-  | 'TECH_CARD_SEAM_SOURCE_AI';
+  | "TECH_CARD_SEAM_SOURCE_UNKNOWN"
+  | "TECH_CARD_SEAM_SOURCE_GRAPH"
+  | "TECH_CARD_SEAM_SOURCE_DOLL"
+  | "TECH_CARD_SEAM_SOURCE_ORDER"
+  | "TECH_CARD_SEAM_SOURCE_MANUAL"
+  | "TECH_CARD_SEAM_SOURCE_AI";
 // TechCardSeamSide is one side of a seam: its anchors in walk order (1..8).
 export type common_TechCardSeamSide = {
   parts: common_TechCardSeamAnchor[] | undefined;
@@ -11279,7 +11421,8 @@ export type UpdateTechCardRequest = {
   saveSessionId: string | undefined;
 };
 
-export type UpdateTechCardResponse = {};
+export type UpdateTechCardResponse = {
+};
 
 export type ListTechCardSnapshotsRequest = {
   techCardId: number | undefined;
@@ -11504,7 +11647,8 @@ export type SetTechCardFindingSeenRequest = {
   seen: boolean | undefined;
 };
 
-export type SetTechCardFindingSeenResponse = {};
+export type SetTechCardFindingSeenResponse = {
+};
 
 // OperationWorkCatalogItem — одна работа каталога.
 // ВСЁ СТРОКАМИ-ТОКЕНАМИ, НИ ОДНОГО ENUM. Словарь работ — данные, а не контракт: он растёт
@@ -11543,7 +11687,8 @@ export type OperationWorkSmvHint = {
   cardName: string | undefined;
 };
 
-export type GetOperationWorkCatalogRequest = {};
+export type GetOperationWorkCatalogRequest = {
+};
 
 export type GetOperationWorkCatalogResponse = {
   works: OperationWorkCatalogItem[] | undefined;
@@ -11566,7 +11711,8 @@ export type RememberOperationWorkDefaultRequest = {
   clear: boolean | undefined;
 };
 
-export type RememberOperationWorkDefaultResponse = {};
+export type RememberOperationWorkDefaultResponse = {
+};
 
 export type ExportTechCardArchiveRequest = {
   techCardId: number | undefined;
@@ -11682,7 +11828,8 @@ export type AcknowledgeTechCardImportReportRequest = {
   techCardId: number | undefined;
 };
 
-export type AcknowledgeTechCardImportReportResponse = {};
+export type AcknowledgeTechCardImportReportResponse = {
+};
 
 export type ApplyTechCardImportColorwaysRequest = {
   techCardId: number | undefined;
@@ -11704,7 +11851,8 @@ export type DeleteTechCardRequest = {
   id: number | undefined;
 };
 
-export type DeleteTechCardResponse = {};
+export type DeleteTechCardResponse = {
+};
 
 export type ListTechCardsRequest = {
   limit: number | undefined;
@@ -11901,7 +12049,8 @@ export type CostingFxRate = {
   validFrom: wellKnownTimestamp | undefined;
 };
 
-export type GetCostingFxRatesRequest = {};
+export type GetCostingFxRatesRequest = {
+};
 
 export type GetCostingFxRatesResponse = {
   rates: CostingFxRate[] | undefined;
@@ -11911,7 +12060,8 @@ export type UpsertCostingFxRatesRequest = {
   rates: CostingFxRate[] | undefined;
 };
 
-export type UpsertCostingFxRatesResponse = {};
+export type UpsertCostingFxRatesResponse = {
+};
 
 // VatRate is the standard VAT rate for a destination country (ISO 3166-1 alpha-2). A country
 // absent from the list is treated as 0% (export / non-EU).
@@ -11921,7 +12071,8 @@ export type VatRate = {
   validFrom: wellKnownTimestamp | undefined;
 };
 
-export type GetVatRatesRequest = {};
+export type GetVatRatesRequest = {
+};
 
 export type GetVatRatesResponse = {
   rates: VatRate[] | undefined;
@@ -11931,7 +12082,8 @@ export type UpsertVatRatesRequest = {
   rates: VatRate[] | undefined;
 };
 
-export type UpsertVatRatesResponse = {};
+export type UpsertVatRatesResponse = {
+};
 
 // Material catalog (task 10). Create/Update send a common.Material; server-managed fields
 // (id on create, archived, latest_price) are ignored on write.
@@ -12085,12 +12237,12 @@ export type common_MaterialPrice = {
 // MaterialClass is the class-table-inheritance discriminant (S15): it selects which typed
 // attribute set a material carries. Mirrors entity.MaterialClass and the DB CHECK chk_material_class.
 export type common_MaterialClass =
-  | 'MATERIAL_CLASS_UNKNOWN'
-  | 'MATERIAL_CLASS_FABRIC'
-  | 'MATERIAL_CLASS_HARDWARE'
-  | 'MATERIAL_CLASS_THREAD'
-  | 'MATERIAL_CLASS_PACKAGING'
-  | 'MATERIAL_CLASS_OTHER';
+  | "MATERIAL_CLASS_UNKNOWN"
+  | "MATERIAL_CLASS_FABRIC"
+  | "MATERIAL_CLASS_HARDWARE"
+  | "MATERIAL_CLASS_THREAD"
+  | "MATERIAL_CLASS_PACKAGING"
+  | "MATERIAL_CLASS_OTHER";
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
 export type common_MaterialFabricAttrs = {
   widthCm: googletype_Decimal | undefined;
@@ -12110,6 +12262,10 @@ export type common_MaterialHardwareAttrs = {
   finish: string | undefined;
   baseMaterial: string | undefined;
   weightG: googletype_Decimal | undefined;
+  // Число отверстий пуговицы-артикула: 2 | 4, 0 = не указано (хранится NULL). Это свойство
+  // артикула; шаг пришивания несёт СВОЙ fastening.button_holes, который клиент копирует отсюда
+  // только пока он 0 — сервер ничего не выводит и не пересчитывает.
+  buttonHoles: number | undefined;
 };
 
 // MaterialThreadAttrs are the typed attributes of a thread-class material (material_thread_attr).
@@ -12132,10 +12288,10 @@ export type common_MaterialPackagingAttrs = {
 // so the admin can mark and filter materials. Mirrors entity.ValidMaterialPurposes and the DB CHECK
 // chk_material_purpose. UNKNOWN defaults to BOTH on write.
 export type common_MaterialPurpose =
-  | 'MATERIAL_PURPOSE_UNKNOWN'
-  | 'MATERIAL_PURPOSE_SAMPLE'
-  | 'MATERIAL_PURPOSE_PRODUCTION'
-  | 'MATERIAL_PURPOSE_BOTH';
+  | "MATERIAL_PURPOSE_UNKNOWN"
+  | "MATERIAL_PURPOSE_SAMPLE"
+  | "MATERIAL_PURPOSE_PRODUCTION"
+  | "MATERIAL_PURPOSE_BOTH";
 export type CreateMaterialResponse = {
   id: number | undefined;
 };
@@ -12148,14 +12304,16 @@ export type UpdateMaterialRequest = {
   expectedLockVersion: number | undefined;
 };
 
-export type UpdateMaterialResponse = {};
+export type UpdateMaterialResponse = {
+};
 
 export type ArchiveMaterialRequest = {
   id: number | undefined;
   archived: boolean | undefined;
 };
 
-export type ArchiveMaterialResponse = {};
+export type ArchiveMaterialResponse = {
+};
 
 export type GetMaterialRequest = {
   id: number | undefined;
@@ -12179,7 +12337,8 @@ export type AddMaterialPriceRequest = {
   price: common_MaterialPrice | undefined;
 };
 
-export type AddMaterialPriceResponse = {};
+export type AddMaterialPriceResponse = {
+};
 
 export type ListMaterialPricesRequest = {
   materialId: number | undefined;
@@ -12231,16 +12390,16 @@ export type GetMaterialCuttingCoefficientSuggestionResponse = {
 export type common_MaterialCoefficientSuggestionStatus =
   // Сервер ВСЕГДА присылает одно из трёх ниже. Ноль остаётся за «поле не заполнено» и обязан
   // читаться клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
-  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED'
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED"
   // Настилов с планом И фактом меньше трёх. Предложения нет вовсе, и это содержание ответа, а не
   // его отсутствие: коэффициент, выведенный из одного замера, — догадка в одежде числа.
-  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS'
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS"
   // Медиана посчитана, но коэффициент из неё поле не примет (вне [1, 3], chk 0270). ИЗМЕРЕНИЕ
   // отдаётся (median_drift_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе:
   // зажать −12% в 1.0 значило бы подменить измерение ближайшим сохраняемым значением.
-  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE'
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE"
   // Предложение есть, и его можно сохранить как есть.
-  | 'MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY';
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY";
 // Вклад ОДНОГО настила в калибровку — с ТРЕТЬИМ ОТВЕТОМ.
 // Разбор едет наружу ЦЕЛИКОМ, вошедшие и невошедшие настилы вместе: медиана по построению ПРЯЧЕТ
 // выброс, а выброс — это, скорее всего, опечатка замерщика («ввели 500 вместо 50»). Отдать только
@@ -12340,15 +12499,15 @@ export type GetBomWastageSuggestionResponse = {
 export type common_BomWastageSuggestionStatus =
   // Сервер всегда присылает одно из трёх ниже; ноль остаётся за «поле не заполнено» и читается
   // клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
-  | 'BOM_WASTAGE_SUGGESTION_STATUS_UNSPECIFIED'
+  | "BOM_WASTAGE_SUGGESTION_STATUS_UNSPECIFIED"
   // Настилов с netto И фактом меньше трёх. Это СОСТОЯНИЕ, а не ошибка: «фактов пока N из 3» — и
   // после выката это основной ответ (настилов с замером может не быть месяцами).
-  | 'BOM_WASTAGE_SUGGESTION_STATUS_TOO_FEW_FACTS'
+  | "BOM_WASTAGE_SUGGESTION_STATUS_TOO_FEW_FACTS"
   // Медиана посчитана, но поле её не примет (wastage_percent живёт в [0, 100]). ИЗМЕРЕНИЕ отдаётся
   // (median_over_netto_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе.
-  | 'BOM_WASTAGE_SUGGESTION_STATUS_OUT_OF_RANGE'
+  | "BOM_WASTAGE_SUGGESTION_STATUS_OUT_OF_RANGE"
   // Предложение есть, и его можно вписать в поле как есть.
-  | 'BOM_WASTAGE_SUGGESTION_STATUS_READY';
+  | "BOM_WASTAGE_SUGGESTION_STATUS_READY";
 // Вклад ОДНОГО настила в предложение процента раскроя. Разбор едет наружу целиком, вошедшие и
 // невошедшие вместе, и каждый настил называет свою КАРТОЧКУ: медиана «по 3 настилам» может стоять
 // на одной чужой модели, и человек обязан это видеть, прежде чем применять число к своей.
@@ -12602,7 +12761,8 @@ export type DeleteTechCardDevExpenseRequest = {
   id: number | undefined;
 };
 
-export type DeleteTechCardDevExpenseResponse = {};
+export type DeleteTechCardDevExpenseResponse = {
+};
 
 export type ListTechCardDevExpensesRequest = {
   techCardId: number | undefined;
@@ -12658,22 +12818,22 @@ export type common_ProductionRunInsert = {
 // started (in_progress), then received into stock, then closed; it can be cancelled from any
 // non-terminal state. Stored as its lowercase name in the DB.
 export type common_ProductionRunStatus =
-  | 'PRODUCTION_RUN_STATUS_UNKNOWN'
-  | 'PRODUCTION_RUN_STATUS_PLANNED'
-  | 'PRODUCTION_RUN_STATUS_IN_PROGRESS'
-  | 'PRODUCTION_RUN_STATUS_RECEIVED'
-  | 'PRODUCTION_RUN_STATUS_CLOSED'
-  | 'PRODUCTION_RUN_STATUS_CANCELLED'
+  | "PRODUCTION_RUN_STATUS_UNKNOWN"
+  | "PRODUCTION_RUN_STATUS_PLANNED"
+  | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
+  | "PRODUCTION_RUN_STATUS_RECEIVED"
+  | "PRODUCTION_RUN_STATUS_CLOSED"
+  | "PRODUCTION_RUN_STATUS_CANCELLED"
   // At least one partial receipt is booked and the operator has not yet declared the run complete
   // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
   // writable through UpdateProductionRun.
-  | 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED'
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED"
   // DRAFT (Ф2): расчётная партия — состав набран, деньги считаются, производство НЕ начато.
   // Отличается от PLANNED ровно тремя обязательствами, которых у неё НЕТ: она не резервирует ткань,
   // не проходит гейт готовности и не печатает наряд. Всё это появляется на переходе draft → planned.
   // Так и должно быть: прикидка «сколько будет стоить сто чёрных и полсотни белых» не имеет права
   // занимать сырьё на складе, иначе соседний прогон увидит нехватку из-за чужого черновика.
-  | 'PRODUCTION_RUN_STATUS_DRAFT';
+  | "PRODUCTION_RUN_STATUS_DRAFT";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -12725,14 +12885,14 @@ export type common_ProductionRunCost = {
 
 // ProductionRunCostKind is the article category of an actual production-run cost.
 export type common_ProductionRunCostKind =
-  | 'PRODUCTION_RUN_COST_KIND_UNKNOWN'
-  | 'PRODUCTION_RUN_COST_KIND_MATERIALS'
-  | 'PRODUCTION_RUN_COST_KIND_CMT'
-  | 'PRODUCTION_RUN_COST_KIND_HARDWARE'
-  | 'PRODUCTION_RUN_COST_KIND_PACKAGING'
-  | 'PRODUCTION_RUN_COST_KIND_LOGISTICS'
-  | 'PRODUCTION_RUN_COST_KIND_DUTY'
-  | 'PRODUCTION_RUN_COST_KIND_OTHER';
+  | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
+  | "PRODUCTION_RUN_COST_KIND_MATERIALS"
+  | "PRODUCTION_RUN_COST_KIND_CMT"
+  | "PRODUCTION_RUN_COST_KIND_HARDWARE"
+  | "PRODUCTION_RUN_COST_KIND_PACKAGING"
+  | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
+  | "PRODUCTION_RUN_COST_KIND_DUTY"
+  | "PRODUCTION_RUN_COST_KIND_OTHER";
 export type CreateProductionRunResponse = {
   id: number | undefined;
 };
@@ -12754,13 +12914,15 @@ export type UpdateProductionRunRequest = {
   expectedLockVersion?: number;
 };
 
-export type UpdateProductionRunResponse = {};
+export type UpdateProductionRunResponse = {
+};
 
 export type DeleteProductionRunRequest = {
   id: number | undefined;
 };
 
-export type DeleteProductionRunResponse = {};
+export type DeleteProductionRunResponse = {
+};
 
 export type GetProductionRunRequest = {
   id: number | undefined;
@@ -13352,9 +13514,9 @@ export type common_ProductionRunLayInsert = {
 // слоёв быть чётным, можно ли направленную ткань, и как развёртка зеркальных деталей в маркере
 // превращается в изделия.
 export type common_ProductionLayMode =
-  | 'PRODUCTION_LAY_MODE_UNSPECIFIED'
-  | 'PRODUCTION_LAY_MODE_FACE_UP'
-  | 'PRODUCTION_LAY_MODE_FACE_TO_FACE';
+  | "PRODUCTION_LAY_MODE_UNSPECIFIED"
+  | "PRODUCTION_LAY_MODE_FACE_UP"
+  | "PRODUCTION_LAY_MODE_FACE_TO_FACE";
 export type common_ProductionRunLaySectionInsert = {
   sectionKey: string | undefined;
   markerId: number | undefined;
@@ -13368,9 +13530,9 @@ export type common_ProductionRunLaySectionInsert = {
 // потому чувствительно к ним обеим. Число без метода — это число, о точности которого нечего
 // сказать, поэтому схема требует их вместе (chk_prlay_actual_complete, 0285).
 export type common_ProductionLayActualMethod =
-  | 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
-  | 'PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER'
-  | 'PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED';
+  | "PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED"
+  | "PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER"
+  | "PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED";
 export type SaveProductionRunLayResponse = {
   lay: common_ProductionRunLay | undefined;
 };
@@ -13463,17 +13625,18 @@ export type common_ProductionLayCheck = {
 // «не смогли проверить» и «проверили, всё хорошо» — разные предложения, и клиент обязан их
 // различать. Это та же дисциплина, что unknown_count у гейта Ф6.
 export type common_ProductionLayCheckStatus =
-  | 'PRODUCTION_LAY_CHECK_STATUS_UNSPECIFIED'
-  | 'PRODUCTION_LAY_CHECK_STATUS_OK'
-  | 'PRODUCTION_LAY_CHECK_STATUS_WARNING'
-  | 'PRODUCTION_LAY_CHECK_STATUS_BLOCKER'
-  | 'PRODUCTION_LAY_CHECK_STATUS_UNKNOWN';
+  | "PRODUCTION_LAY_CHECK_STATUS_UNSPECIFIED"
+  | "PRODUCTION_LAY_CHECK_STATUS_OK"
+  | "PRODUCTION_LAY_CHECK_STATUS_WARNING"
+  | "PRODUCTION_LAY_CHECK_STATUS_BLOCKER"
+  | "PRODUCTION_LAY_CHECK_STATUS_UNKNOWN";
 export type DeleteProductionRunLayRequest = {
   runId: number | undefined;
   layKey: string | undefined;
 };
 
-export type DeleteProductionRunLayResponse = {};
+export type DeleteProductionRunLayResponse = {
+};
 
 export type ListProductionRunLaysRequest = {
   runId: number | undefined;
@@ -13583,7 +13746,8 @@ export type DeleteProductionRunCutReceiptRequest = {
   sizeId: number | undefined;
 };
 
-export type DeleteProductionRunCutReceiptResponse = {};
+export type DeleteProductionRunCutReceiptResponse = {
+};
 
 export type ListProductionRunCutReceiptsRequest = {
   runId: number | undefined;
@@ -14077,46 +14241,11 @@ export type ReceiveMaterialStockRequest = {
   // Measured LENGTH has no field: `quantity` already is it.
   measuredWidthCm: googletype_Decimal | undefined;
   shadeCode: string | undefined;
-  // invoice_file_id links the supplier's invoice (a library_file uploaded through the files
-  // library) to this receipt; 0 = none.
   invoiceFileId: number | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
   movement: common_MaterialMovement | undefined;
-};
-
-// ReceiveMaterialStockLine is one material of a multi-line (one invoice) receipt.
-export type ReceiveMaterialStockLine = {
-  materialId: number | undefined;
-  // > 0
-  quantity: googletype_Decimal | undefined;
-  // NET per unit, in the request currency; empty = uncosted line.
-  unitCost: googletype_Decimal | undefined;
-  lot: string | undefined;
-};
-
-// ReceiveMaterialStockBatchRequest posts every line of one supplier invoice in ONE transaction.
-// Delivery and input VAT are allocated across the lines in proportion to each line's net.
-export type ReceiveMaterialStockBatchRequest = {
-  // 1..50; a material may not repeat.
-  lines: ReceiveMaterialStockLine[] | undefined;
-  currency: string | undefined;
-  supplierId: number | undefined;
-  supplierDoc: string | undefined;
-  invoiceFileId: number | undefined;
-  occurredAt: string | undefined;
-  expectedAt: string | undefined;
-  comment: string | undefined;
-  // Invoice total input VAT, EUR.
-  inputVatAmount: googletype_Decimal | undefined;
-  inputVatRegime: string | undefined;
-  // Invoice delivery NET, in `currency`; empty/0 = none.
-  deliveryCost: googletype_Decimal | undefined;
-};
-
-export type ReceiveMaterialStockBatchResponse = {
-  movements: common_MaterialMovement[] | undefined;
 };
 
 // MaterialMovement is one row of the append-only stock ledger. unit_cost* fields are confidential.
@@ -14145,7 +14274,6 @@ export type common_MaterialMovement = {
   // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
   // occurred_at vs expected_at, no PO entity needed.
   expectedAt: wellKnownTimestamp | undefined;
-  // The supplier's invoice attached on receipt (library_file id + its name); 0/"" = none.
   invoiceFileId: number | undefined;
   invoiceFileName: string | undefined;
 };
@@ -14153,15 +14281,40 @@ export type common_MaterialMovement = {
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
 // always non-negative; the type (with on_hand before/after) encodes the direction.
 export type common_MaterialMovementType =
-  | 'MATERIAL_MOVEMENT_TYPE_UNKNOWN'
-  | 'MATERIAL_MOVEMENT_TYPE_RECEIPT'
-  | 'MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION'
-  | 'MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION'
-  | 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE'
-  | 'MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION'
-  | 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE'
-  | 'MATERIAL_MOVEMENT_TYPE_ADJUSTMENT'
-  | 'MATERIAL_MOVEMENT_TYPE_WRITEOFF';
+  | "MATERIAL_MOVEMENT_TYPE_UNKNOWN"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT"
+  | "MATERIAL_MOVEMENT_TYPE_RECEIPT_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_PRODUCTION"
+  | "MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE"
+  | "MATERIAL_MOVEMENT_TYPE_ADJUSTMENT"
+  | "MATERIAL_MOVEMENT_TYPE_WRITEOFF";
+export type ReceiveMaterialStockLine = {
+  materialId: number | undefined;
+  quantity: googletype_Decimal | undefined;
+  unitCost: googletype_Decimal | undefined;
+  lot: string | undefined;
+};
+
+export type ReceiveMaterialStockBatchRequest = {
+  lines: ReceiveMaterialStockLine[] | undefined;
+  currency: string | undefined;
+  supplierId: number | undefined;
+  supplierDoc: string | undefined;
+  invoiceFileId: number | undefined;
+  occurredAt: string | undefined;
+  expectedAt: string | undefined;
+  comment: string | undefined;
+  inputVatAmount: googletype_Decimal | undefined;
+  inputVatRegime: string | undefined;
+  deliveryCost: googletype_Decimal | undefined;
+};
+
+export type ReceiveMaterialStockBatchResponse = {
+  movements: common_MaterialMovement[] | undefined;
+};
+
 export type IssueMaterialStockRequest = {
   materialId: number | undefined;
   quantity: googletype_Decimal | undefined;
@@ -14330,9 +14483,11 @@ export type UpsertPackagingBomRequest = {
   items: PackagingBomItem[] | undefined;
 };
 
-export type UpsertPackagingBomResponse = {};
+export type UpsertPackagingBomResponse = {
+};
 
-export type ListPackagingBomRequest = {};
+export type ListPackagingBomRequest = {
+};
 
 export type ListPackagingBomResponse = {
   items: PackagingBomItem[] | undefined;
@@ -14373,9 +14528,11 @@ export type UpsertPackagingRecipeRequest = {
   items: PackagingRecipeItem[] | undefined;
 };
 
-export type UpsertPackagingRecipeResponse = {};
+export type UpsertPackagingRecipeResponse = {
+};
 
-export type ListPackagingRecipeRequest = {};
+export type ListPackagingRecipeRequest = {
+};
 
 export type ListPackagingRecipeResponse = {
   items: PackagingRecipeLine[] | undefined;
@@ -14426,26 +14583,26 @@ export type StyleAssemblyLine = {
 // The three resolved values are ordered by strength; the four unresolved ones each name their own fix.
 export type common_AssemblyResolutionBasis =
   // Not attempted: a bill read on its own (ListStyleAssembly) has no order item to resolve against.
-  | 'ASSEMBLY_RESOLUTION_BASIS_UNKNOWN'
+  | "ASSEMBLY_RESOLUTION_BASIS_UNKNOWN"
   // Resolved: an ACTIVE colour variant whose code equals the item's colourway. The real answer.
-  | 'ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH'
+  | "ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH"
   // Resolved by substitution: the card has exactly ONE live colour, so there is no choice to get
   // wrong (a single-colour dust bag ships with every colourway). Not a colour match — show it as such.
-  | 'ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT'
+  | "ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT"
   // Resolved: the card has no colours at all and its single tech_card.output_material_id stands.
-  | 'ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT'
+  | "ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT"
   // Unresolved: the item's colour EXISTS on this card but is RETIRED. Never auto-substituted — fix by
   // reactivating that colour, or by deciding a substitute deliberately.
-  | 'ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR'
+  | "ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR"
   // Unresolved: the card has live colours, none of them this item's (and more than one, so no sole
   // fallback). Fix by adding the colour.
-  | 'ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH'
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH"
   // Unresolved: a bucket WAS named but its material is archived nomenclature. Fix by un-archiving it
   // or pointing the colour at a live material.
-  | 'ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL'
+  | "ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL"
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
-  | 'ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT';
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
 // StyleAssemblyItem is one writable assembly line; the style target is carried by the request.
 export type StyleAssemblyItem = {
   componentTechCardId: number | undefined;
@@ -14462,7 +14619,8 @@ export type UpsertStyleAssemblyRequest = {
   items: StyleAssemblyItem[] | undefined;
 };
 
-export type UpsertStyleAssemblyResponse = {};
+export type UpsertStyleAssemblyResponse = {
+};
 
 export type ListStyleAssemblyRequest = {
   styleId: number | undefined;
@@ -14490,7 +14648,8 @@ export type DeleteTechCardOutputVariantRequest = {
   id: number | undefined;
 };
 
-export type DeleteTechCardOutputVariantResponse = {};
+export type DeleteTechCardOutputVariantResponse = {
+};
 
 // SaveTechCardMarkerRequest writes ONE saved раскладка. id=0 creates; a non-zero id must already
 // be a marker of tech_card_id and is replaced whole (the layout blob has no partial update).
@@ -14748,9 +14907,9 @@ export type common_TechCardMarkerSpread = {
 
 // TechCardMarkerSpreadMode is how the plies of the настил face each other.
 export type common_TechCardMarkerSpreadMode =
-  | 'TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN'
-  | 'TECH_CARD_MARKER_SPREAD_MODE_FACE_UP'
-  | 'TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE';
+  | "TECH_CARD_MARKER_SPREAD_MODE_UNKNOWN"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_UP"
+  | "TECH_CARD_MARKER_SPREAD_MODE_FACE_TO_FACE";
 export type SaveTechCardMarkerResponse = {
   id: number | undefined;
 };
@@ -14773,7 +14932,8 @@ export type DeleteTechCardMarkerRequest = {
   id: number | undefined;
 };
 
-export type DeleteTechCardMarkerResponse = {};
+export type DeleteTechCardMarkerResponse = {
+};
 
 // SetTechCardMarkerNormRequest designates one раскладка as the norm for its cloth, or clears it.
 // The card is resolved from the marker — a norm belongs to the раскладка, and passing the card
@@ -14897,19 +15057,22 @@ export type AdminSectionInfo = {
   description: string | undefined;
 };
 
-export type GetCurrentAccountRequest = {};
+export type GetCurrentAccountRequest = {
+};
 
 export type GetCurrentAccountResponse = {
   account: AdminAccount | undefined;
 };
 
-export type ListAccountSectionsRequest = {};
+export type ListAccountSectionsRequest = {
+};
 
 export type ListAccountSectionsResponse = {
   sections: AdminSectionInfo[] | undefined;
 };
 
-export type ListAccountsRequest = {};
+export type ListAccountsRequest = {
+};
 
 export type ListAccountsResponse = {
   accounts: AdminAccount[] | undefined;
@@ -14942,20 +15105,23 @@ export type SetAccountDisabledRequest = {
   disabled: boolean | undefined;
 };
 
-export type SetAccountDisabledResponse = {};
+export type SetAccountDisabledResponse = {
+};
 
 export type ResetAccountPasswordRequest = {
   username: string | undefined;
   newPassword: string | undefined;
 };
 
-export type ResetAccountPasswordResponse = {};
+export type ResetAccountPasswordResponse = {
+};
 
 export type DeleteAccountRequest = {
   username: string | undefined;
 };
 
-export type DeleteAccountResponse = {};
+export type DeleteAccountResponse = {
+};
 
 // AcctAccount is a stored chart-of-accounts row. is_system accounts participate in automated
 // posting rules and cannot be renamed or archived (ErrAcctSystemAccount).
@@ -15002,7 +15168,8 @@ export type ArchiveAcctAccountRequest = {
   archived: boolean | undefined;
 };
 
-export type ArchiveAcctAccountResponse = {};
+export type ArchiveAcctAccountResponse = {
+};
 
 // AcctJournalLineInput is one side of a manual journal entry being posted. Either `amount` (base
 // currency, EUR) or `amount_src`+`currency_src` (converted to base server-side via the costing FX
@@ -15103,7 +15270,8 @@ export type AcctPeriod = {
   closedBy: string | undefined;
 };
 
-export type ListAcctPeriodsRequest = {};
+export type ListAcctPeriodsRequest = {
+};
 
 export type ListAcctPeriodsResponse = {
   periods: AcctPeriod[] | undefined;
@@ -15122,7 +15290,8 @@ export type ReopenAcctPeriodRequest = {
   month: string | undefined;
 };
 
-export type ReopenAcctPeriodResponse = {};
+export type ReopenAcctPeriodResponse = {
+};
 
 // AcctEvent is one posting-outbox event's disposition (the internal JSON payload is omitted).
 export type AcctEvent = {
@@ -15149,13 +15318,15 @@ export type ReprocessAcctEventRequest = {
   id: number | undefined;
 };
 
-export type ReprocessAcctEventResponse = {};
+export type ReprocessAcctEventResponse = {
+};
 
 export type ResolveAcctEventRequest = {
   id: number | undefined;
 };
 
-export type ResolveAcctEventResponse = {};
+export type ResolveAcctEventResponse = {
+};
 
 export type GetTrialBalanceRequest = {
   from: string | undefined;
@@ -15393,7 +15564,8 @@ export type IgnoreBankTxnRequest = {
   reason: string | undefined;
 };
 
-export type IgnoreBankTxnResponse = {};
+export type IgnoreBankTxnResponse = {
+};
 
 // AcctBankRule is a substring→account suggestion applied at import.
 export type AcctBankRule = {
@@ -15402,7 +15574,8 @@ export type AcctBankRule = {
   accountCode: string | undefined;
 };
 
-export type ListBankRulesRequest = {};
+export type ListBankRulesRequest = {
+};
 
 export type ListBankRulesResponse = {
   rules: AcctBankRule[] | undefined;
@@ -15421,7 +15594,8 @@ export type DeleteBankRuleRequest = {
   id: number | undefined;
 };
 
-export type DeleteBankRuleResponse = {};
+export type DeleteBankRuleResponse = {
+};
 
 // Supplier is a purchase-side counterparty (the AP catalog).
 export type Supplier = {
@@ -15442,7 +15616,8 @@ export type CreateSupplierResponse = {
   supplier: Supplier | undefined;
 };
 
-export type ListSuppliersRequest = {};
+export type ListSuppliersRequest = {
+};
 
 export type ListSuppliersResponse = {
   suppliers: Supplier[] | undefined;
@@ -15458,7 +15633,8 @@ export type AcctPayableRow = {
   balance: googletype_Decimal | undefined;
 };
 
-export type GetPayablesRequest = {};
+export type GetPayablesRequest = {
+};
 
 export type GetPayablesResponse = {
   rows: AcctPayableRow[] | undefined;
@@ -15473,14 +15649,16 @@ export type AcctReceivableRow = {
   balance: googletype_Decimal | undefined;
 };
 
-export type GetReceivablesRequest = {};
+export type GetReceivablesRequest = {
+};
 
 export type GetReceivablesResponse = {
   rows: AcctReceivableRow[] | undefined;
 };
 
 // GetAcctAlerts: the section's attention flags (the tab dots), aggregated server-side.
-export type GetAcctAlertsRequest = {};
+export type GetAcctAlertsRequest = {
+};
 
 export type GetAcctAlertsResponse = {
   openPayables: number | undefined;
@@ -15740,7 +15918,8 @@ export type CreateFixedAssetResponse = {
   id: number | undefined;
 };
 
-export type ListFixedAssetsRequest = {};
+export type ListFixedAssetsRequest = {
+};
 
 export type ListFixedAssetsResponse = {
   assets: FixedAsset[] | undefined;
@@ -16946,7 +17125,7 @@ export type common_DesignRunParams = {
   image: common_DesignImageOptions | undefined;
   // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
   inpaint: common_DesignInpaintParams | undefined;
-  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  // THE TARGET CANVAS OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: common_DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: common_DesignVideoParams | undefined;
@@ -17169,16 +17348,27 @@ export type common_DesignInpaintParams = {
   maskMediaId: number | undefined;
 };
 
-// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
+// DesignExtendParams — the canvas of an extend (outpaint) run. The ONE source travels in
 // DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
-// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
-// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
-// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
-// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
-// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
-// may be at most 18 MP (`source_too_large`).
+// (`extend_takes_no_words`). There are two modes, selected by FIELD PRESENCE rather than by a non-zero value:
+// · with none of expand_top / bottom / left / right present, the old aspect-ratio mode is unchanged:
+// aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`), and the source is centred on the axis the target grows;
+// · with ANY expand_* present, the sides are whole pixels in the SOURCE picture's coordinates and the canvas is
+// exactly source + those four sides. Omitted sides are zero; aspect_ratio may be empty and does not place the
+// source. Every side must be non-negative and at most 3× its corresponding source side (`extend_sides_invalid`).
+// A request that adds no pixels is `target_aspect_must_extend` in either mode (so four explicitly present zeroes do
+// not buy a no-op). The server caps the canvas at 3 megapixels by downscaling the source AND all four stated sides
+// together, and re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original
+// is kept» is a fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows).
+// The source may be at most 18 MP (`source_too_large`).
 export type common_DesignExtendParams = {
+  // Legacy target mode. Ignored for placement when any expand_* field is present.
   aspectRatio: string | undefined;
+  expandTop?: number;
+  expandBottom?: number;
+  expandLeft?: number;
+  expandRight?: number;
 };
 
 // DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
@@ -17886,11 +18076,13 @@ export type StartDesignRunRequest = {
   // free, before anything is reserved:
   // · extend — anything other than exactly one picture in params.extra_input_media_ids
   // («one_source_picture»); an `ask` or a params.freeform on a route that reads no words
-  // («extend_takes_no_words»); a params.extend.aspect_ratio outside the nine targets, `auto`
-  // and '' included («extend_aspect_unknown»); a target within 0.5 % of the source's own
-  // proportion, which adds no pixels on either side («target_aspect_must_extend»); a source
-  // under the minimum side («source_too_small»); a source over 18 MP, by its stored size or its
-  // header («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
+  // («extend_takes_no_words»); with no per-side fields, a params.extend.aspect_ratio outside the
+  // nine targets, `auto` and '' included («extend_aspect_unknown»); with any per-side field,
+  // a negative expansion or one over 3× its corresponding source side («extend_sides_invalid»);
+  // a target within 0.5 % of the source's own proportion OR a per-side request whose four sides
+  // are zero, both of which add no pixels («target_aspect_must_extend»); a source under the
+  // minimum side («source_too_small»); a source over 18 MP, by its stored size or its header
+  // («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
   // · inpaint — no params.inpaint.source_media_id («no_source_picture»); no
   // params.inpaint.mask_media_id («mask_required»); a mask whose width and height differ from
   // the source's («mask_size_mismatch»); a mask that is not a readable PNG, or is the source
@@ -18190,7 +18382,8 @@ export type DeleteDesignDetailSlotRequest = {
   slotId: number | undefined;
 };
 
-export type DeleteDesignDetailSlotResponse = {};
+export type DeleteDesignDetailSlotResponse = {
+};
 
 export type GetDesignEditLayerRequest = {
   techCardId: number | undefined;
@@ -18555,7 +18748,8 @@ export type DeleteDesignAssetPlacementRequest = {
   techCardId: number | undefined;
 };
 
-export type DeleteDesignAssetPlacementResponse = {};
+export type DeleteDesignAssetPlacementResponse = {
+};
 
 export type DraftDesignIdeaRequest = {
   techCardId: number | undefined;
@@ -18768,26 +18962,26 @@ export type DesignQuizQuestion = {
   // media_id — the moodboard picture (tech card media id, as attached to the board) this question
   // is about; 0 = not a picture question. When set, part is "whole" and family/view are ignored by
   // clients (no pictogram: the board anchors to the picture instead). Clients echo it on save.
-  mediaId?: number | undefined;
+  mediaId: number | undefined;
   // spots — the 1–3 places IN the anchored picture the question is about (99-SPOTS), drawn as
   // numbered rings on the board tile. Only when media_id ≠ 0 and the picture is a target or detail
   // reference; empty for whole-picture questions. Clients echo it on save (like media_id).
-  spots?: DesignQuizSpot[] | undefined;
+  spots: DesignQuizSpot[] | undefined;
 };
 
 // DesignQuizSpot — one place on a quiz question's picture (99-SPOTS).
 export type DesignQuizSpot = {
   // label — the place in the question's own words, 1–4 words ("inner strap edge").
-  label?: string | undefined;
+  label: string | undefined;
   // x — 0..1000 across the picture's width, from the left edge as the viewer sees it.
-  x?: number | undefined;
+  x: number | undefined;
   // y — 0..1000 down the picture's height, from the top.
-  y?: number | undefined;
+  y: number | undefined;
   // scale — "zone" (a part: sleeve, yoke, the run of a hem) or "detail" (a stitch line, a button).
-  scale?: string | undefined;
+  scale: string | undefined;
   // at — output only, server-computed: where label sits inside the question text, as a UTF-16 code
   // unit offset (a JS string index), matched case-insensitively; -1 = not found. Ignored on save.
-  at?: number | undefined;
+  at: number | undefined;
 };
 
 export type GenerateDesignQuizRequest = {
@@ -18992,7 +19186,8 @@ export type AiPurposeInfo = {
   fallback: AiRouteCandidate | undefined;
 };
 
-export type GetAiProvidersConfigRequest = {};
+export type GetAiProvidersConfigRequest = {
+};
 
 export type GetAiProvidersConfigResponse = {
   providers: AiProviderInfo[] | undefined;
@@ -19268,9 +19463,7 @@ export interface AdminService {
   // bom_line_key (assignments[i].bom_line_key), a position the palette does not have
   // (assignments[i].colour_position) or a slot named twice; FailedPrecondition when the colourway
   // has no palette yet.
-  ApplyColorwayPaletteToSlots(
-    request: ApplyColorwayPaletteToSlotsRequest,
-  ): Promise<ApplyColorwayPaletteToSlotsResponse>;
+  ApplyColorwayPaletteToSlots(request: ApplyColorwayPaletteToSlotsRequest): Promise<ApplyColorwayPaletteToSlotsResponse>;
   // Gets a colourway by its id.
   GetColorwayByID(request: GetColorwayByIDRequest): Promise<GetColorwayByIDResponse>;
   // Retrieves a paginated list of colourways. NOTE on ordering: grpc-gateway's mux prepends
@@ -19308,9 +19501,7 @@ export interface AdminService {
   // TransitionColorwayStatus applies a non-publish lifecycle edge (R6): ACTIVE<->HIDDEN and
   // ACTIVE|HIDDEN->ARCHIVED, validated through the server state machine. Publish has its own RPC
   // because it carries preconditions.
-  TransitionColorwayStatus(
-    request: TransitionColorwayStatusRequest,
-  ): Promise<TransitionColorwayStatusResponse>;
+  TransitionColorwayStatus(request: TransitionColorwayStatusRequest): Promise<TransitionColorwayStatusResponse>;
   // Updates the stock for a specific product size.
   UpdateVariantStock(request: UpdateVariantStockRequest): Promise<UpdateVariantStockResponse>;
   // CreateVariant adds a new variant (size) to a colourway at zero stock (R2). The size is immutable;
@@ -19368,13 +19559,9 @@ export interface AdminService {
   // style's primary card, overriding any manual value. R4/p019: it derives the style from the owner
   // relation and never repoints it — cost provenance is separated from ownership. Was
   // SyncColorwayCostFromStyle.
-  SyncColorwayCostFromOwningStyle(
-    request: SyncColorwayCostFromOwningStyleRequest,
-  ): Promise<SyncColorwayCostFromOwningStyleResponse>;
+  SyncColorwayCostFromOwningStyle(request: SyncColorwayCostFromOwningStyleRequest): Promise<SyncColorwayCostFromOwningStyleResponse>;
   // Lists stock change history with optional filters.
-  ListStockChangeHistory(
-    request: ListStockChangeHistoryRequest,
-  ): Promise<ListStockChangeHistoryResponse>;
+  ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
   // Lists stock changes with simplified format for reporting.
   ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
   // ListProductWaitlist reads the back-in-stock waitlist the storefront has been writing since
@@ -19398,9 +19585,7 @@ export interface AdminService {
   // UpsertFiberLabelTranslations replaces a fibre's care-label names as a whole set (a language not
   // sent, or sent with an empty name, is removed) and, when animal_non_textile is present, sets the
   // flag. Bumps the fiber dictionary revision like every other fibre mutation.
-  UpsertFiberLabelTranslations(
-    request: UpsertFiberLabelTranslationsRequest,
-  ): Promise<UpsertFiberLabelTranslationsResponse>;
+  UpsertFiberLabelTranslations(request: UpsertFiberLabelTranslationsRequest): Promise<UpsertFiberLabelTranslationsResponse>;
   ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
   SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
@@ -19457,17 +19642,13 @@ export interface AdminService {
   // (order.ga_client_id → last non-direct UTM). Unlike the GA4-revenue campaign attribution, the
   // numerator is real settled base revenue and CAC is per-channel. Read alongside GetMetrics'
   // GA4-based attribution for upper-funnel context.
-  GetChannelRoasSettled(
-    request: GetChannelRoasSettledRequest,
-  ): Promise<GetChannelRoasSettledResponse>;
+  GetChannelRoasSettled(request: GetChannelRoasSettledRequest): Promise<GetChannelRoasSettledResponse>;
   // Reads the operator-tunable thresholds behind the dashboard alerts.
   GetAlertSettings(request: GetAlertSettingsRequest): Promise<GetAlertSettingsResponse>;
   // Updates the operator-tunable dashboard alert thresholds.
   UpsertAlertSettings(request: UpsertAlertSettingsRequest): Promise<UpsertAlertSettingsResponse>;
   // Sets per-SKU inventory reorder targets used by the inventory-health metrics.
-  UpsertInventoryTargets(
-    request: UpsertInventoryTargetsRequest,
-  ): Promise<UpsertInventoryTargetsResponse>;
+  UpsertInventoryTargets(request: UpsertInventoryTargetsRequest): Promise<UpsertInventoryTargetsResponse>;
   // Records operator-entered marketing spend per channel per day, used for ROAS.
   UpsertChannelSpend(request: UpsertChannelSpendRequest): Promise<UpsertChannelSpendResponse>;
   // UpsertOpexLines writes OPEX line items (NF-08) — each with its own currency (folded to base) and
@@ -19515,31 +19696,21 @@ export interface AdminService {
   GetEmailCampaign(request: GetEmailCampaignRequest): Promise<GetEmailCampaignResponse>;
   DeleteEmailCampaign(request: DeleteEmailCampaignRequest): Promise<DeleteEmailCampaignResponse>;
   // Declared after the /{id} GET so grpc-gateway gives the literal route priority.
-  ListEmailCampaignsPaged(
-    request: ListEmailCampaignsPagedRequest,
-  ): Promise<ListEmailCampaignsPagedResponse>;
-  RenderCampaignPreview(
-    request: RenderCampaignPreviewRequest,
-  ): Promise<RenderCampaignPreviewResponse>;
+  ListEmailCampaignsPaged(request: ListEmailCampaignsPagedRequest): Promise<ListEmailCampaignsPagedResponse>;
+  RenderCampaignPreview(request: RenderCampaignPreviewRequest): Promise<RenderCampaignPreviewResponse>;
   SendTestEmail(request: SendTestEmailRequest): Promise<SendTestEmailResponse>;
   SendCampaignNow(request: SendCampaignNowRequest): Promise<SendCampaignNowResponse>;
   // AutoTranslateEmailCampaign fills the non-English locales' subject + block translations from
   // the English source via an LLM, for the admin to review before launch. overwrite=false only
   // fills what's missing; true re-translates everything.
-  AutoTranslateEmailCampaign(
-    request: AutoTranslateEmailCampaignRequest,
-  ): Promise<AutoTranslateEmailCampaignResponse>;
+  AutoTranslateEmailCampaign(request: AutoTranslateEmailCampaignRequest): Promise<AutoTranslateEmailCampaignResponse>;
   ScheduleCampaign(request: ScheduleCampaignRequest): Promise<ScheduleCampaignResponse>;
   PauseCampaign(request: PauseCampaignRequest): Promise<PauseCampaignResponse>;
   ResumeCampaign(request: ResumeCampaignRequest): Promise<ResumeCampaignResponse>;
   CancelCampaign(request: CancelCampaignRequest): Promise<CancelCampaignResponse>;
-  GetCampaignDispatchStatus(
-    request: GetCampaignDispatchStatusRequest,
-  ): Promise<GetCampaignDispatchStatusResponse>;
+  GetCampaignDispatchStatus(request: GetCampaignDispatchStatusRequest): Promise<GetCampaignDispatchStatusResponse>;
   GetCampaignMetrics(request: GetCampaignMetricsRequest): Promise<GetCampaignMetricsResponse>;
-  GetCampaignRecipients(
-    request: GetCampaignRecipientsRequest,
-  ): Promise<GetCampaignRecipientsResponse>;
+  GetCampaignRecipients(request: GetCampaignRecipientsRequest): Promise<GetCampaignRecipientsResponse>;
   // AddArchive creates a new archive.
   AddArchive(request: AddArchiveRequest): Promise<AddArchiveResponse>;
   UpdateArchive(request: UpdateArchiveRequest): Promise<UpdateArchiveResponse>;
@@ -19600,29 +19771,15 @@ export interface AdminService {
   GetSample(request: GetSampleRequest): Promise<GetSampleResponse>;
   ListSamples(request: ListSamplesRequest): Promise<ListSamplesResponse>;
   // SAMPLE SUBSTITUTIONS (§2.7): dev-time material deviations on a sample.
-  AddSampleSubstitution(
-    request: AddSampleSubstitutionRequest,
-  ): Promise<AddSampleSubstitutionResponse>;
-  DeleteSampleSubstitution(
-    request: DeleteSampleSubstitutionRequest,
-  ): Promise<DeleteSampleSubstitutionResponse>;
-  ListSampleSubstitutions(
-    request: ListSampleSubstitutionsRequest,
-  ): Promise<ListSampleSubstitutionsResponse>;
+  AddSampleSubstitution(request: AddSampleSubstitutionRequest): Promise<AddSampleSubstitutionResponse>;
+  DeleteSampleSubstitution(request: DeleteSampleSubstitutionRequest): Promise<DeleteSampleSubstitutionResponse>;
+  ListSampleSubstitutions(request: ListSampleSubstitutionsRequest): Promise<ListSampleSubstitutionsResponse>;
   // FITTING CHANGE REQUESTS (S26): dedicated CRUD (stable id) + the carry-over view.
-  AddFittingChangeRequest(
-    request: AddFittingChangeRequestRequest,
-  ): Promise<AddFittingChangeRequestResponse>;
-  UpdateFittingChangeRequest(
-    request: UpdateFittingChangeRequestRequest,
-  ): Promise<UpdateFittingChangeRequestResponse>;
-  DeleteFittingChangeRequest(
-    request: DeleteFittingChangeRequestRequest,
-  ): Promise<DeleteFittingChangeRequestResponse>;
+  AddFittingChangeRequest(request: AddFittingChangeRequestRequest): Promise<AddFittingChangeRequestResponse>;
+  UpdateFittingChangeRequest(request: UpdateFittingChangeRequestRequest): Promise<UpdateFittingChangeRequestResponse>;
+  DeleteFittingChangeRequest(request: DeleteFittingChangeRequestRequest): Promise<DeleteFittingChangeRequestResponse>;
   // Declared last (see ListModels ordering note) so the fixed /open path is not shadowed.
-  ListOpenFittingChangeRequests(
-    request: ListOpenFittingChangeRequestsRequest,
-  ): Promise<ListOpenFittingChangeRequestsResponse>;
+  ListOpenFittingChangeRequests(request: ListOpenFittingChangeRequestsRequest): Promise<ListOpenFittingChangeRequestsResponse>;
   // DraftFittingEdits turns a fitting note into unsaved change-request drafts. The client decides
   // which drafts to create through AddFittingChangeRequest.
   DraftFittingEdits(request: DraftFittingEditsRequest): Promise<DraftFittingEditsResponse>;
@@ -19675,13 +19832,9 @@ export interface AdminService {
   // AddTaskChecklistItem appends a checklist item (subtask) to a task.
   AddTaskChecklistItem(request: AddTaskChecklistItemRequest): Promise<AddTaskChecklistItemResponse>;
   // SetTaskChecklistItemDone sets a checklist item's done flag.
-  SetTaskChecklistItemDone(
-    request: SetTaskChecklistItemDoneRequest,
-  ): Promise<SetTaskChecklistItemDoneResponse>;
+  SetTaskChecklistItemDone(request: SetTaskChecklistItemDoneRequest): Promise<SetTaskChecklistItemDoneResponse>;
   // DeleteTaskChecklistItem removes a checklist item.
-  DeleteTaskChecklistItem(
-    request: DeleteTaskChecklistItemRequest,
-  ): Promise<DeleteTaskChecklistItemResponse>;
+  DeleteTaskChecklistItem(request: DeleteTaskChecklistItemRequest): Promise<DeleteTaskChecklistItemResponse>;
   // SetTaskParent делает задачу сабтаской другой (или возвращает её на верхний уровень).
   // ОТДЕЛЬНЫЙ RPC, А НЕ ПОЛЕ TaskInsert: содержимое карточки сохраняется полной заменой, и клиент,
   // не знающий поля, стирал бы родителя каждым сохранением. Ровно та же причина, по которой
@@ -19733,9 +19886,7 @@ export interface AdminService {
   // caller has just seen that file's labels. A bulk action has not seen them, so a
   // replacing bulk write would silently erase whatever a colleague labelled those
   // files with between the grid loading and the button being pressed.
-  AssignLibraryFileTopics(
-    request: AssignLibraryFileTopicsRequest,
-  ): Promise<AssignLibraryFileTopicsResponse>;
+  AssignLibraryFileTopics(request: AssignLibraryFileTopicsRequest): Promise<AssignLibraryFileTopicsResponse>;
   // UpdateFileTopicMeta sets a topic's kind, dates and archive flag. A new message
   // with full-replacement semantics — see the request for why this is not folded
   // into RenameFileTopic.
@@ -19777,9 +19928,7 @@ export interface AdminService {
   // answer carries project NAMES and file COUNTS out of the library, so gating it on
   // the tech-card section would turn the garment card into a side channel into the
   // library. A person without files access simply does not get the block.
-  ListStyleFileProjects(
-    request: ListStyleFileProjectsRequest,
-  ): Promise<ListStyleFileProjectsResponse>;
+  ListStyleFileProjects(request: ListStyleFileProjectsRequest): Promise<ListStyleFileProjectsResponse>;
   // SetLibraryFileOwners REPLACES the file's set of owners (owners come in ones
   // and twos, and the picker has just shown the caller the whole current set, so
   // a full replace is honest here — unlike the bulk topic write above).
@@ -19807,39 +19956,27 @@ export interface AdminService {
   // mean sending a set this screen has never seen. tasks:write for the same
   // reason as the read above — the row belongs to the task (task_file cascades
   // from it), not to the file.
-  AttachLibraryFileToTask(
-    request: AttachLibraryFileToTaskRequest,
-  ): Promise<AttachLibraryFileToTaskResponse>;
+  AttachLibraryFileToTask(request: AttachLibraryFileToTaskRequest): Promise<AttachLibraryFileToTaskResponse>;
   // DetachLibraryFileFromTask removes that link. Also idempotent, and for the
   // same reason: two people clearing the same attachment must both be told it is
   // gone, not one of them that it never was.
-  DetachLibraryFileFromTask(
-    request: DetachLibraryFileFromTaskRequest,
-  ): Promise<DetachLibraryFileFromTaskResponse>;
+  DetachLibraryFileFromTask(request: DetachLibraryFileFromTaskRequest): Promise<DetachLibraryFileFromTaskResponse>;
   // ListLibraryFileComments returns the feed, oldest first.
-  ListLibraryFileComments(
-    request: ListLibraryFileCommentsRequest,
-  ): Promise<ListLibraryFileCommentsResponse>;
+  ListLibraryFileComments(request: ListLibraryFileCommentsRequest): Promise<ListLibraryFileCommentsResponse>;
   // AddLibraryFileComment appends one remark. Classified as a WRITE to the
   // library: files:read reads the feed and cannot add to it, because a discussion
   // is content OF the library rather than a view of it.
-  AddLibraryFileComment(
-    request: AddLibraryFileCommentRequest,
-  ): Promise<AddLibraryFileCommentResponse>;
+  AddLibraryFileComment(request: AddLibraryFileCommentRequest): Promise<AddLibraryFileCommentResponse>;
   // UpdateLibraryFileComment edits a remark and stamps edited_at — an edit that
   // leaves no trace rewrites the past. files:write is necessary but NOT
   // sufficient: the handler additionally requires the caller to be the AUTHOR
   // (a super-admin may edit any), same "map holds one section, code checks the
   // rest" shape as SetLibraryFileOwners.
-  UpdateLibraryFileComment(
-    request: UpdateLibraryFileCommentRequest,
-  ): Promise<UpdateLibraryFileCommentResponse>;
+  UpdateLibraryFileComment(request: UpdateLibraryFileCommentRequest): Promise<UpdateLibraryFileCommentResponse>;
   // DeleteLibraryFileComment removes one's own remark (a super-admin any), same
   // second gate. The literal `comment` segment keeps this clear of DELETE
   // /files/{id}, which is one segment shorter and therefore a different route.
-  DeleteLibraryFileComment(
-    request: DeleteLibraryFileCommentRequest,
-  ): Promise<DeleteLibraryFileCommentResponse>;
+  DeleteLibraryFileComment(request: DeleteLibraryFileCommentRequest): Promise<DeleteLibraryFileCommentResponse>;
   // GetLibraryFileAccess returns one file's access block: level, the named people,
   // the public link with its expiry, and the journal of who changed what when.
   // Declared before ListShared… — the Get-before-List convention of this file.
@@ -19856,9 +19993,7 @@ export interface AdminService {
   // token carries the epoch, so bumping the epoch is the revocation — there is no
   // revocation list to consult and nothing to expire. Same handler circle as
   // SetLibraryFileAccess.
-  RotateLibraryFileLink(
-    request: RotateLibraryFileLinkRequest,
-  ): Promise<RotateLibraryFileLinkResponse>;
+  RotateLibraryFileLink(request: RotateLibraryFileLinkRequest): Promise<RotateLibraryFileLinkResponse>;
   // ListSharedLibraryFiles is the витрина: everything that is `people` or `link`
   // RIGHT NOW, so "what have we actually opened up" is one screen instead of a
   // walk through the grid. Two literal segments — the templated /files/{id} is one
@@ -19866,9 +20001,7 @@ export interface AdminService {
   // The listing runs under the same visibility predicate as the grid (a
   // super-admin sees all of it), which is why two people can honestly see
   // different numbers here. That is accepted, and the screen says so.
-  ListSharedLibraryFiles(
-    request: ListSharedLibraryFilesRequest,
-  ): Promise<ListSharedLibraryFilesResponse>;
+  ListSharedLibraryFiles(request: ListSharedLibraryFilesRequest): Promise<ListSharedLibraryFilesResponse>;
   // CreateLibraryNote creates that file together with its first text. The name is
   // asked for up front — an untitled note is a note nobody finds later — and the
   // `.md` suffix is appended by the server rather than demanded of the person.
@@ -19877,9 +20010,7 @@ export interface AdminService {
   // url, for two hard reasons: text/markdown is not inline-safe, so it only ever
   // gets an attachment url; and fetching a presigned url from JS runs into the
   // bucket's CORS, a lesson the patterns feature has already paid for.
-  GetLibraryNoteContent(
-    request: GetLibraryNoteContentRequest,
-  ): Promise<GetLibraryNoteContentResponse>;
+  GetLibraryNoteContent(request: GetLibraryNoteContentRequest): Promise<GetLibraryNoteContentResponse>;
   // SaveLibraryNoteContent writes a new version under a COMPARE-AND-SET on
   // sha256: the caller sends the sha256 it started from, and a row that moved
   // underneath comes back as DATA (conflict = true, with the stored text), not as
@@ -19887,9 +20018,7 @@ export interface AdminService {
   // правили» and loses nothing, without a second round trip. `force` is the
   // deliberate overwrite; without it, silently overwriting somebody's text is not
   // reachable at all, which is the whole point of asking for it.
-  SaveLibraryNoteContent(
-    request: SaveLibraryNoteContentRequest,
-  ): Promise<SaveLibraryNoteContentResponse>;
+  SaveLibraryNoteContent(request: SaveLibraryNoteContentRequest): Promise<SaveLibraryNoteContentResponse>;
   // FormatLibraryNoteMarkdown turns the plain text the editor is holding into
   // tidy markdown. It is a SUGGESTION and persists NOTHING: the answer replaces
   // the editor's buffer only if the person accepts it, and the write still goes
@@ -19903,9 +20032,7 @@ export interface AdminService {
   // Classified as a WRITE (files:write) although it stores nothing — the rule
   // EnhanceText and AnalyzeTechCardConstruction follow too: AI-assisted
   // authoring is authoring.
-  FormatLibraryNoteMarkdown(
-    request: FormatLibraryNoteMarkdownRequest,
-  ): Promise<FormatLibraryNoteMarkdownResponse>;
+  FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
   // EnhanceText rewrites ONE free-text field of a tech card — improve (fix errors,
   // clearer), expand (more detail), shorten, or prompt (the text as an
   // image-generation prompt, O-50) — for the small `ai ✦` button in the corner
@@ -19948,32 +20075,22 @@ export interface AdminService {
   GetFulfillmentCard(request: GetFulfillmentCardRequest): Promise<GetFulfillmentCardResponse>;
   // SetFulfillmentAssignee sets (or clears, with "") the order's fulfillment
   // assignee, lazily creating the annotation.
-  SetFulfillmentAssignee(
-    request: SetFulfillmentAssigneeRequest,
-  ): Promise<SetFulfillmentAssigneeResponse>;
+  SetFulfillmentAssignee(request: SetFulfillmentAssigneeRequest): Promise<SetFulfillmentAssigneeResponse>;
   // SetFulfillmentNotes sets the order's internal packing notes.
   SetFulfillmentNotes(request: SetFulfillmentNotesRequest): Promise<SetFulfillmentNotesResponse>;
   // AddFulfillmentChecklistItem appends a packing-checklist item to an order.
-  AddFulfillmentChecklistItem(
-    request: AddFulfillmentChecklistItemRequest,
-  ): Promise<AddFulfillmentChecklistItemResponse>;
+  AddFulfillmentChecklistItem(request: AddFulfillmentChecklistItemRequest): Promise<AddFulfillmentChecklistItemResponse>;
   // SetFulfillmentChecklistItemDone sets a packing-checklist item's done flag.
-  SetFulfillmentChecklistItemDone(
-    request: SetFulfillmentChecklistItemDoneRequest,
-  ): Promise<SetFulfillmentChecklistItemDoneResponse>;
+  SetFulfillmentChecklistItemDone(request: SetFulfillmentChecklistItemDoneRequest): Promise<SetFulfillmentChecklistItemDoneResponse>;
   // DeleteFulfillmentChecklistItem removes a packing-checklist item.
-  DeleteFulfillmentChecklistItem(
-    request: DeleteFulfillmentChecklistItemRequest,
-  ): Promise<DeleteFulfillmentChecklistItemResponse>;
+  DeleteFulfillmentChecklistItem(request: DeleteFulfillmentChecklistItemRequest): Promise<DeleteFulfillmentChecklistItemResponse>;
   // ShipFulfillmentOrder records a To-Fulfill order's tracking code, performing
   // the real shipped transition (and the shipped email) — gated by fulfillment
   // perms. Requires a non-empty tracking code.
   ShipFulfillmentOrder(request: ShipFulfillmentOrderRequest): Promise<ShipFulfillmentOrderResponse>;
   // MarkFulfillmentDelivered performs the real delivered transition for a shipped
   // order.
-  MarkFulfillmentDelivered(
-    request: MarkFulfillmentDeliveredRequest,
-  ): Promise<MarkFulfillmentDeliveredResponse>;
+  MarkFulfillmentDelivered(request: MarkFulfillmentDeliveredRequest): Promise<MarkFulfillmentDeliveredResponse>;
   // PrepareShippingLabel returns the default parcel (weight/box derived from the
   // order's tech cards, editable) plus whether label generation is available, so the
   // UI can pre-fill the label form before generating. Read-only.
@@ -19981,9 +20098,7 @@ export interface AdminService {
   // GenerateShippingLabel announces the order's parcel with Sendcloud (carrier label
   // + tracking number), then performs the real shipped transition via the shared ship
   // path. Returns the printable label URL. Gated by fulfillment perms.
-  GenerateShippingLabel(
-    request: GenerateShippingLabelRequest,
-  ): Promise<GenerateShippingLabelResponse>;
+  GenerateShippingLabel(request: GenerateShippingLabelRequest): Promise<GenerateShippingLabelResponse>;
   // GetShippingOptions fetches the shipping options (carrier + service + quote)
   // available for the order's parcel via Sendcloud, so an operator can pick one
   // before generating. Read-only.
@@ -20004,16 +20119,12 @@ export interface AdminService {
   // AssignTechCardRole assigns an admin account a role on a tech card (Q5), multi per role.
   AssignTechCardRole(request: AssignTechCardRoleRequest): Promise<AssignTechCardRoleResponse>;
   // RemoveTechCardRoleAssignment removes one role assignment by id.
-  RemoveTechCardRoleAssignment(
-    request: RemoveTechCardRoleAssignmentRequest,
-  ): Promise<RemoveTechCardRoleAssignmentResponse>;
+  RemoveTechCardRoleAssignment(request: RemoveTechCardRoleAssignmentRequest): Promise<RemoveTechCardRoleAssignmentResponse>;
   // ExitTechCardGuide leaves the guided studio flow for a card (clears TechCard.guided). Idempotent;
   // does not bump lock_version, so an open card form gets no conflict.
   ExitTechCardGuide(request: ExitTechCardGuideRequest): Promise<ExitTechCardGuideResponse>;
   // ListTechCardRoleAssignments lists a card's role assignments with resolved usernames (Q5).
-  ListTechCardRoleAssignments(
-    request: ListTechCardRoleAssignmentsRequest,
-  ): Promise<ListTechCardRoleAssignmentsResponse>;
+  ListTechCardRoleAssignments(request: ListTechCardRoleAssignmentsRequest): Promise<ListTechCardRoleAssignmentsResponse>;
   // ListAdmins is the panel-wide people picker: id, username, self-declared specialties and the
   // super flag of every account that can still be assigned something (disabled ones are excluded).
   // ANY AUTHENTICATED ACCOUNT MAY CALL IT (allowlisted, not section-gated). A picker of people is
@@ -20029,9 +20140,7 @@ export interface AdminService {
   UpdateTechCard(request: UpdateTechCardRequest): Promise<UpdateTechCardResponse>;
   // ListTechCardSnapshots returns the light server-side save history, newest first. The current
   // card is not repeated here: clients render it as their own top row from GetTechCard.
-  ListTechCardSnapshots(
-    request: ListTechCardSnapshotsRequest,
-  ): Promise<ListTechCardSnapshotsResponse>;
+  ListTechCardSnapshots(request: ListTechCardSnapshotsRequest): Promise<ListTechCardSnapshotsResponse>;
   // RestoreTechCardSnapshot brings a card back to any one of its own snapshots, including autosave
   // history and TechCardPatternRevision.snapshot_id rows. One transaction: the current card is snapshotted first
   // (reason «restore:<snapshot_id>»), then rewritten through the UpdateTechCard write path. Approval,
@@ -20039,15 +20148,11 @@ export interface AdminService {
   // NotFound (no such snapshot on this card), Aborted (expected_lock_version is stale),
   // FailedPrecondition (released or system card, unreadable snapshot, narrower size range),
   // PermissionDenied (the snapshot's costing differs from the card's and the caller lacks costing:write).
-  RestoreTechCardSnapshot(
-    request: RestoreTechCardSnapshotRequest,
-  ): Promise<RestoreTechCardSnapshotResponse>;
+  RestoreTechCardSnapshot(request: RestoreTechCardSnapshotRequest): Promise<RestoreTechCardSnapshotResponse>;
   // DeleteTechCardPatternRevision removes one retained pattern-history row. It cannot remove the
   // object currently attached to a live sheet. The card is optimistically locked and returned in
   // the same read shape as GetTechCard.
-  DeleteTechCardPatternRevision(
-    request: DeleteTechCardPatternRevisionRequest,
-  ): Promise<DeleteTechCardPatternRevisionResponse>;
+  DeleteTechCardPatternRevision(request: DeleteTechCardPatternRevisionRequest): Promise<DeleteTechCardPatternRevisionResponse>;
   // DeleteTechCard deletes a tech card by id (nested sections cascade).
   DeleteTechCard(request: DeleteTechCardRequest): Promise<DeleteTechCardResponse>;
   // ListTechCards lists tech cards (paged, optional filters). Declared AFTER
@@ -20075,9 +20180,7 @@ export interface AdminService {
   // TestTechCardListRouteNotShadowed, not by the shape of the path.
   // Classified rd(tech_cards): it derives nothing a reader of the card could not derive by reading
   // it, and it spends nothing. Its LLM sibling is a WRITE grant, because that one does spend.
-  GetTechCardConstructionAudit(
-    request: GetTechCardConstructionAuditRequest,
-  ): Promise<GetTechCardConstructionAuditResponse>;
+  GetTechCardConstructionAudit(request: GetTechCardConstructionAuditRequest): Promise<GetTechCardConstructionAuditResponse>;
   // AnalyzeTechCardConstruction — THE LLM LAYER of the same review, behind the Analyze button. It
   // reads the SAVED card, sends it to the model with the machine layer's verified facts attached,
   // and returns ONLY what the model said (source="model") past a verifier that drops every finding
@@ -20092,9 +20195,7 @@ export interface AdminService {
   // IT SPENDS MONEY ON EVERY PRESS, which is why it is classified wr(tech_cards) while its machine
   // sibling is rd, and why three limits stand in front of the call: one run per admin per card at a
   // time, a minimum interval between runs of the same card, and a per-admin hourly ceiling.
-  AnalyzeTechCardConstruction(
-    request: AnalyzeTechCardConstructionRequest,
-  ): Promise<AnalyzeTechCardConstructionResponse>;
+  AnalyzeTechCardConstruction(request: AnalyzeTechCardConstructionRequest): Promise<AnalyzeTechCardConstructionResponse>;
   // AddTechCardIssue files ONE issue against a tech card — the gesture that turns a finding of the
   // review into a tracked row someone answers for.
   // IT IS NARROW ON PURPOSE, AND IT WORKS ON A FROZEN CARD. Filing through UpdateTechCard would be
@@ -20110,9 +20211,7 @@ export interface AdminService {
   // server never computes, whose mark comes back in GetTechCardConstructionAuditResponse.seen_marks.
   // A card keeps at most 500 marks; a new key past that is FAILED_PRECONDITION. Idempotent both
   // ways; works on a released card (a mark is not card content). Classified wr(tech_cards).
-  SetTechCardFindingSeen(
-    request: SetTechCardFindingSeenRequest,
-  ): Promise<SetTechCardFindingSeenResponse>;
+  SetTechCardFindingSeen(request: SetTechCardFindingSeenRequest): Promise<SetTechCardFindingSeenResponse>;
   // КАТАЛОГ РАБОТ (видов операций) — СЕРВЕРНЫЕ ДАННЫЕ, ОТДАВАЕМЫЕ ОДНИМ ЗАПРОСОМ.
   // Пункты, их синонимы поиска (RU/EN), допустимые машинки, глобальные дефолты свойств и подсказки
   // нормы времени приезжают вместе, потому что порознь они бесполезны: пикер работ рисуется целиком
@@ -20121,9 +20220,7 @@ export interface AdminService {
   // перегенерации клиента (инцидент Ж7: незнакомый член enum protojson выбрасывает молча).
   // Путь — два сегмента после /tech-card/, поэтому /tech-card/{id} его не проглатывает; порядок
   // всё равно закреплён TestTechCardListRouteNotShadowed, а не формой пути.
-  GetOperationWorkCatalog(
-    request: GetOperationWorkCatalogRequest,
-  ): Promise<GetOperationWorkCatalogResponse>;
+  GetOperationWorkCatalog(request: GetOperationWorkCatalogRequest): Promise<GetOperationWorkCatalogResponse>;
   // RememberOperationWorkDefault — жест «у меня эта работа всегда такая»: пара (работа, поле) →
   // значение, глобально, на все карточки. Единственная рантайм-запись во весь каталог; идентичность
   // работ (токен, глагол) правится только миграциями.
@@ -20131,9 +20228,7 @@ export interface AdminService {
   // лестница наследования (шаг → профиль оборудования карточки → не задано, миграция 0306), и
   // второй механизм поверх неё отвечал бы на один вопрос дважды. Реестр разрешённых полей отдаётся
   // в default_fields каталога, чтобы жест рисовался по ОДНОМУ списку, а не по второму, своему.
-  RememberOperationWorkDefault(
-    request: RememberOperationWorkDefaultRequest,
-  ): Promise<RememberOperationWorkDefaultResponse>;
+  RememberOperationWorkDefault(request: RememberOperationWorkDefaultRequest): Promise<RememberOperationWorkDefaultResponse>;
   // ЭКСПОРТ ТЕХ-КАРТЫ ZIP-АРХИВОМ — карточка целиком одним файлом: card.json, размерная сетка,
   // сборка, колорвеи, паспорта материалов, медиа, выкройки и раскладки. Деньги из архива вырезаны
   // (money_policy манифеста), подписи и релизы вычищены: архив — исходник для чужой панели, а не
@@ -20146,9 +20241,7 @@ export interface AdminService {
   // Классифицирован wr(tech_cards), а не rd, и это не описка рядом с GetTechCard: архив уносит
   // приватные выкройки и паспорта материалов ЗА ПРЕДЕЛЫ панели одним файлом. Это осознанная
   // выдача, а не чтение карточки, и право на неё — право автора карточки, а не её читателя.
-  ExportTechCardArchive(
-    request: ExportTechCardArchiveRequest,
-  ): Promise<ExportTechCardArchiveResponse>;
+  ExportTechCardArchive(request: ExportTechCardArchiveRequest): Promise<ExportTechCardArchiveResponse>;
   // ФИКСАЦИЯ ИМПОРТА — вторая половина двухшагового импорта.
   // ПЕРВОЙ ПОЛОВИНЫ В ЭТОМ КОНТРАКТЕ НЕТ И НЕ БУДЕТ: заливка архива с сухим прогоном —
   // multipart/form-data (POST /api/techcard-archive/upload), а multipart не выражается в protobuf.
@@ -20159,15 +20252,11 @@ export interface AdminService {
   CommitTechCardImport(request: CommitTechCardImportRequest): Promise<CommitTechCardImportResponse>;
   // ОТЧЁТ ИМПОРТА ПО КАРТОЧКЕ — что именно приехало, что пропущено и что приехало обеднённым.
   // Карточка без импорта — норма, а не ошибка: у неё просто нет строки отчёта.
-  GetTechCardImportReport(
-    request: GetTechCardImportReportRequest,
-  ): Promise<GetTechCardImportReportResponse>;
+  GetTechCardImportReport(request: GetTechCardImportReportRequest): Promise<GetTechCardImportReportResponse>;
   // ЗАКРЫТИЕ БАННЕРА «карточка импортирована»: человек прочитал отчёт и берёт дыры на себя.
   // Идемпотентно — повторный ack не ошибка. wr(tech_cards): жест снимает предупреждение с
   // карточки у ВСЕХ, кто её откроет, и это решение владельца карточки, а не её читателя.
-  AcknowledgeTechCardImportReport(
-    request: AcknowledgeTechCardImportReportRequest,
-  ): Promise<AcknowledgeTechCardImportReportResponse>;
+  AcknowledgeTechCardImportReport(request: AcknowledgeTechCardImportReportRequest): Promise<AcknowledgeTechCardImportReportResponse>;
   // КОЛОРВЕИ ИЗ АРХИВА — ОТДЕЛЬНОЙ КНОПКОЙ ИЗ ОТЧЁТА, а не самим импортом (решение владельца).
   // Колорвей — это ПРОДУКТ, и импорт продуктов не создаёт: colorways.json едет справкой, а импорт
   // отчитывается строкой colorways_not_applied по каждому цвету. Этот вызов — второй, ЯВНЫЙ шаг:
@@ -20184,9 +20273,7 @@ export interface AdminService {
   // ПРОДУКТЫ, той же внутренней дорогой, что CreateColorway, и право на это — право того, кто
   // ведёт каталог. Технолог с tech_cards:write, но без products:write, импортирует карточку и не
   // может завести из неё колорвеи; это следствие того, чем колорвей является, а не пробел.
-  ApplyTechCardImportColorways(
-    request: ApplyTechCardImportColorwaysRequest,
-  ): Promise<ApplyTechCardImportColorwaysResponse>;
+  ApplyTechCardImportColorways(request: ApplyTechCardImportColorwaysRequest): Promise<ApplyTechCardImportColorwaysResponse>;
   // Material catalog (task 10): shared nomenclature for BOM lines + append-only price history.
   CreateMaterial(request: CreateMaterialRequest): Promise<CreateMaterialResponse>;
   UpdateMaterial(request: UpdateMaterialRequest): Promise<UpdateMaterialResponse>;
@@ -20200,9 +20287,7 @@ export interface AdminService {
   // сканирует настилы по ПРОГОНАМ и поднимает их технологические карточки, а платить за это на
   // каждом чтении каталога незачем — каталог материалов читается всюду, а «сколько на самом деле
   // ушло ткани» спрашивают отдельно и редко.
-  GetMaterialCuttingCoefficientSuggestion(
-    request: GetMaterialCuttingCoefficientSuggestionRequest,
-  ): Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
+  GetMaterialCuttingCoefficientSuggestion(request: GetMaterialCuttingCoefficientSuggestionRequest): Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
   // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ по факту настилов (T7 волна 2) — СОСЕД, НЕ СИНОНИМ предыдущего
   // RPC. Оба медианят факты настилов одного артикула, но знаменатели РАЗНЫЕ, и потому это разные
   // числа для разных полей:
@@ -20222,9 +20307,7 @@ export interface AdminService {
   // ПРЕДЛОЖЕНИЕ, А НЕ ПРИМЕНЕНИЕ: обработчик только читает; число вписывает в поле рука. Скоуп
   // медианы — все модели артикула, и ответ несёт состав (счётчики + список дрейфов с именами
   // карточек): число без опоры непроверяемо.
-  GetBomWastageSuggestion(
-    request: GetBomWastageSuggestionRequest,
-  ): Promise<GetBomWastageSuggestionResponse>;
+  GetBomWastageSuggestion(request: GetBomWastageSuggestionRequest): Promise<GetBomWastageSuggestionResponse>;
   // RepriceTechCardBom re-pulls the current material-catalog price into every catalog-linked BOM
   // line of a mutable (non-released) card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
   // with the same CATALOG_LATEST resolution the style cost estimate uses (costing currency, else
@@ -20239,23 +20322,15 @@ export interface AdminService {
   // into the BOM. Read-only; tech_card_id 0 lists all cards. Requires tech-cards read; the AMOUNT
   // additionally needs costing:read and comes back stripped without it (structure — card, article,
   // kind, currency — is visible to any tech-cards reader).
-  ListCostingMigrationExceptions(
-    request: ListCostingMigrationExceptionsRequest,
-  ): Promise<ListCostingMigrationExceptionsResponse>;
+  ListCostingMigrationExceptions(request: ListCostingMigrationExceptionsRequest): Promise<ListCostingMigrationExceptionsResponse>;
   // Tech-card release snapshots (task 11): the immutable frozen spec + planned cost per release.
   ListTechCardReleases(request: ListTechCardReleasesRequest): Promise<ListTechCardReleasesResponse>;
   GetTechCardRelease(request: GetTechCardReleaseRequest): Promise<GetTechCardReleaseResponse>;
   // Development (R&D) cost journal (task 14): per-tech-card one-off costs (sample, labour, …)
   // with a computed roll-up. A period cost — never seeded into product cost_price.
-  AddTechCardDevExpense(
-    request: AddTechCardDevExpenseRequest,
-  ): Promise<AddTechCardDevExpenseResponse>;
-  DeleteTechCardDevExpense(
-    request: DeleteTechCardDevExpenseRequest,
-  ): Promise<DeleteTechCardDevExpenseResponse>;
-  ListTechCardDevExpenses(
-    request: ListTechCardDevExpensesRequest,
-  ): Promise<ListTechCardDevExpensesResponse>;
+  AddTechCardDevExpense(request: AddTechCardDevExpenseRequest): Promise<AddTechCardDevExpenseResponse>;
+  DeleteTechCardDevExpense(request: DeleteTechCardDevExpenseRequest): Promise<DeleteTechCardDevExpenseResponse>;
+  ListTechCardDevExpenses(request: ListTechCardDevExpensesRequest): Promise<ListTechCardDevExpensesResponse>;
   // Production runs (партии, task 09): a batch produced from a tech card, with a plan snapshot
   // and (later) actual costs for plan/fact analysis.
   CreateProductionRun(request: CreateProductionRunRequest): Promise<CreateProductionRunResponse>;
@@ -20281,9 +20356,7 @@ export interface AdminService {
   // DIFFERENT payload is rejected with AlreadyExists. An all-scrap receipt (0 good, >0 defect) is
   // valid: nothing is stocked, the run still closes with the defect recorded.
   // Requires production:write AND products:write (it moves sellable stock).
-  PostProductionRunReceipt(
-    request: PostProductionRunReceiptRequest,
-  ): Promise<PostProductionRunReceiptResponse>;
+  PostProductionRunReceipt(request: PostProductionRunReceiptRequest): Promise<PostProductionRunReceiptResponse>;
   // ReverseProductionRunReceipt undoes ONE receipt of a run (Phase 6, plan 05): in one transaction
   // it takes the receipt's good units back OUT of each line's product stock (refused with the exact
   // per-variant shortfall when any unit was already sold — stock never goes negative and sold units
@@ -20304,48 +20377,32 @@ export interface AdminService {
   // costing:write and a non-empty reason. Reversing an already-reversed receipt (or a reversal
   // row) fails with FailedPrecondition — the precondition runs under the run lock, which is also
   // the idempotency guard.
-  ReverseProductionRunReceipt(
-    request: ReverseProductionRunReceiptRequest,
-  ): Promise<ReverseProductionRunReceiptResponse>;
+  ReverseProductionRunReceipt(request: ReverseProductionRunReceiptRequest): Promise<ReverseProductionRunReceiptResponse>;
   // GetProductionRunMaterialPlan estimates the fabric/notion requirement of a run from its lines'
   // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
   // It is a plan-estimate before the marker; the real consumption comes from stock issues.
-  GetProductionRunMaterialPlan(
-    request: GetProductionRunMaterialPlanRequest,
-  ): Promise<GetProductionRunMaterialPlanResponse>;
+  GetProductionRunMaterialPlan(request: GetProductionRunMaterialPlanRequest): Promise<GetProductionRunMaterialPlanResponse>;
   // GetProductionRunCutPlan — кат-лист ПАРТИИ: деталь × колорвей × размер → сколько панелей
   // выкроить и из какого артикула. Проекция только на чтение поверх линий прогона и деталей карты
   // (по релизу, если прогон к нему привязан), сестра материального плана: тот отвечает «сколько
   // ткани заказать», этот — «что из неё выкроить». Денег в ответе нет, гейт — SectionProduction.
-  GetProductionRunCutPlan(
-    request: GetProductionRunCutPlanRequest,
-  ): Promise<GetProductionRunCutPlanResponse>;
+  GetProductionRunCutPlan(request: GetProductionRunCutPlanRequest): Promise<GetProductionRunCutPlanResponse>;
   // НАСТИЛЫ ПРОГОНА (Ф4). Сознательно ОТДЕЛЬНЫЕ RPC, а не поле UpdateProductionRun: полная замена
   // детей внутри сохранения прогона — буквально причина смерти 0119 (0243:3-9), и она вернулась бы
   // в тот же день, когда настилы поехали бы рядом с production_run_cost, который до сих пор
   // full-replace (productionrun.go:356-359).
   SaveProductionRunLay(request: SaveProductionRunLayRequest): Promise<SaveProductionRunLayResponse>;
-  DeleteProductionRunLay(
-    request: DeleteProductionRunLayRequest,
-  ): Promise<DeleteProductionRunLayResponse>;
-  ListProductionRunLays(
-    request: ListProductionRunLaysRequest,
-  ): Promise<ListProductionRunLaysResponse>;
+  DeleteProductionRunLay(request: DeleteProductionRunLayRequest): Promise<DeleteProductionRunLayResponse>;
+  ListProductionRunLays(request: ListProductionRunLaysRequest): Promise<ListProductionRunLaysResponse>;
   // ПРИЁМКА КРОЯ (Ф5б.5). Форма скопирована с трёх RPC настилов выше, и по той же причине: строка
   // приёмки — ребёнок настила, а полная замена детей внутри сохранения родителя есть причина смерти
   // 0119 (0243:3-9). Save — АПСЕРТ по паре (настил, размер), поэтому повторное сохранение той же
   // пары правит строку, а не заводит вторую; удаление адресуется той же парой.
   // Список отдаётся ПО ПРОГОНУ, а не по настилу: цех сверяет заказанное с выкроенным по всему
   // прогону сразу, и список на один настил заставлял бы клиента собирать эту сверку из N ответов.
-  SaveProductionRunCutReceipt(
-    request: SaveProductionRunCutReceiptRequest,
-  ): Promise<SaveProductionRunCutReceiptResponse>;
-  DeleteProductionRunCutReceipt(
-    request: DeleteProductionRunCutReceiptRequest,
-  ): Promise<DeleteProductionRunCutReceiptResponse>;
-  ListProductionRunCutReceipts(
-    request: ListProductionRunCutReceiptsRequest,
-  ): Promise<ListProductionRunCutReceiptsResponse>;
+  SaveProductionRunCutReceipt(request: SaveProductionRunCutReceiptRequest): Promise<SaveProductionRunCutReceiptResponse>;
+  DeleteProductionRunCutReceipt(request: DeleteProductionRunCutReceiptRequest): Promise<DeleteProductionRunCutReceiptResponse>;
+  ListProductionRunCutReceipts(request: ListProductionRunCutReceiptsRequest): Promise<ListProductionRunCutReceiptsResponse>;
   // CheckProductionRunReadiness — ГЕЙТ ГОТОВНОСТИ ПРОГОНА (Ф6). Not to be confused with
   // GetTechCardReadiness: that one is ADVISORY, takes only a card id, and sees colourways as two
   // aggregates; this one judges ONE CONCRETE FUTURE RUN — by its colourways and its quantities —
@@ -20364,38 +20421,29 @@ export interface AdminService {
   // read the reason it was refused, or a planner without tech-card access gets a dead control
   // stating an unfixable requirement. GetProductionRunMaterialPlan reads the very same card facts
   // and is classified the same way.
-  CheckProductionRunReadiness(
-    request: CheckProductionRunReadinessRequest,
-  ): Promise<CheckProductionRunReadinessResponse>;
+  CheckProductionRunReadiness(request: CheckProductionRunReadinessRequest): Promise<CheckProductionRunReadinessResponse>;
   // Material warehouse (new-flow NF-01): on-hand balance + moving-average valuation and an
   // append-only movement ledger per catalog material.
   ReceiveMaterialStock(request: ReceiveMaterialStockRequest): Promise<ReceiveMaterialStockResponse>;
-  // ReceiveMaterialStockBatch posts one supplier invoice with several materials in ONE transaction.
-  ReceiveMaterialStockBatch(
-    request: ReceiveMaterialStockBatchRequest,
-  ): Promise<ReceiveMaterialStockBatchResponse>;
+  // Receive several supplier-invoice lines atomically. Shared delivery and input VAT totals are
+  // allocated by line net value before each receipt is posted.
+  ReceiveMaterialStockBatch(request: ReceiveMaterialStockBatchRequest): Promise<ReceiveMaterialStockBatchResponse>;
   IssueMaterialStock(request: IssueMaterialStockRequest): Promise<IssueMaterialStockResponse>;
   AdjustMaterialStock(request: AdjustMaterialStockRequest): Promise<AdjustMaterialStockResponse>;
   // BatchIssueMaterialStock issues (or returns) SEVERAL materials to one target in ONE transaction.
   // Sewing a sample takes the whole BOM out of the warehouse at once; looping IssueMaterialStock
   // per line meant a mid-loop shortage left the stock half-drawn with no way back. All or nothing.
-  BatchIssueMaterialStock(
-    request: BatchIssueMaterialStockRequest,
-  ): Promise<BatchIssueMaterialStockResponse>;
+  BatchIssueMaterialStock(request: BatchIssueMaterialStockRequest): Promise<BatchIssueMaterialStockResponse>;
   GetMaterialStock(request: GetMaterialStockRequest): Promise<GetMaterialStockResponse>;
   ListMaterialStock(request: ListMaterialStockRequest): Promise<ListMaterialStockResponse>;
-  ListMaterialMovements(
-    request: ListMaterialMovementsRequest,
-  ): Promise<ListMaterialMovementsResponse>;
+  ListMaterialMovements(request: ListMaterialMovementsRequest): Promise<ListMaterialMovementsResponse>;
   // UpsertPackagingBom full-replaces the global packaging recipe consumed on ship (gap-07 v2 B).
   UpsertPackagingBom(request: UpsertPackagingBomRequest): Promise<UpsertPackagingBomResponse>;
   // ListPackagingBom returns the packaging recipe (material name/unit + per-order/per-item quantities).
   ListPackagingBom(request: ListPackagingBomRequest): Promise<ListPackagingBomResponse>;
   // UpsertPackagingRecipe full-replaces one scope target's packaging recipe (PLM rework §2.8, Q3): the
   // whole global set, or one style's set, or one product's set (scope = global|style|product).
-  UpsertPackagingRecipe(
-    request: UpsertPackagingRecipeRequest,
-  ): Promise<UpsertPackagingRecipeResponse>;
+  UpsertPackagingRecipe(request: UpsertPackagingRecipeRequest): Promise<UpsertPackagingRecipeResponse>;
   // ListPackagingRecipe returns every packaging recipe (all scopes) with material name/unit.
   ListPackagingRecipe(request: ListPackagingRecipeRequest): Promise<ListPackagingRecipeResponse>;
   // UpsertStyleAssembly full-replaces a garment style's ASSEMBLY bill (WS7, §2.8): the auxiliary items
@@ -20417,17 +20465,13 @@ export interface AdminService {
   // Refused with FailedPrecondition for a sellable card, a released card, a colour already on the
   // card, a bucket another variant (or another card's single output material) owns, or a unit that
   // disagrees with the card's other colours. An archived or unitless material is InvalidArgument.
-  UpsertTechCardOutputVariant(
-    request: UpsertTechCardOutputVariantRequest,
-  ): Promise<UpsertTechCardOutputVariantResponse>;
+  UpsertTechCardOutputVariant(request: UpsertTechCardOutputVariantRequest): Promise<UpsertTechCardOutputVariantResponse>;
   // DeleteTechCardOutputVariant removes a colour variant outright. Deactivating it (active=false) is
   // the normal retirement; deleting is the "this colour was a mistake" action and the only way to
   // un-pin the card's auxiliary purpose. The warehouse bucket itself survives with its stock and
   // moving average — only this card's claim on it goes. Once runs can be planned by colour, a
   // variant a run line references is refused with FailedPrecondition ("deactivate it instead").
-  DeleteTechCardOutputVariant(
-    request: DeleteTechCardOutputVariantRequest,
-  ): Promise<DeleteTechCardOutputVariantResponse>;
+  DeleteTechCardOutputVariant(request: DeleteTechCardOutputVariantRequest): Promise<DeleteTechCardOutputVariantResponse>;
   // SaveTechCardMarker creates (id=0) or fully replaces (id>0) ONE saved раскладка (marker, 0257):
   // a measured fabric layout of one size's pieces, self-contained geometry included. Last-write-wins
   // on purpose — no lock_version of its own, and the write does NOT bump tech_card.lock_version
@@ -20459,9 +20503,7 @@ export interface AdminService {
   // operator to assume the costing moved by itself.
   // Refused with FailedPrecondition on a released card (marker designation is card content), and
   // NotFound for a marker that does not exist.
-  SetTechCardMarkerNorm(
-    request: SetTechCardMarkerNormRequest,
-  ): Promise<SetTechCardMarkerNormResponse>;
+  SetTechCardMarkerNorm(request: SetTechCardMarkerNormRequest): Promise<SetTechCardMarkerNormResponse>;
   // PutTechCardPatternSizeIndex stores the size tokens the CLIENT parsed out of the DXF block names
   // of one fabric scope (Ф6.3), so the server-side readiness gate can answer «is there a pattern for
   // this size» honestly instead of counting tech_card_size_pattern.size_id — a column the client
@@ -20480,9 +20522,7 @@ export interface AdminService {
   // wr(tech_cards): this WRITES a derived fact about the card's patterns, from the patterns tab, in
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
-  PutTechCardPatternSizeIndex(
-    request: PutTechCardPatternSizeIndexRequest,
-  ): Promise<PutTechCardPatternSizeIndexResponse>;
+  PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
   // SuggestPatternPieces (pattern import, F9) — ONE sync vision+JSON call (chat.pattern_pieces) that
   // NAMES the pieces of an imported sewing pattern. The client finds the pieces itself (geometry is
   // deterministic and never comes from the model), renders the assembled sheet with a number on
@@ -20544,9 +20584,7 @@ export interface AdminService {
   // decisions, more than 24 category_options or an empty or repeated one, more than 4 examples, 60
   // units per example or 16 parts per unit, an empty label, name or part, a duplicate or unknown
   // id, a field above its bound.
-  SuggestAssemblySkeleton(
-    request: SuggestAssemblySkeletonRequest,
-  ): Promise<SuggestAssemblySkeletonResponse>;
+  SuggestAssemblySkeleton(request: SuggestAssemblySkeletonRequest): Promise<SuggestAssemblySkeletonResponse>;
   // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
   // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
   // type one.
@@ -20571,9 +20609,7 @@ export interface AdminService {
   // stored number quietly wrong after every such edit.
   // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
   // patterns, from the patterns tab, and it feeds costing and the release gate.
-  SaveTechCardPieceAreas(
-    request: SaveTechCardPieceAreasRequest,
-  ): Promise<SaveTechCardPieceAreasResponse>;
+  SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
   // UpsertTechCardSeams stores the technologist's seam decisions — confirmed / rejected seams and
   // seams connected by hand on the pieces map — so every reader resolves ONE list.
   // KEYED AND PARTIAL: a row per seam_key is inserted or replaced whole; rows not named are
@@ -20598,9 +20634,7 @@ export interface AdminService {
   // makes the fill-in campaign finishable and what says when it is finished; see total_lines for the
   // exact go/no-go, which is NOT «total_lines == 0» on a default call.
   // Read-only. Requires tech-cards read: it is the BOM tab's own data, seen across cards.
-  ListTechCardFabricDirectionGaps(
-    request: ListTechCardFabricDirectionGapsRequest,
-  ): Promise<ListTechCardFabricDirectionGapsResponse>;
+  ListTechCardFabricDirectionGaps(request: ListTechCardFabricDirectionGapsRequest): Promise<ListTechCardFabricDirectionGapsResponse>;
   // GetDesignBand is ONE read of the whole band: bench slots, the day's budget, the edit layers,
   // the reference roles, the aggregates the header needs, and the FIRST PAGE of runs with their
   // pictures already under them.
@@ -20694,9 +20728,7 @@ export interface AdminService {
   // ARTIFACTS reads the mark to decide what it offers for markup, which is why the field existed
   // on the wire before this verb did — and why, until it landed, the mark was readable everywhere
   // and settable nowhere.
-  SetDesignPictureSelected(
-    request: SetDesignPictureSelectedRequest,
-  ): Promise<SetDesignPictureSelectedResponse>;
+  SetDesignPictureSelected(request: SetDesignPictureSelectedRequest): Promise<SetDesignPictureSelectedResponse>;
   // RegisterDesignUpload files ONE GESTURE as one batch plus its pictures; the bytes themselves
   // went up through UploadContentImage first. Optionally the same call puts the FIRST picture into
   // a bench slot, under the SAME compare-and-set as an ordinary placement — otherwise a drop onto
@@ -20749,9 +20781,7 @@ export interface AdminService {
   // why that is forced. It enters no section digest: a prompt hint is not a fact about the garment,
   // and saving one must not stale a sign-off.
   // InvalidArgument: an unknown role, or a media_id the card does not hold.
-  SetDesignReferenceRole(
-    request: SetDesignReferenceRoleRequest,
-  ): Promise<SetDesignReferenceRoleResponse>;
+  SetDesignReferenceRole(request: SetDesignReferenceRoleRequest): Promise<SetDesignReferenceRoleResponse>;
   // SetDesignReferenceHeld takes a labelled board picture OUT OF THE PROMPT, or puts it back
   // (109 §4, «remove from prompt»). The label (view / detail slot) and the picture on the board stay;
   // only label_state moves between ok and held, and a held picture rides no run. A model's detail
@@ -20761,21 +20791,15 @@ export interface AdminService {
   // FailedPrecondition nothing_to_hold: the picture has no settled label (no row, no role, still
   // being read, waiting for a person) — it is not in the prompt. Putting back a picture that is not
   // held is a no-op.
-  SetDesignReferenceHeld(
-    request: SetDesignReferenceHeldRequest,
-  ): Promise<SetDesignReferenceHeldResponse>;
+  SetDesignReferenceHeld(request: SetDesignReferenceHeldRequest): Promise<SetDesignReferenceHeldResponse>;
   // PreviewDesignRunInputs is a DRY RUN of StartDesignRun's input assembly (101 §2.8): the snapshot a
   // run of this kind and params would freeze right now — the same function, the same sources, no
   // reservation, no money, no model. «what the model gets» draws this answer instead of re-deriving
   // the rule on the client, plus the board pictures that stay home and why.
-  PreviewDesignRunInputs(
-    request: PreviewDesignRunInputsRequest,
-  ): Promise<PreviewDesignRunInputsResponse>;
+  PreviewDesignRunInputs(request: PreviewDesignRunInputsRequest): Promise<PreviewDesignRunInputsResponse>;
   // DeleteDesignDetailSlot removes an EMPTY detail slot.
   // FailedPrecondition: slot_filled.
-  DeleteDesignDetailSlot(
-    request: DeleteDesignDetailSlotRequest,
-  ): Promise<DeleteDesignDetailSlotResponse>;
+  DeleteDesignDetailSlot(request: DeleteDesignDetailSlotRequest): Promise<DeleteDesignDetailSlotResponse>;
   // THE CARD'S ASSET SHELVES — cloths, patterns and hardware (V-11).
   // UpsertDesignAsset writes ONE shelf row, creating it when asset_id is 0 and replacing its
   // fields otherwise. There is one verb rather than a create and an update because the screen has
@@ -20811,9 +20835,7 @@ export interface AdminService {
   // in this band. FailedPrecondition `foreign_colorway`: the colourway belongs to another card.
   // NotFound on an asset of another card, exactly like DeleteDesignAsset. InvalidArgument on a
   // negative colorway_id.
-  SetDesignAssetColorway(
-    request: SetDesignAssetColorwayRequest,
-  ): Promise<SetDesignAssetColorwayResponse>;
+  SetDesignAssetColorway(request: SetDesignAssetColorwayRequest): Promise<SetDesignAssetColorwayResponse>;
   // SetDesignAssetBinding says WHICH ASSET IS THE FABRIC OF ONE (COLOURWAY, SLOT): colourway N wears
   // asset X on BOM roll-goods line M (see common.DesignAssetBinding). asset_id 0 takes the fabric
   // off the pair, which is a real answer («nothing chosen for this slot yet»), not an omission;
@@ -20839,23 +20861,17 @@ export interface AdminService {
   // still exists is refused — see above). NotFound on an asset of another card, exactly like
   // DeleteDesignAsset. InvalidArgument on a colorway_id or bom_item_id that is not positive, or a
   // negative asset_id.
-  SetDesignAssetBinding(
-    request: SetDesignAssetBindingRequest,
-  ): Promise<SetDesignAssetBindingResponse>;
+  SetDesignAssetBinding(request: SetDesignAssetBindingRequest): Promise<SetDesignAssetBindingResponse>;
   // SetDesignAssetPlacement puts ONE mark on ONE flat: this asset, this drawing, here. Creates when
   // placement_id is 0, moves it otherwise.
   // InvalidArgument: an asset or a picture of another card, a shape whose point count does not
   // match its kind, or a coordinate outside 0..1.
-  SetDesignAssetPlacement(
-    request: SetDesignAssetPlacementRequest,
-  ): Promise<SetDesignAssetPlacementResponse>;
+  SetDesignAssetPlacement(request: SetDesignAssetPlacementRequest): Promise<SetDesignAssetPlacementResponse>;
   // DeleteDesignAssetPlacement takes ONE mark off a flat. The asset stays on its shelf: unmarking
   // and removing are different acts, exactly as unmarking a bench slot is not deleting the plate.
   // THE CARD IS NAMED IN THE PATH here too, and the mark is scoped to it THROUGH ITS ASSET — a
   // placement row carries no tech_card_id of its own by design. NotFound on a mark of another card.
-  DeleteDesignAssetPlacement(
-    request: DeleteDesignAssetPlacementRequest,
-  ): Promise<DeleteDesignAssetPlacementResponse>;
+  DeleteDesignAssetPlacement(request: DeleteDesignAssetPlacementRequest): Promise<DeleteDesignAssetPlacementResponse>;
   // GetDesignEditLayer reads ONE layer WITH its strokes. It exists because GetDesignBand
   // deliberately lists the layers WITHOUT them: 512 KB is the cap per LAYER, a card may hold
   // several, and shipping them all would make every open of the tab cost megabytes in order to draw
@@ -20902,9 +20918,7 @@ export interface AdminService {
   // refusals of SetDesignBenchSlot when the slot being moved refuses the edit. InvalidArgument: an
   // unknown or foreign media_id, replace_mismatch, a client_request_id already spent on a different
   // flatten.
-  FlattenDesignEditLayer(
-    request: FlattenDesignEditLayerRequest,
-  ): Promise<FlattenDesignEditLayerResponse>;
+  FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
   // ImportDesignVector files an ALREADY-UPLOADED vector file into the band as an edit layer: the
   // media row keeps the authoritative SVG, the layer keeps the editable projection of it, and
   // DesignEditLayer.source_media_id is the edge between them.
@@ -20974,9 +20988,7 @@ export interface AdminService {
   // shared across the sides. A cached answer is returned without a call when EVERY requested side
   // has one from this call shape and !force.
   // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
-  SuggestDesignPartsCard(
-    request: SuggestDesignPartsCardRequest,
-  ): Promise<SuggestDesignPartsCardResponse>;
+  SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
   // GenerateDesignJoins (flat route) — one sync vision+JSON call (chat.design_joins): the model reads
   // the card's reference photos (with their roles) and the garment note and writes the JOIN LIST on
   // the fixed landmark ruler, the layers, the absences and a verdict on whether the photos show one
@@ -21018,9 +21030,7 @@ export interface AdminService {
   // `stale` on a sent row is ignored. A saved row whose decision_key matches a DIFFERENT stored
   // question id forgets that older row (latest wins). close_session closes the open quiz session after
   // the save. Returns the stored list.
-  SaveDesignQuizAnswers(
-    request: SaveDesignQuizAnswersRequest,
-  ): Promise<SaveDesignQuizAnswersResponse>;
+  SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -21031,9 +21041,7 @@ export interface AdminService {
   // setting is left alone (see UpdateWorkshopSettingsRequest). Returns the resulting configuration,
   // so a caller never needs a follow-up read. A request that names no setting at all, or a value
   // outside the plausibility band for its unit, is InvalidArgument with a field-tagged detail.
-  UpdateWorkshopSettings(
-    request: UpdateWorkshopSettingsRequest,
-  ): Promise<UpdateWorkshopSettingsResponse>;
+  UpdateWorkshopSettings(request: UpdateWorkshopSettingsRequest): Promise<UpdateWorkshopSettingsResponse>;
   // GetOrderPackingSpec is the packer/QC-readable composition of an order (WS7, scope 3): the garments
   // that ship, the on-garment assembly (labels/tags) to verify per line, and the packaging the whole
   // order needs (resolved from WS2 packaging_recipe). Read-only — reserves/consumes nothing.
@@ -21053,49 +21061,29 @@ export interface AdminService {
   UpdateSettings(request: UpdateSettingsRequest): Promise<UpdateSettingsResponse>;
   // UpsertPaymentMethodFees sets the estimated processing-fee model (percent + fixed) per
   // payment method, used to estimate the fee of orders without a captured Stripe fee.
-  UpsertPaymentMethodFees(
-    request: UpsertPaymentMethodFeesRequest,
-  ): Promise<UpsertPaymentMethodFeesResponse>;
+  UpsertPaymentMethodFees(request: UpsertPaymentMethodFeesRequest): Promise<UpsertPaymentMethodFeesResponse>;
   // SetShipmentActualCost records the actual carrier invoice (and optional return-leg cost)
   // for an order's shipment, so contribution margin can use real logistics cost.
-  SetShipmentActualCost(
-    request: SetShipmentActualCostRequest,
-  ): Promise<SetShipmentActualCostResponse>;
-  GetBackgroundHeroColor(
-    request: GetBackgroundHeroColorRequest,
-  ): Promise<GetBackgroundHeroColorResponse>;
-  SetBackgroundHeroColor(
-    request: SetBackgroundHeroColorRequest,
-  ): Promise<SetBackgroundHeroColorResponse>;
+  SetShipmentActualCost(request: SetShipmentActualCostRequest): Promise<SetShipmentActualCostResponse>;
+  GetBackgroundHeroColor(request: GetBackgroundHeroColorRequest): Promise<GetBackgroundHeroColorResponse>;
+  SetBackgroundHeroColor(request: SetBackgroundHeroColorRequest): Promise<SetBackgroundHeroColorResponse>;
   // AddShipmentCarrier adds a new shipping carrier.
   AddShipmentCarrier(request: AddShipmentCarrierRequest): Promise<AddShipmentCarrierResponse>;
   // UpdateShipmentCarrier updates an existing shipping carrier.
-  UpdateShipmentCarrier(
-    request: UpdateShipmentCarrierRequest,
-  ): Promise<UpdateShipmentCarrierResponse>;
+  UpdateShipmentCarrier(request: UpdateShipmentCarrierRequest): Promise<UpdateShipmentCarrierResponse>;
   // DeleteShipmentCarrier deletes a shipping carrier by ID.
-  DeleteShipmentCarrier(
-    request: DeleteShipmentCarrierRequest,
-  ): Promise<DeleteShipmentCarrierResponse>;
+  DeleteShipmentCarrier(request: DeleteShipmentCarrierRequest): Promise<DeleteShipmentCarrierResponse>;
   GetSupportTicketById(request: GetSupportTicketByIdRequest): Promise<GetSupportTicketByIdResponse>;
-  GetSupportTicketByCaseNumber(
-    request: GetSupportTicketByCaseNumberRequest,
-  ): Promise<GetSupportTicketByCaseNumberResponse>;
-  GetSupportTicketsPaged(
-    request: GetSupportTicketsPagedRequest,
-  ): Promise<GetSupportTicketsPagedResponse>;
-  UpdateSupportTicketStatus(
-    request: UpdateSupportTicketStatusRequest,
-  ): Promise<UpdateSupportTicketStatusResponse>;
+  GetSupportTicketByCaseNumber(request: GetSupportTicketByCaseNumberRequest): Promise<GetSupportTicketByCaseNumberResponse>;
+  GetSupportTicketsPaged(request: GetSupportTicketsPagedRequest): Promise<GetSupportTicketsPagedResponse>;
+  UpdateSupportTicketStatus(request: UpdateSupportTicketStatusRequest): Promise<UpdateSupportTicketStatusResponse>;
   UpdateSupportTicket(request: UpdateSupportTicketRequest): Promise<UpdateSupportTicketResponse>;
   // Get order reviews paged
   GetOrderReviewsPaged(request: GetOrderReviewsPagedRequest): Promise<GetOrderReviewsPagedResponse>;
   // Delete an order review and its item reviews
   DeleteOrderReview(request: DeleteOrderReviewRequest): Promise<DeleteOrderReviewResponse>;
   // Get all item reviews for a product (paged)
-  GetProductReviewsPaged(
-    request: GetProductReviewsPagedRequest,
-  ): Promise<GetProductReviewsPagedResponse>;
+  GetProductReviewsPaged(request: GetProductReviewsPagedRequest): Promise<GetProductReviewsPagedResponse>;
   // List members with filters + pagination.
   ListMembers(request: ListMembersRequest): Promise<ListMembersResponse>;
   // Get a single member with membership detail.
@@ -21146,9 +21134,7 @@ export interface AdminService {
   CreateAccount(request: CreateAccountRequest): Promise<CreateAccountResponse>;
   // UpdateAccountPermissions replaces an account's super flag and permission set.
   // Requires the accounts section (write).
-  UpdateAccountPermissions(
-    request: UpdateAccountPermissionsRequest,
-  ): Promise<UpdateAccountPermissionsResponse>;
+  UpdateAccountPermissions(request: UpdateAccountPermissionsRequest): Promise<UpdateAccountPermissionsResponse>;
   // SetAccountDisabled enables or disables an account (a disabled account cannot
   // obtain new tokens at login). Requires the accounts section (write).
   SetAccountDisabled(request: SetAccountDisabledRequest): Promise<SetAccountDisabledResponse>;
@@ -21170,9 +21156,7 @@ export interface AdminService {
   // /accounts/ is account MANAGEMENT and requires that section, and a route that
   // reads like management but is not would be the first thing to be gated by
   // mistake.
-  SetAccountSpecialties(
-    request: SetAccountSpecialtiesRequest,
-  ): Promise<SetAccountSpecialtiesResponse>;
+  SetAccountSpecialties(request: SetAccountSpecialtiesRequest): Promise<SetAccountSpecialtiesResponse>;
   // DeleteAccountSpecialty removes ONE entry from the SHARED specialty
   // vocabulary, by name.
   // STRICTER THAN WRITING ONE, AND THAT ASYMMETRY IS THE POINT.
@@ -21197,9 +21181,7 @@ export interface AdminService {
   // POST .../delete rather than DELETE .../{name}: a specialty name is free-form
   // text that may contain spaces or a slash, and putting it in the path would
   // make deletion depend on how the word was typed.
-  DeleteAccountSpecialty(
-    request: DeleteAccountSpecialtyRequest,
-  ): Promise<DeleteAccountSpecialtyResponse>;
+  DeleteAccountSpecialty(request: DeleteAccountSpecialtyRequest): Promise<DeleteAccountSpecialtyResponse>;
   ListAcctAccounts(request: ListAcctAccountsRequest): Promise<ListAcctAccountsResponse>;
   CreateAcctAccount(request: CreateAcctAccountRequest): Promise<CreateAcctAccountResponse>;
   // UpdateAcctAccount renames a custom (non-system) account; code and section are immutable.
@@ -21230,9 +21212,7 @@ export interface AdminService {
   GetTrialBalance(request: GetTrialBalanceRequest): Promise<GetTrialBalanceResponse>;
   // GetProfitLossStatement returns the monthly Income Statement (revenue / cogs / opex sections)
   // over [from, to) (to exclusive), one column per calendar month.
-  GetProfitLossStatement(
-    request: GetProfitLossStatementRequest,
-  ): Promise<GetProfitLossStatementResponse>;
+  GetProfitLossStatement(request: GetProfitLossStatementRequest): Promise<GetProfitLossStatementResponse>;
   // GetBalanceSheet returns assets/liabilities/equity balances from inception through as_of
   // (inclusive), including the virtual "Current Period Net Profit" equity row.
   GetBalanceSheet(request: GetBalanceSheetRequest): Promise<GetBalanceSheetResponse>;
@@ -21242,15 +21222,11 @@ export interface AdminService {
   // GetAcctReconciliation proves the derived ledger matches operational truth (revenue, fees,
   // COGS, materials, finished goods) and lists what is deliberately left unposted, over
   // [from, to) (to exclusive).
-  GetAcctReconciliation(
-    request: GetAcctReconciliationRequest,
-  ): Promise<GetAcctReconciliationResponse>;
+  GetAcctReconciliation(request: GetAcctReconciliationRequest): Promise<GetAcctReconciliationResponse>;
   // ListAcctEventsNeedingReview lists outbox events that were terminally disposed but need an operator
   // (a non-EUR/degenerate order needing a manual entry, an orphan refund, or a dead-letter). Their
   // month cannot close until each is resolved or reprocessed.
-  ListAcctEventsNeedingReview(
-    request: ListAcctEventsNeedingReviewRequest,
-  ): Promise<ListAcctEventsNeedingReviewResponse>;
+  ListAcctEventsNeedingReview(request: ListAcctEventsNeedingReviewRequest): Promise<ListAcctEventsNeedingReviewResponse>;
   // ReprocessAcctEvent resets an event so the worker re-attempts it from scratch (used after the cause
   // is fixed, e.g. the missing vat_rate was added).
   ReprocessAcctEvent(request: ReprocessAcctEventRequest): Promise<ReprocessAcctEventResponse>;
@@ -21362,10739 +21338,8916 @@ type RequestType = {
   body: string | null;
 };
 
-type RequestHandler = (
-  request: RequestType,
-  meta: { service: string; method: string },
-) => Promise<unknown>;
+type RequestHandler = (request: RequestType, meta: { service: string, method: string }) => Promise<unknown>;
 
-export function createAdminServiceClient(handler: RequestHandler): AdminService {
+export function createAdminServiceClient(
+  handler: RequestHandler
+): AdminService {
   return {
-    GetDictionary(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDictionary(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionary`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDictionary',
-        },
-      ) as Promise<GetDictionaryResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDictionary",
+      }) as Promise<GetDictionaryResponse>;
     },
-    UploadContentImage(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UploadContentImage(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/image`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UploadContentImage',
-        },
-      ) as Promise<UploadContentImageResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadContentImage",
+      }) as Promise<UploadContentImageResponse>;
     },
-    UploadContentVideo(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UploadContentVideo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/video`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UploadContentVideo',
-        },
-      ) as Promise<UploadContentVideoResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadContentVideo",
+      }) as Promise<UploadContentVideoResponse>;
     },
-    UploadPattern(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UploadPattern(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/pattern`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UploadPattern',
-        },
-      ) as Promise<UploadPatternResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadPattern",
+      }) as Promise<UploadPatternResponse>;
     },
-    UploadContentVector(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UploadContentVector(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/vector`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UploadContentVector',
-        },
-      ) as Promise<UploadContentVectorResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadContentVector",
+      }) as Promise<UploadContentVectorResponse>;
     },
-    UploadContentModel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UploadContentModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/model`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UploadContentModel',
-        },
-      ) as Promise<UploadContentModelResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UploadContentModel",
+      }) as Promise<UploadContentModelResponse>;
     },
-    DeleteFromBucket(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteFromBucket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.id) {
-        queryParams.push(`id=${encodeURIComponent(request.id.toString())}`);
+        queryParams.push(`id=${encodeURIComponent(request.id.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteFromBucket',
-        },
-      ) as Promise<DeleteFromBucketResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFromBucket",
+      }) as Promise<DeleteFromBucketResponse>;
     },
-    ListObjectsPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListObjectsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListObjectsPaged',
-        },
-      ) as Promise<ListObjectsPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListObjectsPaged",
+      }) as Promise<ListObjectsPagedResponse>;
     },
-    GetMediaUsage(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMediaUsage(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/usage`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.mediaIds) {
         request.mediaIds.forEach((x) => {
-          queryParams.push(`mediaIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`mediaIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMediaUsage',
-        },
-      ) as Promise<GetMediaUsageResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMediaUsage",
+      }) as Promise<GetMediaUsageResponse>;
     },
-    ListMediaMonths(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMediaMonths(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/months`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMediaMonths',
-        },
-      ) as Promise<ListMediaMonthsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMediaMonths",
+      }) as Promise<ListMediaMonthsResponse>;
     },
-    ListMediaFacets(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMediaFacets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/content/facets`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMediaFacets',
-        },
-      ) as Promise<ListMediaFacetsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMediaFacets",
+      }) as Promise<ListMediaFacetsResponse>;
     },
-    CreateColorway(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateColorway',
-        },
-      ) as Promise<CreateColorwayResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateColorway",
+      }) as Promise<CreateColorwayResponse>;
     },
-    UpdateColorway(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateColorway',
-        },
-      ) as Promise<UpdateColorwayResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColorway",
+      }) as Promise<UpdateColorwayResponse>;
     },
-    UpdateColorwayRecipe(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateColorwayRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/recipe`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateColorwayRecipe',
-        },
-      ) as Promise<UpdateColorwayRecipeResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColorwayRecipe",
+      }) as Promise<UpdateColorwayRecipeResponse>;
     },
-    ApplyColorwayPaletteToSlots(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ApplyColorwayPaletteToSlots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/palette/apply`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ApplyColorwayPaletteToSlots',
-        },
-      ) as Promise<ApplyColorwayPaletteToSlotsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApplyColorwayPaletteToSlots",
+      }) as Promise<ApplyColorwayPaletteToSlotsResponse>;
     },
-    GetColorwayByID(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetColorwayByID',
-        },
-      ) as Promise<GetColorwayByIDResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetColorwayByID",
+      }) as Promise<GetColorwayByIDResponse>;
     },
-    GetColorwaysPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetColorwaysPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.sortFactors) {
         request.sortFactors.forEach((x) => {
-          queryParams.push(`sortFactors=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`sortFactors=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.filterConditions?.from) {
-        queryParams.push(
-          `filterConditions.from=${encodeURIComponent(request.filterConditions.from.toString())}`,
-        );
+        queryParams.push(`filterConditions.from=${encodeURIComponent(request.filterConditions.from.toString())}`)
       }
       if (request.filterConditions?.to) {
-        queryParams.push(
-          `filterConditions.to=${encodeURIComponent(request.filterConditions.to.toString())}`,
-        );
+        queryParams.push(`filterConditions.to=${encodeURIComponent(request.filterConditions.to.toString())}`)
       }
       if (request.filterConditions?.currency) {
-        queryParams.push(
-          `filterConditions.currency=${encodeURIComponent(request.filterConditions.currency.toString())}`,
-        );
+        queryParams.push(`filterConditions.currency=${encodeURIComponent(request.filterConditions.currency.toString())}`)
       }
       if (request.filterConditions?.onSale) {
-        queryParams.push(
-          `filterConditions.onSale=${encodeURIComponent(request.filterConditions.onSale.toString())}`,
-        );
+        queryParams.push(`filterConditions.onSale=${encodeURIComponent(request.filterConditions.onSale.toString())}`)
       }
       if (request.filterConditions?.gender) {
         request.filterConditions.gender.forEach((x) => {
-          queryParams.push(`filterConditions.gender=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.gender=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.topCategoryIds) {
         request.filterConditions.topCategoryIds.forEach((x) => {
-          queryParams.push(`filterConditions.topCategoryIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.topCategoryIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.subCategoryIds) {
         request.filterConditions.subCategoryIds.forEach((x) => {
-          queryParams.push(`filterConditions.subCategoryIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.subCategoryIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.typeIds) {
         request.filterConditions.typeIds.forEach((x) => {
-          queryParams.push(`filterConditions.typeIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.typeIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.sizesIds) {
         request.filterConditions.sizesIds.forEach((x) => {
-          queryParams.push(`filterConditions.sizesIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.sizesIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.preorder) {
-        queryParams.push(
-          `filterConditions.preorder=${encodeURIComponent(request.filterConditions.preorder.toString())}`,
-        );
+        queryParams.push(`filterConditions.preorder=${encodeURIComponent(request.filterConditions.preorder.toString())}`)
       }
       if (request.filterConditions?.byTag) {
-        queryParams.push(
-          `filterConditions.byTag=${encodeURIComponent(request.filterConditions.byTag.toString())}`,
-        );
+        queryParams.push(`filterConditions.byTag=${encodeURIComponent(request.filterConditions.byTag.toString())}`)
       }
       if (request.filterConditions?.collections) {
         request.filterConditions.collections.forEach((x) => {
-          queryParams.push(`filterConditions.collections=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.collections=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.seasons) {
         request.filterConditions.seasons.forEach((x) => {
-          queryParams.push(`filterConditions.seasons=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.seasons=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.excludeTopCategoryIds) {
         request.filterConditions.excludeTopCategoryIds.forEach((x) => {
-          queryParams.push(
-            `filterConditions.excludeTopCategoryIds=${encodeURIComponent(x.toString())}`,
-          );
-        });
+          queryParams.push(`filterConditions.excludeTopCategoryIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.colorCodes) {
         request.filterConditions.colorCodes.forEach((x) => {
-          queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`filterConditions.colorCodes=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.filterConditions?.exclusive) {
-        queryParams.push(
-          `filterConditions.exclusive=${encodeURIComponent(request.filterConditions.exclusive.toString())}`,
-        );
+        queryParams.push(`filterConditions.exclusive=${encodeURIComponent(request.filterConditions.exclusive.toString())}`)
       }
       if (request.statuses) {
         request.statuses.forEach((x) => {
-          queryParams.push(`statuses=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`statuses=${encodeURIComponent(x.toString())}`)
+        })
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetColorwaysPaged',
-        },
-      ) as Promise<GetColorwaysPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetColorwaysPaged",
+      }) as Promise<GetColorwaysPagedResponse>;
     },
-    ArchiveColorwayByID(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveColorwayByID',
-        },
-      ) as Promise<ArchiveColorwayByIDResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveColorwayByID",
+      }) as Promise<ArchiveColorwayByIDResponse>;
     },
-    DeleteColorwayByID(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.expectedVersion) {
-        queryParams.push(
-          `expectedVersion=${encodeURIComponent(request.expectedVersion.toString())}`,
-        );
+        queryParams.push(`expectedVersion=${encodeURIComponent(request.expectedVersion.toString())}`)
       }
       if (request.dryRun) {
-        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`);
+        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteColorwayByID',
-        },
-      ) as Promise<DeleteColorwayByIDResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteColorwayByID",
+      }) as Promise<DeleteColorwayByIDResponse>;
     },
-    PublishColorway(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PublishColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/publish`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PublishColorway',
-        },
-      ) as Promise<PublishColorwayResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PublishColorway",
+      }) as Promise<PublishColorwayResponse>;
     },
-    TransitionColorwayStatus(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    TransitionColorwayStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/status`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'TransitionColorwayStatus',
-        },
-      ) as Promise<TransitionColorwayStatusResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "TransitionColorwayStatus",
+      }) as Promise<TransitionColorwayStatusResponse>;
     },
-    UpdateVariantStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateVariantStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateVariantStock',
-        },
-      ) as Promise<UpdateVariantStockResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateVariantStock",
+      }) as Promise<UpdateVariantStockResponse>;
     },
-    CreateVariant(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/variants`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateVariant',
-        },
-      ) as Promise<CreateVariantResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateVariant",
+      }) as Promise<CreateVariantResponse>;
     },
-    UpdateVariant(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.variantId) {
-        throw new Error('missing required field request.variant_id');
+        throw new Error("missing required field request.variant_id");
       }
       const path = `api/admin/variants/${request.variantId}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateVariant',
-        },
-      ) as Promise<UpdateVariantResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateVariant",
+      }) as Promise<UpdateVariantResponse>;
     },
-    ArchiveVariant(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.variantId) {
-        throw new Error('missing required field request.variant_id');
+        throw new Error("missing required field request.variant_id");
       }
       const path = `api/admin/variants/${request.variantId}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveVariant',
-        },
-      ) as Promise<ArchiveVariantResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveVariant",
+      }) as Promise<ArchiveVariantResponse>;
     },
-    ListVariantSeconds(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListVariantSeconds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/seconds`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListVariantSeconds',
-        },
-      ) as Promise<ListVariantSecondsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListVariantSeconds",
+      }) as Promise<ListVariantSecondsResponse>;
     },
-    SetVariantPrice(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetVariantPrice(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.variantId) {
-        throw new Error('missing required field request.variant_id');
+        throw new Error("missing required field request.variant_id");
       }
       const path = `api/admin/variants/${request.variantId}/price`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetVariantPrice',
-        },
-      ) as Promise<SetVariantPriceResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetVariantPrice",
+      }) as Promise<SetVariantPriceResponse>;
     },
-    UpdateStyle(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {
-        throw new Error('missing required field request.style_id');
+        throw new Error("missing required field request.style_id");
       }
       const path = `api/admin/styles/${request.styleId}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateStyle',
-        },
-      ) as Promise<UpdateStyleResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyle",
+      }) as Promise<UpdateStyleResponse>;
     },
-    GetStyleSizeChart(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {
-        throw new Error('missing required field request.style_id');
+        throw new Error("missing required field request.style_id");
       }
       const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetStyleSizeChart',
-        },
-      ) as Promise<GetStyleSizeChartResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleSizeChart",
+      }) as Promise<GetStyleSizeChartResponse>;
     },
-    GetStyleCutList(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetStyleCutList(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/styles/${request.techCardId}/cut-list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetStyleCutList',
-        },
-      ) as Promise<GetStyleCutListResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleCutList",
+      }) as Promise<GetStyleCutListResponse>;
     },
-    UpdateStyleSizeChart(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateStyleSizeChart(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {
-        throw new Error('missing required field request.style_id');
+        throw new Error("missing required field request.style_id");
       }
       const path = `api/admin/styles/${request.styleId}/size-chart`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateStyleSizeChart',
-        },
-      ) as Promise<UpdateStyleSizeChartResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateStyleSizeChart",
+      }) as Promise<UpdateStyleSizeChartResponse>;
     },
-    CloneStyleForSeason(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CloneStyleForSeason(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.sourceStyleId) {
-        throw new Error('missing required field request.source_style_id');
+        throw new Error("missing required field request.source_style_id");
       }
       const path = `api/admin/styles/${request.sourceStyleId}/clone-for-season`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CloneStyleForSeason',
-        },
-      ) as Promise<CloneStyleForSeasonResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CloneStyleForSeason",
+      }) as Promise<CloneStyleForSeasonResponse>;
     },
-    RelinkDraftColorway(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RelinkDraftColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/relink`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RelinkDraftColorway',
-        },
-      ) as Promise<RelinkDraftColorwayResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RelinkDraftColorway",
+      }) as Promise<RelinkDraftColorwayResponse>;
     },
-    GetColorwayCustoms(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/customs`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetColorwayCustoms',
-        },
-      ) as Promise<GetColorwayCustomsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetColorwayCustoms",
+      }) as Promise<GetColorwayCustomsResponse>;
     },
-    SetColorwayCustoms(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetColorwayCustoms(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways/customs`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetColorwayCustoms',
-        },
-      ) as Promise<SetColorwayCustomsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetColorwayCustoms",
+      }) as Promise<SetColorwayCustomsResponse>;
     },
-    SyncColorwayCostFromOwningStyle(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SyncColorwayCostFromOwningStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
-        throw new Error('missing required field request.colorway_id');
+        throw new Error("missing required field request.colorway_id");
       }
       const path = `api/admin/colorways/${request.colorwayId}/cost/sync`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SyncColorwayCostFromOwningStyle',
-        },
-      ) as Promise<SyncColorwayCostFromOwningStyleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SyncColorwayCostFromOwningStyle",
+      }) as Promise<SyncColorwayCostFromOwningStyleResponse>;
     },
-    ListStockChangeHistory(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListStockChangeHistory(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock-change-history`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.dateFrom) {
-        queryParams.push(`dateFrom=${encodeURIComponent(request.dateFrom.toString())}`);
+        queryParams.push(`dateFrom=${encodeURIComponent(request.dateFrom.toString())}`)
       }
       if (request.dateTo) {
-        queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`);
+        queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`)
       }
       if (request.colorwayId) {
-        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`);
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.sizeId) {
-        queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`);
+        queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`)
       }
       if (request.source) {
-        queryParams.push(`source=${encodeURIComponent(request.source.toString())}`);
+        queryParams.push(`source=${encodeURIComponent(request.source.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListStockChangeHistory',
-        },
-      ) as Promise<ListStockChangeHistoryResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStockChangeHistory",
+      }) as Promise<ListStockChangeHistoryResponse>;
     },
-    ListStockChanges(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListStockChanges(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/stock-changes`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       if (request.colorwayId) {
-        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`);
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       if (request.source) {
-        queryParams.push(`source=${encodeURIComponent(request.source.toString())}`);
+        queryParams.push(`source=${encodeURIComponent(request.source.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.sizeId) {
-        queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`);
+        queryParams.push(`sizeId=${encodeURIComponent(request.sizeId.toString())}`)
       }
       if (request.sortByDirection) {
-        queryParams.push(
-          `sortByDirection=${encodeURIComponent(request.sortByDirection.toString())}`,
-        );
+        queryParams.push(`sortByDirection=${encodeURIComponent(request.sortByDirection.toString())}`)
       }
       if (request.productionRunId) {
-        queryParams.push(
-          `productionRunId=${encodeURIComponent(request.productionRunId.toString())}`,
-        );
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListStockChanges',
-        },
-      ) as Promise<ListStockChangesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStockChanges",
+      }) as Promise<ListStockChangesResponse>;
     },
-    ListProductWaitlist(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListProductWaitlist(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/waitlist`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`);
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListProductWaitlist',
-        },
-      ) as Promise<ListProductWaitlistResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductWaitlist",
+      }) as Promise<ListProductWaitlistResponse>;
     },
-    ListColors(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListColors(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListColors',
-        },
-      ) as Promise<ListColorsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListColors",
+      }) as Promise<ListColorsResponse>;
     },
-    CreateColor(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateColor',
-        },
-      ) as Promise<CreateColorResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateColor",
+      }) as Promise<CreateColorResponse>;
     },
-    UpdateColor(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/dictionaries/colors/${request.code}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateColor',
-        },
-      ) as Promise<UpdateColorResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateColor",
+      }) as Promise<UpdateColorResponse>;
     },
-    ArchiveColor(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/dictionaries/colors/${request.code}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveColor',
-        },
-      ) as Promise<ArchiveColorResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveColor",
+      }) as Promise<ArchiveColorResponse>;
     },
-    ListCollections(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListCollections(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListCollections',
-        },
-      ) as Promise<ListCollectionsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCollections",
+      }) as Promise<ListCollectionsResponse>;
     },
-    CreateCollection(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/collections`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateCollection',
-        },
-      ) as Promise<CreateCollectionResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateCollection",
+      }) as Promise<CreateCollectionResponse>;
     },
-    UpdateCollection(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/dictionaries/collections/${request.id}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateCollection',
-        },
-      ) as Promise<UpdateCollectionResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateCollection",
+      }) as Promise<UpdateCollectionResponse>;
     },
-    ArchiveCollection(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveCollection(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/dictionaries/collections/${request.id}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveCollection',
-        },
-      ) as Promise<ArchiveCollectionResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveCollection",
+      }) as Promise<ArchiveCollectionResponse>;
     },
-    ListTags(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTags(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTags',
-        },
-      ) as Promise<ListTagsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTags",
+      }) as Promise<ListTagsResponse>;
     },
-    CreateTag(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/tags`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateTag',
-        },
-      ) as Promise<CreateTagResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateTag",
+      }) as Promise<CreateTagResponse>;
     },
-    UpdateTag(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/dictionaries/tags/${request.id}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateTag',
-        },
-      ) as Promise<UpdateTagResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTag",
+      }) as Promise<UpdateTagResponse>;
     },
-    ArchiveTag(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveTag(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/dictionaries/tags/${request.id}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveTag',
-        },
-      ) as Promise<ArchiveTagResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveTag",
+      }) as Promise<ArchiveTagResponse>;
     },
-    CreateFiber(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/fibers`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateFiber',
-        },
-      ) as Promise<CreateFiberResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFiber",
+      }) as Promise<CreateFiberResponse>;
     },
-    ArchiveFiber(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveFiber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/dictionaries/fibers/${request.code}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveFiber',
-        },
-      ) as Promise<ArchiveFiberResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveFiber",
+      }) as Promise<ArchiveFiberResponse>;
     },
-    UpsertFiberLabelTranslations(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertFiberLabelTranslations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/dictionaries/fibers/${request.code}/label-translations`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertFiberLabelTranslations',
-        },
-      ) as Promise<UpsertFiberLabelTranslationsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertFiberLabelTranslations",
+      }) as Promise<UpsertFiberLabelTranslationsResponse>;
     },
-    ListCountries(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.activeOnly) {
-        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`);
+        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListCountries',
-        },
-      ) as Promise<ListCountriesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCountries",
+      }) as Promise<ListCountriesResponse>;
     },
-    SetCountryActive(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetCountryActive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/dictionaries/countries/${request.code}/active`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetCountryActive',
-        },
-      ) as Promise<SetCountryActiveResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetCountryActive",
+      }) as Promise<SetCountryActiveResponse>;
     },
-    AddPromo(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddPromo(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddPromo',
-        },
-      ) as Promise<AddPromoResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddPromo",
+      }) as Promise<AddPromoResponse>;
     },
-    UpdatePromoCode(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdatePromoCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdatePromoCode',
-        },
-      ) as Promise<UpdatePromoCodeResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdatePromoCode",
+      }) as Promise<UpdatePromoCodeResponse>;
     },
-    ListPromos(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListPromos(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/promo/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListPromos',
-        },
-      ) as Promise<ListPromosResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPromos",
+      }) as Promise<ListPromosResponse>;
     },
-    DeletePromoCode(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeletePromoCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/promo/${request.code}/delete`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeletePromoCode',
-        },
-      ) as Promise<DeletePromoCodeResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeletePromoCode",
+      }) as Promise<DeletePromoCodeResponse>;
     },
-    DisablePromoCode(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DisablePromoCode(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/promo/${request.code}/disable`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DisablePromoCode',
-        },
-      ) as Promise<DisablePromoCodeResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DisablePromoCode",
+      }) as Promise<DisablePromoCodeResponse>;
     },
-    GetOrderByUUID(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOrderByUUID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/order/${request.orderUuid}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOrderByUUID',
-        },
-      ) as Promise<GetOrderByUUIDResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrderByUUID",
+      }) as Promise<GetOrderByUUIDResponse>;
     },
-    SetTrackingNumber(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetTrackingNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/set-tracking-number`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetTrackingNumber',
-        },
-      ) as Promise<SetTrackingNumberResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTrackingNumber",
+      }) as Promise<SetTrackingNumberResponse>;
     },
-    ListOrders(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListOrders(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/orders/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListOrders',
-        },
-      ) as Promise<ListOrdersResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOrders",
+      }) as Promise<ListOrdersResponse>;
     },
-    GetOrdersOverview(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOrdersOverview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/orders/overview`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOrdersOverview',
-        },
-      ) as Promise<GetOrdersOverviewResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrdersOverview",
+      }) as Promise<GetOrdersOverviewResponse>;
     },
-    RefundOrder(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RefundOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/refund`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RefundOrder',
-        },
-      ) as Promise<RefundOrderResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RefundOrder",
+      }) as Promise<RefundOrderResponse>;
     },
-    DeliveredOrder(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeliveredOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/delivered`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeliveredOrder',
-        },
-      ) as Promise<DeliveredOrderResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeliveredOrder",
+      }) as Promise<DeliveredOrderResponse>;
     },
-    GetMetrics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMetrics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.period) {
-        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`);
+        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`)
       }
       if (request.endAt) {
-        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`);
+        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`)
       }
       if (request.compareMode) {
-        queryParams.push(`compareMode=${encodeURIComponent(request.compareMode.toString())}`);
+        queryParams.push(`compareMode=${encodeURIComponent(request.compareMode.toString())}`)
       }
       if (request.sections) {
         request.sections.forEach((x) => {
-          queryParams.push(`sections=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`sections=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.trendGranularity) {
-        queryParams.push(
-          `trendGranularity=${encodeURIComponent(request.trendGranularity.toString())}`,
-        );
+        queryParams.push(`trendGranularity=${encodeURIComponent(request.trendGranularity.toString())}`)
       }
       if (request.comparePeriod?.from) {
-        queryParams.push(
-          `comparePeriod.from=${encodeURIComponent(request.comparePeriod.from.toString())}`,
-        );
+        queryParams.push(`comparePeriod.from=${encodeURIComponent(request.comparePeriod.from.toString())}`)
       }
       if (request.comparePeriod?.to) {
-        queryParams.push(
-          `comparePeriod.to=${encodeURIComponent(request.comparePeriod.to.toString())}`,
-        );
+        queryParams.push(`comparePeriod.to=${encodeURIComponent(request.comparePeriod.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMetrics',
-        },
-      ) as Promise<GetMetricsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMetrics",
+      }) as Promise<GetMetricsResponse>;
     },
-    GetDashboard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDashboard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dashboard`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.period) {
-        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`);
+        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`)
       }
       if (request.endAt) {
-        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`);
+        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.compareMode) {
-        queryParams.push(`compareMode=${encodeURIComponent(request.compareMode.toString())}`);
+        queryParams.push(`compareMode=${encodeURIComponent(request.compareMode.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDashboard',
-        },
-      ) as Promise<GetDashboardResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDashboard",
+      }) as Promise<GetDashboardResponse>;
     },
-    GetStyleEconomics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetStyleEconomics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/style-economics`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetStyleEconomics',
-        },
-      ) as Promise<GetStyleEconomicsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleEconomics",
+      }) as Promise<GetStyleEconomicsResponse>;
     },
-    GetStyleCostEstimate(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetStyleCostEstimate(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/style-cost-estimate`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.colorwayId) {
-        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`);
+        queryParams.push(`colorwayId=${encodeURIComponent(request.colorwayId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetStyleCostEstimate',
-        },
-      ) as Promise<GetStyleCostEstimateResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStyleCostEstimate",
+      }) as Promise<GetStyleCostEstimateResponse>;
     },
-    GetChannelRoasSettled(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetChannelRoasSettled(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/channel-roas-settled`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.period) {
-        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`);
+        queryParams.push(`period=${encodeURIComponent(request.period.toString())}`)
       }
       if (request.endAt) {
-        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`);
+        queryParams.push(`endAt=${encodeURIComponent(request.endAt.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetChannelRoasSettled',
-        },
-      ) as Promise<GetChannelRoasSettledResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetChannelRoasSettled",
+      }) as Promise<GetChannelRoasSettledResponse>;
     },
-    GetAlertSettings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAlertSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dashboard/alert-settings`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAlertSettings',
-        },
-      ) as Promise<GetAlertSettingsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAlertSettings",
+      }) as Promise<GetAlertSettingsResponse>;
     },
-    UpsertAlertSettings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertAlertSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dashboard/alert-settings/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertAlertSettings',
-        },
-      ) as Promise<UpsertAlertSettingsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertAlertSettings",
+      }) as Promise<UpsertAlertSettingsResponse>;
     },
-    UpsertInventoryTargets(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertInventoryTargets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/inventory/targets/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertInventoryTargets',
-        },
-      ) as Promise<UpsertInventoryTargetsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertInventoryTargets",
+      }) as Promise<UpsertInventoryTargetsResponse>;
     },
-    UpsertChannelSpend(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertChannelSpend(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/channel-spend/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertChannelSpend',
-        },
-      ) as Promise<UpsertChannelSpendResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertChannelSpend",
+      }) as Promise<UpsertChannelSpendResponse>;
     },
-    UpsertOpexLines(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertOpexLines(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/lines/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertOpexLines',
-        },
-      ) as Promise<UpsertOpexLinesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertOpexLines",
+      }) as Promise<UpsertOpexLinesResponse>;
     },
-    DeleteOpexLine(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteOpexLine(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/lines/delete`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteOpexLine',
-        },
-      ) as Promise<DeleteOpexLineResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteOpexLine",
+      }) as Promise<DeleteOpexLineResponse>;
     },
-    ListOpexLines(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListOpexLines(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/lines/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListOpexLines',
-        },
-      ) as Promise<ListOpexLinesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpexLines",
+      }) as Promise<ListOpexLinesResponse>;
     },
-    UpsertOpexRecurring(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/recurring/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertOpexRecurring',
-        },
-      ) as Promise<UpsertOpexRecurringResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertOpexRecurring",
+      }) as Promise<UpsertOpexRecurringResponse>;
     },
-    ArchiveOpexRecurring(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/recurring/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveOpexRecurring',
-        },
-      ) as Promise<ArchiveOpexRecurringResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveOpexRecurring",
+      }) as Promise<ArchiveOpexRecurringResponse>;
     },
-    ListOpexRecurring(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListOpexRecurring(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/opex/recurring/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListOpexRecurring',
-        },
-      ) as Promise<ListOpexRecurringResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpexRecurring",
+      }) as Promise<ListOpexRecurringResponse>;
     },
-    UpsertEmployee(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertEmployee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/employees/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertEmployee',
-        },
-      ) as Promise<UpsertEmployeeResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmployee",
+      }) as Promise<UpsertEmployeeResponse>;
     },
-    ArchiveEmployee(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveEmployee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/employees/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveEmployee',
-        },
-      ) as Promise<ArchiveEmployeeResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveEmployee",
+      }) as Promise<ArchiveEmployeeResponse>;
     },
-    ListEmployees(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListEmployees(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/metrics/employees/list`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListEmployees',
-        },
-      ) as Promise<ListEmployeesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmployees",
+      }) as Promise<ListEmployeesResponse>;
     },
-    CancelOrder(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CancelOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/cancel`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CancelOrder',
-        },
-      ) as Promise<CancelOrderResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CancelOrder",
+      }) as Promise<CancelOrderResponse>;
     },
-    AddOrderComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddOrderComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/comment`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddOrderComment',
-        },
-      ) as Promise<AddOrderCommentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddOrderComment",
+      }) as Promise<AddOrderCommentResponse>;
     },
-    ListOrderComments(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListOrderComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/orders/${request.orderUuid}/comments`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListOrderComments',
-        },
-      ) as Promise<ListOrderCommentsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOrderComments",
+      }) as Promise<ListOrderCommentsResponse>;
     },
-    CreateCustomOrder(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateCustomOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/orders/custom`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateCustomOrder',
-        },
-      ) as Promise<CreateCustomOrderResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateCustomOrder",
+      }) as Promise<CreateCustomOrderResponse>;
     },
-    AddHero(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddHero(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/hero/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddHero',
-        },
-      ) as Promise<AddHeroResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddHero",
+      }) as Promise<AddHeroResponse>;
     },
-    UpsertEmailSegment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-segments`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertEmailSegment',
-        },
-      ) as Promise<UpsertEmailSegmentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmailSegment",
+      }) as Promise<UpsertEmailSegmentResponse>;
     },
-    GetEmailSegment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-segments/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetEmailSegment',
-        },
-      ) as Promise<GetEmailSegmentResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetEmailSegment",
+      }) as Promise<GetEmailSegmentResponse>;
     },
-    DeleteEmailSegment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-segments/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteEmailSegment',
-        },
-      ) as Promise<DeleteEmailSegmentResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteEmailSegment",
+      }) as Promise<DeleteEmailSegmentResponse>;
     },
-    ListEmailSegments(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListEmailSegments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-segments`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListEmailSegments',
-        },
-      ) as Promise<ListEmailSegmentsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmailSegments",
+      }) as Promise<ListEmailSegmentsResponse>;
     },
-    PreviewEmailSegment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PreviewEmailSegment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-segments/preview`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PreviewEmailSegment',
-        },
-      ) as Promise<PreviewEmailSegmentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PreviewEmailSegment",
+      }) as Promise<PreviewEmailSegmentResponse>;
     },
-    UpsertEmailCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-campaigns`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertEmailCampaign',
-        },
-      ) as Promise<UpsertEmailCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertEmailCampaign",
+      }) as Promise<UpsertEmailCampaignResponse>;
     },
-    GetEmailCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetEmailCampaign',
-        },
-      ) as Promise<GetEmailCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetEmailCampaign",
+      }) as Promise<GetEmailCampaignResponse>;
     },
-    DeleteEmailCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteEmailCampaign',
-        },
-      ) as Promise<DeleteEmailCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteEmailCampaign",
+      }) as Promise<DeleteEmailCampaignResponse>;
     },
-    ListEmailCampaignsPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListEmailCampaignsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-campaigns/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.topic) {
-        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`);
+        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListEmailCampaignsPaged',
-        },
-      ) as Promise<ListEmailCampaignsPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListEmailCampaignsPaged",
+      }) as Promise<ListEmailCampaignsPagedResponse>;
     },
-    RenderCampaignPreview(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RenderCampaignPreview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-campaigns/render-preview`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RenderCampaignPreview',
-        },
-      ) as Promise<RenderCampaignPreviewResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RenderCampaignPreview",
+      }) as Promise<RenderCampaignPreviewResponse>;
     },
-    SendTestEmail(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SendTestEmail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/email-campaigns/test-send`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SendTestEmail',
-        },
-      ) as Promise<SendTestEmailResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SendTestEmail",
+      }) as Promise<SendTestEmailResponse>;
     },
-    SendCampaignNow(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SendCampaignNow(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/send`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SendCampaignNow',
-        },
-      ) as Promise<SendCampaignNowResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SendCampaignNow",
+      }) as Promise<SendCampaignNowResponse>;
     },
-    AutoTranslateEmailCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AutoTranslateEmailCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/auto-translate`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AutoTranslateEmailCampaign',
-        },
-      ) as Promise<AutoTranslateEmailCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AutoTranslateEmailCampaign",
+      }) as Promise<AutoTranslateEmailCampaignResponse>;
     },
-    ScheduleCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ScheduleCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/schedule`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ScheduleCampaign',
-        },
-      ) as Promise<ScheduleCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ScheduleCampaign",
+      }) as Promise<ScheduleCampaignResponse>;
     },
-    PauseCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PauseCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/pause`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PauseCampaign',
-        },
-      ) as Promise<PauseCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PauseCampaign",
+      }) as Promise<PauseCampaignResponse>;
     },
-    ResumeCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ResumeCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/resume`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ResumeCampaign',
-        },
-      ) as Promise<ResumeCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResumeCampaign",
+      }) as Promise<ResumeCampaignResponse>;
     },
-    CancelCampaign(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CancelCampaign(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/cancel`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CancelCampaign',
-        },
-      ) as Promise<CancelCampaignResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CancelCampaign",
+      }) as Promise<CancelCampaignResponse>;
     },
-    GetCampaignDispatchStatus(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCampaignDispatchStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/dispatch-status`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCampaignDispatchStatus',
-        },
-      ) as Promise<GetCampaignDispatchStatusResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignDispatchStatus",
+      }) as Promise<GetCampaignDispatchStatusResponse>;
     },
-    GetCampaignMetrics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCampaignMetrics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.campaignId) {
-        throw new Error('missing required field request.campaign_id');
+        throw new Error("missing required field request.campaign_id");
       }
       const path = `api/admin/email-campaigns/${request.campaignId}/metrics`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCampaignMetrics',
-        },
-      ) as Promise<GetCampaignMetricsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignMetrics",
+      }) as Promise<GetCampaignMetricsResponse>;
     },
-    GetCampaignRecipients(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCampaignRecipients(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/email-campaigns/${request.id}/recipients`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.afterId) {
-        queryParams.push(`afterId=${encodeURIComponent(request.afterId.toString())}`);
+        queryParams.push(`afterId=${encodeURIComponent(request.afterId.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCampaignRecipients',
-        },
-      ) as Promise<GetCampaignRecipientsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCampaignRecipients",
+      }) as Promise<GetCampaignRecipientsResponse>;
     },
-    AddArchive(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/archive/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddArchive',
-        },
-      ) as Promise<AddArchiveResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddArchive",
+      }) as Promise<AddArchiveResponse>;
     },
-    UpdateArchive(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/archive/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateArchive',
-        },
-      ) as Promise<UpdateArchiveResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateArchive",
+      }) as Promise<UpdateArchiveResponse>;
     },
-    DeleteArchiveById(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteArchiveById(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/archive/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteArchiveById',
-        },
-      ) as Promise<DeleteArchiveByIdResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteArchiveById",
+      }) as Promise<DeleteArchiveByIdResponse>;
     },
-    GetArchiveByID(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetArchiveByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/archive/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetArchiveByID',
-        },
-      ) as Promise<GetArchiveByIDResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetArchiveByID",
+      }) as Promise<GetArchiveByIDResponse>;
     },
-    GetArchivesPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetArchivesPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/archive/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetArchivesPaged',
-        },
-      ) as Promise<GetArchivesPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetArchivesPaged",
+      }) as Promise<GetArchivesPagedResponse>;
     },
-    AddModel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddModel',
-        },
-      ) as Promise<AddModelResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddModel",
+      }) as Promise<AddModelResponse>;
     },
-    GetModel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/model/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetModel',
-        },
-      ) as Promise<GetModelResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetModel",
+      }) as Promise<GetModelResponse>;
     },
-    UpdateModel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateModel',
-        },
-      ) as Promise<UpdateModelResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateModel",
+      }) as Promise<UpdateModelResponse>;
     },
-    DeleteModel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteModel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/model/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteModel',
-        },
-      ) as Promise<DeleteModelResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteModel",
+      }) as Promise<DeleteModelResponse>;
     },
-    ListModels(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListModels(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/model/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.gender) {
-        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`);
+        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`)
       }
       if (request.name) {
-        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`);
+        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListModels',
-        },
-      ) as Promise<ListModelsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListModels",
+      }) as Promise<ListModelsResponse>;
     },
-    AddFitting(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddFitting',
-        },
-      ) as Promise<AddFittingResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFitting",
+      }) as Promise<AddFittingResponse>;
     },
-    GetFitting(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/fitting/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetFitting',
-        },
-      ) as Promise<GetFittingResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFitting",
+      }) as Promise<GetFittingResponse>;
     },
-    UpdateFitting(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateFitting',
-        },
-      ) as Promise<UpdateFittingResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFitting",
+      }) as Promise<UpdateFittingResponse>;
     },
-    DeleteFitting(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteFitting(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/fitting/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteFitting',
-        },
-      ) as Promise<DeleteFittingResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFitting",
+      }) as Promise<DeleteFittingResponse>;
     },
-    ListFittings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListFittings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`);
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
       }
       if (request.modelId) {
-        queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`);
+        queryParams.push(`modelId=${encodeURIComponent(request.modelId.toString())}`)
       }
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListFittings',
-        },
-      ) as Promise<ListFittingsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFittings",
+      }) as Promise<ListFittingsResponse>;
     },
-    AddSample(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/sample/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddSample',
-        },
-      ) as Promise<AddSampleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddSample",
+      }) as Promise<AddSampleResponse>;
     },
-    UpdateSample(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/sample/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateSample',
-        },
-      ) as Promise<UpdateSampleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSample",
+      }) as Promise<UpdateSampleResponse>;
     },
-    DeleteSample(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/sample/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.dryRun) {
-        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`);
+        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteSample',
-        },
-      ) as Promise<DeleteSampleResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteSample",
+      }) as Promise<DeleteSampleResponse>;
     },
-    GetSample(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetSample(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/sample/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetSample',
-        },
-      ) as Promise<GetSampleResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSample",
+      }) as Promise<GetSampleResponse>;
     },
-    ListSamples(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListSamples(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/sample/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.purpose) {
-        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`);
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListSamples',
-        },
-      ) as Promise<ListSamplesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSamples",
+      }) as Promise<ListSamplesResponse>;
     },
-    AddSampleSubstitution(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddSampleSubstitution(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/sample/substitution/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddSampleSubstitution',
-        },
-      ) as Promise<AddSampleSubstitutionResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddSampleSubstitution",
+      }) as Promise<AddSampleSubstitutionResponse>;
     },
-    DeleteSampleSubstitution(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteSampleSubstitution(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/sample/substitution/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteSampleSubstitution',
-        },
-      ) as Promise<DeleteSampleSubstitutionResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteSampleSubstitution",
+      }) as Promise<DeleteSampleSubstitutionResponse>;
     },
-    ListSampleSubstitutions(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListSampleSubstitutions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.sampleId) {
-        throw new Error('missing required field request.sample_id');
+        throw new Error("missing required field request.sample_id");
       }
       const path = `api/admin/sample/${request.sampleId}/substitutions`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListSampleSubstitutions',
-        },
-      ) as Promise<ListSampleSubstitutionsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSampleSubstitutions",
+      }) as Promise<ListSampleSubstitutionsResponse>;
     },
-    AddFittingChangeRequest(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/change-request/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddFittingChangeRequest',
-        },
-      ) as Promise<AddFittingChangeRequestResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFittingChangeRequest",
+      }) as Promise<AddFittingChangeRequestResponse>;
     },
-    UpdateFittingChangeRequest(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/change-request/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateFittingChangeRequest',
-        },
-      ) as Promise<UpdateFittingChangeRequestResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFittingChangeRequest",
+      }) as Promise<UpdateFittingChangeRequestResponse>;
     },
-    DeleteFittingChangeRequest(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteFittingChangeRequest(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/fitting/change-request/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteFittingChangeRequest',
-        },
-      ) as Promise<DeleteFittingChangeRequestResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFittingChangeRequest",
+      }) as Promise<DeleteFittingChangeRequestResponse>;
     },
-    ListOpenFittingChangeRequests(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListOpenFittingChangeRequests(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fitting/change-request/open`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.beforeRound) {
-        queryParams.push(`beforeRound=${encodeURIComponent(request.beforeRound.toString())}`);
+        queryParams.push(`beforeRound=${encodeURIComponent(request.beforeRound.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListOpenFittingChangeRequests',
-        },
-      ) as Promise<ListOpenFittingChangeRequestsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOpenFittingChangeRequests",
+      }) as Promise<ListOpenFittingChangeRequestsResponse>;
     },
-    DraftFittingEdits(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DraftFittingEdits(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.fittingId) {
-        throw new Error('missing required field request.fitting_id');
+        throw new Error("missing required field request.fitting_id");
       }
       const path = `api/admin/fittings/${request.fittingId}/draft-edits`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DraftFittingEdits',
-        },
-      ) as Promise<DraftFittingEditsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DraftFittingEdits",
+      }) as Promise<DraftFittingEditsResponse>;
     },
-    AddTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTask',
-        },
-      ) as Promise<AddTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTask",
+      }) as Promise<AddTaskResponse>;
     },
-    GetTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/task/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTask',
-        },
-      ) as Promise<GetTaskResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTask",
+      }) as Promise<GetTaskResponse>;
     },
-    UpdateTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateTask',
-        },
-      ) as Promise<UpdateTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTask",
+      }) as Promise<UpdateTaskResponse>;
     },
-    MoveTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    MoveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/move`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'MoveTask',
-        },
-      ) as Promise<MoveTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MoveTask",
+      }) as Promise<MoveTaskResponse>;
     },
-    DeleteTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/task/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTask',
-        },
-      ) as Promise<DeleteTaskResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTask",
+      }) as Promise<DeleteTaskResponse>;
     },
-    AddTaskComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTaskComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/comment/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTaskComment',
-        },
-      ) as Promise<AddTaskCommentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskComment",
+      }) as Promise<AddTaskCommentResponse>;
     },
-    ListTaskComments(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTaskComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.taskId) {
-        throw new Error('missing required field request.task_id');
+        throw new Error("missing required field request.task_id");
       }
       const path = `api/admin/task/${request.taskId}/comments`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTaskComments',
-        },
-      ) as Promise<ListTaskCommentsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTaskComments",
+      }) as Promise<ListTaskCommentsResponse>;
     },
-    ListTasks(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTasks(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.board) {
-        queryParams.push(`board=${encodeURIComponent(request.board.toString())}`);
+        queryParams.push(`board=${encodeURIComponent(request.board.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.assignee) {
-        queryParams.push(`assignee=${encodeURIComponent(request.assignee.toString())}`);
+        queryParams.push(`assignee=${encodeURIComponent(request.assignee.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`);
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
       }
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       if (request.orderUuid) {
-        queryParams.push(`orderUuid=${encodeURIComponent(request.orderUuid.toString())}`);
+        queryParams.push(`orderUuid=${encodeURIComponent(request.orderUuid.toString())}`)
       }
       if (request.archiveId) {
-        queryParams.push(`archiveId=${encodeURIComponent(request.archiveId.toString())}`);
+        queryParams.push(`archiveId=${encodeURIComponent(request.archiveId.toString())}`)
       }
       if (request.fittingId) {
-        queryParams.push(`fittingId=${encodeURIComponent(request.fittingId.toString())}`);
+        queryParams.push(`fittingId=${encodeURIComponent(request.fittingId.toString())}`)
       }
       if (request.productionRunId) {
-        queryParams.push(
-          `productionRunId=${encodeURIComponent(request.productionRunId.toString())}`,
-        );
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
       }
       if (request.sampleId) {
-        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`);
+        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`)
       }
       if (request.projectTopicId) {
-        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`);
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
       }
       if (request.parentTaskId) {
-        queryParams.push(`parentTaskId=${encodeURIComponent(request.parentTaskId.toString())}`);
+        queryParams.push(`parentTaskId=${encodeURIComponent(request.parentTaskId.toString())}`)
       }
       if (request.query) {
-        queryParams.push(`query=${encodeURIComponent(request.query.toString())}`);
+        queryParams.push(`query=${encodeURIComponent(request.query.toString())}`)
       }
       if (request.closedFrom) {
-        queryParams.push(`closedFrom=${encodeURIComponent(request.closedFrom.toString())}`);
+        queryParams.push(`closedFrom=${encodeURIComponent(request.closedFrom.toString())}`)
       }
       if (request.closedTo) {
-        queryParams.push(`closedTo=${encodeURIComponent(request.closedTo.toString())}`);
+        queryParams.push(`closedTo=${encodeURIComponent(request.closedTo.toString())}`)
       }
       if (request.boardId) {
-        queryParams.push(`boardId=${encodeURIComponent(request.boardId.toString())}`);
+        queryParams.push(`boardId=${encodeURIComponent(request.boardId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTasks',
-        },
-      ) as Promise<ListTasksResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTasks",
+      }) as Promise<ListTasksResponse>;
     },
-    ListTaskBoards(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTaskBoards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/board/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTaskBoards',
-        },
-      ) as Promise<ListTaskBoardsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTaskBoards",
+      }) as Promise<ListTaskBoardsResponse>;
     },
-    ReorderTaskBoards(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReorderTaskBoards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/board/reorder`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReorderTaskBoards',
-        },
-      ) as Promise<ReorderTaskBoardsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReorderTaskBoards",
+      }) as Promise<ReorderTaskBoardsResponse>;
     },
-    AddTaskBoard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/board/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTaskBoard',
-        },
-      ) as Promise<AddTaskBoardResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskBoard",
+      }) as Promise<AddTaskBoardResponse>;
     },
-    UpdateTaskBoard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/board/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateTaskBoard',
-        },
-      ) as Promise<UpdateTaskBoardResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTaskBoard",
+      }) as Promise<UpdateTaskBoardResponse>;
     },
-    DeleteTaskBoard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTaskBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/task/board/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.moveToId) {
-        queryParams.push(`moveToId=${encodeURIComponent(request.moveToId.toString())}`);
+        queryParams.push(`moveToId=${encodeURIComponent(request.moveToId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTaskBoard',
-        },
-      ) as Promise<DeleteTaskBoardResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskBoard",
+      }) as Promise<DeleteTaskBoardResponse>;
     },
-    ArchiveTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveTask',
-        },
-      ) as Promise<ArchiveTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveTask",
+      }) as Promise<ArchiveTaskResponse>;
     },
-    UnarchiveTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UnarchiveTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/unarchive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UnarchiveTask',
-        },
-      ) as Promise<UnarchiveTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UnarchiveTask",
+      }) as Promise<UnarchiveTaskResponse>;
     },
-    AddTaskChecklistItem(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTaskChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/checklist/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTaskChecklistItem',
-        },
-      ) as Promise<AddTaskChecklistItemResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskChecklistItem",
+      }) as Promise<AddTaskChecklistItemResponse>;
     },
-    SetTaskChecklistItemDone(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetTaskChecklistItemDone(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/checklist/done`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetTaskChecklistItemDone',
-        },
-      ) as Promise<SetTaskChecklistItemDoneResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTaskChecklistItemDone",
+      }) as Promise<SetTaskChecklistItemDoneResponse>;
     },
-    DeleteTaskChecklistItem(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTaskChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/task/checklist/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTaskChecklistItem',
-        },
-      ) as Promise<DeleteTaskChecklistItemResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskChecklistItem",
+      }) as Promise<DeleteTaskChecklistItemResponse>;
     },
-    SetTaskParent(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetTaskParent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/parent`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetTaskParent',
-        },
-      ) as Promise<SetTaskParentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTaskParent",
+      }) as Promise<SetTaskParentResponse>;
     },
-    AddTaskLink(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTaskLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/link/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTaskLink',
-        },
-      ) as Promise<AddTaskLinkResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTaskLink",
+      }) as Promise<AddTaskLinkResponse>;
     },
-    DeleteTaskLink(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTaskLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/link/remove`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTaskLink',
-        },
-      ) as Promise<DeleteTaskLinkResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskLink",
+      }) as Promise<DeleteTaskLinkResponse>;
     },
-    DeleteTaskComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTaskComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/task/comment/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTaskComment',
-        },
-      ) as Promise<DeleteTaskCommentResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTaskComment",
+      }) as Promise<DeleteTaskCommentResponse>;
     },
-    GetLibraryFile(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetLibraryFile',
-        },
-      ) as Promise<GetLibraryFileResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFile",
+      }) as Promise<GetLibraryFileResponse>;
     },
-    ListLibraryFiles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.topicId) {
-        queryParams.push(`topicId=${encodeURIComponent(request.topicId.toString())}`);
+        queryParams.push(`topicId=${encodeURIComponent(request.topicId.toString())}`)
       }
       if (request.untopiced) {
-        queryParams.push(`untopiced=${encodeURIComponent(request.untopiced.toString())}`);
+        queryParams.push(`untopiced=${encodeURIComponent(request.untopiced.toString())}`)
       }
       if (request.search) {
-        queryParams.push(`search=${encodeURIComponent(request.search.toString())}`);
+        queryParams.push(`search=${encodeURIComponent(request.search.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.topicIds) {
         request.topicIds.forEach((x) => {
-          queryParams.push(`topicIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`topicIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.sortBy) {
-        queryParams.push(`sortBy=${encodeURIComponent(request.sortBy.toString())}`);
+        queryParams.push(`sortBy=${encodeURIComponent(request.sortBy.toString())}`)
       }
       if (request.personId) {
-        queryParams.push(`personId=${encodeURIComponent(request.personId.toString())}`);
+        queryParams.push(`personId=${encodeURIComponent(request.personId.toString())}`)
       }
       if (request.personRole) {
-        queryParams.push(`personRole=${encodeURIComponent(request.personRole.toString())}`);
+        queryParams.push(`personRole=${encodeURIComponent(request.personRole.toString())}`)
       }
       if (request.projectTopicId) {
-        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`);
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
       }
       if (request.roleId) {
-        queryParams.push(`roleId=${encodeURIComponent(request.roleId.toString())}`);
+        queryParams.push(`roleId=${encodeURIComponent(request.roleId.toString())}`)
       }
       if (request.withoutRole) {
-        queryParams.push(`withoutRole=${encodeURIComponent(request.withoutRole.toString())}`);
+        queryParams.push(`withoutRole=${encodeURIComponent(request.withoutRole.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListLibraryFiles',
-        },
-      ) as Promise<ListLibraryFilesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFiles",
+      }) as Promise<ListLibraryFilesResponse>;
     },
-    UpdateLibraryFile(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateLibraryFile',
-        },
-      ) as Promise<UpdateLibraryFileResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateLibraryFile",
+      }) as Promise<UpdateLibraryFileResponse>;
     },
-    DeleteLibraryFile(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteLibraryFile',
-        },
-      ) as Promise<DeleteLibraryFileResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteLibraryFile",
+      }) as Promise<DeleteLibraryFileResponse>;
     },
-    ListFileTopics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListFileTopics',
-        },
-      ) as Promise<ListFileTopicsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileTopics",
+      }) as Promise<ListFileTopicsResponse>;
     },
-    CreateFileTopic(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/create`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateFileTopic',
-        },
-      ) as Promise<CreateFileTopicResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFileTopic",
+      }) as Promise<CreateFileTopicResponse>;
     },
-    RenameFileTopic(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RenameFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/rename`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RenameFileTopic',
-        },
-      ) as Promise<RenameFileTopicResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RenameFileTopic",
+      }) as Promise<RenameFileTopicResponse>;
     },
-    DeleteFileTopic(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/topics/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteFileTopic',
-        },
-      ) as Promise<DeleteFileTopicResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFileTopic",
+      }) as Promise<DeleteFileTopicResponse>;
     },
-    MergeFileTopics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    MergeFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/merge`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'MergeFileTopics',
-        },
-      ) as Promise<MergeFileTopicsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MergeFileTopics",
+      }) as Promise<MergeFileTopicsResponse>;
     },
-    AssignLibraryFileTopics(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AssignLibraryFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/assign`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AssignLibraryFileTopics',
-        },
-      ) as Promise<AssignLibraryFileTopicsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AssignLibraryFileTopics",
+      }) as Promise<AssignLibraryFileTopicsResponse>;
     },
-    UpdateFileTopicMeta(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateFileTopicMeta(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/topics/meta`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateFileTopicMeta',
-        },
-      ) as Promise<UpdateFileTopicMetaResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFileTopicMeta",
+      }) as Promise<UpdateFileTopicMetaResponse>;
     },
-    ListFileRoles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/roles/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       if (request.projectTopicId) {
-        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`);
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListFileRoles',
-        },
-      ) as Promise<ListFileRolesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileRoles",
+      }) as Promise<ListFileRolesResponse>;
     },
-    UpsertFileRole(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertFileRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/roles/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertFileRole',
-        },
-      ) as Promise<UpsertFileRoleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertFileRole",
+      }) as Promise<UpsertFileRoleResponse>;
     },
-    MergeFileRoles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    MergeFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/roles/merge`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'MergeFileRoles',
-        },
-      ) as Promise<MergeFileRolesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MergeFileRoles",
+      }) as Promise<MergeFileRolesResponse>;
     },
-    SetLibraryFileRoles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetLibraryFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/roles/assign`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetLibraryFileRoles',
-        },
-      ) as Promise<SetLibraryFileRolesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileRoles",
+      }) as Promise<SetLibraryFileRolesResponse>;
     },
-    LinkFileTopicStyle(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    LinkFileTopicStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/projects/styles/link`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'LinkFileTopicStyle',
-        },
-      ) as Promise<LinkFileTopicStyleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "LinkFileTopicStyle",
+      }) as Promise<LinkFileTopicStyleResponse>;
     },
-    UnlinkFileTopicStyle(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UnlinkFileTopicStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/projects/styles/unlink`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UnlinkFileTopicStyle',
-        },
-      ) as Promise<UnlinkFileTopicStyleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UnlinkFileTopicStyle",
+      }) as Promise<UnlinkFileTopicStyleResponse>;
     },
-    ListFileTopicStyles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListFileTopicStyles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.topicId) {
-        throw new Error('missing required field request.topic_id');
+        throw new Error("missing required field request.topic_id");
       }
       const path = `api/admin/files/projects/${request.topicId}/styles`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListFileTopicStyles',
-        },
-      ) as Promise<ListFileTopicStylesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileTopicStyles",
+      }) as Promise<ListFileTopicStylesResponse>;
     },
-    ListStyleFileProjects(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListStyleFileProjects(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/files/styles/${request.techCardId}/projects`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListStyleFileProjects',
-        },
-      ) as Promise<ListStyleFileProjectsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStyleFileProjects",
+      }) as Promise<ListStyleFileProjectsResponse>;
     },
-    SetLibraryFileOwners(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetLibraryFileOwners(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/owners`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetLibraryFileOwners',
-        },
-      ) as Promise<SetLibraryFileOwnersResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileOwners",
+      }) as Promise<SetLibraryFileOwnersResponse>;
     },
-    ListLibraryFileTasks(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListLibraryFileTasks(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}/tasks`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListLibraryFileTasks',
-        },
-      ) as Promise<ListLibraryFileTasksResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFileTasks",
+      }) as Promise<ListLibraryFileTasksResponse>;
     },
-    AttachLibraryFileToTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AttachLibraryFileToTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/task/attach`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AttachLibraryFileToTask',
-        },
-      ) as Promise<AttachLibraryFileToTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AttachLibraryFileToTask",
+      }) as Promise<AttachLibraryFileToTaskResponse>;
     },
-    DetachLibraryFileFromTask(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DetachLibraryFileFromTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/task/detach`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DetachLibraryFileFromTask',
-        },
-      ) as Promise<DetachLibraryFileFromTaskResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DetachLibraryFileFromTask",
+      }) as Promise<DetachLibraryFileFromTaskResponse>;
     },
-    ListLibraryFileComments(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListLibraryFileComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}/comments`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListLibraryFileComments',
-        },
-      ) as Promise<ListLibraryFileCommentsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFileComments",
+      }) as Promise<ListLibraryFileCommentsResponse>;
     },
-    AddLibraryFileComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/comment/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddLibraryFileComment',
-        },
-      ) as Promise<AddLibraryFileCommentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddLibraryFileComment",
+      }) as Promise<AddLibraryFileCommentResponse>;
     },
-    UpdateLibraryFileComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/comment/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateLibraryFileComment',
-        },
-      ) as Promise<UpdateLibraryFileCommentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateLibraryFileComment",
+      }) as Promise<UpdateLibraryFileCommentResponse>;
     },
-    DeleteLibraryFileComment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/comment/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteLibraryFileComment',
-        },
-      ) as Promise<DeleteLibraryFileCommentResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteLibraryFileComment",
+      }) as Promise<DeleteLibraryFileCommentResponse>;
     },
-    GetLibraryFileAccess(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetLibraryFileAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}/access`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetLibraryFileAccess',
-        },
-      ) as Promise<GetLibraryFileAccessResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFileAccess",
+      }) as Promise<GetLibraryFileAccessResponse>;
     },
-    SetLibraryFileAccess(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetLibraryFileAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/access/set`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetLibraryFileAccess',
-        },
-      ) as Promise<SetLibraryFileAccessResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileAccess",
+      }) as Promise<SetLibraryFileAccessResponse>;
     },
-    RotateLibraryFileLink(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RotateLibraryFileLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/access/rotate`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RotateLibraryFileLink',
-        },
-      ) as Promise<RotateLibraryFileLinkResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RotateLibraryFileLink",
+      }) as Promise<RotateLibraryFileLinkResponse>;
     },
-    ListSharedLibraryFiles(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListSharedLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/shared/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.level) {
-        queryParams.push(`level=${encodeURIComponent(request.level.toString())}`);
+        queryParams.push(`level=${encodeURIComponent(request.level.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListSharedLibraryFiles',
-        },
-      ) as Promise<ListSharedLibraryFilesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSharedLibraryFiles",
+      }) as Promise<ListSharedLibraryFilesResponse>;
     },
-    CreateLibraryNote(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateLibraryNote(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/note/create`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateLibraryNote',
-        },
-      ) as Promise<CreateLibraryNoteResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateLibraryNote",
+      }) as Promise<CreateLibraryNoteResponse>;
     },
-    GetLibraryNoteContent(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetLibraryNoteContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/files/${request.id}/note`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetLibraryNoteContent',
-        },
-      ) as Promise<GetLibraryNoteContentResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryNoteContent",
+      }) as Promise<GetLibraryNoteContentResponse>;
     },
-    SaveLibraryNoteContent(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveLibraryNoteContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/note/save`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveLibraryNoteContent',
-        },
-      ) as Promise<SaveLibraryNoteContentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveLibraryNoteContent",
+      }) as Promise<SaveLibraryNoteContentResponse>;
     },
-    FormatLibraryNoteMarkdown(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    FormatLibraryNoteMarkdown(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/note/format`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'FormatLibraryNoteMarkdown',
-        },
-      ) as Promise<FormatLibraryNoteMarkdownResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "FormatLibraryNoteMarkdown",
+      }) as Promise<FormatLibraryNoteMarkdownResponse>;
     },
-    EnhanceText(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    EnhanceText(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/enhance-text`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'EnhanceText',
-        },
-      ) as Promise<EnhanceTextResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "EnhanceText",
+      }) as Promise<EnhanceTextResponse>;
     },
-    SuggestPrompts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestPrompts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/suggest-prompts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestPrompts',
-        },
-      ) as Promise<SuggestPromptsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPrompts",
+      }) as Promise<SuggestPromptsResponse>;
     },
-    SuggestCallouts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestCallouts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/suggest-callouts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestCallouts',
-        },
-      ) as Promise<SuggestCalloutsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestCallouts",
+      }) as Promise<SuggestCalloutsResponse>;
     },
-    GetFulfillmentBoard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.deliveredLimit) {
-        queryParams.push(`deliveredLimit=${encodeURIComponent(request.deliveredLimit.toString())}`);
+        queryParams.push(`deliveredLimit=${encodeURIComponent(request.deliveredLimit.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetFulfillmentBoard',
-        },
-      ) as Promise<GetFulfillmentBoardResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFulfillmentBoard",
+      }) as Promise<GetFulfillmentBoardResponse>;
     },
-    GetFulfillmentCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetFulfillmentCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/fulfillment/card/${request.orderUuid}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetFulfillmentCard',
-        },
-      ) as Promise<GetFulfillmentCardResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFulfillmentCard",
+      }) as Promise<GetFulfillmentCardResponse>;
     },
-    SetFulfillmentAssignee(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetFulfillmentAssignee(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/assignee`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetFulfillmentAssignee',
-        },
-      ) as Promise<SetFulfillmentAssigneeResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentAssignee",
+      }) as Promise<SetFulfillmentAssigneeResponse>;
     },
-    SetFulfillmentNotes(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetFulfillmentNotes(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/notes`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetFulfillmentNotes',
-        },
-      ) as Promise<SetFulfillmentNotesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentNotes",
+      }) as Promise<SetFulfillmentNotesResponse>;
     },
-    AddFulfillmentChecklistItem(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddFulfillmentChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/checklist/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddFulfillmentChecklistItem',
-        },
-      ) as Promise<AddFulfillmentChecklistItemResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddFulfillmentChecklistItem",
+      }) as Promise<AddFulfillmentChecklistItemResponse>;
     },
-    SetFulfillmentChecklistItemDone(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetFulfillmentChecklistItemDone(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/checklist/done`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetFulfillmentChecklistItemDone',
-        },
-      ) as Promise<SetFulfillmentChecklistItemDoneResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetFulfillmentChecklistItemDone",
+      }) as Promise<SetFulfillmentChecklistItemDoneResponse>;
     },
-    DeleteFulfillmentChecklistItem(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteFulfillmentChecklistItem(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/fulfillment/checklist/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteFulfillmentChecklistItem',
-        },
-      ) as Promise<DeleteFulfillmentChecklistItemResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFulfillmentChecklistItem",
+      }) as Promise<DeleteFulfillmentChecklistItemResponse>;
     },
-    ShipFulfillmentOrder(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ShipFulfillmentOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/ship`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ShipFulfillmentOrder',
-        },
-      ) as Promise<ShipFulfillmentOrderResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ShipFulfillmentOrder",
+      }) as Promise<ShipFulfillmentOrderResponse>;
     },
-    MarkFulfillmentDelivered(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    MarkFulfillmentDelivered(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/deliver`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'MarkFulfillmentDelivered',
-        },
-      ) as Promise<MarkFulfillmentDeliveredResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MarkFulfillmentDelivered",
+      }) as Promise<MarkFulfillmentDeliveredResponse>;
     },
-    PrepareShippingLabel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PrepareShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/fulfillment/label/${request.orderUuid}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PrepareShippingLabel',
-        },
-      ) as Promise<PrepareShippingLabelResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PrepareShippingLabel",
+      }) as Promise<PrepareShippingLabelResponse>;
     },
-    GenerateShippingLabel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GenerateShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/label`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GenerateShippingLabel',
-        },
-      ) as Promise<GenerateShippingLabelResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateShippingLabel",
+      }) as Promise<GenerateShippingLabelResponse>;
     },
-    GetShippingOptions(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetShippingOptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/label/options`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetShippingOptions',
-        },
-      ) as Promise<GetShippingOptionsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetShippingOptions",
+      }) as Promise<GetShippingOptionsResponse>;
     },
-    VoidShippingLabel(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    VoidShippingLabel(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/label/void`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'VoidShippingLabel',
-        },
-      ) as Promise<VoidShippingLabelResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "VoidShippingLabel",
+      }) as Promise<VoidShippingLabelResponse>;
     },
-    SchedulePickup(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SchedulePickup(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/pickup`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SchedulePickup',
-        },
-      ) as Promise<SchedulePickupResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SchedulePickup",
+      }) as Promise<SchedulePickupResponse>;
     },
-    CreateTechCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateTechCard',
-        },
-      ) as Promise<CreateTechCardResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateTechCard",
+      }) as Promise<CreateTechCardResponse>;
     },
-    SuggestStyleNumber(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestStyleNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/suggest-style-number`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestStyleNumber',
-        },
-      ) as Promise<SuggestStyleNumberResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestStyleNumber",
+      }) as Promise<SuggestStyleNumberResponse>;
     },
-    AssignTechCardRole(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AssignTechCardRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/role/assign`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AssignTechCardRole',
-        },
-      ) as Promise<AssignTechCardRoleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AssignTechCardRole",
+      }) as Promise<AssignTechCardRoleResponse>;
     },
-    RemoveTechCardRoleAssignment(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RemoveTechCardRoleAssignment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/role/remove`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RemoveTechCardRoleAssignment',
-        },
-      ) as Promise<RemoveTechCardRoleAssignmentResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RemoveTechCardRoleAssignment",
+      }) as Promise<RemoveTechCardRoleAssignmentResponse>;
     },
-    ExitTechCardGuide(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ExitTechCardGuide(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/guide/exit`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ExitTechCardGuide',
-        },
-      ) as Promise<ExitTechCardGuideResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExitTechCardGuide",
+      }) as Promise<ExitTechCardGuideResponse>;
     },
-    ListTechCardRoleAssignments(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCardRoleAssignments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/roles`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCardRoleAssignments',
-        },
-      ) as Promise<ListTechCardRoleAssignmentsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardRoleAssignments",
+      }) as Promise<ListTechCardRoleAssignmentsResponse>;
     },
-    ListAdmins(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAdmins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/admins/pick`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAdmins',
-        },
-      ) as Promise<ListAdminsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAdmins",
+      }) as Promise<ListAdminsResponse>;
     },
-    GetTechCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.vatCountryCode) {
-        queryParams.push(`vatCountryCode=${encodeURIComponent(request.vatCountryCode.toString())}`);
+        queryParams.push(`vatCountryCode=${encodeURIComponent(request.vatCountryCode.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCard',
-        },
-      ) as Promise<GetTechCardResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCard",
+      }) as Promise<GetTechCardResponse>;
     },
-    UpdateTechCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateTechCard',
-        },
-      ) as Promise<UpdateTechCardResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTechCard",
+      }) as Promise<UpdateTechCardResponse>;
     },
-    ListTechCardSnapshots(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCardSnapshots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/snapshots`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.pageSize) {
-        queryParams.push(`pageSize=${encodeURIComponent(request.pageSize.toString())}`);
+        queryParams.push(`pageSize=${encodeURIComponent(request.pageSize.toString())}`)
       }
       if (request.beforeSnapshotId) {
-        queryParams.push(
-          `beforeSnapshotId=${encodeURIComponent(request.beforeSnapshotId.toString())}`,
-        );
+        queryParams.push(`beforeSnapshotId=${encodeURIComponent(request.beforeSnapshotId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCardSnapshots',
-        },
-      ) as Promise<ListTechCardSnapshotsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardSnapshots",
+      }) as Promise<ListTechCardSnapshotsResponse>;
     },
-    RestoreTechCardSnapshot(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RestoreTechCardSnapshot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.snapshotId) {
-        throw new Error('missing required field request.snapshot_id');
+        throw new Error("missing required field request.snapshot_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/snapshot/${request.snapshotId}/restore`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RestoreTechCardSnapshot',
-        },
-      ) as Promise<RestoreTechCardSnapshotResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RestoreTechCardSnapshot",
+      }) as Promise<RestoreTechCardSnapshotResponse>;
     },
-    DeleteTechCardPatternRevision(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCardPatternRevision(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.historyId) {
-        throw new Error('missing required field request.history_id');
+        throw new Error("missing required field request.history_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/pattern-history/${request.historyId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.expectedLockVersion) {
-        queryParams.push(
-          `expectedLockVersion=${encodeURIComponent(request.expectedLockVersion.toString())}`,
-        );
+        queryParams.push(`expectedLockVersion=${encodeURIComponent(request.expectedLockVersion.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCardPatternRevision',
-        },
-      ) as Promise<DeleteTechCardPatternRevisionResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardPatternRevision",
+      }) as Promise<DeleteTechCardPatternRevisionResponse>;
     },
-    DeleteTechCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCard',
-        },
-      ) as Promise<DeleteTechCardResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCard",
+      }) as Promise<DeleteTechCardResponse>;
     },
-    ListTechCards(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCards(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.stage) {
-        queryParams.push(`stage=${encodeURIComponent(request.stage.toString())}`);
+        queryParams.push(`stage=${encodeURIComponent(request.stage.toString())}`)
       }
       if (request.gender) {
-        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`);
+        queryParams.push(`gender=${encodeURIComponent(request.gender.toString())}`)
       }
       if (request.brand) {
-        queryParams.push(`brand=${encodeURIComponent(request.brand.toString())}`);
+        queryParams.push(`brand=${encodeURIComponent(request.brand.toString())}`)
       }
       if (request.name) {
-        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`);
+        queryParams.push(`name=${encodeURIComponent(request.name.toString())}`)
       }
       if (request.productId) {
-        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`);
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
       }
       if (request.purpose) {
-        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`);
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
       }
       if (request.skuSeason?.code) {
-        queryParams.push(`skuSeason.code=${encodeURIComponent(request.skuSeason.code.toString())}`);
+        queryParams.push(`skuSeason.code=${encodeURIComponent(request.skuSeason.code.toString())}`)
       }
       if (request.skuSeason?.year) {
-        queryParams.push(`skuSeason.year=${encodeURIComponent(request.skuSeason.year.toString())}`);
+        queryParams.push(`skuSeason.year=${encodeURIComponent(request.skuSeason.year.toString())}`)
       }
       if (request.categoryIds) {
         request.categoryIds.forEach((x) => {
-          queryParams.push(`categoryIds=${encodeURIComponent(x.toString())}`);
-        });
+          queryParams.push(`categoryIds=${encodeURIComponent(x.toString())}`)
+        })
       }
       if (request.collection) {
-        queryParams.push(`collection=${encodeURIComponent(request.collection.toString())}`);
+        queryParams.push(`collection=${encodeURIComponent(request.collection.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCards',
-        },
-      ) as Promise<ListTechCardsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCards",
+      }) as Promise<ListTechCardsResponse>;
     },
-    GetTechCardReadiness(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCardReadiness(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/readiness/${request.techCardId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCardReadiness',
-        },
-      ) as Promise<GetTechCardReadinessResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardReadiness",
+      }) as Promise<GetTechCardReadinessResponse>;
     },
-    GetStylePipeline(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetStylePipeline(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/pipeline`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.cardsPerStage) {
-        queryParams.push(`cardsPerStage=${encodeURIComponent(request.cardsPerStage.toString())}`);
+        queryParams.push(`cardsPerStage=${encodeURIComponent(request.cardsPerStage.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetStylePipeline',
-        },
-      ) as Promise<GetStylePipelineResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetStylePipeline",
+      }) as Promise<GetStylePipelineResponse>;
     },
-    GetTechCardConstructionAudit(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCardConstructionAudit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/construction/audit`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCardConstructionAudit',
-        },
-      ) as Promise<GetTechCardConstructionAuditResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardConstructionAudit",
+      }) as Promise<GetTechCardConstructionAuditResponse>;
     },
-    AnalyzeTechCardConstruction(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AnalyzeTechCardConstruction(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/construction/analyze`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AnalyzeTechCardConstruction',
-        },
-      ) as Promise<AnalyzeTechCardConstructionResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AnalyzeTechCardConstruction",
+      }) as Promise<AnalyzeTechCardConstructionResponse>;
     },
-    AddTechCardIssue(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTechCardIssue(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/issue`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTechCardIssue',
-        },
-      ) as Promise<AddTechCardIssueResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTechCardIssue",
+      }) as Promise<AddTechCardIssueResponse>;
     },
-    SetTechCardFindingSeen(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetTechCardFindingSeen(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/construction/finding-seen`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetTechCardFindingSeen',
-        },
-      ) as Promise<SetTechCardFindingSeenResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTechCardFindingSeen",
+      }) as Promise<SetTechCardFindingSeenResponse>;
     },
-    GetOperationWorkCatalog(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOperationWorkCatalog(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/operation-work/catalog`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOperationWorkCatalog',
-        },
-      ) as Promise<GetOperationWorkCatalogResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOperationWorkCatalog",
+      }) as Promise<GetOperationWorkCatalogResponse>;
     },
-    RememberOperationWorkDefault(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RememberOperationWorkDefault(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/operation-work/default`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RememberOperationWorkDefault',
-        },
-      ) as Promise<RememberOperationWorkDefaultResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RememberOperationWorkDefault",
+      }) as Promise<RememberOperationWorkDefaultResponse>;
     },
-    ExportTechCardArchive(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ExportTechCardArchive(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/archive/export`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ExportTechCardArchive',
-        },
-      ) as Promise<ExportTechCardArchiveResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportTechCardArchive",
+      }) as Promise<ExportTechCardArchiveResponse>;
     },
-    CommitTechCardImport(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CommitTechCardImport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/import/commit`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CommitTechCardImport',
-        },
-      ) as Promise<CommitTechCardImportResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CommitTechCardImport",
+      }) as Promise<CommitTechCardImportResponse>;
     },
-    GetTechCardImportReport(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCardImportReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/import/report/${request.techCardId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCardImportReport',
-        },
-      ) as Promise<GetTechCardImportReportResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardImportReport",
+      }) as Promise<GetTechCardImportReportResponse>;
     },
-    AcknowledgeTechCardImportReport(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AcknowledgeTechCardImportReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/import/report/acknowledge`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AcknowledgeTechCardImportReport',
-        },
-      ) as Promise<AcknowledgeTechCardImportReportResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AcknowledgeTechCardImportReport",
+      }) as Promise<AcknowledgeTechCardImportReportResponse>;
     },
-    ApplyTechCardImportColorways(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ApplyTechCardImportColorways(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/import/colorways/apply`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ApplyTechCardImportColorways',
-        },
-      ) as Promise<ApplyTechCardImportColorwaysResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApplyTechCardImportColorways",
+      }) as Promise<ApplyTechCardImportColorwaysResponse>;
     },
-    CreateMaterial(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateMaterial',
-        },
-      ) as Promise<CreateMaterialResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateMaterial",
+      }) as Promise<CreateMaterialResponse>;
     },
-    UpdateMaterial(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateMaterial',
-        },
-      ) as Promise<UpdateMaterialResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateMaterial",
+      }) as Promise<UpdateMaterialResponse>;
     },
-    ArchiveMaterial(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveMaterial',
-        },
-      ) as Promise<ArchiveMaterialResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveMaterial",
+      }) as Promise<ArchiveMaterialResponse>;
     },
-    GetMaterial(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMaterial(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/materials/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMaterial',
-        },
-      ) as Promise<GetMaterialResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMaterial",
+      }) as Promise<GetMaterialResponse>;
     },
-    ListMaterials(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMaterials(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.section) {
-        queryParams.push(`section=${encodeURIComponent(request.section.toString())}`);
+        queryParams.push(`section=${encodeURIComponent(request.section.toString())}`)
       }
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       if (request.purpose) {
-        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`);
+        queryParams.push(`purpose=${encodeURIComponent(request.purpose.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMaterials',
-        },
-      ) as Promise<ListMaterialsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterials",
+      }) as Promise<ListMaterialsResponse>;
     },
-    AddMaterialPrice(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddMaterialPrice(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/materials/price`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddMaterialPrice',
-        },
-      ) as Promise<AddMaterialPriceResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddMaterialPrice",
+      }) as Promise<AddMaterialPriceResponse>;
     },
-    ListMaterialPrices(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMaterialPrices(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
-        throw new Error('missing required field request.material_id');
+        throw new Error("missing required field request.material_id");
       }
       const path = `api/admin/materials/${request.materialId}/prices`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMaterialPrices',
-        },
-      ) as Promise<ListMaterialPricesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialPrices",
+      }) as Promise<ListMaterialPricesResponse>;
     },
-    GetMaterialCuttingCoefficientSuggestion(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMaterialCuttingCoefficientSuggestion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
-        throw new Error('missing required field request.material_id');
+        throw new Error("missing required field request.material_id");
       }
       const path = `api/admin/materials/${request.materialId}/cutting-coefficient-suggestion`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMaterialCuttingCoefficientSuggestion',
-        },
-      ) as Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMaterialCuttingCoefficientSuggestion",
+      }) as Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
     },
-    GetBomWastageSuggestion(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetBomWastageSuggestion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
-        throw new Error('missing required field request.material_id');
+        throw new Error("missing required field request.material_id");
       }
       const path = `api/admin/materials/${request.materialId}/bom-wastage-suggestion`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetBomWastageSuggestion',
-        },
-      ) as Promise<GetBomWastageSuggestionResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetBomWastageSuggestion",
+      }) as Promise<GetBomWastageSuggestionResponse>;
     },
-    RepriceTechCardBom(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RepriceTechCardBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/bom/reprice`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RepriceTechCardBom',
-        },
-      ) as Promise<RepriceTechCardBomResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RepriceTechCardBom",
+      }) as Promise<RepriceTechCardBomResponse>;
     },
-    ListCostingMigrationExceptions(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListCostingMigrationExceptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/costing-migration-exceptions`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListCostingMigrationExceptions',
-        },
-      ) as Promise<ListCostingMigrationExceptionsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCostingMigrationExceptions",
+      }) as Promise<ListCostingMigrationExceptionsResponse>;
     },
-    ListTechCardReleases(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCardReleases(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/releases`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCardReleases',
-        },
-      ) as Promise<ListTechCardReleasesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardReleases",
+      }) as Promise<ListTechCardReleasesResponse>;
     },
-    GetTechCardRelease(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCardRelease(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/release/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCardRelease',
-        },
-      ) as Promise<GetTechCardReleaseResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardRelease",
+      }) as Promise<GetTechCardReleaseResponse>;
     },
-    AddTechCardDevExpense(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddTechCardDevExpense(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/dev-expense`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddTechCardDevExpense',
-        },
-      ) as Promise<AddTechCardDevExpenseResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTechCardDevExpense",
+      }) as Promise<AddTechCardDevExpenseResponse>;
     },
-    DeleteTechCardDevExpense(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCardDevExpense(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/dev-expense/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCardDevExpense',
-        },
-      ) as Promise<DeleteTechCardDevExpenseResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardDevExpense",
+      }) as Promise<DeleteTechCardDevExpenseResponse>;
     },
-    ListTechCardDevExpenses(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCardDevExpenses(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/dev-expenses`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCardDevExpenses',
-        },
-      ) as Promise<ListTechCardDevExpensesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardDevExpenses",
+      }) as Promise<ListTechCardDevExpensesResponse>;
     },
-    CreateProductionRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateProductionRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/production-runs`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateProductionRun',
-        },
-      ) as Promise<CreateProductionRunResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateProductionRun",
+      }) as Promise<CreateProductionRunResponse>;
     },
-    UpdateProductionRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateProductionRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/production-runs/${request.id}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateProductionRun',
-        },
-      ) as Promise<UpdateProductionRunResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateProductionRun",
+      }) as Promise<UpdateProductionRunResponse>;
     },
-    DeleteProductionRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteProductionRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/production-runs/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteProductionRun',
-        },
-      ) as Promise<DeleteProductionRunResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteProductionRun",
+      }) as Promise<DeleteProductionRunResponse>;
     },
-    GetProductionRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetProductionRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/production-runs/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetProductionRun',
-        },
-      ) as Promise<GetProductionRunResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductionRun",
+      }) as Promise<GetProductionRunResponse>;
     },
-    ListProductionRuns(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListProductionRuns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/production-runs`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.staleDays) {
-        queryParams.push(`staleDays=${encodeURIComponent(request.staleDays.toString())}`);
+        queryParams.push(`staleDays=${encodeURIComponent(request.staleDays.toString())}`)
       }
       if (request.overdueOnly) {
-        queryParams.push(`overdueOnly=${encodeURIComponent(request.overdueOnly.toString())}`);
+        queryParams.push(`overdueOnly=${encodeURIComponent(request.overdueOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListProductionRuns',
-        },
-      ) as Promise<ListProductionRunsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductionRuns",
+      }) as Promise<ListProductionRunsResponse>;
     },
-    ReceiveProductionRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReceiveProductionRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/receive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReceiveProductionRun',
-        },
-      ) as Promise<ReceiveProductionRunResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReceiveProductionRun",
+      }) as Promise<ReceiveProductionRunResponse>;
     },
-    PostProductionRunReceipt(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PostProductionRunReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/receipts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PostProductionRunReceipt',
-        },
-      ) as Promise<PostProductionRunReceiptResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostProductionRunReceipt",
+      }) as Promise<PostProductionRunReceiptResponse>;
     },
-    ReverseProductionRunReceipt(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReverseProductionRunReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       if (!request.receiptId) {
-        throw new Error('missing required field request.receipt_id');
+        throw new Error("missing required field request.receipt_id");
       }
       const path = `api/admin/production-runs/${request.runId}/receipts/${request.receiptId}/reverse`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReverseProductionRunReceipt',
-        },
-      ) as Promise<ReverseProductionRunReceiptResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReverseProductionRunReceipt",
+      }) as Promise<ReverseProductionRunReceiptResponse>;
     },
-    GetProductionRunMaterialPlan(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetProductionRunMaterialPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/material-plan`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetProductionRunMaterialPlan',
-        },
-      ) as Promise<GetProductionRunMaterialPlanResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductionRunMaterialPlan",
+      }) as Promise<GetProductionRunMaterialPlanResponse>;
     },
-    GetProductionRunCutPlan(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetProductionRunCutPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/cut-plan`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetProductionRunCutPlan',
-        },
-      ) as Promise<GetProductionRunCutPlanResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductionRunCutPlan",
+      }) as Promise<GetProductionRunCutPlanResponse>;
     },
-    SaveProductionRunLay(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveProductionRunLay(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/lays`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveProductionRunLay',
-        },
-      ) as Promise<SaveProductionRunLayResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveProductionRunLay",
+      }) as Promise<SaveProductionRunLayResponse>;
     },
-    DeleteProductionRunLay(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteProductionRunLay(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       if (!request.layKey) {
-        throw new Error('missing required field request.lay_key');
+        throw new Error("missing required field request.lay_key");
       }
       const path = `api/admin/production-runs/${request.runId}/lays/${request.layKey}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteProductionRunLay',
-        },
-      ) as Promise<DeleteProductionRunLayResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteProductionRunLay",
+      }) as Promise<DeleteProductionRunLayResponse>;
     },
-    ListProductionRunLays(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListProductionRunLays(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/lays`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListProductionRunLays',
-        },
-      ) as Promise<ListProductionRunLaysResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductionRunLays",
+      }) as Promise<ListProductionRunLaysResponse>;
     },
-    SaveProductionRunCutReceipt(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveProductionRunCutReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       if (!request.layKey) {
-        throw new Error('missing required field request.lay_key');
+        throw new Error("missing required field request.lay_key");
       }
       const path = `api/admin/production-runs/${request.runId}/lays/${request.layKey}/cut-receipts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveProductionRunCutReceipt',
-        },
-      ) as Promise<SaveProductionRunCutReceiptResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveProductionRunCutReceipt",
+      }) as Promise<SaveProductionRunCutReceiptResponse>;
     },
-    DeleteProductionRunCutReceipt(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteProductionRunCutReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       if (!request.layKey) {
-        throw new Error('missing required field request.lay_key');
+        throw new Error("missing required field request.lay_key");
       }
       if (!request.sizeId) {
-        throw new Error('missing required field request.size_id');
+        throw new Error("missing required field request.size_id");
       }
       const path = `api/admin/production-runs/${request.runId}/lays/${request.layKey}/cut-receipts/${request.sizeId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteProductionRunCutReceipt',
-        },
-      ) as Promise<DeleteProductionRunCutReceiptResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteProductionRunCutReceipt",
+      }) as Promise<DeleteProductionRunCutReceiptResponse>;
     },
-    ListProductionRunCutReceipts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListProductionRunCutReceipts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/production-runs/${request.runId}/cut-receipts`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListProductionRunCutReceipts',
-        },
-      ) as Promise<ListProductionRunCutReceiptsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductionRunCutReceipts",
+      }) as Promise<ListProductionRunCutReceiptsResponse>;
     },
-    CheckProductionRunReadiness(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CheckProductionRunReadiness(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/production-runs/readiness`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CheckProductionRunReadiness',
-        },
-      ) as Promise<CheckProductionRunReadinessResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CheckProductionRunReadiness",
+      }) as Promise<CheckProductionRunReadinessResponse>;
     },
-    ReceiveMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReceiveMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/receive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReceiveMaterialStock',
-        },
-      ) as Promise<ReceiveMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReceiveMaterialStock",
+      }) as Promise<ReceiveMaterialStockResponse>;
     },
-    ReceiveMaterialStockBatch(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReceiveMaterialStockBatch(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/receive-batch`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReceiveMaterialStockBatch',
-        },
-      ) as Promise<ReceiveMaterialStockBatchResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReceiveMaterialStockBatch",
+      }) as Promise<ReceiveMaterialStockBatchResponse>;
     },
-    IssueMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    IssueMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/issue`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'IssueMaterialStock',
-        },
-      ) as Promise<IssueMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "IssueMaterialStock",
+      }) as Promise<IssueMaterialStockResponse>;
     },
-    AdjustMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AdjustMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/adjust`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AdjustMaterialStock',
-        },
-      ) as Promise<AdjustMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AdjustMaterialStock",
+      }) as Promise<AdjustMaterialStockResponse>;
     },
-    BatchIssueMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    BatchIssueMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/issue-batch`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'BatchIssueMaterialStock',
-        },
-      ) as Promise<BatchIssueMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "BatchIssueMaterialStock",
+      }) as Promise<BatchIssueMaterialStockResponse>;
     },
-    GetMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
-        throw new Error('missing required field request.material_id');
+        throw new Error("missing required field request.material_id");
       }
       const path = `api/admin/inventory/${request.materialId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMaterialStock',
-        },
-      ) as Promise<GetMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMaterialStock",
+      }) as Promise<GetMaterialStockResponse>;
     },
-    ListMaterialStock(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.section) {
-        queryParams.push(`section=${encodeURIComponent(request.section.toString())}`);
+        queryParams.push(`section=${encodeURIComponent(request.section.toString())}`)
       }
       if (request.q) {
-        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`);
+        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`)
       }
       if (request.withStockOnly) {
-        queryParams.push(`withStockOnly=${encodeURIComponent(request.withStockOnly.toString())}`);
+        queryParams.push(`withStockOnly=${encodeURIComponent(request.withStockOnly.toString())}`)
       }
       if (request.belowMinOnly) {
-        queryParams.push(`belowMinOnly=${encodeURIComponent(request.belowMinOnly.toString())}`);
+        queryParams.push(`belowMinOnly=${encodeURIComponent(request.belowMinOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMaterialStock',
-        },
-      ) as Promise<ListMaterialStockResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialStock",
+      }) as Promise<ListMaterialStockResponse>;
     },
-    ListMaterialMovements(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMaterialMovements(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/movements`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.materialId) {
-        queryParams.push(`materialId=${encodeURIComponent(request.materialId.toString())}`);
+        queryParams.push(`materialId=${encodeURIComponent(request.materialId.toString())}`)
       }
       if (request.productionRunId) {
-        queryParams.push(
-          `productionRunId=${encodeURIComponent(request.productionRunId.toString())}`,
-        );
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
       }
       if (request.sampleId) {
-        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`);
+        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`)
       }
       if (request.movementType) {
-        queryParams.push(`movementType=${encodeURIComponent(request.movementType.toString())}`);
+        queryParams.push(`movementType=${encodeURIComponent(request.movementType.toString())}`)
       }
       if (request.occurredFrom) {
-        queryParams.push(`occurredFrom=${encodeURIComponent(request.occurredFrom.toString())}`);
+        queryParams.push(`occurredFrom=${encodeURIComponent(request.occurredFrom.toString())}`)
       }
       if (request.occurredTo) {
-        queryParams.push(`occurredTo=${encodeURIComponent(request.occurredTo.toString())}`);
+        queryParams.push(`occurredTo=${encodeURIComponent(request.occurredTo.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMaterialMovements',
-        },
-      ) as Promise<ListMaterialMovementsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialMovements",
+      }) as Promise<ListMaterialMovementsResponse>;
     },
-    UpsertPackagingBom(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertPackagingBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/packaging-bom/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertPackagingBom',
-        },
-      ) as Promise<UpsertPackagingBomResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertPackagingBom",
+      }) as Promise<UpsertPackagingBomResponse>;
     },
-    ListPackagingBom(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListPackagingBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/packaging-bom`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListPackagingBom',
-        },
-      ) as Promise<ListPackagingBomResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPackagingBom",
+      }) as Promise<ListPackagingBomResponse>;
     },
-    UpsertPackagingRecipe(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertPackagingRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/packaging-recipe/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertPackagingRecipe',
-        },
-      ) as Promise<UpsertPackagingRecipeResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertPackagingRecipe",
+      }) as Promise<UpsertPackagingRecipeResponse>;
     },
-    ListPackagingRecipe(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListPackagingRecipe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/packaging-recipe`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListPackagingRecipe',
-        },
-      ) as Promise<ListPackagingRecipeResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPackagingRecipe",
+      }) as Promise<ListPackagingRecipeResponse>;
     },
-    UpsertStyleAssembly(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertStyleAssembly(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/style-assembly/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertStyleAssembly',
-        },
-      ) as Promise<UpsertStyleAssemblyResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertStyleAssembly",
+      }) as Promise<UpsertStyleAssemblyResponse>;
     },
-    ListStyleAssembly(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListStyleAssembly(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {
-        throw new Error('missing required field request.style_id');
+        throw new Error("missing required field request.style_id");
       }
       const path = `api/admin/tech-card/${request.styleId}/style-assembly`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListStyleAssembly',
-        },
-      ) as Promise<ListStyleAssemblyResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListStyleAssembly",
+      }) as Promise<ListStyleAssemblyResponse>;
     },
-    UpsertTechCardOutputVariant(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertTechCardOutputVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/output-variant/upsert`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertTechCardOutputVariant',
-        },
-      ) as Promise<UpsertTechCardOutputVariantResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardOutputVariant",
+      }) as Promise<UpsertTechCardOutputVariantResponse>;
     },
-    DeleteTechCardOutputVariant(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCardOutputVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/output-variant/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCardOutputVariant',
-        },
-      ) as Promise<DeleteTechCardOutputVariantResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardOutputVariant",
+      }) as Promise<DeleteTechCardOutputVariantResponse>;
     },
-    SaveTechCardMarker(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/marker/save`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveTechCardMarker',
-        },
-      ) as Promise<SaveTechCardMarkerResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTechCardMarker",
+      }) as Promise<SaveTechCardMarkerResponse>;
     },
-    GetTechCardMarker(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/marker/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTechCardMarker',
-        },
-      ) as Promise<GetTechCardMarkerResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardMarker",
+      }) as Promise<GetTechCardMarkerResponse>;
     },
-    DeleteTechCardMarker(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/marker/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCardMarker',
-        },
-      ) as Promise<DeleteTechCardMarkerResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardMarker",
+      }) as Promise<DeleteTechCardMarkerResponse>;
     },
-    SetTechCardMarkerNorm(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetTechCardMarkerNorm(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/tech-card/marker/${request.id}/norm`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetTechCardMarkerNorm',
-        },
-      ) as Promise<SetTechCardMarkerNormResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTechCardMarkerNorm",
+      }) as Promise<SetTechCardMarkerNormResponse>;
     },
-    PutTechCardPatternSizeIndex(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PutTechCardPatternSizeIndex(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/pattern-size-index`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PutTechCardPatternSizeIndex',
-        },
-      ) as Promise<PutTechCardPatternSizeIndexResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PutTechCardPatternSizeIndex",
+      }) as Promise<PutTechCardPatternSizeIndexResponse>;
     },
-    SuggestPatternPieces(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestPatternPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/pattern-import/pieces:suggest`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestPatternPieces',
-        },
-      ) as Promise<SuggestPatternPiecesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPatternPieces",
+      }) as Promise<SuggestPatternPiecesResponse>;
     },
-    ClassifyPatternPages(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ClassifyPatternPages(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/pattern-import/pages:classify`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ClassifyPatternPages',
-        },
-      ) as Promise<ClassifyPatternPagesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ClassifyPatternPages",
+      }) as Promise<ClassifyPatternPagesResponse>;
     },
-    SuggestAssemblySkeleton(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestAssemblySkeleton(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/assembly-skeleton:suggest`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestAssemblySkeleton',
-        },
-      ) as Promise<SuggestAssemblySkeletonResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestAssemblySkeleton",
+      }) as Promise<SuggestAssemblySkeletonResponse>;
     },
-    SaveTechCardPieceAreas(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/piece-areas`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveTechCardPieceAreas',
-        },
-      ) as Promise<SaveTechCardPieceAreasResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTechCardPieceAreas",
+      }) as Promise<SaveTechCardPieceAreasResponse>;
     },
-    UpsertTechCardSeams(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/seams`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertTechCardSeams',
-        },
-      ) as Promise<UpsertTechCardSeamsResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardSeams",
+      }) as Promise<UpsertTechCardSeamsResponse>;
     },
-    DeleteTechCardSeams(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteTechCardSeams(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/seams:delete`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteTechCardSeams',
-        },
-      ) as Promise<DeleteTechCardSeamsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardSeams",
+      }) as Promise<DeleteTechCardSeamsResponse>;
     },
-    ListTechCardFabricDirectionGaps(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.techCardId) {
-        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`);
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
       }
       if (request.includeInactive) {
-        queryParams.push(
-          `includeInactive=${encodeURIComponent(request.includeInactive.toString())}`,
-        );
+        queryParams.push(`includeInactive=${encodeURIComponent(request.includeInactive.toString())}`)
       }
       if (request.countsOnly) {
-        queryParams.push(`countsOnly=${encodeURIComponent(request.countsOnly.toString())}`);
+        queryParams.push(`countsOnly=${encodeURIComponent(request.countsOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListTechCardFabricDirectionGaps',
-        },
-      ) as Promise<ListTechCardFabricDirectionGapsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardFabricDirectionGaps",
+      }) as Promise<ListTechCardFabricDirectionGapsResponse>;
     },
-    GetDesignBand(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDesignBand(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.benchColorwayId) {
-        queryParams.push(
-          `benchColorwayId=${encodeURIComponent(request.benchColorwayId.toString())}`,
-        );
+        queryParams.push(`benchColorwayId=${encodeURIComponent(request.benchColorwayId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDesignBand',
-        },
-      ) as Promise<GetDesignBandResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignBand",
+      }) as Promise<GetDesignBandResponse>;
     },
-    ListDesignRuns(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListDesignRuns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/runs`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.pageToken) {
-        queryParams.push(`pageToken=${encodeURIComponent(request.pageToken.toString())}`);
+        queryParams.push(`pageToken=${encodeURIComponent(request.pageToken.toString())}`)
       }
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListDesignRuns',
-        },
-      ) as Promise<ListDesignRunsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListDesignRuns",
+      }) as Promise<ListDesignRunsResponse>;
     },
-    GetDesignRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/design/run/${request.runId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDesignRun',
-        },
-      ) as Promise<GetDesignRunResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignRun",
+      }) as Promise<GetDesignRunResponse>;
     },
-    StartDesignRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    StartDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/runs`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'StartDesignRun',
-        },
-      ) as Promise<StartDesignRunResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "StartDesignRun",
+      }) as Promise<StartDesignRunResponse>;
     },
-    CancelDesignRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CancelDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/design/run/${request.runId}/cancel`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CancelDesignRun',
-        },
-      ) as Promise<CancelDesignRunResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CancelDesignRun",
+      }) as Promise<CancelDesignRunResponse>;
     },
-    ArchiveDesignRun(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveDesignRun(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
-        throw new Error('missing required field request.run_id');
+        throw new Error("missing required field request.run_id");
       }
       const path = `api/admin/design/run/${request.runId}/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveDesignRun',
-        },
-      ) as Promise<ArchiveDesignRunResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveDesignRun",
+      }) as Promise<ArchiveDesignRunResponse>;
     },
-    HideDesignPicture(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    HideDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/hide`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'HideDesignPicture',
-        },
-      ) as Promise<HideDesignPictureResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "HideDesignPicture",
+      }) as Promise<HideDesignPictureResponse>;
     },
-    UndoDesignEdit(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UndoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/undo`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UndoDesignEdit',
-        },
-      ) as Promise<UndoDesignEditResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UndoDesignEdit",
+      }) as Promise<UndoDesignEditResponse>;
     },
-    RedoDesignEdit(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RedoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/redo`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RedoDesignEdit',
-        },
-      ) as Promise<RedoDesignEditResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RedoDesignEdit",
+      }) as Promise<RedoDesignEditResponse>;
     },
-    DeleteDesignPicture(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/delete`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteDesignPicture',
-        },
-      ) as Promise<DeleteDesignPictureResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignPicture",
+      }) as Promise<DeleteDesignPictureResponse>;
     },
-    SetDesignPictureSelected(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignPictureSelected(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/selected`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignPictureSelected',
-        },
-      ) as Promise<SetDesignPictureSelectedResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignPictureSelected",
+      }) as Promise<SetDesignPictureSelectedResponse>;
     },
-    RegisterDesignUpload(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RegisterDesignUpload(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/upload`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RegisterDesignUpload',
-        },
-      ) as Promise<RegisterDesignUploadResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RegisterDesignUpload",
+      }) as Promise<RegisterDesignUploadResponse>;
     },
-    SplitDesignPicture(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SplitDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
-        throw new Error('missing required field request.picture_id');
+        throw new Error("missing required field request.picture_id");
       }
       const path = `api/admin/design/picture/${request.pictureId}/split`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SplitDesignPicture',
-        },
-      ) as Promise<SplitDesignPictureResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SplitDesignPicture",
+      }) as Promise<SplitDesignPictureResponse>;
     },
-    SetDesignBenchSlot(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignBenchSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/bench`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignBenchSlot',
-        },
-      ) as Promise<SetDesignBenchSlotResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignBenchSlot",
+      }) as Promise<SetDesignBenchSlotResponse>;
     },
-    SetDesignReferenceRole(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignReferenceRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/reference-role`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignReferenceRole',
-        },
-      ) as Promise<SetDesignReferenceRoleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignReferenceRole",
+      }) as Promise<SetDesignReferenceRoleResponse>;
     },
-    SetDesignReferenceHeld(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignReferenceHeld(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/reference-held`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignReferenceHeld',
-        },
-      ) as Promise<SetDesignReferenceHeldResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignReferenceHeld",
+      }) as Promise<SetDesignReferenceHeldResponse>;
     },
-    PreviewDesignRunInputs(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PreviewDesignRunInputs(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/runs/preview`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PreviewDesignRunInputs',
-        },
-      ) as Promise<PreviewDesignRunInputsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PreviewDesignRunInputs",
+      }) as Promise<PreviewDesignRunInputsResponse>;
     },
-    DeleteDesignDetailSlot(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteDesignDetailSlot(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.slotId) {
-        throw new Error('missing required field request.slot_id');
+        throw new Error("missing required field request.slot_id");
       }
       const path = `api/admin/design/bench/${request.slotId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteDesignDetailSlot',
-        },
-      ) as Promise<DeleteDesignDetailSlotResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignDetailSlot",
+      }) as Promise<DeleteDesignDetailSlotResponse>;
     },
-    UpsertDesignAsset(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertDesignAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertDesignAsset',
-        },
-      ) as Promise<UpsertDesignAssetResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertDesignAsset",
+      }) as Promise<UpsertDesignAssetResponse>;
     },
-    DeleteDesignAsset(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteDesignAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.assetId) {
-        throw new Error('missing required field request.asset_id');
+        throw new Error("missing required field request.asset_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset/${request.assetId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteDesignAsset',
-        },
-      ) as Promise<DeleteDesignAssetResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignAsset",
+      }) as Promise<DeleteDesignAssetResponse>;
     },
-    SetDesignAssetColorway(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignAssetColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset/colorway`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignAssetColorway',
-        },
-      ) as Promise<SetDesignAssetColorwayResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignAssetColorway",
+      }) as Promise<SetDesignAssetColorwayResponse>;
     },
-    SetDesignAssetBinding(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignAssetBinding(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset/binding`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignAssetBinding',
-        },
-      ) as Promise<SetDesignAssetBindingResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignAssetBinding",
+      }) as Promise<SetDesignAssetBindingResponse>;
     },
-    SetDesignAssetPlacement(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignAssetPlacement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset-placement`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignAssetPlacement',
-        },
-      ) as Promise<SetDesignAssetPlacementResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignAssetPlacement",
+      }) as Promise<SetDesignAssetPlacementResponse>;
     },
-    DeleteDesignAssetPlacement(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteDesignAssetPlacement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.placementId) {
-        throw new Error('missing required field request.placement_id');
+        throw new Error("missing required field request.placement_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/asset-placement/${request.placementId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteDesignAssetPlacement',
-        },
-      ) as Promise<DeleteDesignAssetPlacementResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignAssetPlacement",
+      }) as Promise<DeleteDesignAssetPlacementResponse>;
     },
-    GetDesignEditLayer(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.layerId) {
-        throw new Error('missing required field request.layer_id');
+        throw new Error("missing required field request.layer_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/layer/${request.layerId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDesignEditLayer',
-        },
-      ) as Promise<GetDesignEditLayerResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignEditLayer",
+      }) as Promise<GetDesignEditLayerResponse>;
     },
-    SaveDesignEditLayer(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/layer`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveDesignEditLayer',
-        },
-      ) as Promise<SaveDesignEditLayerResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignEditLayer",
+      }) as Promise<SaveDesignEditLayerResponse>;
     },
-    FlattenDesignEditLayer(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    FlattenDesignEditLayer(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.layerId) {
-        throw new Error('missing required field request.layer_id');
+        throw new Error("missing required field request.layer_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/layer/${request.layerId}/flatten`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'FlattenDesignEditLayer',
-        },
-      ) as Promise<FlattenDesignEditLayerResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "FlattenDesignEditLayer",
+      }) as Promise<FlattenDesignEditLayerResponse>;
     },
-    ImportDesignVector(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ImportDesignVector(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/vector`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ImportDesignVector',
-        },
-      ) as Promise<ImportDesignVectorResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ImportDesignVector",
+      }) as Promise<ImportDesignVectorResponse>;
     },
-    SetDesignColourPlan(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignColourPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/colour-plan`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignColourPlan',
-        },
-      ) as Promise<SetDesignColourPlanResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignColourPlan",
+      }) as Promise<SetDesignColourPlanResponse>;
     },
-    DraftDesignIdea(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DraftDesignIdea(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/draft-idea`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DraftDesignIdea',
-        },
-      ) as Promise<DraftDesignIdeaResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DraftDesignIdea",
+      }) as Promise<DraftDesignIdeaResponse>;
     },
-    GenerateDesignQuiz(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GenerateDesignQuiz(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/quiz`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GenerateDesignQuiz',
-        },
-      ) as Promise<GenerateDesignQuizResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignQuiz",
+      }) as Promise<GenerateDesignQuizResponse>;
     },
-    SuggestDesignParts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestDesignParts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestDesignParts',
-        },
-      ) as Promise<SuggestDesignPartsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignParts",
+      }) as Promise<SuggestDesignPartsResponse>;
     },
-    SuggestDesignPartsCard(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SuggestDesignPartsCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest-card`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SuggestDesignPartsCard',
-        },
-      ) as Promise<SuggestDesignPartsCardResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignPartsCard",
+      }) as Promise<SuggestDesignPartsCardResponse>;
     },
-    GenerateDesignJoins(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GenerateDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/joins:generate`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GenerateDesignJoins',
-        },
-      ) as Promise<GenerateDesignJoinsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignJoins",
+      }) as Promise<GenerateDesignJoinsResponse>;
     },
-    SetDesignJoins(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/joins`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignJoins',
-        },
-      ) as Promise<SetDesignJoinsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignJoins",
+      }) as Promise<SetDesignJoinsResponse>;
     },
-    SetDesignPartsPieces(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignPartsPieces(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/parts/pieces`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignPartsPieces',
-        },
-      ) as Promise<SetDesignPartsPiecesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignPartsPieces",
+      }) as Promise<SetDesignPartsPiecesResponse>;
     },
-    SetDesignDetailKept(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetDesignDetailKept(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       if (!request.slotId) {
-        throw new Error('missing required field request.slot_id');
+        throw new Error("missing required field request.slot_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/bench/${request.slotId}/kept`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetDesignDetailKept',
-        },
-      ) as Promise<SetDesignDetailKeptResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignDetailKept",
+      }) as Promise<SetDesignDetailKeptResponse>;
     },
-    GetDesignQuizAnswers(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetDesignQuizAnswers',
-        },
-      ) as Promise<GetDesignQuizAnswersResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignQuizAnswers",
+      }) as Promise<GetDesignQuizAnswersResponse>;
     },
-    SaveDesignQuizAnswers(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SaveDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
-        throw new Error('missing required field request.tech_card_id');
+        throw new Error("missing required field request.tech_card_id");
       }
       const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SaveDesignQuizAnswers',
-        },
-      ) as Promise<SaveDesignQuizAnswersResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignQuizAnswers",
+      }) as Promise<SaveDesignQuizAnswersResponse>;
     },
-    GetWorkshopSettings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetWorkshopSettings',
-        },
-      ) as Promise<GetWorkshopSettingsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetWorkshopSettings",
+      }) as Promise<GetWorkshopSettingsResponse>;
     },
-    UpdateWorkshopSettings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateWorkshopSettings',
-        },
-      ) as Promise<UpdateWorkshopSettingsResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateWorkshopSettings",
+      }) as Promise<UpdateWorkshopSettingsResponse>;
     },
-    GetOrderPackingSpec(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOrderPackingSpec(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
-        throw new Error('missing required field request.order_uuid');
+        throw new Error("missing required field request.order_uuid");
       }
       const path = `api/admin/fulfillment/${request.orderUuid}/packing-spec`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOrderPackingSpec',
-        },
-      ) as Promise<GetOrderPackingSpecResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrderPackingSpec",
+      }) as Promise<GetOrderPackingSpecResponse>;
     },
-    ListMaterialLots(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMaterialLots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.materialId) {
-        throw new Error('missing required field request.material_id');
+        throw new Error("missing required field request.material_id");
       }
       const path = `api/admin/inventory/${request.materialId}/lots`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMaterialLots',
-        },
-      ) as Promise<ListMaterialLotsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMaterialLots",
+      }) as Promise<ListMaterialLotsResponse>;
     },
-    GetCostingFxRates(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCostingFxRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/costing/fx-rates`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCostingFxRates',
-        },
-      ) as Promise<GetCostingFxRatesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCostingFxRates",
+      }) as Promise<GetCostingFxRatesResponse>;
     },
-    UpsertCostingFxRates(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertCostingFxRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/costing/fx-rates`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertCostingFxRates',
-        },
-      ) as Promise<UpsertCostingFxRatesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertCostingFxRates",
+      }) as Promise<UpsertCostingFxRatesResponse>;
     },
-    GetVatRates(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetVatRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/vat-rates`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetVatRates',
-        },
-      ) as Promise<GetVatRatesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetVatRates",
+      }) as Promise<GetVatRatesResponse>;
     },
-    UpsertVatRates(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertVatRates(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/vat-rates`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertVatRates',
-        },
-      ) as Promise<UpsertVatRatesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertVatRates",
+      }) as Promise<UpsertVatRatesResponse>;
     },
-    UpdateSettings(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateSettings',
-        },
-      ) as Promise<UpdateSettingsResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSettings",
+      }) as Promise<UpdateSettingsResponse>;
     },
-    UpsertPaymentMethodFees(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpsertPaymentMethodFees(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/payment-method-fees`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpsertPaymentMethodFees',
-        },
-      ) as Promise<UpsertPaymentMethodFeesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertPaymentMethodFees",
+      }) as Promise<UpsertPaymentMethodFeesResponse>;
     },
-    SetShipmentActualCost(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetShipmentActualCost(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/order/shipment/actual-cost`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetShipmentActualCost',
-        },
-      ) as Promise<SetShipmentActualCostResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetShipmentActualCost",
+      }) as Promise<SetShipmentActualCostResponse>;
     },
-    GetBackgroundHeroColor(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetBackgroundHeroColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/background-hero-color`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetBackgroundHeroColor',
-        },
-      ) as Promise<GetBackgroundHeroColorResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetBackgroundHeroColor",
+      }) as Promise<GetBackgroundHeroColorResponse>;
     },
-    SetBackgroundHeroColor(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetBackgroundHeroColor(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/background-hero-color`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetBackgroundHeroColor',
-        },
-      ) as Promise<SetBackgroundHeroColorResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetBackgroundHeroColor",
+      }) as Promise<SetBackgroundHeroColorResponse>;
     },
-    AddShipmentCarrier(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AddShipmentCarrier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/shipment-carrier/add`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AddShipmentCarrier',
-        },
-      ) as Promise<AddShipmentCarrierResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddShipmentCarrier",
+      }) as Promise<AddShipmentCarrierResponse>;
     },
-    UpdateShipmentCarrier(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateShipmentCarrier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/settings/shipment-carrier/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateShipmentCarrier',
-        },
-      ) as Promise<UpdateShipmentCarrierResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateShipmentCarrier",
+      }) as Promise<UpdateShipmentCarrierResponse>;
     },
-    DeleteShipmentCarrier(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteShipmentCarrier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/settings/shipment-carrier/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteShipmentCarrier',
-        },
-      ) as Promise<DeleteShipmentCarrierResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteShipmentCarrier",
+      }) as Promise<DeleteShipmentCarrierResponse>;
     },
-    GetSupportTicketById(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetSupportTicketById(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/support/tickets/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetSupportTicketById',
-        },
-      ) as Promise<GetSupportTicketByIdResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketById",
+      }) as Promise<GetSupportTicketByIdResponse>;
     },
-    GetSupportTicketByCaseNumber(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetSupportTicketByCaseNumber(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.caseNumber) {
-        throw new Error('missing required field request.case_number');
+        throw new Error("missing required field request.case_number");
       }
       const path = `api/admin/support/tickets/case/${request.caseNumber}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetSupportTicketByCaseNumber',
-        },
-      ) as Promise<GetSupportTicketByCaseNumberResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketByCaseNumber",
+      }) as Promise<GetSupportTicketByCaseNumberResponse>;
     },
-    GetSupportTicketsPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetSupportTicketsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/support/tickets/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.email) {
-        queryParams.push(`email=${encodeURIComponent(request.email.toString())}`);
+        queryParams.push(`email=${encodeURIComponent(request.email.toString())}`)
       }
       if (request.orderReference) {
-        queryParams.push(`orderReference=${encodeURIComponent(request.orderReference.toString())}`);
+        queryParams.push(`orderReference=${encodeURIComponent(request.orderReference.toString())}`)
       }
       if (request.topic) {
-        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`);
+        queryParams.push(`topic=${encodeURIComponent(request.topic.toString())}`)
       }
       if (request.category) {
-        queryParams.push(`category=${encodeURIComponent(request.category.toString())}`);
+        queryParams.push(`category=${encodeURIComponent(request.category.toString())}`)
       }
       if (request.priority) {
-        queryParams.push(`priority=${encodeURIComponent(request.priority.toString())}`);
+        queryParams.push(`priority=${encodeURIComponent(request.priority.toString())}`)
       }
       if (request.dateFrom) {
-        queryParams.push(`dateFrom=${encodeURIComponent(request.dateFrom.toString())}`);
+        queryParams.push(`dateFrom=${encodeURIComponent(request.dateFrom.toString())}`)
       }
       if (request.dateTo) {
-        queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`);
+        queryParams.push(`dateTo=${encodeURIComponent(request.dateTo.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetSupportTicketsPaged',
-        },
-      ) as Promise<GetSupportTicketsPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetSupportTicketsPaged",
+      }) as Promise<GetSupportTicketsPagedResponse>;
     },
-    UpdateSupportTicketStatus(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateSupportTicketStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/support/tickets/${request.id}/update-status`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateSupportTicketStatus',
-        },
-      ) as Promise<UpdateSupportTicketStatusResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSupportTicketStatus",
+      }) as Promise<UpdateSupportTicketStatusResponse>;
     },
-    UpdateSupportTicket(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateSupportTicket(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/support/tickets/${request.id}/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateSupportTicket',
-        },
-      ) as Promise<UpdateSupportTicketResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateSupportTicket",
+      }) as Promise<UpdateSupportTicketResponse>;
     },
-    GetOrderReviewsPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOrderReviewsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/reviews/paged`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOrderReviewsPaged',
-        },
-      ) as Promise<GetOrderReviewsPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrderReviewsPaged",
+      }) as Promise<GetOrderReviewsPagedResponse>;
     },
-    DeleteOrderReview(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteOrderReview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderId) {
-        throw new Error('missing required field request.order_id');
+        throw new Error("missing required field request.order_id");
       }
       const path = `api/admin/review/${request.orderId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteOrderReview',
-        },
-      ) as Promise<DeleteOrderReviewResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteOrderReview",
+      }) as Promise<DeleteOrderReviewResponse>;
     },
-    GetProductReviewsPaged(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetProductReviewsPaged(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.productId) {
-        throw new Error('missing required field request.product_id');
+        throw new Error("missing required field request.product_id");
       }
       const path = `api/admin/product/${request.productId}/reviews`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.orderFactor) {
-        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`);
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetProductReviewsPaged',
-        },
-      ) as Promise<GetProductReviewsPagedResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductReviewsPaged",
+      }) as Promise<GetProductReviewsPagedResponse>;
     },
-    ListMembers(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListMembers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/members`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.tier) {
-        queryParams.push(`tier=${encodeURIComponent(request.tier.toString())}`);
+        queryParams.push(`tier=${encodeURIComponent(request.tier.toString())}`)
       }
       if (request.status) {
-        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`);
+        queryParams.push(`status=${encodeURIComponent(request.status.toString())}`)
       }
       if (request.spendMinEur) {
-        queryParams.push(`spendMinEur=${encodeURIComponent(request.spendMinEur.toString())}`);
+        queryParams.push(`spendMinEur=${encodeURIComponent(request.spendMinEur.toString())}`)
       }
       if (request.spendMaxEur) {
-        queryParams.push(`spendMaxEur=${encodeURIComponent(request.spendMaxEur.toString())}`);
+        queryParams.push(`spendMaxEur=${encodeURIComponent(request.spendMaxEur.toString())}`)
       }
       if (request.registeredFrom) {
-        queryParams.push(`registeredFrom=${encodeURIComponent(request.registeredFrom.toString())}`);
+        queryParams.push(`registeredFrom=${encodeURIComponent(request.registeredFrom.toString())}`)
       }
       if (request.registeredTo) {
-        queryParams.push(`registeredTo=${encodeURIComponent(request.registeredTo.toString())}`);
+        queryParams.push(`registeredTo=${encodeURIComponent(request.registeredTo.toString())}`)
       }
       if (request.daysUntilReviewMax) {
-        queryParams.push(
-          `daysUntilReviewMax=${encodeURIComponent(request.daysUntilReviewMax.toString())}`,
-        );
+        queryParams.push(`daysUntilReviewMax=${encodeURIComponent(request.daysUntilReviewMax.toString())}`)
       }
       if (request.email) {
-        queryParams.push(`email=${encodeURIComponent(request.email.toString())}`);
+        queryParams.push(`email=${encodeURIComponent(request.email.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListMembers',
-        },
-      ) as Promise<ListMembersResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListMembers",
+      }) as Promise<ListMembersResponse>;
     },
-    GetMember(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetMember',
-        },
-      ) as Promise<GetMemberResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMember",
+      }) as Promise<GetMemberResponse>;
     },
-    OverrideTier(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    OverrideTier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}/tier`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'OverrideTier',
-        },
-      ) as Promise<OverrideTierResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "OverrideTier",
+      }) as Promise<OverrideTierResponse>;
     },
-    SetMemberStatus(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetMemberStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}/status`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetMemberStatus',
-        },
-      ) as Promise<SetMemberStatusResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetMemberStatus",
+      }) as Promise<SetMemberStatusResponse>;
     },
-    SoftDeleteMember(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SoftDeleteMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SoftDeleteMember',
-        },
-      ) as Promise<SoftDeleteMemberResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SoftDeleteMember",
+      }) as Promise<SoftDeleteMemberResponse>;
     },
-    HardEraseMember(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    HardEraseMember(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}/erase`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'HardEraseMember',
-        },
-      ) as Promise<HardEraseMemberResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "HardEraseMember",
+      }) as Promise<HardEraseMemberResponse>;
     },
-    GetTierHistory(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTierHistory(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}/tier-history`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTierHistory',
-        },
-      ) as Promise<GetTierHistoryResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTierHistory",
+      }) as Promise<GetTierHistoryResponse>;
     },
-    SendMemberEmail(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SendMemberEmail(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/members/${request.userId}/email`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SendMemberEmail',
-        },
-      ) as Promise<SendMemberEmailResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SendMemberEmail",
+      }) as Promise<SendMemberEmailResponse>;
     },
-    GetTierConfig(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTierConfig(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tier-config`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTierConfig',
-        },
-      ) as Promise<GetTierConfigResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTierConfig",
+      }) as Promise<GetTierConfigResponse>;
     },
-    UpdateTierConfig(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateTierConfig(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tier-config`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateTierConfig',
-        },
-      ) as Promise<UpdateTierConfigResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateTierConfig",
+      }) as Promise<UpdateTierConfigResponse>;
     },
-    GenerateHackerInvite(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GenerateHackerInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/hacker/invite`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GenerateHackerInvite',
-        },
-      ) as Promise<GenerateHackerInviteResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateHackerInvite",
+      }) as Promise<GenerateHackerInviteResponse>;
     },
-    ListHackerInvites(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListHackerInvites(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/hacker/invites`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.activeOnly) {
-        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`);
+        queryParams.push(`activeOnly=${encodeURIComponent(request.activeOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListHackerInvites',
-        },
-      ) as Promise<ListHackerInvitesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListHackerInvites",
+      }) as Promise<ListHackerInvitesResponse>;
     },
-    RevokeHackerInvite(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RevokeHackerInvite(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.inviteId) {
-        throw new Error('missing required field request.invite_id');
+        throw new Error("missing required field request.invite_id");
       }
       const path = `api/admin/hacker/invite/${request.inviteId}/revoke`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RevokeHackerInvite',
-        },
-      ) as Promise<RevokeHackerInviteResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RevokeHackerInvite",
+      }) as Promise<RevokeHackerInviteResponse>;
     },
-    ListHackerAccounts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListHackerAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/hacker/accounts`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListHackerAccounts',
-        },
-      ) as Promise<ListHackerAccountsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListHackerAccounts",
+      }) as Promise<ListHackerAccountsResponse>;
     },
-    RevokeHackerStatus(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RevokeHackerStatus(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.userId) {
-        throw new Error('missing required field request.user_id');
+        throw new Error("missing required field request.user_id");
       }
       const path = `api/admin/hacker/accounts/${request.userId}/revoke`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RevokeHackerStatus',
-        },
-      ) as Promise<RevokeHackerStatusResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RevokeHackerStatus",
+      }) as Promise<RevokeHackerStatusResponse>;
     },
-    GetTierAuditLog(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTierAuditLog(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tier-audit`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.userId) {
-        queryParams.push(`userId=${encodeURIComponent(request.userId.toString())}`);
+        queryParams.push(`userId=${encodeURIComponent(request.userId.toString())}`)
       }
       if (request.actor) {
-        queryParams.push(`actor=${encodeURIComponent(request.actor.toString())}`);
+        queryParams.push(`actor=${encodeURIComponent(request.actor.toString())}`)
       }
       if (request.triggerType) {
-        queryParams.push(`triggerType=${encodeURIComponent(request.triggerType.toString())}`);
+        queryParams.push(`triggerType=${encodeURIComponent(request.triggerType.toString())}`)
       }
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTierAuditLog',
-        },
-      ) as Promise<GetTierAuditLogResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTierAuditLog",
+      }) as Promise<GetTierAuditLogResponse>;
     },
-    RunTierBackfill(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    RunTierBackfill(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tier-backfill`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'RunTierBackfill',
-        },
-      ) as Promise<RunTierBackfillResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RunTierBackfill",
+      }) as Promise<RunTierBackfillResponse>;
     },
-    GetCurrentAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCurrentAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounts/me`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCurrentAccount',
-        },
-      ) as Promise<GetCurrentAccountResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCurrentAccount",
+      }) as Promise<GetCurrentAccountResponse>;
     },
-    ListAccountSections(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAccountSections(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounts/sections`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAccountSections',
-        },
-      ) as Promise<ListAccountSectionsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAccountSections",
+      }) as Promise<ListAccountSectionsResponse>;
     },
-    ListAccounts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounts`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAccounts',
-        },
-      ) as Promise<ListAccountsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAccounts",
+      }) as Promise<ListAccountsResponse>;
     },
-    CreateAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateAccount',
-        },
-      ) as Promise<CreateAccountResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateAccount",
+      }) as Promise<CreateAccountResponse>;
     },
-    UpdateAccountPermissions(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateAccountPermissions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.username) {
-        throw new Error('missing required field request.username');
+        throw new Error("missing required field request.username");
       }
       const path = `api/admin/accounts/${request.username}/permissions`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateAccountPermissions',
-        },
-      ) as Promise<UpdateAccountPermissionsResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAccountPermissions",
+      }) as Promise<UpdateAccountPermissionsResponse>;
     },
-    SetAccountDisabled(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetAccountDisabled(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.username) {
-        throw new Error('missing required field request.username');
+        throw new Error("missing required field request.username");
       }
       const path = `api/admin/accounts/${request.username}/disabled`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetAccountDisabled',
-        },
-      ) as Promise<SetAccountDisabledResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAccountDisabled",
+      }) as Promise<SetAccountDisabledResponse>;
     },
-    ResetAccountPassword(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ResetAccountPassword(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.username) {
-        throw new Error('missing required field request.username');
+        throw new Error("missing required field request.username");
       }
       const path = `api/admin/accounts/${request.username}/password`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ResetAccountPassword',
-        },
-      ) as Promise<ResetAccountPasswordResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResetAccountPassword",
+      }) as Promise<ResetAccountPasswordResponse>;
     },
-    DeleteAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.username) {
-        throw new Error('missing required field request.username');
+        throw new Error("missing required field request.username");
       }
       const path = `api/admin/accounts/${request.username}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'DELETE',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteAccount',
-        },
-      ) as Promise<DeleteAccountResponse>;
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteAccount",
+      }) as Promise<DeleteAccountResponse>;
     },
-    SetAccountSpecialties(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetAccountSpecialties(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/account/specialties`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetAccountSpecialties',
-        },
-      ) as Promise<SetAccountSpecialtiesResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAccountSpecialties",
+      }) as Promise<SetAccountSpecialtiesResponse>;
     },
-    DeleteAccountSpecialty(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteAccountSpecialty(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounts/specialties/delete`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteAccountSpecialty',
-        },
-      ) as Promise<DeleteAccountSpecialtyResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteAccountSpecialty",
+      }) as Promise<DeleteAccountSpecialtyResponse>;
     },
-    ListAcctAccounts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAcctAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.includeArchived) {
-        queryParams.push(
-          `includeArchived=${encodeURIComponent(request.includeArchived.toString())}`,
-        );
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAcctAccounts',
-        },
-      ) as Promise<ListAcctAccountsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctAccounts",
+      }) as Promise<ListAcctAccountsResponse>;
     },
-    CreateAcctAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateAcctAccount',
-        },
-      ) as Promise<CreateAcctAccountResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateAcctAccount",
+      }) as Promise<CreateAcctAccountResponse>;
     },
-    UpdateAcctAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts/update`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateAcctAccount',
-        },
-      ) as Promise<UpdateAcctAccountResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAcctAccount",
+      }) as Promise<UpdateAcctAccountResponse>;
     },
-    ArchiveAcctAccount(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ArchiveAcctAccount(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts/archive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ArchiveAcctAccount',
-        },
-      ) as Promise<ArchiveAcctAccountResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ArchiveAcctAccount",
+      }) as Promise<ArchiveAcctAccountResponse>;
     },
-    CreateJournalEntry(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/journal`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateJournalEntry',
-        },
-      ) as Promise<CreateJournalEntryResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateJournalEntry",
+      }) as Promise<CreateJournalEntryResponse>;
     },
-    ReverseJournalEntry(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReverseJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/journal/reverse`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReverseJournalEntry',
-        },
-      ) as Promise<ReverseJournalEntryResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReverseJournalEntry",
+      }) as Promise<ReverseJournalEntryResponse>;
     },
-    GetJournalEntry(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetJournalEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.id) {
-        throw new Error('missing required field request.id');
+        throw new Error("missing required field request.id");
       }
       const path = `api/admin/accounting/journal/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetJournalEntry',
-        },
-      ) as Promise<GetJournalEntryResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetJournalEntry",
+      }) as Promise<GetJournalEntryResponse>;
     },
-    ListJournalEntries(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListJournalEntries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/journal`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       if (request.accountCode) {
-        queryParams.push(`accountCode=${encodeURIComponent(request.accountCode.toString())}`);
+        queryParams.push(`accountCode=${encodeURIComponent(request.accountCode.toString())}`)
       }
       if (request.sourceType) {
-        queryParams.push(`sourceType=${encodeURIComponent(request.sourceType.toString())}`);
+        queryParams.push(`sourceType=${encodeURIComponent(request.sourceType.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       if (request.q) {
-        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`);
+        queryParams.push(`q=${encodeURIComponent(request.q.toString())}`)
       }
       if (request.order) {
-        queryParams.push(`order=${encodeURIComponent(request.order.toString())}`);
+        queryParams.push(`order=${encodeURIComponent(request.order.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListJournalEntries',
-        },
-      ) as Promise<ListJournalEntriesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListJournalEntries",
+      }) as Promise<ListJournalEntriesResponse>;
     },
-    ListAcctPeriods(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAcctPeriods(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/periods`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAcctPeriods',
-        },
-      ) as Promise<ListAcctPeriodsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctPeriods",
+      }) as Promise<ListAcctPeriodsResponse>;
     },
-    CloseAcctPeriod(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CloseAcctPeriod(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/periods/close`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CloseAcctPeriod',
-        },
-      ) as Promise<CloseAcctPeriodResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CloseAcctPeriod",
+      }) as Promise<CloseAcctPeriodResponse>;
     },
-    ReopenAcctPeriod(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReopenAcctPeriod(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/periods/reopen`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReopenAcctPeriod',
-        },
-      ) as Promise<ReopenAcctPeriodResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReopenAcctPeriod",
+      }) as Promise<ReopenAcctPeriodResponse>;
     },
-    GetTrialBalance(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetTrialBalance(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/trial-balance`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetTrialBalance',
-        },
-      ) as Promise<GetTrialBalanceResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTrialBalance",
+      }) as Promise<GetTrialBalanceResponse>;
     },
-    GetProfitLossStatement(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetProfitLossStatement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/profit-loss`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetProfitLossStatement',
-        },
-      ) as Promise<GetProfitLossStatementResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProfitLossStatement",
+      }) as Promise<GetProfitLossStatementResponse>;
     },
-    GetBalanceSheet(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetBalanceSheet(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/balance-sheet`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.asOf) {
-        queryParams.push(`asOf=${encodeURIComponent(request.asOf.toString())}`);
+        queryParams.push(`asOf=${encodeURIComponent(request.asOf.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetBalanceSheet',
-        },
-      ) as Promise<GetBalanceSheetResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetBalanceSheet",
+      }) as Promise<GetBalanceSheetResponse>;
     },
-    GetAccountLedger(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAccountLedger(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.code) {
-        throw new Error('missing required field request.code');
+        throw new Error("missing required field request.code");
       }
       const path = `api/admin/accounting/reports/ledger/${request.code}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       if (request.offset) {
-        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`);
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAccountLedger',
-        },
-      ) as Promise<GetAccountLedgerResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAccountLedger",
+      }) as Promise<GetAccountLedgerResponse>;
     },
-    GetAcctReconciliation(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAcctReconciliation(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/reconciliation`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAcctReconciliation',
-        },
-      ) as Promise<GetAcctReconciliationResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAcctReconciliation",
+      }) as Promise<GetAcctReconciliationResponse>;
     },
-    ListAcctEventsNeedingReview(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListAcctEventsNeedingReview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/events/needs-review`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListAcctEventsNeedingReview',
-        },
-      ) as Promise<ListAcctEventsNeedingReviewResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListAcctEventsNeedingReview",
+      }) as Promise<ListAcctEventsNeedingReviewResponse>;
     },
-    ReprocessAcctEvent(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ReprocessAcctEvent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/events/reprocess`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ReprocessAcctEvent',
-        },
-      ) as Promise<ReprocessAcctEventResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReprocessAcctEvent",
+      }) as Promise<ReprocessAcctEventResponse>;
     },
-    ResolveAcctEvent(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ResolveAcctEvent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/events/resolve`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ResolveAcctEvent',
-        },
-      ) as Promise<ResolveAcctEventResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ResolveAcctEvent",
+      }) as Promise<ResolveAcctEventResponse>;
     },
-    GetVatReturnPL(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetVatReturnPL(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/vat-return`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.month) {
-        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`);
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetVatReturnPL',
-        },
-      ) as Promise<GetVatReturnPLResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetVatReturnPL",
+      }) as Promise<GetVatReturnPLResponse>;
     },
-    GetOssReturn(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetOssReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/oss-return`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.quarter) {
-        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`);
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetOssReturn',
-        },
-      ) as Promise<GetOssReturnResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOssReturn",
+      }) as Promise<GetOssReturnResponse>;
     },
-    ExportJpkV7M(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ExportJpkV7M(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/jpk-v7m`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.month) {
-        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`);
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ExportJpkV7M',
-        },
-      ) as Promise<ExportJpkV7MResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportJpkV7M",
+      }) as Promise<ExportJpkV7MResponse>;
     },
-    ExportOssReturn(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ExportOssReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/oss-export`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.quarter) {
-        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`);
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ExportOssReturn',
-        },
-      ) as Promise<ExportOssReturnResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ExportOssReturn",
+      }) as Promise<ExportOssReturnResponse>;
     },
-    GetUkVatReturn(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetUkVatReturn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/uk-vat-return`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.quarter) {
-        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`);
+        queryParams.push(`quarter=${encodeURIComponent(request.quarter.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetUkVatReturn',
-        },
-      ) as Promise<GetUkVatReturnResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetUkVatReturn",
+      }) as Promise<GetUkVatReturnResponse>;
     },
-    GetVatUe(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetVatUe(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/vat-ue`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.month) {
-        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`);
+        queryParams.push(`month=${encodeURIComponent(request.month.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetVatUe',
-        },
-      ) as Promise<GetVatUeResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetVatUe",
+      }) as Promise<GetVatUeResponse>;
     },
-    GetFrs105Accounts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetFrs105Accounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/frs105`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetFrs105Accounts',
-        },
-      ) as Promise<GetFrs105AccountsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFrs105Accounts",
+      }) as Promise<GetFrs105AccountsResponse>;
     },
-    GetCashFlowStatement(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetCashFlowStatement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/cash-flow`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetCashFlowStatement',
-        },
-      ) as Promise<GetCashFlowStatementResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetCashFlowStatement",
+      }) as Promise<GetCashFlowStatementResponse>;
     },
-    GetFinancialHealth(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetFinancialHealth(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/financial-health`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.from) {
-        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`);
+        queryParams.push(`from=${encodeURIComponent(request.from.toString())}`)
       }
       if (request.to) {
-        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`);
+        queryParams.push(`to=${encodeURIComponent(request.to.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetFinancialHealth',
-        },
-      ) as Promise<GetFinancialHealthResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetFinancialHealth",
+      }) as Promise<GetFinancialHealthResponse>;
     },
-    ImportBankCsv(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ImportBankCsv(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/import`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ImportBankCsv',
-        },
-      ) as Promise<ImportBankCsvResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ImportBankCsv",
+      }) as Promise<ImportBankCsvResponse>;
     },
-    ListBankTxns(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListBankTxns(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/txns`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.state) {
-        queryParams.push(`state=${encodeURIComponent(request.state.toString())}`);
+        queryParams.push(`state=${encodeURIComponent(request.state.toString())}`)
       }
       if (request.limit) {
-        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`);
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListBankTxns',
-        },
-      ) as Promise<ListBankTxnsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankTxns",
+      }) as Promise<ListBankTxnsResponse>;
     },
-    PostBankTxn(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PostBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/post`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PostBankTxn',
-        },
-      ) as Promise<PostBankTxnResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostBankTxn",
+      }) as Promise<PostBankTxnResponse>;
     },
-    IgnoreBankTxn(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    IgnoreBankTxn(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/ignore`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'IgnoreBankTxn',
-        },
-      ) as Promise<IgnoreBankTxnResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "IgnoreBankTxn",
+      }) as Promise<IgnoreBankTxnResponse>;
     },
-    ListBankRules(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListBankRules(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListBankRules',
-        },
-      ) as Promise<ListBankRulesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListBankRules",
+      }) as Promise<ListBankRulesResponse>;
     },
-    CreateBankRule(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/rules`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateBankRule',
-        },
-      ) as Promise<CreateBankRuleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateBankRule",
+      }) as Promise<CreateBankRuleResponse>;
     },
-    DeleteBankRule(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    DeleteBankRule(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/bank/rules/delete`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'DeleteBankRule',
-        },
-      ) as Promise<DeleteBankRuleResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteBankRule",
+      }) as Promise<DeleteBankRuleResponse>;
     },
-    CreateSupplier(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateSupplier(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateSupplier',
-        },
-      ) as Promise<CreateSupplierResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateSupplier",
+      }) as Promise<CreateSupplierResponse>;
     },
-    ListSuppliers(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListSuppliers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/suppliers`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListSuppliers',
-        },
-      ) as Promise<ListSuppliersResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSuppliers",
+      }) as Promise<ListSuppliersResponse>;
     },
-    GetPayables(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetPayables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/payables`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetPayables',
-        },
-      ) as Promise<GetPayablesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetPayables",
+      }) as Promise<GetPayablesResponse>;
     },
-    GetReceivables(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetReceivables(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/reports/receivables`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetReceivables',
-        },
-      ) as Promise<GetReceivablesResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetReceivables",
+      }) as Promise<GetReceivablesResponse>;
     },
-    GetAcctAlerts(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAcctAlerts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/alerts`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAcctAlerts',
-        },
-      ) as Promise<GetAcctAlertsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAcctAlerts",
+      }) as Promise<GetAcctAlertsResponse>;
     },
-    CreateFixedAsset(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    CreateFixedAsset(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'CreateFixedAsset',
-        },
-      ) as Promise<CreateFixedAssetResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFixedAsset",
+      }) as Promise<CreateFixedAssetResponse>;
     },
-    ListFixedAssets(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    ListFixedAssets(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/fixed-assets`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'ListFixedAssets',
-        },
-      ) as Promise<ListFixedAssetsResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFixedAssets",
+      }) as Promise<ListFixedAssetsResponse>;
     },
-    PostDepreciation(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    PostDepreciation(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/depreciation/post`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'PostDepreciation',
-        },
-      ) as Promise<PostDepreciationResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostDepreciation",
+      }) as Promise<PostDepreciationResponse>;
     },
-    AccrueCorporationTax(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    AccrueCorporationTax(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/corporation-tax/accrue`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'POST',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'AccrueCorporationTax',
-        },
-      ) as Promise<AccrueCorporationTaxResponse>;
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AccrueCorporationTax",
+      }) as Promise<AccrueCorporationTaxResponse>;
     },
-    GetAiProvidersConfig(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAiProvidersConfig(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/providers`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAiProvidersConfig',
-        },
-      ) as Promise<GetAiProvidersConfigResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiProvidersConfig",
+      }) as Promise<GetAiProvidersConfigResponse>;
     },
-    UpdateAiProvider(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    UpdateAiProvider(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.providerKey) {
-        throw new Error('missing required field request.provider_key');
+        throw new Error("missing required field request.provider_key");
       }
       const path = `api/admin/ai/providers/${request.providerKey}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PATCH',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'UpdateAiProvider',
-        },
-      ) as Promise<UpdateAiProviderResponse>;
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAiProvider",
+      }) as Promise<UpdateAiProviderResponse>;
     },
-    SetAiProviderKey(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetAiProviderKey(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.providerKey) {
-        throw new Error('missing required field request.provider_key');
+        throw new Error("missing required field request.provider_key");
       }
       const path = `api/admin/ai/providers/${request.providerKey}/key`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetAiProviderKey',
-        },
-      ) as Promise<SetAiProviderKeyResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiProviderKey",
+      }) as Promise<SetAiProviderKeyResponse>;
     },
-    SetAiDefaults(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetAiDefaults(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/defaults`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetAiDefaults',
-        },
-      ) as Promise<SetAiDefaultsResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiDefaults",
+      }) as Promise<SetAiDefaultsResponse>;
     },
-    SetAiRoute(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    SetAiRoute(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.purpose) {
-        throw new Error('missing required field request.purpose');
+        throw new Error("missing required field request.purpose");
       }
       const path = `api/admin/ai/routes/${request.purpose}`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
       const queryParams: string[] = [];
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'PUT',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'SetAiRoute',
-        },
-      ) as Promise<SetAiRouteResponse>;
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiRoute",
+      }) as Promise<SetAiRouteResponse>;
     },
-    GetAiSpendReport(request) {
-      // eslint-disable-line @typescript-eslint/no-unused-vars
+    GetAiSpendReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/ai/spend`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
       if (request.fromDay) {
-        queryParams.push(`fromDay=${encodeURIComponent(request.fromDay.toString())}`);
+        queryParams.push(`fromDay=${encodeURIComponent(request.fromDay.toString())}`)
       }
       if (request.toDay) {
-        queryParams.push(`toDay=${encodeURIComponent(request.toDay.toString())}`);
+        queryParams.push(`toDay=${encodeURIComponent(request.toDay.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
-        uri += `?${queryParams.join('&')}`;
+        uri += `?${queryParams.join("&")}`
       }
-      return handler(
-        {
-          path: uri,
-          method: 'GET',
-          body,
-        },
-        {
-          service: 'AdminService',
-          method: 'GetAiSpendReport',
-        },
-      ) as Promise<GetAiSpendReportResponse>;
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiSpendReport",
+      }) as Promise<GetAiSpendReportResponse>;
     },
   };
 }

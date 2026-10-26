@@ -52,7 +52,7 @@ describe('opIconInputOf', () => {
     expect(iconOf(o)).toEqual({ key: 'button_cross_x' });
   });
 
-  it('reads the pending two-hole count from fastening.buttonHoles', () => {
+  it('reads the two-hole count from fastening.buttonHoles', () => {
     const o = op({
       work: 'button_attach',
       fastening: {
@@ -90,7 +90,7 @@ describe('opIconInputOf', () => {
     expect(iconOf(o)).toEqual({ key: 'topstitch', bars: 2, at: 'edge' });
   });
 
-  it('reads the pending seam kind and work variant', () => {
+  it('reads the seam kind and work variant', () => {
     expect(iconOf(op({ work: 'set_zip', workVariant: 'two_way' }))).toEqual({
       key: 'zip_two_way',
     });

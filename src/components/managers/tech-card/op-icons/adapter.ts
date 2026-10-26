@@ -1,29 +1,14 @@
-import type {
-  common_TechCardInsert,
-  common_TechCardOperation,
-  common_TechCardOperationFastening,
-} from 'api/proto-http/admin';
+import type { common_TechCardInsert, common_TechCardOperation } from 'api/proto-http/admin';
 import type { OpIconCard, OpIconInput } from './op-icon';
-
-/** Fields the next proto bump adds to the operation; read only through `pending` below. */
-type OpWithIconFields = common_TechCardOperation & {
-  seamKind?: string;
-  workVariant?: string;
-  fastening?: common_TechCardOperationFastening & { buttonHoles?: number };
-};
-
-// typed after proto bump
-const pending = (o: common_TechCardOperation) => o as OpWithIconFields;
 
 const SEAM_CLASS_UNSET = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
 
 /** The operation as the icon registry reads it; values are the API strings verbatim. */
 export function opIconInputOf(o: common_TechCardOperation): OpIconInput {
-  const next = pending(o);
   return {
     work: o.work,
-    workVariant: next.workVariant,
-    seamKind: next.seamKind,
+    workVariant: o.workVariant,
+    seamKind: o.seamKind,
     seamClass: o.seamClass,
     // unset seam class = inherited from the card, never stored on the step
     seamClassExplicit: !!o.seamClass && o.seamClass !== SEAM_CLASS_UNSET,
@@ -38,7 +23,7 @@ export function opIconInputOf(o: common_TechCardOperation): OpIconInput {
     topstitchRows: o.topstitch?.rows,
     needleCount: o.stitching?.needleCount,
     attachPattern: o.fastening?.attachPattern,
-    buttonHoles: next.fastening?.buttonHoles,
+    buttonHoles: o.fastening?.buttonHoles,
     attachMethod: o.hardware?.attachMethod,
     zipperApplication: o.fastening?.zipperApplication,
     buttonholeStyle: o.fastening?.buttonholeStyle,
