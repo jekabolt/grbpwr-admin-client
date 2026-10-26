@@ -32,5 +32,8 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+      # step-roundtrip-probe shells out to the ast-grep binary; pinned to the local version (0.45.1).
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli@0.45.1 && ast-grep --version
       - name: Run quality gate
         run: ./scripts/ci-check.sh

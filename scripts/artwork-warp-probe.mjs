@@ -103,7 +103,10 @@ const check = (name, ok, detail = '') => {
 };
 
 // Без vsync: rAF идёт так часто, как успевает отрисовка, и время кадра — это работа, а не 16,7 мс.
-const browser = await chromium.launch({ args: ['--disable-gpu-vsync', '--disable-frame-rate-limit'] });
+// --disable-lcd-text: текст оттенками серого везде. Linux-Chromium рисует его субпиксельно (LCD), и
+// цветная кайма строки с точками и ярлыка «1 print» шла в счёт «красного вне зоны» (CI: 232–356 px
+// при тех же inside, что на маке; на маке LCD-текста нет, флаг там ничего не меняет).
+const browser = await chromium.launch({ args: ['--disable-gpu-vsync', '--disable-frame-rate-limit', '--disable-lcd-text'] });
 async function open({ zoom = false, pts = null } = {}) {
   const page = await (await browser.newContext({ viewport: { width: 480, height: 520 }, deviceScaleFactor: 2 })).newPage();
   page.on('pageerror', (e) => check('page error', false, e.message));
@@ -144,6 +147,7 @@ async function redOutside(page) {
     const d = cx.getImageData(0, 0, bmp.width, bmp.height).data;
     let inside = 0;
     let outside = 0;
+    const at = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     const pad = 3;
     for (let y = 0; y < bmp.height; y++)
       for (let x = 0; x < bmp.width; x++) {
@@ -152,9 +156,14 @@ async function redOutside(page) {
         const X = x / k;
         const Y = y / k;
         if (X >= z.x0 - pad && X <= z.x1 + pad && Y >= z.y0 - pad && Y <= z.y1 + pad) inside++;
-        else outside++;
+        else {
+          outside++;
+          at.x0 = Math.min(at.x0, Math.round(X)); at.y0 = Math.min(at.y0, Math.round(Y));
+          at.x1 = Math.max(at.x1, Math.round(X)); at.y1 = Math.max(at.y1, Math.round(Y));
+        }
       }
-    return { inside, outside };
+    // Где лежат чужие пиксели (CSS px) — только при провале, чтобы было видно, что это.
+    return outside ? { inside, outside, at: [at.x0, at.y0, at.x1, at.y1] } : { inside, outside };
   }, [png.toString('base64'), zone]);
 }
 

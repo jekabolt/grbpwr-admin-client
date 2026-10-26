@@ -641,8 +641,10 @@ const paste = (t) =>
   }, t);
 const caret = () => page.evaluate(() => window.__formatBar.caret());
 const at = (n) => JSON.stringify([n, n]);
-const undo = async () => { await page.keyboard.press('Meta+z'); await page.waitForTimeout(150); };
-const redo = async () => { await page.keyboard.press('Meta+Shift+z'); await page.waitForTimeout(150); };
+// ControlOrMeta: ⌘ на маке, Ctrl на Linux/Windows — ровно то, что ждёт обработчик (IS_MAC в
+// format-bar.tsx) и родная отмена Chromium на этой платформе. Meta+z на Linux не отменяет ничего.
+const undo = async () => { await page.keyboard.press('ControlOrMeta+z'); await page.waitForTimeout(150); };
+const redo = async () => { await page.keyboard.press('ControlOrMeta+Shift+z'); await page.waitForTimeout(150); };
 
 const LINKED = `see [etsy](${ETSY})`;
 const BARE = `see ${ETSY}`;

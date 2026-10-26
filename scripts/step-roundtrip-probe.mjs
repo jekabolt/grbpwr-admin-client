@@ -108,6 +108,8 @@ const { emptyOp, toWire, readBack, operationFieldNames } = await import(
   pathToFileURL(outfile).href
 );
 rmSync(outfile, { force: true });
+// esbuild кладёт рядом и CSS импортов бандла — без этого каждый прогон оставлял scripts/.step-roundtrip-*.css.
+rmSync(outfile.replace(/\.mjs$/, '.css'), { force: true });
 
 const T = {
   MACHINE: 'TECH_CARD_OPERATION_TYPE_MACHINE',

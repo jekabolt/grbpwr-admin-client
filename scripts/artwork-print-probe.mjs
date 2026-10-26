@@ -110,7 +110,10 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '  ok  ' : '  FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-const browser = await chromium.launch();
+// Текст — оттенками серого везде. Linux-Chromium рисует его субпиксельно (LCD): цветная кайма
+// подписи «VIEW · FRONT» попадала в класс «синий контур» (CI: синий до x=23, y=562 при том же
+// красном). На маке LCD-текста нет, флаг там ничего не меняет.
+const browser = await chromium.launch({ args: ['--disable-lcd-text'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('pageerror', String(e)));
 await page.route('http://probe.local/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }));
@@ -164,6 +167,34 @@ async function boxes(png) {
   await p2.close();
   return r;
 }
+// PDF → PNG без системных утилит (раньше — макосный sips): pdf.js из зависимостей в той же
+// Chromium, первая страница, scale 2 = 144 dpi. Воркер — в главном потоке (globalThis.pdfjsWorker),
+// так оба модуля грузятся запросами страницы и отдаются из node_modules через route.
+const PDFJS = resolve(REPO, 'node_modules/pdfjs-dist/build');
+async function rasterizePdf(pdf, scale) {
+  const p2 = await browser.newPage();
+  await p2.route('http://pdfjs.local/**', (r) => {
+    const name = new URL(r.request().url()).pathname.slice(1);
+    if (name === 'pdf.mjs' || name === 'pdf.worker.mjs')
+      return r.fulfill({ status: 200, contentType: 'text/javascript', body: readFileSync(resolve(PDFJS, name)) });
+    return r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><body></body>' });
+  });
+  await p2.goto('http://pdfjs.local/');
+  const b64 = await p2.evaluate(async ([data, k]) => {
+    globalThis.pdfjsWorker = await import('/pdf.worker.mjs');
+    const pdfjs = await import('/pdf.mjs');
+    const doc = await pdfjs.getDocument({ data: Uint8Array.from(atob(data), (c) => c.charCodeAt(0)) }).promise;
+    const pg = await doc.getPage(1);
+    const vp = pg.getViewport({ scale: k });
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(vp.width);
+    cv.height = Math.ceil(vp.height);
+    await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+    return cv.toDataURL('image/png').split(',')[1];
+  }, [pdf.toString('base64'), scale]);
+  await p2.close();
+  return Buffer.from(b64, 'base64');
+}
 const report = (name, b, tol) => {
   const dx0 = Math.abs(b.red.x0 - b.blue.x0);
   const dx1 = Math.abs(b.red.x1 - b.blue.x1);
@@ -182,15 +213,12 @@ report('экран', await boxes(screenPng), 4);
 
 const pdfPath = resolve(tmpdir(), `artwork-print-${process.pid}.pdf`);
 await page.pdf({ path: pdfPath, format: 'A4', printBackground: true });
-const pngPath = resolve(tmpdir(), `artwork-print-${process.pid}.png`);
-execFileSync('sips', ['-s', 'format', 'png', '-s', 'dpiWidth', '144', '-s', 'dpiHeight', '144', pdfPath, '--out', pngPath], { stdio: 'ignore' });
-const printPng = readFileSync(pngPath);
+const printPng = await rasterizePdf(readFileSync(pdfPath), 2);
 if (SHOTS) writeFileSync(`${SHOTS}/${TAG}-print-pdf.png`, printPng);
 const pb = await boxes(printPng);
 console.log(`   PDF растр ${pb.w}×${pb.h}`);
 report('печать (page.pdf)', pb, Math.max(4, Math.round(pb.w / 300)));
 rmSync(pdfPath, { force: true });
-rmSync(pngPath, { force: true });
 
 await browser.close();
 console.log(`${pass} из ${pass + fail} проверок прошло`);
