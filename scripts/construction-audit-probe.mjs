@@ -282,8 +282,8 @@ const DROPS_BROKEN = `                  {false && dropped > 0 && (`;
 
 const UNAVAILABLE_FIX = `        text:
           \`the provider does not serve «\${slug}». This is a configuration fault, not a busy \` +
-          \`moment — waiting changes nothing. Point OPENROUTER_MODEL_ANALYSIS at a slug this key \` +
-          \`can reach.\`,`;
+          \`moment — waiting changes nothing. Point the tech-card analysis route in \` +
+          \`admin → AI providers at a slug this key can reach.\`,`;
 const UNAVAILABLE_BROKEN = `        text: 'the ai review is temporarily unavailable, please try again later.',`;
 
 const INVALID_FIX = `        text:
@@ -308,10 +308,10 @@ const FROZEN_FILER_FIX = `    return (
         dashed
         className='shrink-0'
         disabled={busy}
-        onClick={onFile}
+        onClick={() => onFile(filed.flash)}
         title='file this on the issues tab of the released card'
       >
-        {busy ? 'filing…' : 'file as issue'}
+        {busy ? 'filing…' : filed.on ? 'filed ✓' : 'file as issue'}
       </Chip>
     );`;
 const FROZEN_FILER_NATIVE = `    return (
@@ -320,7 +320,7 @@ const FROZEN_FILER_NATIVE = `    return (
         variant='underline'
         size='xs'
         className='shrink-0'
-        onClick={() => onFile()}
+        onClick={() => onFile(filed.flash)}
       >
         file as issue
       </Button>
@@ -452,20 +452,10 @@ const UNSAVED_HASH_MUTE = `        return false && !!then && !!inForm && then !=
 // …но закрытый блок НИКОГДА не читается как чистая карточка: счёт находок живёт в шапке.
 const AI_OPEN_FIX = `  const [auditOpen, setAuditOpen] = useState(false);`;
 const AI_OPEN_EXPANDED = `  const [auditOpen, setAuditOpen] = useState(true);`;
-// Шапка перестаёт считать и всегда говорит «machine: clean» — ровно та тишина, ради которой
+// Шапка перестаёт считать и молчит, как над чистой карточкой, — ровно та тишина, ради которой
 // счётчик в шапке и стоит: свёрнутый блок над карточкой с блокером выглядел бы законченным.
-const AI_COUNT_FIX = `      {findings.length === 0 ? (
-        <Text size='micro' variant='label' component='span'>
-          machine: clean
-        </Text>
-      ) : (
-        <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>
-      )}`;
-const AI_COUNT_HIDDEN = `      {
-        <Text size='micro' variant='label' component='span'>
-          machine: clean
-        </Text>
-      }`;
+const AI_COUNT_FIX = `      {findings.length > 0 && <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>}`;
+const AI_COUNT_HIDDEN = `      {false && <Pill tone='warn'>{plural(findings.length, 'finding')}</Pill>}`;
 
 // budget_exhausted СНОВА ЧИТАЕТСЯ КАК ПОГОДА — дословно тот текст, который уехал на прод и
 // приглашал жать ещё раз на детерминированную неисправность.
@@ -481,11 +471,11 @@ const BUDGET_STATUS_AS_WEATHER = `    case 'budget_exhausted':
       return {
         tone: 'error',`;
 
-// Шапка перестаёт отличать отказ модели от пустого ответа — «ai: none» под провалившимся прогоном.
+// Шапка перестаёт отличать отказ модели от пустого ответа — тишина под провалившимся прогоном.
 const HEAD_FAILED_FIX = `        run.aiStatus !== 'ok' ? (
           <Pill tone='warn'>ai: no report</Pill>
-        ) : modelFindings.length === 0 ? (`;
-const HEAD_FAILED_BLIND = `        modelFindings.length === 0 ? (`;
+        ) : modelFindings.length === 0 ? null : (`;
+const HEAD_FAILED_BLIND = `        modelFindings.length === 0 ? null : (`;
 
 const ABSENT_MAP_FIX = `  if (!now || Object.keys(now).length === 0) return 'unknown';
   const current = now[String(n)];`;

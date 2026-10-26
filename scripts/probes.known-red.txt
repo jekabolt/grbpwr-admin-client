@@ -4,4 +4,3 @@
 # Never add a line to make a new failure green; one line per probe: `<path> — <why it is red>`.
 scripts/step-name-probe.mjs — since 62640326d (10-23) packing steps (no seam) print the inherited «SS — plain seam» + card allowance on map/editor: effectiveSeamClass is applied to every step and opens the seamAllowanceReading gate (4 checks red)
 scripts/construction-audit-probe.mjs — since de5ed2fe1 (10-16) the «not checked» list sits in a closed <details>, against the file's own invariant (construction-audit.tsx:47-50 «NOT A DISCLOSURE … always, expanded»): a clean report reads as «checked and clean» (5 of 187 checks red; owner to decide)
-scripts/work-picker-probe.mjs — BUNDLED_WORK_CATALOG (operation-work.ts) lacks hem_turned «Hem — turned twice», seeded by backend migration 0332 (c9c3b7e, on backend beta); the drift check reads ../grbpwr-products-manager and skips where that tree is absent (CI)

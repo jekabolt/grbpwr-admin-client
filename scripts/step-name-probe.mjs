@@ -536,6 +536,7 @@ const SECOND_FIX = `    return operationHeading({
       operationType: v,
       machineType: o.machineType,
       seamClass: o.seamClass,
+      topstitchMode: o.topstitchMode,
       work: o.work,
       workCatalog,
       pieceNames: [],
@@ -564,9 +565,9 @@ const RELEASELIVE_BROKEN = `  work: o.work || (o.fastening?.cutLengthMm ? 'slit_
 // пятой мутации, — «заметка написана человеком, значит она главнее», — только человек написал ещё
 // и работу, а композитор про обе знает и порядок им уже назначил.
 const NOTEFIRST_FIX = `  const labelOfStep = (i: number) =>
-    operationHeading({`;
+    (operationHeading({`;
 const NOTEFIRST_BROKEN = `  const labelOfStep = (i: number) =>
-    ((getValues(\`operations.\${i}.note\`) as string) || '').trim() ||
+    (((getValues(\`operations.\${i}.note\`) as string) || '').trim() ||
     operationHeading({`;
 // Седьмая — плановая: КАРТА ПРИМЕРКИ СНОВА СОБИРАЕТ ПЛОТНОСТЬ РУКАМИ. Это в точности то, как
 // строка выглядела до правки, и соблазн здесь даже не в «своей копии», а в её незаметности:
@@ -637,8 +638,8 @@ const SA_GATE_BROKEN = ``;
 // печатным листом, и та же цена: две поверхности одной карточки называют одно поле разными словами,
 // а увидеть это можно только положив их рядом. Верхний регистр выбран нарочно — он выглядит
 // стилем, а не расхождением, и именно поэтому такую копию не замечают.
-const SEAMCLASS_FIX = `    seamClassLabel(o.seamClass),`;
-const SEAMCLASS_BROKEN = `    seamClassLabel(o.seamClass).toUpperCase(),`;
+const SEAMCLASS_FIX = `    seamClassLabel(seamClass),`;
+const SEAMCLASS_BROKEN = `    seamClassLabel(seamClass).toUpperCase(),`;
 // Четырнадцатая — адверсарная, ЖИВАЯ ПОЛОВИНА РАЗВИЛКИ: общий ярлык «сводится» с архивным и начинает
 // печатать СЫРОЙ ТОКЕН вместо пустоты. Правка выглядит бережной («не терять данные»), а на живом
 // экране означает `TECH_CARD_SEAM_CLASS_…` на глазах у технолога — и хуже пустоты именно тем, что
@@ -647,15 +648,15 @@ const SEAMCLASS_BROKEN = `    seamClassLabel(o.seamClass).toUpperCase(),`;
 const LIVECLASS_FIX = `export const seamClassLabel = (v?: string): string =>
   !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
     ? ''
-    : (SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '');`;
+    : SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? '';`;
 const LIVECLASS_BROKEN = `export const seamClassLabel = (v?: string): string =>
   !v ? '' : (SEAM_CLASS_LABELS[v as common_TechCardSeamClass] ?? v);`;
 // Пятнадцатая — адверсарная, АРХИВНАЯ ПОЛОВИНА ТОЙ ЖЕ РАЗВИЛКИ, и вместе они и есть её защита. Тут
 // «сведение» идёт в другую сторону: архив получает фолбэк живого экрана и подписанная строка молча
 // ПРОПАДАЕТ. Одна мутация без другой оставила бы половину развилки без сторожа — и следующий
 // исполнитель «починил» бы расхождение в ту сторону, которая не покраснела.
-const RELEASECLASS_FIX = `    : (seamClassOptions.find((o) => o.value === v)?.label ?? v);`;
-const RELEASECLASS_BROKEN = `    : (seamClassOptions.find((o) => o.value === v)?.label ?? '');`;
+const RELEASECLASS_FIX = `    : seamClassOptions.find((o) => o.value === v)?.label ?? v;`;
+const RELEASECLASS_BROKEN = `    : seamClassOptions.find((o) => o.value === v)?.label ?? '';`;
 
 
 // --- ПЕРЕПИСЬ ПЕЧАТНОГО ЛИСТА: СЕМЬ МУТАЦИЙ -----------------------------------------------------
@@ -665,8 +666,8 @@ const RELEASECLASS_BROKEN = `    : (seamClassOptions.find((o) => o.value === v)?
 // СВЕРКОЙ бумаги с экраном, а не константой в пробе.
 const SHEET_ZONE_FIX = `<div>{zoneLabel(o.zone) || '—'}</div>`;
 const SHEET_ZONE_BROKEN = `<div>{(zoneLabel(o.zone) || '—').toUpperCase()}</div>`;
-const SHEET_CLASS_FIX = `<div>{seamClassLabel(o.seamClass) || '—'}</div>`;
-const SHEET_CLASS_BROKEN = `<div>{(seamClassLabel(o.seamClass) || '—').toUpperCase()}</div>`;
+const SHEET_CLASS_FIX = `<div>{seamClassLabel(seamClass) || '—'}</div>`;
+const SHEET_CLASS_BROKEN = `<div>{(seamClassLabel(seamClass) || '—').toUpperCase()}</div>`;
 // Возврат ВЕТКИ, а не текста: лист снова спрашивает словарь процессов ПРЕССА — тот, что отвечает
 // «для какого процесса написан профиль», — и дублирование опять зовётся «fusing».
 const SHEET_FUSING_FIX = `  if (isPressStepType(v) || (v && WAVE_VERBS.has(v)))`;
