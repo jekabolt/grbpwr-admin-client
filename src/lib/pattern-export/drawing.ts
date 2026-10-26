@@ -171,7 +171,7 @@ const LABEL_EM_CM = 0.3175;
 function labelAt(poly: readonly Pt[], s: string, grain: GrainSegment | null): Pt {
   const at = centroid(poly);
   if (!grain) return at;
-  const box = { dir: { x: 1, y: 0 }, halfW: s.length * 0.3 * LABEL_EM_CM, halfH: LABEL_EM_CM / 2 };
+  const box = { dir: { x: 1, y: 0 }, halfW: s.length * 0.36 * LABEL_EM_CM, halfH: LABEL_EM_CM / 2 };
   return labelBesideGrain(at, grain, box, 0.2, poly);
 }
 

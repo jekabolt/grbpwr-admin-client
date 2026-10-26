@@ -524,7 +524,7 @@ function rollLabelAnchor(
   const rad = (angle * Math.PI) / 180;
   const dir = { x: Math.cos(rad), y: -Math.sin(rad) };
   const up = { x: dir.y, y: -dir.x };
-  const halfW = text.length * 0.3 * ROLL_PIECE_LABEL_MM;
+  const halfW = text.length * 0.36 * ROLL_PIECE_LABEL_MM;
   const halfH = 0.35 * ROLL_PIECE_LABEL_MM;
   const centre = {
     x: anchor[0] + dir.x * halfW + up.x * halfH,
