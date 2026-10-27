@@ -11,6 +11,7 @@ import {
   kindIsOffered,
   kindLabelOf,
   kindWrites,
+  operationHowKind,
   type OperationKind,
   type OperationKindStep,
 } from './operation-kinds';
@@ -819,6 +820,7 @@ export type ParkPressRow = { pressEquipment?: string; profileKey?: string; opera
  * молча переставить шаг на другой станок).
  */
 export type StepSnapshot = OperationKindStep & {
+  seamKind?: string;
   workVariant?: string;
   machineProfileKey?: string;
   pressProfileKey?: string;
@@ -905,6 +907,9 @@ export function workApplication(input: {
   // нет, ни одного якоря не писала, и снимать чужой факт «на всякий случай» было бы ровно тем
   // стиранием, которого фаза «перестать терять» не допускает.
   const clears = k ? kindClears(k, after) : {};
+  if (operationHowKind(k?.id, item.token) === 'topstitch' && (current.seamKind ?? '').trim()) {
+    clears.seamKind = '';
+  }
 
   // СВЯЗЬ С ПРОФИЛЕМ ПАРКА ПИШЕТСЯ КЛЮЧОМ, ЯВНО — единственное, что вообще подтягивается при
   // выборе работы, и подтягивается оно СВЯЗЬЮ, а не значениями.

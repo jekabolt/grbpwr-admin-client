@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { OPERATION_KIND_BY_ID } from './operation-kinds';
 import { variantAfterWork, workApplication, type WorkItem } from './operation-work';
 
 const work = (token: string): WorkItem => ({
@@ -30,5 +31,20 @@ describe('work application variants', () => {
   it('keeps a variant declared by the new work', () => {
     expect(variantAfterWork('set_zip', 'two_way')).toBe('two_way');
     expect(variantAfterWork('', 'two_way')).toBe('');
+  });
+
+  it('clears seam kind when the work becomes topstitch', () => {
+    const applied = workApplication({
+      item: work('topstitch'),
+      kind: OPERATION_KIND_BY_ID.get('A2'),
+      current: {
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        seamKind: 'lapped_raw',
+      },
+      park: { machines: [], presses: [] },
+    });
+
+    expect(applied.clears.seamKind).toBe('');
   });
 });

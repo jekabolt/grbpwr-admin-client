@@ -231,6 +231,7 @@ export function UnitBlockHeader({
   block,
   smv,
   terminal,
+  problemCount,
   className,
   unitNameOf,
 }: {
@@ -239,62 +240,81 @@ export function UnitBlockHeader({
   smv: string;
   /** Этот узел — готовое изделие (единственный живой). */
   terminal: boolean;
+  /** Missing, broken, or review steps in this unit. */
+  problemCount: number;
   className?: string;
   /** Owner-facing name of another unit referenced by this block. */
   unitNameOf?: (key: string) => string;
 }) {
   const isTail = block.key === '';
-  // Глиф узла (полоса C): только когда каркас поставил пиктограмму, иначе строка как была.
   const picture = useUnitPicture(isTail ? null : block.key);
+  const target = isTail
+    ? ''
+    : terminal
+      ? '→ GARMENT'
+      : block.absorbedInto
+        ? `→ ${unitNameOf?.(block.absorbedInto) ?? unitDisplayName({ key: block.absorbedInto })}`
+        : '';
   return (
     <div
       className={cn(
-        'mt-1.5 flex items-center gap-1.5 border-t border-textColor px-1 pt-1 first:mt-0',
-        isTail && 'border-dashed border-borderColor',
+        'mt-1.5 grid min-w-0 grid-cols-[auto_minmax(0,auto)_minmax(0,1fr)_auto_auto] items-center gap-x-2 border-b border-hairline px-1 py-1.5 @max-[28rem]:grid-cols-[auto_minmax(0,1fr)_auto] @max-[28rem]:gap-y-0.5',
         className,
       )}
     >
-      <UnitGlyph
-        picture={picture}
-        name={unitDisplayName({ key: block.key, outputUnitName: block.name })}
-        boxClassName='mr-0 size-4 self-center'
-      />
-      <Text
-        size='micro'
-        variant='uppercase'
-        tracking='label'
-        component='span'
-        className='shrink-0 font-bold'
-      >
-        {isTail ? '◌ outside units' : '▣'}
-      </Text>
-      {!isTail && (
+      <span className='size-4'>
+        <UnitGlyph
+          picture={picture}
+          name={unitDisplayName({ key: block.key, outputUnitName: block.name })}
+          boxClassName='mr-0 size-4 self-center'
+        />
+      </span>
+      {isTail ? (
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='col-span-2 min-w-0 truncate @max-[28rem]:col-span-1'
+        >
+          outside units
+        </Text>
+      ) : (
         <InlineUnitName
           block={block}
-          className='text-micro font-bold uppercase tracking-label'
-          inputClassName='text-micro font-bold uppercase tracking-label'
+          className='text-micro uppercase tracking-label'
+          inputClassName='text-micro uppercase tracking-label'
         />
       )}
-      {/* СОСТОЯНИЕ УЗЛА НАЗЫВАЕТСЯ СЛОВОМ, а не выводится читателем из отсутствия чего-то.
-          Три состояния, и они разные: изделие (единственный живой узел), ушёл в другой узел
-          (нормальная середина сборки) и разрыв (живой, но не единственный — сборка не сошлась). */}
-      {!isTail && (
-        <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          {terminal
-            ? '✓ garment'
-            : block.absorbedInto
-              ? `→ ▣ ${unitNameOf?.(block.absorbedInto) ?? unitDisplayName({ key: block.absorbedInto })}`
-              : '✕ break'}
-        </Text>
-      )}
-      {isTail && (
-        <Text size='micro' variant='label' component='span' className='ml-auto shrink-0'>
-          the step's target isn't a unit
+      {target && (
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          title={target}
+          className='min-w-0 truncate uppercase @max-[28rem]:col-start-2 @max-[28rem]:row-start-2'
+        >
+          {target}
         </Text>
       )}
       {smv && (
-        <Text size='micro' variant='label' component='span' className='shrink-0 tabular-nums'>
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className='shrink-0 tabular-nums @max-[28rem]:col-start-3 @max-[28rem]:row-start-2'
+        >
           Σ {smv}
+        </Text>
+      )}
+      {problemCount > 0 && (
+        <Text
+          size='micro'
+          variant='error'
+          component='span'
+          className='shrink-0 tabular-nums @max-[28rem]:col-start-3 @max-[28rem]:row-start-1'
+        >
+          ! {problemCount}
         </Text>
       )}
     </div>

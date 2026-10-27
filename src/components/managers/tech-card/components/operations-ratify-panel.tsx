@@ -123,6 +123,7 @@ const toSnapshot = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>):
   machineType: str(o.machineType),
   pressEquipment: str(o.pressEquipment),
   seamClass: str(o.seamClass),
+  seamKind: str(o.seamKind),
   topstitchMode: str(o.topstitchMode),
   attachMethod: str(o.attachMethod),
   coverageMode: str(o.coverageMode),

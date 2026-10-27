@@ -32,9 +32,12 @@ export type HeaderWarning =
 export function HeaderWarnings({
   items,
   className,
+  countOnly = false,
 }: {
   items: ReadonlyArray<HeaderWarning | null | undefined | false>;
   className?: string;
+  /** Render only `! N`; the popover and accessible label retain the full warning detail. */
+  countOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // THE DOOR IS A SPAN, NOT A BUTTON. Radix's trigger is a native <button>, and every native button
@@ -69,6 +72,7 @@ export function HeaderWarnings({
           unique.length > errors ? ` · ${unique.length - errors} more` : ''
         }`
       : `! ${unique.length} ${unique.length === 1 ? 'warning' : 'warnings'}`;
+  const visibleLabel = countOnly ? `! ${errors || unique.length}` : label;
   return (
     <GenericPopover
       title='warnings'
@@ -90,7 +94,7 @@ export function HeaderWarnings({
           )}
         >
           <span className={errors > 0 ? 'text-error' : 'text-warning'}>!</span>
-          {label.replace(/^!/, '')}
+          {visibleLabel.replace(/^!/, '')}
         </span>
       }
     >

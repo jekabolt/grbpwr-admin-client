@@ -248,7 +248,7 @@ import {
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { AssemblySchematic } from './assembly-schematic';
-import { CardSeamStandard, SequenceRail } from './sequence-rail';
+import { SequenceRail } from './sequence-rail';
 import {
   ButtonAttachTiles,
   PressActionTiles,
@@ -275,6 +275,7 @@ import {
 import { planOldPieceOps } from './nesting/old-pieces-ops';
 import type { SkeletonStep } from 'lib/assembly-skeleton/types';
 import {
+  clearReview,
   ghostCandidates,
   nextMarkedOperation,
   removeGhostFromStep,
@@ -1216,13 +1217,19 @@ function RailTotal() {
 //
 // On a released card the ratify door is not offered: the panel writes, a released card is not
 // written. The count stays — it is a fact either way.
+type RailProblem = { index: number; status: 'missing' | 'broken' | 'review' };
+
 function OperationsHeaderWarnings({
   frozen,
   onRatify,
+  onStepProblem,
+  stepProblems,
   cloth,
 }: {
   frozen?: boolean;
   onRatify: () => void;
+  onStepProblem: (index: number) => void;
+  stepProblems: RailProblem[];
   cloth?: HeaderWarning | null;
 }) {
   const { control } = useFormContext<TechCardFormData>();
@@ -1275,6 +1282,13 @@ function OperationsHeaderWarnings({
     pinCount > 0 ? operations.filter((o) => !((o?.calloutNumber ?? 0) > 0)).length : 0;
 
   const items: HeaderWarning[] = [];
+  stepProblems.forEach(({ index, status }) => {
+    items.push({
+      text: `${operationStepNumber(index)} · ${status}`,
+      error: true,
+      action: { label: 'open step', onClick: () => onStepProblem(index) },
+    });
+  });
   if (unnamed > 0) {
     items.push({
       text: `${unnamed} of ${total} ${total === 1 ? 'step' : 'steps'} not named`,
@@ -1291,7 +1305,7 @@ function OperationsHeaderWarnings({
   if (items.length === 0) return null;
   return (
     <span className='contents' data-unnamed-steps={unnamed || undefined}>
-      <HeaderWarnings items={items} />
+      <HeaderWarnings items={items} countOnly />
     </span>
   );
 }
@@ -2364,6 +2378,8 @@ function OperationEditor({
   pinOptions,
   onInsertAfter,
   onRemove,
+  onMarkReviewed,
+  onReviewAccepted,
   onFlashPieces,
   onActiveBomChange,
   onDropPiece,
@@ -2403,6 +2419,8 @@ function OperationEditor({
   pinOptions: PickerOption[];
   onInsertAfter: () => void;
   onRemove: () => void;
+  onMarkReviewed: () => void;
+  onReviewAccepted: () => void;
   onFlashPieces: () => void;
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
@@ -2433,6 +2451,7 @@ function OperationEditor({
   }) ?? opNumber) as number;
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
   const review = (useWatch({ control, name: `operations.${index}.review` }) ?? '') as string;
+  const draft = !!useWatch({ control, name: `operations.${index}.draft` });
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
   const [addingMaterial, setAddingMaterial] = useState(false);
@@ -3466,6 +3485,7 @@ function OperationEditor({
         machineType,
         pressEquipment,
         seamClass,
+        seamKind,
         topstitchMode,
         attachMethod,
         coverageMode,
@@ -4390,13 +4410,37 @@ function OperationEditor({
         >
           {editorHeading}
         </Text>
-        <div className='ml-auto hidden shrink-0 items-center gap-3 sm:flex'>
-          <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
-            + below
-          </Button>
-          <Button type='button' variant='underline' size='xs' onClick={onRemove}>
-            remove
-          </Button>
+        <div className='ml-auto flex shrink-0 items-center gap-3'>
+          {draft && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={onMarkReviewed}
+              data-editor-draft={index}
+            >
+              mark reviewed
+            </Button>
+          )}
+          {review.trim() && review.trim() !== 'orphan' && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={onReviewAccepted}
+              data-editor-review={index}
+            >
+              accept review
+            </Button>
+          )}
+          <span className='hidden items-center gap-3 sm:flex'>
+            <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
+              + below
+            </Button>
+            <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+              remove
+            </Button>
+          </span>
         </div>
       </div>
 
@@ -4929,8 +4973,8 @@ function OperationEditor({
             />
 
             {howKind !== 'fuse' && <WorkVariantTiles index={index} className='sm:col-span-2' />}
-            {!['join', 'bind', 'hem'].includes(howKind) &&
-              (!['buttonhole', 'button', 'topstitch'].includes(howKind) || !!seamKind) && (
+            {!['join', 'bind', 'hem', 'topstitch'].includes(howKind) &&
+              (!['buttonhole', 'button'].includes(howKind) || !!seamKind) && (
                 <SeamKindTiles
                   index={index}
                   family={showStitching || seamKind ? 'stored' : null}
@@ -6064,6 +6108,19 @@ export function OperationsField({
     if (frozen) return;
     setValue(`operations.${i}.draft`, false, { shouldDirty: true, shouldTouch: true });
   };
+  const acceptReview = (i: number) => {
+    if (frozen) return;
+    const operations = (getValues('operations') ?? []) as CardOperation[];
+    const mark = operations[i]?.review?.trim() ?? '';
+    // An orphan is resolved by replacing or removing the missing piece, never by acknowledging it.
+    if (!mark || mark === 'orphan') return;
+    const nextOperations = operations.map((operation, index) =>
+      index === i ? clearReview(operation) : operation,
+    );
+    setValue(`operations.${i}.review`, '', { shouldDirty: true, shouldTouch: true });
+    const next = nextMarkedOperation(nextOperations, i);
+    if (next >= 0) setSelected(next);
+  };
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -6420,6 +6477,19 @@ export function OperationsField({
   );
   const grouping = useRailGrouping(pieces, smvOf);
   const brokenSteps = grouping.broken;
+  const stepProblems = useMemo<RailProblem[]>(() => {
+    const problems: RailProblem[] = [];
+    fields.forEach((_, index) => {
+      if (errorIndices.has(index)) problems.push({ index, status: 'missing' });
+      else if (brokenSteps.has(index)) problems.push({ index, status: 'broken' });
+      else if (reviewKinds[index]) problems.push({ index, status: 'review' });
+    });
+    return problems;
+  }, [brokenSteps, errorIndices, fields, reviewKinds]);
+  const problemIndices = useMemo(
+    () => new Set(stepProblems.map(({ index }) => index)),
+    [stepProblems],
+  );
   // ДЕФОЛТ ВЫВОДИТСЯ, А НЕ КОНСТАНТА. План объявлял схему режимом по умолчанию — и на любой
   // сегодняшней карточке это дало бы пустое полотно на первом же открытии, то есть экран,
   // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
@@ -7586,6 +7656,8 @@ export function OperationsField({
             <OperationsHeaderWarnings
               frozen={frozen}
               onRatify={() => setRatifyOpen(true)}
+              onStepProblem={(index) => setSelected(index)}
+              stepProblems={stepProblems}
               cloth={clothWarning}
             />
             {headerAction}
@@ -7662,10 +7734,6 @@ export function OperationsField({
           писателей; а `AssemblyCreateDialog` и корневой `StepNumberDrift` живут СНАРУЖИ этого
           блока и остаются смонтированными всегда: диалог создания нужен фулскрину так же, как
           инлайну. */}
-      {!fsOpen &&
-        fields.length === 0 &&
-        unplacedReuploadedKeys.length === 0 &&
-        effectiveMode !== 'schematic' && <CardSeamStandard />}
       {fsOpen ? null : fields.length === 0 &&
         unplacedReuploadedKeys.length === 0 &&
         effectiveMode !== 'schematic' ? (
@@ -7808,6 +7876,7 @@ export function OperationsField({
                     onSelect={(index) => setSelected(index)}
                     errorIndices={errorIndices}
                     brokenSteps={brokenSteps}
+                    problemIndices={problemIndices}
                     activePin={activePin}
                     activeBom={activeBom}
                     pieceShapes={pieceShapes}
@@ -7819,10 +7888,8 @@ export function OperationsField({
                     readPieceDrag={readPieceDrag}
                     // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
                     workCatalog={workCatalog}
-                    // Шаги каркаса, которых ещё никто не проверил (поле `draft`, 0410), и жест
-                    // «проверено» — клик по чипу.
+                    // Шаги каркаса, которых ещё никто не проверил (поле `draft`, 0410).
                     draftIds={draftIds}
-                    onReviewed={markReviewed}
                   />
                 </div>
               )}
@@ -7880,6 +7947,8 @@ export function OperationsField({
                   pinOptions={pinOptions}
                   onInsertAfter={() => insertAfter(selectedIndex)}
                   onRemove={() => removeOperation(selectedIndex)}
+                  onMarkReviewed={() => markReviewed(selectedIndex)}
+                  onReviewAccepted={() => acceptReview(selectedIndex)}
                   onFlashPieces={flashPieces}
                   onActiveBomChange={onActiveBomChange}
                   onEdit={clearFormHistory}
@@ -7938,6 +8007,8 @@ export function OperationsField({
           railStandaloneSteps={grouping.standaloneSteps}
           railErrorIndices={errorIndices}
           railBrokenSteps={brokenSteps}
+          railProblemIndices={problemIndices}
+          railDraftIds={draftIds}
           activePin={activePin}
           activeBom={activeBom}
           onHoverPin={(n) => onActivePinChange?.(n)}
@@ -7984,6 +8055,8 @@ export function OperationsField({
                 pinOptions={pinOptions}
                 onInsertAfter={() => insertAfter(selectedIndex)}
                 onRemove={() => removeOperation(selectedIndex)}
+                onMarkReviewed={() => markReviewed(selectedIndex)}
+                onReviewAccepted={() => acceptReview(selectedIndex)}
                 onFlashPieces={addPiece.onArm}
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearFormHistory}

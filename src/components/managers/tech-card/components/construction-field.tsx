@@ -1,10 +1,13 @@
-import { ComboField, DecimalField } from 'ui';
+import { useFormContext, useWatch } from 'react-hook-form';
+import { ComboField, DecimalField, SelectField } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { decimalToInput } from 'utils/decimal';
 import { EquipmentParkField } from './equipment-park';
 
 import { hemFinishOptions } from './tech-card-options';
+import { cardSeamClassOptions } from './operation-options';
+import type { TechCardFormData } from './schema';
 
 function RequiredSeamAllowanceField() {
   const { data } = useWorkshopSettings();
@@ -20,6 +23,21 @@ function RequiredSeamAllowanceField() {
   );
 }
 
+function CardSeamClassField() {
+  const { control } = useFormContext<TechCardFormData>();
+  const current = useWatch({ control, name: 'construction.defaultSeamClass' }) as
+    | string
+    | undefined;
+
+  return (
+    <SelectField
+      name='construction.defaultSeamClass'
+      label='seam class'
+      items={cardSeamClassOptions(current)}
+    />
+  );
+}
+
 // General workmanship parameters (Sheet «Обработка», upper block): what a step inherits when it
 // doesn't override it. 1:1 — sent as unset when every field is blank (see mapConstructionOut).
 // Guided combos, not closed sets. The fold (and opening it on a server or client error, so
@@ -29,6 +47,7 @@ export function ConstructionField() {
     <>
       <div className='grid grid-cols-2 gap-x-2.5 gap-y-2 sm:grid-cols-3'>
         <RequiredSeamAllowanceField />
+        <CardSeamClassField />
         <DecimalField
           name='construction.defaultStitchesPerCm'
           label='stitches / cm'

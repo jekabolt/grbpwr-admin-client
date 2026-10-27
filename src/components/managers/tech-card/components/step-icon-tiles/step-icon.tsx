@@ -18,12 +18,12 @@ export function useStepOpIcon(index: number): OpIcon {
   );
 }
 
-/** 24px icon cell of a step row in the sequence list. */
+/** Large scanning icon of a step row in the sequence list. */
 export function StepIconCell({ index }: { index: number }) {
   const icon = useStepOpIcon(index);
   return (
-    <span className='flex h-6 w-8 shrink-0 items-center justify-center'>
-      <OpIconArt icon={icon} w={32} h={24} className={cn(icon.missing && 'text-borderColor')} />
+    <span className='flex h-10.5 w-14 shrink-0 items-center justify-center'>
+      <OpIconArt icon={icon} w={56} h={42} className={cn(icon.missing && 'text-borderColor')} />
     </span>
   );
 }
