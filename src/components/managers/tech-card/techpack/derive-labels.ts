@@ -16,6 +16,7 @@ import {
   mediaFromResolved,
   technicalMedia,
 } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type LabelsDeriveOptions = { sampleSizeName?: string };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
@@ -25,7 +26,11 @@ const partFromWire = (value?: string): LabelPart => {
   return part && part in LABEL_PART_NAME ? part : 'SHELL';
 };
 
-export function deriveLabels(techCard: common_TechCard, options: LabelsDeriveOptions = {}) {
+export function deriveLabels(
+  techCard: common_TechCard,
+  options: LabelsDeriveOptions = {},
+  sink?: GapSink,
+) {
   const card = techCard.techCard;
   const primary = techCard.colorways?.[0];
   const careOverride = card?.careLabel?.colorways?.find(
@@ -81,17 +86,42 @@ export function deriveLabels(techCard: common_TechCard, options: LabelsDeriveOpt
     (card?.garmentLabels ?? []).find((label) =>
       /brand|main|identity|size/i.test(clean(label.key)),
     ) ?? card?.garmentLabels?.[0];
+  const add = (code: string, label: string, field: string): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [`field:${field}`],
+      label,
+      section: '05',
+      target: { tab: 'labels', field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
+  const identityName = clean(card?.name);
+  const identityColour =
+    clean(careOverride?.colourName) ||
+    (primary ? colorwayName(primary, 0) : bomColourwayName(techCard));
+  const identitySize =
+    clean(options.sampleSizeName) || (card?.baseSampleSizeId ? `#${card.baseSampleSizeId}` : '');
+  const back = technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK');
+  const gaps = {
+    name: !identityName ? add('pdf_name_missing', 'name', 'name') : undefined,
+    colour: !identityColour ? add('pdf_label_colour_missing', 'colour', 'colour') : undefined,
+    size: !identitySize ? add('pdf_sample_size_missing', 'size', 'sample size') : undefined,
+    composition: !fallbackComposition.length
+      ? add('pdf_composition_missing', 'composition', 'composition')
+      : undefined,
+    placement: !clean(placementLabel?.placement)
+      ? add('pdf_label_placement_missing', 'placement', 'placement')
+      : undefined,
+    back: !back ? add('pdf_back_flat_missing', 'back flat', 'back flat') : undefined,
+  };
 
   return {
     identity: {
-      name: clean(card?.name),
-      colour:
-        clean(careOverride?.colourName) ||
-        (primary ? colorwayName(primary, 0) : bomColourwayName(techCard)),
+      name: identityName,
+      colour: identityColour,
       colourFact: colorwayColour(primary),
-      size:
-        clean(options.sampleSizeName) ||
-        (card?.baseSampleSizeId ? `#${card.baseSampleSizeId}` : ''),
+      size: identitySize,
       brand: clean(card?.brand) || 'GRBPWR',
       logo,
     },
@@ -103,7 +133,8 @@ export function deriveLabels(techCard: common_TechCard, options: LabelsDeriveOpt
       size: clean(placementLabel?.size),
       qty: placementLabel?.qtyPerGarment ?? null,
     },
-    back: technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK'),
+    back,
+    gaps,
     missing: [
       !clean(card?.name) && 'name',
       !primary && !bomColourwayName(techCard) && 'colourway',

@@ -7,6 +7,12 @@
 // signatures only; the engine fills in the bodies.
 import type { ExportDeps, ExportResult } from './formats';
 import type { PatternDrawing } from './drawing';
+import {
+  grainArrowGeometry,
+  grainDisplaySegment,
+  labelBesideGrain,
+  type GrainSegment,
+} from 'lib/nesting/geom/grain-display';
 import { PDF_PAGE_LIMIT_MM, renderPdf, type PdfPlan } from './dxf-pdf';
 import { bounds } from 'lib/nesting/geom/polygon';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
@@ -457,7 +463,7 @@ function drawingFromRollPlacements(
     const outline = placedPoly(piece.poly, placement).map(pagePoint);
     strokes.push({ kind: 'cut', closed: true, pts: outline, pieceKey });
     for (const path of piece.inner ?? []) {
-      if (path.pts.length < 2) continue;
+      if (path.pts.length < 2 || path.layer === piece.displayGrain?.layer) continue;
       strokes.push({
         kind: 'line',
         closed: path.closed,
@@ -465,15 +471,66 @@ function drawingFromRollPlacements(
         pieceKey,
       });
     }
-    const [x, y] = polygonCentroid(outline);
-    labels.push({
-      x,
-      y,
-      s: item.label,
-      sizeMm: ROLL_PIECE_LABEL_MM,
-      angle: 90 - placement.rot,
-      pieceKey,
-    });
+    let grainOnPage: GrainSegment | null = null;
+    if (piece.displayGrain) {
+      const local = grainDisplaySegment([piece.poly], piece.displayGrain);
+      if (local) {
+        const placed = placedPoly([local.a, local.b], placement).map(pagePoint);
+        grainOnPage = {
+          a: { x: placed[0][0], y: placed[0][1] },
+          b: { x: placed[1][0], y: placed[1][1] },
+        };
+        const arrow = grainArrowGeometry(grainOnPage, 3);
+        if (arrow) {
+          strokes.push({
+            kind: 'line',
+            closed: false,
+            pts: [
+              [arrow.shaft.a.x, arrow.shaft.a.y],
+              [arrow.shaft.b.x, arrow.shaft.b.y],
+            ],
+            pieceKey,
+          });
+          for (const head of arrow.heads)
+            strokes.push({
+              kind: 'line',
+              closed: true,
+              fill: true,
+              pts: head.map((point) => [point.x, point.y] as [number, number]),
+              pieceKey,
+            });
+        }
+      }
+    }
+    const angle = 90 - placement.rot;
+    const [x, y] = rollLabelAnchor(outline, item.label, angle, grainOnPage);
+    labels.push({ x, y, s: item.label, sizeMm: ROLL_PIECE_LABEL_MM, angle, pieceKey });
   }
   return { w: widthMm, h: lengthMm, strokes, labels, title, warnings: [...warnings] };
+}
+
+/**
+ * Baseline-left anchor of a roll piece label. It starts at the outline centroid as before; when the
+ * text box would lie on the grain arrow, the box is moved across the arrow, inside the piece.
+ */
+function rollLabelAnchor(
+  outline: readonly [number, number][],
+  text: string,
+  angle: number,
+  grain: GrainSegment | null,
+): [number, number] {
+  const anchor = polygonCentroid(outline);
+  if (!grain) return anchor;
+  const rad = (angle * Math.PI) / 180;
+  const dir = { x: Math.cos(rad), y: -Math.sin(rad) };
+  const up = { x: dir.y, y: -dir.x };
+  const halfW = text.length * 0.36 * ROLL_PIECE_LABEL_MM;
+  const halfH = 0.35 * ROLL_PIECE_LABEL_MM;
+  const centre = {
+    x: anchor[0] + dir.x * halfW + up.x * halfH,
+    y: anchor[1] + dir.y * halfW + up.y * halfH,
+  };
+  const ring = outline.map(([px, py]) => ({ x: px, y: py }));
+  const moved = labelBesideGrain(centre, grain, { dir, halfW, halfH }, 1.5, ring);
+  return [anchor[0] + moved.x - centre.x, anchor[1] + moved.y - centre.y];
 }

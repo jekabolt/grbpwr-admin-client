@@ -157,18 +157,26 @@ export function pieceShapeTitle(found: FoundPiece): string {
 export function PieceSilhouette({
   found,
   boxClassName,
+  boxPx = { w: 40, h: 28 },
 }: {
   found: FoundPiece | null;
   boxClassName?: string;
+  boxPx?: { w: number; h: number };
 }) {
   if (!found) return null;
   const title = pieceShapeTitle(found);
-  // Без рамки (глиф при имени, не контрол); grainLayer='' гасит красную долевую — на 28px она
-  // читалась бы как цвет состояния, а красный в системе — только ошибка; outlineOnly гасит
-  // внутреннюю геометрию, нечитаемую в этом размере. SVG letterbox-ится в бокс сам (meet).
+  // Без рамки (глиф при имени, не контрол); outlineOnly гасит внутреннюю геометрию, нечитаемую
+  // в этом размере, и долевую тоже. SVG letterbox-ится
+  // в бокс сам (meet).
   return (
     <span title={title} className={cn('mr-1.5 inline-flex h-7 w-10 shrink-0', boxClassName)}>
-      <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+      <PieceShape
+        piece={found.piece}
+        grainLayer={found.grainLayer ?? found.piece.manifest?.grainLayer ?? ''}
+        outlineOnly
+        hatchW={boxPx.w}
+        hatchH={boxPx.h}
+      />
     </span>
   );
 }
@@ -249,7 +257,7 @@ export function PieceTile({
         <span className='flex size-full items-center justify-center p-1 pb-3.5'>
           <PieceShape
             piece={found.piece}
-            grainLayer=''
+            grainLayer={found.grainLayer ?? found.piece.manifest?.grainLayer ?? ''}
             outlineOnly
             hatchRole={hatchRole}
             hatchW={Math.max(1, pxBox.w - TILE_PAD_X)}

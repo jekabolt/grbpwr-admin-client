@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 
 import { HEADER_TEXT } from './section-header';
 import GenericPopover from './popover';
@@ -32,11 +32,30 @@ export type HeaderWarning =
 export function HeaderWarnings({
   items,
   className,
+  countOnly = false,
 }: {
   items: ReadonlyArray<HeaderWarning | null | undefined | false>;
   className?: string;
+  /** Render only `! N`; the popover and accessible label retain the full warning detail. */
+  countOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // THE DOOR IS A SPAN, NOT A BUTTON. Radix's trigger is a native <button>, and every native button
+  // under a released card's `<fieldset disabled>` is dead — the list could not be opened at all
+  // there (backlog 18). The list itself is portaled OUT of that fieldset, so the fieldset no longer
+  // guards its fixes: on open we look up whether the door sits in a disabled fieldset and, if so,
+  // show the list read-only (links out stay — they write nothing).
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const [readOnly, setReadOnly] = useState(false);
+  const onOpenChange = (next: boolean) => {
+    if (next) setReadOnly(!!triggerRef.current?.closest('fieldset:disabled'));
+    setOpen(next);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.currentTarget.click();
+  };
   const list = items
     .filter((w): w is HeaderWarning => !!w)
     .map((w) =>
@@ -53,31 +72,36 @@ export function HeaderWarnings({
           unique.length > errors ? ` · ${unique.length - errors} more` : ''
         }`
       : `! ${unique.length} ${unique.length === 1 ? 'warning' : 'warnings'}`;
+  const visibleLabel = countOnly ? `! ${errors || unique.length}` : label;
   return (
     <GenericPopover
       title='warnings'
       open={open}
-      onOpenChange={setOpen}
-      triggerProps={{ 'aria-label': label }}
+      onOpenChange={onOpenChange}
+      triggerProps={{ asChild: true, 'aria-label': label }}
       openElement={
         // Чернилами, без подчёркивания в покое (владелец 17.10: «warnings look so ugly»): цвет несёт
         // только знак `!` — красный у ошибок, жёлто-синий у предупреждений; слово — обычный текст.
         <span
+          ref={triggerRef}
+          role='button'
+          tabIndex={0}
+          onKeyDown={onKeyDown}
           className={cn(
             HEADER_TEXT,
-            'text-textColor underline-offset-2 hover:underline focus-visible:underline',
+            'cursor-pointer text-textColor underline-offset-2 hover:underline focus-visible:underline',
             className,
           )}
         >
           <span className={errors > 0 ? 'text-error' : 'text-warning'}>!</span>
-          {label.replace(/^!/, '')}
+          {visibleLabel.replace(/^!/, '')}
         </span>
       }
     >
       <ul className='flex max-w-[320px] flex-col gap-2'>
         {[...unique.filter((w) => w.error), ...unique.filter((w) => !w.error)].map((w) => (
           <li key={w.text}>
-            {w.action && !w.action.disabled ? (
+            {w.action && !w.action.disabled && (w.action.href || !readOnly) ? (
               w.action.href ? (
                 <a
                   href={w.action.href}

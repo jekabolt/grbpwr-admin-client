@@ -72,11 +72,7 @@ function RecipeMatrix({
                     <span>{cell.value}</span>
                   </span>
                   {cell.sub && <div className='text-micro text-labelColor'>{cell.sub}</div>}
-                  {cell.missing && (
-                    <div>
-                      <Missing name='recipe' />
-                    </div>
-                  )}
+                  {cell.missing && <div>{cell.gap && <Missing gap={cell.gap} />}</div>}
                 </td>
               );
             })}
@@ -123,7 +119,9 @@ function PiecesMatrix({
                 <b>{fabric.label}</b> {fabric.role}
               </td>
               <td data-align='left'>
-                {fabric.pieces.length ? fabric.pieces.join(' · ') : <Missing name='pieces' />}
+                {fabric.pieces.length
+                  ? fabric.pieces.join(' · ')
+                  : fabric.piecesGap && <Missing gap={fabric.piecesGap} />}
               </td>
               {indexes.map((index) => {
                 const cell = fabric.cells[index];
@@ -135,7 +133,9 @@ function PiecesMatrix({
                     </div>
                     {cell.differs && (
                       <div className='text-micro text-labelColor'>
-                        {cell.pieces.length ? cell.pieces.join(' · ') : <Missing name='pieces' />}
+                        {cell.pieces.length
+                          ? cell.pieces.join(' · ')
+                          : cell.piecesGap && <Missing gap={cell.piecesGap} />}
                       </div>
                     )}
                   </td>
@@ -169,7 +169,7 @@ function ColourwaysBody({
           )}
         </>
       ) : (
-        <Missing name='colourways' />
+        model.emptyGap && <Missing gap={model.emptyGap} />
       )}
     </div>
   );

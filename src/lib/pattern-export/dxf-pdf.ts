@@ -857,7 +857,7 @@ function drawContent(pdf: JsPdf, d: PatternDrawing, page: PlanPage, family: stri
         pdf.setLineDashPattern(dash ? [...dash] : [], 0);
         dashed = !!dash;
       }
-      drawPath(pdf, s.pts, s.closed, c.tx, c.ty);
+      drawPath(pdf, s.pts, s.closed, c.tx, c.ty, !!s.fill);
     }
     if (dashed) pdf.setLineDashPattern([], 0);
   }

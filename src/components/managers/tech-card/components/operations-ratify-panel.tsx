@@ -15,6 +15,7 @@ import {
 import {
   groupWorks,
   searchWorks,
+  variantAfterWork,
   workApplication,
   workNaming,
   type ParkMachineRow,
@@ -122,11 +123,13 @@ const toSnapshot = (o: OperationRow, bomKindByKey: ReadonlyMap<string, string>):
   machineType: str(o.machineType),
   pressEquipment: str(o.pressEquipment),
   seamClass: str(o.seamClass),
+  seamKind: str(o.seamKind),
   topstitchMode: str(o.topstitchMode),
   attachMethod: str(o.attachMethod),
   coverageMode: str(o.coverageMode),
   labelAttachStitch: str(o.labelAttachStitch),
   pressAction: str(o.pressAction),
+  workVariant: str(o.workVariant),
   bomKinds: bomKindsOf(o, bomKindByKey),
   machineProfileKey: str(o.machineProfileKey),
   pressProfileKey: str(o.pressProfileKey),
@@ -327,12 +330,19 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
       if (frozen) return;
       const index = row.index;
       const path = `operations.${index}` as const;
+      const current = toSnapshot(
+        ((getValues('operations') ?? [])[index] ?? {}) as unknown as OperationRow,
+        bomKindByKey,
+      );
 
       // «СНЯТЬ ВИД» — ОДНА ЗАПИСЬ И БОЛЬШЕ НИЧЕГО, слово в слово как у строки шага: ни глагол, ни
       // машинка, ни одно свойство не трогаются. Человек сказал «эта работа названа неправильно», а
       // не «этот шаг стал другим»; строка немедленно возвращается на прежнюю деривацию.
       if (!p.token) {
         setValue(`${path}.work`, '', { shouldDirty: true });
+        setValue(`${path}.workVariant`, variantAfterWork('', current.workVariant ?? ''), {
+          shouldDirty: true,
+        });
         setRenamedFrom((m) => {
           if (!m.has(index)) return m;
           const next = new Map(m);
@@ -344,10 +354,6 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
 
       const item = catalog.byToken.get(p.token);
       if (!item) return;
-      const current = toSnapshot(
-        ((getValues('operations') ?? [])[index] ?? {}) as unknown as OperationRow,
-        bomKindByKey,
-      );
 
       setValue(`${path}.work`, p.token, { shouldDirty: true });
 

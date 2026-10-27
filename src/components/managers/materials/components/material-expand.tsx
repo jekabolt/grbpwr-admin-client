@@ -240,6 +240,7 @@ function payloadOf(m: common_Material, d: Draft): common_Material {
               finish: '',
               baseMaterial: '',
               weightG: undefined,
+              buttonHoles: 0,
             }),
             diameterMm: inputToDecimal(d.width),
             weightG: inputToDecimal(d.weight),

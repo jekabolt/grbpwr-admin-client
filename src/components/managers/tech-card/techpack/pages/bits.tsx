@@ -1,14 +1,11 @@
 import type { ReactNode } from 'react';
 import { Pin } from 'ui';
 import type { ResolvedTechMedia } from '../derive-shared';
+import { Gap, type Gap as GapData } from '../gaps';
 
-/** A required fact the card does not hold. `data-missing` feeds the cover's «missing» count. */
-export function Missing({ name }: { name: string }) {
-  return (
-    <span className='font-bold uppercase text-error' data-missing=''>
-      ! {name}
-    </span>
-  );
+/** A required fact the card does not hold. */
+export function Missing({ gap }: { gap: GapData }) {
+  return <Gap gap={gap} />;
 }
 
 /** The card's status pill: released / approved read as done, obsolete as a warning. */
@@ -51,12 +48,14 @@ export function TechpackDrawing({
   height,
   pins = [],
   caption,
+  missingGap,
 }: {
   media: ResolvedTechMedia | null;
   name: string;
   height: number;
   pins?: DrawingPin[];
   caption?: string;
+  missingGap?: GapData;
 }) {
   const ratio = mediaRatio(media);
   return (
@@ -67,9 +66,9 @@ export function TechpackDrawing({
       >
         {media ? (
           <img src={media.url} alt={name} className='h-full w-full object-contain' />
-        ) : (
-          <Missing name={`${name} flat`} />
-        )}
+        ) : missingGap ? (
+          <Missing gap={missingGap} />
+        ) : null}
         {media &&
           pins.map((pin, index) => (
             <Pin

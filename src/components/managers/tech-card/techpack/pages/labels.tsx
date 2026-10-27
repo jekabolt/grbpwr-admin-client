@@ -65,10 +65,12 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
             )}
           </div>
           <div className='flex min-w-0 flex-1 flex-col gap-1 text-control uppercase leading-tight'>
-            <div className='font-bold'>{model.identity.name || <Missing name='name' />}</div>
+            <div className='font-bold'>
+              {model.identity.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
+            </div>
             <div>
-              {model.identity.colour || <Missing name='colour' />} ·{' '}
-              {model.identity.size || <Missing name='size' />}
+              {model.identity.colour || (model.gaps.colour && <Missing gap={model.gaps.colour} />)}{' '}
+              · {model.identity.size || (model.gaps.size && <Missing gap={model.gaps.size} />)}
             </div>
             <div className='text-labelColor'>{model.identity.brand}</div>
           </div>
@@ -78,15 +80,13 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
         <div className='flex h-full gap-3 text-micro uppercase leading-snug'>
           <div className='text-labelColor'>en</div>
           <div>
-            {model.composition.length ? (
-              model.composition.map((line) => (
-                <div key={`${line.part}-${line.value}`}>
-                  <span className='font-bold'>{line.part}</span> {line.value}
-                </div>
-              ))
-            ) : (
-              <Missing name='composition' />
-            )}
+            {model.composition.length
+              ? model.composition.map((line) => (
+                  <div key={`${line.part}-${line.value}`}>
+                    <span className='font-bold'>{line.part}</span> {line.value}
+                  </div>
+                ))
+              : model.gaps.composition && <Missing gap={model.gaps.composition} />}
           </div>
         </div>
       </PhysicalTape>
@@ -94,9 +94,17 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
   );
   const placement = (
     <div className='flex min-h-0 flex-1 flex-col items-center justify-center border border-borderColor'>
-      <TechpackDrawing media={model.back} name='back' height={land ? 480 : 430} caption='' />
+      <TechpackDrawing
+        media={model.back}
+        name='back'
+        height={land ? 480 : 430}
+        caption=''
+        missingGap={model.gaps.back}
+      />
       <div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pb-2 text-micro uppercase'>
-        <b>{model.placement.name || <Missing name='placement' />}</b>
+        <b>
+          {model.placement.name || (model.gaps.placement && <Missing gap={model.gaps.placement} />)}
+        </b>
         {model.placement.attachment && <span>{model.placement.attachment}</span>}
         {model.placement.folding && <span>{model.placement.folding}</span>}
         {model.placement.size && <span>{model.placement.size}</span>}

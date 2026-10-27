@@ -2,6 +2,7 @@ import { HeaderNote, SectionHeader, Tile } from 'ui';
 import { PieceShape } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import { derivePieces, type TechpackPieceGeometry } from '../derive-pieces';
 import { formatNumber } from '../derive-shared';
+import { gapKey, type Gap } from '../gaps';
 import { Missing, Swatch } from './bits';
 import {
   continuedTitle,
@@ -14,12 +15,12 @@ type PiecesPageProps = TechpackPageProps & { geometry?: TechpackPieceGeometry };
 
 const pcs = (qty: number) => `${qty} ${qty === 1 ? 'pc' : 'pcs'}`;
 
-function missingCounts(tiles: readonly { missing: readonly string[] }[]) {
-  const counts = new Map<string, number>();
+function missingGaps(tiles: readonly { missing: readonly Gap[] }[]) {
+  const gaps = new Map<string, Gap>();
   for (const tile of tiles) {
-    for (const name of tile.missing) counts.set(name, (counts.get(name) ?? 0) + 1);
+    for (const gap of tile.missing) gaps.set(gapKey(gap), gap);
   }
-  return Array.from(counts);
+  return [...gaps.values()];
 }
 
 function paginateGroups<T extends { key: string; tiles: unknown[] }>(
@@ -113,7 +114,7 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
           {groups.map((group) => {
             const across = Math.min(columns, group.tiles.length);
             const rows = Math.ceil(group.tiles.length / columns);
-            const missing = missingCounts(group.tiles);
+            const missing = missingGaps(group.tiles);
             return (
               <section key={group.key} className='flex min-h-0 flex-none flex-col'>
                 <div className='flex flex-wrap items-baseline gap-x-3 border-b border-textColor py-1 text-micro uppercase tracking-label'>
@@ -123,10 +124,8 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
                       {[group.name, group.composition, group.colour].filter(Boolean).join(' · ')}
                     </span>
                   )}
-                  {missing.map(([name, count]) => (
-                    <span key={name} className='font-bold text-error' data-missing={String(count)}>
-                      ! {name} × {count}
-                    </span>
+                  {missing.map((gap) => (
+                    <Missing key={gapKey(gap)} gap={gap} />
                   ))}
                 </div>
                 <div
@@ -185,7 +184,7 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
               </section>
             );
           })}
-          {!groups.length && <Missing name='pieces' />}
+          {!groups.length && model.emptyGap && <Missing gap={model.emptyGap} />}
         </div>
       </div>
     </TechpackSheet>

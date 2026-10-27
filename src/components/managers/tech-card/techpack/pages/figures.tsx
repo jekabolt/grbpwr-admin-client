@@ -1,30 +1,30 @@
 import { type ReactNode } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import type { MeasurementView } from '../derive-measurements';
+import { Gap, type Gap as GapData } from '../gaps';
 
 export function QrFigure({
   value,
   label,
   sub,
   size = 96,
+  gap,
 }: {
   value?: string;
   label: string;
   sub?: ReactNode;
   size?: number;
+  gap?: GapData;
 }) {
   return (
     <figure className='flex flex-col items-center border border-textColor p-1.5 text-center'>
       {value ? (
         <PatternQR value={value} size={size} />
-      ) : (
-        <div
-          className='flex items-center justify-center font-bold uppercase text-error'
-          style={{ width: size, height: size }}
-        >
-          ! qr
+      ) : gap ? (
+        <div className='flex items-center justify-center' style={{ width: size, height: size }}>
+          <Gap gap={gap} />
         </div>
-      )}
+      ) : null}
       <figcaption
         className='mt-1 text-micro uppercase leading-tight'
         style={{ maxWidth: size + 24, overflowWrap: 'anywhere' }}

@@ -1,24 +1,20 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Canvas,
   Pin,
-  Chip,
-  ChipRow,
   Section,
   HeaderWarnings,
   HeaderNote,
   Stat,
   StatGrid,
   Text,
-  DecimalField,
+  ViewSwitch,
 } from 'ui';
-import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
-import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
+import { parseDecimalNumber } from 'utils/decimal';
 import { ConstructionAudit } from './construction-audit';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
@@ -34,6 +30,12 @@ import { useCardCategoryNames } from './skeleton-card-inputs';
 import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamsDoor } from './assembly-seams/seams-door';
+import { StepSeamsProvider } from './step-seams/step-seams-context';
+import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { gapSubjects } from '../techpack/gap-findings';
+import { usePdfGaps } from '../techpack/use-pdf-gaps';
+import { CalloutsPanel, PanelCollapseDoor, useCalloutsPanel } from './design/callouts-panel';
+import { ASSEMBLY_MAP_PREFS_KEY } from './design/use-callouts-prefs';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -79,32 +81,6 @@ export function operationMinutes(o: SummaryOp): number {
   return Number.isFinite(smv) ? smv : 0;
 }
 
-// ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2) — the standard a раскладка's recorded allowance is judged against, and
-// the one number on this tab a machine reads rather than a human.
-//
-// On the wire it is a CARD field, not part of `construction` — anything added to a section's digest
-// projection instantly marks every signed-off CONSTRUCTION approval as «edited since signing».
-//
-// THREE VALUES, NOT TWO. Empty = the workshop default applies (the placeholder names it); a number
-// overrides it; 0 is a number like any other («кроим по линии как нарисована»). The distinction
-// lives in the field's `title`, not in a paragraph under it.
-function RequiredSeamAllowanceField() {
-  // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
-  // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
-  const { data } = useWorkshopSettings();
-  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
-  return (
-    <div title='empty inherits the workshop value; 0 means cut along the line as drawn'>
-      <DecimalField
-        name='requiredSeamAllowanceMm'
-        label='required seam allowance, mm'
-        maxDecimals={1}
-        placeholder={shopDefault ? `inherited · ${shopDefault} mm` : 'not set'}
-      />
-    </div>
-  );
-}
-
 // СТАНДАРТЫ КАРТОЧКИ — the required allowance and the card defaults (workmanship + equipment park)
 // in ONE block, folded by default: they are what every step inherits, set once and rarely looked
 // at again. The block opens itself on any error under it, so the error router's revealField finds
@@ -122,14 +98,7 @@ function CardStandards() {
       collapsible
       defaultOpen={hasError}
     >
-      {/* The narrow column belongs to the ONE number, not to the block: the equipment park below
-          needs the full width for its tile grids. */}
-      <div className='flex flex-col gap-2.5'>
-        <div className='sm:max-w-sm'>
-          <RequiredSeamAllowanceField />
-        </div>
-        <ConstructionField />
-      </div>
+      <ConstructionField />
     </Section>
   );
 }
@@ -168,39 +137,50 @@ type FormCallout = {
   posY?: string;
 };
 
+type SketchView = { mediaId: number; kind?: string };
+type ConstructionSketchData = { views: SketchView[]; callouts: FormCallout[] };
+
+function useConstructionSketchData(
+  mediaById: Map<number, common_MediaFull>,
+): ConstructionSketchData {
+  const { control } = useFormContext<TechCardFormData>();
+  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as SketchView[];
+  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
+  const views = useMemo(() => {
+    const pinned = new Set(
+      callouts
+        .filter((callout) => {
+          const x = parseFloat(callout.posX ?? '');
+          const y = parseFloat(callout.posY ?? '');
+          return callout.mediaId && Number.isFinite(x) && Number.isFinite(y);
+        })
+        .map((callout) => callout.mediaId!),
+    );
+    return media.filter((item) => {
+      if (!CONSTRUCTION_VIEW_KINDS.has(item.kind ?? '') || !pinned.has(item.mediaId)) return false;
+      const full = mediaById.get(item.mediaId);
+      return !!(full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl);
+    });
+  }, [callouts, media, mediaById]);
+  return { views, callouts };
+}
+
 // Read-only sketch with numbered pins, shown beside the operations list so the assembly
 // map and the steps live on one screen. Pins are positioned against the IMAGE's own box, not a
 // fixed-aspect frame: callout posX/posY are fractions of the image, so letterboxing would slide
 // every pin off the detail it names.
 function ConstructionSketch({
   mediaById,
+  data,
   activePin,
   onActivePinChange,
 }: {
   mediaById: Map<number, common_MediaFull>;
+  data: ConstructionSketchData;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
-  // Which pins an operation actually claims — computed here, for the same reason the summary
-  // watches its own array: this subscription must not sit in the tab above the operations editor.
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
-  const usedPins = useMemo(
-    () => new Set(operations.map((o) => o.calloutNumber || 0).filter((n) => n > 0)),
-    [operations],
-  );
-  // Assembly map draws on the technical sketches (front/back/detail), not the moodboard.
-  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
-    mediaId: number;
-    kind?: string;
-  }>;
-  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-
-  const views = media.filter((m) => {
-    if (!CONSTRUCTION_VIEW_KINDS.has(m.kind ?? '')) return false;
-    const f = mediaById.get(m.mediaId);
-    return !!(f?.media?.fullSize?.mediaUrl || f?.media?.thumbnail?.mediaUrl);
-  });
+  const { views, callouts } = data;
   const [viewId, setViewId] = useState<number | null>(null);
 
   const pinnedViewId = (() => {
@@ -212,47 +192,34 @@ function ConstructionSketch({
   const activeViewId = pinnedViewId ?? viewId ?? views[0]?.mediaId ?? null;
   const full = activeViewId != null ? mediaById.get(activeViewId) : undefined;
   const url = full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
+  const sideViews = [
+    views.find((view) => view.kind === 'TECH_CARD_MEDIA_KIND_FRONT'),
+    views.find((view) => view.kind === 'TECH_CARD_MEDIA_KIND_BACK'),
+  ].filter((view): view is SketchView => !!view);
 
   if (views.length === 0) {
     return (
-      <div className='flex flex-col gap-1'>
-        <Canvas aspect='3/4' className='flex items-center justify-center'>
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            className='px-2 text-center uppercase'
-          >
-            no technical sketch
-          </Text>
-        </Canvas>
-        <Text size='micro' variant='label'>
-          add a flat on STUDIO, pin it in ARTIFACTS
+      <Canvas aspect='3/4' className='flex items-center justify-center'>
+        <Text size='micro' variant='label' component='span' className='px-2 text-center uppercase'>
+          no pins
         </Text>
-      </div>
+      </Canvas>
     );
   }
 
   return (
     <div className='flex flex-col gap-1.5'>
-      {views.length > 1 && (
-        <ChipRow>
-          {views.map((v) => (
-            <Chip
-              key={v.mediaId}
-              // `nonForm`: переключение проекции (перёд / спинка / деталь) — ЧТЕНИЕ, оно ничего не
-              // пишет. Обычный Chip рендерится нативной кнопкой, а та внутри `<fieldset disabled>`
-              // выпущенной карточки клика не получает: на подписанной карточке было видно только
-              // первое изображение, а спинку посмотреть было нельзя.
-              nonForm
-              selected={v.mediaId === activeViewId}
-              pressed={v.mediaId === activeViewId}
-              onClick={() => setViewId(v.mediaId)}
-            >
-              {mediaKindLabels[v.kind ?? ''] ?? 'view'}
-            </Chip>
-          ))}
-        </ChipRow>
+      {sideViews.length === 2 && (
+        <ViewSwitch<string>
+          quiet
+          label='sketch side'
+          value={String(activeViewId ?? '')}
+          onChange={(next) => setViewId(Number(next))}
+          options={sideViews.map((view) => ({
+            value: String(view.mediaId),
+            label: mediaKindLabels[view.kind ?? ''] ?? 'view',
+          }))}
+        />
       )}
 
       <div className='relative w-full border border-borderColor'>
@@ -263,7 +230,6 @@ function ConstructionSketch({
           const y = parseFloat(c.posY ?? '');
           if (Number.isNaN(x) || Number.isNaN(y)) return null;
           const num = c.number || 0;
-          const used = num > 0 && usedPins.has(num);
           return (
             <Pin
               key={idx}
@@ -271,9 +237,7 @@ function ConstructionSketch({
               y={y * 100}
               label={num || idx + 1}
               highlighted={!!activePin && num === activePin && num > 0}
-              title={`#${num || idx + 1}${c.part?.trim() ? ` · ${c.part.trim()}` : ''}${
-                used ? '' : ' · not bound to an operation'
-              }`}
+              title={`pin ${num || idx + 1}`}
               onMouseEnter={() => num > 0 && onActivePinChange(num)}
               onMouseLeave={() => onActivePinChange(null)}
             />
@@ -281,6 +245,26 @@ function ConstructionSketch({
         })}
       </div>
     </div>
+  );
+}
+
+function LiveConstructionSketch({
+  mediaById,
+  activePin,
+  onActivePinChange,
+}: {
+  mediaById: Map<number, common_MediaFull>;
+  activePin: number | null;
+  onActivePinChange: (n: number | null) => void;
+}) {
+  const data = useConstructionSketchData(mediaById);
+  return (
+    <ConstructionSketch
+      mediaById={mediaById}
+      data={data}
+      activePin={activePin}
+      onActivePinChange={onActivePinChange}
+    />
   );
 }
 
@@ -296,7 +280,7 @@ function ConstructionSketch({
 function shapesAffordance(
   shapes: PieceShapes,
   onGoTab?: (tab: string) => void,
-): React.ReactNode | undefined {
+): ReactNode | undefined {
   if (!shapes.hasDxf) return undefined;
   const toPatterns = onGoTab
     ? { label: 'open patterns', onClick: () => onGoTab('patterns') }
@@ -610,6 +594,12 @@ export function ConstructionTab({
   // предложения и запрос записи, который уезжает в `OperationsField`. Хук сам ни на что в форме не
   // подписан: панель читает форму, только пока открыта.
   const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  // The tech pack's red marks, from the same saved card and inputs as the PDF (print-page).
+  const print = useTechCardPrint(active ? techCard?.id : undefined);
+  const pdfGaps = usePdfGaps(print.data?.techCard, {
+    patternViewerToken: print.data?.patternViewerToken,
+  });
+  const gapSubject = useMemo(() => gapSubjects(print.data?.techCard), [print.data?.techCard]);
   const categoryNames = useCardCategoryNames();
   const skeleton = useSkeletonDoor({
     frozen,
@@ -653,19 +643,14 @@ export function ConstructionTab({
           categoryNames={categoryNames}
         >
           <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-            <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
-              <AssemblyMap
-                sketch={
-                  <ConstructionSketch
-                    mediaById={mediaById}
-                    activePin={pin.active}
-                    onActivePinChange={pin.setActive}
-                  />
-                }
-              />
-              <SeamsDoor techCard={techCard} frozen={frozen} shapes={pieceShapes.shapeByKey} />
-              <PieceLegend />
-            </div>
+            <AssemblyColumn
+              techCard={techCard}
+              frozen={frozen}
+              shapes={pieceShapes.shapeByKey}
+              mediaById={mediaById}
+              activePin={pin.active}
+              onActivePinChange={pin.setActive}
+            />
 
             <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
               {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
@@ -686,76 +671,150 @@ export function ConstructionTab({
                 // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
                 // несохранённых правок.
                 operationCount={(techCard?.techCard?.operations ?? []).length}
+                gaps={pdfGaps ?? undefined}
+                gapSubject={gapSubject}
               />
               <CardStandards />
-              <section className='border border-borderColor bg-bgColor p-4'>
-                {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
+              <StepSeamsProvider techCard={techCard} frozen={frozen}>
+                <section className='border border-borderColor bg-bgColor p-4'>
+                  {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
                     by OperationsField: its warnings read the rail's own subscriptions. */}
-                <OperationsField
-                  activePin={pin.active}
-                  onActivePinChange={pin.setActive}
-                  activeBom={bom.active}
-                  onActiveBomChange={bom.setActive}
-                  colorwayArticles={colorwayArticles}
-                  pieceClothByColorway={pieceClothByColorway}
-                  pieceShapes={pieceShapes.shapeByKey}
-                  orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
-                  // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
-                  // принимает намерение «снять разметку» только против карточки, которая её несёт,
-                  // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
-                  // распакована (восстановленный черновик).
-                  storedHasUnits={(techCard?.techCard?.operations ?? []).some(
-                    (o) => (o?.outputUnitKey ?? '').trim() !== '',
-                  )}
-                  // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
-                  // замораживает тело. Схема получает его ЯВНО, а не через внешний
-                  // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
-                  frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-                  // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
-                  operationMediaUrls={operationMediaUrls}
-                  // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
-                  // от него зависит, показывать ли путь отступления «снять фотографии шагов».
-                  storedHasMedia={(techCard?.techCard?.operations ?? []).some(
-                    (o) => (o?.media ?? []).length > 0,
-                  )}
-                  onSave={onSave}
-                  saving={saving}
-                  applyRequest={skeleton.applyRequest}
-                  onSkeletonApplied={skeleton.onSkeletonApplied}
-                  skeletonUndoRequest={skeleton.skeletonUndoRequest}
-                  onSkeletonUndone={skeleton.onSkeletonUndone}
-                  onSkeletonUndoable={skeleton.onSkeletonUndoable}
-                  emptyAction={skeleton.emptyAction}
-                  headerAction={
-                    <>
-                      {shapesAffordance(pieceShapes, onGoTab)}
-                      {skeleton.headerAction}
-                    </>
-                  }
-                  // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
-                  // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
-                  // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
-                  // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
-                  //
-                  // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
-                  // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
-                  // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
-                  // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
-                  // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
-                  sketchNote={
-                    <ConstructionSketch
-                      mediaById={mediaById}
-                      activePin={pin.active}
-                      onActivePinChange={pin.setActive}
-                    />
-                  }
-                />
-                {skeleton.panel}
-              </section>
+                  <OperationsField
+                    activePin={pin.active}
+                    onActivePinChange={pin.setActive}
+                    activeBom={bom.active}
+                    onActiveBomChange={bom.setActive}
+                    colorwayArticles={colorwayArticles}
+                    pieceClothByColorway={pieceClothByColorway}
+                    pieceShapes={pieceShapes.shapeByKey}
+                    orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
+                    // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+                    // принимает намерение «снять разметку» только против карточки, которая её несёт,
+                    // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+                    // распакована (восстановленный черновик).
+                    storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                      (o) => (o?.outputUnitKey ?? '').trim() !== '',
+                    )}
+                    // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+                    // замораживает тело. Схема получает его ЯВНО, а не через внешний
+                    // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                    frozen={
+                      techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'
+                    }
+                    // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+                    operationMediaUrls={operationMediaUrls}
+                    // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+                    // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+                    storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                      (o) => (o?.media ?? []).length > 0,
+                    )}
+                    onSave={onSave}
+                    saving={saving}
+                    applyRequest={skeleton.applyRequest}
+                    onSkeletonApplied={skeleton.onSkeletonApplied}
+                    skeletonUndoRequest={skeleton.skeletonUndoRequest}
+                    onSkeletonUndone={skeleton.onSkeletonUndone}
+                    onSkeletonUndoable={skeleton.onSkeletonUndoable}
+                    emptyAction={skeleton.emptyAction}
+                    headerAction={
+                      <>
+                        {shapesAffordance(pieceShapes, onGoTab)}
+                        {skeleton.headerAction}
+                      </>
+                    }
+                    // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+                    // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+                    // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+                    // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+                    //
+                    // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+                    // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+                    // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+                    // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+                    // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+                    sketchNote={
+                      <LiveConstructionSketch
+                        mediaById={mediaById}
+                        activePin={pin.active}
+                        onActivePinChange={pin.setActive}
+                      />
+                    }
+                  />
+                  {skeleton.panel}
+                </section>
+              </StepSeamsProvider>
             </div>
           </div>
         </CardUnitPicturesProvider>
       </ActiveStepProvider>
     </div>
+  );
+}
+
+/** Ширина открытой колонки карты сборки — та же, что до свёртки. */
+const ASSEMBLY_COLUMN_W = 320;
+
+/**
+ * КОЛОНКА КАРТЫ СБОРКИ — СВОРАЧИВАЕТСЯ, КАК ПАНЕЛЬ CALLOUTS СТУДИИ (T11). Тот же орган
+ * (`CalloutsPanel`), только слева и без жеста ширины: свёрнутая — полоска «assembly map»;
+ * открытая — прежние 320px (карта, SEAMS, PIECE CODES), шеврон ‹ в
+ * шапке карты. Без предпочтения колонка свёрнута. Правая колонка не меняется — только шире.
+ *
+ * Свёрнутая колонка ПРЯЧЕТСЯ АТРИБУТОМ, а не размонтируется: `SeamsDoor` гидрирует стор решений
+ * швов при монтировании, и без него N на полоске не узнать (и граф швов карты, пиктограмм и куклы
+ * читает тот же стор). Число неизвестно (нет графа) — полоска пишет одно имя.
+ */
+function AssemblyColumn({
+  techCard,
+  frozen,
+  shapes,
+  mediaById,
+  activePin,
+  onActivePinChange,
+}: {
+  techCard: common_TechCard | undefined;
+  frozen: boolean;
+  shapes: PieceShapes['shapeByKey'];
+  mediaById: Map<number, common_MediaFull>;
+  activePin: number | null;
+  onActivePinChange: (n: number | null) => void;
+}) {
+  const sketch = useConstructionSketchData(mediaById);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panel = useCalloutsPanel({
+    count: null,
+    holdKey: techCard?.id ?? 0,
+    panelRef,
+    prefsBase: ASSEMBLY_MAP_PREFS_KEY,
+    defaultCollapsed: true,
+    fixedWidth: ASSEMBLY_COLUMN_W,
+  });
+  return (
+    <CalloutsPanel
+      panel={panel}
+      tag='amap'
+      where='seams to decide'
+      side='left'
+      label='assembly map'
+      resizable={false}
+      bare
+      openClassName='lg:sticky lg:top-36 lg:w-[var(--cw)] lg:self-start'
+      className='w-full space-y-2.5'
+    >
+      <AssemblyMap
+        hasSketch={sketch.views.length > 0}
+        sketch={
+          <ConstructionSketch
+            mediaById={mediaById}
+            data={sketch}
+            activePin={activePin}
+            onActivePinChange={onActivePinChange}
+          />
+        }
+        action={<PanelCollapseDoor panel={panel} tag='amap' side='left' label='assembly map' />}
+      />
+      <SeamsDoor techCard={techCard} frozen={frozen} shapes={shapes} />
+      <PieceLegend />
+    </CalloutsPanel>
   );
 }

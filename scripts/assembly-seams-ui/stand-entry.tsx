@@ -112,6 +112,7 @@ function Stand({ c, card, frozen }: { c: StandCard; card: common_TechCard; froze
         <GraphTap />
         <div className='w-[320px] shrink-0 space-y-2.5' data-map-column>
           <AssemblyMap
+            hasSketch={false}
             sketch={
               <div className='flex aspect-[3/4] items-center justify-center border border-borderColor bg-pageBg text-micro text-labelColor uppercase'>
                 technical sketch (stand stub)

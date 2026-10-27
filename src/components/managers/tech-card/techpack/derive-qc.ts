@@ -2,6 +2,7 @@ import type { common_TechCard, common_TechCardBomItem } from 'api/proto-http/adm
 import { fmtDelta } from './derive-assembly';
 import type { MeasurementRow } from './derive-measurements';
 import { bomRefs, clean, decimalNumber, enumLabel, shortDate, type BomRef } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type QcCheck = {
   key: string;
@@ -9,6 +10,7 @@ export type QcCheck = {
   op?: string;
   note?: string;
   missing?: boolean;
+  gap?: Gap;
 };
 
 export type SignoffRow = {
@@ -71,10 +73,32 @@ const itemName = (item: common_TechCardBomItem): string =>
 const sizeOf = (item: common_TechCardBomItem): string =>
   itemName(item).replace(/^buttons?\s+/i, '');
 
-export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
+export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffModel {
   const { techCard } = input;
   const tc = techCard.techCard;
   const checks: QcCheck[] = [];
+  const add = (
+    code: string,
+    label: string,
+    field: string,
+    refs: string[] = [],
+    op?: number,
+    bomLine?: string,
+  ): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [
+        ...refs,
+        op ? `op:${op}` : '',
+        bomLine ? `bom:${bomLine}` : '',
+        `field:${field}`,
+      ].filter(Boolean),
+      label,
+      section: '09',
+      target: { tab: 'signoff', op, bomLine, field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
   const ops = (tc?.operations ?? []).filter((op) => op.operationNumber);
   const opsUsing = (ref: BomRef) =>
     ops
@@ -101,6 +125,13 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
       op: issue.operationNumber ? String(issue.operationNumber) : undefined,
       note: enumLabel(issue.severity, 'TECH_CARD_ISSUE_SEVERITY_'),
       missing: true,
+      gap: add(
+        'pdf_open_issue',
+        issue.description?.trim() || 'open issue',
+        'issue',
+        [`field:issue ${index + 1}`],
+        issue.operationNumber,
+      ),
     });
   }
 
@@ -160,6 +191,14 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
       what: itemName(ref.item),
       note: qty ? `${qty} pcs · no op` : 'no op',
       missing: true,
+      gap: add(
+        'pdf_trim_operation_missing',
+        itemName(ref.item),
+        'operation',
+        [],
+        undefined,
+        ref.key,
+      ),
     });
   }
 
@@ -167,7 +206,12 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
   checks.push(
     placement
       ? { key: 'label', what: `label ${placement}` }
-      : { key: 'label', what: 'label placement', missing: true },
+      : {
+          key: 'label',
+          what: 'label placement',
+          missing: true,
+          gap: add('pdf_label_placement_missing', 'label placement', 'label placement'),
+        },
   );
 
   const rows = input.measurementRows ?? [];
@@ -178,19 +222,35 @@ export function deriveQcSignoffPage(input: QcInput): QcSignoffModel {
       what: 'measurements',
       note: rows.length ? `${missingMeasurements} missing` : undefined,
       missing: true,
+      gap: add('pdf_measurements_missing', 'measurements', 'measurements'),
     });
   } else {
     checks.push({ key: 'measurements', what: 'measurements', note: `${rows.length} points` });
   }
 
   if (!(tc?.patterns ?? []).some((pattern) => pattern.url?.trim())) {
-    checks.push({ key: 'patterns', what: 'pattern', missing: true });
+    checks.push({
+      key: 'patterns',
+      what: 'pattern',
+      missing: true,
+      gap: add('pdf_patterns_missing', 'pattern', 'patterns'),
+    });
   }
   if ((techCard.markers ?? []).length === 0) {
-    checks.push({ key: 'markers', what: 'marker', missing: true });
+    checks.push({
+      key: 'markers',
+      what: 'marker',
+      missing: true,
+      gap: add('pdf_marker_missing', 'marker', 'marker'),
+    });
   }
   if ((techCard.resolvedTechnicalMedia ?? []).length === 0) {
-    checks.push({ key: 'technical', what: 'drawing', missing: true });
+    checks.push({
+      key: 'technical',
+      what: 'drawing',
+      missing: true,
+      gap: add('pdf_drawing_missing', 'drawing', 'drawing'),
+    });
   }
 
   const digestBySection = new Map(

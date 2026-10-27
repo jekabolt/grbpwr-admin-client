@@ -252,6 +252,10 @@ export type AssemblyFullscreenProps = {
   railErrorIndices: ReadonlySet<number>;
   /** Шаги, ломающие сборочный граф. */
   railBrokenSteps: ReadonlySet<number>;
+  /** Missing, broken, or review steps counted in unit headers. */
+  railProblemIndices: ReadonlySet<number>;
+  /** Stored draft rows shown as a grey status in the rail. */
+  railDraftIds: ReadonlySet<string>;
   /** Активный пин эскиза: строка рельса светится вместе с ним (R6 — заливки у пина нет). */
   activePin: number | null;
   activeBom: string | null;
@@ -478,6 +482,8 @@ export function AssemblyFullscreen({
   railStandaloneSteps,
   railErrorIndices,
   railBrokenSteps,
+  railProblemIndices,
+  railDraftIds,
   activePin,
   activeBom,
   onHoverPin,
@@ -1948,6 +1954,7 @@ export function AssemblyFullscreen({
                       onSelect={onPickStep}
                       errorIndices={railErrorIndices}
                       brokenSteps={railBrokenSteps}
+                      problemIndices={railProblemIndices}
                       activePin={activePin}
                       activeBom={activeBom}
                       pieceShapes={pieceShapes}
@@ -1960,6 +1967,7 @@ export function AssemblyFullscreen({
                       readPieceDrag={readPieceDrag}
                       // Каталог работ — имя строки рельса спрашивает работу и в фулскрине (R8).
                       workCatalog={workCatalog}
+                      draftIds={railDraftIds}
                     />
                     {/* Σ SMV — ровно там же, где в инлайне: СРАЗУ под рельсом, и её чернильная
                         черта закрывает прогон шагов (O-48, ревью Codex T48-2). Без неё

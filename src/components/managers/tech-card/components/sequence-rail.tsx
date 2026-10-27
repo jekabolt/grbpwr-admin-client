@@ -17,29 +17,22 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { common_TechCardMachineType } from 'api/proto-http/admin';
-import { clearReview, nextMarkedOperation, type CardOperation } from 'lib/dxf-reconcile';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button, EmptyCell, FormField, FormItem, FormMessage, Select, Text } from 'ui';
+import { Text } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import type { AssemblyBlock } from './assembly-blocks';
 import { type FoundPiece } from './nesting/dxf-geometry';
-import { isMachineStepType } from './equipment-options';
-import {
-  cardSeamClassOptions,
-  effectiveSeamClass,
-  operationHeading,
-  seamClassInherits,
-  seamClassOptions,
-} from './operation-options';
+import { operationHeading, seamClassInherits, seamClassLabel } from './operation-options';
 import type { WorkCatalog } from './operation-work';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { StepIconCell } from './step-icon-tiles';
 import { UnitBlockHeader } from './unit-block';
 import { useActiveStepStore, useIsActiveStep, useMapPickNonce } from './assembly-map/active-step';
 import type { PieceShapeMap } from './use-piece-shapes';
@@ -64,20 +57,15 @@ import type { PieceShapeMap } from './use-piece-shapes';
 // ЧТЕНИЕ ФОРМЫ ОСТАЛОСЬ ВНУТРИ СТРОКИ, через контекст. Это несущее свойство для Ф6в: контекст
 // проникает в порталы, и рельсу, отрисованному внутри оверлея, ничего не нужно доставлять руками.
 
-const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
-
 // ДВЕ РАЗНЫЕ ВЕЩИ, А НЕ ОДНА В ДВУХ РАЗМЕРАХ.
 //
 // Там, где деталь ВЫБИРАЮТ (тарелка, состав шага), она — ПЛИТКА: квадрат 56px с формой и именем
 // поверх (PieceTile). Имя уехало на картинку, поэтому место, которое раньше занимала подпись
 // рядом, целиком отдано форме — при той же занятой полосе.
 //
-// В рельсе деталь не выбирают, там читают ПОРЯДОК: строка 26px, двадцать строк подряд, и заголовок
-// шага уже называет детали словами. Плитке там места нет, поэтому остаётся глиф — но квадратный,
-// чтобы полочка и пояс стояли в одной сетке, а не лесенкой.
-const RAIL_GLYPH = `mr-0.5 size-4 ${SILHOUETTE_INK}`;
-// Шаг может соединять и шесть деталей — тогда от заголовка не осталось бы ничего. Три силуэта
-// отвечают на «про какой это узел», остальное досказывает заголовок: он перечисляет их все.
+// В рельсе деталь не выбирают, там читают ПОРЯДОК. Силуэты живут во второй строке карточки:
+// широкая рельса показывает три, узкая — один, поэтому имя операции всегда получает первую строку.
+const RAIL_GLYPH = `size-4 ${SILHOUETTE_INK}`;
 const RAIL_GLYPH_LIMIT = 3;
 
 const sequenceCollisionDetection: CollisionDetection = (args) => {
@@ -86,114 +74,6 @@ const sequenceCollisionDetection: CollisionDetection = (args) => {
 };
 
 const sequenceDividerId = (at: number) => `sequence-divider:${at}`;
-
-export function CardSeamStandard() {
-  const { control } = useFormContext<TechCardFormData>();
-  return (
-    <div className='mb-1.5 grid grid-cols-1 items-center gap-2 border-b border-textColor bg-pageBg px-2 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
-      <span className='min-w-0'>
-        <Text size='control' component='span' className='block font-bold uppercase'>
-          Card standard
-        </Text>
-        <Text size='micro' variant='label' component='span' className='uppercase'>
-          ISO 4916
-        </Text>
-      </span>
-      <FormField
-        control={control}
-        name='construction.defaultSeamClass'
-        render={({ field, fieldState }) => (
-          <FormItem>
-            <Select
-              name='construction.defaultSeamClass'
-              items={cardSeamClassOptions(field.value as string)}
-              placeholder='Card standard'
-              value={field.value as string}
-              onValueChange={field.onChange}
-              invalid={!!fieldState.error}
-              size='sm'
-            />
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-    </div>
-  );
-}
-
-function OperationSeamClass({
-  index,
-  operationType,
-  cardSeamClass,
-  frozen,
-}: {
-  index: number;
-  operationType: string;
-  cardSeamClass: string;
-  frozen: boolean;
-}) {
-  const { control } = useFormContext<TechCardFormData>();
-  if (!isMachineStepType(operationType)) {
-    return (
-      <div className='col-span-2 px-1 pb-1 text-labelColor sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:p-0 sm:text-center'>
-        <EmptyCell />
-      </div>
-    );
-  }
-  return (
-    <FormField
-      control={control}
-      name={`operations.${index}.seamClass`}
-      render={({ field, fieldState }) => {
-        const raw = field.value as string;
-        const inherited = seamClassInherits(raw);
-        return (
-          <FormItem className='col-span-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 px-1 pb-1 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:p-0'>
-            <Select
-              name={`operations.${index}.seamClass`}
-              items={seamClassOptions}
-              placeholder='Seam class'
-              value={effectiveSeamClass(raw, cardSeamClass)}
-              onValueChange={field.onChange}
-              invalid={!!fieldState.error}
-              readOnly={frozen}
-              size='sm'
-              renderValue={(_, item) => (
-                <span className='block min-w-0 truncate text-left'>{item?.label}</span>
-              )}
-              className={cn(
-                'min-w-0',
-                inherited ? 'text-labelColor' : 'border-textColor text-textColor',
-              )}
-            />
-            <span className='flex items-center gap-2 whitespace-nowrap'>
-              {!inherited && (
-                <Button
-                  variant='underline'
-                  size='xs'
-                  disabled={frozen}
-                  onClick={() => field.onChange('TECH_CARD_SEAM_CLASS_UNKNOWN')}
-                  className='p-0 text-labelColor hover:text-textColor'
-                >
-                  Reset
-                </Button>
-              )}
-              <Text
-                size='nano'
-                variant={inherited ? 'label' : undefined}
-                component='span'
-                className='uppercase tracking-label'
-              >
-                {inherited ? 'Standard' : 'Override'}
-              </Text>
-            </span>
-            <FormMessage className='col-span-2' />
-          </FormItem>
-        );
-      }}
-    />
-  );
-}
 
 // Разделитель — отдельная цель, а не сортируемая строка. Строка означает «поставить рядом»;
 // разделитель означает «поставить сюда И снять со сборочного графа». Смешать их одним id значило
@@ -232,6 +112,8 @@ function RailStep({
   index,
   selected,
   onSelect,
+  onNavigate,
+  ruleBelow,
   hasError,
   assemblyBroken = false,
   activePin,
@@ -241,15 +123,15 @@ function RailStep({
   onDropPiece,
   readPieceDrag,
   workCatalog,
-  cardSeamClass,
   draft = false,
-  onReviewed,
-  onReviewAccepted,
 }: {
   uid: string;
   index: number;
   selected: boolean;
   onSelect: () => void;
+  onNavigate: (index: number) => void;
+  /** Hairline between adjacent rows in the same run. */
+  ruleBelow: boolean;
   hasError: boolean;
   /** Шаг ломает сборочный граф: вход не на фронтире, дубль, невалидный джойн. */
   assemblyBroken?: boolean;
@@ -277,17 +159,11 @@ function RailStep({
    * на одном экране из семи. `undefined` пишется вслух.
    */
   workCatalog: WorkCatalog | undefined;
-  /** Card-level ISO 4916 value used only to render UNKNOWN rows effectively. */
-  cardSeamClass: string;
   /**
    * Шаг записал каркас сборки, и его ещё никто не проверил — поле шага `draft` (0410): переживает
    * перезагрузку и видно всей команде.
    */
   draft?: boolean;
-  /** Клик по чипу draft — «проверено»: метка снимается, поля шага не трогаются. */
-  onReviewed?: () => void;
-  /** `ok` снимает метку перезалива; владелец рельса затем открывает следующую. */
-  onReviewAccepted?: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
@@ -314,11 +190,7 @@ function RailStep({
     []) as string[];
   const smv = (useWatch({ control, name: `operations.${index}.smv` }) ?? '') as string;
   const review = (useWatch({ control, name: `operations.${index}.review` }) ?? '') as string;
-  const frozen =
-    useWatch({ control, name: 'approvalState' }) === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   const marked = review.trim() !== '';
-  // orphan снимается только заменой призрака или ×, не общим «ok»
-  const acceptable = marked && review.trim() !== 'orphan';
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
@@ -328,7 +200,6 @@ function RailStep({
   const linkedPieces = pieceKeys
     .map((k) => allPieces.find((pc) => pc.lineKey === k))
     .filter((p): p is PieceRef => !!p);
-  const pieceNames = linkedPieces.map((p) => p.name);
   // ВЕДУЩИЕ ГЛИФЫ СТРОКИ. Заголовок шага — готовая СТРОКА из operationHeading (она же едет в
   // title и в редактор), и класть картинки внутрь неё нечем; поэтому силуэты стоят рядом с ней
   // отдельными узлами, слева. Только у живых деталей и только там, где контур нашёлся: нет
@@ -365,13 +236,24 @@ function RailStep({
       work,
       workCatalog,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
-      pieceNames,
+      pieceNames: [],
       note,
     }) || 'new step';
   // The cross-highlight mirrors the sketch pin, which fills error-red while it is the active one.
   const linked =
     (!!activePin && activePin > 0 && calloutNumber === activePin) ||
     (!!activeBom && bomLineKeys.includes(activeBom));
+  const seamCode = seamClassInherits(seamClass) ? '' : seamClassLabel(seamClass).split(' — ')[0];
+  const status = hasError
+    ? 'missing'
+    : assemblyBroken
+      ? 'broken'
+      : marked
+        ? 'review'
+        : draft
+          ? 'draft'
+          : '';
+  const problem = status !== '' && status !== 'draft';
 
   return (
     <SortableEntity uid={uid}>
@@ -411,20 +293,17 @@ function RailStep({
             if (key) onDropPiece(index, key);
           }}
           className={cn(
-            'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1 border bg-bgColor pr-1.5 transition-colors sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]',
-            hasError || assemblyBroken || marked || linked
-              ? 'border-error'
-              : selected || over || mapLit
-                ? 'border-textColor'
-                : 'border-borderColor hover:border-labelColor',
-            selected && 'bg-pageBg',
+            'grid min-h-14 grid-cols-[auto_minmax(0,1fr)] items-center bg-bgColor px-1 transition-colors',
+            ruleBelow && 'border-b border-hairline',
+            selected && 'outline outline-1 -outline-offset-1 outline-textColor',
+            over && 'bg-pageBg',
           )}
         >
           <button
             type='button'
             aria-label={`reorder step ${opNumber}`}
             {...dragHandleProps}
-            className='shrink-0 cursor-grab touch-none select-none px-1 py-1 leading-none text-labelColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='col-start-1 row-start-1 shrink-0 cursor-grab touch-none select-none px-1.5 py-1 leading-none text-labelColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             ⠿
           </button>
@@ -441,116 +320,93 @@ function RailStep({
               mapStore?.select(index);
             }}
             onKeyDown={(e) => {
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                const next = index + (e.key === 'ArrowUp' ? -1 : 1);
+                onNavigate(next);
+                const rail = e.currentTarget.closest('[data-sequence-rail]');
+                requestAnimationFrame(() => {
+                  const row = rail?.querySelector<HTMLElement>(`[data-rail-step="${next}"]`);
+                  if (row) {
+                    row.focus();
+                    mapStore?.select(next);
+                  }
+                });
+                return;
+              }
               if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
               onSelect();
               mapStore?.select(index);
             }}
             aria-current={selected}
-            title={label}
-            // ТОЧНАЯ РУЧКА ДЛЯ ПРОБЫ ИМЕНИ. `title` уже несёт заголовок ЦЕЛИКОМ и отдельно от
-            // номера, силуэтов и нормы времени, которые лежат в этом же узле; проба читает именно
-            // его, потому что textContent строки склеил бы четыре разных факта в одну строку и
-            // «имя не то» стало бы неотличимо от «номер не тот».
             data-rail-step={index}
-            className={cn(
-              'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-              ((acceptable && selected) || draft) && 'pr-10',
-            )}
+            className='col-start-2 row-start-1 grid min-w-0 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
-            <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
+            <StepIconCell index={index} />
+            <Text size='control' component='span' className='w-6 shrink-0 tabular-nums'>
               {opNumber}
             </Text>
-            {glyphs.length > 0 && (
-              <span className='flex shrink-0 items-center'>
-                {glyphs.map((g) => (
-                  <PieceSilhouette key={g.key} found={g.shape} boxClassName={RAIL_GLYPH} />
-                ))}
+            <span className='grid min-w-0 grid-rows-2 content-center'>
+              <Text
+                size='control'
+                component='span'
+                title={label}
+                className={cn(
+                  'min-w-0 truncate',
+                  problem && 'text-error',
+                  (linked || mapLit) && 'underline underline-offset-2',
+                )}
+              >
+                {label}
+              </Text>
+              <span className='flex min-h-4 min-w-0 items-center gap-2'>
+                {glyphs.length > 0 && (
+                  <span className='flex shrink-0 items-center gap-0.5'>
+                    {glyphs.map((g, glyphIndex) => (
+                      <PieceSilhouette
+                        key={g.key}
+                        found={g.shape}
+                        boxClassName={cn(RAIL_GLYPH, glyphIndex > 0 && '@max-[28rem]:hidden')}
+                        boxPx={{ w: 16, h: 16 }}
+                      />
+                    ))}
+                  </span>
+                )}
+                {seamCode && (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='shrink-0 uppercase'
+                  >
+                    {seamCode}
+                  </Text>
+                )}
+                {smvMin > 0 && (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='shrink-0 tabular-nums'
+                    title='SMV, min'
+                  >
+                    {smvMin.toFixed(1)}
+                  </Text>
+                )}
+                {status && (
+                  <Text
+                    size='micro'
+                    variant={problem ? 'error' : 'label'}
+                    component='span'
+                    className='shrink-0 uppercase'
+                  >
+                    {status}
+                  </Text>
+                )}
               </span>
-            )}
-            <Text
-              size='control'
-              component='span'
-              className={cn(
-                'min-w-0 flex-1 truncate',
-                opType === NONE_OP_TYPE && 'text-labelColor',
-              )}
-            >
-              {label}
-            </Text>
-            {(hasError || assemblyBroken || marked) && (
-              <Text
-                size='nano'
-                variant='error'
-                component='span'
-                className='shrink-0 font-bold'
-                // Тултип обязан называть ПРИЧИНУ. Раньше он говорил про незаполненное поле и
-                // при нарушении сборки — то есть про другое, и уводил искать не туда.
-                title={
-                  marked
-                    ? 'review needed'
-                    : assemblyBroken && !hasError
-                      ? 'assembly broken'
-                      : 'missing field'
-                }
-              >
-                !
-              </Text>
-            )}
-            {calloutNumber > 0 && (
-              <Text
-                size='nano'
-                variant='label'
-                component='span'
-                className='shrink-0 tabular-nums'
-                title={`pin #${calloutNumber} on the sketch`}
-              >
-                #{calloutNumber}
-              </Text>
-            )}
-            <Text
-              size='micro'
-              variant='label'
-              component='span'
-              className='w-8 shrink-0 text-right tabular-nums'
-              title='SMV, min'
-            >
-              {smvMin > 0 ? smvMin.toFixed(1) : <EmptyCell />}
-            </Text>
+            </span>
           </span>
-          <OperationSeamClass
-            index={index}
-            operationType={opType}
-            cardSeamClass={cardSeamClass}
-            frozen={frozen}
-          />
-          {/* ЧИП DRAFT — КНОПКА РЯДОМ СО СТРОКОЙ, А НЕ ВНУТРИ НЕЁ: строка сама `role='button'`
-              (открыть шаг), и вложенный орган был бы кнопкой в кнопке. Нативная кнопка, как ручка
-              перетаскивания: «проверено» — правка, и в `<fieldset disabled>` выпущенной карточки
-              она молчит. */}
-          {acceptable && selected ? (
-            <Button
-              onClick={onReviewAccepted}
-              disabled={frozen}
-              data-rail-review={index}
-              aria-label={`accept review for step ${opNumber}`}
-              title='accept review'
-              className='col-start-2 row-start-1 shrink-0 justify-self-end border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
-            >
-              <span className='text-nano uppercase'>ok</span>
-            </Button>
-          ) : draft ? (
-            <button
-              type='button'
-              onClick={onReviewed}
-              data-rail-draft={index}
-              aria-label={`step ${opNumber} is a draft from the assembly skeleton: mark it reviewed`}
-              title='written by the assembly skeleton and not reviewed yet. Click to mark it reviewed; changing the step does it too'
-              className='col-start-2 row-start-1 shrink-0 justify-self-end border border-borderColor px-1 leading-none text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:hover:border-borderColor disabled:hover:text-labelColor'
-            >
-              <span className='text-nano uppercase'>draft</span>
-            </button>
-          ) : null}
         </div>
       )}
     </SortableEntity>
@@ -572,6 +428,7 @@ export function SequenceRail({
   onSelect,
   errorIndices,
   brokenSteps,
+  problemIndices,
   activePin,
   activeBom,
   pieceShapes,
@@ -581,7 +438,6 @@ export function SequenceRail({
   readPieceDrag,
   workCatalog,
   draftIds,
-  onReviewed,
 }: {
   /**
    * Мета массива строк из `useFieldArray` владельца — СВОЕГО экземпляра здесь нет и быть не может.
@@ -600,6 +456,8 @@ export function SequenceRail({
   errorIndices: ReadonlySet<number>;
   /** Шаги, ломающие сборочный граф. */
   brokenSteps: ReadonlySet<number>;
+  /** Missing, broken, or review steps counted in unit and block headers. */
+  problemIndices: ReadonlySet<number>;
   activePin: number | null;
   activeBom: string | null;
   pieceShapes: PieceShapeMap;
@@ -612,14 +470,7 @@ export function SequenceRail({
   workCatalog: WorkCatalog | undefined;
   /** Id строк (`fields[i].id`), чьё поле `draft` поднято: каркас записал, никто не проверил. */
   draftIds?: ReadonlySet<string>;
-  /** «Проверено» по клику на чип draft строки `index`. */
-  onReviewed?: (index: number) => void;
 }) {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const cardSeamClass = (useWatch({
-    control,
-    name: 'construction.defaultSeamClass',
-  }) ?? 'TECH_CARD_SEAM_CLASS_UNKNOWN') as string;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -641,18 +492,6 @@ export function SequenceRail({
     const to = fields.findIndex((f) => f.id === over.id);
     if (to < 0) return;
     onMoveOperation(from, to);
-  };
-  const acceptReview = (index: number) => {
-    if (getValues('approvalState') === 'TECH_CARD_APPROVAL_STATE_RELEASED') return;
-    const operations = (getValues('operations') ?? []) as CardOperation[];
-    const row = operations[index];
-    // orphan: призрак ещё в шаге — метку снимает замена призрака или ×, не «ok»
-    const mark = row?.review?.trim() ?? '';
-    if (!mark || mark === 'orphan') return;
-    const nextOperations = operations.map((op, i) => (i === index ? clearReview(op) : op));
-    setValue(`operations.${index}.review`, '', { shouldDirty: true, shouldTouch: true });
-    const next = nextMarkedOperation(nextOperations, index);
-    if (next >= 0) onSelect(next);
   };
   const unitNameByKey = new Map(
     [...headerBefore.values()].map(({ block }) => [
@@ -684,61 +523,65 @@ export function SequenceRail({
   if (grouped) sortableItems.push(sequenceDividerId(fields.length));
 
   return (
-    <>
-      <CardSeamStandard />
-      <DndContext
-        sensors={sensors}
-        collisionDetection={sequenceCollisionDetection}
-        modifiers={[restrictToVerticalAxis]}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
-          <div className='flex flex-col gap-0.5'>
-            {fields.map((f, index) => {
-              // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
-              // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
-              const startsLooseRun = startsUnheadedLooseRun(index);
-              const startsStandalone = startsStandaloneRun(index);
-              return (
-                <Fragment key={f.id}>
-                  {hasDividerBefore(index) && (
-                    <SequenceDivider at={index} visible={startsLooseRun || startsStandalone} />
-                  )}
-                  {grouped && headerBefore.has(index) && (
-                    <UnitBlockHeader
-                      block={headerBefore.get(index)!.block}
-                      smv={headerBefore.get(index)!.smv}
-                      terminal={headerBefore.get(index)!.terminal}
-                      className='mt-0'
-                      unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
-                    />
-                  )}
-                  <RailStep
-                    uid={f.id}
-                    index={index}
-                    selected={index === selectedIndex}
-                    onSelect={() => onSelect(index)}
-                    hasError={errorIndices.has(index)}
-                    assemblyBroken={brokenSteps.has(index)}
-                    activePin={activePin}
-                    activeBom={activeBom}
-                    pieceShapes={pieceShapes}
-                    onHoverPin={onHoverPin}
-                    onDropPiece={onDropPiece}
-                    readPieceDrag={readPieceDrag}
-                    workCatalog={workCatalog}
-                    cardSeamClass={cardSeamClass}
-                    draft={draftIds?.has(f.id) ?? false}
-                    onReviewed={onReviewed ? () => onReviewed(index) : undefined}
-                    onReviewAccepted={() => acceptReview(index)}
+    <DndContext
+      sensors={sensors}
+      collisionDetection={sequenceCollisionDetection}
+      modifiers={[restrictToVerticalAxis]}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
+        <div className='@container flex flex-col' data-sequence-rail='1'>
+          {fields.map((f, index) => {
+            // У свободных шагов один псевдоблок, поэтому шапка стоит только у их первого прогона.
+            // Каждый следующий прогон всё равно обязан закрыть чертой предыдущий настоящий блок.
+            const startsLooseRun = startsUnheadedLooseRun(index);
+            const startsStandalone = startsStandaloneRun(index);
+            return (
+              <Fragment key={f.id}>
+                {hasDividerBefore(index) && (
+                  <SequenceDivider at={index} visible={startsLooseRun || startsStandalone} />
+                )}
+                {grouped && headerBefore.has(index) && (
+                  <UnitBlockHeader
+                    block={headerBefore.get(index)!.block}
+                    smv={headerBefore.get(index)!.smv}
+                    terminal={headerBefore.get(index)!.terminal}
+                    problemCount={
+                      headerBefore
+                        .get(index)!
+                        .block.steps.filter((stepIndex) => problemIndices.has(stepIndex)).length
+                    }
+                    className='mt-0'
+                    unitNameOf={(key) => unitNameByKey.get(key) ?? unitDisplayName({ key })}
                   />
-                </Fragment>
-              );
-            })}
-            {grouped && <SequenceDivider at={fields.length} />}
-          </div>
-        </SortableContext>
-      </DndContext>
-    </>
+                )}
+                <RailStep
+                  uid={f.id}
+                  index={index}
+                  selected={index === selectedIndex}
+                  onSelect={() => onSelect(index)}
+                  onNavigate={(nextIndex) => {
+                    const next = Math.max(0, Math.min(fields.length - 1, nextIndex));
+                    onSelect(next);
+                  }}
+                  ruleBelow={index < fields.length - 1 && !hasDividerBefore(index + 1)}
+                  hasError={errorIndices.has(index)}
+                  assemblyBroken={brokenSteps.has(index)}
+                  activePin={activePin}
+                  activeBom={activeBom}
+                  pieceShapes={pieceShapes}
+                  onHoverPin={onHoverPin}
+                  onDropPiece={onDropPiece}
+                  readPieceDrag={readPieceDrag}
+                  workCatalog={workCatalog}
+                  draft={draftIds?.has(f.id) ?? false}
+                />
+              </Fragment>
+            );
+          })}
+          {grouped && <SequenceDivider at={fields.length} />}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }

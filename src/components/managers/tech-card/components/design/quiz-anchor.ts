@@ -60,6 +60,7 @@ const ROLE_PREFIX = 'role:';
 export function roleQuestion(mediaId: number): DesignQuizQuestion {
   return {
     id: `${ROLE_PREFIX}${mediaId}`,
+    spots: [],
     category: 'role',
     part: 'whole',
     family: '',

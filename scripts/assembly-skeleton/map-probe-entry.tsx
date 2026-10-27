@@ -85,6 +85,7 @@ function Stand({ c }: { c: StandCard }) {
         <div className='flex items-start gap-3.5'>
           <div className='w-[320px] shrink-0 space-y-2.5' data-map-column>
             <AssemblyMap
+              hasSketch={false}
               sketch={
                 <div
                   data-sketch-stub

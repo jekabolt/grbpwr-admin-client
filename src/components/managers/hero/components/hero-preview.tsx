@@ -1,4 +1,5 @@
 import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
+import { storefrontUrl as resolveStorefrontUrl } from 'lib/deployment-env';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Section, Text } from 'ui';
 import { useHeroPreview } from './useHeroPreview';
@@ -7,7 +8,7 @@ interface HeroPreviewProps {
   /** Hydrated draft (mapFormToHeroFull output); memoize upstream so it changes only on content change. */
   hero: common_HeroFullWithTranslations;
   onBlockClick?: (index: number) => void;
-  /** Storefront base URL; defaults to VITE_STOREFRONT_URL, then the beta stand. */
+  /** Storefront base URL; defaults to VITE_STOREFRONT_URL. */
   storefrontUrl?: string;
   country?: string;
 }
@@ -48,11 +49,7 @@ export function HeroPreview({
   const [locale, setLocale] = useState('en');
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const baseUrl = (
-    storefrontUrl ||
-    import.meta.env.VITE_STOREFRONT_URL ||
-    (import.meta.env.DEV ? 'http://localhost:3000' : 'https://grbpwr.com')
-  ).replace(/\/$/, '');
+  const baseUrl = resolveStorefrontUrl(storefrontUrl, true);
   const origin = useMemo(() => {
     try {
       return new URL(baseUrl).origin;

@@ -40,7 +40,14 @@ export type EdgeAnchor = {
   edgeHint: string;
   /** Fingerprint of the piece's segmentation when anchored (16 hex) — the fast path's guard. */
   contourSig: string;
+  /**
+   * «Place by hand»: where the part piece sits on the host (mm from the host bbox's min corner in
+   * the drawing frame, then a turn and a mirror). Set on a surface seam's anchors only.
+   */
+  placement?: SeamPlacement;
 };
+
+export type SeamPlacement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
 
 export type StoredSeamStatus = 'confirmed' | 'rejected';
 export type StoredSeamKind = 'edge' | 'partial' | 'composite' | 'surface' | 'closure';
@@ -82,6 +89,14 @@ export type TechCardSeamAnchorWire = {
   rangeTo: number | undefined;
   edgeHint: string | undefined;
   contourSig: string | undefined;
+  placement?:
+    | {
+        xMm: number | undefined;
+        yMm: number | undefined;
+        rotDeg: number | undefined;
+        flip: boolean | undefined;
+      }
+    | undefined;
 };
 export type TechCardSeamSideWire = { parts: TechCardSeamAnchorWire[] | undefined };
 export type TechCardSeamStatusWire =

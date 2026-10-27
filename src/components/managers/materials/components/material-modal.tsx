@@ -141,6 +141,8 @@ type HardwareDraft = {
   finish: string;
   baseMaterial: string;
   weightG: string;
+  /** Holes of a button article (2 | 4, 0 = not set); kept as loaded so a save never clears it. */
+  buttonHoles: number;
 };
 type ThreadDraft = {
   ticketTex: string;
@@ -205,6 +207,7 @@ const emptyHardware: HardwareDraft = {
   finish: '',
   baseMaterial: '',
   weightG: '',
+  buttonHoles: 0,
 };
 const emptyThread: ThreadDraft = { ticketTex: '', lengthPerConeM: '', needleReco: '' };
 const emptyPackaging: PackagingDraft = { substrate: '', dimensions: '', gsm: '', printMethod: '' };
@@ -294,6 +297,7 @@ const draftFromMaterial = (material: common_Material): Draft => ({
         finish: material.hardwareAttrs.finish ?? '',
         baseMaterial: material.hardwareAttrs.baseMaterial ?? '',
         weightG: material.hardwareAttrs.weightG?.value ?? '',
+        buttonHoles: material.hardwareAttrs.buttonHoles ?? 0,
       }
     : emptyHardware,
   thread: material.threadAttrs
@@ -601,6 +605,7 @@ export function MaterialModal({
               finish: d.hardware.finish.trim(),
               baseMaterial: d.hardware.baseMaterial.trim(),
               weightG: inputToDecimal(d.hardware.weightG),
+              buttonHoles: d.hardware.buttonHoles,
             }
           : undefined,
       threadAttrs:

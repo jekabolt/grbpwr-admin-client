@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_SERVER_URL?: string;
+  /** Backend target for Vite's local /api proxy. Default: http://localhost:3999. */
+  readonly VITE_API_BASE_URL?: string;
   /** URL for media proxy (bypasses CORS when cropping). Default: /media-proxy (dev only). Set in prod if backend has proxy. */
   readonly VITE_MEDIA_PROXY_URL?: string;
   /** Storefront base URL for the hero live-preview iframe (/preview/hero). */
@@ -31,6 +33,8 @@ interface ImportMetaEnv {
   readonly VITE_PATTERN_IMPORT_AI?: string;
   /** Sentry DSN (public by design). Unset: Sentry is never loaded and no request is sent. */
   readonly VITE_SENTRY_DSN?: string;
+  /** Sentry contour name. Defaults to the legacy prod/beta inference from VITE_SERVER_URL. */
+  readonly VITE_SENTRY_ENVIRONMENT?: string;
 }
 
 /** Git sha of the build, baked in by vite.config.ts only when VITE_SENTRY_DSN is set; else ''. */

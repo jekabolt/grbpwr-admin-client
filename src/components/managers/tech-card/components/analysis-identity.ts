@@ -1,4 +1,4 @@
-import { TechCardAnalysisFinding } from 'api/proto-http/admin';
+import type { TechCardAnalysisFinding } from 'api/proto-http/admin';
 
 // IDENTITY OF A FINDING ACROSS RUNS, plus the session mirror of the last run.
 //

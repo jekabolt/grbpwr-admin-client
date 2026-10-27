@@ -75,7 +75,10 @@ function Stand({ c }: { c: StandCard }) {
       >
         <div className='flex flex-row items-start gap-3.5'>
           <div className='w-[320px] shrink-0 space-y-2.5' data-stand-map>
-            <AssemblyMap sketch={<div className='p-4 text-12'>sketch (not in the stand)</div>} />
+            <AssemblyMap
+              hasSketch={false}
+              sketch={<div className='p-4 text-12'>sketch (not in the stand)</div>}
+            />
           </div>
           <section
             className='min-w-0 flex-1 border border-borderColor bg-bgColor p-4'

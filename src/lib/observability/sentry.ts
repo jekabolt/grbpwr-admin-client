@@ -1,21 +1,10 @@
 /* global __APP_RELEASE__ */
 // Loaded only through ./index (dynamic import) when VITE_SENTRY_DSN is set.
 import * as Sentry from '@sentry/react';
+import { sentryEnvironment } from 'lib/deployment-env';
 import type { ErrorInfo } from 'react';
 import type { ApiErrorContext } from './index';
 import { scrubEnvelope } from './scrub';
-
-const PROD_BACKEND_HOST = 'backend.grbpwr.com';
-
-// The contour is told apart the same way the rest of the app does it: by the backend it talks to.
-function environment(): 'prod' | 'beta' {
-  try {
-    const host = new URL(import.meta.env.VITE_SERVER_URL || '').hostname.replace(/\.$/, '');
-    return host === PROD_BACKEND_HOST ? 'prod' : 'beta';
-  } catch {
-    return 'beta';
-  }
-}
 
 // Default integrations that stay off:
 // - Breadcrumbs: fetch/xhr and history breadcrumbs keep full URLs, and admin API calls carry
@@ -28,7 +17,7 @@ export function init(dsn: string) {
   Sentry.init({
     dsn,
     release: __APP_RELEASE__ || undefined,
-    environment: environment(),
+    environment: sentryEnvironment(),
     sendDefaultPii: false,
     // No performance tracing, and no trace headers on API calls: the backend's CORS allowlist
     // does not know sentry-trace/baggage, and a rejected preflight would break every request.

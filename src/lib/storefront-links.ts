@@ -4,6 +4,7 @@ import {
   common_SeasonEnum,
   common_SortFactor,
 } from 'api/proto-http/frontend';
+import { storefrontOrigin } from 'lib/deployment-env';
 
 /**
  * SINGLE SOURCE OF TRUTH for turning a hero "explore / CTA" link into the URL
@@ -97,13 +98,7 @@ const SORT_ENUM = invert(SORT_URL);
 const ORDER_ENUM = invert(ORDER_URL);
 const SEASON_ENUM = invert(SEASON_URL);
 
-const STOREFRONT_ORIGIN = (() => {
-  try {
-    return new URL(import.meta.env.VITE_STOREFRONT_URL || 'https://grbpwr.com').origin;
-  } catch {
-    return 'https://grbpwr.com';
-  }
-})();
+const STOREFRONT_ORIGIN = storefrontOrigin();
 
 // ---- order tracking -------------------------------------------------------
 

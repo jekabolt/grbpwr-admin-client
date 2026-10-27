@@ -350,6 +350,7 @@ export function DxfPieceBreakdown({
                     <PieceSilhouette
                       found={shapeOf.get(r.lineKey) ?? null}
                       boxClassName='mr-0 h-6 w-9'
+                      boxPx={{ w: 36, h: 24 }}
                     />
                     <span className='flex min-w-0 flex-col'>
                       <Text size='micro' component='span' className='truncate uppercase'>
@@ -429,9 +430,9 @@ export function DxfPieceBreakdown({
           процента, — и подгонять под него сами числа нельзя: итог обязан остаться той площадью, из
           которой посчитана норма (иначе таблица перестанет быть проверкой). Остаётся сказать. */}
       <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-        the rows are rounded to whole cm², the total is not: the sum of the “contribution” column may
-        differ from the total by a few units. the total is the area FROM THE NORM CALCULATION, and
-        fitting it to the rounded rows would make the table unverifiable
+        the rows are rounded to whole cm², the total is not: the sum of the “contribution” column
+        may differ from the total by a few units. the total is the area FROM THE NORM CALCULATION,
+        and fitting it to the rounded rows would make the table unverifiable
       </Text>
       {widthOk ? (
         <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>

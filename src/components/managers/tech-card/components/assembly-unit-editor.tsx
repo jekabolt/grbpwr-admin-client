@@ -409,7 +409,12 @@ function UnitStepRow({
       {glyphs.length > 0 && (
         <span className='flex shrink-0 items-center'>
           {glyphs.map((g) => (
-            <PieceSilhouette key={g.key} found={g.shape} boxClassName={ROW_GLYPH} />
+            <PieceSilhouette
+              key={g.key}
+              found={g.shape}
+              boxClassName={ROW_GLYPH}
+              boxPx={{ w: 16, h: 16 }}
+            />
           ))}
         </span>
       )}

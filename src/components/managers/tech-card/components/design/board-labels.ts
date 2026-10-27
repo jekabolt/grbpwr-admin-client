@@ -311,6 +311,7 @@ export function labelQuestion(
       : [...slots.slice(0, 6).map(detailName), NEW_DETAIL_OPTION];
   return {
     id: `${purpose === 'target' ? VIEW_PREFIX : DETAIL_PREFIX}${mediaId}`,
+    spots: [],
     category: 'view',
     part: 'whole',
     family: '',

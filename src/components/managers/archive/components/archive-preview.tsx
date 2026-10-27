@@ -1,4 +1,5 @@
 import { common_ArchiveFull } from 'api/proto-http/frontend';
+import { storefrontUrl as resolveStorefrontUrl } from 'lib/deployment-env';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Section, Text } from 'ui';
 import { ARCHIVE_PREVIEW } from './preview-contract';
@@ -8,7 +9,7 @@ interface ArchivePreviewProps {
   /** Hydrated draft (mapFormToArchiveFull output); memoize upstream so it changes only on content change. */
   archive: common_ArchiveFull;
   onBlockClick?: (index: number) => void;
-  /** Storefront base URL; defaults to VITE_STOREFRONT_URL, then the beta stand. */
+  /** Storefront base URL; defaults to VITE_STOREFRONT_URL. */
   storefrontUrl?: string;
   country?: string;
 }
@@ -46,11 +47,7 @@ export function ArchivePreview({
   const [locale, setLocale] = useState('en');
   const [containerWidth, setContainerWidth] = useState(0);
 
-  const baseUrl = (
-    storefrontUrl ||
-    import.meta.env.VITE_STOREFRONT_URL ||
-    (import.meta.env.DEV ? 'http://localhost:3000' : 'https://grbpwr.com')
-  ).replace(/\/$/, '');
+  const baseUrl = resolveStorefrontUrl(storefrontUrl, true);
   const origin = useMemo(() => {
     try {
       return new URL(baseUrl).origin;

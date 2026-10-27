@@ -12,6 +12,7 @@ import {
   resolveBomRef,
   rollGoods,
 } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 const OMIT_SECTIONS = new Set(['TECH_CARD_BOM_SECTION_LABEL', 'TECH_CARD_BOM_SECTION_PACKAGING']);
 
@@ -23,11 +24,21 @@ export type ColourwaysModel = ReturnType<typeof deriveColourways>;
  * The recipe matrix. A card without colourways prints one colourway made of its BOM colours
  * (`fromBom`), so the workshop still reads which colour goes where.
  */
-export function deriveColourways(techCard: common_TechCard) {
+export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
   const refs = bomRefs(techCard);
   const pieces = techCard.techCard?.pieces ?? [];
   const colorways = techCard.colorways ?? [];
   const bomName = colorways.length ? '' : bomColourwayName(techCard);
+  const add = (code: string, label: string, field: string, refs: string[] = []): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [...refs, `field:${field}`],
+      label,
+      section: '03',
+      target: { tab: 'colourways', field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
   // `undefined` = the BOM-colour colourway: no usages, the BOM line's own colour
   const sources: Array<common_AdminColorwayRef | undefined> = colorways.length
     ? colorways
@@ -74,6 +85,13 @@ export function deriveColourways(techCard: common_TechCard) {
         sub: colours.length ? names.join(' · ') : '',
         swatch: usages.length || group.refs.some(rollGoods) ? colorwayHex(colorway) : '',
         missing: !!colorway && !usages.length,
+        gap:
+          colorway && !usages.length
+            ? add('pdf_colourway_recipe_missing', 'recipe', group.key, [
+                `field:colourway ${index + 1}`,
+                ...(group.refs[0] ? [`bom:${group.refs[0].key}`] : []),
+              ])
+            : undefined,
       };
     }),
   }));
@@ -95,18 +113,37 @@ export function deriveColourways(techCard: common_TechCard) {
       };
     });
     const first = cells[0]?.pieces ?? [];
+    const piecesGap = !first.length
+      ? add('pdf_colourway_pieces_missing', 'pieces', 'pieces', [`bom:${ref.key}`])
+      : undefined;
     return {
       key: ref.key,
       label: alphaKey(index),
       role: materialRole(ref),
       // the pieces column reads the first colourway; a colourway that cuts other pieces says so
       pieces: first,
+      piecesGap,
       cells: cells.map((cell) => ({
         ...cell,
         differs: cell.pieces.join('|') !== first.join('|'),
+        piecesGap:
+          cell.pieces.join('|') !== first.join('|') && !cell.pieces.length
+            ? add('pdf_colourway_pieces_missing', 'pieces', 'pieces', [
+                `bom:${ref.key}`,
+                `field:colourway ${cell.key}`,
+              ])
+            : undefined,
       })),
     };
   });
 
-  return { columns, rows, fabricRows, fromBom: !colorways.length && !!bomName };
+  return {
+    columns,
+    rows,
+    fabricRows,
+    fromBom: !colorways.length && !!bomName,
+    emptyGap: !sources.length
+      ? add('pdf_colourways_missing', 'colourways', 'colourways')
+      : undefined,
+  };
 }

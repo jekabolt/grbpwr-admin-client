@@ -5,6 +5,7 @@ import type {
   common_TechCardMediaFull,
 } from 'api/proto-http/admin';
 import { decimalNumber, decimalText } from './derive-shared';
+import type { Gap, GapSink } from './gaps';
 
 export type TechpackMeasurement = { id: number; name: string };
 
@@ -31,6 +32,7 @@ export type MeasurementRow = {
   method: string;
   required?: string;
   missing: boolean;
+  gap?: Gap;
 };
 
 export type MeasurementsModel = {
@@ -39,6 +41,7 @@ export type MeasurementsModel = {
   rows: MeasurementRow[];
   views: MeasurementView[];
   missing: string[];
+  gaps: { measurements?: Gap; drawing?: Gap };
 };
 
 type MeasurementInput = {
@@ -114,10 +117,20 @@ function calloutMatchesMeasurement(callout: common_TechCardCallout, measurement:
   );
 }
 
-export function deriveMeasurementsPage(input: MeasurementInput): MeasurementsModel {
+export function deriveMeasurementsPage(input: MeasurementInput, sink?: GapSink): MeasurementsModel {
   const { techCard, measurements, sizeChart } = input;
   const tc = techCard.techCard;
   const sampleSizeId = tc?.baseSampleSizeId ?? 0;
+  const add = (code: string, label: string, field: string, refs: string[] = []): Gap => {
+    const gap: Gap = {
+      code,
+      refs: [...refs, `field:${field}`],
+      label,
+      section: '08',
+      target: { tab: 'measurements', field },
+    };
+    return sink?.add(gap) ?? gap;
+  };
   const cells = new Map<string, string>();
   for (const cell of sizeChart?.cells ?? []) {
     if (cell.sizeId == null || cell.measurementNameId == null) continue;
@@ -157,6 +170,11 @@ export function deriveMeasurementsPage(input: MeasurementInput): MeasurementsMod
       method: measurement.name,
       required: required || undefined,
       missing: !required,
+      gap: !required
+        ? add('pdf_measurement_required_missing', 'required', measurement.name, [
+            `field:measurement ${measurement.id}`,
+          ])
+        : undefined,
     };
   });
   const views: MeasurementView[] = selected.map(({ side, item, mediaId }) => ({
@@ -190,11 +208,20 @@ export function deriveMeasurementsPage(input: MeasurementInput): MeasurementsMod
     ...(measurements.length > 0 && rows.some((row) => row.missing) ? ['required'] : []),
     ...(views.length === 0 ? ['drawing'] : []),
   ];
+  const gaps = {
+    measurements:
+      measurements.length === 0
+        ? add('pdf_measurements_missing', 'measurements', 'measurements')
+        : undefined,
+    drawing:
+      views.length === 0 ? add('pdf_measurement_drawing_missing', 'drawing', 'drawing') : undefined,
+  };
   return {
     unit: tc?.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm',
     sampleSize: sampleSizeId ? input.sizeNames?.[sampleSizeId] || `#${sampleSizeId}` : '',
     rows,
     views,
     missing,
+    gaps,
   };
 }

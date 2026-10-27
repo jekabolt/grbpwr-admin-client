@@ -14,6 +14,7 @@ import type { IRPage } from 'lib/pattern-import/types';
 import type { DrawingStroke, PatternDrawing, StrokeKind } from './drawing';
 import { assertPrintableSize, planPdf, renderPdf, type PdfFont, type PdfPlan } from './dxf-pdf';
 import { pdfLayoutOf, type PdfFormatId } from './formats';
+import { withPdfGrainArrows } from './plot-drawing';
 
 export type Rgb = [number, number, number];
 
@@ -240,12 +241,13 @@ export async function readPltSheet(
  * y-down, origin top-left) — nothing moves.
  */
 export function drawingFromPltSheet(sheet: PltSheet): PatternDrawing {
-  const strokes: DrawingStroke[] = sheet.lines.map((l) => ({
+  const source: DrawingStroke[] = sheet.lines.map((l) => ({
     kind: penRole(l.pen).kind,
     closed: l.closed,
     pts: l.pts,
     ...(l.dashMm && l.dashMm.length ? { dash: l.dashMm } : {}),
   }));
+  const strokes = withPdfGrainArrows(source);
   return {
     w: sheet.widthMm,
     h: sheet.heightMm,

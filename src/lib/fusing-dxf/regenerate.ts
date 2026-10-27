@@ -321,8 +321,12 @@ const ECHO_AWARE = {
   mediaAware: true,
   operationKindsAware: true,
   operationWorkAware: true,
+  // The stored operations ride verbatim, seamKind / workVariant / fastening.buttonHoles included.
+  operationSeamKindAware: true,
   operationDraftAware: true,
   operationReviewAware: true,
+  // the echoed card carries each step's seamKeys as stored
+  operationSeamsAware: true,
   bomQtyAware: true,
   labelsAware: true,
 } satisfies Partial<common_TechCardInsert>;

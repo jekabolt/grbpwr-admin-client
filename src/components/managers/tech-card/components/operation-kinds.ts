@@ -826,6 +826,69 @@ export const KIND_BY_WORK_TOKEN: ReadonlyMap<string, OperationKind> = new Map(
     .filter((pair): pair is readonly [string, OperationKind] => !!pair[1]),
 );
 
+/**
+ * The single front-of-editor question for a selected kind. This is presentation routing only:
+ * every other operation field remains stored on the same flat row and is edited in SETUP.
+ *
+ * Catalog-only hem and gather works have no bundled kind id, so their stored work token is the
+ * authoritative identity. All other routes use the resolved kind, never the machine or verb.
+ */
+export type OperationHowKind =
+  | 'fuse'
+  | 'press-action'
+  | 'join'
+  | 'topstitch'
+  | 'bind'
+  | 'hem'
+  | 'buttonhole'
+  | 'button'
+  | 'zip'
+  | 'bartack'
+  | 'label'
+  | 'gather'
+  | 'none';
+
+const HEM_WORKS = new Set(['moscow_hem', 'hem_turned']);
+const GATHER_WORKS = new Set(['gather', 'ease_in', 'gather_ease']);
+
+export function operationHowKind(
+  kindId: string | null | undefined,
+  workToken: string | null | undefined,
+): OperationHowKind {
+  const work = (workToken ?? '').trim();
+  if (HEM_WORKS.has(work)) return 'hem';
+  if (GATHER_WORKS.has(work)) return 'gather';
+
+  switch (kindId) {
+    case 'G9':
+      return 'fuse';
+    case 'G0':
+      return 'press-action';
+    case 'A1':
+      return 'join';
+    case 'A2':
+      return 'topstitch';
+    case 'B1':
+      return 'bind';
+    case 'A7':
+      return 'hem';
+    case 'C1':
+      return 'buttonhole';
+    case 'C2':
+      return 'button';
+    case 'B3':
+      return 'zip';
+    case 'C3':
+      return 'bartack';
+    case 'B5':
+      return 'label';
+    case 'B4':
+      return 'gather';
+    default:
+      return 'none';
+  }
+}
+
 /** Семь ВТО-пунктов, которые различает ТОЛЬКО подглагол, — те, что схлопываются до миграции. */
 const PRESS_ACTION_ONLY = new Set(['G2', 'G4', 'G5', 'G6', 'G7', 'G8']);
 
