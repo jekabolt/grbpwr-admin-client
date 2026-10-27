@@ -1,23 +1,44 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { pairOverlap, pieceTilt, rasterize } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
 import {
+  CARD83_OPS,
+  CARD83_PIECE_KEYS,
+  card83Geoms,
+  card83Graph,
+  card83InnerLines,
+} from './card83.fixture';
+import {
   boxOf,
   candidateOf,
+  confidentSeam,
+  earlierInner,
   fitBox,
   inputName,
+  insideRing,
   labelSpot,
   partnerOf,
   seamOfSides,
   seamSig,
   splitSeams,
+  spotInside,
   spreadLabels,
   stepLayout,
   surfaceSeam,
+  tiltOf,
   toPx,
+  UPRIGHT,
+  type StepLayout,
 } from './step-picture';
+import {
+  inputGroups,
+  sewnBeforeStep,
+  suggestStepPair,
+  usedEdgesBeforeStep,
+} from './step-seams-model';
 
 // A w × h rectangle, CCW from the origin: edge 0 bottom, 1 right, 2 top, 3 left.
 function rect(key: string, w: number, h: number): PieceGeom {
@@ -197,6 +218,249 @@ describe('stepLayout', () => {
     // The picture holds it.
     expect(L.bbox.x1).toBeGreaterThanOrEqual(g.x1);
   });
+
+  const gapAB = (L: StepLayout) => {
+    const a = boxOf(world(geoms.get('A')!, L.T.get('A')!));
+    const b = boxOf(world(geoms.get('B')!, L.T.get('B')!));
+    return Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1);
+  };
+
+  it('an inner seam the solver finds ambiguous does not shape the unit: its pieces stand apart', () => {
+    const unsure = { ...inner, assignment: { margin: 0, confidence: 'ambiguous' as const } };
+    expect(gapAB(stepLayout([['A', 'B']], [unsure], geoms))).toBeGreaterThan(10);
+    const likelyRun = { ...inner, kind: 'partial' as const, score: 0.6 };
+    expect(gapAB(stepLayout([['A', 'B']], [likelyRun], geoms))).toBeGreaterThan(10);
+  });
+
+  it('a stored inner seam shapes the unit whatever the engine thinks of it', () => {
+    const stored = {
+      ...inner,
+      score: 0.3,
+      assignment: { margin: 0, confidence: 'ambiguous' as const },
+      provenance: {
+        seamKey: 's1',
+        status: 'confirmed' as const,
+        source: 'manual' as const,
+        direction: 'same' as const,
+        by: 'x',
+        at: 'now',
+        how: 'hint' as const,
+      },
+    };
+    expect(gapAB(stepLayout([['A', 'B']], [stored], geoms))).toBeLessThan(1);
+  });
+
+  it('a cross seam never folds an input over: its top stays up, or it stands beside', () => {
+    // A's top edge to C's top edge would hang C upside down on A. (A true rectangle turned half
+    // round is the same shape, so C is read as any other piece here.)
+    const g = new Map(geoms);
+    g.set('C', { ...geoms.get('C')!, rect: false });
+    const fold = candidateOf({ a: ['A#2'], b: ['C#2'] }, g)!;
+    const L = stepLayout([['A'], ['C']], [fold], g);
+    expect(tiltOf(L.T.get('C')!)).toBeLessThanOrEqual(UPRIGHT);
+    const a = boxOf(world(g.get('A')!, L.T.get('A')!));
+    const c = boxOf(world(g.get('C')!, L.T.get('C')!));
+    const overlapX = Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0);
+    const overlapY = Math.min(a.y1, c.y1) - Math.max(a.y0, c.y0);
+    expect(overlapX <= 0 || overlapY <= 0).toBe(true);
+  });
+});
+
+describe('confidentSeam', () => {
+  const geoms = geomsOf(rect('A', 100, 300), rect('B', 100, 300));
+  const edge = candidateOf({ a: ['A#1'], b: ['B#3'] }, geoms)!;
+  const prov = {
+    seamKey: 's',
+    status: 'confirmed' as const,
+    source: 'graph' as const,
+    direction: 'same' as const,
+    by: 'x',
+    at: 'now',
+    how: 'hint' as const,
+  };
+  it('stored, or sure, or a clean high edge reading', () => {
+    expect(confidentSeam(edge)).toBe(true);
+    expect(confidentSeam({ ...edge, score: 0.5, provenance: prov })).toBe(true);
+    expect(
+      confidentSeam({
+        ...edge,
+        kind: 'composite',
+        score: 0.5,
+        assignment: { margin: 3, confidence: 'sure' },
+      }),
+    ).toBe(true);
+  });
+  it('not an unsure, rivalled, partial or composite reading, never a closure', () => {
+    expect(confidentSeam({ ...edge, assignment: { margin: 0, confidence: 'ambiguous' } })).toBe(
+      false,
+    );
+    expect(confidentSeam({ ...edge, kind: 'composite' })).toBe(false);
+    expect(confidentSeam({ ...edge, kind: 'partial' })).toBe(false);
+    expect(confidentSeam({ ...edge, score: 0.8 })).toBe(false);
+    expect(confidentSeam({ ...edge, ambiguousWith: [edge] })).toBe(false);
+    expect(confidentSeam({ ...edge, kind: 'closure-not-seam', provenance: prov })).toBe(false);
+  });
+});
+
+/**
+ * Card 83, the owner's shirt, every join step: the picture the picker draws (canvas, exploded) and
+ * the joined result, read the way the eye reads them — by rasters of the laid outlines.
+ */
+describe('stepLayout on card 83', () => {
+  const geoms = card83Geoms();
+  const graph = card83Graph();
+  const innerLines = card83InnerLines();
+  const ops = CARD83_OPS;
+  const pieceKeys = CARD83_PIECE_KEYS;
+  const steps = ops.map((op, i) => {
+    const leaves = inputGroups(ops, i, pieceKeys).map((g) => g.pieces);
+    const raw = splitSeams(graph.chosen, leaves, geoms);
+    const used = usedEdgesBeforeStep(ops, i, new Map());
+    const suggestion = suggestStepPair(ops, i, pieceKeys, geoms, used, null, new Map());
+    const own = suggestion ? [seamOfSides(suggestion, geoms, innerLines)!].filter(Boolean) : [];
+    // Inside each input: the engine's sure seams, and what the steps before sewed there.
+    const sewn = sewnBeforeStep(ops, i, pieceKeys, geoms, new Map());
+    const inner = [...raw.inner, ...earlierInner(sewn, leaves, geoms, innerLines, raw.inner)];
+    const frame = [...inner, ...(own.length ? own : raw.cross)];
+    return {
+      op: op.operationNumber,
+      leaves,
+      canvas: stepLayout(leaves, frame, geoms, { explode: 0.08 }),
+      result: stepLayout(leaves, [...inner, ...own], geoms),
+    };
+  });
+  const ringsOf = (L: StepLayout, leaves: readonly (readonly string[])[], i: number): Pt2[][] => [
+    ...leaves[i].filter((k) => L.T.has(k)).map((k) => world(geoms.get(k)!, L.T.get(k)!)),
+    ...L.ghosts.filter((g) => g.input === i).map((g) => g.ring),
+  ];
+  const overlapOf = (A: Pt2[][], B: Pt2[][]) => {
+    let o = 0;
+    for (const a of A)
+      for (const b of B) o = Math.max(o, pairOverlap(rasterize(a, 2), rasterize(b, 2)));
+    return o;
+  };
+  const identical = (ka: string, kb: string) =>
+    !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
+  const followersOf = (L: StepLayout) => new Set(L.stacked.flatMap((s) => s.slice(1)));
+  // A layer under its twin leans as the twin does; a piece set into a run points away from it.
+  const freeOf = (L: StepLayout) => new Set([...followersOf(L), ...L.onRuns]);
+
+  for (const s of steps) {
+    it(`op ${s.op}: the canvas never lays two inputs on each other`, () => {
+      const rings = s.leaves.map((_, i) => ringsOf(s.canvas, s.leaves, i));
+      for (let p = 0; p < rings.length; p++)
+        for (let q = p + 1; q < rings.length; q++) expect(overlapOf(rings[p], rings[q])).toBe(0);
+    });
+
+    it(`op ${s.op}: the result joins the sides, else stands apart; identical twins lie as one`, () => {
+      const rings = s.leaves.map((_, i) => ringsOf(s.result, s.leaves, i));
+      for (let p = 0; p < rings.length; p++)
+        for (let q = p + 1; q < rings.length; q++) {
+          const o = overlapOf(rings[p], rings[q]);
+          const twins =
+            s.leaves[p].length === 1 &&
+            s.leaves[q].length === 1 &&
+            identical(s.leaves[p][0], s.leaves[q][0]);
+          if (twins) expect(o).toBeGreaterThan(0.99);
+          else expect(o).toBeLessThanOrEqual(0.01);
+        }
+    });
+
+    it(`op ${s.op}: every piece stands its own way up, on the canvas and in the result`, () => {
+      for (const L of [s.canvas, s.result]) {
+        const free = freeOf(L);
+        for (const [k, T] of L.T)
+          if (!free.has(k)) expect(pieceTilt(geoms.get(k)!, T)).toBeLessThanOrEqual(UPRIGHT);
+      }
+    });
+
+    it(`op ${s.op}: inside an input nothing overlaps but a layer under its identical twin`, () => {
+      for (const L of [s.canvas, s.result]) {
+        const followers = followersOf(L);
+        for (const ks of s.leaves) {
+          const drawn = ks.filter((k) => L.T.has(k) && !followers.has(k));
+          for (let p = 0; p < drawn.length; p++)
+            for (let q = p + 1; q < drawn.length; q++) {
+              const a = world(geoms.get(drawn[p])!, L.T.get(drawn[p])!);
+              const b = world(geoms.get(drawn[q])!, L.T.get(drawn[q])!);
+              expect(overlapOf([a], [b])).toBeLessThanOrEqual(0.01);
+            }
+        }
+      }
+    });
+
+    it(`op ${s.op}: each input's name has a spot inside its biggest piece`, () => {
+      for (const L of [s.canvas, s.result])
+        for (const ks of s.leaves) {
+          const rings = ks.filter((k) => L.T.has(k)).map((k) => world(geoms.get(k)!, L.T.get(k)!));
+          const biggest = rings.reduce((m, r) => {
+            const a = (b: Pt2[]) => {
+              const x = boxOf(b);
+              return (x.x1 - x.x0) * (x.y1 - x.y0);
+            };
+            return a(r) > a(m) ? r : m;
+          });
+          expect(insideRing(spotInside(biggest), biggest)).toBe(true);
+        }
+    });
+  }
+
+  it('op 370: the left sleeve is set into the armhole run, away from the body; the rest keeps its way up', () => {
+    const s = steps.find((x) => x.op === 370)!;
+    for (const L of [s.canvas, s.result]) {
+      expect(L.onRuns).toContain('SLV_L');
+      expect(L.onRuns).not.toContain('BP');
+      const free = freeOf(L);
+      for (const [k, T] of L.T)
+        if (!free.has(k)) expect(pieceTilt(geoms.get(k)!, T)).toBeLessThan(0.03);
+    }
+    // Its cuff stays on the sleeve's hem, on the far side from the body.
+    const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
+    const body = box('BP');
+    const slv = box('SLV_L');
+    const cuff = box('SLV_M_L');
+    const far = (b: ReturnType<typeof box>) =>
+      Math.hypot(
+        (b.x0 + b.x1) / 2 - (body.x0 + body.x1) / 2,
+        (b.y0 + b.y1) / 2 - (body.y0 + body.y1) / 2,
+      );
+    expect(far(cuff)).toBeGreaterThan(far(slv));
+  });
+
+  it('op 400: both sleeves hang off the body’s armhole runs, their cuffs beyond them', () => {
+    const s = steps.find((x) => x.op === 400)!;
+    for (const L of [s.canvas, s.result]) {
+      expect(L.onRuns).toEqual(expect.arrayContaining(['SLV_L', 'SLV_R']));
+      const box = (k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+      const body = box('BP');
+      const far = (k: string) => {
+        const b = box(k);
+        return Math.hypot(
+          (b.x0 + b.x1) / 2 - (body.x0 + body.x1) / 2,
+          (b.y0 + b.y1) / 2 - (body.y0 + body.y1) / 2,
+        );
+      };
+      expect(far('SLV_M_L')).toBeGreaterThan(far('SLV_L'));
+      expect(far('SLV_M_R')).toBeGreaterThan(far('SLV_R'));
+    }
+  });
+
+  it('op 200: the result lays the fronts against the back along the proposal, the placket on its front edge', () => {
+    const s = steps.find((x) => x.op === 200)!;
+    const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
+    const bp = box('BP');
+    const fr = box('FR');
+    // FR touches BP's side.
+    expect(Math.min(Math.abs(fr.x0 - bp.x1), Math.abs(bp.x0 - fr.x1))).toBeLessThan(12);
+    // Step 130 sewed the placket to the left front's centre edge (the engine reads the same pair,
+    // unsure): it stands against that edge, upright, never on the front.
+    const fl = box('FL');
+    const pl = box('PLCK');
+    expect(Math.min(Math.abs(fl.x0 - pl.x1), Math.abs(pl.x0 - fl.x1))).toBeLessThan(12);
+    expect(pl.y0).toBeGreaterThan(fl.y0 - 12);
+    expect(pl.y1).toBeLessThan(fl.y1 + 12);
+    expect(pieceTilt(geoms.get('PLCK')!, s.result.T.get('PLCK')!)).toBeLessThan(0.03);
+  });
 });
 
 describe('surfaceSeam', () => {
@@ -279,7 +543,7 @@ describe('partnerOf', () => {
 });
 
 describe('labelSpot', () => {
-  it('sits off the edge, away from the piece', () => {
+  it('sits off the edge, inside its own piece — two laid sides never share the gap', () => {
     const s = labelSpot(
       [
         [100, 0],
@@ -288,8 +552,8 @@ describe('labelSpot', () => {
       [50, 100],
       16,
     );
-    expect(s.at).toEqual([116, 100]);
-    expect(s.anchor).toBe('start');
+    expect(s.at).toEqual([84, 100]);
+    expect(s.anchor).toBe('end');
   });
 });
 

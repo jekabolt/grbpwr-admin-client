@@ -40,9 +40,87 @@ export type UnionOptions = {
    * (00-FEASIBILITY §F: tolerable to ~30 mm) — the placement is marked `approx`.
    */
   hangErrMm?: number;
+  /**
+   * Largest lean (rad) a placement may give a piece from its own up — the angle of its y axis,
+   * mirrored or not. A link whose every option leans more is not taken (the piece stands apart).
+   * Absent = any; a stacked layer under its identical twin is never held to it.
+   */
+  uprightMax?: number;
+};
+
+/** How far a placement leans a piece from its own up, mirrored or not. */
+export const tiltOf = (T: Affine) => Math.atan2(Math.abs(T[2]), T[3]);
+
+/**
+ * How far a placement leans THIS piece: a rectangle turned half round is the same shape (a cuff
+ * hangs from a sleeve's hem by whichever long edge the seam names), any other piece is not.
+ */
+export const pieceTilt = (g: Pick<PieceGeom, 'rect'>, T: Affine) => {
+  const t = tiltOf(T);
+  return g.rect ? Math.min(t, Math.PI - t) : t;
 };
 
 type ResolvedEdge = { id: EdgeId; pieceKey: string; pts: Pt2[]; len: number };
+
+/** One piece's edge of a side that runs across several pieces. */
+export type RunPart = { key: string; pts: Pt2[]; len: number };
+
+/**
+ * A side's parts in world, end to end: each part by its piece's placement, turned so it carries on
+ * from the one before (the model lists them in walking order, but each in its own ring's sense).
+ * Null when a part's piece has no placement yet.
+ */
+export function runOf(
+  parts: readonly RunPart[],
+  at: (key: string) => Affine | undefined,
+): Pt2[] | null {
+  const world: Pt2[][] = [];
+  for (const part of parts) {
+    const T = at(part.key);
+    if (!T) return null;
+    world.push(part.pts.map((p) => apply(T, p)));
+  }
+  const d = (p: Pt2, q: Pt2) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  const first = (r: Pt2[]) => r[0];
+  const last = (r: Pt2[]) => r[r.length - 1];
+  let out: Pt2[] = world[0];
+  if (world.length > 1) {
+    const next = world[1];
+    const near = (p: Pt2) => Math.min(d(p, first(next)), d(p, last(next)));
+    if (near(first(out)) < near(last(out))) out = [...out].reverse();
+  }
+  for (let i = 1; i < world.length; i++) {
+    const r = world[i];
+    const seg = d(last(out), first(r)) <= d(last(out), last(r)) ? r : [...r].reverse();
+    out = [...out, ...seg];
+  }
+  return out;
+}
+
+/**
+ * A piece set into a run that would tilt it past upright — a sleeve into an opened armhole, which
+ * lies flat as a slit between the shoulder points — lies sideways instead: an end of its sewn edge
+ * at the run's chord midpoint (the shoulder point), the piece turned a quarter, pointing away from
+ * what it is sewn to. Every candidate: either edge end at the point, turned either way, mirrored or
+ * not; the caller keeps the clear, unmirrored one that points away.
+ */
+export function sidewaysTrials(
+  A: readonly Pt2[],
+  B: readonly Pt2[],
+): { T: Affine; mirrored: boolean }[] {
+  const a0 = A[0];
+  const a1 = A[A.length - 1];
+  const anchor: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
+  const out: { T: Affine; mirrored: boolean }[] = [];
+  for (const q of [B[0], B[B.length - 1]])
+    for (const s of [1, -1])
+      for (const mirrored of [false, true]) {
+        const R: Affine = compose([0, s, -s, 0, 0, 0], mirrored ? [-1, 0, 0, 1, 0, 0] : IDENTITY);
+        const m = apply(R, q);
+        out.push({ T: compose(translate(anchor[0] - m[0], anchor[1] - m[1]), R), mirrored });
+      }
+  return out;
+}
 
 const polyLen = (pts: readonly Pt2[]) => {
   let s = 0;
@@ -133,6 +211,8 @@ type Link = {
   /** The side already on the table / the side being placed. */
   from: ResolvedEdge | null;
   to: ResolvedEdge | null;
+  /** The placed side when it runs across several pieces (an armhole of front + back). */
+  fromParts?: RunPart[];
   fromKey: string;
   toKey: string;
   len: number;
@@ -142,7 +222,7 @@ type Trial = {
   T: Affine;
   overlap: number;
   endErr: number;
-  mode: 'edge' | 'stack' | 'hung' | 'surface';
+  mode: 'edge' | 'stack' | 'hung' | 'surface' | 'run';
   via?: EdgeId;
   /** A surface part laid by its placement mark — not a guess. */
   exact?: boolean;
@@ -199,11 +279,31 @@ export function unionLayout(
       links.push({ seam: s, from, to, fromKey: S.host, toKey: S.part, len: 1e9 });
       continue;
     }
-    const len = Math.max(ea?.len ?? 0, eb?.len ?? 0);
-    links.push({ seam: s, from: ea, to: eb, fromKey: ka, toKey: kb, len });
-    links.push({ seam: s, from: eb, to: ea, fromKey: kb, toKey: ka, len });
+    // A side across several pieces of the unit is laid along as one run (once they are all on
+    // the table); the piece it places still goes by its one longest edge.
+    const partsOf = (ids: readonly EdgeId[] | undefined): RunPart[] | undefined => {
+      if (!ids || ids.length < 2) return undefined;
+      const parts: RunPart[] = [];
+      for (const id of ids) {
+        const e = resolveEdge(id, G);
+        if (!e || !inUnit.has(e.pieceKey)) return undefined;
+        parts.push({ key: e.pieceKey, pts: e.pts, len: e.len });
+      }
+      return parts;
+    };
+    const pa = partsOf(s.aParts);
+    const pb = partsOf(s.bParts);
+    const runLen = (parts: RunPart[] | undefined, e: ResolvedEdge | null) =>
+      parts ? parts.reduce((t, p) => t + p.len, 0) : e?.len ?? 0;
+    const len = Math.max(runLen(pa, ea), runLen(pb, eb));
+    links.push({ seam: s, from: ea, to: eb, fromParts: pa, fromKey: ka, toKey: kb, len });
+    links.push({ seam: s, from: eb, to: ea, fromParts: pb, fromKey: kb, toKey: ka, len });
   }
-  links.sort((p, q) => q.len - p.len);
+  // What the card sews (a stored row, a step's seam) shapes the unit before the engine's own
+  // readings, whatever their length: a front goes on the back's side it is sewn to, not on the
+  // placket the engine would pair with its centre; longest first within each.
+  const tier = (s: SeamCandidate) => (s.provenance || s.sewn ? 1 : 0);
+  links.sort((p, q) => tier(q.seam) - tier(p.seam) || q.len - p.len);
 
   const placed = new Map<string, UnionPlacement>();
   const order: string[] = [];
@@ -211,6 +311,7 @@ export function unionLayout(
   const leaderOf = new Map<string, string>(); // stacked follower → leader
   const stacks = new Map<string, string[]>(); // leader → [leader, …followers]
   const hung: string[] = [];
+  const onRuns: string[] = [];
   const surface: string[] = [];
   const deferred = new Set<string>();
   const overflowSet = new Set(overflow);
@@ -227,6 +328,20 @@ export function unionLayout(
       step,
     );
   const worldPts = (k: string, T: Affine) => G.get(k)!.rs.map((p) => apply(T, p));
+
+  /** A run's chord midpoint, its normal pointing away from the pieces it runs across, their extent. */
+  const awayOf = (A: readonly Pt2[], hostKeys: readonly string[]) => {
+    const a0 = A[0];
+    const a1 = A[A.length - 1];
+    const mid: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
+    const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
+    let n: Pt2 = [-(a1[1] - a0[1]) / len, (a1[0] - a0[0]) / len];
+    const hostPts = hostKeys.flatMap((k) => worldPts(k, placed.get(k)!.T));
+    const hc = centroid(hostPts);
+    if ((hc[0] - mid[0]) * n[0] + (hc[1] - mid[1]) * n[1] > 0) n = [-n[0], -n[1]];
+    const hb = bboxOf(hostPts);
+    return { mid, n, hc, extent: Math.hypot(hb.x1 - hb.x0, hb.y1 - hb.y0) };
+  };
 
   const maxOverlap = (r: Raster, skip?: string) => {
     let m = 0;
@@ -265,19 +380,45 @@ export function unionLayout(
     }
     if (!l.from || !l.to) return null;
 
-    const A = l.from.pts.map((p) => apply(host.T, p));
+    // A run across pieces waits until every one of them is on the table.
+    const run = l.fromParts ? runOf(l.fromParts, (k) => placed.get(k)?.T) : null;
+    if (l.fromParts && !run) return null;
+    const A = run ?? l.from.pts.map((p) => apply(host.T, p));
     const a0 = A[0];
     const a1 = A[A.length - 1];
     const B = l.to.pts;
     const stack = isIdentical(l.seam, G.get(l.fromKey)!, l.toKey);
     const fromLeader = leaderOf.get(l.fromKey) ?? l.fromKey;
+    // A piece set into a run (a sleeve into an opened armhole) points away from what it is sewn
+    // to: the run's normal is its way up, whatever the page says.
+    const away =
+      run && l.fromParts
+        ? awayOf(
+            A,
+            l.fromParts.map((p) => p.key),
+          )
+        : null;
     let best: Trial | null = null;
     let bestScore = Infinity;
     for (const rev of [false, true])
       for (const mir of [false, true]) {
         const q0 = rev ? B[B.length - 1] : B[0];
         const q1 = rev ? B[0] : B[B.length - 1];
-        const T = rigid(a0, a1, q0, q1, mir);
+        let T = rigid(a0, a1, q0, q1, mir);
+        if (run) {
+          // A cap on an armhole run hangs from its middle, not from one end of it.
+          const m0 = apply(T, q0);
+          const m1 = apply(T, q1);
+          T = compose(
+            translate((a0[0] + a1[0] - m0[0] - m1[0]) / 2, (a0[1] + a1[1] - m0[1] - m1[1]) / 2),
+            T,
+          );
+        }
+        if (!stack && opts.uprightMax != null && pieceTilt(toGeom, T) > opts.uprightMax) continue;
+        if (!stack && away) {
+          const c = centroid(worldPts(l.toKey, T));
+          if ((c[0] - away.mid[0]) * away.n[0] + (c[1] - away.mid[1]) * away.n[1] <= 0) continue;
+        }
         const e1 = apply(T, q1);
         const endErr = Math.hypot(e1[0] - a1[0], e1[1] - a1[1]);
         const r = rasterOf(l.toKey, T);
@@ -299,8 +440,34 @@ export function unionLayout(
           best = { T, overlap, endErr, mode: stack ? 'stack' : 'edge', via: l.from.id };
         }
       }
+    if (!best && away && !stack) {
+      // Along the run it would lie past upright (a slit of an armhole): sideways, pointing away.
+      const dx = away.mid[0] - away.hc[0];
+      const dy = away.mid[1] - away.hc[1];
+      for (const s of sidewaysTrials(A, B)) {
+        const c = centroid(worldPts(l.toKey, s.T));
+        if ((c[0] - away.mid[0]) * dx + (c[1] - away.mid[1]) * dy <= 0) continue;
+        const overlap = maxOverlap(rasterOf(l.toKey, s.T));
+        const score = overlap * 1000 + (s.mirrored ? 50 : 0);
+        if (score < bestScore) {
+          bestScore = score;
+          best = { T: s.T, overlap, endErr: 0, mode: 'edge', via: l.from.id };
+        }
+      }
+    }
     if (!best) return null;
 
+    if (away && best.mode === 'edge') {
+      // Off the run along its normal until clear: a cap wider than the opened armhole sits over it.
+      let T = best.T;
+      let overlap = best.overlap;
+      for (let n = 1; overlap > overlapMax && n <= 12; n++) {
+        const off = n * 0.02 * away.extent;
+        T = compose(translate(away.n[0] * off, away.n[1] * off), best.T);
+        overlap = maxOverlap(rasterOf(l.toKey, T));
+      }
+      return { ...best, T, overlap, mode: 'run' };
+    }
     if (l.seam.kind === 'composite' && best.mode === 'edge') {
       // Hang it: pull the piece off the edge along the edge normal, away from the host body.
       const dx = a1[0] - a0[0];
@@ -338,6 +505,7 @@ export function unionLayout(
     }
     const approx = t.mode === 'hung' || t.endErr > hangErr;
     if (t.mode === 'hung') hung.push(k);
+    if (t.mode === 'run') onRuns.push(k);
     put(k, t.T, { attachedVia: t.via, ...(approx ? { approx: true } : {}) }, true);
   };
 
@@ -422,6 +590,7 @@ export function unionLayout(
     bbox,
     stacked: [...stacks.values()],
     hung,
+    onRuns,
     overflow,
     surface,
     underlay,

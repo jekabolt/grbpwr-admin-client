@@ -169,8 +169,12 @@ export default function SeamPicker({
     return g?.pieces.find((p) => pieces?.has(p)) ?? null;
   }, [host, hostSide, sel, groups, hostGroup, pieces]);
 
-  /** The pair on the table: the user's own (both sides, or one side + its partner), else the proposal. */
-  const pair: (SeamSides & { own: boolean }) | null = (() => {
+  /**
+   * The pair on the table: the user's own (both sides, or one side + its partner), else the
+   * proposal — with the lengths as sewn, which its notches may read shorter than the edges (a
+   * neckline's folds and pleat stay out of the collar seam).
+   */
+  const pair: (SeamSides & { own: boolean; aLen?: number; bLen?: number }) | null = (() => {
     if (inners.length) return null;
     if (sel.a.length && sel.b.length) return { a: sel.a, b: sel.b, own: true };
     if (lone && partner)
@@ -178,7 +182,13 @@ export default function SeamPicker({
         ? { a: sel.a, b: [partner], own: true }
         : { a: [partner], b: sel.b, own: true };
     if (!sel.a.length && !sel.b.length && suggestion)
-      return { a: suggestion.a, b: suggestion.b, own: false };
+      return {
+        a: suggestion.a,
+        b: suggestion.b,
+        own: false,
+        aLen: suggestion.aLen,
+        bLen: suggestion.bLen,
+      };
     return null;
   })();
   const canAccept =
@@ -288,21 +298,23 @@ export default function SeamPicker({
     const first = s.sides.a[0] ?? s.sides.b[0];
     if (first) nos.push({ id: first, i });
   });
-  const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) =>
+  const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone'], lenMm?: number) =>
     ids.forEach((id, k) =>
-      marks.push({ id, tone, label: k === 0 ? mmText(sideLen(ids)) : undefined }),
+      marks.push({ id, tone, label: k === 0 ? mmText(lenMm ?? sideLen(ids)) : undefined }),
     );
   if (sel.a.length || sel.b.length) {
     sideMarks(sel.a, 'pick');
     sideMarks(sel.b, 'pick');
     if (partner) sideMarks([partner], 'proposal');
   } else if (pair) {
-    sideMarks(pair.a, 'proposal');
-    sideMarks(pair.b, 'proposal');
+    sideMarks(pair.a, 'proposal', pair.aLen);
+    sideMarks(pair.b, 'proposal', pair.bLen);
   }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
-  const delta = pair ? deltaMm(sideLen(pair.a), sideLen(pair.b), ease) : null;
+  const delta = pair
+    ? deltaMm(pair.aLen ?? sideLen(pair.a), pair.bLen ?? sideLen(pair.b), ease)
+    : null;
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();

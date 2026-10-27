@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
+import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
 import {
   deltaMm,
   dropKeys,
+  easeOf,
   hasMultipleStepPieces,
   inputGroups,
   inputUnitsWithOuterEdges,
@@ -13,6 +15,7 @@ import {
   isJoinStep,
   longestEdge,
   rowWords,
+  sewnBeforeStep,
   sideOf,
   stepInputPieces,
   suggestPair,
@@ -98,7 +101,11 @@ function shaped(
   };
 }
 
-function storedSeam(key: string, a: string, b: string): StoredSeam {
+function storedSeam(
+  key: string,
+  a: string | readonly string[],
+  b: string | readonly string[],
+): StoredSeam {
   const anchor = (hint: string): EdgeAnchor => ({
     piece: hint.slice(0, hint.lastIndexOf('#')),
     samples: [
@@ -122,8 +129,8 @@ function storedSeam(key: string, a: string, b: string): StoredSeam {
     kind: 'edge',
     direction: 'reversed',
     source: 'manual',
-    sideA: [anchor(a)],
-    sideB: [anchor(b)],
+    sideA: (typeof a === 'string' ? [a] : a).map(anchor),
+    sideB: (typeof b === 'string' ? [b] : b).map(anchor),
     anchoredSize: '',
     note: '',
   };
@@ -188,6 +195,12 @@ describe('lengths', () => {
     expect(deltaMm(500, 480, null)).toBe(20);
     expect(deltaMm(600, 500, 1.2)).toBeCloseTo(0, 6);
     expect(deltaMm(0, 500, null)).toBe(0);
+  });
+  it('reads the step ratio as typed, comma included', () => {
+    expect(easeOf({ fullnessRatio: '1,2' })).toBe(1.2);
+    expect(easeOf({ fullnessRatio: 1.5 })).toBe(1.5);
+    expect(easeOf({ fullnessRatio: '' })).toBeNull();
+    expect(easeOf(undefined)).toBeNull();
   });
   it('sums edges and inner lines of a side', () => {
     const geoms = new Map([['FP', rect('FP', 100, 200)]]);
@@ -292,7 +305,9 @@ describe('suggestStepPair', () => {
     expect(
       inputUnitsWithOuterEdges(ops, 3, keys, geoms, used)[0].edges.map((edge) => edge.id),
     ).not.toContain('FR#1');
-    const suggestion = suggestStepPair(ops, 3, keys, geoms, used, null)!;
+    // The rows say what the earlier steps sewed: the armholes, alike in length, are no guess
+    // beside a stored side seam.
+    const suggestion = suggestStepPair(ops, 3, keys, geoms, used, null, rows)!;
     const pair = [...suggestion.a, ...suggestion.b];
     expect(pair.some((id) => id === 'FR#0' || id === 'BP#0')).toBe(true);
     expect(pair.some((id) => id === 'SLV_R#0' || id === 'SLV_L#0')).toBe(true);
@@ -302,7 +317,11 @@ describe('suggestStepPair', () => {
     const keys = new Set(['COLLAR', 'STAND', 'FRONT', 'BACK', 'SLEEVE']);
     const ops = [
       { inputKeys: ['COLLAR', 'STAND'], outputUnitKey: 'COLLAR_UNIT', seamKeys: ['collar'] },
-      { inputKeys: ['FRONT', 'BACK', 'SLEEVE'], outputUnitKey: 'SHIRT', seamKeys: ['body'] },
+      {
+        inputKeys: ['FRONT', 'BACK', 'SLEEVE'],
+        outputUnitKey: 'SHIRT',
+        seamKeys: ['body', 'arm'],
+      },
       { inputKeys: ['COLLAR_UNIT', 'SHIRT'], outputUnitKey: 'GARMENT' },
     ];
     const geoms = new Map([
@@ -315,15 +334,17 @@ describe('suggestStepPair', () => {
         'FRONT',
         shaped('FRONT', 'Right front', [{ len: 180, turn: -45 }, { len: 182 }, { len: 390 }]),
       ],
-      ['BACK', shaped('BACK', 'Back', [{ len: 280 }, { len: 400 }, { len: 220 }])],
+      ['BACK', shaped('BACK', 'Back', [{ len: 182, turn: -45 }, { len: 400 }, { len: 220 }])],
       [
         'SLEEVE',
         shaped('SLEEVE', 'Right sleeve', [{ len: 182, turn: 45 }, { len: 400 }, { len: 220 }], 'R'),
       ],
     ]);
+    // The sleeve sits on the back's armhole by its row; the front's curve is the neckline.
     const rows = new Map([
       ['collar', storedSeam('collar', 'COLLAR#1', 'STAND#1')],
       ['body', storedSeam('body', 'FRONT#2', 'BACK#1')],
+      ['arm', storedSeam('arm', 'SLEEVE#0', 'BACK#0')],
     ]);
     const suggestion = suggestStepPair(
       ops,
@@ -332,6 +353,7 @@ describe('suggestStepPair', () => {
       geoms,
       usedEdgesBeforeStep(ops, 2, rows),
       null,
+      rows,
     )!;
     expect(suggestion.a).toEqual(['STAND#0']);
     expect(suggestion.b).toEqual(['FRONT#0']);
@@ -391,7 +413,8 @@ describe('suggestStepPair', () => {
   });
 
   // Card 83 lengths: the armhole is two edges (217 + 255) against a 492 cap, so no single
-  // edge fits; a 449 side seam (18°) is near the cap's length but is not an armhole.
+  // edge fits; a 449 side seam (18°) is near the cap's length but is not an armhole. These
+  // shapes carry no corners, so no chain forms either (the real outlines below do).
   it('body + sleeve with no curve pair in the gate: no suggestion, not a side seam', () => {
     const keys = new Set(['FR', 'BP', 'SLV_R']);
     const ops = [
@@ -435,6 +458,203 @@ describe('suggestStepPair', () => {
     ]);
     const suggestion = suggestStepPair(ops, 1, keys, geoms, new Set(), null)!;
     expect([...suggestion.a, ...suggestion.b].sort()).toEqual(['FL#0', 'SLV_L#0']);
+  });
+});
+
+/**
+ * Card 83, the owner's shirt as beta holds it (card83.fixture): real outlines, notches, every
+ * step. The seams below are the ones a sewer would name.
+ */
+describe('card 83: chains across the seams earlier steps made', () => {
+  const geoms = card83Geoms();
+  const keys = CARD83_PIECE_KEYS;
+  const ops = CARD83_OPS;
+  const at = card83Step;
+  const suggest = (op: number, used: Iterable<string> = []) =>
+    suggestStepPair(ops, at(op), keys, geoms, new Set(used), null);
+  const sorted = (xs: readonly string[]) => [...xs].sort();
+
+  it('370: the whole armhole, front + back across side and shoulder seams, meets the sleeve cap', () => {
+    // The back armhole alone fits half the cap (its notches align there): the whole armhole,
+    // aligned end to end — the cap's shoulder notch at the junction — must win.
+    const s = suggest(370)!;
+    expect(sorted(s.a)).toEqual(['BP#4', 'FL#1']);
+    expect(s.b).toEqual(['SLV_L#0']);
+    expect(s.aLen).toBeCloseTo(466.5, 0);
+    expect(s.bLen).toBeCloseTo(469, 0);
+    // The picker, once that pair is taken: the other armhole and the other sleeve — a closed run
+    // (shoulder and side seam both sewn) opened at the underarm, where the cap's notches read.
+    const next = suggest(370, [...s.a, ...s.b])!;
+    expect(sorted(next.a)).toEqual(['BP#0', 'FR#3']);
+    expect(next.b).toEqual(['SLV_R#1']);
+    expect(next.aLen).toBeCloseTo(466.5, 0);
+    expect(next.bLen).toBeCloseTo(469, 0);
+    expect(suggestionWords(next, (p) => p)).toMatch(/^(BP-0 \+ FR-3|FR-3 \+ BP-0) ↔ SLV_R-1$/);
+  });
+
+  it('370: the step sews both armholes, so a later step sees both sleeves on the body', () => {
+    const sewn = sewnBeforeStep(ops, at(400), keys, geoms);
+    const arms = sewn.filter((p) => /^SLV_[LR]#/.test(p.b[0] ?? '') && !/^SLV_/.test(p.a[0] ?? ''));
+    expect(arms.map((p) => [sorted(p.a), p.b, p.own])).toEqual([
+      [['BP#4', 'FL#1'], ['SLV_L#0'], true],
+      [['BP#0', 'FR#3'], ['SLV_R#1'], true],
+    ]);
+  });
+
+  it('400: the collar stand meets the neckline by its notches; the front folds and the back pleat stay out', () => {
+    const s = suggest(400)!;
+    expect(s.a).toEqual(['CLR_1#6']);
+    expect(s.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
+    // Edge to edge the neckline is 579 mm against 439 — a quarter of it is two 35 mm fold-backs
+    // and a 70 mm box pleat between notches; sewn, the two sides are the same length.
+    expect(s.aLen).toBeCloseTo(439.2, 0);
+    expect(s.bLen).toBeCloseTo(439.3, 0);
+    expect(targetsLen(s.b, geoms, () => 0)).toBeCloseTo(579.3, 0);
+  });
+
+  it('50: identical collar layers are sewn along their outer edge, the neck edge left for the body', () => {
+    expect(suggest(50)).toMatchObject({ a: ['CLR_1#2'], b: ['CLR#2'] });
+    expect(sewnBeforeStep(ops, at(130), keys, geoms)).toMatchObject([
+      { a: ['CLR_1#2'], b: ['CLR#2'], layer: true },
+    ]);
+  });
+
+  it('single-edge steps keep their answers', () => {
+    expect(suggest(130)).toMatchObject({ a: ['PLCK#0'], b: ['FL#4'] });
+    expect(suggest(200)).toMatchObject({ a: ['FR#4'], b: ['BP#7'] });
+  });
+
+  it('a cuff: its layers sewn along one long edge, the sleeve onto the other', () => {
+    // A 272.5 × 140 rectangle: which long edge the layer seam takes is a tie (the beta DXF
+    // reads #0, the rounded fixture #2); the sleeve must get the one left free.
+    const cuffR = suggest(230)!;
+    expect(cuffR.a[0]).toMatch(/^SLV_M_R#[02]$/);
+    expect(cuffR.b).toEqual([cuffR.a[0].replace('SLV_M_R#', 'SLV_M_R_1#')]);
+    expect(cuffR.aLen).toBeCloseTo(272.5, 0);
+    const sleeveR = suggest(280)!;
+    expect(sleeveR.a).toEqual(['SLV_R#3']);
+    expect(sleeveR.b[0]).toMatch(/^SLV_M_R#[02]$/);
+    expect(sleeveR.b[0]).not.toBe(cuffR.a[0]);
+    expect(sleeveR.aLen).toBeCloseTo(325, 0);
+    expect(sleeveR.bLen).toBeCloseTo(272.5, 0);
+    const cuffL = suggest(310)!;
+    expect(cuffL.a[0]).toMatch(/^SLV_M_L#[13]$/);
+    expect(cuffL.b[0]).toMatch(/^SLV_M_L_1#[02]$/);
+    const sleeveL = suggest(360)!;
+    expect(sleeveL.a).toEqual(['SLV_L#2']);
+    expect(sleeveL.b[0]).toMatch(/^SLV_M_L#[13]$/);
+    expect(sleeveL.b[0]).not.toBe(cuffL.a[0]);
+  });
+
+  it('260 / 340: a sleeve closed on itself is a join of one input — its underarm seam', () => {
+    expect(isJoinStep(ops, at(260), keys, geoms)).toBe(true);
+    expect(suggest(260)).toMatchObject({ a: ['SLV_R#0'], b: ['SLV_R#2'] });
+    expect(suggest(260)!.aLen).toBeCloseTo(418.5, 0);
+    expect(suggest(340)).toMatchObject({ a: ['SLV_L#1'], b: ['SLV_L#3'] });
+    // A back on its own has no such seam.
+    expect(isJoinStep(ops, at(180), keys, geoms)).toBe(false);
+    expect(suggest(180)).toBeNull();
+  });
+
+  it('press, fuse, button and topstitch steps sew no seam', () => {
+    for (const op of [20, 60, 70, 120, 190, 270, 380, 390, 430, 440, 450]) {
+      expect(isJoinStep(ops, at(op), keys, geoms)).toBe(false);
+      expect(suggest(op)).toBeNull();
+    }
+  });
+
+  it('stored seams are junctions too; the neck run stops at the fronts, not on the placket', () => {
+    const rows = new Map([
+      ['placket', storedSeam('placket', 'PLCK#0', 'FL#4')],
+      ['side', storedSeam('side', 'FR#4', 'BP#7')],
+    ]);
+    const stored = ops.map((op) =>
+      op.operationNumber === 130
+        ? { ...op, seamKeys: ['placket'] }
+        : op.operationNumber === 200
+          ? { ...op, seamKeys: ['side'] }
+          : op,
+    );
+    const arm = suggestStepPair(
+      stored,
+      at(370),
+      keys,
+      geoms,
+      usedEdgesBeforeStep(stored, at(370), rows),
+      null,
+      rows,
+    )!;
+    expect([arm.a.length, arm.b.length]).toEqual([2, 1]);
+    const neck = suggestStepPair(
+      stored,
+      at(400),
+      keys,
+      geoms,
+      usedEdgesBeforeStep(stored, at(400), rows),
+      null,
+      rows,
+    )!;
+    expect(neck.a).toEqual(['CLR_1#6']);
+    expect(neck.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
+  });
+
+  it('without the step list a chain crosses no seam: the back armhole alone takes half the cap', () => {
+    const s = suggestPair(
+      [{ pieces: ['FR', 'BP'] }, { pieces: ['SLV_R'] }],
+      geoms,
+      new Set(),
+      null,
+    )!;
+    expect(s.a).toEqual(['BP#0']);
+    expect(s.b).toEqual(['SLV_R#1']);
+    // Read by the notches: the cap's back half, not its 469 mm.
+    expect(s.aLen).toBeGreaterThan(240);
+    expect(s.aLen).toBeLessThan(260);
+    expect(s.bLen).toBeGreaterThan(240);
+    expect(s.bLen).toBeLessThan(260);
+  });
+});
+
+describe('join steps by type and work', () => {
+  const pieces = new Set(['FP', 'BP']);
+  const two = (extra: object) => [{ inputKeys: ['FP', 'BP'], ...extra }];
+
+  it('a press, a fuse or a button step over two inputs is no join', () => {
+    expect(isJoinStep(two({ operationType: 'TECH_CARD_OPERATION_TYPE_PRESS' }), 0, pieces)).toBe(
+      false,
+    );
+    expect(isJoinStep(two({ operationType: 'TECH_CARD_OPERATION_TYPE_FUSING' }), 0, pieces)).toBe(
+      false,
+    );
+    expect(
+      isJoinStep(
+        two({ operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE', work: 'fuse' }),
+        0,
+        pieces,
+      ),
+    ).toBe(false);
+    expect(
+      isJoinStep(
+        two({ operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE', work: 'button_attach' }),
+        0,
+        pieces,
+      ),
+    ).toBe(false);
+    expect(hasMultipleStepPieces(two({ operationType: 'press' }), 0, pieces)).toBe(false);
+  });
+
+  it('a machine step, a step with no type, or any step with a seam row stays a join', () => {
+    expect(isJoinStep(two({ operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE' }), 0, pieces)).toBe(
+      true,
+    );
+    expect(isJoinStep(two({}), 0, pieces)).toBe(true);
+    expect(
+      isJoinStep(
+        two({ operationType: 'TECH_CARD_OPERATION_TYPE_PRESS', seamKeys: ['s'] }),
+        0,
+        pieces,
+      ),
+    ).toBe(true);
   });
 });
 

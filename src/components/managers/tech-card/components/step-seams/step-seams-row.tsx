@@ -40,8 +40,8 @@ export function StepSeamsRow({ index }: { index: number }) {
   const [busy, setBusy] = useState(false);
 
   const hasMultiplePieces = useMemo(
-    () => hasMultipleStepPieces(ops, index, pieceKeys),
-    [ops, index, pieceKeys],
+    () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
+    [ops, index, pieceKeys, geoms],
   );
   const layout = useStepLayout(leaves, frameSeams, geoms, 0.12, 4);
   const nameOf = scene.pieceName;
