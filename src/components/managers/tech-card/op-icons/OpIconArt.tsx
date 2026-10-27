@@ -16,15 +16,23 @@ function shapeElement(shape: Shape, key: string): JSX.Element {
     (shape[0] === 'c' && shape[4] === 1) ||
     (shape[0] === 'r' && shape[6] === 1);
   const common = {
-    key,
     className: dashed ? 'd' : undefined,
     strokeDasharray: dashed ? '3 3' : undefined,
     vectorEffect: 'non-scaling-stroke' as const,
   };
-  if (shape[0] === 'p') return <path {...common} d={shape[1]} />;
-  if (shape[0] === 'c') return <circle {...common} cx={shape[1]} cy={shape[2]} r={shape[3]} />;
+  if (shape[0] === 'p') return <path key={key} {...common} d={shape[1]} />;
+  if (shape[0] === 'c')
+    return <circle key={key} {...common} cx={shape[1]} cy={shape[2]} r={shape[3]} />;
   return (
-    <rect {...common} x={shape[1]} y={shape[2]} width={shape[3]} height={shape[4]} rx={shape[5]} />
+    <rect
+      key={key}
+      {...common}
+      x={shape[1]}
+      y={shape[2]}
+      width={shape[3]}
+      height={shape[4]}
+      rx={shape[5]}
+    />
   );
 }
 

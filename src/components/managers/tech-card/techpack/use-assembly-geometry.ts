@@ -28,7 +28,7 @@ import type { PieceDTO } from 'lib/nesting/types';
 import { grainRotation } from 'lib/pom/upright';
 import { isDxfUrl } from 'utils/pattern';
 
-import type { AsmPiece, Pt } from './derive-assembly';
+import { assemblyPieceCode, type AsmPiece, type Pt } from './derive-assembly';
 import type { TechpackPieceGeometry } from './derive-pieces';
 
 type Ins = NonNullable<common_TechCard['techCard']>;
@@ -175,6 +175,7 @@ export function buildAssemblyPieces(
     drawn.set(key, {
       key,
       name: p.name || name,
+      code: assemblyPieceCode(p.name, f.block),
       cut: simplify(cut),
       inner,
       notch,

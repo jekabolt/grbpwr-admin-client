@@ -62,10 +62,10 @@ const fixture = {
   resolvedTechnicalMedia: [],
 } as unknown as common_TechCard;
 
-// PARITY (assembly-schema T12): the audit's «pdf gaps» rows, the registry and the red marks the
-// document prints are one list — same fixture, same inputs.
+// PARITY (assembly-schema T12): the audit's «pdf gaps» rows, the registry and section 06's final
+// gaps list are one ordered list — same fixture, same inputs.
 describe('PDF gaps in the audit', () => {
-  it('audit rows == collectPdfGaps == data-gap marks', () => {
+  it('audit rows == collectPdfGaps == section 06 list rows, in order', () => {
     Object.assign(globalThis, {
       window: { location: { origin: 'https://admin.beta.grbpwr.com' } },
     });
@@ -103,12 +103,15 @@ describe('PDF gaps in the audit', () => {
     const pdf = renderToStaticMarkup(
       <TechpackDocument techCard={fixture} orient='land' revision='rev 1' />,
     );
-    const marks = new Set(
-      [...pdf.matchAll(/data-gap="([^"]+)"/g)].map((m) => m[1].replaceAll('&amp;', '&')),
+    const listRows = [...pdf.matchAll(/data-gap-list-row="([^"]+)"/g)].map((m) =>
+      m[1].replaceAll('&amp;', '&'),
     );
+    const keys = gaps.map(gapKey);
 
-    expect(rows).toEqual(gaps.map(gapKey));
-    expect(new Set(rows)).toEqual(marks);
-    expect(audit).toContain('no seam · pick');
+    expect(rows).toEqual(keys);
+    expect(listRows).toEqual(keys);
+    expect(new Set(listRows).size).toBe(listRows.length);
+    expect(audit).toContain('assembly</span> · seam');
+    expect(pdf).toContain('op 560 · seam');
   });
 });

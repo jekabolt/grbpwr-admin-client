@@ -73,17 +73,22 @@ export const TECHPACK_SHEET_CSS = String.raw`
 export function TechpackSheet({
   orient,
   docline,
+  count,
   children,
 }: {
   orient: PrintOrient;
   docline: string;
+  /** Local count for isolated/multi-sheet sections; the full document counter may overwrite it. */
+  count?: string;
   children: ReactNode;
 }) {
   return (
     <div className='tp-sheet' data-orient={orient}>
       <div className='tp-docline'>{docline}</div>
       <div className='tp-body'>{children}</div>
-      <div className='tp-count' data-page-count='' />
+      <div className='tp-count' data-page-count=''>
+        {count}
+      </div>
     </div>
   );
 }

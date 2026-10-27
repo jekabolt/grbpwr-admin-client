@@ -74,8 +74,8 @@ export const KEYS_CSS = String.raw`
 .tpa-fw { fill: var(--color-bgColor); }
 .tpa-fh { fill: var(--color-hairline); }
 .tpa-fp { fill: var(--color-pageBg); }
-.tpa-asm-old { fill: var(--color-textColor); fill-opacity: .14; }
-.tpa-asm-new { fill: var(--color-textColor); fill-opacity: .22; }
+.tpa-asm-old { fill: var(--color-textColor); fill-opacity: .10; }
+.tpa-asm-new { fill: var(--color-textColor); fill-opacity: .42; }
 .tpa-asm-code { fill: var(--color-textColor); font-family: FeatureMono, monospace; font-weight: 700; paint-order: stroke; stroke: var(--color-bgColor); stroke-width: 2px; stroke-linejoin: round; }
 .tpa-asm-unit { fill: var(--color-labelColor); font-family: FeatureMono, monospace; paint-order: stroke; stroke: var(--color-bgColor); stroke-width: 2px; stroke-linejoin: round; }
 .tpa-bad { color: var(--color-error); font-weight: 700; }
@@ -95,9 +95,9 @@ export const KEYS_CSS = String.raw`
 .asm-legend { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--color-hairline); color: var(--color-labelColor); font-size: 11px; line-height: 1.2; }
 .asm-legend > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .asm-sw { display: inline-block; width: 4mm; height: 3mm; border: 1px solid var(--color-textColor); background: var(--color-bgColor); }
-.asm-sw.asm-sw-old { background: color-mix(in srgb, var(--color-textColor) 14%, var(--color-bgColor)); }
-.asm-sw.asm-sw-new { background: color-mix(in srgb, var(--color-textColor) 22%, var(--color-bgColor)); border-width: 1.5px; }
-.asm-sw.asm-sw-top { background: color-mix(in srgb, var(--color-textColor) 22%, var(--color-bgColor)); border-width: 2px; }
+.asm-sw.asm-sw-old { background: color-mix(in srgb, var(--color-textColor) 10%, var(--color-bgColor)); }
+.asm-sw.asm-sw-new { background: color-mix(in srgb, var(--color-textColor) 42%, var(--color-bgColor)); border-width: 1.5px; }
+.asm-sw.asm-sw-top { background: color-mix(in srgb, var(--color-textColor) 60%, var(--color-bgColor)); border-width: 2px; }
 .asm-overlap { position: relative; display: inline-block; width: 5mm; height: 3.5mm; }
 .asm-overlap::before, .asm-overlap::after { content: ''; position: absolute; width: 3.6mm; height: 2.8mm; border: 1px solid var(--color-textColor); background: color-mix(in srgb, var(--color-textColor) 20%, var(--color-bgColor)); }
 .asm-overlap::before { left: 0; top: 0; }

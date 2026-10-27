@@ -16,12 +16,26 @@
 // Pure TS: no React. The hook in use-assembly-geometry.ts reads the DXF and hands the pieces in.
 import type { common_TechCard, common_TechCardOperation } from 'api/proto-http/admin';
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
-import { machineTypeLabel } from 'components/managers/tech-card/components/equipment-options';
 import {
+  isPressStepType,
+  machineTypeLabel,
+  pressEquipmentLabel,
+} from 'components/managers/tech-card/components/equipment-options';
+import {
+  bindingStyleLabel,
+  operationHeading,
   pressTowardLabel,
-  topstitchPhrase,
+  seamClassLabel,
+  stepPlacementText,
+  stepPressText,
+  stepSeamFactTexts,
+  stepToolFactParts,
+  topstitchDistanceText,
+  topstitchLine,
   zoneLabel,
+  type StepFacts,
 } from 'components/managers/tech-card/components/operation-options';
+import { BUNDLED_WORK_CATALOG } from 'components/managers/tech-card/components/operation-work';
 import {
   opIcon,
   opIconCardOf,
@@ -30,6 +44,7 @@ import {
 } from 'components/managers/tech-card/op-icons';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import { unitDisplayName } from 'lib/assembly-unit-name';
+import { longAxisAngle } from 'lib/nesting/render/label-fit';
 import {
   contourSig,
   frameOf,
@@ -45,7 +60,7 @@ import {
 import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seams/frame';
 import { hitOf } from 'lib/seams/resolve';
 
-import type { Gap, GapSink } from './gaps';
+import { GapSink, type Gap } from './gaps';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -54,6 +69,8 @@ type Matrix = [number, number, number, number, number, number];
 export type AsmPiece = {
   key: string;
   name: string;
+  /** Short printed code from the card name or its DXF alias. Never the line key. */
+  code?: string;
   /** Outer contour (cut line). */
   cut: Pt[];
   /** Internal lines (placement, fold, darts), simplified. */
@@ -129,6 +146,11 @@ export type OpWords = {
   tool: Seg[];
   /** Machine / iron / hand. */
   mc?: Seg;
+  /** Filled construction facts, printed as the quiet second line below the operation. */
+  params: string[];
+  /** Filled press settings, printed below the equipment name. */
+  machineParams: string[];
+  draft: boolean;
 };
 
 type Input = { kind: 'piece' | 'unit' | 'other'; key: string };
@@ -187,6 +209,8 @@ export type JoinCard = {
   fold: boolean;
   /** Only near-complete garment units are cropped to the active seam zone. */
   crop: boolean;
+  /** Direct cut-piece inputs, numbered in operation order. */
+  pieceNumbers: ReadonlyMap<string, number>;
 };
 
 /** One row of the assembly table. */
@@ -195,7 +219,7 @@ export type AsmRow = {
   words: OpWords;
   card?: JoinCard;
   /** What a non-joining op acts on, for its outline. */
-  target?: { unit?: string; piece?: string };
+  target?: { unit?: string; piece?: string; label?: string };
 };
 
 export type AssemblyModel = {
@@ -206,6 +230,8 @@ export type AssemblyModel = {
   units: Map<string, Item[]>;
   /** Stored seams that did not resolve on today's pattern (not drawn). */
   unresolved: number;
+  /** Every missing assembly fact, for the terminal Gaps list. */
+  gaps: Gap[];
   emptyGap?: Gap;
 };
 
@@ -215,6 +241,24 @@ const JOIN_WORKS = new Set(['join_lockstitch', 'overlock_serge']);
 const NOT_JOIN = new Set(['button_attach', 'buttonhole', 'topstitch', 'bind_tape_edge']);
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+const CODE_TOKEN = /^[A-Z0-9][A-Z0-9._/-]*$/i;
+
+/** Piece codes printed in assembly diagrams/text. Stable storage keys are deliberately rejected. */
+export function assemblyPieceCode(pieceName?: string, dxfAlias?: string): string {
+  const code = (value: string | undefined, requireCodeShape: boolean) => {
+    const candidate = (value ?? '').trim();
+    const codeShaped = candidate === candidate.toUpperCase() || /[0-9_./-]/.test(candidate);
+    return candidate.length <= 24 &&
+      CODE_TOKEN.test(candidate) &&
+      !ULID.test(candidate) &&
+      (!requireCodeShape || codeShaped)
+      ? candidate
+      : '';
+  };
+  return code(pieceName, true) || code(dxfAlias, false);
+}
+
 const num = (v?: { value?: string }) => {
   const x = Number(v?.value);
   return v?.value != null && v.value !== '' && Number.isFinite(x) ? x : null;
@@ -263,6 +307,8 @@ const TECH_BY_WORK: Record<string, Tech> = {
 function techOf(o: common_TechCardOperation): Tech {
   const byWork = TECH_BY_WORK[o.work ?? ''];
   if (byWork) return byWork;
+  if (o.operationType === 'TECH_CARD_OPERATION_TYPE_FUSING') return 'press';
+  if (o.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN') return 'pressSide';
   if (o.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS') {
     if (o.press?.action === 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE') return 'pressSide';
     if (o.press?.action === 'TECH_CARD_PRESS_ACTION_FINAL') return 'pressFinal';
@@ -344,6 +390,27 @@ function unionLoops(polygons: readonly Pt[][]): Pt[][] {
   } catch {
     return polygons.map((polygon) => [...polygon]);
   }
+}
+
+/** One enclosing outline for a seam-less unit fallback. Internal piece rules remain visible. */
+function groupOutline(polygons: readonly Pt[][]): Pt[] {
+  if (polygons.length === 1) return [...polygons[0]];
+  const points = polygons.flat();
+  if (points.length < 3) return points;
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const turn = (a: Pt, b: Pt, c: Pt) => cross(sub(b, a), sub(c, a));
+  const half = (input: readonly Pt[]) => {
+    const out: Pt[] = [];
+    for (const point of input) {
+      while (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], point) <= 0)
+        out.pop();
+      out.push(point);
+    }
+    return out;
+  };
+  const lower = half(sorted);
+  const upper = half([...sorted].reverse());
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
 function polyLen(pts: readonly Pt[]): number {
@@ -655,6 +722,438 @@ function bounds(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]) {
   if (!Number.isFinite(x0)) return { x0: 0, y0: 0, x1: 1, y1: 1 };
   return { x0, y0, x1, y1 };
 }
+
+type Bounds = ReturnType<typeof bounds>;
+type LabelSlot = Bounds;
+
+const PRINT_CODE_PX = 9.5;
+const PRINT_CODE_MIN_PX = (7 * 96) / 72;
+/** A 0.1 mm planning guard keeps the browser's real glyph box outside the required 1 mm. */
+const PRINT_CODE_CLEARANCE_PX = (1.1 * 96) / 25.4;
+const PRINT_UNIT_PX = 9.5;
+const LABEL_CHAR_WIDTH = 0.62;
+const CODE_CHAR_WIDTH = 0.64;
+const CODE_HEIGHT_EM = 0.98;
+
+const labelWidth = (text: string, fontSize: number) => text.length * fontSize * LABEL_CHAR_WIDTH;
+const overlaps = (a: Bounds, b: Bounds, gap = 0) =>
+  a.x0 < b.x1 + gap && a.x1 > b.x0 - gap && a.y0 < b.y1 + gap && a.y1 > b.y0 - gap;
+const growBounds = (box: Bounds, extra: Bounds): Bounds => ({
+  x0: Math.min(box.x0, extra.x0),
+  y0: Math.min(box.y0, extra.y0),
+  x1: Math.max(box.x1, extra.x1),
+  y1: Math.max(box.y1, extra.y1),
+});
+const containFit = (frame: Bounds, box?: [number, number]) =>
+  box
+    ? Math.min(
+        box[0] / Math.max(frame.x1 - frame.x0, 1e-6),
+        box[1] / Math.max(frame.y1 - frame.y0, 1e-6),
+      )
+    : 0;
+
+type Span = [number, number];
+
+function spansAtX(polygon: readonly Pt[], x: number): Span[] {
+  const hits: number[] = [];
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index];
+    const b = polygon[(index + 1) % polygon.length];
+    if (!((a[0] <= x && b[0] > x) || (b[0] <= x && a[0] > x))) continue;
+    hits.push(a[1] + ((x - a[0]) * (b[1] - a[1])) / (b[0] - a[0]));
+  }
+  hits.sort((a, b) => a - b);
+  const spans: Span[] = [];
+  for (let index = 0; index + 1 < hits.length; index += 2)
+    spans.push([hits[index], hits[index + 1]]);
+  return spans;
+}
+
+function sharedSpans(samples: readonly Span[][]): Span[] {
+  let shared = samples[0] ?? [];
+  for (const sample of samples.slice(1)) {
+    const next: Span[] = [];
+    for (const a of shared)
+      for (const b of sample) {
+        const lo = Math.max(a[0], b[0]);
+        const hi = Math.min(a[1], b[1]);
+        if (lo < hi) next.push([lo, hi]);
+      }
+    shared = next;
+  }
+  return shared.sort((a, b) => b[1] - b[0] - (a[1] - a[0]));
+}
+
+const rotatePoint = (point: Pt, angleDeg: number): Pt => {
+  if (Math.abs(angleDeg) < 1e-9) return [...point];
+  const radians = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos];
+};
+
+function polygonBounds(polygon: readonly Pt[]): Bounds {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of polygon) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : { x0: 0, y0: 0, x1: 0, y1: 0 };
+}
+
+function pointInPolygon(point: Pt, polygon: readonly Pt[]): boolean {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const a = polygon[index];
+    const b = polygon[previous];
+    if (
+      a[1] > point[1] !== b[1] > point[1] &&
+      point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0]
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+const orientation = (a: Pt, b: Pt, c: Pt) =>
+  (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const abC = orientation(a, b, c);
+  const abD = orientation(a, b, d);
+  const cdA = orientation(c, d, a);
+  const cdB = orientation(c, d, b);
+  return abC > 0 !== abD > 0 && cdA > 0 !== cdB > 0;
+}
+
+/** Exact containment for the clearance-expanded code rectangle in the piece outline. */
+function rectangleInsidePolygon(rectangle: Bounds, polygon: readonly Pt[]): boolean {
+  const corners: Pt[] = [
+    [rectangle.x0, rectangle.y0],
+    [rectangle.x1, rectangle.y0],
+    [rectangle.x1, rectangle.y1],
+    [rectangle.x0, rectangle.y1],
+  ];
+  if (corners.some((corner) => !pointInPolygon(corner, polygon))) return false;
+  for (let index = 0; index < polygon.length; index++) {
+    const a = polygon[index];
+    const b = polygon[(index + 1) % polygon.length];
+    if (
+      Math.max(a[0], b[0]) < rectangle.x0 ||
+      Math.min(a[0], b[0]) > rectangle.x1 ||
+      Math.max(a[1], b[1]) < rectangle.y0 ||
+      Math.min(a[1], b[1]) > rectangle.y1
+    ) {
+      continue;
+    }
+    for (let edge = 0; edge < corners.length; edge++) {
+      if (segmentsCross(a, b, corners[edge], corners[(edge + 1) % corners.length])) return false;
+    }
+  }
+  return true;
+}
+
+function rotatedLabelBounds(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  angleDeg: number,
+): Bounds {
+  const corners = (
+    [
+      [-width / 2, -height / 2],
+      [width / 2, -height / 2],
+      [width / 2, height / 2],
+      [-width / 2, height / 2],
+    ] satisfies Pt[]
+  ).map((point): Pt => {
+    const rotated = rotatePoint(point, angleDeg);
+    return [rotated[0] + x, rotated[1] + y];
+  });
+  return polygonBounds(corners);
+}
+
+function insideCodeSite(
+  polygon: readonly Pt[],
+  code: string,
+  fontSize: number,
+  clearance: number,
+  slots: readonly LabelSlot[],
+): { x: number; y: number; angle: number; slot: LabelSlot } | null {
+  const textWidth = code.length * fontSize * CODE_CHAR_WIDTH;
+  const textHeight = fontSize * CODE_HEIGHT_EM;
+  const longAngle = longAxisAngle(polygon.map(([x, y]) => ({ x, y })));
+  // Codes read left-to-right whenever the horizontal label fits. Only turn one onto the piece's
+  // long axis when the same clearance test proves that horizontal ink cannot fit.
+  const angles = Math.abs(longAngle) < 0.5 ? [0] : [0, longAngle];
+  for (const angleDeg of angles) {
+    const rotated = polygon.map((point) => rotatePoint(point, -angleDeg));
+    const rotatedBox = polygonBounds(rotated);
+    const halfWidth = textWidth / 2 + clearance;
+    const halfHeight = textHeight / 2 + clearance;
+    const available = rotatedBox.x1 - rotatedBox.x0 - halfWidth * 2;
+    if (available < 0 || rotatedBox.y1 - rotatedBox.y0 < halfHeight * 2) continue;
+    const candidates: Array<{ x: number; y: number; width: number; centerDistance: number }> = [];
+    const centerX = (rotatedBox.x0 + rotatedBox.x1) / 2;
+    const centerY = (rotatedBox.y0 + rotatedBox.y1) / 2;
+    for (let step = 0; step <= 32; step++) {
+      const x = rotatedBox.x0 + halfWidth + (available * step) / 32;
+      const spans = sharedSpans(
+        [-1, -0.5, 0, 0.5, 1].map((part) => spansAtX(rotated, x + halfWidth * part)),
+      );
+      for (const [lo, hi] of spans) {
+        if (hi - lo < halfHeight * 2) continue;
+        const y = Math.max(lo + halfHeight, Math.min(hi - halfHeight, centerY));
+        candidates.push({ x, y, width: hi - lo, centerDistance: Math.abs(x - centerX) });
+      }
+    }
+    candidates.sort((a, b) => b.width - a.width || a.centerDistance - b.centerDistance);
+    for (const candidate of candidates) {
+      const clearanceBox = {
+        x0: candidate.x - halfWidth,
+        x1: candidate.x + halfWidth,
+        y0: candidate.y - halfHeight,
+        y1: candidate.y + halfHeight,
+      };
+      if (!rectangleInsidePolygon(clearanceBox, rotated)) continue;
+      const center = rotatePoint([candidate.x, candidate.y], angleDeg);
+      const slot = rotatedLabelBounds(center[0], center[1], textWidth, textHeight, angleDeg);
+      if (slots.some((other) => overlaps(slot, other, fontSize * 0.12))) continue;
+      return { x: center[0], y: center[1], angle: angleDeg, slot };
+    }
+  }
+  return null;
+}
+
+function segmentCrossesBox(a: Pt, b: Pt, box: Bounds): boolean {
+  const corners: Pt[] = [
+    [box.x0, box.y0],
+    [box.x1, box.y0],
+    [box.x1, box.y1],
+    [box.x0, box.y1],
+  ];
+  return corners.some((corner, index) => segmentsCross(a, b, corner, corners[(index + 1) % 4]));
+}
+
+function belowCodeSite(
+  pieceBox: Bounds,
+  otherBoxes: readonly Bounds[],
+  code: string,
+  fontSize: number,
+  clearance: number,
+  slots: readonly LabelSlot[],
+  frame: Bounds,
+  leader: boolean,
+): { x: number; y: number; anchor: Pt; edge: Pt; slot: LabelSlot } {
+  const textWidth = code.length * fontSize * CODE_CHAR_WIDTH;
+  const cx = (pieceBox.x0 + pieceBox.x1) / 2;
+  const gap = Math.max(clearance, fontSize * 0.4);
+  const shifts = [0, -0.55, 0.55, -1.1, 1.1];
+  const candidate = (lane: number, shift: number) => {
+    const x = cx + shift * (textWidth + gap);
+    const y0 = pieceBox.y1 + gap + lane * fontSize * 1.45;
+    const slot = {
+      x0: x - textWidth / 2,
+      x1: x + textWidth / 2,
+      y0,
+      y1: y0 + fontSize * CODE_HEIGHT_EM,
+    };
+    const anchor: Pt = [Math.max(pieceBox.x0, Math.min(pieceBox.x1, x)), pieceBox.y1];
+    return { x, y: y0 + (fontSize * CODE_HEIGHT_EM) / 2, anchor, edge: [x, y0] as Pt, slot };
+  };
+  for (let lane = 0; lane < 6; lane++)
+    for (const shift of shifts) {
+      const site = candidate(lane, shift);
+      if (slots.some((other) => overlaps(site.slot, other, fontSize * 0.15))) continue;
+      if (otherBoxes.some((other) => overlaps(site.slot, other, fontSize * 0.08))) continue;
+      if (
+        leader &&
+        [...otherBoxes, ...slots].some((other) => segmentCrossesBox(site.anchor, site.edge, other))
+      ) {
+        continue;
+      }
+      return site;
+    }
+  const y0 = Math.max(pieceBox.y1, frame.y1) + gap;
+  const slot = {
+    x0: cx - textWidth / 2,
+    x1: cx + textWidth / 2,
+    y0,
+    y1: y0 + fontSize * CODE_HEIGHT_EM,
+  };
+  return {
+    x: cx,
+    y: y0 + (fontSize * CODE_HEIGHT_EM) / 2,
+    anchor: [cx, pieceBox.y1],
+    edge: [cx, y0],
+    slot,
+  };
+}
+
+function pieceCodeLabels(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  items: readonly Item[],
+  frame: Bounds,
+  box?: [number, number],
+  reserved: readonly LabelSlot[] = [],
+  outsideLeader = false,
+  insideOnly = false,
+): { body: string; frame: Bounds; slots: LabelSlot[] } {
+  const span = Math.max(frame.x1 - frame.x0, frame.y1 - frame.y0, 1);
+  const pieceBoxes = items.map((item) => bounds(pieces, [item]));
+  const layout = (fit: number) => {
+    const slots: LabelSlot[] = [...reserved];
+    let outputFrame = { ...frame };
+    let body = '';
+    items.forEach((item, itemIndex) => {
+      const piece = pieces.get(item.p);
+      const code = piece?.code ?? '';
+      if (!piece || !code) return;
+      const polygon = piece.cut.map((point) => apply(item.T, point));
+      const pieceBox = pieceBoxes[itemIndex];
+      const clearance = PRINT_CODE_CLEARANCE_PX / fit;
+      let inside: ReturnType<typeof insideCodeSite> = null;
+      let fontSize = PRINT_CODE_PX / fit;
+      let printPx = PRINT_CODE_PX;
+      for (let step = 0; step < 4; step++) {
+        printPx = PRINT_CODE_PX - ((PRINT_CODE_PX - PRINT_CODE_MIN_PX) * step) / 3;
+        fontSize = printPx / fit;
+        inside = insideCodeSite(polygon, code, fontSize, clearance, slots);
+        if (inside) break;
+      }
+      if (inside) {
+        slots.push(inside.slot);
+        const transform =
+          Math.abs(inside.angle) >= 0.01
+            ? ` transform="rotate(${f2(inside.angle)} ${f2(inside.x)} ${f2(inside.y)})"`
+            : '';
+        body += `<text x="${f2(inside.x)}" y="${f2(inside.y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(printPx)}" data-asm-piece="${itemIndex}" data-asm-code-placement="inside"${transform}>${xml(code)}</text>`;
+        return;
+      }
+      if (insideOnly) return;
+      fontSize = PRINT_CODE_MIN_PX / fit;
+      const outside = belowCodeSite(
+        pieceBox,
+        pieceBoxes.filter((_, index) => index !== itemIndex),
+        code,
+        fontSize,
+        clearance,
+        slots,
+        frame,
+        outsideLeader,
+      );
+      slots.push(outside.slot);
+      outputFrame = growBounds(outputFrame, outside.slot);
+      if (outsideLeader)
+        body += `<path d="M${f2(outside.anchor[0])} ${f2(outside.anchor[1])} L${f2(outside.edge[0])} ${f2(outside.edge[1])}" class="tpa-sl tpa-fn tpa-asm-code-leader" stroke-width="${f2(fontSize * 0.08)}"/>`;
+      body += `<text x="${f2(outside.x)}" y="${f2(outside.y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(PRINT_CODE_MIN_PX)}" data-asm-piece="${itemIndex}" data-asm-code-placement="outside">${xml(code)}</text>`;
+    });
+    return { body, frame: outputFrame, slots };
+  };
+  let fit = box ? containFit(frame, box) : (PRINT_CODE_PX * 22) / span;
+  fit = Math.max(fit, 1e-6);
+  let result = layout(fit);
+  if (box)
+    for (let pass = 0; pass < 12; pass++) {
+      const nextFit = Math.max(containFit(result.frame, box), 1e-6);
+      if (Math.abs(nextFit - fit) / fit < 0.0005) break;
+      fit = nextFit;
+      result = layout(fit);
+    }
+  return result;
+}
+
+function pieceNumberBadges(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  items: readonly Item[],
+  numbers: ReadonlyMap<string, number>,
+  frame: Bounds,
+  box?: [number, number],
+): { body: string; slots: LabelSlot[] } {
+  const fit = Math.max(box ? containFit(frame, box) : 1, 1e-6);
+  const slots: LabelSlot[] = [];
+  let body = '';
+  for (const item of items) {
+    const number = numbers.get(item.p);
+    const piece = pieces.get(item.p);
+    if (!number || !piece) continue;
+    const polygon = piece.cut.map((point) => apply(item.T, point));
+    let site: ReturnType<typeof insideCodeSite> = null;
+    let printPx = 13;
+    for (const candidatePx of [13, 11.5, 10, 9]) {
+      const fontSize = candidatePx / fit;
+      site = insideCodeSite(polygon, '88', fontSize, PRINT_CODE_CLEARANCE_PX / fit, slots);
+      if (site) {
+        printPx = candidatePx;
+        break;
+      }
+    }
+    if (!site) {
+      const pieceBox = bounds(pieces, [item]);
+      const x = (pieceBox.x0 + pieceBox.x1) / 2;
+      const y = (pieceBox.y0 + pieceBox.y1) / 2;
+      const side = 9 / fit;
+      site = {
+        x,
+        y,
+        angle: 0,
+        slot: { x0: x - side / 2, x1: x + side / 2, y0: y - side / 2, y1: y + side / 2 },
+      };
+      printPx = 9;
+    }
+    const side = (printPx * 1.25) / fit;
+    const slot = {
+      x0: site.x - side / 2,
+      x1: site.x + side / 2,
+      y0: site.y - side / 2,
+      y1: site.y + side / 2,
+    };
+    slots.push(slot);
+    body +=
+      `<rect x="${f2(slot.x0)}" y="${f2(slot.y0)}" width="${f2(side)}" height="${f2(side)}" class="tpa-fk" data-asm-piece-number="${number}"/>` +
+      `<text x="${f2(site.x)}" y="${f2(site.y)}" font-size="${f2((printPx * 0.82) / fit)}" class="tpa-fw" text-anchor="middle" dominant-baseline="central" font-family="FeatureMono, monospace" font-weight="700">${number}</text>`;
+  }
+  return { body, slots };
+}
+
+function wrappedLabel(
+  text: string,
+  available: number,
+  fontSize: number,
+): { lines: string[]; fontSize: number } {
+  const minFontSize = (7 * 96) / 72;
+  const split = (size: number) => {
+    const maxChars = Math.max(1, Math.floor(available / Math.max(size * LABEL_CHAR_WIDTH, 1e-6)));
+    if (text.length <= maxChars) return [text];
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length < 2) return [text.slice(0, maxChars), text.slice(maxChars)].filter(Boolean);
+    let best = 1;
+    let difference = Infinity;
+    for (let index = 1; index < words.length; index++) {
+      const a = words.slice(0, index).join(' ');
+      const b = words.slice(index).join(' ');
+      const overflow = Math.max(0, a.length - maxChars) + Math.max(0, b.length - maxChars);
+      const score = overflow * 100 + Math.abs(a.length - b.length);
+      if (score < difference) {
+        best = index;
+        difference = score;
+      }
+    }
+    return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+  };
+  const initial = split(fontSize);
+  if (initial.every((line) => labelWidth(line, fontSize) <= available))
+    return { lines: initial, fontSize };
+  return { lines: split(minFontSize), fontSize: minFontSize };
+}
+
 const centerOf = (pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): Pt => {
   const b = bounds(pieces, items);
   return [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
@@ -685,6 +1184,60 @@ function placeBeside(
         : (at ? at[0] : (a.x0 + a.x1) / 2) - (b.x0 + b.x1) / 2;
   const dy = mode === 'above' ? (at ? at[1] : a.y0) - gap - b.y1 : a.y0 - b.y0;
   moveAll(B, translate(dx, dy));
+}
+
+/** With no seam geometry, keep every input at one scale in a compact, non-overlapping row. */
+function placeInRow(pieces: ReadonlyMap<string, AsmPiece>, placed: Item[], incoming: Item[]): void {
+  const a = bounds(pieces, placed);
+  const b = bounds(pieces, incoming);
+  const dx = a.x1 - b.x0;
+  const dy = a.y1 - b.y1;
+  moveAll(incoming, translate(dx, dy));
+}
+
+/** A previously-made unit without seam geometry: one scale, stacked instead of a thin strip. */
+function packUnit(pieces: ReadonlyMap<string, AsmPiece>, source: readonly Item[]): Item[] {
+  if (source.length < 2) return source.map((item) => ({ ...clone(item), T: [...I] as Matrix }));
+  const sourceBoxes = source.map((item) => bounds(pieces, [{ ...item, T: I }]));
+  const candidates: Item[][] = [];
+  for (let columns = 1; columns <= Math.min(source.length, 6); columns++) {
+    const rows = Math.ceil(source.length / columns);
+    const colWidths = Array.from({ length: columns }, () => 0);
+    const rowHeights = Array.from({ length: rows }, () => 0);
+    sourceBoxes.forEach((box, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      colWidths[column] = Math.max(colWidths[column], box.x1 - box.x0);
+      rowHeights[row] = Math.max(rowHeights[row], box.y1 - box.y0);
+    });
+    const xAt = colWidths.map((_, index) =>
+      colWidths.slice(0, index).reduce((sum, width) => sum + width * 0.82, 0),
+    );
+    const yAt = rowHeights.map((_, index) =>
+      rowHeights.slice(0, index).reduce((sum, height) => sum + height * 0.82, 0),
+    );
+    candidates.push(
+      source.map((sourceItem, index) => {
+        const item = { ...clone(sourceItem), T: [...I] as Matrix };
+        const box = sourceBoxes[index];
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        moveAll(
+          [item],
+          translate(
+            xAt[column] + (colWidths[column] - (box.x1 - box.x0)) / 2 - box.x0,
+            yAt[row] + (rowHeights[row] - (box.y1 - box.y0)) / 2 - box.y0,
+          ),
+        );
+        return item;
+      }),
+    );
+  }
+  return candidates.reduce((best, candidate) =>
+    containFit(bounds(pieces, candidate), [160, 100]) > containFit(bounds(pieces, best), [160, 100])
+      ? candidate
+      : best,
+  );
 }
 
 /** Lay group B's edge on group A's edge (chords), face to face (stack) or opened out (flat). */
@@ -871,15 +1424,38 @@ function buildCards(
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
   const producer = new Map(ops.flatMap((op) => (op.out ? [[op.out, op] as const] : [])));
+  const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
 
   for (const op of ops) {
-    if (!op.join) continue;
+    if (!op.join) {
+      if (op.out) {
+        const groups = op.ins
+          .map((input) =>
+            input.kind === 'unit'
+              ? (units.get(input.key) ?? []).map(clone)
+              : input.kind === 'piece' && pieces.has(input.key)
+                ? [{ p: input.key, T: [...I] as Matrix }]
+                : [],
+          )
+          .filter((group) => group.length > 0);
+        const world = groups[0] ?? [];
+        for (const group of groups.slice(1)) {
+          placeInRow(pieces, world, group);
+          world.push(...group);
+        }
+        if (world.length) units.set(op.out, world.map(clone));
+      }
+      continue;
+    }
     const inputs = op.ins
       .map((x) => ({
         input: x,
         items:
           x.kind === 'unit'
-            ? (units.get(x.key) ?? []).map((it) => ({ ...clone(it), old: true }))
+            ? (seamLessCard
+                ? packUnit(pieces, units.get(x.key) ?? [])
+                : (units.get(x.key) ?? []).map(clone)
+              ).map((it) => ({ ...it, old: true }))
             : x.kind === 'piece' && pieces.has(x.key)
               ? [{ p: x.key, T: [...I] as Matrix }]
               : [],
@@ -891,7 +1467,8 @@ function buildCards(
       const source = producer.get(entry.input.key);
       return [
         {
-          items: entry.items,
+          // Keep block membership fixed while `world` absorbs later input groups below.
+          items: [...entry.items],
           name: cap(source?.raw.outputUnitName || unitDisplayName({ key: entry.input.key })),
           op: source?.n ?? 0,
         },
@@ -988,7 +1565,8 @@ function buildCards(
     }
     const world = groups[0] ?? [];
     for (const g of groups.slice(1)) {
-      placeBeside(pieces, world, g, 'right');
+      if (seams.length) placeBeside(pieces, world, g, 'right');
+      else placeInRow(pieces, world, g);
       world.push(...g);
     }
 
@@ -1013,12 +1591,14 @@ function buildCards(
     });
     const badAt = metrics.findIndex((m) => m.bad);
     const names = (parts: SeamPart[]) =>
-      [...new Set(parts.map((p) => pieces.get(p.piece)?.name ?? p.piece))].join(' + ');
+      [...new Set(parts.map((p) => pieces.get(p.piece)?.code).filter(Boolean))].join(' + ') ||
+      'piece';
     const stop =
       badAt >= 0
         ? `Check: ${names(seams[badAt].a)} ${metrics[badAt].left.toFixed(1)} / ${names(seams[badAt].b)} ${(metrics[badAt].right ?? 0).toFixed(1)} · Δ ${fmtDelta(metrics[badAt].delta ?? 0)}`
         : undefined;
     const pieceIns = op.ins.filter((x) => x.kind === 'piece');
+    const pieceNumbers = new Map(pieceIns.map((input, index) => [input.key, index + 1]));
     const worldPieceCount = new Set(world.map((item) => item.p)).size;
     const card: JoinCard = {
       n: op.n,
@@ -1032,8 +1612,10 @@ function buildCards(
         op.ins.length === 2 &&
         pieceIns.length === 2 &&
         twinOfKind(pieces, pieceIns[0].key, pieceIns[1].key, 'identical'),
-      fold: seams.some((s) => !s.b.length),
-      crop: worldPieceCount >= 8 && worldPieceCount / Math.max(pieces.size, 1) >= 0.7,
+      fold: seams.some((s) => s.kind !== 'surface' && !s.b.length),
+      crop:
+        !seamLessCard && worldPieceCount >= 8 && worldPieceCount / Math.max(pieces.size, 1) >= 0.7,
+      pieceNumbers,
     };
     if (op.out) {
       units.set(op.out, world.map(clone));
@@ -1059,8 +1641,22 @@ function wordsOf(
   const ins = ctx.input.techCard.techCard;
   const o = op.raw;
   const tech = op.tech;
-  const pieceName = (k: string) =>
-    ctx.input.pieces.get(k)?.name || ins?.pieces?.find((p) => p.lineKey === k)?.name || k;
+  const heading = operationHeading({
+    operationType: o.operationType,
+    machineType: o.machineType,
+    seamClass: o.seamClass,
+    topstitchMode: o.topstitch?.mode,
+    work: o.work,
+    workCatalog: BUNDLED_WORK_CATALOG,
+    pieceNames: [],
+  });
+  const verb = cap(heading.toLocaleLowerCase() === 'machine' ? VERB[tech] : heading || VERB[tech]);
+  const pieceName = (k: string) => {
+    const piece = ctx.input.pieces.get(k);
+    const stored = ins?.pieces?.find((candidate) => candidate.lineKey === k);
+    const name = (piece?.name || stored?.name || piece?.code || '').trim();
+    return name && !ULID.test(name) ? name : piece?.code || assemblyPieceCode(stored?.name);
+  };
   const plainNameOf = (x: Input) =>
     x.kind === 'unit'
       ? ctx.unitName.get(x.key) ?? unitDisplayName({ key: x.key })
@@ -1070,18 +1666,24 @@ function wordsOf(
   const nameOf = (x: Input) => {
     const name = plainNameOf(x);
     const step = x.kind === 'unit' ? ctx.unitStep.get(x.key) : undefined;
+    const pieceNumber = x.kind === 'piece' ? ctx.card?.pieceNumbers.get(x.key) : undefined;
+    if (pieceNumber) return `${pieceNumber} ${name}`;
     return step ? `${name} (${step})` : name;
   };
-  const note = (o.note ?? '').trim();
+  const rawNote = (o.note ?? '').trim();
+  const normalizedNote = rawNote.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
+  const normalizedVerb = verb.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
+  const note =
+    normalizedNote &&
+    normalizedNote !== normalizedVerb &&
+    !(normalizedNote === 'join' && normalizedVerb.startsWith('join'))
+      ? rawNote
+      : '';
   const line: Seg[] = [];
-  if (tech === 'sew' && op.join && op.ins.length === 1) {
+  if (op.join) {
     const hasSeam = Boolean(ctx.card?.seams.length);
     if (note) line.push({ t: cap(note) });
-    else if (!hasSeam)
-      line.push({
-        t: 'no seam · pick',
-        gap: assemblyGap(ctx.sink, 'asm_edge_missing', 'no seam · pick', op.n, 'seam'),
-      });
+    if (!hasSeam) assemblyGap(ctx.sink, 'asm_edge_missing', 'seam', op.n, 'seam');
     if (ctx.card?.fold) line.push({ t: 'to fold' });
   } else if (tech === 'bind') {
     const z = o.zone;
@@ -1089,34 +1691,17 @@ function wordsOf(
       z && z !== 'TECH_CARD_GARMENT_ZONE_OUTER' && z !== 'TECH_CARD_GARMENT_ZONE_OTHER'
         ? zoneLabel(z)
         : '';
-    line.push(
-      named
-        ? { t: named }
-        : {
-            t: 'no edge',
-            gap: assemblyGap(ctx.sink, 'asm_edge_missing', 'no edge', op.n, 'edge'),
-          },
-    );
+    if (named) line.push({ t: named });
+    else assemblyGap(ctx.sink, 'asm_edge_missing', 'edge', op.n, 'edge');
     line.push({ t: 'tape' });
     if (note) line.push({ t: cap(note) });
   } else if (tech === 'hand') {
     if (note) line.push({ t: cap(note) });
     else if (ctx.twinNote) line.push({ t: `${cap(ctx.twinNote.note)} (as ${ctx.twinNote.n})` });
-    else
-      line.push({
-        t: 'no edge',
-        gap: assemblyGap(ctx.sink, 'asm_edge_missing', 'no edge', op.n, 'edge'),
-      });
+    else assemblyGap(ctx.sink, 'asm_edge_missing', 'edge', op.n, 'edge');
   } else if (tech === 'pressSide') {
     const toward = pressTowardLabel(o.press?.toward).replace(/^toward (the )?/, '');
-    line.push(
-      toward
-        ? { t: `SA → ${toward}` }
-        : {
-            t: 'no side',
-            gap: assemblyGap(ctx.sink, 'pdf_side_missing', 'no side', op.n, 'side'),
-          },
-    );
+    if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', 'press side', op.n, 'side');
     if (note) line.push({ t: cap(note) });
   } else if (note) line.push({ t: cap(note) });
   const hardware = (o.bomLineKeys ?? [])
@@ -1126,50 +1711,167 @@ function wordsOf(
     .filter(Boolean);
   for (const h of hardware) line.push({ t: h });
   if (tech === 'button' && !hardware.length)
-    line.push({
-      t: 'no button',
-      gap: assemblyGap(ctx.sink, 'pdf_button_missing', 'no button', op.n, 'button'),
-    });
+    assemblyGap(ctx.sink, 'pdf_button_missing', 'button', op.n, 'button');
 
   const tool: Seg[] = [];
   if (op.join) {
     const sa = num(o.seamAllowanceMm) ?? num(ins?.requiredSeamAllowanceMm);
-    tool.push(
-      sa != null
-        ? { t: `SA ${mm(sa)} mm` }
-        : { t: 'no SA', gap: assemblyGap(ctx.sink, 'pdf_sa_missing', 'no SA', op.n, 'SA') },
-    );
+    if (sa != null) tool.push({ t: `SA ${mm(sa)} mm` });
+    else assemblyGap(ctx.sink, 'pdf_sa_missing', 'SA', op.n, 'SA');
   }
   if (tech === 'topstitch') {
-    const phrase = topstitchPhrase(o.topstitch?.mode, o.topstitch?.widthMm?.value).replace(
-      /\bthe /g,
-      '',
-    );
-    tool.push(
-      phrase
-        ? { t: `TS ${phrase}` }
-        : { t: 'no TS', gap: assemblyGap(ctx.sink, 'pdf_ts_missing', 'no TS', op.n, 'TS') },
-    );
+    const phrase = topstitchLine(o.topstitch?.mode, o.topstitch?.widthMm?.value, o.topstitch?.rows);
+    if (!phrase) assemblyGap(ctx.sink, 'pdf_ts_missing', 'topstitch', op.n, 'TS');
   }
+
+  const decimal = (value?: { value?: string }) => value?.value;
+  const facts: StepFacts = {
+    work: o.work,
+    operationType: o.operationType,
+    printMethod: o.printMethod,
+    wetProcessKind: o.wetProcessKind,
+    stitching: o.stitching
+      ? {
+          needleCount: o.stitching.needleCount,
+          needleGaugeMm: decimal(o.stitching.needleGaugeMm),
+          seamSecuring: o.stitching.seamSecuring,
+          rowSpacingMm: decimal(o.stitching.rowSpacingMm),
+          fullnessRatio: decimal(o.stitching.fullnessRatio),
+          bindingStyle: o.stitching.bindingStyle,
+          labelAttachStitch: o.stitching.labelAttachStitch,
+        }
+      : undefined,
+    placementLayout: o.placementLayout
+      ? { count: o.placementLayout.count, pitchMm: decimal(o.placementLayout.pitchMm) }
+      : undefined,
+    hardware: o.hardware
+      ? {
+          attachMethod: o.hardware.attachMethod,
+          holePrep: o.hardware.holePrep,
+          reinforcement: o.hardware.reinforcement,
+          foldbackMm: decimal(o.hardware.foldbackMm),
+          cycleStitchCount: o.hardware.cycleStitchCount,
+        }
+      : undefined,
+    print: o.print
+      ? { peelMode: o.print.peelMode, secondPressSec: o.print.secondPressSec }
+      : undefined,
+    weld: o.weld
+      ? {
+          airTemperatureC: o.weld.airTemperatureC,
+          feedSpeedMMin: decimal(o.weld.feedSpeedMMin),
+        }
+      : undefined,
+    trim: o.trim
+      ? { action: o.trim.action, residualAllowanceMm: decimal(o.trim.residualAllowanceMm) }
+      : undefined,
+    threadTrim: o.threadTrim
+      ? { residualTailMaxMm: decimal(o.threadTrim.residualTailMaxMm) }
+      : undefined,
+    clean: o.clean ? { kind: o.clean.kind } : undefined,
+    inspect: o.inspect ? { coverageMode: o.inspect.coverageMode } : undefined,
+    press: o.press ? { action: o.press.action, toward: o.press.toward } : undefined,
+    fastening: o.fastening
+      ? {
+          buttonholeStyle: o.fastening.buttonholeStyle,
+          cutLengthMm: decimal(o.fastening.cutLengthMm),
+          buttonholeOrientation: o.fastening.buttonholeOrientation,
+          bartackLengthMm: decimal(o.fastening.bartackLengthMm),
+          attachPattern: o.fastening.attachPattern,
+          zipperApplication: o.fastening.zipperApplication,
+        }
+      : undefined,
+  };
+  const icon = opIcon(opIconInputOf(o), opIconCardOf(ins));
+  const iconCarriesPress =
+    icon.key.startsWith('press_') || icon.key === 'press_cloth' || icon.key === 'steam_form';
+  const topstitchWidth = o.topstitch?.widthMm?.value?.trim() ?? '';
+  const topstitchParam = icon.bars
+    ? icon.at && topstitchWidth
+      ? topstitchDistanceText(o.topstitch?.mode, topstitchWidth)
+      : ''
+    : topstitchLine(o.topstitch?.mode, topstitchWidth, o.topstitch?.rows);
+  const bindingFact = bindingStyleLabel(o.stitching?.bindingStyle);
+  const seamFacts = stepSeamFactTexts(facts).filter(
+    (fact) => !(icon.derived && bindingFact && fact === bindingFact),
+  );
+  const buttonPatternInIcon = new Set([
+    'button_cross_x',
+    'button_parallel',
+    'button_square',
+    'button_u_shape',
+    'button_other',
+  ]).has(icon.key);
+  const zipperApplicationInIcon =
+    icon.key === 'zip_invisible' ||
+    (icon.key === 'set_zip' && ['CTR', 'LAP', 'EXP', 'FLY'].includes(icon.chip ?? ''));
+  const buttonholeStyleInIcon =
+    icon.key === 'buttonhole_keyhole' &&
+    o.fastening?.buttonholeStyle === 'TECH_CARD_BUTTONHOLE_STYLE_EYELET'
+      ? 'eyelet'
+      : icon.key === 'buttonhole_straight' &&
+          o.fastening?.buttonholeStyle === 'TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT'
+        ? 'straight'
+        : '';
+  const iconBarsCarryNeedles =
+    Boolean(icon.bars) &&
+    !(o.topstitch?.rows != null && o.topstitch.rows > 0) &&
+    o.stitching?.needleCount != null &&
+    o.stitching.needleCount > 0;
+  const toolParams = stepToolFactParts(facts, BUNDLED_WORK_CATALOG).map((part) => {
+    if (part.field === 'buttonPattern' && buttonPatternInIcon) return '';
+    if (part.field === 'zipper' && zipperApplicationInIcon) return '';
+    if (part.field === 'buttonhole' && buttonholeStyleInIcon) {
+      return part.text.replace(`${buttonholeStyleInIcon} buttonhole`, 'buttonhole');
+    }
+    if (part.field === 'needles' && iconBarsCarryNeedles) {
+      return part.text.replace(/^\d+ needles?(?:,\s*)?/, '');
+    }
+    return part.text;
+  });
+  const params = [
+    // Registry adornments own the facts they depict; keep only measurements and qualifiers that
+    // cannot be encoded by the bars, arrow, chip, or exact pictogram beside this line.
+    topstitchParam,
+    iconCarriesPress ? '' : stepPressText(facts) || pressTowardLabel(o.press?.toward),
+    icon.derived ? '' : seamClassLabel(o.seamClass),
+    ...seamFacts,
+    ...toolParams,
+    stepPlacementText(facts).replace(/^×\s+/, '×'),
+  ].filter(Boolean);
+  const profileKey = (o.machineProfileKey ?? '').trim();
+  if (profileKey) {
+    const profile = ins?.construction?.equipmentDefaults?.machines?.find(
+      (candidate) => candidate.profileKey === profileKey,
+    );
+    params.push(`profile ${profile?.label?.trim() || profileKey}`);
+  }
+
   let mc: Seg | undefined;
-  if (o.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS') mc = { t: 'Iron' };
-  else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_HANDWORK' || tech === 'hand')
+  const machineParams: string[] = [];
+  if (isPressStepType(o.operationType)) {
+    const equipment = pressEquipmentLabel(o.pressEquipment);
+    if (equipment) mc = { t: cap(equipment) };
+    else assemblyGap(ctx.sink, 'pdf_machine_missing', 'press equipment', op.n, 'machine');
+    if (o.pressTemperatureC != null) machineParams.push(`${o.pressTemperatureC} °C`);
+    if (o.pressDwellSec != null) machineParams.push(`${o.pressDwellSec} s`);
+    if (o.pressPressureNCm2?.value) machineParams.push(`${o.pressPressureNCm2.value} N/cm²`);
+  } else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_HANDWORK' || tech === 'hand')
     mc = { t: 'Hand' };
-  else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE') {
+  else if (o.machineType && o.machineType !== 'TECH_CARD_MACHINE_TYPE_UNKNOWN') {
     const label = machineTypeLabel(o.machineType)
       .replace(/\s+\d[\d\s/]*$/, '')
       .trim();
-    mc = label
-      ? { t: cap(label) }
-      : {
-          t: 'no machine',
-          gap: assemblyGap(ctx.sink, 'pdf_machine_missing', 'no machine', op.n, 'machine'),
-        };
+    if (label) mc = { t: cap(label) };
+  } else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE') {
+    assemblyGap(ctx.sink, 'pdf_machine_missing', 'machine', op.n, 'machine');
   }
 
   const seamLines = (ctx.card?.seams ?? []).map((seam, index) => {
     const codes = (parts: readonly SeamPart[]) =>
-      [...new Set(parts.map((part) => part.piece))].join(' + ');
+      [
+        ...new Set(parts.map((part) => ctx.input.pieces.get(part.piece)?.code).filter(Boolean)),
+      ].join(' + ');
     const groupIndex = (parts: readonly SeamPart[]) =>
       op.groups.findIndex(
         (group) => parts.length > 0 && parts.every((part) => group.has(part.piece)),
@@ -1204,7 +1906,6 @@ function wordsOf(
       detail = `${zone} edge`;
     return `${circled(index)} ${left || 'edge'} ↔ ${right || 'fold'}${detail ? ` · ${detail}` : ''}`;
   });
-  const icon = opIcon(opIconInputOf(o), opIconCardOf(ins));
   if (icon.missing) {
     const gap: Gap = {
       code: 'pdf_icon_missing',
@@ -1218,13 +1919,16 @@ function wordsOf(
   return {
     tech,
     icon,
-    verb: VERB[tech],
-    ins: op.ins.map(nameOf),
+    verb,
+    ins: op.ins.map(nameOf).filter(Boolean),
     out: op.out ? ctx.unitName.get(op.out) ?? unitDisplayName({ key: op.out }) : undefined,
     line,
     seams: seamLines,
     tool,
     mc,
+    params: [...new Set(params)],
+    machineParams,
+    draft: Boolean(o.draft),
   };
 }
 
@@ -1249,10 +1953,11 @@ function mirrorSets(
 // ── the model ───────────────────────────────────────────────────────────────────────────────────
 
 export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyModel {
+  const gapSink = sink ?? new GapSink();
   const ops = readOps(input);
   const emptyGap = ops.length
     ? undefined
-    : assemblyGap(sink, 'pdf_operations_missing', 'operations', 0, 'operations');
+    : assemblyGap(gapSink, 'pdf_operations_missing', 'operations', 0, 'operations');
   const { seams, unresolved } = locateSeams(input);
   const guessed = bindSeams(
     seams,
@@ -1265,7 +1970,7 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
   const bound = new Map(
     ops.filter((op) => op.join).map((op) => [op.n, seamsOfOp(op.raw, catalog)]),
   );
-  const { cards, units } = buildCards(ops, bound, input.pieces, sink);
+  const { cards, units } = buildCards(ops, bound, input.pieces, gapSink);
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {
@@ -1293,7 +1998,7 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     }
     words.set(
       op.n,
-      wordsOf(op, { input, unitName, unitStep, card: cards.get(op.n), twinNote, sink }),
+      wordsOf(op, { input, unitName, unitStep, card: cards.get(op.n), twinNote, sink: gapSink }),
     );
   }
 
@@ -1306,14 +2011,28 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
       target: op.join
         ? undefined
         : first?.kind === 'unit'
-          ? { unit: first.key }
+          ? {
+              unit: first.key,
+              label: `${unitName.get(first.key) ?? unitDisplayName({ key: first.key })}${
+                unitStep.get(first.key) ? ` · ${unitStep.get(first.key)}` : ''
+              }`,
+            }
           : first?.kind === 'piece'
             ? { piece: first.key }
             : undefined,
     };
   });
 
-  return { rows, words, cards, pieces: input.pieces, units, unresolved, emptyGap };
+  return {
+    rows,
+    words,
+    cards,
+    pieces: input.pieces,
+    units,
+    unresolved,
+    gaps: gapSink.list().filter((gap) => gap.section === '06'),
+    emptyGap,
+  };
 }
 
 // ── drawings ────────────────────────────────────────────────────────────────────────────────────
@@ -1334,7 +2053,17 @@ export function joinSvg(
   const pieces = model.pieces;
   const items = card.items.map(clone);
   if (!items.length) return EMPTY;
-  const b0 = bounds(pieces, items);
+  let b0 = bounds(pieces, items);
+  if (box) {
+    const center: Pt = [(b0.x0 + b0.x1) / 2, (b0.y0 + b0.y1) / 2];
+    const turned = items.map(clone);
+    moveAll(turned, rotate(Math.PI / 2, center));
+    const turnedBounds = bounds(pieces, turned);
+    if (containFit(turnedBounds, box) > containFit(b0, box) * 1.02) {
+      items.splice(0, items.length, ...turned);
+      b0 = turnedBounds;
+    }
+  }
   const span = Math.max(b0.x1 - b0.x0, b0.y1 - b0.y0, 1);
   const tf = (it: Item): Matrix => it.T;
   const world = (it: Item): Item => ({ p: it.p, T: tf(it) });
@@ -1365,7 +2094,7 @@ export function joinSvg(
     }
   }
   const frame = { x0, x1, y0, y1 };
-  const pad = span * (thumb ? 0.07 : 0.09);
+  const pad = span * (thumb ? 0.03 : 0.06);
   x0 -= pad;
   y0 -= pad;
   x1 += pad;
@@ -1382,9 +2111,10 @@ export function joinSvg(
     const blockItems = items.filter((item) =>
       block.items.some((candidate) => candidate.p === item.p),
     );
-    const loops = unionLoops(
-      blockItems.map((item) => cutOf(pieces, item.p).map((point) => apply(tf(item), point))),
+    const polygons = blockItems.map((item) =>
+      cutOf(pieces, item.p).map((point) => apply(tf(item), point)),
     );
+    const loops = card.seams.length ? unionLoops(polygons) : [groupOutline(polygons)];
     for (const loop of loops)
       body += `<path d="${pathData(loop)} Z" class="tpa-s tpa-asm-old" stroke-width="${f2(sw * 1.05)}" stroke-linejoin="round"/>`;
   }
@@ -1406,14 +2136,15 @@ export function joinSvg(
     for (const nt of g.notch)
       body += `<path d="${pathData(nt.map((q) => apply(T, q)))}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 1.05)}"/>`;
   }
-  for (const it of newItems) {
+  for (let itemIndex = 0; itemIndex < newItems.length; itemIndex++) {
+    const it = newItems[itemIndex];
     const g = pieces.get(it.p);
     if (!g) continue;
     const T = tf(it);
     const d = `${pathData(g.cut.map((q) => apply(T, q)))} Z`;
     const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 4)} ${f2(sw * 2.5)}"` : '';
     const top = newItems[newItems.length - 1] === it;
-    body += `<path d="${d}" class="tpa-s tpa-asm-new" stroke-width="${f2(sw * (top ? 2.4 : 1.15))}"${dash} stroke-linejoin="round"/>`;
+    body += `<path d="${d}" class="tpa-s tpa-asm-new" data-asm-piece="${itemIndex}" stroke-width="${f2(sw * (top ? 2.4 : 1.15))}"${dash} stroke-linejoin="round"/>`;
     for (const line of g.inner)
       body += `<path d="${pathData(line.map((q) => apply(T, q)))}" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.48)}"/>`;
     for (const nt of g.notch)
@@ -1421,16 +2152,26 @@ export function joinSvg(
   }
 
   const labels: string[] = [];
-  const clampLabel = (value: number, lo: number, hi: number) =>
-    lo <= hi ? Math.max(lo, Math.min(hi, value)) : (lo + hi) / 2;
-  for (const item of items.filter((candidate) => !candidate.old)) {
-    const box = bounds(pieces, [world(item)]);
-    const lx = clampLabel((box.x0 + box.x1) / 2, x0 + sw * 8, x1 - sw * 8);
-    const ly = clampLabel((box.y0 + box.y1) / 2, y0 + sw * 5, y1 - sw * 5);
-    labels.push(
-      `<text x="${f2(lx)}" y="${f2(ly)}" class="tpa-asm-code" font-size="${f2(sw * 7.6)}" text-anchor="middle" dominant-baseline="central">${xml(item.p)}</text>`,
-    );
-  }
+  const unitLabelSlots: LabelSlot[] = [];
+  const pieceNumbers = pieceNumberBadges(
+    pieces,
+    newItems,
+    card.pieceNumbers,
+    { x0, y0, x1, y1 },
+    box,
+  );
+  const codeLabels = pieceCodeLabels(
+    pieces,
+    newItems,
+    { x0, y0, x1, y1 },
+    box,
+    pieceNumbers.slots,
+    false,
+    true,
+  );
+  let codeBody = codeLabels.body;
+  ({ x0, y0, x1, y1 } = codeLabels.frame);
+  const labelSlots = codeLabels.slots;
   for (const block of card.blocks) {
     const blockItems = items.filter((item) =>
       block.items.some((candidate) => candidate.p === item.p),
@@ -1444,27 +2185,42 @@ export function joinSvg(
       y1: Math.min(blockBox.y1, frame.y1),
     };
     const visibleBox = visible.x0 <= visible.x1 && visible.y0 <= visible.y1 ? visible : blockBox;
-    const fontSize = sw * 6.3;
-    const text = `${block.name}${block.op ? ` · ${block.op}` : ''}`;
-    const anchor: Pt = [
-      clampLabel(visibleBox.x1, frame.x0, frame.x1),
-      clampLabel((visibleBox.y0 + visibleBox.y1) / 2, frame.y0, frame.y1),
-    ];
-    const lx = frame.x1 + sw * 7;
-    const ly = clampLabel(anchor[1], frame.y0 + fontSize, frame.y1 - fontSize);
-    const endX = lx - sw * 1.8;
-    const textWidth = text.length * fontSize * 0.62;
-    x1 = Math.max(x1, lx + textWidth + sw * 2);
-    y0 = Math.min(y0, ly - fontSize);
-    y1 = Math.max(y1, ly + fontSize);
+    const labelFit = containFit({ x0, y0, x1, y1 }, box);
+    const initialFontSize = labelFit ? PRINT_UNIT_PX / labelFit : sw * 6.3;
+    const fullText = `${block.name.trim()}${block.op ? ` · ${block.op}` : ''}`;
+    const available = Math.max(0, visibleBox.x1 - visibleBox.x0 - sw * 2);
+    const wrapped = wrappedLabel(fullText, available, initialFontSize);
+    const fontSize = wrapped.fontSize;
+    const lx = (visibleBox.x0 + visibleBox.x1) / 2;
+    let ly = visibleBox.y1 + fontSize * 0.85;
+    const textWidth = Math.max(...wrapped.lines.map((line) => labelWidth(line, fontSize)));
+    const textHeight = fontSize * Math.max(1, wrapped.lines.length) * 1.15;
+    let slot = {
+      x0: lx - textWidth / 2,
+      x1: lx + textWidth / 2,
+      y0: ly - fontSize * 0.65,
+      y1: ly - fontSize * 0.65 + textHeight,
+    };
+    for (let lane = 0; lane < 3; lane++) {
+      const collides = labelSlots.some((other) => overlaps(slot, other, fontSize * 0.12));
+      if (!collides) break;
+      ly += textHeight + fontSize * 0.35;
+      slot = { ...slot, y0: ly - fontSize * 0.65, y1: ly - fontSize * 0.65 + textHeight };
+    }
+    labelSlots.push(slot);
+    unitLabelSlots.push(slot);
+    ({ x0, y0, x1, y1 } = growBounds({ x0, y0, x1, y1 }, slot));
     labels.push(
-      `<path d="M${f2(anchor[0])} ${f2(anchor[1])} L${f2(endX)} ${f2(ly)}" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.45)}"/>` +
-        `<circle cx="${f2(anchor[0])}" cy="${f2(anchor[1])}" r="${f2(sw * 0.65)}" class="tpa-fk" opacity=".55"/>` +
-        `<text x="${f2(lx)}" y="${f2(ly)}" class="tpa-asm-unit" font-size="${f2(fontSize)}" dominant-baseline="central">${xml(text)}</text>`,
+      `<text x="${f2(lx)}" y="${f2(ly)}" class="tpa-asm-unit" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(fontSize * (labelFit || 1))}">${wrapped.lines
+        .map(
+          (line, index) =>
+            `<tspan x="${f2(lx)}" dy="${index === 0 ? 0 : f2(fontSize * 1.15)}">${xml(line)}</tspan>`,
+        )
+        .join('')}</text>`,
     );
   }
 
-  const fit = box ? Math.min(box[0] / (x1 - x0), box[1] / (y1 - y0)) * 0.92 : 0;
+  const fit = containFit({ x0, y0, x1, y1 }, box);
   const badgeR = fit ? badgePx / fit : span * (thumb ? 0.05 : 0.032);
   const pointAt = (pts: readonly Pt[], wanted: number): Pt => {
     let left = wanted;
@@ -1571,16 +2327,28 @@ export function joinSvg(
       `<path d="M${f2(bx)} ${f2(by - bh * 1.25)} V${f2(by + bh * 0.15)} M${f2(bx + bar)} ${f2(by - bh * 1.25)} V${f2(by + bh * 0.15)}" class="tpa-s" stroke-width="${f2(sw * 0.7)}"/>` +
       `<text x="${f2(bx + bar + sw * 2.5)}" y="${f2(by)}" font-size="${f2(sw * 7.5)}" class="tpa-fk" font-family="FeatureMono, monospace">${bar} mm</text></g>`;
   }
+  const finalCodeLabels = pieceCodeLabels(
+    pieces,
+    newItems,
+    { x0, y0, x1, y1 },
+    box,
+    [...pieceNumbers.slots, ...unitLabelSlots],
+    false,
+    true,
+  );
+  codeBody = finalCodeLabels.body;
+  ({ x0, y0, x1, y1 } = finalCodeLabels.frame);
   return {
     viewBox: `${f2(x0)} ${f2(y0)} ${f2(x1 - x0)} ${f2(y1 - y0)}`,
-    body: `${defs}${body}${labels.join('')}${badges.join('')}${scale}`,
+    body: `${defs}${body}${pieceNumbers.body}${codeBody}${labels.join('')}${badges.join('')}${scale}`,
   };
 }
 
 /** Outline of what a non-joining op acts on: an assembled unit (grey = sewn) or one cut piece. */
 export function silhouetteSvg(
   model: AssemblyModel,
-  target: { unit?: string; piece?: string } | undefined,
+  target: { unit?: string; piece?: string; label?: string } | undefined,
+  box?: [number, number],
 ): SvgMarkup | null {
   if (!target) return null;
   const pieces = model.pieces;
@@ -1593,17 +2361,71 @@ export function silhouetteSvg(
   if (!items.length) return null;
   const b = bounds(pieces, items);
   const span = Math.max(b.x1 - b.x0, b.y1 - b.y0, 1);
-  const pad = span * 0.05;
+  const pad = span * 0.025;
   const sw = span / 55;
+  let frame = {
+    x0: b.x0 - pad,
+    y0: b.y0 - pad,
+    x1: b.x1 + pad,
+    y1: b.y1 + pad,
+  };
   let body = '';
-  for (const it of items) {
-    const g = pieces.get(it.p);
-    if (!g) continue;
-    const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 3)} ${f2(sw * 2)}"` : '';
-    body += `<path d="${pathData(g.cut.map((q) => apply(it.T, q)))} Z" class="tpa-s ${sewn ? 'tpa-fh' : 'tpa-fw'}" stroke-width="${f2(sw)}" stroke-linejoin="round"${dash}/>`;
+  if (target.unit) {
+    const polygons = items.map((item) =>
+      cutOf(pieces, item.p).map((point) => apply(item.T, point)),
+    );
+    const outline = groupOutline(polygons);
+    if (outline.length >= 3)
+      body = `<path d="${pathData(outline)} Z" class="tpa-s tpa-fh" stroke-width="${f2(sw)}" stroke-linejoin="round"/>`;
+    for (const polygon of polygons)
+      body += `<path d="${pathData(polygon)} Z" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.42)}" stroke-linejoin="round"/>`;
+  } else {
+    for (const it of items) {
+      const g = pieces.get(it.p);
+      if (!g) continue;
+      const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 3)} ${f2(sw * 2)}"` : '';
+      body += `<path d="${pathData(g.cut.map((q) => apply(it.T, q)))} Z" class="tpa-s ${sewn ? 'tpa-fh' : 'tpa-fw'}" data-asm-piece="0" stroke-width="${f2(sw)}" stroke-linejoin="round"${dash}/>`;
+    }
+  }
+  const codes = target.piece
+    ? pieceCodeLabels(pieces, items, frame, box)
+    : { body: '', frame, slots: [] };
+  body += codes.body;
+  frame = codes.frame;
+  if (target.unit && target.label) {
+    const fit = containFit(frame, box);
+    const initialFontSize = fit ? PRINT_UNIT_PX / fit : sw * 2.7;
+    const blockWidth = Math.max(0, b.x1 - b.x0 - sw);
+    const captionWidth = box && fit ? (box[0] * 0.72) / fit : blockWidth;
+    const wrapped = wrappedLabel(target.label, Math.max(blockWidth, captionWidth), initialFontSize);
+    if (wrapped.lines.length) {
+      const fontSize = wrapped.fontSize;
+      const x = (b.x0 + b.x1) / 2;
+      let y = b.y1 + fontSize * 0.85;
+      const width = Math.max(...wrapped.lines.map((line) => labelWidth(line, fontSize)));
+      const height = fontSize * wrapped.lines.length * 1.15;
+      let slot = {
+        x0: x - width / 2,
+        x1: x + width / 2,
+        y0: y - fontSize * 0.65,
+        y1: y - fontSize * 0.65 + height,
+      };
+      for (let lane = 0; lane < 3; lane++) {
+        if (!codes.slots.some((other) => overlaps(slot, other, fontSize * 0.12))) break;
+        y += height + fontSize * 0.35;
+        slot = { ...slot, y0: y - fontSize * 0.65, y1: y - fontSize * 0.65 + height };
+      }
+      frame = growBounds(frame, slot);
+      body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-unit" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(fontSize * (fit || 1))}">${wrapped.lines
+        .map(
+          (line, index) =>
+            `<tspan x="${f2(x)}" dy="${index === 0 ? 0 : f2(fontSize * 1.15)}">${xml(line)}</tspan>`,
+        )
+        .join('')}</text>`;
+    }
   }
   return {
-    viewBox: `${f2(b.x0 - pad)} ${f2(b.y0 - pad)} ${f2(b.x1 - b.x0 + pad * 2)} ${f2(b.y1 - b.y0 + pad * 2)}`,
+    viewBox: `${f2(frame.x0)} ${f2(frame.y0)} ${f2(frame.x1 - frame.x0)} ${f2(frame.y1 - frame.y0)}`,
     body,
   };
 }
