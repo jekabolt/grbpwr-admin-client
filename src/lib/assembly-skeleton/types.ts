@@ -226,6 +226,11 @@ export type SeamCandidate = {
    */
   provenance?: SeamProvenance;
   /**
+   * A seam the card's steps sew (a step's row, its proposal, a pick): it shapes a unit before the
+   * engine's own readings. Absent on those.
+   */
+  sewn?: true;
+  /**
    * Sewn sub-range of each side, mm along the run from its start (a partial seam stored with its
    * range). Absent = the whole run.
    */

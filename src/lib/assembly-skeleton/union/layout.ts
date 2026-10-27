@@ -299,7 +299,11 @@ export function unionLayout(
     links.push({ seam: s, from: ea, to: eb, fromParts: pa, fromKey: ka, toKey: kb, len });
     links.push({ seam: s, from: eb, to: ea, fromParts: pb, fromKey: kb, toKey: ka, len });
   }
-  links.sort((p, q) => q.len - p.len);
+  // What the card sews (a stored row, a step's seam) shapes the unit before the engine's own
+  // readings, whatever their length: a front goes on the back's side it is sewn to, not on the
+  // placket the engine would pair with its centre; longest first within each.
+  const tier = (s: SeamCandidate) => (s.provenance || s.sewn ? 1 : 0);
+  links.sort((p, q) => tier(q.seam) - tier(p.seam) || q.len - p.len);
 
   const placed = new Map<string, UnionPlacement>();
   const order: string[] = [];

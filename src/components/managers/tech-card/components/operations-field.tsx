@@ -1273,7 +1273,7 @@ function OperationsHeaderWarnings({
     return ops.flatMap((operation, index) => {
       if (
         (operation.seamKeys?.length ?? 0) > 0 ||
-        !hasMultipleStepPieces(ops, index, seamPieceKeys)
+        !hasMultipleStepPieces(ops, index, seamPieceKeys, seamGeoms)
       ) {
         return [];
       }

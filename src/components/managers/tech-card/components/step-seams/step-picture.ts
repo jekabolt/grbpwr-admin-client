@@ -23,7 +23,7 @@ import {
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
-import { parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
+import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 /** One seam as two lists of edges (a side may run over several edges). */
@@ -137,6 +137,7 @@ export function candidateOf(
     score: 1,
     evidence: EVIDENCE,
     kind: 'edge',
+    sewn: true,
   };
 }
 
@@ -753,12 +754,9 @@ export function stepLayout(
   };
 }
 
-/**
- * A background guess (not a step's own proposal) shapes a unit from this model score down: a pair
- * that fits both ways (each side on a piece its input expects, nothing against it) and no worse.
- * Card 83: side and shoulder seams −0.09…−0.11, a placket's free edge guessed onto the back hem −0.01.
- */
-const GUESS_OK = -0.05;
+// A background guess (not a step's own proposal) shapes a unit from the model's GUESS_OK down: a pair
+// that fits both ways (each side on a piece its input expects, nothing against it) and no worse.
+// Card 83: side and shoulder seams −0.09…−0.11, a placket's free edge guessed onto the back hem −0.01.
 
 /**
  * Seams earlier steps made inside one input of this step — stored rows, the steps' own proposals

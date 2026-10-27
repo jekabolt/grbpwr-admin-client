@@ -4,7 +4,13 @@ import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceTilt, rasterize } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
-import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Graph } from './card83.fixture';
+import {
+  CARD83_OPS,
+  CARD83_PIECE_KEYS,
+  card83Geoms,
+  card83Graph,
+  card83InnerLines,
+} from './card83.fixture';
 import {
   boxOf,
   candidateOf,
@@ -303,6 +309,7 @@ describe('confidentSeam', () => {
 describe('stepLayout on card 83', () => {
   const geoms = card83Geoms();
   const graph = card83Graph();
+  const innerLines = card83InnerLines();
   const ops = CARD83_OPS;
   const pieceKeys = CARD83_PIECE_KEYS;
   const steps = ops.map((op, i) => {
@@ -310,10 +317,10 @@ describe('stepLayout on card 83', () => {
     const raw = splitSeams(graph.chosen, leaves, geoms);
     const used = usedEdgesBeforeStep(ops, i, new Map());
     const suggestion = suggestStepPair(ops, i, pieceKeys, geoms, used, null, new Map());
-    const own = suggestion ? [seamOfSides(suggestion, geoms, new Map())!].filter(Boolean) : [];
+    const own = suggestion ? [seamOfSides(suggestion, geoms, innerLines)!].filter(Boolean) : [];
     // Inside each input: the engine's sure seams, and what the steps before sewed there.
     const sewn = sewnBeforeStep(ops, i, pieceKeys, geoms, new Map());
-    const inner = [...raw.inner, ...earlierInner(sewn, leaves, geoms, new Map(), raw.inner)];
+    const inner = [...raw.inner, ...earlierInner(sewn, leaves, geoms, innerLines, raw.inner)];
     const frame = [...inner, ...(own.length ? own : raw.cross)];
     return {
       op: op.operationNumber,
