@@ -541,6 +541,11 @@ export type UnionLayout = {
   stacked: string[][];
   /** Pieces hung on a 3D / composite join («~»). */
   hung: string[];
+  /**
+   * Pieces set into a run across other pieces (a sleeve into an opened armhole): their way up is
+   * the run's — pointing away from what they are sewn to — not the page's.
+   */
+  onRuns?: string[];
   /** Pieces that did not fit without overlap > SKELETON.overlapMax (or have no contour). */
   overflow: string[];
   /** Surface joins (patch pocket, appliqué): drawn ON their host, last. */

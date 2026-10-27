@@ -11,15 +11,19 @@ import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly
 import {
   pairOverlap,
   pieceKeyOf,
+  pieceTilt,
   rasterize,
   resolveEdge,
+  runOf,
+  sidewaysTrials,
   unionLayout,
   type Raster,
+  type RunPart,
 } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
-import { parseInner, pieceOfTarget } from './step-seams-model';
+import { parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 /** One seam as two lists of edges (a side may run over several edges). */
@@ -124,7 +128,16 @@ export function candidateOf(
   const a = longest(s.a);
   const b = longest(s.b);
   if (!a || !b || pieceKeyOf(a) === pieceKeyOf(b)) return null;
-  return { a, b, score: 1, evidence: EVIDENCE, kind: 'edge' };
+  // A side of several edges (an armhole of front + back) is laid along as one run.
+  return {
+    a,
+    b,
+    ...(s.a.length > 1 ? { aParts: [...s.a] } : {}),
+    ...(s.b.length > 1 ? { bParts: [...s.b] } : {}),
+    score: 1,
+    evidence: EVIDENCE,
+    kind: 'edge',
+  };
 }
 
 const FLIP_Y: Affine = [1, 0, 0, -1, 0, 0];
@@ -257,6 +270,11 @@ export type StepLayout = {
   ghosts: Ghost[];
   /** Identical layers drawn as one shape, the leader first (a collar on its under-collar). */
   stacked: string[][];
+  /**
+   * Pieces set into a run across other pieces (a sleeve into an opened armhole, a collar on a
+   * neckline): they point away from what they are sewn to — the run's way up, not the page's.
+   */
+  onRuns: string[];
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };
@@ -266,6 +284,7 @@ const EMPTY_LAYOUT: StepLayout = {
   input: new Map(),
   ghosts: [],
   stacked: [],
+  onRuns: [],
   bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
 };
 
@@ -330,7 +349,7 @@ function layInput(
   inner: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
   raster: { rasterMm?: number },
-): { T: Map<string, Affine>; stacked: string[][] } {
+): { T: Map<string, Affine>; stacked: string[][]; onRuns: string[] } {
   const L = unionLayout(keys, inner, geoms, { ...raster, overlapMax: TOUCH, uprightMax: UPRIGHT });
   const T = new Map<string, Affine>(L.placements.map((p) => [p.pieceKey, p.T]));
   const left = keys.filter((k) => !T.has(k));
@@ -345,7 +364,7 @@ function layInput(
       x += b.x1 - b.x0;
     }
   }
-  return { T, stacked: L.stacked };
+  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [] };
 }
 
 /** The inverse of a (non-degenerate) affine. */
@@ -392,6 +411,7 @@ export function stepLayout(
   const local = new Map<string, Affine>();
   const localBox = new Map<number, Box>();
   const stacked: string[][] = [];
+  const onRuns: string[] = [];
   for (const i of ins) {
     const ks = keysOf(i);
     if (!ks.length) continue;
@@ -399,6 +419,7 @@ export function stepLayout(
     const laid = layInput(ks, inner, geoms, raster);
     for (const [k, t] of laid.T) local.set(k, t);
     stacked.push(...laid.stacked);
+    onRuns.push(...laid.onRuns);
     localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
   }
   // A layer under its identical twin is not a shape of its own: it leans as the twin's edge says.
@@ -454,8 +475,13 @@ export function stepLayout(
   const G = new Map<number, Affine>();
   let T = new Map<string, Affine>();
   let ghosts: Ghost[] = [];
+  // Layers laid on their twins across inputs (a cuff's second face as its own input).
+  let crossStacks: string[][] = [];
+  // Inputs set into another input's run (a sleeve into the body's armhole).
+  let crossRuns: string[] = [];
   for (;;) {
     G.clear();
+    crossStacks = [];
     // Pairs drawn on each other on purpose: a layer on its identical twin, a part on its host.
     const onEachOther = new Set<string>();
     let placedRasters: Raster[] = [];
@@ -491,7 +517,19 @@ export function stepLayout(
       const ea = resolveEdge(theirs, geoms)!;
       const eb = resolveEdge(mine, geoms)!;
       const Tt = compose(Ht, local.get(kb)!);
-      const A = ea.pts.map((p) => apply(Tt, p));
+      // Their side across several pieces of their input (an armhole of front + back): one run.
+      const theirParts = (theirs === c.a ? c.aParts : c.bParts) ?? [];
+      const run =
+        theirParts.length > 1 && theirParts.every((id) => inOf(id) === i)
+          ? runOf(
+              theirParts.flatMap((id): RunPart[] => {
+                const e = resolveEdge(id, geoms);
+                return e ? [{ key: e.pieceKey, pts: e.pts, len: e.len }] : [];
+              }),
+              (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
+            )
+          : null;
+      const A = run ?? ea.pts.map((p) => apply(Tt, p));
       const B = eb.pts.map((p) => apply(local.get(ka)!, p));
       const a0 = A[0];
       const a1 = A[A.length - 1];
@@ -501,9 +539,14 @@ export function stepLayout(
       // A layer goes ON its twin only in the joined result; an exploded canvas keeps them apart.
       if (stack && explode > 0) return null;
       const upright = (M: Affine) =>
-        mineKeys.every((k) => followers.has(k) || tiltOf(compose(M, local.get(k)!)) <= UPRIGHT);
-      // Off the seam: along the laid edge's normal, away from the input it belongs to.
-      const hc = centroidOf(worldOf(geoms.get(kb)!, Tt));
+        mineKeys.every(
+          (k) => followers.has(k) || pieceTilt(geoms.get(k)!, compose(M, local.get(k)!)) <= UPRIGHT,
+        );
+      // Off the seam: along the laid edge's normal, away from the input it belongs to (for a run,
+      // away from all the pieces it runs across).
+      const hc = run
+        ? centroidOf(keysOf(i).flatMap((k) => worldOf(geoms.get(k)!, compose(Ht, local.get(k)!))))
+        : centroidOf(worldOf(geoms.get(kb)!, Tt));
       const mid: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
       const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
       let nx = -(a1[1] - a0[1]) / len;
@@ -512,7 +555,36 @@ export function stepLayout(
         nx = -nx;
         ny = -ny;
       }
+      // Set into a run, an input points away from what it is sewn to: the run's way up, not the
+      // page's (a sleeve out of an opened armhole, a collar above the neckline).
+      const away = (M: Affine) => {
+        const c = centroidOf(
+          mineKeys.flatMap((k) => worldOf(geoms.get(k)!, compose(M, local.get(k)!))),
+        );
+        return (c[0] - mid[0]) * nx + (c[1] - mid[1]) * ny > 0;
+      };
       let best: { M: Affine; score: number } | null = null;
+      // Off the seam along its normal until clear of the inputs already laid.
+      const settle = (M0: Affine, cost: number) => {
+        let M = M0;
+        let o = overlapAt(j, M);
+        let off = 0;
+        for (let n = 1; o > TOUCH && n <= PUSH_MAX; n++) {
+          off = n * PUSH * unit;
+          M = compose(translate(nx * off, ny * off), M0);
+          o = overlapAt(j, M);
+        }
+        if (o > TOUCH) return;
+        const score = cost + off;
+        if (!best || score < best.score) best = { M, score };
+      };
+      if (stack) {
+        // A layer goes ON its twin, drawn alike: straight onto it first (its own way up whichever
+        // edge the seam names); only a twin drawn another way is covered by turning along the seam.
+        const mc = centroidOf(worldOf(geoms.get(ka)!, local.get(ka)!));
+        const M = translate(hc[0] - mc[0], hc[1] - mc[1]);
+        best = { M, score: -overlapAt(j, M) * 1000 + (upright(M) ? 0 : 500) };
+      }
       for (const rev of [false, true])
         for (const mir of [false, true]) {
           const q0 = rev ? B[B.length - 1] : B[0];
@@ -528,26 +600,33 @@ export function stepLayout(
           const e1 = apply(M0, q1);
           const endErr = Math.hypot(e1[0] - a1[0], e1[1] - a1[1]);
           if (stack) {
-            // The option that covers the twin best.
-            const score = -overlapAt(j, M0) * 1000 + endErr;
+            // The option that covers the twin best, its own way up when that covers half of it.
+            const score = -overlapAt(j, M0) * 1000 + endErr + (upright(M0) ? 0 : 500);
             if (!best || score < best.score) best = { M: M0, score };
             continue;
           }
-          if (!upright(M0)) continue;
-          let M = M0;
-          let o = overlapAt(j, M);
-          let off = 0;
-          for (let n = 1; o > TOUCH && n <= PUSH_MAX; n++) {
-            off = n * PUSH * unit;
-            M = compose(translate(nx * off, ny * off), M0);
-            o = overlapAt(j, M);
-          }
-          if (o > TOUCH) continue;
+          if (!upright(M0) || (run && !away(M0))) continue;
           // As the unit placer: a flip only when it clearly untangles the picture.
-          const score = endErr + off + (mir ? 50 : 0);
-          if (!best || score < best.score) best = { M, score };
+          settle(M0, endErr + (mir ? 50 : 0));
         }
-      if (best && stack) onEachOther.add(pairKey(i, j));
+      if (!best && run) {
+        // Along the run it would lie past upright (a slit of an armhole): sideways, an end of its
+        // edge at the shoulder point, pointing away from the input it is sewn to.
+        const dx = mid[0] - hc[0];
+        const dy = mid[1] - hc[1];
+        for (const s of sidewaysTrials(A, B)) {
+          const c = centroidOf(
+            mineKeys.flatMap((k) => worldOf(geoms.get(k)!, compose(s.T, local.get(k)!))),
+          );
+          if ((c[0] - mid[0]) * dx + (c[1] - mid[1]) * dy <= 0) continue;
+          settle(s.T, s.mirrored ? 50 : 0);
+        }
+      }
+      if (best && stack) {
+        onEachOther.add(pairKey(i, j));
+        crossStacks.push([kb, ka]);
+      }
+      if (best && run) crossRuns.push(...mineKeys);
       return best?.M ?? null;
     };
     // Inputs a cross seam reaches form a cluster (laid against each other); clusters stand apart.
@@ -664,7 +743,67 @@ export function stepLayout(
     ...keys.flatMap((k) => worldOf(geoms.get(k)!, T.get(k)!)),
     ...ghosts.flatMap((g) => g.ring),
   ]);
-  return { T, input, ghosts, stacked, bbox };
+  return {
+    T,
+    input,
+    ghosts,
+    stacked: [...stacked, ...crossStacks],
+    onRuns: [...onRuns, ...crossRuns],
+    bbox,
+  };
+}
+
+/**
+ * A background guess (not a step's own proposal) shapes a unit from this model score down: a pair
+ * that fits both ways (each side on a piece its input expects, nothing against it) and no worse.
+ * Card 83: side and shoulder seams −0.09…−0.11, a placket's free edge guessed onto the back hem −0.01.
+ */
+const GUESS_OK = -0.05;
+
+/**
+ * Seams earlier steps made inside one input of this step — stored rows, the steps' own proposals
+ * and the model's better guesses, as the placer reads them — beside what the engine reads there
+ * itself. An edge the engine already pairs with another partner (sure or not) is its call, not a
+ * guess's — the very pair it reads, a step confirms; a layer's other edge is the one exception
+ * (a cuff's two faces are paired along both long edges, yet one of them is the sleeve's). The
+ * placer still refuses a seam that would land a piece on another or fold it over.
+ */
+export function earlierInner(
+  pairs: readonly SewnPair[],
+  leaves: readonly (readonly string[])[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+  engine: readonly SeamCandidate[],
+): SeamCandidate[] {
+  const input = inputIndex(leaves);
+  const inOf = (id: EdgeId) => input.get(pieceKeyOf(id));
+  const identical = (ka: string, kb: string) =>
+    !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
+  // Each edge's partners as the engine reads them (both sides, parts included).
+  const partners = new Map<EdgeId, EdgeId[]>();
+  for (const c of engine) {
+    if (c.kind === 'surface' || c.kind === 'closure-not-seam') continue;
+    if (identical(pieceKeyOf(c.a), pieceKeyOf(c.b))) continue;
+    const A = c.aParts ?? [c.a];
+    const B = c.bParts ?? [c.b];
+    for (const id of A) partners.set(id, [...(partners.get(id) ?? []), ...B]);
+    for (const id of B) partners.set(id, [...(partners.get(id) ?? []), ...A]);
+  }
+  const out: SeamCandidate[] = [];
+  for (const s of pairs) {
+    if (!s.own && s.score > GUESS_OK) continue;
+    const ids = [...s.a, ...s.b];
+    if (!ids.length) continue;
+    // What the engine pairs an edge with must lie within this pair (the same seam, or a part of
+    // it read on its own — a back armhole without the front's); another partner is its call.
+    const set = new Set(ids);
+    if (ids.some((id) => (partners.get(id) ?? []).some((p) => !set.has(p)))) continue;
+    const i = inOf(ids[0]);
+    if (i == null || ids.some((id) => inOf(id) !== i)) continue;
+    const c = seamOfSides(s, geoms, innerLines);
+    if (c && c.kind !== 'surface') out.push(c);
+  }
+  return out;
 }
 
 // ─── screen ───────────────────────────────────────────────────────────────────────────────────────
@@ -721,8 +860,9 @@ export function midAlong(pts: readonly Pt2[]): { p: Pt2; t: Pt2 } {
 }
 
 /**
- * Where a label of an edge goes: `off` px off the edge's middle, on the side away from `inside`
- * (the piece's centre), anchored so the text runs away from the line.
+ * Where a label of an edge goes: `off` px off the edge's middle, INSIDE its own piece (towards
+ * `inside`, the piece's centre), anchored so the text runs away from the line. Two sides of a seam
+ * laid against each other so label into their own shapes, never both into the gap between them.
  */
 export function labelSpot(
   pts: readonly Pt2[],
@@ -731,7 +871,7 @@ export function labelSpot(
 ): { at: Pt2; anchor: 'start' | 'middle' | 'end'; t: Pt2 } {
   const { p, t } = midAlong(pts);
   let n: Pt2 = [t[1], -t[0]];
-  if (n[0] * (inside[0] - p[0]) + n[1] * (inside[1] - p[1]) > 0) n = [-n[0], -n[1]];
+  if (n[0] * (inside[0] - p[0]) + n[1] * (inside[1] - p[1]) < 0) n = [-n[0], -n[1]];
   return {
     at: [p[0] + n[0] * off, p[1] + n[1] * off],
     anchor: Math.abs(n[0]) < 0.7 ? 'middle' : n[0] > 0 ? 'start' : 'end',

@@ -493,7 +493,7 @@ export function twinKindOf(a: PieceGeom, b: PieceGeom): 'mirror' | 'identical' |
 }
 
 /** The one edge along which identical layers are sewn: longest convex, notched ones first. */
-function identicalSeamEdge(p: PieceGeom): Edge | undefined {
+export function identicalSeamEdge(p: PieceGeom): Edge | undefined {
   const convex = p.edges.filter(
     (e) => e.turnDeg > -CONVEX_TOL_DEG && e.lenMm >= SKELETON.minSeamMm,
   );

@@ -19,6 +19,7 @@ import {
   innerId,
   inputGroups,
   parseInner,
+  sewnBeforeStep,
   suggestStepPair,
   usedEdgesBeforeStep,
   type FormOpLike,
@@ -28,6 +29,7 @@ import {
 import {
   boxOf,
   centroidOf,
+  earlierInner,
   fitBox,
   inputName,
   labelSpot,
@@ -112,7 +114,7 @@ export function splitLaid(
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, Pt2[][]>,
   byKey: ReadonlyMap<string, StoredSeam>,
-): { inner: SeamCandidate[]; cross: SeamCandidate[] } {
+): { inner: SeamCandidate[]; cross: SeamCandidate[]; engine: SeamCandidate[] } {
   const raw = splitSeams(chosen, leaves, geoms);
   const laid = (c: SeamCandidate): SeamCandidate | null => {
     if (c.kind !== 'surface' || c.surface?.mark) return c;
@@ -126,7 +128,37 @@ export function splitLaid(
     return seamOfSides(sides, geoms, innerLines, at);
   };
   const keep = (xs: SeamCandidate[]) => xs.map(laid).filter((c): c is SeamCandidate => !!c);
-  return { inner: keep(raw.inner), cross: keep(raw.cross) };
+  // `engine`: what the engine reads inside the inputs, sure or not — the edges it has spoken for.
+  return { inner: keep(raw.inner), cross: keep(raw.cross), engine: raw.inner };
+}
+
+/**
+ * The seams inside this step's inputs: the engine's own (laid), plus the ones the steps before
+ * `index` sewed there — stored rows and the model's implied proposals — where the engine has not
+ * spoken for the edge. `index` = the step count reads the whole card (a unit on a WITH row).
+ */
+export function innerSeamsOf(
+  split: ReturnType<typeof splitLaid>,
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  leaves: readonly (readonly string[])[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, Pt2[][]>,
+  byKey: ReadonlyMap<string, StoredSeam>,
+): SeamCandidate[] {
+  const sewn = sewnBeforeStep(ops, index, pieceKeys, geoms, byKey);
+  return [...split.inner, ...earlierInner(sewn, leaves, geoms, innerLines, split.engine)];
+}
+
+/** Every piece the card knows: by geometry, and by line key on the card's piece rows. */
+export function useCardPieceKeys(): ReadonlySet<string> {
+  const { ctx, geo } = useCardGeoms();
+  return useMemo(() => {
+    const s = new Set<string>(geo?.pieces.keys() ?? []);
+    for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
+    return s;
+  }, [geo?.pieces, ctx?.techCard?.techCard?.pieces]);
 }
 
 /** The card's stored seam rows by key, server and pending alike. */
@@ -144,12 +176,7 @@ export function useStepScene(index: number) {
   const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as SceneOp[];
   const op = ops[index];
   const { ctx, geo, geoms, innerLines } = useCardGeoms();
-
-  const pieceKeys = useMemo(() => {
-    const s = new Set<string>(geo?.pieces.keys() ?? []);
-    for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
-    return s;
-  }, [geo?.pieces, ctx?.techCard?.techCard?.pieces]);
+  const pieceKeys = useCardPieceKeys();
 
   const cardName = ctx?.nameOf;
   const pieceName = useCallback(
@@ -199,19 +226,24 @@ export function useStepScene(index: number) {
   const used = useStable(new Set<EdgeId>(usedRaw), usedRaw.join(','));
 
   // Shown on a frozen card too (it only cannot be accepted there).
-  const sugRaw: Suggestion | null =
-    geo && geo.dep.status !== 'pending'
-      ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease)
-      : null;
+  const ready = !!geo && geo.dep.status !== 'pending';
+  const sugRaw = useMemo<Suggestion | null>(
+    () => (ready ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease, byKey) : null),
+    [ready, ops, index, pieceKeys, geoms, used, ease, byKey],
+  );
   const suggestion = useStable(
     sugRaw,
     sugRaw ? `${sugRaw.a.join('+')}|${sugRaw.b.join('+')}|${sugRaw.aLen}|${sugRaw.bLen}` : '',
   );
 
-  const split = useMemo(
-    () => splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey),
-    [graph?.chosen, leaves, geoms, byKey, innerLines],
-  );
+  // Inside each input: the engine's seams, and what earlier steps sewed there (stored or implied).
+  const split = useMemo(() => {
+    const s = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
+    return {
+      ...s,
+      inner: innerSeamsOf(s, ops, index, pieceKeys, leaves, geoms, innerLines, byKey),
+    };
+  }, [graph?.chosen, leaves, geoms, byKey, innerLines, ops, index, pieceKeys]);
   const innerSeams = useStable(split.inner, seamSig(split.inner));
 
   const storedRaw = stored

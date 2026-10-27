@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { pairOverlap, rasterize } from 'lib/assembly-skeleton/union';
+import { pairOverlap, pieceTilt, rasterize } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Graph } from './card83.fixture';
@@ -9,6 +9,7 @@ import {
   boxOf,
   candidateOf,
   confidentSeam,
+  earlierInner,
   fitBox,
   inputName,
   insideRing,
@@ -26,7 +27,12 @@ import {
   UPRIGHT,
   type StepLayout,
 } from './step-picture';
-import { inputGroups, suggestStepPair, usedEdgesBeforeStep } from './step-seams-model';
+import {
+  inputGroups,
+  sewnBeforeStep,
+  suggestStepPair,
+  usedEdgesBeforeStep,
+} from './step-seams-model';
 
 // A w × h rectangle, CCW from the origin: edge 0 bottom, 1 right, 2 top, 3 left.
 function rect(key: string, w: number, h: number): PieceGeom {
@@ -239,12 +245,15 @@ describe('stepLayout', () => {
   });
 
   it('a cross seam never folds an input over: its top stays up, or it stands beside', () => {
-    // A's top edge to C's top edge would hang C upside down on A.
-    const fold = candidateOf({ a: ['A#2'], b: ['C#2'] }, geoms)!;
-    const L = stepLayout([['A'], ['C']], [fold], geoms);
+    // A's top edge to C's top edge would hang C upside down on A. (A true rectangle turned half
+    // round is the same shape, so C is read as any other piece here.)
+    const g = new Map(geoms);
+    g.set('C', { ...geoms.get('C')!, rect: false });
+    const fold = candidateOf({ a: ['A#2'], b: ['C#2'] }, g)!;
+    const L = stepLayout([['A'], ['C']], [fold], g);
     expect(tiltOf(L.T.get('C')!)).toBeLessThanOrEqual(UPRIGHT);
-    const a = boxOf(world(geoms.get('A')!, L.T.get('A')!));
-    const c = boxOf(world(geoms.get('C')!, L.T.get('C')!));
+    const a = boxOf(world(g.get('A')!, L.T.get('A')!));
+    const c = boxOf(world(g.get('C')!, L.T.get('C')!));
     const overlapX = Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0);
     const overlapY = Math.min(a.y1, c.y1) - Math.max(a.y0, c.y0);
     expect(overlapX <= 0 || overlapY <= 0).toBe(true);
@@ -298,16 +307,19 @@ describe('stepLayout on card 83', () => {
   const pieceKeys = CARD83_PIECE_KEYS;
   const steps = ops.map((op, i) => {
     const leaves = inputGroups(ops, i, pieceKeys).map((g) => g.pieces);
-    const split = splitSeams(graph.chosen, leaves, geoms);
+    const raw = splitSeams(graph.chosen, leaves, geoms);
     const used = usedEdgesBeforeStep(ops, i, new Map());
-    const suggestion = suggestStepPair(ops, i, pieceKeys, geoms, used, null);
+    const suggestion = suggestStepPair(ops, i, pieceKeys, geoms, used, null, new Map());
     const own = suggestion ? [seamOfSides(suggestion, geoms, new Map())!].filter(Boolean) : [];
-    const frame = [...split.inner, ...(own.length ? own : split.cross)];
+    // Inside each input: the engine's sure seams, and what the steps before sewed there.
+    const sewn = sewnBeforeStep(ops, i, pieceKeys, geoms, new Map());
+    const inner = [...raw.inner, ...earlierInner(sewn, leaves, geoms, new Map(), raw.inner)];
+    const frame = [...inner, ...(own.length ? own : raw.cross)];
     return {
       op: op.operationNumber,
       leaves,
       canvas: stepLayout(leaves, frame, geoms, { explode: 0.08 }),
-      result: stepLayout(leaves, [...split.inner, ...own], geoms),
+      result: stepLayout(leaves, [...inner, ...own], geoms),
     };
   });
   const ringsOf = (L: StepLayout, leaves: readonly (readonly string[])[], i: number): Pt2[][] => [
@@ -323,6 +335,8 @@ describe('stepLayout on card 83', () => {
   const identical = (ka: string, kb: string) =>
     !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
   const followersOf = (L: StepLayout) => new Set(L.stacked.flatMap((s) => s.slice(1)));
+  // A layer under its twin leans as the twin does; a piece set into a run points away from it.
+  const freeOf = (L: StepLayout) => new Set([...followersOf(L), ...L.onRuns]);
 
   for (const s of steps) {
     it(`op ${s.op}: the canvas never lays two inputs on each other`, () => {
@@ -347,9 +361,9 @@ describe('stepLayout on card 83', () => {
 
     it(`op ${s.op}: every piece stands its own way up, on the canvas and in the result`, () => {
       for (const L of [s.canvas, s.result]) {
-        const followers = followersOf(L);
+        const free = freeOf(L);
         for (const [k, T] of L.T)
-          if (!followers.has(k)) expect(tiltOf(T)).toBeLessThanOrEqual(UPRIGHT);
+          if (!free.has(k)) expect(pieceTilt(geoms.get(k)!, T)).toBeLessThanOrEqual(UPRIGHT);
       }
     });
 
@@ -384,27 +398,61 @@ describe('stepLayout on card 83', () => {
     });
   }
 
-  it('op 370: with no proposal and only unsure readings between the inputs, each keeps its own way up', () => {
+  it('op 370: the left sleeve is set into the armhole run, away from the body; the rest keeps its way up', () => {
     const s = steps.find((x) => x.op === 370)!;
     for (const L of [s.canvas, s.result]) {
-      const followers = followersOf(L);
-      for (const [k, T] of L.T) if (!followers.has(k)) expect(tiltOf(T)).toBeLessThan(0.03);
+      expect(L.onRuns).toContain('SLV_L');
+      expect(L.onRuns).not.toContain('BP');
+      const free = freeOf(L);
+      for (const [k, T] of L.T)
+        if (!free.has(k)) expect(pieceTilt(geoms.get(k)!, T)).toBeLessThan(0.03);
+    }
+    // Its cuff stays on the sleeve's hem, on the far side from the body.
+    const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
+    const body = box('BP');
+    const slv = box('SLV_L');
+    const cuff = box('SLV_M_L');
+    const far = (b: ReturnType<typeof box>) =>
+      Math.hypot(
+        (b.x0 + b.x1) / 2 - (body.x0 + body.x1) / 2,
+        (b.y0 + b.y1) / 2 - (body.y0 + body.y1) / 2,
+      );
+    expect(far(cuff)).toBeGreaterThan(far(slv));
+  });
+
+  it('op 400: both sleeves hang off the body’s armhole runs, their cuffs beyond them', () => {
+    const s = steps.find((x) => x.op === 400)!;
+    for (const L of [s.canvas, s.result]) {
+      expect(L.onRuns).toEqual(expect.arrayContaining(['SLV_L', 'SLV_R']));
+      const box = (k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+      const body = box('BP');
+      const far = (k: string) => {
+        const b = box(k);
+        return Math.hypot(
+          (b.x0 + b.x1) / 2 - (body.x0 + body.x1) / 2,
+          (b.y0 + b.y1) / 2 - (body.y0 + body.y1) / 2,
+        );
+      };
+      expect(far('SLV_M_L')).toBeGreaterThan(far('SLV_L'));
+      expect(far('SLV_M_R')).toBeGreaterThan(far('SLV_R'));
     }
   });
 
-  it('op 200: the result lays the fronts against the back along the proposal, the placket apart', () => {
+  it('op 200: the result lays the fronts against the back along the proposal, the placket on its front edge', () => {
     const s = steps.find((x) => x.op === 200)!;
     const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
     const bp = box('BP');
     const fr = box('FR');
     // FR touches BP's side.
     expect(Math.min(Math.abs(fr.x0 - bp.x1), Math.abs(bp.x0 - fr.x1))).toBeLessThan(12);
-    // The placket is not sewn to the front yet by anything sure: beside, never on.
+    // Step 130 sewed the placket to the left front's centre edge (the engine reads the same pair,
+    // unsure): it stands against that edge, upright, never on the front.
     const fl = box('FL');
     const pl = box('PLCK');
-    expect(Math.max(fl.x0 - pl.x1, pl.x0 - fl.x1, fl.y0 - pl.y1, pl.y0 - fl.y1)).toBeGreaterThan(
-      10,
-    );
+    expect(Math.min(Math.abs(fl.x0 - pl.x1), Math.abs(pl.x0 - fl.x1))).toBeLessThan(12);
+    expect(pl.y0).toBeGreaterThan(fl.y0 - 12);
+    expect(pl.y1).toBeLessThan(fl.y1 + 12);
+    expect(pieceTilt(geoms.get('PLCK')!, s.result.T.get('PLCK')!)).toBeLessThan(0.03);
   });
 });
 
@@ -488,7 +536,7 @@ describe('partnerOf', () => {
 });
 
 describe('labelSpot', () => {
-  it('sits off the edge, away from the piece', () => {
+  it('sits off the edge, inside its own piece — two laid sides never share the gap', () => {
     const s = labelSpot(
       [
         [100, 0],
@@ -497,8 +545,8 @@ describe('labelSpot', () => {
       [50, 100],
       16,
     );
-    expect(s.at).toEqual([116, 100]);
-    expect(s.anchor).toBe('start');
+    expect(s.at).toEqual([84, 100]);
+    expect(s.anchor).toBe('end');
   });
 });
 

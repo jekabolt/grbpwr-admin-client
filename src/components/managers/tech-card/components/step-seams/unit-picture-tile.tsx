@@ -4,18 +4,23 @@
 // an ink outline — fixed, small, never a door. Without any geometry the unit stays a word.
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
+import { useWatch } from 'react-hook-form';
 import { Tile } from 'ui';
 import { useCardSeamGraph } from '../card-unit-pictures';
+import type { TechCardFormData } from '../schema';
 import { seamSig } from './step-picture';
 import {
+  innerSeamsOf,
   splitLaid,
   StepPictureSvg,
   useBoxSize,
   useCardGeoms,
+  useCardPieceKeys,
   useSeamRows,
   useStable,
   useStepLayout,
 } from './step-picture-view';
+import type { FormOpLike } from './step-seams-model';
 
 /** The row tile's raster: a 56 px picture needs no finer reading of what touches what. */
 const RASTER_MM = 4;
@@ -33,11 +38,15 @@ export function UnitPictureTile({
   const { geoms, innerLines } = useCardGeoms();
   const { graph } = useCardSeamGraph();
   const byKey = useSeamRows();
+  const pieceKeys = useCardPieceKeys();
+  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOpLike[];
   const inputs = useStable([leaves], leaves.join(','));
-  const innerRaw = useMemo(
-    () => splitLaid(graph?.chosen ?? [], inputs, geoms, innerLines, byKey).inner,
-    [graph?.chosen, inputs, geoms, innerLines, byKey],
-  );
+  // The unit along the seams the card holds inside it: the engine's, and the steps' own (stored
+  // or implied) — the whole card's, a unit is what every step so far made of its pieces.
+  const innerRaw = useMemo(() => {
+    const s = splitLaid(graph?.chosen ?? [], inputs, geoms, innerLines, byKey);
+    return innerSeamsOf(s, ops, ops.length, pieceKeys, inputs, geoms, innerLines, byKey);
+  }, [graph?.chosen, inputs, geoms, innerLines, byKey, ops, pieceKeys]);
   const inner = useStable(innerRaw, seamSig(innerRaw));
   const layout = useStepLayout(inputs, inner, geoms, 0, RASTER_MM);
   const [boxEl, box] = useBoxSize();

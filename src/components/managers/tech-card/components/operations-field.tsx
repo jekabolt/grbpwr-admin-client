@@ -269,6 +269,7 @@ import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
   hasMultipleStepPieces,
+  easeOf,
   suggestStepPair,
   usedEdgesBeforeStep,
   type FormOpLike,
@@ -1276,15 +1277,18 @@ function OperationsHeaderWarnings({
       ) {
         return [];
       }
-      const ratio = Number.parseFloat(
-        String((operation as FormOpLike & { fullnessRatio?: string }).fullnessRatio ?? '').replace(
-          ',',
-          '.',
-        ),
-      );
-      const ease = Number.isFinite(ratio) && ratio > 0 ? ratio : null;
       const used = usedEdgesBeforeStep(ops, index, seamsByKey);
-      return suggestStepPair(ops, index, seamPieceKeys, seamGeoms, used, ease) ? [] : [index];
+      return suggestStepPair(
+        ops,
+        index,
+        seamPieceKeys,
+        seamGeoms,
+        used,
+        easeOf(operation),
+        seamsByKey,
+      )
+        ? []
+        : [index];
     });
   }, [operations, seamGeometry?.dep.status, seamGeoms, seamPieceKeys, seams, seamsByKey]);
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
