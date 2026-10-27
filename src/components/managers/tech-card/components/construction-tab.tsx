@@ -1,6 +1,5 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -15,9 +14,8 @@ import {
   Stat,
   StatGrid,
   Text,
-  DecimalField,
 } from 'ui';
-import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { parseDecimalNumber } from 'utils/decimal';
 import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';
 import { ConstructionField } from './construction-field';
@@ -86,32 +84,6 @@ export function operationMinutes(o: SummaryOp): number {
   return Number.isFinite(smv) ? smv : 0;
 }
 
-// ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2) — the standard a раскладка's recorded allowance is judged against, and
-// the one number on this tab a machine reads rather than a human.
-//
-// On the wire it is a CARD field, not part of `construction` — anything added to a section's digest
-// projection instantly marks every signed-off CONSTRUCTION approval as «edited since signing».
-//
-// THREE VALUES, NOT TWO. Empty = the workshop default applies (the placeholder names it); a number
-// overrides it; 0 is a number like any other («кроим по линии как нарисована»). The distinction
-// lives in the field's `title`, not in a paragraph under it.
-function RequiredSeamAllowanceField() {
-  // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
-  // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
-  const { data } = useWorkshopSettings();
-  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
-  return (
-    <div title='empty inherits the workshop value; 0 means cut along the line as drawn'>
-      <DecimalField
-        name='requiredSeamAllowanceMm'
-        label='required seam allowance, mm'
-        maxDecimals={1}
-        placeholder={shopDefault ? `inherited · ${shopDefault} mm` : 'not set'}
-      />
-    </div>
-  );
-}
-
 // СТАНДАРТЫ КАРТОЧКИ — the required allowance and the card defaults (workmanship + equipment park)
 // in ONE block, folded by default: they are what every step inherits, set once and rarely looked
 // at again. The block opens itself on any error under it, so the error router's revealField finds
@@ -129,14 +101,7 @@ function CardStandards() {
       collapsible
       defaultOpen={hasError}
     >
-      {/* The narrow column belongs to the ONE number, not to the block: the equipment park below
-          needs the full width for its tile grids. */}
-      <div className='flex flex-col gap-2.5'>
-        <div className='sm:max-w-sm'>
-          <RequiredSeamAllowanceField />
-        </div>
-        <ConstructionField />
-      </div>
+      <ConstructionField />
     </Section>
   );
 }

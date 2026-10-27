@@ -1,15 +1,24 @@
-import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
+  AddDoor,
   Chip,
   Close,
   ConfirmationModal,
+  FoldCaret,
   GroupLabel,
-  Pill,
+  Row,
   Select,
   Text,
-  Tiles,
   FormField,
   FormItem,
   FormLabel,
@@ -18,6 +27,7 @@ import {
   InputField,
   SelectField,
 } from 'ui';
+import { StitchPictogram } from 'components/managers/tech-card/annotation/stitch-pictogram';
 import { ulid } from 'utils/ulid';
 import {
   automationLevelOptions,
@@ -36,6 +46,7 @@ import {
   pressProfileProcessOptions,
   resolveMachineProfile,
   resolvePressProfile,
+  stitchTypeNumber,
   threadTensionOptions,
 } from './equipment-options';
 import { attachmentOptions, machineProfileSummary, pressProfileSummary } from './operation-options';
@@ -137,7 +148,6 @@ const emptyPressProfile: PressProfileRow = {
 // resolving.
 type ProfileUse = { byKey: number; byType: number };
 const NO_USE: ProfileUse = { byKey: 0, byType: 0 };
-const totalUses = (u: ProfileUse | undefined) => (u ? u.byKey + u.byType : 0);
 
 function countProfileUses(
   operations: StepRow[],
@@ -457,118 +467,128 @@ function ProfileSteamField({ name }: { name: `${typeof PRESSES}.${number}.pressS
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
 const fieldGrid = 'grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3';
 
-// ── the tile ─────────────────────────────────────────────────────────────────────────────────────
-//
-// NOT A BARE <button> WITH TEXT IN IT. A button is measured shrink-to-fit on both axes, and the
-// track here is `minmax(Npx, 1fr)` — a fixed minimum that cannot grow from content. A tile whose
-// name is one unbreakable line therefore stretches past its track and lies ON TOP of its neighbour,
-// while `truncate` inside stays silent: there was nothing to clip, the width was «enough». `w-full`
-// + `min-w-0` + `h-full` + `flex flex-col` is the fix the Tile primitive documents at length; the
-// tiles here are hand-rolled rather than `<Tile>` only because each needs a delete control OUTSIDE
-// the clickable area (a ✕ inside the button would grow the tile and steal its clicks).
-function ProfileTile({
-  selected,
-  bad,
-  invalid,
-  kind,
+function nameSays(name: string, fact: string): boolean {
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\bfusing\b/g, 'fuse')
+      .replace(/\bpressing\b/g, 'press')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  const n = normalize(name);
+  const f = normalize(fact);
+  return !!n && !!f && (n === f || n.includes(f));
+}
+
+function machineRowSummary(row: MachineProfileRow): string {
+  const name = machineProfileName(row);
+  const machine = machineTypeLabel(row.machineType);
+  const settings = machineProfileSummary(row).replace(/\b1 threads\b/g, '1 thread');
+  return [nameSays(name, machine) ? '' : machine, settings].filter(Boolean).join(' · ');
+}
+
+function pressEquipmentFact(name: string, equipment: string): string {
+  if (nameSays(name, equipment)) return '';
+  const withDetail = equipment.match(/^([^()]+?)\s*\(([^)]+)\)$/);
+  if (withDetail && nameSays(name, withDetail[1] ?? '')) return withDetail[2] ?? '';
+  return equipment;
+}
+
+function pressRowSummary(row: PressProfileRow): string {
+  const name = pressProfileName(row);
+  const process = row.operationType === ANY_PROCESS ? '' : pressProcessShort(row.operationType);
+  const equipment = pressEquipmentFact(name, pressEquipmentLabel(row.pressEquipment));
+  const settings = pressProfileSummary(row).replace(/none — press bare/g, 'bare');
+  return [nameSays(name, process) ? '' : process, equipment, settings].filter(Boolean).join(' · ');
+}
+
+type ProfileSelection = { kind: 'machine' | 'press'; key: string } | null;
+
+// The row stays readable inside a disabled release fieldset: opening it is a read action, so the
+// full-width disclosure target is a span rather than a native button. Delete remains a real button
+// and therefore stays disabled on a released card.
+function ProfileRow({
+  open,
+  machine,
+  glyph,
   name,
   summary,
-  uses,
   title,
-  onSelect,
+  editorId,
+  invalid,
+  onToggle,
   onRemove,
   removeLabel,
 }: {
-  selected: boolean;
-  /** The row cannot be saved as it stands — the mapper drops it (no type / no equipment). */
-  bad: boolean;
-  /** A validation error is pinned to one of this row's fields. */
-  invalid: boolean;
-  kind?: React.ReactNode;
+  open: boolean;
+  machine?: boolean;
+  glyph?: ReactNode;
   name: string;
   summary: string;
-  uses: ProfileUse;
   title: string;
-  onSelect: () => void;
+  editorId: string;
+  invalid: boolean;
+  onToggle: () => void;
   onRemove: () => void;
   removeLabel: string;
 }) {
-  const total = totalUses(uses);
   return (
-    <div className='relative'>
-      <Close
-        size='sm'
-        aria-label={removeLabel}
-        onClick={onRemove}
-        className='absolute right-1 top-1 z-10'
-      />
-      {/*
-        A SPAN, NOT A BUTTON, and this is the one place it is not pedantry. Opening a profile to READ
-        it is a read action — but a RELEASED tech card renders its whole form inside
-        `<fieldset disabled>`, and a disabled fieldset disables every descendant BUTTON. The tile
-        would go inert on exactly the documents people only ever read: the settings of the machine
-        the garment was signed off on would be unreachable, silently, and even the `title` tooltip
-        dies with it (a disabled button swallows pointer events). Accordion's header is a span for
-        the same reason and documents the same trap.
-
-        role / tabIndex / aria-pressed keep it a real control for assistive tech; the keydown handler
-        is the part a <button> would have given for free. The ✕ above stays a real button — deleting
-        a profile off a released card is exactly what the frozen fieldset is there to stop.
-      */}
-      <span
-        role='button'
-        tabIndex={0}
-        aria-pressed={selected}
-        onClick={onSelect}
-        onKeyDown={(e: React.KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onSelect();
-          }
-        }}
-        title={title}
-        className={cn(
-          'flex h-full w-full min-w-0 flex-col gap-1 bg-bgColor text-left transition-colors',
-          'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
-          // Weight carries selection, colour carries health — so a tile can be both (Tile contract).
-          // The selected tile thickens its border to 2px and gives a pixel of padding back, so the
-          // content does not shift under the cursor.
-          selected ? 'border-2 p-[5px]' : 'border p-1.5',
-          bad || invalid
-            ? 'border-error'
-            : selected
-              ? 'border-textColor'
-              : 'border-borderColor hover:border-textColor',
-          // AFTER the `p-*` above and not folded into it: `cn` is tailwind-merge, and it resolves
-          // `p-1.5` as overriding an earlier `pr-6` — the room for the ✕ would silently vanish and
-          // the profile's name would run under the button.
-          'pr-6',
-        )}
-      >
-        {kind}
-        <Text size='micro' className='w-full truncate font-bold uppercase'>
-          {name}
-        </Text>
-        <Text size='micro' variant='label' className='w-full truncate'>
-          {summary || 'no settings yet'}
-        </Text>
-        {/* THE COLOUR IS NEVER THE WHOLE MESSAGE (DESIGN.md): the red edge above always comes with
-            the words that explain it. */}
-        {bad && (
-          <Text size='nano' variant='error' component='span' className='w-full truncate'>
-            not saved until you pick one
-          </Text>
-        )}
-        {invalid && !bad && (
-          <Text size='nano' variant='error' component='span' className='w-full truncate'>
-            fix a field below
-          </Text>
-        )}
-        <Text size='nano' variant='label' component='span' className='w-full truncate'>
-          {total === 0 ? 'used by no step' : `used by ${total} step${total === 1 ? '' : 's'}`}
-        </Text>
-      </span>
-    </div>
+    <Row
+      tone={invalid ? 'error' : 'default'}
+      className='group relative w-full items-start border-b-0 py-2 [&>span:first-child]:flex-1'
+      label={
+        <span className='flex w-full min-w-0 items-start gap-2'>
+          <span
+            role='button'
+            tabIndex={0}
+            aria-expanded={open}
+            aria-controls={editorId}
+            onClick={onToggle}
+            onKeyDown={(e: KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onToggle();
+              }
+            }}
+            title={title}
+            className='absolute inset-0 z-10 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+          />
+          {machine && (
+            <span className='pointer-events-none relative z-0 flex min-h-4 w-10 shrink-0 items-center'>
+              {glyph}
+            </span>
+          )}
+          <span className='grid min-w-0 flex-1 grid-cols-1 gap-x-2 gap-y-0.5 sm:grid-cols-3'>
+            <Text
+              size='micro'
+              component='span'
+              className='pointer-events-none relative z-0 font-bold uppercase'
+            >
+              {name}
+            </Text>
+            <Text
+              size='micro'
+              variant={invalid ? 'error' : 'label'}
+              component='span'
+              className='pointer-events-none relative z-0 min-w-0 whitespace-normal break-words sm:col-span-2'
+            >
+              {summary}
+            </Text>
+          </span>
+          <span className='pointer-events-none relative z-20 flex shrink-0 items-center gap-4'>
+            <Close
+              size='sm'
+              aria-label={removeLabel}
+              onClick={onRemove}
+              className='pointer-events-auto opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100'
+            />
+            <span className='pointer-events-none flex size-4 items-center justify-center'>
+              <FoldCaret open={open} className='ml-0' />
+            </span>
+          </span>
+        </span>
+      }
+    />
   );
 }
 
@@ -629,20 +649,25 @@ function useRevealFailingRow(
 function MachineProfiles({
   uses,
   operations,
+  selection,
+  setSelection,
 }: {
   uses: Map<string, ProfileUse>;
   // Passed down rather than watched again: the parent already holds the subscription the counts
   // need, and a second `useWatch('operations')` here would re-render this list on every keystroke
   // in the assembly editor for the same data.
   operations: StepRow[];
+  selection: ProfileSelection;
+  setSelection: Dispatch<SetStateAction<ProfileSelection>>;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   // THE OWNER of the machine list. Everything that changes its SHAPE goes through this instance or
   // through a root setValue — never through a second useFieldArray somewhere else.
   const { fields, append, remove } = useFieldArray({ control, name: MACHINES });
   const rows = (useWatch({ control, name: MACHINES }) ?? []) as MachineProfileRow[];
-  const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingChange | null>(null);
+  const selected = selection?.kind === 'machine' ? selection.key : null;
+  const setSelected = (key: string) => setSelection({ kind: 'machine', key });
 
   // A field violation lands at `construction.equipmentDefaults.machines[i].<field>` — the schema
   // files its band checks there, and the server tags its refusals with the same path. Only the
@@ -655,9 +680,6 @@ function MachineProfiles({
   )?.equipmentDefaults?.machines ?? NO_ERRORS) as Array<unknown>;
   const keys = rows.map((r, i) => rowKey(r.profileKey, i));
   useRevealFailingRow(keys, rowErrors, submitCount, selected, setSelected);
-
-  const selIndex = rows.findIndex((r, i) => rowKey(r.profileKey, i) === selected);
-  const sel = selIndex >= 0 ? rows[selIndex] : undefined;
 
   // CHANGING WHAT A PROFILE IS DETACHES THE STEPS THAT NAMED IT AS SOMETHING ELSE. A step's
   // machine_profile_key pointing at a profile of a DIFFERENT machine type is a FieldViolation on the
@@ -710,207 +732,176 @@ function MachineProfiles({
 
   return (
     <>
-      <GroupLabel
-        flush
-        action={
-          <Chip
-            quiet
-            onClick={() => {
-              const row = { ...emptyMachineProfile, profileKey: ulid() };
-              append(row);
-              setSelected(row.profileKey);
-            }}
-            title='add a machine this style is sewn on — its settings become what every step of that machine inherits'
-          >
-            + machine
-          </Chip>
-        }
-      >
-        machines
-      </GroupLabel>
+      <GroupLabel flush>machines</GroupLabel>
 
-      {fields.length === 0 ? (
-        <Text size='micro' variant='label'>
-          no machines at all. while there are none, a machine step has nothing to inherit — every
-          one of its settings has to be typed into the step itself.
-        </Text>
-      ) : (
-        <Tiles min={150}>
+      {fields.length > 0 && (
+        <div role='list'>
           {fields.map((f, i) => {
             const row = rows[i] ?? ({} as MachineProfileRow);
             const key = rowKey(row.profileKey, i);
-            const named = (row.label ?? '').trim();
             const use = uses.get((row.profileKey ?? '').trim()) ?? NO_USE;
-            const summary = machineProfileSummary(row);
+            const name = machineProfileName(row);
+            const bad = !row.machineType || row.machineType === NONE_MACHINE;
+            const invalid = bad || !!rowErrors[i];
+            const facts = machineRowSummary(row);
+            const summary = bad
+              ? 'no machine'
+              : rowErrors[i]
+                ? `fix fields${facts ? ` · ${facts}` : ''}`
+                : facts || 'no settings';
+            const open = key === selected;
+            const editorId = `machine-profile-${i}`;
             return (
-              <ProfileTile
-                key={f.id}
-                selected={key === selected}
-                bad={!row.machineType || row.machineType === NONE_MACHINE}
-                invalid={!!rowErrors[i]}
-                // The type pill earns its place only beside a NAMED profile: without a label the
-                // bold line below IS the machine's name, and the pill would repeat it word for word
-                // (the same call BomTile makes about its section / class pair).
-                kind={
-                  named ? (
-                    <span className='flex min-w-0'>
-                      <Pill tone='mut' className='min-w-0 truncate'>
-                        {machineTypeLabel(row.machineType) || 'no machine'}
-                      </Pill>
-                    </span>
-                  ) : undefined
-                }
-                name={machineProfileName(row)}
-                summary={summary}
-                uses={use}
-                title={[
-                  machineProfileName(row),
-                  machineTypeLabel(row.machineType),
-                  summary,
-                  (row.note ?? '').trim(),
-                  usesSentence(use),
-                ]
-                  .filter(Boolean)
-                  .join('\n')}
-                onSelect={() => setSelected((cur) => (cur === key ? null : key))}
-                // An unused profile goes without a question — there is nothing to warn about, and a
-                // dialog over every delete is how people learn to confirm without reading.
-                onRemove={() => {
-                  // Not `used by N`: what matters is which steps CHANGE, and those are not the same
-                  // set — see machineRemovalImpact. An impactless delete goes without a question;
-                  // a dialog over every one of them is how people learn to confirm without reading.
-                  const impact = machineRemovalImpact(operations, rows, i);
-                  if (impactTotal(impact) === 0) remove(i);
-                  else
-                    setPending({
-                      kind: 'remove',
-                      index: i,
-                      name: machineProfileName(row),
-                      impact,
-                    });
-                }}
-                removeLabel={`remove ${machineProfileName(row)}`}
-              />
+              <div key={f.id} role='listitem' className='border-b border-hairline last:border-b-0'>
+                <ProfileRow
+                  open={open}
+                  machine
+                  glyph={
+                    <StitchPictogram
+                      iso={stitchTypeNumber(row.machineType, row.threadCount)}
+                      width={40}
+                    />
+                  }
+                  name={name}
+                  summary={summary}
+                  invalid={invalid}
+                  editorId={editorId}
+                  title={[
+                    name,
+                    machineTypeLabel(row.machineType),
+                    facts,
+                    (row.note ?? '').trim(),
+                    usesSentence(use),
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
+                  onToggle={() =>
+                    setSelection((current) =>
+                      current?.kind === 'machine' && current.key === key
+                        ? null
+                        : { kind: 'machine', key },
+                    )
+                  }
+                  onRemove={() => {
+                    const impact = machineRemovalImpact(operations, rows, i);
+                    if (impactTotal(impact) === 0) {
+                      remove(i);
+                      if (open) setSelection(null);
+                    } else {
+                      setPending({ kind: 'remove', index: i, name, impact });
+                    }
+                  }}
+                  removeLabel={`remove ${name}`}
+                />
+
+                {open && (
+                  <div id={editorId} className='pb-2 pt-1'>
+                    <div className={fieldGrid}>
+                      {/* THE NAME IS NOT THE IDENTITY. Two overlocks may be called the same thing
+                          and stay two machines; the key underneath is what every step points at. */}
+                      <InputField
+                        name={machineField(i, 'label')}
+                        label='name (optional)'
+                        maxLength={64}
+                        placeholder='overlock by the window'
+                      />
+                      {/* NOT DISABLED BY «ALREADY USED»: two profiles of one type is ordinary. */}
+                      <SelectField
+                        name={machineField(i, 'machineType')}
+                        label='machine'
+                        items={machineTypeOptions}
+                        onAfterChange={(v) =>
+                          onMachineTypePicked(i, row.machineType ?? '', String(v ?? ''))
+                        }
+                        className={selectNoGrow}
+                      />
+                      <ProfileNumberField
+                        name={machineField(i, 'threadCount')}
+                        label='threads'
+                        value={row.threadCount ?? 0}
+                      />
+                      <SelectField
+                        name={machineField(i, 'needleType')}
+                        label='needle point'
+                        items={needleTypeOptions}
+                        className={selectNoGrow}
+                      />
+                      <ProfileNumberField
+                        name={machineField(i, 'needleSizeNm')}
+                        label='needle size, Nm'
+                        value={row.needleSizeNm ?? 0}
+                        placeholder='90'
+                      />
+                      <SelectField
+                        name={machineField(i, 'bedType')}
+                        label='bed'
+                        items={bedTypeOptions}
+                        className={selectNoGrow}
+                      />
+                      <SelectField
+                        name={machineField(i, 'automation')}
+                        label='automation'
+                        items={automationLevelOptions}
+                        className={selectNoGrow}
+                      />
+                      <SelectField
+                        name={machineField(i, 'threadTension')}
+                        label='thread tension'
+                        items={threadTensionOptions}
+                        className={selectNoGrow}
+                      />
+                      {((row.threadTension ?? NONE_TENSION) !== NONE_TENSION ||
+                        (row.threadTensionNote ?? '').trim() !== '') && (
+                        <InputField
+                          name={machineField(i, 'threadTensionNote')}
+                          label='tension note'
+                          maxLength={64}
+                          placeholder='0.5 tighter, dial 4'
+                        />
+                      )}
+                      <SelectField
+                        name={machineField(i, 'attachmentKind')}
+                        label='default foot'
+                        items={attachmentOptions}
+                        className={selectNoGrow}
+                      />
+                      <DecimalField
+                        name={machineField(i, 'stitchesPerCm')}
+                        label='stitch density (st/cm)'
+                        maxDecimals={2}
+                        placeholder='4'
+                      />
+                      <DecimalField
+                        name={machineField(i, 'stitchWidthMm')}
+                        label='stitch width, mm'
+                        maxDecimals={1}
+                        placeholder='2.5'
+                      />
+                      <InputField
+                        name={machineField(i, 'note')}
+                        label='note'
+                        maxLength={255}
+                        placeholder='Juki DDL-8700, table by the window'
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
-        </Tiles>
-      )}
-
-      {sel && selIndex >= 0 && (
-        <div className='mt-2 border border-borderColor p-2'>
-          <GroupLabel
-            flush
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {usesSentence(uses.get((sel.profileKey ?? '').trim()) ?? NO_USE)}
-              </Text>
-            }
-          >
-            {machineProfileName(sel)}
-          </GroupLabel>
-          <div className={fieldGrid}>
-            {/* THE NAME IS NOT THE IDENTITY. Two overlocks may be called the same thing and stay
-                two machines; the key underneath is what every step points at. */}
-            <InputField
-              name={machineField(selIndex, 'label')}
-              label='name (optional)'
-              maxLength={64}
-              placeholder='overlock by the window'
-            />
-            {/* NOT DISABLED BY «ALREADY USED»: two profiles of one type is the ordinary case. It is
-                not disabled by «already referenced» either — «I picked coverstitch and it is a
-                coverlock» has to stay fixable — so the references are repaired instead. */}
-            <SelectField
-              name={machineField(selIndex, 'machineType')}
-              label='machine'
-              items={machineTypeOptions}
-              onAfterChange={(v) =>
-                onMachineTypePicked(selIndex, sel.machineType ?? '', String(v ?? ''))
-              }
-              className={selectNoGrow}
-            />
-            <ProfileNumberField
-              name={machineField(selIndex, 'threadCount')}
-              label='threads'
-              value={sel.threadCount ?? 0}
-            />
-            <SelectField
-              name={machineField(selIndex, 'needleType')}
-              label='needle point'
-              items={needleTypeOptions}
-              className={selectNoGrow}
-            />
-            <ProfileNumberField
-              name={machineField(selIndex, 'needleSizeNm')}
-              label='needle size, Nm'
-              value={sel.needleSizeNm ?? 0}
-              placeholder='90'
-            />
-            {/* BED AND AUTOMATION EXIST ONLY HERE — they are machine IDENTITY, not step settings: a
-                step that needs another bed is a step on another machine. */}
-            <SelectField
-              name={machineField(selIndex, 'bedType')}
-              label='bed'
-              items={bedTypeOptions}
-              className={selectNoGrow}
-            />
-            <SelectField
-              name={machineField(selIndex, 'automation')}
-              label='automation'
-              items={automationLevelOptions}
-              className={selectNoGrow}
-            />
-            <SelectField
-              name={machineField(selIndex, 'threadTension')}
-              label='thread tension'
-              items={threadTensionOptions}
-              className={selectNoGrow}
-            />
-            {/* The note QUALIFIES the scale («на 0.5 туже») — alone it describes no setting the next
-                machine can be set to, and the server refuses the pair. It stays on screen while it
-                holds text even after the scale goes back to «inherit», or the schema's refusal would
-                land on a control nobody can see and the save would stop with nothing to fix. */}
-            {((sel.threadTension ?? NONE_TENSION) !== NONE_TENSION ||
-              (sel.threadTensionNote ?? '').trim() !== '') && (
-              <InputField
-                name={machineField(selIndex, 'threadTensionNote')}
-                label='tension note'
-                maxLength={64}
-                placeholder='0.5 tighter, dial 4'
-              />
-            )}
-            <SelectField
-              name={machineField(selIndex, 'attachmentKind')}
-              label='default foot'
-              items={attachmentOptions}
-              className={selectNoGrow}
-            />
-            <DecimalField
-              name={machineField(selIndex, 'stitchesPerCm')}
-              label='stitch density (st/cm)'
-              // Hundredths, like the column and like the two decimals beside it — the default three
-              // would be rounded away on the server without a word.
-              maxDecimals={2}
-              placeholder='4'
-            />
-            {/* «stitch width» is the zigzag amplitude / the overlock bite — NOT the topstitch width,
-                which is a distance from an edge and belongs to a step. The two print side by side on
-                the tech pack and must not read as one setting. */}
-            <DecimalField
-              name={machineField(selIndex, 'stitchWidthMm')}
-              label='stitch width, mm'
-              maxDecimals={1}
-              placeholder='2.5'
-            />
-            <InputField
-              name={machineField(selIndex, 'note')}
-              label='note'
-              maxLength={255}
-              placeholder='Juki DDL-8700, table by the window'
-            />
-          </div>
         </div>
       )}
+
+      <AddDoor
+        afterRows={fields.length > 0}
+        onClick={() => {
+          const row = { ...emptyMachineProfile, profileKey: ulid() };
+          append(row);
+          setSelected(row.profileKey);
+        }}
+      >
+        machine
+      </AddDoor>
 
       <ProfileChangeDialog
         pending={pending}
@@ -943,15 +934,20 @@ function MachineProfiles({
 function PressProfiles({
   uses,
   operations,
+  selection,
+  setSelection,
 }: {
   uses: Map<string, ProfileUse>;
   operations: StepRow[];
+  selection: ProfileSelection;
+  setSelection: Dispatch<SetStateAction<ProfileSelection>>;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: PRESSES });
   const rows = (useWatch({ control, name: PRESSES }) ?? []) as PressProfileRow[];
-  const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingChange | null>(null);
+  const selected = selection?.kind === 'press' ? selection.key : null;
+  const setSelected = (key: string) => setSelection({ kind: 'press', key });
 
   const { errors, submitCount } = useFormState({ control, name: PRESSES });
   const rowErrors = ((
@@ -959,9 +955,6 @@ function PressProfiles({
   )?.equipmentDefaults?.presses ?? NO_ERRORS) as Array<unknown>;
   const keys = rows.map((r, i) => rowKey(r.profileKey, i));
   useRevealFailingRow(keys, rowErrors, submitCount, selected, setSelected);
-
-  const selIndex = rows.findIndex((r, i) => rowKey(r.profileKey, i) === selected);
-  const sel = selIndex >= 0 ? rows[selIndex] : undefined;
 
   // The ВТО twin of the machine rule above, and narrower in exactly one way: the server refuses a
   // press key only on the EQUIPMENT (resolveProfileKey), so only an equipment change has to clear
@@ -1004,162 +997,137 @@ function PressProfiles({
 
   return (
     <>
-      <GroupLabel
-        action={
-          <Chip
-            quiet
-            onClick={() => {
-              const row = { ...emptyPressProfile, profileKey: ulid() };
-              append(row);
-              setSelected(row.profileKey);
-            }}
-            title='add a pressing mode — temperature, dwell, pressure and steam a pressing step inherits'
-          >
-            + press mode
-          </Chip>
-        }
-      >
-        pressing modes
-      </GroupLabel>
+      <GroupLabel>pressing modes</GroupLabel>
 
-      {fields.length === 0 ? (
-        <Text size='micro' variant='label'>
-          no pressing modes at all. a step with an iron or a press will carry its own degrees and
-          seconds itself.
-        </Text>
-      ) : (
-        <Tiles min={150}>
+      {fields.length > 0 && (
+        <div role='list'>
           {fields.map((f, i) => {
             const row = rows[i] ?? ({} as PressProfileRow);
             const key = rowKey(row.profileKey, i);
-            const named = (row.label ?? '').trim();
             const use = uses.get((row.profileKey ?? '').trim()) ?? NO_USE;
-            const summary = pressProfileSummary(row);
+            const name = pressProfileName(row);
+            const bad = !row.pressEquipment || row.pressEquipment === NONE_PRESS_EQUIPMENT;
+            const invalid = bad || !!rowErrors[i];
+            const facts = pressRowSummary(row);
+            const summary = bad
+              ? 'no equipment'
+              : rowErrors[i]
+                ? `fix fields${facts ? ` · ${facts}` : ''}`
+                : facts || 'no settings';
             const process = pressProcessShort(row.operationType);
+            const open = key === selected;
+            const editorId = `press-profile-${i}`;
             return (
-              <ProfileTile
-                key={f.id}
-                selected={key === selected}
-                bad={!row.pressEquipment || row.pressEquipment === NONE_PRESS_EQUIPMENT}
-                invalid={!!rowErrors[i]}
-                // WHICH PROCESS the mode is for is a fact of its own — a fusing mode is not offered
-                // on a разутюжка — so it is pilled even when the equipment name is already the
-                // heading below.
-                kind={
-                  <span className='flex min-w-0 flex-wrap items-center gap-1'>
-                    {named && (
-                      <Pill tone='mut' className='min-w-0 truncate'>
-                        {pressEquipmentLabel(row.pressEquipment) || 'no equipment'}
-                      </Pill>
-                    )}
-                    {process && (
-                      <Pill tone='mut' className='min-w-0 truncate'>
-                        {process}
-                      </Pill>
-                    )}
-                  </span>
-                }
-                name={pressProfileName(row)}
-                summary={summary}
-                uses={use}
-                title={[
-                  pressProfileName(row),
-                  pressEquipmentLabel(row.pressEquipment),
-                  process,
-                  summary,
-                  (row.note ?? '').trim(),
-                  usesSentence(use),
-                ]
-                  .filter(Boolean)
-                  .join('\n')}
-                onSelect={() => setSelected((cur) => (cur === key ? null : key))}
-                onRemove={() => {
-                  const impact = pressRemovalImpact(operations, rows, i);
-                  if (impactTotal(impact) === 0) remove(i);
-                  else
-                    setPending({ kind: 'remove', index: i, name: pressProfileName(row), impact });
-                }}
-                removeLabel={`remove ${pressProfileName(row)}`}
-              />
+              <div key={f.id} role='listitem' className='border-b border-hairline last:border-b-0'>
+                <ProfileRow
+                  open={open}
+                  name={name}
+                  summary={summary}
+                  invalid={invalid}
+                  editorId={editorId}
+                  title={[
+                    name,
+                    pressEquipmentLabel(row.pressEquipment),
+                    process === 'any pressing step' ? '' : process,
+                    facts,
+                    (row.note ?? '').trim(),
+                    usesSentence(use),
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
+                  onToggle={() =>
+                    setSelection((current) =>
+                      current?.kind === 'press' && current.key === key
+                        ? null
+                        : { kind: 'press', key },
+                    )
+                  }
+                  onRemove={() => {
+                    const impact = pressRemovalImpact(operations, rows, i);
+                    if (impactTotal(impact) === 0) {
+                      remove(i);
+                      if (open) setSelection(null);
+                    } else {
+                      setPending({ kind: 'remove', index: i, name, impact });
+                    }
+                  }}
+                  removeLabel={`remove ${name}`}
+                />
+
+                {open && (
+                  <div id={editorId} className='pb-2 pt-1'>
+                    <div className={fieldGrid}>
+                      <InputField
+                        name={pressField(i, 'label')}
+                        label='name (optional)'
+                        maxLength={64}
+                        placeholder='fusing press'
+                      />
+                      <SelectField
+                        name={pressField(i, 'pressEquipment')}
+                        label='equipment'
+                        items={pressEquipmentOptions}
+                        onAfterChange={(v) =>
+                          onPressEquipmentPicked(i, row.pressEquipment ?? '', String(v ?? ''))
+                        }
+                        className={selectNoGrow}
+                      />
+                      <SelectField
+                        name={pressField(i, 'operationType')}
+                        label='for which step'
+                        items={pressProfileProcessOptions}
+                        className={selectNoGrow}
+                      />
+                      <ProfileNumberField
+                        name={pressField(i, 'pressTemperatureC')}
+                        label='temperature, °C'
+                        value={row.pressTemperatureC ?? 0}
+                        placeholder='145'
+                      />
+                      <ProfileNumberField
+                        name={pressField(i, 'pressDwellSec')}
+                        label='dwell, sec'
+                        value={row.pressDwellSec ?? 0}
+                        placeholder='12'
+                      />
+                      <DecimalField
+                        name={pressField(i, 'pressPressureNCm2')}
+                        label='pressure, N/cm²'
+                        maxDecimals={1}
+                        placeholder='4'
+                      />
+                      <ProfileSteamField name={pressField(i, 'pressSteam')} />
+                      <SelectField
+                        name={pressField(i, 'pressCloth')}
+                        label='press cloth'
+                        items={pressClothOptions}
+                        className={selectNoGrow}
+                      />
+                      <InputField
+                        name={pressField(i, 'note')}
+                        label='note'
+                        maxLength={255}
+                        placeholder='lower buck, no steam'
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
-        </Tiles>
-      )}
-
-      {sel && selIndex >= 0 && (
-        <div className='mt-2 border border-borderColor p-2'>
-          <GroupLabel
-            flush
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {usesSentence(uses.get((sel.profileKey ?? '').trim()) ?? NO_USE)}
-              </Text>
-            }
-          >
-            {pressProfileName(sel)}
-          </GroupLabel>
-          <div className={fieldGrid}>
-            <InputField
-              name={pressField(selIndex, 'label')}
-              label='name (optional)'
-              maxLength={64}
-              placeholder='fusing press'
-            />
-            <SelectField
-              name={pressField(selIndex, 'pressEquipment')}
-              label='equipment'
-              items={pressEquipmentOptions}
-              onAfterChange={(v) =>
-                onPressEquipmentPicked(selIndex, sel.pressEquipment ?? '', String(v ?? ''))
-              }
-              className={selectNoGrow}
-            />
-            {/* WHICH ВТО PROCESS this mode answers for, so a step gets offered the right one and
-                inherits nothing wrong: «the press of this card» is not an answer for a fusing step
-                when the mode was written for разутюжка. «any» stays legal — one universal mode is a
-                real shop. */}
-            <SelectField
-              name={pressField(selIndex, 'operationType')}
-              label='for which step'
-              items={pressProfileProcessOptions}
-              className={selectNoGrow}
-            />
-            <ProfileNumberField
-              name={pressField(selIndex, 'pressTemperatureC')}
-              label='temperature, °C'
-              value={sel.pressTemperatureC ?? 0}
-              placeholder='145'
-            />
-            <ProfileNumberField
-              name={pressField(selIndex, 'pressDwellSec')}
-              label='dwell, sec'
-              value={sel.pressDwellSec ?? 0}
-              placeholder='12'
-            />
-            {/* The unit is IN THE NAME on both sides of the wire: press pressure is quoted in bar,
-                in kg and in N/cm² depending on who is talking. */}
-            <DecimalField
-              name={pressField(selIndex, 'pressPressureNCm2')}
-              label='pressure, N/cm²'
-              maxDecimals={1}
-              placeholder='4'
-            />
-            <ProfileSteamField name={pressField(selIndex, 'pressSteam')} />
-            <SelectField
-              name={pressField(selIndex, 'pressCloth')}
-              label='press cloth'
-              items={pressClothOptions}
-              className={selectNoGrow}
-            />
-            <InputField
-              name={pressField(selIndex, 'note')}
-              label='note'
-              maxLength={255}
-              placeholder='lower buck, no steam'
-            />
-          </div>
         </div>
       )}
+
+      <AddDoor
+        afterRows={fields.length > 0}
+        onClick={() => {
+          const row = { ...emptyPressProfile, profileKey: ulid() };
+          append(row);
+          setSelected(row.profileKey);
+        }}
+      >
+        press mode
+      </AddDoor>
 
       <ProfileChangeDialog
         pending={pending}
@@ -1198,6 +1166,7 @@ function usesSentence(u: ProfileUse): string {
 
 export function EquipmentParkField() {
   const { control } = useFormContext<TechCardFormData>();
+  const [selection, setSelection] = useState<ProfileSelection>(null);
   // The counts read the steps, so this subscription re-renders the park on every keystroke in the
   // assembly editor — the same cost, for the same reason, that ConstructionSummary already pays. It
   // is scoped to this leaf and only exists while CARD DEFAULTS is unfolded.
@@ -1211,8 +1180,18 @@ export function EquipmentParkField() {
 
   return (
     <div className='mt-3'>
-      <MachineProfiles uses={uses.machines} operations={operations} />
-      <PressProfiles uses={uses.presses} operations={operations} />
+      <MachineProfiles
+        uses={uses.machines}
+        operations={operations}
+        selection={selection}
+        setSelection={setSelection}
+      />
+      <PressProfiles
+        uses={uses.presses}
+        operations={operations}
+        selection={selection}
+        setSelection={setSelection}
+      />
     </div>
   );
 }

@@ -1,8 +1,24 @@
 import { ComboField, DecimalField } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+import { decimalToInput } from 'utils/decimal';
 import { EquipmentParkField } from './equipment-park';
 
 import { hemFinishOptions } from './tech-card-options';
+
+function RequiredSeamAllowanceField() {
+  const { data } = useWorkshopSettings();
+  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
+
+  return (
+    <DecimalField
+      name='requiredSeamAllowanceMm'
+      label='seam allowance, mm'
+      maxDecimals={1}
+      placeholder={shopDefault || undefined}
+    />
+  );
+}
 
 // General workmanship parameters (Sheet «Обработка», upper block): what a step inherits when it
 // doesn't override it. 1:1 — sent as unset when every field is blank (see mapConstructionOut).
@@ -11,16 +27,18 @@ import { hemFinishOptions } from './tech-card-options';
 export function ConstructionField() {
   return (
     <>
-      <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
+      <div className='grid grid-cols-2 gap-x-2.5 gap-y-2 sm:grid-cols-3'>
+        <RequiredSeamAllowanceField />
         <DecimalField
           name='construction.defaultStitchesPerCm'
-          label='default stitch density (st/cm)'
+          label='stitches / cm'
           // Two, not DecimalField's default three: the column stores hundredths and rounds the rest
           // silently. The schema refuses the third place as well — this only keeps it untypeable.
           maxDecimals={2}
-          placeholder='4'
         />
-        <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />
+        <div className='col-span-2 sm:col-span-1'>
+          <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />
+        </div>
         {/* TWO CONTROLS LEFT HERE WITH 0306 and they are not coming back in this shape.
             «overlock threads» was ONE number per card: it could describe one overlock, and a card is
             sewn on several — the migration turned each card's count into a real overlock profile.
@@ -34,7 +52,9 @@ export function ConstructionField() {
         <AiTextareaField
           name='construction.notes'
           label='notes'
-          rows={2}
+          rows={1}
+          autoGrow
+          spareLines={0}
           maxLength={2000}
           enhance='note'
         />
