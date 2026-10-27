@@ -20,6 +20,7 @@ import {
   inputGroups,
   parseInner,
   suggestStepPair,
+  usedEdgesBeforeStep,
   type FormOpLike,
   type Suggestion,
   type TargetId,
@@ -145,10 +146,13 @@ export function useStepScene(index: number) {
       }),
     [keys, byKey],
   );
-  // The edges a proposal and a partner must not take again. (wt/seamfix: add
-  // usedEdgesBeforeStep(ops, index, byKey) to this list.)
+  // The edges a proposal and a partner must not take again: this step's stored seams and
+  // every edge earlier steps already sewed.
   const usedRaw = [
-    ...new Set(stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t))),
+    ...new Set([
+      ...stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t)),
+      ...usedEdgesBeforeStep(ops, index, byKey),
+    ]),
   ].sort();
   const used = useStable(new Set<EdgeId>(usedRaw), usedRaw.join(','));
 

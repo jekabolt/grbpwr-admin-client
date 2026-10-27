@@ -264,10 +264,12 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import {
   hasMultipleStepPieces,
   suggestStepPair,
+  usedEdgesBeforeStep,
   type FormOpLike,
 } from './step-seams/step-seams-model';
 import { StepSeamsRow } from './step-seams/step-seams-row';
@@ -1242,6 +1244,15 @@ function OperationsHeaderWarnings({
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
   const seams = useStepSeams();
   const seamGeometry = seams?.geometry;
+  const seamServer = useSeamsStore((state) => state.server);
+  const seamPending = useSeamsStore((state) => state.pending);
+  const seamsByKey = useMemo(
+    () =>
+      new Map(
+        rowsOf({ server: seamServer, pending: seamPending }).map((row) => [row.seamKey, row]),
+      ),
+    [seamServer, seamPending],
+  );
   const seamGeoms = useMemo(() => {
     const map = new Map<string, PieceGeom>();
     for (const [key, piece] of seamGeometry?.pieces ?? []) map.set(key, piece.geom);
@@ -1271,9 +1282,10 @@ function OperationsHeaderWarnings({
         ),
       );
       const ease = Number.isFinite(ratio) && ratio > 0 ? ratio : null;
-      return suggestStepPair(ops, index, seamPieceKeys, seamGeoms, new Set(), ease) ? [] : [index];
+      const used = usedEdgesBeforeStep(ops, index, seamsByKey);
+      return suggestStepPair(ops, index, seamPieceKeys, seamGeoms, used, ease) ? [] : [index];
     });
-  }, [operations, seamGeometry?.dep.status, seamGeoms, seamPieceKeys, seams]);
+  }, [operations, seamGeometry?.dep.status, seamGeoms, seamPieceKeys, seams, seamsByKey]);
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     lineKey?: string;
     name?: string;
