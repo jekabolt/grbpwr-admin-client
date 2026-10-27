@@ -1782,12 +1782,22 @@ function ProducesBlock({
 
   return (
     <>
-      <GroupLabel>unit</GroupLabel>
+      <GroupLabel
+        action={
+          outputKey ? (
+            // ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
+            // чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
+            // отменялся из редактора.
+            <Button type='button' variant='underline' size='xs' onClick={() => onDissolve(index)}>
+              dissolve
+            </Button>
+          ) : undefined
+        }
+      >
+        unit
+      </GroupLabel>
       {!outputKey ? (
         <div className='max-w-60'>
-          <Text size='micro' variant='label' tracking='label' className='mb-1 uppercase'>
-            unit name
-          </Text>
           <Input
             value={draftName}
             aria-label='unit name'
@@ -1807,17 +1817,11 @@ function ProducesBlock({
         </div>
       ) : (
         <>
-          <div className='flex flex-wrap items-center gap-2'>
+          <div className='max-w-60'>
             {/* Имя живёт на первом производителе. Поглощающий шаг показывает то же поле, но пишет
                 в канонический адрес: сервер очищает outputUnitName на всех поглощениях, потому
                 что второе имя одного узла было бы вторым мнением о факте. */}
             <UnitNameField unitKey={outputKey} producedAt={nameProducer} />
-            {/* ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
-                чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
-                отменялся из редактора. */}
-            <Button type='button' variant='underline' size='xs' onClick={() => onDissolve(index)}>
-              dissolve
-            </Button>
           </div>
           {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
               спрашивал только «узел с таким ключом существует» — а он мог состояться ДРУГИМ

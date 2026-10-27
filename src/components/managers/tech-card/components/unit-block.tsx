@@ -2,7 +2,7 @@ import { cn } from 'lib/utility';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { FormControl, FormField, FormItem, FormLabel, FormMessage, Input, Text } from 'ui';
+import { FormControl, FormField, FormItem, FormMessage, Input, Text } from 'ui';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult } from './assembly-frontier';
@@ -147,7 +147,7 @@ export function InlineUnitName({
   );
 }
 
-/** The labelled PRODUCES control, pointed at the same canonical first-producer field. */
+/** The PRODUCES name input (the «unit» group header names it), on the canonical first-producer field. */
 export function UnitNameField({ unitKey, producedAt }: { unitKey: string; producedAt: number }) {
   const id = useId();
   const { control, path, displayName, frozen, save } = useCanonicalUnitName(unitKey, producedAt);
@@ -179,7 +179,6 @@ export function UnitNameField({ unitKey, producedAt }: { unitKey: string; produc
 
         return (
           <FormItem>
-            <FormLabel>Unit name</FormLabel>
             <FormControl>
               <Input
                 ref={field.ref}
