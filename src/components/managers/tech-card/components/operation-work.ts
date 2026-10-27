@@ -15,6 +15,7 @@ import {
   type OperationKindStep,
 } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';
+import { isWorkVariant } from '../op-icons/work-variants';
 
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ, А НЕ СПИСОК В БАНДЛЕ.
 //
@@ -818,6 +819,7 @@ export type ParkPressRow = { pressEquipment?: string; profileKey?: string; opera
  * молча переставить шаг на другой станок).
  */
 export type StepSnapshot = OperationKindStep & {
+  workVariant?: string;
   machineProfileKey?: string;
   pressProfileKey?: string;
 };
@@ -839,6 +841,12 @@ export type WorkApplication = {
   clears: Partial<Record<OperationFormStringField, string>>;
   links: { machineProfileKey?: string; pressProfileKey?: string };
 };
+
+/** Keep a variant only while the selected work declares it. */
+export function variantAfterWork(work: string, variant: string): string {
+  if (!variant) return '';
+  return isWorkVariant(work, variant) ? variant : '';
+}
 
 export function workApplication(input: {
   item: WorkItem;
@@ -870,6 +878,8 @@ export function workApplication(input: {
     current.pressEquipment ?? '',
     kindWrites,
   );
+  const nextVariant = variantAfterWork(item.token, current.workVariant ?? '');
+  if (nextVariant !== (current.workVariant ?? '')) writes.workVariant = nextVariant;
 
   // ЯКОРЬ ЧУЖОГО ПУНКТА, ОСТАВШИЙСЯ В ЗАПИСИ, ПЕРЕИГРЫВАЛ ВЫБОР ЧЕЛОВЕКА. Замерено: на шаге
   // `{MACHINE, LOCKSTITCH, seam_class = OS_TOPSTITCH}` пункты «Join — lockstitch», «Coverstitch»,

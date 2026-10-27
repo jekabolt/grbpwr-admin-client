@@ -2,7 +2,6 @@ import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import {
-  Button,
   Chip,
   Close,
   ConfirmationModal,
@@ -1685,7 +1684,7 @@ function AdoptChip({
     : `${moving} ${moving === 1 ? 'setting moves' : 'settings move'} into a new card profile and clear in the step: it starts inheriting them instead of holding its own copy.`;
   return (
     <Chip quiet disabled={disabled} onClick={onClick} title={reason || promise}>
-      ↑ {what}
+      {what}
     </Chip>
   );
 }

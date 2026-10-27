@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Tiles } from 'ui';
 import {
@@ -11,15 +10,21 @@ import {
 } from '../../op-icons';
 import type { TechCardFormData } from '../schema';
 import { IconTile, TileRow, useStepFieldErrors } from './icon-tile';
-import { variantAfterWork } from './rules';
 import { useStepWrite } from './use-step-write';
 
 /**
  * «Type» of a work that has variants (set_zip: open-end, two-way, …). The first tile is the work
- * itself, no variant. Always mounted: when the work changes, a variant the new work does not
- * declare is dropped in the same edit (the server refuses it).
+ * itself, no variant. Work changes clear incompatible variants in the shared work writer.
  */
-export function WorkVariantTiles({ index, className }: { index: number; className?: string }) {
+export function WorkVariantTiles({
+  index,
+  className,
+  label = 'type',
+}: {
+  index: number;
+  className?: string;
+  label?: string;
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const write = useStepWrite(index);
   const work = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
@@ -27,15 +32,6 @@ export function WorkVariantTiles({ index, className }: { index: number; classNam
     (useWatch({ control, name: `operations.${index}.workVariant` }) ?? '') as string
   ).trim();
   const errors = useStepFieldErrors(index, ['workVariant']);
-
-  // Never on mount — opening a step does not edit it.
-  const seenWork = useRef(work);
-  useEffect(() => {
-    if (seenWork.current === work) return;
-    seenWork.current = work;
-    const next = variantAfterWork(work, variant);
-    if (next !== variant) write('workVariant', next);
-  }, [work, variant, write]);
 
   const variants = workVariantsOf(work);
   if (variants.length === 0 && !variant) return null;
@@ -46,7 +42,7 @@ export function WorkVariantTiles({ index, className }: { index: number; classNam
   return (
     <TileRow
       field={`operations.${index}.workVariant`}
-      label='type'
+      label={label}
       errors={errors}
       className={className}
     >

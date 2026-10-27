@@ -2,10 +2,10 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
-import { useState, type ReactNode } from 'react';
+import { useState, type ChangeEvent as ReactChangeEvent, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationToolbar } from 'components/managers/tech-card/annotation/toolbar';
-import { Chip, ChipRow, Close, Placeholder, Text } from 'ui';
+import { Button, Close, Input, Media, Placeholder, Text } from 'ui';
 
 import { AnnotationCanvas } from './annotation-canvas';
 import {
@@ -92,6 +92,7 @@ export function OperationMediaStrip({
   // Вид, выбранный на ВСЮ полосу. Сбрасывается, как только фигура поставлена: постановка — жест с
   // концом, а залипший режим ставит вторую мерку следующим кликом по снимку, которого не просили.
   const [placingKind, setPlacingKind] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   // `wireInt` ВНУТРИ, а не на совести вызывающего. Оба словаря ключуются нормализованным id, а
   // тип поля обещает `number` — сырое значение с провода (int64 приезжает СТРОКОЙ) тайпчекается и
@@ -151,183 +152,159 @@ export function OperationMediaStrip({
     onEdit?.();
   };
 
+  const active = activeIndex == null ? undefined : list[activeIndex];
+  const activeUrl = active ? urlOf(wireInt(active.mediaId)) : '';
+
   return (
-    <div className='flex flex-col gap-1.5' {...intake.regionHandlers}>
-      <div className='flex flex-wrap items-center gap-2'>
-        <Text size='micro' variant='label' component='span' className='uppercase'>
-          unit photos{fields.length > 0 ? ` · ${fields.length}` : ''}
-        </Text>
-        {/* ПАНЕЛЬ ВИДОВ ОДНА НА ПОЛОСУ — режимы принадлежат листу, а не кадру. */}
-        {!frozen && fields.length > 0 && (
-          <AnnotationToolbar tool={placingKind} onTool={setPlacingKind} />
-        )}
-        {(intake.busy || intake.dragging) && (
-          <Text size='micro' variant='label' component='span'>
-            {intake.busy ? 'accepting the image from the clipboard…' : 'drop the file — the crop opens'}
-          </Text>
-        )}
-      </div>
-
-      {fields.length === 0 ? (
-        // ПУСТОЕ МЕСТО — САМО СРЕДСТВО ЕГО ЗАПОЛНИТЬ. Кнопка «добавить фото» рядом с заголовком
-        // читалась как ещё один контрол в ряду полей шага и терялась среди них; полосатый
-        // плейсхолдер во всю ширину — это и есть слот, и он выглядит слотом.
-        frozen ? (
-          <Placeholder label='this step has no photos' className='h-20 w-full border-dashed' />
-        ) : (
-          <MediaSlot
-            aspectRatio={['Custom']}
-            heightPx={80}
-            sizeClassName='w-full'
-            label='+ unit photo'
-            hint='callouts go on the shot: measurements, captions, spans'
-            allowMultiple
-            limit={MAX_MEDIA_PER_STEP}
-            showVideos={false}
-            onSelect={add}
-          />
-        )
-      ) : (
-        <>
-          {/* Полоса кадров: рост один, ширина своя, прокрутка только вбок. */}
-          <div className='flex items-start gap-2 overflow-x-auto overflow-y-hidden py-1'>
-            {fields.map((f, i) => {
-              // `fields` и наблюдаемый список расходятся на один кадр сразу после append: строка
-              // уже есть, значения ещё нет. Пропустить кадр — правильнее, чем нарисовать его по
-              // нулевому mediaId: тот показал бы «адрес не разрешён» на снимке, который через
-              // такт приедет целым.
-              const current = list[i];
-              if (!current) return null;
-              const url = urlOf(wireInt(current.mediaId));
-              return (
-                <div key={f.id} className='flex shrink-0 flex-col gap-1'>
-                  {url ? (
-                    <AnnotationCanvas
-                      // Ключ — сама фотография: незавершённая постановка, выбор и перетаскивание
-                      // это состояние ЭТОГО снимка.
-                      key={wireInt(current.mediaId)}
-                      src={url}
-                      alt={(current.caption ?? '').trim() || `unit photo ${i + 1}`}
-                      heightPx={STRIP_HEIGHT}
-                      placingKind={placingKind}
-                      onPlaced={() => setPlacingKind(null)}
-                      annotations={(current.annotations ?? []) as AnnotationForm[]}
-                      frozen={frozen}
-                      renderPiecePicker={renderPiecePicker}
-                      pieceLabel={pieceLabel}
-                      onChange={frozen ? undefined : (next) => setAnnotations(i, next)}
-                      cornerSlot={
-                        !frozen ? (
-                          <StripClose
-                            title='remove the shot from the step; the file itself stays in the library'
-                            onPress={() => {
-                              remove(i);
-                              onEdit?.();
-                            }}
-                          />
-                        ) : undefined
-                      }
-                    />
-                  ) : (
-                    // ЧЕСТНОЕ СОСТОЯНИЕ, А НЕ ПУСТОЙ ПРЯМОУГОЛЬНИК: адрес не пришёл ни с чтения,
-                    // ни из сессии — значит картинку показать нечем, и сказать это надо словом.
-                    <Placeholder
-                      label='address not resolved — it resolves once the card has saved'
-                      className='w-40 px-2 text-center'
-                      style={{ height: STRIP_HEIGHT }}
-                    />
-                  )}
-
-                  <div className='flex items-center gap-1'>
-                    <Text size='nano' variant='label' component='span' className='tabular-nums'>
-                      {i + 1}
-                    </Text>
-                    {!frozen && fields.length > 1 && (
-                      <ChipRow>
-                        {/* Перестановка — тоже ПИСАТЕЛЬ полосы, и `onEdit` зовётся у неё, как у
-                            приёмки, снятия, подписи и выносок: правило «зовётся у писателей»
-                            не терпит одного исключения. Клик у границы — не жест: гасить чужую
-                            запись отмены нечем. */}
-                        <Chip
-                          nonForm
-                          dashed
-                          onClick={() => {
-                            if (i <= 0) return;
-                            move(i, i - 1);
-                            onEdit?.();
-                          }}
-                          title='earlier in the display and print order'
-                        >
-                          ←
-                        </Chip>
-                        <Chip
-                          nonForm
-                          dashed
-                          onClick={() => {
-                            if (i >= fields.length - 1) return;
-                            move(i, i + 1);
-                            onEdit?.();
-                          }}
-                          title='later in the display and print order'
-                        >
-                          →
-                        </Chip>
-                      </ChipRow>
-                    )}
-                  </div>
-
-                  {!frozen && (
-                    <input
-                      value={current.caption ?? ''}
-                      onChange={(e) => {
-                        setValue(`${name}.${i}.caption`, e.target.value, { shouldDirty: true });
-                        onEdit?.();
-                      }}
-                      placeholder="caption — what's on the shot"
-                      maxLength={255}
-                      className={cn(
-                        'w-full border border-borderColor bg-bgColor px-1 py-px text-micro',
-                        'focus:border-textColor focus:outline-none',
-                      )}
-                    />
-                  )}
-                  {frozen && (current.caption ?? '').trim() && (
-                    <Text size='nano' variant='label'>
-                      {current.caption}
-                    </Text>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* Слот «ещё кадр» стоит в самой полосе: пустое место и есть кнопка, которая его
-                заполняет — тот же приём, что у мудборда. */}
-            {!frozen && !full && (
-              <MediaSlot
-                aspectRatio={['Custom']}
-                heightPx={STRIP_HEIGHT}
-                sizeClassName='w-28'
-                compact
-                label='+ more'
-                allowMultiple
-                limit={MAX_MEDIA_PER_STEP - fields.length}
-                showVideos={false}
-                onSelect={add}
-                className='shrink-0'
+    <div
+      className={cn(
+        'flex min-h-14 min-w-14 flex-1 flex-wrap gap-1.5 self-stretch',
+        intake.dragging && 'outline outline-1 outline-textColor',
+      )}
+      {...intake.regionHandlers}
+    >
+      {fields.map((field, index) => {
+        const current = list[index];
+        if (!current) return null;
+        const url = urlOf(wireInt(current.mediaId));
+        return (
+          <div
+            key={field.id}
+            className={cn(
+              'relative size-14 shrink-0 overflow-hidden border bg-bgColor',
+              activeIndex === index ? 'border-textColor' : 'border-borderColor',
+            )}
+          >
+            <span
+              role='button'
+              tabIndex={0}
+              className='block size-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+              aria-label={`photo ${index + 1}`}
+              aria-pressed={activeIndex === index}
+              onClick={() => setActiveIndex((open) => (open === index ? null : index))}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                setActiveIndex((open) => (open === index ? null : index));
+              }}
+            >
+              {url ? (
+                <Media src={url} alt={(current.caption ?? '').trim() || `photo ${index + 1}`} />
+              ) : (
+                <Placeholder label='?' className='size-full border-0' />
+              )}
+            </span>
+            {!frozen && (
+              <StripClose
+                title='remove photo'
+                onPress={() => {
+                  remove(index);
+                  setActiveIndex(null);
+                  onEdit?.();
+                }}
               />
             )}
           </div>
+        );
+      })}
 
-          {!frozen && full && (
-            <Text size='micro' variant='label'>
-              no more than {MAX_MEDIA_PER_STEP} photos per step — a long strip stops being scrolled
-              through
-            </Text>
-          )}
-        </>
+      {!frozen && !full && (
+        <MediaSlot
+          aspectRatio={['1:1']}
+          frameAspect='1'
+          heightPx={56}
+          sizeClassName='size-14'
+          compact
+          hint={null}
+          label='+ photo'
+          allowMultiple
+          limit={MAX_MEDIA_PER_STEP - fields.length}
+          showVideos={false}
+          onSelect={add}
+          className='shrink-0'
+        />
       )}
 
-      {/* Приёмка вставленного и брошенного: одна на полосу, а не на каждый кадр. */}
+      {(intake.busy || intake.dragging) && (
+        <Text size='micro' variant='label' component='span' className='h-14 content-center'>
+          {intake.busy ? 'adding' : 'drop photo'}
+        </Text>
+      )}
+
+      {active && activeIndex != null && (
+        <div className='flex w-full basis-full flex-col gap-2 pt-1'>
+          {activeUrl && (
+            <>
+              {!frozen && <AnnotationToolbar tool={placingKind} onTool={setPlacingKind} />}
+              <AnnotationCanvas
+                key={wireInt(active.mediaId)}
+                src={activeUrl}
+                alt={(active.caption ?? '').trim() || `photo ${activeIndex + 1}`}
+                heightPx={STRIP_HEIGHT}
+                placingKind={placingKind}
+                onPlaced={() => setPlacingKind(null)}
+                annotations={(active.annotations ?? []) as AnnotationForm[]}
+                frozen={frozen}
+                renderPiecePicker={renderPiecePicker}
+                pieceLabel={pieceLabel}
+                onChange={frozen ? undefined : (next) => setAnnotations(activeIndex, next)}
+              />
+            </>
+          )}
+          <div className='flex flex-wrap items-center gap-3'>
+            {!frozen && activeIndex > 0 && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={() => {
+                  move(activeIndex, activeIndex - 1);
+                  setActiveIndex(activeIndex - 1);
+                  onEdit?.();
+                }}
+              >
+                earlier
+              </Button>
+            )}
+            {!frozen && activeIndex < fields.length - 1 && (
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={() => {
+                  move(activeIndex, activeIndex + 1);
+                  setActiveIndex(activeIndex + 1);
+                  onEdit?.();
+                }}
+              >
+                later
+              </Button>
+            )}
+            {!frozen ? (
+              <Input
+                value={active.caption ?? ''}
+                aria-label='photo caption'
+                placeholder='caption'
+                maxLength={255}
+                className='min-w-40 flex-1'
+                onChange={(event: ReactChangeEvent<HTMLInputElement>) => {
+                  setValue(`${name}.${activeIndex}.caption`, event.target.value, {
+                    shouldDirty: true,
+                  });
+                  onEdit?.();
+                }}
+              />
+            ) : (
+              (active.caption ?? '').trim() && (
+                <Text size='nano' variant='label'>
+                  {active.caption}
+                </Text>
+              )
+            )}
+          </div>
+        </div>
+      )}
+
       {intake.dialog}
     </div>
   );
@@ -355,7 +332,7 @@ function StripClose({ title, onPress }: { title: string; onPress: () => void }) 
         e.preventDefault();
         onPress();
       }}
-      className='cursor-pointer bg-bgColor focus-visible:outline-offset-1'
+      className='absolute top-0 right-0 cursor-pointer bg-bgColor focus-visible:outline-offset-1'
     />
   );
 }

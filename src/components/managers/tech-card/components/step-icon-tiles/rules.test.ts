@@ -9,6 +9,7 @@ import {
   BIND_KIND_TILES,
   bindTileSelection,
   formRowOpIconInput,
+  HEM_KIND_TILES,
   holesDefaultFits,
   JOIN_KIND_TILES,
   kindFitsClass,
@@ -21,7 +22,6 @@ import {
   seamKindGroups,
   seamKindPick,
   topstitchRowIcon,
-  variantAfterWork,
 } from './rules';
 
 const BOUND = 'TECH_CARD_SEAM_CLASS_BS_BOUND';
@@ -42,6 +42,14 @@ describe('seam kind tiles', () => {
       BIND_KIND_TILES.map((t) => t.token).sort(),
     );
     expect(JOIN_KIND_TILES).toHaveLength(8);
+    expect(HEM_KIND_TILES.map((t) => t.token)).toEqual([
+      'moscow_hem',
+      'hem_raw',
+      'hem_closed',
+      'hem_zigzag',
+      'blind_hem',
+      'cover_hem',
+    ]);
     expect(seamKindGroups().flatMap((g) => g.kinds)).toHaveLength(SEAM_KINDS.length);
   });
 
@@ -164,7 +172,7 @@ describe('press toward tiles', () => {
   });
 });
 
-describe('topstitch rows and work variants', () => {
+describe('topstitch rows', () => {
   it('previews bars up to three, then the count', () => {
     expect(topstitchRowIcon(0, '')).toEqual({ key: 'topstitch' });
     expect(topstitchRowIcon(2, 'TECH_CARD_TOPSTITCH_MODE_EDGE')).toEqual({
@@ -173,13 +181,6 @@ describe('topstitch rows and work variants', () => {
       at: 'edge',
     });
     expect(topstitchRowIcon(4, '')).toEqual({ key: 'topstitch', bars: 3, more: 4 });
-  });
-
-  it('a new work keeps only a variant it declares', () => {
-    expect(variantAfterWork('set_zip', 'two_way')).toBe('two_way');
-    expect(variantAfterWork('fuse', 'two_way')).toBe('');
-    expect(variantAfterWork('', 'two_way')).toBe('');
-    expect(variantAfterWork('fuse', '')).toBe('');
   });
 });
 

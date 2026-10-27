@@ -11,7 +11,15 @@ const NO_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
  * Rows of topstitching as tiles 0–4, each previewing its bars (the server caps rows at four).
  * 0 = unset; clicking the picked count clears it back to 0.
  */
-export function TopstitchRowTiles({ index, className }: { index: number; className?: string }) {
+export function TopstitchRowTiles({
+  index,
+  className,
+  label = 'rows of topstitching',
+}: {
+  index: number;
+  className?: string;
+  label?: string;
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const write = useStepWrite(index);
   const rows = (useWatch({ control, name: `operations.${index}.topstitchRows` }) ?? 0) as number;
@@ -25,7 +33,7 @@ export function TopstitchRowTiles({ index, className }: { index: number; classNa
   return (
     <TileRow
       field={`operations.${index}.topstitchRows`}
-      label='rows of topstitching'
+      label={label}
       errors={errors}
       className={className}
     >

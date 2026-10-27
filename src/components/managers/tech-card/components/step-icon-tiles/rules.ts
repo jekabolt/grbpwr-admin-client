@@ -3,7 +3,6 @@
 import type { IconKey } from '../../op-icons/icons.gen';
 import type { OpIcon, OpIconInput, TopstitchAt } from '../../op-icons/op-icon';
 import { SEAM_KINDS } from '../../op-icons/seam-kinds';
-import { isWorkVariant } from '../../op-icons/work-variants';
 
 // Pure rules behind the step editor's icon tiles. Every write a tile makes is computed here, so the
 // same rule the backend enforces (0436) is readable and tested in one place.
@@ -47,6 +46,16 @@ export const JOIN_KIND_TILES: readonly KindTile[] = [
   { token: 'locked', label: 'locked' },
   { token: 'lapped_raw', label: 'lapped' },
   { token: 'open_topstitched', label: 'topstitched' },
+];
+
+/** Hem-only row: the narrow hems plus the blind and cover variants used on existing cards. */
+export const HEM_KIND_TILES: readonly KindTile[] = [
+  { token: 'moscow_hem', label: 'rolled' },
+  { token: 'hem_raw', label: 'raw' },
+  { token: 'hem_closed', label: 'closed' },
+  { token: 'hem_zigzag', label: 'zigzag' },
+  { token: 'blind_hem', label: 'blind' },
+  { token: 'cover_hem', label: 'cover' },
 ];
 
 export function seamKindDef(token: string) {
@@ -251,14 +260,6 @@ export function topstitchRowIcon(rows: number, mode: string): OpIcon {
     ...(rows > 3 ? { more: rows } : null),
     ...(at ? { at } : null),
   };
-}
-
-// --- work variant ----------------------------------------------------------------------------
-
-/** After the work changes: keep a variant the new work declares, drop any other. */
-export function variantAfterWork(work: string, variant: string): string {
-  if (!variant) return '';
-  return isWorkVariant(work, variant) ? variant : '';
 }
 
 // --- the flat form row, read as an icon ------------------------------------------------------

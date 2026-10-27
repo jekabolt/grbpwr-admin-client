@@ -28,14 +28,14 @@ export function StepIconCell({ index }: { index: number }) {
   );
 }
 
-/** 40px icon in the step editor header. */
+/** Compact icon in the step editor header. */
 export function StepHeaderIcon({ index }: { index: number }) {
   const icon = useStepOpIcon(index);
   return (
     <OpIconArt
       icon={icon}
-      w={53}
-      h={40}
+      w={32}
+      h={24}
       className={cn('shrink-0', icon.missing && 'text-borderColor')}
     />
   );

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Text, Tiles } from 'ui';
+import { Button, Text, Tiles } from 'ui';
 import { ICONS, type IconKey } from '../../op-icons';
 import type { TechCardFormData } from '../schema';
 import { IconTile, TileRow, useStepFieldErrors } from './icon-tile';
 import {
   BIND_KIND_TILES,
   bindTileSelection,
+  HEM_KIND_TILES,
   JOIN_KIND_TILES,
   kindFitsClass,
   NO_BINDING_STYLE,
@@ -36,11 +37,13 @@ export function SeamKindTiles({
   index,
   family,
   className,
+  label = 'seam kind',
 }: {
   index: number;
   /** Which row this step takes; null = none, though a stored kind is still shown. */
-  family: 'bind' | 'join' | null;
+  family: 'bind' | 'join' | 'hem' | 'stored' | null;
   className?: string;
+  label?: string;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const write = useStepWrite(index);
@@ -73,10 +76,17 @@ export function SeamKindTiles({
   };
 
   const bind = family === 'bind';
+  const hem = family === 'hem';
   const selection = bind
     ? bindTileSelection(seamKind, bindingStyle)
     : { token: seamKind, derived: false };
-  const base: readonly KindTile[] = bind ? BIND_KIND_TILES : JOIN_KIND_TILES;
+  const base: readonly KindTile[] = bind
+    ? BIND_KIND_TILES
+    : hem
+      ? HEM_KIND_TILES
+      : family === 'stored'
+        ? []
+        : JOIN_KIND_TILES;
   // A stored kind outside the row (another class, or newer than this bundle) is shown, picked.
   const tiles =
     seamKind && !base.some((t) => t.token === seamKind)
@@ -102,22 +112,23 @@ export function SeamKindTiles({
     <TileRow
       field={`operations.${index}.seamKind`}
       alsoField={bind ? `operations.${index}.bindingStyle` : undefined}
-      label='seam kind'
+      label={label}
       errors={errors}
       className={className}
     >
-      <Tiles min={TILE_MIN}>
-        {tiles.map((t) => tile(t))}
-        {!bind && (
-          <IconTile
-            label={moreOpen ? 'less' : 'more'}
-            dashed
-            selected={false}
-            onClick={() => setMoreOpen((open) => !open)}
-          />
-        )}
-      </Tiles>
-      {!bind && moreOpen && (
+      <Tiles min={TILE_MIN}>{tiles.map((t) => tile(t))}</Tiles>
+      {!bind && !hem && (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='self-start'
+          onClick={() => setMoreOpen((open) => !open)}
+        >
+          {moreOpen ? 'less' : 'more'}
+        </Button>
+      )}
+      {!bind && !hem && moreOpen && (
         <div className='flex flex-col gap-2 pt-1'>
           {seamKindGroups().map((g) => (
             <div key={g.group} className='flex flex-col gap-1'>

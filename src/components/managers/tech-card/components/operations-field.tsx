@@ -16,6 +16,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent as ReactChangeEvent,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -34,11 +36,9 @@ import {
   type ComboboxGroup,
   ConfirmationModal,
   GroupLabel,
-  Pill,
   RowTotal,
   HeaderWarnings,
   type HeaderWarning,
-  HeaderNote,
   SectionHeader,
   Text,
   Input,
@@ -51,10 +51,10 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  ComboField,
   DecimalField,
   InputField,
   SelectField,
+  Tile,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
@@ -108,7 +108,6 @@ import {
   seamSecuringLabel,
   stepEnumOptions,
   stitchLengthMm,
-  topstitchBlankMeans,
   topstitchModeOptionsFor,
   topstitchModeTakesWidth,
   topstitchWidthLabel,
@@ -122,6 +121,7 @@ import {
   OPERATION_KIND_BY_ID,
   kindLabelOf,
   kindOf,
+  operationHowKind,
   type OperationKind,
 } from './operation-kinds';
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ (0329). Пикер работ, синонимный поиск и дефолты берутся отсюда;
@@ -135,6 +135,7 @@ import {
   machineTokenToEnum,
   resolveStepDefaults,
   searchWorks,
+  variantAfterWork,
   workApplication,
   workDefaultsForForm,
   workNaming,
@@ -250,6 +251,7 @@ import { AssemblySchematic } from './assembly-schematic';
 import { CardSeamStandard, SequenceRail } from './sequence-rail';
 import {
   ButtonAttachTiles,
+  PressActionTiles,
   PressTowardTiles,
   SeamKindTiles,
   StepHeaderIcon,
@@ -259,7 +261,7 @@ import {
 import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
-import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
+import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { StepSeamsRow } from './step-seams/step-seams-row';
@@ -1149,23 +1151,6 @@ export type ColorwayCloth = {
 // effectiveMaterialId, which resolves it over that file's own draft/slot types — deliberately not
 // shared, because importing the recipe editor's types into the construction tab would couple a
 // read-only display to an editor's staging model. If one of the two changes, both must.
-function effectiveArticleId(pin: number, slotDefault: number): number {
-  return pin > 0 ? pin : slotDefault > 0 ? slotDefault : 0;
-}
-
-// One colourway's answer for a slot, as it reads on the step. A colourway can carry BOTH a resolved
-// article and a hole (two usages of the same slot, one pinned and one with no article anywhere), so
-// the two are printed together rather than the hole hiding the article or the reverse.
-function colorwayArticleText(c: {
-  inRecipe: boolean;
-  missing: boolean;
-  articles: string[];
-}): string {
-  if (!c.inRecipe) return 'not in the recipe';
-  if (!c.missing) return c.articles.join(' / ');
-  return c.articles.length > 0 ? `${c.articles.join(' / ')} + no article` : 'no article';
-}
-
 // Reads a drag payload back as a piece lineKey — the private MIME type first, the prefixed
 // text/plain mirror as the fallback. Returns '' for anything that isn't ours.
 function readPieceDrag(dt: DataTransfer): string {
@@ -1594,7 +1579,7 @@ function TrayChip({
 }) {
   const dragProps = {
     draggable: true,
-    onDragStart: (e: React.DragEvent) => {
+    onDragStart: (e: ReactDragEvent) => {
       e.dataTransfer.setData(PIECE_DND_TYPE, piece.lineKey);
       e.dataTransfer.setData('text/plain', `${PIECE_DND_PREFIX}${piece.lineKey}`);
       e.dataTransfer.effectAllowed = 'copy';
@@ -1690,6 +1675,7 @@ function ProducesBlock({
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const outputKey = (useWatch({ name: `operations.${index}.outputUnitKey` }) ?? '') as string;
   const outputName = (useWatch({ name: `operations.${index}.outputUnitName` }) ?? '') as string;
+  const [draftName, setDraftName] = useState('');
 
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
@@ -1700,7 +1686,6 @@ function ProducesBlock({
       setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
     }
   }, [outputKey, outputName, index, setValue]);
-  const absorbs = !!outputKey && inputKeys.includes(outputKey) && assembly.res.units.has(outputKey);
   const nameProducer = unitNameProducerIndex(assembly.res, outputKey, index);
 
   // Внутренний ключ выводится из зоны и занятого пространства имён. Владелец его не видит и не
@@ -1718,17 +1703,13 @@ function ProducesBlock({
     return suggestUnitCode(zone, taken);
   };
 
-  const declare = () => {
+  const declare = (name: string) => {
     if (usable.length < 2) {
-      refuseGesture(
-        `STEP ${index + 1}`,
-        'not a unit',
-        'a unit made of a single input is processing, not a unit: take at least two inputs into the step',
-      );
       return;
     }
     const code = suggest();
     setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
+    setValue(`operations.${index}.outputUnitName`, name.trim(), { shouldDirty: true });
     // Разметка появилась снова — намерение «снять разметку» отменено. Без этого сценарий
     // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
     // а снять флаг руками нечем.
@@ -1736,15 +1717,33 @@ function ProducesBlock({
     onEdit?.();
   };
 
+  if (usable.length < 2 && !outputKey) return null;
+
   return (
     <>
-      <GroupLabel>produces</GroupLabel>
+      <GroupLabel>unit</GroupLabel>
       {!outputKey ? (
-        <ChipRow>
-          <Chip dashed onClick={declare} title='declare that this step assembles a unit'>
-            ▣ make it a unit
-          </Chip>
-        </ChipRow>
+        <div className='max-w-60'>
+          <Text size='micro' variant='label' tracking='label' className='mb-1 uppercase'>
+            unit name
+          </Text>
+          <Input
+            value={draftName}
+            aria-label='unit name'
+            maxLength={255}
+            onChange={(event: ReactChangeEvent<HTMLInputElement>) =>
+              setDraftName(event.target.value)
+            }
+            onBlur={() => {
+              if (draftName.trim()) declare(draftName);
+            }}
+            onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              event.currentTarget.blur();
+            }}
+          />
+        </div>
       ) : (
         <>
           <div className='flex flex-wrap items-center gap-2'>
@@ -1755,19 +1754,10 @@ function ProducesBlock({
             {/* ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
                 чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
                 отменялся из редактора. */}
-            <Chip
-              dashed
-              onClick={() => onDissolve(index)}
-              title='the step stops assembling the unit; its inputs return to the table for the next steps'
-            >
+            <Button type='button' variant='underline' size='xs' onClick={() => onDissolve(index)}>
               dissolve
-            </Chip>
+            </Button>
           </div>
-          {absorbs && (
-            <Text size='micro' variant='label' className='mt-1'>
-              absorption: this unit keeps its identity and gains the contents of this step
-            </Text>
-          )}
           {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
               спрашивал только «узел с таким ключом существует» — а он мог состояться ДРУГИМ
               шагом: у второго производителя джойн отвергнут, входы НЕ съедены, и кнопка
@@ -1847,15 +1837,11 @@ function BootstrapEatenRefs({
   };
 
   return (
-    <ChipRow className='mt-1'>
-      <Chip
-        dashed
-        onClick={apply}
-        title={`the steps below reference pieces this unit consumes; the replacement is mandatory — otherwise the server refuses the whole card`}
-      >
-        replace the consumed references with the unit · {affected.length}
-      </Chip>
-    </ChipRow>
+    <div className='mt-1'>
+      <Button type='button' variant='underline' size='xs' onClick={apply}>
+        replace references
+      </Button>
+    </div>
   );
 }
 
@@ -2190,7 +2176,7 @@ function InheritableNumberField({
   name,
   label,
   value,
-  placeholder,
+  placeholder = '',
 }: {
   name: `operations.${number}.${
     | 'threadCount'
@@ -2208,7 +2194,7 @@ function InheritableNumberField({
     | 'airTemperatureC'}`;
   label: string;
   value: number;
-  placeholder: string;
+  placeholder?: string;
 }) {
   return (
     <InputField
@@ -2274,28 +2260,12 @@ function StitchLengthMirror({
         placeholder={placeholder}
         title='the same setting as stitches / cm — typing here writes the density'
         value={draft ?? derived}
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        onChange={(e: ReactChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
         onBlur={() => setDraft(null)}
       />
     </div>
   );
 }
-
-/**
- * СЛОВА ПРО ТО, ОТКУДА В ШАГ КЛАДУТ ДЕТАЛЬ — на ИНЛАЙНОВОЙ вкладке. Ровно те, что стояли в
- * редакторе намертво.
- *
- * Теперь их приносит ПОВЕРХНОСТЬ, потому что механизм у поверхностей разный: здесь лоток прямо над
- * списком (клик по чипу кладёт деталь) и нативный DnD (чип можно бросить в редактор), а в
- * фулскрине лоток не рендерится вовсе и источника нативного драга нет — там полка и режим добора.
- * Одни и те же слова на обеих поверхностях означали бы, что на одной из них они врут; выбирать,
- * на какой именно, не пришлось: врали в фулскрине, и человек шёл кликать полку.
- */
-const TRAY_PIECE_SOURCE = {
-  groupHint: 'click a piece in the tray to add it',
-  chipTitle: 'pick a piece from the tray above the list',
-  emptyNote: 'not linked to any piece — click one in the tray above, or drag it here',
-};
 
 // ── ВЫВОДИМОСТЬ: ЧТО КАРТОЧКА ЗНАЕТ ПРО ШАГ САМА ───────────────────────────────────────────────
 //
@@ -2379,53 +2349,6 @@ function useStepInference(
   ]);
 }
 
-/**
- * ОТКУДА ВЗЯЛАСЬ ПОДСКАЗКА — СЛОВАМИ, а не «система решила». Источник называется в подсказке
- * метки, потому что проверять вывод человек будет ровно там, откуда он взялся: назначение строки
- * BOM правится на вкладке материалов, имя детали — в чертеже, вид — пикером двумя контролами выше.
- */
-const INFERENCE_SOURCE_WORDS: Record<'fabric' | 'piece-name' | 'work', string> = {
-  fabric: 'the purpose of the cloth these pieces are cut from',
-  'piece-name': 'the names of the pieces this step takes',
-  work: 'the kind of work this step is',
-};
-
-function zoneSuggestedWhy(sources: { id: 'fabric' | 'piece-name' | 'work' }[]): string {
-  const words = sources.map((s) => INFERENCE_SOURCE_WORDS[s.id]);
-  return words.length === 0 ? 'inferred from the card' : `inferred from ${words.join(' and ')}`;
-}
-
-/**
- * МЕТКА «ПОДСТАВЛЕНО» — КНОПКА, А НЕ НАДПИСЬ, и это часть контракта: подставленное обязано
- * сниматься одним касанием там же, где оно показано. Надпись оставила бы человеку только путь
- * «выбрать в селекте другое значение», то есть заменить наш ответ своим — а он мог хотеть
- * пустоты.
- */
-function SuggestedMark({
-  field,
-  what,
-  why,
-  onDismiss,
-}: {
-  field: SuggestedField;
-  what: string;
-  why: string;
-  onDismiss: () => void;
-}) {
-  return (
-    <Chip
-      data-suggested={field}
-      onClick={onDismiss}
-      onRemove={onDismiss}
-      tone='attention'
-      title={`${why} — click to drop it and answer yourself`}
-      className='mt-px max-w-full'
-    >
-      <span className='truncate'>suggested · {what}</span>
-    </Chip>
-  );
-}
-
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
@@ -2438,13 +2361,10 @@ function OperationEditor({
   previousPieceShapes,
   ghostKeys,
   cloth,
-  tiled,
   pinOptions,
-  colorwayArticles,
   onInsertAfter,
   onRemove,
   onFlashPieces,
-  pieceSource,
   onActiveBomChange,
   onDropPiece,
   onReplaceGhost,
@@ -2480,21 +2400,10 @@ function OperationEditor({
    * плиткой состава шага и больше ничем: редактор пишет в форму шаг, а не рецепт.
    */
   cloth?: Map<string, PieceCloth> | null;
-  /** Детали показываются плитками — решает вкладка, одинаково для тарелки и состава шага. */
-  tiled: boolean;
   pinOptions: PickerOption[];
-  colorwayArticles?: ColorwayArticles;
   onInsertAfter: () => void;
   onRemove: () => void;
   onFlashPieces: () => void;
-  /**
-   * ТРИ НАДПИСИ ПРО ИСТОЧНИК ДЕТАЛЕЙ — ОТ ПОВЕРХНОСТИ, а не намертво в редакторе. Редактор один на
-   * две поверхности, а орган, которым в шаг кладут деталь, у них разный: инлайн — лоток над
-   * списком, фулскрин — полка и режим добора. Обработчик «＋ piece» поверхность решала и раньше
-   * (`onFlashPieces`), а слова оставались инлайновыми — и в фулскрине звали к лотку, которого там
-   * нет. Слова и механизм ездят вместе: разъехаться они могут только молча.
-   */
-  pieceSource: { groupHint: string; chipTitle: string; emptyNote: string };
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
   /** Заменить призрака во всей карте и перейти к следующей метке. */
@@ -2518,6 +2427,10 @@ function OperationEditor({
   const form = useFormContext<TechCardFormData>();
   const { control, getValues, setValue } = form;
   const opNumber = (index + 1) * 10;
+  const storedOperationNumber = (useWatch({
+    control,
+    name: `operations.${index}.operationNumber`,
+  }) ?? opNumber) as number;
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
   const review = (useWatch({ control, name: `operations.${index}.review` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -2531,6 +2444,9 @@ function OperationEditor({
   const noteValue = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ??
     NONE_SEAM_CLASS) as string;
+  const seamKind = (
+    (useWatch({ control, name: `operations.${index}.seamKind` }) ?? '') as string
+  ).trim();
   const cardSeamClass = (useWatch({
     control,
     name: 'construction.defaultSeamClass',
@@ -2682,16 +2598,15 @@ function OperationEditor({
   const workValue = (
     (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string
   ).trim();
+  const workVariant = (
+    (useWatch({ control, name: `operations.${index}.workVariant` }) ?? '') as string
+  ).trim();
   // КАТАЛОГ ЧИТАЕТСЯ ТУТ ЖЕ, И РОВНО ПО ТОМУ ЖЕ ДОВОДУ, ЧТО СТРОКОЙ ВЫШЕ. До R8 он жил у пикера
   // (ниже по телу), но ЯРЛЫК длины прорези спрашивает не только сам токен, а и то, знаком ли он
   // каталогу: работа новее бандла — это не петля, и назвать её петлёй значит соврать. Пикер берёт
   // ту же переменную там, где стоял его собственный вызов, — второго обращения к сети нет, ключ
   // запроса один на приложение.
-  const {
-    catalog: workCatalog,
-    live: catalogLive,
-    refresh: refreshCatalog,
-  } = useOperationWorkCatalog();
+  const { catalog: workCatalog, refresh: refreshCatalog } = useOperationWorkCatalog();
 
   const isMachineStep = isMachineType(opType);
   const isPressStep = isPressType(opType);
@@ -2841,24 +2756,6 @@ function OperationEditor({
     seamAllowanceMm.trim() !== '',
     stitchesPerCm.trim() !== '',
     attachmentKind !== NONE_ATTACHMENT,
-  ].filter(Boolean).length;
-  const equipmentOverrideCount = [
-    isMachineStep && !!machineProfileKey.trim(),
-    isMachineStep && threadCount > 0,
-    isMachineStep && needleType !== NONE_NEEDLE,
-    isMachineStep && needleSizeNm > 0,
-    isMachineStep && threadTension !== NONE_TENSION,
-    isMachineStep && stitchWidthMm.trim() !== '',
-    // ВТО-половина — по `ownsPressSettings`, ровно как рендер блока и очистка скрытого: у
-    // печатного шага 160 °C и силиконовая бумага лежат в той же створке и прячутся тем же фолдом.
-    // Со списком трёх ВТО-глаголов редактор открывал бы печатный шаг с шестью заполненными
-    // фактами, показывая «inherits everything» над закрытой створкой, — то же самое, что потерять.
-    ownsPressSettings && !!pressProfileKey.trim(),
-    ownsPressSettings && pressTemperatureC > 0,
-    ownsPressSettings && pressDwellSec > 0,
-    ownsPressSettings && pressPressureNCm2.trim() !== '',
-    ownsPressSettings && pressSteam !== undefined,
-    ownsPressSettings && pressCloth !== NONE_PRESS_CLOTH,
   ].filter(Boolean).length;
   // Шов и плотность прячутся у ВТО-шага — но ТОЛЬКО пока он их не несёт: значение, которое ЕСТЬ,
   // показывается там, где оно есть. Тот же ответ, что у полосы остатков, и потому предикат один.
@@ -3137,26 +3034,19 @@ function OperationEditor({
   //
   // Гейт — те же `show*`, что у рендера: непоказанный факт чужого семейства не имеет права
   // считаться. Он не исчезает — он переезжает в полосу остатков строкой ниже.
-  const kindFactCount = stepFields.filter((f) => f.kind && f.shown && f.filled).length;
   // ЧТО ИЗ ЭТОГО СЕЙЧАС НА ЭКРАНЕ. Поля, которых в таблице нет вовсе, — ядро сетки (глагол, зона,
   // время, выноска, note) и ссылки: они на экране всегда, и их отказ ложится на свой контрол.
   const mountedByTable = new Map(stepFields.map((f) => [f.field as string, f.shown]));
-  const overrideCount = sewingOverrideCount + equipmentOverrideCount;
   // ЕСТЬ ЛИ У ЗОНЫ СВОЙСТВ ЧТО ПОКАЗАТЬ. Считается по ТЕМ ЖЕ предикатам, что рисуют блоки: список
   // блоков пункта на этот вопрос не ответит — у чистки и контроля он не пуст, а единственное их
   // поле стоит в ядре сетки рядом с пикером, и «ничего не названо» над пустым местом было бы
   // неправдой в обе стороны сразу.
-  const kindHasControls =
-    showTopstitch ||
-    showStitching ||
-    showPlacement ||
-    showHardware ||
-    showPrint ||
-    showWeld ||
-    showTrim ||
-    showThreadTrim ||
-    showPressAction;
-  const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
+  const [overridesOpen, setOverridesOpen] = useState(false);
+  const [stepParams] = useSearchParams();
+  const seamPick = stepParams.get('pick');
+  useEffect(() => {
+    if (seamPick === String(storedOperationNumber)) setOverridesOpen(true);
+  }, [seamPick, storedOperationNumber]);
 
   // AND IT OPENS ITSELF ON AN ERROR. Nearly every field in the fold can now fail a check — a thread
   // count out of band, a tension note without its scale, a density that would not fit the column —
@@ -3171,11 +3061,6 @@ function OperationEditor({
   // поле, чей контрол не смонтирован вовсе, живёт в полосе остатков; раскрыв ради него створку,
   // редактор показал бы пустую красную панель и увёл человека от единственного места, где у него
   // есть [clear].
-  const hasFoldedError =
-    !!stepErrors &&
-    Object.keys(stepErrors).some(
-      (field) => !CORE_STEP_FIELDS.has(field) && mountedByTable.get(field) !== false,
-    );
   const errorAt = (field: string): string | undefined => {
     const node = (stepErrors as Record<string, { message?: unknown }> | undefined)?.[field];
     const message = node?.message;
@@ -3403,19 +3288,6 @@ function OperationEditor({
   // бы переигрывать выбор человека у него на глазах. Память гаснет, как только состояние перестаёт
   // соответствовать и пункту, и его родителю: дальше правит уже не пикер, а данные.
   const [pickedKindId, setPickedKindId] = useState('');
-  // ЧТО ПОДСТАВИЛ ВЫБОР РАБОТЫ — СПИСКОМ, ДЛЯ МЕТКИ ПОД ПИКЕРОМ. Держится на один сеанс редактора:
-  // значения записаны человеческим жестом и живут дальше сами, метка лишь объясняет их
-  // происхождение и даёт снять. Этим она и отличается от подстановки выводимости ниже, которая
-  // ВЛАДЕЕТ значением и отзывает его на размонтировании.
-  const [prefilled, setPrefilled] = useState<
-    Array<
-      Omit<StepDefaultFill, 'source'> & {
-        source: StepDefaultFill['source'] | 'catalog';
-        fromStep: number;
-        workLabel: string;
-      }
-    >
-  >([]);
   const pickedKind = pickedKindId ? OPERATION_KIND_BY_ID.get(pickedKindId) : undefined;
   const derivedKind =
     pickedKind &&
@@ -3481,6 +3353,31 @@ function OperationEditor({
     : activeKind?.askMachine
       ? (activeKind.askMachine as readonly string[]).slice()
       : undefined;
+  const kindHowKind = operationHowKind(activeKind?.id, workValue);
+  const howKind = showBindingStyle ? 'bind' : kindHowKind;
+  const showIdentityOperation = !activeKind || activeKind.verb !== opType;
+  const showIdentityMachine =
+    isMachineStep &&
+    (!activeKind ||
+      !!askedMachines ||
+      !activeKind.writes?.machineType ||
+      activeKind.writes.machineType !== machineType ||
+      (activeWork ? activeWork.machineMode === 'ask' : false));
+  const showIdentityEquipment =
+    isPressStep &&
+    (!activeKind ||
+      !activeKind.writes?.pressEquipment ||
+      activeKind.writes.pressEquipment !== pressEquipment);
+  const showIdentityPressAction =
+    isPressStep &&
+    howKind !== 'press-action' &&
+    !!activeKind?.pressAction &&
+    activeKind.pressAction !== pressAction;
+  const writtenDiscriminator = stepDiscriminator
+    ? activeKind?.writes?.[stepDiscriminator.field]
+    : undefined;
+  const showIdentityDiscriminator =
+    !!stepDiscriminator && (!writtenDiscriminator || writtenDiscriminator !== discriminatorValue);
 
   /**
    * СТРОКИ ПИКЕРА — ОТ КАТАЛОГА, ГРУППАМИ, С ПОИСКОМ ПО СИНОНИМАМ.
@@ -3535,8 +3432,8 @@ function OperationEditor({
     // Строка немедленно возвращается на прежнюю деривацию — то самое двоекодье.
     if (!token) {
       setPickedKindId('');
-      setPrefilled([]);
       setValue(`${p}.work`, '', { shouldDirty: true });
+      setValue(`${p}.workVariant`, variantAfterWork('', workVariant), { shouldDirty: true });
       return;
     }
     const item = workCatalog.byToken.get(token);
@@ -3574,6 +3471,7 @@ function OperationEditor({
         coverageMode,
         labelAttachStitch,
         pressAction,
+        workVariant,
         bomKinds: stepBomKinds,
         machineProfileKey,
         pressProfileKey,
@@ -3690,7 +3588,6 @@ function OperationEditor({
         break;
       }
     }
-    const sourceIndex = source ? rows.indexOf(source as unknown as OperationFormValue) : -1;
     const fromCard: Record<string, string | number> = {};
     if (source) {
       for (const field of KIND_PROPERTY_FIELDS) {
@@ -3733,49 +3630,7 @@ function OperationEditor({
         shouldDirty: true,
       });
     }
-    setPrefilled(
-      fills.map((f) => ({
-        ...f,
-        // Номер шага-источника — то, что человек ищет глазами, когда проверяет подстановку.
-        fromStep: f.source === 'card' && sourceIndex >= 0 ? (sourceIndex + 1) * 10 : 0,
-        workLabel: item.label,
-      })),
-    );
   }
-
-  // --- МЕТКА «ПОДСТАВЛЕНО» И ЖЕСТ «ЗАПОМНИТЬ КАК ДЕФОЛТ» --------------------------------------
-  //
-  // МЕТКА ЖИВЁТ ДО КАСАНИЯ ПОЛЯ ИЛИ ДО СОХРАНЕНИЯ, и оба условия ВЫЧИСЛЯЮТСЯ, а не хранятся
-  // третьим флажком: «человек ответил своё» это значение, разошедшееся с нашим, а «сохранено» —
-  // значение, совпавшее с БАЗОЙ формы (после успешной записи база = сервер). Флажок рядом с этими
-  // двумя фактами был бы третьим мнением о них и разошёлся бы с обоими молча.
-  // ПОДПИСКА — НА СТРОКУ ЦЕЛИКОМ, А НЕ НА СПИСОК ИМЁН, И ЭТО ПОЧИНКА, А НЕ СТИЛЬ. `useWatch` с
-  // МАССИВОМ имён берёт начальное значение ОДИН РАЗ, на монтировании, и дальше обновляет его
-  // только по подписке; список же имён рождается вместе с подстановкой — то есть ПОСЛЕ последней
-  // записи. Значение оставалось от прежнего имени, метка не появлялась ни разу, и выглядело это
-  // как «дефолты не работают», хотя поле было заполнено. Имя строки не меняется никогда.
-  const stepNow = (useWatch({ control, name: `operations.${index}` }) ?? {}) as Record<
-    string,
-    unknown
-  >;
-  const prefillBase = (form.formState.defaultValues?.operations?.[index] ?? {}) as Record<
-    string,
-    unknown
-  >;
-  const prefillNotice = prefilled.filter((f) => {
-    // Человек поправил поле — значение разошлось с нашим, и оно теперь его.
-    if (stepNow[f.field] !== f.value) return false;
-    // Карточка сохранилась — база формы стала сервером, и подстановка стала утверждением.
-    return prefillBase[f.field] !== f.value;
-  });
-  /** Снять подставленное: значение уходит в пустоту, метка гаснет. Жест человеческий — и грязный. */
-  const dropPrefilled = (field: string) => {
-    const blank = (emptyOperation as Record<string, unknown>)[field];
-    setValue(`operations.${index}.${field}` as `operations.${number}.note`, blank as never, {
-      shouldDirty: true,
-    });
-    setPrefilled((prev) => prev.filter((f) => f.field !== field));
-  };
 
   const rememberDefault = useMutation({
     mutationFn: (v: { workToken: string; field: string; value: string }) =>
@@ -4057,8 +3912,9 @@ function OperationEditor({
       setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
     }
     setApplied((prev) => {
-      const { zone: _dropped, ...rest } = prev;
-      return rest;
+      const next = { ...prev };
+      delete next.zone;
+      return next;
     });
   }, [zoneSuggested, zoneValue, applied.zone, frozen, dismissed, index, setValue, dismiss]);
 
@@ -4091,8 +3947,9 @@ function OperationEditor({
       );
     }
     setApplied((prev) => {
-      const { thread: _dropped, ...rest } = prev;
-      return rest;
+      const next = { ...prev };
+      delete next.thread;
+      return next;
     });
   }, [threadSuggested, selectedBomKeys, applied.thread, frozen, dismissed, index, setValue]);
 
@@ -4146,8 +4003,9 @@ function OperationEditor({
       setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
     }
     setApplied((prev) => {
-      const { press: _dropped, ...rest } = prev;
-      return rest;
+      const next = { ...prev };
+      delete next.press;
+      return next;
     });
   }, [
     pressSuggested,
@@ -4243,57 +4101,6 @@ function OperationEditor({
     };
   }, [revokeSuggestions]);
 
-  /** Снять подставленное касанием: значение уходит, подсказка на этом шаге гаснет. */
-  const dropSuggested = (field: SuggestedField) => {
-    const wrote = wroteRef.current;
-    if (field === 'zone') {
-      noteSuggested?.(index, 'zone', NONE_ZONE);
-      setValue(`operations.${index}.zone`, NONE_ZONE, { shouldDirty: false });
-    }
-    if (field === 'thread') {
-      noteSuggested?.(index, 'bomLineKeys', { remove: wrote.thread });
-      setValue(
-        `operations.${index}.bomLineKeys`,
-        selectedBomKeys.filter((k) => k !== wrote.thread),
-        { shouldDirty: false },
-      );
-    }
-    if (field === 'press') {
-      noteSuggested?.(index, 'pressEquipment', NONE_PRESS_EQUIPMENT);
-      setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
-      if (wrote.press?.profileKey) {
-        noteSuggested?.(index, 'pressProfileKey', '');
-        setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: false });
-      }
-    }
-    dismiss(field);
-  };
-
-  /**
-   * ПОДСКАЗКА НОРМЫ ВРЕМЕНИ — ГОУСТ для шага, чья работа названа раньше; при выборе работы то же
-   * время пишется ЗНАЧЕНИЕМ с меткой источника (`prefillForWork`, 23-AUTO #6). Две
-   * ступени из РАЗНЫХ источников: карточная (модуль выводимости, R5) и каталожная (`smv_hints`,
-   * R3). Карточная сильнее; каталожная работает только у строки с названной работой.
-   *
-   * Норма времени в дефолты НЕ входит и входить не будет: она зависит от изделия, а не только от
-   * работы, — поэтому серверный реестр `default_fields` её и не содержит.
-   */
-  const cardSmv = inference.smv.smv;
-  const catalogSmv = activeWork ? workCatalog.smvHints.get(activeWork.token) : undefined;
-  const smvHint: { text: string; why: string } | undefined = cardSmv
-    ? {
-        text: cardSmv,
-        why: `the same kind of step took ${cardSmv} min at step ${inference.smv.fromStep} of this card — a hint, not a value`,
-      }
-    : catalogSmv
-      ? {
-          text: catalogSmv.smv,
-          why: `the last “${activeWork?.label}” step took ${catalogSmv.smv} min${
-            catalogSmv.cardName ? ` on ${catalogSmv.cardName}` : ''
-          } — a hint, not a value`,
-        }
-      : undefined;
-
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
   // asked the same question with room for one answer, and an operation genuinely takes several.
   const linkedMaterials = selectedBomKeys
@@ -4355,55 +4162,6 @@ function OperationEditor({
     (isMachineStep ? MACHINE_TYPE_EXPECTS[machineType as common_TechCardMachineType] : undefined);
   const expectsMaterial =
     expects && !linkedMaterials.some((b) => b.section === expects.section) ? expects : null;
-
-  const colorways = colorwayArticles?.colorways ?? [];
-  // No usage on ANY colourway means there is no recipe to report — not that every slot is unused.
-  // A card read that is still refetching looks exactly like this, and printing «не используется ни
-  // в одном рецепте» from it would be a confident negative asserted from missing data.
-  const hasRecipeData = colorways.some((cw) => cw.pinsByLineKey.size > 0);
-  const slotArticles = !hasRecipeData
-    ? []
-    : linkedMaterials.map((line) => {
-        const key = line.lineKey ?? '';
-        const slotDefault = line.materialId ?? 0;
-        const articleName = (id: number) => colorwayArticles?.materialNameById.get(id) ?? `#${id}`;
-        const perColorway = colorways.map((cw) => {
-          const pins = cw.pinsByLineKey.get(key);
-          // No usage at all ≠ a usage with no article. The first says this colourway's recipe never
-          // asks for the slot, the second is a production blocker; conflating them would either
-          // invent a missing article or hide a real one.
-          if (!pins) {
-            return { label: cw.label, ids: [] as number[], inRecipe: false, missing: false };
-          }
-          const ids = Array.from(new Set(pins.map((pin) => effectiveArticleId(pin, slotDefault))));
-          return {
-            label: cw.label,
-            ids: ids.filter((id) => id > 0),
-            inRecipe: true,
-            missing: ids.some((id) => id === 0),
-          };
-        });
-        const inRecipe = perColorway.filter((c) => c.inRecipe);
-        // Compared by ID, never by name: two catalog articles can legitimately share a name (the
-        // same zip stocked from two suppliers), and folding them together would assert that two
-        // colourways take the same physical article when they do not.
-        const distinctIds = new Set(inRecipe.flatMap((c) => c.ids));
-        return {
-          lineKey: key,
-          name: line.name?.trim() || 'unnamed',
-          perColorway: perColorway.map((c) => ({ ...c, articles: c.ids.map(articleName) })),
-          usedAnywhere: inRecipe.length > 0,
-          // «Same everywhere» has to mean EVERY colourway, not merely every colourway that happens
-          // to carry the slot. A zip that exists only in BLK's recipe is the single most important
-          // thing this line can say, and collapsing it to «основная молния → YKK» says the opposite
-          // — that all three colourways take it — while nothing is bought for the other two.
-          uniform:
-            inRecipe.length === colorways.length &&
-            distinctIds.size === 1 &&
-            !inRecipe.some((c) => c.missing),
-          uniformArticle: distinctIds.size === 1 ? articleName(Array.from(distinctIds)[0]) : '',
-        };
-      });
 
   // A pin that no longer resolves (its callout was deleted from the drawing) keeps a visible,
   // re-selectable option instead of reading as «— пин —» — the same defensive fallback the issues
@@ -4560,39 +4318,66 @@ function OperationEditor({
   // (карточка)» верна и бессмысленна: она называет карточный стандарт, а не факт этого шага, — и
   // три таких строки подряд учат не читать сводки вовсе.
   const showSeamSummary = showSewingOverrides && (hasSeam || seamAllowanceMm.trim() !== '');
+  const setupSummaryText = [
+    isMachineStep && machineType !== NONE_MACHINE ? machineTypeLabel(machineType) : '',
+    isPressStep && pressEquipment !== NONE_PRESS_EQUIPMENT
+      ? pressEquipmentLabel(pressEquipment)
+      : '',
+    !isMachineStep && !isPressStep
+      ? OPERATION_TYPE_LABELS[opType as common_TechCardOperationType] ?? ''
+      : '',
+    machineSummaryText,
+    pressSummaryText,
+    showSeamSummary ? seamSummaryText : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const frontFields = new Set([
+    'work',
+    'zone',
+    'smv',
+    'inputKeys',
+    'bomLineKeys',
+    'media',
+    'outputUnitKey',
+    'outputUnitName',
+    'note',
+  ]);
+  if (showIdentityOperation) frontFields.add('operationType');
+  if (showIdentityMachine) frontFields.add('machineType');
+  if (showIdentityEquipment) frontFields.add('pressEquipment');
+  if (showIdentityPressAction) frontFields.add('pressAction');
+  if (showIdentityDiscriminator && stepDiscriminator) frontFields.add(stepDiscriminator.field);
+  if (showPressToward) frontFields.add('pressToward');
+  const howFields: Record<typeof howKind, readonly string[]> = {
+    fuse: ['workVariant'],
+    'press-action': ['pressAction'],
+    join: ['seamKind'],
+    topstitch: ['topstitchMode', 'topstitchWidthMm', 'topstitchRows'],
+    bind: ['seamKind', 'bindingStyle'],
+    hem: ['seamKind', 'topstitchWidthMm'],
+    buttonhole: ['buttonholeStyle', 'cutLengthMm', 'buttonholeOrientation', 'placementCount'],
+    button: ['buttonHoles', 'attachPattern', 'placementCount', 'pitchMm'],
+    zip: ['zipperApplication'],
+    bartack: ['bartackLengthMm'],
+    label: ['labelAttachStitch'],
+    gather: ['fullnessRatio'],
+    none: [],
+  };
+  howFields[howKind].forEach((field) => frontFields.add(field));
+  const hasSetupError = Object.keys(stepErrors ?? {}).some((field) => !frontFields.has(field));
 
   // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
   // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
   // value is shown with its source and stored nowhere, which is the whole difference between «the
   // technologist chose 4 threads» and «it defaulted to 4».
 
-  return (
-    <div
-      onDragEnter={(e: React.DragEvent) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragOver={(e: React.DragEvent) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-      }}
-      onDragLeave={(e: React.DragEvent) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
-      }}
-      onDrop={(e: React.DragEvent) => {
-        e.preventDefault();
-        setOver(false);
-        const key = readPieceDrag(e.dataTransfer);
-        if (key) onDropPiece(index, key);
-      }}
-      className={cn(
-        'min-w-0 flex-1 border bg-bgColor p-3 transition-colors',
-        over ? 'border-textColor' : 'border-borderColor',
-      )}
-    >
-      <div className='mb-2.5 flex flex-wrap items-center gap-2 border-b border-borderColor pb-1'>
+  const variantOneEditor = (
+    <>
+      <div className='mb-3 flex min-w-0 items-center gap-2 border-b border-hairline pb-2'>
         <StepHeaderIcon index={index} />
-        <Text size='default' component='h4' className='font-bold tabular-nums'>
+        <Text size='default' component='h4' className='shrink-0 tabular-nums'>
           {opNumber}
         </Text>
         <Text
@@ -4600,155 +4385,40 @@ function OperationEditor({
           variant='uppercase'
           tracking='label'
           component='span'
+          className='min-w-0 flex-1 truncate'
           data-editor-heading={index}
         >
           {editorHeading}
         </Text>
-        <div className='ml-auto flex shrink-0 items-center gap-1.5'>
-          <Button type='button' variant='secondary' size='xs' onClick={onInsertAfter}>
-            ＋ step below
+        <div className='ml-auto hidden shrink-0 items-center gap-3 sm:flex'>
+          <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
+            + below
           </Button>
-          <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-            remove step
+          <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+            remove
           </Button>
         </div>
       </div>
 
-      {/* THE CORE, and it is all of it: what the step does, ON WHAT, where, and how long it takes.
-          The pieces and materials below are the other half of «with what»; everything else is an
-          override that stays folded away until it differs.
-
-          THE SECOND CONTROL IS THE SECOND AXIS (0306). «Machine» is not an instruction on its own —
-          it says a machine is involved and nothing about which of the twenty-five — so the machine
-          picker sits beside the type and is required by it, exactly like the zone. Press, press open
-          and fusing ask the same question about the equipment: an iron, a fusing press and a steamer
-          are three different instructions to the floor. Neither is an override, and neither belongs
-          in the fold: a required field behind a closed accordion is a save that fails at a control
-          nobody can see. */}
-      <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-        {/* ПИКЕР РАБОТЫ — ПЕРВЫЙ КОНТРОЛ ШАГА, И ВЫБИРАЮТ В НЁМ ПОИСКОМ, А НЕ ГЛАЗАМИ.
-            Технолог называет работу ОДНИМ СВОИМ СЛОВОМ («московский», «моско»), а форма
-            спрашивала глагол и машинку по отдельности — этого слова не было ни в одном из двух
-            списков, а с 0329 их полсотни с лишним и сканировать список стало дороже, чем печатать.
-            Список и синонимы приходят С СЕРВЕРА; в бандле остаётся снимок, чтобы пикер никогда не
-            был пустым, — и подпись под ним честно говорит, на чём он сейчас живёт.
-            ВЫБОР ПИШЕТ РАБОТУ (`work`, хранимую) И ЛИЧНОСТЬ: глагол с машинкой из каталога, класс
-            шва / метод крепления / под-глагол — из пункта, если он у работы есть. Обе оси ниже
-            остаются на экране и редактируемыми: шаг, собранный руками мимо всех работ, продолжает
-            открываться и сохраняться, а работа у него просто не названа. */}
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
         <div
-          className='space-y-px'
+          className='col-span-2 space-y-px'
           data-kind-picker={index}
           data-step-work={workValue || undefined}
         >
           <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
-            kind of operation
+            kind
           </Text>
           <Combobox
             name={`operationWork-${index}`}
-            placeholder='kind of operation'
-            searchPlaceholder='type the work — Russian or English'
+            placeholder='kind'
+            searchPlaceholder='search'
             valueLabel={workLabel}
             filter={filterWorks}
             onSelect={applyWork}
             readOnly={frozen}
-            footer={
-              catalogLive ? undefined : (
-                // ДЕГРАДАЦИЯ НАЗЫВАЕТСЯ ВСЛУХ. Молчаливый фолбэк здесь худший из возможных:
-                // человек печатает русское слово, ничего не находит и решает, что такой работы
-                // нет вовсе.
-                <Text size='micro' variant='label' component='span' data-work-fallback='1'>
-                  offline list · english names only
-                </Text>
-              )
-            }
           />
-          {/* ДВА РАЗНЫХ НЕЗНАНИЯ, И ПУТАТЬ ИХ НЕЛЬЗЯ. «Каталог приехал, а токена в нём нет» это
-              работа НОВЕЕ бандла. «Каталог не приехал» это ничего не говорит о самой работе — и
-              сказать «новее бандла» в этом случае значило бы соврать про запись из-за сбоя сети.
-              Обе ветки одинаковы в главном: токен цел и уедет обратно тем же. */}
-          {workValue &&
-            !activeWork &&
-            (catalogLive ? (
-              <Text size='micro' variant='label' component='p' data-work-unknown={workValue}>
-                this kind came from a newer version of the app — it is kept exactly as it is
-              </Text>
-            ) : (
-              <Text size='micro' variant='label' component='p' data-work-unnamed={workValue}>
-                the catalogue did not load, so this kind cannot be named — it is kept as it is
-              </Text>
-            ))}
         </div>
-        <SelectField
-          name={`operations.${index}.operationType`}
-          label='operation *'
-          items={operationTypeOptionsFor(opType)}
-          className={selectNoGrow}
-        />
-        {/* «НА ЧЁМ» — СУЖЕННЫЙ СПИСОК И ДРУГОЕ СЛОВО НАД НИМ, когда вид якорится не машинкой.
-            У отстрочки якорь — названный mode, а машинку шаг MACHINE обязан нести:
-            сервер отвергает MACHINE без неё. Поэтому пункт машинку ставит, но не угадывает молча —
-            вопрос стоит здесь, на виду, раскрытым. И смена машинки внутри списка вид НЕ меняет:
-            переставил одноигольную на двухигольную — `topstitch_mode` не тронулся, вид прежний. */}
-        {isMachineStep && (
-          <SelectField
-            name={`operations.${index}.machineType`}
-            label={askedMachines ? 'on what *' : 'machine *'}
-            items={
-              askedMachines
-                ? machineTypeOptionsFor(machineType).filter(
-                    (o) => askedMachines.includes(o.value) || o.value === machineType,
-                  )
-                : machineTypeOptionsFor(machineType)
-            }
-            className={selectNoGrow}
-          />
-        )}
-        {isPressStep && (
-          // Фокус-капчер — датчик «человек коснулся контрола» для распознавания очистки пикером;
-          // сброс регистрации формы фокуса не имеет (довод у `pressTouchedRef`).
-          <div
-            className='space-y-px'
-            onFocusCapture={() => {
-              pressTouchedRef.current = true;
-            }}
-          >
-            <SelectField
-              name={`operations.${index}.pressEquipment`}
-              label='equipment *'
-              items={pressEquipmentOptions}
-              className={selectNoGrow}
-            />
-            {applied.press && (
-              <SuggestedMark
-                field='press'
-                what={pressEquipmentLabel(applied.press.equipment)}
-                why='the card park holds exactly one press profile for this process'
-                onDismiss={() => dropSuggested('press')}
-              />
-            )}
-          </div>
-        )}
-        {/* ДИСКРИМИНАТОР ГЛАГОЛА — та же вторая ось, что машинка у «machine» и оборудование у ВТО,
-            и стоит она здесь по тому же доводу: сервер требует её БЕЗУСЛОВНО, а обязательное поле
-            за закрытым аккордеоном — это сохранение, падающее на контроле, которого нет на экране.
-            У каждого из шести глаголов ровно один такой вопрос, поэтому в сетке всегда не больше
-            одного лишнего селекта. */}
-        {stepDiscriminator && (
-          <SelectField
-            name={`operations.${index}.${stepDiscriminator.field}`}
-            label={stepDiscriminator.label}
-            items={stepEnumOptions(
-              stepDiscriminator.labels,
-              stepDiscriminator.unset,
-              discriminatorValue,
-            )}
-            className={selectNoGrow}
-          />
-        )}
-        {/* ЗОНА — ЕДИНСТВЕННОЕ ПОДСТАВЛЯЕМОЕ ПОЛЕ, ВХОДЯЩЕЕ В ПОДПИСЬ КАРТОЧКИ, и поэтому метка
-            рядом с ней обязательна, а не желательна: подписывают то, что видят. Фокус-капчер —
-            датчик «человек коснулся контрола» (довод у `zoneTouchedRef`). */}
         <div
           className='space-y-px'
           onFocusCapture={() => {
@@ -4761,362 +4431,125 @@ function OperationEditor({
             items={zoneOptions}
             className={selectNoGrow}
           />
-          {applied.zone && (
-            <SuggestedMark
-              field='zone'
-              what={zoneOptions.find((o) => o.value === applied.zone)?.label ?? applied.zone}
-              why={zoneSuggestedWhy(inference.zone.sources)}
-              onDismiss={() => dropSuggested('zone')}
-            />
-          )}
         </div>
-        <DecimalField
-          name={`operations.${index}.smv`}
-          label='time, min'
-          // ГОУСТ, А НЕ ЗНАЧЕНИЕ. Норма времени зависит от изделия, поэтому её не подставляют ни
-          // при каком совпадении — её ПОКАЗЫВАЮТ в пустом поле и убирают, как только человек
-          // набрал своё. Место занято тем же плейсхолдером, что и раньше, когда сказать нечего.
-          //
-          // ДВЕ СТУПЕНИ ПОДСКАЗКИ, И БЛИЖНЯЯ СИЛЬНЕЕ: сначала такой же шаг ЭТОЙ карточки (его
-          // считает модуль выводимости), и только если такого нет — «в прошлый раз было
-          // столько-то» с ЧУЖОЙ карточки, из каталога работ. Порядок тот же, что у дефолтов, и по
-          // тому же доводу: контекст ближе весомее. Каталожная ступень существует только у строки
-          // с НАЗВАННОЙ работой — по паре осей такую подсказку не собрать, и это честно.
-          placeholder={smvHint ? `last: ${smvHint.text}` : '1.8'}
-          title={smvHint?.why}
-          data-smv-hint={smvHint?.text || undefined}
-          min={0}
-        />
-        <SelectField
-          name={`operations.${index}.calloutNumber`}
-          label='sketch pin'
-          items={rowPinOptions}
-          valueAsNumber
-          className={selectNoGrow}
-        />
-      </div>
-
-      {/* ── ЗОНА СВОЙСТВ ВИДА — ВСЕГДА РАСКРЫТА, СТВОРКИ У НЕЁ НЕТ ─────────────────────────────
-          ЧТО ЗДЕСЬ ЛЕЖИТ И ПОЧЕМУ ИМЕННО ЭТО. Правило одно и проверяемое: в створке — то, у чего
-          ПУСТОЕ ПОЛЕ ЗНАЧИТ «НАСЛЕДУЙ»; здесь — то, у чего пустое значит «НИКТО НЕ СКАЗАЛ». Оно
-          совпадает с тем, как поля устроены в контракте, поэтому его не придётся помнить:
-          наследуются только те, у кого есть источник выше (профиль парка или карточные дефолты), а
-          у тридцати двух колонок волны источника выше нет ни одного.
-          ЭТО И ЕСТЬ ГЛАВНАЯ ПОЧИНКА. Раньше всё содержательное лежало в свёрнутой створке, чьё имя
-          и было дефектом: «differs from standard» читается как «сюда только исключения», — а
-          свойства вида не исключения, они и есть вид. Владелец открыл шаг, прочитал «inherits
-          everything» и закрыл. */}
-      <GroupLabel
-        action={
-          kindFactCount > 0 ? (
-            <HeaderNote tone='attention'>{kindFactCount}</HeaderNote>
-          ) : kindHasControls ? (
-            <Text size='micro' variant='label' component='span'>
-              nothing stated yet
-            </Text>
-          ) : undefined
-        }
-      >
-        {/* ИМЯ РАБОТЫ БЕРЁТСЯ ИЗ КАТАЛОГА, когда работа названа: он авторитетен, а не бандл. */}
-        {workLabel ? `${workLabel} — how it is done` : 'how it is done'}
-      </GroupLabel>
-
-      {/* ЧТО ПОДСТАВИЛ ВЫБОР РАБОТЫ — НАЗВАНО ПОИМЁННО И СНИМАЕТСЯ КАСАНИЕМ.
-          Подстановка это ЗАПИСЬ по человеческому жесту (выбрал работу), поэтому значение живёт
-          дальше само; метка не владеет им, а объясняет происхождение — «с шага 120 этой карточки»
-          или «твой дефолт для этой работы» — и даёт стереть, если оно не к месту. Метка гаснет
-          сама: человек поправил поле (значение разошлось с нашим) или карточка сохранилась
-          (значение стало базой формы). Обоих условий здесь не хранится флажком — они считаются. */}
-      {prefillNotice.length > 0 && (
-        <div className='mb-1 flex flex-wrap items-center gap-1' data-work-prefill={index}>
-          <Text size='micro' variant='label' component='span'>
-            prefilled ·
-          </Text>
-          {prefillNotice.map((f) => (
-            <Chip
-              key={f.field}
-              data-prefill-field={f.field}
-              data-prefill-source={f.source}
-              onClick={() => dropPrefilled(f.field)}
-              onRemove={() => dropPrefilled(f.field)}
-              tone='attention'
-              title={
-                f.source === 'card'
-                  ? `carried from step ${f.fromStep} of this card · click to clear`
-                  : f.source === 'catalog'
-                    ? `the last “${f.workLabel}” time in the catalogue · click to clear`
-                    : `your saved default for “${f.workLabel}” · click to clear`
-              }
-              className='max-w-full'
-            >
-              <span className='truncate'>
-                {f.field === 'smv'
-                  ? 'time'
-                  : stepFields.find((sf) => (sf.field as string) === f.field)?.label ??
-                    f.field}{' '}
-                ·{' '}
-                {f.source === 'card'
-                  ? `from step ${f.fromStep}`
-                  : f.source === 'catalog'
-                    ? 'catalog'
-                    : 'your default'}
-              </span>
-            </Chip>
-          ))}
-        </div>
-      )}
-
-      {/* «У МЕНЯ ЭТА РАБОТА ВСЕГДА ТАКАЯ» — ЖЕСТ, НАРИСОВАННЫЙ ПО СЕРВЕРНОМУ РЕЕСТРУ.
-          Список полей приходит в ответе каталога и есть тот же срез, которым RPC проверяет
-          присланное имя: машинные и ВТО-настройки в него не входят вовсе (у них своя лестница
-          наследования 0306), и кнопки над ними не появится. Свой, клиентский список здесь
-          разошёлся бы с принимающим молча — и человек жал бы кнопку, всегда отвечающую отказом. */}
-      {activeWork && rememberableDefaults.length > 0 && (
-        <div
-          className='mb-1 flex flex-wrap items-center gap-1'
-          data-work-defaults={activeWork.token}
-        >
-          <Text size='micro' variant='label' component='span'>
-            remember for “{activeWork.label}” ·
-          </Text>
-          {rememberableDefaults.map((r) => (
-            <button
-              key={r.column}
-              type='button'
-              data-remember-field={r.column}
-              disabled={r.already || rememberDefault.isPending || frozen}
-              onClick={() =>
-                rememberDefault.mutate({
-                  workToken: activeWork.token,
-                  field: r.column,
-                  value: r.value,
-                })
-              }
-              title={
-                r.already
-                  ? `${r.label} = ${r.text} is already your default for this work`
-                  : `save ${r.label} = ${r.text} as the default for every “${activeWork.label}” step`
-              }
-              className='inline-flex max-w-full items-center gap-1 border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill disabled:opacity-40'
-            >
-              <span className='truncate'>
-                {r.label} = {r.text}
-                {r.already ? ' ✓' : ''}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* НЕСТАНДАРТНАЯ КОМБИНАЦИЯ — НАЗЫВАЕТСЯ СЛОВАМИ, А НЕ ПОДМЕНЯЕТСЯ БЛИЖАЙШИМ ПУНКТОМ.
-          Пара, не соответствующая ни одному виду, законна: ручная комбинация, токен новее этого
-          бандла, недозаполненный шаг. Выдумать здесь «похожий» вид значило бы соврать о шаге, а
-          что-нибудь почистить — потерять чужую работу. Показываются имя из самих осей и обе оси
-          контролами выше, которые никуда не делись. */}
-      {!activeKind && opType !== NONE_OP_TYPE && (
-        <Text size='micro' variant='label' className='mb-1'>
-          non-standard combination —{' '}
-          {OPERATION_TYPE_LABELS[opType as common_TechCardOperationType] ?? opType}
-          {isMachineStep && machineType !== NONE_MACHINE
-            ? ` · ${machineTypeLabel(machineType)}`
-            : ''}{' '}
-          — the two axes above stay editable and nothing has been changed
-        </Text>
-      )}
-
-      {/* ПОЛОСА ОСТАТКОВ — НАД БЛОКАМИ СЕМЕЙСТВ. Здесь, а не в конце: заполненное, которого шаг
-          не несёт, — это первое, что надо прочитать, открыв зону свойств, потому что именно оно не
-          даст карточке сохраниться. Слово об этом — в самой полосе. */}
-      <ResidueStrip
-        rows={residueRows}
-        errorRows={residueErrorRows}
-        caption='set on this step, but its current kind shows no control for it — the values below are still sent on save, and any refusal lands here'
-        onClear={clearResidueField}
-      />
-      <WorkVariantTiles index={index} />
-      <SeamKindTiles
-        index={index}
-        family={showBindingStyle ? 'bind' : showStitching ? 'join' : null}
-      />
-
-      {/* ОТСТРОЧКА — ТРИ ПОЛЯ, ПОДНЯТЫЕ ИЗ СТВОРКИ. Наследовать им неоткуда (ни профиль машинки, ни
-          карточные дефолты про отступ и число рядов не говорят), значит по правилу раздела им
-          место здесь. Показываются на машинном шаге — и на любом другом, где значение уже стоит:
-          спрятанное число всё равно печатается на листе и всё равно двигает дайджест секции. */}
-      {showTopstitch && (
-        <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-          {/* Список — с оглядкой на то, что в шаге уже лежит: словарь режимов ТОТАЛЕН над
-            контрактом, поэтому токен вне списка означает режим НОВЕЕ этого бандла (обычное
-            состояние между выкаткой бэка и выкаткой клиента), а Radix рисует такое значение
-            ПУСТЫМ триггером — и технолог читает «отстрочки нет» на шаге, где она есть. */}
+        <DecimalField name={`operations.${index}.smv`} label='time, min' min={0} />
+        {showIdentityOperation && (
           <SelectField
-            name={`operations.${index}.topstitchMode`}
-            label='topstitch'
-            items={topstitchModeOptionsFor(topstitchMode)}
+            name={`operations.${index}.operationType`}
+            label='operation *'
+            items={operationTypeOptionsFor(opType)}
             className={selectNoGrow}
           />
-          {/* Поле отступа стоит у режимов, которые число ПРИНИМАЮТ, и больше нигде: «in the ditch»
-            меряет расстояние ноль по определению, и сервер число там отвергает по имени. У «at the
-            edge» оно теперь есть и НЕОБЯЗАТЕЛЬНО — пустое значит «вплотную», — и это ровно то, чего
-            в списке не хватало: пункт «at width from the edge» был этим же приёмом с числом.
-            Классификация — в TOPSTITCH_MODES; режим, который бандл классифицировать не может, поля
-            не показывает — безобидная половина сделки (значение при этом продолжает ездить). */}
-          {showTopstitchWidth && (
-            <>
-              {/* ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, ОТ КОТОРОЙ МЕРЯЮТ, И МЕНЯЕТСЯ ВМЕСТЕ С РЕЖИМОМ. Владелец —
-                практикующий технолог — спросил «у нас есть row spacing, но нет отступа от края»,
-                глядя ровно на это поле: подпись «topstitch width, mm» называла величину и молчала
-                о том, от чего она отсчитывается. Молчать здесь нельзя вдвойне — одно и то же поле
-                при `at the edge` меряется ОТ КРАЯ ДЕТАЛИ, а при `parallel to the seam` ОТ ЛИНИИ
-                ШВА, и на настрочном или запошивочном шве это разные линии. Слова берутся из
-                TOPSTITCH_MODES, откуда их берёт и печатный лист: второй копии не заводится, иначе
-                технолог наберёт число под одной линией, а швея прочитает другую. */}
-              <div className='flex flex-col gap-0.5'>
-                <DecimalField
-                  name={`operations.${index}.topstitchWidthMm`}
-                  label={topstitchWidthLabel(topstitchMode)}
-                  maxDecimals={1}
-                  placeholder='6'
-                />
-                {/* ПУСТОЕ ПОЛЕ ЗДЕСЬ — ОТВЕТ, А НЕ ПРОПУСК, и сказать это обязано оно само. Пока «по
-                  краю» и «на столько-то от края» были ДВУМЯ пунктами списка, пустоте нечего было
-                  значить, и её никто не оставлял; теперь пункт один, и незаполненное числовое поле
-                  само по себе читается как «забыли», а не как «вплотную». Слова — из той же карты,
-                  что подпись выше: линию они называют одну. Строка снимается, как только число
-                  набрано, — при заполненном поле она сообщала бы про состояние, которого нет. */}
-                {topstitchWidthMm.trim() === '' && topstitchBlankMeans(topstitchMode) && (
-                  <Text size='micro' variant='label'>
-                    {topstitchBlankMeans(topstitchMode)}
-                  </Text>
-                )}
-              </div>
-              {/* РЯДЫ ЧЕГО. Голое «rows» — счётчик без предмета, а предмет тут спорный: рядами в
-                этой же карточке зовутся и строчки отстрочки (здесь), и соседние строчки, между
-                которыми меряется «spacing between stitch rows» в игольном блоке ниже. Это те же
-                самые ряды, но живут они в двух разных блоках, и связать их обязана подпись. */}
-              <TopstitchRowTiles index={index} className='col-span-full' />
-            </>
-          )}
-        </div>
-      )}
-      {/* ЛОВУШКА САМОГО КОНТРАКТА: нулевой член `TechCardTopstitchMode` значит НЕ «не указано», а
-          «отстрочки нет», — то есть шаг-отстрочка с незаполненным режимом читается как «не
-          отстрочка». Отказывать нельзя: шаг законно чертится раньше, чем известен отступ. Поэтому
-          мягкое предупреждение, а не ошибка. */}
-      {activeKind?.id === 'A2' && topstitchMode === NONE_TOPSTITCH && (
-        <Text size='micro' variant='label' className='mb-1'>
-          this is a topstitch step but the mode is not picked — on paper an unset mode reads as “no
-          topstitching”
-        </Text>
-      )}
-
-      {/* ── ВИДЫ ОПЕРАЦИЙ (0324): по блоку на семейство ───────────────────────────────────────
-          Каждый показан РОВНО СВОЕМУ глаголу (и, где правило про машинку, — своей машинке), теми
-          же предикатами, которыми маппер решает, что уедет на провод. Пусто здесь не значит ноль
-          и не значит «нет»: явное «нет» у семи словарей есть отдельным ответом. Наследовать этим
-          полям неоткуда — лестницы у них нет, — поэтому плейсхолдер числовых полей ПРИМЕР, а не
-          обещание. */}
-
-      {/* S — как ложится строчка. Только MACHINE, при любой машинке. */}
-      {showStitching && (
-        <>
-          <GroupLabel>stitch detail</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            {/* ЧЕТЫРЕ ИГОЛЬНЫХ КОНТРОЛА — НЕ НА СВАРОЧНОЙ МАШИНЕ. Ни иглы, ни нитки у неё нет, и
-                сервер отвергает всю четвёрку по имени, отказывая вместе с ней всей карточкой:
-                нарисовать их значило бы предложить заполнить поле, которое сохранение не
-                переживёт. Посадка и шов этикетки ниже остаются — они не про иглу. */}
-            {showNeedleFacts && (
-              <>
-                <InheritableNumberField
-                  name={`operations.${index}.needleCount`}
-                  label='needles'
-                  value={needleCount}
-                  placeholder='1'
-                />
-                {/* КАЛИБР МЕРЯЕТ РАССТОЯНИЕ МЕЖДУ ИГЛАМИ, поэтому на одной игле он измеряет ничто —
-                    сервер такую пару отвергает, а очистка выше стирает число, оставшееся от двух.
-                    И ПОДПИСЬ ГОВОРИТ «МЕЖДУ ИГЛАМИ» ВСЛУХ: «needle gauge» в цехе означает и зазор
-                    между иглами, и ТОЛЩИНУ иглы, а толщина у шага уже есть — «needle size, Nm» в
-                    блоке машинки. Два разных измерения про иглу на одном экране под похожими
-                    словами — ровно тот случай, ради которого подпись и переписывается. */}
-                {showNeedleGauge && (
-                  <DecimalField
-                    name={`operations.${index}.needleGaugeMm`}
-                    label='gauge between needles, mm'
-                    maxDecimals={1}
-                    placeholder='6.4'
-                  />
-                )}
-                <SelectField
-                  name={`operations.${index}.seamSecuring`}
-                  label='securing'
-                  items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
-                  className={selectNoGrow}
-                />
-                {/* Между РЯДАМИ строчек. Не путать с калибром выше: тот — между иглами одного ряда.
-                    Контракт различает их явно («не путать с needle_gauge_mm»), а подпись «row
-                    spacing, mm» этого не передавала: она называла величину, но не говорила, между
-                    чем меряется, — и владелец прочитал в ней отступ от края. */}
-                <DecimalField
-                  name={`operations.${index}.rowSpacingMm`}
-                  label='spacing between stitch rows, mm'
-                  maxDecimals={1}
-                  placeholder='6'
-                />
-              </>
-            )}
-            {/* ОТНОШЕНИЕ, а не проценты: 1.0 — слои идут один в один, 2.0 — присборить вдвое. */}
-            <DecimalField
-              name={`operations.${index}.fullnessRatio`}
-              label='ease / gathering, ratio'
-              maxDecimals={2}
-              placeholder='1.0'
-            />
+        )}
+        {showIdentityMachine && (
+          <SelectField
+            name={`operations.${index}.machineType`}
+            label='machine *'
+            items={
+              askedMachines
+                ? machineTypeOptionsFor(machineType).filter(
+                    (option) =>
+                      askedMachines.includes(option.value) || option.value === machineType,
+                  )
+                : machineTypeOptionsFor(machineType)
+            }
+            className={selectNoGrow}
+          />
+        )}
+        {showIdentityEquipment && (
+          <div
+            className='space-y-px'
+            onFocusCapture={() => {
+              pressTouchedRef.current = true;
+            }}
+          >
             <SelectField
-              name={`operations.${index}.labelAttachStitch`}
-              label='label stitched'
-              items={stepEnumOptions(
-                LABEL_ATTACH_STITCH_LABELS,
-                '— not stated —',
-                labelAttachStitch,
-              )}
+              name={`operations.${index}.pressEquipment`}
+              label='equipment *'
+              items={pressEquipmentOptions}
               className={selectNoGrow}
             />
           </div>
-        </>
-      )}
+        )}
+        {showIdentityPressAction && (
+          <SelectField
+            name={`operations.${index}.pressAction`}
+            label='press action'
+            items={stepEnumOptions(PRESS_ACTION_LABELS, '— not stated —', pressAction)}
+            className={selectNoGrow}
+          />
+        )}
+        {showIdentityDiscriminator && stepDiscriminator && (
+          <SelectField
+            name={`operations.${index}.${stepDiscriminator.field}`}
+            label={stepDiscriminator.label}
+            items={stepEnumOptions(
+              stepDiscriminator.labels,
+              stepDiscriminator.unset,
+              discriminatorValue,
+            )}
+            className={selectNoGrow}
+          />
+        )}
+      </div>
 
-      {/* FA — петли, закрепки, пуговицы, молнии. Каждое поле при СВОЁМ явном типе машины: это
-          факт о машинке, а не о глаголе, и тип, разрешённый через профиль, не засчитывается. */}
-      {showFastening && (
+      {(howKind !== 'none' || showPressToward) && (
         <>
-          <GroupLabel>fastening detail</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            {/* ТРИ УСЛОВИЯ ВМЕСТО ОДНОГО ФРАГМЕНТА: у длины прорези свой гейт (два входа), а
-                форма и направление петли остаются при петельной машине. Порядок сохранён именно
-                разбивкой — на петельном автомате человек по-прежнему читает «форма → длина →
-                направление», а на зигзаге видит ровно одно поле, которое там законно. */}
-            {showButtonhole && (
+          <GroupLabel>how</GroupLabel>
+          {howKind === 'fuse' && <WorkVariantTiles index={index} label='' />}
+          {howKind === 'press-action' && <PressActionTiles index={index} />}
+          {howKind === 'join' && <SeamKindTiles index={index} family='join' label='' />}
+          {howKind === 'bind' && <SeamKindTiles index={index} family='bind' label='' />}
+          {howKind === 'hem' && (
+            <div className='space-y-2'>
+              <SeamKindTiles index={index} family='hem' label='' />
+              {showTopstitchWidth && (
+                <div className='grid grid-cols-2 gap-2'>
+                  <DecimalField
+                    name={`operations.${index}.topstitchWidthMm`}
+                    label='distance, mm'
+                    maxDecimals={1}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {howKind === 'topstitch' && (
+            <div className='space-y-2'>
+              <TopstitchRowTiles index={index} label='' />
+              <div className='grid grid-cols-2 gap-2'>
+                <SelectField
+                  name={`operations.${index}.topstitchMode`}
+                  label='at'
+                  items={topstitchModeOptionsFor(topstitchMode)}
+                  className={selectNoGrow}
+                />
+                {showTopstitchWidth && (
+                  <DecimalField
+                    name={`operations.${index}.topstitchWidthMm`}
+                    label='distance, mm'
+                    maxDecimals={1}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+          {howKind === 'buttonhole' && (
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
               <SelectField
                 name={`operations.${index}.buttonholeStyle`}
-                label='buttonhole shape'
+                label='shape'
                 items={stepEnumOptions(BUTTONHOLE_STYLE_ITEMS, '— not stated —', buttonholeStyle)}
                 className={selectNoGrow}
               />
-            )}
-            {showCutLength && (
               <DecimalField
                 name={`operations.${index}.cutLengthMm`}
-                label={cutLengthLabel}
+                label='cut, mm'
                 maxDecimals={1}
-                placeholder='19'
               />
-            )}
-            {showButtonhole && (
               <SelectField
                 name={`operations.${index}.buttonholeOrientation`}
-                label='buttonhole direction'
+                label='direction'
                 items={stepEnumOptions(
                   BUTTONHOLE_ORIENTATION_ITEMS,
                   '— not stated —',
@@ -5124,20 +4557,35 @@ function OperationEditor({
                 )}
                 className={selectNoGrow}
               />
-            )}
-            {/* Закрепка есть и у петлевой машины — ею закрепляют концы прорези. */}
-            {showBartack && (
-              <DecimalField
-                name={`operations.${index}.bartackLengthMm`}
-                label='bartack length, mm'
-                maxDecimals={1}
-                placeholder='7'
+              <InheritableNumberField
+                name={`operations.${index}.placementCount`}
+                label='repeats'
+                value={placementCount}
               />
-            )}
-            {showZipper && (
+            </div>
+          )}
+          {howKind === 'button' && (
+            <div className='space-y-2'>
+              <ButtonAttachTiles index={index} show bomLines={bomLines} frozen={frozen} label='' />
+              <div className='grid grid-cols-2 gap-2'>
+                <InheritableNumberField
+                  name={`operations.${index}.placementCount`}
+                  label='repeats'
+                  value={placementCount}
+                />
+                <DecimalField
+                  name={`operations.${index}.pitchMm`}
+                  label='pitch, mm'
+                  maxDecimals={1}
+                />
+              </div>
+            </div>
+          )}
+          {howKind === 'zip' && (
+            <div className='grid grid-cols-2 gap-2'>
               <SelectField
                 name={`operations.${index}.zipperApplication`}
-                label='zip application'
+                label='application'
                 items={stepEnumOptions(
                   ZIPPER_APPLICATION_LABELS,
                   '— not stated —',
@@ -5145,317 +4593,102 @@ function OperationEditor({
                 )}
                 className={selectNoGrow}
               />
-            )}
-          </div>
-        </>
-      )}
-      <ButtonAttachTiles
-        index={index}
-        show={showAttachPattern}
-        bomLines={bomLines}
-        frozen={frozen}
-      />
-
-      {/* W — сварка и проклейка: две машинки, соединяющие теплом, а не ниткой. */}
-      {showWeld && (
-        <>
-          <GroupLabel>welding</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            {/* Горячий воздух есть только у проклейки шва: ультразвуковой горн греет сам
-                материал, воздуха у него нет вовсе — и сервер отвергает число по имени. */}
-            {showAirTemperature && (
-              <InheritableNumberField
-                name={`operations.${index}.airTemperatureC`}
-                label='hot air, °C'
-                value={airTemperatureC}
-                placeholder='450'
-              />
-            )}
-            <DecimalField
-              name={`operations.${index}.feedSpeedMMin`}
-              label='feed speed, m/min'
-              maxDecimals={1}
-              placeholder='4.0'
-            />
-          </div>
-        </>
-      )}
-
-      {/* PL — сколько раз шаг повторяется по изделию и с каким шагом. MACHINE | HARDWARE_SET |
-          PRINT: три кнопки в ряд, четыре люверса по краю и два отпечатка — один вопрос. */}
-      {showPlacement && (
-        <>
-          <GroupLabel>repeats</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            <InheritableNumberField
-              name={`operations.${index}.placementCount`}
-              label='repeats'
-              value={placementCount}
-              placeholder='1'
-            />
-            {/* Шаг меряет промежуток МЕЖДУ повторами: на одном повторе мерить нечего. */}
-            {showPitch && (
+            </div>
+          )}
+          {howKind === 'bartack' && (
+            <div className='grid grid-cols-2 gap-2'>
               <DecimalField
-                name={`operations.${index}.pitchMm`}
-                label='pitch, mm'
+                name={`operations.${index}.bartackLengthMm`}
+                label='length, mm'
                 maxDecimals={1}
-                placeholder='80'
               />
-            )}
-          </div>
-        </>
-      )}
-
-      {/* H — установка фурнитуры. На цикловом автомате (петля / пуговица / закрепка) от блока
-          остаётся ровно тройка «отверстие / усилитель / стежки цикла»: способа крепления и
-          стропы, которую подгибают, у них нет, и сервер отвергает эти два поля по имени. */}
-      {showHardware && (
-        <>
-          <GroupLabel>hardware detail</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            <SelectField
-              name={`operations.${index}.holePrep`}
-              label='hole prep'
-              items={stepEnumOptions(HOLE_PREP_LABELS, '— not stated —', holePrep)}
-              className={selectNoGrow}
-            />
-            {/* ЧЕМ усилено — строка BOM; здесь только КАК. */}
-            <SelectField
-              name={`operations.${index}.reinforcement`}
-              label='reinforcement'
-              items={stepEnumOptions(REINFORCEMENT_LABELS, '— not stated —', reinforcement)}
-              className={selectNoGrow}
-            />
-            <InheritableNumberField
-              name={`operations.${index}.cycleStitchCount`}
-              label='cycle stitches'
-              value={cycleStitchCount}
-              placeholder='28'
-            />
-            {/* Подгиб стропы есть только у продеваемой фурнитуры — у пряжки и рамки. */}
-            {showFoldback && (
+            </div>
+          )}
+          {howKind === 'label' && (
+            <div className='grid grid-cols-2 gap-2'>
+              <SelectField
+                name={`operations.${index}.labelAttachStitch`}
+                label='stitch'
+                items={stepEnumOptions(
+                  LABEL_ATTACH_STITCH_LABELS,
+                  '— not stated —',
+                  labelAttachStitch,
+                )}
+                className={selectNoGrow}
+              />
+            </div>
+          )}
+          {howKind === 'gather' && (
+            <div className='grid grid-cols-2 gap-2'>
               <DecimalField
-                name={`operations.${index}.foldbackMm`}
-                label='webbing foldback, mm'
-                maxDecimals={1}
-                placeholder='40'
+                name={`operations.${index}.fullnessRatio`}
+                label='ratio'
+                maxDecimals={2}
               />
-            )}
-          </div>
-        </>
-      )}
-
-      {/* P — что происходит с нанесением после прижима. Гравировки здесь нет вовсе: лазер снимает
-          материал сам, носителя нет и прижимать нечем — при выборе метода блок исчезает, а
-          очистка выше стирает то, что успели поставить.
-
-          ТЕМПЕРАТУРА, ВЫДЕРЖКА И СИЛИКОНОВАЯ БУМАГА ЖИВУТ НЕ ЗДЕСЬ, а в блоке «pressing mode»
-          выше: печать берёт их взаймы у термопресса, и это те же самые поля, что у ВТО-шага, а не
-          третья их копия. Здесь — только то, что бывает ТОЛЬКО у нанесения: съём носителя, второй
-          прижим и шкала манометра.
-
-          И ПОТОМУ ДВА БЛОКА ОТВЕЧАЮТ НА ГРАВИРОВКУ ПО-РАЗНОМУ: этот гаснет и стирается, ВТО-блок
-          выше остаётся стоять с отказом на каждом поле. Довод — у `ownsPressSettings`. */}
-      {showPrint && (
-        <>
-          <GroupLabel>press &amp; peel</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            {/* Слово о температуре — вся инструкция: горячий пилинг, стянутый холодным, поднимает
-                печать вместе с плёнкой. */}
-            <SelectField
-              name={`operations.${index}.peelMode`}
-              label='peel'
-              items={stepEnumOptions(PEEL_MODE_LABELS, '— not stated —', peelMode)}
-              className={selectNoGrow}
-            />
-            <InheritableNumberField
-              name={`operations.${index}.secondPressSec`}
-              label='second press, sec'
-              value={secondPressSec}
-              placeholder='5'
-            />
-          </div>
-        </>
-      )}
-
-      {/* T — сколько припуска ОСТАЁТСЯ после подрезки. Не тот, с каким кроили (seam allowance
-          выше): это два разных числа об одном шве, и на листе они стоят рядом. */}
-      {showTrim && (
-        <>
-          <GroupLabel>trim detail</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            <DecimalField
-              name={`operations.${index}.residualAllowanceMm`}
-              label='allowance left, mm'
-              maxDecimals={1}
-              placeholder='3'
-            />
-          </div>
-        </>
-      )}
-
-      {/* F — самый длинный хвост нитки, который допускается оставить. Пусто = стандарт цеха. */}
-      {showThreadTrim && (
-        <>
-          <GroupLabel>thread tails</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            <DecimalField
-              name={`operations.${index}.residualTailMaxMm`}
-              label='longest tail, mm'
-              maxDecimals={1}
-              placeholder='3'
-            />
-          </div>
-        </>
-      )}
-
-      {/* G — ЧТО ИМЕННО ДЕЛАЕТ УТЮГ, И КУДА ЛЁГ ПРИПУСК (0325). До этой волны глагол PRESS был
-          мешком из семи приёмов: подпись обещала «to one side / steam», а сказать это было нечем —
-          разница уезжала в прозу note, которой нет ни в подписи карточки, ни на печатном листе.
-
-          ЗДЕСЬ, А НЕ В СТВОРКЕ: у обоих полей пустое значит «никто не сказал», а не «наследуй», —
-          ступени выше у них нет ни в профиле пресса, ни в карточных дефолтах.
-
-          НАПРАВЛЕНИЕ ПОЯВЛЯЕТСЯ ТОЛЬКО ПРИ «ЗАУТЮЖИТЬ» И ТАМ ОБЯЗАТЕЛЬНО. При остальных приёмах
-          припуск никуда не укладывается: контрол не «необязателен», он бессмыслен, и сервер
-          отвергает поле по имени. Отказ за него ставит zod — на самом контроле, а не тостом после
-          сохранения шести вкладок. */}
-      {showPressAction && (
-        <>
-          <GroupLabel>press detail</GroupLabel>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-            {/* Список — с оглядкой на то, что в шаге уже лежит: словарь ТОТАЛЕН над контрактом,
-                поэтому токен вне списка означает приём НОВЕЕ этого бандла, а Radix нарисовал бы
-                такое значение ПУСТЫМ триггером — и технолог прочитал бы «не указано» там, где
-                указано. */}
-            <SelectField
-              name={`operations.${index}.pressAction`}
-              label='press action'
-              items={stepEnumOptions(PRESS_ACTION_LABELS, '— not stated —', pressAction)}
-              className={selectNoGrow}
-            />
-            {showPressToward && <PressTowardTiles index={index} className='col-span-full' />}
-          </div>
-        </>
-      )}
-
-      {/* СВОДКИ ОДНОЙ СТРОКОЙ — ПО ТОМУ, ЧТО ОСТАЛОСЬ В СТВОРКЕ. Не перенос полей, а именно сводка:
-          в открытом состоянии шаг обязан ГОВОРИТЬ ФАКТАМИ, а не показывать пустоту с надписью
-          «inherits everything». Клик раскрывает створку — редактируется всё там же, где и раньше. */}
-      {(isMachineStep || ownsPressSettings || showSeamSummary) && (
-        <div className='mt-1.5 space-y-px'>
-          {isMachineStep && (
-            <button
-              type='button'
-              onClick={() => setOverridesOpen(true)}
-              className='block w-full text-left'
-            >
-              <Text size='micro' variant='label' component='span'>
-                machine · {machineSummaryText || 'no profile'}
-              </Text>
-            </button>
+            </div>
           )}
-          {ownsPressSettings && (
-            <button
-              type='button'
-              onClick={() => setOverridesOpen(true)}
-              className='block w-full text-left'
-            >
-              <Text size='micro' variant='label' component='span'>
-                pressing · {pressSummaryText || 'no press'}
-              </Text>
-            </button>
-          )}
-          {showSeamSummary && (
-            <button
-              type='button'
-              onClick={() => setOverridesOpen(true)}
-              className='block w-full text-left'
-            >
-              <Text size='micro' variant='label' component='span'>
-                seam · {seamSummaryText || 'card standard'}
-              </Text>
-            </button>
-          )}
-        </div>
+          {showPressToward && <PressTowardTiles index={index} />}
+        </>
       )}
 
-      <GroupLabel
-        action={
-          <Text size='micro' variant='label' component='span'>
-            {pieceSource.groupHint}
-          </Text>
-        }
-      >
-        pieces this step joins
-      </GroupLabel>
-      <ChipRow className='items-start'>
-        {chosenLivePieces.map((k) =>
-          tiled || review.trim() === 'reshaped' || review.trim() === 'orphan' ? (
-            // Убрать — крестиком В УГЛУ плитки, а не кликом по ней самой: плитка достаточно
-            // крупная, чтобы по ней хотелось нажать, и «нажал посмотреть — отвязал деталь» здесь
-            // стоило бы молча потерянной связи шага с деталью.
-            <span key={k} className='relative inline-flex border border-borderColor bg-bgColor'>
-              {/* Ткань — той же картой, что у лотка прямо над этим списком: одна деталь не имеет
-                  права быть заштрихованной в лотке и чистой здесь. Ключ СЫРОЙ (`chosenPieces`
-                  отфильтрован по `byKey`, то есть это lineKey детали), не `pieceRefKey` — им
-                  ключуются только контуры чертежа.
-                  `pxBox` — ВНЕШНИЙ бокс плитки: обёртка размера не задаёт, плитка рисуется
-                  собственным `size-14`, то есть ровно `TILE_BOX` 56×56. Передан явно, потому что
-                  шаг решётки штриховки считается из него, и молчаливое совпадение с дефолтом —
-                  не то же самое, что проверенное: сменят бокс здесь — увидят и это число. */}
-              <PieceTile
-                found={pieceShapes?.get(pieceRefKey(k)) ?? null}
-                previousFound={previousPieceShapes?.get(pieceRefKey(k)) ?? null}
-                reviewMode={review.trim() === 'reshaped' ? 'reshaped' : undefined}
-                name={byKey.get(k)?.name ?? ''}
-                cloth={cloth?.get(k) ?? null}
-                pxBox={TILE_BOX}
-              />
-              <Close
-                size='sm'
-                aria-label={`remove piece ${byKey.get(k)?.name ?? ''}`}
-                title='remove the piece from the step'
-                onClick={() => removePieceKey(k)}
-                className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
-              />
-            </span>
-          ) : (
-            <Chip key={k} title={byKey.get(k)?.name} onRemove={() => removePieceKey(k)}>
-              {byKey.get(k)?.name}
-            </Chip>
-          ),
-        )}
-        {/* Сирота (деталь удалили на PATTERNS) остаётся ТОЛЬКО красным чипом: рисовать ей силуэт
-            значило бы показать живую форму у ссылки, которая на сохранении оборвётся. */}
-        {danglingPieces.map((k) => (
-          <Chip
-            key={k}
-            tone='error'
-            title={`piece ${k} was deleted on the patterns tab — the link is lost on save`}
-            onRemove={() => removePieceKey(k)}
-          >
-            {`#${k.slice(-6)} — piece deleted`}
-          </Chip>
+      <GroupLabel>with</GroupLabel>
+      <div className='flex flex-wrap gap-1.5'>
+        {chosenLivePieces.map((key) => (
+          <span key={key} className='relative inline-flex size-14 border border-borderColor'>
+            <PieceTile
+              found={pieceShapes?.get(pieceRefKey(key)) ?? null}
+              previousFound={previousPieceShapes?.get(pieceRefKey(key)) ?? null}
+              reviewMode={review.trim() === 'reshaped' ? 'reshaped' : undefined}
+              name={byKey.get(key)?.name ?? ''}
+              cloth={cloth?.get(key) ?? null}
+              pxBox={TILE_BOX}
+            />
+            <Close
+              size='sm'
+              aria-label={`remove piece ${byKey.get(key)?.name ?? ''}`}
+              title='remove piece'
+              onClick={() => removePieceKey(key)}
+              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+            />
+          </span>
         ))}
-        {/* Вход-УЗЕЛ. Отдельным видом чипа, а не в общей куче: узел — это уже сшитая подсборка, и
-            путать его с деталью значило бы скрыть от автора, что шаг берёт со стола. */}
-        {chosenUnits.map((k) => (
-          <Chip
-            key={`u:${k}`}
-            title={`unit ${unitDisplayName({ key: k, outputUnitName: assembly.res.units.get(k)?.name })}: ${assembly.res.units.get(k)?.leaves.length ?? 0} pieces inside`}
-            onRemove={() => removePieceKey(k)}
-          >
-            ▣ {unitDisplayName({ key: k, outputUnitName: assembly.res.units.get(k)?.name })}
-          </Chip>
+        {danglingPieces.map((key) => (
+          <span key={key} className='relative inline-flex size-14 border border-error'>
+            <PieceTile found={null} name='missing' pxBox={TILE_BOX} />
+            <Close
+              size='sm'
+              aria-label='remove missing piece'
+              title='remove piece'
+              onClick={() => removePieceKey(key)}
+              className='absolute top-0 right-0 bg-bgColor/80 text-error'
+            />
+          </span>
+        ))}
+        {chosenUnits.map((key) => (
+          <div key={`u:${key}`} className='relative size-14'>
+            <Tile
+              name={unitDisplayName({
+                key,
+                outputUnitName: assembly.res.units.get(key)?.name,
+              })}
+              sub='unit'
+              className='justify-center'
+            />
+            <Close
+              size='sm'
+              aria-label='remove unit'
+              title='remove unit'
+              onClick={() => removePieceKey(key)}
+              className='absolute top-0 right-0 bg-bgColor/80'
+            />
+          </div>
         ))}
         {chosenGhosts.map((ghostKey) => {
-          const ghost = byKey.get(ghostKey);
-          const ghostName = ghost?.name?.trim() || 'piece';
+          const ghostName = byKey.get(ghostKey)?.name?.trim() || 'piece';
           const previous = previousPieceShapes?.get(pieceRefKey(ghostKey)) ?? null;
           return (
             <Fragment key={`ghost:${ghostKey}`}>
-              <span className='relative inline-flex border border-dashed border-error bg-bgColor'>
+              <span className='relative inline-flex size-14 border border-dashed border-error'>
                 <PieceTile
                   found={null}
                   previousFound={previous}
@@ -5466,25 +4699,22 @@ function OperationEditor({
                 <Close
                   size='sm'
                   aria-label={`remove missing piece ${ghostName}`}
-                  title='remove missing piece'
+                  title='remove piece'
                   onClick={() => onRemoveGhost(index, ghostKey)}
-                  className='absolute top-0 right-0 bg-bgColor/80 text-error focus-visible:-outline-offset-2'
+                  className='absolute top-0 right-0 bg-bgColor/80 text-error'
                 />
               </span>
               {(candidatesByGhost.get(ghostKey) ?? []).map((candidate) => {
                 const piece = byKey.get(candidate.pieceLineKey);
-                const candidateName = piece?.name?.trim() || 'piece';
                 return (
                   <Button
                     key={`${ghostKey}:${candidate.pieceLineKey}`}
                     onClick={() => onReplaceGhost(index, ghostKey, candidate.pieceLineKey)}
-                    aria-label={`replace ${ghostName} with ${candidateName}`}
-                    title='replace missing piece'
-                    className='inline-flex border border-borderColor bg-bgColor text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                    className='size-14 border border-borderColor bg-bgColor hover:border-textColor'
                   >
                     <PieceTile
                       found={pieceShapes?.get(pieceRefKey(candidate.pieceLineKey)) ?? null}
-                      name={candidateName}
+                      name={piece?.name?.trim() || 'piece'}
                       cloth={cloth?.get(candidate.pieceLineKey) ?? null}
                       pxBox={TILE_BOX}
                     />
@@ -5494,33 +4724,106 @@ function OperationEditor({
             </Fragment>
           );
         })}
-        <Chip dashed onClick={onFlashPieces} title={pieceSource.chipTitle}>
-          ＋ piece
-        </Chip>
-      </ChipRow>
-      {chosenPieces.length === 0 && danglingPieces.length === 0 && chosenUnits.length === 0 && (
-        <Text size='micro' variant='label' className='mt-1'>
-          {pieceSource.emptyNote}
+        <div className='size-14'>
+          <Tile dashed name='+ piece' onClick={onFlashPieces} className='justify-center' />
+        </div>
+        {linkedMaterials.map((material) => (
+          <span
+            key={material.lineKey}
+            className='relative size-14'
+            onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
+            onMouseLeave={() => onActiveBomChange?.(null)}
+          >
+            <Tile
+              name={material.name?.trim() || 'unnamed'}
+              title={kindLabel(material.kind) ?? LINKABLE_SECTION_LABEL[material.section ?? '']}
+              className='justify-center'
+            />
+            <Close
+              size='sm'
+              aria-label={`remove material ${material.name?.trim() || ''}`}
+              title='remove material'
+              onClick={() => {
+                if (material.lineKey && material.lineKey === applied.thread) dismiss('thread');
+                toggleBom(material.lineKey ?? '');
+              }}
+              className='absolute top-0 right-0 bg-bgColor/80'
+            />
+          </span>
+        ))}
+        {unlinkedBoms.length > 0 && (
+          <div className='size-14'>
+            <Tile
+              dashed
+              name={addingMaterial ? 'cancel' : '+ material'}
+              pressed={addingMaterial}
+              onClick={() => setAddingMaterial((open) => !open)}
+              className='justify-center'
+            />
+          </div>
+        )}
+        <OperationMediaStrip
+          name={`operations.${index}.media`}
+          urlById={mediaUrls ?? EMPTY_MEDIA_URLS}
+          frozen={frozen}
+          renderPiecePicker={({ selected, onPick }) => (
+            <PieceAddChip
+              pieces={pieces}
+              selected={selected}
+              onPick={onPick}
+              shapeOf={(key) => pieceShapes?.get(pieceRefKey(key)) ?? null}
+            />
+          )}
+          pieceLabel={(key) => pieces.find((piece) => piece.lineKey === key)?.name}
+          onEdit={onEdit}
+        />
+      </div>
+      {addingMaterial && unlinkedBySection.length > 0 && (
+        <div className='mt-2 space-y-2'>
+          {unlinkedBySection.map(([section, lines]) => (
+            <div key={section}>
+              <Text size='micro' variant='label' tracking='label' className='uppercase'>
+                {LINKABLE_SECTION_LABEL[section] ?? section}
+              </Text>
+              <ChipRow>
+                {lines.map((line) => (
+                  <Chip
+                    key={line.lineKey}
+                    onClick={() => {
+                      toggleBom(line.lineKey ?? '');
+                      if (unlinkedBoms.length === 1) setAddingMaterial(false);
+                    }}
+                  >
+                    {line.name?.trim() || 'unnamed'}
+                  </Chip>
+                ))}
+              </ChipRow>
+            </div>
+          ))}
+        </div>
+      )}
+      {bomOutOfRange && (
+        <Text size='micro' variant='error' className='mt-1'>
+          material removed
         </Text>
       )}
-
-      {/* НАРУШЕНИЯ ЭТОГО ШАГА — ЗДЕСЬ, А НЕ ТОЛЬКО НА СОХРАНЕНИИ.
-          Клиент считает фронтир на каждое изменение, но до сих пор молчал о результате: гарды
-          стояли только на путях ДОБАВЛЕНИЯ (лоток, drop, объявление узла), а пути, ломающие уже
-          собранный граф, свободны — перестановка шагов, удаление шага-производителя, снятие
-          чипа входа, удаление детали на другой вкладке, замена деталей модалкой DXF.
-          Первичная разметка карточки обычно И ЕСТЬ перестановка, так что это не экзотика.
-          Сервер такую запись отвергает по пути operations[i].input_keys[j], а у этого пути нет
-          ни FormItem, ни FormMessage — текст не рендерился нигде, и автор видел «!» в рельсе с
-          тултипом про «незаполненное обязательное поле», то есть про другое.
-          «Пикер предлагает ровно то, что примет запись» было выполнено наполовину: предлагал
-          ровно, но молча позволял разрушить уже принятое. */}
+      {expectsMaterial && unlinkedBoms.length > 0 && !addingMaterial && (
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='mt-1'
+          onClick={() => setAddingMaterial(true)}
+        >
+          material missing
+        </Button>
+      )}
       {stepViolations.length > 0 && (
         <CalloutBox tone='error'>
           <div className='flex flex-col gap-0.5'>
-            {stepViolations.map((v, i) => (
-              <Text key={`${v.rule}:${v.detail}:${i}`} size='micro'>
-                {ownerViolationMessage(v.message)}
+            {stepViolations.map((violation, violationIndex) => (
+              <Text key={`${violation.rule}:${violation.detail}:${violationIndex}`} size='micro'>
+                {ownerViolationMessage(violation.message)}
               </Text>
             ))}
           </div>
@@ -5536,178 +4839,372 @@ function OperationEditor({
         onEdit={onEdit}
       />
 
-      {/* ФОТО УЗЛА С УКАЗАНИЯМИ. Стоит рядом с материалами, а не в аккордеоне отклонений:
-          «что тут делать» — вопрос того же порядка, что «из чего», и прятать ответ за разворот
-          значило бы прятать половину инструкции. */}
-      <OperationMediaStrip
-        name={`operations.${index}.media`}
-        urlById={mediaUrls ?? EMPTY_MEDIA_URLS}
-        frozen={frozen}
-        // ДЕТАЛЬ НА УКАЗАНИИ — тем же пикером и теми же силуэтами, что и состав шага рядом.
-        // Второй способ выбрать деталь на одном экране означал бы, что одна и та же деталь
-        // называется в двух местах по-разному.
-        renderPiecePicker={({ selected, onPick }) => (
-          <PieceAddChip
-            pieces={pieces}
-            selected={selected}
-            onPick={onPick}
-            shapeOf={(k) => pieceShapes?.get(pieceRefKey(k)) ?? null}
+      <div className='mt-3'>
+        <AiTextareaField
+          name={`operations.${index}.note`}
+          label='note'
+          rows={1}
+          autoGrow
+          className='min-h-0'
+          maxLength={1000}
+          enhance='note'
+        />
+      </div>
+
+      <div className='mt-3'>
+        <Accordion
+          open={overridesOpen || hasSetupError}
+          onOpenChange={setOverridesOpen}
+          tone={hasSetupError ? 'error' : 'default'}
+          title={
+            <span className='flex min-w-0 items-baseline gap-2'>
+              <Text size='control' variant='uppercase' tracking='label' component='span'>
+                setup
+              </Text>
+              {setupSummaryText && (
+                <Text size='micro' variant='label' component='span' className='truncate'>
+                  {setupSummaryText}
+                </Text>
+              )}
+            </span>
+          }
+        >
+          <ResidueStrip
+            rows={residueRows}
+            errorRows={residueErrorRows}
+            caption='stored fields'
+            onClear={clearResidueField}
           />
-        )}
-        pieceLabel={(k) => pieces.find((p) => p.lineKey === k)?.name}
-        onEdit={onEdit}
-      />
-
-      <GroupLabel>materials this step consumes</GroupLabel>
-      {linkableBoms.length === 0 ? (
-        <Text size='micro' variant='label'>
-          the BOM has no materials a step could consume — add hardware, thread, fusing, tape, trim
-          or labels on the BOM tab
-        </Text>
-      ) : (
-        <>
-          <ChipRow>
-            {/* These are what IS linked, not a choice inside a set, so they read as plain chips
-                with a remove — an ink fill here would claim a selection state nothing contrasts
-                against. */}
-            {linkedMaterials.map((b) => (
-              <Chip
-                key={b.lineKey}
-                // The kind when the line carries one — «молния» says more than «фурнитура» — and the
-                // section as the fallback for every line not classified yet.
-                title={kindLabel(b.kind) ?? LINKABLE_SECTION_LABEL[b.section ?? ''] ?? undefined}
-                onRemove={() => {
-                  // Снятая руками привязка — ответ человека: подставлять её обратно нельзя, иначе
-                  // чип возвращался бы под курсором.
-                  if (b.lineKey && b.lineKey === applied.thread) dismiss('thread');
-                  toggleBom(b.lineKey ?? '');
-                }}
-                onMouseEnter={() => onActiveBomChange?.(b.lineKey ?? null)}
-                onMouseLeave={() => onActiveBomChange?.(null)}
-              >
-                {b.name?.trim() || 'unnamed'}
-              </Chip>
-            ))}
-            {unlinkedBoms.length > 0 && (
-              <Chip
-                dashed
-                pressed={addingMaterial}
-                onClick={() => setAddingMaterial((v) => !v)}
-                title='link a BOM material — hardware, thread, fusing, tape, trim, label'
-              >
-                {addingMaterial ? '✕ cancel' : '＋ material'}
-              </Chip>
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+            {!showIdentityOperation && (
+              <SelectField
+                name={`operations.${index}.operationType`}
+                label='operation'
+                items={operationTypeOptionsFor(opType)}
+                className={selectNoGrow}
+              />
             )}
-          </ChipRow>
-          {/* НИТКА ПОДСТАВЛЕНА — И СКАЗАНО, ЧТО ЭТО ПОДСТАНОВКА. Чип выше выглядит ровно как
-              привязанный руками, поэтому метка стоит отдельной строкой: без неё «оно само» было бы
-              неотличимо от «я это выбрал», и первая же ошибка вывода списалась бы на человека. */}
-          {applied.thread && (
-            <SuggestedMark
-              field='thread'
-              what={bomLines.find((b) => b.lineKey === applied.thread)?.name?.trim() || 'thread'}
-              why='it is the only thread line in this BOM that fits the step'
-              onDismiss={() => dropSuggested('thread')}
+            {(isMachineStep || machineType !== NONE_MACHINE) && !showIdentityMachine && (
+              <SelectField
+                name={`operations.${index}.machineType`}
+                label='machine'
+                items={machineTypeOptionsFor(machineType)}
+                className={selectNoGrow}
+              />
+            )}
+            {(isPressStep || pressEquipment !== NONE_PRESS_EQUIPMENT) && !showIdentityEquipment && (
+              <div
+                className='space-y-px'
+                onFocusCapture={() => {
+                  pressTouchedRef.current = true;
+                }}
+              >
+                <SelectField
+                  name={`operations.${index}.pressEquipment`}
+                  label='equipment'
+                  items={pressEquipmentOptions}
+                  className={selectNoGrow}
+                />
+              </div>
+            )}
+            {stepDiscriminator && !showIdentityDiscriminator && (
+              <SelectField
+                name={`operations.${index}.${stepDiscriminator.field}`}
+                label={stepDiscriminator.label}
+                items={stepEnumOptions(
+                  stepDiscriminator.labels,
+                  stepDiscriminator.unset,
+                  discriminatorValue,
+                )}
+                className={selectNoGrow}
+              />
+            )}
+            <SelectField
+              name={`operations.${index}.calloutNumber`}
+              label='PIN'
+              items={rowPinOptions}
+              valueAsNumber
+              className={selectNoGrow}
             />
-          )}
-          {/* The article each colourway resolves the slot to. Printed under the chips rather than
-              inside them: the chip is the ROLE (the durable thing the step links), and folding a
-              per-colourway article into it would claim the operation itself is colourway-specific. */}
-          {slotArticles.map((slot, i) => (
-            // Indexed key: toggleBom dedupes, but the save mapper does not, so a persisted duplicate
-            // line key would otherwise collide here.
-            <Text key={`${slot.lineKey}:${i}`} size='micro' variant='label' className='mt-1'>
-              {slot.name} →{' '}
-              {!slot.usedAnywhere
-                ? 'the slot is not used in any colourway recipe'
-                : slot.uniform
-                  ? slot.uniformArticle
-                  : slot.perColorway
-                      .map((c) => `${c.label}: ${colorwayArticleText(c)}`)
-                      .join(' · ')}
-            </Text>
-          ))}
-          {addingMaterial && unlinkedBySection.length > 0 && (
-            <div className='mt-1.5 space-y-1.5'>
-              {unlinkedBySection.map(([section, lines]) => (
-                <div key={section}>
-                  <Text size='micro' variant='label'>
-                    {LINKABLE_SECTION_LABEL[section] ?? section}
-                  </Text>
-                  <ChipRow>
-                    {lines.map((b) => (
-                      <Chip
-                        key={b.lineKey}
-                        onClick={() => {
-                          toggleBom(b.lineKey ?? '');
-                          if (unlinkedBoms.length === 1) setAddingMaterial(false);
-                        }}
-                      >
-                        {b.name?.trim() || 'unnamed'}
-                      </Chip>
-                    ))}
-                  </ChipRow>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-      {bomOutOfRange && (
-        <Text size='micro' variant='error' className='mt-1'>
-          the material was removed or moved — pick it again
-        </Text>
-      )}
-      {/* Advisory, never a form error: a step CAN legitimately be drafted before its material
-          exists in the BOM, and blocking the save would make the check the operator's enemy. */}
-      {expectsMaterial && (
-        <ChipRow className='mt-1'>
-          <Text size='micro' component='span' className='text-warning'>
-            ! usually consumes {expectsMaterial.what}, none linked
-          </Text>
-          {unlinkedBoms.length > 0 && !addingMaterial && (
-            <Chip dashed onClick={() => setAddingMaterial(true)}>
-              ＋ material
-            </Chip>
-          )}
-        </ChipRow>
-      )}
 
-      {/* DIFFERS FROM STANDARD — folded away, and empty on most steps. Everything in here inherits
-          from the card when left blank, and the placeholder states WHAT it would inherit and FROM
-          WHERE. The inherited value is never written into the field: that is the whole difference
-          between «the technologist chose 4 st/cm» and «it defaulted to 4», and the old preset
-          effect destroyed it on every row it touched. */}
-      <Accordion
-        open={overridesOpen || hasFoldedError}
-        onOpenChange={setOverridesOpen}
-        tone={hasFoldedError ? 'error' : 'default'}
-        title={
-          <Text size='control' variant='uppercase' tracking='label' component='span'>
-            differs from standard
-          </Text>
-        }
-        meta={overrideCount > 0 ? <Pill tone='attention'>{overrideCount}</Pill> : undefined}
-      >
-        {/* THE MACHINE'S OWN SETTINGS — every one of them an override of the profile named above.
-            Blank inherits, and the placeholder (or the picker's first option) says what would be
-            inherited and from which profile. Bed and automation are deliberately absent: those are
-            machine IDENTITY, and a step that needs another bed is a step on another machine. */}
-        {isMachineStep && (
-          <>
-            <GroupLabel
-              flush
-              action={
-                <div className='flex flex-wrap items-center justify-end gap-2'>
-                  <Text size='micro' variant='label' component='span'>
-                    {machineProfile
-                      ? `inherits ${machineSource}`
-                      : 'no profile — blanks stay unset'}
-                  </Text>
-                  {/* «These are not this step's exception, they are the card's normal.» The values
-                      MOVE into the park and leave the step blank — the button lives in
-                      equipment-park.tsx because it writes into the array CARD DEFAULTS owns, and a
-                      write that misses that owner's own methods leaves a mounted list stale. */}
+            {howKind !== 'fuse' && <WorkVariantTiles index={index} className='sm:col-span-2' />}
+            {!['join', 'bind', 'hem'].includes(howKind) &&
+              (!['buttonhole', 'button', 'topstitch'].includes(howKind) || !!seamKind) && (
+                <SeamKindTiles
+                  index={index}
+                  family={showStitching || seamKind ? 'stored' : null}
+                  className='sm:col-span-2'
+                />
+              )}
+            {showTopstitch && howKind !== 'topstitch' && (
+              <>
+                <SelectField
+                  name={`operations.${index}.topstitchMode`}
+                  label='topstitch'
+                  items={topstitchModeOptionsFor(topstitchMode)}
+                  className={selectNoGrow}
+                />
+                {showTopstitchWidth && howKind !== 'hem' && (
+                  <DecimalField
+                    name={`operations.${index}.topstitchWidthMm`}
+                    label={topstitchWidthLabel(topstitchMode)}
+                    maxDecimals={1}
+                  />
+                )}
+                <TopstitchRowTiles index={index} className='sm:col-span-2' />
+              </>
+            )}
+
+            {showNeedleFacts && (
+              <>
+                <InheritableNumberField
+                  name={`operations.${index}.needleCount`}
+                  label='needles'
+                  value={needleCount}
+                />
+                {showNeedleGauge && (
+                  <DecimalField
+                    name={`operations.${index}.needleGaugeMm`}
+                    label='needle gauge, mm'
+                    maxDecimals={1}
+                  />
+                )}
+                <SelectField
+                  name={`operations.${index}.seamSecuring`}
+                  label='securing'
+                  items={stepEnumOptions(SEAM_SECURING_LABELS, '— not stated —', seamSecuring)}
+                  className={selectNoGrow}
+                />
+                <DecimalField
+                  name={`operations.${index}.rowSpacingMm`}
+                  label='row spacing, mm'
+                  maxDecimals={1}
+                />
+              </>
+            )}
+            {showStitching && howKind !== 'gather' && (
+              <DecimalField
+                name={`operations.${index}.fullnessRatio`}
+                label='ease'
+                maxDecimals={2}
+              />
+            )}
+            {showStitching && howKind !== 'label' && (
+              <SelectField
+                name={`operations.${index}.labelAttachStitch`}
+                label='label stitched'
+                items={stepEnumOptions(
+                  LABEL_ATTACH_STITCH_LABELS,
+                  '— not stated —',
+                  labelAttachStitch,
+                )}
+                className={selectNoGrow}
+              />
+            )}
+
+            {showButtonhole && howKind !== 'buttonhole' && (
+              <>
+                <SelectField
+                  name={`operations.${index}.buttonholeStyle`}
+                  label='buttonhole shape'
+                  items={stepEnumOptions(BUTTONHOLE_STYLE_ITEMS, '— not stated —', buttonholeStyle)}
+                  className={selectNoGrow}
+                />
+                <SelectField
+                  name={`operations.${index}.buttonholeOrientation`}
+                  label='direction'
+                  items={stepEnumOptions(
+                    BUTTONHOLE_ORIENTATION_ITEMS,
+                    '— not stated —',
+                    buttonholeOrientation,
+                  )}
+                  className={selectNoGrow}
+                />
+              </>
+            )}
+            {showCutLength && howKind !== 'buttonhole' && (
+              <DecimalField
+                name={`operations.${index}.cutLengthMm`}
+                label={cutLengthLabel}
+                maxDecimals={1}
+              />
+            )}
+            {showBartack && howKind !== 'bartack' && (
+              <DecimalField
+                name={`operations.${index}.bartackLengthMm`}
+                label='bartack, mm'
+                maxDecimals={1}
+              />
+            )}
+            {showZipper && howKind !== 'zip' && (
+              <SelectField
+                name={`operations.${index}.zipperApplication`}
+                label='zip application'
+                items={stepEnumOptions(
+                  ZIPPER_APPLICATION_LABELS,
+                  '— not stated —',
+                  zipperApplication,
+                )}
+                className={selectNoGrow}
+              />
+            )}
+            {howKind !== 'button' && (
+              <ButtonAttachTiles
+                index={index}
+                show={showAttachPattern}
+                bomLines={bomLines}
+                frozen={frozen}
+                className='sm:col-span-2'
+              />
+            )}
+
+            {showWeld && (
+              <>
+                {showAirTemperature && (
+                  <InheritableNumberField
+                    name={`operations.${index}.airTemperatureC`}
+                    label='hot air, °C'
+                    value={airTemperatureC}
+                  />
+                )}
+                <DecimalField
+                  name={`operations.${index}.feedSpeedMMin`}
+                  label='feed, m/min'
+                  maxDecimals={1}
+                />
+              </>
+            )}
+            {showPlacement && !['button', 'buttonhole'].includes(howKind) && (
+              <InheritableNumberField
+                name={`operations.${index}.placementCount`}
+                label='repeats'
+                value={placementCount}
+              />
+            )}
+            {showPitch && howKind !== 'button' && (
+              <DecimalField
+                name={`operations.${index}.pitchMm`}
+                label='pitch, mm'
+                maxDecimals={1}
+              />
+            )}
+            {showHardware && (
+              <>
+                <SelectField
+                  name={`operations.${index}.holePrep`}
+                  label='hole prep'
+                  items={stepEnumOptions(HOLE_PREP_LABELS, '— not stated —', holePrep)}
+                  className={selectNoGrow}
+                />
+                <SelectField
+                  name={`operations.${index}.reinforcement`}
+                  label='reinforcement'
+                  items={stepEnumOptions(REINFORCEMENT_LABELS, '— not stated —', reinforcement)}
+                  className={selectNoGrow}
+                />
+                <InheritableNumberField
+                  name={`operations.${index}.cycleStitchCount`}
+                  label='cycle stitches'
+                  value={cycleStitchCount}
+                />
+                {showFoldback && (
+                  <DecimalField
+                    name={`operations.${index}.foldbackMm`}
+                    label='foldback, mm'
+                    maxDecimals={1}
+                  />
+                )}
+              </>
+            )}
+            {showPrint && (
+              <>
+                <SelectField
+                  name={`operations.${index}.peelMode`}
+                  label='peel'
+                  items={stepEnumOptions(PEEL_MODE_LABELS, '— not stated —', peelMode)}
+                  className={selectNoGrow}
+                />
+                <InheritableNumberField
+                  name={`operations.${index}.secondPressSec`}
+                  label='second press, sec'
+                  value={secondPressSec}
+                />
+              </>
+            )}
+            {showTrim && (
+              <DecimalField
+                name={`operations.${index}.residualAllowanceMm`}
+                label='allowance left, mm'
+                maxDecimals={1}
+              />
+            )}
+            {showThreadTrim && (
+              <DecimalField
+                name={`operations.${index}.residualTailMaxMm`}
+                label='longest tail, mm'
+                maxDecimals={1}
+              />
+            )}
+            {showPressAction && howKind !== 'press-action' && !showIdentityPressAction && (
+              <SelectField
+                name={`operations.${index}.pressAction`}
+                label='press action'
+                items={stepEnumOptions(PRESS_ACTION_LABELS, '— not stated —', pressAction)}
+                className={selectNoGrow}
+              />
+            )}
+            {isMachineStep && (
+              <>
+                <EncodedSelectField<string>
+                  name={`operations.${index}.machineProfileKey`}
+                  label='machine profile'
+                  items={machineProfileOptions}
+                  encode={(value) => (value?.trim() ? value : PROFILE_INHERIT)}
+                  decode={(option) => (option === PROFILE_INHERIT ? '' : option)}
+                  className={selectNoGrow}
+                />
+                <InheritableNumberField
+                  name={`operations.${index}.threadCount`}
+                  label='threads'
+                  value={threadCount}
+                  placeholder={inherited.threadCount}
+                />
+                <SelectField
+                  name={`operations.${index}.needleType`}
+                  label='needle point'
+                  items={withInheritLabel(needleTypeOptions, NONE_NEEDLE, inherited.needleType)}
+                  className={selectNoGrow}
+                />
+                <InheritableNumberField
+                  name={`operations.${index}.needleSizeNm`}
+                  label='needle size, Nm'
+                  value={needleSizeNm}
+                  placeholder={inherited.needleSizeNm}
+                />
+                <SelectField
+                  name={`operations.${index}.threadTension`}
+                  label='thread tension'
+                  items={withInheritLabel(
+                    threadTensionOptions,
+                    NONE_TENSION,
+                    inherited.threadTension,
+                  )}
+                  className={selectNoGrow}
+                />
+                {(threadTension !== NONE_TENSION || threadTensionNote.trim() !== '') && (
+                  <InputField
+                    name={`operations.${index}.threadTensionNote`}
+                    label='tension note'
+                    maxLength={64}
+                  />
+                )}
+                <DecimalField
+                  name={`operations.${index}.stitchWidthMm`}
+                  label='stitch width, mm'
+                  maxDecimals={1}
+                  placeholder={inherited.stitchWidthMm}
+                />
+                <div className='self-end'>
                   <AdoptMachineIntoProfile
                     index={index}
                     step={{
@@ -5725,104 +5222,67 @@ function OperationEditor({
                     }}
                   />
                 </div>
-              }
-            >
-              machine settings
-            </GroupLabel>
-            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-              <EncodedSelectField<string>
-                name={`operations.${index}.machineProfileKey`}
-                label='machine profile'
-                items={machineProfileOptions}
-                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
-                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
-                className={selectNoGrow}
-              />
-              <InheritableNumberField
-                name={`operations.${index}.threadCount`}
-                label='threads'
-                value={threadCount}
-                placeholder={inherited.threadCount}
-              />
-              <SelectField
-                name={`operations.${index}.needleType`}
-                label='needle point'
-                items={withInheritLabel(needleTypeOptions, NONE_NEEDLE, inherited.needleType)}
-                className={selectNoGrow}
-              />
-              <InheritableNumberField
-                name={`operations.${index}.needleSizeNm`}
-                label='needle size, Nm'
-                value={needleSizeNm}
-                placeholder={inherited.needleSizeNm}
-              />
-              <SelectField
-                name={`operations.${index}.threadTension`}
-                label='thread tension'
-                items={withInheritLabel(
-                  threadTensionOptions,
-                  NONE_TENSION,
-                  inherited.threadTension,
-                )}
-                className={selectNoGrow}
-              />
-              {/* The note QUALIFIES the scale («на 0.5 туже») — on its own it describes no setting
-                  the next machine can be set to, which is why the server refuses the pair and why
-                  the box only appears once the scale is answered.
-                  ...UNLESS A NOTE IS ALREADY THERE. Hiding it the moment the tension goes back to
-                  «inherit» would strand the text behind its own validation error: the schema refuses
-                  the pair, the message lands on a control that is no longer rendered, and the save
-                  stops working with nothing on screen to fix. Same rule as the sewing block below —
-                  a value that EXISTS is shown wherever it is, and the operator clears it. */}
-              {(threadTension !== NONE_TENSION || threadTensionNote.trim() !== '') && (
-                <InputField
-                  name={`operations.${index}.threadTensionNote`}
-                  label='tension note'
-                  maxLength={64}
-                  placeholder='0.5 tighter, dial 4'
+              </>
+            )}
+
+            {ownsPressSettings && (
+              <>
+                <EncodedSelectField<string>
+                  name={`operations.${index}.pressProfileKey`}
+                  label='press profile'
+                  items={pressProfileOptions}
+                  encode={(value) => (value?.trim() ? value : PROFILE_INHERIT)}
+                  decode={(option) => (option === PROFILE_INHERIT ? '' : option)}
+                  className={selectNoGrow}
                 />
-              )}
-              {/* «stitch width» is the zigzag amplitude / the overlock bite — the width of the
-                  STITCH ITSELF, which is what the dial on the machine is called, so the caption
-                  keeps that name. NOT the topstitch distance, which is a gap between the stitch
-                  line and the edge (or the seam line) and lives in the topstitch block above; that
-                  one no longer says «width» at all, precisely so these two cannot read as one
-                  setting where they print side by side on the tech pack. */}
-              <DecimalField
-                name={`operations.${index}.stitchWidthMm`}
-                label='stitch width, mm'
-                maxDecimals={1}
-                placeholder={inherited.stitchWidthMm}
-              />
-            </div>
-          </>
-        )}
-
-        {/* THE ВТО MODE — the press twin of the block above. Same rule throughout: blank inherits
-            the profile, and the three-valued steam control keeps «not stated» apart from «press it
-            dry», which is an instruction somebody gave.
-
-            `ownsPressSettings`, А НЕ `isPressStep`: печать берёт термопресс взаймы, и температура,
-            выдержка, давление, пар и силиконовая бумага — её законные факты, хотя ВТО и не является
-            тем, ЧТО шаг делает. Обязательности пикера оборудования это не расширяет: она живёт на
-            трёх ВТО-глаголах, пикер стоит выше, в ядре, и печати не показывается — `press_equipment`
-            у неё опционален и попадает на шаг только вместе с переключённым глаголом. */}
-        {ownsPressSettings && (
-          <>
-            <GroupLabel
-              flush
-              action={
-                <div className='flex flex-wrap items-center justify-end gap-2'>
-                  <Text size='micro' variant='label' component='span'>
-                    {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
-                  </Text>
-                  {/* ПРОДВИЖЕНИЕ В КАРТОЧНЫЙ ПРОФИЛЬ — только у ВТО-глаголов, и это не половинчатость.
-                      Новый профиль штампуется процессом ШАГА (`operationType: step.operationType`),
-                      а пикер процесса в парке знает ровно «any» и три ВТО-глагола: продвинутый с
-                      печати режим стал бы профилем «для печати», который парк не может ни показать,
-                      ни отредактировать. Печатному шагу остаётся выбрать готовый режим — что и есть
-                      «взять пресс взаймы». */}
-                  {isPressStep && (
+                <InheritableNumberField
+                  name={`operations.${index}.pressTemperatureC`}
+                  label='temperature, °C'
+                  value={pressTemperatureC}
+                  placeholder={inherited.pressTemperatureC}
+                />
+                <InheritableNumberField
+                  name={`operations.${index}.pressDwellSec`}
+                  label='dwell, sec'
+                  value={pressDwellSec}
+                  placeholder={inherited.pressDwellSec}
+                />
+                <DecimalField
+                  name={`operations.${index}.pressPressureNCm2`}
+                  label='pressure, N/cm²'
+                  maxDecimals={1}
+                  placeholder={inherited.pressPressureNCm2}
+                />
+                <EncodedSelectField<boolean | undefined>
+                  name={`operations.${index}.pressSteam`}
+                  label='steam'
+                  items={[
+                    {
+                      value: 'inherit',
+                      label:
+                        inherited.pressSteam === NOT_SET
+                          ? '— inherit —'
+                          : `inherit: ${inherited.pressSteam}`,
+                    },
+                    { value: 'yes', label: 'with steam' },
+                    { value: 'no', label: 'press dry' },
+                  ]}
+                  encode={(value) => (value === undefined ? 'inherit' : value ? 'yes' : 'no')}
+                  decode={(option) => (option === 'inherit' ? undefined : option === 'yes')}
+                  className={selectNoGrow}
+                />
+                <SelectField
+                  name={`operations.${index}.pressCloth`}
+                  label='press cloth'
+                  items={withInheritLabel(
+                    pressClothOptions,
+                    NONE_PRESS_CLOTH,
+                    inherited.pressCloth,
+                  )}
+                  className={selectNoGrow}
+                />
+                {isPressStep && (
+                  <div className='self-end'>
                     <AdoptPressIntoProfile
                       index={index}
                       step={{
@@ -5836,151 +5296,124 @@ function OperationEditor({
                         pressCloth,
                       }}
                     />
-                  )}
-                </div>
-              }
-            >
-              pressing mode
-            </GroupLabel>
-            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-              <EncodedSelectField<string>
-                name={`operations.${index}.pressProfileKey`}
-                label='press profile'
-                items={pressProfileOptions}
-                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
-                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
-                className={selectNoGrow}
-              />
-              <InheritableNumberField
-                name={`operations.${index}.pressTemperatureC`}
-                label='temperature, °C'
-                value={pressTemperatureC}
-                placeholder={inherited.pressTemperatureC}
-              />
-              <InheritableNumberField
-                name={`operations.${index}.pressDwellSec`}
-                label='dwell, sec'
-                value={pressDwellSec}
-                placeholder={inherited.pressDwellSec}
-              />
-              {/* The unit is IN THE NAME on both sides of the wire: pressure on a press is quoted in
-                  bar, in kg and in N/cm² depending on who is talking, and a bare «pressure» field
-                  would be filled in three different units by three people. */}
-              <DecimalField
-                name={`operations.${index}.pressPressureNCm2`}
-                label='pressure, N/cm²'
-                maxDecimals={1}
-                placeholder={inherited.pressPressureNCm2}
-              />
-              <EncodedSelectField<boolean | undefined>
-                name={`operations.${index}.pressSteam`}
-                label='steam'
-                items={[
-                  {
-                    value: 'inherit',
-                    label:
-                      inherited.pressSteam === NOT_SET
-                        ? '— inherit —'
-                        : `inherit: ${inherited.pressSteam}`,
-                  },
-                  { value: 'yes', label: 'with steam' },
-                  { value: 'no', label: 'no steam — press dry' },
-                ]}
-                encode={(v) => (v === undefined ? 'inherit' : v ? 'yes' : 'no')}
-                decode={(o) => (o === 'inherit' ? undefined : o === 'yes')}
-                className={selectNoGrow}
-              />
-              <SelectField
-                name={`operations.${index}.pressCloth`}
-                label='press cloth'
-                items={withInheritLabel(pressClothOptions, NONE_PRESS_CLOTH, inherited.pressCloth)}
-                className={selectNoGrow}
-              />
-            </div>
-          </>
-        )}
-
-        {/* THE SEAM AND THE STITCH. Hidden on a ВТО step — there is no seam class to press and no
-            density to iron — but only while the step actually holds none of them: a value that
-            EXISTS is shown wherever it is, because a hidden number still prints on the tech pack
-            and still moves the section digest, and clearing somebody's input on a type switch is
-            not this form's decision to make. */}
-        {showSewingOverrides && (
-          <>
-            {/* Not `flush`: this label follows a block, it does not open one. */}
-            {(isMachineStep || isPressStep) && (
-              <GroupLabel
-                action={
-                  isPressStep ? (
-                    <Text size='micro' variant='label' component='span'>
-                      set while this was a sewing step — clear what no longer applies
-                    </Text>
-                  ) : undefined
-                }
-              >
-                seam &amp; stitch
-              </GroupLabel>
+                  </div>
+                )}
+              </>
             )}
-            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-              <SelectField
-                name={`operations.${index}.seamClass`}
-                label='seam class'
-                items={seamClassOptions}
-                className={selectNoGrow}
-              />
-              <DecimalField
-                name={`operations.${index}.seamAllowanceMm`}
-                label='seam allowance, mm'
-                maxDecimals={1}
-                placeholder={inherited.seamAllowance}
-              />
-              <DecimalField
-                name={`operations.${index}.stitchesPerCm`}
-                label='stitches / cm'
-                // Hundredths — the column's scale. The mirror below already rounds to two when it
-                // converts a length back into a density.
-                maxDecimals={2}
-                placeholder={inherited.stitchDensity}
-              />
-              {/* The same setting in the other unit — see StitchLengthMirror. It is placed after the
-                  density, not instead of it, because the density is what is stored and what the
-                  card's own default is expressed in. */}
-              <StitchLengthMirror
-                index={index}
-                density={stitchesPerCm}
-                placeholder={inherited.stitchLength}
-              />
-              <SelectField
-                name={`operations.${index}.attachmentKind`}
-                label='attachment'
-                items={withInheritLabel(attachmentOptions, NONE_ATTACHMENT, inherited.attachment)}
-                className={selectNoGrow}
-              />
-              {showAttachmentSize && (
-                <DecimalField
-                  name={`operations.${index}.attachmentSizeMm`}
-                  label='attachment size, mm'
-                  maxDecimals={1}
-                  placeholder='8'
-                />
-              )}
-            </div>
-          </>
-        )}
-      </Accordion>
 
-      {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
-          saying which was which, so two cards filled them the opposite way round. */}
-      <div className='mt-2'>
-        <AiTextareaField
-          name={`operations.${index}.note`}
-          label='note'
-          rows={2}
-          maxLength={1000}
-          enhance='note'
-        />
+            {showSewingOverrides && (
+              <>
+                <SelectField
+                  name={`operations.${index}.seamClass`}
+                  label='seam class'
+                  items={seamClassOptions}
+                  className={selectNoGrow}
+                />
+                <DecimalField
+                  name={`operations.${index}.seamAllowanceMm`}
+                  label='allowance, mm'
+                  maxDecimals={1}
+                  placeholder={inherited.seamAllowance}
+                />
+                <DecimalField
+                  name={`operations.${index}.stitchesPerCm`}
+                  label='stitches / cm'
+                  maxDecimals={2}
+                  placeholder={inherited.stitchDensity}
+                />
+                <StitchLengthMirror
+                  index={index}
+                  density={stitchesPerCm}
+                  placeholder={inherited.stitchLength}
+                />
+                <SelectField
+                  name={`operations.${index}.attachmentKind`}
+                  label='attachment'
+                  items={withInheritLabel(attachmentOptions, NONE_ATTACHMENT, inherited.attachment)}
+                  className={selectNoGrow}
+                />
+                {showAttachmentSize && (
+                  <DecimalField
+                    name={`operations.${index}.attachmentSizeMm`}
+                    label='attachment, mm'
+                    maxDecimals={1}
+                  />
+                )}
+              </>
+            )}
+
+            {activeWork && rememberableDefaults.length > 0 && (
+              <div
+                className='flex flex-col gap-1 sm:col-span-2'
+                data-work-defaults={activeWork.token}
+              >
+                <Text size='micro' variant='label' component='span'>
+                  remember for
+                </Text>
+                <ChipRow>
+                  {rememberableDefaults.map((item) => (
+                    <Chip
+                      key={item.column}
+                      data-remember-field={item.column}
+                      selected={item.already}
+                      disabled={item.already || rememberDefault.isPending || frozen}
+                      onClick={() =>
+                        rememberDefault.mutate({
+                          workToken: activeWork.token,
+                          field: item.column,
+                          value: item.value,
+                        })
+                      }
+                    >
+                      {item.label} = {item.text}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              </div>
+            )}
+            <div className='sm:col-span-2'>
+              <StepSeamsRow index={index} />
+            </div>
+          </div>
+        </Accordion>
       </div>
-      <StepSeamsRow index={index} />
+
+      <div className='mt-3 flex items-center justify-end gap-3 border-t border-hairline pt-2 sm:hidden'>
+        <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
+          + below
+        </Button>
+        <Button type='button' variant='underline' size='xs' onClick={onRemove}>
+          remove
+        </Button>
+      </div>
+    </>
+  );
+
+  return (
+    <div
+      onDragEnter={(e: ReactDragEvent) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragOver={(e: ReactDragEvent) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={(e: ReactDragEvent) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(e: ReactDragEvent) => {
+        e.preventDefault();
+        setOver(false);
+        const key = readPieceDrag(e.dataTransfer);
+        if (key) onDropPiece(index, key);
+      }}
+      className={cn(
+        'min-w-0 flex-1 border bg-bgColor p-3 transition-colors',
+        over ? 'border-textColor' : 'border-borderColor',
+      )}
+    >
+      {variantOneEditor}
     </div>
   );
 }
@@ -5996,7 +5429,6 @@ export function OperationsField({
   onActivePinChange,
   activeBom = null,
   onActiveBomChange,
-  colorwayArticles,
   pieceClothByColorway,
   pieceShapes = null,
   orphanBlocks = [],
@@ -6115,11 +5547,6 @@ export function OperationsField({
   // подписка на строку рельса означала бы сто двадцать шесть подписок на карточке свалки, и
   // каталог обязан приехать сюда, а не в каждую строку.
   const { catalog: workCatalog } = useOperationWorkCatalog();
-  const cardSeamClass = (useWatch({
-    control,
-    name: 'construction.defaultSeamClass',
-  }) ?? NONE_SEAM_CLASS) as string;
-
   // ПАНЕЛЬ РАТИФИКАЦИИ — ОДНО СОСТОЯНИЕ ОТКРЫТОСТИ И НИ ОДНОГО СВОЕГО МУТАТОРА (то же правило, что
   // у фулскрина сборки, R3): `useFieldArray` по операциям существует в единственном экземпляре —
   // здесь, наверху, — а панель пишет в ту же форму существующим писателем.
@@ -6192,49 +5619,6 @@ export function OperationsField({
   // первым же ⌘Z. Флаг поднят ровно на синхронное время применения записи.
   const applying = useRef(false);
 
-  /**
-   * ФОКУС, ПОДТВЕРДИВШИЙ ЖЕСТ, НЕ ИМЕЕТ ПРАВА ЕГО ЖЕ И ЗАБЫТЬ.
-   *
-   * Переименование узла подтверждается уходом фокуса — и ровно этот уход дёргает седьмую точку
-   * сброса (`focusin` на fieldset редактора), потому что фокус приземляется в соседнее поле того же
-   * редактора. Порядок событий тут неумолим: `focusout` (жест состоялся, запись легла) → `focusin`
-   * (запись умерла). Без этого щита подтверждение уходом фокуса рождало бы запись мёртвой, то есть
-   * один из двух объявленных способов подтвердить жест был бы способом сделать его неотменяемым.
-   *
-   * ЩИТ ЖИВЁТ ДО БЛИЖАЙШЕГО ПЕРЕХОДА ФОКУСА, А НЕ ОДИН ТАКТ. Такта хватало ровно одному из двух
-   * объявленных способов подтвердить жест. У подтверждения УХОДОМ ФОКУСА `focusout` и `focusin`
-   * приходят синхронно, в одной задаче, и таймер на ноль их накрывал. У подтверждения ENTER'ОМ
-   * фокус остаётся в поле: таймер снимал щит немедленно, а седьмая точка сброса приходила позже —
-   * первым же переходом в СОСЕДНЕЕ ПОЛЕ того же редактора, то есть на самом естественном
-   * продолжении жеста («переименовал код — дописываю имя»). Запись умирала молча, и ⌘Z не
-   * возвращал ничего (замерено стендом `rev7.mjs`, сценарий A).
-   *
-   * Больше одного перехода щит не держит, и стоять ему не на чем: в поле кода фокус приходит
-   * ИЗВНЕ, а этот приход сам дёргает седьмую точку — вся формовая история умирает ДО набора.
-   * Пережить щит может только запись, легшая пока фокус был в поле, то есть само переименование.
-   *
-   * СЛУШАТЕЛЬ ПУЗЫРЬКОВЫЙ, А НЕ КАПЧУРНЫЙ: React вешает свои `onFocus` на корень приложения, то
-   * есть ВНУТРИ документа, и капчурный слушатель окна снял бы щит РАНЬШЕ седьмой точки сброса —
-   * то есть не сделал бы ничего. Всплытие доходит до window последним.
-   *
-   * Родня ему `applying`: инверсия тоже ходит через мутаторы, а те сами точки сброса.
-   */
-  const settling = useRef(false);
-  const releaseSettle = useRef<(() => void) | null>(null);
-  const settleGesture = () => {
-    if (settling.current) return; // щит уже поднят: второй слушатель снял бы его первым переходом
-    settling.current = true;
-    const release = () => {
-      settling.current = false;
-      releaseSettle.current = null;
-      window.removeEventListener('focusin', release);
-    };
-    releaseSettle.current = release;
-    window.addEventListener('focusin', release);
-  };
-  // Экран закрыли посреди поднятого щита — слушатель обязан уйти вместе с ним.
-  useEffect(() => () => releaseSettle.current?.(), []);
-
   const setHistory = useCallback((next: Hist) => {
     // Чистые функции отдают ТОТ ЖЕ объект, когда менять нечего, — и ре-рендера тогда не будет.
     if (next === history.current) return;
@@ -6248,7 +5632,7 @@ export function OperationsField({
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
   const clearFormHistory = useCallback(() => {
-    if (applying.current || settling.current) return;
+    if (applying.current) return;
     pendingAppend.current = null;
     setHistory(dropForm(history.current));
   }, [setHistory]);
@@ -8492,15 +7876,10 @@ export function OperationsField({
                   previousPieceShapes={previousPieceShapes}
                   ghostKeys={ghostKeys}
                   cloth={inlineCloth?.map ?? null}
-                  tiled={tiled}
                   pinOptions={pinOptions}
-                  colorwayArticles={colorwayArticles}
                   onInsertAfter={() => insertAfter(selectedIndex)}
                   onRemove={() => removeOperation(selectedIndex)}
                   onFlashPieces={flashPieces}
-                  // Слова про источник деталей — ИНЛАЙНОВЫЕ: лоток стоит прямо над списком, и
-                  // «click a piece in the tray» здесь правда.
-                  pieceSource={TRAY_PIECE_SOURCE}
                   onActiveBomChange={onActiveBomChange}
                   onEdit={clearFormHistory}
                   onDropPiece={addInputToOperation}
@@ -8601,15 +7980,10 @@ export function OperationsField({
                 previousPieceShapes={previousPieceShapes}
                 ghostKeys={ghostKeys}
                 cloth={inlineCloth?.map ?? null}
-                tiled={tiled}
                 pinOptions={pinOptions}
-                colorwayArticles={colorwayArticles}
                 onInsertAfter={() => insertAfter(selectedIndex)}
                 onRemove={() => removeOperation(selectedIndex)}
                 onFlashPieces={addPiece.onArm}
-                // Слова — ОТТУДА ЖЕ, ОТКУДА ОБРАБОТЧИК. Иначе редактор фулскрина продолжал бы
-                // звать к лотку, а вооружал бы полку.
-                pieceSource={addPiece}
                 onActiveBomChange={onActiveBomChange}
                 onEdit={clearFormHistory}
                 onDropPiece={addInputToOperation}

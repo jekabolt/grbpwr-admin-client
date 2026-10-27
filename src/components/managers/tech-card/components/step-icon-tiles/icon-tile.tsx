@@ -74,7 +74,7 @@ export function TileRow({
   field: string;
   /** A second path this row edits (and shows the errors of), so a refusal on it finds the row. */
   alsoField?: string;
-  label: string;
+  label?: string;
   lead?: ReactNode;
   errors?: readonly string[];
   className?: string;
@@ -82,18 +82,22 @@ export function TileRow({
 }) {
   const row = (
     <FormItem className={cn('flex flex-col gap-1', !alsoField && className)} data-field={field}>
-      <div className='flex items-center gap-2'>
-        <Text
-          size='micro'
-          variant='label'
-          tracking='label'
-          component='span'
-          className='leading-none uppercase'
-        >
-          {label}
-        </Text>
-        {lead}
-      </div>
+      {(label || lead) && (
+        <div className='flex items-center gap-2'>
+          {label && (
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='leading-none uppercase'
+            >
+              {label}
+            </Text>
+          )}
+          {lead}
+        </div>
+      )}
       {children}
       {errors?.map((message) => (
         <Text key={message} size='micro' variant='errorLabel'>

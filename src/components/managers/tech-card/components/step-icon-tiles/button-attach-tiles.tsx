@@ -32,6 +32,7 @@ export function ButtonAttachTiles({
   bomLines,
   frozen = false,
   className,
+  label = 'button pattern',
 }: {
   index: number;
   /** The step is a button-attach step (the old «button pattern» gate). */
@@ -39,6 +40,7 @@ export function ButtonAttachTiles({
   bomLines: readonly { lineKey?: string; materialId?: number }[];
   frozen?: boolean;
   className?: string;
+  label?: string;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const write = useStepWrite(index);
@@ -129,7 +131,7 @@ export function ButtonAttachTiles({
     return (
       <TileRow
         field={`operations.${index}.buttonHoles`}
-        label='holes'
+        label={label || 'holes'}
         errors={errors}
         className={className}
       >
@@ -145,7 +147,7 @@ export function ButtonAttachTiles({
     <TileRow
       field={`operations.${index}.attachPattern`}
       alsoField={`operations.${index}.buttonHoles`}
-      label='button pattern'
+      label={label}
       lead={
         <>
           <Text
