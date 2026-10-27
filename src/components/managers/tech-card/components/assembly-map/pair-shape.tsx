@@ -18,17 +18,13 @@ const LABEL_MAX_CHARS = 16;
 
 /**
  * An input's name fitted to the width of its own group and to LABEL_MAX_CHARS: cut with «…» like
- * a piece tile's caption, the count kept, the full name in the <title>. A long name used to run
+ * a piece tile's caption, with the full name in the <title>. A long name used to run
  * across the next input's shapes and over its name.
  */
-export function fitLabel(name: string, count: string, groupPx: number): string {
-  const fits = Math.min(
-    LABEL_MAX_CHARS + count.length,
-    Math.max(6, Math.floor(Math.max(groupPx, 48) / CHAR_PX)),
-  );
-  if ((name + count).length <= fits) return name + count;
-  const room = Math.max(3, fits - count.length - 1);
-  return `${name.slice(0, room).trimEnd()}…${count}`;
+export function fitLabel(name: string, groupPx: number): string {
+  const fits = Math.min(LABEL_MAX_CHARS, Math.max(6, Math.floor(Math.max(groupPx, 48) / CHAR_PX)));
+  if (name.length <= fits) return name;
+  return `${name.slice(0, Math.max(3, fits - 1)).trimEnd()}…`;
 }
 
 /**
@@ -143,8 +139,7 @@ export const PairShape = memo(function PairShape({
       {(() => {
         const texts = picture.labels.map((l) => {
           const full = names[l.input] ?? '';
-          const count = l.pieces > 1 ? ` · ${l.pieces}` : '';
-          return { full: full + count, text: fitLabel(full, count, l.w / u) };
+          return { full, text: fitLabel(full, l.w / u) };
         });
         const at = placeLabels(
           picture.labels.map((l, i) => ({ at: l.at, chars: texts[i].text.length })),

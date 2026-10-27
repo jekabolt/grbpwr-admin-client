@@ -1,7 +1,13 @@
 // ДАННЫЕ КАРТЫ — шаги карточки из формы + граф швов провайдера пиктограмм → `readMap` (lib). Свой
 // лист со своей подпиской, как эскиз: вкладка `operations` не смотрит, чтобы набор в редакторе шага
 // не перерисовывал всю колонку операций.
-import { readMap, type MapRead, type MapStep } from 'lib/assembly-skeleton/map';
+import {
+  pieceFamilies,
+  readMap,
+  type MapRead,
+  type MapStep,
+  type PieceFamily,
+} from 'lib/assembly-skeleton/map';
 import { readablePieceName } from 'lib/assembly-skeleton/names';
 import type { SeamGraph } from 'lib/assembly-skeleton/types';
 import { unitDisplayName } from 'lib/assembly-unit-name';
@@ -19,9 +25,12 @@ export const MACHINE = 'TECH_CARD_OPERATION_TYPE_MACHINE';
 export type MapModel = {
   read: MapRead | null;
   ops: FormOp[];
+  families: PieceFamily[];
+  pieces: Array<{ key: string; name: string }>;
   pieceName: (key: string) => string;
   unitName: (key: string) => string;
   isUnit: (key: string) => boolean;
+  unsewnPieceCount: number;
   /** Первый машинный шаг — карта показывает его, пока ничего не выбрано (D2). */
   firstMachine: number | null;
   defaultSeamClass?: string;
@@ -66,6 +75,19 @@ export function useMapModel(): MapModel {
     () => new Map(pieces.map((p) => [(p.lineKey ?? '').trim(), readablePieceName(p.name ?? '')])),
     [pieces],
   );
+  const families = useMemo(() => (read ? pieceFamilies(read) : []), [read]);
+  const shownPieceNames = useMemo(() => {
+    const names = new Map(pieceNames);
+    for (const family of families) {
+      const name = [readablePieceName(family.name), family.tag].filter(Boolean).join(' ');
+      for (const key of family.members) names.set(key, name);
+    }
+    return names;
+  }, [families, pieceNames]);
+  const mappedPieces = useMemo(
+    () => new Set(families.flatMap((family) => family.members)),
+    [families],
+  );
   const unitNames = useMemo(() => {
     const m = new Map<string, string>();
     for (const o of ops) {
@@ -99,9 +121,22 @@ export function useMapModel(): MapModel {
     read,
     sewnOf,
     ops,
-    pieceName: (k) => pieceNames.get(k) || read?.geoms.get(k)?.name || k,
+    families,
+    pieces: pieces
+      .map((piece) => {
+        const key = (piece.lineKey ?? '').trim();
+        return { key, name: pieceNames.get(key) || key };
+      })
+      .filter((piece) => piece.key),
+    pieceName: (k) => shownPieceNames.get(k) || read?.geoms.get(k)?.name || k,
     unitName: (k) => unitNames.get(k) ?? unitDisplayName({ key: k }),
     isUnit: (k) => unitNames.has(k),
+    unsewnPieceCount:
+      families.filter((family) => family.picture.edges.length === 0).length +
+      pieces.filter((piece) => {
+        const key = (piece.lineKey ?? '').trim();
+        return key && !mappedPieces.has(key);
+      }).length,
     firstMachine,
     defaultSeamClass: construction?.defaultSeamClass,
   };

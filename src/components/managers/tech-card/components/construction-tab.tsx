@@ -6,17 +6,15 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Canvas,
   Pin,
-  Chip,
-  ChipRow,
   Section,
   HeaderWarnings,
   HeaderNote,
   Stat,
   StatGrid,
   Text,
+  ViewSwitch,
 } from 'ui';
 import { parseDecimalNumber } from 'utils/decimal';
-import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionAudit } from './construction-audit';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
@@ -36,7 +34,6 @@ import { StepSeamsProvider } from './step-seams/step-seams-context';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { gapSubjects } from '../techpack/gap-findings';
 import { usePdfGaps } from '../techpack/use-pdf-gaps';
-import { useSeamReview } from './assembly-seams/use-seam-decisions';
 import { CalloutsPanel, PanelCollapseDoor, useCalloutsPanel } from './design/callouts-panel';
 import { ASSEMBLY_MAP_PREFS_KEY } from './design/use-callouts-prefs';
 
@@ -140,39 +137,50 @@ type FormCallout = {
   posY?: string;
 };
 
+type SketchView = { mediaId: number; kind?: string };
+type ConstructionSketchData = { views: SketchView[]; callouts: FormCallout[] };
+
+function useConstructionSketchData(
+  mediaById: Map<number, common_MediaFull>,
+): ConstructionSketchData {
+  const { control } = useFormContext<TechCardFormData>();
+  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as SketchView[];
+  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
+  const views = useMemo(() => {
+    const pinned = new Set(
+      callouts
+        .filter((callout) => {
+          const x = parseFloat(callout.posX ?? '');
+          const y = parseFloat(callout.posY ?? '');
+          return callout.mediaId && Number.isFinite(x) && Number.isFinite(y);
+        })
+        .map((callout) => callout.mediaId!),
+    );
+    return media.filter((item) => {
+      if (!CONSTRUCTION_VIEW_KINDS.has(item.kind ?? '') || !pinned.has(item.mediaId)) return false;
+      const full = mediaById.get(item.mediaId);
+      return !!(full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl);
+    });
+  }, [callouts, media, mediaById]);
+  return { views, callouts };
+}
+
 // Read-only sketch with numbered pins, shown beside the operations list so the assembly
 // map and the steps live on one screen. Pins are positioned against the IMAGE's own box, not a
 // fixed-aspect frame: callout posX/posY are fractions of the image, so letterboxing would slide
 // every pin off the detail it names.
 function ConstructionSketch({
   mediaById,
+  data,
   activePin,
   onActivePinChange,
 }: {
   mediaById: Map<number, common_MediaFull>;
+  data: ConstructionSketchData;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
 }) {
-  const { control } = useFormContext<TechCardFormData>();
-  // Which pins an operation actually claims — computed here, for the same reason the summary
-  // watches its own array: this subscription must not sit in the tab above the operations editor.
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
-  const usedPins = useMemo(
-    () => new Set(operations.map((o) => o.calloutNumber || 0).filter((n) => n > 0)),
-    [operations],
-  );
-  // Assembly map draws on the technical sketches (front/back/detail), not the moodboard.
-  const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
-    mediaId: number;
-    kind?: string;
-  }>;
-  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-
-  const views = media.filter((m) => {
-    if (!CONSTRUCTION_VIEW_KINDS.has(m.kind ?? '')) return false;
-    const f = mediaById.get(m.mediaId);
-    return !!(f?.media?.fullSize?.mediaUrl || f?.media?.thumbnail?.mediaUrl);
-  });
+  const { views, callouts } = data;
   const [viewId, setViewId] = useState<number | null>(null);
 
   const pinnedViewId = (() => {
@@ -184,47 +192,34 @@ function ConstructionSketch({
   const activeViewId = pinnedViewId ?? viewId ?? views[0]?.mediaId ?? null;
   const full = activeViewId != null ? mediaById.get(activeViewId) : undefined;
   const url = full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
+  const sideViews = [
+    views.find((view) => view.kind === 'TECH_CARD_MEDIA_KIND_FRONT'),
+    views.find((view) => view.kind === 'TECH_CARD_MEDIA_KIND_BACK'),
+  ].filter((view): view is SketchView => !!view);
 
   if (views.length === 0) {
     return (
-      <div className='flex flex-col gap-1'>
-        <Canvas aspect='3/4' className='flex items-center justify-center'>
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            className='px-2 text-center uppercase'
-          >
-            no technical sketch
-          </Text>
-        </Canvas>
-        <Text size='micro' variant='label'>
-          add a flat on STUDIO, pin it in ARTIFACTS
+      <Canvas aspect='3/4' className='flex items-center justify-center'>
+        <Text size='micro' variant='label' component='span' className='px-2 text-center uppercase'>
+          no pins
         </Text>
-      </div>
+      </Canvas>
     );
   }
 
   return (
     <div className='flex flex-col gap-1.5'>
-      {views.length > 1 && (
-        <ChipRow>
-          {views.map((v) => (
-            <Chip
-              key={v.mediaId}
-              // `nonForm`: переключение проекции (перёд / спинка / деталь) — ЧТЕНИЕ, оно ничего не
-              // пишет. Обычный Chip рендерится нативной кнопкой, а та внутри `<fieldset disabled>`
-              // выпущенной карточки клика не получает: на подписанной карточке было видно только
-              // первое изображение, а спинку посмотреть было нельзя.
-              nonForm
-              selected={v.mediaId === activeViewId}
-              pressed={v.mediaId === activeViewId}
-              onClick={() => setViewId(v.mediaId)}
-            >
-              {mediaKindLabels[v.kind ?? ''] ?? 'view'}
-            </Chip>
-          ))}
-        </ChipRow>
+      {sideViews.length === 2 && (
+        <ViewSwitch<string>
+          quiet
+          label='sketch side'
+          value={String(activeViewId ?? '')}
+          onChange={(next) => setViewId(Number(next))}
+          options={sideViews.map((view) => ({
+            value: String(view.mediaId),
+            label: mediaKindLabels[view.kind ?? ''] ?? 'view',
+          }))}
+        />
       )}
 
       <div className='relative w-full border border-borderColor'>
@@ -235,7 +230,6 @@ function ConstructionSketch({
           const y = parseFloat(c.posY ?? '');
           if (Number.isNaN(x) || Number.isNaN(y)) return null;
           const num = c.number || 0;
-          const used = num > 0 && usedPins.has(num);
           return (
             <Pin
               key={idx}
@@ -243,9 +237,7 @@ function ConstructionSketch({
               y={y * 100}
               label={num || idx + 1}
               highlighted={!!activePin && num === activePin && num > 0}
-              title={`#${num || idx + 1}${c.part?.trim() ? ` · ${c.part.trim()}` : ''}${
-                used ? '' : ' · not bound to an operation'
-              }`}
+              title={`pin ${num || idx + 1}`}
               onMouseEnter={() => num > 0 && onActivePinChange(num)}
               onMouseLeave={() => onActivePinChange(null)}
             />
@@ -253,6 +245,26 @@ function ConstructionSketch({
         })}
       </div>
     </div>
+  );
+}
+
+function LiveConstructionSketch({
+  mediaById,
+  activePin,
+  onActivePinChange,
+}: {
+  mediaById: Map<number, common_MediaFull>;
+  activePin: number | null;
+  onActivePinChange: (n: number | null) => void;
+}) {
+  const data = useConstructionSketchData(mediaById);
+  return (
+    <ConstructionSketch
+      mediaById={mediaById}
+      data={data}
+      activePin={activePin}
+      onActivePinChange={onActivePinChange}
+    />
   );
 }
 
@@ -268,7 +280,7 @@ function ConstructionSketch({
 function shapesAffordance(
   shapes: PieceShapes,
   onGoTab?: (tab: string) => void,
-): React.ReactNode | undefined {
+): ReactNode | undefined {
   if (!shapes.hasDxf) return undefined;
   const toPatterns = onGoTab
     ? { label: 'open patterns', onClick: () => onGoTab('patterns') }
@@ -635,13 +647,9 @@ export function ConstructionTab({
               techCard={techCard}
               frozen={frozen}
               shapes={pieceShapes.shapeByKey}
-              sketch={
-                <ConstructionSketch
-                  mediaById={mediaById}
-                  activePin={pin.active}
-                  onActivePinChange={pin.setActive}
-                />
-              }
+              mediaById={mediaById}
+              activePin={pin.active}
+              onActivePinChange={pin.setActive}
             />
 
             <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
@@ -725,7 +733,7 @@ export function ConstructionTab({
                     // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
                     // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
                     sketchNote={
-                      <ConstructionSketch
+                      <LiveConstructionSketch
                         mediaById={mediaById}
                         activePin={pin.active}
                         onActivePinChange={pin.setActive}
@@ -748,8 +756,8 @@ const ASSEMBLY_COLUMN_W = 320;
 
 /**
  * КОЛОНКА КАРТЫ СБОРКИ — СВОРАЧИВАЕТСЯ, КАК ПАНЕЛЬ CALLOUTS СТУДИИ (T11). Тот же орган
- * (`CalloutsPanel`), только слева и без жеста ширины: свёрнутая — полоска «assembly map · N», где
- * N — швы, которые ещё решать; открытая — прежние 320px (карта, SEAMS, PIECE CODES), шеврон ‹ в
+ * (`CalloutsPanel`), только слева и без жеста ширины: свёрнутая — полоска «assembly map»;
+ * открытая — прежние 320px (карта, SEAMS, PIECE CODES), шеврон ‹ в
  * шапке карты. Без предпочтения колонка свёрнута. Правая колонка не меняется — только шире.
  *
  * Свёрнутая колонка ПРЯЧЕТСЯ АТРИБУТОМ, а не размонтируется: `SeamsDoor` гидрирует стор решений
@@ -760,17 +768,21 @@ function AssemblyColumn({
   techCard,
   frozen,
   shapes,
-  sketch,
+  mediaById,
+  activePin,
+  onActivePinChange,
 }: {
   techCard: common_TechCard | undefined;
   frozen: boolean;
   shapes: PieceShapes['shapeByKey'];
-  sketch: ReactNode;
+  mediaById: Map<number, common_MediaFull>;
+  activePin: number | null;
+  onActivePinChange: (n: number | null) => void;
 }) {
-  const { review } = useSeamReview();
+  const sketch = useConstructionSketchData(mediaById);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const panel = useCalloutsPanel({
-    count: review ? review.counts.decide : null,
+    count: null,
     holdKey: techCard?.id ?? 0,
     panelRef,
     prefsBase: ASSEMBLY_MAP_PREFS_KEY,
@@ -790,7 +802,15 @@ function AssemblyColumn({
       className='w-full space-y-2.5'
     >
       <AssemblyMap
-        sketch={sketch}
+        hasSketch={sketch.views.length > 0}
+        sketch={
+          <ConstructionSketch
+            mediaById={mediaById}
+            data={sketch}
+            activePin={activePin}
+            onActivePinChange={onActivePinChange}
+          />
+        }
         action={<PanelCollapseDoor panel={panel} tag='amap' side='left' label='assembly map' />}
       />
       <SeamsDoor techCard={techCard} frozen={frozen} shapes={shapes} />
