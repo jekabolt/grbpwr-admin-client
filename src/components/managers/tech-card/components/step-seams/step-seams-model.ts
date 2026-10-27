@@ -6,7 +6,7 @@
 // millimetres with y UP, so an edge is drawn as [x, −y] and an inner line is anchored as [x, −y].
 
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
-import { roleVeto } from 'lib/assembly-skeleton/assignment/costs';
+import { roleOf, roleVeto } from 'lib/assembly-skeleton/assignment/costs';
 import { readName, roleDef } from 'lib/assembly-skeleton/skeleton/model';
 import type { Edge, EdgeId, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
@@ -237,7 +237,11 @@ export function inputUnitsWithOuterEdges(
 
 /** Within this share of the longer edge a pair is offered at all. */
 const SUGGEST_REL = 0.2;
-const CURVE_DEG = 10;
+/**
+ * An edge bends at least this much to count as a curve. Card 83: shaped side seams turn 14–18°,
+ * a shirt-tail hem 17–25°, a collar's neck edge 30°, armholes and caps 110–320°.
+ */
+const CURVE_DEG = 28;
 const BODY_ROLES = new Set(['front', 'back', 'side', 'yoke', 'placket', 'facing', 'fly', 'skirt']);
 const NECK_ROLES = new Set(['collar', 'stand', 'rib', 'hood']);
 
@@ -292,16 +296,21 @@ function pairRoleCost(a: string | null, b: string | null): number {
   return a === b ? 0.02 : 0;
 }
 
+const isCurve = (edge: Edge) => Math.abs(edge.turnDeg) >= CURVE_DEG;
+
 function curveCost(a: Edge, b: Edge): number {
-  const ca = Math.abs(a.turnDeg) >= CURVE_DEG;
-  const cb = Math.abs(b.turnDeg) >= CURVE_DEG;
+  const ca = isCurve(a);
+  const cb = isCurve(b);
   if (ca && cb) return a.turnDeg * b.turnDeg < 0 ? -0.1 : -0.06;
   return ca || cb ? 0.08 : 0;
 }
 
 /**
  * The best free outer-edge pair across two different input units. Length remains the gate; roles,
- * curve compatibility and notches rank the plausible pairs inside it.
+ * curve compatibility and notches rank the plausible pairs inside it. A body ↔ sleeve or body ↔
+ * neck join is an armhole ↔ cap or a neckline ↔ collar: only a curve ↔ curve pair is offered
+ * there — a side seam or a hem that happens to have the right length is no answer, so the row
+ * says «no seam» instead (card 83, steps 370 / 400).
  */
 export function suggestPair(
   groups: readonly { pieces: readonly string[] }[],
@@ -325,11 +334,14 @@ export function suggestPair(
       for (const ea of edges(groups[i].pieces)) {
         for (const eb of edges(groups[j].pieces)) {
           if (ea.pieceKey === eb.pieceKey || ea.lenMm < 30 || eb.lenMm < 30) continue;
+          if (structuralCurve && !(isCurve(ea) && isCurve(eb))) continue;
           const ga = geoms.get(ea.pieceKey);
           const gb = geoms.get(eb.pieceKey);
-          if (!ga || !gb || roleVeto(ga, gb)) continue;
+          if (!ga || !gb) continue;
           const roleA = roleOfPiece(ga, geoms);
           const roleB = roleOfPiece(gb, geoms);
+          // The veto reads names only: FL (a flap by name, FR's mirror twin) is a front here.
+          if (roleVeto(ga, gb) && roleA === roleOf(ga) && roleB === roleOf(gb)) continue;
           const roleCost = pairRoleCost(roleA, roleB);
           if (!Number.isFinite(roleCost)) continue;
           const d = deltaMm(ea.lenMm, eb.lenMm, ease);
@@ -339,13 +351,8 @@ export function suggestPair(
           const endpoint =
             (roleFits(classA, roleA) ? -0.025 : 0.1) + (roleFits(classB, roleB) ? -0.025 : 0.1);
           const shape = curveCost(ea, eb);
-          const curveRequirement =
-            structuralCurve &&
-            (Math.abs(ea.turnDeg) < CURVE_DEG || Math.abs(eb.turnDeg) < CURVE_DEG)
-              ? 0.12
-              : 0;
           const lengthTie = -Math.min(ea.lenMm, eb.lenMm, 1000) / 1_000_000;
-          const score = rel + notch + endpoint + roleCost + shape + curveRequirement + lengthTie;
+          const score = rel + notch + endpoint + roleCost + shape + lengthTie;
           if (!best || score < best.score)
             best = { score, s: { a: [ea.id], b: [eb.id], aLen: ea.lenMm, bLen: eb.lenMm } };
         }

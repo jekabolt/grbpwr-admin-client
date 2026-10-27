@@ -389,6 +389,53 @@ describe('suggestStepPair', () => {
     expect(pieces).toContain('BP');
     expect(new Set(pieces)).not.toEqual(new Set(['FR', 'FL']));
   });
+
+  // Card 83 lengths: the armhole is two edges (217 + 255) against a 492 cap, so no single
+  // edge fits; a 449 side seam (18°) is near the cap's length but is not an armhole.
+  it('body + sleeve with no curve pair in the gate: no suggestion, not a side seam', () => {
+    const keys = new Set(['FR', 'BP', 'SLV_R']);
+    const ops = [
+      { inputKeys: ['FR', 'BP'], outputUnitKey: 'BODY' },
+      { inputKeys: ['BODY', 'SLV_R'], outputUnitKey: 'SHELL' },
+    ];
+    const geoms = new Map([
+      [
+        'FR',
+        shaped('FR', 'FR', [
+          { len: 217, turn: -321 },
+          { len: 449, turn: -18 },
+        ]),
+      ],
+      [
+        'BP',
+        shaped('BP', 'BP', [
+          { len: 255, turn: -310 },
+          { len: 449, turn: -14 },
+        ]),
+      ],
+      [
+        'SLV_R',
+        shaped('SLV_R', 'SLV_R', [{ len: 492, turn: 113 }, { len: 436 }, { len: 342 }], 'R'),
+      ],
+    ]);
+    expect(suggestStepPair(ops, 1, keys, geoms, new Set(), null)).toBeNull();
+  });
+
+  it('FL reads as a pocket flap by name, but as FR’s mirror twin it is a front', () => {
+    const keys = new Set(['FR', 'FL', 'SLV_L']);
+    const ops = [
+      { inputKeys: ['FR', 'FL'], outputUnitKey: 'BODY' },
+      { inputKeys: ['BODY', 'SLV_L'], outputUnitKey: 'SHELL' },
+    ];
+    const fl = shaped('FL', 'FL', [{ len: 470, turn: -320 }, { len: 449 }]);
+    const geoms = new Map([
+      ['FR', shaped('FR', 'FR', [{ len: 300, turn: -320 }, { len: 449 }])],
+      ['FL', { ...fl, twinOf: [{ key: 'FR', kind: 'mirror' }] } as PieceGeom],
+      ['SLV_L', shaped('SLV_L', 'SLV_L', [{ len: 472, turn: 115 }, { len: 436 }], 'L')],
+    ]);
+    const suggestion = suggestStepPair(ops, 1, keys, geoms, new Set(), null)!;
+    expect([...suggestion.a, ...suggestion.b].sort()).toEqual(['FL#0', 'SLV_L#0']);
+  });
 });
 
 describe('surface seam rows', () => {
