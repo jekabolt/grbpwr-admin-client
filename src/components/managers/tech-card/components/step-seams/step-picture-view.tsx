@@ -6,7 +6,7 @@
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
-import type { EdgeAnchor, StoredSeam } from 'lib/seams';
+import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
@@ -26,12 +26,13 @@ import {
 } from './step-seams-model';
 import {
   boxOf,
-  candidateOf,
   centroidOf,
   fitBox,
   inputName,
   labelSpot,
   pathOf,
+  seamOfSides,
+  seamSig,
   splitSeams,
   spreadLabels,
   stepLayout,
@@ -61,10 +62,13 @@ export function useStable<T>(value: T, sig: string): T {
   return ref.current.value;
 }
 
-export const seamSig = (xs: readonly SeamCandidate[]) =>
-  xs.map((c) => `${c.a}|${c.b}|${c.kind}`).join(',');
-
-export type StoredOnStep = { key: string; row: StoredSeam | undefined; sides: SeamSides };
+export type StoredOnStep = {
+  key: string;
+  row: StoredSeam | undefined;
+  sides: SeamSides;
+  /** A surface seam's hand placement (on its anchors). */
+  placement?: SeamPlacement;
+};
 
 /**
  * Everything the step picture of step `index` is made of: the inputs (leaf pieces, one human name
@@ -135,15 +139,22 @@ export function useStepScene(index: number) {
             a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
             b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
           },
+          placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((x) => x.placement)
+            ?.placement,
         };
       }),
     [keys, byKey],
   );
-  const usedRaw = stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t));
+  // The edges a proposal and a partner must not take again. (wt/seamfix: add
+  // usedEdgesBeforeStep(ops, index, byKey) to this list.)
+  const usedRaw = [
+    ...new Set(stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t))),
+  ].sort();
   const used = useStable(new Set<EdgeId>(usedRaw), usedRaw.join(','));
 
+  // Shown on a frozen card too (it only cannot be accepted there).
   const sugRaw: Suggestion | null =
-    geo && geo.dep.status !== 'pending' && !ctx?.frozen
+    geo && geo.dep.status !== 'pending'
       ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease)
       : null;
   const suggestion = useStable(
@@ -151,24 +162,45 @@ export function useStepScene(index: number) {
     sugRaw ? `${sugRaw.a.join('+')}|${sugRaw.b.join('+')}|${sugRaw.aLen}|${sugRaw.bLen}` : '',
   );
 
-  const split = useMemo(
-    () => splitSeams(graph?.chosen ?? [], leaves, geoms),
-    [graph?.chosen, leaves, geoms],
-  );
+  const split = useMemo(() => {
+    const raw = splitSeams(graph?.chosen ?? [], leaves, geoms);
+    // A stored surface seam reaches the graph with no mark (T = identity): lay it by its row's
+    // placement, else on its host's line; one the rows do not hold is not drawn as laid.
+    const laid = (c: SeamCandidate): SeamCandidate | null => {
+      if (c.kind !== 'surface' || c.surface?.mark) return c;
+      const row = c.provenance ? byKey.get(c.provenance.seamKey) : undefined;
+      if (!row) return null;
+      const sides = {
+        a: row.sideA.flatMap(targetsOfAnchor),
+        b: row.sideB.flatMap(targetsOfAnchor),
+      };
+      const at = [...row.sideA, ...row.sideB].find((x) => x.placement)?.placement;
+      return seamOfSides(sides, geoms, innerLines, at);
+    };
+    const keep = (xs: SeamCandidate[]) => xs.map(laid).filter((c): c is SeamCandidate => !!c);
+    return { inner: keep(raw.inner), cross: keep(raw.cross) };
+  }, [graph?.chosen, leaves, geoms, byKey, innerLines]);
   const innerSeams = useStable(split.inner, seamSig(split.inner));
+
+  const storedRaw = stored
+    .map((s) => seamOfSides(s.sides, geoms, innerLines, s.placement))
+    .filter((c): c is SeamCandidate => !!c);
+  const storedSeams = useStable(storedRaw, seamSig(storedRaw));
 
   // The canvas lays the inputs along the step's own seams (stored, else the proposal), else along
   // what the card's graph reads between them — never along the live pick, so a click moves nothing.
+  // A surface seam is left out here (the part stands beside its host, its line clear to pick): it
+  // is laid on the host in RESULT only.
   const own = [
-    ...stored.map((s) => candidateOf(s.sides, geoms)),
-    suggestion ? candidateOf(suggestion, geoms) : null,
+    ...storedRaw,
+    ...(suggestion ? [seamOfSides(suggestion, geoms, innerLines)] : []),
   ].filter((c): c is SeamCandidate => !!c);
-  const frameRaw = [...split.inner, ...(own.length ? own : split.cross)];
+  const flat = (xs: readonly SeamCandidate[]) => xs.filter((c) => c.kind !== 'surface');
+  const frameRaw = [
+    ...split.inner,
+    ...(own.length || stored.length ? flat(own) : flat(split.cross)),
+  ];
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-  const storedRaw = stored
-    .map((s) => candidateOf(s.sides, geoms))
-    .filter((c): c is SeamCandidate => !!c);
-  const storedSeams = useStable(storedRaw, seamSig(storedRaw));
 
   return {
     ctx,
@@ -274,6 +306,7 @@ export function StepPictureSvg({
   nos = [],
   names,
   namesBelow,
+  ghostName,
   hover,
   onHover,
   onPick,
@@ -290,6 +323,8 @@ export function StepPictureSvg({
   nos?: readonly NoMark[];
   names?: readonly string[];
   namesBelow?: boolean;
+  /** A shapeless piece's name, written in its empty square (not on a tile). */
+  ghostName?: (key: string) => string;
   hover?: TargetId | null;
   onHover?: (id: TargetId | null) => void;
   onPick?: (id: TargetId) => void;
@@ -309,6 +344,10 @@ export function StepPictureSvg({
     return out;
   }, [layout, geoms, fit]);
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
+  const ghosts = useMemo(
+    () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
+    [layout.ghosts, fit],
+  );
 
   /** A target's polyline on screen (an edge, a chain, an inner line). */
   const ptsOf = (id: TargetId): Pt2[] | null => {
@@ -349,22 +388,37 @@ export function StepPictureSvg({
       m,
       s: labelSpot(pts, centreOf.get(pieceOfId(m.id)) ?? pts[0], 16),
     }));
-  // Mono type: ~0.6 em a character.
-  const spots = spreadLabels(
-    labels.map(({ m, s }) => ({ ...s, w: (m.label ?? '').length * L.font * 0.62, h: L.font + 2 })),
-  );
-
-  const nameSpots = (names ?? []).map((text, gi) => {
-    const ring = pieces.filter((p) => p.input === gi).flatMap((p) => p.ring);
-    if (!ring.length || !text) return null;
-    const b = boxOf(ring);
-    return {
-      text,
-      at: (namesBelow
-        ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
-        : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]) as Pt2,
-    };
+  const noSpots = nos.flatMap(({ id, i }) => {
+    const pts = ptsOf(id);
+    return pts ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], 18) }] : [];
   });
+  const nameSpots = (names ?? []).flatMap((text, gi) => {
+    const ring = [
+      ...pieces.filter((p) => p.input === gi).flatMap((p) => p.ring),
+      ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
+    ];
+    if (!ring.length || !text) return [];
+    const b = boxOf(ring);
+    const at: Pt2 = namesBelow
+      ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
+      : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
+    return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
+  });
+  // One collision pass: the mm by its edge first, then the numbers, then the unit names (mono type,
+  // ~0.62 em a character; the names' letter spacing on top).
+  const spots = spreadLabels([
+    ...labels.map(({ m, s }) => ({
+      ...s,
+      w: (m.label ?? '').length * L.font * 0.62,
+      h: L.font + 2,
+    })),
+    ...noSpots.map(({ s }) => ({ ...s, anchor: 'middle' as const, w: 20, h: 20 })),
+    ...nameSpots.map(({ text, s }) => ({ ...s, w: text.length * L.font * 0.66, h: L.font + 2 })),
+  ]);
+  const labelAt = (i: number) => spots[i];
+  const noAt = (i: number) => spots[labels.length + i];
+  const nameAt = (i: number) => spots[labels.length + noSpots.length + i];
 
   if (w < 2 || h < 2) return null;
   return (
@@ -386,6 +440,38 @@ export function StepPictureSvg({
           <path key={p.key} d={pathOf(p.ring, true)} />
         ))}
       </g>
+      {ghosts.length > 0 && (
+        <g
+          fill={FILL}
+          stroke={GREY}
+          strokeWidth={L.hair * 1.5}
+          strokeDasharray={L.dash}
+          data-step-ghost=''
+        >
+          {ghosts.map((g) => (
+            <path key={`g:${g.key}`} d={pathOf(g.ring, true)} />
+          ))}
+        </g>
+      )}
+      {look !== 'tile' &&
+        ghostName &&
+        ghosts.map((g) => {
+          const c = centroidOf(g.ring);
+          return (
+            <text
+              key={`gn:${g.key}`}
+              x={c[0]}
+              y={c[1]}
+              textAnchor='middle'
+              dominantBaseline='central'
+              fill={GREY}
+              fontSize={L.font - 2}
+              pointerEvents='none'
+            >
+              {ghostName(g.key)}
+            </text>
+          );
+        })}
       {look === 'canvas' && (
         <g fill='none' stroke={FAINT} strokeWidth={1} strokeDasharray='4 3'>
           {doors
@@ -422,8 +508,8 @@ export function StepPictureSvg({
         labels.map(({ m, s }, i) => (
           <text
             key={`l:${m.id}`}
-            x={spots[i][0]}
-            y={spots[i][1]}
+            x={labelAt(i)[0]}
+            y={labelAt(i)[1]}
             textAnchor={s.anchor}
             dominantBaseline='central'
             fill={m.tone === 'pick' ? PICK : INK}
@@ -437,15 +523,13 @@ export function StepPictureSvg({
           </text>
         ))}
       {look !== 'tile' &&
-        nos.map(({ id, i }) => {
-          const pts = ptsOf(id);
-          if (!pts) return null;
-          const s = labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], 18);
+        noSpots.map(({ id, i }, n) => {
+          const at = noAt(n);
           return (
             <g key={`n:${id}`} pointerEvents='none' data-pair-no={i + 1}>
               <rect
-                x={s.at[0] - 9}
-                y={s.at[1] - 9}
+                x={at[0] - 9}
+                y={at[1] - 9}
                 width={18}
                 height={18}
                 fill={FILL}
@@ -453,8 +537,8 @@ export function StepPictureSvg({
                 strokeWidth={1}
               />
               <text
-                x={s.at[0]}
-                y={s.at[1]}
+                x={at[0]}
+                y={at[1]}
                 textAnchor='middle'
                 dominantBaseline='central'
                 fill={PAIR_INK}
@@ -466,26 +550,24 @@ export function StepPictureSvg({
           );
         })}
       {look !== 'tile' &&
-        nameSpots.map((s, i) =>
-          s ? (
-            <text
-              key={`u:${i}`}
-              x={s.at[0]}
-              y={s.at[1]}
-              textAnchor='middle'
-              dominantBaseline='central'
-              fill={GREY}
-              stroke={FILL}
-              strokeWidth={4}
-              paintOrder='stroke'
-              letterSpacing='0.04em'
-              pointerEvents='none'
-              data-unit-name=''
-            >
-              {s.text}
-            </text>
-          ) : null,
-        )}
+        nameSpots.map((s, i) => (
+          <text
+            key={`u:${i}`}
+            x={nameAt(i)[0]}
+            y={nameAt(i)[1]}
+            textAnchor='middle'
+            dominantBaseline='central'
+            fill={GREY}
+            stroke={FILL}
+            strokeWidth={4}
+            paintOrder='stroke'
+            letterSpacing='0.04em'
+            pointerEvents='none'
+            data-unit-name=''
+          >
+            {s.text}
+          </text>
+        ))}
       {onPick &&
         doors.map((x) => (
           <path

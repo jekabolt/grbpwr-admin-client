@@ -13,6 +13,7 @@ import type { EdgeId, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -36,10 +37,17 @@ import {
   type Pt,
   type TargetId,
 } from './step-seams-model';
-import { boxOf, candidateOf, partnerOf, pathOf, type SeamSides } from './step-picture';
+import {
+  boxOf,
+  partnerOf,
+  pathOf,
+  seamOfSides,
+  seamSig,
+  surfaceSeam,
+  type SeamSides,
+} from './step-picture';
 import {
   StepPictureSvg,
-  seamSig,
   useBoxSize,
   useStable,
   useStepLayout,
@@ -184,7 +192,7 @@ export default function SeamPicker({
     [geoms, geo?.grainDeg, nameOf],
   );
 
-  const placement = useCallback((): SeamPlacement | undefined => {
+  const placement = useMemo((): SeamPlacement | undefined => {
     if (!place || !host) return undefined;
     return {
       xMm: Math.round(place.x * 10) / 10,
@@ -212,7 +220,7 @@ export default function SeamPicker({
       return surfaceRow(
         { geom: g, k: h.k, line, grainDeg: geo.grainDeg.get(h.piece) ?? 0 },
         parts,
-        placement(),
+        placement,
       );
     },
     [geoms, anchorCtx, pieces, geo, partKey, placement],
@@ -255,7 +263,19 @@ export default function SeamPicker({
 
   // ── the canvas: inputs along the step's seam, apart; RESULT: joined along the pair ──
   const layout = useStepLayout(leaves, frameSeams, geoms, EXPLODE);
-  const pairSeam = pair ? candidateOf(pair, geoms) : null;
+  // A surface pick lies on its host's line in RESULT (by «place», else centred on the line).
+  const pairSeam =
+    surface && host && partKey
+      ? surfaceSeam(
+          host.piece,
+          partKey,
+          innerLines.get(host.piece)?.[host.k] ?? [],
+          geoms,
+          placement,
+        )
+      : pair
+        ? seamOfSides(pair, geoms, innerLines)
+        : null;
   const resultRaw = [...innerSeams, ...storedSeams, ...(pairSeam ? [pairSeam] : [])];
   const resultSeams = useStable<SeamCandidate[]>(resultRaw, seamSig(resultRaw));
   const joined = useStepLayout(leaves, resultSeams, geoms, 0);
@@ -395,6 +415,7 @@ export default function SeamPicker({
                     nos={nos}
                     names={groups.map((g) => g.name)}
                     namesBelow={phone}
+                    ghostName={nameOf}
                     hover={hover}
                     onHover={setHover}
                     onPick={frozen ? undefined : toggle}
@@ -423,7 +444,9 @@ export default function SeamPicker({
                       look='result'
                       layout={joined}
                       geoms={geoms}
+                      innerLines={innerLines}
                       marks={resultMarks}
+                      ghostName={nameOf}
                       className='absolute inset-0'
                     />
                   )}
@@ -432,7 +455,7 @@ export default function SeamPicker({
             </div>
 
             <div
-              className='sticky bottom-0 flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 md:gap-4.5 md:px-5'
+              className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
               data-seam-bar=''
             >
               {error && (
@@ -500,7 +523,8 @@ export default function SeamPicker({
 /**
  * «place»: the host in its drawing frame (mm, y down) with its mark in the pick blue, the part on
  * top following the pointer. The stored placement is the part's bbox corner relative to the host's,
- * then turned — the same numbers the surface seam has always stored.
+ * then turned — the same numbers the surface seam has always stored. The drag lives here (the
+ * picker hears the drop only); the host layer is drawn once.
  */
 function PlaceView({
   w,
@@ -521,18 +545,60 @@ function PlaceView({
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const hb = boxOf(host.cut);
-  const pb = boxOf(part.cut);
+  const [live, setLive] = useState(place);
+  useEffect(() => setLive(place), [place]);
+  const hb = useMemo(() => boxOf(host.cut), [host]);
+  const pb = useMemo(() => boxOf(part.cut), [part]);
   const m = Math.max(pb.x1 - pb.x0, pb.y1 - pb.y0);
   const vb = [hb.x0 - m, hb.y0 - m, hb.x1 - hb.x0 + 2 * m, hb.y1 - hb.y0 + 2 * m];
+  const hostLayer = useMemo(
+    () => (
+      <>
+        <path
+          d={pathOf(host.cut, true)}
+          fill='var(--color-bgColor)'
+          stroke='var(--color-textColor)'
+          strokeWidth={2}
+          vectorEffect='non-scaling-stroke'
+        />
+        <path
+          d={pathOf(line)}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={3}
+          vectorEffect='non-scaling-stroke'
+        />
+      </>
+    ),
+    [host, line],
+  );
+  const partLayer = useMemo(
+    () => (
+      <path
+        d={pathOf(part.cut, true)}
+        fill='var(--color-bgColor)'
+        fillOpacity={0.85}
+        stroke='var(--color-textColor)'
+        strokeWidth={1.2}
+        strokeDasharray='6 4'
+        vectorEffect='non-scaling-stroke'
+      />
+    ),
+    [part],
+  );
   const toMm = (e: PointerEvent) => {
     const ctm = svgRef.current?.getScreenCTM();
     if (!ctm) return null;
     const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
     return { x: p.x, y: p.y };
   };
-  const ox = hb.x0 + place.x;
-  const oy = hb.y0 + place.y;
+  const drop = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    onPlace(live);
+  };
+  const ox = hb.x0 + live.x;
+  const oy = hb.y0 + live.y;
   if (w < 2 || h < 2) return null;
   return (
     <svg
@@ -546,46 +612,24 @@ function PlaceView({
         const g = drag.current;
         if (!g) return;
         const p = toMm(e);
-        if (p) onPlace({ ...place, x: g.px + p.x - g.x, y: g.py + p.y - g.y });
+        if (p) setLive({ ...live, x: g.px + p.x - g.x, y: g.py + p.y - g.y });
       }}
-      onPointerUp={() => {
-        drag.current = null;
-      }}
+      onPointerUp={drop}
+      onPointerCancel={drop}
       data-seam-place=''
     >
-      <path
-        d={pathOf(host.cut, true)}
-        fill='var(--color-bgColor)'
-        stroke='var(--color-textColor)'
-        strokeWidth={2}
-        vectorEffect='non-scaling-stroke'
-      />
-      <path
-        d={pathOf(line)}
-        fill='none'
-        stroke='var(--color-warning)'
-        strokeWidth={3}
-        vectorEffect='non-scaling-stroke'
-      />
+      {hostLayer}
       <g
-        transform={`translate(${ox.toFixed(1)} ${oy.toFixed(1)}) rotate(${place.rot}) translate(${(-pb.x0).toFixed(1)} ${(-pb.y0).toFixed(1)})`}
+        transform={`translate(${ox.toFixed(1)} ${oy.toFixed(1)}) rotate(${live.rot}) translate(${(-pb.x0).toFixed(1)} ${(-pb.y0).toFixed(1)})`}
         className='cursor-move'
         onPointerDown={(e) => {
           const p = toMm(e);
           if (!p) return;
           (e.target as Element).setPointerCapture?.(e.pointerId);
-          drag.current = { x: p.x, y: p.y, px: place.x, py: place.y };
+          drag.current = { x: p.x, y: p.y, px: live.x, py: live.y };
         }}
       >
-        <path
-          d={pathOf(part.cut, true)}
-          fill='var(--color-bgColor)'
-          fillOpacity={0.85}
-          stroke='var(--color-textColor)'
-          strokeWidth={1.2}
-          strokeDasharray='6 4'
-          vectorEffect='non-scaling-stroke'
-        />
+        {partLayer}
       </g>
     </svg>
   );

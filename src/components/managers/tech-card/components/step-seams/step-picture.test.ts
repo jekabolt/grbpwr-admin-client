@@ -10,9 +10,12 @@ import {
   inputName,
   labelSpot,
   partnerOf,
+  seamOfSides,
+  seamSig,
   splitSeams,
   spreadLabels,
   stepLayout,
+  surfaceSeam,
   toPx,
 } from './step-picture';
 
@@ -156,6 +159,105 @@ describe('stepLayout', () => {
 
   it('no pieces → an empty picture', () => {
     expect(stepLayout([[]], [], geoms).T.size).toBe(0);
+  });
+
+  it('a unit with no seam inside is not drawn joined: its pieces stand apart', () => {
+    const L = stepLayout([['A', 'B'], ['C']], [cross], geoms);
+    const a = boxOf(world(geoms.get('A')!, L.T.get('A')!));
+    const b = boxOf(world(geoms.get('B')!, L.T.get('B')!));
+    const gap = Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1);
+    expect(gap).toBeGreaterThan(10);
+    // C still goes against B along the step's seam.
+    const c = boxOf(world(geoms.get('C')!, L.T.get('C')!));
+    expect(Math.min(Math.abs(c.x0 - b.x1), Math.abs(b.x0 - c.x1))).toBeLessThan(1);
+  });
+
+  it('another input never stands in a unit’s gap', () => {
+    const L = stepLayout([['A', 'B'], ['C']], [], geoms);
+    const box = (k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+    const ab = boxOf([
+      ...world(geoms.get('A')!, L.T.get('A')!),
+      ...world(geoms.get('B')!, L.T.get('B')!),
+    ]);
+    const c = box('C');
+    const overlapX = Math.min(ab.x1, c.x1) - Math.max(ab.x0, c.x0);
+    const overlapY = Math.min(ab.y1, c.y1) - Math.max(ab.y0, c.y0);
+    expect(overlapX <= 0 || overlapY <= 0).toBe(true);
+  });
+
+  it('a piece with no shape is an empty square beside its input', () => {
+    const L = stepLayout([['A', 'X'], ['C']], [], geoms);
+    expect(L.T.has('X')).toBe(false);
+    expect(L.input.get('X')).toBe(0);
+    expect(L.ghosts.map((g) => [g.key, g.input])).toEqual([['X', 0]]);
+    const g = boxOf(L.ghosts[0].ring);
+    const a = boxOf(world(geoms.get('A')!, L.T.get('A')!));
+    expect(g.x0).toBeGreaterThan(a.x1);
+    expect(g.x1 - g.x0).toBeGreaterThan(10);
+    // The picture holds it.
+    expect(L.bbox.x1).toBeGreaterThanOrEqual(g.x1);
+  });
+});
+
+describe('surfaceSeam', () => {
+  const geoms = geomsOf(rect('H', 400, 600), rect('P', 100, 100));
+  const partBox = (c: NonNullable<ReturnType<typeof surfaceSeam>>) =>
+    boxOf(world(geoms.get('P')!, c.surface!.T));
+
+  it('lays the part by its hand placement (corner from the host’s, drawing frame y down)', () => {
+    const c = surfaceSeam('H', 'P', [], geoms, { xMm: 50, yMm: 60, rotDeg: 0, flip: false })!;
+    expect(c.kind).toBe('surface');
+    const b = partBox(c);
+    expect(b.x0).toBeCloseTo(50);
+    expect(b.x1).toBeCloseTo(150);
+    // 60 mm down from the host's top (y 600) → the part's top at 540.
+    expect(b.y1).toBeCloseTo(540);
+    expect(b.y0).toBeCloseTo(440);
+  });
+
+  it('with no placement it sits centred on the host’s line', () => {
+    const c = surfaceSeam(
+      'H',
+      'P',
+      [
+        [100, 300],
+        [300, 300],
+      ],
+      geoms,
+    )!;
+    const b = partBox(c);
+    expect((b.x0 + b.x1) / 2).toBeCloseTo(200);
+    expect((b.y0 + b.y1) / 2).toBeCloseTo(300);
+  });
+
+  it('a surface seam between two inputs lays the part on its host', () => {
+    const c = surfaceSeam('H', 'P', [], geoms, { xMm: 50, yMm: 60, rotDeg: 0, flip: false })!;
+    const L = stepLayout([['H'], ['P']], [c], geoms);
+    const h = boxOf(world(geoms.get('H')!, L.T.get('H')!));
+    const p = boxOf(world(geoms.get('P')!, L.T.get('P')!));
+    expect(p.x0 - h.x0).toBeCloseTo(50);
+    expect(h.y1 - p.y1).toBeCloseTo(60);
+  });
+
+  it('seamOfSides: an inner line makes it a surface seam, edges a plain one', () => {
+    const lines = new Map([['H', [[[0, 0] as Pt2, [10, 0] as Pt2]]]]);
+    expect(seamOfSides({ a: ['H:i0'], b: ['P#0'] }, geoms, lines)?.kind).toBe('surface');
+    expect(seamOfSides({ a: ['H#1'], b: ['P#3'] }, geoms, lines)?.kind).toBe('edge');
+    expect(seamOfSides({ a: ['H:i0'], b: [] }, geoms, lines)).toBeNull();
+  });
+});
+
+describe('seamSig', () => {
+  const geoms = geomsOf(rect('H', 400, 600), rect('P', 100, 100));
+  it('moves with what the placer reads, not with the words', () => {
+    const at = { xMm: 50, yMm: 60, rotDeg: 0, flip: false };
+    const c = surfaceSeam('H', 'P', [], geoms, at)!;
+    const moved = surfaceSeam('H', 'P', [], geoms, { ...at, xMm: 70 })!;
+    expect(seamSig([c])).not.toBe(seamSig([moved]));
+    const e = candidateOf({ a: ['H#1'], b: ['P#3'] }, geoms)!;
+    expect(seamSig([e])).not.toBe(seamSig([{ ...e, aParts: ['H#1', 'H#2'] }]));
+    expect(seamSig([e])).not.toBe(seamSig([{ ...e, range: { a: [0, 10], b: [0, 10] } }]));
+    expect(seamSig([e])).toBe(seamSig([{ ...e, evidence: { ...e.evidence, dLenMm: 3 } }]));
   });
 });
 

@@ -11,6 +11,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text } from 'ui';
 import { rowFromHand } from '../assembly-seams/seam-actions';
 import type { TechCardFormData } from '../schema';
+import { PairNo } from './pair-no';
 import { useAttachStepSeam } from './step-seams-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
@@ -109,9 +110,10 @@ export function StepSeamsRow({ index }: { index: number }) {
         seams
       </GroupLabel>
       <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-        {stored.map(({ key, row, sides }) => (
+        {stored.map(({ key, row, sides }, i) => (
           <SeamTile
             key={key}
+            no={i}
             scene={scene}
             layout={layout}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
@@ -158,16 +160,22 @@ export function StepSeamsRow({ index }: { index: number }) {
   );
 }
 
-/** One seam as a 56px tile: the step's inputs with its edges marked (✕ when it can be taken off). */
+/**
+ * One seam as a 56px tile: the step's inputs with its edges marked, its number at the corner (✕
+ * when it can be taken off).
+ */
 function SeamTile({
   scene,
   layout,
   marks,
   dashed,
   missing,
+  no,
   onRemove,
   ...rest
 }: {
+  /** The seam's number on the step — the one the picker shows beside it. */
+  no?: number;
   scene: StepScene;
   layout: StepLayout;
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
@@ -197,8 +205,14 @@ function SeamTile({
           look='tile'
           layout={layout}
           geoms={scene.geoms}
+          innerLines={scene.innerLines}
           marks={marks}
         />
+      )}
+      {no != null && (
+        <span className='absolute top-0 left-0'>
+          <PairNo i={no} />
+        </span>
       )}
       {onRemove && (
         <span className='absolute top-0 right-0'>
