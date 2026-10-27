@@ -4973,8 +4973,8 @@ function OperationEditor({
             />
 
             {howKind !== 'fuse' && <WorkVariantTiles index={index} className='sm:col-span-2' />}
-            {!['join', 'bind', 'hem', 'topstitch'].includes(howKind) &&
-              (!['buttonhole', 'button'].includes(howKind) || !!seamKind) && (
+            {!['join', 'bind', 'hem'].includes(howKind) &&
+              (!['buttonhole', 'button', 'topstitch'].includes(howKind) || !!seamKind) && (
                 <SeamKindTiles
                   index={index}
                   family={showStitching || seamKind ? 'stored' : null}
