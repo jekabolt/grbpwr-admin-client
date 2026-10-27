@@ -119,6 +119,7 @@ export function StepSeamsRow({ index }: { index: number }) {
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
+            onOpen={cardId ? () => setOpen(true) : undefined}
             data-step-seam={key}
           />
         ))}
@@ -129,6 +130,7 @@ export function StepSeamsRow({ index }: { index: number }) {
               layout={layout}
               marks={[...suggestion.a, ...suggestion.b].map((id) => ({ id, tone: 'proposal' }))}
               dashed
+              onOpen={cardId ? () => setOpen(true) : undefined}
             />
             {!frozen && (
               <Button
@@ -172,6 +174,7 @@ function SeamTile({
   missing,
   no,
   onRemove,
+  onOpen,
   ...rest
 }: {
   /** The seam's number on the step — the one the picker shows beside it. */
@@ -182,12 +185,28 @@ function SeamTile({
   dashed?: boolean;
   missing?: boolean;
   onRemove?: () => void;
+  /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
+  onOpen?: () => void;
   'data-step-seam'?: string;
 }) {
   return (
     <span
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-label={onOpen ? 'pick' : undefined}
+      onClick={onOpen}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onOpen();
+            }
+          : undefined
+      }
       className={cn(
         'relative inline-flex h-14 min-w-23 flex-none items-center justify-center border bg-bgColor px-1.5',
+        onOpen && 'cursor-pointer hover:border-textColor',
         dashed ? 'border-dashed border-textColor' : missing ? 'border-error' : 'border-borderColor',
       )}
       data-seam-tile={dashed ? 'proposal' : missing ? 'missing' : 'stored'}
@@ -216,7 +235,14 @@ function SeamTile({
       )}
       {onRemove && (
         <span className='absolute top-0 right-0'>
-          <Close size='sm' onClick={onRemove} aria-label='remove' />
+          <Close
+            size='sm'
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            aria-label='remove'
+          />
         </span>
       )}
     </span>
