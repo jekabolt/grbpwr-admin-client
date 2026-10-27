@@ -392,27 +392,6 @@ function unionLoops(polygons: readonly Pt[][]): Pt[][] {
   }
 }
 
-/** One enclosing outline for a seam-less unit fallback. Internal piece rules remain visible. */
-function groupOutline(polygons: readonly Pt[][]): Pt[] {
-  if (polygons.length === 1) return [...polygons[0]];
-  const points = polygons.flat();
-  if (points.length < 3) return points;
-  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const turn = (a: Pt, b: Pt, c: Pt) => cross(sub(b, a), sub(c, a));
-  const half = (input: readonly Pt[]) => {
-    const out: Pt[] = [];
-    for (const point of input) {
-      while (out.length >= 2 && turn(out[out.length - 2], out[out.length - 1], point) <= 0)
-        out.pop();
-      out.push(point);
-    }
-    return out;
-  };
-  const lower = half(sorted);
-  const upper = half([...sorted].reverse());
-  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
-}
-
 function polyLen(pts: readonly Pt[]): number {
   let s = 0;
   for (let i = 1; i < pts.length; i++) s += dist(pts[i], pts[i - 1]);
@@ -1211,10 +1190,10 @@ function packUnit(pieces: ReadonlyMap<string, AsmPiece>, source: readonly Item[]
       rowHeights[row] = Math.max(rowHeights[row], box.y1 - box.y0);
     });
     const xAt = colWidths.map((_, index) =>
-      colWidths.slice(0, index).reduce((sum, width) => sum + width * 0.82, 0),
+      colWidths.slice(0, index).reduce((sum, width) => sum + width * 1.04, 0),
     );
     const yAt = rowHeights.map((_, index) =>
-      rowHeights.slice(0, index).reduce((sum, height) => sum + height * 0.82, 0),
+      rowHeights.slice(0, index).reduce((sum, height) => sum + height * 1.04, 0),
     );
     candidates.push(
       source.map((sourceItem, index) => {
@@ -2054,12 +2033,13 @@ export function joinSvg(
   const items = card.items.map(clone);
   if (!items.length) return EMPTY;
   let b0 = bounds(pieces, items);
-  if (box) {
+  // Turn only a lone loose piece; an assembled or multi-piece picture keeps the garment's top up.
+  if (box && items.length === 1 && !items[0].old) {
     const center: Pt = [(b0.x0 + b0.x1) / 2, (b0.y0 + b0.y1) / 2];
     const turned = items.map(clone);
     moveAll(turned, rotate(Math.PI / 2, center));
     const turnedBounds = bounds(pieces, turned);
-    if (containFit(turnedBounds, box) > containFit(b0, box) * 1.02) {
+    if (containFit(turnedBounds, box) > containFit(b0, box) * 1.25) {
       items.splice(0, items.length, ...turned);
       b0 = turnedBounds;
     }
@@ -2114,7 +2094,7 @@ export function joinSvg(
     const polygons = blockItems.map((item) =>
       cutOf(pieces, item.p).map((point) => apply(tf(item), point)),
     );
-    const loops = card.seams.length ? unionLoops(polygons) : [groupOutline(polygons)];
+    const loops = card.seams.length ? unionLoops(polygons) : polygons;
     for (const loop of loops)
       body += `<path d="${pathData(loop)} Z" class="tpa-s tpa-asm-old" stroke-width="${f2(sw * 1.05)}" stroke-linejoin="round"/>`;
   }
@@ -2374,11 +2354,8 @@ export function silhouetteSvg(
     const polygons = items.map((item) =>
       cutOf(pieces, item.p).map((point) => apply(item.T, point)),
     );
-    const outline = groupOutline(polygons);
-    if (outline.length >= 3)
-      body = `<path d="${pathData(outline)} Z" class="tpa-s tpa-fh" stroke-width="${f2(sw)}" stroke-linejoin="round"/>`;
     for (const polygon of polygons)
-      body += `<path d="${pathData(polygon)} Z" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.42)}" stroke-linejoin="round"/>`;
+      body += `<path d="${pathData(polygon)} Z" class="tpa-s tpa-fh" stroke-width="${f2(sw)}" stroke-linejoin="round"/>`;
   } else {
     for (const it of items) {
       const g = pieces.get(it.p);

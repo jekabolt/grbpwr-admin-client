@@ -345,12 +345,13 @@ describe('assembly raw-card fallbacks', () => {
     expect(markup.body).not.toContain('tpa-asm-code-leader');
     expect(markup.body).not.toContain(left);
     expect(markup.body).not.toContain(right);
-    expect(block.body.match(/tpa-asm-old/g)).toHaveLength(1);
+    // A seam-less earlier block draws each piece's own cut (as prod does), not one hull around them.
+    expect(block.body.match(/tpa-asm-old/g)).toHaveLength(2);
     expect(block.body.match(/tpa-asm-unit/g)).toHaveLength(1);
     expect(block.body).toContain('Back · 10');
     expect(model.units.get('finished-back')).toHaveLength(2);
     expect(pressRow?.target?.label).toBe('Right back panel · 20');
-    expect(silhouette?.body.match(/<path/g)).toHaveLength(3);
+    expect(silhouette?.body.match(/<path/g)).toHaveLength(2);
     expect(silhouette?.body).not.toContain('tpa-asm-code');
     expect(silhouette?.body).toContain('>Right back</tspan>');
     expect(silhouette?.body).toContain('>panel · 20</tspan>');
