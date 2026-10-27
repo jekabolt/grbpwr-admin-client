@@ -11,6 +11,8 @@ export interface TextareaProps {
    * поповер, который прыгал бы вслед за ростом.
    */
   autoGrow?: boolean;
+  /** Spare lines under the caret while auto-growing (default 3). 0 = an empty field is one row. */
+  spareLines?: number;
   [k: string]: any;
 }
 
@@ -27,7 +29,7 @@ const SPARE_LINES = 3;
 const MAX_AUTO_HEIGHT = 480;
 
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, name, variant = 'default', autoGrow = true, onInput, ...props }, ref) => {
+  ({ className, name, variant = 'default', autoGrow = true, spareLines = SPARE_LINES, onInput, ...props }, ref) => {
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
     // СЛИЯНИЕ РЕФОВ. Примитиву нужен свой ref (он меряет и правит высоту), но в тот же ref пишет
@@ -98,12 +100,12 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
       el.style.minHeight = '0px';
       el.style.height = '0px';
       const content = el.scrollHeight + borders;
-      el.style.height = `${Math.min(content + SPARE_LINES * lh, MAX_AUTO_HEIGHT)}px`;
+      el.style.height = `${Math.min(content + spareLines * lh, MAX_AUTO_HEIGHT)}px`;
       el.style.minHeight = prevMinHeight;
       for (const [n, top] of scrollers) {
         if (n.scrollTop !== top) n.scrollTop = top;
       }
-    }, [autoGrow]);
+    }, [autoGrow, spareLines]);
 
     // Контролируемое значение (RHF, form.reset, восстановление черновика) меняется мимо жестов
     // пользователя — эффект отвечает за них, `onInput` ниже за живой набор.

@@ -4752,7 +4752,7 @@ function OperationEditor({
           </span>
         ))}
         {unlinkedBoms.length > 0 && (
-          <div className='size-14'>
+          <div className='h-14 w-24'>
             <Tile
               dashed
               name={addingMaterial ? 'cancel' : '+ material'}
@@ -4845,6 +4845,7 @@ function OperationEditor({
           label='note'
           rows={1}
           autoGrow
+          spareLines={0}
           className='min-h-0'
           maxLength={1000}
           enhance='note'
