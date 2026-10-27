@@ -45,7 +45,7 @@ export const JOIN_KIND_TILES: readonly KindTile[] = [
   { token: 'felled', label: 'felled' },
   { token: 'locked', label: 'locked' },
   { token: 'lapped_raw', label: 'raw lap' },
-  { token: 'open_topstitched', label: 'open topstitched' },
+  { token: 'open_topstitched', label: 'open top-stitched' },
 ];
 
 /** Hem-only row: the narrow hems plus the blind and cover variants used on existing cards. */
