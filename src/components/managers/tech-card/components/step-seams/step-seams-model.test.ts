@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { segmentPiece, twins } from 'lib/assembly-skeleton/geometry';
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { PieceDTO } from 'lib/nesting/types';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
+import fixture from './card83-outlines.json';
 import {
   deltaMm,
   dropKeys,
+  easeOf,
   hasMultipleStepPieces,
   inputGroups,
   inputUnitsWithOuterEdges,
@@ -98,7 +102,11 @@ function shaped(
   };
 }
 
-function storedSeam(key: string, a: string, b: string): StoredSeam {
+function storedSeam(
+  key: string,
+  a: string | readonly string[],
+  b: string | readonly string[],
+): StoredSeam {
   const anchor = (hint: string): EdgeAnchor => ({
     piece: hint.slice(0, hint.lastIndexOf('#')),
     samples: [
@@ -122,11 +130,59 @@ function storedSeam(key: string, a: string, b: string): StoredSeam {
     kind: 'edge',
     direction: 'reversed',
     source: 'manual',
-    sideA: [anchor(a)],
-    sideB: [anchor(b)],
+    sideA: (typeof a === 'string' ? [a] : a).map(anchor),
+    sideB: (typeof b === 'string' ? [b] : b).map(anchor),
     anchoredSize: '',
     note: '',
   };
+}
+
+/** A card-83 outline as the picker draws it (SVG path, mm, y down), segmented like a real piece. */
+function pieceFromPath(key: string, d: string): PieceGeom {
+  const pts = [...d.matchAll(/[ML]\s*(-?[\d.]+),(-?[\d.]+)/g)].map((m) => ({
+    x: Number(m[1]) / 10,
+    y: -Number(m[2]) / 10,
+  }));
+  const minX = Math.min(...pts.map((p) => p.x));
+  const minY = Math.min(...pts.map((p) => p.y));
+  const poly = pts.map((p) => ({ x: p.x - minX, y: p.y - minY }));
+  const piece = {
+    id: 0,
+    name: key,
+    poly,
+    bboxW: Math.max(...poly.map((p) => p.x)),
+    bboxH: Math.max(...poly.map((p) => p.y)),
+    areaCm2: 0,
+    source: 'card83',
+  } as unknown as PieceDTO;
+  return segmentPiece({
+    pieceKey: key,
+    name: key,
+    piece,
+    piecesPerGarment: 1,
+    cutSymmetry: null,
+    cloth: null,
+    fused: false,
+  });
+}
+
+/** Card 83 (men's shirt): its twelve pieces, twinned, and the join steps that matter. */
+function card83() {
+  const pieces = twins(Object.entries(fixture.pieces).map(([key, d]) => pieceFromPath(key, d)));
+  const geoms = new Map(pieces.map((g) => [g.pieceKey, g]));
+  const keys = new Set(geoms.keys());
+  const ops = [
+    { operationNumber: 50, inputKeys: ['CLR_1', 'CLR'], outputUnitKey: 'COLLAR' },
+    { operationNumber: 130, inputKeys: ['PLCK', 'FL'], outputUnitKey: 'LEFT_FRONT' },
+    { operationNumber: 200, inputKeys: ['FR', 'LEFT_FRONT', 'BP'], outputUnitKey: 'BODY' },
+    { operationNumber: 230, inputKeys: ['SLV_M_R', 'SLV_M_R_1'], outputUnitKey: 'CUFF_R' },
+    { operationNumber: 280, inputKeys: ['SLV_R', 'CUFF_R'], outputUnitKey: 'SLEEVE_R' },
+    { operationNumber: 310, inputKeys: ['SLV_M_L', 'SLV_M_L_1'], outputUnitKey: 'CUFF_L' },
+    { operationNumber: 360, inputKeys: ['SLV_L', 'CUFF_L'], outputUnitKey: 'SLEEVE_L' },
+    { operationNumber: 370, inputKeys: ['BODY', 'SLEEVE_R', 'SLEEVE_L'], outputUnitKey: 'BASE' },
+    { operationNumber: 400, inputKeys: ['COLLAR', 'BASE'], outputUnitKey: 'SHIRT' },
+  ];
+  return { geoms, keys, ops, at: (n: number) => ops.findIndex((op) => op.operationNumber === n) };
 }
 
 describe('inputGroups', () => {
@@ -188,6 +244,12 @@ describe('lengths', () => {
     expect(deltaMm(500, 480, null)).toBe(20);
     expect(deltaMm(600, 500, 1.2)).toBeCloseTo(0, 6);
     expect(deltaMm(0, 500, null)).toBe(0);
+  });
+  it('reads the step ratio as typed, comma included', () => {
+    expect(easeOf({ fullnessRatio: '1,2' })).toBe(1.2);
+    expect(easeOf({ fullnessRatio: 1.5 })).toBe(1.5);
+    expect(easeOf({ fullnessRatio: '' })).toBeNull();
+    expect(easeOf(undefined)).toBeNull();
   });
   it('sums edges and inner lines of a side', () => {
     const geoms = new Map([['FP', rect('FP', 100, 200)]]);
@@ -391,7 +453,8 @@ describe('suggestStepPair', () => {
   });
 
   // Card 83 lengths: the armhole is two edges (217 + 255) against a 492 cap, so no single
-  // edge fits; a 449 side seam (18°) is near the cap's length but is not an armhole.
+  // edge fits; a 449 side seam (18°) is near the cap's length but is not an armhole. These
+  // shapes carry no corners, so no chain forms either (the real outlines below do).
   it('body + sleeve with no curve pair in the gate: no suggestion, not a side seam', () => {
     const keys = new Set(['FR', 'BP', 'SLV_R']);
     const ops = [
@@ -435,6 +498,83 @@ describe('suggestStepPair', () => {
     ]);
     const suggestion = suggestStepPair(ops, 1, keys, geoms, new Set(), null)!;
     expect([...suggestion.a, ...suggestion.b].sort()).toEqual(['FL#0', 'SLV_L#0']);
+  });
+});
+
+describe('card 83: chains across the seams earlier steps made', () => {
+  const { geoms, keys, ops, at } = card83();
+
+  it('370: the armhole, front + back across the side seam, meets the sleeve cap', () => {
+    const s = suggestStepPair(ops, at(370), keys, geoms, new Set(), null)!;
+    expect(s.a).toEqual(['FL#1', 'BP#1']);
+    expect(s.b).toEqual(['SLV_L#0']);
+    expect(s.aLen).toBeCloseTo(471.4, 0);
+    expect(s.bLen).toBeCloseTo(491.6, 0);
+    // The picker, once that pair is taken: the other armhole and the other sleeve.
+    const next = suggestStepPair(ops, at(370), keys, geoms, new Set([...s.a, ...s.b]), null)!;
+    expect(next.a).toEqual(['FR#3', 'BP#5']);
+    expect(next.b).toEqual(['SLV_R#1']);
+    expect(suggestionWords(next, (p) => p)).toBe('FR-3 + BP-5 ↔ SLV_R-1');
+  });
+
+  it('400: the neckline, front + back + front across the shoulders, meets the collar', () => {
+    const s = suggestStepPair(ops, at(400), keys, geoms, new Set(), null)!;
+    expect(s.a).toEqual(['CLR_1#7']);
+    expect(s.b).toEqual(['FR#1', 'BP#7', 'FL#3']);
+    expect(s.aLen).toBeCloseTo(459.6, 0);
+    expect(s.bLen).toBeCloseTo(590.3, 0);
+  });
+
+  it('single-edge steps keep their answers', () => {
+    expect(suggestStepPair(ops, at(200), keys, geoms, new Set(), null)).toMatchObject({
+      a: ['FR#4'],
+      b: ['BP#4'],
+    });
+    expect(suggestStepPair(ops, at(280), keys, geoms, new Set(), null)).toMatchObject({
+      a: ['SLV_R#3'],
+      b: ['SLV_M_R#0'],
+    });
+  });
+
+  it('stored seams are junctions too; the neck run stops at the fronts, not on the placket', () => {
+    const rows = new Map([
+      ['placket', storedSeam('placket', 'PLCK#0', 'FL#4')],
+      ['side', storedSeam('side', 'FR#4', 'BP#4')],
+    ]);
+    const stored = ops.map((op) =>
+      op.operationNumber === 130
+        ? { ...op, seamKeys: ['placket'] }
+        : op.operationNumber === 200
+          ? { ...op, seamKeys: ['side'] }
+          : op,
+    );
+    const arm = suggestStepPair(
+      stored,
+      at(370),
+      keys,
+      geoms,
+      usedEdgesBeforeStep(stored, at(370), rows),
+      null,
+      rows,
+    )!;
+    expect([arm.a.length, arm.b.length]).toEqual([2, 1]);
+    const neck = suggestStepPair(
+      stored,
+      at(400),
+      keys,
+      geoms,
+      usedEdgesBeforeStep(stored, at(400), rows),
+      null,
+      rows,
+    )!;
+    expect(neck.a).toEqual(['CLR_1#7']);
+    expect(neck.b).toEqual(['FR#1', 'BP#7', 'FL#3']);
+  });
+
+  it('without the step list a chain crosses no seam: the armhole stays two edges', () => {
+    expect(
+      suggestPair([{ pieces: ['FR', 'BP'] }, { pieces: ['SLV_R'] }], geoms, new Set(), null),
+    ).toBeNull();
   });
 });
 

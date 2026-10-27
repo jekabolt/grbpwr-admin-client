@@ -193,8 +193,8 @@ export default function SeamPicker({
     [inkOf],
   );
   const suggestion = useMemo(
-    () => (frozen ? null : suggestStepPair(ops, index, pieceKeys, geoms, used, ease)),
-    [frozen, ops, index, pieceKeys, geoms, used, ease],
+    () => (frozen ? null : suggestStepPair(ops, index, pieceKeys, geoms, used, ease, byKey)),
+    [frozen, ops, index, pieceKeys, geoms, used, ease, byKey],
   );
 
   // ── what «pair» would write ──

@@ -65,9 +65,9 @@ export function StepSeamsRow({ index }: { index: number }) {
   const suggestion = useMemo(
     () =>
       keys.length === 0 && geo?.dep.status !== 'pending'
-        ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease)
+        ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease, byKey)
         : null,
-    [keys.length, geo?.dep.status, ops, index, pieceKeys, geoms, used, ease],
+    [keys.length, geo?.dep.status, ops, index, pieceKeys, geoms, used, ease, byKey],
   );
   const nameOf = useCallback(
     (key: string) => geo?.pieces.get(key)?.name || ctx?.nameOf(key) || key,
