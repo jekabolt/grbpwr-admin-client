@@ -264,6 +264,12 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import { useStepSeams } from './step-seams/step-seams-context';
+import {
+  hasMultipleStepPieces,
+  suggestStepPair,
+  type FormOpLike,
+} from './step-seams/step-seams-model';
 import { StepSeamsRow } from './step-seams/step-seams-row';
 import type { PieceShapeMap } from './use-piece-shapes';
 import {
@@ -273,7 +279,7 @@ import {
   type OrphanPieceInfo,
 } from './orphan-pieces';
 import { planOldPieceOps } from './nesting/old-pieces-ops';
-import type { SkeletonStep } from 'lib/assembly-skeleton/types';
+import type { PieceGeom, SkeletonStep } from 'lib/assembly-skeleton/types';
 import {
   clearReview,
   ghostCandidates,
@@ -1234,6 +1240,40 @@ function OperationsHeaderWarnings({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
+  const seams = useStepSeams();
+  const seamGeometry = seams?.geometry;
+  const seamGeoms = useMemo(() => {
+    const map = new Map<string, PieceGeom>();
+    for (const [key, piece] of seamGeometry?.pieces ?? []) map.set(key, piece.geom);
+    return map;
+  }, [seamGeometry?.pieces]);
+  const seamPieceKeys = useMemo(() => {
+    const set = new Set<string>(seamGeometry?.pieces.keys() ?? []);
+    for (const piece of seams?.techCard?.techCard?.pieces ?? []) {
+      if (piece.lineKey) set.add(piece.lineKey);
+    }
+    return set;
+  }, [seams?.techCard?.techCard?.pieces, seamGeometry?.pieces]);
+  const missingSeamSteps = useMemo(() => {
+    if (!seams || seamGeometry?.dep.status === 'pending') return [];
+    const ops = operations as FormOpLike[];
+    return ops.flatMap((operation, index) => {
+      if (
+        (operation.seamKeys?.length ?? 0) > 0 ||
+        !hasMultipleStepPieces(ops, index, seamPieceKeys)
+      ) {
+        return [];
+      }
+      const ratio = Number.parseFloat(
+        String((operation as FormOpLike & { fullnessRatio?: string }).fullnessRatio ?? '').replace(
+          ',',
+          '.',
+        ),
+      );
+      const ease = Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+      return suggestStepPair(ops, index, seamPieceKeys, seamGeoms, new Set(), ease) ? [] : [index];
+    });
+  }, [operations, seamGeometry?.dep.status, seamGeoms, seamPieceKeys, seams]);
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     lineKey?: string;
     name?: string;
@@ -1285,6 +1325,13 @@ function OperationsHeaderWarnings({
   stepProblems.forEach(({ index, status }) => {
     items.push({
       text: `${operationStepNumber(index)} · ${status}`,
+      error: true,
+      action: { label: 'open step', onClick: () => onStepProblem(index) },
+    });
+  });
+  missingSeamSteps.forEach((index) => {
+    items.push({
+      text: `${operationStepNumber(index)} · no seam`,
       error: true,
       action: { label: 'open step', onClick: () => onStepProblem(index) },
     });
@@ -4822,6 +4869,7 @@ function OperationEditor({
           onEdit={onEdit}
         />
       </div>
+      <StepSeamsRow index={index} />
       {addingMaterial && unlinkedBySection.length > 0 && (
         <div className='mt-2 space-y-2'>
           {unlinkedBySection.map(([section, lines]) => (
@@ -5416,9 +5464,6 @@ function OperationEditor({
                 </ChipRow>
               </div>
             )}
-            <div className='sm:col-span-2'>
-              <StepSeamsRow index={index} />
-            </div>
           </div>
         </Accordion>
       </div>

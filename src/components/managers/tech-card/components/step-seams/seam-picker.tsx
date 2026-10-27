@@ -7,7 +7,6 @@
 // only by «accept». «place» drags the part onto its host for a surface seam.
 
 import * as Dialog from '@radix-ui/react-dialog';
-import type { common_TechCard } from 'api/proto-http/admin';
 import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
 import {
@@ -20,15 +19,14 @@ import {
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Chip, ChipRow, Close, Pill, Placeholder, Text, ViewSwitch } from 'ui';
-import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import type { AsmPiece } from '../../techpack/derive-assembly';
 import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
-import { rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
+import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import type { TechCardFormData } from '../schema';
 import { PairNo } from './pair-no';
 import { PAIR_INK, PIECE_INK, SIDE_INK } from './palette';
-import { useStepSeams } from './step-seams-context';
+import { useAttachStepSeam, useStepSeams } from './step-seams-context';
 import {
   deltaMm,
   fmtMm,
@@ -39,7 +37,8 @@ import {
   pieceOfTarget,
   rowWords,
   sideOf,
-  suggestPair,
+  suggestStepPair,
+  suggestionWords,
   surfaceRow,
   targetWords,
   type FormOpLike,
@@ -103,9 +102,9 @@ export default function SeamPicker({
   onClose: () => void;
 }) {
   const ctx = useStepSeams()!;
-  const { techCard, frozen, writes, nameOf: cardName } = ctx;
-  const geo = useAssemblyGeometry((techCard ?? {}) as common_TechCard);
+  const { techCard, frozen, geometry: geo, nameOf: cardName } = ctx;
   const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const attach = useAttachStepSeam(index);
   const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOpLike[];
   const op = ops[index] as (FormOpLike & { fullnessRatio?: string }) | undefined;
   const keys = useMemo(() => [...(op?.seamKeys ?? [])], [op?.seamKeys]);
@@ -194,8 +193,8 @@ export default function SeamPicker({
     [inkOf],
   );
   const suggestion = useMemo(
-    () => (frozen ? null : suggestPair(groups, geoms, used, ease)),
-    [frozen, groups, geoms, used, ease],
+    () => (frozen ? null : suggestStepPair(ops, index, pieceKeys, geoms, used, ease)),
+    [frozen, ops, index, pieceKeys, geoms, used, ease],
   );
 
   // ── what «pair» would write ──
@@ -267,24 +266,17 @@ export default function SeamPicker({
       }
       setBusy(true);
       setRefused('');
-      const ok = await writes.upsert([row]);
+      const ok = await attach(row);
       setBusy(false);
       if (!ok) {
         setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
         return;
       }
-      const sig = rowPairSig(row);
-      const stored = rowsOf(useSeamsStore.getState()).find((r) => rowPairSig(r) === sig);
-      const key = stored?.seamKey ?? row.seamKey;
-      const cur = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
-      setValue(`operations.${index}.seamKeys`, [...cur.filter((k) => k !== key), key], {
-        shouldDirty: true,
-      });
       setSel(EMPTY);
       setPlace(null);
       setChosen('a');
     },
-    [frozen, busy, buildRow, writes, getValues, setValue, index],
+    [frozen, busy, buildRow, attach],
   );
 
   const dropKey = (key: string) => {
@@ -629,9 +621,9 @@ export default function SeamPicker({
             {suggestion && !sel.a.length && !sel.b.length && (
               <ChipRow>
                 <Text size='control' variant='label'>
-                  {`${suggestion.a.map((id) => targetWords(id, nameOf)).join(' + ')} ↔ ${suggestion.b
-                    .map((id) => targetWords(id, nameOf))
-                    .join(' + ')} · Δ ${fmtMm(deltaMm(suggestion.aLen, suggestion.bLen, ease))}`}
+                  {`${suggestionWords(suggestion, nameOf)} · Δ ${fmtMm(
+                    deltaMm(suggestion.aLen, suggestion.bLen, ease),
+                  )}`}
                 </Text>
                 <Chip
                   dashed

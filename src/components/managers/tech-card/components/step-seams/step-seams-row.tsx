@@ -2,26 +2,34 @@
 // chips (① FP_L ↔ BP_L), a ✕ that takes the key off this step only (the seam stays on the card),
 // and «pick» — the picker. `?pick=<op number>` (a PDF-gap deep link) opens it on arrival.
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Chip, ChipRow, Text } from 'ui';
+import { Button, Chip, ChipRow, Text } from 'ui';
+import { rowFromHand } from '../assembly-seams/seam-actions';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import type { TechCardFormData } from '../schema';
 import { PairNo } from './pair-no';
-import { useStepSeams } from './step-seams-context';
-import { rowWords } from './step-seams-model';
+import { useAttachStepSeam, useStepSeams } from './step-seams-context';
+import {
+  hasMultipleStepPieces,
+  rowWords,
+  suggestStepPair,
+  suggestionWords,
+  type FormOpLike,
+} from './step-seams-model';
 
 const SeamPicker = lazy(() => import('./seam-picker'));
 
 export function StepSeamsRow({ index }: { index: number }) {
   const ctx = useStepSeams();
   const { setValue, getValues } = useFormContext<TechCardFormData>();
-  const keys = (useWatch<TechCardFormData>({ name: `operations.${index}.seamKeys` }) ??
-    []) as string[];
-  const opNumber = useWatch<TechCardFormData>({ name: `operations.${index}.operationNumber` }) as
-    | number
-    | undefined;
+  const attach = useAttachStepSeam(index);
+  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOpLike[];
+  const op = ops[index] as (FormOpLike & { fullnessRatio?: string }) | undefined;
+  const keys = useMemo(() => [...(op?.seamKeys ?? [])], [op?.seamKeys]);
+  const opNumber = op?.operationNumber;
   const server = useSeamsStore((s) => s.server);
   const pending = useSeamsStore((s) => s.pending);
   const byKey = useMemo(
@@ -29,12 +37,46 @@ export function StepSeamsRow({ index }: { index: number }) {
     [server, pending],
   );
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const geo = ctx?.geometry;
+  const geoms = useMemo(() => {
+    const map = new Map<string, PieceGeom>();
+    for (const [key, piece] of geo?.pieces ?? []) map.set(key, piece.geom);
+    return map;
+  }, [geo?.pieces]);
+  const pieceKeys = useMemo(() => {
+    const set = new Set<string>(geo?.pieces.keys() ?? []);
+    for (const piece of ctx?.techCard?.techCard?.pieces ?? []) {
+      if (piece.lineKey) set.add(piece.lineKey);
+    }
+    return set;
+  }, [ctx?.techCard?.techCard?.pieces, geo?.pieces]);
+  const hasMultiplePieces = useMemo(
+    () => hasMultipleStepPieces(ops, index, pieceKeys),
+    [ops, index, pieceKeys],
+  );
+  const ease = useMemo(() => {
+    const ratio = Number.parseFloat(String(op?.fullnessRatio ?? '').replace(',', '.'));
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+  }, [op?.fullnessRatio]);
+  const suggestion = useMemo(
+    () =>
+      keys.length === 0 && geo?.dep.status !== 'pending'
+        ? suggestStepPair(ops, index, pieceKeys, geoms, new Set(), ease)
+        : null,
+    [keys.length, geo?.dep.status, ops, index, pieceKeys, geoms, ease],
+  );
+  const nameOf = useCallback(
+    (key: string) => geo?.pieces.get(key)?.name || ctx?.nameOf(key) || key,
+    [ctx, geo?.pieces],
+  );
 
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.
   const [params, setParams] = useSearchParams();
   const pick = params.get('pick');
   useEffect(() => {
-    if (!ctx || !pick || !opNumber || String(opNumber) !== pick) return;
+    if (!ctx || !hasMultiplePieces || !pick || !opNumber || String(opNumber) !== pick) return;
     setOpen(true);
     setParams(
       (p) => {
@@ -44,10 +86,10 @@ export function StepSeamsRow({ index }: { index: number }) {
       },
       { replace: true },
     );
-  }, [ctx, pick, opNumber, setParams]);
+  }, [ctx, hasMultiplePieces, pick, opNumber, setParams]);
 
-  if (!ctx) return null;
-  const { cardId, frozen, nameOf } = ctx;
+  if (!ctx || !hasMultiplePieces) return null;
+  const { cardId, frozen } = ctx;
 
   const drop = (key: string) => {
     const cur = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
@@ -56,6 +98,21 @@ export function StepSeamsRow({ index }: { index: number }) {
       cur.filter((k) => k !== key),
       { shouldDirty: true },
     );
+  };
+
+  const accept = async () => {
+    if (!suggestion || !geo || frozen || !cardId || busy) return;
+    const row = rowFromHand(
+      suggestion.a,
+      suggestion.b,
+      geoms,
+      { pieces: [...geoms.values()], grainDeg: geo.grainDeg, nameOf },
+      { direction: 'reversed' },
+    );
+    if (!row) return;
+    setBusy(true);
+    await attach(row);
+    setBusy(false);
   };
 
   return (
@@ -78,16 +135,36 @@ export function StepSeamsRow({ index }: { index: number }) {
             </Chip>
           );
         })}
-        <Chip
-          dashed
-          nonForm
+        {keys.length === 0 && suggestion && <Chip>{suggestionWords(suggestion, nameOf)}</Chip>}
+        {keys.length === 0 && geo?.dep.status !== 'pending' && !suggestion && (
+          <Text size='micro' variant='error'>
+            no seam
+          </Text>
+        )}
+        {keys.length === 0 && suggestion && !frozen && (
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            onClick={() => void accept()}
+            disabled={!cardId || busy}
+            title={cardId ? undefined : 'save first'}
+            data-step-seams-accept=''
+          >
+            accept
+          </Button>
+        )}
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
           onClick={() => setOpen(true)}
           disabled={!cardId}
           title={cardId ? undefined : 'save first'}
           data-step-seams-pick=''
         >
           pick
-        </Chip>
+        </Button>
       </ChipRow>
       {open && (
         <Suspense fallback={null}>

@@ -5,12 +5,16 @@ import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
   deltaMm,
   dropKeys,
+  hasMultipleStepPieces,
   inputGroups,
   innerAnchor,
   longestEdge,
   rowWords,
   sideOf,
+  stepInputPieces,
   suggestPair,
+  suggestStepPair,
+  suggestionWords,
   surfaceRow,
   targetsLen,
 } from './step-seams-model';
@@ -81,6 +85,28 @@ describe('inputGroups', () => {
   });
 });
 
+describe('step seam eligibility', () => {
+  const pieces = new Set(['FP', 'BP']);
+
+  it('counts distinct leaf pieces in WITH, including pieces inside a unit', () => {
+    const ops = [{ inputKeys: ['FP', 'BP'], outputUnitKey: 'BODY' }, { inputKeys: ['BODY'] }];
+    expect(stepInputPieces(ops, 1, pieces)).toEqual(['FP', 'BP']);
+    expect(hasMultipleStepPieces(ops, 1, pieces)).toBe(true);
+  });
+
+  it('does not count materials, photos, duplicates, or unresolved keys as pieces', () => {
+    const ops = [
+      {
+        inputKeys: ['FP', 'FP', 'GHOST'],
+        bomLineKeys: ['THREAD'],
+        media: [{ mediaId: 4 }],
+      },
+    ];
+    expect(stepInputPieces(ops, 0, pieces)).toEqual(['FP']);
+    expect(hasMultipleStepPieces(ops, 0, pieces)).toBe(false);
+  });
+});
+
 describe('lengths', () => {
   it('Δ is the plain difference without ease, the gathered difference with it', () => {
     expect(deltaMm(500, 480, null)).toBe(20);
@@ -128,6 +154,28 @@ describe('suggestPair', () => {
     const s = suggestPair([{ pieces: ['FP'] }, { pieces: ['BP'] }], geoms, new Set(), null)!;
     expect(s.a).toEqual(['FP#0']);
     expect(s.b).toEqual(['BP#3']);
+  });
+});
+
+describe('suggestStepPair', () => {
+  it('uses the shared WITH gate and produces the compact row words', () => {
+    const pieces = new Set(['BP_U', 'BP_MAIN']);
+    const geoms = new Map([
+      ['BP_U', rect('BP_U', 300, 500)],
+      ['BP_MAIN', rect('BP_MAIN', 310, 502)],
+    ]);
+    const suggestion = suggestStepPair(
+      [{ inputKeys: ['BP_U', 'BP_MAIN'] }],
+      0,
+      pieces,
+      geoms,
+      new Set(),
+      null,
+    )!;
+    expect(suggestionWords(suggestion, (piece) => piece)).toMatch(/^BP_U-\d+ ↔ BP_MAIN-\d+$/);
+    expect(
+      suggestStepPair([{ inputKeys: ['BP_U'] }], 0, pieces, geoms, new Set(), null),
+    ).toBeNull();
   });
 });
 

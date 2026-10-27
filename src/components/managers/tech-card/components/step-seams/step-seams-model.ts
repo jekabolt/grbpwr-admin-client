@@ -68,6 +68,24 @@ export function inputGroups(
     .filter((g) => g.key && g.pieces.length > 0);
 }
 
+/** Distinct leaf pieces held by this step's WITH inputs; materials and photos are not inputs. */
+export function stepInputPieces(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): string[] {
+  return [...new Set(inputGroups(ops, index, pieceKeys).flatMap((group) => group.pieces))];
+}
+
+/** The seams row exists only when WITH resolves to at least two distinct pieces. */
+export function hasMultipleStepPieces(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): boolean {
+  return stepInputPieces(ops, index, pieceKeys).length >= 2;
+}
+
 /** Side a click lands on: by input when the step joins two or more inputs, else the chosen side. */
 export function sideOf(
   piece: string,
@@ -146,6 +164,27 @@ export function suggestPair(
     }
   }
   return best?.s ?? null;
+}
+
+/** One step's suggestion, including the shared WITH piece-count gate. */
+export function suggestStepPair(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  used: ReadonlySet<EdgeId>,
+  ease: number | null,
+): Suggestion | null {
+  const groups = inputGroups(ops, index, pieceKeys);
+  if (new Set(groups.flatMap((group) => group.pieces)).size < 2) return null;
+  return suggestPair(groups, geoms, used, ease);
+}
+
+/** Compact words shared by the row and picker: `BP_U-5 ↔ BP_MAIN-1`. */
+export function suggestionWords(suggestion: Suggestion, nameOf: (piece: string) => string): string {
+  const words = (ids: readonly EdgeId[]) =>
+    ids.map((id) => `${nameOf(pieceOf(id))}-${id.slice(id.lastIndexOf('#') + 1)}`).join(' + ');
+  return `${words(suggestion.a)} ↔ ${words(suggestion.b)}`;
 }
 
 // ─── the rows a pick writes ───────────────────────────────────────────────────────────────────────

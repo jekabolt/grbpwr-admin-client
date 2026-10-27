@@ -8,10 +8,20 @@
 //   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever.
 
 import type { common_TechCard } from 'api/proto-http/admin';
-import type { TechCardSeamWire } from 'lib/seams';
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import type { StoredSeam, TechCardSeamWire } from 'lib/seams';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react';
 import { useFormContext } from 'react-hook-form';
-import { hydrateSeams, useSeamsStore } from '../assembly-seams/seams-store';
+import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
+import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
+import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
 import { dropKeys } from './step-seams-model';
@@ -21,6 +31,7 @@ export type StepSeamsCtx = {
   cardId: number | undefined;
   frozen: boolean;
   writes: SeamWrites;
+  geometry: AssemblyGeometry;
   /** A piece's words by its line key: the card's name, else the key. */
   nameOf: (pieceKey: string) => string;
 };
@@ -29,6 +40,30 @@ const Ctx = createContext<StepSeamsCtx | null>(null);
 
 /** Null outside a provider: the row then draws nothing (print, stands, other tabs). */
 export const useStepSeams = () => useContext(Ctx);
+
+/** Store one seam row, then attach the server's canonical key to this form step. */
+export function useAttachStepSeam(index: number) {
+  const ctx = useStepSeams();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  return useCallback(
+    async (row: StoredSeam): Promise<boolean> => {
+      if (!ctx) return false;
+      const ok = await ctx.writes.upsert([row]);
+      if (!ok) return false;
+      const sig = rowPairSig(row);
+      const stored = rowsOf(useSeamsStore.getState()).find(
+        (candidate) => rowPairSig(candidate) === sig,
+      );
+      const key = stored?.seamKey ?? row.seamKey;
+      const current = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
+      setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
+        shouldDirty: true,
+      });
+      return true;
+    },
+    [ctx, getValues, index, setValue],
+  );
+}
 
 export function StepSeamsProvider({
   techCard,
@@ -41,6 +76,7 @@ export function StepSeamsProvider({
 }) {
   const cardId = techCard?.id;
   const writes = useSeamWrites(cardId, frozen);
+  const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard);
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
   // The store follows the card read here too: the assembly map's door hydrates it only while the
@@ -83,8 +119,8 @@ export function StepSeamsProvider({
   }, [techCard?.techCard?.pieces]);
 
   const value = useMemo<StepSeamsCtx>(
-    () => ({ techCard, cardId, frozen, writes, nameOf: (k) => names.get(k) ?? k }),
-    [techCard, cardId, frozen, writes, names],
+    () => ({ techCard, cardId, frozen, writes, geometry, nameOf: (k) => names.get(k) ?? k }),
+    [techCard, cardId, frozen, writes, geometry, names],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
