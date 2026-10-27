@@ -40,7 +40,16 @@ export type UnionOptions = {
    * (00-FEASIBILITY §F: tolerable to ~30 mm) — the placement is marked `approx`.
    */
   hangErrMm?: number;
+  /**
+   * Largest lean (rad) a placement may give a piece from its own up — the angle of its y axis,
+   * mirrored or not. A link whose every option leans more is not taken (the piece stands apart).
+   * Absent = any; a stacked layer under its identical twin is never held to it.
+   */
+  uprightMax?: number;
 };
+
+/** How far a placement leans a piece from its own up, mirrored or not. */
+const tiltOf = (T: Affine) => Math.atan2(Math.abs(T[2]), T[3]);
 
 type ResolvedEdge = { id: EdgeId; pieceKey: string; pts: Pt2[]; len: number };
 
@@ -278,6 +287,7 @@ export function unionLayout(
         const q0 = rev ? B[B.length - 1] : B[0];
         const q1 = rev ? B[0] : B[B.length - 1];
         const T = rigid(a0, a1, q0, q1, mir);
+        if (!stack && opts.uprightMax != null && tiltOf(T) > opts.uprightMax) continue;
         const e1 = apply(T, q1);
         const endErr = Math.hypot(e1[0] - a1[0], e1[1] - a1[1]);
         const r = rasterOf(l.toKey, T);

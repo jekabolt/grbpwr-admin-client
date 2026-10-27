@@ -266,6 +266,7 @@ import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-si
 import { TechCardFormData } from './schema';
 import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useStepSeams } from './step-seams/step-seams-context';
+import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
   hasMultipleStepPieces,
   suggestStepPair,
@@ -4772,23 +4773,22 @@ function OperationEditor({
           </span>
         ))}
         {chosenUnits.map((key) => (
-          <div key={`u:${key}`} className='relative size-14'>
-            <Tile
+          <span key={`u:${key}`} className='relative inline-flex size-14 border border-borderColor'>
+            <UnitPictureTile
+              leaves={assembly.res.units.get(key)?.leaves ?? []}
               name={unitDisplayName({
                 key,
                 outputUnitName: assembly.res.units.get(key)?.name,
               })}
-              sub='unit'
-              className='justify-center'
             />
             <Close
               size='sm'
               aria-label='remove unit'
               title='remove unit'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80'
+              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
             />
-          </div>
+          </span>
         ))}
         {chosenGhosts.map((ghostKey) => {
           const ghostName = byKey.get(ghostKey)?.name?.trim() || 'piece';

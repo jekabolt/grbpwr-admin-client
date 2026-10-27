@@ -35,6 +35,7 @@ import {
   seamOfSides,
   seamSig,
   splitSeams,
+  spotInside,
   spreadLabels,
   stepLayout,
   toPx,
@@ -76,24 +77,18 @@ export type StoredOnStep = {
  * each), the piece geometry, the card's seams split by this step, the step's stored seams and the
  * length proposal. Null outside the step-seams provider.
  */
-export function useStepScene(index: number) {
+/**
+ * The card's piece geometry as the placer reads it (rs frame, y up) and each piece's inner lines
+ * (placement, fold) in that frame. Empty outside the step-seams provider or before the DXF is read.
+ */
+export function useCardGeoms() {
   const ctx = useStepSeams();
-  const { graph } = useCardSeamGraph();
-  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as SceneOp[];
-  const op = ops[index];
   const geo = ctx?.geometry;
-
   const geoms = useMemo(() => {
     const m = new Map<string, PieceGeom>();
     for (const [k, p] of geo?.pieces ?? []) m.set(k, p.geom);
     return m;
   }, [geo?.pieces]);
-  const pieceKeys = useMemo(() => {
-    const s = new Set<string>(geo?.pieces.keys() ?? []);
-    for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
-    return s;
-  }, [geo?.pieces, ctx?.techCard?.techCard?.pieces]);
-  /** Inner lines (placement, fold) in the segmentation frame (y up). */
   const innerLines = useMemo(() => {
     const m = new Map<string, Pt2[][]>();
     for (const [k, p] of geo?.pieces ?? [])
@@ -103,6 +98,58 @@ export function useStepScene(index: number) {
       );
     return m;
   }, [geo?.pieces]);
+  return { ctx, geo, geoms, innerLines };
+}
+
+/**
+ * The card's seams split by the inputs, every one laid as the placer needs it: a stored surface seam
+ * reaches the graph with no mark (T = identity), so it is laid by its row's placement, else on its
+ * host's line; one the rows do not hold is not drawn as laid.
+ */
+export function splitLaid(
+  chosen: readonly SeamCandidate[],
+  leaves: readonly (readonly string[])[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, Pt2[][]>,
+  byKey: ReadonlyMap<string, StoredSeam>,
+): { inner: SeamCandidate[]; cross: SeamCandidate[] } {
+  const raw = splitSeams(chosen, leaves, geoms);
+  const laid = (c: SeamCandidate): SeamCandidate | null => {
+    if (c.kind !== 'surface' || c.surface?.mark) return c;
+    const row = c.provenance ? byKey.get(c.provenance.seamKey) : undefined;
+    if (!row) return null;
+    const sides = {
+      a: row.sideA.flatMap(targetsOfAnchor),
+      b: row.sideB.flatMap(targetsOfAnchor),
+    };
+    const at = [...row.sideA, ...row.sideB].find((x) => x.placement)?.placement;
+    return seamOfSides(sides, geoms, innerLines, at);
+  };
+  const keep = (xs: SeamCandidate[]) => xs.map(laid).filter((c): c is SeamCandidate => !!c);
+  return { inner: keep(raw.inner), cross: keep(raw.cross) };
+}
+
+/** The card's stored seam rows by key, server and pending alike. */
+export function useSeamRows(): ReadonlyMap<string, StoredSeam> {
+  const server = useSeamsStore((s) => s.server);
+  const pending = useSeamsStore((s) => s.pending);
+  return useMemo(
+    () => new Map(rowsOf({ server, pending }).map((r) => [r.seamKey, r])),
+    [server, pending],
+  );
+}
+
+export function useStepScene(index: number) {
+  const { graph } = useCardSeamGraph();
+  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as SceneOp[];
+  const op = ops[index];
+  const { ctx, geo, geoms, innerLines } = useCardGeoms();
+
+  const pieceKeys = useMemo(() => {
+    const s = new Set<string>(geo?.pieces.keys() ?? []);
+    for (const p of ctx?.techCard?.techCard?.pieces ?? []) if (p.lineKey) s.add(p.lineKey);
+    return s;
+  }, [geo?.pieces, ctx?.techCard?.techCard?.pieces]);
 
   const cardName = ctx?.nameOf;
   const pieceName = useCallback(
@@ -123,12 +170,7 @@ export function useStepScene(index: number) {
     return Number.isFinite(r) && r > 0 ? r : null;
   })();
 
-  const server = useSeamsStore((s) => s.server);
-  const pending = useSeamsStore((s) => s.pending);
-  const byKey = useMemo(
-    () => new Map(rowsOf({ server, pending }).map((r) => [r.seamKey, r])),
-    [server, pending],
-  );
+  const byKey = useSeamRows();
   const stored = useMemo<StoredOnStep[]>(
     () =>
       keys.map((key) => {
@@ -166,24 +208,10 @@ export function useStepScene(index: number) {
     sugRaw ? `${sugRaw.a.join('+')}|${sugRaw.b.join('+')}|${sugRaw.aLen}|${sugRaw.bLen}` : '',
   );
 
-  const split = useMemo(() => {
-    const raw = splitSeams(graph?.chosen ?? [], leaves, geoms);
-    // A stored surface seam reaches the graph with no mark (T = identity): lay it by its row's
-    // placement, else on its host's line; one the rows do not hold is not drawn as laid.
-    const laid = (c: SeamCandidate): SeamCandidate | null => {
-      if (c.kind !== 'surface' || c.surface?.mark) return c;
-      const row = c.provenance ? byKey.get(c.provenance.seamKey) : undefined;
-      if (!row) return null;
-      const sides = {
-        a: row.sideA.flatMap(targetsOfAnchor),
-        b: row.sideB.flatMap(targetsOfAnchor),
-      };
-      const at = [...row.sideA, ...row.sideB].find((x) => x.placement)?.placement;
-      return seamOfSides(sides, geoms, innerLines, at);
-    };
-    const keep = (xs: SeamCandidate[]) => xs.map(laid).filter((c): c is SeamCandidate => !!c);
-    return { inner: keep(raw.inner), cross: keep(raw.cross) };
-  }, [graph?.chosen, leaves, geoms, byKey, innerLines]);
+  const split = useMemo(
+    () => splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey),
+    [graph?.chosen, leaves, geoms, byKey, innerLines],
+  );
   const innerSeams = useStable(split.inner, seamSig(split.inner));
 
   const storedRaw = stored
@@ -396,16 +424,26 @@ export function StepPictureSvg({
     const pts = ptsOf(id);
     return pts ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], 18) }] : [];
   });
+  // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
+  // never across the gap between pieces that only stand together.
   const nameSpots = (names ?? []).flatMap((text, gi) => {
+    const own = pieces.filter((p) => p.input === gi);
     const ring = [
-      ...pieces.filter((p) => p.input === gi).flatMap((p) => p.ring),
+      ...own.flatMap((p) => p.ring),
       ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
     ];
     if (!ring.length || !text) return [];
     const b = boxOf(ring);
+    const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
+      const pb = boxOf(p.ring);
+      const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
+      return !m || area > m.area ? { ring: p.ring, area } : m;
+    }, null);
     const at: Pt2 = namesBelow
       ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
-      : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+      : biggest
+        ? spotInside(biggest.ring)
+        : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
     const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
