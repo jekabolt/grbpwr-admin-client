@@ -17,6 +17,7 @@ import {
   rowWords,
   suggestStepPair,
   suggestionWords,
+  usedEdgesBeforeStep,
   type FormOpLike,
 } from './step-seams-model';
 
@@ -60,12 +61,13 @@ export function StepSeamsRow({ index }: { index: number }) {
     const ratio = Number.parseFloat(String(op?.fullnessRatio ?? '').replace(',', '.'));
     return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
   }, [op?.fullnessRatio]);
+  const used = useMemo(() => usedEdgesBeforeStep(ops, index, byKey), [ops, index, byKey]);
   const suggestion = useMemo(
     () =>
       keys.length === 0 && geo?.dep.status !== 'pending'
-        ? suggestStepPair(ops, index, pieceKeys, geoms, new Set(), ease)
+        ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease)
         : null,
-    [keys.length, geo?.dep.status, ops, index, pieceKeys, geoms, ease],
+    [keys.length, geo?.dep.status, ops, index, pieceKeys, geoms, used, ease],
   );
   const nameOf = useCallback(
     (key: string) => geo?.pieces.get(key)?.name || ctx?.nameOf(key) || key,

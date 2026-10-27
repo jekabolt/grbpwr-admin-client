@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
 import {
   deltaMm,
   dropKeys,
   hasMultipleStepPieces,
   inputGroups,
+  inputUnitsWithOuterEdges,
   innerAnchor,
+  isJoinStep,
   longestEdge,
   rowWords,
   sideOf,
@@ -17,6 +20,7 @@ import {
   suggestionWords,
   surfaceRow,
   targetsLen,
+  usedEdgesBeforeStep,
 } from './step-seams-model';
 
 /** A w × h rectangle, CCW from the origin, one plain edge per side (`KEY#0..3`). */
@@ -56,7 +60,73 @@ function rect(key: string, w: number, h: number, notches: number[][] = []): Piec
     rect: true,
     areaMm2: w * h,
     perimMm: 2 * (w + h),
+    twinOf: [],
   } as unknown as PieceGeom;
+}
+
+function shaped(
+  key: string,
+  name: string,
+  edges: readonly { len: number; turn?: number; notches?: number[] }[],
+  hand: PieceGeom['hand'] = null,
+): PieceGeom {
+  const base = rect(key, 100, 100);
+  const shapedEdges = edges.map(
+    ({ len, turn = 0, notches = [] }, k): Edge => ({
+      ...base.edges[k % base.edges.length],
+      id: `${key}#${k}`,
+      pieceKey: key,
+      k,
+      s: k,
+      e: k + 1,
+      pts: [
+        [0, k * 10],
+        [len, k * 10],
+      ],
+      lenMm: len,
+      chordMm: turn ? len * 0.9 : len,
+      turnDeg: turn,
+      notchesMm: notches,
+    }),
+  );
+  return {
+    ...base,
+    name,
+    hand,
+    edges: shapedEdges,
+    perimMm: shapedEdges.reduce((sum, edge) => sum + edge.lenMm, 0),
+  };
+}
+
+function storedSeam(key: string, a: string, b: string): StoredSeam {
+  const anchor = (hint: string): EdgeAnchor => ({
+    piece: hint.slice(0, hint.lastIndexOf('#')),
+    samples: [
+      [0, 0],
+      [0.25, 0],
+      [0.5, 0],
+      [0.75, 0],
+      [1, 0],
+    ],
+    perimShare: 0.25,
+    lenMm: 100,
+    notches: 0,
+    turnDeg: 0,
+    range: [0, 1],
+    edgeHint: hint,
+    contourSig: 'same',
+  });
+  return {
+    seamKey: key,
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchor(a)],
+    sideB: [anchor(b)],
+    anchoredSize: '',
+    note: '',
+  };
 }
 
 describe('inputGroups', () => {
@@ -88,10 +158,16 @@ describe('inputGroups', () => {
 describe('step seam eligibility', () => {
   const pieces = new Set(['FP', 'BP']);
 
-  it('counts distinct leaf pieces in WITH, including pieces inside a unit', () => {
-    const ops = [{ inputKeys: ['FP', 'BP'], outputUnitKey: 'BODY' }, { inputKeys: ['BODY'] }];
+  it('does not show a seam row when WITH is one already assembled unit', () => {
+    const ops = [{ inputKeys: ['FP', 'BP'], outputUnitKey: 'BODY' }, { inputKeys: ['FP', 'BP'] }];
     expect(stepInputPieces(ops, 1, pieces)).toEqual(['FP', 'BP']);
-    expect(hasMultipleStepPieces(ops, 1, pieces)).toBe(true);
+    expect(inputGroups(ops, 1, pieces)).toEqual([{ key: 'BODY', pieces: ['FP', 'BP'] }]);
+    expect(isJoinStep(ops, 1, pieces)).toBe(false);
+    expect(hasMultipleStepPieces(ops, 1, pieces)).toBe(false);
+  });
+
+  it('recognises two separate live inputs as a join', () => {
+    expect(isJoinStep([{ inputKeys: ['FP', 'BP'] }], 0, pieces)).toBe(true);
   });
 
   it('does not count materials, photos, duplicates, or unresolved keys as pieces', () => {
@@ -176,6 +252,142 @@ describe('suggestStepPair', () => {
     expect(
       suggestStepPair([{ inputKeys: ['BP_U'] }], 0, pieces, geoms, new Set(), null),
     ).toBeNull();
+  });
+
+  it('370-like: picks a body armhole and sleeve cap across three input units', () => {
+    const keys = new Set(['FR', 'BP', 'SLV_R', 'R_PANEL', 'SLV_L', 'L_PANEL']);
+    const ops = [
+      { inputKeys: ['FR', 'BP'], outputUnitKey: 'BODY', seamKeys: ['body'] },
+      { inputKeys: ['SLV_R', 'R_PANEL'], outputUnitKey: 'RIGHT_SLEEVE', seamKeys: ['right'] },
+      { inputKeys: ['SLV_L', 'L_PANEL'], outputUnitKey: 'LEFT_SLEEVE', seamKeys: ['left'] },
+      { inputKeys: ['BODY', 'RIGHT_SLEEVE', 'LEFT_SLEEVE'], outputUnitKey: 'SHELL' },
+    ];
+    const geoms = new Map([
+      ['FR', shaped('FR', 'Right front', [{ len: 160, turn: -70 }, { len: 410 }, { len: 230 }])],
+      ['BP', shaped('BP', 'Back', [{ len: 164, turn: -55 }, { len: 405 }, { len: 235 }])],
+      [
+        'SLV_R',
+        shaped('SLV_R', 'Right sleeve', [{ len: 162, turn: 75 }, { len: 410 }, { len: 225 }], 'R'),
+      ],
+      [
+        'R_PANEL',
+        shaped('R_PANEL', 'Right sleeve panel', [{ len: 90 }, { len: 410 }, { len: 230 }], 'R'),
+      ],
+      [
+        'SLV_L',
+        shaped('SLV_L', 'Left sleeve', [{ len: 161, turn: 75 }, { len: 408 }, { len: 226 }], 'L'),
+      ],
+      [
+        'L_PANEL',
+        shaped('L_PANEL', 'Left sleeve panel', [{ len: 92 }, { len: 408 }, { len: 232 }], 'L'),
+      ],
+    ]);
+    const rows = new Map([
+      ['body', storedSeam('body', 'FR#1', 'BP#1')],
+      ['right', storedSeam('right', 'SLV_R#1', 'R_PANEL#1')],
+      ['left', storedSeam('left', 'SLV_L#1', 'L_PANEL#1')],
+    ]);
+    const used = usedEdgesBeforeStep(ops, 3, rows);
+    expect(inputUnitsWithOuterEdges(ops, 3, keys, geoms, used)).toHaveLength(3);
+    expect(
+      inputUnitsWithOuterEdges(ops, 3, keys, geoms, used)[0].edges.map((edge) => edge.id),
+    ).not.toContain('FR#1');
+    const suggestion = suggestStepPair(ops, 3, keys, geoms, used, null)!;
+    const pair = [...suggestion.a, ...suggestion.b];
+    expect(pair.some((id) => id === 'FR#0' || id === 'BP#0')).toBe(true);
+    expect(pair.some((id) => id === 'SLV_R#0' || id === 'SLV_L#0')).toBe(true);
+  });
+
+  it('400-like: prefers the shirt neckline to a collar stand edge', () => {
+    const keys = new Set(['COLLAR', 'STAND', 'FRONT', 'BACK', 'SLEEVE']);
+    const ops = [
+      { inputKeys: ['COLLAR', 'STAND'], outputUnitKey: 'COLLAR_UNIT', seamKeys: ['collar'] },
+      { inputKeys: ['FRONT', 'BACK', 'SLEEVE'], outputUnitKey: 'SHIRT', seamKeys: ['body'] },
+      { inputKeys: ['COLLAR_UNIT', 'SHIRT'], outputUnitKey: 'GARMENT' },
+    ];
+    const geoms = new Map([
+      ['COLLAR', shaped('COLLAR', 'Collar', [{ len: 250 }, { len: 210 }, { len: 100 }])],
+      [
+        'STAND',
+        shaped('STAND', 'Collar stand', [{ len: 182, turn: 45 }, { len: 210 }, { len: 95 }]),
+      ],
+      [
+        'FRONT',
+        shaped('FRONT', 'Right front', [{ len: 180, turn: -45 }, { len: 182 }, { len: 390 }]),
+      ],
+      ['BACK', shaped('BACK', 'Back', [{ len: 280 }, { len: 400 }, { len: 220 }])],
+      [
+        'SLEEVE',
+        shaped('SLEEVE', 'Right sleeve', [{ len: 182, turn: 45 }, { len: 400 }, { len: 220 }], 'R'),
+      ],
+    ]);
+    const rows = new Map([
+      ['collar', storedSeam('collar', 'COLLAR#1', 'STAND#1')],
+      ['body', storedSeam('body', 'FRONT#2', 'BACK#1')],
+    ]);
+    const suggestion = suggestStepPair(
+      ops,
+      2,
+      keys,
+      geoms,
+      usedEdgesBeforeStep(ops, 2, rows),
+      null,
+    )!;
+    expect(suggestion.a).toEqual(['STAND#0']);
+    expect(suggestion.b).toEqual(['FRONT#0']);
+  });
+
+  it('280-like: proposes a sleeve-to-cuff seam beyond the old three-percent gate', () => {
+    const keys = new Set(['SLV_R', 'CUFF_OUT', 'CUFF_IN']);
+    const ops = [
+      { inputKeys: ['CUFF_OUT', 'CUFF_IN'], outputUnitKey: 'CUFF_UNIT', seamKeys: ['cuff'] },
+      { inputKeys: ['SLV_R', 'CUFF_UNIT'], outputUnitKey: 'SLEEVE_UNIT' },
+    ];
+    const geoms = new Map([
+      ['SLV_R', shaped('SLV_R', 'Right sleeve', [{ len: 120 }, { len: 400 }, { len: 220 }], 'R')],
+      [
+        'CUFF_OUT',
+        shaped('CUFF_OUT', 'Cuff outer', [{ len: 100 }, { len: 132 }, { len: 70 }], 'R'),
+      ],
+      ['CUFF_IN', shaped('CUFF_IN', 'Cuff inner', [{ len: 100 }, { len: 145 }, { len: 80 }], 'R')],
+    ]);
+    const rows = new Map([['cuff', storedSeam('cuff', 'CUFF_OUT#0', 'CUFF_IN#0')]]);
+    const suggestion = suggestStepPair(
+      ops,
+      1,
+      keys,
+      geoms,
+      usedEdgesBeforeStep(ops, 1, rows),
+      null,
+    );
+    expect(suggestion).not.toBeNull();
+    expect([...suggestion!.a, ...suggestion!.b]).toContain('SLV_R#0');
+  });
+
+  it('200-like: never pairs the right front to the left front', () => {
+    const keys = new Set(['FR', 'FL', 'PLCK', 'BP']);
+    const ops = [
+      { inputKeys: ['PLCK', 'FL'], outputUnitKey: 'LEFT_FRONT', seamKeys: ['placket'] },
+      { inputKeys: ['FR', 'PLCK', 'FL', 'BP'], outputUnitKey: 'BODY' },
+    ];
+    const geoms = new Map([
+      ['FR', shaped('FR', 'Right front', [{ len: 200 }, { len: 410 }, { len: 510 }], 'R')],
+      ['FL', shaped('FL', 'Left front', [{ len: 150 }, { len: 200 }, { len: 490 }], 'L')],
+      ['PLCK', shaped('PLCK', 'Placket', [{ len: 150 }, { len: 70 }, { len: 80 }], 'L')],
+      ['BP', shaped('BP', 'Back', [{ len: 206 }, { len: 430 }, { len: 530 }])],
+    ]);
+    const rows = new Map([['placket', storedSeam('placket', 'PLCK#0', 'FL#0')]]);
+    const suggestion = suggestStepPair(
+      ops,
+      1,
+      keys,
+      geoms,
+      usedEdgesBeforeStep(ops, 1, rows),
+      null,
+    )!;
+    const pieces = [...suggestion.a, ...suggestion.b].map((id) => id.slice(0, id.lastIndexOf('#')));
+    expect(pieces).toContain('BP');
+    expect(new Set(pieces)).not.toEqual(new Set(['FR', 'FL']));
   });
 });
 

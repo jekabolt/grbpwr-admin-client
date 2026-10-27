@@ -5,7 +5,10 @@
 // y down — `cut`, `inner`). A piece's segmentation (`PieceGeom`, edges, anchors) lives in the same
 // millimetres with y UP, so an edge is drawn as [x, −y] and an inner line is anchored as [x, −y].
 
-import type { EdgeId, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
+import { roleVeto } from 'lib/assembly-skeleton/assignment/costs';
+import { readName, roleDef } from 'lib/assembly-skeleton/skeleton/model';
+import type { Edge, EdgeId, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
   contourSig,
   frameOf,
@@ -38,7 +41,55 @@ export type FormOpLike = {
   outputUnitKey?: string;
   seamKeys?: readonly string[];
   operationNumber?: number;
+  assemblyBlockDetached?: boolean;
 };
+
+export type InputGroup = { key: string; pieces: string[] };
+
+type Membership = {
+  components: Map<string, string[]>;
+  owner: Map<string, string>;
+  units: Map<string, string[]>;
+};
+
+/** Unit membership immediately before a step, including pieces referenced by their old leaf key. */
+function membershipBefore(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): Membership {
+  const components = new Map<string, string[]>();
+  const owner = new Map<string, string>();
+  const units = new Map<string, string[]>();
+  for (const piece of pieceKeys) {
+    components.set(piece, [piece]);
+    owner.set(piece, piece);
+  }
+
+  const ownersOf = (raw: string): string[] => {
+    const key = raw.trim();
+    if (!key) return [];
+    const leaves = pieceKeys.has(key) ? [key] : units.get(key) ?? [];
+    return [...new Set(leaves.map((piece) => owner.get(piece)).filter((k): k is string => !!k))];
+  };
+
+  for (let i = 0; i < index; i++) {
+    const op = ops[i];
+    const output = (op?.outputUnitKey ?? '').trim();
+    if (!output || op?.assemblyBlockDetached) continue;
+    const inputs = [...new Set((op.inputKeys ?? []).flatMap(ownersOf))];
+    if (inputs.length < 2) continue;
+    const pieces = [
+      ...new Set(inputs.flatMap((key) => components.get(key) ?? units.get(key) ?? [])),
+    ];
+    if (pieces.length < 2) continue;
+    for (const key of inputs) components.delete(key);
+    components.set(output, pieces);
+    units.set(output, pieces);
+    for (const piece of pieces) owner.set(piece, output);
+  }
+  return { components, owner, units };
+}
 
 /**
  * The step's inputs, each as the pieces it is made of: a piece is itself, a unit is the leaves of
@@ -48,24 +99,25 @@ export function inputGroups(
   ops: readonly FormOpLike[],
   index: number,
   pieceKeys: ReadonlySet<string>,
-): { key: string; pieces: string[] }[] {
-  const leaves = (key: string, before: number, seen: Set<string>): string[] => {
-    const k = key.trim();
-    if (!k) return [];
-    if (pieceKeys.has(k)) return [k];
-    if (seen.has(`${k}@${before}`)) return [];
-    seen.add(`${k}@${before}`);
-    for (let i = before - 1; i >= 0; i--) {
-      if ((ops[i]?.outputUnitKey ?? '').trim() !== k) continue;
-      const out: string[] = [];
-      for (const inKey of ops[i]?.inputKeys ?? []) out.push(...leaves(inKey, i, seen));
-      return out;
+): InputGroup[] {
+  const state = membershipBefore(ops, index, pieceKeys);
+  const groups: InputGroup[] = [];
+  const seen = new Set<string>();
+  for (const raw of ops[index]?.inputKeys ?? []) {
+    const key = raw.trim();
+    if (!key) continue;
+    const leaves = pieceKeys.has(key) ? [key] : state.units.get(key) ?? [];
+    for (const owner of new Set(
+      leaves.map((piece) => state.owner.get(piece)).filter((k): k is string => !!k),
+    )) {
+      if (seen.has(owner)) continue;
+      const pieces = state.components.get(owner) ?? state.units.get(owner) ?? [];
+      if (!pieces.length) continue;
+      seen.add(owner);
+      groups.push({ key: owner, pieces: [...pieces] });
     }
-    return [];
-  };
-  return (ops[index]?.inputKeys ?? [])
-    .map((key) => ({ key: key.trim(), pieces: [...new Set(leaves(key, index, new Set()))] }))
-    .filter((g) => g.key && g.pieces.length > 0);
+  }
+  return groups;
 }
 
 /** Distinct leaf pieces held by this step's WITH inputs; materials and photos are not inputs. */
@@ -77,13 +129,22 @@ export function stepInputPieces(
   return [...new Set(inputGroups(ops, index, pieceKeys).flatMap((group) => group.pieces))];
 }
 
-/** The seams row exists only when WITH resolves to at least two distinct pieces. */
+/** True when WITH resolves to at least two separate live pieces or units. */
+export function isJoinStep(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+): boolean {
+  return inputGroups(ops, index, pieceKeys).length >= 2;
+}
+
+/** Kept for the picker API; eligibility is input-unit count, not flattened piece count. */
 export function hasMultipleStepPieces(
   ops: readonly FormOpLike[],
   index: number,
   pieceKeys: ReadonlySet<string>,
 ): boolean {
-  return stepInputPieces(ops, index, pieceKeys).length >= 2;
+  return isJoinStep(ops, index, pieceKeys);
 }
 
 /** Side a click lands on: by input when the step joins two or more inputs, else the chosen side. */
@@ -128,12 +189,119 @@ export const fmtMm = (v: number) => String(Math.round(v * 10) / 10);
 
 export type Suggestion = { a: EdgeId[]; b: EdgeId[]; aLen: number; bLen: number };
 
+export type InputUnitEdges = InputGroup & { edges: Edge[] };
+
+/** Edges occupied by confirmed seams attached to earlier steps. */
+export function usedEdgesBeforeStep(
+  ops: readonly FormOpLike[],
+  index: number,
+  seams: ReadonlyMap<string, StoredSeam>,
+): Set<EdgeId> {
+  const used = new Set<EdgeId>();
+  for (let i = 0; i < index; i++) {
+    for (const key of ops[i]?.seamKeys ?? []) {
+      const seam = seams.get(key);
+      if (
+        !seam ||
+        seam.status !== 'confirmed' ||
+        seam.stale ||
+        seam.kind === 'surface' ||
+        seam.kind === 'closure'
+      )
+        continue;
+      for (const anchor of [...seam.sideA, ...seam.sideB]) {
+        if (!anchor.edgeHint.includes('#')) continue;
+        for (const edge of edgeIdsOf(anchor.edgeHint)) used.add(edge);
+      }
+    }
+  }
+  return used;
+}
+
+/** The live input units and only their unconsumed outer edges. */
+export function inputUnitsWithOuterEdges(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  used: ReadonlySet<EdgeId>,
+): InputUnitEdges[] {
+  return inputGroups(ops, index, pieceKeys).map((group) => ({
+    ...group,
+    edges: group.pieces.flatMap((piece) => {
+      const geom = geoms.get(piece);
+      return geom ? plainEdges(geom).filter((edge) => !used.has(edge.id)) : [];
+    }),
+  }));
+}
+
 /** Within this share of the longer edge a pair is offered at all. */
-const SUGGEST_REL = 0.03;
+const SUGGEST_REL = 0.2;
+const CURVE_DEG = 10;
+const BODY_ROLES = new Set(['front', 'back', 'side', 'yoke', 'placket', 'facing', 'fly', 'skirt']);
+const NECK_ROLES = new Set(['collar', 'stand', 'rib', 'hood']);
+
+type InputClass = 'body' | 'sleeve' | 'neck' | 'cuff' | 'band' | 'other';
+
+function roleOfPiece(piece: PieceGeom, geoms: ReadonlyMap<string, PieceGeom>): string | null {
+  const own = readName(piece.name).role;
+  if (roleDef(own)?.level === 'panel') return own;
+  for (const twin of piece.twinOf ?? []) {
+    if (twin.kind !== 'mirror') continue;
+    const role = readName(geoms.get(twin.key)?.name ?? '').role;
+    if (roleDef(role)?.level === 'panel') return role;
+  }
+  return own;
+}
+
+function classOf(group: { pieces: readonly string[] }, geoms: ReadonlyMap<string, PieceGeom>) {
+  const roles = new Set(
+    group.pieces
+      .map((key) => geoms.get(key))
+      .filter((piece): piece is PieceGeom => !!piece)
+      .map((piece) => roleOfPiece(piece, geoms)),
+  );
+  if ([...roles].some((role) => !!role && BODY_ROLES.has(role))) return 'body' as const;
+  if (roles.has('sleeve')) return 'sleeve' as const;
+  if ([...roles].some((role) => !!role && NECK_ROLES.has(role))) return 'neck' as const;
+  if (roles.has('cuff')) return 'cuff' as const;
+  if (roles.has('waistband') || roles.has('hemband')) return 'band' as const;
+  return 'other' as const;
+}
+
+function roleFits(input: InputClass, role: string | null): boolean {
+  if (!role || input === 'other') return true;
+  if (input === 'body') return BODY_ROLES.has(role);
+  if (input === 'neck') return NECK_ROLES.has(role);
+  return role === input || (input === 'band' && (role === 'waistband' || role === 'hemband'));
+}
+
+function pairRoleCost(a: string | null, b: string | null): number {
+  if (!a || !b) return 0;
+  const pair = new Set([a, b]);
+  if (a === 'front' && b === 'front') return Infinity;
+  if (pair.has('front') && pair.has('back')) return -0.06;
+  if (pair.has('front') && pair.has('placket')) return -0.06;
+  if (pair.has('sleeve') && pair.has('cuff')) return -0.08;
+  if (pair.has('collar') && pair.has('stand')) return -0.08;
+  if (
+    [...pair].some((role) => BODY_ROLES.has(role)) &&
+    [...pair].some((role) => role === 'sleeve' || NECK_ROLES.has(role))
+  )
+    return -0.06;
+  return a === b ? 0.02 : 0;
+}
+
+function curveCost(a: Edge, b: Edge): number {
+  const ca = Math.abs(a.turnDeg) >= CURVE_DEG;
+  const cb = Math.abs(b.turnDeg) >= CURVE_DEG;
+  if (ca && cb) return a.turnDeg * b.turnDeg < 0 ? -0.1 : -0.06;
+  return ca || cb ? 0.08 : 0;
+}
 
 /**
- * The pair of edges, one per side, closest in length (notch counts break ties and penalise a
- * mismatch); none within 3 % → nothing. Edges already sewn by this step are skipped.
+ * The best free outer-edge pair across two different input units. Length remains the gate; roles,
+ * curve compatibility and notches rank the plausible pairs inside it.
  */
 export function suggestPair(
   groups: readonly { pieces: readonly string[] }[],
@@ -141,26 +309,47 @@ export function suggestPair(
   used: ReadonlySet<EdgeId>,
   ease: number | null,
 ): Suggestion | null {
-  const sides: [string[], string[]] =
-    groups.length >= 2
-      ? [[...groups[0].pieces], groups.slice(1).flatMap((g) => [...g.pieces])]
-      : [[...(groups[0]?.pieces ?? [])], [...(groups[0]?.pieces ?? [])]];
   const edges = (ps: readonly string[]) =>
     ps.flatMap((p) => {
       const g = geoms.get(p);
       return g ? plainEdges(g).filter((e) => !used.has(e.id)) : [];
     });
   let best: { score: number; s: Suggestion } | null = null;
-  for (const ea of edges(sides[0])) {
-    for (const eb of edges(sides[1])) {
-      if (ea.pieceKey === eb.pieceKey) continue;
-      const d = deltaMm(ea.lenMm, eb.lenMm, ease);
-      const rel = d / Math.max(ea.lenMm, eb.lenMm, 1);
-      if (rel > SUGGEST_REL || ea.lenMm < 30) continue;
-      const notch = ea.notchesMm.length === eb.notchesMm.length ? 0 : 0.01;
-      const score = rel + notch;
-      if (!best || score < best.score)
-        best = { score, s: { a: [ea.id], b: [eb.id], aLen: ea.lenMm, bLen: eb.lenMm } };
+  for (let i = 0; i < groups.length; i++) {
+    const classA = classOf(groups[i], geoms);
+    for (let j = i + 1; j < groups.length; j++) {
+      const classB = classOf(groups[j], geoms);
+      const structuralCurve =
+        (classA === 'body' && (classB === 'sleeve' || classB === 'neck')) ||
+        (classB === 'body' && (classA === 'sleeve' || classA === 'neck'));
+      for (const ea of edges(groups[i].pieces)) {
+        for (const eb of edges(groups[j].pieces)) {
+          if (ea.pieceKey === eb.pieceKey || ea.lenMm < 30 || eb.lenMm < 30) continue;
+          const ga = geoms.get(ea.pieceKey);
+          const gb = geoms.get(eb.pieceKey);
+          if (!ga || !gb || roleVeto(ga, gb)) continue;
+          const roleA = roleOfPiece(ga, geoms);
+          const roleB = roleOfPiece(gb, geoms);
+          const roleCost = pairRoleCost(roleA, roleB);
+          if (!Number.isFinite(roleCost)) continue;
+          const d = deltaMm(ea.lenMm, eb.lenMm, ease);
+          const rel = d / Math.max(ea.lenMm, eb.lenMm, 1);
+          if (rel > SUGGEST_REL) continue;
+          const notch = ea.notchesMm.length === eb.notchesMm.length ? 0 : 0.02;
+          const endpoint =
+            (roleFits(classA, roleA) ? -0.025 : 0.1) + (roleFits(classB, roleB) ? -0.025 : 0.1);
+          const shape = curveCost(ea, eb);
+          const curveRequirement =
+            structuralCurve &&
+            (Math.abs(ea.turnDeg) < CURVE_DEG || Math.abs(eb.turnDeg) < CURVE_DEG)
+              ? 0.12
+              : 0;
+          const lengthTie = -Math.min(ea.lenMm, eb.lenMm, 1000) / 1_000_000;
+          const score = rel + notch + endpoint + roleCost + shape + curveRequirement + lengthTie;
+          if (!best || score < best.score)
+            best = { score, s: { a: [ea.id], b: [eb.id], aLen: ea.lenMm, bLen: eb.lenMm } };
+        }
+      }
     }
   }
   return best?.s ?? null;
@@ -176,7 +365,7 @@ export function suggestStepPair(
   ease: number | null,
 ): Suggestion | null {
   const groups = inputGroups(ops, index, pieceKeys);
-  if (new Set(groups.flatMap((group) => group.pieces)).size < 2) return null;
+  if (groups.length < 2) return null;
   return suggestPair(groups, geoms, used, ease);
 }
 
