@@ -9,6 +9,7 @@ import { DataTable, HeaderNote, SectionHeader } from 'ui';
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
+import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
   wireInt,
@@ -27,7 +28,7 @@ import {
   type Seg,
   type SvgMarkup,
 } from '../derive-assembly';
-import { gapSection, gapSubjects } from '../gap-findings';
+import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
 
@@ -63,7 +64,9 @@ const ASM_CSS = String.raw`
 .asm-gaps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; row-gap: 16px; }
 .asm-gap-group { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; break-inside: avoid; }
 .asm-gap-title { grid-column: 1 / -1; margin-bottom: 4px; color: var(--color-labelColor); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
-.asm-gap-line { padding: 3px 0; border-bottom: 1px solid var(--color-hairline); font-size: 11px; line-height: 1.25; }
+.asm-gap-line { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--color-hairline); color: var(--color-error); font-size: 11px; line-height: 1.25; text-decoration: none; }
+.asm-gap-text { min-width: 0; text-decoration: underline; text-underline-offset: 2px; }
+.asm-gap-to { flex: none; color: var(--color-labelColor); font-size: 10px; }
 `;
 
 const DIM = {
@@ -352,13 +355,17 @@ function GapsSheet({
   docline,
   count,
   subjectOf,
+  cardId,
 }: {
   page: GapPage;
   orient: PrintOrient;
   docline: string;
   count: string;
   subjectOf: (gap: Gap) => string;
+  /** The card the lines link back to; a card not saved yet prints plain lines. */
+  cardId?: number;
 }) {
+  const origin = viewerOrigin();
   return (
     <TechpackSheet orient={orient} docline={docline} count={count}>
       <SectionHeader title='06 assembly · gaps' />
@@ -368,10 +375,25 @@ function GapsSheet({
             <div className='asm-gap-title'>{group.kind}</div>
             {group.gaps.map((gap) => {
               const subject = subjectOf(gap);
+              const text = `${gap.target.op ? `op ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${subject}` : ''}`;
+              if (!cardId)
+                return (
+                  <div className='asm-gap-line' data-gap-list-row={gapKey(gap)} key={gapKey(gap)}>
+                    <span className='asm-gap-text'>{text}</span>
+                  </div>
+                );
               return (
-                <div className='asm-gap-line' data-gap-list-row={gapKey(gap)} key={gapKey(gap)}>
-                  {`${gap.target.op ? `op ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${subject}` : ''}`}
-                </div>
+                <a
+                  className='asm-gap-line'
+                  data-gap-list-row={gapKey(gap)}
+                  key={gapKey(gap)}
+                  href={gapHref(gap.target, cardId, origin)}
+                  target='_blank'
+                  rel='noreferrer'
+                >
+                  <span className='asm-gap-text'>{text}</span>
+                  <span className='asm-gap-to'>{gapWhere(gap.target)}</span>
+                </a>
               );
             })}
           </div>
@@ -562,6 +584,7 @@ export function AssemblyPage({
           docline={docline}
           count={`${pages.length + photoSheets.length + index + 1} / ${total}`}
           subjectOf={subjectOf}
+          cardId={techCard.id}
         />
       ))}
       {!rows.length && !photos.length && !gaps.length && (

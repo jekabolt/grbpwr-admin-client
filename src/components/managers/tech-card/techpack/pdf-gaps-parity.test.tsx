@@ -113,5 +113,14 @@ describe('PDF gaps in the audit', () => {
     expect(new Set(listRows).size).toBe(listRows.length);
     expect(audit).toContain('assembly</span> · seam');
     expect(pdf).toContain('op 560 · seam');
+    // Every list line is a link to where the gap is fixed (the same door as the audit's Go to).
+    const links = [...pdf.matchAll(/<a class="asm-gap-line"[^>]*href="([^"]+)"/g)].map((m) =>
+      m[1].replaceAll('&amp;', '&'),
+    );
+    expect(links).toHaveLength(keys.length);
+    expect(links).toContain(
+      `${window.location.origin}/tech-cards/1?tab=construction&op=560&pick=560`,
+    );
+    expect(pdf).toContain('construction · op 560');
   });
 });

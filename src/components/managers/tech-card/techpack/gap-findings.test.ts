@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { common_TechCard } from 'api/proto-http/admin';
-import { gapNav, gapSubjects, gapsToClientFindings } from './gap-findings';
+import { gapHref, gapNav, gapSubjects, gapsToClientFindings, gapWhere } from './gap-findings';
 import type { Gap } from './gaps';
 
 const gap = (over: Partial<Gap>): Gap =>
@@ -77,5 +77,20 @@ describe('gapSubjects', () => {
       name(gap({ target: { tab: 'pieces', piece: '01KZVT1QZWB5DX4YDRW3W4QNW1', field: 'code' } })),
     ).toBe('yoke');
     expect(name(gap({}))).toBe('');
+  });
+});
+
+describe('gapHref / gapWhere', () => {
+  it('links a PDF gap line to the same tab and params as the audit door', () => {
+    const origin = 'https://admin.beta.grbpwr.com';
+    expect(gapHref({ tab: 'construction', op: 560, field: 'seam' }, 6, origin)).toBe(
+      'https://admin.beta.grbpwr.com/tech-cards/6?tab=construction&op=560&pick=560',
+    );
+    expect(gapHref({ tab: 'materials', bomLine: 'SHELL', field: 'width' }, 6, origin)).toBe(
+      'https://admin.beta.grbpwr.com/tech-cards/6?tab=bom&bom=SHELL',
+    );
+    expect(gapWhere({ tab: 'construction', op: 30, field: 'seam' })).toBe('construction · op 30');
+    expect(gapWhere({ tab: 'materials', bomLine: 'SHELL' })).toBe('bom · SHELL');
+    expect(gapWhere({ tab: 'measurements' })).toBe('sizes');
   });
 });

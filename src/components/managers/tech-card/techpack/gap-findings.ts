@@ -110,6 +110,23 @@ function byField(field: string): GapNav | null {
   }
 }
 
+/**
+ * The PDF's door to the same place: the card URL with the tab and its query params. `reveal` /
+ * `scroll` need the open page, so a link from paper lands on the tab (+ step / BOM line) only.
+ */
+export function gapHref(t: GapTarget, cardId: number, origin: string): string {
+  const nav = gapNav(t);
+  const params = new URLSearchParams({ tab: nav.tab, ...nav.extra });
+  return `${origin}/tech-cards/${cardId}?${params.toString()}`;
+}
+
+/** The destination printed beside a PDF gap line: `construction · op 30`, `bom · SHELL`. */
+export function gapWhere(t: GapTarget): string {
+  const nav = gapNav(t);
+  const detail = nav.extra?.op ? `op ${nav.extra.op}` : nav.extra?.bom;
+  return detail ? `${nav.tab} · ${detail}` : nav.tab;
+}
+
 export function gapNav(t: GapTarget): GapNav {
   const field = (t.field ?? '').trim();
   switch (t.tab) {
