@@ -25,6 +25,7 @@ import type { AsmPiece } from '../../techpack/derive-assembly';
 import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
+import { PairNo } from './pair-no';
 import { useAttachStepSeam } from './step-seams-context';
 import {
   deltaMm,
@@ -32,6 +33,7 @@ import {
   longestEdge,
   parseInner,
   pieceOfTarget,
+  proposalLabel,
   sideOf,
   surfaceRow,
   type Pt,
@@ -76,10 +78,13 @@ export default function SeamPicker({
   index,
   open,
   onClose,
+  proposal: initialProposal = 0,
 }: {
   index: number;
   open: boolean;
   onClose: () => void;
+  /** Which of the step's proposals the picker opens on. */
+  proposal?: number;
 }) {
   const scene = useStepScene(index);
   const {
@@ -92,7 +97,7 @@ export default function SeamPicker({
     ease,
     stored,
     used,
-    suggestion,
+    suggestions,
     innerSeams,
     frameSeams,
     storedSeams,
@@ -109,6 +114,12 @@ export default function SeamPicker({
   const [place, setPlace] = useState<Place | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
+  const [prop, setProp] = useState(initialProposal);
+  const suggestion = suggestions[prop] ?? suggestions[0] ?? null;
+  const propOptions = useMemo(
+    () => suggestions.map((p, i) => ({ value: String(i), label: proposalLabel(p, i) })),
+    [suggestions],
+  );
 
   const pieces = geo?.pieces;
   const lenOf = useCallback(
@@ -271,8 +282,29 @@ export default function SeamPicker({
     if (!has && groups.length < 2 && side === 'a' && sel.a.length === 0) setChosen('b');
   };
 
-  // ── the canvas: inputs along the step's seam, apart; RESULT: joined along the pair ──
-  const layout = useStepLayout(leaves, frameSeams, geoms, EXPLODE);
+  // ── the canvas: only the pieces of the seam on the table (the proposal's, and whatever a
+  // re-pick touches), apart; RESULT: them joined ──
+  const seamIds = [
+    ...(suggestion ? [...suggestion.a, ...suggestion.b] : []),
+    ...(pair ? [...pair.a, ...pair.b] : []),
+    ...sel.a,
+    ...sel.b,
+    ...(partner ? [partner] : []),
+  ];
+  const seamPieces = new Set(seamIds.map(pieceOfTarget));
+  const focus = seamPieces.size > 0 && inners.length === 0;
+  const shownRaw = groups
+    .map((g) => ({
+      name: g.name,
+      pieces: focus ? g.pieces.filter((p) => seamPieces.has(p)) : g.pieces,
+    }))
+    .filter((g) => g.pieces.length > 0);
+  const shown = useStable(
+    shownRaw,
+    shownRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
+  );
+  const seamLeaves = useMemo(() => shown.map((g) => g.pieces), [shown]);
+  const layout = useStepLayout(focus ? seamLeaves : leaves, frameSeams, geoms, EXPLODE);
   // A surface pick lies on its host's line in RESULT (by «place», else centred on the line).
   const pairSeam =
     surface && host && partKey
@@ -286,9 +318,9 @@ export default function SeamPicker({
       : pair
         ? seamOfSides(pair, geoms, innerLines)
         : null;
-  const resultRaw = [...innerSeams, ...storedSeams, ...(pairSeam ? [pairSeam] : [])];
+  const resultRaw = [...innerSeams, ...(focus ? [] : storedSeams), ...(pairSeam ? [pairSeam] : [])];
   const resultSeams = useStable<SeamCandidate[]>(resultRaw, seamSig(resultRaw));
-  const joined = useStepLayout(leaves, resultSeams, geoms, 0);
+  const joined = useStepLayout(focus ? seamLeaves : leaves, resultSeams, geoms, 0);
   const hasResult = storedSeams.length > 0 || !!pairSeam;
 
   const marks: EdgeMark[] = [];
@@ -305,10 +337,10 @@ export default function SeamPicker({
   if (sel.a.length || sel.b.length) {
     sideMarks(sel.a, 'pick');
     sideMarks(sel.b, 'pick');
-    if (partner) sideMarks([partner], 'proposal');
+    if (partner) sideMarks([partner], 'pick');
   } else if (pair) {
-    sideMarks(pair.a, 'proposal', pair.aLen);
-    sideMarks(pair.b, 'proposal', pair.bLen);
+    sideMarks(pair.a, 'pick', pair.aLen);
+    sideMarks(pair.b, 'pick', pair.bLen);
   }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
@@ -347,6 +379,18 @@ export default function SeamPicker({
     }
   };
 
+  const switchProposal = (v: string) => {
+    reset();
+    setProp(Number(v));
+  };
+  const groupName = (id: TargetId | undefined) => {
+    if (!id) return '';
+    const k = pieceOfTarget(id);
+    return groups.find((g) => g.pieces.includes(k))?.name ?? nameOf(k);
+  };
+  const pairName = pair ? `${groupName(pair.a[0])} · ${groupName(pair.b[0])}` : '';
+  const stepName = op?.outputUnitName?.trim() || (op?.work ?? '').replace(/_/g, ' ');
+
   const loading = geo?.dep.status === 'pending';
   const drawn = layout.T.size > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
@@ -381,6 +425,19 @@ export default function SeamPicker({
             <Text size='small' tracking='section' className='uppercase'>
               {`op ${op?.operationNumber ?? ''}`}
             </Text>
+            {stepName && (
+              <Text size='small' variant='label' className='min-w-0 truncate'>
+                {stepName}
+              </Text>
+            )}
+            {propOptions.length > 1 && (
+              <ViewSwitch
+                value={String(prop)}
+                options={propOptions}
+                onChange={switchProposal}
+                label='seam'
+              />
+            )}
             {groups.length < 2 && !frozen && (
               <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
             )}
@@ -425,7 +482,7 @@ export default function SeamPicker({
                     innerLines={innerLines}
                     marks={marks}
                     nos={nos}
-                    names={groups.map((g) => g.name)}
+                    names={(focus ? shown : groups).map((g) => g.name)}
                     namesBelow={phone}
                     ghostName={nameOf}
                     hover={hover}
@@ -474,6 +531,14 @@ export default function SeamPicker({
                 <Text size='micro' variant='error' className='min-w-0 truncate'>
                   {error}
                 </Text>
+              )}
+              {pair && (
+                <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
+                  <PairNo i={stored.length} />
+                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                    {pairName}
+                  </Text>
+                </span>
               )}
               <span className='flex-1' />
               {delta != null ? (

@@ -20,7 +20,8 @@ import {
   inputGroups,
   parseInner,
   sewnBeforeStep,
-  suggestStepPair,
+  suggestStepPairs,
+  type StepProposal,
   usedEdgesBeforeStep,
   type FormOpLike,
   type Suggestion,
@@ -227,14 +228,15 @@ export function useStepScene(index: number) {
 
   // Shown on a frozen card too (it only cannot be accepted there).
   const ready = !!geo && geo.dep.status !== 'pending';
-  const sugRaw = useMemo<Suggestion | null>(
-    () => (ready ? suggestStepPair(ops, index, pieceKeys, geoms, used, ease, byKey) : null),
+  const sugsRaw = useMemo<StepProposal[]>(
+    () => (ready ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey) : []),
     [ready, ops, index, pieceKeys, geoms, used, ease, byKey],
   );
-  const suggestion = useStable(
-    sugRaw,
-    sugRaw ? `${sugRaw.a.join('+')}|${sugRaw.b.join('+')}|${sugRaw.aLen}|${sugRaw.bLen}` : '',
+  const suggestions = useStable(
+    sugsRaw,
+    sugsRaw.map((p) => `${p.a.join('+')}|${p.b.join('+')}|${p.aLen}|${p.bLen}|${p.hand}`).join(';'),
   );
+  const suggestion: Suggestion | null = suggestions[0] ?? null;
 
   // Inside each input: the engine's seams, and what earlier steps sewed there (stored or implied).
   const split = useMemo(() => {
@@ -282,6 +284,7 @@ export function useStepScene(index: number) {
     stored,
     used,
     suggestion,
+    suggestions,
     innerSeams,
     frameSeams,
     storedSeams,
@@ -343,7 +346,8 @@ type Look = {
 const LOOK: Record<'canvas' | 'result' | 'tile', Look> = {
   canvas: { outline: 3.2, hair: 0.8, mark: 3, stored: 3.5, dash: '9 6', font: 12 },
   result: { outline: 2.6, hair: 0.7, mark: 2.5, stored: 2.5, dash: '9 6', font: 11 },
-  tile: { outline: 1.3, hair: 0.35, mark: 1.6, stored: 2.2, dash: '3 2', font: 9 },
+  // A row tile marks a seam by colour only, never by weight (owner): marks at the outline width.
+  tile: { outline: 1.3, hair: 0.35, mark: 1.3, stored: 1.3, dash: '3 2', font: 9 },
 };
 
 const INK = 'var(--color-textColor)';

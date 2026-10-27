@@ -37,6 +37,7 @@ import {
   inputGroups,
   sewnBeforeStep,
   suggestStepPair,
+  suggestStepPairs,
   usedEdgesBeforeStep,
 } from './step-seams-model';
 
@@ -324,7 +325,9 @@ describe('stepLayout on card 83', () => {
     const frame = [...inner, ...(own.length ? own : raw.cross)];
     return {
       op: op.operationNumber,
+      index: i,
       leaves,
+      inner,
       canvas: stepLayout(leaves, frame, geoms, { explode: 0.08 }),
       result: stepLayout(leaves, [...inner, ...own], geoms),
     };
@@ -445,18 +448,31 @@ describe('stepLayout on card 83', () => {
     }
   });
 
-  it('op 200: the result lays the fronts against the back along the proposal, the placket on its front edge', () => {
+  it('op 200: the result lays the fronts against the back along the proposals, the placket on its front edge', () => {
     const s = steps.find((x) => x.op === 200)!;
-    const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
-    const bp = box('BP');
-    const fr = box('FR');
-    // FR touches BP's side.
-    expect(Math.min(Math.abs(fr.x0 - bp.x1), Math.abs(bp.x0 - fr.x1))).toBeLessThan(12);
+    const boxIn = (L: StepLayout, k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+    const sideBySide = (L: StepLayout, a: string, b: string) => {
+      const A = boxIn(L, a);
+      const B = boxIn(L, b);
+      return Math.min(Math.abs(A.x0 - B.x1), Math.abs(B.x0 - A.x1));
+    };
+    // The step proposes one side seam per side, the left first: the picture takes the first, so
+    // the left front touches the back's side.
+    expect(sideBySide(s.result, 'FL', 'BP')).toBeLessThan(12);
+    // Both proposals sewn: each front on its own side of the back.
+    const used = usedEdgesBeforeStep(ops, s.index, new Map());
+    const sides = suggestStepPairs(ops, s.index, pieceKeys, geoms, used, null, new Map());
+    expect(sides.map((p) => p.hand)).toEqual(['L', 'R']);
+    const own = sides.map((p) => seamOfSides(p, geoms, innerLines)!).filter(Boolean);
+    const both = stepLayout(s.leaves, [...s.inner, ...own], geoms);
+    expect(sideBySide(both, 'FL', 'BP')).toBeLessThan(12);
+    expect(sideBySide(both, 'FR', 'BP')).toBeLessThan(12);
     // Step 130 sewed the placket to the left front's centre edge (the engine reads the same pair,
     // unsure): it stands against that edge, upright, never on the front.
+    const box = (k: string) => boxIn(s.result, k);
     const fl = box('FL');
     const pl = box('PLCK');
-    expect(Math.min(Math.abs(fl.x0 - pl.x1), Math.abs(pl.x0 - fl.x1))).toBeLessThan(12);
+    expect(sideBySide(s.result, 'FL', 'PLCK')).toBeLessThan(12);
     expect(pl.y0).toBeGreaterThan(fl.y0 - 12);
     expect(pl.y1).toBeLessThan(fl.y1 + 12);
     expect(pieceTilt(geoms.get('PLCK')!, s.result.T.get('PLCK')!)).toBeLessThan(0.03);

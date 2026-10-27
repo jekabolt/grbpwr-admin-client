@@ -262,7 +262,7 @@ import { UnitNameField, unitNameProducerIndex } from './unit-block';
 import { OperationMediaStrip } from './operation-media-strip';
 import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
-import { PieceSilhouette, PieceTile, SILHOUETTE_INK, TILE_BOX } from './piece-silhouette';
+import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useStepSeams } from './step-seams/step-seams-context';
@@ -302,6 +302,8 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 
 /** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
+// The WITH row: every tile shares one 72 px footprint, the silhouette fills it.
+const WITH_BOX = { w: 72, h: 72 };
 
 type ReviewPatternRow = {
   lineKey?: string;
@@ -4746,14 +4748,15 @@ function OperationEditor({
       <GroupLabel>with</GroupLabel>
       <div className='flex flex-wrap gap-1.5'>
         {chosenLivePieces.map((key) => (
-          <span key={key} className='relative inline-flex size-14 border border-borderColor'>
+          <span key={key} className='relative inline-flex size-18 border border-borderColor'>
             <PieceTile
               found={pieceShapes?.get(pieceRefKey(key)) ?? null}
               previousFound={previousPieceShapes?.get(pieceRefKey(key)) ?? null}
               reviewMode={review.trim() === 'reshaped' ? 'reshaped' : undefined}
               name={byKey.get(key)?.name ?? ''}
               cloth={cloth?.get(key) ?? null}
-              pxBox={TILE_BOX}
+              pxBox={WITH_BOX}
+              className='size-18'
             />
             <Close
               size='sm'
@@ -4765,8 +4768,8 @@ function OperationEditor({
           </span>
         ))}
         {danglingPieces.map((key) => (
-          <span key={key} className='relative inline-flex size-14 border border-error'>
-            <PieceTile found={null} name='missing' pxBox={TILE_BOX} />
+          <span key={key} className='relative inline-flex size-18 border border-error'>
+            <PieceTile found={null} name='missing' pxBox={WITH_BOX} className='size-18' />
             <Close
               size='sm'
               aria-label='remove missing piece'
@@ -4777,7 +4780,7 @@ function OperationEditor({
           </span>
         ))}
         {chosenUnits.map((key) => (
-          <span key={`u:${key}`} className='relative inline-flex size-14 border border-borderColor'>
+          <span key={`u:${key}`} className='relative inline-flex size-18 border border-borderColor'>
             <UnitPictureTile
               leaves={assembly.res.units.get(key)?.leaves ?? []}
               name={unitDisplayName({
@@ -4799,13 +4802,14 @@ function OperationEditor({
           const previous = previousPieceShapes?.get(pieceRefKey(ghostKey)) ?? null;
           return (
             <Fragment key={`ghost:${ghostKey}`}>
-              <span className='relative inline-flex size-14 border border-dashed border-error'>
+              <span className='relative inline-flex size-18 border border-dashed border-error'>
                 <PieceTile
                   found={null}
                   previousFound={previous}
                   reviewMode='orphan'
                   name={ghostName}
-                  pxBox={TILE_BOX}
+                  pxBox={WITH_BOX}
+                  className='size-18'
                 />
                 <Close
                   size='sm'
@@ -4821,13 +4825,14 @@ function OperationEditor({
                   <Button
                     key={`${ghostKey}:${candidate.pieceLineKey}`}
                     onClick={() => onReplaceGhost(index, ghostKey, candidate.pieceLineKey)}
-                    className='size-14 border border-borderColor bg-bgColor hover:border-textColor'
+                    className='size-18 border border-borderColor bg-bgColor hover:border-textColor'
                   >
                     <PieceTile
                       found={pieceShapes?.get(pieceRefKey(candidate.pieceLineKey)) ?? null}
                       name={piece?.name?.trim() || 'piece'}
                       cloth={cloth?.get(candidate.pieceLineKey) ?? null}
-                      pxBox={TILE_BOX}
+                      pxBox={WITH_BOX}
+                      className='size-18'
                     />
                   </Button>
                 );
@@ -4835,13 +4840,13 @@ function OperationEditor({
             </Fragment>
           );
         })}
-        <div className='size-14'>
+        <div className='size-18'>
           <Tile dashed name='+ piece' onClick={onFlashPieces} className='justify-center' />
         </div>
         {linkedMaterials.map((material) => (
           <span
             key={material.lineKey}
-            className='relative size-14'
+            className='relative size-18'
             onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
             onMouseLeave={() => onActiveBomChange?.(null)}
           >
@@ -4863,7 +4868,7 @@ function OperationEditor({
           </span>
         ))}
         {unlinkedBoms.length > 0 && (
-          <div className='h-14 w-24'>
+          <div className='h-18 w-24'>
             <Tile
               dashed
               name={addingMaterial ? 'cancel' : '+ material'}

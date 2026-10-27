@@ -5,7 +5,7 @@ import { cn } from 'lib/utility';
 import { OpIconArt, type OpIcon } from '../../op-icons';
 import type { TechCardFormData } from '../schema';
 
-/** One pickable tile: a 40px icon over a short label; the picked one is inverted. */
+/** One pickable tile, 72px high: a 64 × 48 icon over a short label; the picked one is inverted. */
 export function IconTile({
   icon,
   label,
@@ -32,15 +32,18 @@ export function IconTile({
       selected={selected}
       dashed={dashed || derived}
       title={title ?? label}
-      className={cn('items-center', inverted && 'border-textColor bg-textColor text-bgColor')}
+      className={cn(
+        'h-18 items-center overflow-hidden p-1',
+        inverted && 'border-textColor bg-textColor text-bgColor',
+      )}
     >
-      {icon ? <OpIconArt icon={icon} w={53} h={40} /> : <span className='h-10' />}
+      {icon ? <OpIconArt icon={icon} w={64} h={48} /> : <span className='h-12' />}
       <Text
         size='micro'
         tracking='label'
         variant={inverted ? 'selected' : 'uppercase'}
         component='span'
-        className='mt-1 line-clamp-3 w-full break-words text-center leading-tight'
+        className='mt-0.5 line-clamp-1 w-full break-words text-center leading-tight'
       >
         {label}
       </Text>
