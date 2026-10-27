@@ -43,7 +43,6 @@ const ASM_CSS = String.raw`
 .asm-table td.asm-n { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; }
 .asm-seams { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { display: flex; flex: none; align-items: center; justify-content: center; }
-.asm-join-picture { box-sizing: border-box; padding-left: 22px; }
 .asm-pic { gap: 4px; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
@@ -68,14 +67,13 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 46, tool: 112, joinW: 142, joinH: 112, keyW: 67, keyH: 59 },
+  land: { n: 46, tool: 112, joinW: 142, joinH: 112, keyW: 84, keyH: 70 },
   port: { n: 48, tool: 140, joinW: 190, joinH: 104, keyW: 84, keyH: 70 },
 } as const;
 
 const ROWS_PER_SHEET = 8;
 const PICTURE_FILL = 0.85;
 const PICTURE_GAP = 4;
-const JOIN_LEFT_CLEARANCE = 22;
 
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
@@ -93,12 +91,12 @@ type Photo = {
 function pictureDimensions(orient: PrintOrient) {
   const d = DIM[orient];
   return {
-    join: [
-      Math.round((d.joinW - JOIN_LEFT_CLEARANCE) * PICTURE_FILL),
-      Math.round(d.joinH * PICTURE_FILL),
-    ] as [number, number],
+    join: [Math.round(d.joinW * PICTURE_FILL), Math.round(d.joinH * PICTURE_FILL)] as [
+      number,
+      number,
+    ],
     silhouette: [
-      Math.round((d.joinW - d.keyW - PICTURE_GAP) * PICTURE_FILL),
+      Math.round((d.joinW - d.keyW - PICTURE_GAP) * (orient === 'land' ? 1 : PICTURE_FILL)),
       Math.round(d.joinH * PICTURE_FILL),
     ] as [number, number],
   };
@@ -158,11 +156,8 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const picture = pictureDimensions(orient);
   if (r.pic) {
     return (
-      <div className='asm-picture-box asm-join-picture' style={{ width: d.joinW, height: d.joinH }}>
-        <div className='asm-joinpic'>
-          <Svg m={r.pic} w={picture.join[0]} h={picture.join[1]} label={`${r.n} ${r.words.verb}`} />
-          <KeyArt icon={r.words.icon} w={18} h={14} className='asm-badge' />
-        </div>
+      <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
+        <Svg m={r.pic} w={picture.join[0]} h={picture.join[1]} label={`${r.n} ${r.words.verb}`} />
       </div>
     );
   }
@@ -459,11 +454,12 @@ export function AssemblyPage({
         cur.push(r);
         used += hs[i];
       });
-      if (out.length > 1) {
-        const base = Math.floor(rows.length / out.length);
-        const extra = rows.length % out.length;
+      const balancedColumnCount = Math.ceil(out.length / perSheet) * perSheet;
+      if (balancedColumnCount > 1) {
+        const base = Math.floor(rows.length / balancedColumnCount);
+        const extra = rows.length % balancedColumnCount;
         let at = 0;
-        const balanced = out.map((_, index) => {
+        const balanced = Array.from({ length: balancedColumnCount }, (_, index) => {
           const size = base + (index < extra ? 1 : 0);
           const col = rows.slice(at, at + size);
           at += size;
