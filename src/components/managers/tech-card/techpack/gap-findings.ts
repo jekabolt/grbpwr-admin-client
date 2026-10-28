@@ -150,7 +150,7 @@ export function gapWhere(target: GapTarget, translate: PdfT = englishT): string 
       labels: translate('gaps.tabLabels'),
       signoff: translate('gaps.tabSignoff'),
     }[nav.tab] ?? nav.tab;
-  const detail = nav.extra?.op ? `op ${nav.extra.op}` : nav.extra?.bom;
+  const detail = nav.extra?.op ? `${translate('assembly.op')} ${nav.extra.op}` : nav.extra?.bom;
   return detail ? `${tab} · ${detail}` : tab;
 }
 

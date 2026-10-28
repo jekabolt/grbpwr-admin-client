@@ -364,7 +364,12 @@ export const en = {
     tabSignoff: 'signoff',
   },
   notices: {
-    openFindings: '{count} open {noun}',
+    openFindings: {
+      one: '{count} open finding',
+      few: '{count} open findings',
+      many: '{count} open findings',
+      other: '{count} open findings',
+    },
     finding: 'finding',
     findings: 'findings',
     colourwayMissing: 'colourway #{id} is not on this card — printed for all colourways',
