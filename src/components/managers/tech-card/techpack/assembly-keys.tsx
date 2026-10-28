@@ -6,6 +6,7 @@ import { CalloutBox } from 'ui';
 import { OpIconArt, type OpIcon } from 'components/managers/tech-card/op-icons';
 
 import type { Seg, SvgMarkup } from './derive-assembly';
+import { useT } from './i18n';
 
 /** The turn-out key printed under a join that is bagged out. */
 export const TURN_KEY: OpIcon = { key: 'turn_out' };
@@ -106,14 +107,16 @@ export const KEYS_CSS = String.raw`
 
 /** The one blocking check: what, who unblocks it, where to sign it off. */
 export function StopBox({ text, n, className }: { text: string; n: number; className?: string }) {
+  const { t } = useT();
   return (
     <CalloutBox tone='error' className={className}>
       <div className='asm-stop-in'>
-        <b>STOP</b>
+        <b>{t('assembly.stop')}</b>
         <span>{text}</span>
-        <span>→ pattern maker · hold {n}</span>
+        <span>{t('assembly.patternMakerHold', { op: n })}</span>
         <span className='asm-slot'>
-          resolved by <i /> date <i className='asm-slot-short' />
+          {t('assembly.resolvedBy')} <i /> {t('assembly.resolvedDate')}{' '}
+          <i className='asm-slot-short' />
         </span>
       </div>
     </CalloutBox>
@@ -121,34 +124,35 @@ export function StopBox({ text, n, className }: { text: string; n: number; class
 }
 
 export function Legend() {
+  const { t } = useT();
   return (
     <div className='asm-legend'>
       <span>
-        <i className='asm-sw asm-sw-old' /> sewn
+        <i className='asm-sw asm-sw-old' /> {t('assembly.sewn')}
       </span>
       <span>
-        <i className='asm-sw asm-sw-new' /> new
+        <i className='asm-sw asm-sw-new' /> {t('assembly.new')}
       </span>
       <span>
-        <i className='asm-overlap' /> overlap
+        <i className='asm-overlap' /> {t('assembly.overlap')}
       </span>
       <span>
-        <i className='asm-sw asm-sw-top' /> on top
+        <i className='asm-sw asm-sw-top' /> {t('assembly.onTop')}
       </span>
       <span>
         <svg width='22' height='12' aria-hidden viewBox='0 0 22 12'>
           <path d='M1 6h20' className='tpa-s' strokeWidth='2.2' strokeLinecap='round' />
         </svg>
-        seam
+        {t('assembly.seam')}
       </span>
       <span>
         <svg width='22' height='12' aria-hidden viewBox='0 0 22 12'>
           <path d='M1 6h20' className='tpa-s' strokeWidth='2' strokeDasharray='3 2' />
         </svg>
-        hidden seam
+        {t('assembly.hiddenSeam')}
       </span>
       <span>
-        <i className='asm-letter'>1</i> pair no.
+        <i className='asm-letter'>1</i> {t('assembly.pairNumber')}
       </span>
     </div>
   );

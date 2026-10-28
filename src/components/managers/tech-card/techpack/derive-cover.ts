@@ -15,6 +15,7 @@ import {
   technicalMedia,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, type PdfT } from './i18n';
 
 export type CoverDeriveOptions = {
   sampleSizeName?: string;
@@ -35,6 +36,7 @@ export function deriveCover(
   techCard: common_TechCard,
   options: CoverDeriveOptions = {},
   sink?: GapSink,
+  t: PdfT = englishT,
 ) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
@@ -62,7 +64,7 @@ export function deriveCover(
       .filter((qty): qty is number => qty != null)
       .reduce((sum, qty) => sum + qty, 0);
     return {
-      name: clean(ref.item.name) || 'button',
+      name: clean(ref.item.name) || t('assembly.button'),
       qty: decimal(ref.item.qtyPerGarment) ?? (operationQty || null),
       spec: clean(ref.item.spec),
     };
@@ -78,29 +80,29 @@ export function deriveCover(
     return sink?.add(gap) ?? gap;
   };
   const gaps = {
-    status: !status ? add('pdf_status_missing', 'status', 'status') : undefined,
+    status: !status ? add('pdf_status_missing', t('gaps.status'), 'status') : undefined,
     sampleSize: !(clean(options.sampleSizeName) || card?.baseSampleSizeId)
-      ? add('pdf_sample_size_missing', 'sample size', 'sample size')
+      ? add('pdf_sample_size_missing', t('gaps.sampleSize'), 'sample size')
       : undefined,
-    pieces: !pieces.length ? add('pdf_pieces_missing', 'pieces', 'pieces') : undefined,
+    pieces: !pieces.length ? add('pdf_pieces_missing', t('gaps.pieces'), 'pieces') : undefined,
     operations: !operations.length
-      ? add('pdf_operations_missing', 'operations', 'operations')
+      ? add('pdf_operations_missing', t('gaps.operations'), 'operations')
       : undefined,
-    fabrics: !fabrics.length ? add('pdf_fabrics_missing', 'fabrics', 'fabrics') : undefined,
+    fabrics: !fabrics.length ? add('pdf_fabrics_missing', t('gaps.fabrics'), 'fabrics') : undefined,
     buttonQty:
       buttons.length && !buttonFacts.some((button) => button.qty)
-        ? add('pdf_button_qty_missing', 'qty', 'button qty')
+        ? add('pdf_button_qty_missing', t('gaps.quantity'), 'button qty')
         : undefined,
     colourways:
       !colorways.length && !bomColourway
-        ? add('pdf_colourways_missing', 'colourways', 'colourways')
+        ? add('pdf_colourways_missing', t('gaps.colourways'), 'colourways')
         : undefined,
-    name: !clean(card?.name) ? add('pdf_name_missing', 'name', 'name') : undefined,
+    name: !clean(card?.name) ? add('pdf_name_missing', t('gaps.name'), 'name') : undefined,
     front: !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_FRONT')
-      ? add('pdf_front_flat_missing', 'front flat', 'front flat')
+      ? add('pdf_front_flat_missing', t('gaps.frontFlat'), 'front flat')
       : undefined,
     back: !technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK')
-      ? add('pdf_back_flat_missing', 'back flat', 'back flat')
+      ? add('pdf_back_flat_missing', t('gaps.backFlat'), 'back flat')
       : undefined,
   };
 
@@ -110,7 +112,7 @@ export function deriveCover(
     styleNumber: clean(card?.styleNumber),
     collection: clean(card?.collection),
     season: skuToSeasonLabel(card?.skuSeason),
-    gender: enumLabel(card?.targetGender),
+    gender: t('common.generated', { text: enumLabel(card?.targetGender) }),
     stage: stage === '—' ? '' : stage,
     approval: status,
     sampleSize:
@@ -123,7 +125,7 @@ export function deriveCover(
     operations: operations.length,
     assemblies: assemblies.size,
     fabrics: fabrics.map((ref) => ({
-      role: materialRole(ref),
+      role: t('common.generated', { text: materialRole(ref) }),
       name: clean(ref.item.name),
       colour: materialColour(ref, primary).name,
       pieces: pieces.filter(
@@ -132,7 +134,11 @@ export function deriveCover(
     })),
     buttons: buttonFacts,
     buttonTotal: buttonFacts.reduce((sum, button) => sum + (button.qty ?? 0), 0),
-    colorways: colorways.length ? colorways.map(colorwayName) : bomColourway ? [bomColourway] : [],
+    colorways: colorways.length
+      ? colorways.map((colorway, index) => colorwayName(colorway, index, t))
+      : bomColourway
+        ? [bomColourway]
+        : [],
     gaps,
   };
 }

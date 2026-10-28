@@ -5,6 +5,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
+import { englishT, type PdfT } from './i18n';
 
 /** What every section page gets from the document: the card, the paper, the running head, «NN». */
 export type TechpackPageProps = {
@@ -42,8 +43,8 @@ export function chunksOf<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
-export const continuedTitle = (n: string, title: string, continued: boolean) =>
-  `${n} ${title}${continued ? ' · cont.' : ''}`;
+export const continuedTitle = (n: string, title: string, continued: boolean, t: PdfT = englishT) =>
+  `${n} ${title}${continued ? t('common.continued') : ''}`;
 
 export const TECHPACK_SHEET_CSS = String.raw`
 .tp-doc { display: flex; flex-direction: column; align-items: center; gap: 24px; }

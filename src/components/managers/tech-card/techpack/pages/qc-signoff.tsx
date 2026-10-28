@@ -7,6 +7,7 @@ import { deriveQcSignoffPage, type QcCheck, type QcSeamDelta } from '../derive-q
 import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
 import { statusTone } from './bits';
 import { Gap } from '../gaps';
+import { own, useT } from '../i18n';
 
 type Props = {
   techCard: common_TechCard;
@@ -21,8 +22,6 @@ type Props = {
 };
 
 /** Who signs a sample off, when the card holds no sign-offs yet: a blank form. */
-const ROLES = ['designer', 'pattern maker', 'technologist', 'sample'];
-
 const CheckBox = () => (
   <span className='inline-block size-3 border border-textColor align-middle' />
 );
@@ -45,6 +44,7 @@ export function QcSignoffPage({
   labelPlacement,
   revisionLabel,
 }: Props) {
+  const { t } = useT();
   const land = orient === 'land';
   const model = deriveQcSignoffPage({
     techCard,
@@ -52,30 +52,35 @@ export function QcSignoffPage({
     sizeNames,
     seamDeltas,
     labelPlacement,
+    t,
   });
+  const roles = [t('qc.designer'), t('qc.patternMaker'), t('qc.technologist'), t('qc.sample')];
   const hasRevisions = model.revisions.length > 0;
   const status = cardStatus(techCard);
   const qc = (checks: readonly QcCheck[]) => (
     <div>
-      <GroupLabel flush action={<HeaderNote>{checks.length} checks</HeaderNote>}>
-        qc checklist
+      <GroupLabel
+        flush
+        action={<HeaderNote>{t('common.checks', { count: checks.length })}</HeaderNote>}
+      >
+        {t('qc.checklist')}
       </GroupLabel>
       <DataTable>
         <thead>
           <tr>
             <th data-align='left' className='w-1/3'>
-              check
+              {t('qc.check')}
             </th>
-            <th>op</th>
-            <th>pass</th>
-            <th>fail</th>
-            <th data-align='left'>note</th>
+            <th>{t('assembly.op')}</th>
+            <th>{t('qc.pass')}</th>
+            <th>{t('qc.fail')}</th>
+            <th data-align='left'>{t('common.note')}</th>
           </tr>
         </thead>
         <tbody>
           {checks.map((check) => (
             <tr key={check.key}>
-              <td data-align='left'>{check.gap ? <Gap gap={check.gap} /> : check.what}</td>
+              <td data-align='left'>{check.gap ? <Gap gap={check.gap} /> : own(check.what)}</td>
               <td className='tabular-nums text-labelColor'>{check.op || <EmptyCell />}</td>
               <td>
                 <CheckBox />
@@ -84,7 +89,7 @@ export function QcSignoffPage({
                 <CheckBox />
               </td>
               <td data-align='left' className='text-labelColor'>
-                {check.note}
+                {own(check.note)}
               </td>
             </tr>
           ))}
@@ -95,16 +100,16 @@ export function QcSignoffPage({
   const signoff = (signoffs = model.signoffs, showRevision = true) => (
     <div className='flex min-h-0 flex-1 flex-col justify-between gap-6'>
       <div>
-        <GroupLabel flush>sign-off</GroupLabel>
+        <GroupLabel flush>{t('qc.signoff')}</GroupLabel>
         {signoffs.length > 0 ? (
           <DataTable variant='grid'>
             <thead>
               <tr>
-                <th>role</th>
-                <th>state</th>
-                <th>name</th>
-                <th>date</th>
-                <th>note</th>
+                <th>{t('common.role')}</th>
+                <th>{t('common.state')}</th>
+                <th>{t('common.name')}</th>
+                <th>{t('common.date')}</th>
+                <th>{t('common.note')}</th>
               </tr>
             </thead>
             <tbody>
@@ -118,12 +123,12 @@ export function QcSignoffPage({
                   </td>
                   <td>
                     <Pill tone={row.stale ? 'warn' : signoffTone(row.state)}>
-                      {row.stale ? 'stale' : row.state}
+                      {row.stale ? t('qc.stale') : row.state}
                     </Pill>
                   </td>
-                  <td>{row.signedBy}</td>
+                  <td>{own(row.signedBy)}</td>
                   <td>{row.signedAt}</td>
-                  <td>{row.note}</td>
+                  <td>{own(row.note)}</td>
                 </tr>
               ))}
             </tbody>
@@ -132,14 +137,14 @@ export function QcSignoffPage({
           <DataTable variant='grid'>
             <thead>
               <tr>
-                <th>role</th>
-                <th>name</th>
-                <th>date</th>
-                <th>signature</th>
+                <th>{t('common.role')}</th>
+                <th>{t('common.name')}</th>
+                <th>{t('common.date')}</th>
+                <th>{t('qc.signature')}</th>
               </tr>
             </thead>
             <tbody>
-              {ROLES.map((role) => (
+              {roles.map((role) => (
                 <tr key={role}>
                   <td className='uppercase text-labelColor' style={{ height: land ? 102 : 88 }}>
                     {role}
@@ -155,14 +160,14 @@ export function QcSignoffPage({
       </div>
       {showRevision && hasRevisions ? (
         <div>
-          <GroupLabel flush>revision</GroupLabel>
+          <GroupLabel flush>{t('qc.revision')}</GroupLabel>
           <DataTable>
             <thead>
               <tr>
-                <th>date</th>
-                <th data-align='left'>action</th>
-                <th data-align='left'>section</th>
-                <th data-align='left'>by</th>
+                <th>{t('common.date')}</th>
+                <th data-align='left'>{t('common.action')}</th>
+                <th data-align='left'>{t('common.section')}</th>
+                <th data-align='left'>{t('common.by')}</th>
               </tr>
             </thead>
             <tbody>
@@ -171,7 +176,9 @@ export function QcSignoffPage({
                   <td>{row.date}</td>
                   <td data-align='left'>{row.action}</td>
                   <td data-align='left'>{row.section}</td>
-                  <td data-align='left'>{[row.author, row.note].filter(Boolean).join(' · ')}</td>
+                  <td data-align='left'>
+                    {[own(row.author), own(row.note)].filter(Boolean).join(' · ')}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -180,12 +187,12 @@ export function QcSignoffPage({
       ) : showRevision ? (
         (revisionLabel || status) && (
           <div>
-            <GroupLabel flush>revision</GroupLabel>
+            <GroupLabel flush>{t('qc.revision')}</GroupLabel>
             <DataTable>
               <thead>
                 <tr>
-                  <th>rev</th>
-                  <th data-align='left'>state</th>
+                  <th>{t('qc.revisionShort')}</th>
+                  <th data-align='left'>{t('common.state')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -194,7 +201,11 @@ export function QcSignoffPage({
                     {revisionLabel}
                   </td>
                   <td data-align='left'>
-                    {status && <Pill tone={statusTone(status)}>{status}</Pill>}
+                    {status && (
+                      <Pill tone={statusTone(status)}>
+                        {t('common.generated', { text: status })}
+                      </Pill>
+                    )}
                   </td>
                 </tr>
               </tbody>
@@ -207,9 +218,11 @@ export function QcSignoffPage({
 
   const header = (continued = false) => (
     <SectionHeader
-      title={continuedTitle(n, 'qc & sign-off', continued)}
+      title={continuedTitle(n, t('qc.title'), continued, t)}
       action={
-        model.sampleSize ? <HeaderNote>{`sample ${model.sampleSize}`}</HeaderNote> : undefined
+        model.sampleSize ? (
+          <HeaderNote>{t('measurements.sample', { size: model.sampleSize })}</HeaderNote>
+        ) : undefined
       }
     />
   );

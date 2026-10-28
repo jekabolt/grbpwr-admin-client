@@ -17,6 +17,7 @@ import {
   technicalMedia,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, type PdfT } from './i18n';
 
 export type LabelsDeriveOptions = { sampleSizeName?: string };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
@@ -30,6 +31,7 @@ export function deriveLabels(
   techCard: common_TechCard,
   options: LabelsDeriveOptions = {},
   sink?: GapSink,
+  t: PdfT = englishT,
 ) {
   const card = techCard.techCard;
   const primary = techCard.colorways?.[0];
@@ -39,7 +41,7 @@ export function deriveLabels(
   const overrideFibers = careOverride?.fibers ?? [];
   const composition = overrideFibers.length
     ? [...new Set(overrideFibers.map((fiber) => partFromWire(fiber.part)))].map((part) => ({
-        part: LABEL_PART_NAME[part],
+        part: t('common.generated', { text: LABEL_PART_NAME[part] }),
         value: overrideFibers
           .filter((fiber) => partFromWire(fiber.part) === part)
           .map((fiber) =>
@@ -53,14 +55,16 @@ export function deriveLabels(
     : bomRefs(techCard).flatMap((ref) => {
         const part = effectiveLabelPart(ref.item);
         const value = formatCompositionCell(ref.item.composition);
-        return part === 'NOT_ON_LABEL' || !value ? [] : [{ part: LABEL_PART_NAME[part], value }];
+        return part === 'NOT_ON_LABEL' || !value
+          ? []
+          : [{ part: t('common.generated', { text: LABEL_PART_NAME[part] }), value }];
       });
   const fallbackComposition = composition.length
     ? composition
     : (techCard.compositionEntries ?? []).length
       ? [
           {
-            part: 'SHELL',
+            part: t('labels.shell'),
             value: (techCard.compositionEntries ?? [])
               .map((entry) => {
                 const percentage = decimal(entry.percent);
@@ -99,21 +103,23 @@ export function deriveLabels(
   const identityName = clean(card?.name);
   const identityColour =
     clean(careOverride?.colourName) ||
-    (primary ? colorwayName(primary, 0) : bomColourwayName(techCard));
+    (primary ? colorwayName(primary, 0, t) : bomColourwayName(techCard));
   const identitySize =
     clean(options.sampleSizeName) || (card?.baseSampleSizeId ? `#${card.baseSampleSizeId}` : '');
   const back = technicalMedia(techCard, 'TECH_CARD_MEDIA_KIND_BACK');
   const gaps = {
-    name: !identityName ? add('pdf_name_missing', 'name', 'name') : undefined,
-    colour: !identityColour ? add('pdf_label_colour_missing', 'colour', 'colour') : undefined,
-    size: !identitySize ? add('pdf_sample_size_missing', 'size', 'sample size') : undefined,
+    name: !identityName ? add('pdf_name_missing', t('gaps.name'), 'name') : undefined,
+    colour: !identityColour
+      ? add('pdf_label_colour_missing', t('gaps.colour'), 'colour')
+      : undefined,
+    size: !identitySize ? add('pdf_sample_size_missing', t('gaps.size'), 'sample size') : undefined,
     composition: !fallbackComposition.length
-      ? add('pdf_composition_missing', 'composition', 'composition')
+      ? add('pdf_composition_missing', t('gaps.composition'), 'composition')
       : undefined,
     placement: !clean(placementLabel?.placement)
-      ? add('pdf_label_placement_missing', 'placement', 'placement')
+      ? add('pdf_label_placement_missing', t('gaps.placement'), 'placement')
       : undefined,
-    back: !back ? add('pdf_back_flat_missing', 'back flat', 'back flat') : undefined,
+    back: !back ? add('pdf_back_flat_missing', t('gaps.backFlat'), 'back flat') : undefined,
   };
 
   return {

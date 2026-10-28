@@ -4,6 +4,7 @@ import { deriveCover, type CoverDeriveOptions } from '../derive-cover';
 import type { Gap } from '../gaps';
 import { Missing, statusTone, TechpackDrawing } from './bits';
 import { TechpackSheet, type TechpackPageProps } from '../sheet';
+import { own, useT, type PdfT } from '../i18n';
 
 /** A section in the contents; its page number is filled in from the laid-out sheets. */
 export type TechpackTocItem = { n: string; title: string };
@@ -14,19 +15,19 @@ type CoverPageProps = TechpackPageProps &
     pdfGaps?: readonly Gap[];
   };
 
-const glossary: Array<[string, string]> = [
-  ['SA', 'seam allowance'],
-  ['CB', 'centre back'],
-  ['CF', 'centre front'],
-  ['TS', 'topstitch'],
-  ['m/c', 'machine'],
-  ['GSM', 'grams / m²'],
-  ['DXF', 'pattern file'],
-  ['PAIR', '2 pcs L+R'],
-  ['P', 'perimeter'],
-  ['Turn out', 'right side out'],
-  ['Δ', 'length difference'],
-  ['RS / WS', 'right / wrong side'],
+const glossary = (t: PdfT): Array<[string, string]> => [
+  ['SA', t('cover.seamAllowance')],
+  ['CB', t('cover.centreBack')],
+  ['CF', t('cover.centreFront')],
+  ['TS', t('cover.topstitch')],
+  ['m/c', t('cover.machine')],
+  ['GSM', t('cover.gramsPerSquareMetre')],
+  ['DXF', t('cover.patternFile')],
+  ['PAIR', t('cover.pair')],
+  ['P', t('cover.perimeter')],
+  [t('cover.turnOutKey'), t('cover.turnOut')],
+  ['Δ', t('cover.lengthDifference')],
+  ['RS / WS', t('cover.sides')],
 ];
 
 /** «a · b · b» → «a · b»: a collection named after its season prints once. */
@@ -46,16 +47,17 @@ export function CoverPage({
   revisionLabel,
   pdfGaps = [],
 }: CoverPageProps) {
-  const model = deriveCover(techCard, { sampleSizeName, revisionLabel });
+  const { t } = useT();
+  const model = deriveCover(techCard, { sampleSizeName, revisionLabel }, undefined, t);
   const land = orient === 'land';
   const fabrics = model.fabrics
-    .map((fabric) => [fabric.name, fabric.colour].filter(Boolean).join(' · '))
+    .map((fabric) => [own(fabric.name), own(fabric.colour)].filter(Boolean).join(' · '))
     .filter(Boolean)
     .join(' + ');
   const buttonFacts = model.buttons
     // «button 11 mm» without a spec still names its size
     .map((button) =>
-      [button.qty, button.spec || button.name.replace(/^buttons?\s*/i, '')]
+      [button.qty, own(button.spec) || own(button.name).replace(/^buttons?\s*/i, '')]
         .filter(Boolean)
         .join(' × '),
     )
@@ -64,17 +66,19 @@ export function CoverPage({
   const summary = (
     <div>
       <KV
-        k='status'
+        k={t('common.status')}
         v={
           model.approval ? (
-            <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
+            <Pill tone={statusTone(model.approval)}>
+              {t('common.generated', { text: model.approval })}
+            </Pill>
           ) : (
             model.gaps.status && <Missing gap={model.gaps.status} />
           )
         }
       />
       <KV
-        k='sample size'
+        k={t('common.sampleSize')}
         v={
           model.sampleSize ? (
             <span className='uppercase'>{model.sampleSize}</span>
@@ -84,7 +88,7 @@ export function CoverPage({
         }
       />
       <KV
-        k='cut pieces'
+        k={t('common.cutPieces')}
         v={
           model.pieceCount ? (
             <>
@@ -104,22 +108,28 @@ export function CoverPage({
         }
       />
       <KV
-        k='operations'
+        k={t('common.operations')}
         v={
           model.operations ? (
             <>
               {model.operations}
-              <span className='text-labelColor'> · {model.assemblies} assemblies</span>
+              <span className='text-labelColor'>
+                {' '}
+                · {t('cover.assemblies', { count: model.assemblies })}
+              </span>
             </>
           ) : (
             model.gaps.operations && <Missing gap={model.gaps.operations} />
           )
         }
       />
-      <KV k='fabrics' v={fabrics || (model.gaps.fabrics && <Missing gap={model.gaps.fabrics} />)} />
+      <KV
+        k={t('common.fabrics')}
+        v={fabrics || (model.gaps.fabrics && <Missing gap={model.gaps.fabrics} />)}
+      />
       {model.buttons.length ? (
         <KV
-          k='buttons'
+          k={t('common.buttons')}
           v={
             <>
               {model.buttonTotal ||
@@ -130,19 +140,21 @@ export function CoverPage({
         />
       ) : null}
       <KV
-        k='colourways'
+        k={t('common.colourways')}
         v={
           model.colorways.length ||
           (model.gaps.colourways && <Missing gap={model.gaps.colourways} />)
         }
       />
-      {pdfGaps.length > 0 && <KV k='missing' v={`${pdfGaps.length} gaps`} />}
-      {model.revision && <KV k='revision' v={model.revision} />}
+      {pdfGaps.length > 0 && (
+        <KV k={t('common.missing')} v={t('common.gaps', { count: pdfGaps.length })} />
+      )}
+      {model.revision && <KV k={t('common.revision')} v={model.revision} />}
     </div>
   );
   const contents = (
     <div>
-      <GroupLabel flush>contents</GroupLabel>
+      <GroupLabel flush>{t('cover.contents')}</GroupLabel>
       {toc.map((item) => (
         <Row
           key={item.n}
@@ -159,9 +171,9 @@ export function CoverPage({
   );
   const key = (
     <div>
-      <GroupLabel flush>key</GroupLabel>
+      <GroupLabel flush>{t('cover.key')}</GroupLabel>
       <div className='grid grid-cols-2 gap-x-4'>
-        {glossary.map(([label, value]) => (
+        {glossary(t).map(([label, value]) => (
           <Row key={label} label={label} value={value} />
         ))}
       </div>
@@ -176,13 +188,13 @@ export function CoverPage({
             <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-textColor' />
             <div className='min-w-0'>
               <div className='text-micro uppercase tracking-section text-labelColor'>
-                {model.brand} · tech pack
+                {model.brand} · {t('common.techPack')}
               </div>
               <h1 className='text-statBig font-bold uppercase leading-tight'>
                 {model.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
               </h1>
               <div className='text-control'>
-                {uniqueLine([model.gender, model.collection, model.season])}
+                {uniqueLine([model.gender, own(model.collection), model.season])}
               </div>
               {model.styleNumber && (
                 <div className='text-micro uppercase tracking-label text-labelColor'>
@@ -193,13 +205,15 @@ export function CoverPage({
           </div>
           <div className='flex flex-col items-end gap-1 text-right text-control leading-tight'>
             {model.approval ? (
-              <Pill tone={statusTone(model.approval)}>{model.approval}</Pill>
+              <Pill tone={statusTone(model.approval)}>
+                {t('common.generated', { text: model.approval })}
+              </Pill>
             ) : (
               model.gaps.status && <Missing gap={model.gaps.status} />
             )}
             {model.revision && <div className='font-semibold'>{model.revision}</div>}
             <div className='text-labelColor'>
-              sample{' '}
+              {t('common.sample')}{' '}
               {model.sampleSize ? (
                 <span className='uppercase'>{model.sampleSize}</span>
               ) : (
@@ -216,13 +230,13 @@ export function CoverPage({
             <div className='flex flex-1 items-center justify-center gap-4 border border-borderColor'>
               <TechpackDrawing
                 media={model.front}
-                name='front'
+                name={t('common.front')}
                 height={325}
                 missingGap={model.gaps.front}
               />
               <TechpackDrawing
                 media={model.back}
-                name='back'
+                name={t('common.back')}
                 height={325}
                 missingGap={model.gaps.back}
               />
@@ -239,13 +253,13 @@ export function CoverPage({
           <div className='flex items-center justify-center gap-2 border border-borderColor py-2'>
             <TechpackDrawing
               media={model.front}
-              name='front'
+              name={t('common.front')}
               height={325}
               missingGap={model.gaps.front}
             />
             <TechpackDrawing
               media={model.back}
-              name='back'
+              name={t('common.back')}
               height={325}
               missingGap={model.gaps.back}
             />

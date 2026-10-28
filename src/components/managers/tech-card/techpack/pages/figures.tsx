@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { PatternQR } from 'components/managers/tech-card/patterns/pattern-qr';
 import type { MeasurementView } from '../derive-measurements';
 import { Gap, type Gap as GapData } from '../gaps';
+import { own } from '../i18n';
 
 export function QrFigure({
   value,
@@ -29,7 +30,7 @@ export function QrFigure({
         className='mt-1 text-micro uppercase leading-tight'
         style={{ maxWidth: size + 24, overflowWrap: 'anywhere' }}
       >
-        <div className='font-semibold'>{label}</div>
+        <div className='font-semibold'>{own(label)}</div>
         {sub && <div className='text-labelColor'>{sub}</div>}
       </figcaption>
     </figure>

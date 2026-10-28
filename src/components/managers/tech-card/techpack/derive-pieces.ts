@@ -17,6 +17,7 @@ import {
   rollGoods,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, type PdfT } from './i18n';
 
 export type TechpackPieceGeometry = {
   shapeByKey: ReadonlyMap<string, FoundPiece | null> | null;
@@ -105,6 +106,7 @@ export function derivePieces(
   techCard: common_TechCard,
   geometry?: TechpackPieceGeometry,
   sink?: GapSink,
+  t: PdfT = englishT,
 ) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
@@ -146,13 +148,13 @@ export function derivePieces(
             box: drawBox(shape),
             areaM2: shape && qty != null ? (shape.piece.areaCm2 * qty) / 10_000 : null,
             missing: [
-              !clean(piece.name) && add('pdf_piece_name_missing', 'name', 'name', pieceRef),
-              !code && add('asm_piece_no_code', 'code', 'code', pieceRef),
-              qty == null && add('pdf_piece_qty_missing', 'qty', 'qty', pieceRef),
-              !ref && add('pdf_piece_material_missing', 'material', 'material', pieceRef),
+              !clean(piece.name) && add('pdf_piece_name_missing', t('gaps.name'), 'name', pieceRef),
+              !code && add('asm_piece_no_code', t('gaps.code'), 'code', pieceRef),
+              qty == null && add('pdf_piece_qty_missing', t('gaps.quantity'), 'qty', pieceRef),
+              !ref && add('pdf_piece_material_missing', t('gaps.material'), 'material', pieceRef),
               geometry?.shapeByKey &&
                 !shape &&
-                add('pdf_piece_dxf_missing', 'dxf', 'dxf', pieceRef),
+                add('pdf_piece_dxf_missing', t('gaps.dxf'), 'dxf', pieceRef),
             ].filter((value): value is Gap => Boolean(value)),
           },
         ];
@@ -183,9 +185,11 @@ export function derivePieces(
         key: group.key,
         label: group.label,
         name: group.ref
-          ? clean(group.ref.item.name) || materialRole(group.ref)
-          : 'material missing',
-        role: group.ref ? materialRole(group.ref) : 'unassigned',
+          ? clean(group.ref.item.name) || t('common.generated', { text: materialRole(group.ref) })
+          : t('pieces.materialMissing'),
+        role: group.ref
+          ? t('common.generated', { text: materialRole(group.ref) })
+          : t('pieces.unassigned'),
         composition: clean(group.ref?.item.composition),
         colour: colour.name,
         swatch: colour.swatch,
@@ -211,6 +215,8 @@ export function derivePieces(
     pieceCount: sourcePieces.length,
     panelCount: sourcePieces.reduce((sum, piece) => sum + (piece.piecesPerGarment ?? 0), 0),
     hasGeometry: Boolean(geometry?.shapeByKey),
-    emptyGap: !sourcePieces.length ? add('pdf_pieces_missing', 'pieces', 'pieces') : undefined,
+    emptyGap: !sourcePieces.length
+      ? add('pdf_pieces_missing', t('gaps.pieces'), 'pieces')
+      : undefined,
   };
 }

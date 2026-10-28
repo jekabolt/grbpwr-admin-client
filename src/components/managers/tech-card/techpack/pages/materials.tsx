@@ -9,6 +9,7 @@ import {
   useTechpackOverflow,
 } from '../sheet';
 import { Missing, Swatch, TechpackDrawing } from './bits';
+import { own, useT } from '../i18n';
 
 type Hardware = MaterialsModel['hardware'][number] & { showTotal?: boolean };
 type PageModel = Omit<MaterialsModel, 'hardware'> & { hardware: Hardware[] };
@@ -28,14 +29,17 @@ function MaterialsBody({
   showDrawing?: boolean;
   showFabrics?: boolean;
 }) {
+  const { t } = useT();
   return (
     <>
       <SectionHeader
-        title={continuedTitle(n, 'materials & trims', continued)}
+        title={continuedTitle(n, t('materials.title'), continued, t)}
         action={
           <HeaderNote>
-            bom {model.bomCount}
-            {model.buttonTotal ? ` · buttons ${formatNumber(model.buttonTotal, 0)}` : ''}
+            {t('materials.bomCount', { count: model.bomCount })}
+            {model.buttonTotal
+              ? ` · ${t('materials.buttonCount', { value: formatNumber(model.buttonTotal, 0) })}`
+              : ''}
           </HeaderNote>
         }
       />
@@ -51,18 +55,18 @@ function MaterialsBody({
         >
           {showFabrics && (
             <div>
-              <GroupLabel flush>fabrics</GroupLabel>
+              <GroupLabel flush>{t('common.fabrics')}</GroupLabel>
               <DataTable>
                 <thead>
                   <tr>
-                    <th>bom</th>
-                    <th data-align='left'>material · colour</th>
-                    <th data-align='left'>composition</th>
-                    <th>width</th>
-                    <th>gsm</th>
-                    <th>pcs</th>
-                    <th>consumption</th>
-                    <th>price</th>
+                    <th>{t('materials.bom')}</th>
+                    <th data-align='left'>{t('materials.materialColour')}</th>
+                    <th data-align='left'>{t('common.composition')}</th>
+                    <th>{t('common.width')}</th>
+                    <th>{t('materials.gsm')}</th>
+                    <th>{t('materials.piecesShort')}</th>
+                    <th>{t('materials.consumption')}</th>
+                    <th>{t('materials.price')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -72,11 +76,11 @@ function MaterialsBody({
                         <Swatch colour={fabric.swatch} /> <b>{fabric.key}</b>
                       </td>
                       <td data-align='left'>
-                        {[fabric.name, fabric.colour].filter(Boolean).join(' · ') ||
+                        {[own(fabric.name), own(fabric.colour)].filter(Boolean).join(' · ') ||
                           (fabric.gaps.material && <Missing gap={fabric.gaps.material} />)}
                         <div className='text-micro uppercase text-labelColor'>{fabric.role}</div>
                       </td>
-                      <td data-align='left'>{fabric.composition}</td>
+                      <td data-align='left'>{own(fabric.composition)}</td>
                       <td className='whitespace-nowrap'>
                         {fabric.widthCm == null
                           ? fabric.gaps.width && <Missing gap={fabric.gaps.width} />
@@ -128,33 +132,38 @@ function MaterialsBody({
             <div key={thread.key}>
               <GroupLabel
                 flush
-                action={<HeaderNote>{thread.operationNumbers.length} ops</HeaderNote>}
+                action={
+                  <HeaderNote>
+                    {t('common.operationsShort', { count: thread.operationNumbers.length })}
+                  </HeaderNote>
+                }
               >
-                thread
+                {t('materials.thread')}
               </GroupLabel>
               <DataTable>
                 <thead>
                   <tr>
-                    <th>colour</th>
-                    <th data-align='left'>article</th>
-                    <th data-align='left'>composition</th>
-                    <th data-align='left'>supplier</th>
+                    <th>{t('common.colour')}</th>
+                    <th data-align='left'>{t('common.article')}</th>
+                    <th data-align='left'>{t('common.composition')}</th>
+                    <th data-align='left'>{t('common.supplier')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td className='whitespace-nowrap'>
-                      <Swatch colour={thread.swatch} /> {thread.colour}
+                      <Swatch colour={thread.swatch} /> {own(thread.colour)}
                     </td>
                     <td data-align='left'>
-                      {thread.name || (thread.articleGap && <Missing gap={thread.articleGap} />)}
+                      {own(thread.name) ||
+                        (thread.articleGap && <Missing gap={thread.articleGap} />)}
                     </td>
-                    <td data-align='left'>{thread.composition}</td>
-                    <td data-align='left'>{thread.supplier}</td>
+                    <td data-align='left'>{own(thread.composition)}</td>
+                    <td data-align='left'>{own(thread.supplier)}</td>
                   </tr>
                   {thread.operationNumbers.length > 0 && (
                     <tr>
-                      <td className='text-labelColor'>ops</td>
+                      <td className='text-labelColor'>{t('materials.operationNumbers')}</td>
                       <td data-align='left' colSpan={3}>
                         {thread.operationNumbers.join(' · ')}
                       </td>
@@ -187,18 +196,18 @@ function MaterialsBody({
               <div key={`${item.key}-${rows[0]?.key ?? 'empty'}`}>
                 <GroupLabel
                   flush
-                  action={item.detail ? <HeaderNote>{item.detail}</HeaderNote> : undefined}
+                  action={item.detail ? <HeaderNote>{own(item.detail)}</HeaderNote> : undefined}
                 >
-                  {item.name || item.kind}
+                  {own(item.name) || item.kind}
                 </GroupLabel>
                 <DataTable>
                   <thead>
                     <tr>
-                      <th>pin</th>
-                      <th data-align='left'>where</th>
-                      <th>ops</th>
-                      <th data-align='left'>source</th>
-                      <th>qty</th>
+                      <th>{t('materials.pin')}</th>
+                      <th data-align='left'>{t('materials.where')}</th>
+                      <th>{t('materials.operationNumbers')}</th>
+                      <th data-align='left'>{t('common.source')}</th>
+                      <th>{t('common.quantity')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -214,7 +223,7 @@ function MaterialsBody({
                           )}
                         </td>
                         <td data-align='left'>
-                          {spot.where ||
+                          {own(spot.where) ||
                             (spot.gaps?.placement && <Missing gap={spot.gaps.placement} />)}
                         </td>
                         <td>
@@ -235,7 +244,7 @@ function MaterialsBody({
                     {item.showTotal !== false && (
                       <TotalRow>
                         <td />
-                        <td data-align='left'>per garment</td>
+                        <td data-align='left'>{t('materials.perGarment')}</td>
                         <td />
                         <td />
                         <td>
@@ -255,13 +264,13 @@ function MaterialsBody({
           <div className='flex min-h-0 min-w-0 flex-1 items-center justify-center border border-borderColor'>
             <TechpackDrawing
               media={model.front}
-              name='front'
+              name={t('common.front')}
               pins={model.pins.map((pin) => ({
                 ...pin,
                 highlighted: pin.missingQty,
               }))}
               height={land ? 560 : 300}
-              caption='front · trims'
+              caption={t('materials.frontTrims')}
               missingGap={model.gaps.front}
             />
           </div>
@@ -295,7 +304,8 @@ function packBlocks(blocks: MaterialBlock[], land: boolean): MaterialBlock[][] {
 }
 
 export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProps) {
-  const model = deriveMaterials(techCard);
+  const { t } = useT();
+  const model = deriveMaterials(techCard, undefined, t);
   const land = orient === 'land';
   const itemCount =
     model.fabrics.length +

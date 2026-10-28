@@ -6,6 +6,7 @@ import type {
 } from 'api/proto-http/admin';
 import { decimalNumber, decimalText } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, type PdfT } from './i18n';
 
 export type TechpackMeasurement = { id: number; name: string };
 
@@ -49,6 +50,7 @@ type MeasurementInput = {
   measurements: readonly TechpackMeasurement[];
   sizeChart?: common_StyleSizeChart;
   sizeNames?: Readonly<Record<number, string>>;
+  t?: PdfT;
 };
 
 type Geometry = {
@@ -121,6 +123,7 @@ export function deriveMeasurementsPage(input: MeasurementInput, sink?: GapSink):
   const { techCard, measurements, sizeChart } = input;
   const tc = techCard.techCard;
   const sampleSizeId = tc?.baseSampleSizeId ?? 0;
+  const t = input.t ?? englishT;
   const add = (code: string, label: string, field: string, refs: string[] = []): Gap => {
     const gap: Gap = {
       code,
@@ -171,7 +174,7 @@ export function deriveMeasurementsPage(input: MeasurementInput, sink?: GapSink):
       required: required || undefined,
       missing: !required,
       gap: !required
-        ? add('pdf_measurement_required_missing', 'required', measurement.name, [
+        ? add('pdf_measurement_required_missing', t('gaps.required'), measurement.name, [
             `field:measurement ${measurement.id}`,
           ])
         : undefined,
@@ -182,7 +185,7 @@ export function deriveMeasurementsPage(input: MeasurementInput, sink?: GapSink):
     mediaId,
     src: mediaUrl(item),
     caption: [
-      side,
+      t(side === 'front' ? 'common.front' : 'common.back'),
       ...rows.flatMap((row) => {
         const point = points.get(row.id);
         return point?.geometry.mediaId === mediaId ? [point.label] : [];
@@ -211,10 +214,12 @@ export function deriveMeasurementsPage(input: MeasurementInput, sink?: GapSink):
   const gaps = {
     measurements:
       measurements.length === 0
-        ? add('pdf_measurements_missing', 'measurements', 'measurements')
+        ? add('pdf_measurements_missing', t('gaps.measurements'), 'measurements')
         : undefined,
     drawing:
-      views.length === 0 ? add('pdf_measurement_drawing_missing', 'drawing', 'drawing') : undefined,
+      views.length === 0
+        ? add('pdf_measurement_drawing_missing', t('gaps.drawing'), 'drawing')
+        : undefined,
   };
   return {
     unit: tc?.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm',

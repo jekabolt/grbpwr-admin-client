@@ -3,6 +3,7 @@ import { fmtDelta } from './derive-assembly';
 import type { MeasurementRow } from './derive-measurements';
 import { bomRefs, clean, decimalNumber, enumLabel, shortDate, type BomRef } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, own, type PdfT } from './i18n';
 
 export type QcCheck = {
   key: string;
@@ -51,6 +52,7 @@ type QcInput = {
   seamDeltas?: readonly QcSeamDelta[];
   /** The label placement the labels page prints; empty = missing. */
   labelPlacement?: string;
+  t?: PdfT;
 };
 
 const BUTTON = 'TECH_CARD_BOM_KIND_BUTTON';
@@ -66,16 +68,21 @@ const opList = (ops: Iterable<number>): string =>
     .sort((a, b) => a - b)
     .join(' · ');
 
-const itemName = (item: common_TechCardBomItem): string =>
-  clean(item.name) || enumLabel(item.kind) || enumLabel(item.section) || 'trim';
+const itemName = (item: common_TechCardBomItem, t: PdfT): string => {
+  const authored = clean(item.name);
+  if (authored) return own(authored);
+  const generated = enumLabel(item.kind) || enumLabel(item.section);
+  return generated ? t('common.generated', { text: generated }) : t('common.material');
+};
 
 /** «button 11 mm» → «11 mm» next to the word «buttons». */
-const sizeOf = (item: common_TechCardBomItem): string =>
-  itemName(item).replace(/^buttons?\s+/i, '');
+const sizeOf = (item: common_TechCardBomItem, t: PdfT): string =>
+  itemName(item, t).replace(/^buttons?\s+/i, '');
 
 export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffModel {
   const { techCard } = input;
   const tc = techCard.techCard;
+  const t = input.t ?? englishT;
   const checks: QcCheck[] = [];
   const add = (
     code: string,
@@ -112,22 +119,25 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   for (const seam of input.seamDeltas ?? []) {
     checks.push({
       key: `seam-${seam.op}`,
-      what: 'seam Δ resolved',
+      what: t('qc.seamResolved'),
       op: String(seam.op),
       note: `Δ ${fmtDelta(seam.delta)} mm`,
     });
   }
   for (const [index, issue] of (tc?.issues ?? []).entries()) {
     if (issue.status !== 'TECH_CARD_ISSUE_STATUS_OPEN') continue;
+    const description = own(issue.description?.trim());
     checks.push({
       key: `issue-${index}`,
-      what: issue.description?.trim() || 'open issue',
+      what: description || t('qc.openIssue'),
       op: issue.operationNumber ? String(issue.operationNumber) : undefined,
-      note: enumLabel(issue.severity, 'TECH_CARD_ISSUE_SEVERITY_'),
+      note: t('common.generated', {
+        text: enumLabel(issue.severity, 'TECH_CARD_ISSUE_SEVERITY_'),
+      }),
       missing: true,
       gap: add(
         'pdf_open_issue',
-        issue.description?.trim() || 'open issue',
+        description || t('gaps.openIssue'),
         'issue',
         [`field:issue ${index + 1}`],
         issue.operationNumber,
@@ -136,7 +146,8 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   }
 
   const holes = opsOf('TECH_CARD_MACHINE_TYPE_BUTTONHOLE', 'buttonhole');
-  if (holes.length) checks.push({ key: 'buttonholes', what: 'buttonholes', op: opList(holes) });
+  if (holes.length)
+    checks.push({ key: 'buttonholes', what: t('qc.buttonholes'), op: opList(holes) });
 
   // a trim no operation consumes is not sewn on: red, like every other missing fact
   const refs = bomRefs(techCard);
@@ -147,13 +158,13 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     const total = qty.reduce((sum, value) => sum + value, 0);
     checks.push({
       key: 'buttons',
-      what: total ? `buttons · ${total}` : 'buttons',
+      what: total ? `${t('qc.buttons')} · ${total}` : t('qc.buttons'),
       op: opList([
         ...opsOf('TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH', 'button_attach'),
         ...buttons.flatMap(opsUsing),
       ]),
       note: buttons
-        .map((ref, i) => (qty[i] ? `${qty[i]} × ${sizeOf(ref.item)}` : sizeOf(ref.item)))
+        .map((ref, i) => (qty[i] ? `${qty[i]} × ${sizeOf(ref.item, t)}` : sizeOf(ref.item, t)))
         .join(' · '),
     });
     unlinked.push(...buttons.filter((ref) => opsUsing(ref).length === 0));
@@ -166,9 +177,9 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     }
     checks.push({
       key: `thread-${ref.key}`,
-      what: `thread ${clean(ref.item.color) || itemName(ref.item)}`,
+      what: t('qc.thread', { name: own(clean(ref.item.color) || itemName(ref.item, t)) }),
       op: opList(used),
-      note: `${used.length} ops`,
+      note: t('common.operationsShort', { count: used.length }),
     });
   }
   for (const ref of refs.filter((r) => TRIMS.has(r.item.section ?? '') && r.item.kind !== BUTTON)) {
@@ -180,7 +191,7 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     const qty = decimalNumber(ref.item.qtyPerGarment);
     checks.push({
       key: `trim-${ref.key}`,
-      what: qty ? `${itemName(ref.item)} · ${qty}` : itemName(ref.item),
+      what: qty ? `${itemName(ref.item, t)} · ${qty}` : itemName(ref.item, t),
       op: opList(used),
     });
   }
@@ -188,12 +199,12 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     const qty = decimalNumber(ref.item.qtyPerGarment);
     checks.push({
       key: `unlinked-${ref.key}`,
-      what: itemName(ref.item),
-      note: qty ? `${qty} pcs · no op` : 'no op',
+      what: itemName(ref.item, t),
+      note: qty ? t('qc.piecesNoOperation', { count: qty }) : t('qc.noOperation'),
       missing: true,
       gap: add(
         'pdf_trim_operation_missing',
-        itemName(ref.item),
+        itemName(ref.item, t),
         'operation',
         [],
         undefined,
@@ -205,12 +216,12 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   const placement = clean(input.labelPlacement);
   checks.push(
     placement
-      ? { key: 'label', what: `label ${placement}` }
+      ? { key: 'label', what: t('qc.label', { placement: own(placement) }) }
       : {
           key: 'label',
-          what: 'label placement',
+          what: t('qc.labelPlacement'),
           missing: true,
-          gap: add('pdf_label_placement_missing', 'label placement', 'label placement'),
+          gap: add('pdf_label_placement_missing', t('qc.labelPlacement'), 'label placement'),
         },
   );
 
@@ -219,37 +230,41 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   if (!rows.length || missingMeasurements) {
     checks.push({
       key: 'measurements',
-      what: 'measurements',
-      note: rows.length ? `${missingMeasurements} missing` : undefined,
+      what: t('common.measurements'),
+      note: rows.length ? t('qc.missingCount', { count: missingMeasurements }) : undefined,
       missing: true,
-      gap: add('pdf_measurements_missing', 'measurements', 'measurements'),
+      gap: add('pdf_measurements_missing', t('gaps.measurements'), 'measurements'),
     });
   } else {
-    checks.push({ key: 'measurements', what: 'measurements', note: `${rows.length} points` });
+    checks.push({
+      key: 'measurements',
+      what: t('measurements.title'),
+      note: t('common.points', { count: rows.length }),
+    });
   }
 
   if (!(tc?.patterns ?? []).some((pattern) => pattern.url?.trim())) {
     checks.push({
       key: 'patterns',
-      what: 'pattern',
+      what: t('common.pattern'),
       missing: true,
-      gap: add('pdf_patterns_missing', 'pattern', 'patterns'),
+      gap: add('pdf_patterns_missing', t('gaps.pattern'), 'patterns'),
     });
   }
   if ((techCard.markers ?? []).length === 0) {
     checks.push({
       key: 'markers',
-      what: 'marker',
+      what: t('common.marker'),
       missing: true,
-      gap: add('pdf_marker_missing', 'marker', 'marker'),
+      gap: add('pdf_marker_missing', t('gaps.marker'), 'marker'),
     });
   }
   if ((techCard.resolvedTechnicalMedia ?? []).length === 0) {
     checks.push({
       key: 'technical',
-      what: 'drawing',
+      what: t('common.drawing'),
       missing: true,
-      gap: add('pdf_drawing_missing', 'drawing', 'drawing'),
+      gap: add('pdf_drawing_missing', t('gaps.drawing'), 'drawing'),
     });
   }
 
@@ -259,10 +274,24 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
   const signoffs: SignoffRow[] = (tc?.signoffs ?? []).map((signoff, index) => {
     const live = digestBySection.get(signoff.section);
     const signed = signoff.signedDigest?.trim();
+    const role = enumLabel(signoff.section, 'TECH_CARD_SIGNOFF_SECTION_');
+    const state = enumLabel(signoff.state, 'TECH_CARD_SIGNOFF_STATE_');
     return {
       key: `${signoff.section || 'signoff'}-${index}`,
-      role: enumLabel(signoff.section, 'TECH_CARD_SIGNOFF_SECTION_') || 'sign-off',
-      state: enumLabel(signoff.state, 'TECH_CARD_SIGNOFF_STATE_') || 'pending',
+      role:
+        String(signoff.section) === 'TECH_CARD_SIGNOFF_SECTION_TECHNICAL'
+          ? t('qc.technical')
+          : role
+            ? t('common.generated', { text: role })
+            : t('qc.signoff'),
+      state:
+        signoff.state === 'TECH_CARD_SIGNOFF_STATE_APPROVED'
+          ? t('qc.approved')
+          : signoff.state === 'TECH_CARD_SIGNOFF_STATE_REJECTED'
+            ? t('qc.rejected')
+            : state
+              ? t('common.generated', { text: state })
+              : t('qc.pending'),
       signedBy: signoff.signedBy?.trim() || undefined,
       signedAt: shortDate(signoff.signedAt) || undefined,
       note: signoff.note?.trim() || undefined,
@@ -275,8 +304,12 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
     .map((revision, index) => ({
       key: `${revision.createdAt || 'revision'}-${index}`,
       date: shortDate(revision.createdAt),
-      action: (revision.action || 'updated').replaceAll('_', ' '),
-      section: revision.section?.replaceAll('_', ' ') || undefined,
+      action: revision.action
+        ? t('common.generated', { text: revision.action.replaceAll('_', ' ') })
+        : t('qc.updated'),
+      section: revision.section
+        ? t('common.generated', { text: revision.section.replaceAll('_', ' ') })
+        : undefined,
       author: revision.author?.trim() || undefined,
       note: revision.changeNote?.trim() || undefined,
     }));

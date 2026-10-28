@@ -9,6 +9,7 @@ import {
 import { TechnicalDrawing } from './figures';
 import { Missing } from './bits';
 import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '../sheet';
+import { own, useT } from '../i18n';
 
 type Props = {
   techCard: common_TechCard;
@@ -23,22 +24,23 @@ type Props = {
 };
 
 function MeasurementsTable({ rows, unit }: { rows: readonly MeasurementRow[]; unit: string }) {
+  const { t } = useT();
   return (
     <DataTable>
       <thead>
         <tr>
-          <th>point</th>
-          <th data-align='left'>method</th>
-          <th>required</th>
-          <th>tol ±</th>
-          <th>measured</th>
+          <th>{t('measurements.point')}</th>
+          <th data-align='left'>{t('measurements.method')}</th>
+          <th>{t('common.required')}</th>
+          <th>{t('measurements.tolerance')}</th>
+          <th>{t('measurements.measured')}</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.id}>
-            <td className='font-bold'>{row.point}</td>
-            <td data-align='left'>{row.method}</td>
+            <td className='font-bold'>{own(row.point)}</td>
+            <td data-align='left'>{own(row.method)}</td>
             <td>{row.required ? `${row.required} ${unit}` : <EmptyCell />}</td>
             <td />
             <td />
@@ -59,7 +61,8 @@ export function MeasurementsPage({
   sizeNames,
   release = false,
 }: Props) {
-  const model = deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames });
+  const { t } = useT();
+  const model = deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames, t });
   const land = orient === 'land';
   // port: two flats side by side are ~340px wide each, so the panel need not be taller
   const figureHeight = land ? 340 : 400;
@@ -77,7 +80,7 @@ export function MeasurementsPage({
       >
         <div ref={probe ? contentRef : undefined} className='contents'>
           <SectionHeader
-            title={continuedTitle(n, 'measurements', continued)}
+            title={continuedTitle(n, t('measurements.title'), continued, t)}
             action={
               <HeaderNote>
                 {model.gaps.measurements && <Missing gap={model.gaps.measurements} />}
@@ -87,11 +90,17 @@ export function MeasurementsPage({
                   </span>
                 ))}
                 {model.unit}
-                {model.sampleSize ? ` · sample ${model.sampleSize}` : ''}
+                {model.sampleSize
+                  ? ` · ${t('measurements.sample', { size: model.sampleSize })}`
+                  : ''}
               </HeaderNote>
             }
           />
-          {release && <p className='mb-1 text-nano uppercase text-labelColor'>live · not in rev</p>}
+          {release && (
+            <p className='mb-1 text-nano uppercase text-labelColor'>
+              {t('common.liveNotInRevision')}
+            </p>
+          )}
           <div
             className='flex items-center justify-center gap-6 border border-borderColor px-4'
             style={{ height: figureHeight }}

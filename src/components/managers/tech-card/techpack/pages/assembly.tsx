@@ -31,6 +31,7 @@ import {
 import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
+import { own, useT, type PdfT } from '../i18n';
 
 const ASM_CSS = String.raw`
 .asm-cols { display: grid; min-height: 0; flex: 1 1 0; column-gap: 24px; }
@@ -128,13 +129,14 @@ function Cols({ orient }: { orient: PrintOrient }) {
 }
 
 function Head() {
+  const { t } = useT();
   return (
     <thead>
       <tr>
-        <th>op</th>
-        <th data-align='left'>picture</th>
-        <th data-align='left'>operation</th>
-        <th data-align='left'>machine · Δ</th>
+        <th>{t('assembly.op')}</th>
+        <th data-align='left'>{t('assembly.picture')}</th>
+        <th data-align='left'>{t('assembly.operation')}</th>
+        <th data-align='left'>{t('assembly.machineDelta')}</th>
       </tr>
     </thead>
   );
@@ -191,6 +193,7 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
 }
 
 function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
+  const { t } = useT();
   const w = r.words;
   return (
     <tr data-op={r.n}>
@@ -207,9 +210,11 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
               → <b>{w.out}</b>
             </>
           )}
-          {w.draft && <span className='asm-marker'>draft</span>}
+          {w.draft && <span className='asm-marker'>{t('assembly.draft')}</span>}
           {Array.from({ length: r.photoCount }, (_, index) => (
-            <span className='asm-marker' key={index}>{`photo ${index + 1}`}</span>
+            <span className='asm-marker' key={index}>
+              {t('assembly.photo', { count: index + 1 })}
+            </span>
           ))}
         </div>
         <Line segs={w.line.filter((segment) => !segment.gap)} />
@@ -224,7 +229,7 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
         {r.card?.turn && (
           <div className='asm-turn'>
             <KeyArt icon={TURN_KEY} w={24} h={18} />
-            <span>Turn out</span>
+            <span>{t('assembly.turnOut')}</span>
           </div>
         )}
       </td>
@@ -304,12 +309,12 @@ function operationPhotos(techCard: common_TechCard): Photo[] {
 type GapGroup = { kind: string; gaps: Gap[] };
 type GapPage = { groups: GapGroup[] };
 
-function gapPages(gaps: readonly Gap[], orient: PrintOrient): GapPage[] {
+function gapPages(gaps: readonly Gap[], orient: PrintOrient, t: PdfT): GapPage[] {
   const perPage = orient === 'land' ? 34 : 48;
   return chunksOf(gaps, perPage).map((pageGaps) => {
     const groups: GapGroup[] = [];
     for (const gap of pageGaps) {
-      const kind = gapSection(gap);
+      const kind = gapSection(gap, t);
       const previous = groups[groups.length - 1];
       if (previous?.kind === kind) previous.gaps.push(gap);
       else groups.push({ kind, gaps: [gap] });
@@ -331,24 +336,24 @@ function PhotoSheet({
   count: string;
   pieceLabel: (key: string) => string | undefined;
 }) {
+  const { t } = useT();
   return (
     <TechpackSheet orient={orient} docline={docline} count={count}>
       <SectionHeader
-        title='06 assembly · photos'
-        action={
-          <HeaderNote>{`${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}`}</HeaderNote>
-        }
+        title={t('assembly.photosTitle')}
+        action={<HeaderNote>{t('common.photos', { count: photos.length })}</HeaderNote>}
       />
       <div className='asm-photos' data-count={photos.length} data-assembly-page='photos'>
         {photos.map((photo) => (
           <figure className='asm-photo' data-photo-op={photo.op} key={`${photo.op}-${photo.index}`}>
             <figcaption className='asm-photo-caption'>
-              {`op ${photo.op} · photo ${photo.index}${photo.caption ? ` · ${photo.caption}` : ''}`}
+              {t('assembly.photoCaption', { op: photo.op, index: photo.index })}
+              {photo.caption ? ` · ${own(photo.caption)}` : ''}
             </figcaption>
             <div className='asm-photo-frame'>
               <AnnotationCanvas
                 src={photo.url}
-                alt={`Operation ${photo.op}`}
+                alt={t('assembly.operationAlt', { op: photo.op })}
                 annotations={photo.annotations}
                 className='asm-photo-canvas'
                 maxHeightClass='max-h-[120mm]'
@@ -379,17 +384,18 @@ function GapsSheet({
   /** The card the lines link back to; a card not saved yet prints plain lines. */
   cardId?: number;
 }) {
+  const { t } = useT();
   const origin = viewerOrigin();
   return (
     <TechpackSheet orient={orient} docline={docline} count={count}>
-      <SectionHeader title='06 assembly · gaps' />
+      <SectionHeader title={t('assembly.gapsTitle')} />
       <div className='asm-gaps' data-assembly-page='gaps'>
         {page.groups.map((group, groupIndex) => (
           <div className='asm-gap-group' key={`${group.kind}-${groupIndex}`}>
             <div className='asm-gap-title'>{group.kind}</div>
             {group.gaps.map((gap) => {
               const subject = subjectOf(gap);
-              const text = `${gap.target.op ? `op ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${subject}` : ''}`;
+              const text = `${gap.target.op ? `${t('assembly.op')} ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${own(subject)}` : ''}`;
               if (!cardId)
                 return (
                   <div className='asm-gap-line' data-gap-list-row={gapKey(gap)} key={gapKey(gap)}>
@@ -406,7 +412,7 @@ function GapsSheet({
                   rel='noreferrer'
                 >
                   <span className='asm-gap-text'>{text}</span>
-                  <span className='asm-gap-to'>{gapWhere(gap.target)}</span>
+                  <span className='asm-gap-to'>{gapWhere(gap.target, t)}</span>
                 </a>
               );
             })}
@@ -437,6 +443,7 @@ export function AssemblyPage({
   /** true once the rows are measured and paginated (the print-ready gate waits for it). */
   onLaidOut: (done: boolean) => void;
 }) {
+  const { t } = useT();
   const picture = useMemo(() => pictureDimensions(orient), [orient]);
   const photos = useMemo(() => operationPhotos(techCard), [techCard]);
   const photoSheets = useMemo(() => chunksOf(photos, 2), [photos]);
@@ -522,12 +529,12 @@ export function AssemblyPage({
   }, [done, onLaidOut]);
 
   if (!model) return null;
-  const title = `${n} assembly`;
+  const title = `${n} ${t('assembly.title')}`;
 
   const per = orient === 'land' ? 2 : 1;
   const pages: Col[][] = [];
   if (cols) for (let i = 0; i < cols.length; i += per) pages.push(cols.slice(i, i + per));
-  const gaps = gapPages(pdfGaps, orient);
+  const gaps = gapPages(pdfGaps, orient, t);
   const total = Math.max(1, pages.length + photoSheets.length + gaps.length);
   const pieceLabel = (key: string) =>
     model.pieces.get(key)?.name ||
@@ -567,7 +574,11 @@ export function AssemblyPage({
           >
             <SectionHeader
               title={title}
-              action={<HeaderNote>{`ops ${first}–${last} · ${rows.length}`}</HeaderNote>}
+              action={
+                <HeaderNote>
+                  {t('assembly.opsRange', { first, last, count: rows.length })}
+                </HeaderNote>
+              }
             />
             <div className='asm-cols' data-orient={orient} data-assembly-page='operations'>
               {Array.from({ length: per }, (_, i) => (

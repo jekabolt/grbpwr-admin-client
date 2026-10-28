@@ -10,6 +10,7 @@ import type { ClientFinding } from '../components/finding-seen';
 import { pieceCode } from './derive-pieces';
 import { bomRefs, clean, pieceKey } from './derive-shared';
 import type { Gap, GapTarget } from './gaps';
+import { englishT, type PdfT } from './i18n';
 
 /** The PDF's section names by number (document.tsx TOC). */
 export const GAP_SECTION: Readonly<Record<string, string>> = {
@@ -23,8 +24,22 @@ export const GAP_SECTION: Readonly<Record<string, string>> = {
   '08': 'measurements',
   '09': 'qc',
 };
-export const gapSection = (g: Pick<Gap, 'section'>) =>
-  GAP_SECTION[g.section] ?? (g.section || 'pdf');
+const GAP_SECTION_KEY = {
+  '00': 'gaps.sectionCover',
+  '01': 'gaps.sectionMaterials',
+  '02': 'gaps.sectionPieces',
+  '03': 'gaps.sectionColourways',
+  '04': 'gaps.sectionPatterns',
+  '05': 'gaps.sectionLabels',
+  '06': 'gaps.sectionAssembly',
+  '08': 'gaps.sectionMeasurements',
+  '09': 'gaps.sectionQc',
+} as const;
+
+export const gapSection = (g: Pick<Gap, 'section'>, t: PdfT = englishT) => {
+  const key = GAP_SECTION_KEY[g.section as keyof typeof GAP_SECTION_KEY];
+  return key ? t(key) : g.section || t('gaps.sectionPdf');
+};
 
 /**
  * What a gap row names after its label: the BOM line's name for a materials / patterns gap, the
@@ -121,10 +136,22 @@ export function gapHref(t: GapTarget, cardId: number, origin: string): string {
 }
 
 /** The destination printed beside a PDF gap line: `construction · op 30`, `bom · SHELL`. */
-export function gapWhere(t: GapTarget): string {
-  const nav = gapNav(t);
+export function gapWhere(target: GapTarget, translate: PdfT = englishT): string {
+  const nav = gapNav(target);
+  const tab =
+    {
+      construction: translate('gaps.tabConstruction'),
+      bom: translate('gaps.tabBom'),
+      patterns: translate('gaps.tabPatterns'),
+      colorways: translate('gaps.tabColourways'),
+      studio: translate('gaps.tabStudio'),
+      sizes: translate('gaps.tabSizes'),
+      artifacts: translate('gaps.tabArtifacts'),
+      labels: translate('gaps.tabLabels'),
+      signoff: translate('gaps.tabSignoff'),
+    }[nav.tab] ?? nav.tab;
   const detail = nav.extra?.op ? `op ${nav.extra.op}` : nav.extra?.bom;
-  return detail ? `${nav.tab} · ${detail}` : nav.tab;
+  return detail ? `${tab} · ${detail}` : tab;
 }
 
 export function gapNav(t: GapTarget): GapNav {

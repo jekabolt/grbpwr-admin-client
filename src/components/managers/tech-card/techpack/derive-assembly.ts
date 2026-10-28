@@ -61,6 +61,7 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { englishT, own, type PdfT } from './i18n';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -89,6 +90,7 @@ export type AssemblyInput = {
   pieces: ReadonlyMap<string, AsmPiece>;
   /** Grain turn per piece lineKey (lib/pom grainRotation), the frame anchors are written in. */
   grainDeg: ReadonlyMap<string, number>;
+  t?: PdfT;
 };
 
 export type Tech =
@@ -1401,6 +1403,7 @@ function buildCards(
   bound: Map<number, AsmSeam[]>,
   pieces: ReadonlyMap<string, AsmPiece>,
   sink?: GapSink,
+  t: PdfT = englishT,
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
@@ -1450,7 +1453,7 @@ function buildCards(
         {
           // Keep block membership fixed while `world` absorbs later input groups below.
           items: [...entry.items],
-          name: cap(source?.raw.outputUnitName || unitDisplayName({ key: entry.input.key })),
+          name: own(cap(source?.raw.outputUnitName || unitDisplayName({ key: entry.input.key }))),
           op: source?.n ?? 0,
         },
       ];
@@ -1461,7 +1464,7 @@ function buildCards(
     const itemOf = (p: string) => groups.flatMap((g) => g).find((it) => it.p === p);
 
     if (!groups.length)
-      gaps.push(assemblyGap(sink, 'asm_step_no_pieces', 'pieces', op.n, 'inputs'));
+      gaps.push(assemblyGap(sink, 'asm_step_no_pieces', t('gaps.pieces'), op.n, 'inputs'));
 
     for (const s of seams) {
       if (s.kind === 'surface') {
@@ -1471,7 +1474,14 @@ function buildCards(
         const moving = groups.find((group) => group !== fixed);
         if (!target || !host || !fixed || !moving) {
           gaps.push(
-            assemblyGap(sink, 'asm_inner_target_missing', 'target', op.n, 'inner target', s.key),
+            assemblyGap(
+              sink,
+              'asm_inner_target_missing',
+              t('gaps.target'),
+              op.n,
+              'inner target',
+              s.key,
+            ),
           );
           if (fixed && moving) placeBeside(pieces, fixed, moving, 'right');
           continue;
@@ -1558,7 +1568,7 @@ function buildCards(
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const gap = bad
-        ? assemblyGap(sink, 'asm_length_mismatch', 'length', op.n, 'seam length', s.key)
+        ? assemblyGap(sink, 'asm_length_mismatch', t('gaps.length'), op.n, 'seam length', s.key)
         : undefined;
       if (gap) gaps.push(gap);
       return {
@@ -1573,10 +1583,16 @@ function buildCards(
     const badAt = metrics.findIndex((m) => m.bad);
     const names = (parts: SeamPart[]) =>
       [...new Set(parts.map((p) => pieces.get(p.piece)?.code).filter(Boolean))].join(' + ') ||
-      'piece';
+      t('assembly.piece');
     const stop =
       badAt >= 0
-        ? `Check: ${names(seams[badAt].a)} ${metrics[badAt].left.toFixed(1)} / ${names(seams[badAt].b)} ${(metrics[badAt].right ?? 0).toFixed(1)} · Δ ${fmtDelta(metrics[badAt].delta ?? 0)}`
+        ? t('assembly.checkMismatch', {
+            leftName: names(seams[badAt].a),
+            left: metrics[badAt].left.toFixed(1),
+            rightName: names(seams[badAt].b),
+            right: (metrics[badAt].right ?? 0).toFixed(1),
+            delta: fmtDelta(metrics[badAt].delta ?? 0),
+          })
         : undefined;
     const pieceIns = op.ins.filter((x) => x.kind === 'piece');
     const pieceNumbers = new Map(pieceIns.map((input, index) => [input.key, index + 1]));
@@ -1620,6 +1636,7 @@ function wordsOf(
   },
 ): OpWords {
   const ins = ctx.input.techCard.techCard;
+  const t = ctx.input.t ?? englishT;
   const o = op.raw;
   const tech = op.tech;
   const heading = operationHeading({
@@ -1631,11 +1648,31 @@ function wordsOf(
     workCatalog: BUNDLED_WORK_CATALOG,
     pieceNames: [],
   });
-  const verb = cap(heading.toLocaleLowerCase() === 'machine' ? VERB[tech] : heading || VERB[tech]);
+  const verbKey = {
+    press: 'assembly.pressFlat',
+    pressSide: 'assembly.pressSa',
+    pressFinal: 'assembly.finalPress',
+    topstitch: 'assembly.topstitch',
+    buttonhole: 'assembly.buttonholes',
+    button: 'assembly.sewButtons',
+    bind: 'assembly.bindEdge',
+    hand: 'assembly.handwork',
+    overlock: 'assembly.overlock',
+    sew: 'assembly.sew',
+    turn: 'assembly.turnOut',
+  } as const;
+  const fallbackVerb = t(verbKey[tech]);
+  const verb = cap(
+    heading.toLocaleLowerCase() === 'machine'
+      ? fallbackVerb
+      : o.work
+        ? own(heading)
+        : t('common.generated', { text: heading || fallbackVerb }),
+  );
   const pieceName = (k: string) => {
     const piece = ctx.input.pieces.get(k);
     const stored = ins?.pieces?.find((candidate) => candidate.lineKey === k);
-    const name = (piece?.name || stored?.name || piece?.code || '').trim();
+    const name = own((piece?.name || stored?.name || piece?.code || '').trim());
     return name && !ULID.test(name) ? name : piece?.code || assemblyPieceCode(stored?.name);
   };
   const plainNameOf = (x: Input) =>
@@ -1651,7 +1688,7 @@ function wordsOf(
     if (pieceNumber) return `${pieceNumber} ${name}`;
     return step ? `${name} (${step})` : name;
   };
-  const rawNote = (o.note ?? '').trim();
+  const rawNote = own((o.note ?? '').trim());
   const normalizedNote = rawNote.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
   const normalizedVerb = verb.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
   const note =
@@ -1664,35 +1701,38 @@ function wordsOf(
   if (op.join) {
     const hasSeam = Boolean(ctx.card?.seams.length);
     if (note) line.push({ t: cap(note) });
-    if (!hasSeam) assemblyGap(ctx.sink, 'asm_edge_missing', 'seam', op.n, 'seam');
-    if (ctx.card?.fold) line.push({ t: 'to fold' });
+    if (!hasSeam) assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.seam'), op.n, 'seam');
+    if (ctx.card?.fold) line.push({ t: t('assembly.toFold') });
   } else if (tech === 'bind') {
     const z = o.zone;
     const named =
       z && z !== 'TECH_CARD_GARMENT_ZONE_OUTER' && z !== 'TECH_CARD_GARMENT_ZONE_OTHER'
         ? zoneLabel(z)
         : '';
-    if (named) line.push({ t: named });
-    else assemblyGap(ctx.sink, 'asm_edge_missing', 'edge', op.n, 'edge');
-    line.push({ t: 'tape' });
+    if (named) line.push({ t: t('common.generated', { text: named }) });
+    else assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.edge'), op.n, 'edge');
+    line.push({ t: t('assembly.tape') });
     if (note) line.push({ t: cap(note) });
   } else if (tech === 'hand') {
     if (note) line.push({ t: cap(note) });
-    else if (ctx.twinNote) line.push({ t: `${cap(ctx.twinNote.note)} (as ${ctx.twinNote.n})` });
-    else assemblyGap(ctx.sink, 'asm_edge_missing', 'edge', op.n, 'edge');
+    else if (ctx.twinNote)
+      line.push({
+        t: t('assembly.asOperation', { note: own(cap(ctx.twinNote.note)), op: ctx.twinNote.n }),
+      });
+    else assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.edge'), op.n, 'edge');
   } else if (tech === 'pressSide') {
     const toward = pressTowardLabel(o.press?.toward).replace(/^toward (the )?/, '');
-    if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', 'press side', op.n, 'side');
+    if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', t('gaps.pressSide'), op.n, 'side');
     if (note) line.push({ t: cap(note) });
   } else if (note) line.push({ t: cap(note) });
   const hardware = (o.bomLineKeys ?? [])
     .map((k) => ins?.bomItems?.find((b) => b.lineKey === k))
     .filter((b) => b?.section === 'TECH_CARD_BOM_SECTION_HARDWARE')
-    .map((b) => b?.name ?? '')
+    .map((b) => own(b?.name ?? ''))
     .filter(Boolean);
   for (const h of hardware) line.push({ t: h });
   if (tech === 'button' && !hardware.length)
-    assemblyGap(ctx.sink, 'pdf_button_missing', 'button', op.n, 'button');
+    assemblyGap(ctx.sink, 'pdf_button_missing', t('gaps.button'), op.n, 'button');
 
   const tool: Seg[] = [];
   if (op.join) {
@@ -1702,7 +1742,7 @@ function wordsOf(
   }
   if (tech === 'topstitch') {
     const phrase = topstitchLine(o.topstitch?.mode, o.topstitch?.widthMm?.value, o.topstitch?.rows);
-    if (!phrase) assemblyGap(ctx.sink, 'pdf_ts_missing', 'topstitch', op.n, 'TS');
+    if (!phrase) assemblyGap(ctx.sink, 'pdf_ts_missing', t('gaps.topstitch'), op.n, 'TS');
   }
 
   const decimal = (value?: { value?: string }) => value?.value;
@@ -1819,33 +1859,35 @@ function wordsOf(
     ...seamFacts,
     ...toolParams,
     stepPlacementText(facts).replace(/^×\s+/, '×'),
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .map((value) => t('common.generated', { text: value }));
   const profileKey = (o.machineProfileKey ?? '').trim();
   if (profileKey) {
     const profile = ins?.construction?.equipmentDefaults?.machines?.find(
       (candidate) => candidate.profileKey === profileKey,
     );
-    params.push(`profile ${profile?.label?.trim() || profileKey}`);
+    params.push(t('assembly.profile', { name: own(profile?.label?.trim() || profileKey) }));
   }
 
   let mc: Seg | undefined;
   const machineParams: string[] = [];
   if (isPressStepType(o.operationType)) {
     const equipment = pressEquipmentLabel(o.pressEquipment);
-    if (equipment) mc = { t: cap(equipment) };
-    else assemblyGap(ctx.sink, 'pdf_machine_missing', 'press equipment', op.n, 'machine');
+    if (equipment) mc = { t: t('common.generated', { text: cap(equipment) }) };
+    else assemblyGap(ctx.sink, 'pdf_machine_missing', t('gaps.pressEquipment'), op.n, 'machine');
     if (o.pressTemperatureC != null) machineParams.push(`${o.pressTemperatureC} °C`);
     if (o.pressDwellSec != null) machineParams.push(`${o.pressDwellSec} s`);
     if (o.pressPressureNCm2?.value) machineParams.push(`${o.pressPressureNCm2.value} N/cm²`);
   } else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_HANDWORK' || tech === 'hand')
-    mc = { t: 'Hand' };
+    mc = { t: t('assembly.hand') };
   else if (o.machineType && o.machineType !== 'TECH_CARD_MACHINE_TYPE_UNKNOWN') {
     const label = machineTypeLabel(o.machineType)
       .replace(/\s+\d[\d\s/]*$/, '')
       .trim();
-    if (label) mc = { t: cap(label) };
+    if (label) mc = { t: t('common.generated', { text: cap(label) }) };
   } else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE') {
-    assemblyGap(ctx.sink, 'pdf_machine_missing', 'machine', op.n, 'machine');
+    assemblyGap(ctx.sink, 'pdf_machine_missing', t('gaps.machine'), op.n, 'machine');
   }
 
   const seamLines = (ctx.card?.seams ?? []).map((seam, index) => {
@@ -1871,7 +1913,7 @@ function wordsOf(
       left = moving ? (leaves?.size === 1 ? [...leaves][0] : plainNameOf(moving)) : '';
       right = host;
     }
-    const storedDetail = seam.note
+    const storedDetail = own(seam.note)
       .replace(/\bop\s*\d+\b/gi, '')
       .replace(/^[\s,.:;·/-]+|[\s,.:;·/-]+$/g, '')
       .trim();
@@ -1881,21 +1923,21 @@ function wordsOf(
       seamParts.every((part) => ctx.input.pieces.get(part.piece)?.pocketing);
     const zone = zoneLabel(o.zone);
     let detail = storedDetail;
-    if (seam.kind === 'surface') detail = 'slit';
-    else if (!detail && pocketBag) detail = 'bag';
+    if (seam.kind === 'surface') detail = t('assembly.slit');
+    else if (!detail && pocketBag) detail = t('assembly.bag');
     else if (!detail && (ctx.card?.seams.length ?? 0) === 1 && seam.kind === 'composite' && zone)
-      detail = `${zone} edge`;
-    return `${circled(index)} ${left || 'edge'} ↔ ${right || 'fold'}${detail ? ` · ${detail}` : ''}`;
+      detail = `${t('common.generated', { text: zone })} ${t('assembly.edge')}`;
+    return `${circled(index)} ${left || t('assembly.edge')} ↔ ${right || t('assembly.fold')}${detail ? ` · ${detail}` : ''}`;
   });
   if (icon.missing) {
     const gap: Gap = {
       code: 'pdf_icon_missing',
       refs: [`op:${op.n}`],
-      label: 'icon',
+      label: t('gaps.icon'),
       section: '06',
       target: { tab: 'construction', op: op.n },
     };
-    line.push({ t: 'icon', gap: ctx.sink?.add(gap) ?? gap });
+    line.push({ t: t('assembly.icon'), gap: ctx.sink?.add(gap) ?? gap });
   }
   return {
     tech,
@@ -1934,11 +1976,12 @@ function mirrorSets(
 // ── the model ───────────────────────────────────────────────────────────────────────────────────
 
 export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyModel {
+  const t = input.t ?? englishT;
   const gapSink = sink ?? new GapSink();
   const ops = readOps(input);
   const emptyGap = ops.length
     ? undefined
-    : assemblyGap(gapSink, 'pdf_operations_missing', 'operations', 0, 'operations');
+    : assemblyGap(gapSink, 'pdf_operations_missing', t('gaps.operations'), 0, 'operations');
   const { seams, unresolved } = locateSeams(input);
   const guessed = bindSeams(
     seams,
@@ -1951,14 +1994,14 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
   const bound = new Map(
     ops.filter((op) => op.join).map((op) => [op.n, seamsOfOp(op.raw, catalog)]),
   );
-  const { cards, units } = buildCards(ops, bound, input.pieces, gapSink);
+  const { cards, units } = buildCards(ops, bound, input.pieces, gapSink, t);
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {
     if (o.out && !unitName.has(o.out)) {
       unitName.set(
         o.out,
-        cap(unitDisplayName({ key: o.out, outputUnitName: o.raw.outputUnitName })),
+        own(cap(unitDisplayName({ key: o.out, outputUnitName: o.raw.outputUnitName }))),
       );
       unitStep.set(o.out, o.n);
     }

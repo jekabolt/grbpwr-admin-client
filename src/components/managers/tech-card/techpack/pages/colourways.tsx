@@ -9,6 +9,7 @@ import {
   useTechpackOverflow,
 } from '../sheet';
 import { Missing, Swatch } from './bits';
+import { own, useT } from '../i18n';
 
 type RecipeRows = ColourwaysModel['rows'];
 type RecipeColumns = ColourwaysModel['columns'];
@@ -23,12 +24,14 @@ function ColourwaysHeader({
   n: string;
   continued?: boolean;
 }) {
+  const { t } = useT();
   return (
     <SectionHeader
-      title={continuedTitle(n, 'colourways', continued)}
+      title={continuedTitle(n, t('colourways.title'), continued, t)}
       action={
         <HeaderNote>
-          {model.rows.length} · {model.fromBom ? 'from bom colours' : 'material recipe'}
+          {model.rows.length} ·{' '}
+          {model.fromBom ? t('colourways.fromBom') : t('colourways.materialRecipe')}
         </HeaderNote>
       }
     />
@@ -44,6 +47,7 @@ function RecipeMatrix({
   rows: RecipeRows;
   columns: RecipeColumns;
 }) {
+  const { t } = useT();
   const indexes = columns.map((column) =>
     model.columns.findIndex((item) => item.key === column.key),
   );
@@ -51,7 +55,7 @@ function RecipeMatrix({
     <DataTable variant='grid'>
       <thead>
         <tr>
-          <th>colourway</th>
+          <th>{t('colourways.colourway')}</th>
           {columns.map((column) => (
             <th key={column.key}>{column.label}</th>
           ))}
@@ -61,7 +65,7 @@ function RecipeMatrix({
         {rows.map((row) => (
           <tr key={row.key}>
             <td className='whitespace-nowrap'>
-              <Swatch colour={row.swatch} size={14} /> <b>{row.name}</b>
+              <Swatch colour={row.swatch} size={14} /> <b>{own(row.name)}</b>
             </td>
             {indexes.map((index) => {
               const cell = row.cells[index];
@@ -69,9 +73,9 @@ function RecipeMatrix({
                 <td key={cell.key}>
                   <span className='inline-flex items-center gap-1.5'>
                     <Swatch colour={cell.swatch} />
-                    <span>{cell.value}</span>
+                    <span>{own(cell.value)}</span>
                   </span>
-                  {cell.sub && <div className='text-micro text-labelColor'>{cell.sub}</div>}
+                  {cell.sub && <div className='text-micro text-labelColor'>{own(cell.sub)}</div>}
                   {cell.missing && <div>{cell.gap && <Missing gap={cell.gap} />}</div>}
                 </td>
               );
@@ -94,21 +98,22 @@ function PiecesMatrix({
   colourways: RecipeRows;
   labelled?: boolean;
 }) {
+  const { t } = useT();
   const indexes = colourways.map((row) => model.rows.findIndex((item) => item.key === row.key));
   return (
     <>
       {labelled && (
         <GroupLabel flush className='mt-4'>
-          pieces × colourway
+          {t('colourways.piecesColourway')}
         </GroupLabel>
       )}
       <DataTable variant='grid'>
         <thead>
           <tr>
-            <th>bom</th>
-            <th data-align='left'>pieces</th>
+            <th>{t('materials.bom')}</th>
+            <th data-align='left'>{t('common.pieces')}</th>
             {colourways.map((row) => (
-              <th key={row.key}>{row.name}</th>
+              <th key={row.key}>{own(row.name)}</th>
             ))}
           </tr>
         </thead>
@@ -120,7 +125,7 @@ function PiecesMatrix({
               </td>
               <td data-align='left'>
                 {fabric.pieces.length
-                  ? fabric.pieces.join(' · ')
+                  ? fabric.pieces.map(own).join(' · ')
                   : fabric.piecesGap && <Missing gap={fabric.piecesGap} />}
               </td>
               {indexes.map((index) => {
@@ -128,13 +133,13 @@ function PiecesMatrix({
                 return (
                   <td key={cell.key}>
                     <div className='whitespace-nowrap'>
-                      <Swatch colour={cell.swatch} /> {cell.material}
-                      {cell.colour && ` · ${cell.colour}`}
+                      <Swatch colour={cell.swatch} /> {own(cell.material)}
+                      {cell.colour && ` · ${own(cell.colour)}`}
                     </div>
                     {cell.differs && (
                       <div className='text-micro text-labelColor'>
                         {cell.pieces.length
-                          ? cell.pieces.join(' · ')
+                          ? cell.pieces.map(own).join(' · ')
                           : cell.piecesGap && <Missing gap={cell.piecesGap} />}
                       </div>
                     )}
@@ -176,11 +181,13 @@ function ColourwaysBody({
 }
 
 export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; n: string }) {
-  return <ColourwaysBody model={deriveColourways(techCard)} n={n} />;
+  const { t } = useT();
+  return <ColourwaysBody model={deriveColourways(techCard, undefined, t)} n={n} />;
 }
 
 export function ColourwaysPage({ techCard, orient, docline, n }: TechpackPageProps) {
-  const model = deriveColourways(techCard);
+  const { t } = useT();
+  const model = deriveColourways(techCard, undefined, t);
   const land = orient === 'land';
   const recipeColumns = land ? 6 : 4;
   const fabricColumns = land ? 5 : 3;

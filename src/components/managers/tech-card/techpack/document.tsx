@@ -38,19 +38,9 @@ import { QcSignoffPage } from './pages/qc-signoff';
 import { TECHPACK_SHEET_CSS, TechpackSheet } from './sheet';
 import { useAssemblyGeometry } from './use-assembly-geometry';
 import { useTechpackMarkerLayouts, useTechpackMeasurements } from './use-l3-data';
+import { own, useT } from './i18n';
 
 const SECTION_START = /^(\d\d)\s/;
-
-const TOC: TechpackTocItem[] = [
-  { n: '01', title: 'Materials & trims' },
-  { n: '02', title: 'Cut pieces × material' },
-  { n: '03', title: 'Colourways' },
-  { n: '04', title: 'Patterns & marker' },
-  { n: '05', title: 'Labels' },
-  { n: '06', title: 'Assembly' },
-  { n: '08', title: 'Measurements' },
-  { n: '09', title: 'QC & sign-off' },
-];
 
 function text(el: Element, value: string) {
   if (el.textContent !== value) el.textContent = value;
@@ -103,21 +93,29 @@ export function TechpackDocument({
   /** The red marks this document prints (`collectPdfGaps`), each time the list changes. */
   onGaps?: (gaps: Gap[]) => void;
 }) {
+  const { t } = useT();
   const ins = techCard.techCard;
   const { dictionary } = useDictionary();
   const sampleSize = (dictionary?.sizes ?? []).find(
     (s) => s.id != null && s.id === ins?.baseSampleSizeId,
   )?.name;
   const sampleSizeName = sampleSize ? formatSizeName(sampleSize) : '';
-  const revisionLabel =
-    revision ?? (techCard.lockVersion != null ? `rev ${techCard.lockVersion}` : '');
+  const suppliedRevision = revision?.match(/^rev(\.)?\s*(.+)$/i);
+  const revisionLabel = suppliedRevision
+    ? t(suppliedRevision[1] ? 'common.revisionDotValue' : 'common.revisionValue', {
+        number: suppliedRevision[2],
+      })
+    : revision ??
+      (techCard.lockVersion != null
+        ? t('common.revisionValue', { number: techCard.lockVersion })
+        : '');
   const docline = furnitureLine(
-    'tech pack',
-    ins?.collection,
-    ins?.name,
+    t('common.techPack'),
+    own(ins?.collection),
+    ins?.name ?? '',
     sampleSizeName,
     revisionLabel,
-    ins?.status,
+    t('common.generated', { text: ins?.status ?? '' }),
   );
 
   // one-way: once the two sections outgrow one sheet they stay on two
@@ -133,13 +131,14 @@ export function TechpackDocument({
         measurements: sizing.measurements,
         sizeChart: sizing.sizeChart,
         sizeNames: sizing.sizeNames,
+        t,
       }).rows,
-    [techCard, sizing.measurements, sizing.sizeChart, sizing.sizeNames],
+    [techCard, sizing.measurements, sizing.sizeChart, sizing.sizeNames, t],
   );
 
   const labelPlacement = useMemo(
-    () => deriveLabels(techCard, { sampleSizeName }).placement.name,
-    [techCard, sampleSizeName],
+    () => deriveLabels(techCard, { sampleSizeName }, undefined, t).placement.name,
+    [techCard, sampleSizeName, t],
   );
 
   const geometry = useAssemblyGeometry(techCard);
@@ -147,21 +146,21 @@ export function TechpackDocument({
   const netM2ByLine = useMemo(
     () =>
       Object.fromEntries(
-        derivePieces(techCard, geometry.shapes)
+        derivePieces(techCard, geometry.shapes, undefined, t)
           .groups.filter((group) => group.netAreaM2 > 0)
           .map((group) => [group.key, group.netAreaM2]),
       ),
-    [techCard, geometry.shapes],
+    [techCard, geometry.shapes, t],
   );
   const model = useMemo<AssemblyModel | null>(() => {
     if (geometry.dep.status === 'pending') return null;
     try {
-      return deriveAssembly({ techCard, pieces: geometry.pieces, grainDeg: geometry.grainDeg });
+      return deriveAssembly({ techCard, pieces: geometry.pieces, grainDeg: geometry.grainDeg, t });
     } catch {
       // a pattern the engine cannot read still prints the operations, without drawings
-      return deriveAssembly({ techCard, pieces: new Map(), grainDeg: new Map() });
+      return deriveAssembly({ techCard, pieces: new Map(), grainDeg: new Map(), t });
     }
-  }, [techCard, geometry.dep.status, geometry.pieces, geometry.grainDeg]);
+  }, [techCard, geometry.dep.status, geometry.pieces, geometry.grainDeg, t]);
 
   const seamDeltas = useMemo<QcSeamDelta[] | undefined>(() => {
     if (!model) return undefined;
@@ -191,6 +190,7 @@ export function TechpackDocument({
             netM2ByLine,
             includeMarkerLayouts: split && !release,
             labelPlacement,
+            t,
           })
         : [],
     [
@@ -211,6 +211,7 @@ export function TechpackDocument({
       split,
       release,
       labelPlacement,
+      t,
     ],
   );
   useEffect(() => {
@@ -225,11 +226,11 @@ export function TechpackDocument({
   useEffect(() => {
     onDataStatus?.([
       { label: geoLabel, status: geoStatus },
-      { label: 'assembly layout', status: layoutStatus },
-      { label: 'size chart', status: sizingStatus },
-      { label: 'marker layouts', status: markerStatus },
+      { label: t('common.generated', { text: 'assembly layout' }), status: layoutStatus },
+      { label: t('common.generated', { text: 'size chart' }), status: sizingStatus },
+      { label: t('common.generated', { text: 'marker layouts' }), status: markerStatus },
     ]);
-  }, [geoLabel, geoStatus, layoutStatus, sizingStatus, markerStatus, onDataStatus]);
+  }, [geoLabel, geoStatus, layoutStatus, sizingStatus, markerStatus, onDataStatus, t]);
 
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -255,6 +256,16 @@ export function TechpackDocument({
   }, []);
 
   const page = { techCard, orient, docline };
+  const toc: TechpackTocItem[] = [
+    { n: '01', title: t('cover.titleMaterials') },
+    { n: '02', title: t('cover.titlePieces') },
+    { n: '03', title: t('cover.titleColourways') },
+    { n: '04', title: t('cover.titlePatterns') },
+    { n: '05', title: t('cover.titleLabels') },
+    { n: '06', title: t('cover.titleAssembly') },
+    { n: '08', title: t('cover.titleMeasurements') },
+    { n: '09', title: t('cover.titleQc') },
+  ];
   const patterns = {
     techCard,
     orient,
@@ -272,7 +283,7 @@ export function TechpackDocument({
         <CoverPage
           {...page}
           n='00'
-          toc={TOC}
+          toc={toc}
           sampleSizeName={sampleSizeName}
           revisionLabel={revisionLabel}
           pdfGaps={pdfGaps}
