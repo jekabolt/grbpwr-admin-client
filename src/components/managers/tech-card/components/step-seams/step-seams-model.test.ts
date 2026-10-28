@@ -5,6 +5,7 @@ import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
 import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
+import { CARD58_OPS, CARD58_PIECE_KEYS, card58Geoms, card58Step } from './card58.fixture';
 import {
   deltaMm,
   dropKeys,
@@ -468,6 +469,30 @@ describe('suggestStepPair', () => {
  * Card 83, the owner's shirt as beta holds it (card83.fixture): real outlines, notches, every
  * step. The seams below are the ones a sewer would name.
  */
+describe('card 58: the panels of one front', () => {
+  const geoms = card58Geoms();
+  const keys = CARD58_PIECE_KEYS;
+  const ops = CARD58_OPS;
+  const at = card58Step;
+
+  it('80: three panels of the left front — fronts of ONE hand — meet edge to edge', () => {
+    const props = suggestStepPairs(ops, at(80), keys, geoms, new Set(), null);
+    expect(props.length).toBeGreaterThanOrEqual(1);
+    for (const p of props) {
+      for (const id of [...p.a, ...p.b]) expect(id).toMatch(/^FP(_[12])?_L#\d+$/);
+      expect(p.a[0].split('#')[0]).not.toBe(p.b[0].split('#')[0]);
+    }
+  });
+
+  it('140: the sewn left front panel meets the left front', () => {
+    const s = suggestStepPair(ops, at(140), keys, geoms, new Set(), null);
+    expect(s).not.toBeNull();
+    const ids = [...s!.a, ...s!.b];
+    expect(ids.some((id) => id.startsWith('FRONT_L#'))).toBe(true);
+    expect(ids.some((id) => /^FP(_[12])?_L#/.test(id))).toBe(true);
+  });
+});
+
 describe('card 83: chains across the seams earlier steps made', () => {
   const geoms = card83Geoms();
   const keys = CARD83_PIECE_KEYS;

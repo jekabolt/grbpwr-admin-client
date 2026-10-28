@@ -627,8 +627,6 @@ export function stepLayout(
       const mineKeys = keysOf(j);
       const stack =
         mineKeys.length === 1 && keysOf(i).length === 1 && identicalPair(c, geoms, ka, kb);
-      // A layer goes ON its twin only in the joined result; an exploded canvas keeps them apart.
-      if (stack && explode > 0) return null;
       const upright = (M: Affine) =>
         mineKeys.every(
           (k) => followers.has(k) || pieceTilt(geoms.get(k)!, compose(M, local.get(k)!)) <= UPRIGHT,
@@ -686,8 +684,38 @@ export function stepLayout(
         if (!best || score < best.score) best = { M, score };
       };
       if (stack) {
-        // A layer goes ON its twin, drawn alike: straight onto it first (its own way up whichever
-        // edge the seam names); only a twin drawn another way is covered by turning along the seam.
+        // Two layers cut alike, sewn along one edge and opened out, lie across the seam from each
+        // other, mirror images — a book opened at its spine; turned over on purpose, so never
+        // upright. The layer goes ON its twin, edge on edge, then turns over the seam's tangent
+        // at its middle: a straight edge folds on itself, a curved one has the layers touch at
+        // the middle and part towards the ends (sewn, they are not flat). A layer that still cuts
+        // into its twin slides off along the normal, as any input does.
+        const S = rigid(a0, a1, B[0], B[B.length - 1], false);
+        const m0 = apply(S, B[0]);
+        const m1 = apply(S, B[B.length - 1]);
+        const onTwin = compose(
+          translate(mid[0] - (m0[0] + m1[0]) / 2, mid[1] - (m0[1] + m1[1]) / 2),
+          S,
+        );
+        const { p: hp, t: ht } = midAlong(A);
+        // Off the twin along the tangent's normal, away from the host: the chord's normal points
+        // back into a deep crescent, whose middle bulges past its own centroid.
+        nx = -ht[1];
+        ny = ht[0];
+        if ((hc[0] - hp[0]) * nx + (hc[1] - hp[1]) * ny > 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        settle(compose(reflectAcross(hp, ht), onTwin), 0);
+        // (`best` is set inside `settle`: read past the narrowing.)
+        const opened = best as { M: Affine; score: number } | null;
+        if (opened) return opened.M;
+        // No room to open it out: two layers alone go ON each other in the joined result (an
+        // exploded canvas keeps them apart; among other inputs — the gores of a patchwork — a
+        // layer with no room is laid by another seam or stands apart), drawn alike — straight
+        // onto it first (its own way up whichever edge the seam names); only a twin drawn another
+        // way is covered by turning along the seam.
+        if (explode > 0 || placedKeys.length > 1) return null;
         const mc = centroidOf(worldOf(geoms.get(ka)!, local.get(ka)!));
         const M = translate(hc[0] - mc[0], hc[1] - mc[1]);
         best = { M, score: -overlapAt(j, M) * 1000 + (upright(M) ? 0 : 500) };
@@ -745,7 +773,10 @@ export function stepLayout(
       const cl = [rest[0]];
       const inCl = new Set(cl);
       const used: SeamCandidate[] = [];
+      // A fresh table: an earlier cluster is shelved elsewhere, not under this one.
       placedRasters = [];
+      placedKeys = [];
+      placedFine = null;
       settle(rest[0], IDENTITY);
       if (!loose.has(rest[0]))
         for (let laid = true; laid; ) {
@@ -760,6 +791,7 @@ export function stepLayout(
             if (!M) continue;
             settle(j, M);
             cl.push(j);
+            inCl.add(j);
             used.push(c);
             laid = true;
             break;
@@ -940,6 +972,14 @@ export const pathOf = (pts: readonly Pt2[], closed = false) =>
   pts.length
     ? `M${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}${closed ? 'Z' : ''}`
     : '';
+
+/** The reflection across the line through `p` along the unit direction `t`. */
+function reflectAcross(p: Pt2, t: Pt2): Affine {
+  const a = 2 * t[0] * t[0] - 1;
+  const b = 2 * t[0] * t[1];
+  const d = 2 * t[1] * t[1] - 1;
+  return [a, b, b, d, p[0] - (a * p[0] + b * p[1]), p[1] - (b * p[0] + d * p[1])];
+}
 
 /** The point halfway along a polyline and the unit tangent there. */
 export function midAlong(pts: readonly Pt2[]): { p: Pt2; t: Pt2 } {

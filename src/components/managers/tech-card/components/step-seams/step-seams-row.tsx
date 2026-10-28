@@ -51,14 +51,15 @@ export function StepSeamsRow({ index }: { index: number }) {
   const nameOf = scene.pieceName;
   // Each tile lays its pieces along the seam it shows (a stored one, or its own proposal).
   const storedFrame = useMemo(
-    () => frameSeamsOf(innerSeams, storedSeams, null, crossSeams),
+    () => frameSeamsOf(innerSeams, storedSeams, [], crossSeams),
     [innerSeams, storedSeams, crossSeams],
   );
   const proposalFrames = useMemo(
     () =>
-      suggestions.map((sug) =>
-        frameSeamsOf(innerSeams, storedSeams, seamOfSides(sug, geoms, innerLines), crossSeams),
-      ),
+      suggestions.map((sug) => {
+        const own = seamOfSides(sug, geoms, innerLines);
+        return frameSeamsOf(innerSeams, storedSeams, own ? [own] : [], crossSeams);
+      }),
     [suggestions, innerSeams, storedSeams, crossSeams, geoms, innerLines],
   );
 
