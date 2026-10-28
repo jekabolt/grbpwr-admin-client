@@ -62,7 +62,7 @@ import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
-import { machineText, operationText, pressEquipmentText } from './i18n/vocabulary';
+import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -1663,14 +1663,9 @@ function wordsOf(
     turn: 'assembly.turnOut',
   } as const;
   const fallbackVerb = t(verbKey[tech]);
-  const fixedVerb = operationText(o.work, o.operationType, t);
   const verb = cap(
-    fixedVerb ??
-      (heading.toLocaleLowerCase() === 'machine'
-        ? fallbackVerb
-        : o.work
-          ? own(heading)
-          : t('common.generated', { text: heading || fallbackVerb })),
+    operationVerb(o.work, o.operationType, heading, t) ??
+      (heading.toLocaleLowerCase() === 'machine' ? fallbackVerb : own(heading) || fallbackVerb),
   );
   const pieceName = (k: string) => {
     const piece = ctx.input.pieces.get(k);

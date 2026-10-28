@@ -9,6 +9,21 @@ const valueFor = (map: KeyMap, value: string | undefined, t: PdfT): string | und
   return key ? t(key) : undefined;
 };
 
+const same = (a: string, b: string) =>
+  a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+
+// Словарное слово берём, только если его английский — ровно то, что лист печатал до перевода.
+// Иначе на листе стоит другой текст (подпись из каталога, имя из карточки): его переводит модель.
+// На английском всегда возвращается прежний текст — английский лист не меняется ни на букву.
+const pick = (map: KeyMap, value: string | undefined, fallback: string, t: PdfT): string => {
+  const key = value ? map[value] : undefined;
+  if (key && same(englishT(key), fallback)) {
+    const text = t(key);
+    return text === englishT(key) ? fallback : text;
+  }
+  return own(fallback);
+};
+
 // Статус — свободная строка карточки («draft», «DRAFT», «released»): ищем без регистра, а
 // незнакомый отдаём модели, как остальной свой текст.
 const STATUS_KEYS: KeyMap = {
@@ -37,7 +52,7 @@ const GENDER_KEYS: KeyMap = {
 };
 
 export const genderText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(GENDER_KEYS, value, t) ?? fallback;
+  pick(GENDER_KEYS, value, fallback, t);
 
 const MATERIAL_ROLE_KEYS: KeyMap = {
   TECH_CARD_BOM_PURPOSE_UNSET: 'vocab.purposeUnset',
@@ -60,16 +75,18 @@ export const materialRoleText = (
   fallback: string,
   t: PdfT,
 ): string =>
-  valueFor(MATERIAL_ROLE_KEYS, item.purpose, t) ??
-  valueFor(MATERIAL_ROLE_KEYS, item.section, t) ??
-  fallback;
+  item.purpose &&
+  MATERIAL_ROLE_KEYS[item.purpose] &&
+  same(englishT(MATERIAL_ROLE_KEYS[item.purpose]), fallback)
+    ? pick(MATERIAL_ROLE_KEYS, item.purpose, fallback, t)
+    : pick(MATERIAL_ROLE_KEYS, item.section, fallback, t);
 
 const BOM_KIND_KEYS: KeyMap = {
   TECH_CARD_BOM_KIND_BUTTON: 'vocab.bomButton',
 };
 
 export const bomKindText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(BOM_KIND_KEYS, value, t) ?? fallback;
+  pick(BOM_KIND_KEYS, value, fallback, t);
 
 const LABEL_PART_KEYS: KeyMap = {
   SHELL: 'labels.shell',
@@ -82,7 +99,7 @@ const LABEL_PART_KEYS: KeyMap = {
 };
 
 export const labelPartText = (value: string, fallback: string, t: PdfT): string =>
-  valueFor(LABEL_PART_KEYS, value, t) ?? fallback;
+  pick(LABEL_PART_KEYS, value, fallback, t);
 
 const OPERATION_WORK_KEYS: KeyMap = {
   join_lockstitch: 'vocab.operationJoin',
@@ -100,6 +117,19 @@ const OPERATION_TYPE_KEYS: KeyMap = {
   TECH_CARD_OPERATION_TYPE_PRESS: 'vocab.operationPressFlat',
 };
 
+/** The operation verb for a heading the catalog printed: dictionary word when it is that word, else the model. */
+export const operationVerb = (
+  work: string | undefined,
+  operationType: string | undefined,
+  heading: string,
+  t: PdfT,
+): string | undefined => {
+  const en = operationText(work, operationType, englishT);
+  if (!en || !same(en, heading)) return undefined;
+  const text = operationText(work, operationType, t) ?? heading;
+  return text === en ? heading : text;
+};
+
 export const operationText = (
   work: string | undefined,
   operationType: string | undefined,
@@ -114,7 +144,7 @@ const MACHINE_KEYS: KeyMap = {
 };
 
 export const machineText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(MACHINE_KEYS, value, t) ?? fallback;
+  pick(MACHINE_KEYS, value, fallback, t);
 
 const PRESS_EQUIPMENT_KEYS: KeyMap = {
   TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS: 'vocab.machineFusingPress',
@@ -122,7 +152,7 @@ const PRESS_EQUIPMENT_KEYS: KeyMap = {
 };
 
 export const pressEquipmentText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(PRESS_EQUIPMENT_KEYS, value, t) ?? fallback;
+  pick(PRESS_EQUIPMENT_KEYS, value, fallback, t);
 
 const REVISION_ACTION_KEYS: KeyMap = {
   created: 'vocab.revisionCreated',
@@ -149,7 +179,7 @@ const REVISION_SECTION_KEYS: KeyMap = {
 };
 
 export const revisionActionText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(REVISION_ACTION_KEYS, value, t) ?? fallback;
+  pick(REVISION_ACTION_KEYS, value, fallback, t);
 
 export const revisionSectionText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  valueFor(REVISION_SECTION_KEYS, value, t) ?? fallback;
+  pick(REVISION_SECTION_KEYS, value, fallback, t);
