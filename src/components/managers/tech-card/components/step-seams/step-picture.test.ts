@@ -5,6 +5,14 @@ import { pairOverlap, pieceTilt, rasterize } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
 import {
+  CARD77_OPS,
+  CARD77_PIECE_KEYS,
+  card77Geoms,
+  card77Graph,
+  card77InnerLines,
+  card77Step,
+} from './card77.fixture';
+import {
   CARD83_OPS,
   CARD83_PIECE_KEYS,
   card83Geoms,
@@ -17,6 +25,7 @@ import {
   confidentSeam,
   earlierInner,
   fitBox,
+  focusPieces,
   inputName,
   insideRing,
   labelSpot,
@@ -33,10 +42,13 @@ import {
   UPRIGHT,
   type StepLayout,
 } from './step-picture';
+import { frameSeamsOf, innerSeamsOf, splitLaid } from './step-picture-view';
 import {
   inputGroups,
+  pieceOfTarget,
   sewnBeforeStep,
   suggestStepPair,
+  suggestStepPairs,
   usedEdgesBeforeStep,
 } from './step-seams-model';
 
@@ -324,7 +336,9 @@ describe('stepLayout on card 83', () => {
     const frame = [...inner, ...(own.length ? own : raw.cross)];
     return {
       op: op.operationNumber,
+      index: i,
       leaves,
+      inner,
       canvas: stepLayout(leaves, frame, geoms, { explode: 0.08 }),
       result: stepLayout(leaves, [...inner, ...own], geoms),
     };
@@ -445,18 +459,31 @@ describe('stepLayout on card 83', () => {
     }
   });
 
-  it('op 200: the result lays the fronts against the back along the proposal, the placket on its front edge', () => {
+  it('op 200: the result lays the fronts against the back along the proposals, the placket on its front edge', () => {
     const s = steps.find((x) => x.op === 200)!;
-    const box = (k: string) => boxOf(world(geoms.get(k)!, s.result.T.get(k)!));
-    const bp = box('BP');
-    const fr = box('FR');
-    // FR touches BP's side.
-    expect(Math.min(Math.abs(fr.x0 - bp.x1), Math.abs(bp.x0 - fr.x1))).toBeLessThan(12);
+    const boxIn = (L: StepLayout, k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+    const sideBySide = (L: StepLayout, a: string, b: string) => {
+      const A = boxIn(L, a);
+      const B = boxIn(L, b);
+      return Math.min(Math.abs(A.x0 - B.x1), Math.abs(B.x0 - A.x1));
+    };
+    // The step proposes one side seam per side, the left first: the picture takes the first, so
+    // the left front touches the back's side.
+    expect(sideBySide(s.result, 'FL', 'BP')).toBeLessThan(12);
+    // Both proposals sewn: each front on its own side of the back.
+    const used = usedEdgesBeforeStep(ops, s.index, new Map());
+    const sides = suggestStepPairs(ops, s.index, pieceKeys, geoms, used, null, new Map());
+    expect(sides.map((p) => p.hand)).toEqual(['L', 'R']);
+    const own = sides.map((p) => seamOfSides(p, geoms, innerLines)!).filter(Boolean);
+    const both = stepLayout(s.leaves, [...s.inner, ...own], geoms);
+    expect(sideBySide(both, 'FL', 'BP')).toBeLessThan(12);
+    expect(sideBySide(both, 'FR', 'BP')).toBeLessThan(12);
     // Step 130 sewed the placket to the left front's centre edge (the engine reads the same pair,
     // unsure): it stands against that edge, upright, never on the front.
+    const box = (k: string) => boxIn(s.result, k);
     const fl = box('FL');
     const pl = box('PLCK');
-    expect(Math.min(Math.abs(fl.x0 - pl.x1), Math.abs(pl.x0 - fl.x1))).toBeLessThan(12);
+    expect(sideBySide(s.result, 'FL', 'PLCK')).toBeLessThan(12);
     expect(pl.y0).toBeGreaterThan(fl.y0 - 12);
     expect(pl.y1).toBeLessThan(fl.y1 + 12);
     expect(pieceTilt(geoms.get('PLCK')!, s.result.T.get('PLCK')!)).toBeLessThan(0.03);
@@ -593,5 +620,122 @@ describe('spreadLabels', () => {
       [0, 0],
       [0, 100],
     ]);
+  });
+});
+
+describe('focusPieces', () => {
+  const geoms = geomsOf(rect('A', 100, 300), rect('B', 100, 300), rect('C', 100, 300));
+  const sure = (a: string, b: string) => ({ ...candidateOf({ a: [a], b: [b] }, geoms)!, score: 1 });
+  const seamPieces = new Set(['A', 'C']);
+
+  it('adds the piece a sewn seam runs through between the seam’s pieces', () => {
+    const inner = [sure('A#1', 'B#3'), sure('B#1', 'C#3')];
+    expect(focusPieces(['A', 'B', 'C'], seamPieces, inner)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('a piece of the seam no sewn seam reaches is kept; a loose piece is not', () => {
+    expect(focusPieces(['A', 'B', 'C'], seamPieces, [])).toEqual(['A', 'C']);
+    const unsure = { ...sure('A#1', 'B#3'), score: 0.5 };
+    expect(focusPieces(['A', 'B', 'C'], seamPieces, [unsure, sure('B#1', 'C#3')])).toEqual([
+      'A',
+      'C',
+    ]);
+  });
+
+  it('one piece of the seam needs no bridge', () => {
+    expect(focusPieces(['A', 'B'], new Set(['A']), [sure('A#1', 'B#3')])).toEqual(['A']);
+  });
+});
+
+describe('stepLayout apart', () => {
+  const geoms = geomsOf(rect('A', 100, 300), rect('B', 100, 300), rect('C', 80, 200));
+  const inner = candidateOf({ a: ['A#1'], b: ['B#3'] }, geoms)!;
+
+  it('a piece no seam joins to the input’s main body stands beside it and is reported apart', () => {
+    const L = stepLayout([['A', 'B', 'C']], [inner], geoms);
+    expect(L.apart).toEqual(['C']);
+    expect(L.T.has('C')).toBe(true);
+  });
+
+  it('nothing is apart when every piece is joined, or when the input is one piece', () => {
+    expect(stepLayout([['A', 'B']], [inner], geoms).apart).toEqual([]);
+    expect(stepLayout([['C']], [], geoms).apart).toEqual([]);
+  });
+});
+
+describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoked body', () => {
+  const geoms = card77Geoms();
+  const graph = card77Graph();
+  const innerLines = card77InnerLines();
+  const ops = CARD77_OPS;
+  const pieceKeys = CARD77_PIECE_KEYS;
+  const index = card77Step(1020);
+  const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
+  const byKey = new Map();
+  const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+  const proposals = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
+  const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
+  const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
+  const cross = split.cross.filter((c) => c.kind !== 'surface');
+  // What the picker draws for each proposal: the pieces carrying the seam, joined by what the
+  // steps before sewed; the canvas framed by the proposal shown, the result sewn along it.
+  const views = proposals.map((sug) => {
+    const own = seamOfSides(sug, geoms, innerLines)!;
+    const seamPieces = new Set([...sug.a, ...sug.b].map(pieceOfTarget));
+    const focused = leaves
+      .map((l) => focusPieces(l, seamPieces, inner))
+      .filter((l) => l.length > 0);
+    return {
+      hand: sug.hand,
+      sleeve: pieceOfTarget(sug.a[0]),
+      focused,
+      canvas: stepLayout(focused, frameSeamsOf(inner, [], own, cross), geoms, { explode: 0.08 }),
+      result: stepLayout(focused, [...inner, own], geoms),
+    };
+  });
+  const box = (L: StepLayout, k: string) => boxOf(world(geoms.get(k)!, L.T.get(k)!));
+  const mid = (b: ReturnType<typeof box>) => (b.x0 + b.x1) / 2;
+  const overlapOf = (A: Pt2[][], B: Pt2[][]) => {
+    let o = 0;
+    for (const a of A)
+      for (const b of B) o = Math.max(o, pairOverlap(rasterize(a, 2), rasterize(b, 2)));
+    return o;
+  };
+
+  it('one proposal per side: the sleeve cap against the body’s four-edge armhole', () => {
+    expect(views.map((v) => v.hand)).toEqual(['L', 'R']);
+    expect(views.map((v) => v.sleeve)).toEqual(['SLV_L', 'SLV_R']);
+    for (const v of views) {
+      expect(v.focused.map((l) => l.length)).toEqual([1, 5]);
+      expect(v.focused[1]).toEqual(expect.arrayContaining(['BP_U', 'BP_U_1', 'BP_MAIN']));
+    }
+  });
+
+  it('the body’s part is laid joined: the yoke on the back, its second layer on it', () => {
+    for (const v of views)
+      for (const L of [v.canvas, v.result]) {
+        expect(L.apart).toEqual([]);
+        expect(L.stacked).toEqual([['BP_U', 'BP_U_1']]);
+        const yoke = box(L, 'BP_U');
+        const back = box(L, 'BP_MAIN');
+        expect(yoke.y0).toBeGreaterThan(back.y1 - 1);
+        expect(yoke.y0 - back.y1).toBeLessThan(20);
+      }
+  });
+
+  it('the sleeve is set into the armhole run and, sewn, clears the body', () => {
+    for (const v of views) {
+      expect(v.canvas.onRuns).toEqual([v.sleeve]);
+      expect(v.result.onRuns).toEqual([v.sleeve]);
+      const body = v.focused[1].map((k) => world(geoms.get(k)!, v.result.T.get(k)!));
+      const sleeve = [world(geoms.get(v.sleeve)!, v.result.T.get(v.sleeve)!)];
+      expect(overlapOf(sleeve, body)).toBeLessThanOrEqual(0.01);
+    }
+  });
+
+  it('each side’s sleeve hangs on its own side of the body', () => {
+    const [l, r] = views;
+    expect(mid(box(l.result, 'SLV_L'))).toBeLessThan(mid(box(l.result, 'BP_MAIN')));
+    expect(mid(box(r.result, 'SLV_R'))).toBeGreaterThan(mid(box(r.result, 'BP_MAIN')));
   });
 });

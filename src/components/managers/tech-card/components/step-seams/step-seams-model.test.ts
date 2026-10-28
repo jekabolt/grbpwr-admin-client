@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
+import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
 import {
   deltaMm,
@@ -14,12 +15,14 @@ import {
   innerAnchor,
   isJoinStep,
   longestEdge,
+  proposalLabel,
   rowWords,
   sewnBeforeStep,
   sideOf,
   stepInputPieces,
   suggestPair,
   suggestStepPair,
+  suggestStepPairs,
   suggestionWords,
   surfaceRow,
   targetsLen,
@@ -519,9 +522,13 @@ describe('card 83: chains across the seams earlier steps made', () => {
     ]);
   });
 
-  it('single-edge steps keep their answers', () => {
+  it('single-edge steps keep their answers; a three-input step offers one seam per side, left first', () => {
     expect(suggest(130)).toMatchObject({ a: ['PLCK#0'], b: ['FL#4'] });
-    expect(suggest(200)).toMatchObject({ a: ['FR#4'], b: ['BP#7'] });
+    const sides = suggestStepPairs(ops, at(200), keys, geoms, new Set(), null);
+    expect(sides.map((p) => [p.hand, ...p.a, ...p.b])).toEqual([
+      ['L', 'FL#0', 'BP#5'],
+      ['R', 'FR#4', 'BP#7'],
+    ]);
   });
 
   it('a cuff: its layers sewn along one long edge, the sleeve onto the other', () => {
@@ -612,6 +619,49 @@ describe('card 83: chains across the seams earlier steps made', () => {
     expect(s.aLen).toBeLessThan(260);
     expect(s.bLen).toBeGreaterThan(240);
     expect(s.bLen).toBeLessThan(260);
+  });
+});
+
+/**
+ * Card 77, the owner's «starvation» shirt as beta holds it (card77.fixture; card 85 is its copy):
+ * a yoke of two identical layers, fronts of an upper and a lower panel, pocket bags, sleeves with
+ * plackets. The armhole is a chain of four edges across three units' seams, none of them stored.
+ */
+describe('card 77: both sleeves on their armholes, one proposal per side', () => {
+  const geoms = card77Geoms();
+  const keys = CARD77_PIECE_KEYS;
+  const ops = CARD77_OPS;
+  const at = card77Step;
+  const sorted = (xs: readonly string[]) => [...xs].sort();
+  const proposals = (op: number) => suggestStepPairs(ops, at(op), keys, geoms, new Set(), null);
+
+  it('270: the yoke goes on the back along its straight edge, not the side seam of a nearer length', () => {
+    // 484.9 straight against a 484.8 gentle curve (68°), not 512.5 against 512.5 — a yoke seam is
+    // a straight edge on a shaped one; only the lengths that agree closely enough are a seam.
+    const s = suggestStepPair(ops, at(270), keys, geoms, new Set(), null)!;
+    expect(sorted([...s.a, ...s.b])).toEqual(['BP_MAIN#1', 'BP_U#5']);
+  });
+
+  it('1020: each sleeve cap meets the whole armhole of its side — back, yoke, upper and lower front', () => {
+    const all = proposals(1020);
+    expect(all.map((p, i) => proposalLabel(p, i)).sort()).toEqual(['left', 'right']);
+    const left = all.find((p) => p.hand === 'L')!;
+    const right = all.find((p) => p.hand === 'R')!;
+    const sides = (p: { a: string[]; b: string[] }) =>
+      [p.a, p.b].sort((x, y) => x.length - y.length).map(sorted);
+    expect(sides(left)).toEqual([['SLV_L#1'], ['BP_MAIN#2', 'BP_U_1#4', 'P_L_MAIN#0', 'P_L_U#4']]);
+    expect(sides(right)).toEqual([['SLV_R#0'], ['BP_MAIN#0', 'BP_U_1#0', 'P_R_MAIN#2', 'P_R_U#3']]);
+    for (const p of [left, right]) {
+      expect(p.aLen).toBeCloseTo(541, 0);
+      expect(p.bLen).toBeCloseTo(541, 0);
+    }
+  });
+
+  it('1020: no proposal joins the two sleeves to each other', () => {
+    for (const p of proposals(1020)) {
+      const sleeves = [...p.a, ...p.b].filter((id) => /^SLV_/.test(id));
+      expect(sleeves).toHaveLength(1);
+    }
   });
 });
 

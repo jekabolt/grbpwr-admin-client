@@ -158,7 +158,7 @@ export function OperationMediaStrip({
   return (
     <div
       className={cn(
-        'flex min-h-14 min-w-14 flex-1 flex-wrap gap-1.5 self-stretch',
+        'flex min-h-18 min-w-18 flex-1 flex-wrap gap-1.5 self-stretch',
         intake.dragging && 'outline outline-1 outline-textColor',
       )}
       {...intake.regionHandlers}
@@ -171,7 +171,7 @@ export function OperationMediaStrip({
           <div
             key={field.id}
             className={cn(
-              'relative size-14 shrink-0 overflow-hidden border bg-bgColor',
+              'relative size-18 shrink-0 overflow-hidden border bg-bgColor',
               activeIndex === index ? 'border-textColor' : 'border-borderColor',
             )}
           >
@@ -212,8 +212,8 @@ export function OperationMediaStrip({
         <MediaSlot
           aspectRatio={['1:1']}
           frameAspect='1'
-          heightPx={56}
-          sizeClassName='size-14'
+          heightPx={72}
+          sizeClassName='size-18'
           compact
           hint={null}
           label='+ photo'
@@ -226,7 +226,7 @@ export function OperationMediaStrip({
       )}
 
       {(intake.busy || intake.dragging) && (
-        <Text size='micro' variant='label' component='span' className='h-14 content-center'>
+        <Text size='micro' variant='label' component='span' className='h-18 content-center'>
           {intake.busy ? 'adding' : 'drop photo'}
         </Text>
       )}

@@ -46,6 +46,12 @@ export type UnionOptions = {
    * Absent = any; a stacked layer under its identical twin is never held to it.
    */
   uprightMax?: number;
+  /**
+   * A piece its edge seam lands on its host by a sliver (a straight yoke edge against the back's
+   * curved one) goes off along the seam's normal, away from the host, until clear — at most this
+   * share of the host's extent (0.24 = twelve steps of 2 %). Absent = such a link is refused.
+   */
+  pushOffMax?: number;
 };
 
 /** How far a placement leans a piece from its own up, mirrored or not. */
@@ -68,7 +74,9 @@ export type RunPart = { key: string; pts: Pt2[]; len: number };
 /**
  * A side's parts in world, end to end: each part by its piece's placement, turned so it carries on
  * from the one before (the model lists them in walking order, but each in its own ring's sense).
- * Null when a part's piece has no placement yet.
+ * A side that closes on itself (an armhole of a body whose side seam and yoke are sewn: the model
+ * may list it from any part) runs from its widest break — the shoulder gap — so its chord spans
+ * the opening, not a corner. Null when a part's piece has no placement yet.
  */
 export function runOf(
   parts: readonly RunPart[],
@@ -83,18 +91,30 @@ export function runOf(
   const d = (p: Pt2, q: Pt2) => Math.hypot(p[0] - q[0], p[1] - q[1]);
   const first = (r: Pt2[]) => r[0];
   const last = (r: Pt2[]) => r[r.length - 1];
-  let out: Pt2[] = world[0];
+  const walk: Pt2[][] = [world[0]];
   if (world.length > 1) {
     const next = world[1];
     const near = (p: Pt2) => Math.min(d(p, first(next)), d(p, last(next)));
-    if (near(first(out)) < near(last(out))) out = [...out].reverse();
+    if (near(first(world[0])) < near(last(world[0]))) walk[0] = [...world[0]].reverse();
   }
   for (let i = 1; i < world.length; i++) {
     const r = world[i];
-    const seg = d(last(out), first(r)) <= d(last(out), last(r)) ? r : [...r].reverse();
-    out = [...out, ...seg];
+    const end = last(walk[i - 1]);
+    walk.push(d(end, first(r)) <= d(end, last(r)) ? r : [...r].reverse());
   }
-  return out;
+  // The break between consecutive parts (the end round to the start counts too) that is widest
+  // opens the run; a run already open at its ends keeps its order.
+  let open = 0;
+  let widest = d(last(walk[walk.length - 1]), first(walk[0]));
+  for (let i = 1; i < walk.length; i++) {
+    const gap = d(last(walk[i - 1]), first(walk[i]));
+    if (gap > widest) {
+      widest = gap;
+      open = i;
+    }
+  }
+  const ordered = open ? [...walk.slice(open), ...walk.slice(0, open)] : walk;
+  return ordered.flat();
 }
 
 /**
@@ -485,6 +505,31 @@ export function unionLayout(
       const gap = Math.max(4, 0.05 * Math.hypot(hb.x1 - hb.x0, hb.y1 - hb.y0));
       const T = compose(translate(nx * gap, ny * gap), best.T);
       return { ...best, T, overlap: maxOverlap(rasterOf(l.toKey, T)), mode: 'hung' };
+    }
+    if (opts.pushOffMax && best.mode === 'edge' && best.overlap > overlapMax) {
+      // Off the edge along its normal, away from the host, until clear of everything on the table.
+      const dx = a1[0] - a0[0];
+      const dy = a1[1] - a0[1];
+      const len = Math.hypot(dx, dy) || 1;
+      let nx = -dy / len;
+      let ny = dx / len;
+      const hostPts = worldPts(l.fromKey, host.T);
+      const hc = centroid(hostPts);
+      const mid: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
+      if ((hc[0] - mid[0]) * nx + (hc[1] - mid[1]) * ny > 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const hb = bboxOf(hostPts);
+      const extent = Math.hypot(hb.x1 - hb.x0, hb.y1 - hb.y0);
+      let T = best.T;
+      let overlap = best.overlap;
+      for (let n = 1; overlap > overlapMax && n * 0.02 <= opts.pushOffMax + 1e-9; n++) {
+        const off = n * 0.02 * extent;
+        T = compose(translate(nx * off, ny * off), best.T);
+        overlap = maxOverlap(rasterOf(l.toKey, T));
+      }
+      return overlap <= overlapMax ? { ...best, T, overlap } : best;
     }
     return best;
   };

@@ -22,7 +22,7 @@ import {
 } from './step-picture-view';
 import type { FormOpLike } from './step-seams-model';
 
-/** The row tile's raster: a 56 px picture needs no finer reading of what touches what. */
+/** The row tile's raster: a 72 px picture needs no finer reading of what touches what. */
 const RASTER_MM = 4;
 
 export function UnitPictureTile({
@@ -54,7 +54,7 @@ export function UnitPictureTile({
   return (
     <span
       title={name}
-      className={cn('relative flex size-14 shrink-0 flex-col overflow-hidden bg-pageBg', className)}
+      className={cn('relative flex size-18 shrink-0 flex-col overflow-hidden bg-pageBg', className)}
     >
       <span ref={boxEl} className='block min-h-0 flex-1 px-1 pt-1'>
         {box.w > 0 && box.h > 0 && (

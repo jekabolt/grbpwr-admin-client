@@ -276,9 +276,58 @@ export type StepLayout = {
    * neckline): they point away from what they are sewn to — the run's way up, not the page's.
    */
   onRuns: string[];
+  /** Pieces no seam inside their input lays: they stand beside it in a row, not joined to it. */
+  apart: string[];
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };
+
+/**
+ * The pieces of one input a focused picture draws: the ones carrying the seam's edges, and the
+ * pieces between them that the seams already sewn inside the input run through (a yoke's armhole
+ * edge reaches the back through the yoke's other layer and the yoke seam) — so the input's parts
+ * are laid joined, as the unit is, never as loose pieces each with a bit of the seam.
+ */
+export function focusPieces(
+  pieces: readonly string[],
+  seamPieces: ReadonlySet<string>,
+  inner: readonly SeamCandidate[],
+): string[] {
+  const own = pieces.filter((k) => seamPieces.has(k));
+  if (own.length < 2) return own;
+  const here = new Set(pieces);
+  const adj = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (a === b || !here.has(a) || !here.has(b)) return;
+    if (!adj.has(a)) adj.set(a, new Set());
+    adj.get(a)!.add(b);
+  };
+  for (const c of inner) {
+    if (!confidentSeam(c)) continue;
+    const surface = c.kind === 'surface' ? c.surface : undefined;
+    const A = surface ? [surface.host] : (c.aParts ?? [c.a]).map(pieceKeyOf);
+    const B = surface ? [surface.part] : (c.bParts ?? [c.b]).map(pieceKeyOf);
+    for (const a of A)
+      for (const b of B) {
+        link(a, b);
+        link(b, a);
+      }
+  }
+  // Breadth-first from the seam's first piece; every other one joins by its shortest path.
+  const from = new Map<string, string | null>([[own[0], null]]);
+  const queue = [own[0]];
+  while (queue.length) {
+    const k = queue.shift()!;
+    for (const n of adj.get(k) ?? [])
+      if (!from.has(n)) {
+        from.set(n, k);
+        queue.push(n);
+      }
+  }
+  const keep = new Set(own);
+  for (const k of own.slice(1)) for (let p = from.get(k); p; p = from.get(p)) keep.add(p);
+  return pieces.filter((k) => keep.has(k));
+}
 
 const EMPTY_LAYOUT: StepLayout = {
   T: new Map(),
@@ -286,6 +335,7 @@ const EMPTY_LAYOUT: StepLayout = {
   ghosts: [],
   stacked: [],
   onRuns: [],
+  apart: [],
   bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
 };
 
@@ -342,18 +392,41 @@ const identicalPair = (
   !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
 
 /**
- * An input on its own: its pieces along its inner seams, upright and clear of each other; pieces
- * the placer leaves out stand beside in a row, their own way up, a small gap between.
+ * An input on its own: its pieces along its inner seams, upright and clear of each other (a seam
+ * may push a piece off by a hair, never fold it); pieces the placer leaves out stand beside in a
+ * row, their own way up, a small gap between. `apart`: every piece no seam joins to the input's
+ * main body — left out, or laid beside it as a body of its own.
  */
 function layInput(
   keys: readonly string[],
   inner: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
   raster: { rasterMm?: number },
-): { T: Map<string, Affine>; stacked: string[][]; onRuns: string[] } {
-  const L = unionLayout(keys, inner, geoms, { ...raster, overlapMax: TOUCH, uprightMax: UPRIGHT });
+): { T: Map<string, Affine>; stacked: string[][]; onRuns: string[]; apart: string[] } {
+  const L = unionLayout(keys, inner, geoms, {
+    ...raster,
+    overlapMax: TOUCH,
+    uprightMax: UPRIGHT,
+    pushOffMax: PUSH * PUSH_MAX,
+  });
   const T = new Map<string, Affine>(L.placements.map((p) => [p.pieceKey, p.T]));
   const left = keys.filter((k) => !T.has(k));
+  // The body each laid piece belongs to: along what it hangs from (a surface part: its host) to a
+  // root; the first root is the input's main body, any other root a body laid beside it.
+  const hostOf = new Map<string, string>();
+  for (const p of L.placements)
+    if (p.attachedVia) hostOf.set(p.pieceKey, pieceKeyOf(p.attachedVia));
+  for (const c of inner)
+    if (c.kind === 'surface' && c.surface && T.has(c.surface.part) && !hostOf.has(c.surface.part))
+      hostOf.set(c.surface.part, c.surface.host);
+  const rootOf = (k: string) => {
+    for (let n = 0; hostOf.has(k) && n < keys.length; n++) k = hostOf.get(k)!;
+    return k;
+  };
+  const main = L.placements[0]?.pieceKey;
+  const beside = keys.filter((k) => T.has(k) && rootOf(k) !== main);
+  // One piece alone is the input, not a piece beside it.
+  const apart = keys.length > 1 ? [...left, ...beside] : [];
   if (left.length) {
     const placed = [...T].flatMap(([k, t]) => worldOf(geoms.get(k)!, t));
     const all = placed.length ? boxOf(placed) : { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -365,7 +438,7 @@ function layInput(
       x += b.x1 - b.x0;
     }
   }
-  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [] };
+  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart };
 }
 
 /** The inverse of a (non-degenerate) affine. */
@@ -413,6 +486,7 @@ export function stepLayout(
   const localBox = new Map<number, Box>();
   const stacked: string[][] = [];
   const onRuns: string[] = [];
+  const apart: string[] = [];
   for (const i of ins) {
     const ks = keysOf(i);
     if (!ks.length) continue;
@@ -421,6 +495,7 @@ export function stepLayout(
     for (const [k, t] of laid.T) local.set(k, t);
     stacked.push(...laid.stacked);
     onRuns.push(...laid.onRuns);
+    apart.push(...laid.apart);
     localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
   }
   // A layer under its identical twin is not a shape of its own: it leans as the twin's edge says.
@@ -468,6 +543,8 @@ export function stepLayout(
     .sort((p, q) => q.len - p.len)
     .map((x) => x.c);
   const step = Math.max(2, unit / 120);
+  /** The row step a hair is read at: a quarter of the coarse one, never under a millimetre. */
+  const fine = Math.max(1, step / 4);
   const rastersOf = (i: number, M: Affine) => ringsOf(i, M).map((r) => rasterize(r, step));
   const order = [...ins].sort((p, q) => area(q) - area(p));
 
@@ -486,14 +563,27 @@ export function stepLayout(
     // Pairs drawn on each other on purpose: a layer on its identical twin, a part on its host.
     const onEachOther = new Set<string>();
     let placedRasters: Raster[] = [];
+    // The same at the fine step, built when a placement needs the hair read (and dropped with
+    // every input laid, as the table changed).
+    let placedFine: Raster[] | null = null;
+    let placedKeys: { i: number; M: Affine }[] = [];
     const settle = (i: number, M: Affine) => {
       G.set(i, M);
       placedRasters.push(...rastersOf(i, M));
+      placedKeys.push({ i, M });
+      placedFine = null;
     };
     const overlapAt = (j: number, M: Affine) => {
       let o = 0;
       for (const r of rastersOf(j, M))
         for (const p of placedRasters) o = Math.max(o, pairOverlap(r, p));
+      return o;
+    };
+    const overlapFine = (j: number, M: Affine) => {
+      placedFine ??= placedKeys.flatMap((p) => ringsOf(p.i, p.M).map((r) => rasterize(r, fine)));
+      let o = 0;
+      for (const r of ringsOf(j, M).map((ring) => rasterize(ring, fine)))
+        for (const p of placedFine) o = Math.max(o, pairOverlap(r, p));
       return o;
     };
     /** The motion of input `j` that lays its side of `c` on the placed side, or null: not clear. */
@@ -576,6 +666,22 @@ export function stepLayout(
           o = overlapAt(j, M);
         }
         if (o > TOUCH) return;
+        // Clear of the hair too: read at the fine step (a cap's tip on the shoulder is thinner than
+        // a coarse row), a quarter step at a time, two coarse steps further at most, keeping the
+        // place that reads least. A place that still reads a hair is no place: the input stands
+        // on its own, as it does when a coarse overlap stays.
+        let h = overlapFine(j, M);
+        for (let n = 1; h > 0 && n <= 8; n++) {
+          const at = off + (n * PUSH * unit) / 4;
+          const Mf = compose(translate(nx * at, ny * at), M0);
+          const hf = overlapFine(j, Mf);
+          if (hf < h) {
+            M = Mf;
+            h = hf;
+            off = at;
+          }
+        }
+        if (h > 0) return;
         const score = cost + off;
         if (!best || score < best.score) best = { M, score };
       };
@@ -750,6 +856,7 @@ export function stepLayout(
     ghosts,
     stacked: [...stacked, ...crossStacks],
     onRuns: [...onRuns, ...crossRuns],
+    apart,
     bbox,
   };
 }

@@ -11,47 +11,63 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text } from 'ui';
 import { rowFromHand } from '../assembly-seams/seam-actions';
 import type { TechCardFormData } from '../schema';
+import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
+import { focusPieces, seamOfSides } from './step-picture';
 import { useAttachStepSeam } from './step-seams-context';
-import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
+import { hasMultipleStepPieces, pieceOfTarget, type TargetId } from './step-seams-model';
 import {
+  frameSeamsOf,
   StepPictureSvg,
   useStepLayout,
   useStepScene,
   type EdgeMark,
   type StepScene,
 } from './step-picture-view';
-import type { StepLayout } from './step-picture';
 
 const SeamPicker = lazy(() => import('./seam-picker'));
 
-/** Tile picture size, px (mockup tile_c: 80 × 44 inside a 56px-high tile). */
-const TILE_W = 80;
-const TILE_H = 44;
+/** Tile picture size, px (mockup «A»: the seam ~88 × 60 inside a 72px-high tile). */
+const TILE_W = 88;
+const TILE_H = 60;
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
-  const { ctx, op, ops, geo, geoms, pieceKeys, leaves, keys, stored, suggestion, frameSeams } =
-    scene;
+  const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
+  const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();
   const attach = useAttachStepSeam(index);
   const opNumber = op?.operationNumber;
-  const [open, setOpen] = useState(false);
+  // The proposal the picker opens on; null = closed.
+  const [openAt, setOpenAt] = useState<number | null>(null);
+  const open = openAt != null;
+  const setOpen = (o: boolean) => setOpenAt(o ? 0 : null);
   const [busy, setBusy] = useState(false);
 
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
     [ops, index, pieceKeys, geoms],
   );
-  const layout = useStepLayout(leaves, frameSeams, geoms, 0.12, 4);
   const nameOf = scene.pieceName;
+  // Each tile lays its pieces along the seam it shows (a stored one, or its own proposal).
+  const storedFrame = useMemo(
+    () => frameSeamsOf(innerSeams, storedSeams, null, crossSeams),
+    [innerSeams, storedSeams, crossSeams],
+  );
+  const proposalFrames = useMemo(
+    () =>
+      suggestions.map((sug) =>
+        frameSeamsOf(innerSeams, storedSeams, seamOfSides(sug, geoms, innerLines), crossSeams),
+      ),
+    [suggestions, innerSeams, storedSeams, crossSeams, geoms, innerLines],
+  );
 
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.
   const [params, setParams] = useSearchParams();
   const pick = params.get('pick');
   useEffect(() => {
     if (!ctx || !hasMultiplePieces || !pick || !opNumber || String(opNumber) !== pick) return;
-    setOpen(true);
+    setOpenAt(0);
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
@@ -62,20 +78,24 @@ export function StepSeamsRow({ index }: { index: number }) {
     );
   }, [ctx, hasMultiplePieces, pick, opNumber, setParams]);
 
-  const accept = useCallback(async () => {
-    if (!suggestion || !geo || ctx?.frozen || !ctx?.cardId || busy) return;
-    const row = rowFromHand(
-      suggestion.a,
-      suggestion.b,
-      geoms,
-      { pieces: [...geoms.values()], grainDeg: geo.grainDeg, nameOf },
-      { direction: 'reversed' },
-    );
-    if (!row) return;
-    setBusy(true);
-    await attach(row);
-    setBusy(false);
-  }, [suggestion, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach]);
+  const accept = useCallback(
+    async (i: number) => {
+      const suggestion = suggestions[i];
+      if (!suggestion || !geo || ctx?.frozen || !ctx?.cardId || busy) return;
+      const row = rowFromHand(
+        suggestion.a,
+        suggestion.b,
+        geoms,
+        { pieces: [...geoms.values()], grainDeg: geo.grainDeg, nameOf },
+        { direction: 'reversed' },
+      );
+      if (!row) return;
+      setBusy(true);
+      await attach(row);
+      setBusy(false);
+    },
+    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach],
+  );
 
   if (!ctx || !hasMultiplePieces) return null;
   const { cardId, frozen } = ctx;
@@ -115,7 +135,7 @@ export function StepSeamsRow({ index }: { index: number }) {
             key={key}
             no={i}
             scene={scene}
-            layout={layout}
+            seams={storedFrame}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
@@ -123,31 +143,33 @@ export function StepSeamsRow({ index }: { index: number }) {
             data-step-seam={key}
           />
         ))}
-        {keys.length === 0 && suggestion && (
-          <>
-            <SeamTile
-              scene={scene}
-              layout={layout}
-              marks={[...suggestion.a, ...suggestion.b].map((id) => ({ id, tone: 'proposal' }))}
-              dashed
-              onOpen={cardId ? () => setOpen(true) : undefined}
-            />
-            {!frozen && (
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                onClick={() => void accept()}
-                disabled={!cardId || busy}
-                title={cardId ? undefined : 'save first'}
-                data-step-seams-accept=''
-              >
-                accept
-              </Button>
-            )}
-          </>
-        )}
-        {keys.length === 0 && !pending && !suggestion && (
+        {keys.length === 0 &&
+          suggestions.map((sug, i) => (
+            <span key={i} className='inline-flex items-center gap-2'>
+              <SeamTile
+                no={suggestions.length > 1 ? i : undefined}
+                scene={scene}
+                seams={proposalFrames[i] ?? storedFrame}
+                marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'pick' }))}
+                dashed
+                onOpen={cardId ? () => setOpenAt(i) : undefined}
+              />
+              {!frozen && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => void accept(i)}
+                  disabled={!cardId || busy}
+                  title={cardId ? undefined : 'save first'}
+                  data-step-seams-accept=''
+                >
+                  accept
+                </Button>
+              )}
+            </span>
+          ))}
+        {keys.length === 0 && !pending && suggestions.length === 0 && (
           <Text size='micro' variant='error' tracking='label' data-step-seams-status=''>
             no seam
           </Text>
@@ -155,7 +177,12 @@ export function StepSeamsRow({ index }: { index: number }) {
       </div>
       {open && (
         <Suspense fallback={null}>
-          <SeamPicker index={index} open={open} onClose={() => setOpen(false)} />
+          <SeamPicker
+            index={index}
+            open={open}
+            proposal={openAt ?? 0}
+            onClose={() => setOpen(false)}
+          />
         </Suspense>
       )}
     </div>
@@ -163,12 +190,13 @@ export function StepSeamsRow({ index }: { index: number }) {
 }
 
 /**
- * One seam as a 56px tile: the step's inputs with its edges marked, its number at the corner (✕
+ * One seam as a 72px tile: only the pieces that carry its edges, laid along the step's seams between
+ * them, the joined edges marked, its number at the corner (✕
  * when it can be taken off).
  */
 function SeamTile({
   scene,
-  layout,
+  seams,
   marks,
   dashed,
   missing,
@@ -180,7 +208,8 @@ function SeamTile({
   /** The seam's number on the step — the one the picker shows beside it. */
   no?: number;
   scene: StepScene;
-  layout: StepLayout;
+  /** The seams the tile lays its pieces along. */
+  seams: readonly SeamCandidate[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
@@ -189,6 +218,15 @@ function SeamTile({
   onOpen?: () => void;
   'data-step-seam'?: string;
 }) {
+  const ids = marks.map((m) => m.id).join(',');
+  // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
+  const leavesRaw = useMemo(() => {
+    const own = new Set(ids.split(',').filter(Boolean).map(pieceOfTarget));
+    return scene.leaves
+      .map((l) => focusPieces(l, own, scene.innerSeams))
+      .filter((l) => l.length > 0);
+  }, [scene.leaves, scene.innerSeams, ids]);
+  const layout = useStepLayout(leavesRaw, seams, scene.geoms, 0.12, 4);
   return (
     <span
       role={onOpen ? 'button' : undefined}
@@ -205,7 +243,7 @@ function SeamTile({
           : undefined
       }
       className={cn(
-        'relative inline-flex h-14 min-w-23 flex-none items-center justify-center border bg-bgColor px-1.5',
+        'relative inline-flex h-18 min-w-24 flex-none items-center justify-center border bg-bgColor px-1.5',
         onOpen && 'cursor-pointer hover:border-textColor',
         dashed ? 'border-dashed border-textColor' : missing ? 'border-error' : 'border-borderColor',
       )}
