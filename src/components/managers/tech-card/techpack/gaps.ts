@@ -15,6 +15,7 @@ import { deriveMeasurementsPage, type TechpackMeasurement } from './derive-measu
 import { derivePatternsMarkerPage } from './derive-patterns';
 import { derivePieces, type TechpackPieceGeometry } from './derive-pieces';
 import { deriveQcSignoffPage, type QcSeamDelta } from './derive-qc';
+import { englishT, type PdfT } from './i18n';
 
 export type GapTab =
   | 'construction'
@@ -97,23 +98,26 @@ export type CollectPdfGapsInput = {
   netM2ByLine?: Readonly<Record<string, number>>;
   includeMarkerLayouts?: boolean;
   labelPlacement?: string;
+  t?: PdfT;
 };
 
 /** Run the same pure derivations as the document without rendering it. */
 export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
+  const t = input.t ?? englishT;
   const sink = new GapSink();
   const pieces = input.pieces ?? new Map<string, AsmPiece>();
   const grainDeg = input.grainDeg ?? new Map<string, number>();
-  const assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg }, sink);
+  const assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg, t }, sink);
   deriveCover(
     input.techCard,
     { sampleSizeName: input.sampleSizeName, revisionLabel: input.revisionLabel },
     sink,
+    t,
   );
-  deriveMaterials(input.techCard, sink);
-  derivePieces(input.techCard, input.pieceGeometry, sink);
-  deriveColourways(input.techCard, sink);
-  const labels = deriveLabels(input.techCard, { sampleSizeName: input.sampleSizeName }, sink);
+  deriveMaterials(input.techCard, sink, t);
+  derivePieces(input.techCard, input.pieceGeometry, sink, t);
+  deriveColourways(input.techCard, sink, t);
+  const labels = deriveLabels(input.techCard, { sampleSizeName: input.sampleSizeName }, sink, t);
   derivePatternsMarkerPage(
     {
       techCard: input.techCard,
@@ -124,6 +128,7 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
       sizeNames: input.sizeNames,
       netM2ByLine: input.netM2ByLine,
       includeLayouts: input.includeMarkerLayouts,
+      t,
     },
     sink,
   );
@@ -133,6 +138,7 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
       measurements: input.measurements ?? [],
       sizeChart: input.sizeChart,
       sizeNames: input.sizeNames,
+      t,
     },
     sink,
   );
@@ -146,6 +152,7 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
       sizeNames: input.sizeNames,
       seamDeltas,
       labelPlacement: input.labelPlacement ?? labels.placement.name,
+      t,
     },
     sink,
   );

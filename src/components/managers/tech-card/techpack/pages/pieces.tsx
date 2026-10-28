@@ -10,10 +10,11 @@ import {
   type TechpackPageProps,
   useTechpackOverflow,
 } from '../sheet';
+import { own, useT, type PdfT } from '../i18n';
 
 type PiecesPageProps = TechpackPageProps & { geometry?: TechpackPieceGeometry };
 
-const pcs = (qty: number) => `${qty} ${qty === 1 ? 'pc' : 'pcs'}`;
+const pcs = (qty: number, t: PdfT) => t('common.piecesShort', { count: qty });
 
 function missingGaps(tiles: readonly { missing: readonly Gap[] }[]) {
   const gaps = new Map<string, Gap>();
@@ -58,7 +59,8 @@ function paginateGroups<T extends { key: string; tiles: unknown[] }>(
 }
 
 export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPageProps) {
-  const model = derivePieces(techCard, geometry);
+  const { t } = useT();
+  const model = derivePieces(techCard, geometry, undefined, t);
   const land = orient === 'land';
   const columns = land ? 5 : 3;
   const tileCount = model.groups.reduce((sum, group) => sum + group.tiles.length, 0);
@@ -79,13 +81,13 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
     >
       <div ref={probe ? contentRef : undefined} className='contents'>
         <SectionHeader
-          title={continuedTitle(n, 'cut pieces × material', continued)}
+          title={continuedTitle(n, t('pieces.title'), continued, t)}
           action={
             <HeaderNote>
               {[
-                `${model.panelCount} panels`,
-                model.paired && 'pairs grouped',
-                model.grainLayer && 'grain marked',
+                t('common.panels', { count: model.panelCount }),
+                model.paired && t('pieces.pairsGrouped'),
+                model.grainLayer && t('pieces.grainMarked'),
               ]
                 .filter(Boolean)
                 .join(' · ')}
@@ -99,12 +101,15 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
               .map((group) => (
                 <span key={group.key} className='flex items-center gap-2 whitespace-nowrap'>
                   <b>{group.label}</b>
-                  <span>{group.name}</span>
+                  <span>{own(group.name)}</span>
                   <Swatch colour={group.swatch} />
-                  <span>{[group.composition, group.colour].filter(Boolean).join(' · ')}</span>
+                  <span>
+                    {[own(group.composition), own(group.colour)].filter(Boolean).join(' · ')}
+                  </span>
                   <span className='text-labelColor'>
-                    {pcs(group.panelCount)}
-                    {model.hasGeometry && ` · ${formatNumber(group.netAreaM2, 2)} m² net`}
+                    {pcs(group.panelCount, t)}
+                    {model.hasGeometry &&
+                      ` · ${formatNumber(group.netAreaM2, 2)} m² ${t('pieces.net')}`}
                   </span>
                 </span>
               ))}
@@ -121,7 +126,9 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
                   {group.role !== 'unassigned' && (
                     <span>
                       <b>{group.label}</b>{' '}
-                      {[group.name, group.composition, group.colour].filter(Boolean).join(' · ')}
+                      {[own(group.name), own(group.composition), own(group.colour)]
+                        .filter(Boolean)
+                        .join(' · ')}
                     </span>
                   )}
                   {missing.map((gap) => (
@@ -165,12 +172,12 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
                           )}
                         </div>
                       }
-                      name={tile.name}
+                      name={own(tile.name)}
                       sub={
                         <span className='flex flex-wrap justify-between gap-x-1'>
                           <span>{tile.codes}</span>
                           <span className='whitespace-nowrap text-textColor'>
-                            {tile.qty != null && <b>{pcs(tile.qty)}</b>}
+                            {tile.qty != null && <b>{pcs(tile.qty, t)}</b>}
                             {tile.paired ? ' · L+R' : tile.symmetry && ` · ${tile.symmetry}`}
                             {` · ${group.label}`}
                             {tile.perimeterCm != null &&

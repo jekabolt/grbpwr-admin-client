@@ -3,6 +3,7 @@ import { GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
 import { deriveLabels, type LabelsDeriveOptions } from '../derive-labels';
 import { Missing, TechpackDrawing } from './bits';
 import { TechpackSheet, type TechpackPageProps } from '../sheet';
+import { englishT, own, useT } from '../i18n';
 
 type LabelsPageProps = TechpackPageProps & LabelsDeriveOptions;
 
@@ -46,18 +47,19 @@ function PhysicalTape({
 }
 
 export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: LabelsPageProps) {
-  const model = deriveLabels(techCard, { sampleSizeName });
+  const { t } = useT();
+  const model = deriveLabels(techCard, { sampleSizeName }, undefined, t);
   const land = orient === 'land';
   const scale = land ? 5.2 : 5.4;
   const tapes = (
     <div className='flex flex-col gap-5'>
-      <PhysicalTape caption='a · identity' scale={scale}>
+      <PhysicalTape caption={t('labels.identity')} scale={scale}>
         <div className='flex h-full items-center gap-3'>
           <div className='h-full shrink-0' style={{ width: 22 * scale }}>
             {model.identity.logo ? (
               <img
                 src={model.identity.logo.url}
-                alt='label logo'
+                alt={t('labels.logoAlt')}
                 className='h-full w-full object-contain'
               />
             ) : (
@@ -69,21 +71,34 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
               {model.identity.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
             </div>
             <div>
-              {model.identity.colour || (model.gaps.colour && <Missing gap={model.gaps.colour} />)}{' '}
+              {model.identity.colour ? (
+                <span translate='no'>{model.identity.colour}</span>
+              ) : (
+                model.gaps.colour && <Missing gap={model.gaps.colour} />
+              )}{' '}
               · {model.identity.size || (model.gaps.size && <Missing gap={model.gaps.size} />)}
             </div>
             <div className='text-labelColor'>{model.identity.brand}</div>
           </div>
         </div>
       </PhysicalTape>
-      <PhysicalTape caption='b · composition' scale={scale} heightMm={labelSheet.heightMm / 2}>
+      <PhysicalTape
+        caption={t('labels.composition')}
+        scale={scale}
+        heightMm={labelSheet.heightMm / 2}
+      >
         <div className='flex h-full gap-3 text-micro uppercase leading-snug'>
-          <div className='text-labelColor'>en</div>
+          <div className='text-labelColor' translate='no'>
+            {englishT('labels.language')}
+          </div>
           <div>
             {model.composition.length
               ? model.composition.map((line) => (
                   <div key={`${line.part}-${line.value}`}>
-                    <span className='font-bold'>{line.part}</span> {line.value}
+                    <span className='font-bold' translate='no'>
+                      {line.part}
+                    </span>{' '}
+                    <span translate='no'>{line.value}</span>
                   </div>
                 ))
               : model.gaps.composition && <Missing gap={model.gaps.composition} />}
@@ -96,19 +111,22 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
     <div className='flex min-h-0 flex-1 flex-col items-center justify-center border border-borderColor'>
       <TechpackDrawing
         media={model.back}
-        name='back'
+        name={t('common.back')}
         height={land ? 480 : 430}
         caption=''
         missingGap={model.gaps.back}
       />
       <div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pb-2 text-micro uppercase'>
         <b>
-          {model.placement.name || (model.gaps.placement && <Missing gap={model.gaps.placement} />)}
+          {own(model.placement.name) ||
+            (model.gaps.placement && <Missing gap={model.gaps.placement} />)}
         </b>
-        {model.placement.attachment && <span>{model.placement.attachment}</span>}
-        {model.placement.folding && <span>{model.placement.folding}</span>}
-        {model.placement.size && <span>{model.placement.size}</span>}
-        {model.placement.qty != null && <span>qty {model.placement.qty}</span>}
+        {model.placement.attachment && <span>{own(model.placement.attachment)}</span>}
+        {model.placement.folding && <span>{own(model.placement.folding)}</span>}
+        {model.placement.size && <span>{own(model.placement.size)}</span>}
+        {model.placement.qty != null && (
+          <span>{t('labels.quantity', { count: model.placement.qty })}</span>
+        )}
       </div>
     </div>
   );
@@ -116,8 +134,8 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
   return (
     <TechpackSheet orient={orient} docline={docline}>
       <SectionHeader
-        title={`${n} labels`}
-        action={<HeaderNote>identity · composition · placement</HeaderNote>}
+        title={`${n} ${t('labels.title')}`}
+        action={<HeaderNote>{t('labels.summary')}</HeaderNote>}
       />
       {land ? (
         <div className='flex min-h-0 flex-1 gap-8'>

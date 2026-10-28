@@ -11,6 +11,7 @@ import {
   pieceLayerRoleLabel,
 } from 'components/managers/tech-card/components/piece-layer-role';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
+import { englishT, type PdfT } from './i18n';
 
 export type ResolvedTechMedia = {
   id: number;
@@ -63,12 +64,16 @@ export function alphaKey(index: number): string {
   return String.fromCharCode(65 + (index % 26));
 }
 
-export function colorwayName(colorway: common_AdminColorwayRef, index: number): string {
+export function colorwayName(
+  colorway: common_AdminColorwayRef,
+  index: number,
+  t: PdfT = englishT,
+): string {
   return (
     clean(colorway.devName) ||
     clean(colorway.colorCode) ||
     clean(colorway.baseSku) ||
-    `colourway ${index + 1}`
+    t('colourways.number', { number: index + 1 })
   );
 }
 

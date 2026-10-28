@@ -13,6 +13,8 @@ import {
   rollGoods,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, type PdfT } from './i18n';
+import { bomKindText, materialRoleText } from './i18n/vocabulary';
 
 const OMIT_SECTIONS = new Set(['TECH_CARD_BOM_SECTION_LABEL', 'TECH_CARD_BOM_SECTION_PACKAGING']);
 
@@ -24,7 +26,7 @@ export type ColourwaysModel = ReturnType<typeof deriveColourways>;
  * The recipe matrix. A card without colourways prints one colourway made of its BOM colours
  * (`fromBom`), so the workshop still reads which colour goes where.
  */
-export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
+export function deriveColourways(techCard: common_TechCard, sink?: GapSink, t: PdfT = englishT) {
   const refs = bomRefs(techCard);
   const pieces = techCard.techCard?.pieces ?? [];
   const colorways = techCard.colorways ?? [];
@@ -46,23 +48,32 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
       ? [undefined]
       : [];
   const sourceName = (colorway: common_AdminColorwayRef | undefined, index: number) =>
-    colorway ? colorwayName(colorway, index) : bomName;
+    colorway ? colorwayName(colorway, index, t) : bomName;
   const matrixRefs = refs.filter((ref) => !OMIT_SECTIONS.has(ref.item.section ?? ''));
   const partGroups = [
     ...matrixRefs
       .reduce((groups, ref) => {
-        const label = rollGoods(ref)
-          ? materialRole(ref)
-          : enumLabel(ref.item.kind) || clean(ref.item.name) || enumLabel(ref.item.section);
+        const isRollGoods = rollGoods(ref);
+        const kind = enumLabel(ref.item.kind);
+        const authored = !isRollGoods && !kind && clean(ref.item.name);
+        const label = isRollGoods
+          ? materialRoleText(ref.item, materialRole(ref), t)
+          : kind
+            ? bomKindText(ref.item.kind, t('common.generated', { text: kind }), t)
+            : authored || t('common.generated', { text: enumLabel(ref.item.section) });
         const key = label || ref.key;
-        const group = groups.get(key) ?? { key, label, refs: [] };
+        const group = groups.get(key) ?? { key, label, authored: !!authored, refs: [] };
         group.refs.push(ref);
         groups.set(key, group);
         return groups;
-      }, new Map<string, { key: string; label: string; refs: typeof matrixRefs }>())
+      }, new Map<string, { key: string; label: string; authored: boolean; refs: typeof matrixRefs }>())
       .values(),
   ];
-  const columns = partGroups.map((group) => ({ key: group.key, label: group.label }));
+  const columns = partGroups.map((group) => ({
+    key: group.key,
+    label: group.label,
+    authored: group.authored,
+  }));
   const rows = sources.map((colorway, index) => ({
     key: colorway ? String(colorway.colorwayId ?? index) : 'bom',
     name: sourceName(colorway, index),
@@ -87,7 +98,7 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
         missing: !!colorway && !usages.length,
         gap:
           colorway && !usages.length
-            ? add('pdf_colourway_recipe_missing', 'recipe', group.key, [
+            ? add('pdf_colourway_recipe_missing', t('gaps.recipe'), group.key, [
                 `field:colourway ${index + 1}`,
                 ...(group.refs[0] ? [`bom:${group.refs[0].key}`] : []),
               ])
@@ -114,12 +125,12 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
     });
     const first = cells[0]?.pieces ?? [];
     const piecesGap = !first.length
-      ? add('pdf_colourway_pieces_missing', 'pieces', 'pieces', [`bom:${ref.key}`])
+      ? add('pdf_colourway_pieces_missing', t('gaps.pieces'), 'pieces', [`bom:${ref.key}`])
       : undefined;
     return {
       key: ref.key,
       label: alphaKey(index),
-      role: materialRole(ref),
+      role: materialRoleText(ref.item, materialRole(ref), t),
       // the pieces column reads the first colourway; a colourway that cuts other pieces says so
       pieces: first,
       piecesGap,
@@ -128,7 +139,7 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
         differs: cell.pieces.join('|') !== first.join('|'),
         piecesGap:
           cell.pieces.join('|') !== first.join('|') && !cell.pieces.length
-            ? add('pdf_colourway_pieces_missing', 'pieces', 'pieces', [
+            ? add('pdf_colourway_pieces_missing', t('gaps.pieces'), 'pieces', [
                 `bom:${ref.key}`,
                 `field:colourway ${cell.key}`,
               ])
@@ -143,7 +154,7 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink) {
     fabricRows,
     fromBom: !colorways.length && !!bomName,
     emptyGap: !sources.length
-      ? add('pdf_colourways_missing', 'colourways', 'colourways')
+      ? add('pdf_colourways_missing', t('gaps.colourways'), 'colourways')
       : undefined,
   };
 }

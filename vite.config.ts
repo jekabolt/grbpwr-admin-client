@@ -47,6 +47,7 @@ function translateApiPlugin(apiKey?: string, model?: string) {
               source: body.source,
               targets: body.targets,
               constraints: body.constraints,
+              context: body.context,
               apiKey,
               model,
             });

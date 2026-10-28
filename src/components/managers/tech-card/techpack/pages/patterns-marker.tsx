@@ -12,6 +12,7 @@ import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '..
 import { Missing } from './bits';
 import { QrFigure } from './figures';
 import type { Gap } from '../gaps';
+import { own, useT } from '../i18n';
 
 type ContentProps = {
   techCard: common_TechCard;
@@ -41,6 +42,7 @@ const number = (value: number | undefined, digits = 2): string =>
   value == null ? '' : value.toFixed(digits);
 
 function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
+  const { t } = useT();
   const patternOrigin = props.patternOrigin ?? viewerOrigin();
   const markerOrigin = props.markerOrigin ?? viewerOrigin();
   const model = useMemo(
@@ -54,6 +56,7 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
         sizeNames: props.sizeNames,
         netM2ByLine: props.netM2ByLine,
         includeLayouts: layouts,
+        t,
       }),
     [
       props.techCard,
@@ -64,6 +67,7 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
       props.sizeNames,
       props.netM2ByLine,
       layouts,
+      t,
     ],
   );
   const labelsQr =
@@ -74,10 +78,10 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
     ...model.patterns.map((pattern) => ({
       key: `pattern-${pattern.key}`,
       value: pattern.qrValue,
-      label: `${pattern.code} ${pattern.label}`,
+      label: `${pattern.code} ${own(pattern.label)}`,
       sub: [
-        `${pattern.sheetCount} ${pattern.sheetCount === 1 ? 'sheet' : 'sheets'}`,
-        pattern.pieceCount ? `${pattern.pieceCount} pcs` : '',
+        t('common.sheets', { count: pattern.sheetCount }),
+        pattern.pieceCount ? t('common.piecesShort', { count: pattern.pieceCount }) : '',
         pattern.version ? `v${pattern.version}` : '',
         pattern.sizes,
       ]
@@ -90,13 +94,22 @@ function usePatternsMarkerModel(props: ContentProps, layouts: boolean) {
       .map((marker) => ({
         key: `marker-${marker.key}`,
         value: marker.qrValue,
-        label: marker.label,
-        sub: 'layout viewer',
+        label: own(marker.label),
+        sub: t('patterns.layoutViewer'),
         gap: marker.gap,
       })),
-    ...(model.emptyGap ? [{ key: 'missing-pattern', label: 'pattern', gap: model.emptyGap }] : []),
+    ...(model.emptyGap
+      ? [{ key: 'missing-pattern', label: t('common.pattern'), gap: model.emptyGap }]
+      : []),
     ...(labelsQr
-      ? [{ key: 'labels', value: labelsQr, label: 'label artwork', sub: 'care labels' }]
+      ? [
+          {
+            key: 'labels',
+            value: labelsQr,
+            label: t('patterns.labelArtwork'),
+            sub: t('patterns.careLabels'),
+          },
+        ]
       : []),
   ];
   const pictures = layouts
@@ -114,14 +127,15 @@ function PatternsHeader({
   n: string;
   continued?: boolean;
 }) {
+  const { t } = useT();
   return (
     <SectionHeader
-      title={continuedTitle(n, 'patterns & marker', continued)}
+      title={continuedTitle(n, t('patterns.title'), continued, t)}
       action={
         model.missing.length > 0 ? (
-          <HeaderNote tone='warn'>{model.missing.length} gaps</HeaderNote>
+          <HeaderNote tone='warn'>{t('common.gaps', { count: model.missing.length })}</HeaderNote>
         ) : (
-          <HeaderNote>scan · read-only</HeaderNote>
+          <HeaderNote>{t('patterns.scanReadOnly')}</HeaderNote>
         )
       }
     />
@@ -146,19 +160,20 @@ function QrGrid({ qrs, size }: { qrs: readonly QrItem[]; size: number }) {
 }
 
 function ConsumptionTable({ markers }: { markers: readonly TechpackMarkerRow[] }) {
+  const { t } = useT();
   return (
     <div className='min-w-0 flex-1'>
-      <GroupLabel flush>consumption</GroupLabel>
+      <GroupLabel flush>{t('patterns.consumption')}</GroupLabel>
       <DataTable>
         <thead>
           <tr>
-            <th data-align='left'>fabric</th>
-            <th>width</th>
-            <th>pcs</th>
-            <th>net m²</th>
-            <th>marker m</th>
-            <th>util %</th>
-            <th>m / garment</th>
+            <th data-align='left'>{t('patterns.fabric')}</th>
+            <th>{t('common.width')}</th>
+            <th>{t('patterns.piecesShort')}</th>
+            <th>{t('patterns.netSquareMetres')}</th>
+            <th>{t('patterns.markerMetres')}</th>
+            <th>{t('patterns.utilization')}</th>
+            <th>{t('patterns.perGarment')}</th>
           </tr>
         </thead>
         <tbody>
@@ -166,7 +181,7 @@ function ConsumptionTable({ markers }: { markers: readonly TechpackMarkerRow[] }
             <tr key={marker.key}>
               <td data-align='left'>
                 {marker.code && <b>{marker.code} </b>}
-                {marker.fabric}
+                {own(marker.fabric)}
               </td>
               <td className='whitespace-nowrap'>
                 {marker.widthCm == null ? null : `${number(marker.widthCm, 0)} cm`}
@@ -193,9 +208,10 @@ function ConsumptionTable({ markers }: { markers: readonly TechpackMarkerRow[] }
 }
 
 function LayoutGrid({ pictures, land }: { pictures: readonly TechpackMarkerRow[]; land: boolean }) {
+  const { t } = useT();
   return (
     <div className='min-h-0 flex-1'>
-      <GroupLabel flush>marker layouts</GroupLabel>
+      <GroupLabel flush>{t('patterns.markerLayouts')}</GroupLabel>
       <div className={land ? 'grid grid-cols-2 gap-4' : 'flex flex-col gap-4'}>
         {pictures.map((marker) => (
           <figure key={`layout-${marker.key}`} className='min-w-0'>
@@ -210,7 +226,7 @@ function LayoutGrid({ pictures, land }: { pictures: readonly TechpackMarkerRow[]
               )}
             </div>
             <figcaption className='mt-1 text-micro uppercase text-labelColor'>
-              {marker.label}
+              {own(marker.label)}
             </figcaption>
           </figure>
         ))}

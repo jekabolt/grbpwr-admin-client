@@ -18,12 +18,15 @@ import {
 import { ROUTES } from 'constants/routes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { BackLink, Button, Pill, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
+import { BackLink, Button, Pill, Select, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { TechPackDocument } from './components/tech-pack-document';
 import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPacking';
 import { TechpackDocument } from './techpack/document';
 import { gapsToClientFindings } from './techpack/gap-findings';
 import type { Gap } from './techpack/gaps';
+import { createPdfT, htmlLang, parsePdfLang, PDF_LANGS, PdfLangProvider } from './techpack/i18n';
+import { PDF_FONTS_CSS, usePdfFonts } from './techpack/i18n/pdf-fonts';
+import { useOwnTranslation } from './techpack/i18n/use-own-translation';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -64,6 +67,8 @@ export function TechCardPrint() {
     searchParams.has(name),
   );
   const classic = searchParams.get('layout') === 'classic' || hasClassicOnlyScope;
+  const lang = useMemo(() => parsePdfLang(searchParams), [searchParams.toString()]);
+  const t = useMemo(() => createPdfT(lang), [lang]);
   // Ориентация живёт в адресе (?orient=land), как и весь скоуп: ссылка на печать воспроизводит
   // лист целиком. Книжная — умолчание, параметр для неё снимается.
   const setOrient = useCallback(
@@ -73,6 +78,20 @@ export function TechCardPrint() {
           const sp = new URLSearchParams(prev);
           if (next === 'land') sp.set('orient', 'land');
           else sp.delete('orient');
+          return sp;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const setLang = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (prev) => {
+          const sp = new URLSearchParams(prev);
+          if (next === 'en') sp.delete('lang');
+          else sp.set('lang', next);
           return sp;
         },
         { replace: true },
@@ -172,6 +191,10 @@ export function TechCardPrint() {
   // и пустую колонку цвета при раннем клике. Документ отдаёт их наверх одним колбэком; setState
   // из useState стабилен, поэтому цикла рендеров это не создаёт.
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+  // Иероглифы листа на cn/ja/kr — свой шрифт, который грузится по выбору языка. Классика английская.
+  const fontDep = usePdfFonts(classic ? 'en' : lang);
+  // Свой текст карточки — на тот же язык, моделью; документ перемонтируется, когда перевод пришёл.
+  const own = useOwnTranslation(classic ? 'en' : lang);
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
@@ -194,6 +217,8 @@ export function TechCardPrint() {
       ? [{ label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) }]
       : []),
     ...docDeps,
+    fontDep,
+    own.dep,
   ]);
 
   // НАЗАД — один путь у двери «← back» и у Esc (O-65). Карточка открывает этот экран в той же
@@ -232,7 +257,7 @@ export function TechCardPrint() {
         query.orient === 'land' ? 'max-w-[317mm]' : 'max-w-[230mm]'
       }${classic ? '' : ' techpack-page'}`}
     >
-      <style>{PRINT_CSS}</style>
+      <style>{PRINT_CSS + PDF_FONTS_CSS}</style>
 
       <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
@@ -260,6 +285,18 @@ export function TechCardPrint() {
             options={ORIENT_OPTIONS}
             onChange={setOrient}
           />
+          {!classic && (
+            <label className='flex items-center gap-2'>
+              <span className='sr-only'>pdf language</span>
+              <Select
+                name='pdf-language'
+                value={lang}
+                items={PDF_LANGS.map(({ code, name }) => ({ value: code, label: name }))}
+                onValueChange={setLang}
+                size='sm'
+              />
+            </label>
+          )}
           <Text variant='inactive' size='small'>
             choose “save as PDF” as the destination · only Chrome prints the running head and page
             numbers
@@ -298,17 +335,43 @@ export function TechCardPrint() {
       ) : (
         <div
           className={classic ? 'techpack-doc border border-borderColor shadow-sm' : 'techpack-doc'}
+          lang={classic ? undefined : htmlLang(lang)}
+          data-pdf-lang={classic ? undefined : lang}
         >
           {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
               плашка без неё напечаталась бы текстом впритык к рамке. */}
-          <div className='px-8 pt-6'>
-            <PrintDegradedNotice items={degraded} />
-            {openFindings > 0 && (
-              <Text variant='uppercase' size='small' className='mb-4 break-inside-avoid'>
-                {openFindings} open {openFindings === 1 ? 'finding' : 'findings'}
-              </Text>
-            )}
-          </div>
+          {classic ? (
+            <div className='px-8 pt-6'>
+              <PrintDegradedNotice items={degraded} />
+              {openFindings > 0 && (
+                <Text variant='uppercase' size='small' className='mb-4 break-inside-avoid'>
+                  {openFindings} open {openFindings === 1 ? 'finding' : 'findings'}
+                </Text>
+              )}
+            </div>
+          ) : (
+            <PdfLangProvider lang={lang}>
+              <div className='px-8 pt-6'>
+                {degraded.length > 0 && (
+                  <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                    {t('notices.degraded', {
+                      items: degraded
+                        .map((item) => t('common.generated', { text: item }))
+                        .join(', '),
+                    })}
+                  </p>
+                )}
+                {openFindings > 0 && (
+                  <Text variant='uppercase' size='small' className='mb-4 break-inside-avoid'>
+                    {t('notices.openFindings', {
+                      count: openFindings,
+                      noun: t(openFindings === 1 ? 'notices.finding' : 'notices.findings'),
+                    })}
+                  </Text>
+                )}
+              </div>
+            </PdfLangProvider>
+          )}
           {/* ЗДЕСЬ СТОЯЛА ПЛАШКА «просили версию листа N, а напечатан текущий документ». Она была
               честным отказом ровно до тех пор, пока версии существовали: в цех мог уйти лист с
               номером версии на нём и другим содержимым внутри. Версий больше нет — расходиться
@@ -316,20 +379,30 @@ export function TechCardPrint() {
           {scope?.colorwayMissing || scope?.runMissing ? (
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
-                {scope.colorwayMissing
-                  ? `colourway #${query.colorwayId} is not on this card — printed for all colourways`
-                  : `production run #${query.runId} not received — printed without a batch scope`}
+                {classic
+                  ? scope.colorwayMissing
+                    ? `colourway #${query.colorwayId} is not on this card — printed for all colourways`
+                    : `production run #${query.runId} not received — printed without a batch scope`
+                  : scope.colorwayMissing
+                    ? t('notices.colourwayMissing', { id: query.colorwayId })
+                    : t('notices.runMissing', { id: query.runId })}
               </p>
             </div>
           ) : null}
           {snapshotBroken && (
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
-                {releaseForeign
-                  ? `release #${releaseId} belongs to another tech card — ignored, the LIVE card was printed`
-                  : `revision snapshot could not be read${
-                      releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : ''
-                    } — the LIVE card was printed, not the frozen revision`}
+                {classic
+                  ? releaseForeign
+                    ? `release #${releaseId} belongs to another tech card — ignored, the LIVE card was printed`
+                    : `revision snapshot could not be read${
+                        releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : ''
+                      } — the LIVE card was printed, not the frozen revision`
+                  : releaseForeign
+                    ? t('notices.releaseForeign', { id: releaseId })
+                    : t('notices.snapshotBroken', {
+                        error: releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : '',
+                      })}
               </p>
             </div>
           )}
@@ -344,17 +417,24 @@ export function TechCardPrint() {
               cutPlan={cutPlanError ? undefined : cutPlan}
             />
           ) : (
-            <TechpackDocument
-              techCard={snapshot ?? techCard}
-              orient={query.orient}
-              release={!!snapshot}
-              revision={
-                snapshot ? `rev.${wireInt(releaseData?.release?.releaseNumber) || '—'}` : undefined
-              }
-              patternViewerToken={printData?.patternViewerToken ?? ''}
-              onDataStatus={setDocDeps}
-              onGaps={setGaps}
-            />
+            <PdfLangProvider lang={lang}>
+              <TechpackDocument
+                key={own.docKey}
+                techCard={snapshot ?? techCard}
+                orient={query.orient}
+                release={!!snapshot}
+                revision={
+                  snapshot
+                    ? t('common.revisionDotValue', {
+                        number: wireInt(releaseData?.release?.releaseNumber) || '—',
+                      })
+                    : undefined
+                }
+                patternViewerToken={printData?.patternViewerToken ?? ''}
+                onDataStatus={setDocDeps}
+                onGaps={setGaps}
+              />
+            </PdfLangProvider>
           )}
         </div>
       )}

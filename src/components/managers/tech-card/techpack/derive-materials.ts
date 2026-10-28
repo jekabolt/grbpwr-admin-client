@@ -14,6 +14,8 @@ import {
   technicalMedia,
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
+import { englishT, own, type PdfT } from './i18n';
+import { bomKindText, materialRoleText } from './i18n/vocabulary';
 
 const THREAD = 'TECH_CARD_BOM_SECTION_THREAD';
 const INTERLINING = 'TECH_CARD_BOM_SECTION_INTERLINING';
@@ -45,7 +47,7 @@ export type Spot = {
 
 export type MaterialsModel = ReturnType<typeof deriveMaterials>;
 
-export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
+export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: PdfT = englishT) {
   const card = techCard.techCard;
   const refs = bomRefs(techCard);
   const primary = techCard.colorways?.[0];
@@ -88,7 +90,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
       key: alphaKey(index),
       refKey: ref.key,
       name,
-      role: materialRole(ref),
+      role: materialRoleText(ref.item, materialRole(ref), t),
       colour: colour.name,
       swatch: colour.swatch,
       composition: formatCompositionCell(ref.item.composition),
@@ -103,14 +105,17 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
       gaps: {
         material:
           !name && !colour.name
-            ? add('pdf_material_missing', 'material', 'material', ref.key)
+            ? add('pdf_material_missing', t('gaps.material'), 'material', ref.key)
             : undefined,
-        width: widthCm == null ? add('pdf_width_missing', 'width', 'width', ref.key) : undefined,
+        width:
+          widthCm == null ? add('pdf_width_missing', t('gaps.width'), 'width', ref.key) : undefined,
         pieces: !pieceCount
-          ? add('pdf_material_pieces_missing', 'pieces', 'pieces', ref.key)
+          ? add('pdf_material_pieces_missing', t('gaps.pieces'), 'pieces', ref.key)
           : undefined,
         marker:
-          consumptionM == null ? add('pdf_marker_missing', 'marker', 'marker', ref.key) : undefined,
+          consumptionM == null
+            ? add('pdf_marker_missing', t('gaps.marker'), 'marker', ref.key)
+            : undefined,
       },
     };
   });
@@ -134,7 +139,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
           .map((operation) => operation.operationNumber)
           .filter((number): number is number => number != null),
         articleGap: !name
-          ? add('pdf_thread_article_missing', 'article', 'article', ref.key)
+          ? add('pdf_thread_article_missing', t('gaps.article'), 'article', ref.key)
           : undefined,
       };
     });
@@ -150,7 +155,9 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
       for (const operation of linkedOperations) {
         const callout = callouts.find((item) => item.number === operation.calloutNumber);
         const pin = operation.calloutNumber == null ? '' : String(operation.calloutNumber);
-        const where = enumLabel(operation.zone) || clean(callout?.part);
+        const where = operation.zone
+          ? t('common.generated', { text: enumLabel(operation.zone) })
+          : own(clean(callout?.part));
         const quantity = decimal(
           operation.bomQuantities?.find((item) => clean(item.lineKey) === clean(ref.item.lineKey))
             ?.qtyPerGarment,
@@ -169,7 +176,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
           pin,
           where,
           operationNumbers: operation.operationNumber == null ? [] : [operation.operationNumber],
-          source: 'op link',
+          source: t('materials.operationLink'),
           qty: quantity,
           x: pct(x),
           y: pct(y),
@@ -184,16 +191,18 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
       for (const spot of spots) {
         const opRef = spot.operationNumbers[0] ? [`op:${spot.operationNumbers[0]}`] : [];
         spot.gaps = {
-          pin: !spot.pin ? add('pdf_trim_pin_missing', 'pin', 'pin', ref.key, opRef) : undefined,
+          pin: !spot.pin
+            ? add('pdf_trim_pin_missing', t('gaps.pin'), 'pin', ref.key, opRef)
+            : undefined,
           placement: !spot.where
-            ? add('pdf_trim_placement_missing', 'placement', 'placement', ref.key, opRef)
+            ? add('pdf_trim_placement_missing', t('gaps.placement'), 'placement', ref.key, opRef)
             : undefined,
           operation: !spot.operationNumbers.length
-            ? add('pdf_trim_operation_missing', 'operation', 'operation', ref.key)
+            ? add('pdf_trim_operation_missing', t('gaps.operation'), 'operation', ref.key)
             : undefined,
           qty:
             spot.qty == null
-              ? add('pdf_trim_qty_missing', 'qty', 'qty', ref.key, opRef)
+              ? add('pdf_trim_qty_missing', t('gaps.quantity'), 'qty', ref.key, opRef)
               : undefined,
         };
       }
@@ -204,18 +213,40 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
         key: ref.key,
         name: clean(ref.item.name),
         detail: clean(ref.item.composition) || clean(ref.item.spec),
-        kind: enumLabel(ref.item.kind) || enumLabel(ref.item.section),
+        kind: bomKindText(
+          ref.item.kind,
+          t('common.generated', {
+            text: enumLabel(ref.item.kind) || enumLabel(ref.item.section),
+          }),
+          t,
+        ),
         spots,
         qty,
         emptyGaps: empty
           ? {
-              pin: add('pdf_trim_pin_missing', 'pin', 'pin', ref.key),
-              placement: add('pdf_trim_placement_missing', 'placement', 'placement', ref.key),
-              operation: add('pdf_trim_operation_missing', 'operation', 'operation', ref.key),
-              qty: qty == null ? add('pdf_trim_qty_missing', 'qty', 'qty', ref.key) : undefined,
+              pin: add('pdf_trim_pin_missing', t('gaps.pin'), 'pin', ref.key),
+              placement: add(
+                'pdf_trim_placement_missing',
+                t('gaps.placement'),
+                'placement',
+                ref.key,
+              ),
+              operation: add(
+                'pdf_trim_operation_missing',
+                t('gaps.operation'),
+                'operation',
+                ref.key,
+              ),
+              qty:
+                qty == null
+                  ? add('pdf_trim_qty_missing', t('gaps.quantity'), 'qty', ref.key)
+                  : undefined,
             }
           : undefined,
-        qtyGap: qty == null ? add('pdf_trim_qty_missing', 'qty', 'qty total', ref.key) : undefined,
+        qtyGap:
+          qty == null
+            ? add('pdf_trim_qty_missing', t('gaps.quantity'), 'qty total', ref.key)
+            : undefined,
       };
     });
 
@@ -242,11 +273,13 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink) {
     bomCount: refs.length,
     missingInterlining: fused.length && !hasInterlining ? fused : [],
     gaps: {
-      front: !front ? add('pdf_front_flat_missing', 'front flat', 'front flat') : undefined,
-      fabrics: !fabrics.length ? add('pdf_fabrics_missing', 'fabrics', 'fabrics') : undefined,
+      front: !front ? add('pdf_front_flat_missing', t('gaps.frontFlat'), 'front flat') : undefined,
+      fabrics: !fabrics.length
+        ? add('pdf_fabrics_missing', t('gaps.fabrics'), 'fabrics')
+        : undefined,
       interlining:
         fused.length && !hasInterlining
-          ? add('pdf_interlining_missing', 'interlining', 'interlining')
+          ? add('pdf_interlining_missing', t('gaps.interlining'), 'interlining')
           : undefined,
     },
   };

@@ -16,7 +16,8 @@ import {
   type AnnotationForm,
 } from 'components/managers/tech-card/components/schema';
 
-import { KEYS_CSS, KeyArt, Legend, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
+import { KEYS_CSS, KeyArt, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
+import { asmProtoFlags } from '../asm-proto-flags';
 import {
   fmtDelta,
   joinSvg,
@@ -31,22 +32,23 @@ import {
 import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
+import { own, useT, type PdfT } from '../i18n';
 
 const ASM_CSS = String.raw`
 .asm-cols { display: grid; min-height: 0; flex: 1 1 0; column-gap: 24px; }
 .asm-cols[data-orient=land] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .asm-cols[data-orient=port] { grid-template-columns: minmax(0, 1fr); }
-.asm-col { min-width: 0; min-height: 0; overflow: hidden; }
-.asm-table table { table-layout: fixed; }
-.asm-table td { padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; }
+.asm-col { min-width: 0; min-height: 0; overflow: visible; }
+.asm-col > div:has(> table.asm-table) { overflow: visible; }
+.asm-table { width: 100%; table-layout: fixed; }
+.asm-table td { min-width: 0; padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
 .asm-table th { font-size: 10px !important; }
 .asm-mc { color: var(--color-textColor); }
 .asm-table td.asm-n { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; }
-.asm-seams { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
-.asm-picture-box { display: flex; flex: none; align-items: center; justify-content: center; }
-.asm-pic { gap: 4px; }
-.asm-pic[data-orient=land] { flex-direction: column; align-items: center; justify-content: flex-start; }
-.asm-pic[data-orient=land] > :first-child { align-self: flex-start; }
+.asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
+.asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
+.asm-picture-box > svg { max-width: 100%; max-height: 100%; }
+.asm-picture-key { position: absolute; left: 4px; top: 4px; z-index: 1; background: var(--color-bgColor); }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
 .asm-what b { font-weight: 700; }
@@ -72,13 +74,11 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 52, keyH: 44 },
-  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 52, keyH: 44 },
+  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 40, keyH: 34 },
+  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 40, keyH: 34 },
 } as const;
 
 const ROWS_PER_SHEET = 6;
-const PICTURE_FILL = 0.95;
-const PICTURE_GAP = 4;
 /** DataTable cell padding, both sides (px-1.5 ×2). */
 const CELL_PAD_X = 12;
 
@@ -98,20 +98,8 @@ type Photo = {
 function pictureDimensions(orient: PrintOrient) {
   const d = DIM[orient];
   return {
-    join: [Math.round(d.joinW * PICTURE_FILL), Math.round(d.joinH * PICTURE_FILL)] as [
-      number,
-      number,
-    ],
-    // landscape: the key sits small above the outline, which takes the full width; portrait: beside it
-    silhouette: (orient === 'land'
-      ? [
-          Math.round(d.joinW * PICTURE_FILL),
-          Math.round((d.joinH - d.keyH - PICTURE_GAP) * PICTURE_FILL),
-        ]
-      : [
-          Math.round((d.joinW - d.keyW - PICTURE_GAP) * PICTURE_FILL),
-          Math.round(d.joinH * PICTURE_FILL),
-        ]) as [number, number],
+    join: [d.joinW, d.joinH] as [number, number],
+    silhouette: [d.joinW, d.joinH] as [number, number],
   };
 }
 
@@ -128,13 +116,14 @@ function Cols({ orient }: { orient: PrintOrient }) {
 }
 
 function Head() {
+  const { t } = useT();
   return (
     <thead>
       <tr>
-        <th>op</th>
-        <th data-align='left'>picture</th>
-        <th data-align='left'>operation</th>
-        <th data-align='left'>machine · Δ</th>
+        <th>{t('assembly.op')}</th>
+        <th data-align='left'>{t('assembly.picture')}</th>
+        <th data-align='left'>{t('assembly.operation')}</th>
+        <th data-align='left'>{t('assembly.machineDelta')}</th>
       </tr>
     </thead>
   );
@@ -167,21 +156,19 @@ function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
 function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
-  if (r.pic) {
-    return (
-      <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-        <Svg m={r.pic} w={picture.join[0]} h={picture.join[1]} label={`${r.n} ${r.words.verb}`} />
-      </div>
-    );
-  }
+  const drawing = r.pic ?? r.sil;
+  const showKey = asmProtoFlags().key;
   return (
-    <div
-      className='asm-picture-box asm-pic'
-      data-orient={orient}
-      style={{ width: d.joinW, height: d.joinH }}
-    >
-      <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} />
-      {r.sil && <Svg m={r.sil} w={picture.silhouette[0]} h={picture.silhouette[1]} />}
+    <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
+      {drawing && (
+        <Svg
+          m={drawing}
+          w={r.pic ? picture.join[0] : picture.silhouette[0]}
+          h={r.pic ? picture.join[1] : picture.silhouette[1]}
+          label={`${r.n} ${r.words.verb}`}
+        />
+      )}
+      {showKey && <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} className='asm-picture-key' />}
     </div>
   );
 }
@@ -191,6 +178,7 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
 }
 
 function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
+  const { t } = useT();
   const w = r.words;
   return (
     <tr data-op={r.n}>
@@ -207,9 +195,11 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
               → <b>{w.out}</b>
             </>
           )}
-          {w.draft && <span className='asm-marker'>draft</span>}
+          {w.draft && <span className='asm-marker'>{t('assembly.draft')}</span>}
           {Array.from({ length: r.photoCount }, (_, index) => (
-            <span className='asm-marker' key={index}>{`photo ${index + 1}`}</span>
+            <span className='asm-marker' key={index}>
+              {t('assembly.photo', { count: index + 1 })}
+            </span>
           ))}
         </div>
         <Line segs={w.line.filter((segment) => !segment.gap)} />
@@ -224,7 +214,7 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
         {r.card?.turn && (
           <div className='asm-turn'>
             <KeyArt icon={TURN_KEY} w={24} h={18} />
-            <span>Turn out</span>
+            <span>{t('assembly.turnOut')}</span>
           </div>
         )}
       </td>
@@ -304,12 +294,12 @@ function operationPhotos(techCard: common_TechCard): Photo[] {
 type GapGroup = { kind: string; gaps: Gap[] };
 type GapPage = { groups: GapGroup[] };
 
-function gapPages(gaps: readonly Gap[], orient: PrintOrient): GapPage[] {
+function gapPages(gaps: readonly Gap[], orient: PrintOrient, t: PdfT): GapPage[] {
   const perPage = orient === 'land' ? 34 : 48;
   return chunksOf(gaps, perPage).map((pageGaps) => {
     const groups: GapGroup[] = [];
     for (const gap of pageGaps) {
-      const kind = gapSection(gap);
+      const kind = gapSection(gap, t);
       const previous = groups[groups.length - 1];
       if (previous?.kind === kind) previous.gaps.push(gap);
       else groups.push({ kind, gaps: [gap] });
@@ -331,24 +321,24 @@ function PhotoSheet({
   count: string;
   pieceLabel: (key: string) => string | undefined;
 }) {
+  const { t } = useT();
   return (
     <TechpackSheet orient={orient} docline={docline} count={count}>
       <SectionHeader
-        title='06 assembly · photos'
-        action={
-          <HeaderNote>{`${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}`}</HeaderNote>
-        }
+        title={t('assembly.photosTitle')}
+        action={<HeaderNote>{t('common.photos', { count: photos.length })}</HeaderNote>}
       />
       <div className='asm-photos' data-count={photos.length} data-assembly-page='photos'>
         {photos.map((photo) => (
           <figure className='asm-photo' data-photo-op={photo.op} key={`${photo.op}-${photo.index}`}>
             <figcaption className='asm-photo-caption'>
-              {`op ${photo.op} · photo ${photo.index}${photo.caption ? ` · ${photo.caption}` : ''}`}
+              {t('assembly.photoCaption', { op: photo.op, index: photo.index })}
+              {photo.caption ? ` · ${own(photo.caption)}` : ''}
             </figcaption>
             <div className='asm-photo-frame'>
               <AnnotationCanvas
                 src={photo.url}
-                alt={`Operation ${photo.op}`}
+                alt={t('assembly.operationAlt', { op: photo.op })}
                 annotations={photo.annotations}
                 className='asm-photo-canvas'
                 maxHeightClass='max-h-[120mm]'
@@ -379,17 +369,18 @@ function GapsSheet({
   /** The card the lines link back to; a card not saved yet prints plain lines. */
   cardId?: number;
 }) {
+  const { t } = useT();
   const origin = viewerOrigin();
   return (
     <TechpackSheet orient={orient} docline={docline} count={count}>
-      <SectionHeader title='06 assembly · gaps' />
+      <SectionHeader title={t('assembly.gapsTitle')} />
       <div className='asm-gaps' data-assembly-page='gaps'>
         {page.groups.map((group, groupIndex) => (
           <div className='asm-gap-group' key={`${group.kind}-${groupIndex}`}>
             <div className='asm-gap-title'>{group.kind}</div>
             {group.gaps.map((gap) => {
               const subject = subjectOf(gap);
-              const text = `${gap.target.op ? `op ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${subject}` : ''}`;
+              const text = `${gap.target.op ? `${t('assembly.op')} ${gap.target.op} · ` : ''}${gap.label}${subject ? ` · ${own(subject)}` : ''}`;
               if (!cardId)
                 return (
                   <div className='asm-gap-line' data-gap-list-row={gapKey(gap)} key={gapKey(gap)}>
@@ -406,7 +397,7 @@ function GapsSheet({
                   rel='noreferrer'
                 >
                   <span className='asm-gap-text'>{text}</span>
-                  <span className='asm-gap-to'>{gapWhere(gap.target)}</span>
+                  <span className='asm-gap-to'>{gapWhere(gap.target, t)}</span>
                 </a>
               );
             })}
@@ -437,6 +428,7 @@ export function AssemblyPage({
   /** true once the rows are measured and paginated (the print-ready gate waits for it). */
   onLaidOut: (done: boolean) => void;
 }) {
+  const { t } = useT();
   const picture = useMemo(() => pictureDimensions(orient), [orient]);
   const photos = useMemo(() => operationPhotos(techCard), [techCard]);
   const photoSheets = useMemo(() => chunksOf(photos, 2), [photos]);
@@ -453,7 +445,7 @@ export function AssemblyPage({
         pic: r.card?.items.length
           ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)
           : undefined,
-        sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette),
+        sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
         photoCount: photoCountByOp.get(r.n) ?? 0,
       })),
     [model, photoCountByOp, picture.join, picture.silhouette],
@@ -522,12 +514,12 @@ export function AssemblyPage({
   }, [done, onLaidOut]);
 
   if (!model) return null;
-  const title = `${n} assembly`;
+  const title = `${n} ${t('assembly.title')}`;
 
   const per = orient === 'land' ? 2 : 1;
   const pages: Col[][] = [];
   if (cols) for (let i = 0; i < cols.length; i += per) pages.push(cols.slice(i, i + per));
-  const gaps = gapPages(pdfGaps, orient);
+  const gaps = gapPages(pdfGaps, orient, t);
   const total = Math.max(1, pages.length + photoSheets.length + gaps.length);
   const pieceLabel = (key: string) =>
     model.pieces.get(key)?.name ||
@@ -550,7 +542,6 @@ export function AssemblyPage({
                 <Table col={rows} orient={orient} />
               </div>
             </div>
-            <Legend />
           </div>
         </div>
       )}
@@ -567,7 +558,11 @@ export function AssemblyPage({
           >
             <SectionHeader
               title={title}
-              action={<HeaderNote>{`ops ${first}–${last} · ${rows.length}`}</HeaderNote>}
+              action={
+                <HeaderNote>
+                  {t('assembly.opsRange', { first, last, count: rows.length })}
+                </HeaderNote>
+              }
             />
             <div className='asm-cols' data-orient={orient} data-assembly-page='operations'>
               {Array.from({ length: per }, (_, i) => (
@@ -576,7 +571,6 @@ export function AssemblyPage({
                 </div>
               ))}
             </div>
-            <Legend />
           </TechpackSheet>
         );
       })}
