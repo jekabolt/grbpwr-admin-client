@@ -287,9 +287,7 @@ export function TechCardPrint() {
           />
           {!classic && (
             <label className='flex items-center gap-2'>
-              <Text variant='inactive' size='small'>
-                pdf language
-              </Text>
+              <span className='sr-only'>pdf language</span>
               <Select
                 name='pdf-language'
                 value={lang}

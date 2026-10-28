@@ -18,6 +18,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { labelPartText } from './i18n/vocabulary';
 
 export type LabelsDeriveOptions = { sampleSizeName?: string };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
@@ -41,7 +42,7 @@ export function deriveLabels(
   const overrideFibers = careOverride?.fibers ?? [];
   const composition = overrideFibers.length
     ? [...new Set(overrideFibers.map((fiber) => partFromWire(fiber.part)))].map((part) => ({
-        part: t('common.generated', { text: LABEL_PART_NAME[part] }),
+        part: labelPartText(part, LABEL_PART_NAME[part], t),
         value: overrideFibers
           .filter((fiber) => partFromWire(fiber.part) === part)
           .map((fiber) =>
@@ -57,7 +58,7 @@ export function deriveLabels(
         const value = formatCompositionCell(ref.item.composition);
         return part === 'NOT_ON_LABEL' || !value
           ? []
-          : [{ part: t('common.generated', { text: LABEL_PART_NAME[part] }), value }];
+          : [{ part: labelPartText(part, LABEL_PART_NAME[part], t), value }];
       });
   const fallbackComposition = composition.length
     ? composition

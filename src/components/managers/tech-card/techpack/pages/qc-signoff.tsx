@@ -8,6 +8,7 @@ import { chunksOf, continuedTitle, TechpackSheet, useTechpackOverflow } from '..
 import { statusTone } from './bits';
 import { Gap } from '../gaps';
 import { own, useT } from '../i18n';
+import { statusText } from '../i18n/vocabulary';
 
 type Props = {
   techCard: common_TechCard;
@@ -201,11 +202,7 @@ export function QcSignoffPage({
                     {revisionLabel}
                   </td>
                   <td data-align='left'>
-                    {status && (
-                      <Pill tone={statusTone(status)}>
-                        {t('common.generated', { text: status })}
-                      </Pill>
-                    )}
+                    {status && <Pill tone={statusTone(status)}>{statusText(status, t)}</Pill>}
                   </td>
                 </tr>
               </tbody>

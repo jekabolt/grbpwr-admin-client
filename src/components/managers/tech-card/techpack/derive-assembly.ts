@@ -62,6 +62,7 @@ import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
+import { machineText, operationText, pressEquipmentText } from './i18n/vocabulary';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -1662,12 +1663,14 @@ function wordsOf(
     turn: 'assembly.turnOut',
   } as const;
   const fallbackVerb = t(verbKey[tech]);
+  const fixedVerb = operationText(o.work, o.operationType, t);
   const verb = cap(
-    heading.toLocaleLowerCase() === 'machine'
-      ? fallbackVerb
-      : o.work
-        ? own(heading)
-        : t('common.generated', { text: heading || fallbackVerb }),
+    fixedVerb ??
+      (heading.toLocaleLowerCase() === 'machine'
+        ? fallbackVerb
+        : o.work
+          ? own(heading)
+          : t('common.generated', { text: heading || fallbackVerb })),
   );
   const pieceName = (k: string) => {
     const piece = ctx.input.pieces.get(k);
@@ -1709,7 +1712,7 @@ function wordsOf(
       z && z !== 'TECH_CARD_GARMENT_ZONE_OUTER' && z !== 'TECH_CARD_GARMENT_ZONE_OTHER'
         ? zoneLabel(z)
         : '';
-    if (named) line.push({ t: t('common.generated', { text: named }) });
+    if (named) line.push({ t: own(named) });
     else assemblyGap(ctx.sink, 'asm_edge_missing', t('gaps.edge'), op.n, 'edge');
     line.push({ t: t('assembly.tape') });
     if (note) line.push({ t: cap(note) });
@@ -1861,7 +1864,7 @@ function wordsOf(
     stepPlacementText(facts).replace(/^×\s+/, '×'),
   ]
     .filter(Boolean)
-    .map((value) => t('common.generated', { text: value }));
+    .map((value) => own(value));
   const profileKey = (o.machineProfileKey ?? '').trim();
   if (profileKey) {
     const profile = ins?.construction?.equipmentDefaults?.machines?.find(
@@ -1874,7 +1877,7 @@ function wordsOf(
   const machineParams: string[] = [];
   if (isPressStepType(o.operationType)) {
     const equipment = pressEquipmentLabel(o.pressEquipment);
-    if (equipment) mc = { t: t('common.generated', { text: cap(equipment) }) };
+    if (equipment) mc = { t: pressEquipmentText(o.pressEquipment, cap(equipment), t) };
     else assemblyGap(ctx.sink, 'pdf_machine_missing', t('gaps.pressEquipment'), op.n, 'machine');
     if (o.pressTemperatureC != null) machineParams.push(`${o.pressTemperatureC} °C`);
     if (o.pressDwellSec != null) machineParams.push(`${o.pressDwellSec} s`);
@@ -1885,7 +1888,7 @@ function wordsOf(
     const label = machineTypeLabel(o.machineType)
       .replace(/\s+\d[\d\s/]*$/, '')
       .trim();
-    if (label) mc = { t: t('common.generated', { text: cap(label) }) };
+    if (label) mc = { t: machineText(o.machineType, cap(label), t) };
   } else if (o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE') {
     assemblyGap(ctx.sink, 'pdf_machine_missing', t('gaps.machine'), op.n, 'machine');
   }
@@ -1926,7 +1929,7 @@ function wordsOf(
     if (seam.kind === 'surface') detail = t('assembly.slit');
     else if (!detail && pocketBag) detail = t('assembly.bag');
     else if (!detail && (ctx.card?.seams.length ?? 0) === 1 && seam.kind === 'composite' && zone)
-      detail = `${t('common.generated', { text: zone })} ${t('assembly.edge')}`;
+      detail = `${own(zone)} ${t('assembly.edge')}`;
     return `${circled(index)} ${left || t('assembly.edge')} ↔ ${right || t('assembly.fold')}${detail ? ` · ${detail}` : ''}`;
   });
   if (icon.missing) {

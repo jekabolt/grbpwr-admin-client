@@ -16,6 +16,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { genderText, materialRoleText, statusText } from './i18n/vocabulary';
 
 export type CoverDeriveOptions = {
   sampleSizeName?: string;
@@ -112,9 +113,10 @@ export function deriveCover(
     styleNumber: clean(card?.styleNumber),
     collection: clean(card?.collection),
     season: skuToSeasonLabel(card?.skuSeason),
-    gender: t('common.generated', { text: enumLabel(card?.targetGender) }),
+    gender: genderText(card?.targetGender, enumLabel(card?.targetGender), t),
     stage: stage === '—' ? '' : stage,
     approval: status,
+    approvalLabel: statusText(status, t),
     sampleSize:
       clean(options.sampleSizeName) || (card?.baseSampleSizeId ? `#${card.baseSampleSizeId}` : ''),
     revision: clean(options.revisionLabel),
@@ -125,7 +127,7 @@ export function deriveCover(
     operations: operations.length,
     assemblies: assemblies.size,
     fabrics: fabrics.map((ref) => ({
-      role: t('common.generated', { text: materialRole(ref) }),
+      role: materialRoleText(ref.item, materialRole(ref), t),
       name: clean(ref.item.name),
       colour: materialColour(ref, primary).name,
       pieces: pieces.filter(

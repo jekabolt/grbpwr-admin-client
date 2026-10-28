@@ -14,6 +14,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { bomKindText, materialRoleText } from './i18n/vocabulary';
 
 const OMIT_SECTIONS = new Set(['TECH_CARD_BOM_SECTION_LABEL', 'TECH_CARD_BOM_SECTION_PACKAGING']);
 
@@ -52,20 +53,27 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink, t: P
   const partGroups = [
     ...matrixRefs
       .reduce((groups, ref) => {
-        const label = rollGoods(ref)
-          ? t('common.generated', { text: materialRole(ref) })
-          : enumLabel(ref.item.kind)
-            ? t('common.generated', { text: enumLabel(ref.item.kind) })
-            : clean(ref.item.name) || t('common.generated', { text: enumLabel(ref.item.section) });
+        const isRollGoods = rollGoods(ref);
+        const kind = enumLabel(ref.item.kind);
+        const authored = !isRollGoods && !kind && clean(ref.item.name);
+        const label = isRollGoods
+          ? materialRoleText(ref.item, materialRole(ref), t)
+          : kind
+            ? bomKindText(ref.item.kind, t('common.generated', { text: kind }), t)
+            : authored || t('common.generated', { text: enumLabel(ref.item.section) });
         const key = label || ref.key;
-        const group = groups.get(key) ?? { key, label, refs: [] };
+        const group = groups.get(key) ?? { key, label, authored: !!authored, refs: [] };
         group.refs.push(ref);
         groups.set(key, group);
         return groups;
-      }, new Map<string, { key: string; label: string; refs: typeof matrixRefs }>())
+      }, new Map<string, { key: string; label: string; authored: boolean; refs: typeof matrixRefs }>())
       .values(),
   ];
-  const columns = partGroups.map((group) => ({ key: group.key, label: group.label }));
+  const columns = partGroups.map((group) => ({
+    key: group.key,
+    label: group.label,
+    authored: group.authored,
+  }));
   const rows = sources.map((colorway, index) => ({
     key: colorway ? String(colorway.colorwayId ?? index) : 'bom',
     name: sourceName(colorway, index),
@@ -122,7 +130,7 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink, t: P
     return {
       key: ref.key,
       label: alphaKey(index),
-      role: t('common.generated', { text: materialRole(ref) }),
+      role: materialRoleText(ref.item, materialRole(ref), t),
       // the pieces column reads the first colourway; a colourway that cuts other pieces says so
       pieces: first,
       piecesGap,

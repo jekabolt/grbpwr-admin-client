@@ -270,3 +270,79 @@ export const techpackFixture = {
     },
   ],
 } as unknown as common_TechCard;
+
+const coverageCard = techpackFixture.techCard!;
+
+/** Extra enum and generator shapes for the pseudo-locale coverage test only. */
+export const techpackCoverageFixture = {
+  ...techpackFixture,
+  techCard: {
+    ...coverageCard,
+    status: 'DRAFT',
+    targetGender: 'GENDER_ENUM_FEMALE',
+    bomItems: [
+      ...(coverageCard.bomItems ?? []),
+      {
+        id: 4,
+        lineKey: 'INTERFACING_MAIN',
+        section: 'TECH_CARD_BOM_SECTION_INTERLINING',
+        purpose: 'TECH_CARD_BOM_PURPOSE_INTERFACING',
+        name: 'Fusible canvas',
+        color: 'Natural',
+        composition: '100% cotton',
+        fabricWidth: decimal('90'),
+      },
+    ],
+    operations: [
+      ...(coverageCard.operations ?? []).map((operation) =>
+        operation.operationNumber === 10
+          ? {
+              ...operation,
+              topstitch: {
+                mode: 'TECH_CARD_TOPSTITCH_MODE_EDGE' as const,
+                widthMm: decimal('6'),
+                rows: 2,
+              },
+            }
+          : operation.operationNumber === 20
+            ? {
+                ...operation,
+                pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS' as const,
+              }
+            : operation,
+      ),
+      {
+        operationNumber: 40,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+        work: 'buttonhole',
+        inputKeys: ['FRONT_UNIT'],
+        hardware: {
+          holePrep: 'TECH_CARD_HOLE_PREP_NONE',
+          reinforcement: 'TECH_CARD_REINFORCEMENT_NONE',
+        },
+        fastening: {
+          buttonholeOrientation: 'TECH_CARD_BUTTONHOLE_ORIENTATION_VERTICAL',
+          cutLengthMm: decimal('12'),
+        },
+      },
+      {
+        operationNumber: 50,
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+        work: 'press_flat',
+        inputKeys: ['FRONT_UNIT'],
+        pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_IRON',
+      },
+    ],
+  },
+  revisions: [
+    {
+      createdAt: '2026-03-16T12:00:00Z',
+      action: 'created',
+      section: 'header',
+      author: 'T. Owner',
+      changeNote: 'Initial card',
+    },
+    ...(techpackFixture.revisions ?? []),
+  ],
+} as common_TechCard;

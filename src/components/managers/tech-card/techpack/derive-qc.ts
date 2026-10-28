@@ -4,6 +4,7 @@ import type { MeasurementRow } from './derive-measurements';
 import { bomRefs, clean, decimalNumber, enumLabel, shortDate, type BomRef } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
+import { bomKindText, revisionActionText, revisionSectionText } from './i18n/vocabulary';
 
 export type QcCheck = {
   key: string;
@@ -72,7 +73,9 @@ const itemName = (item: common_TechCardBomItem, t: PdfT): string => {
   const authored = clean(item.name);
   if (authored) return own(authored);
   const generated = enumLabel(item.kind) || enumLabel(item.section);
-  return generated ? t('common.generated', { text: generated }) : t('common.material');
+  return generated
+    ? bomKindText(item.kind, t('common.generated', { text: generated }), t)
+    : t('common.material');
 };
 
 /** «button 11 mm» → «11 mm» next to the word «buttons». */
@@ -305,10 +308,10 @@ export function deriveQcSignoffPage(input: QcInput, sink?: GapSink): QcSignoffMo
       key: `${revision.createdAt || 'revision'}-${index}`,
       date: shortDate(revision.createdAt),
       action: revision.action
-        ? t('common.generated', { text: revision.action.replaceAll('_', ' ') })
+        ? revisionActionText(revision.action, revision.action.replaceAll('_', ' '), t)
         : t('qc.updated'),
       section: revision.section
-        ? t('common.generated', { text: revision.section.replaceAll('_', ' ') })
+        ? revisionSectionText(revision.section, revision.section.replaceAll('_', ' '), t)
         : undefined,
       author: revision.author?.trim() || undefined,
       note: revision.changeNote?.trim() || undefined,

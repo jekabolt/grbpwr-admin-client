@@ -15,6 +15,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, own, type PdfT } from './i18n';
+import { bomKindText, materialRoleText } from './i18n/vocabulary';
 
 const THREAD = 'TECH_CARD_BOM_SECTION_THREAD';
 const INTERLINING = 'TECH_CARD_BOM_SECTION_INTERLINING';
@@ -89,7 +90,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
       key: alphaKey(index),
       refKey: ref.key,
       name,
-      role: t('common.generated', { text: materialRole(ref) }),
+      role: materialRoleText(ref.item, materialRole(ref), t),
       colour: colour.name,
       swatch: colour.swatch,
       composition: formatCompositionCell(ref.item.composition),
@@ -212,9 +213,13 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         key: ref.key,
         name: clean(ref.item.name),
         detail: clean(ref.item.composition) || clean(ref.item.spec),
-        kind: t('common.generated', {
-          text: enumLabel(ref.item.kind) || enumLabel(ref.item.section),
-        }),
+        kind: bomKindText(
+          ref.item.kind,
+          t('common.generated', {
+            text: enumLabel(ref.item.kind) || enumLabel(ref.item.section),
+          }),
+          t,
+        ),
         spots,
         qty,
         emptyGaps: empty

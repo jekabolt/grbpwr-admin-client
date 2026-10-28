@@ -27,6 +27,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { materialRoleText } from './i18n/vocabulary';
 
 export type TechpackPatternGroup = {
   key: string;
@@ -240,7 +241,7 @@ export function derivePatternsMarkerPage(input: PatternInput, sink?: GapSink): P
       : '_unbound';
     const label = scope
       ? scope.byPurpose
-        ? t('common.generated', { text: bomPurposeLabel(scope.key) })
+        ? materialRoleText({ purpose: scope.key }, bomPurposeLabel(scope.key), t)
         : scope.lines[0]?.name?.trim() || t('colourways.bomLine')
       : t('patterns.unbound');
     const versionStamp = sheets.reduce((sum, sheet) => sum + (sheet.version ?? 0), 0);
@@ -293,7 +294,7 @@ export function derivePatternsMarkerPage(input: PatternInput, sink?: GapSink): P
       label: summary.name?.trim() || (id ? `${t('common.marker')} ${id}` : t('common.marker')),
       code: fabric?.code,
       fabric: fabric
-        ? t('common.generated', { text: materialRole(fabric.ref) })
+        ? materialRoleText(fabric.ref.item, materialRole(fabric.ref), t)
         : summary.bomItemName?.trim() || t('patterns.unbound'),
       widthCm: decimalNumber(summary.fabricWidthCm),
       pieceCount: summary.totalCount || undefined,
@@ -331,9 +332,9 @@ export function derivePatternsMarkerPage(input: PatternInput, sink?: GapSink): P
     const gap = add('pdf_marker_missing', t('gaps.marker'), 'marker', [], fabric.ref.key);
     markers.push({
       key: `missing-${fabric.ref.key}`,
-      label: `${fabric.code} ${t('common.generated', { text: materialRole(fabric.ref) })}`,
+      label: `${fabric.code} ${materialRoleText(fabric.ref.item, materialRole(fabric.ref), t)}`,
       code: fabric.code,
-      fabric: t('common.generated', { text: materialRole(fabric.ref) }),
+      fabric: materialRoleText(fabric.ref.item, materialRole(fabric.ref), t),
       widthCm: decimalNumber(fabric.ref.item.fabricWidth),
       pieceCount:
         cut.reduce((sum, piece) => sum + Math.max(1, piece.piecesPerGarment ?? 1), 0) || undefined,

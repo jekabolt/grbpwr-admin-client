@@ -1,48 +1,8 @@
 const OWN_TEXT = [
-  // Product and brand names stay verbatim by owner decision.
+  // Product, collection and brand names stay verbatim by owner decision.
   'Workshop jacket',
-  'GRBPWR',
-  // Other card-authored fields pass through own(); a separate lane translates this seam.
   'Core',
-  'Left front',
-  'Right front',
-  'front',
-  'Back panel',
-  'Cotton twill',
-  'Black',
-  'cotton',
-  'Core thread',
-  'polyester',
-  'Thread House',
-  'Button',
-  'horn',
-  'Match notches',
-  'Front unit',
-  'Front placket',
-  'CB neck',
-  'edge stitch',
-  'end fold',
-  'Confirm pocket depth',
-  'A. Maker',
-  'Sample approved',
-  'Night',
-  'Main marker',
-  'T. Owner',
-  'Button placement',
-  'Chest width',
-  'Body length',
-  'Join lockstitch',
-  'Join / seam',
-  'Fuse',
-  'Button attach',
-  // Raw fixture state and enum labels pass through the placeholder-only common.generated key.
-  'released',
-  'tech card target gender unisex',
-  'main material',
-  'button',
-  'SHELL',
-  'updated',
-  'construction',
+  'GRBPWR',
 ] as const;
 
 export function visibleText(markup: string): string {
@@ -59,7 +19,8 @@ export function visibleText(markup: string): string {
 function withoutFixtureText(node: string): string {
   let text = node;
   for (const allowed of [...OWN_TEXT].sort((a, b) => b.length - a.length)) {
-    text = text.replaceAll(allowed, ' ');
+    const escaped = allowed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    text = text.replace(new RegExp(`(^| · )${escaped}(?=$| · )`, 'g'), '$1');
   }
   return text;
 }
@@ -69,7 +30,9 @@ export function outsideTranslations(markup: string): string {
     .split('\n')
     .map((node) => {
       const source = node.trim();
-      let text = withoutFixtureText(node).replace(/⟦[^⟧]*⟧/g, ' ');
+      let text = withoutFixtureText(node)
+        .replace(/⟦[^⟧]*⟧/g, ' ')
+        .replace(/⟪[^⟫]*⟫/g, ' ');
       // Paper codes, the fixed abbreviations, fixture sizes, and measurement units stay verbatim.
       text = text.replaceAll('m/c', ' ');
       text = text.replaceAll('L+R', ' ');
@@ -98,6 +61,7 @@ export function englishWordLeaks(
     .map((node) => {
       const source = node.trim();
       const text = withoutFixtureText(node)
+        .replace(/⟪[^⟫]*⟫/g, ' ')
         .replaceAll('m/c', ' ')
         .replaceAll('L+R', ' ')
         .replace(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, ' ')

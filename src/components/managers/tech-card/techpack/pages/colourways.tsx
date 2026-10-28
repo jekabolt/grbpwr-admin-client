@@ -57,7 +57,7 @@ function RecipeMatrix({
         <tr>
           <th>{t('colourways.colourway')}</th>
           {columns.map((column) => (
-            <th key={column.key}>{column.label}</th>
+            <th key={column.key}>{column.authored ? own(column.label) : column.label}</th>
           ))}
         </tr>
       </thead>

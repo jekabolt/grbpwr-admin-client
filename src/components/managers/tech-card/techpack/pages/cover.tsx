@@ -69,9 +69,7 @@ export function CoverPage({
         k={t('common.status')}
         v={
           model.approval ? (
-            <Pill tone={statusTone(model.approval)}>
-              {t('common.generated', { text: model.approval })}
-            </Pill>
+            <Pill tone={statusTone(model.approval)}>{model.approvalLabel}</Pill>
           ) : (
             model.gaps.status && <Missing gap={model.gaps.status} />
           )
@@ -194,7 +192,7 @@ export function CoverPage({
                 {model.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
               </h1>
               <div className='text-control'>
-                {uniqueLine([model.gender, own(model.collection), model.season])}
+                {uniqueLine([model.gender, model.collection, model.season])}
               </div>
               {model.styleNumber && (
                 <div className='text-micro uppercase tracking-label text-labelColor'>
@@ -205,9 +203,7 @@ export function CoverPage({
           </div>
           <div className='flex flex-col items-end gap-1 text-right text-control leading-tight'>
             {model.approval ? (
-              <Pill tone={statusTone(model.approval)}>
-                {t('common.generated', { text: model.approval })}
-              </Pill>
+              <Pill tone={statusTone(model.approval)}>{model.approvalLabel}</Pill>
             ) : (
               model.gaps.status && <Missing gap={model.gaps.status} />
             )}

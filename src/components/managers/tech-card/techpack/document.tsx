@@ -38,7 +38,8 @@ import { QcSignoffPage } from './pages/qc-signoff';
 import { TECHPACK_SHEET_CSS, TechpackSheet } from './sheet';
 import { useAssemblyGeometry } from './use-assembly-geometry';
 import { useTechpackMarkerLayouts, useTechpackMeasurements } from './use-l3-data';
-import { own, useT } from './i18n';
+import { useT } from './i18n';
+import { statusText } from './i18n/vocabulary';
 
 const SECTION_START = /^(\d\d)\s/;
 
@@ -111,11 +112,11 @@ export function TechpackDocument({
         : '');
   const docline = furnitureLine(
     t('common.techPack'),
-    own(ins?.collection),
+    ins?.collection ?? '',
     ins?.name ?? '',
     sampleSizeName,
     revisionLabel,
-    t('common.generated', { text: ins?.status ?? '' }),
+    statusText(ins?.status, t),
   );
 
   // one-way: once the two sections outgrow one sheet they stay on two

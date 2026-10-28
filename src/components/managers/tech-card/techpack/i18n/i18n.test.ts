@@ -74,6 +74,7 @@ export const NOT_TRANSLATED_ALLOWLIST: Record<Locale, ReadonlySet<string>> = {
     'common.revisionDotValue',
     'common.material',
     'common.generated',
+    'vocab.genderUnisex',
     'gaps.material',
   ]),
   pl: new Set(['common.generated']),

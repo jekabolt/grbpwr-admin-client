@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  techpackCoverageFixture,
   techpackFixture,
   techpackGeometry,
   techpackMarkerLayouts,
@@ -43,7 +44,14 @@ vi.mock('../use-l3-data', () => ({
 import { TechpackDocument } from '../document';
 import { en, type Message } from './en';
 import { PdfLangProvider } from './context';
+import { setOwnState } from './own';
 import { englishWordLeaks } from './test-helpers';
+
+class MarkingOwnTable extends Map<string, string> {
+  override get(key: string) {
+    return `⟪${key}⟫`;
+  }
+}
 
 const englishWords = new Set(
   Object.values(en)
@@ -67,18 +75,23 @@ describe.each(['ru', 'cn', 'de'] as const)('%s rendered PDF dictionary', (locale
     Object.assign(globalThis, {
       window: { location: { origin: 'https://admin.beta.grbpwr.com' } },
     });
-    const markup = renderToStaticMarkup(
-      <PdfLangProvider lang={locale}>
-        <TechpackDocument
-          techCard={techpackFixture}
-          orient='land'
-          revision='rev 7'
-          patternViewerToken='pattern-token'
-        />
-      </PdfLangProvider>,
-    );
+    setOwnState({ lang: locale, table: new MarkingOwnTable(), seen: new Set() });
+    try {
+      const markup = renderToStaticMarkup(
+        <PdfLangProvider lang={locale}>
+          <TechpackDocument
+            techCard={techpackCoverageFixture}
+            orient='land'
+            revision='rev 7'
+            patternViewerToken='pattern-token'
+          />
+        </PdfLangProvider>,
+      );
 
-    const leaked = englishWordLeaks(markup, englishWords, allowedWords[locale]);
-    expect(leaked, `English dictionary words: ${leaked}`).toBe('');
+      const leaked = englishWordLeaks(markup, englishWords, allowedWords[locale]);
+      expect(leaked, `English dictionary words: ${leaked}`).toBe('');
+    } finally {
+      setOwnState({ lang: 'en', table: new Map(), seen: new Set() });
+    }
   });
 });

@@ -18,6 +18,7 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { materialRoleText } from './i18n/vocabulary';
 
 export type TechpackPieceGeometry = {
   shapeByKey: ReadonlyMap<string, FoundPiece | null> | null;
@@ -185,10 +186,11 @@ export function derivePieces(
         key: group.key,
         label: group.label,
         name: group.ref
-          ? clean(group.ref.item.name) || t('common.generated', { text: materialRole(group.ref) })
+          ? clean(group.ref.item.name) ||
+            materialRoleText(group.ref.item, materialRole(group.ref), t)
           : t('pieces.materialMissing'),
         role: group.ref
-          ? t('common.generated', { text: materialRole(group.ref) })
+          ? materialRoleText(group.ref.item, materialRole(group.ref), t)
           : t('pieces.unassigned'),
         composition: clean(group.ref?.item.composition),
         colour: colour.name,
