@@ -104,6 +104,7 @@ export default function SeamPicker({
     used,
     suggestions,
     innerSeams,
+    proposalSeams,
     crossSeams,
     storedSeams,
     pieceName: nameOf,
@@ -310,13 +311,9 @@ export default function SeamPicker({
     focusRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
   );
   const focusLeaves = useMemo(() => focused.map((g) => g.pieces), [focused]);
-  // Along the proposal shown (the right sleeve's armhole on the right), never the live pick.
-  const frameRaw = frameSeamsOf(
-    innerSeams,
-    storedSeams,
-    suggestion ? seamOfSides(suggestion, geoms, innerLines) : null,
-    crossSeams,
-  );
+  // Along the step's proposals (the right sleeve's armhole on the right; a third input on its own
+  // seam), never the live pick.
+  const frameRaw = frameSeamsOf(innerSeams, storedSeams, proposalSeams, crossSeams);
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
   const laidFocus = useStepLayout(focus ? focusLeaves : leaves, frameSeams, geoms, EXPLODE);
   // A piece of the seam no earlier seam attaches to its unit is not drawn loose with a bit of the
@@ -354,21 +351,30 @@ export default function SeamPicker({
 
   const marks: EdgeMark[] = [];
   const nos: NoMark[] = [];
-  stored.forEach((s, i) => {
-    for (const id of [...s.sides.a, ...s.sides.b]) marks.push({ id, tone: 'stored' });
-    const first = s.sides.a[0] ?? s.sides.b[0];
-    if (first) nos.push({ id: first, i });
-  });
-  // One label per side, on its first edge that is drawn (a piece laid apart has none).
+  // One label per side, on its longest edge that is drawn (a neckline's on the back neck, not on
+  // a front's end of it; a piece laid apart has none).
   const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone'], lenMm?: number) => {
-    const at = Math.max(
-      0,
-      ids.findIndex((id) => layout.T.has(pieceOfTarget(id))),
-    );
+    let at = 0;
+    let longest = -1;
+    ids.forEach((id, k) => {
+      if (!layout.T.has(pieceOfTarget(id))) return;
+      const l = lenOf(id);
+      if (l > longest) {
+        longest = l;
+        at = k;
+      }
+    });
     ids.forEach((id, k) =>
       marks.push({ id, tone, label: k === at ? mmText(lenMm ?? sideLen(ids)) : undefined }),
     );
   };
+  // A stored seam reads as a proposal does: its edges with their lengths, its number on the first.
+  stored.forEach((s, i) => {
+    sideMarks(s.sides.a, 'stored');
+    sideMarks(s.sides.b, 'stored');
+    const first = s.sides.a[0] ?? s.sides.b[0];
+    if (first) nos.push({ id: first, i });
+  });
   if (sel.a.length || sel.b.length) {
     sideMarks(sel.a, 'pick');
     sideMarks(sel.b, 'pick');
@@ -379,9 +385,14 @@ export default function SeamPicker({
   }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
+  // Edge to edge on both sides (a part on its host's line has no Δ).
+  const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
+    s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
   const delta = pair
     ? deltaMm(pair.aLen ?? sideLen(pair.a), pair.bLen ?? sideLen(pair.b), ease)
-    : null;
+    : stored.length === 1 && edgeToEdge(stored[0].sides)
+      ? deltaMm(sideLen(stored[0].sides.a), sideLen(stored[0].sides.b), ease)
+      : null;
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();
@@ -423,7 +434,9 @@ export default function SeamPicker({
     const k = pieceOfTarget(id);
     return groups.find((g) => g.pieces.includes(k))?.name ?? nameOf(k);
   };
-  const pairName = pair ? `${groupName(pair.a[0])} · ${groupName(pair.b[0])}` : '';
+  const sidesName = (a: TargetId | undefined, b: TargetId | undefined) =>
+    [groupName(a), groupName(b)].filter(Boolean).join(' · ');
+  const pairName = pair ? sidesName(pair.a[0], pair.b[0]) : '';
   // The seam's number on the step: after the stored ones, a proposal by its place among them.
   const pairNo = stored.length + (pair?.own ? 0 : prop);
   // The step's words as its row shows them («join / seam · armhole»), else the unit it makes.
@@ -570,6 +583,18 @@ export default function SeamPicker({
                   {error}
                 </Text>
               )}
+              {stored.map((s, i) => (
+                <span
+                  key={s.key}
+                  className='flex min-w-0 items-center gap-2'
+                  data-seam-stored={s.key}
+                >
+                  <PairNo i={i} />
+                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                    {sidesName(s.sides.a[0], s.sides.b[0])}
+                  </Text>
+                </span>
+              ))}
               {pair && (
                 <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
                   <PairNo i={pairNo} />

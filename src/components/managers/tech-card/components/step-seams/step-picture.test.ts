@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { pairOverlap, pieceTilt, rasterize } from 'lib/assembly-skeleton/union';
+import type { Edge, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { pairOverlap, pieceKeyOf, pieceTilt, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
 import {
@@ -20,6 +20,14 @@ import {
   card83InnerLines,
 } from './card83.fixture';
 import {
+  CARD58_OPS,
+  CARD58_PIECE_KEYS,
+  card58Geoms,
+  card58Graph,
+  card58InnerLines,
+  card58Step,
+} from './card58.fixture';
+import {
   boxOf,
   candidateOf,
   confidentSeam,
@@ -29,6 +37,7 @@ import {
   inputName,
   insideRing,
   labelSpot,
+  midAlong,
   partnerOf,
   seamOfSides,
   seamSig,
@@ -318,6 +327,121 @@ describe('confidentSeam', () => {
  * Card 83, the owner's shirt, every join step: the picture the picker draws (canvas, exploded) and
  * the joined result, read the way the eye reads them — by rasters of the laid outlines.
  */
+describe('stepLayout on card 58', () => {
+  const geoms = card58Geoms();
+  const graph = card58Graph();
+  const innerLines = card58InnerLines();
+  const ops = CARD58_OPS;
+  const pieceKeys = CARD58_PIECE_KEYS;
+  const at = card58Step;
+  const identical = (ka: string, kb: string) =>
+    !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
+  const det = (T: readonly number[]) => T[0] * T[3] - T[1] * T[2];
+  const ring = (L: StepLayout, k: string) => world(geoms.get(k)!, L.T.get(k)!);
+  const overlapOf = (a: Pt2[], b: Pt2[]) => pairOverlap(rasterize(a, 2), rasterize(b, 2));
+  /** How far apart a seam's two edges lie in a layout (their middles), mm. */
+  const gapOf = (L: StepLayout, c: SeamCandidate) => {
+    const mid = (id: string) => {
+      const T = L.T.get(pieceKeyOf(id))!;
+      return midAlong(resolveEdge(id, geoms)!.pts.map((p) => apply(T, p))).p;
+    };
+    const a = mid(c.a);
+    const b = mid(c.b);
+    return Math.hypot(a[0] - b[0], a[1] - b[1]);
+  };
+  const lenOf = (c: SeamCandidate) => resolveEdge(c.a, geoms)!.len;
+  /** The step as the app frames it: every proposal (or the first alone), its own seams laid. */
+  const stepOf = (op: number, every = true) => {
+    const i = at(op);
+    const leaves = inputGroups(ops, i, pieceKeys).map((g) => g.pieces);
+    const raw = splitSeams(graph.chosen, leaves, geoms);
+    const used = usedEdgesBeforeStep(ops, i, new Map());
+    const proposals = suggestStepPairs(ops, i, pieceKeys, geoms, used, null, new Map());
+    const own = (every ? proposals : proposals.slice(0, 1))
+      .map((p) => seamOfSides(p, geoms, innerLines))
+      .filter((c): c is SeamCandidate => !!c);
+    const sewn = sewnBeforeStep(ops, i, pieceKeys, geoms, new Map());
+    const inner = [...raw.inner, ...earlierInner(sewn, leaves, geoms, innerLines, raw.inner)];
+    return {
+      leaves,
+      proposals,
+      own,
+      canvas: stepLayout(leaves, frameSeamsOf(inner, [], own, raw.cross), geoms, { explode: 0.08 }),
+      result: stepLayout(leaves, [...inner, ...own], geoms),
+    };
+  };
+
+  for (const op of [10, 30])
+    it(`op ${op}: two layers cut alike open out over their seam — mirror images, never on each other`, () => {
+      const s = stepOf(op);
+      expect(s.leaves.map((l) => l.length)).toEqual([1, 1]);
+      const [ka] = s.leaves[0];
+      const [kb] = s.leaves[1];
+      expect(identical(ka, kb)).toBe(true);
+      expect(s.own).toHaveLength(1);
+      for (const L of [s.canvas, s.result]) {
+        expect(L.T.has(ka) && L.T.has(kb)).toBe(true);
+        expect(overlapOf(ring(L, ka), ring(L, kb))).toBeLessThanOrEqual(0.01);
+        expect(det(L.T.get(ka)!) * det(L.T.get(kb)!)).toBeLessThan(0);
+        expect(L.stacked).toEqual([]);
+      }
+      // Sewn edge to edge: the seam's edges meet in the result, a sliver apart at most.
+      expect(gapOf(s.result, s.own[0])).toBeLessThan(0.25 * lenOf(s.own[0]));
+    });
+
+  /** The least distance between two rings, mm (0 when they touch or cross). */
+  const ringGap = (a: Pt2[], b: Pt2[]) => {
+    const toSeg = (q: Pt2, p0: Pt2, p1: Pt2) => {
+      const dx = p1[0] - p0[0];
+      const dy = p1[1] - p0[1];
+      const l2 = dx * dx + dy * dy || 1;
+      const k = Math.max(0, Math.min(1, ((q[0] - p0[0]) * dx + (q[1] - p0[1]) * dy) / l2));
+      return Math.hypot(q[0] - p0[0] - k * dx, q[1] - p0[1] - k * dy);
+    };
+    let d = Infinity;
+    for (const [P, Q] of [
+      [a, b],
+      [b, a],
+    ])
+      for (const q of P) for (let i = 0; i < Q.length; i++) d = Math.min(d, toSeg(q, Q[i], Q[(i + 1) % Q.length]));
+    return d;
+  };
+  /** Inputs drawn touching (a sewn pair meets along its seam), as components. */
+  const touching = (L: StepLayout, leaves: readonly (readonly string[])[], tol = 10) => {
+    const comp = leaves.map((_, i) => i);
+    const find = (i: number): number => (comp[i] === i ? i : (comp[i] = find(comp[i])));
+    for (let p = 0; p < leaves.length; p++)
+      for (let q = p + 1; q < leaves.length; q++)
+        for (const ka of leaves[p])
+          for (const kb of leaves[q])
+            if (ringGap(ring(L, ka), ring(L, kb)) <= tol) comp[find(p)] = find(q);
+    return new Set(leaves.map((_, i) => find(i))).size;
+  };
+
+  it('op 60: the stand, its facing and the collar hang together on their three proposals; the first alone leaves the collar apart', () => {
+    const s = stepOf(60);
+    expect(s.leaves).toHaveLength(3);
+    expect(s.proposals.length).toBeGreaterThanOrEqual(2);
+    // Nothing on anything else; the twins opened out over their seam, mirror images.
+    const rings = s.leaves.map((ks) => ks.map((k) => ring(s.result, k)));
+    for (let p = 0; p < rings.length; p++)
+      for (let q = p + 1; q < rings.length; q++)
+        for (const a of rings[p]) for (const b of rings[q]) expect(overlapOf(a, b)).toBeLessThanOrEqual(0.01);
+    const twin = s.own.find((c) => identical(pieceKeyOf(c.a), pieceKeyOf(c.b)))!;
+    expect(twin).toBeDefined();
+    expect(gapOf(s.result, twin)).toBeLessThan(0.25 * lenOf(twin));
+    expect(det(s.result.T.get(pieceKeyOf(twin.a))!) * det(s.result.T.get(pieceKeyOf(twin.b))!)).toBeLessThan(0);
+    expect(s.result.stacked.some((st) => st.includes(pieceKeyOf(twin.a)))).toBe(false);
+    // One whole: every input meets another along a seam (a deep collar curve meets a flat stand
+    // edge at its ends, so the seam's middles may part — the pieces still touch).
+    expect(touching(s.result, s.leaves)).toBe(1);
+    // The first proposal alone (the twins) leaves the collar standing apart.
+    const first = stepOf(60, false);
+    expect(first.own).toHaveLength(1);
+    expect(touching(first.result, first.leaves)).toBe(2);
+  });
+});
+
 describe('stepLayout on card 83', () => {
   const geoms = card83Geoms();
   const graph = card83Graph();
@@ -358,6 +482,18 @@ describe('stepLayout on card 83', () => {
   const followersOf = (L: StepLayout) => new Set(L.stacked.flatMap((s) => s.slice(1)));
   // A layer under its twin leans as the twin does; a piece set into a run points away from it.
   const freeOf = (L: StepLayout) => new Set([...followersOf(L), ...L.onRuns]);
+  const det = (T: readonly number[]) => T[0] * T[3] - T[1] * T[2];
+  // A layer opened out over its identical twin (two single-piece inputs) is the twin's mirror
+  // image: turned over on purpose.
+  const openedOf = (L: StepLayout, leaves: readonly (readonly string[])[]) => {
+    const singles = leaves.filter((ks) => ks.length === 1).map((ks) => ks[0]);
+    return new Set(
+      singles.filter(
+        (k) =>
+          L.T.has(k) && det(L.T.get(k)!) < 0 && singles.some((o) => o !== k && identical(k, o)),
+      ),
+    );
+  };
 
   for (const s of steps) {
     it(`op ${s.op}: the canvas never lays two inputs on each other`, () => {
@@ -366,25 +502,30 @@ describe('stepLayout on card 83', () => {
         for (let q = p + 1; q < rings.length; q++) expect(overlapOf(rings[p], rings[q])).toBe(0);
     });
 
-    it(`op ${s.op}: the result joins the sides, else stands apart; identical twins lie as one`, () => {
+    it(`op ${s.op}: the result joins the sides, else stands apart; identical twins open out over their seam, never on each other`, () => {
       const rings = s.leaves.map((_, i) => ringsOf(s.result, s.leaves, i));
       for (let p = 0; p < rings.length; p++)
         for (let q = p + 1; q < rings.length; q++) {
-          const o = overlapOf(rings[p], rings[q]);
+          expect(overlapOf(rings[p], rings[q])).toBeLessThanOrEqual(0.01);
           const twins =
             s.leaves[p].length === 1 &&
             s.leaves[q].length === 1 &&
             identical(s.leaves[p][0], s.leaves[q][0]);
-          if (twins) expect(o).toBeGreaterThan(0.99);
-          else expect(o).toBeLessThanOrEqual(0.01);
+          // One is the other's mirror image, a book opened at the seam.
+          if (twins)
+            expect(
+              det(s.result.T.get(s.leaves[p][0])!) * det(s.result.T.get(s.leaves[q][0])!),
+            ).toBeLessThan(0);
         }
     });
 
     it(`op ${s.op}: every piece stands its own way up, on the canvas and in the result`, () => {
       for (const L of [s.canvas, s.result]) {
         const free = freeOf(L);
+        const opened = openedOf(L, s.leaves);
         for (const [k, T] of L.T)
-          if (!free.has(k)) expect(pieceTilt(geoms.get(k)!, T)).toBeLessThanOrEqual(UPRIGHT);
+          if (!free.has(k) && !opened.has(k))
+            expect(pieceTilt(geoms.get(k)!, T)).toBeLessThanOrEqual(UPRIGHT);
       }
     });
 
@@ -689,7 +830,7 @@ describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoke
       hand: sug.hand,
       sleeve: pieceOfTarget(sug.a[0]),
       focused,
-      canvas: stepLayout(focused, frameSeamsOf(inner, [], own, cross), geoms, { explode: 0.08 }),
+      canvas: stepLayout(focused, frameSeamsOf(inner, [], [own], cross), geoms, { explode: 0.08 }),
       result: stepLayout(focused, [...inner, own], geoms),
     };
   });

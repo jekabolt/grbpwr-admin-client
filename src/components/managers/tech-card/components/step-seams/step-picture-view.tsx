@@ -267,13 +267,13 @@ export function useStepScene(index: number) {
   // own; none once a seam is stored (a stored row with no shape still counts).
   const crossRaw = stored.length ? [] : split.cross.filter((c) => c.kind !== 'surface');
   const crossSeams = useStable(crossRaw, seamSig(crossRaw));
-  // The frame along the first proposal — the picker and a tile frame along the one they show.
-  const frameRaw = frameSeamsOf(
-    split.inner,
-    storedSeams,
-    suggestion ? seamOfSides(suggestion, geoms, innerLines) : null,
-    crossSeams,
-  );
+  // The frame along every proposal — together they make the step's unit whole (three inputs,
+  // two seams); the picker and a tile frame along the ones they show.
+  const proposalRaw = suggestions
+    .map((s) => seamOfSides(s, geoms, innerLines))
+    .filter((c): c is SeamCandidate => !!c);
+  const proposalSeams = useStable(proposalRaw, seamSig(proposalRaw));
+  const frameRaw = frameSeamsOf(split.inner, storedSeams, proposalSeams, crossSeams);
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
 
   return {
@@ -294,6 +294,7 @@ export function useStepScene(index: number) {
     suggestion,
     suggestions,
     innerSeams,
+    proposalSeams,
     frameSeams,
     crossSeams,
     storedSeams,
@@ -305,18 +306,19 @@ export type StepScene = ReturnType<typeof useStepScene>;
 
 /**
  * What a canvas or a tile lays the inputs along: the seams inside them, then the step's own seams
- * (stored, and the proposal it shows — never the live pick, so a click moves nothing), else what
- * the card's graph reads between the inputs. A surface seam is left out (the part stands beside
- * its host, its line clear to pick): it is laid on the host in RESULT only.
+ * (stored, and its proposals — all of them, one seam per pair of inputs, so a third input hangs
+ * on its own seam; never the live pick, so a click moves nothing), else what the card's graph
+ * reads between the inputs. A surface seam is left out (the part stands beside its host, its
+ * line clear to pick): it is laid on the host in RESULT only.
  */
 export function frameSeamsOf(
   inner: readonly SeamCandidate[],
   stored: readonly SeamCandidate[],
-  proposal: SeamCandidate | null,
+  proposals: readonly SeamCandidate[],
   cross: readonly SeamCandidate[],
 ): SeamCandidate[] {
   const flat = (xs: readonly SeamCandidate[]) => xs.filter((c) => c.kind !== 'surface');
-  const own = [...stored, ...(proposal ? [proposal] : [])];
+  const own = [...stored, ...proposals];
   return [...inner, ...(own.length ? flat(own) : cross)];
 }
 
@@ -509,20 +511,26 @@ export function StepPictureSvg({
     const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
-  // One collision pass: the mm by its edge first, then the numbers, then the unit names (mono type,
-  // ~0.62 em a character; the names' letter spacing on top).
+  // One collision pass: the unit names stand first, where they are (a name is what a shape IS);
+  // the mm then slide along their own edges clear of them, a breath apart (the name's box is read
+  // a little wider than the type), then the numbers. Mono type, ~0.62 em a character; the names'
+  // letter spacing on top.
   const spots = spreadLabels([
+    ...nameSpots.map(({ text, s }) => ({
+      ...s,
+      w: text.length * L.font * 0.66 + 16,
+      h: L.font + 8,
+    })),
     ...labels.map(({ m, s }) => ({
       ...s,
       w: (m.label ?? '').length * L.font * 0.62,
       h: L.font + 2,
     })),
     ...noSpots.map(({ s }) => ({ ...s, anchor: 'middle' as const, w: 20, h: 20 })),
-    ...nameSpots.map(({ text, s }) => ({ ...s, w: text.length * L.font * 0.66, h: L.font + 2 })),
   ]);
-  const labelAt = (i: number) => spots[i];
-  const noAt = (i: number) => spots[labels.length + i];
-  const nameAt = (i: number) => spots[labels.length + noSpots.length + i];
+  const nameAt = (i: number) => spots[i];
+  const labelAt = (i: number) => spots[nameSpots.length + i];
+  const noAt = (i: number) => spots[nameSpots.length + labels.length + i];
 
   if (w < 2 || h < 2) return null;
   return (

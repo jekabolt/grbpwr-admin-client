@@ -433,10 +433,13 @@ function roleFits(input: InputClass, role: string | null): boolean {
   return role === input || (input === 'band' && (role === 'waistband' || role === 'hemband'));
 }
 
-function pairRoleCost(a: string | null, b: string | null): number {
+/** `sameHand`: both pieces named for the one hand (`FP_L`, `FP_1_L`). */
+function pairRoleCost(a: string | null, b: string | null, sameHand: boolean): number {
   if (!a || !b) return 0;
   const pair = new Set([a, b]);
-  if (a === 'front' && b === 'front') return Infinity;
+  // Two fronts meet only as the panels of ONE front (a left front's centre and side panels);
+  // a left and a right front, or fronts no name hands, never meet edge to edge.
+  if (a === 'front' && b === 'front') return sameHand ? 0.02 : Infinity;
   if (pair.has('front') && pair.has('back')) return -0.06;
   if (pair.has('front') && pair.has('placket')) return -0.06;
   if (pair.has('sleeve') && pair.has('cuff')) return -0.08;
@@ -1040,7 +1043,7 @@ function scoreSides(
       const roleB = roleOfPiece(gb, geoms);
       // The veto reads names only: FL (a flap by name, FR's mirror twin) is a front here.
       if (roleVeto(ga, gb) && roleA === roleOf(ga) && roleB === roleOf(gb)) return null;
-      const cost = pairRoleCost(roleA, roleB);
+      const cost = pairRoleCost(roleA, roleB, !!ga.hand && ga.hand === gb.hand);
       if (!Number.isFinite(cost)) return null;
       roleSum += cost;
       pairs++;

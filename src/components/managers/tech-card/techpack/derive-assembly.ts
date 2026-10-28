@@ -710,6 +710,8 @@ const PRINT_CODE_MIN_PX = (7 * 96) / 72;
 /** A 0.1 mm planning guard keeps the browser's real glyph box outside the required 1 mm. */
 const PRINT_CODE_CLEARANCE_PX = (1.1 * 96) / 25.4;
 const PRINT_UNIT_PX = 9.5;
+/** Outline weight of a silhouette as printed, px — the join thumbnails' own weight. */
+const PRINT_SILHOUETTE_STROKE_PX = 1.4;
 const LABEL_CHAR_WIDTH = 0.62;
 const CODE_CHAR_WIDTH = 0.64;
 const CODE_HEIGHT_EM = 0.98;
@@ -2342,13 +2344,14 @@ export function silhouetteSvg(
   const b = bounds(pieces, items);
   const span = Math.max(b.x1 - b.x0, b.y1 - b.y0, 1);
   const pad = span * 0.025;
-  const sw = span / 55;
   let frame = {
     x0: b.x0 - pad,
     y0: b.y0 - pad,
     x1: b.x1 + pad,
     y1: b.y1 + pad,
   };
+  // the outline prints at a fixed line weight: a share of the span thickens it as the box grows
+  const sw = box ? PRINT_SILHOUETTE_STROKE_PX / Math.max(containFit(frame, box), 1e-6) : span / 55;
   let body = '';
   if (target.unit) {
     const polygons = items.map((item) =>

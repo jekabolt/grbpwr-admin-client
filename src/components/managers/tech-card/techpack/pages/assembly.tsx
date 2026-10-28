@@ -45,6 +45,8 @@ const ASM_CSS = String.raw`
 .asm-seams { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { display: flex; flex: none; align-items: center; justify-content: center; }
 .asm-pic { gap: 4px; }
+.asm-pic[data-orient=land] { flex-direction: column; align-items: center; justify-content: flex-start; }
+.asm-pic[data-orient=land] > :first-child { align-self: flex-start; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
 .asm-what b { font-weight: 700; }
@@ -70,13 +72,15 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 46, tool: 112, joinW: 142, joinH: 112, keyW: 84, keyH: 70 },
-  port: { n: 48, tool: 140, joinW: 190, joinH: 104, keyW: 84, keyH: 70 },
+  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 52, keyH: 44 },
+  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 52, keyH: 44 },
 } as const;
 
-const ROWS_PER_SHEET = 8;
-const PICTURE_FILL = 0.85;
+const ROWS_PER_SHEET = 6;
+const PICTURE_FILL = 0.95;
 const PICTURE_GAP = 4;
+/** DataTable cell padding, both sides (px-1.5 ×2). */
+const CELL_PAD_X = 12;
 
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
@@ -98,10 +102,16 @@ function pictureDimensions(orient: PrintOrient) {
       number,
       number,
     ],
-    silhouette: [
-      Math.round((d.joinW - d.keyW - PICTURE_GAP) * (orient === 'land' ? 1 : PICTURE_FILL)),
-      Math.round(d.joinH * PICTURE_FILL),
-    ] as [number, number],
+    // landscape: the key sits small above the outline, which takes the full width; portrait: beside it
+    silhouette: (orient === 'land'
+      ? [
+          Math.round(d.joinW * PICTURE_FILL),
+          Math.round((d.joinH - d.keyH - PICTURE_GAP) * PICTURE_FILL),
+        ]
+      : [
+          Math.round((d.joinW - d.keyW - PICTURE_GAP) * PICTURE_FILL),
+          Math.round(d.joinH * PICTURE_FILL),
+        ]) as [number, number],
   };
 }
 
@@ -110,7 +120,7 @@ function Cols({ orient }: { orient: PrintOrient }) {
   return (
     <colgroup>
       <col style={{ width: d.n }} />
-      <col style={{ width: '29%' }} />
+      <col style={{ width: d.joinW + CELL_PAD_X }} />
       <col />
       <col style={{ width: d.tool }} />
     </colgroup>
@@ -165,7 +175,11 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
     );
   }
   return (
-    <div className='asm-picture-box asm-pic' style={{ width: d.joinW, height: d.joinH }}>
+    <div
+      className='asm-picture-box asm-pic'
+      data-orient={orient}
+      style={{ width: d.joinW, height: d.joinH }}
+    >
       <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} />
       {r.sil && <Svg m={r.sil} w={picture.silhouette[0]} h={picture.silhouette[1]} />}
     </div>
