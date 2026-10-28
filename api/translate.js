@@ -20,12 +20,13 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const { source, targets, constraints } = body;
+    const { source, targets, constraints, context } = body;
 
     const translations = await translateFields({
       source,
       targets,
       constraints,
+      context,
       apiKey,
       model: process.env.OPENROUTER_MODEL || undefined,
     });

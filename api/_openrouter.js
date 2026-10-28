@@ -25,11 +25,19 @@ const MAX_TOKENS = 4000;
  * @param {Source}  params.source       Source language name + field values to translate.
  * @param {Target[]} params.targets     Target languages (code + human-readable name).
  * @param {Record<string, { maxLength?: number }>} [params.constraints] Per-field limits.
+ * @param {'techpack'} [params.context] Tech pack sheet: factory vocabulary, not shop copy.
  * @param {string}  params.apiKey       OpenRouter API key (server-side only).
  * @param {string}  [params.model]      Model slug; defaults to gemini-2.5-flash.
  * @returns {Promise<Record<string, Record<string, string>>>} translations keyed by target code.
  */
-export async function translateFields({ source, targets, constraints = {}, apiKey, model }) {
+export async function translateFields({
+  source,
+  targets,
+  constraints = {},
+  context,
+  apiKey,
+  model,
+}) {
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not configured');
   if (!source || !source.fields || Object.keys(source.fields).length === 0) {
     throw new Error('No source fields to translate');
@@ -41,8 +49,18 @@ export async function translateFields({ source, targets, constraints = {}, apiKe
   const fieldNames = Object.keys(source.fields);
   const targetCodes = targets.map((t) => t.code);
 
+  // A tech pack goes to a sewing factory: the reader is a technologist, not a shopper.
+  const role =
+    context === 'techpack'
+      ? [
+          'You are a garment technologist translating a tech pack for a sewing factory (brand grbpwr).',
+          'Fields are operation names, part names, notes, materials and measurement points.',
+          "Use the factory floor's standard terms of the target language, terse like the source.",
+          '- Keep codes like FRT_L_MAIN, abbreviations SA, CB, CF, TS, RS, WS, GSM, numbers and units exactly as written.',
+        ]
+      : ['You are a professional fashion e-commerce translator for the brand grbpwr.'];
   const systemPrompt = [
-    'You are a professional fashion e-commerce translator for the brand grbpwr.',
+    ...role,
     `Translate the provided fields from ${source.langName} into each requested target language.`,
     'Rules:',
     '- Preserve brand names, proper nouns, product/model names, sizes, measurements, and SKU-like tokens untranslated.',

@@ -26,6 +26,7 @@ import { gapsToClientFindings } from './techpack/gap-findings';
 import type { Gap } from './techpack/gaps';
 import { createPdfT, htmlLang, parsePdfLang, PDF_LANGS, PdfLangProvider } from './techpack/i18n';
 import { PDF_FONTS_CSS, usePdfFonts } from './techpack/i18n/pdf-fonts';
+import { useOwnTranslation } from './techpack/i18n/use-own-translation';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -192,6 +193,8 @@ export function TechCardPrint() {
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
   // Иероглифы листа на cn/ja/kr — свой шрифт, который грузится по выбору языка. Классика английская.
   const fontDep = usePdfFonts(classic ? 'en' : lang);
+  // Свой текст карточки — на тот же язык, моделью; документ перемонтируется, когда перевод пришёл.
+  const own = useOwnTranslation(classic ? 'en' : lang);
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
@@ -215,6 +218,7 @@ export function TechCardPrint() {
       : []),
     ...docDeps,
     fontDep,
+    own.dep,
   ]);
 
   // НАЗАД — один путь у двери «← back» и у Esc (O-65). Карточка открывает этот экран в той же
@@ -417,6 +421,7 @@ export function TechCardPrint() {
           ) : (
             <PdfLangProvider lang={lang}>
               <TechpackDocument
+                key={own.docKey}
                 techCard={snapshot ?? techCard}
                 orient={query.orient}
                 release={!!snapshot}
