@@ -484,6 +484,18 @@ describe('card 58: the panels of one front', () => {
     }
   });
 
+  it('80: the panels meet side by side — never hem to hem by an equal width', () => {
+    // All three panels end in a 39.5 mm hem: equal lengths, no seam. FP_L's long side meets
+    // FP_1_L's free long side, which reads as straight against a hooked end and scores worse.
+    const props = suggestStepPairs(ops, at(80), keys, geoms, new Set(), null);
+    expect(props.map((p) => [...p.a, ...p.b])).toEqual([
+      ['FP_1_L#0', 'FP_2_L#2'],
+      ['FP_L#0', 'FP_1_L#2'],
+    ]);
+    expect(props[1].aLen).toBeCloseTo(481.7, 0);
+    expect(props[1].bLen).toBeCloseTo(454.8, 0);
+  });
+
   it('140: the sewn left front panel meets the left front', () => {
     const s = suggestStepPair(ops, at(140), keys, geoms, new Set(), null);
     expect(s).not.toBeNull();
