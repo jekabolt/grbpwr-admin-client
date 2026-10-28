@@ -16,7 +16,8 @@ import {
   type AnnotationForm,
 } from 'components/managers/tech-card/components/schema';
 
-import { KEYS_CSS, KeyArt, Legend, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
+import { KEYS_CSS, KeyArt, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
+import { asmProtoFlags } from '../asm-proto-flags';
 import {
   fmtDelta,
   joinSvg,
@@ -37,17 +38,17 @@ const ASM_CSS = String.raw`
 .asm-cols { display: grid; min-height: 0; flex: 1 1 0; column-gap: 24px; }
 .asm-cols[data-orient=land] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .asm-cols[data-orient=port] { grid-template-columns: minmax(0, 1fr); }
-.asm-col { min-width: 0; min-height: 0; overflow: hidden; }
-.asm-table table { table-layout: fixed; }
-.asm-table td { padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; }
+.asm-col { min-width: 0; min-height: 0; overflow: visible; }
+.asm-col > div:has(> table.asm-table) { overflow: visible; }
+.asm-table { width: 100%; table-layout: fixed; }
+.asm-table td { min-width: 0; padding-top: 4px !important; padding-bottom: 4px !important; font-size: 12px !important; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
 .asm-table th { font-size: 10px !important; }
 .asm-mc { color: var(--color-textColor); }
 .asm-table td.asm-n { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; }
-.asm-seams { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
-.asm-picture-box { display: flex; flex: none; align-items: center; justify-content: center; }
-.asm-pic { gap: 4px; }
-.asm-pic[data-orient=land] { flex-direction: column; align-items: center; justify-content: flex-start; }
-.asm-pic[data-orient=land] > :first-child { align-self: flex-start; }
+.asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
+.asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
+.asm-picture-box > svg { max-width: 100%; max-height: 100%; }
+.asm-picture-key { position: absolute; left: 4px; top: 4px; z-index: 1; background: var(--color-bgColor); }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
 .asm-what b { font-weight: 700; }
@@ -73,13 +74,11 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 52, keyH: 44 },
-  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 52, keyH: 44 },
+  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 40, keyH: 34 },
+  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 40, keyH: 34 },
 } as const;
 
 const ROWS_PER_SHEET = 6;
-const PICTURE_FILL = 0.95;
-const PICTURE_GAP = 4;
 /** DataTable cell padding, both sides (px-1.5 ×2). */
 const CELL_PAD_X = 12;
 
@@ -99,20 +98,8 @@ type Photo = {
 function pictureDimensions(orient: PrintOrient) {
   const d = DIM[orient];
   return {
-    join: [Math.round(d.joinW * PICTURE_FILL), Math.round(d.joinH * PICTURE_FILL)] as [
-      number,
-      number,
-    ],
-    // landscape: the key sits small above the outline, which takes the full width; portrait: beside it
-    silhouette: (orient === 'land'
-      ? [
-          Math.round(d.joinW * PICTURE_FILL),
-          Math.round((d.joinH - d.keyH - PICTURE_GAP) * PICTURE_FILL),
-        ]
-      : [
-          Math.round((d.joinW - d.keyW - PICTURE_GAP) * PICTURE_FILL),
-          Math.round(d.joinH * PICTURE_FILL),
-        ]) as [number, number],
+    join: [d.joinW, d.joinH] as [number, number],
+    silhouette: [d.joinW, d.joinH] as [number, number],
   };
 }
 
@@ -169,21 +156,19 @@ function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
 function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
-  if (r.pic) {
-    return (
-      <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-        <Svg m={r.pic} w={picture.join[0]} h={picture.join[1]} label={`${r.n} ${r.words.verb}`} />
-      </div>
-    );
-  }
+  const drawing = r.pic ?? r.sil;
+  const showKey = asmProtoFlags().key;
   return (
-    <div
-      className='asm-picture-box asm-pic'
-      data-orient={orient}
-      style={{ width: d.joinW, height: d.joinH }}
-    >
-      <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} />
-      {r.sil && <Svg m={r.sil} w={picture.silhouette[0]} h={picture.silhouette[1]} />}
+    <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
+      {drawing && (
+        <Svg
+          m={drawing}
+          w={r.pic ? picture.join[0] : picture.silhouette[0]}
+          h={r.pic ? picture.join[1] : picture.silhouette[1]}
+          label={`${r.n} ${r.words.verb}`}
+        />
+      )}
+      {showKey && <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} className='asm-picture-key' />}
     </div>
   );
 }
@@ -460,7 +445,7 @@ export function AssemblyPage({
         pic: r.card?.items.length
           ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)
           : undefined,
-        sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette),
+        sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
         photoCount: photoCountByOp.get(r.n) ?? 0,
       })),
     [model, photoCountByOp, picture.join, picture.silhouette],
@@ -557,7 +542,6 @@ export function AssemblyPage({
                 <Table col={rows} orient={orient} />
               </div>
             </div>
-            <Legend />
           </div>
         </div>
       )}
@@ -587,7 +571,6 @@ export function AssemblyPage({
                 </div>
               ))}
             </div>
-            <Legend />
           </TechpackSheet>
         );
       })}

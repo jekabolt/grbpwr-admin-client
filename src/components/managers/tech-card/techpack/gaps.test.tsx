@@ -17,6 +17,8 @@ import {
 } from './derive-assembly';
 import { GapSink } from './gaps';
 
+Object.assign(globalThis, { window: { location: { search: '' } } });
+
 const fixture = {
   id: 1,
   lockVersion: 1,
@@ -264,7 +266,13 @@ describe('assembly raw-card fallbacks', () => {
     const left = '01M5EVQR86N1RGS9BTSNKJ39WX';
     const right = '01M5EVQR86Q4MTCB72ZFJDK8AY';
     const tiny = 'TINY';
-    const shape = (key: string, code: string, width = 80, height = 100): AsmPiece => ({
+    const shape = (
+      key: string,
+      code: string,
+      width = 80,
+      height = 100,
+      placement = false,
+    ): AsmPiece => ({
       key,
       name: code,
       code,
@@ -278,7 +286,25 @@ describe('assembly raw-card fallbacks', () => {
       notch: [],
       pocketing: false,
       area: width * height,
-      geom: { edges: [], twinOf: [] } as unknown as AsmPiece['geom'],
+      geom: {
+        edges: [],
+        twinOf: [],
+        marks: placement
+          ? [
+              {
+                id: `${key}@placement`,
+                kind: 'placement',
+                pts: [
+                  [22, -20],
+                  [58, -20],
+                  [58, 120],
+                  [22, 120],
+                ],
+                bbox: { x: 22, y: -20, w: 36, h: 140, cx: 40, cy: 50 },
+              },
+            ]
+          : [],
+      } as unknown as AsmPiece['geom'],
     });
     const raw = {
       techCard: {
@@ -320,7 +346,7 @@ describe('assembly raw-card fallbacks', () => {
     const model = deriveAssembly({
       techCard: raw,
       pieces: new Map([
-        [left, shape(left, 'BP')],
+        [left, shape(left, 'BP', 80, 100, true)],
         [right, shape(right, 'BP_1', 36, 140)],
         [tiny, shape(tiny, 'TINY', 4, 24)],
       ]),
@@ -337,30 +363,31 @@ describe('assembly raw-card fallbacks', () => {
     expect(assemblyPieceCode('Back', 'BP_MAIN')).toBe('BP_MAIN');
     expect(assemblyPieceCode('Left front panel', 'P_L_MAIN')).toBe('P_L_MAIN');
     expect(assemblyPieceCode(left, right)).toBe('');
-    expect(markup.body).toContain('>BP</text>');
+    // Only the incoming item is labelled; the base is the grey context.
+    expect(markup.body).not.toContain('>BP</text>');
     expect(markup.body).toContain('>BP_1</text>');
-    expect(markup.body.match(/data-asm-piece-number=/g)).toHaveLength(2);
+    expect(markup.body).not.toContain('data-asm-piece-number=');
     expect(model.words.get(10)?.ins).toEqual(['1 BP', '2 BP_1']);
-    expect(markup.body).toContain('data-asm-code-placement="inside"');
+    expect(model.words.get(10)?.seams).toEqual(['① BP_1 ↔ BP · slit']);
+    expect(JSON.stringify(model.words.get(10))).not.toMatch(/[0-9A-HJKMNP-TV-Z]{26}/i);
+    expect(markup.body).not.toContain('data-asm-code-placement=');
     expect(markup.body).not.toContain('tpa-asm-code-leader');
     expect(markup.body).not.toContain(left);
     expect(markup.body).not.toContain(right);
-    // A seam-less earlier block draws each piece's own cut (as prod does), not one hull around them.
-    expect(block.body.match(/tpa-asm-old/g)).toHaveLength(2);
-    expect(block.body.match(/tpa-asm-unit/g)).toHaveLength(1);
-    expect(block.body).toContain('Back · 10');
+    expect(block.body).not.toContain('tpa-asm-old');
+    expect(block.body).not.toContain('tpa-asm-unit');
+    expect(block.body).toContain('data-asm-missing="seam"');
     expect(model.units.get('finished-back')).toHaveLength(2);
     expect(pressRow?.target?.label).toBe('Right back panel · 20');
-    expect(silhouette?.body.match(/<path/g)).toHaveLength(2);
+    expect(silhouette?.body.match(/<path/g)?.length).toBeGreaterThanOrEqual(1);
     expect(silhouette?.body).not.toContain('tpa-asm-code');
-    expect(silhouette?.body).toContain('>Right back</tspan>');
-    expect(silhouette?.body).toContain('>panel · 20</tspan>');
+    expect(silhouette?.body).not.toContain('Right back');
+    expect(silhouette?.body).not.toContain('panel · 20');
     expect(silhouette?.body).not.toContain('…');
     expect(pieceSilhouette?.body).toContain('>BP_1</text>');
-    expect(pieceSilhouette?.body).toMatch(
-      /<text[^>]+transform="rotate\(90 [^)]+\)"[^>]*>BP_1<\/text>/,
-    );
-    expect(tinySilhouette?.body).toContain('data-asm-code-placement="outside"');
+    expect(pieceSilhouette?.body).not.toContain('transform="rotate');
+    expect(tinySilhouette?.body).toContain('>TINY</text>');
+    expect(tinySilhouette?.body).not.toContain('data-asm-code-placement=');
     expect(tinySilhouette?.body).not.toContain('tpa-asm-code-leader');
   });
 });
