@@ -18,7 +18,6 @@ import {
 } from './derive-shared';
 import type { Gap, GapSink } from './gaps';
 import { englishT, type PdfT } from './i18n';
-import { labelPartText } from './i18n/vocabulary';
 
 export type LabelsDeriveOptions = { sampleSizeName?: string };
 export type LabelsModel = ReturnType<typeof deriveLabels>;
@@ -28,6 +27,8 @@ const partFromWire = (value?: string): LabelPart => {
   return part && part in LABEL_PART_NAME ? part : 'SHELL';
 };
 
+// Лента этикетки печатается как есть, на любом языке листа: это то, что пришьют на изделие.
+// Переводятся только подписи страницы и пробелы — их читает фабрика.
 export function deriveLabels(
   techCard: common_TechCard,
   options: LabelsDeriveOptions = {},
@@ -42,7 +43,7 @@ export function deriveLabels(
   const overrideFibers = careOverride?.fibers ?? [];
   const composition = overrideFibers.length
     ? [...new Set(overrideFibers.map((fiber) => partFromWire(fiber.part)))].map((part) => ({
-        part: labelPartText(part, LABEL_PART_NAME[part], t),
+        part: LABEL_PART_NAME[part],
         value: overrideFibers
           .filter((fiber) => partFromWire(fiber.part) === part)
           .map((fiber) =>
@@ -56,16 +57,14 @@ export function deriveLabels(
     : bomRefs(techCard).flatMap((ref) => {
         const part = effectiveLabelPart(ref.item);
         const value = formatCompositionCell(ref.item.composition);
-        return part === 'NOT_ON_LABEL' || !value
-          ? []
-          : [{ part: labelPartText(part, LABEL_PART_NAME[part], t), value }];
+        return part === 'NOT_ON_LABEL' || !value ? [] : [{ part: LABEL_PART_NAME[part], value }];
       });
   const fallbackComposition = composition.length
     ? composition
     : (techCard.compositionEntries ?? []).length
       ? [
           {
-            part: t('labels.shell'),
+            part: englishT('labels.shell'),
             value: (techCard.compositionEntries ?? [])
               .map((entry) => {
                 const percentage = decimal(entry.percent);
