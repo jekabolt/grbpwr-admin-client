@@ -25,6 +25,7 @@ import { TechpackDocument } from './techpack/document';
 import { gapsToClientFindings } from './techpack/gap-findings';
 import type { Gap } from './techpack/gaps';
 import { createPdfT, htmlLang, parsePdfLang, PDF_LANGS, PdfLangProvider } from './techpack/i18n';
+import { PDF_FONTS_CSS, usePdfFonts } from './techpack/i18n/pdf-fonts';
 
 // This page renders OUTSIDE the app Layout (see ProtectedBare in index.tsx), so the tech
 // pack is plain top-level content in normal flow. Printing then needs no isolation tricks
@@ -189,6 +190,8 @@ export function TechCardPrint() {
   // и пустую колонку цвета при раннем клике. Документ отдаёт их наверх одним колбэком; setState
   // из useState стабилен, поэтому цикла рендеров это не создаёт.
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+  // Иероглифы листа на cn/ja/kr — свой шрифт, который грузится по выбору языка. Классика английская.
+  const fontDep = usePdfFonts(classic ? 'en' : lang);
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
@@ -211,6 +214,7 @@ export function TechCardPrint() {
       ? [{ label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) }]
       : []),
     ...docDeps,
+    fontDep,
   ]);
 
   // НАЗАД — один путь у двери «← back» и у Esc (O-65). Карточка открывает этот экран в той же
@@ -249,7 +253,7 @@ export function TechCardPrint() {
         query.orient === 'land' ? 'max-w-[317mm]' : 'max-w-[230mm]'
       }${classic ? '' : ' techpack-page'}`}
     >
-      <style>{PRINT_CSS}</style>
+      <style>{PRINT_CSS + PDF_FONTS_CSS}</style>
 
       <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <div className='flex items-center gap-3'>
