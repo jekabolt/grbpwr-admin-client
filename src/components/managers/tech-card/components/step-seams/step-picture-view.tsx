@@ -46,7 +46,17 @@ import {
   type StepLayout,
 } from './step-picture';
 
-export type SceneOp = FormOpLike & { fullnessRatio?: string; outputUnitName?: string };
+export type SceneOp = FormOpLike & {
+  fullnessRatio?: string;
+  outputUnitName?: string;
+  // What names the step in its row (`stepWords`); the form holds them, the picker reads them.
+  operationType?: string;
+  machineType?: string;
+  zone?: string;
+  seamClass?: string;
+  topstitchMode?: string;
+  work?: string;
+};
 
 /** The edge ids and inner targets an anchor names on today's drawing (by its hint). */
 export function targetsOfAnchor(a: EdgeAnchor): TargetId[] {
@@ -253,19 +263,17 @@ export function useStepScene(index: number) {
     .filter((c): c is SeamCandidate => !!c);
   const storedSeams = useStable(storedRaw, seamSig(storedRaw));
 
-  // The canvas lays the inputs along the step's own seams (stored, else the proposal), else along
-  // what the card's graph reads between them — never along the live pick, so a click moves nothing.
-  // A surface seam is left out here (the part stands beside its host, its line clear to pick): it
-  // is laid on the host in RESULT only.
-  const own = [
-    ...storedRaw,
-    ...(suggestion ? [seamOfSides(suggestion, geoms, innerLines)] : []),
-  ].filter((c): c is SeamCandidate => !!c);
-  const flat = (xs: readonly SeamCandidate[]) => xs.filter((c) => c.kind !== 'surface');
-  const frameRaw = [
-    ...split.inner,
-    ...(own.length || stored.length ? flat(own) : flat(split.cross)),
-  ];
+  // What the card's graph reads between the inputs — the frame when the step has no seam of its
+  // own; none once a seam is stored (a stored row with no shape still counts).
+  const crossRaw = stored.length ? [] : split.cross.filter((c) => c.kind !== 'surface');
+  const crossSeams = useStable(crossRaw, seamSig(crossRaw));
+  // The frame along the first proposal — the picker and a tile frame along the one they show.
+  const frameRaw = frameSeamsOf(
+    split.inner,
+    storedSeams,
+    suggestion ? seamOfSides(suggestion, geoms, innerLines) : null,
+    crossSeams,
+  );
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
 
   return {
@@ -287,12 +295,30 @@ export function useStepScene(index: number) {
     suggestions,
     innerSeams,
     frameSeams,
+    crossSeams,
     storedSeams,
     pieceName,
   };
 }
 
 export type StepScene = ReturnType<typeof useStepScene>;
+
+/**
+ * What a canvas or a tile lays the inputs along: the seams inside them, then the step's own seams
+ * (stored, and the proposal it shows — never the live pick, so a click moves nothing), else what
+ * the card's graph reads between the inputs. A surface seam is left out (the part stands beside
+ * its host, its line clear to pick): it is laid on the host in RESULT only.
+ */
+export function frameSeamsOf(
+  inner: readonly SeamCandidate[],
+  stored: readonly SeamCandidate[],
+  proposal: SeamCandidate | null,
+  cross: readonly SeamCandidate[],
+): SeamCandidate[] {
+  const flat = (xs: readonly SeamCandidate[]) => xs.filter((c) => c.kind !== 'surface');
+  const own = [...stored, ...(proposal ? [proposal] : [])];
+  return [...inner, ...(own.length ? flat(own) : cross)];
+}
 
 /** `stepLayout`, memoised on the seams' identity. */
 export function useStepLayout(

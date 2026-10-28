@@ -11,10 +11,13 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text } from 'ui';
 import { rowFromHand } from '../assembly-seams/seam-actions';
 import type { TechCardFormData } from '../schema';
+import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
+import { focusPieces, seamOfSides } from './step-picture';
 import { useAttachStepSeam } from './step-seams-context';
 import { hasMultipleStepPieces, pieceOfTarget, type TargetId } from './step-seams-model';
 import {
+  frameSeamsOf,
   StepPictureSvg,
   useStepLayout,
   useStepScene,
@@ -31,6 +34,7 @@ const TILE_H = 60;
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
+  const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();
   const attach = useAttachStepSeam(index);
   const opNumber = op?.operationNumber;
@@ -45,6 +49,18 @@ export function StepSeamsRow({ index }: { index: number }) {
     [ops, index, pieceKeys, geoms],
   );
   const nameOf = scene.pieceName;
+  // Each tile lays its pieces along the seam it shows (a stored one, or its own proposal).
+  const storedFrame = useMemo(
+    () => frameSeamsOf(innerSeams, storedSeams, null, crossSeams),
+    [innerSeams, storedSeams, crossSeams],
+  );
+  const proposalFrames = useMemo(
+    () =>
+      suggestions.map((sug) =>
+        frameSeamsOf(innerSeams, storedSeams, seamOfSides(sug, geoms, innerLines), crossSeams),
+      ),
+    [suggestions, innerSeams, storedSeams, crossSeams, geoms, innerLines],
+  );
 
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.
   const [params, setParams] = useSearchParams();
@@ -119,6 +135,7 @@ export function StepSeamsRow({ index }: { index: number }) {
             key={key}
             no={i}
             scene={scene}
+            seams={storedFrame}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
@@ -132,6 +149,7 @@ export function StepSeamsRow({ index }: { index: number }) {
               <SeamTile
                 no={suggestions.length > 1 ? i : undefined}
                 scene={scene}
+                seams={proposalFrames[i] ?? storedFrame}
                 marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'pick' }))}
                 dashed
                 onOpen={cardId ? () => setOpenAt(i) : undefined}
@@ -178,6 +196,7 @@ export function StepSeamsRow({ index }: { index: number }) {
  */
 function SeamTile({
   scene,
+  seams,
   marks,
   dashed,
   missing,
@@ -189,6 +208,8 @@ function SeamTile({
   /** The seam's number on the step — the one the picker shows beside it. */
   no?: number;
   scene: StepScene;
+  /** The seams the tile lays its pieces along. */
+  seams: readonly SeamCandidate[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
@@ -198,11 +219,14 @@ function SeamTile({
   'data-step-seam'?: string;
 }) {
   const ids = marks.map((m) => m.id).join(',');
+  // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
   const leavesRaw = useMemo(() => {
     const own = new Set(ids.split(',').filter(Boolean).map(pieceOfTarget));
-    return scene.leaves.map((l) => l.filter((p) => own.has(p))).filter((l) => l.length > 0);
-  }, [scene.leaves, ids]);
-  const layout = useStepLayout(leavesRaw, scene.frameSeams, scene.geoms, 0.12, 4);
+    return scene.leaves
+      .map((l) => focusPieces(l, own, scene.innerSeams))
+      .filter((l) => l.length > 0);
+  }, [scene.leaves, scene.innerSeams, ids]);
+  const layout = useStepLayout(leavesRaw, seams, scene.geoms, 0.12, 4);
   return (
     <span
       role={onOpen ? 'button' : undefined}

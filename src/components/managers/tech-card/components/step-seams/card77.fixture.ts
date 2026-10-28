@@ -6,8 +6,16 @@
 // takes three inputs (both sleeves and the body) and must propose one seam per side.
 
 import { segmentPiece, twins } from 'lib/assembly-skeleton/geometry';
-import type { PieceGeom, SkeletonFacts, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
+import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
+import type {
+  PieceGeom,
+  Pt2,
+  SeamGraph,
+  SkeletonFacts,
+  SkeletonPieceInput,
+} from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
+import { seamAssignmentInputOf } from '../assembly-seams/seam-assignment';
 import real from './card77-real.json';
 import type { FormOpLike } from './step-seams-model';
 
@@ -85,4 +93,30 @@ export function card77Facts(): SkeletonFacts {
 /** The pieces' segmentation, as the picker's geometry hook hands it over. */
 export function card77Geoms(): Map<string, PieceGeom> {
   return new Map(twins(card77Facts().pieces.map(segmentPiece)).map((g) => [g.pieceKey, g]));
+}
+
+/** Each piece's inner lines (placket folds, pocket marks), mm, y up — as the picker's hook reads them. */
+export function card77InnerLines(): Map<string, Pt2[][]> {
+  return new Map(
+    Object.entries(PIECES).map(([key, p]) => [
+      key,
+      p.lines.map((line) => line.map((q): Pt2 => [q[0], q[1]])),
+    ]),
+  );
+}
+
+/**
+ * The card's seam graph as the unit-pictures provider reads it: no stored seams, the global
+ * assignment over the card's own order (the mode the app ships with).
+ */
+export function card77Graph(): SeamGraph {
+  const facts = card77Facts();
+  return readSeamGraph(
+    facts,
+    undefined,
+    {},
+    undefined,
+    undefined,
+    seamAssignmentInputOf(CARD77_OPS as never, CARD77_PIECE_KEYS),
+  );
 }
