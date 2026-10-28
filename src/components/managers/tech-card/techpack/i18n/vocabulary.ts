@@ -1,5 +1,6 @@
 import type { PdfMessageKey } from './en';
-import type { PdfT } from './translate';
+import { own } from './own';
+import { englishT, type PdfT } from './translate';
 
 type KeyMap = Readonly<Record<string, PdfMessageKey>>;
 
@@ -8,13 +9,20 @@ const valueFor = (map: KeyMap, value: string | undefined, t: PdfT): string | und
   return key ? t(key) : undefined;
 };
 
+// Статус — свободная строка карточки («draft», «DRAFT», «released»): ищем без регистра, а
+// незнакомый отдаём модели, как остальной свой текст.
 const STATUS_KEYS: KeyMap = {
-  DRAFT: 'vocab.statusDraft',
+  draft: 'vocab.statusDraft',
   released: 'vocab.statusReleased',
 };
 
-export const statusText = (value: string | undefined, t: PdfT): string =>
-  valueFor(STATUS_KEYS, value, t) ?? value ?? '';
+export const statusText = (value: string | undefined, t: PdfT): string => {
+  const key = value ? STATUS_KEYS[value.toLowerCase()] : undefined;
+  if (!key) return own(value);
+  // На английском — как записано в карточке: английский лист не меняется ни на букву.
+  const text = t(key);
+  return text === englishT(key) ? value ?? '' : text;
+};
 
 const GENDER_KEYS: KeyMap = {
   GENDER_ENUM_MALE: 'vocab.genderMale',
