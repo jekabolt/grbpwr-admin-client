@@ -278,6 +278,8 @@ export type StepLayout = {
   onRuns: string[];
   /** Pieces no seam inside their input lays: they stand beside it in a row, not joined to it. */
   apart: string[];
+  /** Inputs laid against each other along the step's seams, the biggest first; the rest stand beside. */
+  clusters: number[][];
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };
@@ -336,6 +338,7 @@ const EMPTY_LAYOUT: StepLayout = {
   stacked: [],
   onRuns: [],
   apart: [],
+  clusters: [],
   bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
 };
 
@@ -498,6 +501,7 @@ export function stepLayout(
     apart.push(...laid.apart);
     localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
   }
+  const standing = new Set(apart);
   // A layer under its identical twin is not a shape of its own: it leans as the twin's edge says.
   const followers = new Set(stacked.flatMap((s) => s.slice(1)));
   // Ghosts: a square a quarter of the largest input, in a row after their input's pieces.
@@ -523,7 +527,26 @@ export function stepLayout(
     const b = localBox.get(i);
     return b ? (b.x1 - b.x0) * (b.y1 - b.y0) : 0;
   };
+  // A side whose own edge lies on a piece not drawn joined (standing apart, or left out of the
+  // picture) is read along its longest part that is: a sleeve still hangs on the armhole's rest.
+  const drawnPart = (id: EdgeId, parts: readonly EdgeId[] | undefined): EdgeId => {
+    const joined = (k: string) => local.has(k) && !standing.has(k);
+    if (joined(pieceKeyOf(id))) return id;
+    let best = id;
+    let longest = -1;
+    for (const p of parts ?? []) {
+      const len = joined(pieceKeyOf(p)) ? resolveEdge(p, geoms)?.len ?? 0 : -1;
+      if (len > longest) {
+        longest = len;
+        best = p;
+      }
+    }
+    return best;
+  };
   const cross = seams
+    .map((c) =>
+      c.kind === 'surface' ? c : { ...c, a: drawnPart(c.a, c.aParts), b: drawnPart(c.b, c.bParts) },
+    )
     .filter((c) => {
       const ia = inOf(c.a);
       const ib = inOf(c.b);
@@ -553,6 +576,7 @@ export function stepLayout(
   const G = new Map<number, Affine>();
   let T = new Map<string, Affine>();
   let ghosts: Ghost[] = [];
+  let clustersOut: number[][] = [];
   // Layers laid on their twins across inputs (a cuff's second face as its own input).
   let crossStacks: string[][] = [];
   // Inputs set into another input's run (a sleeve into the body's armhole).
@@ -608,8 +632,11 @@ export function stepLayout(
       const ea = resolveEdge(theirs, geoms)!;
       const eb = resolveEdge(mine, geoms)!;
       const Tt = compose(Ht, local.get(kb)!);
-      // Their side across several pieces of their input (an armhole of front + back): one run.
-      const theirParts = (theirs === c.a ? c.aParts : c.bParts) ?? [];
+      // Their side across several pieces of their input (an armhole of front + back): one run —
+      // along the pieces drawn joined; one standing apart (a yoke no upright seam lays on the
+      // fronts' shoulders) or not drawn is not part of the opening.
+      const gone = (id: EdgeId) => inOf(id) == null || standing.has(pieceKeyOf(id));
+      const theirParts = ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
       const run =
         theirParts.length > 1 && theirParts.every((id) => inOf(id) === i)
           ? runOf(
@@ -634,7 +661,11 @@ export function stepLayout(
       // Off the seam: along the laid edge's normal, away from the input it belongs to (for a run,
       // away from all the pieces it runs across).
       const hc = run
-        ? centroidOf(keysOf(i).flatMap((k) => worldOf(geoms.get(k)!, compose(Ht, local.get(k)!))))
+        ? centroidOf(
+            keysOf(i)
+              .filter((k) => !standing.has(k))
+              .flatMap((k) => worldOf(geoms.get(k)!, compose(Ht, local.get(k)!))),
+          )
         : centroidOf(worldOf(geoms.get(kb)!, Tt));
       const mid: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
       const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
@@ -800,6 +831,7 @@ export function stepLayout(
       clusters.push(cl);
       holds.push(used);
     }
+    clustersOut = clusters;
     // Explode: each input of a cluster away from the centre of the seams that hold the cluster.
     if (explode > 0)
       clusters.forEach((cl, n) => {
@@ -889,6 +921,7 @@ export function stepLayout(
     stacked: [...stacked, ...crossStacks],
     onRuns: [...onRuns, ...crossRuns],
     apart,
+    clusters: clustersOut,
     bbox,
   };
 }

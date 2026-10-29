@@ -802,6 +802,34 @@ describe('stepLayout apart', () => {
     expect(stepLayout([['A', 'B']], [inner], geoms).apart).toEqual([]);
     expect(stepLayout([['C']], [], geoms).apart).toEqual([]);
   });
+
+  it('a run across a piece standing apart hangs along the pieces drawn joined (card 57 op 80, 70 op 50)', () => {
+    // A yoke no seam lays upright stands beside the body; the sleeve's armhole run crosses it.
+    const g = geomsOf(
+      rect('A', 100, 300),
+      rect('B', 100, 300),
+      rect('Y', 120, 60),
+      rect('S', 150, 200),
+    );
+    const run: SeamCandidate = { ...candidateOf({ a: ['S#0'], b: ['A#2', 'B#2', 'Y#0'] }, g)! };
+    for (const leaves of [
+      [['A', 'B', 'Y'], ['S']],
+      [['A', 'B'], ['S']],
+    ]) {
+      const L = stepLayout(leaves, [inner, run], g);
+      expect(L.clusters).toHaveLength(1);
+      expect(L.onRuns).toContain('S');
+      const body = boxOf([
+        ...world(g.get('A')!, L.T.get('A')!),
+        ...world(g.get('B')!, L.T.get('B')!),
+      ]);
+      const s = boxOf(world(g.get('S')!, L.T.get('S')!));
+      // Above the body's top, over its width.
+      expect(s.y0).toBeGreaterThanOrEqual(body.y1 - 1);
+      expect((s.x0 + s.x1) / 2).toBeGreaterThan(body.x0);
+      expect((s.x0 + s.x1) / 2).toBeLessThan(body.x1);
+    }
+  });
 });
 
 describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoked body', () => {
