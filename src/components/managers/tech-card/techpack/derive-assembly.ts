@@ -42,7 +42,9 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
-import type { PieceGeom, PieceMark } from 'lib/assembly-skeleton/types';
+import { readName } from 'lib/assembly-skeleton/skeleton/model';
+import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
+import type { Edge, PieceGeom, PieceMark } from 'lib/assembly-skeleton/types';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   contourSig,
@@ -62,6 +64,7 @@ import { hitOf } from 'lib/seams/resolve';
 import { GapSink, type Gap } from './gaps';
 import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
+import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
 
 export type Pt = [number, number];
@@ -132,8 +135,12 @@ export type SeamMetric = {
   letter: string;
   left: number;
   leftName?: string;
+  leftNameGenitive?: string;
+  leftMachineName?: string;
   right?: number;
   rightName?: string;
+  rightNameGenitive?: string;
+  rightMachineName?: string;
   delta?: number;
   bad: boolean;
   gap?: Gap;
@@ -186,6 +193,10 @@ type SeamPart = {
   share: number;
   /** Signed turn of the sewn run, degrees, + convex. */
   turn: number;
+  /** Current edge/run evidence, retained for inference diagnostics and tests. */
+  edgeId?: string;
+  edgeName?: string;
+  notches?: number;
 };
 
 type Placement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
@@ -200,6 +211,8 @@ type AsmSeam = {
   pieces: string[];
   inner?: InnerTarget;
   surfaceRole?: 'placement' | 'inner';
+  /** A confirmed stored decision recovered on its still-present hinted current edges. */
+  relaxedStored?: boolean;
 };
 
 type Item = { p: string; T: Matrix; old?: boolean };
@@ -508,6 +521,9 @@ function partOf(hit: AnchorHit, geom: PieceGeom): SeamPart | null {
     lenMm: hit.lenMm * share,
     share,
     turn: turnOf(pts),
+    edgeId: run.id,
+    edgeName: run.edges.map(edgeNameOf).filter(Boolean).join(' + ') || undefined,
+    notches: run.notches,
   };
 }
 
@@ -520,6 +536,32 @@ function placementOf(anchor: unknown): Placement | undefined {
   const rotDeg = Number(placement.rotDeg ?? 0);
   if (![xMm, yMm, rotDeg].every(Number.isFinite)) return undefined;
   return { xMm, yMm, rotDeg, flip: Boolean(placement.flip) };
+}
+
+/**
+ * A confirmed seam can predate notch extraction or a harmless re-segmentation. Keep its decision
+ * when the hinted run still exists on the same piece and still has the anchored shape/length.
+ */
+function relaxedStoredHit(anchor: EdgeAnchor, geom: PieceGeom, grainDeg: number): AnchorHit | null {
+  const run = runById(geom, anchor.edgeHint, SEAMS.maxChain);
+  if (!run) return null;
+  const ratio = run.lenMm / Math.max(anchor.lenMm, 1e-6);
+  if (ratio < 0.7 || ratio > 1.4) return null;
+  if (
+    Math.abs(anchor.turnDeg) >= 15 &&
+    Math.abs(run.turnDeg) >= 15 &&
+    Math.sign(anchor.turnDeg) !== Math.sign(run.turnDeg)
+  )
+    return null;
+  const samples = runSamples(frameOf(geom, grainDeg), run);
+  const best = FRAMES.map((frame) => ({
+    frame,
+    fit: rmsFit(inFrame(samples, frame), anchor.samples),
+  })).sort((a, b) => a.fit - b.fit)[0];
+  // The same-piece hint is accepted with the length band and turn direction above. Normalized
+  // samples may move substantially when the sewing contour or bbox replaces a cut contour.
+  if (!best) return null;
+  return hitOf(anchor, run, 'hint', best.frame, best.fit);
 }
 
 function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: number } {
@@ -538,7 +580,8 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
     const match = /\bop\s*(\d+)\b/i.exec(seam.note ?? '') ?? /^op(\d+)(?:\D|$)/i.exec(seam.seamKey);
     return match ? Number(match[1]) : undefined;
   };
-  const add = (seam: StoredSeam, ha: AnchorHit[], hb: AnchorHit[]) => {
+  const added = new Set<string>();
+  const add = (seam: StoredSeam, ha: AnchorHit[], hb: AnchorHit[], relaxedStored = false) => {
     const side = (hs: AnchorHit[]) =>
       hs
         .map((h) => {
@@ -557,11 +600,31 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       a,
       b,
       pieces: [...new Set([...a, ...b].map((p) => p.piece))],
+      relaxedStored,
     });
+    added.add(seam.seamKey);
     return true;
   };
   let unresolved = r.stale.length;
   for (const row of r.applied) if (row.candidate) add(row.seam, row.a, row.b);
+  for (const row of r.stale) {
+    const seam = row.seam;
+    if (added.has(seam.seamKey)) continue;
+    const side = (anchors: readonly EdgeAnchor[]) =>
+      anchors.map((anchor) => {
+        const geom = byKey.get(anchor.piece);
+        return geom ? relaxedStoredHit(anchor, geom, input.grainDeg.get(anchor.piece) ?? 0) : null;
+      });
+    const a = side(seam.sideA);
+    const b = side(seam.sideB);
+    if (
+      a.length &&
+      a.every((hit): hit is AnchorHit => !!hit) &&
+      b.every((hit): hit is AnchorHit => !!hit) &&
+      add(seam, a, b, true)
+    )
+      unresolved--;
+  }
   for (const o of r.orphan) {
     const s = o.seam;
     const one = s.sideA.length ? s.sideA : s.sideB;
@@ -682,6 +745,21 @@ function bindSeams(
   for (const s of seams) {
     const covers = (o: Op) => s.pieces.every((p) => o.leaves.has(p));
     const single = (o: Op) => o.ins.length === 1 && covers(o);
+    const connectsInputs = (o: Op) => {
+      if (!s.a.length || !s.b.length || !covers(o)) return false;
+      const groupsOf = (parts: readonly SeamPart[]) => {
+        const groups = new Set<number>();
+        for (const part of parts) {
+          const index = o.groups.findIndex((group) => group.has(part.piece));
+          if (index < 0) return null;
+          groups.add(index);
+        }
+        return groups;
+      };
+      const a = groupsOf(s.a);
+      const b = groupsOf(s.b);
+      return !!a && !!b && [...a].every((index) => !b.has(index));
+    };
     let op =
       s.opHint == null
         ? undefined
@@ -710,11 +788,14 @@ function bindSeams(
         }))
         .sort((a, b) => b.role - a.role)[0];
       op =
-        (namedClosure && namedClosure.role >= 9 ? namedClosure.candidate : undefined) ??
-        joins.find(forms) ??
-        joins.find(single) ??
-        joins.find(covers);
-    } else op = joins.find(single) ?? joins.find(covers);
+        joins.find(connectsInputs) ??
+        (s.relaxedStored
+          ? undefined
+          : (namedClosure && namedClosure.role >= 9 ? namedClosure.candidate : undefined) ??
+            joins.find(forms) ??
+            joins.find(single) ??
+            joins.find(covers));
+    } else op = s.relaxedStored ? undefined : joins.find(single) ?? joins.find(covers);
     if (op) out.set(op.n, [...(out.get(op.n) ?? []), s]);
   }
   return out;
@@ -1014,6 +1095,17 @@ function twinOfKind(
 
 type EdgePart = { item: Item; part: SeamPart };
 
+/** Optional importer/POM names outrank shape when an edge carries them. */
+function edgeNameOf(edge: Edge): string {
+  const named = edge as Edge & {
+    role?: string;
+    name?: string;
+    label?: string;
+    semanticRole?: string;
+  };
+  return [named.semanticRole, named.role, named.name, named.label].filter(Boolean).join(' ');
+}
+
 function edgePartsOf(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): EdgePart[] {
   return items.flatMap((item) => {
     const piece = pieces.get(item.p);
@@ -1030,6 +1122,9 @@ function edgePartsOf(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item
                 lenMm: edge.lenMm,
                 share: 1,
                 turn: turnOf(pts),
+                edgeId: edge.id,
+                edgeName: edgeNameOf(edge) || undefined,
+                notches: edge.notchesMm.length,
               },
             },
           ];
@@ -1064,6 +1159,45 @@ function edgeRoleScore(part: SeamPart, piece: AsmPiece, terms: string): number {
   if (/sleeve sides|join sides|\bsides?\b/.test(terms))
     return vertical * 3 + straight * 2 + length * 2 + Math.abs(nx - 0.5);
   return length * 3 + straight + curve * 0.5;
+}
+
+function edgeNameScore(part: SeamPart, terms: string): number {
+  const name = part.edgeName?.toLocaleLowerCase();
+  if (!name) return 0;
+  const wanted = /neck|collar/.test(terms)
+    ? /neckline|collar[-_ ]?neck|stand[-_ ]?neck|\bneck\b/
+    : /armhole/.test(terms)
+      ? /armhole|sleeve[-_ ]?cap|\bcap\b/
+      : /shoulder/.test(terms)
+        ? /shoulder/
+        : /waist/.test(terms)
+          ? /waist|strip[-_ ]?attach/
+          : /cuff|wrist/.test(terms)
+            ? /cuff|wrist|strip[-_ ]?attach/
+            : /bottom|hem/.test(terms)
+              ? /hem|bottom|strip[-_ ]?attach/
+              : /inseam/.test(terms)
+                ? /inseam/
+                : /outseam|side seam|join sides/.test(terms)
+                  ? /outseam|side|underarm|sleeve[-_ ]?seam/
+                  : undefined;
+  if (!wanted) return 0;
+  if (wanted.test(name)) return 40;
+  if (/neck|collar/.test(terms) && /outer|stand[-_ ]?top|collar[-_ ]?outer/.test(name)) return -40;
+  return -8;
+}
+
+function pairEvidenceScore(a: SeamPart, b: SeamPart, terms: string): number {
+  if (!a.edgeName && !b.edgeName) return Math.sign(a.turn) !== Math.sign(b.turn) ? 1.5 : 0;
+  const notchesA = a.notches ?? 0;
+  const notchesB = b.notches ?? 0;
+  const notchDifference = Math.abs(notchesA - notchesB);
+  const notch = notchDifference === 0 ? (notchesA > 0 ? 6 : 1) : -2 * notchDifference;
+  const aCurve = Math.abs(a.turn);
+  const bCurve = Math.abs(b.turn);
+  const curveRatio = Math.min(aCurve, bCurve) / Math.max(aCurve, bCurve, 1);
+  const curvature = curveRatio * 2 + (Math.sign(a.turn) !== Math.sign(b.turn) ? 1.5 : 0);
+  return edgeNameScore(a, terms) + edgeNameScore(b, terms) + notch + curvature;
 }
 
 function bestZoneParts(
@@ -1137,10 +1271,70 @@ function bestEdgePair(
       const role =
         edgeRoleScore(a.part, pieces.get(a.part.piece)!, terms) +
         edgeRoleScore(b.part, pieces.get(b.part.piece)!, terms);
-      const complementary = Math.sign(a.part.turn) !== Math.sign(b.part.turn) ? 1.5 : 0;
-      const score = ratio * 9 + role + complementary;
+      const score = ratio * 9 + role + pairEvidenceScore(a.part, b.part, terms);
       if (!best || score > best.score) best = { a: a.part, b: b.part, score };
     }
+  return best;
+}
+
+const CHAIN_TERMS =
+  /neck|collar|armhole|shoulder|waist|cuff|wrist|bottom|hem|inseam|outseam|side seam|join sides/;
+
+/** A boundary carried by several pieces of one input unit against one edge of a single piece. */
+function bestUnitChainPair(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  unit: readonly Item[],
+  single: readonly Item[],
+  terms: string,
+): { a: SeamPart[]; b: SeamPart[] } | undefined {
+  const unitItems = [...new Map(unit.map((item) => [item.p, item])).values()];
+  if (!CHAIN_TERMS.test(terms) || unitItems.length < 2 || single.length !== 1) return undefined;
+  type State = { parts: SeamPart[]; role: number };
+  let states: State[] = [{ parts: [], role: 0 }];
+  for (const item of unitItems) {
+    const candidates = edgePartsOf(pieces, [item])
+      .map(({ part }) => ({
+        part,
+        role: edgeRoleScore(part, pieces.get(part.piece)!, terms) + edgeNameScore(part, terms),
+      }))
+      .sort((a, b) => b.role - a.role)
+      .slice(0, 4);
+    if (!candidates.length) return undefined;
+    states = states
+      .flatMap((state) =>
+        candidates.map((candidate) => ({
+          parts: [...state.parts, candidate.part],
+          role: state.role + candidate.role,
+        })),
+      )
+      .sort((a, b) => b.role - a.role)
+      .slice(0, 96);
+  }
+
+  let best: { a: SeamPart[]; b: SeamPart[]; score: number } | undefined;
+  for (const edge of edgePartsOf(pieces, single)) {
+    for (const state of states) {
+      const chainLength = state.parts.reduce((sum, part) => sum + part.lenMm, 0);
+      const ratio =
+        Math.min(chainLength, edge.part.lenMm) / Math.max(chainLength, edge.part.lenMm, 1);
+      if (ratio < 0.55 || Math.min(chainLength, edge.part.lenMm) < 18) continue;
+      const chainNotches = state.parts.reduce((sum, part) => sum + (part.notches ?? 0), 0);
+      const notchDifference = Math.abs(chainNotches - (edge.part.notches ?? 0));
+      const notch = notchDifference === 0 ? (chainNotches > 0 ? 12 : 1) : -3 * notchDifference;
+      const chainTurn = state.parts.reduce((sum, part) => sum + part.turn, 0);
+      const curveRatio =
+        Math.min(Math.abs(chainTurn), Math.abs(edge.part.turn)) /
+        Math.max(Math.abs(chainTurn), Math.abs(edge.part.turn), 1);
+      const curvature =
+        curveRatio * 3 + (Math.sign(chainTurn) !== Math.sign(edge.part.turn) ? 2 : 0);
+      const singleRole =
+        edgeRoleScore(edge.part, pieces.get(edge.part.piece)!, terms) +
+        edgeNameScore(edge.part, terms);
+      const score = ratio * 12 + state.role / state.parts.length + singleRole + notch + curvature;
+      // The single-piece side stays first: Δ reads its length against the unit boundary.
+      if (!best || score > best.score) best = { a: [edge.part], b: state.parts, score };
+    }
+  }
   return best;
 }
 
@@ -1184,6 +1378,11 @@ function edgeChainsOf(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Ite
             lenMm: edges[a].edge.lenMm + edges[b].edge.lenMm,
             share: 1,
             turn: turnOf(pts),
+            edgeId: `${item.p}#${edges[a].edge.k}+${edges[b].edge.k}`,
+            edgeName:
+              [edgeNameOf(edges[a].edge), edgeNameOf(edges[b].edge)].filter(Boolean).join(' + ') ||
+              undefined,
+            notches: edges[a].edge.notchesMm.length + edges[b].edge.notchesMm.length,
           },
         });
       }
@@ -1385,16 +1584,25 @@ function inferredSeams(pieces: ReadonlyMap<string, AsmPiece>, groups: Item[][], 
     const composite = /pck|pocket/.test(`${fixedCodes} ${movingCodes}`)
       ? bestCompositeEdgePair(pieces, fixed, moving, pairTerms)
       : undefined;
-    const pair = composite ?? bestEdgePair(pieces, fixed, moving, pairTerms, usedFixed);
+    const unitChain =
+      fixed.length > 1 && moving.length === 1
+        ? bestUnitChainPair(pieces, fixed, moving, pairTerms)
+        : moving.length > 1 && fixed.length === 1
+          ? bestUnitChainPair(pieces, moving, fixed, pairTerms)
+          : undefined;
+    const simple = composite ?? bestEdgePair(pieces, fixed, moving, pairTerms, usedFixed);
+    const pair = unitChain ?? (simple ? { a: [simple.a], b: [simple.b] } : undefined);
     if (!pair) continue;
-    usedFixed.add(`${pair.a.piece}:${pathData(pair.a.pts)}`);
+    for (const part of [...pair.a, ...pair.b])
+      if (fixed.some((item) => item.p === part.piece))
+        usedFixed.add(`${part.piece}:${pathData(part.pts)}`);
     out.push({
       key: `proto-edge-${op.n}-${index}`,
-      kind: composite ? 'composite' : 'edge',
+      kind: composite || unitChain ? 'composite' : 'edge',
       note: '',
-      a: [pair.a],
-      b: [pair.b],
-      pieces: [...new Set([pair.a.piece, pair.b.piece])],
+      a: pair.a,
+      b: pair.b,
+      pieces: [...new Set([...pair.a, ...pair.b].map((part) => part.piece))],
     });
   }
   return out;
@@ -1456,44 +1664,102 @@ function isCollarGroup(pieces: ReadonlyMap<string, AsmPiece>, items: readonly It
   });
 }
 
+type SeamSideName = { nominative: string; genitive: string; code: string };
+
+function pieceRoleMap(pieces: ReadonlyMap<string, AsmPiece>): ReadonlyMap<string, string | null> {
+  const readings = new Map(
+    [...pieces].map(([key, piece]) => [key, readName(`${piece.code ?? ''} ${piece.name ?? ''}`)]),
+  );
+  const roles = new Map<string, string | null>(
+    [...readings].map(([key, reading]) => [key, reading.role]),
+  );
+  const roleLevel = new Map(ROLE_BOOK.roles.map((role) => [role.id, role.level]));
+  // The shared role reader's F3 rule: FL reads as pocket alone, but as front beside its mirrored
+  // FR panel. Keep that card context when naming a side of the seam.
+  for (const [key, piece] of pieces) {
+    for (const twin of piece.geom.twinOf.filter((candidate) => candidate.kind === 'mirror')) {
+      const ownRole = roles.get(key);
+      const twinRole = roles.get(twin.key);
+      if (!ownRole || !twinRole || ownRole === twinRole) continue;
+      if (roleLevel.get(twinRole) === 'panel' && roleLevel.get(ownRole) !== 'panel')
+        roles.set(key, twinRole);
+    }
+  }
+  const present = new Set([...roles.values()].filter(Boolean));
+  for (const context of ROLE_BOOK.contextRoles ?? []) {
+    if (present.has(context.role)) continue;
+    for (const [key, reading] of readings)
+      if (!roles.get(key) && reading.family && context.tokens.includes(reading.family))
+        roles.set(key, context.role);
+  }
+  return roles;
+}
+
 function seamSideName(
   parts: readonly SeamPart[],
   partner: readonly SeamPart[],
   pieces: ReadonlyMap<string, AsmPiece>,
   terms: string,
   t: PdfT,
-): string {
-  const textOf = (side: readonly SeamPart[]) =>
-    side
-      .map((part) => {
-        const piece = pieces.get(part.piece);
-        return `${piece?.code ?? ''} ${piece?.name ?? ''}`;
-      })
-      .join(' ')
-      .toLocaleLowerCase();
-  const side = textOf(parts);
-  const other = textOf(partner);
-  const collar = /(^|[\s_-])(clr|collar)([\s_-]|$)|воротник/.test(side);
-  const otherCollar = /(^|[\s_-])(clr|collar)([\s_-]|$)|воротник/.test(other);
-  const stand = /(^|[\s_-])(stand|clr[_-]?st)([\s_-]|$)|стойк/.test(side);
-  const otherStand = /(^|[\s_-])(stand|clr[_-]?st)([\s_-]|$)|стойк/.test(other);
-  const sleeve = /(^|[\s_-])(slv|sleeve)([\s_-]|$)|рукав/.test(side);
-  const otherSleeve = /(^|[\s_-])(slv|sleeve)([\s_-]|$)|рукав/.test(other);
+): SeamSideName {
+  const roles = pieceRoleMap(pieces);
+  const unique = (side: readonly SeamPart[]) => [...new Set(side.map((part) => part.piece))];
+  const sidePieces = unique(parts);
+  const otherPieces = unique(partner);
+  const sideRoles = new Set(sidePieces.map((key) => roles.get(key)).filter(Boolean));
+  const otherRoles = new Set(otherPieces.map((key) => roles.get(key)).filter(Boolean));
+  const collar = sideRoles.has('collar');
+  const otherCollar = otherRoles.has('collar');
+  const stand = sideRoles.has('stand');
+  const otherStand = otherRoles.has('stand');
+  const sleeve = sideRoles.has('sleeve');
+  const otherSleeve = otherRoles.has('sleeve');
   const armholeOperation = /armhole|sleeve|пройм|окат|рукав/.test(terms);
+  const code = sidePieces
+    .map((key) => {
+      const piece = pieces.get(key);
+      return assemblyPieceCode(piece?.code, piece?.name);
+    })
+    .filter(Boolean)
+    .join(' + ');
+  const named = (id: PartNounId, count = 1): SeamSideName => ({
+    ...partNoun(id, count, t),
+    code,
+  });
 
-  if (stand) return t('assembly.partStand');
-  if (collar) return t('assembly.partCollar');
-  if (otherCollar || otherStand) return t('assembly.partNeckline');
-  if (armholeOperation && sleeve && !otherSleeve) return t('assembly.partSleeveCap');
-  if (armholeOperation && otherSleeve && !sleeve) return t('assembly.partArmhole');
+  if (stand && sideRoles.size === 1) return named('stand', sidePieces.length);
+  if (collar && sideRoles.size === 1) return named('collar', sidePieces.length);
+  if (otherCollar || otherStand) return named('neckline');
+  if (armholeOperation && sleeve && !otherSleeve) return named('sleeveCap');
+  if (armholeOperation && otherSleeve && !sleeve) return named('armhole');
 
-  return (
-    [...new Set(parts.map((part) => pieces.get(part.piece)?.code).filter(Boolean))].join(' + ') ||
-    [...new Set(parts.map((part) => own(pieces.get(part.piece)?.name)).filter(Boolean))].join(
-      ' + ',
-    ) ||
-    t('assembly.piece')
-  );
+  const groups = new Map<string, string[]>();
+  const knownRoles = new Set(ROLE_BOOK.roles.map((row) => row.id));
+  for (const key of sidePieces) {
+    const role = roles.get(key);
+    const piece = pieces.get(key);
+    const fallback = assemblyPieceCode(piece?.code, piece?.name) || own(piece?.name) || key;
+    const group = role && knownRoles.has(role) ? role : fallback;
+    groups.set(group, [...(groups.get(group) ?? []), key]);
+  }
+  const nominative: string[] = [];
+  const genitive: string[] = [];
+  for (const [group, keys] of groups) {
+    if (ROLE_BOOK.roles.some((row) => row.id === group)) {
+      const noun = partNoun(group as PartNounId, keys.length, t);
+      nominative.push(noun.nominative);
+      genitive.push(noun.genitive);
+    } else {
+      nominative.push(group);
+      genitive.push(group);
+    }
+  }
+  const piece = partNoun('piece', sidePieces.length || 1, t);
+  return {
+    nominative: nominative.join(' + ') || piece.nominative,
+    genitive: genitive.join(' + ') || piece.genitive,
+    code,
+  };
 }
 
 function placeAtInnerTarget(
@@ -1745,16 +2011,19 @@ function buildCards(
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const terms = opTerms(op);
-      const leftName = seamSideName(s.a, s.b, pieces, terms, t);
-      const rightName = seamSideName(s.b, s.a, pieces, terms, t);
+      const leftSide = seamSideName(s.a, s.b, pieces, terms, t);
+      const rightSide = seamSideName(s.b, s.a, pieces, terms, t);
+      const sameName = leftSide.nominative === rightSide.nominative;
+      const machineName = (side: SeamSideName) =>
+        sameName && side.code ? `${side.nominative} (${side.code})` : side.nominative;
       const shorterLeft = left <= right;
       const gap = bad
         ? assemblyGap(
             sink,
             'asm_length_mismatch',
             t('assembly.shorterThan', {
-              a: shorterLeft ? leftName : rightName,
-              b: shorterLeft ? rightName : leftName,
+              a: shorterLeft ? leftSide.nominative : rightSide.nominative,
+              b: shorterLeft ? rightSide.genitive : leftSide.genitive,
               d: Math.round(Math.abs(delta)),
             }),
             op.n,
@@ -1766,9 +2035,13 @@ function buildCards(
       return {
         letter: String(i + 1),
         left,
-        leftName,
+        leftName: leftSide.nominative,
+        leftNameGenitive: leftSide.genitive,
+        leftMachineName: machineName(leftSide),
         right,
-        rightName,
+        rightName: rightSide.nominative,
+        rightNameGenitive: rightSide.genitive,
+        rightMachineName: machineName(rightSide),
         delta,
         bad,
         gap,

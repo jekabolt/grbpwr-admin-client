@@ -1,6 +1,7 @@
 import type { PdfMessageKey } from './en';
 import { own } from './own';
 import { englishT, type PdfT } from './translate';
+import { bomWord } from './bom-words';
 
 type KeyMap = Readonly<Record<string, PdfMessageKey>>;
 
@@ -74,19 +75,36 @@ export const materialRoleText = (
   item: { purpose?: string; section?: string },
   fallback: string,
   t: PdfT,
-): string =>
-  item.purpose &&
-  MATERIAL_ROLE_KEYS[item.purpose] &&
-  same(englishT(MATERIAL_ROLE_KEYS[item.purpose]), fallback)
-    ? pick(MATERIAL_ROLE_KEYS, item.purpose, fallback, t)
-    : pick(MATERIAL_ROLE_KEYS, item.section, fallback, t);
+): string => {
+  if (
+    item.purpose &&
+    MATERIAL_ROLE_KEYS[item.purpose] &&
+    same(englishT(MATERIAL_ROLE_KEYS[item.purpose]), fallback)
+  )
+    return pick(MATERIAL_ROLE_KEYS, item.purpose, fallback, t);
+  const sectionWord = bomWord(item.section, t);
+  const englishSectionWord = bomWord(item.section, englishT);
+  if (sectionWord && englishSectionWord && same(englishSectionWord, fallback))
+    return sectionWord === englishSectionWord ? fallback : sectionWord;
+  return pick(MATERIAL_ROLE_KEYS, item.section, fallback, t);
+};
 
 const BOM_KIND_KEYS: KeyMap = {
   TECH_CARD_BOM_KIND_BUTTON: 'vocab.bomButton',
 };
 
-export const bomKindText = (value: string | undefined, fallback: string, t: PdfT): string =>
-  pick(BOM_KIND_KEYS, value, fallback, t);
+export const bomKindText = (value: string | undefined, fallback: string, t: PdfT): string => {
+  const translated = bomWord(value, t);
+  const english = bomWord(value, englishT);
+  if (translated && english) {
+    if (translated === english) return fallback;
+    const index = fallback.toLocaleLowerCase().lastIndexOf(english.toLocaleLowerCase());
+    return index < 0
+      ? translated
+      : `${fallback.slice(0, index)}${translated}${fallback.slice(index + english.length)}`;
+  }
+  return pick(BOM_KIND_KEYS, value, fallback, t);
+};
 
 const LABEL_PART_KEYS: KeyMap = {
   SHELL: 'labels.shell',

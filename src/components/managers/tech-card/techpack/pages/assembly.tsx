@@ -136,8 +136,12 @@ export function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
       {shown.map((m) => {
         const right = m.right ?? 0;
         const shorterLeft = m.left <= right;
-        const shorterName = (shorterLeft ? m.leftName : m.rightName) ?? t('assembly.piece');
-        const longerName = (shorterLeft ? m.rightName : m.leftName) ?? t('assembly.piece');
+        const shorterName =
+          (shorterLeft ? m.leftMachineName ?? m.leftName : m.rightMachineName ?? m.rightName) ??
+          t('assembly.piece');
+        const longerName =
+          (shorterLeft ? m.rightMachineName ?? m.rightName : m.leftMachineName ?? m.leftName) ??
+          t('assembly.piece');
         const shorter = shorterLeft ? m.left : right;
         const longer = shorterLeft ? right : m.left;
         const rawDelta = m.delta ?? 0;
