@@ -182,6 +182,26 @@ describe('topstitch rows', () => {
     });
     expect(topstitchRowIcon(4, '')).toEqual({ key: 'topstitch', bars: 3, more: 4 });
   });
+
+  it('draws the bars on the step edge when its kind takes rows', () => {
+    expect(topstitchRowIcon(2, '', 'faced_split')).toEqual({ key: 'faced_split', bars: 2 });
+    expect(topstitchRowIcon(1, '', 'hem_raw')).toEqual({ key: 'hem_raw', bars: 1 });
+    expect(topstitchRowIcon(0, '', 'hem_closed')).toEqual({ key: 'hem_closed' });
+    expect(topstitchRowIcon(2, '', 'seam_open')).toEqual({ key: 'topstitch', bars: 2 });
+  });
+
+  it('prints a topstitched collar edge with its rows', () => {
+    expect(
+      opIcon(
+        {
+          seamKind: 'faced_split',
+          topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+          topstitchRows: 2,
+        },
+        {},
+      ),
+    ).toEqual({ key: 'faced_split', bars: 2, at: 'edge' });
+  });
 });
 
 describe('the form row reads as the wire op does', () => {

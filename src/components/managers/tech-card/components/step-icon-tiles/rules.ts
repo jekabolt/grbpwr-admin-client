@@ -1,6 +1,6 @@
 // Direct modules, not the op-icons barrel: schema.ts imports these rules, and the barrel would
 // drag the SVG component into every importer of the schema.
-import type { IconKey } from '../../op-icons/icons.gen';
+import { BAR_BASE, type IconKey } from '../../op-icons/icons.gen';
 import type { OpIcon, OpIconInput, TopstitchAt } from '../../op-icons/op-icon';
 import { SEAM_KINDS } from '../../op-icons/seam-kinds';
 
@@ -251,11 +251,14 @@ export function topstitchAtOf(mode: string): TopstitchAt | undefined {
   return undefined;
 }
 
-export function topstitchRowIcon(rows: number, mode: string): OpIcon {
+/** The bars sit on the step's own edge when its kind takes rows (a turned collar edge, a hem),
+ *  so the tiles preview what the sheet will print; any other kind keeps the plain topstitch base. */
+export function topstitchRowIcon(rows: number, mode: string, base?: IconKey): OpIcon {
+  const key: IconKey = base && BAR_BASE[base] ? base : 'topstitch';
   const at = topstitchAtOf(mode);
-  if (rows < 1) return { key: 'topstitch' };
+  if (rows < 1) return { key };
   return {
-    key: 'topstitch',
+    key,
     bars: Math.min(rows, 3) as 1 | 2 | 3,
     ...(rows > 3 ? { more: rows } : null),
     ...(at ? { at } : null),
