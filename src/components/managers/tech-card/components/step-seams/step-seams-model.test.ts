@@ -28,6 +28,7 @@ import {
   surfaceRow,
   targetsLen,
   usedEdgesBeforeStep,
+  wholeOverPartial,
 } from './step-seams-model';
 
 /** A w × h rectangle, CCW from the origin, one plain edge per side (`KEY#0..3`). */
@@ -496,6 +497,12 @@ describe('card 58: the panels of one front', () => {
     expect(props[1].bLen).toBeCloseTo(454.8, 0);
   });
 
+  it('80: what the step proposes is what it sews — both panel seams, for every later step', () => {
+    const sewn = sewnBeforeStep(ops, at(90), keys, geoms).map((p) => [...p.a, ...p.b].sort());
+    expect(sewn).toContainEqual(['FP_1_L#0', 'FP_2_L#2']);
+    expect(sewn).toContainEqual(['FP_1_L#2', 'FP_L#0']);
+  });
+
   it('140: the sewn left front panel meets the left front', () => {
     const s = suggestStepPair(ops, at(140), keys, geoms, new Set(), null);
     expect(s).not.toBeNull();
@@ -833,5 +840,52 @@ describe('dropKeys', () => {
     expect(next.map((o) => o.seamKeys ?? [])).toEqual([['b'], [], []]);
     expect(next[2]).toBe(ops[2]);
     expect(dropKeys(ops, new Set(['zzz']))).toBeNull();
+  });
+});
+
+describe('wholeOverPartial: a chain sewn end to end beats the partial it holds', () => {
+  const side = (ids: string[], lenMm: number) => ({
+    ids,
+    edges: [],
+    pieces: [...new Set(ids.map((id) => id.split('#')[0]))],
+    lenMm,
+    turnDeg: 0,
+    notches: 0,
+    segs: [],
+    nx: 0,
+    ny: 0,
+  });
+  const pair = (
+    a: ReturnType<typeof side>,
+    b: ReturnType<typeof side>,
+    score: number,
+    aLen: number,
+    bLen: number,
+  ) => ({
+    score,
+    a,
+    b,
+    layer: false,
+    aLen,
+    bLen,
+  });
+  const cap = side(['SLV_L#0'], 469);
+  const back = side(['BP#5'], 253);
+  const armhole = side(['FL#1', 'BP#5'], 466);
+  const other = pair(side(['X#0'], 300), side(['Y#0'], 300), -0.18, 300, 300);
+
+  it('the back armhole on half the cap gives way to the whole armhole, at its rank', () => {
+    // Card 69, op 250: BP#5 aligns with half of SLV_L#0 by its notches and outscored the whole.
+    const half = pair(back, cap, -0.195, 253, 252);
+    const whole = pair(armhole, cap, -0.175, 466, 469);
+    const out = wholeOverPartial([half, other, whole] as never);
+    expect(out.map((c) => c.a.ids.join('+'))).toEqual(['FL#1+BP#5', 'X#0']);
+    expect(out[0].score).toBeCloseTo(-0.195, 3);
+  });
+
+  it('a partial no end-to-end chain holds stays as it is', () => {
+    const half = pair(back, cap, -0.195, 253, 252);
+    const loose = pair(armhole, cap, -0.1, 400, 469);
+    expect(wholeOverPartial([half, other, loose] as never)).toEqual([half, other, loose]);
   });
 });
