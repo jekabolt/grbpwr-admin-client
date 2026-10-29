@@ -544,7 +544,7 @@ function placementOf(anchor: unknown): Placement | undefined {
  */
 function relaxedStoredHit(anchor: EdgeAnchor, geom: PieceGeom, grainDeg: number): AnchorHit | null {
   const run = runById(geom, anchor.edgeHint, SEAMS.maxChain);
-  if (!run) return null;
+  if (!run || anchor.samples.length !== 5) return null;
   const ratio = run.lenMm / Math.max(anchor.lenMm, 1e-6);
   if (ratio < 0.7 || ratio > 1.4) return null;
   if (
@@ -1370,6 +1370,7 @@ function bestUnitChainPair(
   terms: string,
   roles: ReadonlyMap<string, string | null>,
   sewn: ReadonlySet<string>,
+  usedFixed: ReadonlySet<string>,
 ): { a: SeamPart[]; b: SeamPart[] } | undefined {
   const carriers = CHAIN_CARRIERS.find((row) => row.terms.test(terms))?.roles;
   const singleReps = layerReps(pieces, single);
@@ -1393,7 +1394,8 @@ function bestUnitChainPair(
   for (const item of unitItems) {
     const piece = pieces.get(item.p)!;
     const free = edgePartsOf(pieces, [item]).filter(
-      ({ part }) => !part.edgeId || !sewn.has(part.edgeId),
+      ({ part }) =>
+        (!part.edgeId || !sewn.has(part.edgeId)) && !usedFixed.has(`${part.piece}:${pathData(part.pts)}`),
     );
     // a whole centre panel (a back without its mirror) is crossed by the boundary, not edged by it
     const centred =
@@ -1724,9 +1726,9 @@ function inferredSeams(
     // the incoming side may be a stack of identical layers (upper + under collar) — still one edge
     const unitChain =
       layerReps(pieces, moving).length === 1
-        ? bestUnitChainPair(pieces, fixed, moving, pairTerms, roles, sewn)
+        ? bestUnitChainPair(pieces, fixed, moving, pairTerms, roles, sewn, usedFixed)
         : layerReps(pieces, fixed).length === 1
-          ? bestUnitChainPair(pieces, moving, fixed, pairTerms, roles, sewn)
+          ? bestUnitChainPair(pieces, moving, fixed, pairTerms, roles, sewn, usedFixed)
           : undefined;
     const simple = composite ?? bestEdgePair(pieces, fixed, moving, pairTerms, usedFixed);
     const pair = unitChain ?? (simple ? { a: [simple.a], b: [simple.b] } : undefined);
