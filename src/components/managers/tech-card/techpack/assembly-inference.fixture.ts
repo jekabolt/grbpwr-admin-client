@@ -31,12 +31,27 @@ const pointsFor = (fact: EdgeFact): Pt2[] => {
 };
 
 function fixturePiece(key: string, name: string, facts: EdgeFact[], area = 10_000): AsmPiece {
+  const width = Math.max(...facts.map((fact) => fact.lenMm), 40);
+  const height = Math.max(40, facts.length * 16);
+  const side = (a: Pt2, b: Pt2): Pt2[] =>
+    Array.from({ length: 4 }, (_, index) => [
+      a[0] + ((b[0] - a[0]) * index) / 4,
+      a[1] + ((b[1] - a[1]) * index) / 4,
+    ]);
+  // More than twice the six-sample corner window, like a real resampled contour.
+  const rs: Pt2[] = [
+    ...side([0, 0], [width, 0]),
+    ...side([width, 0], [width, height]),
+    ...side([width, height], [0, height]),
+    ...side([0, height], [0, 0]),
+  ];
   const edges: (Edge & { semanticRole?: string })[] = facts.map((fact) => ({
     id: `${key}#${fact.k}`,
     pieceKey: key,
     k: fact.k,
-    s: fact.k,
-    e: fact.k + 1,
+    // Semantic edge ids may keep their real card index while the synthetic ring stays valid.
+    s: (fact.k * 2) % rs.length,
+    e: (fact.k * 2 + 2) % rs.length,
     pts: pointsFor(fact),
     lenMm: fact.lenMm,
     chordMm: fact.lenMm,
@@ -45,14 +60,6 @@ function fixturePiece(key: string, name: string, facts: EdgeFact[], area = 10_00
     kind: 'edge',
     ...(fact.semanticRole ? { semanticRole: fact.semanticRole } : {}),
   }));
-  const width = Math.max(...facts.map((fact) => fact.lenMm), 40);
-  const height = Math.max(40, facts.length * 16);
-  const rs: Pt2[] = [
-    [0, 0],
-    [width, 0],
-    [width, height],
-    [0, height],
-  ];
   const geom: PieceGeom = {
     pieceKey: key,
     name,
@@ -365,7 +372,7 @@ function stored(
   } as CardSeam;
 }
 
-/** Trimmed from card85-asm-input.json: only ops 490/620/640 and their relevant pieces/seams. */
+/** Trimmed from card85-asm-input.json: its late assembled unit plus final press and fastenings. */
 export function card85StoredSeamFixture(): AssemblyInput {
   const pieces = [
     fixturePiece(MAIN_A, 'clr_main collar', [
@@ -380,6 +387,34 @@ export function card85StoredSeamFixture(): AssemblyInput {
     fixturePiece(FLAP, 'FLP_L_MAIN flap', [{ k: 8, lenMm: 101.5, notches: 3 }]),
     fixturePiece(FRONT, 'P_L_MAIN front', [{ k: 2, lenMm: 572.171 }]),
     fixturePiece(PLACKET, 'PLCK_L placket', [{ k: 0, lenMm: 701.4316 }]),
+  ];
+  pieces.find((piece) => piece.key === PLACKET)!.geom.marks = [
+    {
+      id: `${PLACKET}@buttonhole`,
+      kind: 'buttonhole',
+      layer: '8',
+      closed: false,
+      pts: [
+        [90, 20],
+        [110, 20],
+      ],
+      bbox: { w: 20, h: 0, cx: 100, cy: 20 },
+      lenMm: 20,
+    },
+    {
+      id: `${PLACKET}@button`,
+      kind: 'drill',
+      layer: '8',
+      closed: true,
+      pts: [
+        [129, 20],
+        [130, 19],
+        [131, 20],
+        [130, 21],
+      ],
+      bbox: { w: 2, h: 2, cx: 130, cy: 20 },
+      lenMm: 6,
+    },
   ];
   const seams = [
     stored(
@@ -487,6 +522,42 @@ export function card85StoredSeamFixture(): AssemblyInput {
         zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
         inputKeys: ['COLLAR BASE', NECK],
         outputUnitKey: 'COLLAR WITH NECK DETAIL',
+      },
+      {
+        operationNumber: 650,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'join_lockstitch',
+        zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
+        inputKeys: ['LEFT FRONT PANEL WITH PLACKET', 'COLLAR WITH NECK DETAIL'],
+        outputUnitKey: 'OUTER',
+      },
+      {
+        operationNumber: 1070,
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+        work: 'press_final',
+        inputKeys: ['OUTER'],
+        press: { action: 'TECH_CARD_PRESS_ACTION_FINAL' },
+      },
+      {
+        operationNumber: 1080,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'buttonhole',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+        inputKeys: ['OUTER'],
+        placementLayout: { count: 1 },
+        fastening: {
+          buttonholeStyle: 'TECH_CARD_BUTTONHOLE_STYLE_STRAIGHT',
+          buttonholeOrientation: 'TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL',
+        },
+      },
+      {
+        operationNumber: 1090,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'button_attach',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+        inputKeys: ['OUTER'],
+        placementLayout: { count: 1 },
+        fastening: { attachPattern: 'TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL' },
       },
     ],
     seams,

@@ -1395,7 +1395,8 @@ function bestUnitChainPair(
     const piece = pieces.get(item.p)!;
     const free = edgePartsOf(pieces, [item]).filter(
       ({ part }) =>
-        (!part.edgeId || !sewn.has(part.edgeId)) && !usedFixed.has(`${part.piece}:${pathData(part.pts)}`),
+        (!part.edgeId || !sewn.has(part.edgeId)) &&
+        !usedFixed.has(`${part.piece}:${pathData(part.pts)}`),
     );
     // a whole centre panel (a back without its mirror) is crossed by the boundary, not edged by it
     const centred =
@@ -2279,6 +2280,14 @@ function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[
   const code = `${piece.code ?? ''} ${piece.name}`.toLocaleUpperCase();
   const terms = opTerms(op);
   let score = marks.length;
+  // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
+  // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
+  // the final shirt's button is printed at the neck instead of on its closure.
+  if (
+    (op.tech === 'button' || op.tech === 'buttonhole') &&
+    /(PLCK|PLACKET|P_[LR]|FRONT)/.test(code)
+  )
+    score += 200;
   if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
   if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
   if (/front/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 100;

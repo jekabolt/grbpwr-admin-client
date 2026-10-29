@@ -469,6 +469,24 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 export type Tone = 'proposal' | 'pick' | 'stored';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
+export type PictureActionLine = {
+  id: string;
+  piece: string;
+  /** Piece geometry frame (mm, y up), before the picture layout affine. */
+  points: readonly Pt2[];
+  weight: 'ink' | 'heavy';
+  dashed?: boolean;
+  kind: string;
+};
+export type PictureActionGlyph = {
+  id: string;
+  piece: string;
+  /** Piece geometry frame (mm, y up), before the picture layout affine. */
+  point: Pt2;
+  kind: 'button' | 'buttonhole' | 'label';
+  /** Unit direction in the same piece frame; only a buttonhole reads it. */
+  direction?: Pt2;
+};
 
 type Look = {
   outline: number;
@@ -508,6 +526,8 @@ export function StepPictureSvg({
   geoms,
   innerLines,
   marks = [],
+  actionLines = [],
+  actionGlyphs = [],
   nos = [],
   names,
   namesBelow,
@@ -525,6 +545,8 @@ export function StepPictureSvg({
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   marks?: readonly EdgeMark[];
+  actionLines?: readonly PictureActionLine[];
+  actionGlyphs?: readonly PictureActionGlyph[];
   nos?: readonly NoMark[];
   names?: readonly string[];
   namesBelow?: boolean;
@@ -586,6 +608,26 @@ export function StepPictureSvg({
   const markLines = marks
     .map((m) => ({ m, pts: ptsOf(m.id) }))
     .filter((x): x is { m: EdgeMark; pts: Pt2[] } => !!x.pts);
+  const actionLinePaths = actionLines.flatMap((line) => {
+    const T = layout.T.get(line.piece);
+    return T && line.points.length
+      ? [{ line, points: line.points.map((point) => toPx(fit, apply(T, point))) }]
+      : [];
+  });
+  const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
+    const T = layout.T.get(glyph.piece);
+    if (!T) return [];
+    const at = toPx(fit, apply(T, glyph.point));
+    const direction = glyph.direction ?? ([1, 0] as Pt2);
+    const toward = toPx(
+      fit,
+      apply(T, [glyph.point[0] + direction[0], glyph.point[1] + direction[1]]),
+    );
+    const dx = toward[0] - at[0];
+    const dy = toward[1] - at[1];
+    const length = Math.hypot(dx, dy) || 1;
+    return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
+  });
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const labels = markLines
     .filter(({ m }) => m.label)
@@ -658,7 +700,7 @@ export function StepPictureSvg({
       </g>
       <g fill={FILL} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
         {pieces.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} />
+          <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
         ))}
       </g>
       {ghosts.length > 0 && (
@@ -725,6 +767,78 @@ export function StepPictureSvg({
           data-seam-mark={m.tone}
         />
       ))}
+      {actionLinePaths.map(({ line, points }) => (
+        <path
+          key={`action-line:${line.id}`}
+          d={pathOf(points)}
+          fill='none'
+          stroke={INK}
+          strokeWidth={line.weight === 'heavy' ? L.mark : L.outline}
+          strokeDasharray={line.dashed ? '5 3' : undefined}
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-asm-mark={line.kind}
+          data-asm-piece={line.piece}
+        />
+      ))}
+      {actionGlyphSpots.map(({ glyph, at, direction }) => {
+        if (glyph.kind === 'button') {
+          const radius = 4.2;
+          return (
+            <g
+              key={`action-glyph:${glyph.id}`}
+              fill={FILL}
+              stroke={INK}
+              pointerEvents='none'
+              data-asm-mark='button'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+            >
+              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.mark} />
+              <path
+                d={`M${at[0] - radius * 0.55} ${at[1]}H${at[0] + radius * 0.55}M${at[0]} ${at[1] - radius * 0.55}V${at[1] + radius * 0.55}`}
+                fill='none'
+                strokeWidth={L.mark * 0.8}
+              />
+            </g>
+          );
+        }
+        if (glyph.kind === 'buttonhole') {
+          const half = 7;
+          return (
+            <path
+              key={`action-glyph:${glyph.id}`}
+              d={`M${at[0] - direction[0] * half} ${at[1] - direction[1] * half}L${at[0] + direction[0] * half} ${at[1] + direction[1] * half}`}
+              fill='none'
+              stroke={INK}
+              strokeWidth={L.mark}
+              strokeLinecap='round'
+              pointerEvents='none'
+              data-asm-mark='buttonhole'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+            />
+          );
+        }
+        return (
+          <rect
+            key={`action-glyph:${glyph.id}`}
+            x={at[0] - 9}
+            y={at[1] - 5.5}
+            width={18}
+            height={11}
+            fill={FILL}
+            stroke={INK}
+            strokeWidth={L.mark}
+            pointerEvents='none'
+            data-asm-mark='label'
+            data-asm-piece={glyph.piece}
+          />
+        );
+      })}
       {look !== 'tile' &&
         labels.map(({ m, s }, i) => (
           <text

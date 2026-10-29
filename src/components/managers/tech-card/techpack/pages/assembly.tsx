@@ -15,10 +15,21 @@ import {
 } from 'components/managers/tech-card/components/card-seam-graph';
 import {
   StepPictureSvg,
+  STEP_TILE_RASTER_MM,
   stepPictureOfOp,
+  type PictureActionGlyph,
+  type PictureActionLine,
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import {
+  boxOf,
+  confidentSeam,
+  stepLayout,
+} from 'components/managers/tech-card/components/step-seams/step-picture';
+import type { Pt2 } from 'lib/assembly-skeleton/types';
+import { pieceKeyOf } from 'lib/assembly-skeleton/union';
+import { apply } from 'lib/assembly-skeleton/union/affine';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -32,6 +43,7 @@ import {
   joinSvg,
   shownMetrics,
   silhouetteSvg,
+  type AsmAction,
   type AsmRow,
   type AssemblyModel,
   type SeamMetric,
@@ -106,6 +118,287 @@ type Photo = {
   caption: string;
   annotations: AnnotationForm[];
 };
+
+const picturePieceSignature = (keys: Iterable<string>) => [...new Set(keys)].sort().join('\u0000');
+
+const pictureClusterArea = (picture: StepPicture, keys: readonly string[]) =>
+  keys.reduce((sum, key) => sum + Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0), 0);
+
+/**
+ * Sewn bodies in a laid editor picture. `stepLayout.apart` is the placer telling us which pieces
+ * did not join its main body; confident sewn seams then recover the smaller bodies among them.
+ */
+export function editorPictureClusters(picture: StepPicture): string[][] {
+  const keys = [...picture.layout.T.keys()];
+  const apart = new Set(picture.layout.apart);
+  const main = keys.filter((key) => !apart.has(key));
+  const loose = keys.filter((key) => apart.has(key));
+  const adjacent = new Map(loose.map((key) => [key, new Set<string>()]));
+  const link = (a: string, b: string) => {
+    if (a === b || !adjacent.has(a) || !adjacent.has(b)) return;
+    adjacent.get(a)!.add(b);
+    adjacent.get(b)!.add(a);
+  };
+
+  for (const seam of picture.frameSeams) {
+    if (!confidentSeam(seam)) continue;
+    const sides =
+      seam.kind === 'surface' && seam.surface
+        ? [[seam.surface.host], [seam.surface.part]]
+        : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
+    for (const a of sides[0]) for (const b of sides[1]) link(a, b);
+  }
+
+  const clusters: string[][] = main.length ? [main] : [];
+  const seen = new Set<string>();
+  for (const start of loose) {
+    if (seen.has(start)) continue;
+    const cluster: string[] = [];
+    const queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const key = queue.shift()!;
+      cluster.push(key);
+      for (const next of adjacent.get(key) ?? [])
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+    }
+    clusters.push(cluster);
+  }
+  return clusters.sort((a, b) => pictureClusterArea(picture, b) - pictureClusterArea(picture, a));
+}
+
+function pictureWithClusters(picture: StepPicture, clusters: readonly (readonly string[])[]) {
+  const keep = new Set(clusters.flatMap((cluster) => [...cluster]));
+  const T = new Map([...picture.layout.T].filter(([key]) => keep.has(key)));
+  const points = [...T].flatMap(([key, affine]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(affine, point)),
+  );
+  if (!points.length) return picture;
+  return {
+    ...picture,
+    layoutLeaves: picture.layoutLeaves
+      .map((leaf) => leaf.filter((key) => keep.has(key)))
+      .filter((leaf) => leaf.length > 0),
+    layout: {
+      ...picture.layout,
+      T,
+      input: new Map([...picture.layout.input].filter(([key]) => keep.has(key))),
+      ghosts: picture.layout.ghosts.filter((ghost) => keep.has(ghost.key)),
+      stacked: picture.layout.stacked
+        .map((stack) => stack.filter((key) => keep.has(key)))
+        .filter((stack) => stack.length > 1),
+      onRuns: picture.layout.onRuns.filter((key) => keep.has(key)),
+      apart: picture.layout.apart.filter((key) => keep.has(key)),
+      bbox: boxOf(points),
+    },
+  };
+}
+
+function focusNonJoinPicture(picture: StepPicture, action: AsmAction | undefined): StepPicture {
+  const clusters = editorPictureClusters(picture);
+  // One body, or one body with a single useful companion, is already readable (card 85: 920/1010).
+  if (clusters.length <= 2) return picture;
+  const marks = editorActionMarks(action, picture.geoms);
+  const markedPieces = new Set(
+    [...marks.lines, ...marks.glyphs]
+      .map((mark) => mark.piece)
+      .filter((key) => picture.layout.T.has(key)),
+  );
+  const selected = markedPieces.size
+    ? clusters.filter((cluster) => cluster.some((key) => markedPieces.has(key)))
+    : clusters.slice(0, 1);
+  return pictureWithClusters(picture, selected.length ? selected : clusters.slice(0, 1));
+}
+
+const sceneOperations = (techCard: common_TechCard): SceneOp[] =>
+  (techCard.techCard?.operations ?? []).map((operation) => ({
+    operationNumber: operation.operationNumber,
+    operationType: operation.operationType,
+    work: operation.work,
+    inputKeys: operation.inputKeys ?? [],
+    outputUnitKey: operation.outputUnitKey,
+    outputUnitName: operation.outputUnitName,
+    seamKeys: operation.seamKeys ?? [],
+    fullnessRatio: operation.stitching?.fullnessRatio?.value,
+  }));
+
+/** Editor scenes for print: joins show their tile; later work shows that join's assembled result. */
+export function editorOperationPictures(
+  techCard: common_TechCard,
+  model: AssemblyModel,
+): Map<number, StepPicture> | null {
+  try {
+    const graph = seamGraphOfCard(techCard, model.pieces);
+    const geoms = new Map([...model.pieces].map(([key, piece]) => [key, piece.geom]));
+    const innerLines = new Map(
+      [...model.pieces].map(([key, piece]) => [
+        key,
+        piece.inner.map((line) => line.map(([x, y]) => [x, -y] as Pt2)),
+      ]),
+    );
+    const pieceKeys = new Set([
+      ...geoms.keys(),
+      ...(techCard.techCard?.pieces ?? []).flatMap((piece) =>
+        piece.lineKey ? [piece.lineKey] : [],
+      ),
+    ]);
+    const byKey = seamRowsOfCard(techCard);
+    const names = new Map(
+      (techCard.techCard?.pieces ?? []).flatMap((piece) =>
+        piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
+      ),
+    );
+    const operations = sceneOperations(techCard);
+    const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
+    const rowByNumber = new Map(model.rows.map((row) => [row.n, row]));
+    const pictures = new Map<number, StepPicture>();
+    const assembledByPieces = new Map<string, StepPicture>();
+    const sceneAt = (operation: SceneOp, index: number) =>
+      stepPictureOfOp(operation, graph, geoms, {
+        operations,
+        index,
+        pieceKeys,
+        innerLines,
+        byKey,
+        nameOf: (key) => names.get(key) ?? key,
+      });
+
+    operations.forEach((operation, index) => {
+      const number = operation.operationNumber ?? 0;
+      const row = rowByNumber.get(number);
+      if (!row) return;
+      try {
+        if (joins.has(number)) {
+          const picture = sceneAt(operation, index);
+          if (picture.layout.T.size) pictures.set(number, picture);
+          const layout = stepLayout(picture.leaves, picture.frameSeams, geoms, {
+            explode: 0,
+            rasterMm: STEP_TILE_RASTER_MM,
+          });
+          if (layout.T.size) {
+            const assembled = { ...picture, marks: [], layoutLeaves: picture.leaves, layout };
+            assembledByPieces.set(
+              picturePieceSignature(picture.leaves.flatMap((leaf) => leaf)),
+              assembled,
+            );
+          }
+          return;
+        }
+
+        const targetKeys = (model.targets.get(number) ?? []).map((item) => item.p);
+        if (!targetKeys.length) return;
+        const signature = picturePieceSignature(targetKeys);
+        const assembled = assembledByPieces.get(signature);
+        if (assembled) {
+          const result = { ...assembled, op: operation, marks: [] };
+          pictures.set(number, focusNonJoinPicture(result, row.action));
+          return;
+        }
+
+        const picture = sceneAt(operation, index);
+        const target = new Set(targetKeys);
+        const leaves = picture.leaves
+          .map((leaf) => leaf.filter((key) => target.has(key)))
+          .filter((leaf) => leaf.length > 0);
+        const layoutLeaves = leaves.length ? leaves : [[...target]];
+        const layout = stepLayout(layoutLeaves, picture.innerSeams, geoms, {
+          explode: 0,
+          rasterMm: STEP_TILE_RASTER_MM,
+        });
+        if (layout.T.size) {
+          const result = { ...picture, marks: [], layoutLeaves, layout };
+          pictures.set(number, focusNonJoinPicture(result, row.action));
+        }
+      } catch {
+        // One malformed operation falls back to its legacy picture without taking the card down.
+      }
+    });
+    return pictures;
+  } catch {
+    // A malformed pattern still prints through the legacy drawings.
+    return null;
+  }
+}
+
+const decimal = (value: { value?: string } | undefined, fallback: number) => {
+  const parsed = Number(value?.value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+/** Legacy action grammar, expressed in piece coordinates for the editor picture renderer. */
+export function editorActionMarks(
+  action: AsmAction | undefined,
+  geoms: ReadonlyMap<string, { rs: Pt2[] }>,
+): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
+  if (!action) return { lines: [], glyphs: [] };
+  const lines: PictureActionLine[] = [];
+  const offsetTowardCentre = (piece: string, points: readonly Pt2[], distance: number) => {
+    const geom = geoms.get(piece);
+    if (!geom) return [...points];
+    const b = boxOf(geom.rs);
+    const centre: Pt2 = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+    return points.map((point): Pt2 => {
+      const dx = centre[0] - point[0];
+      const dy = centre[1] - point[1];
+      const length = Math.hypot(dx, dy) || 1;
+      return [point[0] + (dx / length) * distance, point[1] + (dy / length) * distance];
+    });
+  };
+  action.edgeParts.forEach((part, index) => {
+    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
+    if (!points.length) return;
+    if (action.tech === 'topstitch') {
+      lines.push({
+        id: `${action.n}:${index}:topstitch`,
+        piece: part.piece,
+        points: offsetTowardCentre(part.piece, points, decimal(action.raw.topstitch?.widthMm, 1.5)),
+        weight: 'ink',
+        dashed: true,
+        kind: 'topstitch',
+      });
+      return;
+    }
+    if (action.tech === 'pressSide') {
+      const weight = 'ink' as const;
+      lines.push({
+        id: `${action.n}:${index}:press-edge`,
+        piece: part.piece,
+        points,
+        weight,
+        kind: 'press-side',
+      });
+      lines.push({
+        id: `${action.n}:${index}:press-offset`,
+        piece: part.piece,
+        points: offsetTowardCentre(part.piece, points, decimal(action.raw.seamAllowanceMm, 7)),
+        weight,
+        kind: 'press-side',
+      });
+      return;
+    }
+    lines.push({
+      id: `${action.n}:${index}:edge`,
+      piece: part.piece,
+      points,
+      weight: 'heavy',
+      kind: action.tech,
+    });
+  });
+  const glyphs = action.placements.map((placement): PictureActionGlyph => {
+    const radians = (placement.angleDeg * Math.PI) / 180;
+    return {
+      id: placement.id,
+      piece: placement.piece,
+      kind: placement.kind,
+      point: [placement.point[0], -placement.point[1]],
+      direction: [Math.cos(radians), -Math.sin(radians)],
+    };
+  });
+  return { lines, glyphs };
+}
 
 function pictureDimensions(orient: PrintOrient) {
   const d = DIM[orient];
@@ -187,6 +480,9 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
+  const actionMarks = r.editorPic
+    ? editorActionMarks(r.action, r.editorPic.geoms)
+    : { lines: [], glyphs: [] };
   const showKey = asmProtoFlags().key;
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
@@ -200,6 +496,8 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}
+          actionLines={actionMarks.lines}
+          actionGlyphs={actionMarks.glyphs}
           className='asm-editor-picture'
         />
       ) : drawing ? (
@@ -475,64 +773,14 @@ export function AssemblyPage({
     return counts;
   }, [photos]);
   const pictureMode = asmProtoFlags().pic;
-  const editorPictures = useMemo(() => {
-    if (pictureMode !== 'editor' || !model) return null;
-    try {
-      const graph = seamGraphOfCard(techCard, model.pieces);
-      const geoms = new Map([...model.pieces].map(([key, piece]) => [key, piece.geom]));
-      const innerLines = new Map(
-        [...model.pieces].map(([key, piece]) => [
-          key,
-          piece.inner.map((line) => line.map(([x, y]) => [x, -y] as [number, number])),
-        ]),
-      );
-      const pieceKeys = new Set([
-        ...geoms.keys(),
-        ...(techCard.techCard?.pieces ?? []).flatMap((piece) =>
-          piece.lineKey ? [piece.lineKey] : [],
-        ),
-      ]);
-      const byKey = seamRowsOfCard(techCard);
-      const names = new Map(
-        (techCard.techCard?.pieces ?? []).flatMap((piece) =>
-          piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
-        ),
-      );
-      const operations: SceneOp[] = (techCard.techCard?.operations ?? []).map((operation) => ({
-        operationNumber: operation.operationNumber,
-        operationType: operation.operationType,
-        work: operation.work,
-        inputKeys: operation.inputKeys ?? [],
-        outputUnitKey: operation.outputUnitKey,
-        outputUnitName: operation.outputUnitName,
-        seamKeys: operation.seamKeys ?? [],
-        fullnessRatio: operation.stitching?.fullnessRatio?.value,
-      }));
-      const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
-      const pictures = new Map<number, StepPicture>();
-      operations.forEach((operation, index) => {
-        const number = operation.operationNumber ?? 0;
-        if (!joins.has(number)) return;
-        const picture = stepPictureOfOp(operation, graph, geoms, {
-          operations,
-          index,
-          pieceKeys,
-          innerLines,
-          byKey,
-          nameOf: (key) => names.get(key) ?? key,
-        });
-        if (picture.layout.T.size) pictures.set(number, picture);
-      });
-      return pictures;
-    } catch {
-      // A malformed pattern still prints through the legacy drawing, as it did before this flag.
-      return null;
-    }
-  }, [pictureMode, model, techCard]);
+  const editorPictures = useMemo(
+    () => (pictureMode === 'editor' && model ? editorOperationPictures(techCard, model) : null),
+    [pictureMode, model, techCard],
+  );
   const rows = useMemo<Row[]>(
     () =>
       (model?.rows ?? []).map((r) => {
-        const editorPic = r.card ? editorPictures?.get(r.n) : undefined;
+        const editorPic = editorPictures?.get(r.n);
         return {
           ...r,
           editorPic,
@@ -540,7 +788,10 @@ export function AssemblyPage({
             !editorPic && r.card?.items.length
               ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)
               : undefined,
-          sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
+          sil:
+            r.card || editorPic
+              ? null
+              : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
           photoCount: photoCountByOp.get(r.n) ?? 0,
         };
       }),
