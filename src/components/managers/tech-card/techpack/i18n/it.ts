@@ -137,6 +137,7 @@ export const it = {
     turnOut: 'rivoltare sul diritto',
     turnOutKey: 'Rivoltare',
     lengthDifference: 'differenza lunghezza',
+    sidesKey: 'DR / RV',
     sides: 'diritto / rovescio',
   },
   materials: {
@@ -167,6 +168,11 @@ export const it = {
     unassigned: 'non assegnato',
     code: 'codice',
     dxf: 'DXF',
+    noMaterialLine: {
+      one: 'materiale mancante: {count} pezzo ({codes}) — assegnare nella distinta base',
+      many: 'materiale mancante: {count} pezzi ({codes}) — assegnare nella distinta base',
+      other: 'materiale mancante: {count} pezzi ({codes}) — assegnare nella distinta base',
+    },
   },
   colourways: {
     title: 'varianti colore',
@@ -252,10 +258,14 @@ export const it = {
     icon: 'icona',
     profile: 'profilo {name}',
     asOperation: '{note} (come {op})',
-    checkMismatch: 'Controllo: {leftName} {left} / {rightName} {right} · Δ {delta}',
+    deltaMm: '{d} mm',
+    shorterThan: '{a} è più corto di {d} mm rispetto a {b}',
+    partCollar: 'colletto',
+    partNeckline: 'scollatura',
+    partStand: 'piedino collo',
+    partSleeveCap: 'testa manica',
+    partArmhole: 'giro manica',
     piece: 'pezzo',
-    stop: 'FERMA',
-    patternMakerHold: '→ modellista · sospendere {op}',
     resolvedBy: 'risolto da',
     resolvedDate: 'data',
     sewn: 'cucito',
@@ -371,6 +381,7 @@ export const it = {
     tabArtifacts: 'file',
     tabLabels: 'etichette',
     tabSignoff: 'approvazione',
+    bomWhere: 'BOM · {role} · {part}',
   },
   notices: {
     openFindings: {

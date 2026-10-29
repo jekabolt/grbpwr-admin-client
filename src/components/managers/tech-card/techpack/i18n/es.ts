@@ -137,6 +137,7 @@ export const es = {
     turnOut: 'volver al derecho',
     turnOutKey: 'Volver',
     lengthDifference: 'diferencia de largo',
+    sidesKey: 'DER / REV',
     sides: 'derecho / revés',
   },
   materials: {
@@ -167,6 +168,11 @@ export const es = {
     unassigned: 'sin asignar',
     code: 'código',
     dxf: 'DXF',
+    noMaterialLine: {
+      one: 'sin material: {count} pieza ({codes}) — asignar en BOM',
+      many: 'sin material: {count} piezas ({codes}) — asignar en BOM',
+      other: 'sin material: {count} piezas ({codes}) — asignar en BOM',
+    },
   },
   colourways: {
     title: 'variantes de color',
@@ -252,10 +258,14 @@ export const es = {
     icon: 'icono',
     profile: 'perfil {name}',
     asOperation: '{note} (como {op})',
-    checkMismatch: 'Control: {leftName} {left} / {rightName} {right} · Δ {delta}',
+    deltaMm: '{d} mm',
+    shorterThan: '{a} es {d} mm más corto que {b}',
+    partCollar: 'cuello',
+    partNeckline: 'escote',
+    partStand: 'pie de cuello',
+    partSleeveCap: 'copa de manga',
+    partArmhole: 'sisa',
     piece: 'pieza',
-    stop: 'ALTO',
-    patternMakerHold: '→ patronista · retener {op}',
     resolvedBy: 'resuelto por',
     resolvedDate: 'fecha',
     sewn: 'cosido',
@@ -371,6 +381,7 @@ export const es = {
     tabArtifacts: 'archivos',
     tabLabels: 'etiquetas',
     tabSignoff: 'aprobación',
+    bomWhere: 'BOM · {role} · {part}',
   },
   notices: {
     openFindings: {

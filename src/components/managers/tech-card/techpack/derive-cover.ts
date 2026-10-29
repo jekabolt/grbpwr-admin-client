@@ -131,7 +131,7 @@ export function deriveCover(
       name: clean(ref.item.name),
       colour: materialColour(ref, primary).name,
       pieces: pieces.filter(
-        (piece, index) => materialForPiece(refs, primary, piece, index)?.key === ref.key,
+        (piece, index) => materialForPiece(refs, primary, piece, index, techCard)?.key === ref.key,
       ).length,
     })),
     buttons: buttonFacts,

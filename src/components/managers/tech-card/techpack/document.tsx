@@ -166,7 +166,7 @@ export function TechpackDocument({
   const seamDeltas = useMemo<QcSeamDelta[] | undefined>(() => {
     if (!model) return undefined;
     return Array.from(model.cards.values())
-      .filter((card) => card.stop)
+      .filter((card) => card.metrics.some((metric) => metric.bad))
       .map((card) => ({ op: card.n, delta: card.metrics.find((m) => m.bad)?.delta ?? 0 }))
       .sort((a, b) => a.op - b.op);
   }, [model]);

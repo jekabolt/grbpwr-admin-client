@@ -131,7 +131,9 @@ export type SvgMarkup = { viewBox: string; body: string };
 export type SeamMetric = {
   letter: string;
   left: number;
+  leftName?: string;
   right?: number;
+  rightName?: string;
   delta?: number;
   bad: boolean;
   gap?: Gap;
@@ -228,7 +230,6 @@ export type JoinCard = {
   metrics: SeamMetric[];
   gaps: Gap[];
   blocks: { items: Item[]; name: string; op: number }[];
-  stop?: string;
   /** Two layers of one shape sewn round and turned to the face. */
   turn: boolean;
   /** A single piece sewn onto itself (a stored closure). */
@@ -1455,6 +1456,46 @@ function isCollarGroup(pieces: ReadonlyMap<string, AsmPiece>, items: readonly It
   });
 }
 
+function seamSideName(
+  parts: readonly SeamPart[],
+  partner: readonly SeamPart[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+  terms: string,
+  t: PdfT,
+): string {
+  const textOf = (side: readonly SeamPart[]) =>
+    side
+      .map((part) => {
+        const piece = pieces.get(part.piece);
+        return `${piece?.code ?? ''} ${piece?.name ?? ''}`;
+      })
+      .join(' ')
+      .toLocaleLowerCase();
+  const side = textOf(parts);
+  const other = textOf(partner);
+  const collar = /(^|[\s_-])(clr|collar)([\s_-]|$)|воротник/.test(side);
+  const otherCollar = /(^|[\s_-])(clr|collar)([\s_-]|$)|воротник/.test(other);
+  const stand = /(^|[\s_-])(stand|clr[_-]?st)([\s_-]|$)|стойк/.test(side);
+  const otherStand = /(^|[\s_-])(stand|clr[_-]?st)([\s_-]|$)|стойк/.test(other);
+  const sleeve = /(^|[\s_-])(slv|sleeve)([\s_-]|$)|рукав/.test(side);
+  const otherSleeve = /(^|[\s_-])(slv|sleeve)([\s_-]|$)|рукав/.test(other);
+  const armholeOperation = /armhole|sleeve|пройм|окат|рукав/.test(terms);
+
+  if (stand) return t('assembly.partStand');
+  if (collar) return t('assembly.partCollar');
+  if (otherCollar || otherStand) return t('assembly.partNeckline');
+  if (armholeOperation && sleeve && !otherSleeve) return t('assembly.partSleeveCap');
+  if (armholeOperation && otherSleeve && !sleeve) return t('assembly.partArmhole');
+
+  return (
+    [...new Set(parts.map((part) => pieces.get(part.piece)?.code).filter(Boolean))].join(' + ') ||
+    [...new Set(parts.map((part) => own(pieces.get(part.piece)?.name)).filter(Boolean))].join(
+      ' + ',
+    ) ||
+    t('assembly.piece')
+  );
+}
+
 function placeAtInnerTarget(
   pieces: ReadonlyMap<string, AsmPiece>,
   moving: Item[],
@@ -1703,33 +1744,36 @@ function buildCards(
       const right = s.b.reduce((t, p) => t + p.lenMm, 0);
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
+      const terms = opTerms(op);
+      const leftName = seamSideName(s.a, s.b, pieces, terms, t);
+      const rightName = seamSideName(s.b, s.a, pieces, terms, t);
+      const shorterLeft = left <= right;
       const gap = bad
-        ? assemblyGap(sink, 'asm_length_mismatch', t('gaps.length'), op.n, 'seam length', s.key)
+        ? assemblyGap(
+            sink,
+            'asm_length_mismatch',
+            t('assembly.shorterThan', {
+              a: shorterLeft ? leftName : rightName,
+              b: shorterLeft ? rightName : leftName,
+              d: Math.round(Math.abs(delta)),
+            }),
+            op.n,
+            'seam length',
+            s.key,
+          )
         : undefined;
       if (gap) gaps.push(gap);
       return {
         letter: String(i + 1),
         left,
+        leftName,
         right,
+        rightName,
         delta,
         bad,
         gap,
       };
     });
-    const badAt = metrics.findIndex((m) => m.bad);
-    const names = (parts: SeamPart[]) =>
-      [...new Set(parts.map((p) => pieces.get(p.piece)?.code).filter(Boolean))].join(' + ') ||
-      t('assembly.piece');
-    const stop =
-      badAt >= 0
-        ? t('assembly.checkMismatch', {
-            leftName: names(seams[badAt].a),
-            left: metrics[badAt].left.toFixed(1),
-            rightName: names(seams[badAt].b),
-            right: (metrics[badAt].right ?? 0).toFixed(1),
-            delta: fmtDelta(metrics[badAt].delta ?? 0),
-          })
-        : undefined;
     const pieceIns = op.ins.filter((x) => x.kind === 'piece');
     const pieceNumbers = new Map(pieceIns.map((input, index) => [input.key, index + 1]));
     const baseInput = inputs.reduce(
@@ -1757,7 +1801,6 @@ function buildCards(
       metrics,
       gaps,
       blocks,
-      stop,
       turn:
         op.ins.length === 2 &&
         pieceIns.length === 2 &&

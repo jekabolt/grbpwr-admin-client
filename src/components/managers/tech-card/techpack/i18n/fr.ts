@@ -137,6 +137,7 @@ export const fr = {
     turnOut: "retourner sur l'endroit",
     turnOutKey: 'Retourner',
     lengthDifference: 'écart de longueur',
+    sidesKey: 'END / ENV',
     sides: 'endroit / envers',
   },
   materials: {
@@ -167,6 +168,11 @@ export const fr = {
     unassigned: 'non affecté',
     code: 'code',
     dxf: 'DXF',
+    noMaterialLine: {
+      one: 'matière absente : {count} pièce ({codes}) — affecter dans la nomenclature',
+      many: 'matière absente : {count} pièces ({codes}) — affecter dans la nomenclature',
+      other: 'matière absente : {count} pièces ({codes}) — affecter dans la nomenclature',
+    },
   },
   colourways: {
     title: 'coloris',
@@ -252,10 +258,14 @@ export const fr = {
     icon: 'pictogramme',
     profile: 'profil {name}',
     asOperation: '{note} (comme {op})',
-    checkMismatch: 'Contrôle : {leftName} {left} / {rightName} {right} · Δ {delta}',
+    deltaMm: '{d} mm',
+    shorterThan: '{a} est plus court de {d} mm que {b}',
+    partCollar: 'col',
+    partNeckline: 'encolure',
+    partStand: 'pied de col',
+    partSleeveCap: 'tête de manche',
+    partArmhole: 'emmanchure',
     piece: 'pièce',
-    stop: 'ARRÊT',
-    patternMakerHold: '→ modéliste · attente {op}',
     resolvedBy: 'résolu par',
     resolvedDate: 'date',
     sewn: 'cousu',
@@ -371,6 +381,7 @@ export const fr = {
     tabArtifacts: 'livrables',
     tabLabels: 'étiquettes',
     tabSignoff: 'validation',
+    bomWhere: 'BOM · {role} · {part}',
   },
   notices: {
     openFindings: {

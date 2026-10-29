@@ -2,8 +2,8 @@
 // with its own picture: a join (sew / overlock) draws its pieces laid along the stored seam edges
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
-// so a row (with its STOP box) never splits.
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+// so an operation row never splits.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, HeaderNote, SectionHeader } from 'ui';
 
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
@@ -16,10 +16,9 @@ import {
   type AnnotationForm,
 } from 'components/managers/tech-card/components/schema';
 
-import { KEYS_CSS, KeyArt, Line, StopBox, Svg, TURN_KEY } from '../assembly-keys';
+import { KEYS_CSS, KeyArt, Line, Svg, TURN_KEY } from '../assembly-keys';
 import { asmProtoFlags } from '../asm-proto-flags';
 import {
-  fmtDelta,
   joinSvg,
   shownMetrics,
   silhouetteSvg,
@@ -55,8 +54,6 @@ const ASM_CSS = String.raw`
 .asm-params, .asm-machine-params { margin-top: 2px; color: var(--color-labelColor); font-size: 10px; line-height: 1.25; }
 .asm-marker { display: inline-block; margin-left: 5px; border: 1px solid var(--color-textColor); padding: 0 3px; color: var(--color-textColor); font-size: 9px; line-height: 1.35; text-transform: lowercase; vertical-align: 1px; }
 .asm-turn { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; }
-.asm-stop td { padding-top: 0 !important; }
-.asm-stop-box { padding: 4px 8px !important; font-size: 12px; line-height: 1.3; }
 .asm-measure { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
 .asm-measure .asm-col { overflow: visible; }
 .asm-photos { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
@@ -130,25 +127,39 @@ function Head() {
 }
 
 /** Δ only from 0.5 mm; a broken seam prints both lengths. */
-function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
+export function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
+  const { t } = useT();
   const shown = shownMetrics(metrics);
   if (!shown.length) return null;
   return (
     <div className='asm-delta'>
-      {shown.map((m) => (
-        <Fragment key={m.letter}>
-          <span className={m.bad ? 'asm-delta-line asm-delta-bad' : 'asm-delta-line'}>
-            <i className='asm-letter'>{m.letter}</i>
-            {fmtDelta(m.delta ?? 0)}
-          </span>
-          {m.bad && (
-            <>
-              <span className='asm-delta-bad'>{m.left.toFixed(1)}</span>
-              <span className='asm-delta-bad'>↔ {m.right?.toFixed(1)}</span>
-            </>
-          )}
-        </Fragment>
-      ))}
+      {shown.map((m) => {
+        const right = m.right ?? 0;
+        const shorterLeft = m.left <= right;
+        const shorterName = (shorterLeft ? m.leftName : m.rightName) ?? t('assembly.piece');
+        const longerName = (shorterLeft ? m.rightName : m.leftName) ?? t('assembly.piece');
+        const shorter = shorterLeft ? m.left : right;
+        const longer = shorterLeft ? right : m.left;
+        const rawDelta = m.delta ?? 0;
+        const roundedDelta = Math.round(Math.abs(rawDelta));
+        const delta = m.bad ? -roundedDelta : rawDelta < 0 ? -roundedDelta : roundedDelta;
+        const signed = delta < 0 ? `−${Math.abs(delta)}` : `+${delta}`;
+        return (
+          <div className={`asm-delta-metric${m.bad ? ' asm-delta-bad' : ''}`} key={m.letter}>
+            <span className='asm-delta-line'>{t('assembly.deltaMm', { d: signed })}</span>
+            {m.bad && (
+              <>
+                <span className='asm-delta-line'>
+                  {shorterName} {Math.round(shorter)}
+                </span>
+                <span className='asm-delta-line'>
+                  {longerName} {Math.round(longer)}
+                </span>
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -234,19 +245,11 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   );
 }
 
-/** A block = what stays together on one page: the op row and its STOP box. */
+/** A block = one operation row, kept whole during pagination. */
 function BlockBody({ r, orient }: { r: Row; orient: PrintOrient }) {
   return (
     <tbody data-block={r.n}>
       <OpRow r={r} orient={orient} />
-      {r.card?.stop && (
-        <tr className='asm-stop'>
-          <td />
-          <td colSpan={3} data-align='left'>
-            <StopBox text={r.card.stop} n={r.n} className='asm-stop-box' />
-          </td>
-        </tr>
-      )}
     </tbody>
   );
 }
@@ -359,6 +362,7 @@ function GapsSheet({
   docline,
   count,
   subjectOf,
+  techCard,
   cardId,
 }: {
   page: GapPage;
@@ -366,6 +370,7 @@ function GapsSheet({
   docline: string;
   count: string;
   subjectOf: (gap: Gap) => string;
+  techCard: common_TechCard;
   /** The card the lines link back to; a card not saved yet prints plain lines. */
   cardId?: number;
 }) {
@@ -397,7 +402,7 @@ function GapsSheet({
                   rel='noreferrer'
                 >
                   <span className='asm-gap-text'>{text}</span>
-                  <span className='asm-gap-to'>{gapWhere(gap.target, t)}</span>
+                  <span className='asm-gap-to'>{gapWhere(gap.target, t, techCard)}</span>
                 </a>
               );
             })}
@@ -592,6 +597,7 @@ export function AssemblyPage({
           docline={docline}
           count={`${pages.length + photoSheets.length + index + 1} / ${total}`}
           subjectOf={subjectOf}
+          techCard={techCard}
           cardId={techCard.id}
         />
       ))}

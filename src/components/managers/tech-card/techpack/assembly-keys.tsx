@@ -1,12 +1,8 @@
-// Shared vocabulary of the Assembly table and the Step-by-step cards: one key drawing per
-// technique, one printed instruction line and the STOP box, so both sections read the
-// same. Colours are classes on the theme tokens (no literal colours in the drawings).
-import { CalloutBox } from 'ui';
-
+// Shared vocabulary of the Assembly table and the Step-by-step cards: one key drawing and one
+// printed instruction line per technique. Colours are classes on the theme tokens.
 import { OpIconArt, type OpIcon } from 'components/managers/tech-card/op-icons';
 
 import type { Seg, SvgMarkup } from './derive-assembly';
-import { useT } from './i18n';
 
 /** The turn-out key printed under a join that is bagged out. */
 export const TURN_KEY: OpIcon = { key: 'turn_out' };
@@ -85,29 +81,7 @@ export const KEYS_CSS = String.raw`
 .asm-joinpic { position: relative; width: fit-content; }
 .asm-badge { position: absolute; left: 0; top: 0; padding: 1px; background: var(--color-bgColor); }
 .asm-delta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 2px; white-space: nowrap; }
+.asm-delta-metric { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .asm-delta-line { display: inline-flex; align-items: center; gap: 4px; }
 .asm-delta-bad { color: var(--color-error); font-weight: 700; }
-.asm-letter { display: inline-flex; width: 3.4mm; height: 3.4mm; align-items: center; justify-content: center; flex: none; border-radius: 50%; background: var(--color-textColor); color: var(--color-bgColor); font-size: 10px; font-style: normal; font-weight: 700; line-height: 1; }
-.asm-stop-in { display: flex; flex-direction: column; gap: 2px; }
-.asm-slot { display: flex; align-items: flex-end; gap: 6px; margin-top: 4px; }
-.asm-slot i { display: inline-block; flex: 1 1 auto; min-width: 20mm; height: 0; border-bottom: 1px solid var(--color-textColor); }
-.asm-slot i.asm-slot-short { flex: 0 0 22mm; min-width: 22mm; }
 `;
-
-/** The one blocking check: what, who unblocks it, where to sign it off. */
-export function StopBox({ text, n, className }: { text: string; n: number; className?: string }) {
-  const { t } = useT();
-  return (
-    <CalloutBox tone='error' className={className}>
-      <div className='asm-stop-in'>
-        <b>{t('assembly.stop')}</b>
-        <span>{text}</span>
-        <span>{t('assembly.patternMakerHold', { op: n })}</span>
-        <span className='asm-slot'>
-          {t('assembly.resolvedBy')} <i /> {t('assembly.resolvedDate')}{' '}
-          <i className='asm-slot-short' />
-        </span>
-      </div>
-    </CalloutBox>
-  );
-}
