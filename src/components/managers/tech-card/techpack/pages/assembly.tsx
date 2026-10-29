@@ -9,6 +9,16 @@ import { DataTable, HeaderNote, SectionHeader } from 'ui';
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
+import {
+  seamGraphOfCard,
+  seamRowsOfCard,
+} from 'components/managers/tech-card/components/card-seam-graph';
+import {
+  StepPictureSvg,
+  stepPictureOfOp,
+  type SceneOp,
+  type StepPicture,
+} from 'components/managers/tech-card/components/step-seams/step-picture-view';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -82,7 +92,12 @@ const CELL_PAD_X = 12;
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
 
-type Row = AsmRow & { pic?: SvgMarkup; sil?: SvgMarkup | null; photoCount: number };
+type Row = AsmRow & {
+  pic?: SvgMarkup;
+  editorPic?: StepPicture;
+  sil?: SvgMarkup | null;
+  photoCount: number;
+};
 
 type Photo = {
   op: number;
@@ -175,14 +190,26 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const showKey = asmProtoFlags().key;
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-      {drawing && (
+      {r.editorPic ? (
+        <StepPictureSvg
+          w={picture.join[0]}
+          h={picture.join[1]}
+          pad={4}
+          look='print'
+          layout={r.editorPic.layout}
+          geoms={r.editorPic.geoms}
+          innerLines={r.editorPic.innerLines}
+          marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}
+          className='asm-editor-picture'
+        />
+      ) : drawing ? (
         <Svg
           m={drawing}
           w={r.pic ? picture.join[0] : picture.silhouette[0]}
           h={r.pic ? picture.join[1] : picture.silhouette[1]}
           label={`${r.n} ${r.words.verb}`}
         />
-      )}
+      ) : null}
       {showKey && <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} className='asm-picture-key' />}
     </div>
   );
@@ -447,17 +474,77 @@ export function AssemblyPage({
     for (const photo of photos) counts.set(photo.op, (counts.get(photo.op) ?? 0) + 1);
     return counts;
   }, [photos]);
+  const pictureMode = asmProtoFlags().pic;
+  const editorPictures = useMemo(() => {
+    if (pictureMode !== 'editor' || !model) return null;
+    try {
+      const graph = seamGraphOfCard(techCard, model.pieces);
+      const geoms = new Map([...model.pieces].map(([key, piece]) => [key, piece.geom]));
+      const innerLines = new Map(
+        [...model.pieces].map(([key, piece]) => [
+          key,
+          piece.inner.map((line) => line.map(([x, y]) => [x, -y] as [number, number])),
+        ]),
+      );
+      const pieceKeys = new Set([
+        ...geoms.keys(),
+        ...(techCard.techCard?.pieces ?? []).flatMap((piece) =>
+          piece.lineKey ? [piece.lineKey] : [],
+        ),
+      ]);
+      const byKey = seamRowsOfCard(techCard);
+      const names = new Map(
+        (techCard.techCard?.pieces ?? []).flatMap((piece) =>
+          piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
+        ),
+      );
+      const operations: SceneOp[] = (techCard.techCard?.operations ?? []).map((operation) => ({
+        operationNumber: operation.operationNumber,
+        operationType: operation.operationType,
+        work: operation.work,
+        inputKeys: operation.inputKeys ?? [],
+        outputUnitKey: operation.outputUnitKey,
+        outputUnitName: operation.outputUnitName,
+        seamKeys: operation.seamKeys ?? [],
+        fullnessRatio: operation.stitching?.fullnessRatio?.value,
+      }));
+      const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
+      const pictures = new Map<number, StepPicture>();
+      operations.forEach((operation, index) => {
+        const number = operation.operationNumber ?? 0;
+        if (!joins.has(number)) return;
+        const picture = stepPictureOfOp(operation, graph, geoms, {
+          operations,
+          index,
+          pieceKeys,
+          innerLines,
+          byKey,
+          nameOf: (key) => names.get(key) ?? key,
+        });
+        if (picture.layout.T.size) pictures.set(number, picture);
+      });
+      return pictures;
+    } catch {
+      // A malformed pattern still prints through the legacy drawing, as it did before this flag.
+      return null;
+    }
+  }, [pictureMode, model, techCard]);
   const rows = useMemo<Row[]>(
     () =>
-      (model?.rows ?? []).map((r) => ({
-        ...r,
-        pic: r.card?.items.length
-          ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)
-          : undefined,
-        sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
-        photoCount: photoCountByOp.get(r.n) ?? 0,
-      })),
-    [model, photoCountByOp, picture.join, picture.silhouette],
+      (model?.rows ?? []).map((r) => {
+        const editorPic = r.card ? editorPictures?.get(r.n) : undefined;
+        return {
+          ...r,
+          editorPic,
+          pic:
+            !editorPic && r.card?.items.length
+              ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)
+              : undefined,
+          sil: r.card ? null : silhouetteSvg(model!, r.target, picture.silhouette, r.action),
+          photoCount: photoCountByOp.get(r.n) ?? 0,
+        };
+      }),
+    [model, editorPictures, photoCountByOp, picture.join, picture.silhouette],
   );
   const [laid, setLaid] = useState<{ rows: Row[]; cols: Col[] } | null>(null);
   const cols = laid?.rows === rows ? laid.cols : null;

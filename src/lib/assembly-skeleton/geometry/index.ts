@@ -9,7 +9,13 @@
 // A4 (composite second pass over lane B's units) plugs in through runsOf / scoreRuns.
 
 import { assignSeams } from '../assignment';
-import type { SeamAssignmentInput, SeamDecisionsInput, SeamGraph, SkeletonFacts } from '../types';
+import type {
+  PieceGeom,
+  SeamAssignmentInput,
+  SeamDecisionsInput,
+  SeamGraph,
+  SkeletonFacts,
+} from '../types';
 import { ALL_RULES, candidatePool, greedyAssign, type MatchRules } from './match';
 import { segmentPiece } from './segment';
 import { twins } from './twins';
@@ -24,8 +30,14 @@ export function buildSeamGraph(
   rules: MatchRules = ALL_RULES,
   decisions?: SeamDecisionsInput,
   assign?: SeamAssignmentInput,
+  segmented?: readonly PieceGeom[],
 ): SeamGraph {
-  const pool = candidatePool(twins(facts.pieces.map(segmentPiece)), facts, rules, decisions);
+  const pool = candidatePool(
+    twins(segmented ?? facts.pieces.map(segmentPiece)),
+    facts,
+    rules,
+    decisions,
+  );
   if (assign?.mode === 'global') return assignSeams(pool, assign);
   const graph = greedyAssign(pool);
   if (assign?.mode === 'shadow') {

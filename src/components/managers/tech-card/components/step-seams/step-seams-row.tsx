@@ -13,11 +13,14 @@ import { rowFromHand } from '../assembly-seams/seam-actions';
 import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
-import { focusPieces, seamOfSides } from './step-picture';
+import { seamOfSides } from './step-picture';
 import { useAttachStepSeam } from './step-seams-context';
-import { hasMultipleStepPieces, pieceOfTarget, type TargetId } from './step-seams-model';
+import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
+  focusedStepLeaves,
   frameSeamsOf,
+  STEP_TILE_EXPLODE,
+  STEP_TILE_RASTER_MM,
   StepPictureSvg,
   useStepLayout,
   useStepScene,
@@ -227,13 +230,17 @@ export function SeamTile({
 }) {
   const ids = marks.map((m) => m.id).join(',');
   // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
-  const leavesRaw = useMemo(() => {
-    const own = new Set(ids.split(',').filter(Boolean).map(pieceOfTarget));
-    return scene.leaves
-      .map((l) => focusPieces(l, own, scene.innerSeams))
-      .filter((l) => l.length > 0);
-  }, [scene.leaves, scene.innerSeams, ids]);
-  const layout = useStepLayout(leavesRaw, seams, scene.geoms, 0.12, 4);
+  const leavesRaw = useMemo(
+    () => focusedStepLeaves(scene.leaves, ids.split(',').filter(Boolean), scene.innerSeams),
+    [scene.leaves, scene.innerSeams, ids],
+  );
+  const layout = useStepLayout(
+    leavesRaw,
+    seams,
+    scene.geoms,
+    STEP_TILE_EXPLODE,
+    STEP_TILE_RASTER_MM,
+  );
   return (
     <span
       role={onOpen ? 'button' : undefined}

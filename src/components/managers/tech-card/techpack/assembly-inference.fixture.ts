@@ -3,6 +3,7 @@ import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { toWire, type EdgeAnchor, type StoredSeam } from 'lib/seams';
 
 import card83 from './assembly-card83.fixture.json';
+import card83Seams from './assembly-card83-seams.fixture.json';
 import type { AsmPiece, AssemblyInput } from './derive-assembly';
 
 type CardSeam = NonNullable<common_TechCard['seams']>[number];
@@ -130,6 +131,88 @@ export function card83RealFixture(): AssemblyInput {
     techCard: raw.techCard,
     pieces: new Map(pieces.map((piece) => [piece.key, piece])),
     grainDeg: new Map(raw.grainDeg),
+  };
+}
+
+type RawCard83Anchor = {
+  pieceLineKey: string;
+  samples: { u: number; v: number }[];
+  perimShare: number;
+  lenMm: number;
+  notches: number;
+  turnDeg: number;
+  rangeFrom: number;
+  rangeTo: number;
+  edgeHint: string;
+  contourSig: string;
+};
+
+type RawCard83Seam = {
+  seamKey: string;
+  status: StoredSeam['status'];
+  kind: StoredSeam['kind'];
+  direction: StoredSeam['direction'];
+  source: StoredSeam['source'];
+  sideA: RawCard83Anchor[];
+  sideB: RawCard83Anchor[];
+  anchoredSize: string;
+  note: string;
+};
+
+const card83Anchor = (raw: RawCard83Anchor): EdgeAnchor => ({
+  piece: raw.pieceLineKey,
+  samples: raw.samples.map(({ u, v }) => [u, v]),
+  perimShare: raw.perimShare,
+  lenMm: raw.lenMm,
+  notches: raw.notches,
+  turnDeg: raw.turnDeg,
+  range: raw.rangeFrom === 0 && raw.rangeTo === 0 ? [0, 1] : [raw.rangeFrom, raw.rangeTo],
+  edgeHint: raw.edgeHint,
+  contourSig: raw.contourSig,
+});
+
+/** Card 83 geometry overlaid with prod card 16's stored seams and operation links. */
+export function card83StoredSeamsFixture(): AssemblyInput {
+  const base = card83RealFixture();
+  const overlay = card83Seams as unknown as {
+    seams: RawCard83Seam[];
+    operationSeams: { op: number; ord: number; seamKey: string }[];
+  };
+  const seamKeys = new Map<number, string[]>();
+  for (const link of [...overlay.operationSeams].sort((a, b) => a.ord - b.ord)) {
+    const keys = seamKeys.get(link.op) ?? [];
+    keys.push(link.seamKey);
+    seamKeys.set(link.op, keys);
+  }
+  const ins = base.techCard.techCard;
+  return {
+    ...base,
+    techCard: {
+      ...base.techCard,
+      techCard: ins
+        ? {
+            ...ins,
+            operations: (ins.operations ?? []).map((operation) => ({
+              ...operation,
+              seamKeys: seamKeys.get(operation.operationNumber ?? 0) ?? operation.seamKeys ?? [],
+            })),
+          }
+        : ins,
+      seams: overlay.seams.map(
+        (row) =>
+          toWire({
+            seamKey: row.seamKey,
+            status: row.status,
+            kind: row.kind,
+            direction: row.direction,
+            source: row.source,
+            sideA: row.sideA.map(card83Anchor),
+            sideB: row.sideB.map(card83Anchor),
+            anchoredSize: row.anchoredSize,
+            note: row.note,
+          }) as CardSeam,
+      ),
+    },
   };
 }
 

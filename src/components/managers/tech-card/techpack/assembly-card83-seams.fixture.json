@@ -1,0 +1,1119 @@
+{
+  "seams": [
+    {
+      "fp": "d504be0cb2f6f0d0059efb5d94730c8fccb3641447a5a3ec59beaabc5f36abd4",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 69.9,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.026,
+              "v": 0.82
+            },
+            {
+              "u": 0.029,
+              "v": 0.701
+            },
+            {
+              "u": 0.032,
+              "v": 0.582
+            },
+            {
+              "u": 0.035,
+              "v": 0.463
+            },
+            {
+              "u": 0.038,
+              "v": 0.344
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631MR65TBJ9Z79497KF#3",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.0605,
+          "pieceLineKey": "01M2R89631MR65TBJ9Z79497KF"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 69.9,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.026,
+              "v": 0.82
+            },
+            {
+              "u": 0.029,
+              "v": 0.701
+            },
+            {
+              "u": 0.032,
+              "v": 0.582
+            },
+            {
+              "u": 0.035,
+              "v": 0.463
+            },
+            {
+              "u": 0.038,
+              "v": 0.344
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R8963149J30B6Z1JJPJX6T#3",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.0605,
+          "pieceLineKey": "01M2R8963149J30B6Z1JJPJX6T"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M5JFWYKRYE31DDGSWG35TKHC",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "8485737b72215b5f925d7db1242a94b42762f51055493cdafa41cfa834853704",
+      "kind": "edge",
+      "note": "its back panel",
+      "sideA": [
+        {
+          "lenMm": 413.4,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 0.001,
+              "v": 0.597
+            },
+            {
+              "u": 0.009,
+              "v": 0.448
+            },
+            {
+              "u": 0.012,
+              "v": 0.298
+            },
+            {
+              "u": 0.006,
+              "v": 0.149
+            },
+            {
+              "u": 0,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -13.5,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#5",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.1652,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 413.4,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0
+            },
+            {
+              "u": 0.994,
+              "v": 0.149
+            },
+            {
+              "u": 0.988,
+              "v": 0.298
+            },
+            {
+              "u": 0.991,
+              "v": 0.448
+            },
+            {
+              "u": 0.999,
+              "v": 0.597
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -13.5,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#7",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.1652,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        }
+      ],
+      "source": "graph",
+      "status": "rejected",
+      "sizeId": null,
+      "seamKey": "01M5JG24RZ5YBKMRA548TQB0HC",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "d504be0cb2f6f0d0059efb5d94730c8fccb3641447a5a3ec59beaabc5f36abd4",
+      "kind": "closure",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 429.6,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.974,
+              "v": 0.82
+            },
+            {
+              "u": 0.738,
+              "v": 0.938
+            },
+            {
+              "u": 0.5,
+              "v": 1
+            },
+            {
+              "u": 0.262,
+              "v": 0.938
+            },
+            {
+              "u": 0.026,
+              "v": 0.82
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 38.6,
+          "edgeHint": "01M2R8963149J30B6Z1JJPJX6T#2",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.372,
+          "pieceLineKey": "01M2R8963149J30B6Z1JJPJX6T"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 429.6,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.974,
+              "v": 0.82
+            },
+            {
+              "u": 0.738,
+              "v": 0.938
+            },
+            {
+              "u": 0.5,
+              "v": 1
+            },
+            {
+              "u": 0.262,
+              "v": 0.938
+            },
+            {
+              "u": 0.026,
+              "v": 0.82
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 38.6,
+          "edgeHint": "01M2R89631MR65TBJ9Z79497KF#2",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.372,
+          "pieceLineKey": "01M2R89631MR65TBJ9Z79497KF"
+        }
+      ],
+      "source": "graph",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M5JG2NA2A4KXBZ1NZ6375EC8",
+      "sizeKey": 0,
+      "direction": "same",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "8485737b72215b5f925d7db1242a94b42762f51055493cdafa41cfa834853704",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 325,
+          "notches": 4,
+          "samples": [
+            {
+              "u": 0.1,
+              "v": 0
+            },
+            {
+              "u": 0.296,
+              "v": 0
+            },
+            {
+              "u": 0.492,
+              "v": 0
+            },
+            {
+              "u": 0.688,
+              "v": 0
+            },
+            {
+              "u": 0.884,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631QE0T84QN1PGE09HJ#3",
+          "rangeFrom": 0,
+          "contourSig": "8e79e91afb5f819c",
+          "perimShare": 0.1993,
+          "pieceLineKey": "01M2R89631QE0T84QN1PGE09HJ"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 272.5,
+          "notches": 3,
+          "samples": [
+            {
+              "u": 1,
+              "v": 1
+            },
+            {
+              "u": 0.75,
+              "v": 1
+            },
+            {
+              "u": 0.5,
+              "v": 1
+            },
+            {
+              "u": 0.25,
+              "v": 1
+            },
+            {
+              "u": 0,
+              "v": 1
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R8963133XT9K2BKXBGB4F2#0",
+          "rangeFrom": 0,
+          "contourSig": "4141edff797b399d",
+          "perimShare": 0.3303,
+          "pieceLineKey": "01M2R8963133XT9K2BKXBGB4F2"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M5JG4CFP1A904P6V4PZC49MV",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "d504be0cb2f6f0d0059efb5d94730c8fccb3641447a5a3ec59beaabc5f36abd4",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 325,
+          "notches": 4,
+          "samples": [
+            {
+              "u": 0.116,
+              "v": 0
+            },
+            {
+              "u": 0.312,
+              "v": 0
+            },
+            {
+              "u": 0.508,
+              "v": 0
+            },
+            {
+              "u": 0.704,
+              "v": 0
+            },
+            {
+              "u": 0.9,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631S6RH9PFZN7RVEA46#2",
+          "rangeFrom": 0,
+          "contourSig": "a8ad9625ca307b8b",
+          "perimShare": 0.1993,
+          "pieceLineKey": "01M2R89631S6RH9PFZN7RVEA46"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 286.5,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 1,
+              "v": 1
+            },
+            {
+              "u": 0.75,
+              "v": 1
+            },
+            {
+              "u": 0.5,
+              "v": 1
+            },
+            {
+              "u": 0.25,
+              "v": 1
+            },
+            {
+              "u": 0,
+              "v": 1
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631VXB2TDJDM64Y6ENA#0",
+          "rangeFrom": 0,
+          "contourSig": "011fe79079acf956",
+          "perimShare": 0.3252,
+          "pieceLineKey": "01M2R89631VXB2TDJDM64Y6ENA"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M5JG4VAPPD5Z1W5JAXMV2A38",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "d504be0cb2f6f0d0059efb5d94730c8fccb3641447a5a3ec59beaabc5f36abd4",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 49.1,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0
+            },
+            {
+              "u": 1,
+              "v": 0.084
+            },
+            {
+              "u": 1,
+              "v": 0.167
+            },
+            {
+              "u": 1,
+              "v": 0.251
+            },
+            {
+              "u": 1,
+              "v": 0.335
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631MR65TBJ9Z79497KF#7",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.0426,
+          "pieceLineKey": "01M2R89631MR65TBJ9Z79497KF"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 49.1,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0
+            },
+            {
+              "u": 1,
+              "v": 0.084
+            },
+            {
+              "u": 1,
+              "v": 0.167
+            },
+            {
+              "u": 1,
+              "v": 0.251
+            },
+            {
+              "u": 1,
+              "v": 0.335
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R8963149J30B6Z1JJPJX6T#7",
+          "rangeFrom": 0,
+          "contourSig": "249eb68810c21986",
+          "perimShare": 0.0426,
+          "pieceLineKey": "01M2R8963149J30B6Z1JJPJX6T"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M5JG721P8GXAAA7ENXVJRKHP",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": "M"
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 413.4,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0.039
+            },
+            {
+              "u": 0.983,
+              "v": 0.198
+            },
+            {
+              "u": 0.979,
+              "v": 0.358
+            },
+            {
+              "u": 0.984,
+              "v": 0.517
+            },
+            {
+              "u": 0.995,
+              "v": 0.676
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -17.7,
+          "edgeHint": "01M2R89631CMHQ6K9SC0VRG50J#0",
+          "rangeFrom": 0,
+          "contourSig": "e05c5f14e487263a",
+          "perimShare": 0.2212,
+          "pieceLineKey": "01M2R89631CMHQ6K9SC0VRG50J"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 413.4,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 0.001,
+              "v": 0.597
+            },
+            {
+              "u": 0.009,
+              "v": 0.448
+            },
+            {
+              "u": 0.012,
+              "v": 0.298
+            },
+            {
+              "u": 0.006,
+              "v": 0.149
+            },
+            {
+              "u": 0,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -13.5,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#5",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.1652,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63HSRDFPKX5FHHB1S4GBPP1",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 164.4,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.875,
+              "v": 0.94
+            },
+            {
+              "u": 0.752,
+              "v": 0.955
+            },
+            {
+              "u": 0.63,
+              "v": 0.97
+            },
+            {
+              "u": 0.507,
+              "v": 0.985
+            },
+            {
+              "u": 0.384,
+              "v": 1
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631CMHQ6K9SC0VRG50J#2",
+          "rangeFrom": 0,
+          "contourSig": "e05c5f14e487263a",
+          "perimShare": 0.088,
+          "pieceLineKey": "01M2R89631CMHQ6K9SC0VRG50J"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 164.4,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.282,
+              "v": 1
+            },
+            {
+              "u": 0.215,
+              "v": 0.977
+            },
+            {
+              "u": 0.148,
+              "v": 0.954
+            },
+            {
+              "u": 0.082,
+              "v": 0.932
+            },
+            {
+              "u": 0.015,
+              "v": 0.909
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#3",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.0657,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63HSZ300G1DEAQ6HCHBZNHZ",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 325,
+          "notches": 4,
+          "samples": [
+            {
+              "u": 0.1,
+              "v": 0
+            },
+            {
+              "u": 0.296,
+              "v": 0
+            },
+            {
+              "u": 0.492,
+              "v": 0
+            },
+            {
+              "u": 0.688,
+              "v": 0
+            },
+            {
+              "u": 0.884,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631QE0T84QN1PGE09HJ#3",
+          "rangeFrom": 0,
+          "contourSig": "8e79e91afb5f819c",
+          "perimShare": 0.1993,
+          "pieceLineKey": "01M2R89631QE0T84QN1PGE09HJ"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 272.5,
+          "notches": 3,
+          "samples": [
+            {
+              "u": 0,
+              "v": 0
+            },
+            {
+              "u": 0.25,
+              "v": 0
+            },
+            {
+              "u": 0.5,
+              "v": 0
+            },
+            {
+              "u": 0.75,
+              "v": 0
+            },
+            {
+              "u": 1,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R8963133XT9K2BKXBGB4F2#2",
+          "rangeFrom": 0,
+          "contourSig": "4141edff797b399d",
+          "perimShare": 0.3303,
+          "pieceLineKey": "01M2R8963133XT9K2BKXBGB4F2"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63JSG5CTMM0XZ325R0JA1B6",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "composite",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 213.7,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 0.995,
+              "v": 0.676
+            },
+            {
+              "u": 0.847,
+              "v": 0.705
+            },
+            {
+              "u": 0.794,
+              "v": 0.781
+            },
+            {
+              "u": 0.821,
+              "v": 0.862
+            },
+            {
+              "u": 0.875,
+              "v": 0.94
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -320.1,
+          "edgeHint": "01M2R89631CMHQ6K9SC0VRG50J#1",
+          "rangeFrom": 0,
+          "contourSig": "e05c5f14e487263a",
+          "perimShare": 0.1144,
+          "pieceLineKey": "01M2R89631CMHQ6K9SC0VRG50J"
+        },
+        {
+          "lenMm": 252.8,
+          "notches": 1,
+          "samples": [
+            {
+              "u": 0.015,
+              "v": 0.909
+            },
+            {
+              "u": 0.058,
+              "v": 0.824
+            },
+            {
+              "u": 0.088,
+              "v": 0.737
+            },
+            {
+              "u": 0.085,
+              "v": 0.646
+            },
+            {
+              "u": 0.001,
+              "v": 0.597
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -309.8,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#4",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.101,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 469,
+          "notches": 3,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0.801
+            },
+            {
+              "u": 0.752,
+              "v": 0.91
+            },
+            {
+              "u": 0.495,
+              "v": 0.998
+            },
+            {
+              "u": 0.242,
+              "v": 0.913
+            },
+            {
+              "u": 0,
+              "v": 0.8
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 117.6,
+          "edgeHint": "01M2R89631S6RH9PFZN7RVEA46#0",
+          "rangeFrom": 0,
+          "contourSig": "a8ad9625ca307b8b",
+          "perimShare": 0.2876,
+          "pieceLineKey": "01M2R89631S6RH9PFZN7RVEA46"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63JSZWNYRQT6YBNYGW74CR3",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "edge",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 325,
+          "notches": 4,
+          "samples": [
+            {
+              "u": 0.116,
+              "v": 0
+            },
+            {
+              "u": 0.312,
+              "v": 0
+            },
+            {
+              "u": 0.508,
+              "v": 0
+            },
+            {
+              "u": 0.704,
+              "v": 0
+            },
+            {
+              "u": 0.9,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631S6RH9PFZN7RVEA46#2",
+          "rangeFrom": 0,
+          "contourSig": "a8ad9625ca307b8b",
+          "perimShare": 0.1993,
+          "pieceLineKey": "01M2R89631S6RH9PFZN7RVEA46"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 272.5,
+          "notches": 3,
+          "samples": [
+            {
+              "u": 0,
+              "v": 0
+            },
+            {
+              "u": 0.25,
+              "v": 0
+            },
+            {
+              "u": 0.5,
+              "v": 0
+            },
+            {
+              "u": 0.75,
+              "v": 0
+            },
+            {
+              "u": 1,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": 0,
+          "edgeHint": "01M2R89631VXB2TDJDM64Y6ENA#3",
+          "rangeFrom": 0,
+          "contourSig": "cd0751b7465465ed",
+          "perimShare": 0.3303,
+          "pieceLineKey": "01M2R89631VXB2TDJDM64Y6ENA"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63K3WT7ZJBJM3ZH49S2FFZP",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    },
+    {
+      "fp": "b1e1de0920d63360f985522c5824d89827b1c45991a70688bc70c2e5f8e8915c",
+      "kind": "composite",
+      "note": "",
+      "sideA": [
+        {
+          "lenMm": 439.2,
+          "notches": 5,
+          "samples": [
+            {
+              "u": 0,
+              "v": 0
+            },
+            {
+              "u": 0.249,
+              "v": 0.123
+            },
+            {
+              "u": 0.5,
+              "v": 0.205
+            },
+            {
+              "u": 0.751,
+              "v": 0.123
+            },
+            {
+              "u": 1,
+              "v": 0
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -30,
+          "edgeHint": "01M2R8963149J30B6Z1JJPJX6T#6",
+          "rangeFrom": 0,
+          "contourSig": "231797dfd1ddfd95",
+          "perimShare": 0.3997,
+          "pieceLineKey": "01M2R8963149J30B6Z1JJPJX6T"
+        }
+      ],
+      "sideB": [
+        {
+          "lenMm": 154,
+          "notches": 2,
+          "samples": [
+            {
+              "u": 1,
+              "v": 0.919
+            },
+            {
+              "u": 0.882,
+              "v": 0.918
+            },
+            {
+              "u": 0.764,
+              "v": 0.92
+            },
+            {
+              "u": 0.661,
+              "v": 0.946
+            },
+            {
+              "u": 0.616,
+              "v": 1
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -229.1,
+          "edgeHint": "01M2R89631C870W4X9G2ZXXJA7#1",
+          "rangeFrom": 0,
+          "contourSig": "40dcfc4ebf72a928",
+          "perimShare": 0.0824,
+          "pieceLineKey": "01M2R89631C870W4X9G2ZXXJA7"
+        },
+        {
+          "lenMm": 271.3,
+          "notches": 2,
+          "samples": [
+            {
+              "u": 0.718,
+              "v": 1
+            },
+            {
+              "u": 0.619,
+              "v": 0.955
+            },
+            {
+              "u": 0.5,
+              "v": 0.957
+            },
+            {
+              "u": 0.381,
+              "v": 0.955
+            },
+            {
+              "u": 0.282,
+              "v": 1
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -322.8,
+          "edgeHint": "01M2R89631RZX5HEJCCD755RF4#2",
+          "rangeFrom": 0,
+          "contourSig": "4bc10e9bbcc0c4cd",
+          "perimShare": 0.1084,
+          "pieceLineKey": "01M2R89631RZX5HEJCCD755RF4"
+        },
+        {
+          "lenMm": 154,
+          "notches": 2,
+          "samples": [
+            {
+              "u": 0.384,
+              "v": 1
+            },
+            {
+              "u": 0.339,
+              "v": 0.946
+            },
+            {
+              "u": 0.236,
+              "v": 0.92
+            },
+            {
+              "u": 0.118,
+              "v": 0.918
+            },
+            {
+              "u": 0,
+              "v": 0.919
+            }
+          ],
+          "rangeTo": 0,
+          "turnDeg": -229.1,
+          "edgeHint": "01M2R89631CMHQ6K9SC0VRG50J#3",
+          "rangeFrom": 0,
+          "contourSig": "e05c5f14e487263a",
+          "perimShare": 0.0824,
+          "pieceLineKey": "01M2R89631CMHQ6K9SC0VRG50J"
+        }
+      ],
+      "source": "manual",
+      "status": "confirmed",
+      "sizeId": null,
+      "seamKey": "01M63K48KXZKSF3QEKDAAN0A2C",
+      "sizeKey": 0,
+      "direction": "reversed",
+      "anchoredSize": ""
+    }
+  ],
+  "operationSeams": [
+    {
+      "op": 200,
+      "ord": 0,
+      "seamKey": "01M63HSRDFPKX5FHHB1S4GBPP1"
+    },
+    {
+      "op": 200,
+      "ord": 1,
+      "seamKey": "01M63HSZ300G1DEAQ6HCHBZNHZ"
+    },
+    {
+      "op": 280,
+      "ord": 0,
+      "seamKey": "01M63JSG5CTMM0XZ325R0JA1B6"
+    },
+    {
+      "op": 360,
+      "ord": 0,
+      "seamKey": "01M63K3WT7ZJBJM3ZH49S2FFZP"
+    },
+    {
+      "op": 370,
+      "ord": 0,
+      "seamKey": "01M63JSZWNYRQT6YBNYGW74CR3"
+    },
+    {
+      "op": 400,
+      "ord": 0,
+      "seamKey": "01M63K48KXZKSF3QEKDAAN0A2C"
+    }
+  ]
+}

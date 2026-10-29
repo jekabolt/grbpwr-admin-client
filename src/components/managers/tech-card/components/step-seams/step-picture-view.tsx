@@ -19,9 +19,9 @@ import {
   innerId,
   inputGroups,
   parseInner,
+  pieceOfTarget,
   sewnBeforeStep,
   suggestStepPairs,
-  type StepProposal,
   usedEdgesBeforeStep,
   type FormOpLike,
   type Suggestion,
@@ -32,11 +32,11 @@ import {
   centroidOf,
   earlierInner,
   fitBox,
+  focusPieces,
   inputName,
   labelSpot,
   pathOf,
   seamOfSides,
-  seamSig,
   splitSeams,
   spotInside,
   spreadLabels,
@@ -101,6 +101,8 @@ export type StoredOnStep = {
   key: string;
   row: StoredSeam | undefined;
   sides: SeamSides;
+  /** The stored row resolved by the shared seam graph against today's geometry. */
+  candidates: SeamCandidate[];
   /** A surface seam's hand placement (on its anchors). */
   placement?: SeamPlacement;
 };
@@ -202,6 +204,159 @@ export function useSeamRows(): ReadonlyMap<string, StoredSeam> {
   );
 }
 
+export type StepPictureOptions = {
+  operations: readonly SceneOp[];
+  index: number;
+  pieceKeys: ReadonlySet<string>;
+  innerLines?: ReadonlyMap<string, Pt2[][]>;
+  byKey?: ReadonlyMap<string, StoredSeam>;
+  nameOf?: (pieceKey: string) => string;
+  ready?: boolean;
+  explode?: number;
+  rasterMm?: number;
+};
+
+/** The exact coarse reading used by the editor's compact SEAMS tile. */
+export const STEP_TILE_EXPLODE = 0.12;
+export const STEP_TILE_RASTER_MM = 4;
+
+/** Pieces the editor's SEAMS tile keeps for the seam targets it is showing. */
+export function focusedStepLeaves(
+  leaves: readonly (readonly string[])[],
+  targets: readonly TargetId[],
+  innerSeams: readonly SeamCandidate[],
+): string[][] {
+  if (!targets.length) return leaves.map((leaf) => [...leaf]);
+  const own = new Set(targets.map(pieceOfTarget));
+  return leaves.map((leaf) => focusPieces(leaf, own, innerSeams)).filter((leaf) => leaf.length > 0);
+}
+
+const candidateSides = (candidate: SeamCandidate): SeamSides => ({
+  a: candidate.aParts?.length ? [...candidate.aParts] : [candidate.a],
+  b: candidate.bParts?.length ? [...candidate.bParts] : [candidate.b],
+});
+
+/** Pure operation scene shared by the editor hook and the PDF renderer. */
+export function stepPictureOfOp(
+  op: SceneOp | undefined,
+  graph: { chosen: readonly SeamCandidate[] } | null | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  options: StepPictureOptions,
+) {
+  const {
+    operations: ops,
+    index,
+    pieceKeys,
+    innerLines = new Map<string, Pt2[][]>(),
+    byKey = new Map<string, StoredSeam>(),
+    nameOf = (key: string) => key,
+    ready = true,
+    explode = STEP_TILE_EXPLODE,
+    rasterMm = STEP_TILE_RASTER_MM,
+  } = options;
+  const active = op ?? ops[index];
+  const groups = inputGroups(ops, index, pieceKeys).map((group) => ({
+    ...group,
+    name: inputName(group.key, index, ops, (key) => pieceKeys.has(key), nameOf),
+  }));
+  const leaves = groups.map((group) => group.pieces);
+  const keys = [...(active?.seamKeys ?? [])];
+  const ease = (() => {
+    const ratio = Number.parseFloat(String(active?.fullnessRatio ?? '').replace(',', '.'));
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+  })();
+  const chosenByKey = new Map<string, SeamCandidate[]>();
+  for (const candidate of graph?.chosen ?? []) {
+    const key = candidate.provenance?.seamKey;
+    if (!key || !keys.includes(key) || candidate.kind === 'closure-not-seam') continue;
+    chosenByKey.set(key, [...(chosenByKey.get(key) ?? []), candidate]);
+  }
+  const stored: StoredOnStep[] = keys.map((key) => {
+    const row = byKey.get(key);
+    const candidates = chosenByKey.get(key) ?? [];
+    const resolved = candidates.map(candidateSides);
+    return {
+      key,
+      row,
+      sides: resolved.length
+        ? {
+            a: resolved.flatMap((sides) => sides.a),
+            b: resolved.flatMap((sides) => sides.b),
+          }
+        : {
+            a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
+            b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
+          },
+      candidates,
+      placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((anchor) => anchor.placement)
+        ?.placement,
+    };
+  });
+  const used = new Set<EdgeId>([
+    ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]).filter((id) => !parseInner(id)),
+    ...usedEdgesBeforeStep(ops, index, byKey),
+  ]);
+  const suggestions = ready
+    ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
+    : [];
+  const suggestion: Suggestion | null = suggestions[0] ?? null;
+  const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
+  const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
+  const storedSeams = stored
+    .flatMap((seam) =>
+      seam.candidates.length
+        ? seam.candidates
+        : [seamOfSides(seam.sides, geoms, innerLines, seam.placement)],
+    )
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const crossSeams = stored.length
+    ? []
+    : split.cross.filter((candidate) => candidate.kind !== 'surface');
+  const proposalSeams = suggestions
+    .map((candidate) => seamOfSides(candidate, geoms, innerLines))
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const frameSeams = frameSeamsOf(
+    innerSeams,
+    storedSeams,
+    stored.length ? [] : proposalSeams,
+    crossSeams,
+  );
+  const marks: EdgeMark[] = (
+    stored.length
+      ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
+      : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
+  ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
+  const layoutLeaves = focusedStepLeaves(
+    leaves,
+    marks.map((mark) => mark.id),
+    innerSeams,
+  );
+  return {
+    op: active,
+    geoms,
+    innerLines,
+    groups,
+    leaves,
+    keys,
+    ease,
+    byKey,
+    stored,
+    used,
+    suggestion,
+    suggestions,
+    innerSeams,
+    proposalSeams,
+    frameSeams,
+    crossSeams,
+    storedSeams,
+    marks,
+    layoutLeaves,
+    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm }),
+  };
+}
+
+export type StepPicture = ReturnType<typeof stepPictureOfOp>;
+
 export function useStepScene(index: number) {
   const { graph } = useCardSeamGraph();
   const { control, getValues } = useFormContext<TechCardFormData>();
@@ -228,111 +383,29 @@ export function useStepScene(index: number) {
     (k: string) => geo?.pieces.get(k)?.name || cardName?.(k) || k,
     [geo?.pieces, cardName],
   );
-  const rawGroups = inputGroups(ops, index, pieceKeys).map((g) => ({
-    ...g,
-    name: inputName(g.key, index, ops, (k) => pieceKeys.has(k), pieceName),
-  }));
-  const groups = useStable(rawGroups, JSON.stringify(rawGroups));
-  const leaves = useMemo(() => groups.map((g) => g.pieces), [groups]);
-
-  const keysRaw = [...(op?.seamKeys ?? [])];
-  const keys = useStable(keysRaw, keysRaw.join(','));
-  const ease = (() => {
-    const r = Number.parseFloat(String(op?.fullnessRatio ?? '').replace(',', '.'));
-    return Number.isFinite(r) && r > 0 ? r : null;
-  })();
-
   const byKey = useSeamRows();
-  const stored = useMemo<StoredOnStep[]>(
-    () =>
-      keys.map((key) => {
-        const row = byKey.get(key);
-        return {
-          key,
-          row,
-          sides: {
-            a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
-            b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
-          },
-          placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((x) => x.placement)
-            ?.placement,
-        };
-      }),
-    [keys, byKey],
-  );
-  // The edges a proposal and a partner must not take again: this step's stored seams and
-  // every edge earlier steps already sewed.
-  const usedRaw = [
-    ...new Set([
-      ...stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t)),
-      ...usedEdgesBeforeStep(ops, index, byKey),
-    ]),
-  ].sort();
-  const used = useStable(new Set<EdgeId>(usedRaw), usedRaw.join(','));
-
-  // Shown on a frozen card too (it only cannot be accepted there).
   const ready = !!geo && geo.dep.status !== 'pending';
-  const sugsRaw = useMemo<StepProposal[]>(
-    () => (ready ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey) : []),
-    [ready, ops, index, pieceKeys, geoms, used, ease, byKey],
+  const picture = useMemo(
+    () =>
+      stepPictureOfOp(op, graph, geoms, {
+        operations: ops,
+        index,
+        pieceKeys,
+        innerLines,
+        byKey,
+        nameOf: pieceName,
+        ready,
+      }),
+    [op, graph, geoms, ops, index, pieceKeys, innerLines, byKey, pieceName, ready],
   );
-  const suggestions = useStable(
-    sugsRaw,
-    sugsRaw.map((p) => `${p.a.join('+')}|${p.b.join('+')}|${p.aLen}|${p.bLen}|${p.hand}`).join(';'),
-  );
-  const suggestion: Suggestion | null = suggestions[0] ?? null;
-
-  // Inside each input: the engine's seams, and what earlier steps sewed there (stored or implied).
-  const split = useMemo(() => {
-    const s = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
-    return {
-      ...s,
-      inner: innerSeamsOf(s, ops, index, pieceKeys, leaves, geoms, innerLines, byKey),
-    };
-  }, [graph?.chosen, leaves, geoms, byKey, innerLines, ops, index, pieceKeys]);
-  const innerSeams = useStable(split.inner, seamSig(split.inner));
-
-  const storedRaw = stored
-    .map((s) => seamOfSides(s.sides, geoms, innerLines, s.placement))
-    .filter((c): c is SeamCandidate => !!c);
-  const storedSeams = useStable(storedRaw, seamSig(storedRaw));
-
-  // What the card's graph reads between the inputs — the frame when the step has no seam of its
-  // own; none once a seam is stored (a stored row with no shape still counts).
-  const crossRaw = stored.length ? [] : split.cross.filter((c) => c.kind !== 'surface');
-  const crossSeams = useStable(crossRaw, seamSig(crossRaw));
-  // The frame along every proposal — together they make the step's unit whole (three inputs,
-  // two seams); the picker and a tile frame along the ones they show.
-  const proposalRaw = suggestions
-    .map((s) => seamOfSides(s, geoms, innerLines))
-    .filter((c): c is SeamCandidate => !!c);
-  const proposalSeams = useStable(proposalRaw, seamSig(proposalRaw));
-  const frameRaw = frameSeamsOf(split.inner, storedSeams, proposalSeams, crossSeams);
-  const frameSeams = useStable(frameRaw, seamSig(frameRaw));
 
   return {
     ctx,
-    op,
     ops,
     geo,
-    geoms,
     pieceKeys,
-    innerLines,
-    groups,
-    leaves,
-    keys,
-    ease,
-    byKey,
-    stored,
-    used,
-    suggestion,
-    suggestions,
-    innerSeams,
-    proposalSeams,
-    frameSeams,
-    crossSeams,
-    storedSeams,
     pieceName,
+    ...picture,
   };
 }
 
@@ -405,11 +478,13 @@ type Look = {
   dash: string;
   font: number;
 };
-const LOOK: Record<'canvas' | 'result' | 'tile', Look> = {
+const LOOK: Record<'canvas' | 'result' | 'tile' | 'print', Look> = {
   canvas: { outline: 3.2, hair: 0.8, mark: 3, stored: 3.5, dash: '9 6', font: 12 },
   result: { outline: 2.6, hair: 0.7, mark: 2.5, stored: 2.5, dash: '9 6', font: 11 },
   // A row tile marks a seam by colour only, never by weight (owner): marks at the outline width.
   tile: { outline: 1.3, hair: 0.35, mark: 1.3, stored: 1.3, dash: '3 2', font: 9 },
+  // The existing PDF weights: ordinary ink 1.75 px, active seam 3 px, monochrome hairlines.
+  print: { outline: 1.75, hair: 0.7, mark: 3, stored: 3, dash: '5 3', font: 9 },
 };
 
 const INK = 'var(--color-textColor)';
