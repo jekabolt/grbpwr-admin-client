@@ -7,7 +7,7 @@ import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleto
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
@@ -383,6 +383,8 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+/** A layer lying on its partner (a pocket bag on the front): the inner-rule grey. */
+const UNDER = 'var(--color-hairline)';
 
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
@@ -440,6 +442,16 @@ export function StepPictureSvg({
     return out;
   }, [layout, geoms, fit]);
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
+  // A layer goes under its partner's outline: the partner's fill, the layer in grey, the partner's
+  // outline again on top (its outer half, as the fills leave it).
+  const { base, under } = useMemo(() => {
+    const layered = new Set(layout.layers.map(([l]) => l));
+    return {
+      base: pieces.filter((p) => !layered.has(p.input)),
+      under: pieces.filter((p) => layered.has(p.input)),
+    };
+  }, [pieces, layout.layers]);
+  const maskId = `step-under-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -543,15 +555,41 @@ export function StepPictureSvg({
       aria-hidden={onPick ? undefined : true}
     >
       <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
-        {pieces.map((p) => (
+        {base.map((p) => (
           <path key={p.key} d={pathOf(p.ring, true)} />
         ))}
       </g>
       <g fill={FILL} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
-        {pieces.map((p) => (
+        {base.map((p) => (
           <path key={p.key} d={pathOf(p.ring, true)} />
         ))}
       </g>
+      {under.length > 0 && (
+        <>
+          <g fill={UNDER} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+            {under.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} />
+            ))}
+          </g>
+          <mask id={maskId} maskUnits='userSpaceOnUse' x={-w} y={-h} width={3 * w} height={3 * h}>
+            <rect x={-w} y={-h} width={3 * w} height={3 * h} fill='white' />
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} fill='black' />
+            ))}
+          </mask>
+          <g
+            fill='none'
+            stroke={INK}
+            strokeWidth={L.outline}
+            strokeLinejoin='round'
+            mask={`url(#${maskId})`}
+          >
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} />
+            ))}
+          </g>
+        </>
+      )}
       {ghosts.length > 0 && (
         <g
           fill={FILL}
