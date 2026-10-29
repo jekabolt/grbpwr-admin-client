@@ -41,8 +41,12 @@ export type EdgeAnchor = {
   /** Fingerprint of the piece's segmentation when anchored (16 hex) — the fast path's guard. */
   contourSig: string;
   /**
-   * «Place by hand»: where the part piece sits on the host (mm from the host bbox's min corner in
-   * the drawing frame, then a turn and a mirror). Set on a surface seam's anchors only.
+   * «Place by hand», interpreted by seam kind. Surface: the part's drawing-frame bbox corner from
+   * the host's, then an in-plane turn and mirror. Edge / partial / composite, on the moved piece's
+   * anchors only: `xMm` is the signed slide from a centred fit along the partner's current seam run;
+   * `yMm` is 1 for inside and 0 for opened out; `rotDeg` is a turn about the seam and `flip` is face
+   * down. On read those kinds re-snap from today's resolved runs and clamp the slide. The x/y values
+   * are never applied as a free pose, so grading cannot pull the piece away from its seam.
    */
   placement?: SeamPlacement;
 };

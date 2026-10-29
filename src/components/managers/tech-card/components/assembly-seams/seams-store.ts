@@ -76,7 +76,7 @@ export function rowsOf(s: Pick<SeamsState, 'server' | 'pending'>): StoredSeam[] 
 
 /**
  * What a re-read of the graph depends on: identity, status, kind, direction, the anchors' hints and
- * the server's verdict. A note is not in it — words do not move a seam.
+ * its hand placement and the server's verdict. A note is not in it — words do not move a seam.
  */
 export function rowsSig(rows: readonly StoredSeam[]): string {
   return rows
@@ -86,7 +86,11 @@ export function rowsSig(rows: readonly StoredSeam[]): string {
           ...r.sideA,
           ...r.sideB,
         ]
-          .map((a) => `${a.edgeHint}@${a.contourSig}`)
+          .map((a) => {
+            const p = a.placement;
+            const placement = p ? `@${p.xMm},${p.yMm},${p.rotDeg},${p.flip ? 1 : 0}` : '';
+            return `${a.edgeHint}@${a.contourSig}${placement}`;
+          })
           .join('/')}`,
     )
     .sort()
