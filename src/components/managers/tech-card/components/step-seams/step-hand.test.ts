@@ -8,8 +8,14 @@ import {
   clampHandSlide,
   decodeHandPlace,
   handsFromSeams,
+  laidHands,
+  pickHandTarget,
   snapHand,
+  targetOfSides,
+  twinRowOf,
+  type HandOn,
   type HandPlace,
+  type HandTarget,
   withHandPlace,
 } from './step-hand';
 
@@ -87,7 +93,8 @@ describe('hand placement storage', () => {
 
     const read = fromWire(toWire(row))!;
     expect(decodeHandPlace(read.sideA[0].placement)).toEqual(hand);
-    expect(handsFromSeams([read]).get(part.pieceKey)).toEqual(hand);
+    // Read back with the partner across the seam it was set on.
+    expect(handsFromSeams([read]).get(part.pieceKey)).toEqual({ ...hand, partner: 'PARTNER' });
     expect(read.sideB[0].placement).toBeUndefined();
   });
 });
@@ -168,5 +175,87 @@ describe('snapHand', () => {
         [250, 0],
       ]),
     ).toBeLessThan(0.5);
+  });
+});
+
+describe("a twin lays its twin's placement", () => {
+  // Left and right: a bag on each back's top. The backs are mirror twins, the bags identical.
+  const twin = (g: PieceGeom, key: string, kind: 'mirror' | 'identical') =>
+    ({ ...g, twinOf: [{ key, kind }] }) as PieceGeom;
+  const geoms = new Map(
+    [
+      twin(rect('BAG_L', 100, 60), 'BAG_R', 'identical'),
+      twin(rect('BAG_R', 100, 60), 'BAG_L', 'identical'),
+      twin(rect('BACK_L', 200, 300), 'BACK_R', 'mirror'),
+      twin(rect('BACK_R', 200, 300), 'BACK_L', 'mirror'),
+      rect('OTHER', 200, 300),
+    ].map((g) => [g.pieceKey, g]),
+  );
+  const targetsOf = (piece: string, partner: string) =>
+    new Map<string, HandTarget[]>([
+      [piece, [targetOfSides(piece, { a: [`${piece}#0`], b: [`${partner}#2`] }, geoms)!]],
+    ]);
+  const left: HandOn = { inside: true, rotDeg: 90, flip: true, slideMm: 12, partner: 'BACK_L' };
+
+  it('mirrored along a mirrored partner: the slide runs the other way', () => {
+    const laid = laidHands(
+      targetsOf('BAG_R', 'BACK_R'),
+      geoms,
+      new Map(),
+      new Map([['BAG_L', left]]),
+    );
+    expect(laid.get('BAG_R')).toMatchObject({
+      place: { inside: true, rotDeg: 90, flip: true, slideMm: -12, partner: 'BACK_R' },
+      twin: true,
+    });
+  });
+
+  it('its own placement wins', () => {
+    const own: HandOn = { inside: false, rotDeg: 0, flip: false, slideMm: 0, partner: 'BACK_R' };
+    const laid = laidHands(
+      targetsOf('BAG_R', 'BACK_R'),
+      geoms,
+      new Map([['BAG_R', own]]),
+      new Map([['BAG_L', left]]),
+    );
+    expect(laid.get('BAG_R')).toMatchObject({ place: own, twin: false });
+  });
+
+  it('only on a seam to a twin of the partner it was set on', () => {
+    const laid = laidHands(
+      targetsOf('BAG_R', 'OTHER'),
+      geoms,
+      new Map(),
+      new Map([['BAG_L', left]]),
+    );
+    expect(laid.has('BAG_R')).toBe(false);
+  });
+
+  it('a placement names its seam: none while the partner is not across', () => {
+    const [target] = targetsOf('BAG_L', 'OTHER').get('BAG_L')!;
+    expect(pickHandTarget([target], left)).toBeUndefined();
+    expect(pickHandTarget([target], { ...left, partner: undefined })).toBe(target);
+  });
+
+  it("a save writes the twin's seam only when the step stores it", () => {
+    const rowOf = (piece: string, partner: string): StoredSeam => ({
+      seamKey: `seam-${piece}`,
+      status: 'confirmed',
+      kind: 'edge',
+      direction: 'reversed',
+      source: 'manual',
+      sideA: [anchorOfRunId([...geoms.values()], `${piece}#0`)!],
+      sideB: [anchorOfRunId([...geoms.values()], `${partner}#2`)!],
+      anchoredSize: 'base',
+      note: '',
+    });
+    const own = rowOf('BAG_L', 'BACK_L');
+    const theirs = rowOf('BAG_R', 'BACK_R');
+    const found = twinRowOf([own, theirs], 'BAG_L', 'BACK_L', left, geoms);
+    expect(found?.row).toBe(theirs);
+    expect(found?.twin).toBe('BAG_R');
+    expect(found?.place).toEqual({ inside: true, rotDeg: 90, flip: true, slideMm: -12 });
+    expect(found?.current).toBeUndefined();
+    expect(twinRowOf([own], 'BAG_L', 'BACK_L', left, geoms)).toBeNull();
   });
 });

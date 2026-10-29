@@ -23,6 +23,7 @@ import {
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
+import { handTargetsOf, laidHands, snapHand, type HandOn, type LaidHand } from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
@@ -286,6 +287,13 @@ export type StepLayout = {
    * indices. The joined result only — an exploded canvas stands them beside.
    */
   layers: [number, number][];
+  /**
+   * Pieces a hand placement lays `inside` on a partner of their own input (a bag on the back it was
+   * sewn into a step before): [layer, partner] piece keys, drawn grey under the partner as a layer.
+   */
+  pieceLayers: [string, string][];
+  /** The hand placements laid, by piece: its own, or its twin's mirrored. */
+  hand: Map<string, LaidHand>;
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };
@@ -346,6 +354,8 @@ const EMPTY_LAYOUT: StepLayout = {
   apart: [],
   clusters: [],
   layers: [],
+  pieceLayers: [],
+  hand: new Map(),
   bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
 };
 
@@ -422,7 +432,13 @@ function layInput(
   inner: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
   raster: { rasterMm?: number },
-): { T: Map<string, Affine>; stacked: string[][]; onRuns: string[]; apart: string[] } {
+): {
+  T: Map<string, Affine>;
+  stacked: string[][];
+  onRuns: string[];
+  apart: string[];
+  hostOf: Map<string, string>;
+} {
   const L = unionLayout(keys, inner, geoms, {
     ...raster,
     overlapMax: TOUCH,
@@ -458,8 +474,35 @@ function layInput(
       x += b.x1 - b.x0;
     }
   }
-  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart };
+  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart, hostOf };
 }
+
+/**
+ * What moves with a piece laid by hand on a partner of its own input: the pieces hung on it (its
+ * side of the input once the link to the partner is cut) — or the piece alone, when the partner
+ * hangs on that side too.
+ */
+function handSide(piece: string, partner: string, hostOf: ReadonlyMap<string, string>): string[] {
+  const adj = new Map<string, string[]>();
+  const link = (a: string, b: string) => adj.set(a, [...(adj.get(a) ?? []), b]);
+  for (const [k, h] of hostOf) {
+    if ((k === piece && h === partner) || (k === partner && h === piece)) continue;
+    link(k, h);
+    link(h, k);
+  }
+  const seen = new Set([piece]);
+  const queue = [piece];
+  while (queue.length)
+    for (const n of adj.get(queue.shift()!) ?? [])
+      if (!seen.has(n)) {
+        seen.add(n);
+        queue.push(n);
+      }
+  return seen.has(partner) ? [piece] : [...seen];
+}
+
+/** A placement the picture can undo (a fold seen edge-on cannot be). */
+const invertible = (T: Affine) => Math.abs(T[0] * T[3] - T[1] * T[2]) > 1e-9;
 
 /** The inverse of a (non-degenerate) affine. */
 export function invert(T: Affine): Affine {
@@ -469,6 +512,7 @@ export function invert(T: Affine): Affine {
 }
 
 const pairKey = (i: number, j: number) => (i < j ? `${i}:${j}` : `${j}:${i}`);
+const NO_HAND: ReadonlyMap<string, HandOn> = new Map();
 
 /**
  * Lay the step out, honestly. Each input on its own first: its pieces along the seams already sewn
@@ -488,22 +532,46 @@ const pairKey = (i: number, j: number) => (i < j ? `${i}:${j}` : `${j}:${i}`);
  * so it never takes the place of a clear one. Any other overlap the seams leave is undone: that
  * input stands alone and the step is laid again, at worst every input on the shelves, which never
  * touch.
+ *
+ * A hand placement (`hand`, piece → placement, the picker's inside / turn / flip / slide) beats every
+ * guess for its piece: the piece is snapped onto its partner's run (`snapHand`) — inside a unit, its
+ * side of the unit moves with it; across inputs, its input does, before any seam is guessed, and the
+ * two are never pulled apart for touching. `inside` lays it as a layer of its partner. A piece with
+ * no placement of its own takes its twin's, mirrored (`twinHand`: the card's placements anywhere;
+ * default `hand`) when it is sewn to the twin of the twin's partner.
  */
 export function stepLayout(
   leaves: readonly (readonly string[])[],
   seams: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
-  opts: { explode?: number; rasterMm?: number } = {},
+  opts: {
+    explode?: number;
+    rasterMm?: number;
+    hand?: ReadonlyMap<string, HandOn>;
+    twinHand?: ReadonlyMap<string, HandOn>;
+  } = {},
 ): StepLayout {
   const input = inputIndex(leaves);
   const drawable = (k: string) => (geoms.get(k)?.rs.length ?? 0) >= 3;
   const keys = [...input.keys()].filter(drawable);
   if (keys.length === 0) return EMPTY_LAYOUT;
+  const drawnKeys = new Set(keys);
   const raster = opts.rasterMm ? { rasterMm: opts.rasterMm } : {};
   const explode = opts.explode ?? 0;
   const ins = leaves.map((_, i) => i).filter((i) => [...input.values()].includes(i));
   const inOf = (id: EdgeId) => input.get(pieceKeyOf(id));
   const keysOf = (i: number) => keys.filter((k) => input.get(k) === i);
+
+  // Hand placements: a piece's own, else its twin's mirrored — on a seam to a drawn partner.
+  const handOwn = opts.hand ?? NO_HAND;
+  const hands =
+    handOwn.size || opts.twinHand?.size
+      ? laidHands(handTargetsOf(seams, geoms), geoms, handOwn, opts.twinHand ?? handOwn, (k) =>
+          drawnKeys.has(k),
+        )
+      : new Map<string, LaidHand>();
+  const snapOf = (h: LaidHand, place: HandOn = h.place) =>
+    snapHand(h.target.part, h.target.partnerGeom, h.target.partRun, h.target.partnerRun, place);
 
   // ── 1. each input alone ──
   const local = new Map<string, Affine>();
@@ -511,15 +579,31 @@ export function stepLayout(
   const stacked: string[][] = [];
   const onRuns: string[] = [];
   const apart: string[] = [];
+  const pieceLayers: [string, string][] = [];
   for (const i of ins) {
     const ks = keysOf(i);
     if (!ks.length) continue;
     const inner = seams.filter((c) => inOf(c.a) === i && inOf(c.b) === i && confidentSeam(c));
     const laid = layInput(ks, inner, geoms, raster);
+    // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
+    // partner's run as the placement says (the bag a step before laid inside the back stays there).
+    let laidApart = laid.apart;
+    for (const [k, h] of hands) {
+      const p = h.target.partner;
+      if (input.get(k) !== i || input.get(p) !== i) continue;
+      const from = laid.T.get(k);
+      const onto = laid.T.get(p);
+      if (!from || !onto) continue;
+      const D = compose(compose(onto, snapOf(h)), invert(from));
+      const moved = handSide(k, p, laid.hostOf);
+      for (const m of moved) laid.T.set(m, compose(D, laid.T.get(m)!));
+      if (!laidApart.includes(p)) laidApart = laidApart.filter((m) => !moved.includes(m));
+      if (h.place.inside) pieceLayers.push([k, p]);
+    }
     for (const [k, t] of laid.T) local.set(k, t);
     stacked.push(...laid.stacked);
     onRuns.push(...laid.onRuns);
-    apart.push(...laid.apart);
+    apart.push(...laidApart);
     localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
   }
   const standing = new Set(apart);
@@ -592,6 +676,16 @@ export function stepLayout(
   const rastersOf = (i: number, M: Affine) => ringsOf(i, M).map((r) => rasterize(r, step));
   const order = [...ins].sort((p, q) => area(q) - area(p));
 
+  // Hand placements across inputs: the piece's input laid on its partner's by the placement.
+  const crossHands = [...hands].filter(([k, h]) => input.get(k) !== input.get(h.target.partner));
+  /** Input of a piece placed by hand → its partner's input (laid first, so it roots the cluster). */
+  const handParent = new Map(
+    crossHands.map(([k, h]) => [input.get(k)!, input.get(h.target.partner)!] as const),
+  );
+  // Pieces whose input was laid before their partner's: re-snapped at the end when the placement
+  // (a fold seen edge-on) cannot be undone to lay the partner.
+  let pinned: string[] = [];
+
   // Inputs the seams cannot lay clear stand on their own; the step is laid again without them.
   const loose = new Set<number>();
   const G = new Map<number, Affine>();
@@ -617,6 +711,9 @@ export function stepLayout(
     // every input laid, as the table changed).
     let placedFine: Map<number, Raster[]> | null = null;
     let placedKeys: { i: number; M: Affine }[] = [];
+    // Inputs a hand placement holds (both sides of it): another input that lands on one gives way.
+    const held = new Set<number>();
+    pinned = [];
     const settle = (i: number, M: Affine) => {
       G.set(i, M);
       placedRasters.set(i, rastersOf(i, M));
@@ -887,20 +984,66 @@ export function stepLayout(
     // Inputs a cross seam reaches form a cluster (laid against each other); clusters stand apart.
     const clusters: number[][] = [];
     const holds: SeamCandidate[][] = [];
+    /** A hand placement across inputs from this cluster: the other input laid by it, or null. */
+    const byHand = (inCl: ReadonlySet<number>): number | null => {
+      for (const [k, h] of crossHands) {
+        const p = h.target.partner;
+        const ik = input.get(k)!;
+        const ip = input.get(p)!;
+        if (loose.has(ik) || loose.has(ip)) continue;
+        const S = snapOf(h);
+        let j: number;
+        let M: Affine;
+        if (inCl.has(ip) && !G.has(ik)) {
+          j = ik;
+          M = compose(compose(compose(G.get(ip)!, local.get(p)!), S), invert(local.get(k)!));
+        } else if (inCl.has(ik) && !G.has(ip)) {
+          // Laid before its partner: the partner goes where the placement wants it.
+          j = ip;
+          const U = invertible(S) ? S : snapOf(h, { ...h.place, rotDeg: 0 });
+          if (U !== S) pinned.push(k);
+          M = compose(
+            compose(compose(G.get(ik)!, local.get(k)!), invert(U)),
+            invert(local.get(p)!),
+          );
+        } else continue;
+        settle(j, M);
+        held.add(ik);
+        held.add(ip);
+        onEachOther.add(pairKey(ik, ip));
+        if (h.place.inside && explode === 0) layers.push([ik, ip]);
+        return j;
+      }
+      return null;
+    };
     for (;;) {
       const rest = order.filter((i) => !G.has(i));
       if (!rest.length) break;
-      const cl = [rest[0]];
+      // A piece placed by hand hangs on its partner: the partner's input roots the cluster.
+      const root =
+        rest.find((i) => {
+          const ip = handParent.get(i);
+          return ip == null || ip === i || G.has(ip) || loose.has(ip);
+        }) ?? rest[0];
+      const cl = [root];
       const inCl = new Set(cl);
       const used: SeamCandidate[] = [];
       // A fresh table: an earlier cluster is shelved elsewhere, not under this one.
       placedRasters = new Map();
       placedKeys = [];
       placedFine = null;
-      settle(rest[0], IDENTITY);
-      if (!loose.has(rest[0]))
+      settle(root, IDENTITY);
+      if (!loose.has(root))
         for (let laid = true; laid; ) {
           laid = false;
+          // A hand placement first: it beats every guess.
+          const j = byHand(inCl);
+          if (j != null) {
+            cl.push(j);
+            inCl.add(j);
+            laid = true;
+            continue;
+          }
           // Clear places first; a layer on its partner only once no seam lays any input clear.
           for (const asLayer of [false, true]) {
             for (const c of cross) {
@@ -999,10 +1142,19 @@ export function stepLayout(
         if (onEachOther.has(pairKey(i, j))) continue;
         let o = 0;
         for (const a of R.get(i)!) for (const b of R.get(j)!) o = Math.max(o, pairOverlap(a, b));
-        if (o > tol) culprit = area(i) <= area(j) ? i : j;
+        // A hand placement holds: the guessed input gives way to it.
+        if (o > tol)
+          culprit =
+            held.has(i) !== held.has(j) ? (held.has(i) ? j : i) : area(i) <= area(j) ? i : j;
       }
     if (culprit == null || loose.has(culprit)) break;
     loose.add(culprit);
+  }
+
+  for (const k of pinned) {
+    const h = hands.get(k)!;
+    const onto = T.get(h.target.partner);
+    if (onto) T.set(k, compose(onto, snapOf(h)));
   }
 
   const bbox = boxOf([
@@ -1018,6 +1170,8 @@ export function stepLayout(
     apart,
     clusters: clustersOut,
     layers: layersOut,
+    pieceLayers,
+    hand: hands,
     bbox,
   };
 }

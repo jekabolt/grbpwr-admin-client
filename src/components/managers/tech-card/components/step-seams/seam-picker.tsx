@@ -10,8 +10,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { resolveEdge } from 'lib/assembly-skeleton/union';
-import { apply, compose } from 'lib/assembly-skeleton/union/affine';
+import { apply } from 'lib/assembly-skeleton/union/affine';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
 import {
   useCallback,
@@ -33,9 +32,14 @@ import {
   clampHandSlide,
   DEFAULT_HAND,
   handsFromSeams,
+  handTargetsOf,
   isHandSeamKind,
-  snapHand,
+  pickHandTarget,
+  sameHand,
+  twinRowOf,
+  type HandOn,
   type HandPlace,
+  type HandTarget,
   withHandPlace,
 } from './step-hand';
 import { useAttachStepSeam } from './step-seams-context';
@@ -94,58 +98,17 @@ const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
 const mmText = (v: number) => `${fmtMm(v)} mm`;
 
-type HandTarget = {
-  piece: string;
-  partner: string;
-  part: PieceGeom;
-  partnerGeom: PieceGeom;
-  partRun: readonly Pt2[];
-  partnerRun: readonly Pt2[];
-};
-
-const edgeTargets = (ids: readonly TargetId[]): EdgeId[] =>
-  ids.filter((id): id is EdgeId => !parseInner(id));
-
-const bestRun = (
-  ids: readonly TargetId[],
-  geoms: ReadonlyMap<string, PieceGeom>,
-  piece?: string,
-) => {
-  let best: ReturnType<typeof resolveEdge> = null;
-  for (const id of runsOfSide(edgeTargets(ids), geoms)) {
-    const run = resolveEdge(id, geoms);
-    if (!run || (piece && run.pieceKey !== piece) || (best && best.len >= run.len)) continue;
-    best = run;
+/** Stored placements with this session's edits on top (null: cleared). */
+const withOverrides = (
+  base: ReadonlyMap<string, HandOn>,
+  edits: ReadonlyMap<string, HandOn | null>,
+): Map<string, HandOn> => {
+  const next = new Map(base);
+  for (const [piece, place] of edits) {
+    if (place) next.set(piece, place);
+    else next.delete(piece);
   }
-  return best;
-};
-
-const targetOfSides = (
-  piece: string,
-  sides: SeamSides,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): HandTarget | null => {
-  const ownSide = sides.a.some((id) => pieceOfTarget(id) === piece)
-    ? sides.a
-    : sides.b.some((id) => pieceOfTarget(id) === piece)
-      ? sides.b
-      : null;
-  if (!ownSide) return null;
-  const otherSide = ownSide === sides.a ? sides.b : sides.a;
-  const partRun = bestRun(ownSide, geoms, piece);
-  const partnerRun = bestRun(otherSide, geoms);
-  if (!partRun || !partnerRun || partRun.pieceKey === partnerRun.pieceKey) return null;
-  const part = geoms.get(partRun.pieceKey);
-  const partnerGeom = geoms.get(partnerRun.pieceKey);
-  if (!part || !partnerGeom) return null;
-  return {
-    piece: part.pieceKey,
-    partner: partnerGeom.pieceKey,
-    part,
-    partnerGeom,
-    partRun: partRun.pts,
-    partnerRun: partnerRun.pts,
-  };
+  return next;
 };
 
 const handsOnRow = (
@@ -158,45 +121,6 @@ const handsOnRow = (
     if (pieces.has(piece)) next = withHandPlace(next, piece, place ?? undefined);
   return next;
 };
-
-/**
- * Picker bridge until the shared placer consumes `hand` itself. The shared signature is
- * `stepLayout(leaves, seams, geoms, { explode, hand })`.
- */
-function useHandStepLayout(
-  leaves: readonly (readonly string[])[],
-  seams: readonly SeamCandidate[],
-  geoms: ReadonlyMap<string, PieceGeom>,
-  explode: number,
-  hand: ReadonlyMap<string, HandPlace>,
-  targets: ReadonlyMap<string, HandTarget>,
-): StepLayout {
-  return useMemo(() => {
-    // TODO(hand): pass `hand` in stepLayout's options once the layer placer owns hand placement.
-    const automatic = stepLayout(leaves, seams, geoms, { explode });
-    if (hand.size === 0) return automatic;
-    const T = new Map(automatic.T);
-    for (const [piece, place] of hand) {
-      const target = targets.get(piece);
-      const partnerT = target ? T.get(target.partner) : undefined;
-      if (!target || !partnerT) continue;
-      T.set(
-        piece,
-        compose(
-          partnerT,
-          snapHand(target.part, target.partnerGeom, target.partRun, target.partnerRun, place),
-        ),
-      );
-    }
-    const points = [
-      ...[...T].flatMap(([piece, transform]) =>
-        (geoms.get(piece)?.rs ?? []).map((point) => apply(transform, point)),
-      ),
-      ...automatic.ghosts.flatMap((ghost) => ghost.ring),
-    ];
-    return { ...automatic, T, bbox: boxOf(points) };
-  }, [leaves, seams, geoms, explode, hand, targets]);
-}
 
 export default function SeamPicker({
   index,
@@ -241,9 +165,7 @@ export default function SeamPicker({
   const [hover, setHover] = useState<TargetId | null>(null);
   const [place, setPlace] = useState<Place | null>(null);
   const [selectedPiece, setSelectedPiece] = useState<string | null>(null);
-  const [handOverrides, setHandOverrides] = useState<Map<string, HandPlace | null>>(
-    () => new Map(),
-  );
+  const [handOverrides, setHandOverrides] = useState<Map<string, HandOn | null>>(() => new Map());
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   const [prop, setProp] = useState(initialProposal);
@@ -340,20 +262,23 @@ export default function SeamPicker({
     !!cardId &&
     (surface ? !!partKey && sel[hostSide!].length === 1 : inners.length === 0 && !!pair);
 
+  // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
+  // the whole card's (the right bag mirrors the left one placed a step later).
   const storedHand = useMemo(() => {
     const rows = ops
       .slice(0, index + 1)
       .flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
     return handsFromSeams(rows);
   }, [ops, index, byKey]);
-  const hand = useMemo(() => {
-    const next = new Map(storedHand);
-    for (const [piece, place] of handOverrides) {
-      if (place) next.set(piece, place);
-      else next.delete(piece);
-    }
-    return next;
-  }, [storedHand, handOverrides]);
+  const cardHand = useMemo(
+    () =>
+      handsFromSeams(
+        ops.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? [])),
+      ),
+    [ops, byKey],
+  );
+  const hand = useMemo(() => withOverrides(storedHand, handOverrides), [storedHand, handOverrides]);
+  const twinHand = useMemo(() => withOverrides(cardHand, handOverrides), [cardHand, handOverrides]);
   const pairPieces = useMemo(
     () => new Set(pair ? [...pair.a, ...pair.b].map(pieceOfTarget) : []),
     [pair],
@@ -419,8 +344,23 @@ export default function SeamPicker({
     setBusy(true);
     setRefused('');
     const ok = await attach(row);
+    // A twin's seam already stored on this step takes the mirrored placement too.
+    const twins = ok
+      ? [...handOverrides].flatMap(([piece, place]) => {
+          if (!pairPieces.has(piece)) return [];
+          const t = twinWrite(
+            piece,
+            place?.partner,
+            place ?? undefined,
+            storedHand.get(piece),
+            row.seamKey,
+          );
+          return t ? [t] : [];
+        })
+      : [];
+    const twinsOk = twins.length && scene.ctx ? await scene.ctx.writes.upsert(twins) : true;
     setBusy(false);
-    if (!ok) {
+    if (!ok || !twinsOk) {
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
@@ -494,28 +434,11 @@ export default function SeamPicker({
         : null;
   const resultRaw = [...innerSeams, ...(focus ? [] : storedSeams), ...(pairSeam ? [pairSeam] : [])];
   const resultSeams = useStable<SeamCandidate[]>(resultRaw, seamSig(resultRaw));
-  const handTargets = useMemo(() => {
-    const targets = new Map<string, HandTarget>();
-    for (const seam of resultSeams) {
-      if (seam.kind === 'surface' || seam.kind === 'closure-not-seam') continue;
-      const sides: SeamSides = {
-        a: seam.aParts ?? [seam.a],
-        b: seam.bParts ?? [seam.b],
-      };
-      for (const piece of new Set([...sides.a, ...sides.b].map(pieceOfTarget))) {
-        const target = targetOfSides(piece, sides, geoms);
-        if (target) targets.set(piece, target);
-      }
-    }
-    return targets;
-  }, [resultSeams, geoms]);
-  const joined = useHandStepLayout(
-    focus ? seamLeaves : leaves,
-    resultSeams,
-    geoms,
-    0,
-    hand,
-    handTargets,
+  const handTargets = useMemo(() => handTargetsOf(resultSeams, geoms), [resultSeams, geoms]);
+  const resultLeaves = focus ? seamLeaves : leaves;
+  const joined = useMemo(
+    () => stepLayout(resultLeaves, resultSeams, geoms, { explode: 0, hand, twinHand }),
+    [resultLeaves, resultSeams, geoms, hand, twinHand],
   );
   const hasResult = storedSeams.length > 0 || !!pairSeam;
 
@@ -615,8 +538,18 @@ export default function SeamPicker({
   const loading = geo?.dep.status === 'pending';
   const drawn = layout.T.size > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
-  const selectedHand = selectedPiece ? hand.get(selectedPiece) : undefined;
-  const selectedTarget = selectedPiece ? handTargets.get(selectedPiece) : undefined;
+  // The selected piece's placement as drawn: its own, or its twin's mirrored.
+  const selectedLaid = selectedPiece ? joined.hand.get(selectedPiece) : undefined;
+  const selectedHand: HandOn | undefined =
+    selectedLaid?.place ?? (selectedPiece ? hand.get(selectedPiece) : undefined);
+  const selectedTarget: HandTarget | undefined =
+    selectedLaid?.target ??
+    (selectedPiece
+      ? pickHandTarget(handTargets.get(selectedPiece), hand.get(selectedPiece))
+      : undefined);
+  // A twin lends its placement to a piece with none: «inside» off is then an own placement.
+  const twinPlaced = (piece: string) =>
+    (geoms.get(piece)?.twinOf ?? []).some((t) => twinHand.has(t.key));
 
   const storedEntryFor = (piece: string) => {
     if (pairPieces.has(piece)) return undefined;
@@ -628,7 +561,7 @@ export default function SeamPicker({
     );
   };
 
-  const putHandOverride = (piece: string, next: HandPlace | undefined) => {
+  const putHandOverride = (piece: string, next: HandOn | undefined) => {
     setHandOverrides((current) => {
       const changed = new Map(current);
       changed.set(piece, next ?? null);
@@ -636,17 +569,40 @@ export default function SeamPicker({
     });
   };
 
+  /**
+   * The twin's seam stored on this step takes the mirrored placement too, while it has none of its
+   * own or still mirrors the piece's previous one; a twin's seam on another step is only drawn.
+   */
+  const twinWrite = (
+    piece: string,
+    partner: string | undefined,
+    next: HandPlace | undefined,
+    prev: HandPlace | undefined,
+    skip: string,
+  ): StoredSeam | null => {
+    if (!partner) return null;
+    const rows = stored.flatMap((item) => (item.row && item.key !== skip ? [item.row] : []));
+    const twin = twinRowOf(rows, piece, partner, next, geoms);
+    if (!twin) return null;
+    const was = twinRowOf(rows, piece, partner, prev, geoms)?.place;
+    if (twin.current && !sameHand(twin.current, was)) return null;
+    if (sameHand(twin.current, twin.place)) return null;
+    return withHandPlace(twin.row, twin.twin, twin.place);
+  };
+
   const persistStoredHand = async (
     piece: string,
     next: HandPlace | undefined,
     fallback: HandPlace | undefined,
+    partner: string | undefined,
   ) => {
     const item = storedEntryFor(piece);
     if (!item?.row || !scene.ctx) return;
     const row = withHandPlace(item.row, piece, next);
+    const twin = twinWrite(piece, partner, next, fallback, item.key);
     setBusy(true);
     setRefused('');
-    const ok = await scene.ctx.writes.upsert([row]);
+    const ok = await scene.ctx.writes.upsert(twin ? [row, twin] : [row]);
     setBusy(false);
     if (ok) return;
     putHandOverride(piece, fallback);
@@ -656,16 +612,23 @@ export default function SeamPicker({
   const editSelectedHand = (next: HandPlace | undefined) => {
     if (!selectedPiece || !selectedTarget || frozen || busy) return;
     const fallback = storedHand.get(selectedPiece);
-    putHandOverride(selectedPiece, next);
-    if (storedEntryFor(selectedPiece)) void persistStoredHand(selectedPiece, next, fallback);
+    const own = next && { ...next, partner: selectedTarget.partner };
+    putHandOverride(selectedPiece, own);
+    if (storedEntryFor(selectedPiece))
+      void persistStoredHand(selectedPiece, own, fallback, selectedTarget.partner);
   };
 
   const slideSelectedHand = (slideMm: number, done: boolean) => {
     if (!selectedPiece || !selectedTarget || frozen || busy) return;
-    const next = { ...(hand.get(selectedPiece) ?? DEFAULT_HAND), slideMm };
+    const next = { ...(selectedHand ?? DEFAULT_HAND), slideMm, partner: selectedTarget.partner };
     putHandOverride(selectedPiece, next);
     if (done && storedEntryFor(selectedPiece))
-      void persistStoredHand(selectedPiece, next, storedHand.get(selectedPiece));
+      void persistStoredHand(
+        selectedPiece,
+        next,
+        storedHand.get(selectedPiece),
+        selectedTarget.partner,
+      );
   };
 
   return (
@@ -886,27 +849,15 @@ export default function SeamPicker({
                     onClick={() =>
                       editSelectedHand(
                         selectedHand?.inside
-                          ? undefined
+                          ? selectedPiece && twinPlaced(selectedPiece)
+                            ? { ...selectedHand, inside: false }
+                            : undefined
                           : { ...(selectedHand ?? DEFAULT_HAND), inside: true },
                       )
                     }
                     disabled={!selectedTarget || frozen || busy}
                   >
                     inside
-                  </Button>
-                  <Button
-                    type='button'
-                    variant='underline'
-                    size='xs'
-                    onClick={() =>
-                      editSelectedHand({
-                        ...(selectedHand ?? DEFAULT_HAND),
-                        rotDeg: ((selectedHand?.rotDeg ?? 0) + 90) % 360,
-                      })
-                    }
-                    disabled={!selectedTarget || frozen || busy}
-                  >
-                    turn
                   </Button>
                   <Button
                     type='button'

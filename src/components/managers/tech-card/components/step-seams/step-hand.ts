@@ -1,6 +1,9 @@
-import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
+import { runsOfSide } from '../assembly-seams/seam-actions';
+import { parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 
 /** A piece placed by hand along one of its stored seam runs. */
 export type HandPlace = {
@@ -15,6 +18,12 @@ export type HandPlace = {
 };
 
 export const DEFAULT_HAND: HandPlace = { inside: false, rotDeg: 0, flip: false, slideMm: 0 };
+
+/**
+ * A hand placement as the layout reads it: on the seam to `partner` (a piece on the seam's other
+ * side) when it names one — a piece sewn twice keeps its placement on the seam it was set on.
+ */
+export type HandOn = HandPlace & { partner?: string };
 
 export const isHandSeamKind = (kind: StoredSeam['kind']) =>
   kind === 'edge' || kind === 'partial' || kind === 'composite';
@@ -45,15 +54,24 @@ export function decodeHandPlace(placement: SeamPlacement | undefined): HandPlace
   };
 }
 
-/** Every moved piece encoded on edge-like seam anchors, ready for `stepLayout`'s `hand` option. */
-export function handsFromSeams(rows: readonly StoredSeam[]): Map<string, HandPlace> {
-  const hand = new Map<string, HandPlace>();
+/**
+ * Every moved piece encoded on edge-like seam anchors, with the partner across the seam it was set
+ * on, ready for `stepLayout`'s `hand` option.
+ */
+export function handsFromSeams(rows: readonly StoredSeam[]): Map<string, HandOn> {
+  const hand = new Map<string, HandOn>();
   for (const row of rows) {
     if (!isHandSeamKind(row.kind)) continue;
-    for (const anchor of [...row.sideA, ...row.sideB]) {
-      const decoded = decodeHandPlace(anchor.placement);
-      if (decoded) hand.set(anchor.piece, decoded);
-    }
+    for (const [own, other] of [
+      [row.sideA, row.sideB],
+      [row.sideB, row.sideA],
+    ] as const)
+      for (const anchor of own) {
+        const decoded = decodeHandPlace(anchor.placement);
+        if (!decoded) continue;
+        const partner = other.find((a) => a.piece !== anchor.piece)?.piece;
+        hand.set(anchor.piece, partner ? { ...decoded, partner } : decoded);
+      }
   }
   return hand;
 }
@@ -181,3 +199,229 @@ export function snapHand(
   candidates.sort((a, b) => a.score - b.score);
   return candidates[0].placed;
 }
+
+// ── where a hand placement snaps: the seam it lies on ──
+
+/** The seam a piece's hand placement re-snaps on: its own longest run there, the partner's across. */
+export type HandTarget = {
+  piece: string;
+  /** The piece of the other side's longest run. */
+  partner: string;
+  /** Every piece on the seam's other side. */
+  across: string[];
+  part: PieceGeom;
+  partnerGeom: PieceGeom;
+  partRun: readonly Pt2[];
+  partnerRun: readonly Pt2[];
+};
+
+const edgeTargets = (ids: readonly TargetId[]): EdgeId[] =>
+  ids.filter((id): id is EdgeId => !parseInner(id));
+
+const bestRun = (
+  ids: readonly TargetId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  piece?: string,
+) => {
+  let best: ReturnType<typeof resolveEdge> = null;
+  for (const id of runsOfSide(edgeTargets(ids), geoms)) {
+    const run = resolveEdge(id, geoms);
+    if (!run || (piece && run.pieceKey !== piece) || (best && best.len >= run.len)) continue;
+    best = run;
+  }
+  return best;
+};
+
+/** `piece`'s target on a seam of two sides (null: not on it, or nothing to snap onto). */
+export function targetOfSides(
+  piece: string,
+  sides: { a: readonly TargetId[]; b: readonly TargetId[] },
+  geoms: ReadonlyMap<string, PieceGeom>,
+): HandTarget | null {
+  const ownSide = sides.a.some((id) => pieceOfTarget(id) === piece)
+    ? sides.a
+    : sides.b.some((id) => pieceOfTarget(id) === piece)
+      ? sides.b
+      : null;
+  if (!ownSide) return null;
+  const otherSide = ownSide === sides.a ? sides.b : sides.a;
+  const partRun = bestRun(ownSide, geoms, piece);
+  const partnerRun = bestRun(otherSide, geoms);
+  if (!partRun || !partnerRun || partRun.pieceKey === partnerRun.pieceKey) return null;
+  const part = geoms.get(partRun.pieceKey);
+  const partnerGeom = geoms.get(partnerRun.pieceKey);
+  if (!part || !partnerGeom) return null;
+  return {
+    piece: part.pieceKey,
+    partner: partnerGeom.pieceKey,
+    across: [...new Set(otherSide.map(pieceOfTarget))].filter((k) => k !== piece),
+    part,
+    partnerGeom,
+    partRun: partRun.pts,
+    partnerRun: partnerRun.pts,
+  };
+}
+
+/** Every piece's targets on these seams (edge-like ones: a surface or a closure has none), in order. */
+export function handTargetsOf(
+  seams: readonly SeamCandidate[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Map<string, HandTarget[]> {
+  const out = new Map<string, HandTarget[]>();
+  for (const seam of seams) {
+    if (seam.kind === 'surface' || seam.kind === 'closure-not-seam') continue;
+    const sides = { a: seam.aParts ?? [seam.a], b: seam.bParts ?? [seam.b] };
+    for (const piece of new Set([...sides.a, ...sides.b].map(pieceOfTarget))) {
+      const target = targetOfSides(piece, sides, geoms);
+      if (!target) continue;
+      const list = out.get(piece) ?? [];
+      list.push(target);
+      out.set(piece, list);
+    }
+  }
+  return out;
+}
+
+/**
+ * The seam a placement lies on: the last one to the partner it names, else the piece's last seam
+ * (none when the named partner is not across any of them — it is not sewn here yet).
+ */
+export function pickHandTarget(
+  targets: readonly HandTarget[] | undefined,
+  hand?: HandOn,
+): HandTarget | undefined {
+  if (!targets?.length) return undefined;
+  const want = hand?.partner;
+  if (!want) return targets[targets.length - 1];
+  for (let i = targets.length - 1; i >= 0; i--)
+    if (targets[i].across.includes(want)) return targets[i];
+  return undefined;
+}
+
+/**
+ * A twin's placement read for a piece with none of its own: `twin` (the left bag) placed by hand on
+ * the seam to `twinPartner` (the left back) lays this piece the same way on `target` when the seam's
+ * other side holds a twin of that partner (the right back). Along a mirrored partner the slide runs
+ * the other way: its run is digitised in the other direction.
+ */
+export function mirrorHand(
+  hand: HandOn,
+  target: HandTarget,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): HandOn | undefined {
+  const q = hand.partner;
+  let kind: 'mirror' | 'identical' | undefined;
+  for (const x of target.across) {
+    const link = geoms.get(x)?.twinOf.find((t) => (q ? t.key === q : true));
+    if (link) {
+      kind = link.kind;
+      break;
+    }
+  }
+  if (!kind) return undefined;
+  return {
+    inside: hand.inside,
+    rotDeg: hand.rotDeg,
+    flip: hand.flip,
+    slideMm: kind === 'mirror' ? -hand.slideMm : hand.slideMm,
+    partner: target.partner,
+  };
+}
+
+/** A hand placement as laid: what places the piece, on which seam, and whether a twin lent it. */
+export type LaidHand = { place: HandOn; target: HandTarget; twin: boolean };
+
+/**
+ * The hand placements a step lays, piece by piece: a piece's own (on the seam it names), else its
+ * twin's, mirrored — from `twinHand`, the card's placements anywhere (default: `hand`). `drawn`: a
+ * target whose partner is not drawn lays nothing.
+ */
+export function laidHands(
+  targets: ReadonlyMap<string, readonly HandTarget[]>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  hand: ReadonlyMap<string, HandOn>,
+  twinHand: ReadonlyMap<string, HandOn> = hand,
+  drawn: (piece: string) => boolean = () => true,
+): Map<string, LaidHand> {
+  const out = new Map<string, LaidHand>();
+  for (const [piece, all] of targets) {
+    if (!drawn(piece)) continue;
+    const list = all.filter((t) => drawn(t.partner));
+    const own = hand.get(piece);
+    if (own) {
+      const target = pickHandTarget(list, own);
+      if (target) out.set(piece, { place: own, target, twin: false });
+      continue;
+    }
+    // A twin's placement, on the last seam that matches it.
+    const twins = geoms.get(piece)?.twinOf ?? [];
+    let found: LaidHand | undefined;
+    for (let i = list.length - 1; i >= 0 && !found; i--)
+      for (const t of twins) {
+        const theirs = twinHand.get(t.key) ?? hand.get(t.key);
+        const place = theirs ? mirrorHand(theirs, list[i], geoms) : undefined;
+        if (place) {
+          found = { place, target: list[i], twin: true };
+          break;
+        }
+      }
+    if (found) out.set(piece, found);
+  }
+  return out;
+}
+
+/** Placements equal as stored (the partner they name aside). */
+export const sameHand = (a: HandPlace | undefined, b: HandPlace | undefined) =>
+  !a || !b
+    ? a === b
+    : a.inside === b.inside &&
+      normalizeHandRotation(a.rotDeg) === normalizeHandRotation(b.rotDeg) &&
+      a.flip === b.flip &&
+      Math.abs(a.slideMm - b.slideMm) < 0.05;
+
+/**
+ * The twin's seam among `rows` (a step's own stored seams) that a placement of `piece` across
+ * `partner` mirrors onto: a twin of the piece on one side, a twin of the partner on the other — with
+ * the twin and the placement it takes (null: no such seam).
+ */
+export function twinRowOf(
+  rows: readonly StoredSeam[],
+  piece: string,
+  partner: string,
+  hand: HandPlace | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): {
+  row: StoredSeam;
+  twin: string;
+  place: HandPlace | undefined;
+  current: HandPlace | undefined;
+} | null {
+  const twins = geoms.get(piece)?.twinOf ?? [];
+  const partnerTwins = geoms.get(partner)?.twinOf ?? [];
+  for (const row of rows) {
+    if (!isHandSeamKind(row.kind)) continue;
+    for (const [own, other] of [
+      [row.sideA, row.sideB],
+      [row.sideB, row.sideA],
+    ] as const) {
+      const twin = twins.find((t) => t.key !== piece && own.some((a) => a.piece === t.key));
+      const link = partnerTwins.find(
+        (t) => t.key !== partner && other.some((a) => a.piece === t.key),
+      );
+      if (!twin || !link) continue;
+      const current = decodeHandPlace(own.find((a) => a.piece === twin.key)?.placement);
+      const place = hand
+        ? { ...hand, slideMm: link.kind === 'mirror' ? -hand.slideMm : hand.slideMm }
+        : undefined;
+      return { row, twin: twin.key, place: place && strip(place), current };
+    }
+  }
+  return null;
+}
+
+const strip = ({ inside, rotDeg, flip, slideMm }: HandPlace): HandPlace => ({
+  inside,
+  rotDeg,
+  flip,
+  slideMm,
+});

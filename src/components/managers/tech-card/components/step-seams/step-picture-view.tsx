@@ -444,13 +444,17 @@ export function StepPictureSvg({
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A layer goes under its partner's outline: the partner's fill, the layer in grey, the partner's
   // outline again on top (its outer half, as the fills leave it).
+  // A piece laid by hand inside its partner within one unit is a layer too.
   const { base, under } = useMemo(() => {
     const layered = new Set(layout.layers.map(([l]) => l));
+    const laidIn = new Set(layout.pieceLayers.map(([k]) => k));
+    const isUnder = (p: { key: string; input: number }) =>
+      layered.has(p.input) || laidIn.has(p.key);
     return {
-      base: pieces.filter((p) => !layered.has(p.input)),
-      under: pieces.filter((p) => layered.has(p.input)),
+      base: pieces.filter((p) => !isUnder(p)),
+      under: pieces.filter(isUnder),
     };
-  }, [pieces, layout.layers]);
+  }, [pieces, layout.layers, layout.pieceLayers]);
   const maskId = `step-under-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
