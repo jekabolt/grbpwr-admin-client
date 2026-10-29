@@ -338,9 +338,56 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
   const namesOf = (picture: ReturnType<typeof sceneOf>) =>
     [...picture.layout.T.keys()].map((key) => model.pieces.get(key)?.name);
 
-  it('keeps readable operations 920 and 1010 unchanged', () => {
+  it('keeps operation 920 and removes the unmarked sleeve from operation 1010', () => {
     expect(namesOf(pictures.get(920)!)).toEqual(['FLP_R_MAIN']);
-    expect(namesOf(pictures.get(1010)!)).toEqual(['FLP_R_MAIN', 'SLV_R', 'FLP_R']);
+    expect(namesOf(pictures.get(1010)!)).toEqual(['FLP_R_MAIN', 'FLP_R']);
+  });
+
+  it.each([
+    [510, false],
+    [520, true],
+    [530, false],
+  ] as const)(
+    'keeps operation %i on the relevant left-front cluster',
+    (operationNumber, marked) => {
+      const source = joinedResult(input, 490);
+      const clusters = editorPictureClusters(source);
+      const row = model.rows.find((candidate) => candidate.n === operationNumber)!;
+      const action = editorActionMarks(row.action, source.geoms);
+      const markedPieces = new Set([...action.lines, ...action.glyphs].map((mark) => mark.piece));
+      const expected = marked
+        ? clusters.filter((cluster) => cluster.some((key) => markedPieces.has(key))).flat()
+        : clusters[0];
+
+      expect(new Set(pictures.get(operationNumber)!.layout.T.keys())).toEqual(new Set(expected));
+    },
+  );
+
+  it('keeps every non-join picture on marked clusters, or the largest unmarked cluster', () => {
+    let checked = 0;
+    for (const row of model.rows.filter((candidate) => !candidate.card)) {
+      const picture = pictures.get(row.n);
+      if (!picture) continue;
+      checked += 1;
+      const action = editorActionMarks(row.action, picture.geoms);
+      const markedPieces = new Set(
+        [...action.lines, ...action.glyphs]
+          .map((mark) => mark.piece)
+          .filter((key) => picture.layout.T.has(key)),
+      );
+      const clusters = editorPictureClusters(picture);
+
+      if (!markedPieces.size) {
+        expect(clusters, `op ${row.n}`).toHaveLength(1);
+        continue;
+      }
+      for (const cluster of clusters)
+        expect(
+          cluster.some((key) => markedPieces.has(key)),
+          `op ${row.n} · ${cluster.join(', ')}`,
+        ).toBe(true);
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('fills operation 1070 with only the largest sewn cluster', () => {

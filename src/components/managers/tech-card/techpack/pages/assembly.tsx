@@ -199,8 +199,7 @@ function pictureWithClusters(picture: StepPicture, clusters: readonly (readonly 
 
 function focusNonJoinPicture(picture: StepPicture, action: AsmAction | undefined): StepPicture {
   const clusters = editorPictureClusters(picture);
-  // One body, or one body with a single useful companion, is already readable (card 85: 920/1010).
-  if (clusters.length <= 2) return picture;
+  if (clusters.length <= 1) return picture;
   const marks = editorActionMarks(action, picture.geoms);
   const markedPieces = new Set(
     [...marks.lines, ...marks.glyphs]
