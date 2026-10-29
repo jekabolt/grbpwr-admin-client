@@ -2,6 +2,7 @@ import type { common_TechCard } from 'api/proto-http/admin';
 import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { toWire, type EdgeAnchor, type StoredSeam } from 'lib/seams';
 
+import card83 from './assembly-card83.fixture.json';
 import type { AsmPiece, AssemblyInput } from './derive-assembly';
 
 type CardSeam = NonNullable<common_TechCard['seams']>[number];
@@ -97,38 +98,39 @@ function inputOf(
   };
 }
 
-export function card83ChainFixture(): AssemblyInput {
-  const pieces = [
-    fixturePiece('BP', 'BP back', [{ k: 2, lenMm: 271.3, notches: 2, turnDeg: -42 }]),
-    fixturePiece('FR', 'FR front', [{ k: 1, lenMm: 154, notches: 2, turnDeg: -28 }]),
-    fixturePiece('FL', 'FL front', [{ k: 3, lenMm: 154, notches: 1, turnDeg: -28 }]),
-    fixturePiece(
-      'CLR',
-      'CLR collar',
-      [
-        { k: 5, lenMm: 414.6, turnDeg: 34 },
-        { k: 6, lenMm: 439.2, notches: 5, turnDeg: 96 },
-      ],
-      2_000,
-    ),
-  ];
-  return inputOf(pieces, [
-    {
-      operationNumber: 390,
-      operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
-      work: 'press_flat',
-      inputKeys: ['BP', 'FR', 'FL'],
-      outputUnitKey: 'BODY',
-    },
-    {
-      operationNumber: 400,
-      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
-      work: 'join_lockstitch',
-      zone: 'TECH_CARD_GARMENT_ZONE_NECKLINE',
-      inputKeys: ['BODY', 'CLR'],
-      outputUnitKey: 'BODY_WITH_COLLAR',
-    },
-  ]);
+/**
+ * Real card 83 (beta), captured from the print page's deriveAssembly input and trimmed to its
+ * sewing joins. No stored seams: op 400 attaches a two-layer collar (CLR + CLR_1) to «Base»,
+ * whose ten pieces include both sleeves with their two-layer cuffs (SLV_M_*).
+ */
+export function card83RealFixture(): AssemblyInput {
+  const raw = card83 as unknown as {
+    techCard: common_TechCard;
+    pieces: (Omit<AsmPiece, 'geom'> & {
+      geom: Omit<PieceGeom, 'edges'> & { edges: Omit<Edge, 'pts'>[] };
+    })[];
+    grainDeg: [string, number][];
+  };
+  // Edge points are stored once, in `rs`; every edge is the closed-ring slice rs[s..e].
+  const ringSlice = (rs: readonly Pt2[], s: number, e: number): Pt2[] =>
+    s <= e ? rs.slice(s, e + 1) : [...rs.slice(s), ...rs.slice(0, e + 1)];
+  const pieces = raw.pieces.map(
+    (piece): AsmPiece => ({
+      ...piece,
+      geom: {
+        ...piece.geom,
+        edges: piece.geom.edges.map((edge) => ({
+          ...edge,
+          pts: ringSlice(piece.geom.rs, edge.s, edge.e),
+        })),
+      },
+    }),
+  );
+  return {
+    techCard: raw.techCard,
+    pieces: new Map(pieces.map((piece) => [piece.key, piece])),
+    grainDeg: new Map(raw.grainDeg),
+  };
 }
 
 export function collarGrammarFixture(): AssemblyInput {
@@ -153,22 +155,11 @@ export function collarGrammarFixture(): AssemblyInput {
 
 export function roleNameFixture(): AssemblyInput {
   const pieces = [
-    fixturePiece('BP', 'BP back', [
-      { k: 0, lenMm: 103, notches: 2, turnDeg: -20, semanticRole: 'shoulder' },
-    ]),
-    fixturePiece('FR', 'FR front', [
-      { k: 0, lenMm: 50, notches: 1, turnDeg: 10, semanticRole: 'shoulder' },
-    ]),
-    fixturePiece('FL', 'FL', [
-      { k: 0, lenMm: 50, notches: 1, turnDeg: 10, semanticRole: 'shoulder' },
-    ]),
-    fixturePiece('YK', 'YK yoke', [
-      { k: 0, lenMm: 50, notches: 1, turnDeg: 10, semanticRole: 'shoulder' },
-    ]),
-    fixturePiece('PCK', 'PCK pocket', [
-      { k: 0, lenMm: 50, notches: 1, turnDeg: 10, semanticRole: 'shoulder' },
-    ]),
-    fixturePiece('SLV_M_R', 'SLV_M_R sleeve', [{ k: 0, lenMm: 100 }]),
+    fixturePiece('BP', 'BP back', [{ k: 0, lenMm: 300, notches: 1 }]),
+    fixturePiece('FR', 'FR front', [{ k: 0, lenMm: 150, notches: 1 }]),
+    fixturePiece('FL', 'FL', [{ k: 0, lenMm: 150, notches: 1 }]),
+    fixturePiece('HB', 'HB hemband', [{ k: 0, lenMm: 320, notches: 2 }]),
+    fixturePiece('SLV_UP_R', 'SLV_UP_R sleeve', [{ k: 0, lenMm: 100 }]),
     fixturePiece('SLV_R', 'SLV_R sleeve', [{ k: 0, lenMm: 126 }]),
   ];
   pieces.find((piece) => piece.key === 'FR')!.geom.twinOf = [{ key: 'FL', kind: 'mirror' }];
@@ -185,29 +176,29 @@ export function roleNameFixture(): AssemblyInput {
       operationNumber: 200,
       operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
       work: 'join_lockstitch',
-      zone: 'TECH_CARD_GARMENT_ZONE_SHOULDER',
-      inputKeys: ['BP', 'FRONT_PARTS'],
+      zone: 'TECH_CARD_GARMENT_ZONE_HEM',
+      inputKeys: ['HB', 'FRONT_PARTS'],
     },
     {
       operationNumber: 201,
       operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
       work: 'press_flat',
-      inputKeys: ['YK', 'PCK'],
+      inputKeys: ['FR', 'BP'],
       outputUnitKey: 'MIXED_PARTS',
     },
     {
       operationNumber: 205,
       operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
       work: 'join_lockstitch',
-      zone: 'TECH_CARD_GARMENT_ZONE_SHOULDER',
-      inputKeys: ['BP', 'MIXED_PARTS'],
+      zone: 'TECH_CARD_GARMENT_ZONE_HEM',
+      inputKeys: ['HB', 'MIXED_PARTS'],
     },
     {
       operationNumber: 210,
       operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
       work: 'join_lockstitch',
       zone: 'TECH_CARD_GARMENT_ZONE_OTHER',
-      inputKeys: ['SLV_M_R', 'SLV_R'],
+      inputKeys: ['SLV_UP_R', 'SLV_R'],
     },
   ]);
 }

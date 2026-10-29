@@ -1150,7 +1150,7 @@ function edgeRoleScore(part: SeamPart, piece: AsmPiece, terms: string): number {
   const straight = straightness(part.pts);
   const curve = Math.min(1, Math.abs(part.turn) / 90);
   const length = Math.min(1, part.lenMm / Math.max(Math.sqrt(piece.area), 1));
-  if (/bottom|hem/.test(terms)) return ny * 4 + horizontal * 2 + straight + length;
+  if (/bottom|hem|cuff|wrist/.test(terms)) return ny * 4 + horizontal * 2 + straight + length;
   if (/shoulder/.test(terms)) return (1 - ny) * 4 + horizontal * 2 + straight + length;
   if (/armhole/.test(terms))
     return curve * 3 + (1 - Math.abs(nx - 0.5) * 2) * -0.5 + (1 - ny) + length * 2;
@@ -1187,8 +1187,12 @@ function edgeNameScore(part: SeamPart, terms: string): number {
   return -8;
 }
 
+/** The way an edge curves; a straight edge (a few degrees of digitising noise) has none. */
+const bendOf = (turn: number) => (Math.abs(turn) < 3 ? 0 : Math.sign(turn));
+
 function pairEvidenceScore(a: SeamPart, b: SeamPart, terms: string): number {
-  if (!a.edgeName && !b.edgeName) return Math.sign(a.turn) !== Math.sign(b.turn) ? 1.5 : 0;
+  const opposite = bendOf(a.turn) !== bendOf(b.turn);
+  if (!a.edgeName && !b.edgeName) return opposite ? 1.5 : 0;
   const notchesA = a.notches ?? 0;
   const notchesB = b.notches ?? 0;
   const notchDifference = Math.abs(notchesA - notchesB);
@@ -1196,7 +1200,7 @@ function pairEvidenceScore(a: SeamPart, b: SeamPart, terms: string): number {
   const aCurve = Math.abs(a.turn);
   const bCurve = Math.abs(b.turn);
   const curveRatio = Math.min(aCurve, bCurve) / Math.max(aCurve, bCurve, 1);
-  const curvature = curveRatio * 2 + (Math.sign(a.turn) !== Math.sign(b.turn) ? 1.5 : 0);
+  const curvature = curveRatio * 2 + (opposite ? 1.5 : 0);
   return edgeNameScore(a, terms) + edgeNameScore(b, terms) + notch + curvature;
 }
 
@@ -1277,25 +1281,132 @@ function bestEdgePair(
   return best;
 }
 
-const CHAIN_TERMS =
-  /neck|collar|armhole|shoulder|waist|cuff|wrist|bottom|hem|inseam|outseam|side seam|join sides/;
+/**
+ * Boundaries that run across several panels of a unit, and the piece roles that carry them: the
+ * neckline crosses back + fronts (+ yoke), a hem band takes every bottom edge, a cuff takes the
+ * wrist of every sleeve panel. Shoulders and side seams pair one edge with one edge, never a chain.
+ */
+const CHAIN_CARRIERS: readonly { terms: RegExp; roles: readonly string[] }[] = [
+  { terms: /neck|collar/, roles: ['back', 'front', 'yoke'] },
+  { terms: /armhole/, roles: ['back', 'front', 'side', 'yoke'] },
+  { terms: /cuff|wrist/, roles: ['sleeve'] },
+  { terms: /waist/, roles: ['front', 'back', 'side', 'skirt'] },
+  { terms: /bottom|hem/, roles: ['front', 'back', 'side', 'skirt'] },
+];
 
-/** A boundary carried by several pieces of one input unit against one edge of a single piece. */
+/** `CLR` before `CLR_1`: the base name of a stack of identical cut copies. */
+const copyRank = (pieces: ReadonlyMap<string, AsmPiece>, item: Item) =>
+  /[_\s-]\d+$/.test(pieces.get(item.p)?.code ?? pieces.get(item.p)?.name ?? '') ? 1 : 0;
+
+/**
+ * One item per stack of identical layers. An upper and an under collar (`CLR` + `CLR_1`) or two
+ * cuff layers are sewn on as one edge: the boundary length is one layer's, not their sum.
+ */
+function layerReps(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): Item[] {
+  const unique = [...new Map(items.map((item) => [item.p, item])).values()];
+  const reps: Item[] = [];
+  for (const item of [...unique].sort((a, b) => copyRank(pieces, a) - copyRank(pieces, b)))
+    if (!reps.some((rep) => twinOfKind(pieces, item.p, rep.p, 'identical'))) reps.push(item);
+  return unique.filter((item) => reps.includes(item));
+}
+
+/** Edge ids (`piece#k`) an earlier seam of the unit already sewed; a run `piece#2+3` sews both. */
+function sewnEdgeIds(seams: readonly AsmSeam[]): Set<string> {
+  const out = new Set<string>();
+  for (const seam of seams)
+    for (const part of [...seam.a, ...seam.b]) {
+      const id = part.edgeId;
+      const at = id?.lastIndexOf('#') ?? -1;
+      if (!id || at < 0) continue;
+      for (const k of id.slice(at + 1).split('+')) out.add(`${id.slice(0, at)}#${k}`);
+    }
+  return out;
+}
+
+/**
+ * Notch evidence between the two sides of a boundary. Counts along a chain are not additive
+ * (a shared shoulder point, a CB mark), so they only resemble each other; but an edge with no
+ * notches against a notched side is almost never the sewn one (a collar's outer edge).
+ */
+function notchLikeness(a: number, b: number): number {
+  if (!a && !b) return 0;
+  if (!a || !b) return -4;
+  return (Math.min(a, b) / Math.max(a, b)) * 6;
+}
+
+/** A neck, waist or hem boundary crosses the centre line of a whole (unmirrored) piece. */
+const CENTRE_TERMS = /neck|collar|waist|bottom|hem/;
+
+/**
+ * How wholly the edge sits where the boundary runs: a neckline lies entirely near the top of a
+ * panel (an armhole reaches far down), a hem entirely near the bottom.
+ */
+function extentScore(part: SeamPart, piece: AsmPiece, terms: string): number {
+  const box = polygonBounds(piece.cut);
+  const height = Math.max(box.y1 - box.y0, 1e-6);
+  const ys = part.pts.map((point) => (point[1] - box.y0) / height);
+  if (/neck|collar/.test(terms)) return (1 - Math.max(...ys)) * 4;
+  if (/bottom|hem/.test(terms)) return Math.min(...ys) * 4;
+  return 0;
+}
+
+function spansCentre(part: SeamPart, piece: AsmPiece): boolean {
+  const box = polygonBounds(piece.cut);
+  const centre = (box.x0 + box.x1) / 2;
+  const xs = part.pts.map((point) => point[0]);
+  return Math.min(...xs) < centre - 1 && Math.max(...xs) > centre + 1;
+}
+
+/**
+ * A boundary carried by several panels of one input unit against one edge of a single incoming
+ * piece (or one stack of its identical layers). Every carrier panel of the unit gives exactly one
+ * free edge: a neckline is back neck + both front necks even when the collar is 140 mm short,
+ * so membership never follows length — the length gap is what the card must print.
+ */
 function bestUnitChainPair(
   pieces: ReadonlyMap<string, AsmPiece>,
   unit: readonly Item[],
   single: readonly Item[],
   terms: string,
+  roles: ReadonlyMap<string, string | null>,
+  sewn: ReadonlySet<string>,
 ): { a: SeamPart[]; b: SeamPart[] } | undefined {
-  const unitItems = [...new Map(unit.map((item) => [item.p, item])).values()];
-  if (!CHAIN_TERMS.test(terms) || unitItems.length < 2 || single.length !== 1) return undefined;
+  const carriers = CHAIN_CARRIERS.find((row) => row.terms.test(terms))?.roles;
+  const singleReps = layerReps(pieces, single);
+  if (!carriers || singleReps.length !== 1) return undefined;
+  const incoming = new Set(single.map((item) => item.p));
+  const hand = itemSide(pieces, singleReps[0]);
+  const unitItems = layerReps(pieces, unit).filter((item) => {
+    const role = roles.get(item.p);
+    if (incoming.has(item.p) || !role || !carriers.includes(role)) return false;
+    // a sided piece (a sleeve) takes only its own side of the unit
+    const side = itemSide(pieces, item);
+    return hand === 'N' || side === 'N' || side === hand;
+  });
+  if (unitItems.length < 2) return undefined;
+  const mirrored = (item: Item) =>
+    unitItems.some((other) => twinOfKind(pieces, item.p, other.p, 'mirror'));
+
+  type Candidate = { part: SeamPart; role: number };
   type State = { parts: SeamPart[]; role: number };
   let states: State[] = [{ parts: [], role: 0 }];
   for (const item of unitItems) {
-    const candidates = edgePartsOf(pieces, [item])
+    const piece = pieces.get(item.p)!;
+    const free = edgePartsOf(pieces, [item]).filter(
+      ({ part }) => !part.edgeId || !sewn.has(part.edgeId),
+    );
+    // a whole centre panel (a back without its mirror) is crossed by the boundary, not edged by it
+    const centred =
+      CENTRE_TERMS.test(terms) && !mirrored(item) && itemSide(pieces, item) === 'N'
+        ? free.filter(({ part }) => spansCentre(part, piece))
+        : free;
+    const candidates: Candidate[] = (centred.length ? centred : free)
       .map(({ part }) => ({
         part,
-        role: edgeRoleScore(part, pieces.get(part.piece)!, terms) + edgeNameScore(part, terms),
+        role:
+          edgeRoleScore(part, piece, terms) +
+          edgeNameScore(part, terms) +
+          extentScore(part, piece, terms),
       }))
       .sort((a, b) => b.role - a.role)
       .slice(0, 4);
@@ -1310,27 +1421,40 @@ function bestUnitChainPair(
       .sort((a, b) => b.role - a.role)
       .slice(0, 96);
   }
+  // mirrored panels carry the boundary as mirror images: their edges match in length
+  const mirrorPenalty = (parts: readonly SeamPart[]) =>
+    parts.reduce(
+      (sum, part, index) =>
+        sum +
+        parts
+          .slice(index + 1)
+          .filter(
+            (other) =>
+              twinOfKind(pieces, part.piece, other.piece, 'mirror') &&
+              Math.abs(part.lenMm - other.lenMm) > 0.02 * Math.max(part.lenMm, other.lenMm),
+          ).length *
+          8,
+      0,
+    );
 
   let best: { a: SeamPart[]; b: SeamPart[]; score: number } | undefined;
-  for (const edge of edgePartsOf(pieces, single)) {
+  for (const edge of edgePartsOf(pieces, singleReps)) {
+    if (edge.part.edgeId && sewn.has(edge.part.edgeId)) continue;
     for (const state of states) {
       const chainLength = state.parts.reduce((sum, part) => sum + part.lenMm, 0);
       const ratio =
         Math.min(chainLength, edge.part.lenMm) / Math.max(chainLength, edge.part.lenMm, 1);
       if (ratio < 0.55 || Math.min(chainLength, edge.part.lenMm) < 18) continue;
       const chainNotches = state.parts.reduce((sum, part) => sum + (part.notches ?? 0), 0);
-      const notchDifference = Math.abs(chainNotches - (edge.part.notches ?? 0));
-      const notch = notchDifference === 0 ? (chainNotches > 0 ? 12 : 1) : -3 * notchDifference;
-      const chainTurn = state.parts.reduce((sum, part) => sum + part.turn, 0);
-      const curveRatio =
-        Math.min(Math.abs(chainTurn), Math.abs(edge.part.turn)) /
-        Math.max(Math.abs(chainTurn), Math.abs(edge.part.turn), 1);
-      const curvature =
-        curveRatio * 3 + (Math.sign(chainTurn) !== Math.sign(edge.part.turn) ? 2 : 0);
       const singleRole =
         edgeRoleScore(edge.part, pieces.get(edge.part.piece)!, terms) +
         edgeNameScore(edge.part, terms);
-      const score = ratio * 12 + state.role / state.parts.length + singleRole + notch + curvature;
+      const score =
+        ratio * 12 +
+        state.role +
+        singleRole +
+        notchLikeness(chainNotches, edge.part.notches ?? 0) -
+        mirrorPenalty(state.parts);
       // The single-piece side stays first: Δ reads its length against the unit boundary.
       if (!best || score > best.score) best = { a: [edge.part], b: state.parts, score };
     }
@@ -1537,7 +1661,13 @@ function surfaceSeam(
   };
 }
 
-function inferredSeams(pieces: ReadonlyMap<string, AsmPiece>, groups: Item[][], op: Op): AsmSeam[] {
+function inferredSeams(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  groups: Item[][],
+  op: Op,
+  roles: ReadonlyMap<string, string | null> = new Map(),
+  sewn: ReadonlySet<string> = new Set(),
+): AsmSeam[] {
   if (!groups.length) return [];
   const terms = opTerms(op);
   if (groups.length === 1) {
@@ -1580,15 +1710,23 @@ function inferredSeams(pieces: ReadonlyMap<string, AsmPiece>, groups: Item[][], 
       .map((item) => `${pieces.get(item.p)?.code ?? ''} ${pieces.get(item.p)?.name ?? ''}`)
       .join(' ')
       .toLocaleLowerCase();
-    const pairTerms = /nck|clr|collar/.test(movingCodes) ? `${terms} neckline collar` : terms;
+    const cuffed = [moving, fixed].some(
+      (side) => side.length > 0 && side.every((item) => roles.get(item.p) === 'cuff'),
+    );
+    const pairTerms = /nck|clr|collar/.test(movingCodes)
+      ? `${terms} neckline collar`
+      : cuffed
+        ? `${terms} cuff`
+        : terms;
     const composite = /pck|pocket/.test(`${fixedCodes} ${movingCodes}`)
       ? bestCompositeEdgePair(pieces, fixed, moving, pairTerms)
       : undefined;
+    // the incoming side may be a stack of identical layers (upper + under collar) — still one edge
     const unitChain =
-      fixed.length > 1 && moving.length === 1
-        ? bestUnitChainPair(pieces, fixed, moving, pairTerms)
-        : moving.length > 1 && fixed.length === 1
-          ? bestUnitChainPair(pieces, moving, fixed, pairTerms)
+      layerReps(pieces, moving).length === 1
+        ? bestUnitChainPair(pieces, fixed, moving, pairTerms, roles, sewn)
+        : layerReps(pieces, fixed).length === 1
+          ? bestUnitChainPair(pieces, moving, fixed, pairTerms, roles, sewn)
           : undefined;
     const simple = composite ?? bestEdgePair(pieces, fixed, moving, pairTerms, usedFixed);
     const pair = unitChain ?? (simple ? { a: [simple.a], b: [simple.b] } : undefined);
@@ -1666,7 +1804,12 @@ function isCollarGroup(pieces: ReadonlyMap<string, AsmPiece>, items: readonly It
 
 type SeamSideName = { nominative: string; genitive: string; code: string };
 
-function pieceRoleMap(pieces: ReadonlyMap<string, AsmPiece>): ReadonlyMap<string, string | null> {
+const BODY_ROLES: ReadonlySet<string> = new Set(['front', 'back', 'side', 'yoke']);
+
+function pieceRoleMap(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  ops: readonly Op[] = [],
+): ReadonlyMap<string, string | null> {
   const readings = new Map(
     [...pieces].map(([key, piece]) => [key, readName(`${piece.code ?? ''} ${piece.name ?? ''}`)]),
   );
@@ -1685,6 +1828,23 @@ function pieceRoleMap(pieces: ReadonlyMap<string, AsmPiece>): ReadonlyMap<string
         roles.set(key, twinRole);
     }
   }
+  // A code may name only the garment family: SLV_M_R reads «sleeve», but the unit its layers are
+  // first sewn into is «right sleeve cuff». When pieces of one role form a unit that names a finer
+  // part (a sub-level role), that part is what the pieces are.
+  for (const op of ops) {
+    if (!op.out || !op.ins.length || op.ins.some((input) => input.kind !== 'piece')) continue;
+    const unitRole = readName(`${op.raw.outputUnitName ?? ''} ${op.out}`).role;
+    if (!unitRole || roleLevel.get(unitRole) !== 'sub') continue;
+    const ownRoles = new Set([...op.leaves].map((key) => roles.get(key) ?? null));
+    const [ownRole] = [...ownRoles];
+    if (
+      ownRoles.size !== 1 ||
+      ownRole === unitRole ||
+      (ownRole && roleLevel.get(ownRole) !== 'panel')
+    )
+      continue;
+    for (const key of op.leaves) if (pieces.has(key)) roles.set(key, unitRole);
+  }
   const present = new Set([...roles.values()].filter(Boolean));
   for (const context of ROLE_BOOK.contextRoles ?? []) {
     if (present.has(context.role)) continue;
@@ -1701,8 +1861,8 @@ function seamSideName(
   pieces: ReadonlyMap<string, AsmPiece>,
   terms: string,
   t: PdfT,
+  roles: ReadonlyMap<string, string | null> = pieceRoleMap(pieces),
 ): SeamSideName {
-  const roles = pieceRoleMap(pieces);
   const unique = (side: readonly SeamPart[]) => [...new Set(side.map((part) => part.piece))];
   const sidePieces = unique(parts);
   const otherPieces = unique(partner);
@@ -1730,8 +1890,11 @@ function seamSideName(
   if (stand && sideRoles.size === 1) return named('stand', sidePieces.length);
   if (collar && sideRoles.size === 1) return named('collar', sidePieces.length);
   if (otherCollar || otherStand) return named('neckline');
-  if (armholeOperation && sleeve && !otherSleeve) return named('sleeveCap');
-  if (armholeOperation && otherSleeve && !sleeve) return named('armhole');
+  // cap and armhole only where a sleeve meets the body, not where it meets its own cuff or tab
+  const body = [...sideRoles].some((role) => BODY_ROLES.has(role!));
+  const otherBody = [...otherRoles].some((role) => BODY_ROLES.has(role!));
+  if (armholeOperation && sleeve && !otherSleeve && otherBody) return named('sleeveCap');
+  if (armholeOperation && otherSleeve && !sleeve && body) return named('armhole');
 
   const groups = new Map<string, string[]>();
   const knownRoles = new Set(ROLE_BOOK.roles.map((row) => row.id));
@@ -1814,6 +1977,7 @@ function buildCards(
   const unitSeams = new Map<string, AsmSeam[]>();
   const producer = new Map(ops.flatMap((op) => (op.out ? [[op.out, op] as const] : [])));
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
+  const roles = pieceRoleMap(pieces, ops);
 
   for (const op of ops) {
     if (!op.join) {
@@ -1888,7 +2052,17 @@ function buildCards(
       ? storedSeams
       : inheritedSurface
         ? [inheritedSurface]
-        : inferredSeams(pieces, groups, op);
+        : inferredSeams(
+            pieces,
+            groups,
+            op,
+            roles,
+            sewnEdgeIds(
+              op.ins.flatMap((input) =>
+                input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : [],
+              ),
+            ),
+          );
     const gaps: Gap[] = [];
     const groupOf = (p: string) => groups.find((g) => g.some((it) => it.p === p));
     const itemOf = (p: string) => groups.flatMap((g) => g).find((it) => it.p === p);
@@ -2011,8 +2185,8 @@ function buildCards(
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const terms = opTerms(op);
-      const leftSide = seamSideName(s.a, s.b, pieces, terms, t);
-      const rightSide = seamSideName(s.b, s.a, pieces, terms, t);
+      const leftSide = seamSideName(s.a, s.b, pieces, terms, t, roles);
+      const rightSide = seamSideName(s.b, s.a, pieces, terms, t, roles);
       const sameName = leftSide.nominative === rightSide.nominative;
       const machineName = (side: SeamSideName) =>
         sameName && side.code ? `${side.nominative} (${side.code})` : side.nominative;
