@@ -6,14 +6,18 @@ const OWN_TEXT = [
 ] as const;
 
 export function visibleText(markup: string): string {
-  return markup
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/g, ' ')
-    .replace(/<[^>]+>/g, '\n')
-    .replaceAll('&amp;', '&')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#x27;', "'")
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>');
+  return (
+    markup
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/g, ' ')
+      // The label tape prints as sewn on the garment, in any sheet language (owner 28.10).
+      .replace(/<(\w+)\b[^>]*\btranslate="no"[^>]*>[^<]*<\/\1>/g, ' ')
+      .replace(/<[^>]+>/g, '\n')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+  );
 }
 
 function withoutFixtureText(node: string): string {

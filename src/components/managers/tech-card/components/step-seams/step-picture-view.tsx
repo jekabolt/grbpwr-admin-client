@@ -8,7 +8,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useWatch } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
@@ -19,9 +19,9 @@ import {
   innerId,
   inputGroups,
   parseInner,
+  pieceOfTarget,
   sewnBeforeStep,
   suggestStepPairs,
-  type StepProposal,
   usedEdgesBeforeStep,
   type FormOpLike,
   type Suggestion,
@@ -32,11 +32,11 @@ import {
   centroidOf,
   earlierInner,
   fitBox,
+  focusPieces,
   inputName,
   labelSpot,
   pathOf,
   seamOfSides,
-  seamSig,
   splitSeams,
   spotInside,
   spreadLabels,
@@ -57,6 +57,26 @@ export type SceneOp = FormOpLike & {
   topstitchMode?: string;
   work?: string;
 };
+
+function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
+  return JSON.stringify(
+    ops.slice(0, index + 1).map((op) => ({
+      inputKeys: op?.inputKeys,
+      outputUnitKey: op?.outputUnitKey,
+      seamKeys: op?.seamKeys,
+      operationNumber: op?.operationNumber,
+      assemblyBlockDetached: op?.assemblyBlockDetached,
+      fullnessRatio: op?.fullnessRatio,
+      operationType: op?.operationType,
+      machineType: op?.machineType,
+      zone: op?.zone,
+      seamClass: op?.seamClass,
+      topstitchMode: op?.topstitchMode,
+      work: op?.work,
+      outputUnitName: op?.outputUnitName,
+    })),
+  );
+}
 
 /** The edge ids and inner targets an anchor names on today's drawing (by its hint). */
 export function targetsOfAnchor(a: EdgeAnchor): TargetId[] {
@@ -81,6 +101,8 @@ export type StoredOnStep = {
   key: string;
   row: StoredSeam | undefined;
   sides: SeamSides;
+  /** The stored row resolved by the shared seam graph against today's geometry. */
+  candidates: SeamCandidate[];
   /** A surface seam's hand placement (on its anchors). */
   placement?: SeamPlacement;
 };
@@ -182,107 +204,136 @@ export function useSeamRows(): ReadonlyMap<string, StoredSeam> {
   );
 }
 
-export function useStepScene(index: number) {
-  const { graph } = useCardSeamGraph();
-  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as SceneOp[];
-  const op = ops[index];
-  const { ctx, geo, geoms, innerLines } = useCardGeoms();
-  const pieceKeys = useCardPieceKeys();
+export type StepPictureOptions = {
+  operations: readonly SceneOp[];
+  index: number;
+  pieceKeys: ReadonlySet<string>;
+  innerLines?: ReadonlyMap<string, Pt2[][]>;
+  byKey?: ReadonlyMap<string, StoredSeam>;
+  nameOf?: (pieceKey: string) => string;
+  ready?: boolean;
+  explode?: number;
+  rasterMm?: number;
+};
 
-  const cardName = ctx?.nameOf;
-  const pieceName = useCallback(
-    (k: string) => geo?.pieces.get(k)?.name || cardName?.(k) || k,
-    [geo?.pieces, cardName],
-  );
-  const rawGroups = inputGroups(ops, index, pieceKeys).map((g) => ({
-    ...g,
-    name: inputName(g.key, index, ops, (k) => pieceKeys.has(k), pieceName),
+/** The exact coarse reading used by the editor's compact SEAMS tile. */
+export const STEP_TILE_EXPLODE = 0.12;
+export const STEP_TILE_RASTER_MM = 4;
+
+/** Pieces the editor's SEAMS tile keeps for the seam targets it is showing. */
+export function focusedStepLeaves(
+  leaves: readonly (readonly string[])[],
+  targets: readonly TargetId[],
+  innerSeams: readonly SeamCandidate[],
+): string[][] {
+  if (!targets.length) return leaves.map((leaf) => [...leaf]);
+  const own = new Set(targets.map(pieceOfTarget));
+  return leaves.map((leaf) => focusPieces(leaf, own, innerSeams)).filter((leaf) => leaf.length > 0);
+}
+
+const candidateSides = (candidate: SeamCandidate): SeamSides => ({
+  a: candidate.aParts?.length ? [...candidate.aParts] : [candidate.a],
+  b: candidate.bParts?.length ? [...candidate.bParts] : [candidate.b],
+});
+
+/** Pure operation scene shared by the editor hook and the PDF renderer. */
+export function stepPictureOfOp(
+  op: SceneOp | undefined,
+  graph: { chosen: readonly SeamCandidate[] } | null | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  options: StepPictureOptions,
+) {
+  const {
+    operations: ops,
+    index,
+    pieceKeys,
+    innerLines = new Map<string, Pt2[][]>(),
+    byKey = new Map<string, StoredSeam>(),
+    nameOf = (key: string) => key,
+    ready = true,
+    explode = STEP_TILE_EXPLODE,
+    rasterMm = STEP_TILE_RASTER_MM,
+  } = options;
+  const active = op ?? ops[index];
+  const groups = inputGroups(ops, index, pieceKeys).map((group) => ({
+    ...group,
+    name: inputName(group.key, index, ops, (key) => pieceKeys.has(key), nameOf),
   }));
-  const groups = useStable(rawGroups, JSON.stringify(rawGroups));
-  const leaves = useMemo(() => groups.map((g) => g.pieces), [groups]);
-
-  const keysRaw = [...(op?.seamKeys ?? [])];
-  const keys = useStable(keysRaw, keysRaw.join(','));
+  const leaves = groups.map((group) => group.pieces);
+  const keys = [...(active?.seamKeys ?? [])];
   const ease = (() => {
-    const r = Number.parseFloat(String(op?.fullnessRatio ?? '').replace(',', '.'));
-    return Number.isFinite(r) && r > 0 ? r : null;
+    const ratio = Number.parseFloat(String(active?.fullnessRatio ?? '').replace(',', '.'));
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
   })();
-
-  const byKey = useSeamRows();
-  const stored = useMemo<StoredOnStep[]>(
-    () =>
-      keys.map((key) => {
-        const row = byKey.get(key);
-        return {
-          key,
-          row,
-          sides: {
+  const chosenByKey = new Map<string, SeamCandidate[]>();
+  for (const candidate of graph?.chosen ?? []) {
+    const key = candidate.provenance?.seamKey;
+    if (!key || !keys.includes(key) || candidate.kind === 'closure-not-seam') continue;
+    chosenByKey.set(key, [...(chosenByKey.get(key) ?? []), candidate]);
+  }
+  const stored: StoredOnStep[] = keys.map((key) => {
+    const row = byKey.get(key);
+    const candidates = chosenByKey.get(key) ?? [];
+    const resolved = candidates.map(candidateSides);
+    return {
+      key,
+      row,
+      sides: resolved.length
+        ? {
+            a: resolved.flatMap((sides) => sides.a),
+            b: resolved.flatMap((sides) => sides.b),
+          }
+        : {
             a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
             b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
           },
-          placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((x) => x.placement)
-            ?.placement,
-        };
-      }),
-    [keys, byKey],
-  );
-  // The edges a proposal and a partner must not take again: this step's stored seams and
-  // every edge earlier steps already sewed.
-  const usedRaw = [
-    ...new Set([
-      ...stored.flatMap((s) => [...s.sides.a, ...s.sides.b]).filter((t) => !parseInner(t)),
-      ...usedEdgesBeforeStep(ops, index, byKey),
-    ]),
-  ].sort();
-  const used = useStable(new Set<EdgeId>(usedRaw), usedRaw.join(','));
-
-  // Shown on a frozen card too (it only cannot be accepted there).
-  const ready = !!geo && geo.dep.status !== 'pending';
-  const sugsRaw = useMemo<StepProposal[]>(
-    () => (ready ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey) : []),
-    [ready, ops, index, pieceKeys, geoms, used, ease, byKey],
-  );
-  const suggestions = useStable(
-    sugsRaw,
-    sugsRaw.map((p) => `${p.a.join('+')}|${p.b.join('+')}|${p.aLen}|${p.bLen}|${p.hand}`).join(';'),
-  );
-  const suggestion: Suggestion | null = suggestions[0] ?? null;
-
-  // Inside each input: the engine's seams, and what earlier steps sewed there (stored or implied).
-  const split = useMemo(() => {
-    const s = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
-    return {
-      ...s,
-      inner: innerSeamsOf(s, ops, index, pieceKeys, leaves, geoms, innerLines, byKey),
+      candidates,
+      placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((anchor) => anchor.placement)
+        ?.placement,
     };
-  }, [graph?.chosen, leaves, geoms, byKey, innerLines, ops, index, pieceKeys]);
-  const innerSeams = useStable(split.inner, seamSig(split.inner));
-
-  const storedRaw = stored
-    .map((s) => seamOfSides(s.sides, geoms, innerLines, s.placement))
-    .filter((c): c is SeamCandidate => !!c);
-  const storedSeams = useStable(storedRaw, seamSig(storedRaw));
-
-  // What the card's graph reads between the inputs — the frame when the step has no seam of its
-  // own; none once a seam is stored (a stored row with no shape still counts).
-  const crossRaw = stored.length ? [] : split.cross.filter((c) => c.kind !== 'surface');
-  const crossSeams = useStable(crossRaw, seamSig(crossRaw));
-  // The frame along every proposal — together they make the step's unit whole (three inputs,
-  // two seams); the picker and a tile frame along the ones they show.
-  const proposalRaw = suggestions
-    .map((s) => seamOfSides(s, geoms, innerLines))
-    .filter((c): c is SeamCandidate => !!c);
-  const proposalSeams = useStable(proposalRaw, seamSig(proposalRaw));
-  const frameRaw = frameSeamsOf(split.inner, storedSeams, proposalSeams, crossSeams);
-  const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-
+  });
+  const used = new Set<EdgeId>([
+    ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]).filter((id) => !parseInner(id)),
+    ...usedEdgesBeforeStep(ops, index, byKey),
+  ]);
+  const suggestions = ready
+    ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
+    : [];
+  const suggestion: Suggestion | null = suggestions[0] ?? null;
+  const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
+  const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
+  const storedSeams = stored
+    .flatMap((seam) =>
+      seam.candidates.length
+        ? seam.candidates
+        : [seamOfSides(seam.sides, geoms, innerLines, seam.placement)],
+    )
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const crossSeams = stored.length
+    ? []
+    : split.cross.filter((candidate) => candidate.kind !== 'surface');
+  const proposalSeams = suggestions
+    .map((candidate) => seamOfSides(candidate, geoms, innerLines))
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const frameSeams = frameSeamsOf(
+    innerSeams,
+    storedSeams,
+    stored.length ? [] : proposalSeams,
+    crossSeams,
+  );
+  const marks: EdgeMark[] = (
+    stored.length
+      ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
+      : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
+  ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
+  const layoutLeaves = focusedStepLeaves(
+    leaves,
+    marks.map((mark) => mark.id),
+    innerSeams,
+  );
   return {
-    ctx,
-    op,
-    ops,
-    geo,
+    op: active,
     geoms,
-    pieceKeys,
     innerLines,
     groups,
     leaves,
@@ -298,7 +349,63 @@ export function useStepScene(index: number) {
     frameSeams,
     crossSeams,
     storedSeams,
+    marks,
+    layoutLeaves,
+    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm }),
+  };
+}
+
+export type StepPicture = ReturnType<typeof stepPictureOfOp>;
+
+export function useStepScene(index: number) {
+  const { graph } = useCardSeamGraph();
+  const { control, getValues } = useFormContext<TechCardFormData>();
+  // A 48-step quiz mounts one scene per strip tile. Subscribe each one only to the operation
+  // facts its drawing uses; notes, media and other form typing must not redraw the whole strip.
+  const opsSig = useWatch({
+    control,
+    name: 'operations',
+    compute: (value) => sceneOpsSignature((value ?? []) as SceneOp[], index),
+  });
+  // A fresh array per signature: setValue on a step mutates the form's array in place, so the raw
+  // reference would keep every memo below on the old step facts.
+  const ops = useMemo(
+    () => [...((getValues('operations') ?? []) as SceneOp[])],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opsSig, getValues],
+  );
+  const op = ops[index];
+  const { ctx, geo, geoms, innerLines } = useCardGeoms();
+  const pieceKeys = useCardPieceKeys();
+
+  const cardName = ctx?.nameOf;
+  const pieceName = useCallback(
+    (k: string) => geo?.pieces.get(k)?.name || cardName?.(k) || k,
+    [geo?.pieces, cardName],
+  );
+  const byKey = useSeamRows();
+  const ready = !!geo && geo.dep.status !== 'pending';
+  const picture = useMemo(
+    () =>
+      stepPictureOfOp(op, graph, geoms, {
+        operations: ops,
+        index,
+        pieceKeys,
+        innerLines,
+        byKey,
+        nameOf: pieceName,
+        ready,
+      }),
+    [op, graph, geoms, ops, index, pieceKeys, innerLines, byKey, pieceName, ready],
+  );
+
+  return {
+    ctx,
+    ops,
+    geo,
+    pieceKeys,
     pieceName,
+    ...picture,
   };
 }
 
@@ -362,6 +469,24 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 export type Tone = 'proposal' | 'pick' | 'stored';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
+export type PictureActionLine = {
+  id: string;
+  piece: string;
+  /** Piece geometry frame (mm, y up), before the picture layout affine. */
+  points: readonly Pt2[];
+  weight: 'ink' | 'heavy';
+  dashed?: boolean;
+  kind: string;
+};
+export type PictureActionGlyph = {
+  id: string;
+  piece: string;
+  /** Piece geometry frame (mm, y up), before the picture layout affine. */
+  point: Pt2;
+  kind: 'button' | 'buttonhole' | 'label';
+  /** Unit direction in the same piece frame; only a buttonhole reads it. */
+  direction?: Pt2;
+};
 
 type Look = {
   outline: number;
@@ -371,11 +496,13 @@ type Look = {
   dash: string;
   font: number;
 };
-const LOOK: Record<'canvas' | 'result' | 'tile', Look> = {
+const LOOK: Record<'canvas' | 'result' | 'tile' | 'print', Look> = {
   canvas: { outline: 3.2, hair: 0.8, mark: 3, stored: 3.5, dash: '9 6', font: 12 },
   result: { outline: 2.6, hair: 0.7, mark: 2.5, stored: 2.5, dash: '9 6', font: 11 },
   // A row tile marks a seam by colour only, never by weight (owner): marks at the outline width.
   tile: { outline: 1.3, hair: 0.35, mark: 1.3, stored: 1.3, dash: '3 2', font: 9 },
+  // The existing PDF weights: ordinary ink 1.75 px, active seam 3 px, monochrome hairlines.
+  print: { outline: 1.75, hair: 0.7, mark: 3, stored: 3, dash: '5 3', font: 9 },
 };
 
 const INK = 'var(--color-textColor)';
@@ -401,6 +528,8 @@ export function StepPictureSvg({
   geoms,
   innerLines,
   marks = [],
+  actionLines = [],
+  actionGlyphs = [],
   nos = [],
   names,
   namesBelow,
@@ -418,6 +547,8 @@ export function StepPictureSvg({
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   marks?: readonly EdgeMark[];
+  actionLines?: readonly PictureActionLine[];
+  actionGlyphs?: readonly PictureActionGlyph[];
   nos?: readonly NoMark[];
   names?: readonly string[];
   namesBelow?: boolean;
@@ -493,6 +624,26 @@ export function StepPictureSvg({
   const markLines = marks
     .map((m) => ({ m, pts: ptsOf(m.id) }))
     .filter((x): x is { m: EdgeMark; pts: Pt2[] } => !!x.pts);
+  const actionLinePaths = actionLines.flatMap((line) => {
+    const T = layout.T.get(line.piece);
+    return T && line.points.length
+      ? [{ line, points: line.points.map((point) => toPx(fit, apply(T, point))) }]
+      : [];
+  });
+  const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
+    const T = layout.T.get(glyph.piece);
+    if (!T) return [];
+    const at = toPx(fit, apply(T, glyph.point));
+    const direction = glyph.direction ?? ([1, 0] as Pt2);
+    const toward = toPx(
+      fit,
+      apply(T, [glyph.point[0] + direction[0], glyph.point[1] + direction[1]]),
+    );
+    const dx = toward[0] - at[0];
+    const dy = toward[1] - at[1];
+    const length = Math.hypot(dx, dy) || 1;
+    return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
+  });
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const labels = markLines
     .filter(({ m }) => m.label)
@@ -565,14 +716,14 @@ export function StepPictureSvg({
       </g>
       <g fill={FILL} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
         {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} />
+          <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
         ))}
       </g>
       {under.length > 0 && (
         <>
           <g fill={UNDER} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
             {under.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} />
+              <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
             ))}
           </g>
           <mask id={maskId} maskUnits='userSpaceOnUse' x={-w} y={-h} width={3 * w} height={3 * h}>
@@ -658,6 +809,78 @@ export function StepPictureSvg({
           data-seam-mark={m.tone}
         />
       ))}
+      {actionLinePaths.map(({ line, points }) => (
+        <path
+          key={`action-line:${line.id}`}
+          d={pathOf(points)}
+          fill='none'
+          stroke={INK}
+          strokeWidth={line.weight === 'heavy' ? L.mark : L.outline}
+          strokeDasharray={line.dashed ? '5 3' : undefined}
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-asm-mark={line.kind}
+          data-asm-piece={line.piece}
+        />
+      ))}
+      {actionGlyphSpots.map(({ glyph, at, direction }) => {
+        if (glyph.kind === 'button') {
+          const radius = 4.2;
+          return (
+            <g
+              key={`action-glyph:${glyph.id}`}
+              fill={FILL}
+              stroke={INK}
+              pointerEvents='none'
+              data-asm-mark='button'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+            >
+              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.mark} />
+              <path
+                d={`M${at[0] - radius * 0.55} ${at[1]}H${at[0] + radius * 0.55}M${at[0]} ${at[1] - radius * 0.55}V${at[1] + radius * 0.55}`}
+                fill='none'
+                strokeWidth={L.mark * 0.8}
+              />
+            </g>
+          );
+        }
+        if (glyph.kind === 'buttonhole') {
+          const half = 7;
+          return (
+            <path
+              key={`action-glyph:${glyph.id}`}
+              d={`M${at[0] - direction[0] * half} ${at[1] - direction[1] * half}L${at[0] + direction[0] * half} ${at[1] + direction[1] * half}`}
+              fill='none'
+              stroke={INK}
+              strokeWidth={L.mark}
+              strokeLinecap='round'
+              pointerEvents='none'
+              data-asm-mark='buttonhole'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+            />
+          );
+        }
+        return (
+          <rect
+            key={`action-glyph:${glyph.id}`}
+            x={at[0] - 9}
+            y={at[1] - 5.5}
+            width={18}
+            height={11}
+            fill={FILL}
+            stroke={INK}
+            strokeWidth={L.mark}
+            pointerEvents='none'
+            data-asm-mark='label'
+            data-asm-piece={glyph.piece}
+          />
+        );
+      })}
       {look !== 'tile' &&
         labels.map(({ m, s }, i) => (
           <text

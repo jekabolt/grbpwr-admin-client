@@ -94,10 +94,10 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
             </HeaderNote>
           }
         />
-        {groups.some((group) => group.role !== 'unassigned') && (
+        {groups.some((group) => group.key !== 'unassigned') && (
           <div className='mb-2 flex flex-wrap gap-x-6 gap-y-1 text-control'>
             {groups
-              .filter((group) => group.role !== 'unassigned')
+              .filter((group) => group.key !== 'unassigned')
               .map((group) => (
                 <span key={group.key} className='flex items-center gap-2 whitespace-nowrap'>
                   <b>{group.label}</b>
@@ -123,7 +123,7 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
             return (
               <section key={group.key} className='flex min-h-0 flex-none flex-col'>
                 <div className='flex flex-wrap items-baseline gap-x-3 border-b border-textColor py-1 text-micro uppercase tracking-label'>
-                  {group.role !== 'unassigned' && (
+                  {group.key !== 'unassigned' && (
                     <span>
                       <b>{group.label}</b>{' '}
                       {[own(group.name), own(group.composition), own(group.colour)]
@@ -179,7 +179,7 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
                           <span className='whitespace-nowrap text-textColor'>
                             {tile.qty != null && <b>{pcs(tile.qty, t)}</b>}
                             {tile.paired ? ' · L+R' : tile.symmetry && ` · ${tile.symmetry}`}
-                            {` · ${group.label}`}
+                            {group.key !== 'unassigned' && ` · ${group.label}`}
                             {tile.perimeterCm != null &&
                               ` · P ${formatNumber(tile.perimeterCm, 0)} cm`}
                           </span>

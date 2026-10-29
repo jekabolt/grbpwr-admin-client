@@ -6,11 +6,13 @@
 // gap marked seen stays seen across reloads and is left out of the paper's open count.
 
 import type { common_TechCard } from 'api/proto-http/admin';
+import { defaultLabelPart } from 'components/managers/tech-card/care-labels/label-parts';
 import type { ClientFinding } from '../components/finding-seen';
 import { pieceCode } from './derive-pieces';
-import { bomRefs, clean, pieceKey } from './derive-shared';
+import { bomRefs, clean, materialRole, pieceKey } from './derive-shared';
 import type { Gap, GapTarget } from './gaps';
 import { englishT, type PdfT } from './i18n';
+import { materialRoleText } from './i18n/vocabulary';
 
 /** The PDF's section names by number (document.tsx TOC). */
 export const GAP_SECTION: Readonly<Record<string, string>> = {
@@ -52,7 +54,8 @@ export function gapSubjects(card?: common_TechCard): (g: Gap) => string {
   // A piece by its printed code; a piece without one (the gap may be exactly that) by its name.
   const piece = new Map(
     (card?.techCard?.pieces ?? []).map(
-      (p, i) => [pieceKey(p, i), pieceCode(p.lineKey) || clean(p.name) || pieceKey(p, i)] as const,
+      (p, i) =>
+        [pieceKey(p, i), pieceCode(p.lineKey, p.name) || clean(p.name) || pieceKey(p, i)] as const,
     ),
   );
   return (g) => {
@@ -135,8 +138,12 @@ export function gapHref(t: GapTarget, cardId: number, origin: string): string {
   return `${origin}/tech-cards/${cardId}?${params.toString()}`;
 }
 
-/** The destination printed beside a PDF gap line: `construction · op 30`, `bom · SHELL`. */
-export function gapWhere(target: GapTarget, translate: PdfT = englishT): string {
+/** The destination printed beside a PDF gap line: `construction · op 30`, `bom · main · SHELL`. */
+export function gapWhere(
+  target: GapTarget,
+  translate: PdfT = englishT,
+  card?: common_TechCard,
+): string {
   const nav = gapNav(target);
   const tab =
     {
@@ -150,7 +157,18 @@ export function gapWhere(target: GapTarget, translate: PdfT = englishT): string 
       labels: translate('gaps.tabLabels'),
       signoff: translate('gaps.tabSignoff'),
     }[nav.tab] ?? nav.tab;
-  const detail = nav.extra?.op ? `${translate('assembly.op')} ${nav.extra.op}` : nav.extra?.bom;
+  if (nav.extra?.bom) {
+    const ref = card ? bomRefs(card).find((candidate) => candidate.key === nav.extra?.bom) : null;
+    const role = ref
+      ? materialRoleText(ref.item, materialRole(ref), translate)
+      : translate('common.material');
+    const part = ref ? defaultLabelPart(ref.item.section, ref.item.purpose) : 'NOT_ON_LABEL';
+    return translate('gaps.bomWhere', {
+      role,
+      part: part === 'NOT_ON_LABEL' ? '' : part,
+    }).replace(/\s*·\s*$/, '');
+  }
+  const detail = nav.extra?.op ? `${translate('assembly.op')} ${nav.extra.op}` : undefined;
   return detail ? `${tab} · ${detail}` : tab;
 }
 

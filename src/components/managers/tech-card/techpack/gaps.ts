@@ -143,7 +143,7 @@ export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
     sink,
   );
   const seamDeltas: QcSeamDelta[] = [...assembly.cards.values()]
-    .filter((card) => card.stop)
+    .filter((card) => card.metrics.some((metric) => metric.bad))
     .map((card) => ({ op: card.n, delta: card.metrics.find((metric) => metric.bad)?.delta ?? 0 }));
   deriveQcSignoffPage(
     {

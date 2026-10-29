@@ -327,7 +327,8 @@ export function derivePatternsMarkerPage(input: PatternInput, sink?: GapSink): P
   for (const fabric of fabrics) {
     if ((techCard.markers ?? []).some((marker) => fabricOf(marker.bomLineKey) === fabric)) continue;
     const cut = pieces.filter(
-      (piece, index) => materialForPiece(refs, primary, piece, index)?.key === fabric.ref.key,
+      (piece, index) =>
+        materialForPiece(refs, primary, piece, index, techCard)?.key === fabric.ref.key,
     );
     const gap = add('pdf_marker_missing', t('gaps.marker'), 'marker', [], fabric.ref.key);
     markers.push({

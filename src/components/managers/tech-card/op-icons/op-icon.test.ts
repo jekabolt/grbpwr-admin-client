@@ -58,7 +58,9 @@ describe('operation icon registry', () => {
       'SL',
     ]);
     expect(Object.keys(BAR_BASE).sort()).toEqual([
+      'faced_split',
       'hem_closed',
+      'hem_raw',
       'lapped_raw',
       'seam_one_side',
       'topstitch',

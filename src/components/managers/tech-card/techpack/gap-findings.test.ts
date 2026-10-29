@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { gapHref, gapNav, gapSubjects, gapsToClientFindings, gapWhere } from './gap-findings';
 import type { Gap } from './gaps';
+import { createPdfT } from './i18n';
 
 const gap = (over: Partial<Gap>): Gap =>
   ({
@@ -90,7 +91,27 @@ describe('gapHref / gapWhere', () => {
       'https://admin.beta.grbpwr.com/tech-cards/6?tab=bom&bom=SHELL',
     );
     expect(gapWhere({ tab: 'construction', op: 30, field: 'seam' })).toBe('construction · op 30');
-    expect(gapWhere({ tab: 'materials', bomLine: 'SHELL' })).toBe('bom · SHELL');
+    expect(gapWhere({ tab: 'materials', bomLine: 'SHELL' })).toBe('bom · material');
     expect(gapWhere({ tab: 'measurements' })).toBe('sizes');
+  });
+
+  it('prints a BOM role and label part, never its ULID', () => {
+    const lineKey = '01KZVT1QZWB5DX4YDRW3W4QNW1';
+    const card = {
+      techCard: {
+        bomItems: [
+          {
+            lineKey,
+            section: 'TECH_CARD_BOM_SECTION_FABRIC',
+            purpose: 'TECH_CARD_BOM_PURPOSE_MAIN',
+          },
+        ],
+      },
+    } as unknown as common_TechCard;
+    const where = gapWhere({ tab: 'materials', bomLine: lineKey }, createPdfT('ru'), card);
+
+    expect(where).toBe('BOM · основной материал · SHELL');
+    expect(where).not.toContain(lineKey);
+    expect(where).not.toMatch(/[0-9A-HJKMNP-TV-Z]{26}/i);
   });
 });

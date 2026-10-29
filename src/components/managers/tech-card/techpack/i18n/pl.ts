@@ -177,6 +177,7 @@ export const pl = {
     turnOut: 'wywrócić na prawą stronę',
     turnOutKey: 'Wywrócić',
     lengthDifference: 'różnica długości',
+    sidesKey: 'PS / LS',
     sides: 'prawa / lewa strona',
   },
   materials: {
@@ -207,6 +208,12 @@ export const pl = {
     unassigned: 'nieprzypisane',
     code: 'kod',
     dxf: 'DXF',
+    noMaterialLine: {
+      one: 'brak materiału: {count} element ({codes}) — przypisz w BOM',
+      few: 'brak materiału: {count} elementy ({codes}) — przypisz w BOM',
+      many: 'brak materiału: {count} elementów ({codes}) — przypisz w BOM',
+      other: 'brak materiału: {count} elementu ({codes}) — przypisz w BOM',
+    },
   },
   colourways: {
     title: 'warianty kolorystyczne',
@@ -292,10 +299,14 @@ export const pl = {
     icon: 'ikona',
     profile: 'profil {name}',
     asOperation: '{note} (jako {op})',
-    checkMismatch: 'Kontrola: {leftName} {left} / {rightName} {right} · Δ {delta}',
+    deltaMm: '{d} mm',
+    shorterThan: '{a} jest o {d} mm krótszy niż {b}',
+    partCollar: 'kołnierz',
+    partNeckline: 'dekolt',
+    partStand: 'stójka',
+    partSleeveCap: 'główka rękawa',
+    partArmhole: 'podkrój pachy',
     piece: 'element',
-    stop: 'WSTRZYMAJ',
-    patternMakerHold: '→ konstruktor odzieży · wstrzymaj {op}',
     resolvedBy: 'rozwiązał',
     resolvedDate: 'data',
     sewn: 'zszyte',
@@ -411,6 +422,7 @@ export const pl = {
     tabArtifacts: 'pliki',
     tabLabels: 'etykiety',
     tabSignoff: 'zatwierdzenie',
+    bomWhere: 'BOM · {role} · {part}',
   },
   notices: {
     openFindings: {

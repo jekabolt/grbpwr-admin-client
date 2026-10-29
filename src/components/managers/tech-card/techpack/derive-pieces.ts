@@ -67,9 +67,9 @@ const INTERNAL_PIECE_ID =
   /^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/i;
 
 /** A line key is useful as identity, but only a human-authored key is useful as a printed code. */
-export const pieceCode = (lineKey?: string): string => {
+export const pieceCode = (lineKey?: string, name?: string): string => {
   const value = clean(lineKey);
-  return INTERNAL_PIECE_ID.test(value) ? '' : value.toUpperCase();
+  return INTERNAL_PIECE_ID.test(value) ? clean(name) : value.toUpperCase();
 };
 
 /**
@@ -124,18 +124,41 @@ export function derivePieces(
     };
     return sink?.add(gap) ?? gap;
   };
+  const resolvedPieces = sourcePieces.map((piece, index) => ({
+    piece,
+    index,
+    ref: materialForPiece(refs, primary, piece, index, techCard),
+    code: pieceCode(piece.lineKey, piece.name),
+    pieceRef: clean(piece.lineKey) || `piece-${index + 1}`,
+  }));
+  const unassigned = resolvedPieces.filter(({ ref }) => !ref);
+  const unresolvedMaterialGap: Gap | undefined = unassigned.length
+    ? {
+        code: 'pdf_piece_material_missing',
+        refs: [...unassigned.map(({ pieceRef }) => `piece:${pieceRef}`), 'field:material'],
+        label: t('pieces.noMaterialLine', {
+          count: unassigned.length,
+          codes: unassigned
+            .map(({ code, piece }) => code || clean(piece.name))
+            .filter(Boolean)
+            .join(', '),
+        }),
+        section: '02',
+        target: { tab: 'pieces', field: 'material' },
+      }
+    : undefined;
+  const materialGap = unresolvedMaterialGap
+    ? sink?.add(unresolvedMaterialGap) ?? unresolvedMaterialGap
+    : undefined;
   const groups = [
     ...rollRefs.map((ref, index) => ({ ref, key: ref.key, label: alphaKey(index) })),
     { ref: null, key: 'unassigned', label: '!' },
   ]
     .map((group) => {
-      const pieces = sourcePieces.flatMap((piece, index) => {
-        const ref = materialForPiece(refs, primary, piece, index);
+      const pieces = resolvedPieces.flatMap(({ piece, index, ref, code, pieceRef }) => {
         if ((ref?.key ?? 'unassigned') !== group.key) return [];
         const shape = geometry?.shapeByKey?.get(pieceRefKey(clean(piece.lineKey))) ?? null;
         const qty = piece.piecesPerGarment ?? null;
-        const code = pieceCode(piece.lineKey);
-        const pieceRef = clean(piece.lineKey) || `piece-${index + 1}`;
         return [
           {
             key: pieceKey(piece, index),
@@ -152,7 +175,7 @@ export function derivePieces(
               !clean(piece.name) && add('pdf_piece_name_missing', t('gaps.name'), 'name', pieceRef),
               !code && add('asm_piece_no_code', t('gaps.code'), 'code', pieceRef),
               qty == null && add('pdf_piece_qty_missing', t('gaps.quantity'), 'qty', pieceRef),
-              !ref && add('pdf_piece_material_missing', t('gaps.material'), 'material', pieceRef),
+              !ref && materialGap,
               geometry?.shapeByKey &&
                 !shape &&
                 add('pdf_piece_dxf_missing', t('gaps.dxf'), 'dxf', pieceRef),

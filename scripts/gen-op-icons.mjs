@@ -271,7 +271,24 @@ const chip = Object.fromEntries(
 const topstitchBase = shapesOf('topstitch_0');
 const lappedBase = commonShapes(shapesOf('lapped ×2'), shapesOf('lapped ×3')).slice(0, 2);
 const hemBase = commonShapes(shapesOf('hem_turned ×2'), shapesOf('hem_turned ×3')).slice(0, 1);
+// A turned edge (collar, cuff, flap: two plies sewn face to face, turned, topstitched) and a single
+// raw-edge hem have no row cards on the sheet: their bars are drawn here, across the whole edge,
+// and the base drops the sheet's own one-row mark.
+const facedBase = shapesOf('faced_split').slice(0, 2);
+const hemRawBase = shapesOf('hem_raw').slice(0, 2);
+const vbars = (xs, y0, y1) =>
+  xs.map((x) => ({ type: 'p', d: `M${x} ${y0} V${y1}`, dashed: false }));
 const bars = {
+  faced: {
+    1: vbars([17], 3, 21),
+    2: vbars([17, 13.5], 3, 21),
+    3: vbars([17, 13.5, 10], 3, 21),
+  },
+  hem_raw: {
+    1: vbars([19], 6, 16),
+    2: vbars([20.5, 17.5], 6, 16),
+    3: vbars([21, 18.5, 16], 6, 16),
+  },
   topstitch: {
     1: subtract(topstitchBase, shapesOf('topstitch_1 · topstitch_raw')),
     2: subtract(topstitchBase, shapesOf('topstitch_2')),
@@ -348,7 +365,7 @@ const defineIcons = <K extends string>(icons: Record<K, readonly Shape[]>): Read
 export const ICONS = defineIcons({${orderedIcons.map(([key, shapes]) => `${quote(key)}:${shapesTs(shapes)}`).join(',')}});
 
 export type IconKey = keyof typeof ICONS;
-export type BarFamily = 'topstitch' | 'lapped_raw' | 'hem_closed';
+export type BarFamily = 'topstitch' | 'lapped_raw' | 'hem_closed' | 'faced' | 'hem_raw';
 
 export const ICON_ALIASES = {${orderedAliases.map(([alias, target]) => `${quote(alias)}:${quote(target)}`).join(',')}} as const;
 
@@ -369,6 +386,8 @@ export const BAR_BASE: Partial<Record<IconKey, { family: BarFamily; shapes: read
   topstitch:{family:'topstitch',shapes:ICONS.topstitch,zone:[10,17,7,22.5]},
   lapped_raw:{family:'lapped_raw',shapes:${shapesTs(lappedBase)},zone:[13,19,8,17]},
   hem_closed:{family:'hem_closed',shapes:${shapesTs(hemBase)},zone:[12,18.5,6,16]},
+  faced_split:{family:'faced',shapes:${shapesTs(facedBase)},zone:[10,17,3,21]},
+  hem_raw:{family:'hem_raw',shapes:${shapesTs(hemRawBase)},zone:[16,21,6,16]},
 };
 `;
 
@@ -404,7 +423,13 @@ const chipItems = Object.entries(chip)
     itemHtml(`chip ${key}`, pairHtml(pressBase, shapes.map(shapeHtml).join(''))),
   )
   .join('\n');
-const barBase = { topstitch: topstitchBase, lapped_raw: lappedBase, hem_closed: hemBase };
+const barBase = {
+  topstitch: topstitchBase,
+  lapped_raw: lappedBase,
+  hem_closed: hemBase,
+  faced: facedBase,
+  hem_raw: hemRawBase,
+};
 const barItems = Object.entries(bars)
   .flatMap(([family, rows]) =>
     [1, 2, 3, 4].map((row) => {

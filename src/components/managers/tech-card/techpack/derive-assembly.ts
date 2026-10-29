@@ -42,9 +42,10 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { readName } from 'lib/assembly-skeleton/skeleton/model';
+import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
+import type { Edge, PieceGeom, PieceMark } from 'lib/assembly-skeleton/types';
 import { unitDisplayName } from 'lib/assembly-unit-name';
-import { longAxisAngle } from 'lib/nesting/render/label-fit';
 import {
   contourSig,
   frameOf,
@@ -61,8 +62,10 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
-import { machineText, operationText, pressEquipmentText } from './i18n/vocabulary';
+import { partNoun, type PartNounId } from './i18n/part-nouns';
+import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -101,7 +104,9 @@ export type Tech =
   | 'topstitch'
   | 'buttonhole'
   | 'button'
+  | 'label'
   | 'bind'
+  | 'hem'
   | 'hand'
   | 'overlock'
   | 'sew'
@@ -114,7 +119,9 @@ export const VERB: Record<Tech, string> = {
   topstitch: 'Topstitch',
   buttonhole: 'Buttonholes',
   button: 'Sew buttons',
+  label: 'Attach label',
   bind: 'Bind edge',
+  hem: 'Hem',
   hand: 'Handwork',
   overlock: 'Overlock',
   sew: 'Sew',
@@ -127,7 +134,13 @@ export type SvgMarkup = { viewBox: string; body: string };
 export type SeamMetric = {
   letter: string;
   left: number;
+  leftName?: string;
+  leftNameGenitive?: string;
+  leftMachineName?: string;
   right?: number;
+  rightName?: string;
+  rightNameGenitive?: string;
+  rightMachineName?: string;
   delta?: number;
   bad: boolean;
   gap?: Gap;
@@ -180,6 +193,10 @@ type SeamPart = {
   share: number;
   /** Signed turn of the sewn run, degrees, + convex. */
   turn: number;
+  /** Current edge/run evidence, retained for inference diagnostics and tests. */
+  edgeId?: string;
+  edgeName?: string;
+  notches?: number;
 };
 
 type Placement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
@@ -193,9 +210,30 @@ type AsmSeam = {
   b: SeamPart[];
   pieces: string[];
   inner?: InnerTarget;
+  surfaceRole?: 'placement' | 'inner';
+  /** A confirmed stored decision recovered on its still-present hinted current edges. */
+  relaxedStored?: boolean;
 };
 
 type Item = { p: string; T: Matrix; old?: boolean };
+
+type CardInput = { pieces: string[]; label: string; incoming: boolean };
+type PlacementGlyph = {
+  id: string;
+  piece: string;
+  kind: 'button' | 'buttonhole' | 'label';
+  point: Pt;
+  angleDeg: number;
+};
+
+export type AsmAction = {
+  n: number;
+  tech: Tech;
+  raw: common_TechCardOperation;
+  edgeParts: SeamPart[];
+  placements: PlacementGlyph[];
+  missing?: 'seam' | 'position';
+};
 
 /** One join operation (sew / overlock) with its drawing. */
 export type JoinCard = {
@@ -205,7 +243,6 @@ export type JoinCard = {
   metrics: SeamMetric[];
   gaps: Gap[];
   blocks: { items: Item[]; name: string; op: number }[];
-  stop?: string;
   /** Two layers of one shape sewn round and turned to the face. */
   turn: boolean;
   /** A single piece sewn onto itself (a stored closure). */
@@ -214,6 +251,8 @@ export type JoinCard = {
   crop: boolean;
   /** Direct cut-piece inputs, numbered in operation order. */
   pieceNumbers: ReadonlyMap<string, number>;
+  inputs: CardInput[];
+  missing?: 'seam';
 };
 
 /** One row of the assembly table. */
@@ -223,6 +262,7 @@ export type AsmRow = {
   card?: JoinCard;
   /** What a non-joining op acts on, for its outline. */
   target?: { unit?: string; piece?: string; label?: string };
+  action?: AsmAction;
 };
 
 export type AssemblyModel = {
@@ -231,6 +271,7 @@ export type AssemblyModel = {
   cards: Map<number, JoinCard>;
   pieces: ReadonlyMap<string, AsmPiece>;
   units: Map<string, Item[]>;
+  targets: Map<number, Item[]>;
   /** Stored seams that did not resolve on today's pattern (not drawn). */
   unresolved: number;
   /** Every missing assembly fact, for the terminal Gaps list. */
@@ -302,7 +343,9 @@ const TECH_BY_WORK: Record<string, Tech> = {
   topstitch: 'topstitch',
   buttonhole: 'buttonhole',
   button_attach: 'button',
+  attach_label: 'label',
   bind_tape_edge: 'bind',
+  hem_turned: 'hem',
   hand_work: 'hand',
   overlock_serge: 'overlock',
 };
@@ -478,6 +521,9 @@ function partOf(hit: AnchorHit, geom: PieceGeom): SeamPart | null {
     lenMm: hit.lenMm * share,
     share,
     turn: turnOf(pts),
+    edgeId: run.id,
+    edgeName: run.edges.map(edgeNameOf).filter(Boolean).join(' + ') || undefined,
+    notches: run.notches,
   };
 }
 
@@ -490,6 +536,32 @@ function placementOf(anchor: unknown): Placement | undefined {
   const rotDeg = Number(placement.rotDeg ?? 0);
   if (![xMm, yMm, rotDeg].every(Number.isFinite)) return undefined;
   return { xMm, yMm, rotDeg, flip: Boolean(placement.flip) };
+}
+
+/**
+ * A confirmed seam can predate notch extraction or a harmless re-segmentation. Keep its decision
+ * when the hinted run still exists on the same piece and still has the anchored shape/length.
+ */
+function relaxedStoredHit(anchor: EdgeAnchor, geom: PieceGeom, grainDeg: number): AnchorHit | null {
+  const run = runById(geom, anchor.edgeHint, SEAMS.maxChain);
+  if (!run || anchor.samples.length !== 5) return null;
+  const ratio = run.lenMm / Math.max(anchor.lenMm, 1e-6);
+  if (ratio < 0.7 || ratio > 1.4) return null;
+  if (
+    Math.abs(anchor.turnDeg) >= 15 &&
+    Math.abs(run.turnDeg) >= 15 &&
+    Math.sign(anchor.turnDeg) !== Math.sign(run.turnDeg)
+  )
+    return null;
+  const samples = runSamples(frameOf(geom, grainDeg), run);
+  const best = FRAMES.map((frame) => ({
+    frame,
+    fit: rmsFit(inFrame(samples, frame), anchor.samples),
+  })).sort((a, b) => a.fit - b.fit)[0];
+  // The same-piece hint is accepted with the length band and turn direction above. Normalized
+  // samples may move substantially when the sewing contour or bbox replaces a cut contour.
+  if (!best) return null;
+  return hitOf(anchor, run, 'hint', best.frame, best.fit);
 }
 
 function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: number } {
@@ -508,7 +580,8 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
     const match = /\bop\s*(\d+)\b/i.exec(seam.note ?? '') ?? /^op(\d+)(?:\D|$)/i.exec(seam.seamKey);
     return match ? Number(match[1]) : undefined;
   };
-  const add = (seam: StoredSeam, ha: AnchorHit[], hb: AnchorHit[]) => {
+  const added = new Set<string>();
+  const add = (seam: StoredSeam, ha: AnchorHit[], hb: AnchorHit[], relaxedStored = false) => {
     const side = (hs: AnchorHit[]) =>
       hs
         .map((h) => {
@@ -527,11 +600,31 @@ function locateSeams(input: AssemblyInput): { seams: AsmSeam[]; unresolved: numb
       a,
       b,
       pieces: [...new Set([...a, ...b].map((p) => p.piece))],
+      relaxedStored,
     });
+    added.add(seam.seamKey);
     return true;
   };
   let unresolved = r.stale.length;
   for (const row of r.applied) if (row.candidate) add(row.seam, row.a, row.b);
+  for (const row of r.stale) {
+    const seam = row.seam;
+    if (added.has(seam.seamKey)) continue;
+    const side = (anchors: readonly EdgeAnchor[]) =>
+      anchors.map((anchor) => {
+        const geom = byKey.get(anchor.piece);
+        return geom ? relaxedStoredHit(anchor, geom, input.grainDeg.get(anchor.piece) ?? 0) : null;
+      });
+    const a = side(seam.sideA);
+    const b = side(seam.sideB);
+    if (
+      a.length &&
+      a.every((hit): hit is AnchorHit => !!hit) &&
+      b.every((hit): hit is AnchorHit => !!hit) &&
+      add(seam, a, b, true)
+    )
+      unresolved--;
+  }
   for (const o of r.orphan) {
     const s = o.seam;
     const one = s.sideA.length ? s.sideA : s.sideB;
@@ -642,12 +735,31 @@ function readOps(input: AssemblyInput): Op[] {
   return ops;
 }
 
-/** The join a stored seam belongs to: the first one that brings its two sides together. */
-function bindSeams(seams: AsmSeam[], joins: Op[]): Map<number, AsmSeam[]> {
+/** The join a stored seam belongs to: named zones/closures first, then the forming join. */
+function bindSeams(
+  seams: AsmSeam[],
+  joins: Op[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+): Map<number, AsmSeam[]> {
   const out = new Map<number, AsmSeam[]>();
   for (const s of seams) {
     const covers = (o: Op) => s.pieces.every((p) => o.leaves.has(p));
     const single = (o: Op) => o.ins.length === 1 && covers(o);
+    const connectsInputs = (o: Op) => {
+      if (!s.a.length || !s.b.length || !covers(o)) return false;
+      const groupsOf = (parts: readonly SeamPart[]) => {
+        const groups = new Set<number>();
+        for (const part of parts) {
+          const index = o.groups.findIndex((group) => group.has(part.piece));
+          if (index < 0) return null;
+          groups.add(index);
+        }
+        return groups;
+      };
+      const a = groupsOf(s.a);
+      const b = groupsOf(s.b);
+      return !!a && !!b && [...a].every((index) => !b.has(index));
+    };
     let op =
       s.opHint == null
         ? undefined
@@ -662,8 +774,28 @@ function bindSeams(seams: AsmSeam[], joins: Op[]): Map<number, AsmSeam[]> {
       const forms = (o: Op) =>
         covers(o) &&
         o.groups.every((g) => !([...A].some((p) => g.has(p)) && [...B].some((p) => g.has(p))));
-      op = joins.find(forms) ?? joins.find(single) ?? joins.find(covers);
-    } else op = joins.find(single) ?? joins.find(covers);
+      const namedClosure = joins
+        .filter(
+          (candidate) =>
+            single(candidate) && /shoulder|sleeve sides|armhole|neckline/.test(opTerms(candidate)),
+        )
+        .map((candidate) => ({
+          candidate,
+          role: [...s.a, ...s.b].reduce((best, part) => {
+            const piece = pieces.get(part.piece);
+            return piece ? Math.max(best, edgeRoleScore(part, piece, opTerms(candidate))) : best;
+          }, 0),
+        }))
+        .sort((a, b) => b.role - a.role)[0];
+      op =
+        joins.find(connectsInputs) ??
+        (s.relaxedStored
+          ? undefined
+          : (namedClosure && namedClosure.role >= 9 ? namedClosure.candidate : undefined) ??
+            joins.find(forms) ??
+            joins.find(single) ??
+            joins.find(covers));
+    } else op = s.relaxedStored ? undefined : joins.find(single) ?? joins.find(covers);
     if (op) out.set(op.n, [...(out.get(op.n) ?? []), s]);
   }
   return out;
@@ -706,28 +838,10 @@ function bounds(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]) {
 }
 
 type Bounds = ReturnType<typeof bounds>;
-type LabelSlot = Bounds;
-
-const PRINT_CODE_PX = 9.5;
 const PRINT_CODE_MIN_PX = (7 * 96) / 72;
-/** A 0.1 mm planning guard keeps the browser's real glyph box outside the required 1 mm. */
-const PRINT_CODE_CLEARANCE_PX = (1.1 * 96) / 25.4;
-const PRINT_UNIT_PX = 9.5;
-/** Outline weight of a silhouette as printed, px — the join thumbnails' own weight. */
+/** Outline weight of context geometry as printed, px. */
 const PRINT_SILHOUETTE_STROKE_PX = 1.4;
-const LABEL_CHAR_WIDTH = 0.62;
-const CODE_CHAR_WIDTH = 0.64;
-const CODE_HEIGHT_EM = 0.98;
 
-const labelWidth = (text: string, fontSize: number) => text.length * fontSize * LABEL_CHAR_WIDTH;
-const overlaps = (a: Bounds, b: Bounds, gap = 0) =>
-  a.x0 < b.x1 + gap && a.x1 > b.x0 - gap && a.y0 < b.y1 + gap && a.y1 > b.y0 - gap;
-const growBounds = (box: Bounds, extra: Bounds): Bounds => ({
-  x0: Math.min(box.x0, extra.x0),
-  y0: Math.min(box.y0, extra.y0),
-  x1: Math.max(box.x1, extra.x1),
-  y1: Math.max(box.y1, extra.y1),
-});
 const containFit = (frame: Bounds, box?: [number, number]) =>
   box
     ? Math.min(
@@ -736,45 +850,13 @@ const containFit = (frame: Bounds, box?: [number, number]) =>
       )
     : 0;
 
-type Span = [number, number];
-
-function spansAtX(polygon: readonly Pt[], x: number): Span[] {
-  const hits: number[] = [];
-  for (let index = 0; index < polygon.length; index++) {
-    const a = polygon[index];
-    const b = polygon[(index + 1) % polygon.length];
-    if (!((a[0] <= x && b[0] > x) || (b[0] <= x && a[0] > x))) continue;
-    hits.push(a[1] + ((x - a[0]) * (b[1] - a[1])) / (b[0] - a[0]));
-  }
-  hits.sort((a, b) => a - b);
-  const spans: Span[] = [];
-  for (let index = 0; index + 1 < hits.length; index += 2)
-    spans.push([hits[index], hits[index + 1]]);
-  return spans;
+function fitWithTopBand(frame: Bounds, box: [number, number] | undefined, topBandPx: number) {
+  if (!box) return { frame: { ...frame, y0: frame.y0 - topBandPx }, fit: 1 };
+  const width = Math.max(frame.x1 - frame.x0, 1e-6);
+  const height = Math.max(frame.y1 - frame.y0, 1e-6);
+  const fit = Math.max(Math.min(box[0] / width, Math.max(box[1] - topBandPx, 1) / height), 1e-6);
+  return { frame: { ...frame, y0: frame.y0 - topBandPx / fit }, fit };
 }
-
-function sharedSpans(samples: readonly Span[][]): Span[] {
-  let shared = samples[0] ?? [];
-  for (const sample of samples.slice(1)) {
-    const next: Span[] = [];
-    for (const a of shared)
-      for (const b of sample) {
-        const lo = Math.max(a[0], b[0]);
-        const hi = Math.min(a[1], b[1]);
-        if (lo < hi) next.push([lo, hi]);
-      }
-    shared = next;
-  }
-  return shared.sort((a, b) => b[1] - b[0] - (a[1] - a[0]));
-}
-
-const rotatePoint = (point: Pt, angleDeg: number): Pt => {
-  if (Math.abs(angleDeg) < 1e-9) return [...point];
-  const radians = (angleDeg * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return [point[0] * cos - point[1] * sin, point[0] * sin + point[1] * cos];
-};
 
 function polygonBounds(polygon: readonly Pt[]): Bounds {
   let x0 = Infinity;
@@ -788,354 +870,6 @@ function polygonBounds(polygon: readonly Pt[]): Bounds {
     y1 = Math.max(y1, y);
   }
   return Number.isFinite(x0) ? { x0, y0, x1, y1 } : { x0: 0, y0: 0, x1: 0, y1: 0 };
-}
-
-function pointInPolygon(point: Pt, polygon: readonly Pt[]): boolean {
-  let inside = false;
-  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
-    const a = polygon[index];
-    const b = polygon[previous];
-    if (
-      a[1] > point[1] !== b[1] > point[1] &&
-      point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0]
-    ) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-const orientation = (a: Pt, b: Pt, c: Pt) =>
-  (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-
-function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
-  const abC = orientation(a, b, c);
-  const abD = orientation(a, b, d);
-  const cdA = orientation(c, d, a);
-  const cdB = orientation(c, d, b);
-  return abC > 0 !== abD > 0 && cdA > 0 !== cdB > 0;
-}
-
-/** Exact containment for the clearance-expanded code rectangle in the piece outline. */
-function rectangleInsidePolygon(rectangle: Bounds, polygon: readonly Pt[]): boolean {
-  const corners: Pt[] = [
-    [rectangle.x0, rectangle.y0],
-    [rectangle.x1, rectangle.y0],
-    [rectangle.x1, rectangle.y1],
-    [rectangle.x0, rectangle.y1],
-  ];
-  if (corners.some((corner) => !pointInPolygon(corner, polygon))) return false;
-  for (let index = 0; index < polygon.length; index++) {
-    const a = polygon[index];
-    const b = polygon[(index + 1) % polygon.length];
-    if (
-      Math.max(a[0], b[0]) < rectangle.x0 ||
-      Math.min(a[0], b[0]) > rectangle.x1 ||
-      Math.max(a[1], b[1]) < rectangle.y0 ||
-      Math.min(a[1], b[1]) > rectangle.y1
-    ) {
-      continue;
-    }
-    for (let edge = 0; edge < corners.length; edge++) {
-      if (segmentsCross(a, b, corners[edge], corners[(edge + 1) % corners.length])) return false;
-    }
-  }
-  return true;
-}
-
-function rotatedLabelBounds(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  angleDeg: number,
-): Bounds {
-  const corners = (
-    [
-      [-width / 2, -height / 2],
-      [width / 2, -height / 2],
-      [width / 2, height / 2],
-      [-width / 2, height / 2],
-    ] satisfies Pt[]
-  ).map((point): Pt => {
-    const rotated = rotatePoint(point, angleDeg);
-    return [rotated[0] + x, rotated[1] + y];
-  });
-  return polygonBounds(corners);
-}
-
-function insideCodeSite(
-  polygon: readonly Pt[],
-  code: string,
-  fontSize: number,
-  clearance: number,
-  slots: readonly LabelSlot[],
-): { x: number; y: number; angle: number; slot: LabelSlot } | null {
-  const textWidth = code.length * fontSize * CODE_CHAR_WIDTH;
-  const textHeight = fontSize * CODE_HEIGHT_EM;
-  const longAngle = longAxisAngle(polygon.map(([x, y]) => ({ x, y })));
-  // Codes read left-to-right whenever the horizontal label fits. Only turn one onto the piece's
-  // long axis when the same clearance test proves that horizontal ink cannot fit.
-  const angles = Math.abs(longAngle) < 0.5 ? [0] : [0, longAngle];
-  for (const angleDeg of angles) {
-    const rotated = polygon.map((point) => rotatePoint(point, -angleDeg));
-    const rotatedBox = polygonBounds(rotated);
-    const halfWidth = textWidth / 2 + clearance;
-    const halfHeight = textHeight / 2 + clearance;
-    const available = rotatedBox.x1 - rotatedBox.x0 - halfWidth * 2;
-    if (available < 0 || rotatedBox.y1 - rotatedBox.y0 < halfHeight * 2) continue;
-    const candidates: Array<{ x: number; y: number; width: number; centerDistance: number }> = [];
-    const centerX = (rotatedBox.x0 + rotatedBox.x1) / 2;
-    const centerY = (rotatedBox.y0 + rotatedBox.y1) / 2;
-    for (let step = 0; step <= 32; step++) {
-      const x = rotatedBox.x0 + halfWidth + (available * step) / 32;
-      const spans = sharedSpans(
-        [-1, -0.5, 0, 0.5, 1].map((part) => spansAtX(rotated, x + halfWidth * part)),
-      );
-      for (const [lo, hi] of spans) {
-        if (hi - lo < halfHeight * 2) continue;
-        const y = Math.max(lo + halfHeight, Math.min(hi - halfHeight, centerY));
-        candidates.push({ x, y, width: hi - lo, centerDistance: Math.abs(x - centerX) });
-      }
-    }
-    candidates.sort((a, b) => b.width - a.width || a.centerDistance - b.centerDistance);
-    for (const candidate of candidates) {
-      const clearanceBox = {
-        x0: candidate.x - halfWidth,
-        x1: candidate.x + halfWidth,
-        y0: candidate.y - halfHeight,
-        y1: candidate.y + halfHeight,
-      };
-      if (!rectangleInsidePolygon(clearanceBox, rotated)) continue;
-      const center = rotatePoint([candidate.x, candidate.y], angleDeg);
-      const slot = rotatedLabelBounds(center[0], center[1], textWidth, textHeight, angleDeg);
-      if (slots.some((other) => overlaps(slot, other, fontSize * 0.12))) continue;
-      return { x: center[0], y: center[1], angle: angleDeg, slot };
-    }
-  }
-  return null;
-}
-
-function segmentCrossesBox(a: Pt, b: Pt, box: Bounds): boolean {
-  const corners: Pt[] = [
-    [box.x0, box.y0],
-    [box.x1, box.y0],
-    [box.x1, box.y1],
-    [box.x0, box.y1],
-  ];
-  return corners.some((corner, index) => segmentsCross(a, b, corner, corners[(index + 1) % 4]));
-}
-
-function belowCodeSite(
-  pieceBox: Bounds,
-  otherBoxes: readonly Bounds[],
-  code: string,
-  fontSize: number,
-  clearance: number,
-  slots: readonly LabelSlot[],
-  frame: Bounds,
-  leader: boolean,
-): { x: number; y: number; anchor: Pt; edge: Pt; slot: LabelSlot } {
-  const textWidth = code.length * fontSize * CODE_CHAR_WIDTH;
-  const cx = (pieceBox.x0 + pieceBox.x1) / 2;
-  const gap = Math.max(clearance, fontSize * 0.4);
-  const shifts = [0, -0.55, 0.55, -1.1, 1.1];
-  const candidate = (lane: number, shift: number) => {
-    const x = cx + shift * (textWidth + gap);
-    const y0 = pieceBox.y1 + gap + lane * fontSize * 1.45;
-    const slot = {
-      x0: x - textWidth / 2,
-      x1: x + textWidth / 2,
-      y0,
-      y1: y0 + fontSize * CODE_HEIGHT_EM,
-    };
-    const anchor: Pt = [Math.max(pieceBox.x0, Math.min(pieceBox.x1, x)), pieceBox.y1];
-    return { x, y: y0 + (fontSize * CODE_HEIGHT_EM) / 2, anchor, edge: [x, y0] as Pt, slot };
-  };
-  for (let lane = 0; lane < 6; lane++)
-    for (const shift of shifts) {
-      const site = candidate(lane, shift);
-      if (slots.some((other) => overlaps(site.slot, other, fontSize * 0.15))) continue;
-      if (otherBoxes.some((other) => overlaps(site.slot, other, fontSize * 0.08))) continue;
-      if (
-        leader &&
-        [...otherBoxes, ...slots].some((other) => segmentCrossesBox(site.anchor, site.edge, other))
-      ) {
-        continue;
-      }
-      return site;
-    }
-  const y0 = Math.max(pieceBox.y1, frame.y1) + gap;
-  const slot = {
-    x0: cx - textWidth / 2,
-    x1: cx + textWidth / 2,
-    y0,
-    y1: y0 + fontSize * CODE_HEIGHT_EM,
-  };
-  return {
-    x: cx,
-    y: y0 + (fontSize * CODE_HEIGHT_EM) / 2,
-    anchor: [cx, pieceBox.y1],
-    edge: [cx, y0],
-    slot,
-  };
-}
-
-function pieceCodeLabels(
-  pieces: ReadonlyMap<string, AsmPiece>,
-  items: readonly Item[],
-  frame: Bounds,
-  box?: [number, number],
-  reserved: readonly LabelSlot[] = [],
-  outsideLeader = false,
-  insideOnly = false,
-): { body: string; frame: Bounds; slots: LabelSlot[] } {
-  const span = Math.max(frame.x1 - frame.x0, frame.y1 - frame.y0, 1);
-  const pieceBoxes = items.map((item) => bounds(pieces, [item]));
-  const layout = (fit: number) => {
-    const slots: LabelSlot[] = [...reserved];
-    let outputFrame = { ...frame };
-    let body = '';
-    items.forEach((item, itemIndex) => {
-      const piece = pieces.get(item.p);
-      const code = piece?.code ?? '';
-      if (!piece || !code) return;
-      const polygon = piece.cut.map((point) => apply(item.T, point));
-      const pieceBox = pieceBoxes[itemIndex];
-      const clearance = PRINT_CODE_CLEARANCE_PX / fit;
-      let inside: ReturnType<typeof insideCodeSite> = null;
-      let fontSize = PRINT_CODE_PX / fit;
-      let printPx = PRINT_CODE_PX;
-      for (let step = 0; step < 4; step++) {
-        printPx = PRINT_CODE_PX - ((PRINT_CODE_PX - PRINT_CODE_MIN_PX) * step) / 3;
-        fontSize = printPx / fit;
-        inside = insideCodeSite(polygon, code, fontSize, clearance, slots);
-        if (inside) break;
-      }
-      if (inside) {
-        slots.push(inside.slot);
-        const transform =
-          Math.abs(inside.angle) >= 0.01
-            ? ` transform="rotate(${f2(inside.angle)} ${f2(inside.x)} ${f2(inside.y)})"`
-            : '';
-        body += `<text x="${f2(inside.x)}" y="${f2(inside.y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(printPx)}" data-asm-piece="${itemIndex}" data-asm-code-placement="inside"${transform}>${xml(code)}</text>`;
-        return;
-      }
-      if (insideOnly) return;
-      fontSize = PRINT_CODE_MIN_PX / fit;
-      const outside = belowCodeSite(
-        pieceBox,
-        pieceBoxes.filter((_, index) => index !== itemIndex),
-        code,
-        fontSize,
-        clearance,
-        slots,
-        frame,
-        outsideLeader,
-      );
-      slots.push(outside.slot);
-      outputFrame = growBounds(outputFrame, outside.slot);
-      if (outsideLeader)
-        body += `<path d="M${f2(outside.anchor[0])} ${f2(outside.anchor[1])} L${f2(outside.edge[0])} ${f2(outside.edge[1])}" class="tpa-sl tpa-fn tpa-asm-code-leader" stroke-width="${f2(fontSize * 0.08)}"/>`;
-      body += `<text x="${f2(outside.x)}" y="${f2(outside.y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(PRINT_CODE_MIN_PX)}" data-asm-piece="${itemIndex}" data-asm-code-placement="outside">${xml(code)}</text>`;
-    });
-    return { body, frame: outputFrame, slots };
-  };
-  let fit = box ? containFit(frame, box) : (PRINT_CODE_PX * 22) / span;
-  fit = Math.max(fit, 1e-6);
-  let result = layout(fit);
-  if (box)
-    for (let pass = 0; pass < 12; pass++) {
-      const nextFit = Math.max(containFit(result.frame, box), 1e-6);
-      if (Math.abs(nextFit - fit) / fit < 0.0005) break;
-      fit = nextFit;
-      result = layout(fit);
-    }
-  return result;
-}
-
-function pieceNumberBadges(
-  pieces: ReadonlyMap<string, AsmPiece>,
-  items: readonly Item[],
-  numbers: ReadonlyMap<string, number>,
-  frame: Bounds,
-  box?: [number, number],
-): { body: string; slots: LabelSlot[] } {
-  const fit = Math.max(box ? containFit(frame, box) : 1, 1e-6);
-  const slots: LabelSlot[] = [];
-  let body = '';
-  for (const item of items) {
-    const number = numbers.get(item.p);
-    const piece = pieces.get(item.p);
-    if (!number || !piece) continue;
-    const polygon = piece.cut.map((point) => apply(item.T, point));
-    let site: ReturnType<typeof insideCodeSite> = null;
-    let printPx = 13;
-    for (const candidatePx of [13, 11.5, 10, 9]) {
-      const fontSize = candidatePx / fit;
-      site = insideCodeSite(polygon, '88', fontSize, PRINT_CODE_CLEARANCE_PX / fit, slots);
-      if (site) {
-        printPx = candidatePx;
-        break;
-      }
-    }
-    if (!site) {
-      const pieceBox = bounds(pieces, [item]);
-      const x = (pieceBox.x0 + pieceBox.x1) / 2;
-      const y = (pieceBox.y0 + pieceBox.y1) / 2;
-      const side = 9 / fit;
-      site = {
-        x,
-        y,
-        angle: 0,
-        slot: { x0: x - side / 2, x1: x + side / 2, y0: y - side / 2, y1: y + side / 2 },
-      };
-      printPx = 9;
-    }
-    const side = (printPx * 1.25) / fit;
-    const slot = {
-      x0: site.x - side / 2,
-      x1: site.x + side / 2,
-      y0: site.y - side / 2,
-      y1: site.y + side / 2,
-    };
-    slots.push(slot);
-    body +=
-      `<rect x="${f2(slot.x0)}" y="${f2(slot.y0)}" width="${f2(side)}" height="${f2(side)}" class="tpa-fk" data-asm-piece-number="${number}"/>` +
-      `<text x="${f2(site.x)}" y="${f2(site.y)}" font-size="${f2((printPx * 0.82) / fit)}" class="tpa-fw" text-anchor="middle" dominant-baseline="central" font-family="FeatureMono, monospace" font-weight="700">${number}</text>`;
-  }
-  return { body, slots };
-}
-
-function wrappedLabel(
-  text: string,
-  available: number,
-  fontSize: number,
-): { lines: string[]; fontSize: number } {
-  const minFontSize = (7 * 96) / 72;
-  const split = (size: number) => {
-    const maxChars = Math.max(1, Math.floor(available / Math.max(size * LABEL_CHAR_WIDTH, 1e-6)));
-    if (text.length <= maxChars) return [text];
-    const words = text.split(/\s+/).filter(Boolean);
-    if (words.length < 2) return [text.slice(0, maxChars), text.slice(maxChars)].filter(Boolean);
-    let best = 1;
-    let difference = Infinity;
-    for (let index = 1; index < words.length; index++) {
-      const a = words.slice(0, index).join(' ');
-      const b = words.slice(index).join(' ');
-      const overflow = Math.max(0, a.length - maxChars) + Math.max(0, b.length - maxChars);
-      const score = overflow * 100 + Math.abs(a.length - b.length);
-      if (score < difference) {
-        best = index;
-        difference = score;
-      }
-    }
-    return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
-  };
-  const initial = split(fontSize);
-  if (initial.every((line) => labelWidth(line, fontSize) <= available))
-    return { lines: initial, fontSize };
-  return { lines: split(minFontSize), fontSize: minFontSize };
 }
 
 const centerOf = (pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): Pt => {
@@ -1359,7 +1093,840 @@ function twinOfKind(
   return !!pieces.get(a)?.geom.twinOf.some((t) => t.key === b && t.kind === kind);
 }
 
-type Built = { cards: Map<number, JoinCard>; units: Map<string, Item[]> };
+type EdgePart = { item: Item; part: SeamPart };
+
+/** Optional importer/POM names outrank shape when an edge carries them. */
+function edgeNameOf(edge: Edge): string {
+  const named = edge as Edge & {
+    role?: string;
+    name?: string;
+    label?: string;
+    semanticRole?: string;
+  };
+  return [named.semanticRole, named.role, named.name, named.label].filter(Boolean).join(' ');
+}
+
+function edgePartsOf(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): EdgePart[] {
+  return items.flatMap((item) => {
+    const piece = pieces.get(item.p);
+    return (piece?.geom.edges ?? []).flatMap((edge) => {
+      const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+      return pts.length < 2
+        ? []
+        : [
+            {
+              item,
+              part: {
+                piece: item.p,
+                pts,
+                lenMm: edge.lenMm,
+                share: 1,
+                turn: turnOf(pts),
+                edgeId: edge.id,
+                edgeName: edgeNameOf(edge) || undefined,
+                notches: edge.notchesMm.length,
+              },
+            },
+          ];
+    });
+  });
+}
+
+function opTerms(op: Op): string {
+  return `${op.raw.zone ?? ''} ${op.raw.note ?? ''} ${op.work}`.toLocaleLowerCase();
+}
+
+function edgeRoleScore(part: SeamPart, piece: AsmPiece, terms: string): number {
+  const box = polygonBounds(piece.cut);
+  const centre: Pt = [
+    part.pts.reduce((sum, point) => sum + point[0], 0) / part.pts.length,
+    part.pts.reduce((sum, point) => sum + point[1], 0) / part.pts.length,
+  ];
+  const nx = (centre[0] - box.x0) / Math.max(box.x1 - box.x0, 1e-6);
+  const ny = (centre[1] - box.y0) / Math.max(box.y1 - box.y0, 1e-6);
+  const chord = sub(part.pts[part.pts.length - 1], part.pts[0]);
+  const horizontal = Math.abs(chord[0]) / Math.max(Math.hypot(chord[0], chord[1]), 1e-6);
+  const vertical = 1 - horizontal;
+  const straight = straightness(part.pts);
+  const curve = Math.min(1, Math.abs(part.turn) / 90);
+  const length = Math.min(1, part.lenMm / Math.max(Math.sqrt(piece.area), 1));
+  if (/bottom|hem|cuff|wrist/.test(terms)) return ny * 4 + horizontal * 2 + straight + length;
+  if (/shoulder/.test(terms)) return (1 - ny) * 4 + horizontal * 2 + straight + length;
+  if (/armhole/.test(terms))
+    return curve * 3 + (1 - Math.abs(nx - 0.5) * 2) * -0.5 + (1 - ny) + length * 2;
+  if (/neck|collar/.test(terms))
+    return (1 - ny) * 3 + (1 - Math.abs(nx - 0.5) * 2) + curve * 2 + length;
+  if (/sleeve sides|join sides|\bsides?\b/.test(terms))
+    return vertical * 3 + straight * 2 + length * 2 + Math.abs(nx - 0.5);
+  return length * 3 + straight + curve * 0.5;
+}
+
+function edgeNameScore(part: SeamPart, terms: string): number {
+  const name = part.edgeName?.toLocaleLowerCase();
+  if (!name) return 0;
+  const wanted = /neck|collar/.test(terms)
+    ? /neckline|collar[-_ ]?neck|stand[-_ ]?neck|\bneck\b/
+    : /armhole/.test(terms)
+      ? /armhole|sleeve[-_ ]?cap|\bcap\b/
+      : /shoulder/.test(terms)
+        ? /shoulder/
+        : /waist/.test(terms)
+          ? /waist|strip[-_ ]?attach/
+          : /cuff|wrist/.test(terms)
+            ? /cuff|wrist|strip[-_ ]?attach/
+            : /bottom|hem/.test(terms)
+              ? /hem|bottom|strip[-_ ]?attach/
+              : /inseam/.test(terms)
+                ? /inseam/
+                : /outseam|side seam|join sides/.test(terms)
+                  ? /outseam|side|underarm|sleeve[-_ ]?seam/
+                  : undefined;
+  if (!wanted) return 0;
+  if (wanted.test(name)) return 40;
+  if (/neck|collar/.test(terms) && /outer|stand[-_ ]?top|collar[-_ ]?outer/.test(name)) return -40;
+  return -8;
+}
+
+/** The way an edge curves; a straight edge (a few degrees of digitising noise) has none. */
+const bendOf = (turn: number) => (Math.abs(turn) < 3 ? 0 : Math.sign(turn));
+
+function pairEvidenceScore(a: SeamPart, b: SeamPart, terms: string): number {
+  const opposite = bendOf(a.turn) !== bendOf(b.turn);
+  if (!a.edgeName && !b.edgeName) return opposite ? 1.5 : 0;
+  const notchesA = a.notches ?? 0;
+  const notchesB = b.notches ?? 0;
+  const notchDifference = Math.abs(notchesA - notchesB);
+  const notch = notchDifference === 0 ? (notchesA > 0 ? 6 : 1) : -2 * notchDifference;
+  const aCurve = Math.abs(a.turn);
+  const bCurve = Math.abs(b.turn);
+  const curveRatio = Math.min(aCurve, bCurve) / Math.max(aCurve, bCurve, 1);
+  const curvature = curveRatio * 2 + (opposite ? 1.5 : 0);
+  return edgeNameScore(a, terms) + edgeNameScore(b, terms) + notch + curvature;
+}
+
+function bestZoneParts(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  items: readonly Item[],
+  terms: string,
+): SeamPart[] {
+  const unitBox = bounds(pieces, items);
+  const wanted = /shoulder|armholes|left and right|sleeve sides|join sides/.test(terms) ? 2 : 1;
+  const scored = edgePartsOf(pieces, items).map(({ item, part }) => {
+    const world = part.pts.map((point) => apply(item.T, point));
+    const centre: Pt = [
+      world.reduce((sum, point) => sum + point[0], 0) / world.length,
+      world.reduce((sum, point) => sum + point[1], 0) / world.length,
+    ];
+    const nx = (centre[0] - unitBox.x0) / Math.max(unitBox.x1 - unitBox.x0, 1e-6);
+    const ny = (centre[1] - unitBox.y0) / Math.max(unitBox.y1 - unitBox.y0, 1e-6);
+    const chord = sub(world[world.length - 1], world[0]);
+    const horizontal = Math.abs(chord[0]) / Math.max(Math.hypot(chord[0], chord[1]), 1e-6);
+    const vertical = 1 - horizontal;
+    let global = 0;
+    if (/bottom|hem/.test(terms)) global = ny * 10 + horizontal * 3;
+    else if (/shoulder/.test(terms)) global = (1 - ny) * 8 + horizontal * 2;
+    else if (/armhole/.test(terms)) global = (1 - Math.abs(nx - 0.5) * 2) * -2 + (1 - ny) * 2;
+    else if (/neck|collar/.test(terms)) global = (1 - ny) * 6 + (1 - Math.abs(nx - 0.5) * 2) * 2;
+    else if (/sleeve sides|join sides|\bsides?\b/.test(terms))
+      global = vertical * 4 + Math.abs(nx - 0.5) * 2;
+    return {
+      part,
+      score: edgeRoleScore(part, pieces.get(part.piece)!, terms) + global,
+      horizontal,
+      vertical,
+      nx,
+      ny,
+      curve: Math.abs(part.turn),
+    };
+  });
+  const qualified = scored.filter((row) => {
+    if (/bottom|hem/.test(terms)) return row.horizontal >= 0.55 && row.ny >= 0.55;
+    if (/shoulder/.test(terms)) return row.horizontal >= 0.55 && row.ny <= 0.5;
+    if (/armhole/.test(terms)) return row.curve >= 8 && row.ny <= 0.72;
+    if (/sleeve sides|join sides|\bsides?\b/.test(terms)) return row.vertical >= 0.55;
+    return true;
+  });
+  const ranked = (qualified.length >= wanted ? qualified : scored).sort(
+    (a, b) => b.score - a.score,
+  );
+  const chosen: SeamPart[] = [];
+  for (const row of ranked) {
+    if (chosen.some((part) => part.piece === row.part.piece && wanted > 1)) continue;
+    chosen.push(row.part);
+    if (chosen.length >= wanted) break;
+  }
+  return chosen;
+}
+
+function bestEdgePair(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  fixed: readonly Item[],
+  moving: readonly Item[],
+  terms: string,
+  excludedFixed: ReadonlySet<string> = new Set(),
+): { a: SeamPart; b: SeamPart } | undefined {
+  let best: { a: SeamPart; b: SeamPart; score: number } | undefined;
+  for (const a of edgePartsOf(pieces, fixed))
+    for (const b of edgePartsOf(pieces, moving)) {
+      const fixedKey = `${a.part.piece}:${pathData(a.part.pts)}`;
+      if (excludedFixed.has(fixedKey)) continue;
+      const ratio = Math.min(a.part.lenMm, b.part.lenMm) / Math.max(a.part.lenMm, b.part.lenMm, 1);
+      if (ratio < 0.55 || Math.min(a.part.lenMm, b.part.lenMm) < 18) continue;
+      const role =
+        edgeRoleScore(a.part, pieces.get(a.part.piece)!, terms) +
+        edgeRoleScore(b.part, pieces.get(b.part.piece)!, terms);
+      const score = ratio * 9 + role + pairEvidenceScore(a.part, b.part, terms);
+      if (!best || score > best.score) best = { a: a.part, b: b.part, score };
+    }
+  return best;
+}
+
+/**
+ * Boundaries that run across several panels of a unit, and the piece roles that carry them: the
+ * neckline crosses back + fronts (+ yoke), a hem band takes every bottom edge, a cuff takes the
+ * wrist of every sleeve panel. Shoulders and side seams pair one edge with one edge, never a chain.
+ */
+const CHAIN_CARRIERS: readonly { terms: RegExp; roles: readonly string[] }[] = [
+  { terms: /neck|collar/, roles: ['back', 'front', 'yoke'] },
+  { terms: /armhole/, roles: ['back', 'front', 'side', 'yoke'] },
+  { terms: /cuff|wrist/, roles: ['sleeve'] },
+  { terms: /waist/, roles: ['front', 'back', 'side', 'skirt'] },
+  { terms: /bottom|hem/, roles: ['front', 'back', 'side', 'skirt'] },
+];
+
+/** `CLR` before `CLR_1`: the base name of a stack of identical cut copies. */
+const copyRank = (pieces: ReadonlyMap<string, AsmPiece>, item: Item) =>
+  /[_\s-]\d+$/.test(pieces.get(item.p)?.code ?? pieces.get(item.p)?.name ?? '') ? 1 : 0;
+
+/**
+ * One item per stack of identical layers. An upper and an under collar (`CLR` + `CLR_1`) or two
+ * cuff layers are sewn on as one edge: the boundary length is one layer's, not their sum.
+ */
+function layerReps(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): Item[] {
+  const unique = [...new Map(items.map((item) => [item.p, item])).values()];
+  const reps: Item[] = [];
+  for (const item of [...unique].sort((a, b) => copyRank(pieces, a) - copyRank(pieces, b)))
+    if (!reps.some((rep) => twinOfKind(pieces, item.p, rep.p, 'identical'))) reps.push(item);
+  return unique.filter((item) => reps.includes(item));
+}
+
+/** Edge ids (`piece#k`) an earlier seam of the unit already sewed; a run `piece#2+3` sews both. */
+function sewnEdgeIds(seams: readonly AsmSeam[]): Set<string> {
+  const out = new Set<string>();
+  for (const seam of seams)
+    for (const part of [...seam.a, ...seam.b]) {
+      const id = part.edgeId;
+      const at = id?.lastIndexOf('#') ?? -1;
+      if (!id || at < 0) continue;
+      for (const k of id.slice(at + 1).split('+')) out.add(`${id.slice(0, at)}#${k}`);
+    }
+  return out;
+}
+
+/**
+ * Notch evidence between the two sides of a boundary. Counts along a chain are not additive
+ * (a shared shoulder point, a CB mark), so they only resemble each other; but an edge with no
+ * notches against a notched side is almost never the sewn one (a collar's outer edge).
+ */
+function notchLikeness(a: number, b: number): number {
+  if (!a && !b) return 0;
+  if (!a || !b) return -4;
+  return (Math.min(a, b) / Math.max(a, b)) * 6;
+}
+
+/** A neck, waist or hem boundary crosses the centre line of a whole (unmirrored) piece. */
+const CENTRE_TERMS = /neck|collar|waist|bottom|hem/;
+
+/**
+ * How wholly the edge sits where the boundary runs: a neckline lies entirely near the top of a
+ * panel (an armhole reaches far down), a hem entirely near the bottom.
+ */
+function extentScore(part: SeamPart, piece: AsmPiece, terms: string): number {
+  const box = polygonBounds(piece.cut);
+  const height = Math.max(box.y1 - box.y0, 1e-6);
+  const ys = part.pts.map((point) => (point[1] - box.y0) / height);
+  if (/neck|collar/.test(terms)) return (1 - Math.max(...ys)) * 4;
+  if (/bottom|hem/.test(terms)) return Math.min(...ys) * 4;
+  return 0;
+}
+
+function spansCentre(part: SeamPart, piece: AsmPiece): boolean {
+  const box = polygonBounds(piece.cut);
+  const centre = (box.x0 + box.x1) / 2;
+  const xs = part.pts.map((point) => point[0]);
+  return Math.min(...xs) < centre - 1 && Math.max(...xs) > centre + 1;
+}
+
+/**
+ * A boundary carried by several panels of one input unit against one edge of a single incoming
+ * piece (or one stack of its identical layers). Every carrier panel of the unit gives exactly one
+ * free edge: a neckline is back neck + both front necks even when the collar is 140 mm short,
+ * so membership never follows length — the length gap is what the card must print.
+ */
+function bestUnitChainPair(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  unit: readonly Item[],
+  single: readonly Item[],
+  terms: string,
+  roles: ReadonlyMap<string, string | null>,
+  sewn: ReadonlySet<string>,
+  usedFixed: ReadonlySet<string>,
+): { a: SeamPart[]; b: SeamPart[] } | undefined {
+  const carriers = CHAIN_CARRIERS.find((row) => row.terms.test(terms))?.roles;
+  const singleReps = layerReps(pieces, single);
+  if (!carriers || singleReps.length !== 1) return undefined;
+  const incoming = new Set(single.map((item) => item.p));
+  const hand = itemSide(pieces, singleReps[0]);
+  const unitItems = layerReps(pieces, unit).filter((item) => {
+    const role = roles.get(item.p);
+    if (incoming.has(item.p) || !role || !carriers.includes(role)) return false;
+    // a sided piece (a sleeve) takes only its own side of the unit
+    const side = itemSide(pieces, item);
+    return hand === 'N' || side === 'N' || side === hand;
+  });
+  if (unitItems.length < 2) return undefined;
+  const mirrored = (item: Item) =>
+    unitItems.some((other) => twinOfKind(pieces, item.p, other.p, 'mirror'));
+
+  type Candidate = { part: SeamPart; role: number };
+  type State = { parts: SeamPart[]; role: number };
+  let states: State[] = [{ parts: [], role: 0 }];
+  for (const item of unitItems) {
+    const piece = pieces.get(item.p)!;
+    const free = edgePartsOf(pieces, [item]).filter(
+      ({ part }) =>
+        (!part.edgeId || !sewn.has(part.edgeId)) &&
+        !usedFixed.has(`${part.piece}:${pathData(part.pts)}`),
+    );
+    // a whole centre panel (a back without its mirror) is crossed by the boundary, not edged by it
+    const centred =
+      CENTRE_TERMS.test(terms) && !mirrored(item) && itemSide(pieces, item) === 'N'
+        ? free.filter(({ part }) => spansCentre(part, piece))
+        : free;
+    const candidates: Candidate[] = (centred.length ? centred : free)
+      .map(({ part }) => ({
+        part,
+        role:
+          edgeRoleScore(part, piece, terms) +
+          edgeNameScore(part, terms) +
+          extentScore(part, piece, terms),
+      }))
+      .sort((a, b) => b.role - a.role)
+      .slice(0, 4);
+    if (!candidates.length) return undefined;
+    states = states
+      .flatMap((state) =>
+        candidates.map((candidate) => ({
+          parts: [...state.parts, candidate.part],
+          role: state.role + candidate.role,
+        })),
+      )
+      .sort((a, b) => b.role - a.role)
+      .slice(0, 96);
+  }
+  // mirrored panels carry the boundary as mirror images: their edges match in length
+  const mirrorPenalty = (parts: readonly SeamPart[]) =>
+    parts.reduce(
+      (sum, part, index) =>
+        sum +
+        parts
+          .slice(index + 1)
+          .filter(
+            (other) =>
+              twinOfKind(pieces, part.piece, other.piece, 'mirror') &&
+              Math.abs(part.lenMm - other.lenMm) > 0.02 * Math.max(part.lenMm, other.lenMm),
+          ).length *
+          8,
+      0,
+    );
+
+  let best: { a: SeamPart[]; b: SeamPart[]; score: number } | undefined;
+  for (const edge of edgePartsOf(pieces, singleReps)) {
+    if (edge.part.edgeId && sewn.has(edge.part.edgeId)) continue;
+    for (const state of states) {
+      const chainLength = state.parts.reduce((sum, part) => sum + part.lenMm, 0);
+      const ratio =
+        Math.min(chainLength, edge.part.lenMm) / Math.max(chainLength, edge.part.lenMm, 1);
+      if (ratio < 0.55 || Math.min(chainLength, edge.part.lenMm) < 18) continue;
+      const chainNotches = state.parts.reduce((sum, part) => sum + (part.notches ?? 0), 0);
+      const singleRole =
+        edgeRoleScore(edge.part, pieces.get(edge.part.piece)!, terms) +
+        edgeNameScore(edge.part, terms);
+      const score =
+        ratio * 12 +
+        state.role +
+        singleRole +
+        notchLikeness(chainNotches, edge.part.notches ?? 0) -
+        mirrorPenalty(state.parts);
+      // The single-piece side stays first: Δ reads its length against the unit boundary.
+      if (!best || score > best.score) best = { a: [edge.part], b: state.parts, score };
+    }
+  }
+  return best;
+}
+
+type EdgeChain = EdgePart & { lengths: [number, number] };
+
+function joinedEdgePath(a: readonly Pt[], b: readonly Pt[]): Pt[] | undefined {
+  const reverse = (points: readonly Pt[]) => [...points].reverse();
+  const candidates: [number, Pt[]][] = [
+    [dist(a[a.length - 1], b[0]), [...a, ...b.slice(1)]],
+    [dist(a[a.length - 1], b[b.length - 1]), [...a, ...reverse(b).slice(1)]],
+    [dist(a[0], b[b.length - 1]), [...b, ...a.slice(1)]],
+    [dist(a[0], b[0]), [...reverse(a), ...b.slice(1)]],
+  ];
+  const best = candidates.sort((left, right) => left[0] - right[0])[0];
+  return best[0] <= 2 ? best[1] : undefined;
+}
+
+/** Two adjacent edge runs that form one sewn curve, such as a pocket upper to its front panel. */
+function edgeChainsOf(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): EdgeChain[] {
+  return items.flatMap((item) => {
+    const piece = pieces.get(item.p);
+    if (!piece) return [];
+    const edges = piece.geom.edges.flatMap((edge) => {
+      const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+      return pts.length >= 2 ? [{ edge, pts }] : [];
+    });
+    const chains: EdgeChain[] = [];
+    for (let a = 0; a < edges.length; a++)
+      for (let b = a + 1; b < edges.length; b++) {
+        const pts = joinedEdgePath(edges[a].pts, edges[b].pts);
+        if (!pts) continue;
+        chains.push({
+          item,
+          lengths: [edges[a].edge.lenMm, edges[b].edge.lenMm].sort((x, y) => x - y) as [
+            number,
+            number,
+          ],
+          part: {
+            piece: item.p,
+            pts,
+            lenMm: edges[a].edge.lenMm + edges[b].edge.lenMm,
+            share: 1,
+            turn: turnOf(pts),
+            edgeId: `${item.p}#${edges[a].edge.k}+${edges[b].edge.k}`,
+            edgeName:
+              [edgeNameOf(edges[a].edge), edgeNameOf(edges[b].edge)].filter(Boolean).join(' + ') ||
+              undefined,
+            notches: edges[a].edge.notchesMm.length + edges[b].edge.notchesMm.length,
+          },
+        });
+      }
+    return chains;
+  });
+}
+
+function bestCompositeEdgePair(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  fixed: readonly Item[],
+  moving: readonly Item[],
+  terms: string,
+): { a: SeamPart; b: SeamPart } | undefined {
+  let best: { a: SeamPart; b: SeamPart; score: number } | undefined;
+  for (const a of edgeChainsOf(pieces, fixed))
+    for (const b of edgeChainsOf(pieces, moving)) {
+      const segmentsMatch = a.lengths.every(
+        (length, index) => Math.abs(length - b.lengths[index]) <= 2,
+      );
+      if (!segmentsMatch) continue;
+      const ratio = Math.min(a.part.lenMm, b.part.lenMm) / Math.max(a.part.lenMm, b.part.lenMm, 1);
+      const score =
+        ratio * 12 +
+        edgeRoleScore(a.part, pieces.get(a.part.piece)!, terms) +
+        edgeRoleScore(b.part, pieces.get(b.part.piece)!, terms);
+      if (!best || score > best.score) best = { a: a.part, b: b.part, score };
+    }
+  return best;
+}
+
+function surfaceSeam(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  fixed: Item[],
+  moving: Item[],
+  op: Op,
+): AsmSeam | undefined {
+  const smallPartner = areaOf(pieces, moving) / Math.max(areaOf(pieces, fixed), 1) < 0.15;
+  let innerBest:
+    | {
+        host: Item;
+        moving: Item;
+        mark: PieceMark;
+        markIndex: number;
+        edge: SeamPart;
+        difference: number;
+      }
+    | undefined;
+  for (const host of fixed) {
+    const piece = pieces.get(host.p);
+    if (!piece) continue;
+    for (const [markIndex, mark] of (piece.geom.marks ?? []).entries()) {
+      if (mark.kind === 'placement' || mark.pts.length < 2) continue;
+      const pts = mark.pts.map(([x, y]) => [x, -y] as Pt);
+      const targetLength = polyLen(pts);
+      for (const item of moving)
+        for (const edge of pieces.get(item.p)?.geom.edges ?? []) {
+          const difference = Math.abs(edge.lenMm - targetLength);
+          const tolerance = smallPartner
+            ? Math.max(3, targetLength * 0.1)
+            : Math.max(2, targetLength * 0.02);
+          if (difference > tolerance) continue;
+          const edgePart: SeamPart = {
+            piece: item.p,
+            pts: edge.pts.map(([x, y]) => [x, -y] as Pt),
+            lenMm: edge.lenMm,
+            share: 1,
+            turn: turnOf(edge.pts.map(([x, y]) => [x, -y] as Pt)),
+          };
+          if (!innerBest || difference < innerBest.difference)
+            innerBest = { host, moving: item, mark, markIndex, edge: edgePart, difference };
+        }
+    }
+  }
+  if (innerBest) {
+    const pts = innerBest.mark.pts.map(([x, y]) => [x, -y] as Pt);
+    const hostPart: SeamPart = {
+      piece: innerBest.host.p,
+      pts,
+      lenMm: polyLen(pts),
+      share: 1,
+      turn: turnOf(pts),
+    };
+    return {
+      key: `proto-inner-${op.n}`,
+      kind: 'surface',
+      note: '',
+      a: [hostPart],
+      b: [innerBest.edge],
+      pieces: [innerBest.host.p, ...moving.map((item) => item.p)],
+      inner: {
+        piece: innerBest.host.p,
+        index: innerBest.markIndex,
+        pts,
+      },
+      surfaceRole: 'inner',
+    };
+  }
+
+  const movingBox = bounds(pieces, moving);
+  const movingW = movingBox.x1 - movingBox.x0;
+  const movingH = movingBox.y1 - movingBox.y0;
+  let best:
+    | { host: Item; mark: PieceMark; score: number; placement: Placement; pts: Pt[] }
+    | undefined;
+  for (const host of fixed) {
+    const piece = pieces.get(host.p);
+    const hostBox = piece ? bounds(pieces, [{ p: host.p, T: I }]) : undefined;
+    if (!piece || !hostBox) continue;
+    for (const mark of piece.geom.marks ?? []) {
+      if (mark.kind !== 'placement' || mark.pts.length < 2) continue;
+      const ratio =
+        Math.min(mark.bbox.w, movingW) / Math.max(mark.bbox.w, movingW, 1) +
+        Math.min(mark.bbox.h, movingH) / Math.max(mark.bbox.h, movingH, 1);
+      if (ratio < 0.9 || (best && ratio <= best.score)) continue;
+      const pts = mark.pts.map(([x, y]) => [x, -y] as Pt);
+      best = {
+        host,
+        mark,
+        score: ratio,
+        pts,
+        placement: {
+          xMm: mark.bbox.cx - movingW / 2 - hostBox.x0,
+          yMm: -mark.bbox.cy - movingH / 2 - hostBox.y0,
+          rotDeg: 0,
+          flip: false,
+        },
+      };
+    }
+  }
+  if (!best) return undefined;
+  const part: SeamPart = {
+    piece: best.host.p,
+    pts: best.pts,
+    lenMm: polyLen(best.pts),
+    share: 1,
+    turn: turnOf(best.pts),
+  };
+  return {
+    key: `proto-surface-${op.n}`,
+    kind: 'surface',
+    note: '',
+    a: [part],
+    b: [],
+    pieces: [best.host.p, ...moving.map((item) => item.p)],
+    inner: {
+      piece: best.host.p,
+      index: -1,
+      pts: best.pts,
+      placement: best.placement,
+    },
+    surfaceRole: 'placement',
+  };
+}
+
+function inferredSeams(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  groups: Item[][],
+  op: Op,
+  roles: ReadonlyMap<string, string | null> = new Map(),
+  sewn: ReadonlySet<string> = new Set(),
+): AsmSeam[] {
+  if (!groups.length) return [];
+  const terms = opTerms(op);
+  if (groups.length === 1) {
+    const parts = bestZoneParts(pieces, groups[0], terms);
+    return parts.length
+      ? [
+          {
+            key: `proto-zone-${op.n}`,
+            kind: 'edge',
+            note: '',
+            a: parts,
+            b: [],
+            pieces: [...new Set(parts.map((part) => part.piece))],
+          },
+        ]
+      : [];
+  }
+  const baseIndex = groups.reduce(
+    (best, group, index) => (areaOf(pieces, group) > areaOf(pieces, groups[best]) ? index : best),
+    0,
+  );
+  const fixed = groups[baseIndex];
+  const out: AsmSeam[] = [];
+  const usedFixed = new Set<string>();
+  for (let index = 0; index < groups.length; index++) {
+    if (index === baseIndex) continue;
+    const moving = groups[index];
+    const movingCodes = moving
+      .map((item) => `${pieces.get(item.p)?.code ?? ''} ${pieces.get(item.p)?.name ?? ''}`)
+      .join(' ')
+      .toLocaleLowerCase();
+    const surface = /nck|clr|collar|armhole/.test(`${movingCodes} ${terms}`)
+      ? undefined
+      : surfaceSeam(pieces, fixed, moving, op);
+    if (surface) {
+      out.push(surface);
+      continue;
+    }
+    const fixedCodes = fixed
+      .map((item) => `${pieces.get(item.p)?.code ?? ''} ${pieces.get(item.p)?.name ?? ''}`)
+      .join(' ')
+      .toLocaleLowerCase();
+    const cuffed = [moving, fixed].some(
+      (side) => side.length > 0 && side.every((item) => roles.get(item.p) === 'cuff'),
+    );
+    const pairTerms = /nck|clr|collar/.test(movingCodes)
+      ? `${terms} neckline collar`
+      : cuffed
+        ? `${terms} cuff`
+        : terms;
+    const composite = /pck|pocket/.test(`${fixedCodes} ${movingCodes}`)
+      ? bestCompositeEdgePair(pieces, fixed, moving, pairTerms)
+      : undefined;
+    // the incoming side may be a stack of identical layers (upper + under collar) — still one edge
+    const unitChain =
+      layerReps(pieces, moving).length === 1
+        ? bestUnitChainPair(pieces, fixed, moving, pairTerms, roles, sewn, usedFixed)
+        : layerReps(pieces, fixed).length === 1
+          ? bestUnitChainPair(pieces, moving, fixed, pairTerms, roles, sewn, usedFixed)
+          : undefined;
+    const simple = composite ?? bestEdgePair(pieces, fixed, moving, pairTerms, usedFixed);
+    const pair = unitChain ?? (simple ? { a: [simple.a], b: [simple.b] } : undefined);
+    if (!pair) continue;
+    for (const part of [...pair.a, ...pair.b])
+      if (fixed.some((item) => item.p === part.piece))
+        usedFixed.add(`${part.piece}:${pathData(part.pts)}`);
+    out.push({
+      key: `proto-edge-${op.n}-${index}`,
+      kind: composite || unitChain ? 'composite' : 'edge',
+      note: '',
+      a: pair.a,
+      b: pair.b,
+      pieces: [...new Set([...pair.a, ...pair.b].map((part) => part.piece))],
+    });
+  }
+  return out;
+}
+
+type Built = {
+  cards: Map<number, JoinCard>;
+  units: Map<string, Item[]>;
+  targets: Map<number, Item[]>;
+  targetSeams: Map<number, AsmSeam[]>;
+};
+
+function itemSide(pieces: ReadonlyMap<string, AsmPiece>, item: Item): 'L' | 'R' | 'N' {
+  const piece = pieces.get(item.p);
+  const text = `${piece?.code ?? ''} ${piece?.name ?? ''}`.toLocaleUpperCase();
+  if (piece?.geom.hand === 'L' || /(^|[_\s])L(EFT)?([_\s]|$)/.test(text)) return 'L';
+  if (piece?.geom.hand === 'R' || /(^|[_\s])R(IGHT)?([_\s]|$)/.test(text)) return 'R';
+  return 'N';
+}
+
+function hangArmholePartner(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  moving: Item[],
+  fixedItem: Item,
+  fixedPart: SeamPart,
+): void {
+  const side = moving.map((item) => itemSide(pieces, item)).find((value) => value !== 'N');
+  if (!side) return;
+  const edge = fixedPart.pts.map((point) => apply(fixedItem.T, point));
+  const pivot: Pt = [
+    edge.reduce((sum, point) => sum + point[0], 0) / edge.length,
+    edge.reduce((sum, point) => sum + point[1], 0) / edge.length,
+  ];
+  moveAll(moving, rotate((side === 'L' ? -1 : 1) * (Math.PI / 6), pivot));
+}
+
+function closeGarmentView(pieces: ReadonlyMap<string, AsmPiece>, items: Item[]): void {
+  const left = items.filter((item) => itemSide(pieces, item) === 'L');
+  const right = items.filter((item) => itemSide(pieces, item) === 'R');
+  const back = items.filter((item) => /(^|[_\s])BP([_\s]|$)/i.test(pieces.get(item.p)?.code ?? ''));
+  const host = back.length ? back : items.filter((item) => itemSide(pieces, item) === 'N');
+  if (!host.length || !left.length || !right.length) return;
+  const h = bounds(pieces, host);
+  const place = (group: Item[], side: 'L' | 'R') => {
+    const box = bounds(pieces, group);
+    const dx = side === 'L' ? h.x0 - box.x0 : h.x1 - box.x1;
+    moveAll(group, translate(dx, h.y1 - box.y1));
+  };
+  place(left, 'L');
+  place(right, 'R');
+  // White paper is painted in this order: back first, then left and right fronts.
+  items.splice(0, items.length, ...host, ...left, ...right);
+}
+
+function isCollarGroup(pieces: ReadonlyMap<string, AsmPiece>, items: readonly Item[]): boolean {
+  return items.some((item) => {
+    const piece = pieces.get(item.p);
+    return /(^|[_\s])(NCK|CLR|COLLAR)([_\s]|$)/i.test(`${piece?.code ?? ''} ${piece?.name ?? ''}`);
+  });
+}
+
+type SeamSideName = { nominative: string; genitive: string; code: string };
+
+const BODY_ROLES: ReadonlySet<string> = new Set(['front', 'back', 'side', 'yoke']);
+
+function pieceRoleMap(
+  pieces: ReadonlyMap<string, AsmPiece>,
+  ops: readonly Op[] = [],
+): ReadonlyMap<string, string | null> {
+  const readings = new Map(
+    [...pieces].map(([key, piece]) => [key, readName(`${piece.code ?? ''} ${piece.name ?? ''}`)]),
+  );
+  const roles = new Map<string, string | null>(
+    [...readings].map(([key, reading]) => [key, reading.role]),
+  );
+  const roleLevel = new Map(ROLE_BOOK.roles.map((role) => [role.id, role.level]));
+  // The shared role reader's F3 rule: FL reads as pocket alone, but as front beside its mirrored
+  // FR panel. Keep that card context when naming a side of the seam.
+  for (const [key, piece] of pieces) {
+    for (const twin of piece.geom.twinOf.filter((candidate) => candidate.kind === 'mirror')) {
+      const ownRole = roles.get(key);
+      const twinRole = roles.get(twin.key);
+      if (!ownRole || !twinRole || ownRole === twinRole) continue;
+      if (roleLevel.get(twinRole) === 'panel' && roleLevel.get(ownRole) !== 'panel')
+        roles.set(key, twinRole);
+    }
+  }
+  // A code may name only the garment family: SLV_M_R reads «sleeve», but the unit its layers are
+  // first sewn into is «right sleeve cuff». When pieces of one role form a unit that names a finer
+  // part (a sub-level role), that part is what the pieces are.
+  for (const op of ops) {
+    if (!op.out || !op.ins.length || op.ins.some((input) => input.kind !== 'piece')) continue;
+    const unitRole = readName(`${op.raw.outputUnitName ?? ''} ${op.out}`).role;
+    if (!unitRole || roleLevel.get(unitRole) !== 'sub') continue;
+    const ownRoles = new Set([...op.leaves].map((key) => roles.get(key) ?? null));
+    const [ownRole] = [...ownRoles];
+    if (
+      ownRoles.size !== 1 ||
+      ownRole === unitRole ||
+      (ownRole && roleLevel.get(ownRole) !== 'panel')
+    )
+      continue;
+    for (const key of op.leaves) if (pieces.has(key)) roles.set(key, unitRole);
+  }
+  const present = new Set([...roles.values()].filter(Boolean));
+  for (const context of ROLE_BOOK.contextRoles ?? []) {
+    if (present.has(context.role)) continue;
+    for (const [key, reading] of readings)
+      if (!roles.get(key) && reading.family && context.tokens.includes(reading.family))
+        roles.set(key, context.role);
+  }
+  return roles;
+}
+
+function seamSideName(
+  parts: readonly SeamPart[],
+  partner: readonly SeamPart[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+  terms: string,
+  t: PdfT,
+  roles: ReadonlyMap<string, string | null> = pieceRoleMap(pieces),
+): SeamSideName {
+  const unique = (side: readonly SeamPart[]) => [...new Set(side.map((part) => part.piece))];
+  const sidePieces = unique(parts);
+  const otherPieces = unique(partner);
+  const sideRoles = new Set(sidePieces.map((key) => roles.get(key)).filter(Boolean));
+  const otherRoles = new Set(otherPieces.map((key) => roles.get(key)).filter(Boolean));
+  const collar = sideRoles.has('collar');
+  const otherCollar = otherRoles.has('collar');
+  const stand = sideRoles.has('stand');
+  const otherStand = otherRoles.has('stand');
+  const sleeve = sideRoles.has('sleeve');
+  const otherSleeve = otherRoles.has('sleeve');
+  const armholeOperation = /armhole|sleeve|пройм|окат|рукав/.test(terms);
+  const code = sidePieces
+    .map((key) => {
+      const piece = pieces.get(key);
+      return assemblyPieceCode(piece?.code, piece?.name);
+    })
+    .filter(Boolean)
+    .join(' + ');
+  const named = (id: PartNounId, count = 1): SeamSideName => ({
+    ...partNoun(id, count, t),
+    code,
+  });
+
+  if (stand && sideRoles.size === 1) return named('stand', sidePieces.length);
+  if (collar && sideRoles.size === 1) return named('collar', sidePieces.length);
+  if (otherCollar || otherStand) return named('neckline');
+  // cap and armhole only where a sleeve meets the body, not where it meets its own cuff or tab
+  const body = [...sideRoles].some((role) => BODY_ROLES.has(role!));
+  const otherBody = [...otherRoles].some((role) => BODY_ROLES.has(role!));
+  if (armholeOperation && sleeve && !otherSleeve && otherBody) return named('sleeveCap');
+  if (armholeOperation && otherSleeve && !sleeve && body) return named('armhole');
+
+  const groups = new Map<string, string[]>();
+  const knownRoles = new Set(ROLE_BOOK.roles.map((row) => row.id));
+  for (const key of sidePieces) {
+    const role = roles.get(key);
+    const piece = pieces.get(key);
+    const fallback = assemblyPieceCode(piece?.code, piece?.name) || own(piece?.name) || key;
+    const group = role && knownRoles.has(role) ? role : fallback;
+    groups.set(group, [...(groups.get(group) ?? []), key]);
+  }
+  const nominative: string[] = [];
+  const genitive: string[] = [];
+  for (const [group, keys] of groups) {
+    if (ROLE_BOOK.roles.some((row) => row.id === group)) {
+      const noun = partNoun(group as PartNounId, keys.length, t);
+      nominative.push(noun.nominative);
+      genitive.push(noun.genitive);
+    } else {
+      nominative.push(group);
+      genitive.push(group);
+    }
+  }
+  const piece = partNoun('piece', sidePieces.length || 1, t);
+  return {
+    nominative: nominative.join(' + ') || piece.nominative,
+    genitive: genitive.join(' + ') || piece.genitive,
+    code,
+  };
+}
 
 function placeAtInnerTarget(
   pieces: ReadonlyMap<string, AsmPiece>,
@@ -1408,11 +1975,24 @@ function buildCards(
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
+  const targets = new Map<number, Item[]>();
+  const targetSeams = new Map<number, AsmSeam[]>();
+  const unitSeams = new Map<string, AsmSeam[]>();
   const producer = new Map(ops.flatMap((op) => (op.out ? [[op.out, op] as const] : [])));
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
+  const roles = pieceRoleMap(pieces, ops);
 
   for (const op of ops) {
     if (!op.join) {
+      const first = op.ins[0];
+      const targetItems =
+        first?.kind === 'unit'
+          ? (units.get(first.key) ?? []).map(clone)
+          : first?.kind === 'piece' && pieces.has(first.key)
+            ? [{ p: first.key, T: [...I] as Matrix }]
+            : [];
+      if (targetItems.length) targets.set(op.n, targetItems);
+      if (first?.kind === 'unit') targetSeams.set(op.n, [...(unitSeams.get(first.key) ?? [])]);
       if (op.out) {
         const groups = op.ins
           .map((input) =>
@@ -1428,7 +2008,11 @@ function buildCards(
           placeInRow(pieces, world, group);
           world.push(...group);
         }
-        if (world.length) units.set(op.out, world.map(clone));
+        if (world.length) {
+          units.set(op.out, world.map(clone));
+          const sourceUnit = op.ins.find((input) => input.kind === 'unit');
+          unitSeams.set(op.out, [...(sourceUnit ? unitSeams.get(sourceUnit.key) ?? [] : [])]);
+        }
       }
       continue;
     }
@@ -1447,6 +2031,7 @@ function buildCards(
       }))
       .filter((entry) => entry.items.length > 0);
     const groups: Item[][] = inputs.map((entry) => entry.items);
+    if (groups.length === 1 && /shoulder/.test(opTerms(op))) closeGarmentView(pieces, groups[0]);
     const blocks = inputs.flatMap((entry) => {
       if (entry.input.kind !== 'unit') return [];
       const source = producer.get(entry.input.key);
@@ -1459,7 +2044,28 @@ function buildCards(
         },
       ];
     });
-    const seams = bound.get(op.n) ?? [];
+    const storedSeams = bound.get(op.n) ?? [];
+    const inheritedSurface = /lining/.test(opTerms(op))
+      ? op.ins
+          .flatMap((input) => (input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : []))
+          .reverse()
+          .find((seam) => seam.kind === 'surface')
+      : undefined;
+    const seams = storedSeams.length
+      ? storedSeams
+      : inheritedSurface
+        ? [inheritedSurface]
+        : inferredSeams(
+            pieces,
+            groups,
+            op,
+            roles,
+            sewnEdgeIds(
+              op.ins.flatMap((input) =>
+                input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : [],
+              ),
+            ),
+          );
     const gaps: Gap[] = [];
     const groupOf = (p: string) => groups.find((g) => g.some((it) => it.p === p));
     const itemOf = (p: string) => groups.flatMap((g) => g).find((it) => it.p === p);
@@ -1523,8 +2129,21 @@ function buildCards(
         straightness(pf.pts) >= 0.8 && straightness(pm.pts) >= 0.8 && ratio >= 0.6 && ratio <= 1.6;
       // layers of one block go on each other by their shared outline, not by the seam's chord
       const lay = stack && !identical ? congruentLay(pieces, iF, iM) : null;
-      if (lay) moveAll(moving, lay);
-      else if (chord) alignEdges(pieces, moving, iF, pf.pts, iM, pm.pts, stack ? 'stack' : 'flat');
+      const collarToGarment = isCollarGroup(pieces, moving) && !isCollarGroup(pieces, fixed);
+      if (collarToGarment) {
+        const pts = pf.pts.map((point) => apply(iF.T, point));
+        const middle = pts[Math.floor(pts.length / 2)];
+        placeBeside(pieces, fixed, moving, 'above', [
+          middle[0],
+          Math.min(...pts.map((point) => point[1])),
+        ]);
+      } else if (lay) moveAll(moving, lay);
+      else if (s.kind === 'composite') alignEdges(pieces, moving, iF, pf.pts, iM, pm.pts, 'flat');
+      else if (/armhole/.test(opTerms(op))) {
+        alignEdges(pieces, moving, iF, pf.pts, iM, pm.pts, 'flat');
+        hangArmholePartner(pieces, moving, iF, pf);
+      } else if (chord)
+        alignEdges(pieces, moving, iF, pf.pts, iM, pm.pts, stack ? 'stack' : 'flat');
       else if (identical) {
         iM.T = [...iF.T] as Matrix;
       } else {
@@ -1568,35 +2187,62 @@ function buildCards(
       const right = s.b.reduce((t, p) => t + p.lenMm, 0);
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
+      const terms = opTerms(op);
+      const leftSide = seamSideName(s.a, s.b, pieces, terms, t, roles);
+      const rightSide = seamSideName(s.b, s.a, pieces, terms, t, roles);
+      const sameName = leftSide.nominative === rightSide.nominative;
+      const machineName = (side: SeamSideName) =>
+        sameName && side.code ? `${side.nominative} (${side.code})` : side.nominative;
+      const shorterLeft = left <= right;
       const gap = bad
-        ? assemblyGap(sink, 'asm_length_mismatch', t('gaps.length'), op.n, 'seam length', s.key)
+        ? assemblyGap(
+            sink,
+            'asm_length_mismatch',
+            t('assembly.shorterThan', {
+              a: shorterLeft ? leftSide.nominative : rightSide.nominative,
+              b: shorterLeft ? rightSide.genitive : leftSide.genitive,
+              d: Math.round(Math.abs(delta)),
+            }),
+            op.n,
+            'seam length',
+            s.key,
+          )
         : undefined;
       if (gap) gaps.push(gap);
       return {
         letter: String(i + 1),
         left,
+        leftName: leftSide.nominative,
+        leftNameGenitive: leftSide.genitive,
+        leftMachineName: machineName(leftSide),
         right,
+        rightName: rightSide.nominative,
+        rightNameGenitive: rightSide.genitive,
+        rightMachineName: machineName(rightSide),
         delta,
         bad,
         gap,
       };
     });
-    const badAt = metrics.findIndex((m) => m.bad);
-    const names = (parts: SeamPart[]) =>
-      [...new Set(parts.map((p) => pieces.get(p.piece)?.code).filter(Boolean))].join(' + ') ||
-      t('assembly.piece');
-    const stop =
-      badAt >= 0
-        ? t('assembly.checkMismatch', {
-            leftName: names(seams[badAt].a),
-            left: metrics[badAt].left.toFixed(1),
-            rightName: names(seams[badAt].b),
-            right: (metrics[badAt].right ?? 0).toFixed(1),
-            delta: fmtDelta(metrics[badAt].delta ?? 0),
-          })
-        : undefined;
     const pieceIns = op.ins.filter((x) => x.kind === 'piece');
     const pieceNumbers = new Map(pieceIns.map((input, index) => [input.key, index + 1]));
+    const baseInput = inputs.reduce(
+      (best, entry, index) =>
+        areaOf(pieces, entry.items) > areaOf(pieces, inputs[best]?.items ?? []) ? index : best,
+      0,
+    );
+    const cardInputs: CardInput[] = inputs.map((entry, index) => {
+      const source = entry.input.kind === 'unit' ? producer.get(entry.input.key) : undefined;
+      const piece = entry.input.kind === 'piece' ? pieces.get(entry.input.key) : undefined;
+      return {
+        pieces: entry.items.map((item) => item.p),
+        label:
+          entry.input.kind === 'unit'
+            ? String(source?.n ?? entry.input.key)
+            : assemblyPieceCode(piece?.code, piece?.name) || String(index + 1),
+        incoming: inputs.length > 1 && index !== baseInput,
+      };
+    });
     const worldPieceCount = new Set(world.map((item) => item.p)).size;
     const card: JoinCard = {
       n: op.n,
@@ -1605,7 +2251,6 @@ function buildCards(
       metrics,
       gaps,
       blocks,
-      stop,
       turn:
         op.ins.length === 2 &&
         pieceIns.length === 2 &&
@@ -1614,13 +2259,160 @@ function buildCards(
       crop:
         !seamLessCard && worldPieceCount >= 8 && worldPieceCount / Math.max(pieces.size, 1) >= 0.7,
       pieceNumbers,
+      inputs: cardInputs,
+      missing: seams.length ? undefined : 'seam',
     };
-    if (op.out) {
-      units.set(op.out, world.map(clone));
+    const targetUnit =
+      op.out || (op.ins.length === 1 && op.ins[0].kind === 'unit' ? op.ins[0].key : '');
+    if (targetUnit) {
+      units.set(targetUnit, world.map(clone));
+      const history = op.ins.flatMap((input) =>
+        input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : [],
+      );
+      unitSeams.set(targetUnit, [...history, ...seams]);
     }
     cards.set(op.n, card);
   }
-  return { cards, units };
+  return { cards, units, targets, targetSeams };
+}
+
+function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[]): number {
+  const code = `${piece.code ?? ''} ${piece.name}`.toLocaleUpperCase();
+  const terms = opTerms(op);
+  let score = marks.length;
+  // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
+  // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
+  // the final shirt's button is printed at the neck instead of on its closure.
+  if (
+    (op.tech === 'button' || op.tech === 'buttonhole') &&
+    /(PLCK|PLACKET|P_[LR]|FRONT)/.test(code)
+  )
+    score += 200;
+  if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
+  if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
+  if (/front/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 100;
+  if (/lining/.test(terms) && /(PCK|POCKET)/.test(code)) score += 100;
+  if (/outer/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 40;
+  return score;
+}
+
+function placementMarks(
+  op: Op,
+  pieces: ReadonlyMap<string, AsmPiece>,
+  items: readonly Item[],
+  used: Set<string>,
+): PlacementGlyph[] {
+  const kind = op.tech === 'label' ? 'label' : op.tech;
+  if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
+  const candidates = items.flatMap((item) => {
+    const piece = pieces.get(item.p);
+    if (!piece) return [];
+    const available = (piece.geom.marks ?? []).filter((mark) => !used.has(mark.id));
+    const exact = available.filter((mark) =>
+      kind === 'buttonhole'
+        ? mark.kind === 'buttonhole'
+        : kind === 'button'
+          ? mark.kind === 'drill'
+          : mark.kind === 'placement',
+    );
+    const fallback =
+      exact.length || kind === 'label'
+        ? exact
+        : available.filter((mark) => mark.kind === 'drill' || mark.kind === 'buttonhole');
+    return fallback.length
+      ? [{ item, piece, marks: fallback, score: placementPieceScore(piece, op, fallback) }]
+      : [];
+  });
+  const selected = candidates.sort((a, b) => b.score - a.score)[0];
+  if (!selected) return [];
+  const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
+  const marks = selected.marks.slice(0, count || selected.marks.length);
+  const orientation = op.raw.fastening?.buttonholeOrientation ?? '';
+  return marks.map((mark) => {
+    used.add(mark.id);
+    const first = mark.pts[0];
+    const last = mark.pts[mark.pts.length - 1] ?? first;
+    const measured = (Math.atan2(-(last[1] - first[1]), last[0] - first[0]) * 180) / Math.PI;
+    const angleDeg = orientation.includes('VERTICAL')
+      ? 90
+      : orientation.includes('HORIZONTAL')
+        ? 0
+        : measured;
+    return {
+      id: mark.id,
+      piece: selected.item.p,
+      kind,
+      point: [mark.bbox.cx, -mark.bbox.cy],
+      angleDeg,
+    };
+  });
+}
+
+function fallbackPlacements(
+  op: Op,
+  pieces: ReadonlyMap<string, AsmPiece>,
+  items: readonly Item[],
+): PlacementGlyph[] {
+  const count = op.raw.placementLayout?.count ?? 0;
+  const pitch = num(op.raw.placementLayout?.pitchMm);
+  if (!count || pitch == null || !items.length) return [];
+  const item = items.reduce((best, candidate) =>
+    (pieces.get(candidate.p)?.area ?? 0) > (pieces.get(best.p)?.area ?? 0) ? candidate : best,
+  );
+  const piece = pieces.get(item.p);
+  if (!piece) return [];
+  const box = polygonBounds(piece.cut);
+  const start = (box.y0 + box.y1 - pitch * (count - 1)) / 2;
+  const kind = op.tech === 'label' ? 'label' : op.tech;
+  if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
+  return Array.from({ length: count }, (_, index) => ({
+    id: `proto-position-${op.n}-${index}`,
+    piece: item.p,
+    kind,
+    point: [(box.x0 + box.x1) / 2, start + pitch * index] as Pt,
+    angleDeg: op.raw.fastening?.buttonholeOrientation?.includes('VERTICAL') ? 90 : 0,
+  }));
+}
+
+function buildActions(
+  ops: readonly Op[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+  targets: ReadonlyMap<number, Item[]>,
+  targetSeams: ReadonlyMap<number, AsmSeam[]>,
+): Map<number, AsmAction> {
+  const actions = new Map<number, AsmAction>();
+  const usedMarks = new Set<string>();
+  for (const op of ops) {
+    if (op.join) continue;
+    const items = targets.get(op.n) ?? [];
+    let placements = placementMarks(op, pieces, items, usedMarks);
+    if (!placements.length) placements = fallbackPlacements(op, pieces, items);
+    const history = targetSeams.get(op.n) ?? [];
+    const terms = opTerms(op);
+    const historyFirst =
+      op.tech === 'topstitch' || op.tech === 'pressSide' || /lining|other/.test(terms);
+    let edgeParts = historyFirst
+      ? [...(history[history.length - 1]?.a ?? []), ...(history[history.length - 1]?.b ?? [])]
+      : [];
+    if (!edgeParts.length && ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech))
+      edgeParts = bestZoneParts(pieces, items, terms);
+    const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
+    const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
+    actions.set(op.n, {
+      n: op.n,
+      tech: op.tech,
+      raw: op.raw,
+      edgeParts,
+      placements,
+      missing:
+        placementOp && !placements.length
+          ? 'position'
+          : edgeOp && !edgeParts.length
+            ? 'seam'
+            : undefined,
+    });
+  }
+  return actions;
 }
 
 // ── words ───────────────────────────────────────────────────────────────────────────────────────
@@ -1656,34 +2448,35 @@ function wordsOf(
     topstitch: 'assembly.topstitch',
     buttonhole: 'assembly.buttonholes',
     button: 'assembly.sewButtons',
+    label: 'assembly.sew',
     bind: 'assembly.bindEdge',
+    hem: 'assembly.sew',
     hand: 'assembly.handwork',
     overlock: 'assembly.overlock',
     sew: 'assembly.sew',
     turn: 'assembly.turnOut',
   } as const;
   const fallbackVerb = t(verbKey[tech]);
-  const fixedVerb = operationText(o.work, o.operationType, t);
   const verb = cap(
-    fixedVerb ??
-      (heading.toLocaleLowerCase() === 'machine'
-        ? fallbackVerb
-        : o.work
-          ? own(heading)
-          : t('common.generated', { text: heading || fallbackVerb })),
+    operationVerb(o.work, o.operationType, heading, t) ??
+      (heading.toLocaleLowerCase() === 'machine' ? fallbackVerb : own(heading) || fallbackVerb),
   );
   const pieceName = (k: string) => {
     const piece = ctx.input.pieces.get(k);
     const stored = ins?.pieces?.find((candidate) => candidate.lineKey === k);
     const name = own((piece?.name || stored?.name || piece?.code || '').trim());
-    return name && !ULID.test(name) ? name : piece?.code || assemblyPieceCode(stored?.name);
+    return name && !ULID.test(name)
+      ? name
+      : assemblyPieceCode(piece?.code) || assemblyPieceCode(stored?.name);
   };
   const plainNameOf = (x: Input) =>
     x.kind === 'unit'
       ? ctx.unitName.get(x.key) ?? unitDisplayName({ key: x.key })
       : x.kind === 'piece'
         ? pieceName(x.key)
-        : x.key;
+        : ULID.test(x.key)
+          ? ''
+          : x.key;
   const nameOf = (x: Input) => {
     const name = plainNameOf(x);
     const step = x.kind === 'unit' ? ctx.unitStep.get(x.key) : undefined;
@@ -1894,27 +2687,28 @@ function wordsOf(
   }
 
   const seamLines = (ctx.card?.seams ?? []).map((seam, index) => {
-    const codes = (parts: readonly SeamPart[]) =>
-      [
-        ...new Set(parts.map((part) => ctx.input.pieces.get(part.piece)?.code).filter(Boolean)),
-      ].join(' + ');
     const groupIndex = (parts: readonly SeamPart[]) =>
       op.groups.findIndex(
         (group) => parts.length > 0 && parts.every((part) => group.has(part.piece)),
       );
+    const names = (parts: readonly SeamPart[]) => {
+      const inputIndex = groupIndex(parts);
+      if (inputIndex >= 0) return plainNameOf(op.ins[inputIndex]);
+      return [...new Set(parts.map((part) => pieceName(part.piece)).filter(Boolean))].join(' + ');
+    };
     const sideAGroup = groupIndex(seam.a);
     const sideBGroup = groupIndex(seam.b);
     const [leftParts, rightParts] =
       sideBGroup >= 0 && sideAGroup > sideBGroup ? [seam.b, seam.a] : [seam.a, seam.b];
-    let left = codes(leftParts);
-    let right = codes(rightParts);
+    let left = names(leftParts);
+    let right = names(rightParts);
     if (seam.kind === 'surface') {
       const host = seam.inner?.piece || seam.a[0]?.piece || '';
       const movingIndex = op.ins.findIndex((_, group) => !op.groups[group]?.has(host));
       const moving = op.ins[movingIndex];
-      const leaves = op.groups[movingIndex];
-      left = moving ? (leaves?.size === 1 ? [...leaves][0] : plainNameOf(moving)) : '';
-      right = host;
+      const hostIndex = op.groups.findIndex((group) => group.has(host));
+      left = moving ? plainNameOf(moving) : '';
+      right = hostIndex >= 0 ? plainNameOf(op.ins[hostIndex]) : pieceName(host);
     }
     const storedDetail = own(seam.note)
       .replace(/\bop\s*\d+\b/gi, '')
@@ -1926,7 +2720,7 @@ function wordsOf(
       seamParts.every((part) => ctx.input.pieces.get(part.piece)?.pocketing);
     const zone = zoneLabel(o.zone);
     let detail = storedDetail;
-    if (seam.kind === 'surface') detail = t('assembly.slit');
+    if (seam.kind === 'surface') detail = seam.surfaceRole === 'inner' ? '' : t('assembly.slit');
     else if (!detail && pocketBag) detail = t('assembly.bag');
     else if (!detail && (ctx.card?.seams.length ?? 0) === 1 && seam.kind === 'composite' && zone)
       detail = `${own(zone)} ${t('assembly.edge')}`;
@@ -1986,9 +2780,11 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     ? undefined
     : assemblyGap(gapSink, 'pdf_operations_missing', t('gaps.operations'), 0, 'operations');
   const { seams, unresolved } = locateSeams(input);
+  const owned = new Set(ops.flatMap((op) => op.raw.seamKeys ?? []));
   const guessed = bindSeams(
-    seams,
+    seams.filter((seam) => !owned.has(seam.key)),
     ops.filter((o) => o.join),
+    input.pieces,
   );
   const catalog: SeamCatalog = {
     byKey: new Map(seams.map((seam) => [seam.key, seam])),
@@ -1997,7 +2793,8 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
   const bound = new Map(
     ops.filter((op) => op.join).map((op) => [op.n, seamsOfOp(op.raw, catalog)]),
   );
-  const { cards, units } = buildCards(ops, bound, input.pieces, gapSink, t);
+  const { cards, units, targets, targetSeams } = buildCards(ops, bound, input.pieces, gapSink, t);
+  const actions = buildActions(ops, input.pieces, targets, targetSeams);
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {
@@ -2035,6 +2832,7 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
       n: op.n,
       words: words.get(op.n)!,
       card: cards.get(op.n),
+      action: actions.get(op.n),
       target: op.join
         ? undefined
         : first?.kind === 'unit'
@@ -2056,6 +2854,7 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     cards,
     pieces: input.pieces,
     units,
+    targets,
     unresolved,
     gaps: gapSink.list().filter((gap) => gap.section === '06'),
     emptyGap,
@@ -2070,6 +2869,8 @@ const EMPTY: SvgMarkup = { viewBox: '0 0 1 1', body: '' };
  * A join's drawing. `box` = the on-page box in px it is fitted into, so seam numbers print at one
  * size (`badgePx` = half the number box) whatever the drawing's scale.
  */
+
+/** Ink-only join grammar: paper shapes, grey context, ink partners, heavy active edges. */
 export function joinSvg(
   model: AssemblyModel,
   card: JoinCard,
@@ -2080,375 +2881,284 @@ export function joinSvg(
   const pieces = model.pieces;
   const items = card.items.map(clone);
   if (!items.length) return EMPTY;
-  let b0 = bounds(pieces, items);
-  // Turn only a lone loose piece; an assembled or multi-piece picture keeps the garment's top up.
-  if (box && items.length === 1 && !items[0].old) {
-    const center: Pt = [(b0.x0 + b0.x1) / 2, (b0.y0 + b0.y1) / 2];
-    const turned = items.map(clone);
-    moveAll(turned, rotate(Math.PI / 2, center));
-    const turnedBounds = bounds(pieces, turned);
-    if (containFit(turnedBounds, box) > containFit(b0, box) * 1.25) {
-      items.splice(0, items.length, ...turned);
-      b0 = turnedBounds;
-    }
-  }
-  const span = Math.max(b0.x1 - b0.x0, b0.y1 - b0.y0, 1);
-  const tf = (it: Item): Matrix => it.T;
-  const world = (it: Item): Item => ({ p: it.p, T: tf(it) });
 
-  const all = items.flatMap((it) => cutOf(pieces, it.p).map((q) => apply(tf(it), q)));
-  let x0 = Math.min(...all.map((p) => p[0]));
-  let x1 = Math.max(...all.map((p) => p[0]));
-  let y0 = Math.min(...all.map((p) => p[1]));
-  let y1 = Math.max(...all.map((p) => p[1]));
-  const seamPoints = card.seams.flatMap((seam) =>
-    [...seam.a, ...seam.b].flatMap((part) => {
-      const item = items.find((candidate) => candidate.p === part.piece);
-      return item ? part.pts.map((point) => apply(tf(item), point)) : [];
-    }),
+  const incomingPieces = new Set(
+    card.inputs.filter((input) => input.incoming).flatMap((input) => input.pieces),
   );
-  if (card.crop && seamPoints.length > 1) {
-    const sx0 = Math.min(...seamPoints.map((point) => point[0]));
-    const sx1 = Math.max(...seamPoints.map((point) => point[0]));
-    const sy0 = Math.min(...seamPoints.map((point) => point[1]));
-    const sy1 = Math.max(...seamPoints.map((point) => point[1]));
-    const seamSpan = Math.max(sx1 - sx0, sy1 - sy0, span * 0.04);
-    if (x1 - x0 > (sx1 - sx0) * 2.4 || y1 - y0 > (sy1 - sy0) * 2.4) {
-      const margin = Math.max(seamSpan * 0.45, span * 0.05);
-      x0 = sx0 - margin;
-      x1 = sx1 + margin;
-      y0 = sy0 - margin;
-      y1 = sy1 + margin;
+  const contextItems = items.filter((item) => !incomingPieces.has(item.p));
+  const contextCenter = centerOf(pieces, contextItems.length ? contextItems : items);
+  for (const input of card.inputs.filter((candidate) => candidate.incoming)) {
+    const group = items.filter((item) => input.pieces.includes(item.p));
+    if (!group.length) continue;
+    const groupCenter = centerOf(pieces, group);
+    let direction = sub(groupCenter, contextCenter);
+    if (Math.hypot(direction[0], direction[1]) < 1e-6) {
+      const part = card.seams
+        .flatMap((seam) => [...seam.a, ...seam.b])
+        .find((candidate) => input.pieces.includes(candidate.piece));
+      const chord = part ? sub(part.pts[part.pts.length - 1], part.pts[0]) : ([1, 0] as Pt);
+      direction = [-chord[1], chord[0]];
     }
+    const length = Math.hypot(direction[0], direction[1]) || 1;
+    moveAll(group, translate((direction[0] / length) * 3, (direction[1] / length) * 3));
   }
-  const frame = { x0, x1, y0, y1 };
-  const pad = span * (thumb ? 0.03 : 0.06);
-  x0 -= pad;
-  y0 -= pad;
-  x1 += pad;
-  y1 += pad * 1.2;
-  const sw = span / (thumb ? 150 : 260);
-  const id = `tp${thumb ? 't' : 'b'}${card.n}`;
+  const incomingGroups = card.inputs
+    .filter((input) => input.incoming)
+    .flatMap((input) => {
+      const group = items.filter((item) => input.pieces.includes(item.p));
+      return group.length ? [{ input, group }] : [];
+    });
 
-  const defs = `<defs><marker id="${id}a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8 Z" class="tpa-fk"/></marker></defs>`;
-
-  let body = '';
-  const order = [...items];
-  const blocked = new Set(card.blocks.flatMap((block) => block.items.map((item) => item.p)));
-  for (const block of card.blocks) {
-    const blockItems = items.filter((item) =>
-      block.items.some((candidate) => candidate.p === item.p),
-    );
-    const polygons = blockItems.map((item) =>
-      cutOf(pieces, item.p).map((point) => apply(tf(item), point)),
-    );
-    const loops = card.seams.length ? unionLoops(polygons) : polygons;
-    for (const loop of loops)
-      body += `<path d="${pathData(loop)} Z" class="tpa-s tpa-asm-old" stroke-width="${f2(sw * 1.05)}" stroke-linejoin="round"/>`;
-  }
-  for (const it of order.filter((item) => item.old && !blocked.has(item.p))) {
-    const g = pieces.get(it.p);
-    if (!g) continue;
-    body += `<path d="${pathData(g.cut.map((point) => apply(tf(it), point)))} Z" class="tpa-s tpa-asm-old" stroke-width="${f2(sw)}" stroke-linejoin="round"/>`;
-  }
-  const newItems = order.filter((item) => !item.old);
-  for (const it of order.filter((item) => item.old)) {
-    const g = pieces.get(it.p);
-    if (!g) continue;
-    const T = tf(it);
-    const d = `${pathData(g.cut.map((q) => apply(T, q)))} Z`;
-    const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 4)} ${f2(sw * 2.5)}"` : '';
-    body += `<path d="${d}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 0.48)}"${dash} stroke-linejoin="round"/>`;
-    for (const line of g.inner)
-      body += `<path d="${pathData(line.map((q) => apply(T, q)))}" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.48)}"/>`;
-    for (const nt of g.notch)
-      body += `<path d="${pathData(nt.map((q) => apply(T, q)))}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 1.05)}"/>`;
-  }
-  for (let itemIndex = 0; itemIndex < newItems.length; itemIndex++) {
-    const it = newItems[itemIndex];
-    const g = pieces.get(it.p);
-    if (!g) continue;
-    const T = tf(it);
-    const d = `${pathData(g.cut.map((q) => apply(T, q)))} Z`;
-    const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 4)} ${f2(sw * 2.5)}"` : '';
-    const top = newItems[newItems.length - 1] === it;
-    body += `<path d="${d}" class="tpa-s tpa-asm-new" data-asm-piece="${itemIndex}" stroke-width="${f2(sw * (top ? 2.4 : 1.15))}"${dash} stroke-linejoin="round"/>`;
-    for (const line of g.inner)
-      body += `<path d="${pathData(line.map((q) => apply(T, q)))}" class="tpa-sl tpa-fn" stroke-width="${f2(sw * 0.48)}"/>`;
-    for (const nt of g.notch)
-      body += `<path d="${pathData(nt.map((q) => apply(T, q)))}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 1.05)}"/>`;
-  }
-
-  const labels: string[] = [];
-  const unitLabelSlots: LabelSlot[] = [];
-  const pieceNumbers = pieceNumberBadges(
-    pieces,
-    newItems,
-    card.pieceNumbers,
-    { x0, y0, x1, y1 },
-    box,
-  );
-  const codeLabels = pieceCodeLabels(
-    pieces,
-    newItems,
-    { x0, y0, x1, y1 },
-    box,
-    pieceNumbers.slots,
-    false,
-    true,
-  );
-  let codeBody = codeLabels.body;
-  ({ x0, y0, x1, y1 } = codeLabels.frame);
-  const labelSlots = codeLabels.slots;
-  for (const block of card.blocks) {
-    const blockItems = items.filter((item) =>
-      block.items.some((candidate) => candidate.p === item.p),
-    );
-    if (!blockItems.length) continue;
-    const blockBox = bounds(pieces, blockItems.map(world));
-    const visible = {
-      x0: Math.max(blockBox.x0, frame.x0),
-      x1: Math.min(blockBox.x1, frame.x1),
-      y0: Math.max(blockBox.y0, frame.y0),
-      y1: Math.min(blockBox.y1, frame.y1),
-    };
-    const visibleBox = visible.x0 <= visible.x1 && visible.y0 <= visible.y1 ? visible : blockBox;
-    const labelFit = containFit({ x0, y0, x1, y1 }, box);
-    const initialFontSize = labelFit ? PRINT_UNIT_PX / labelFit : sw * 6.3;
-    const fullText = `${block.name.trim()}${block.op ? ` · ${block.op}` : ''}`;
-    const available = Math.max(0, visibleBox.x1 - visibleBox.x0 - sw * 2);
-    const wrapped = wrappedLabel(fullText, available, initialFontSize);
-    const fontSize = wrapped.fontSize;
-    const lx = (visibleBox.x0 + visibleBox.x1) / 2;
-    let ly = visibleBox.y1 + fontSize * 0.85;
-    const textWidth = Math.max(...wrapped.lines.map((line) => labelWidth(line, fontSize)));
-    const textHeight = fontSize * Math.max(1, wrapped.lines.length) * 1.15;
-    let slot = {
-      x0: lx - textWidth / 2,
-      x1: lx + textWidth / 2,
-      y0: ly - fontSize * 0.65,
-      y1: ly - fontSize * 0.65 + textHeight,
-    };
-    for (let lane = 0; lane < 3; lane++) {
-      const collides = labelSlots.some((other) => overlaps(slot, other, fontSize * 0.12));
-      if (!collides) break;
-      ly += textHeight + fontSize * 0.35;
-      slot = { ...slot, y0: ly - fontSize * 0.65, y1: ly - fontSize * 0.65 + textHeight };
-    }
-    labelSlots.push(slot);
-    unitLabelSlots.push(slot);
-    ({ x0, y0, x1, y1 } = growBounds({ x0, y0, x1, y1 }, slot));
-    labels.push(
-      `<text x="${f2(lx)}" y="${f2(ly)}" class="tpa-asm-unit" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(fontSize * (labelFit || 1))}">${wrapped.lines
-        .map(
-          (line, index) =>
-            `<tspan x="${f2(lx)}" dy="${index === 0 ? 0 : f2(fontSize * 1.15)}">${xml(line)}</tspan>`,
-        )
-        .join('')}</text>`,
-    );
-  }
-
-  const fit = containFit({ x0, y0, x1, y1 }, box);
-  const badgeR = fit ? badgePx / fit : span * (thumb ? 0.05 : 0.032);
-  const pointAt = (pts: readonly Pt[], wanted: number): Pt => {
-    let left = wanted;
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const length = dist(pts[i], pts[i + 1]);
-      if (left <= length || i + 2 === pts.length) {
-        const t = length ? Math.min(1, left / length) : 0;
-        return [
-          pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t,
-          pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t,
-        ];
-      }
-      left -= length;
-    }
-    return pts[pts.length - 1] ?? [0, 0];
+  let frame = bounds(pieces, items);
+  const flags = asmProtoFlags();
+  const span = Math.max(frame.x1 - frame.x0, frame.y1 - frame.y0, 1);
+  const pad = span * (thumb ? 0.035 : 0.055);
+  frame = {
+    x0: frame.x0 - pad,
+    y0: frame.y0 - pad,
+    x1: frame.x1 + pad,
+    y1: frame.y1 + pad,
   };
-  type Badge = { pos: Pt; r: number; pts: Pt[] };
-  const badges: string[] = [];
+  const drawingFrame = { ...frame };
+  const warningRow = card.missing && flags.missing === 'red' ? 1 : 0;
+  const labelRows = incomingGroups.length;
+  const topBandPx = warningRow + labelRows > 0 ? 2 + (warningRow + labelRows) * 14 : 0;
+  const fitted = fitWithTopBand(frame, box, topBandPx);
+  frame = fitted.frame;
+  const fit = fitted.fit;
+  const hair = box ? PRINT_SILHOUETTE_STROKE_PX / fit : span / 260;
+  const ink = box ? 1.75 / fit : span / 210;
+  const heavy = box ? 3 / fit : span / 115;
+  let body = '';
+
+  const contextLoops = unionLoops(
+    (contextItems.length ? contextItems : items).map((item) =>
+      cutOf(pieces, item.p).map((point) => apply(item.T, point)),
+    ),
+  );
+  for (const loop of contextLoops)
+    body += `<path d="${pathData(loop)} Z" class="tpa-sl tpa-fw" stroke-width="${f2(hair)}" stroke-linejoin="round"/>`;
+
+  if (!incomingGroups.length) {
+    const surfacePieces = new Set(
+      card.seams
+        .filter((seam) => seam.kind === 'surface')
+        .flatMap((seam) => seam.pieces.filter((piece) => piece !== seam.inner?.piece)),
+    );
+    for (const item of items.filter((candidate) => surfacePieces.has(candidate.p))) {
+      const outline = cutOf(pieces, item.p).map((point) => apply(item.T, point));
+      body += `<path d="${pathData(outline)} Z" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" stroke-linejoin="round"/>`;
+    }
+  }
+
+  for (const { group } of incomingGroups) {
+    const loops = unionLoops(
+      group.map((item) => cutOf(pieces, item.p).map((point) => apply(item.T, point))),
+    );
+    for (const loop of loops)
+      body += `<path d="${pathData(loop)} Z" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" stroke-linejoin="round"/>`;
+  }
+
   card.seams.forEach((seam, seamIndex) => {
-    const number = String(seamIndex + 1);
-    const pair: Badge[] = [];
-    for (const side of [seam.a, seam.b]) {
-      const paths: { pts: Pt[]; item: Item; length: number }[] = [];
-      for (const part of side) {
-        const item = items.find((candidate) => candidate.p === part.piece);
-        if (!item) continue;
-        const pts = part.pts.map((point) => apply(tf(item), point));
-        const length = polyLen(pts);
-        paths.push({ pts, item, length });
-        body += `<path d="${pathData(pts)}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 3.6)}" stroke-linecap="round" stroke-linejoin="round"/>`;
-        body += `<path d="${pathData(pts)}" class="tpa-sw tpa-fn" stroke-width="${f2(sw * 1.05)}" stroke-dasharray="${f2(sw * 3.4)} ${f2(sw * 2.6)}"/>`;
-      }
-      let wanted = paths.reduce((sum, path) => sum + path.length, 0) / 2;
-      let chosen = paths[paths.length - 1];
-      for (const path of paths) {
-        if (wanted <= path.length) {
-          chosen = path;
-          break;
-        }
-        wanted -= path.length;
-      }
-      if (!chosen) continue;
-      const midpoint = pointAt(chosen.pts, wanted);
-      const center = centerOf(pieces, [world(chosen.item)]);
-      const outward = sub(midpoint, center);
-      const length = Math.hypot(outward[0], outward[1]) || 1;
-      pair.push({
-        pos: [
-          midpoint[0] + (outward[0] / length) * badgeR * 1.15,
-          midpoint[1] + (outward[1] / length) * badgeR * 1.15,
-        ],
-        r: badgeR,
-        pts: chosen.pts,
-      });
+    const paths: Pt[][] = [];
+    for (const part of [...seam.a, ...seam.b]) {
+      const item = items.find((candidate) => candidate.p === part.piece);
+      if (!item) continue;
+      const points = part.pts.map((point) => apply(item.T, point));
+      paths.push(points);
+      body += `<path d="${pathData(points)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
-    if (pair.length === 2) {
-      const distance = dist(pair[0].pos, pair[1].pos);
-      const minimum = badgeR * 2.5;
-      if (distance < minimum) {
-        const pts = pair[0].pts;
-        const tangent = sub(pts[pts.length - 1], pts[0]);
-        const length = Math.hypot(tangent[0], tangent[1]) || 1;
-        const shift = (minimum - distance) / 2;
-        pair[0].pos = [
-          pair[0].pos[0] - (tangent[0] / length) * shift,
-          pair[0].pos[1] - (tangent[1] / length) * shift,
-        ];
-        pair[1].pos = [
-          pair[1].pos[0] + (tangent[0] / length) * shift,
-          pair[1].pos[1] + (tangent[1] / length) * shift,
-        ];
-      }
-    }
-    if (pair[0] && pair[0].pts.length > 1) {
-      const pts = pair[0].pts;
-      const ia = Math.max(0, Math.floor((pts.length - 1) * 0.55));
-      const ib = Math.max(ia + 1, Math.floor((pts.length - 1) * 0.8));
-      const pa = pts[Math.min(ia, pts.length - 2)];
-      const pb = pts[Math.min(ib, pts.length - 1)];
-      body += `<path d="M${f2(pa[0])} ${f2(pa[1])} L${f2(pb[0])} ${f2(pb[1])}" class="tpa-s tpa-fn" stroke-width="${f2(sw * 0.9)}" marker-end="url(#${id}a)"/>`;
-    }
-    for (const badge of pair) {
-      x0 = Math.min(x0, badge.pos[0] - badge.r * 1.3);
-      x1 = Math.max(x1, badge.pos[0] + badge.r * 1.3);
-      y0 = Math.min(y0, badge.pos[1] - badge.r * 1.3);
-      y1 = Math.max(y1, badge.pos[1] + badge.r * 1.3);
-      badges.push(
-        `<circle cx="${f2(badge.pos[0])}" cy="${f2(badge.pos[1])}" r="${f2(badge.r)}" class="tpa-fk tpa-sw" stroke-width="${f2(sw * 0.7)}"/>` +
-          `<text x="${f2(badge.pos[0])}" y="${f2(badge.pos[1])}" font-size="${f2(badge.r * 1.42)}" class="tpa-fw" text-anchor="middle" dominant-baseline="central" font-family="FeatureMono, monospace" font-weight="700">${number}</text>`,
-      );
-    }
+    if (!flags.seamNumbers || card.seams.length < 2 || !paths.length) return;
+    const points = paths.flat();
+    const x = points.reduce((sum, point) => sum + point[0], 0) / points.length;
+    const y = points.reduce((sum, point) => sum + point[1], 0) / points.length;
+    const radius = badgePx / fit;
+    body += `<circle cx="${f2(x)}" cy="${f2(y)}" r="${f2(radius)}" class="tpa-s tpa-fw" stroke-width="${f2(hair)}"/><text x="${f2(x)}" y="${f2(y)}" class="tpa-fk" font-size="${f2(radius * 1.35)}" text-anchor="middle" dominant-baseline="central" font-family="FeatureMono, monospace" font-weight="700">${seamIndex + 1}</text>`;
   });
 
-  let scale = '';
-  if (!thumb) {
-    y1 += pad * 0.45;
-    const bar = span > 850 ? 100 : 50;
-    const bx = x0 + pad * 0.6;
-    const by = y1 - pad * 0.25;
-    const bh = sw * 4;
-    scale =
-      `<g aria-label="${bar} mm"><rect x="${f2(bx)}" y="${f2(by - bh)}" width="${bar / 2}" height="${f2(bh)}" class="tpa-fk"/>` +
-      `<rect x="${f2(bx + bar / 2)}" y="${f2(by - bh)}" width="${bar / 2}" height="${f2(bh)}" class="tpa-fw tpa-s" stroke-width="${f2(sw * 0.5)}"/>` +
-      `<path d="M${f2(bx)} ${f2(by - bh * 1.25)} V${f2(by + bh * 0.15)} M${f2(bx + bar)} ${f2(by - bh * 1.25)} V${f2(by + bh * 0.15)}" class="tpa-s" stroke-width="${f2(sw * 0.7)}"/>` +
-      `<text x="${f2(bx + bar + sw * 2.5)}" y="${f2(by)}" font-size="${f2(sw * 7.5)}" class="tpa-fk" font-family="FeatureMono, monospace">${bar} mm</text></g>`;
+  for (const [labelIndex, { input, group }] of incomingGroups.entries()) {
+    const groupBox = bounds(pieces, group);
+    const centre = (groupBox.x0 + groupBox.x1) / 2;
+    const halfText = (Math.max(input.label.length, 1) * PRINT_CODE_MIN_PX * 0.32) / fit;
+    const inset = 3 / fit;
+    const low = frame.x0 + halfText + inset;
+    const high = frame.x1 - halfText - inset;
+    const x = low <= high ? Math.max(low, Math.min(high, centre)) : (frame.x0 + frame.x1) / 2;
+    const y = drawingFrame.y0 - (7 + labelIndex * 14) / fit;
+    const fontSize = PRINT_CODE_MIN_PX / fit;
+    body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-asm-label="true" data-print-px="${f2(PRINT_CODE_MIN_PX)}">${xml(input.label)}</text>`;
   }
-  const finalCodeLabels = pieceCodeLabels(
-    pieces,
-    newItems,
-    { x0, y0, x1, y1 },
-    box,
-    [...pieceNumbers.slots, ...unitLabelSlots],
-    false,
-    true,
-  );
-  codeBody = finalCodeLabels.body;
-  ({ x0, y0, x1, y1 } = finalCodeLabels.frame);
+
+  if (card.missing && flags.missing === 'red') {
+    const x = frame.x1 - 5 / fit;
+    const y = drawingFrame.y0 - (7 + labelRows * 14) / fit;
+    body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-missing" font-size="${f2(10 / fit)}" text-anchor="end" data-asm-missing="seam">! seam</text>`;
+  }
   return {
-    viewBox: `${f2(x0)} ${f2(y0)} ${f2(x1 - x0)} ${f2(y1 - y0)}`,
-    body: `${defs}${body}${pieceNumbers.body}${codeBody}${labels.join('')}${badges.join('')}${scale}`,
+    viewBox: `${f2(frame.x0)} ${f2(frame.y0)} ${f2(frame.x1 - frame.x0)} ${f2(frame.y1 - frame.y0)}`,
+    body,
   };
 }
 
 /** Outline of what a non-joining op acts on: an assembled unit (grey = sewn) or one cut piece. */
+
+/** Ink-only action grammar for placement, edge work, press and fusing rows. */
 export function silhouetteSvg(
   model: AssemblyModel,
   target: { unit?: string; piece?: string; label?: string } | undefined,
   box?: [number, number],
+  action?: AsmAction,
 ): SvgMarkup | null {
   if (!target) return null;
   const pieces = model.pieces;
-  const sewn = !!target.unit;
-  const items: Item[] = target.unit
-    ? (model.units.get(target.unit) ?? []).map(clone)
-    : target.piece && pieces.has(target.piece)
-      ? [{ p: target.piece, T: [...I] as Matrix }]
-      : [];
+  const items: Item[] = action?.n
+    ? (model.targets.get(action.n) ?? []).map(clone)
+    : target.unit
+      ? (model.units.get(target.unit) ?? []).map(clone)
+      : target.piece && pieces.has(target.piece)
+        ? [{ p: target.piece, T: [...I] as Matrix }]
+        : [];
   if (!items.length) return null;
-  const b = bounds(pieces, items);
-  const span = Math.max(b.x1 - b.x0, b.y1 - b.y0, 1);
-  const pad = span * 0.025;
-  let frame = {
-    x0: b.x0 - pad,
-    y0: b.y0 - pad,
-    x1: b.x1 + pad,
-    y1: b.y1 + pad,
+  const targetPiece = !target.unit && target.piece ? pieces.get(target.piece) : undefined;
+  const pieceLabel = targetPiece ? assemblyPieceCode(targetPiece.code, targetPiece.name) : '';
+  const worldEdgePaths = (action?.edgeParts ?? []).flatMap((part) => {
+    const item = items.find((candidate) => candidate.p === part.piece);
+    return item ? [{ part, item, points: part.pts.map((point) => apply(item.T, point)) }] : [];
+  });
+  const worldPlacements = (action?.placements ?? []).flatMap((placement) => {
+    const item = items.find((candidate) => candidate.p === placement.piece);
+    return item ? [{ ...placement, item, world: apply(item.T, placement.point) }] : [];
+  });
+
+  let frame = bounds(pieces, items);
+  const flags = asmProtoFlags();
+  const span = Math.max(frame.x1 - frame.x0, frame.y1 - frame.y0, 1);
+  const pad = span * 0.03;
+  frame = {
+    x0: frame.x0 - pad,
+    y0: frame.y0 - pad,
+    x1: frame.x1 + pad,
+    y1: frame.y1 + pad,
   };
-  // the outline prints at a fixed line weight: a share of the span thickens it as the box grows
-  const sw = box ? PRINT_SILHOUETTE_STROKE_PX / Math.max(containFit(frame, box), 1e-6) : span / 55;
+  const drawingFrame = { ...frame };
+  const warningRow = action?.missing && flags.missing === 'red' ? 1 : 0;
+  const labelRows = pieceLabel ? 1 : 0;
+  const topBandPx = warningRow + labelRows > 0 ? 2 + (warningRow + labelRows) * 14 : 0;
+  const fitted = fitWithTopBand(frame, box, topBandPx);
+  frame = fitted.frame;
+  const fit = fitted.fit;
+  const hair = box ? PRINT_SILHOUETTE_STROKE_PX / fit : span / 260;
+  const ink = box ? 1.75 / fit : span / 210;
+  const heavy = box ? 3 / fit : span / 115;
   let body = '';
+
   if (target.unit) {
-    const polygons = items.map((item) =>
-      cutOf(pieces, item.p).map((point) => apply(item.T, point)),
+    const wholeUnitInk =
+      !action ||
+      (!worldEdgePaths.length && !worldPlacements.length) ||
+      (action.raw.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' &&
+        action.tech !== 'pressSide');
+    const loops = unionLoops(
+      items.map((item) => cutOf(pieces, item.p).map((point) => apply(item.T, point))),
     );
-    for (const polygon of polygons)
-      body += `<path d="${pathData(polygon)} Z" class="tpa-s tpa-fh" stroke-width="${f2(sw)}" stroke-linejoin="round"/>`;
+    for (const loop of loops)
+      body += `<path d="${pathData(loop)} Z" class="${wholeUnitInk ? 'tpa-s' : 'tpa-sl'} tpa-fw" stroke-width="${f2(wholeUnitInk ? ink : hair)}" stroke-linejoin="round"/>`;
   } else {
-    for (const it of items) {
-      const g = pieces.get(it.p);
-      if (!g) continue;
-      const dash = g.pocketing ? ` stroke-dasharray="${f2(sw * 3)} ${f2(sw * 2)}"` : '';
-      body += `<path d="${pathData(g.cut.map((q) => apply(it.T, q)))} Z" class="tpa-s ${sewn ? 'tpa-fh' : 'tpa-fw'}" data-asm-piece="0" stroke-width="${f2(sw)}" stroke-linejoin="round"${dash}/>`;
+    for (const item of items) {
+      const piece = pieces.get(item.p);
+      if (!piece) continue;
+      const outline = piece.cut.map((point) => apply(item.T, point));
+      body += `<path d="${pathData(outline)} Z" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" stroke-linejoin="round"/>`;
+      for (const line of piece.inner)
+        body += `<path d="${pathData(line.map((point) => apply(item.T, point)))}" class="tpa-sl tpa-fn" stroke-width="${f2(hair * 0.65)}"/>`;
+      for (const notch of piece.notch)
+        body += `<path d="${pathData(notch.map((point) => apply(item.T, point)))}" class="tpa-sl tpa-fn" stroke-width="${f2(hair * 0.8)}"/>`;
     }
   }
-  const codes = target.piece
-    ? pieceCodeLabels(pieces, items, frame, box)
-    : { body: '', frame, slots: [] };
-  body += codes.body;
-  frame = codes.frame;
-  if (target.unit && target.label) {
-    const fit = containFit(frame, box);
-    const initialFontSize = fit ? PRINT_UNIT_PX / fit : sw * 2.7;
-    const blockWidth = Math.max(0, b.x1 - b.x0 - sw);
-    const captionWidth = box && fit ? (box[0] * 0.72) / fit : blockWidth;
-    const wrapped = wrappedLabel(target.label, Math.max(blockWidth, captionWidth), initialFontSize);
-    if (wrapped.lines.length) {
-      const fontSize = wrapped.fontSize;
-      const x = (b.x0 + b.x1) / 2;
-      let y = b.y1 + fontSize * 0.85;
-      const width = Math.max(...wrapped.lines.map((line) => labelWidth(line, fontSize)));
-      const height = fontSize * wrapped.lines.length * 1.15;
-      let slot = {
-        x0: x - width / 2,
-        x1: x + width / 2,
-        y0: y - fontSize * 0.65,
-        y1: y - fontSize * 0.65 + height,
-      };
-      for (let lane = 0; lane < 3; lane++) {
-        if (!codes.slots.some((other) => overlaps(slot, other, fontSize * 0.12))) break;
-        y += height + fontSize * 0.35;
-        slot = { ...slot, y0: y - fontSize * 0.65, y1: y - fontSize * 0.65 + height };
-      }
-      frame = growBounds(frame, slot);
-      body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-unit" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-print-px="${f2(fontSize * (fit || 1))}">${wrapped.lines
-        .map(
-          (line, index) =>
-            `<tspan x="${f2(x)}" dy="${index === 0 ? 0 : f2(fontSize * 1.15)}">${xml(line)}</tspan>`,
-        )
-        .join('')}</text>`;
+
+  if (action?.raw.operationType === 'TECH_CARD_OPERATION_TYPE_FUSING') {
+    for (const item of items) {
+      const piece = pieces.get(item.p);
+      if (!piece) continue;
+      const centre = centerOf(pieces, [item]);
+      const inset = piece.cut.map((point) => {
+        const world = apply(item.T, point);
+        return [
+          centre[0] + (world[0] - centre[0]) * 0.965,
+          centre[1] + (world[1] - centre[1]) * 0.965,
+        ] as Pt;
+      });
+      body += `<path d="${pathData(inset)} Z" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linejoin="round"/>`;
     }
+  }
+
+  for (const path of worldEdgePaths) {
+    if (action?.tech === 'topstitch') {
+      const width = num(action.raw.topstitch?.widthMm) ?? 1.5;
+      const centre = centerOf(pieces, [path.item]);
+      const offset = path.points.map((point) => {
+        const direction = sub(centre, point);
+        const length = Math.hypot(direction[0], direction[1]) || 1;
+        return [
+          point[0] + (direction[0] / length) * width,
+          point[1] + (direction[1] / length) * width,
+        ] as Pt;
+      });
+      body += `<path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-dasharray="${f2(5 / fit)} ${f2(3 / fit)}" stroke-linecap="round"/>`;
+      continue;
+    }
+    if (action?.tech === 'pressSide') {
+      const allowance = num(action.raw.seamAllowanceMm) ?? 7;
+      const centre = centerOf(pieces, [path.item]);
+      const offset = path.points.map((point) => {
+        const direction = sub(centre, point);
+        const length = Math.hypot(direction[0], direction[1]) || 1;
+        return [
+          point[0] + (direction[0] / length) * allowance,
+          point[1] + (direction[1] / length) * allowance,
+        ] as Pt;
+      });
+      body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/><path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/>`;
+      continue;
+    }
+    body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+
+  for (const placement of worldPlacements) {
+    const [x, y] = placement.world;
+    if (placement.kind === 'button') {
+      const radius = 4.2 / fit;
+      body += `<circle cx="${f2(x)}" cy="${f2(y)}" r="${f2(radius)}" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" data-asm-mark="button" data-print-diameter-px="8.4"/><path d="M${f2(x - radius * 0.55)} ${f2(y)} H${f2(x + radius * 0.55)} M${f2(x)} ${f2(y - radius * 0.55)} V${f2(y + radius * 0.55)}" class="tpa-s tpa-fn" stroke-width="${f2(ink * 0.8)}"/>`;
+    } else if (placement.kind === 'buttonhole') {
+      const half = 7 / fit;
+      const radians = (placement.angleDeg * Math.PI) / 180;
+      const dx = Math.cos(radians) * half;
+      const dy = Math.sin(radians) * half;
+      body += `<path d="M${f2(x - dx)} ${f2(y - dy)} L${f2(x + dx)} ${f2(y + dy)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" data-asm-mark="buttonhole" data-print-length-px="14"/>`;
+    } else {
+      const w = 18 / fit;
+      const h = 11 / fit;
+      body += `<rect x="${f2(x - w / 2)}" y="${f2(y - h / 2)}" width="${f2(w)}" height="${f2(h)}" class="tpa-s tpa-fw" stroke-width="${f2(ink)}"/>`;
+    }
+  }
+
+  if (pieceLabel) {
+    const b = bounds(pieces, items);
+    const halfText = (pieceLabel.length * PRINT_CODE_MIN_PX * 0.32) / fit;
+    const inset = 3 / fit;
+    const low = frame.x0 + halfText + inset;
+    const high = frame.x1 - halfText - inset;
+    const centre = (b.x0 + b.x1) / 2;
+    const x = low <= high ? Math.max(low, Math.min(high, centre)) : (frame.x0 + frame.x1) / 2;
+    const y = drawingFrame.y0 - 7 / fit;
+    const fontSize = PRINT_CODE_MIN_PX / fit;
+    body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-code" font-size="${f2(fontSize)}" text-anchor="middle" dominant-baseline="central" data-asm-label="true" data-print-px="${f2(PRINT_CODE_MIN_PX)}">${xml(pieceLabel)}</text>`;
+  }
+
+  if (action?.missing && flags.missing === 'red') {
+    const x = frame.x1 - 5 / fit;
+    const y = drawingFrame.y0 - (7 + labelRows * 14) / fit;
+    body += `<text x="${f2(x)}" y="${f2(y)}" class="tpa-asm-missing" font-size="${f2(10 / fit)}" text-anchor="end" data-asm-missing="${action.missing}">! ${action.missing}</text>`;
   }
   return {
     viewBox: `${f2(frame.x0)} ${f2(frame.y0)} ${f2(frame.x1 - frame.x0)} ${f2(frame.y1 - frame.y0)}`,

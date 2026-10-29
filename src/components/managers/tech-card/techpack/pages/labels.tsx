@@ -3,7 +3,7 @@ import { GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
 import { deriveLabels, type LabelsDeriveOptions } from '../derive-labels';
 import { Missing, TechpackDrawing } from './bits';
 import { TechpackSheet, type TechpackPageProps } from '../sheet';
-import { own, useT } from '../i18n';
+import { englishT, own, useT } from '../i18n';
 
 type LabelsPageProps = TechpackPageProps & LabelsDeriveOptions;
 
@@ -71,8 +71,11 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
               {model.identity.name || (model.gaps.name && <Missing gap={model.gaps.name} />)}
             </div>
             <div>
-              {own(model.identity.colour) ||
-                (model.gaps.colour && <Missing gap={model.gaps.colour} />)}{' '}
+              {model.identity.colour ? (
+                <span translate='no'>{model.identity.colour}</span>
+              ) : (
+                model.gaps.colour && <Missing gap={model.gaps.colour} />
+              )}{' '}
               · {model.identity.size || (model.gaps.size && <Missing gap={model.gaps.size} />)}
             </div>
             <div className='text-labelColor'>{model.identity.brand}</div>
@@ -85,12 +88,17 @@ export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: Lab
         heightMm={labelSheet.heightMm / 2}
       >
         <div className='flex h-full gap-3 text-micro uppercase leading-snug'>
-          <div className='text-labelColor'>{t('labels.language')}</div>
+          <div className='text-labelColor' translate='no'>
+            {englishT('labels.language')}
+          </div>
           <div>
             {model.composition.length
               ? model.composition.map((line) => (
                   <div key={`${line.part}-${line.value}`}>
-                    <span className='font-bold'>{line.part}</span> {own(line.value)}
+                    <span className='font-bold' translate='no'>
+                      {line.part}
+                    </span>{' '}
+                    <span translate='no'>{line.value}</span>
                   </div>
                 ))
               : model.gaps.composition && <Missing gap={model.gaps.composition} />}

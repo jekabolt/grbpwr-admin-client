@@ -27,7 +27,7 @@ const glossary = (t: PdfT): Array<[string, string]> => [
   ['P', t('cover.perimeter')],
   [t('cover.turnOutKey'), t('cover.turnOut')],
   ['Δ', t('cover.lengthDifference')],
-  ['RS / WS', t('cover.sides')],
+  [t('cover.sidesKey'), t('cover.sides')],
 ];
 
 /** «a · b · b» → «a · b»: a collection named after its season prints once. */
@@ -172,7 +172,12 @@ export function CoverPage({
       <GroupLabel flush>{t('cover.key')}</GroupLabel>
       <div className='grid grid-cols-2 gap-x-4'>
         {glossary(t).map(([label, value]) => (
-          <Row key={label} label={label} value={value} />
+          <Row
+            key={label}
+            className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 [&>span:first-child]:whitespace-nowrap [&>span:last-child]:min-w-0 [&>span:last-child]:whitespace-normal'
+            label={label}
+            value={value}
+          />
         ))}
       </div>
     </div>
