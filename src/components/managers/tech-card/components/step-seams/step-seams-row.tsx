@@ -151,7 +151,7 @@ export function StepSeamsRow({ index }: { index: number }) {
                 no={suggestions.length > 1 ? i : undefined}
                 scene={scene}
                 seams={proposalFrames[i] ?? storedFrame}
-                marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'pick' }))}
+                marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
                 dashed
                 onOpen={cardId ? () => setOpenAt(i) : undefined}
               />
@@ -195,7 +195,7 @@ export function StepSeamsRow({ index }: { index: number }) {
  * them, the joined edges marked, its number at the corner (✕
  * when it can be taken off).
  */
-function SeamTile({
+export function SeamTile({
   scene,
   seams,
   marks,
@@ -204,6 +204,9 @@ function SeamTile({
   no,
   onRemove,
   onOpen,
+  current,
+  status,
+  emptyLabel,
   ...rest
 }: {
   /** The seam's number on the step — the one the picker shows beside it. */
@@ -217,6 +220,9 @@ function SeamTile({
   onRemove?: () => void;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
   onOpen?: () => void;
+  current?: boolean;
+  status?: 'done' | 'skipped';
+  emptyLabel?: string;
   'data-step-seam'?: string;
 }) {
   const ids = marks.map((m) => m.id).join(',');
@@ -233,6 +239,7 @@ function SeamTile({
       role={onOpen ? 'button' : undefined}
       tabIndex={onOpen ? 0 : undefined}
       aria-label={onOpen ? 'pick' : undefined}
+      aria-current={current ? 'step' : undefined}
       onClick={onOpen}
       onKeyDown={
         onOpen
@@ -247,11 +254,17 @@ function SeamTile({
         'relative inline-flex h-18 min-w-24 flex-none items-center justify-center border bg-bgColor px-1.5',
         onOpen && 'cursor-pointer hover:border-textColor',
         dashed ? 'border-dashed border-textColor' : missing ? 'border-error' : 'border-borderColor',
+        current && 'border-2 border-solid border-textColor',
+        status === 'skipped' && 'opacity-40',
       )}
       data-seam-tile={dashed ? 'proposal' : missing ? 'missing' : 'stored'}
       {...rest}
     >
-      {missing ? (
+      {emptyLabel ? (
+        <Text size='nano' variant='error'>
+          {emptyLabel}
+        </Text>
+      ) : missing ? (
         <Text size='nano' variant='error'>
           missing
         </Text>
@@ -283,6 +296,11 @@ function SeamTile({
             aria-label='remove'
           />
         </span>
+      )}
+      {status === 'done' && (
+        <Text size='nano' component='span' className='absolute right-1 bottom-0.5'>
+          ✓
+        </Text>
       )}
     </span>
   );

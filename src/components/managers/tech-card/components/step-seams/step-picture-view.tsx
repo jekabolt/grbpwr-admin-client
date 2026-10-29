@@ -8,7 +8,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useWatch } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
@@ -57,6 +57,26 @@ export type SceneOp = FormOpLike & {
   topstitchMode?: string;
   work?: string;
 };
+
+function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
+  return JSON.stringify(
+    ops.slice(0, index + 1).map((op) => ({
+      inputKeys: op?.inputKeys,
+      outputUnitKey: op?.outputUnitKey,
+      seamKeys: op?.seamKeys,
+      operationNumber: op?.operationNumber,
+      assemblyBlockDetached: op?.assemblyBlockDetached,
+      fullnessRatio: op?.fullnessRatio,
+      operationType: op?.operationType,
+      machineType: op?.machineType,
+      zone: op?.zone,
+      seamClass: op?.seamClass,
+      topstitchMode: op?.topstitchMode,
+      work: op?.work,
+      outputUnitName: op?.outputUnitName,
+    })),
+  );
+}
 
 /** The edge ids and inner targets an anchor names on today's drawing (by its hint). */
 export function targetsOfAnchor(a: EdgeAnchor): TargetId[] {
@@ -184,7 +204,21 @@ export function useSeamRows(): ReadonlyMap<string, StoredSeam> {
 
 export function useStepScene(index: number) {
   const { graph } = useCardSeamGraph();
-  const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as SceneOp[];
+  const { control, getValues } = useFormContext<TechCardFormData>();
+  // A 48-step quiz mounts one scene per strip tile. Subscribe each one only to the operation
+  // facts its drawing uses; notes, media and other form typing must not redraw the whole strip.
+  const opsSig = useWatch({
+    control,
+    name: 'operations',
+    compute: (value) => sceneOpsSignature((value ?? []) as SceneOp[], index),
+  });
+  // A fresh array per signature: setValue on a step mutates the form's array in place, so the raw
+  // reference would keep every memo below on the old step facts.
+  const ops = useMemo(
+    () => [...((getValues('operations') ?? []) as SceneOp[])],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opsSig, getValues],
+  );
   const op = ops[index];
   const { ctx, geo, geoms, innerLines } = useCardGeoms();
   const pieceKeys = useCardPieceKeys();

@@ -11,6 +11,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import type { EdgeId, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
+import { cn } from 'lib/utility';
 import {
   useCallback,
   useEffect,
@@ -19,6 +20,7 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react';
 import { Button, Close, Placeholder, Text, ViewSwitch } from 'ui';
 import type { AsmPiece } from '../../techpack/derive-assembly';
@@ -91,6 +93,39 @@ export default function SeamPicker({
   /** Which of the step's proposals the picker opens on. */
   proposal?: number;
 }) {
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+        <SeamPickerBody index={index} proposal={initialProposal} mode='dialog' onClose={onClose} />
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+export function SeamPickerBody({
+  index,
+  proposal: initialProposal = 0,
+  mode = 'inline',
+  onClose,
+  onAccepted,
+  footerActions,
+  readOnly = false,
+}: {
+  index: number;
+  /** Which of the step's proposals is selected first. */
+  proposal?: number;
+  mode?: 'dialog' | 'inline';
+  onClose?: () => void;
+  onAccepted?: () => void;
+  footerActions?: ReactNode;
+  readOnly?: boolean;
+}) {
   const scene = useStepScene(index);
   const {
     op,
@@ -109,7 +144,7 @@ export default function SeamPicker({
     storedSeams,
     pieceName: nameOf,
   } = scene;
-  const frozen = scene.ctx?.frozen ?? true;
+  const frozen = (scene.ctx?.frozen ?? true) || readOnly;
   const cardId = scene.ctx?.cardId;
   const attach = useAttachStepSeam(index);
   const errors = useSeamsStore((s) => s.errors);
@@ -277,6 +312,7 @@ export default function SeamPicker({
       return;
     }
     reset();
+    onAccepted?.();
   };
 
   const toggle = (id: TargetId) => {
@@ -380,8 +416,9 @@ export default function SeamPicker({
     sideMarks(sel.b, 'pick');
     if (partner) sideMarks([partner], 'pick');
   } else if (pair) {
-    sideMarks(pair.a, 'pick', pair.aLen);
-    sideMarks(pair.b, 'pick', pair.bLen);
+    const tone: EdgeMark['tone'] = pair.own ? 'pick' : 'proposal';
+    sideMarks(pair.a, tone, pair.aLen);
+    sideMarks(pair.b, tone, pair.bLen);
   }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
@@ -416,19 +453,35 @@ export default function SeamPicker({
     });
   };
 
+  const switchProposal = (v: string) => {
+    reset();
+    setProp(Number(v));
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea')) return;
     if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
+    } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
+      e.preventDefault();
+      switchProposal(String(Number(e.key) - 1));
     }
   };
 
-  const switchProposal = (v: string) => {
-    reset();
-    setProp(Number(v));
+  const escape = () => {
+    if (place) {
+      setPlace(null);
+      return true;
+    }
+    if (sel.a.length || sel.b.length) {
+      reset();
+      return true;
+    }
+    return false;
   };
+
   const groupName = (id: TargetId | undefined) => {
     if (!id) return '';
     const k = pieceOfTarget(id);
@@ -446,217 +499,232 @@ export default function SeamPicker({
   const drawn = layout.T.size > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
 
-  return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <Dialog.Content
-          data-seam-picker=''
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-pageBg px-3 text-textColor focus:outline-none md:px-4 md:pb-4'
-          onEscapeKeyDown={(e) => {
-            if (place) {
-              e.preventDefault();
-              setPlace(null);
-            } else if (sel.a.length || sel.b.length) {
-              e.preventDefault();
-              reset();
-            }
-          }}
-          onKeyDown={onKeyDown}
-        >
-          <Dialog.Title className='sr-only'>{`op ${op?.operationNumber ?? ''} seams`}</Dialog.Title>
+  const content = (
+    <>
+      {mode === 'dialog' && (
+        <>
+          <Dialog.Title className='sr-only'>{`op #${op?.operationNumber ?? ''} seams`}</Dialog.Title>
           <Dialog.Description className='sr-only'>pick edges</Dialog.Description>
+        </>
+      )}
 
-          <div className='flex h-13 flex-none items-center gap-3'>
-            <Text size='small' tracking='section' className='uppercase'>
-              {`op ${op?.operationNumber ?? ''}`}
-            </Text>
-            {stepName && (
-              <Text size='small' variant='label' className='min-w-0 truncate'>
-                {stepName}
-              </Text>
-            )}
-            {propOptions.length > 1 && (
-              <ViewSwitch
-                value={String(prop)}
-                options={propOptions}
-                onChange={switchProposal}
-                label='seam'
+      <div className='flex h-13 flex-none items-center gap-3'>
+        <Text size='small' tracking='section' className='uppercase'>
+          {`op #${op?.operationNumber ?? ''}`}
+        </Text>
+        {stepName && (
+          <Text size='small' variant='label' className='min-w-0 truncate'>
+            {stepName}
+          </Text>
+        )}
+        {propOptions.length > 1 && (
+          <ViewSwitch
+            value={String(prop)}
+            options={propOptions}
+            onChange={switchProposal}
+            label='seam'
+          />
+        )}
+        {groups.length < 2 && !frozen && (
+          <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
+        )}
+        {onClose && (
+          <div className='ml-auto'>
+            <Close onClick={onClose} aria-label='close' />
+          </div>
+        )}
+      </div>
+
+      <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
+        <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
+          <div
+            ref={canvasEl}
+            className='relative min-h-0 min-w-0 flex-1 touch-none select-none'
+            data-seam-picker-canvas=''
+          >
+            {loading && !drawn ? (
+              <div className='absolute inset-0 grid place-items-center'>
+                <Placeholder label='loading' />
+              </div>
+            ) : !drawn ? (
+              <div className='absolute inset-0 grid place-items-center'>
+                <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
+              </div>
+            ) : place && hostPiece && partPiece && host ? (
+              <PlaceView
+                w={canvas.w}
+                h={canvas.h}
+                host={hostPiece}
+                line={hostPiece.inner[host.k] ?? []}
+                part={partPiece}
+                place={place}
+                onPlace={setPlace}
+              />
+            ) : (
+              <StepPictureSvg
+                w={canvas.w}
+                h={canvas.h}
+                pad={phone ? 28 : 64}
+                look='canvas'
+                layout={layout}
+                geoms={geoms}
+                innerLines={innerLines}
+                marks={marks}
+                nos={nos}
+                names={(focus ? shown : groups).map((g) => g.name)}
+                namesBelow={phone}
+                ghostName={nameOf}
+                hover={hover}
+                onHover={setHover}
+                onPick={frozen ? undefined : toggle}
+                className='absolute inset-0'
               />
             )}
-            {groups.length < 2 && !frozen && (
-              <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
-            )}
-            <div className='ml-auto'>
-              <Close onClick={onClose} aria-label='close' />
-            </div>
           </div>
-
-          <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
-            <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
-              <div
-                ref={canvasEl}
-                className='relative min-h-0 min-w-0 flex-1 touch-none select-none'
-                data-seam-picker-canvas=''
-              >
-                {loading && !drawn ? (
-                  <div className='absolute inset-0 grid place-items-center'>
-                    <Placeholder label='loading' />
-                  </div>
-                ) : !drawn ? (
-                  <div className='absolute inset-0 grid place-items-center'>
-                    <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
-                  </div>
-                ) : place && hostPiece && partPiece && host ? (
-                  <PlaceView
-                    w={canvas.w}
-                    h={canvas.h}
-                    host={hostPiece}
-                    line={hostPiece.inner[host.k] ?? []}
-                    part={partPiece}
-                    place={place}
-                    onPlace={setPlace}
-                  />
-                ) : (
-                  <StepPictureSvg
-                    w={canvas.w}
-                    h={canvas.h}
-                    pad={phone ? 28 : 64}
-                    look='canvas'
-                    layout={layout}
-                    geoms={geoms}
-                    innerLines={innerLines}
-                    marks={marks}
-                    nos={nos}
-                    names={(focus ? shown : groups).map((g) => g.name)}
-                    namesBelow={phone}
-                    ghostName={nameOf}
-                    hover={hover}
-                    onHover={setHover}
-                    onPick={frozen ? undefined : toggle}
-                    className='absolute inset-0'
-                  />
-                )}
-              </div>
-              <div
-                className='relative h-1/3 flex-none border-t border-hairline md:h-auto md:w-75 md:border-t-0 md:border-l'
-                data-seam-result=''
-              >
-                <Text
-                  size='micro'
-                  variant='label'
-                  tracking='label'
-                  className='absolute top-2.5 left-3 uppercase'
-                >
-                  result
-                </Text>
-                <div ref={resultEl} className='absolute inset-x-0 top-6 bottom-0'>
-                  {hasResult && (
-                    <StepPictureSvg
-                      w={result.w}
-                      h={result.h}
-                      pad={18}
-                      look='result'
-                      layout={joined}
-                      geoms={geoms}
-                      innerLines={innerLines}
-                      marks={resultMarks}
-                      ghostName={nameOf}
-                      className='absolute inset-0'
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div
-              className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
-              data-seam-bar=''
+          <div
+            className='relative h-1/3 flex-none border-t border-hairline md:h-auto md:w-75 md:border-t-0 md:border-l'
+            data-seam-result=''
+          >
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              className='absolute top-2.5 left-3 uppercase'
             >
-              {error && (
-                <Text size='micro' variant='error' className='min-w-0 truncate'>
-                  {error}
-                </Text>
-              )}
-              {stored.map((s, i) => (
-                <span
-                  key={s.key}
-                  className='flex min-w-0 items-center gap-2'
-                  data-seam-stored={s.key}
-                >
-                  <PairNo i={i} />
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {sidesName(s.sides.a[0], s.sides.b[0])}
-                  </Text>
-                </span>
-              ))}
-              {pair && (
-                <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
-                  <PairNo i={pairNo} />
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {pairName}
-                  </Text>
-                </span>
-              )}
-              <span className='flex-1' />
-              {delta != null ? (
-                <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
-                  {`Δ ${fmtMm(delta)} mm`}
-                </Text>
-              ) : empty && !loading ? (
-                <Text size='micro' variant='error' data-step-seams-status=''>
-                  no seam
-                </Text>
-              ) : null}
-              {surface && !frozen && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={startPlace}
-                  disabled={!hostPiece || !partPiece}
-                >
-                  {place ? 'done' : 'place'}
-                </Button>
-              )}
-              {place && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => setPlace({ ...place, rot: (place.rot + 90) % 360 })}
-                >
-                  turn
-                </Button>
-              )}
-              {(sel.a.length > 0 || sel.b.length > 0) && (
-                <Button type='button' variant='underline' size='xs' onClick={reset}>
-                  clear
-                </Button>
-              )}
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => void commit()}
-                  disabled={!canAccept}
-                  loading={busy}
-                  data-seam-accept=''
-                >
-                  accept
-                </Button>
+              result
+            </Text>
+            <div ref={resultEl} className='absolute inset-x-0 top-6 bottom-0'>
+              {hasResult && (
+                <StepPictureSvg
+                  w={result.w}
+                  h={result.h}
+                  pad={18}
+                  look='result'
+                  layout={joined}
+                  geoms={geoms}
+                  innerLines={innerLines}
+                  marks={resultMarks}
+                  ghostName={nameOf}
+                  className='absolute inset-0'
+                />
               )}
             </div>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+
+        <div
+          className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
+          data-seam-bar=''
+        >
+          {error && (
+            <Text size='micro' variant='error' className='min-w-0 truncate'>
+              {error}
+            </Text>
+          )}
+          {stored.map((s, i) => (
+            <span key={s.key} className='flex min-w-0 items-center gap-2' data-seam-stored={s.key}>
+              <PairNo i={i} />
+              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                {sidesName(s.sides.a[0], s.sides.b[0])}
+              </Text>
+            </span>
+          ))}
+          {pair && (
+            <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
+              <PairNo i={pairNo} />
+              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                {pairName}
+              </Text>
+            </span>
+          )}
+          <span className='flex-1' />
+          {delta != null ? (
+            <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
+              {`Δ ${fmtMm(delta)} mm`}
+            </Text>
+          ) : empty && !loading ? (
+            <Text size='micro' variant='error' data-step-seams-status=''>
+              no seam
+            </Text>
+          ) : null}
+          {surface && !frozen && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={startPlace}
+              disabled={!hostPiece || !partPiece}
+            >
+              {place ? 'done' : 'place'}
+            </Button>
+          )}
+          {place && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setPlace({ ...place, rot: (place.rot + 90) % 360 })}
+            >
+              turn
+            </Button>
+          )}
+          {(sel.a.length > 0 || sel.b.length > 0) && (
+            <Button type='button' variant='underline' size='xs' onClick={reset}>
+              clear
+            </Button>
+          )}
+          {!frozen && (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              onClick={() => void commit()}
+              disabled={!canAccept}
+              loading={busy}
+              data-seam-accept=''
+            >
+              accept
+            </Button>
+          )}
+          {footerActions}
+        </div>
+      </div>
+    </>
+  );
+
+  if (mode === 'dialog') {
+    return (
+      <Dialog.Content
+        data-seam-picker=''
+        className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-pageBg px-3 text-textColor focus:outline-none md:px-4 md:pb-4'
+        onEscapeKeyDown={(e) => {
+          if (escape()) e.preventDefault();
+        }}
+        onKeyDown={onKeyDown}
+      >
+        {content}
+      </Dialog.Content>
+    );
+  }
+
+  return (
+    <div
+      data-seam-picker='inline'
+      className={cn(
+        'flex h-120 min-h-0 flex-col bg-bgColor text-textColor',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+      )}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && escape()) {
+          e.preventDefault();
+          return;
+        }
+        onKeyDown(e);
+      }}
+    >
+      {content}
+    </div>
   );
 }
 
