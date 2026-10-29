@@ -78,7 +78,8 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
         (!wireInt(item.colorwayId) || wireInt(item.colorwayId) === wireInt(primary?.colorwayId)),
     );
     const assignedPieces = pieces.filter(
-      (piece, pieceIndex) => materialForPiece(refs, primary, piece, pieceIndex)?.key === ref.key,
+      (piece, pieceIndex) =>
+        materialForPiece(refs, primary, piece, pieceIndex, techCard)?.key === ref.key,
     );
     const colour = materialColour(ref, primary);
     const markerLength = decimal(marker?.consumptionPerUnitCm) ?? decimal(marker?.usedLengthCm);

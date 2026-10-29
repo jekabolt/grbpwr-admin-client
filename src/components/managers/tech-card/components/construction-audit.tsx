@@ -48,6 +48,7 @@ import { PdfGapsGroup, type GapRow } from './pdf-gaps-group';
 import type { Gap } from '../techpack/gaps';
 import { gapNav, gapsToClientFindings } from '../techpack/gap-findings';
 import { revealField } from 'utils/field-errors';
+import { SeamsQuiz } from './step-seams/seams-quiz';
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
 // a report ABOUT. Advisory throughout: nothing here disables a control or refuses a save.
@@ -1221,6 +1222,8 @@ export function ConstructionAudit({
           деньги, и человек видел бы схлопнувшуюся панель вместо начавшегося прогона. Цена решения
           честная и небольшая: чтобы заказать разбор, блок нужно раскрыть. */}
       {analyzeControl && <div className='mb-2 flex justify-end'>{analyzeControl}</div>}
+
+      <SeamsQuiz />
 
       {/* НЕСОХРАНЁННАЯ КАРТОЧКА — ОТДЕЛЬНАЯ ВЕТКА, А НЕ ЗАГРУЗКА. Вкладка сборки открыта и на
           `/add-tech-card` (`isTabVisible` не гейтит её на `isEditMode`), а отключённый запрос

@@ -9,8 +9,10 @@
 // surface seam.
 
 import * as Dialog from '@radix-ui/react-dialog';
-import type { EdgeId, SeamCandidate } from 'lib/assembly-skeleton/types';
+import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { apply } from 'lib/assembly-skeleton/union/affine';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
+import { cn } from 'lib/utility';
 import {
   useCallback,
   useEffect,
@@ -19,6 +21,7 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react';
 import { Button, Close, Placeholder, Text, ViewSwitch } from 'ui';
 import type { AsmPiece } from '../../techpack/derive-assembly';
@@ -27,6 +30,20 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
+import {
+  clampHandSlide,
+  DEFAULT_HAND,
+  handsFromSeams,
+  handTargetsOf,
+  isHandSeamKind,
+  pickHandTarget,
+  sameHand,
+  twinRowOf,
+  type HandOn,
+  type HandPlace,
+  type HandTarget,
+  withHandPlace,
+} from './step-hand';
 import { useAttachStepSeam } from './step-seams-context';
 import { stepWords } from './step-words';
 import {
@@ -43,13 +60,17 @@ import {
 } from './step-seams-model';
 import {
   boxOf,
+  fitBox,
   focusPieces,
   partnerOf,
   pathOf,
   seamOfSides,
   seamSig,
+  stepLayout,
   surfaceSeam,
+  toPx,
   type SeamSides,
+  type StepLayout,
 } from './step-picture';
 import {
   StepPictureSvg,
@@ -79,6 +100,30 @@ const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
 const mmText = (v: number) => `${fmtMm(v)} mm`;
 
+/** Stored placements with this session's edits on top (null: cleared). */
+const withOverrides = (
+  base: ReadonlyMap<string, HandOn>,
+  edits: ReadonlyMap<string, HandOn | null>,
+): Map<string, HandOn> => {
+  const next = new Map(base);
+  for (const [piece, place] of edits) {
+    if (place) next.set(piece, place);
+    else next.delete(piece);
+  }
+  return next;
+};
+
+const handsOnRow = (
+  row: StoredSeam,
+  hand: ReadonlyMap<string, HandPlace | null>,
+  pieces: ReadonlySet<string>,
+) => {
+  let next = row;
+  for (const [piece, place] of hand)
+    if (pieces.has(piece)) next = withHandPlace(next, piece, place ?? undefined);
+  return next;
+};
+
 export default function SeamPicker({
   index,
   open,
@@ -91,11 +136,46 @@ export default function SeamPicker({
   /** Which of the step's proposals the picker opens on. */
   proposal?: number;
 }) {
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+        <SeamPickerBody index={index} proposal={initialProposal} mode='dialog' onClose={onClose} />
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+export function SeamPickerBody({
+  index,
+  proposal: initialProposal = 0,
+  mode = 'inline',
+  onClose,
+  onAccepted,
+  footerActions,
+  readOnly = false,
+}: {
+  index: number;
+  /** Which of the step's proposals is selected first. */
+  proposal?: number;
+  mode?: 'dialog' | 'inline';
+  onClose?: () => void;
+  onAccepted?: () => void;
+  footerActions?: ReactNode;
+  readOnly?: boolean;
+}) {
   const scene = useStepScene(index);
   const {
     op,
     geo,
     geoms,
+    ops,
+    byKey,
     innerLines,
     groups,
     leaves,
@@ -109,7 +189,7 @@ export default function SeamPicker({
     storedSeams,
     pieceName: nameOf,
   } = scene;
-  const frozen = scene.ctx?.frozen ?? true;
+  const frozen = (scene.ctx?.frozen ?? true) || readOnly;
   const cardId = scene.ctx?.cardId;
   const attach = useAttachStepSeam(index);
   const errors = useSeamsStore((s) => s.errors);
@@ -119,6 +199,8 @@ export default function SeamPicker({
   const [chosen, setChosen] = useState<Side>('a');
   const [hover, setHover] = useState<TargetId | null>(null);
   const [place, setPlace] = useState<Place | null>(null);
+  const [selectedPiece, setSelectedPiece] = useState<string | null>(null);
+  const [handOverrides, setHandOverrides] = useState<Map<string, HandOn | null>>(() => new Map());
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   const [prop, setProp] = useState(initialProposal);
@@ -215,6 +297,28 @@ export default function SeamPicker({
     !!cardId &&
     (surface ? !!partKey && sel[hostSide!].length === 1 : inners.length === 0 && !!pair);
 
+  // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
+  // the whole card's (the right bag mirrors the left one placed a step later).
+  const storedHand = useMemo(() => {
+    const rows = ops
+      .slice(0, index + 1)
+      .flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
+    return handsFromSeams(rows);
+  }, [ops, index, byKey]);
+  const cardHand = useMemo(
+    () =>
+      handsFromSeams(
+        ops.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? [])),
+      ),
+    [ops, byKey],
+  );
+  const hand = useMemo(() => withOverrides(storedHand, handOverrides), [storedHand, handOverrides]);
+  const twinHand = useMemo(() => withOverrides(cardHand, handOverrides), [cardHand, handOverrides]);
+  const pairPieces = useMemo(
+    () => new Set(pair ? [...pair.a, ...pair.b].map(pieceOfTarget) : []),
+    [pair],
+  );
+
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
     [geoms, geo?.grainDeg, nameOf],
@@ -233,8 +337,10 @@ export default function SeamPicker({
   const buildRow = useCallback(
     (s: Sel): StoredSeam | null => {
       const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
-      if (ins.length === 0)
-        return rowFromHand(s.a, s.b, geoms, anchorCtx, { direction: 'reversed' });
+      if (ins.length === 0) {
+        const row = rowFromHand(s.a, s.b, geoms, anchorCtx, { direction: 'reversed' });
+        return row ? handsOnRow(row, handOverrides, pairPieces) : null;
+      }
       const h = parseInner(ins[0]);
       const g = h ? geoms.get(h.piece) : undefined;
       const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
@@ -251,12 +357,14 @@ export default function SeamPicker({
         placement,
       );
     },
-    [geoms, anchorCtx, pieces, geo, partKey, placement],
+    [geoms, anchorCtx, pieces, geo, partKey, placement, handOverrides, pairPieces],
   );
 
   const reset = () => {
     setSel(EMPTY);
     setPlace(null);
+    setSelectedPiece(null);
+    setHandOverrides(new Map());
     setChosen('a');
     setRefused('');
   };
@@ -271,12 +379,28 @@ export default function SeamPicker({
     setBusy(true);
     setRefused('');
     const ok = await attach(row);
+    // A twin's seam already stored on this step takes the mirrored placement too.
+    const twins = ok
+      ? [...handOverrides].flatMap(([piece, place]) => {
+          if (!pairPieces.has(piece)) return [];
+          const t = twinWrite(
+            piece,
+            place?.partner,
+            place ?? undefined,
+            storedHand.get(piece),
+            row.seamKey,
+          );
+          return t ? [t] : [];
+        })
+      : [];
+    const twinsOk = twins.length && scene.ctx ? await scene.ctx.writes.upsert(twins) : true;
     setBusy(false);
-    if (!ok) {
+    if (!ok || !twinsOk) {
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
     reset();
+    onAccepted?.();
   };
 
   const toggle = (id: TargetId) => {
@@ -346,7 +470,12 @@ export default function SeamPicker({
         : null;
   const resultRaw = [...innerSeams, ...(focus ? [] : storedSeams), ...(pairSeam ? [pairSeam] : [])];
   const resultSeams = useStable<SeamCandidate[]>(resultRaw, seamSig(resultRaw));
-  const joined = useStepLayout(focus ? seamLeaves : leaves, resultSeams, geoms, 0);
+  const handTargets = useMemo(() => handTargetsOf(resultSeams, geoms), [resultSeams, geoms]);
+  const resultLeaves = focus ? seamLeaves : leaves;
+  const joined = useMemo(
+    () => stepLayout(resultLeaves, resultSeams, geoms, { explode: 0, hand, twinHand }),
+    [resultLeaves, resultSeams, geoms, hand, twinHand],
+  );
   const hasResult = storedSeams.length > 0 || !!pairSeam;
 
   const marks: EdgeMark[] = [];
@@ -380,8 +509,9 @@ export default function SeamPicker({
     sideMarks(sel.b, 'pick');
     if (partner) sideMarks([partner], 'pick');
   } else if (pair) {
-    sideMarks(pair.a, 'pick', pair.aLen);
-    sideMarks(pair.b, 'pick', pair.bLen);
+    const tone: EdgeMark['tone'] = pair.own ? 'pick' : 'proposal';
+    sideMarks(pair.a, tone, pair.aLen);
+    sideMarks(pair.b, tone, pair.bLen);
   }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
@@ -416,19 +546,39 @@ export default function SeamPicker({
     });
   };
 
+  const switchProposal = (v: string) => {
+    reset();
+    setProp(Number(v));
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea')) return;
     if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
+    } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
+      e.preventDefault();
+      switchProposal(String(Number(e.key) - 1));
     }
   };
 
-  const switchProposal = (v: string) => {
-    reset();
-    setProp(Number(v));
+  const escape = () => {
+    if (selectedPiece) {
+      setSelectedPiece(null);
+      return true;
+    }
+    if (place) {
+      setPlace(null);
+      return true;
+    }
+    if (sel.a.length || sel.b.length) {
+      reset();
+      return true;
+    }
+    return false;
   };
+
   const groupName = (id: TargetId | undefined) => {
     if (!id) return '';
     const k = pieceOfTarget(id);
@@ -445,218 +595,541 @@ export default function SeamPicker({
   const loading = geo?.dep.status === 'pending';
   const drawn = layout.T.size > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
+  // The selected piece's placement as drawn: its own, or its twin's mirrored.
+  const selectedLaid = selectedPiece ? joined.hand.get(selectedPiece) : undefined;
+  const selectedHand: HandOn | undefined =
+    selectedLaid?.place ?? (selectedPiece ? hand.get(selectedPiece) : undefined);
+  const selectedTarget: HandTarget | undefined =
+    selectedLaid?.target ??
+    (selectedPiece
+      ? pickHandTarget(handTargets.get(selectedPiece), hand.get(selectedPiece))
+      : undefined);
+  // A twin lends its placement to a piece with none: «inside» off is then an own placement.
+  const twinPlaced = (piece: string) =>
+    (geoms.get(piece)?.twinOf ?? []).some((t) => twinHand.has(t.key));
 
-  return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <Dialog.Content
-          data-seam-picker=''
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-pageBg px-3 text-textColor focus:outline-none md:px-4 md:pb-4'
-          onEscapeKeyDown={(e) => {
-            if (place) {
-              e.preventDefault();
-              setPlace(null);
-            } else if (sel.a.length || sel.b.length) {
-              e.preventDefault();
-              reset();
-            }
-          }}
-          onKeyDown={onKeyDown}
-        >
-          <Dialog.Title className='sr-only'>{`op ${op?.operationNumber ?? ''} seams`}</Dialog.Title>
+  const storedEntryFor = (piece: string) => {
+    if (pairPieces.has(piece)) return undefined;
+    return stored.find(
+      (item) =>
+        item.row &&
+        isHandSeamKind(item.row.kind) &&
+        [...item.row.sideA, ...item.row.sideB].some((anchor) => anchor.piece === piece),
+    );
+  };
+
+  const putHandOverride = (piece: string, next: HandOn | undefined) => {
+    setHandOverrides((current) => {
+      const changed = new Map(current);
+      changed.set(piece, next ?? null);
+      return changed;
+    });
+  };
+
+  /**
+   * The twin's seam stored on this step takes the mirrored placement too, while it has none of its
+   * own or still mirrors the piece's previous one; a twin's seam on another step is only drawn.
+   */
+  const twinWrite = (
+    piece: string,
+    partner: string | undefined,
+    next: HandPlace | undefined,
+    prev: HandPlace | undefined,
+    skip: string,
+  ): StoredSeam | null => {
+    if (!partner) return null;
+    const rows = stored.flatMap((item) => (item.row && item.key !== skip ? [item.row] : []));
+    const twin = twinRowOf(rows, piece, partner, next, geoms);
+    if (!twin) return null;
+    const was = twinRowOf(rows, piece, partner, prev, geoms)?.place;
+    if (twin.current && !sameHand(twin.current, was)) return null;
+    if (sameHand(twin.current, twin.place)) return null;
+    return withHandPlace(twin.row, twin.twin, twin.place);
+  };
+
+  const persistStoredHand = async (
+    piece: string,
+    next: HandPlace | undefined,
+    fallback: HandPlace | undefined,
+    partner: string | undefined,
+  ) => {
+    const item = storedEntryFor(piece);
+    if (!item?.row || !scene.ctx) return;
+    const row = withHandPlace(item.row, piece, next);
+    const twin = twinWrite(piece, partner, next, fallback, item.key);
+    setBusy(true);
+    setRefused('');
+    const ok = await scene.ctx.writes.upsert(twin ? [row, twin] : [row]);
+    setBusy(false);
+    if (ok) return;
+    putHandOverride(piece, fallback);
+    setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
+  };
+
+  const editSelectedHand = (next: HandPlace | undefined) => {
+    if (!selectedPiece || !selectedTarget || frozen || busy) return;
+    const fallback = storedHand.get(selectedPiece);
+    const own = next && { ...next, partner: selectedTarget.partner };
+    putHandOverride(selectedPiece, own);
+    if (storedEntryFor(selectedPiece))
+      void persistStoredHand(selectedPiece, own, fallback, selectedTarget.partner);
+  };
+
+  const slideSelectedHand = (slideMm: number, done: boolean) => {
+    if (!selectedPiece || !selectedTarget || frozen || busy) return;
+    const next = { ...(selectedHand ?? DEFAULT_HAND), slideMm, partner: selectedTarget.partner };
+    putHandOverride(selectedPiece, next);
+    if (done && storedEntryFor(selectedPiece))
+      void persistStoredHand(
+        selectedPiece,
+        next,
+        storedHand.get(selectedPiece),
+        selectedTarget.partner,
+      );
+  };
+
+  const content = (
+    <>
+      {mode === 'dialog' && (
+        <>
+          <Dialog.Title className='sr-only'>{`op #${op?.operationNumber ?? ''} seams`}</Dialog.Title>
           <Dialog.Description className='sr-only'>pick edges</Dialog.Description>
+        </>
+      )}
 
-          <div className='flex h-13 flex-none items-center gap-3'>
-            <Text size='small' tracking='section' className='uppercase'>
-              {`op ${op?.operationNumber ?? ''}`}
-            </Text>
-            {stepName && (
-              <Text size='small' variant='label' className='min-w-0 truncate'>
-                {stepName}
-              </Text>
-            )}
-            {propOptions.length > 1 && (
-              <ViewSwitch
-                value={String(prop)}
-                options={propOptions}
-                onChange={switchProposal}
-                label='seam'
+      <div className='flex h-13 flex-none items-center gap-3'>
+        <Text size='small' tracking='section' className='uppercase'>
+          {`op #${op?.operationNumber ?? ''}`}
+        </Text>
+        {stepName && (
+          <Text size='small' variant='label' className='min-w-0 truncate'>
+            {stepName}
+          </Text>
+        )}
+        {propOptions.length > 1 && (
+          <ViewSwitch
+            value={String(prop)}
+            options={propOptions}
+            onChange={switchProposal}
+            label='seam'
+          />
+        )}
+        {groups.length < 2 && !frozen && (
+          <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
+        )}
+        {onClose && (
+          <div className='ml-auto'>
+            <Close onClick={onClose} aria-label='close' />
+          </div>
+        )}
+      </div>
+
+      <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
+        <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
+          <div
+            ref={canvasEl}
+            className='relative min-h-0 min-w-0 flex-1 touch-none select-none'
+            data-seam-picker-canvas=''
+          >
+            {loading && !drawn ? (
+              <div className='absolute inset-0 grid place-items-center'>
+                <Placeholder label='loading' />
+              </div>
+            ) : !drawn ? (
+              <div className='absolute inset-0 grid place-items-center'>
+                <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
+              </div>
+            ) : place && hostPiece && partPiece && host ? (
+              <PlaceView
+                w={canvas.w}
+                h={canvas.h}
+                host={hostPiece}
+                line={hostPiece.inner[host.k] ?? []}
+                part={partPiece}
+                place={place}
+                onPlace={setPlace}
+              />
+            ) : (
+              <StepPictureSvg
+                w={canvas.w}
+                h={canvas.h}
+                pad={phone ? 28 : 64}
+                look='canvas'
+                layout={layout}
+                geoms={geoms}
+                innerLines={innerLines}
+                marks={marks}
+                nos={nos}
+                names={(focus ? shown : groups).map((g) => g.name)}
+                namesBelow={phone}
+                ghostName={nameOf}
+                hover={hover}
+                onHover={setHover}
+                onPick={frozen ? undefined : toggle}
+                className='absolute inset-0'
               />
             )}
-            {groups.length < 2 && !frozen && (
-              <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
-            )}
-            <div className='ml-auto'>
-              <Close onClick={onClose} aria-label='close' />
-            </div>
           </div>
-
-          <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
-            <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
-              <div
-                ref={canvasEl}
-                className='relative min-h-0 min-w-0 flex-1 touch-none select-none'
-                data-seam-picker-canvas=''
-              >
-                {loading && !drawn ? (
-                  <div className='absolute inset-0 grid place-items-center'>
-                    <Placeholder label='loading' />
-                  </div>
-                ) : !drawn ? (
-                  <div className='absolute inset-0 grid place-items-center'>
-                    <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
-                  </div>
-                ) : place && hostPiece && partPiece && host ? (
-                  <PlaceView
-                    w={canvas.w}
-                    h={canvas.h}
-                    host={hostPiece}
-                    line={hostPiece.inner[host.k] ?? []}
-                    part={partPiece}
-                    place={place}
-                    onPlace={setPlace}
-                  />
-                ) : (
+          <div
+            className='relative h-1/3 flex-none border-t border-hairline md:h-auto md:w-75 md:border-t-0 md:border-l'
+            data-seam-result=''
+          >
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              className='absolute top-2.5 left-3 uppercase'
+            >
+              result
+            </Text>
+            <div ref={resultEl} className='absolute inset-x-0 top-6 bottom-0'>
+              {hasResult && (
+                <>
                   <StepPictureSvg
-                    w={canvas.w}
-                    h={canvas.h}
-                    pad={phone ? 28 : 64}
-                    look='canvas'
-                    layout={layout}
+                    w={result.w}
+                    h={result.h}
+                    pad={18}
+                    look='result'
+                    layout={joined}
                     geoms={geoms}
                     innerLines={innerLines}
-                    marks={marks}
-                    nos={nos}
-                    names={(focus ? shown : groups).map((g) => g.name)}
-                    namesBelow={phone}
+                    marks={resultMarks}
                     ghostName={nameOf}
-                    hover={hover}
-                    onHover={setHover}
-                    onPick={frozen ? undefined : toggle}
                     className='absolute inset-0'
                   />
-                )}
-              </div>
-              <div
-                className='relative h-1/3 flex-none border-t border-hairline md:h-auto md:w-75 md:border-t-0 md:border-l'
-                data-seam-result=''
-              >
-                <Text
-                  size='micro'
-                  variant='label'
-                  tracking='label'
-                  className='absolute top-2.5 left-3 uppercase'
-                >
-                  result
-                </Text>
-                <div ref={resultEl} className='absolute inset-x-0 top-6 bottom-0'>
-                  {hasResult && (
-                    <StepPictureSvg
-                      w={result.w}
-                      h={result.h}
-                      pad={18}
-                      look='result'
-                      layout={joined}
-                      geoms={geoms}
-                      innerLines={innerLines}
-                      marks={resultMarks}
-                      ghostName={nameOf}
-                      className='absolute inset-0'
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div
-              className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
-              data-seam-bar=''
-            >
-              {error && (
-                <Text size='micro' variant='error' className='min-w-0 truncate'>
-                  {error}
-                </Text>
-              )}
-              {stored.map((s, i) => (
-                <span
-                  key={s.key}
-                  className='flex min-w-0 items-center gap-2'
-                  data-seam-stored={s.key}
-                >
-                  <PairNo i={i} />
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {sidesName(s.sides.a[0], s.sides.b[0])}
-                  </Text>
-                </span>
-              ))}
-              {pair && (
-                <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
-                  <PairNo i={pairNo} />
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {pairName}
-                  </Text>
-                </span>
-              )}
-              <span className='flex-1' />
-              {delta != null ? (
-                <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
-                  {`Δ ${fmtMm(delta)} mm`}
-                </Text>
-              ) : empty && !loading ? (
-                <Text size='micro' variant='error' data-step-seams-status=''>
-                  no seam
-                </Text>
-              ) : null}
-              {surface && !frozen && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={startPlace}
-                  disabled={!hostPiece || !partPiece}
-                >
-                  {place ? 'done' : 'place'}
-                </Button>
-              )}
-              {place && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => setPlace({ ...place, rot: (place.rot + 90) % 360 })}
-                >
-                  turn
-                </Button>
-              )}
-              {(sel.a.length > 0 || sel.b.length > 0) && (
-                <Button type='button' variant='underline' size='xs' onClick={reset}>
-                  clear
-                </Button>
-              )}
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => void commit()}
-                  disabled={!canAccept}
-                  loading={busy}
-                  data-seam-accept=''
-                >
-                  accept
-                </Button>
+                  <ResultHandOverlay
+                    w={result.w}
+                    h={result.h}
+                    pad={18}
+                    layout={joined}
+                    geoms={geoms}
+                    nameOf={nameOf}
+                    selected={selectedPiece}
+                    target={selectedTarget}
+                    hand={selectedHand}
+                    disabled={frozen || busy}
+                    onSelect={setSelectedPiece}
+                    onSlide={slideSelectedHand}
+                  />
+                </>
               )}
             </div>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+
+        <div
+          className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
+          data-seam-bar=''
+        >
+          {error && (
+            <Text size='micro' variant='error' className='min-w-0 truncate'>
+              {error}
+            </Text>
+          )}
+          {stored.map((s, i) => (
+            <span key={s.key} className='flex min-w-0 items-center gap-2' data-seam-stored={s.key}>
+              <PairNo i={i} />
+              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                {sidesName(s.sides.a[0], s.sides.b[0])}
+              </Text>
+            </span>
+          ))}
+          {pair && (
+            <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
+              <PairNo i={pairNo} />
+              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                {pairName}
+              </Text>
+            </span>
+          )}
+          <span className='flex-1' />
+          {delta != null ? (
+            <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
+              {`Δ ${fmtMm(delta)} mm`}
+            </Text>
+          ) : empty && !loading ? (
+            <Text size='micro' variant='error' data-step-seams-status=''>
+              no seam
+            </Text>
+          ) : null}
+          {surface && !frozen && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={startPlace}
+              disabled={!hostPiece || !partPiece}
+            >
+              {place ? 'done' : 'place'}
+            </Button>
+          )}
+          {place && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setPlace({ ...place, rot: (place.rot + 90) % 360 })}
+            >
+              turn
+            </Button>
+          )}
+          {selectedPiece && (
+            <>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className={selectedHand?.inside ? 'text-warning' : undefined}
+                aria-pressed={selectedHand?.inside ?? false}
+                onClick={() =>
+                  editSelectedHand(
+                    selectedHand?.inside
+                      ? selectedPiece && twinPlaced(selectedPiece)
+                        ? { ...selectedHand, inside: false }
+                        : undefined
+                      : { ...(selectedHand ?? DEFAULT_HAND), inside: true },
+                  )
+                }
+                disabled={!selectedTarget || frozen || busy}
+              >
+                inside
+              </Button>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={() =>
+                  editSelectedHand({
+                    ...(selectedHand ?? DEFAULT_HAND),
+                    flip: !(selectedHand?.flip ?? false),
+                  })
+                }
+                disabled={!selectedTarget || frozen || busy}
+              >
+                flip
+              </Button>
+            </>
+          )}
+          {(sel.a.length > 0 || sel.b.length > 0) && (
+            <Button type='button' variant='underline' size='xs' onClick={reset}>
+              clear
+            </Button>
+          )}
+          {!frozen && (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              onClick={() => void commit()}
+              disabled={!canAccept}
+              loading={busy}
+              data-seam-accept=''
+            >
+              accept
+            </Button>
+          )}
+          {footerActions}
+        </div>
+      </div>
+    </>
+  );
+
+  if (mode === 'dialog') {
+    return (
+      <Dialog.Content
+        data-seam-picker=''
+        className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-pageBg px-3 text-textColor focus:outline-none md:px-4 md:pb-4'
+        onEscapeKeyDown={(e) => {
+          if (escape()) e.preventDefault();
+        }}
+        onKeyDown={onKeyDown}
+      >
+        {content}
+      </Dialog.Content>
+    );
+  }
+
+  return (
+    <div
+      data-seam-picker='inline'
+      className={cn(
+        'flex h-120 min-h-0 flex-col bg-bgColor text-textColor',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+      )}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && escape()) {
+          e.preventDefault();
+          return;
+        }
+        onKeyDown(e);
+      }}
+    >
+      {content}
+    </div>
+  );
+}
+
+function ResultHandOverlay({
+  w,
+  h,
+  pad,
+  layout,
+  geoms,
+  nameOf,
+  selected,
+  target,
+  hand,
+  disabled,
+  onSelect,
+  onSlide,
+}: {
+  w: number;
+  h: number;
+  pad: number;
+  layout: StepLayout;
+  geoms: ReadonlyMap<string, PieceGeom>;
+  nameOf: (piece: string) => string;
+  selected: string | null;
+  target: HandTarget | undefined;
+  hand: HandPlace | undefined;
+  disabled: boolean;
+  onSelect: (piece: string | null) => void;
+  onSlide: (slideMm: number, done: boolean) => void;
+}) {
+  const fit = useMemo(() => fitBox(layout.bbox, w, h, pad), [layout.bbox, w, h, pad]);
+  const pieces = useMemo(
+    () =>
+      [...layout.T].flatMap(([piece, transform]) => {
+        const geom = geoms.get(piece);
+        return geom
+          ? [{ piece, ring: geom.rs.map((point) => toPx(fit, apply(transform, point))) }]
+          : [];
+      }),
+    [layout, geoms, fit],
+  );
+  const drag = useRef<{
+    piece: string;
+    clientX: number;
+    clientY: number;
+    slideMm: number;
+    latestMm: number;
+    tx: number;
+    ty: number;
+    scale: number;
+    canSlide: boolean;
+    moved: boolean;
+  } | null>(null);
+
+  const slideAt = (e: PointerEvent, state: NonNullable<typeof drag.current>) => {
+    const dx = (e.clientX - state.clientX) / state.scale;
+    const dy = -(e.clientY - state.clientY) / state.scale;
+    if (!target) return state.slideMm;
+    return clampHandSlide(
+      target.partRun,
+      target.partnerRun,
+      state.slideMm + dx * state.tx + dy * state.ty,
+    );
+  };
+
+  const finish = (e: PointerEvent, cancelled = false) => {
+    const state = drag.current;
+    if (!state) return;
+    drag.current = null;
+    if (state.canSlide && state.moved) {
+      onSlide(cancelled ? state.latestMm : slideAt(e, state), true);
+      return;
+    }
+    if (!cancelled) onSelect(selected === state.piece ? null : state.piece);
+  };
+
+  if (w < 2 || h < 2) return null;
+  const selectedRing = pieces.find((piece) => piece.piece === selected)?.ring;
+  const hitPieces = selected
+    ? [
+        ...pieces.filter((piece) => piece.piece !== selected),
+        ...pieces.filter((piece) => piece.piece === selected),
+      ]
+    : pieces;
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className='absolute inset-0 touch-none'
+      onPointerMove={(e) => {
+        const state = drag.current;
+        if (!state || !state.canSlide) return;
+        const moved = Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) > 2;
+        if (!moved && !state.moved) return;
+        state.moved = true;
+        state.latestMm = slideAt(e, state);
+        onSlide(state.latestMm, false);
+      }}
+      onPointerUp={(e) => finish(e)}
+      onPointerCancel={(e) => finish(e, true)}
+      data-hand-result=''
+    >
+      {hitPieces.map((item) => (
+        <path
+          key={item.piece}
+          d={pathOf(item.ring, true)}
+          fill='transparent'
+          stroke='transparent'
+          pointerEvents='all'
+          tabIndex={0}
+          role='button'
+          aria-label={nameOf(item.piece)}
+          aria-pressed={selected === item.piece}
+          className={
+            selected === item.piece && target && !disabled
+              ? 'cursor-move focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+              : 'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+          }
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            onSelect(selected === item.piece ? null : item.piece);
+          }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            const partnerT = target ? layout.T.get(target.partner) : undefined;
+            const partnerRun =
+              target && partnerT ? target.partnerRun.map((point) => apply(partnerT, point)) : [];
+            const a = partnerRun[0] ?? ([0, 0] as Pt2);
+            const b = partnerRun[partnerRun.length - 1] ?? ([1, 0] as Pt2);
+            const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+            const canSlide =
+              !disabled && selected === item.piece && target?.piece === item.piece && !!partnerT;
+            drag.current = {
+              piece: item.piece,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              slideMm: hand?.slideMm ?? 0,
+              latestMm: hand?.slideMm ?? 0,
+              tx: (b[0] - a[0]) / length,
+              ty: (b[1] - a[1]) / length,
+              scale: Math.max(fit.s, 1e-6),
+              canSlide,
+              moved: false,
+            };
+          }}
+          data-hand-piece=''
+        />
+      ))}
+      {selectedRing && (
+        <path
+          d={pathOf(selectedRing, true)}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={2.6}
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-hand-selected=''
+        />
+      )}
+    </svg>
   );
 }
 

@@ -109,7 +109,8 @@ export function deriveColourways(techCard: common_TechCard, sink?: GapSink, t: P
   const fabricRows = refs.filter(rollGoods).map((ref, index) => {
     const cells = sources.map((colorway, colorwayIndex) => {
       const assigned = pieces.filter(
-        (piece, pieceIndex) => materialForPiece(refs, colorway, piece, pieceIndex)?.key === ref.key,
+        (piece, pieceIndex) =>
+          materialForPiece(refs, colorway, piece, pieceIndex, techCard)?.key === ref.key,
       );
       const usages = (colorway?.usages ?? []).filter(
         (usage) => resolveBomRef(refs, usage)?.key === ref.key,

@@ -177,6 +177,7 @@ export function materialForPiece(
   colorway: common_AdminColorwayRef | undefined,
   piece: common_TechCardPiece,
   pieceIndex: number,
+  techCard?: common_TechCard,
 ): BomRef | null {
   const pieceLineKey = clean(piece.lineKey);
   const candidates = (colorway?.usages ?? [])
@@ -207,7 +208,62 @@ export function materialForPiece(
   const legacy = (piece.materials ?? []).find(
     (material) => wireInt(material.colorwayId) === wireInt(colorway?.colorwayId),
   );
-  return legacy ? resolveBomRef(refs, legacy) : null;
+  const legacyRef = legacy ? resolveBomRef(refs, legacy) : null;
+  if (legacyRef) return legacyRef;
+
+  const uniqueRef = (candidates: Array<BomRef | null>): BomRef | null => {
+    const unique = new Map(
+      candidates.filter((ref): ref is BomRef => Boolean(ref)).map((ref) => [ref.key, ref]),
+    );
+    return unique.size === 1 ? [...unique.values()][0] : null;
+  };
+  const refForBinding = (binding: {
+    bomLineKey?: string;
+    fabricPurpose?: string;
+  }): BomRef | null => {
+    const byLine = resolveBomRef(refs, binding);
+    if (byLine) return byLine;
+    const purpose = clean(binding.fabricPurpose);
+    if (!purpose) return null;
+    return uniqueRef(
+      refs.filter((ref) => rollGoods(ref) && clean(ref.item.purpose) === purpose).map((ref) => ref),
+    );
+  };
+  const insert = techCard?.techCard;
+  if (!insert) return null;
+
+  // A stored area scope names the cloth whose DXF supplied this exact piece. It is the strongest
+  // fallback because the binding is piece-specific, unlike a card-wide pattern row.
+  const areaScope = (techCard.pieceAreaScopes ?? []).find((scope) =>
+    (scope.areas ?? []).some((area) => clean(area.pieceLineKey) === pieceLineKey),
+  );
+  if (areaScope) {
+    const scopeKey = clean(areaScope.scopeKey);
+    const direct = refForBinding({ bomLineKey: scopeKey, fabricPurpose: scopeKey });
+    if (direct) return direct;
+    const fromScopePattern = uniqueRef(
+      (insert.patterns ?? [])
+        .filter(
+          (pattern) =>
+            clean(pattern.bomLineKey) === scopeKey || clean(pattern.fabricPurpose) === scopeKey,
+        )
+        .map(refForBinding),
+    );
+    if (fromScopePattern) return fromScopePattern;
+  }
+
+  // A block-to-piece row carries the same DXF scope as the sheet it came from. Older cards often
+  // have this link but no colourway recipe on the piece.
+  const aliases = (insert.pieceDxfAliases?.items ?? []).filter(
+    (alias) => clean(alias.pieceLineKey) === pieceLineKey,
+  );
+  const aliasRef = uniqueRef(aliases.map(refForBinding));
+  if (aliasRef) return aliasRef;
+
+  // Finally, a card with one bound pattern material has one honest answer for every piece in that
+  // DXF. Multiple pattern materials remain unresolved unless one of the piece-specific bindings
+  // above disambiguates them.
+  return uniqueRef((insert.patterns ?? []).map(refForBinding));
 }
 
 export function usageForBom(

@@ -389,6 +389,23 @@ const NOTCH_TOL_MM = 3;
 const NOTCH_TOL_REL = 0.03;
 /** The partner of a fully matched side must take part in the seam with at least this share. */
 const ALIGN_SHARE = 0.5;
+/**
+ * A side shorter than this (mm) never joins two inputs beside the step's first proposal: three
+ * panels of one front cut to one hem width meet hem to hem by length alone (card 58, op 80).
+ */
+const CONNECT_MIN_MM = 60;
+/**
+ * Panels of one part (pieces of one role, sewn side by side: their sides face opposite ways)
+ * still hanging apart are joined up to this score, when their lengths agree within PANEL_REL —
+ * a long side seam reads as a straight edge on a hooked one and scores no better (card 58, op 80).
+ */
+const PANEL_OK = 0.12;
+const PANEL_REL = 0.1;
+const PANEL_FACING = -0.7;
+/** A chain sewn end to end within this share stands in for a partial reading it holds. */
+const WHOLE_REL = 0.03;
+/** A side sewn within this (mm) of its full length is read whole, not partially. */
+const WHOLE_TOL_MM = 0.5;
 /** What an alignment folds away costs this per whole side left over: sewing more wins. */
 const FOLD_COST = 0.1;
 /** A double notch: two notches this close are one. */
@@ -1341,13 +1358,18 @@ function applyStep(
   if (!groups.length) return;
   const groupOf = new Map<string, number>();
   groups.forEach((g, n) => g.pieces.forEach((p) => groupOf.set(p, n)));
-  // The inputs a sewn pair joins, as "i|j" (i < j); the first join between two inputs is what the
-  // step's row says it does, every later one between the same two a guess.
-  const joined = new Set<string>();
-  const joinOf = (a: readonly EdgeId[], b: readonly EdgeId[]) => {
-    const i = groupOf.get(pieceOf(a[0])) ?? -1;
-    const j = groupOf.get(pieceOf(b[0])) ?? -1;
-    return `${Math.min(i, j)}|${Math.max(i, j)}`;
+  // The inputs the sewn pairs connect, as one set each: the first pair between two sets is what
+  // the step's row says it does, any pair inside one set a guess. Not "the first pair between
+  // two inputs": a step of three inputs joins them with two seams, and a third pair between two
+  // inputs already connected through the other is a coincidence (card 59, op 610).
+  const root = groups.map((_, n) => n);
+  const find = (n: number): number => (root[n] === n ? n : (root[n] = find(root[n])));
+  const connect = (a: readonly EdgeId[], b: readonly EdgeId[]) => {
+    const i = find(groupOf.get(pieceOf(a[0])) ?? -1);
+    const j = find(groupOf.get(pieceOf(b[0])) ?? -1);
+    if (i < 0 || j < 0 || i === j) return false;
+    root[i] = j;
+    return true;
   };
   const rows = storedSidesOf(op, seams);
   for (const seam of rows) {
@@ -1355,7 +1377,7 @@ function applyStep(
       stored: true,
       junction: seam.direction !== 'same' && !isLayerSeam(seam.a, seam.b, geoms),
     });
-    if (seam.a.length && seam.b.length) joined.add(joinOf(seam.a, seam.b));
+    if (seam.a.length && seam.b.length) connect(seam.a, seam.b);
   }
   const taken = new Set(state.sewn);
   const ease = easeOf(op);
@@ -1372,18 +1394,26 @@ function applyStep(
   if (sewsNothing(op)) return;
   // The step's own proposal first — what its row offers is what the step sews (a placket onto a
   // front's centre edge, which no guess would cross) — then the best guesses for what is still
-  // free: the first join between two inputs is what the step does, a further one between the
-  // same two (the proposal too, once a stored row joins them) only when it scores like a seam,
-  // not like a coincidence of lengths.
+  // free: a pair that connects two inputs still apart is what the step does, a further one
+  // (the proposal too, once a stored row connects them) only when it scores like a seam, not
+  // like a coincidence of lengths.
   const stack = new Set(groups.flatMap((g) => [...stackable(g, state, state.stored)]));
-  const own = scoredPairs(groups, geoms, state, state.stored, ease, false).slice(0, 1);
-  for (const cand of [...own, ...scoredPairs(groups, geoms, state, state.stored, ease, true)]) {
+  // What the step proposes connects every input: those pairs are its own seams — the first
+  // always, a further one when a guess could have made it too (no centre line crossed, no two
+  // deep curves bending one way). A yoke proposed beside a layer seam is sewn, so a later
+  // sleeve finds the armhole, not the yoke edge (card 59, op 610 → 670).
+  const connecting: Scored[] = [];
+  proposalsOf(groups, geoms, state, state.stored, ease, connecting);
+  const guesses = scoredPairs(groups, geoms, state, state.stored, ease, true);
+  const pairKey = (c: Scored) => [...c.a.ids, '|', ...c.b.ids].join(',');
+  const guessable = new Set(guesses.map(pairKey));
+  const own = connecting.filter((c, n) => n === 0 || guessable.has(pairKey(c)));
+  for (const cand of [...own, ...guesses]) {
     const ids = [...cand.a.ids, ...cand.b.ids];
     // An edge this step already took is gone; one an earlier step sewed inside the input is
     // stacked on, once.
     if (ids.some((id) => taken.has(id) && !(stack.has(id) && stack.delete(id)))) continue;
-    const join = joinOf(cand.a.ids, cand.b.ids);
-    const first = !joined.has(join);
+    const first = connect(cand.a.ids, cand.b.ids);
     if (!first && cand.score > GUESS_OK) continue;
     for (const id of ids) taken.add(id);
     sew(state, cand.a.ids, cand.b.ids, geoms, {
@@ -1392,7 +1422,6 @@ function applyStep(
       own: first,
       score: cand.score,
     });
-    joined.add(join);
   }
 }
 
@@ -1469,6 +1498,43 @@ export function proposalLabel(proposal: StepProposal, index: number): string {
 }
 
 /**
+ * A side read by its notches as part of the other (a back armhole on half a cap) gives way to a
+ * chain that holds it and sews the same partner end to end: the chain takes the partial's
+ * place in the ranking, the partial is dropped. Card 69, op 250: BP#5 alone aligns with half of
+ * SLV_L#0 and outscores FL#1 + BP#5, the whole armhole; cards 57/70/71: the armhole without its
+ * back yoke edge.
+ */
+export function wholeOverPartial(scored: readonly Scored[]): Scored[] {
+  const partial = (c: Scored) =>
+    Math.abs(c.aLen - c.a.lenMm) > WHOLE_TOL_MM || Math.abs(c.bLen - c.b.lenMm) > WHOLE_TOL_MM;
+  const plainRel = (c: Scored) =>
+    Math.abs(c.a.lenMm - c.b.lenMm) / Math.max(c.a.lenMm, c.b.lenMm, 1);
+  const same = (x: Side, y: Side) =>
+    x.ids.length === y.ids.length && x.ids.every((id) => y.ids.includes(id));
+  const holds = (big: Side, small: Side) =>
+    big.ids.length > small.ids.length && small.ids.every((id) => big.ids.includes(id));
+  const whole = scored.filter((w) => !partial(w) && plainRel(w) <= WHOLE_REL);
+  const holder = (c: Scored) =>
+    whole.find(
+      (w) =>
+        (same(w.a, c.a) && holds(w.b, c.b)) ||
+        (same(w.b, c.b) && holds(w.a, c.a)) ||
+        (same(w.a, c.b) && holds(w.b, c.a)) ||
+        (same(w.b, c.a) && holds(w.a, c.b)),
+    );
+  const promoted = new Map<Scored, number>();
+  const kept = scored.filter((c) => {
+    const w = partial(c) ? holder(c) : undefined;
+    if (w) promoted.set(w, Math.min(promoted.get(w) ?? w.score, c.score));
+    return !w;
+  });
+  if (!promoted.size) return kept;
+  return kept
+    .map((c) => (promoted.has(c) ? { ...c, score: promoted.get(c)! } : c))
+    .sort((x, y) => x.score - y.score);
+}
+
+/**
  * The step's seams: the best pair, then — on a step with three or more inputs — the best pair
  * between two inputs no earlier proposal joins, on edges no earlier proposal takes, on a hand no
  * earlier proposal has, as long as it scores like a seam (both sleeves on a body, both side
@@ -1481,10 +1547,16 @@ function proposalsOf(
   state: SewnState,
   used: ReadonlySet<EdgeId>,
   ease: number | null,
+  connecting?: Scored[],
 ): StepProposal[] {
   const handOf = handReader(geoms);
   const groupOf = new Map<string, number>();
   groups.forEach((g, n) => g.pieces.forEach((p) => groupOf.set(p, n)));
+  // The inputs a proposal has already joined, as one set each: a proposal joins two sets, until
+  // every input is in one.
+  const root = groups.map((_, n) => n);
+  const find = (n: number): number => (root[n] === n ? n : (root[n] = find(root[n])));
+  let parts = groups.length;
   const joinOf = (a: Side, b: Side) => {
     const i = groupOf.get(a.pieces[0]) ?? -1;
     const j = groupOf.get(b.pieces[0]) ?? -1;
@@ -1494,18 +1566,56 @@ function proposalsOf(
   const taken = new Set<EdgeId>();
   const hands = new Set<Hand>();
   const out: StepProposal[] = [];
-  for (const cand of scoredPairs(groups, geoms, state, used, ease, false)) {
-    if (out.length && cand.score > GUESS_OK) break;
-    const ids = [...cand.a.ids, ...cand.b.ids];
-    if (ids.some((id) => taken.has(id))) continue;
-    const join = joinOf(cand.a, cand.b);
-    if (joined.has(join)) continue;
+  const take = (cand: Scored, hand: Hand) => {
+    joined.add(joinOf(cand.a, cand.b));
+    hands.add(hand);
+    for (const id of [...cand.a.ids, ...cand.b.ids]) taken.add(id);
+    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand });
+  };
+  const scored = wholeOverPartial(scoredPairs(groups, geoms, state, used, ease, false));
+  const long = (c: Scored) => Math.min(c.a.lenMm, c.b.lenMm) >= CONNECT_MIN_MM;
+  const roleOfKey = (p: string) => {
+    const g = geoms.get(p);
+    return g ? roleOfPiece(g, geoms) : null;
+  };
+  // Two panels of one part laid side by side: one role, sides facing opposite ways, one length.
+  const panels = (c: Scored) => {
+    const roles = new Set([...c.a.pieces, ...c.b.pieces].map(roleOfKey));
+    const na = Math.hypot(c.a.nx, c.a.ny);
+    const nb = Math.hypot(c.b.nx, c.b.ny);
+    const facing = na > 0 && nb > 0 ? (c.a.nx * c.b.nx + c.a.ny * c.b.ny) / (na * nb) : 0;
+    return (
+      roles.size === 1 &&
+      !roles.has(null) &&
+      facing <= PANEL_FACING &&
+      Math.abs(c.aLen - c.bLen) / Math.max(c.aLen, c.bLen, 1) <= PANEL_REL
+    );
+  };
+  // First what connects every input — the step joins them all, so each set's best free pair to
+  // another set, whatever it scores and whichever hand it is on (three left pieces of one front).
+  for (const cand of scored) {
+    if (parts <= 1) break;
+    if (out.length && cand.score > PANEL_OK) break;
+    if (out.length && (!long(cand) || (cand.score > GUESS_OK && !panels(cand)))) continue;
+    if ([...cand.a.ids, ...cand.b.ids].some((id) => taken.has(id))) continue;
+    const i = find(groupOf.get(cand.a.pieces[0]) ?? -1);
+    const j = find(groupOf.get(cand.b.pieces[0]) ?? -1);
+    if (i < 0 || j < 0 || i === j) continue;
+    root[i] = j;
+    parts--;
+    connecting?.push(cand);
+    take(cand, sideHand(cand.a, handOf) ?? sideHand(cand.b, handOf));
+  }
+  // Then what closes a ring (the panels of a bag): a pair between two inputs no proposal joins
+  // yet, on a hand none has, as long as it scores like a seam.
+  for (const cand of scored) {
+    if (cand.score > GUESS_OK) break;
+    if (!long(cand)) continue;
+    if ([...cand.a.ids, ...cand.b.ids].some((id) => taken.has(id))) continue;
+    if (joined.has(joinOf(cand.a, cand.b))) continue;
     const hand = sideHand(cand.a, handOf) ?? sideHand(cand.b, handOf);
     if (hand && hands.has(hand)) continue;
-    joined.add(join);
-    hands.add(hand);
-    for (const id of ids) taken.add(id);
-    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand });
+    take(cand, hand);
   }
   const rank = (h: Hand) => (h === 'L' ? 0 : h === 'R' ? 1 : 2);
   return out

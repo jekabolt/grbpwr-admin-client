@@ -32,6 +32,12 @@ const translations: Record<Exclude<PdfLocale, 'en' | 'xx'>, PdfTranslations> = {
 export type PdfTValues = Record<string, string | number | undefined | null> & { count?: number };
 export type PdfT = (key: PdfMessageKey, values?: PdfTValues) => string;
 
+const localeByTranslator = new WeakMap<PdfT, PdfLocale>();
+
+/** Locale carried by a translator created here; custom test translators remain English. */
+export const pdfLocaleOf = (translate: PdfT): PdfLocale =>
+  localeByTranslator.get(translate) ?? 'en';
+
 const englishMessage = (key: PdfMessageKey): Message => {
   const [section, name] = key.split('.') as [keyof typeof en, string];
   return en[section][name as keyof (typeof en)[typeof section]] as Message;
@@ -83,12 +89,14 @@ function interpolate(message: string, values: PdfTValues | undefined): string {
 }
 
 export function createPdfT(locale: PdfLocale): PdfT {
-  return (key, values) => {
+  const translate: PdfT = (key, values) => {
     const english = englishMessage(key);
     const translated = translatedMessage(locale, key);
     const text = interpolate(localizedText(english, translated, locale, values?.count), values);
     return locale === 'xx' ? pseudo(text) : text;
   };
+  localeByTranslator.set(translate, locale);
+  return translate;
 }
 
 export const englishT = createPdfT('en');

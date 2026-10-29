@@ -181,6 +181,7 @@ export const en = {
     turnOut: 'right side out',
     turnOutKey: 'Turn out',
     lengthDifference: 'length difference',
+    sidesKey: 'RS / WS',
     sides: 'right / wrong side',
   },
   materials: {
@@ -211,6 +212,10 @@ export const en = {
     unassigned: 'unassigned',
     code: 'code',
     dxf: 'dxf',
+    noMaterialLine: {
+      one: 'no material: {count} piece ({codes}) — assign in BOM',
+      other: 'no material: {count} pieces ({codes}) — assign in BOM',
+    },
   },
   colourways: {
     title: 'colourways',
@@ -296,10 +301,14 @@ export const en = {
     icon: 'icon',
     profile: 'profile {name}',
     asOperation: '{note} (as {op})',
-    checkMismatch: 'Check: {leftName} {left} / {rightName} {right} · Δ {delta}',
+    deltaMm: '{d} mm',
+    shorterThan: '{a} {d} mm shorter than {b}',
+    partCollar: 'collar',
+    partNeckline: 'neckline',
+    partStand: 'stand',
+    partSleeveCap: 'sleeve cap',
+    partArmhole: 'armhole',
     piece: 'piece',
-    stop: 'STOP',
-    patternMakerHold: '→ pattern maker · hold {op}',
     resolvedBy: 'resolved by',
     resolvedDate: 'date',
     sewn: 'sewn',
@@ -415,6 +424,7 @@ export const en = {
     tabArtifacts: 'artifacts',
     tabLabels: 'labels',
     tabSignoff: 'signoff',
+    bomWhere: 'bom · {role} · {part}',
   },
   notices: {
     openFindings: {

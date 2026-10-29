@@ -19,20 +19,15 @@
 // в простое браузера, вне кадра набора; (4) больше CAP_PIECES деталей — пиктограмм нет, молча.
 // Правка шагов пересчитывает одни раскладки узлов, граф не трогает.
 import { assignmentMode } from 'lib/assembly-skeleton/assignment';
-import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
 import type { SeamGraph, SkeletonProposal } from 'lib/assembly-skeleton/types';
 import { unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
+import type { common_TechCard } from 'api/proto-http/admin';
 
-import { seamAssignmentInputOf } from './assembly-seams/seam-assignment';
 import { cardSeamDecisions, useCardSeamsSig } from './assembly-seams/seams-store';
-import {
-  buildSkeletonFacts,
-  skeletonCategoryRead,
-  skeletonLined,
-} from './assembly-skeleton-source';
+import { seamGraphOfCard } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum, type TechCardFormData } from './schema';
@@ -180,40 +175,27 @@ export function CardUnitPicturesProvider({
       const read = () => {
         if (cancelled) return;
         const v = live.current;
-        const bomLines = (v.bomItems ?? []) as Parameters<typeof buildSkeletonFacts>[0]['bomLines'];
-        // The panel's own reading of category and lining — one graph for the proposal, the
-        // assembly surfaces and the print sheet.
-        const lined = skeletonLined({
-          cloth: v.cloth,
-          pieces: v.pieces,
-          aliases: v.aliases ?? [],
-          patterns: v.patterns ?? [],
-          bomLines,
-        });
-        const { facts } = buildSkeletonFacts({
-          pieces: v.pieces,
-          shapes: v.shapes,
-          cloth: v.cloth,
-          bomLines,
-          category: skeletonCategoryRead({
-            categoryNames: v.categoryNames ?? [],
-            hasLining: lined,
-            pieceNames: v.pieces.map((p) => p.name ?? ''),
-            purpose: toPurposeEnum(v.purpose),
-          }).category,
-          defaultMachineType: null,
-          aliases: v.aliases ?? [],
-        });
         let g: SeamGraph | null = null;
-        if (facts.pieces.length > 0) {
+        if (v.pieces.length > 0) {
           try {
-            g = readSeamGraph(
-              facts,
-              undefined,
-              {},
-              cardSeamDecisions(facts),
-              undefined,
-              seamAssignmentInputOf(v.operations, new Set(facts.pieces.map((p) => p.pieceKey))),
+            const card = {
+              techCard: {
+                pieces: v.pieces,
+                bomItems: v.bomItems,
+                operations: v.operations,
+                pieceDxfAliases: { items: v.aliases ?? [] },
+                patterns: v.patterns,
+                purpose: toPurposeEnum(v.purpose),
+              },
+            } as unknown as common_TechCard;
+            g = seamGraphOfCard(
+              card,
+              {
+                shapes: v.shapes,
+                cloth: v.cloth,
+                categoryNames: v.categoryNames,
+              },
+              { decisions: cardSeamDecisions },
             );
           } catch {
             // Пиктограмма — подсказка, не данные: сбой чтения выкройки не должен ронять вкладку.

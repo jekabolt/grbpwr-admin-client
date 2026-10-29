@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Edge, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { pairOverlap, pieceKeyOf, pieceTilt, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
+import {
+  pairOverlap,
+  pieceKeyOf,
+  pieceTilt,
+  rasterize,
+  resolveEdge,
+} from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 
 import {
@@ -19,6 +25,14 @@ import {
   card83Graph,
   card83InnerLines,
 } from './card83.fixture';
+import {
+  CARD63_OPS,
+  CARD63_PIECE_KEYS,
+  card63Geoms,
+  card63Graph,
+  card63InnerLines,
+  card63Step,
+} from './card63.fixture';
 import {
   CARD58_OPS,
   CARD58_PIECE_KEYS,
@@ -51,6 +65,7 @@ import {
   UPRIGHT,
   type StepLayout,
 } from './step-picture';
+import type { HandOn } from './step-hand';
 import { frameSeamsOf, innerSeamsOf, splitLaid } from './step-picture-view';
 import {
   inputGroups,
@@ -277,13 +292,29 @@ describe('stepLayout', () => {
     const g = new Map(geoms);
     g.set('C', { ...geoms.get('C')!, rect: false });
     const fold = candidateOf({ a: ['A#2'], b: ['C#2'] }, g)!;
-    const L = stepLayout([['A'], ['C']], [fold], g);
-    expect(tiltOf(L.T.get('C')!)).toBeLessThanOrEqual(UPRIGHT);
-    const a = boxOf(world(g.get('A')!, L.T.get('A')!));
-    const c = boxOf(world(g.get('C')!, L.T.get('C')!));
+    const boxes = (L: StepLayout) => ({
+      a: boxOf(world(g.get('A')!, L.T.get('A')!)),
+      c: boxOf(world(g.get('C')!, L.T.get('C')!)),
+    });
+    // Exploded (the canvas), C stands beside A.
+    const E = stepLayout([['A'], ['C']], [fold], g, { explode: 0.08 });
+    expect(tiltOf(E.T.get('C')!)).toBeLessThanOrEqual(UPRIGHT);
+    expect(E.layers).toEqual([]);
+    const { a, c } = boxes(E);
     const overlapX = Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0);
     const overlapY = Math.min(a.y1, c.y1) - Math.max(a.y0, c.y0);
     expect(overlapX <= 0 || overlapY <= 0).toBe(true);
+    // Joined (the result), C hangs from A's top inside A, its top still up: A's layer, as a pocket
+    // bag lies on the front it is sewn to — not folded over it.
+    const L = stepLayout([['A'], ['C']], [fold], g);
+    expect(tiltOf(L.T.get('C')!)).toBeLessThanOrEqual(UPRIGHT);
+    expect(L.layers).toEqual([[1, 0]]);
+    const on = boxes(L);
+    expect(on.c.x0).toBeGreaterThanOrEqual(on.a.x0 - 0.5);
+    expect(on.c.x1).toBeLessThanOrEqual(on.a.x1 + 0.5);
+    expect(on.c.y0).toBeGreaterThanOrEqual(on.a.y0 - 0.5);
+    expect(on.c.y1).toBeLessThanOrEqual(on.a.y1 + 0.5);
+    expect(on.c.y1).toBeCloseTo(on.a.y1, 0);
   });
 });
 
@@ -403,7 +434,8 @@ describe('stepLayout on card 58', () => {
       [a, b],
       [b, a],
     ])
-      for (const q of P) for (let i = 0; i < Q.length; i++) d = Math.min(d, toSeg(q, Q[i], Q[(i + 1) % Q.length]));
+      for (const q of P)
+        for (let i = 0; i < Q.length; i++) d = Math.min(d, toSeg(q, Q[i], Q[(i + 1) % Q.length]));
     return d;
   };
   /** Inputs drawn touching (a sewn pair meets along its seam), as components. */
@@ -426,11 +458,14 @@ describe('stepLayout on card 58', () => {
     const rings = s.leaves.map((ks) => ks.map((k) => ring(s.result, k)));
     for (let p = 0; p < rings.length; p++)
       for (let q = p + 1; q < rings.length; q++)
-        for (const a of rings[p]) for (const b of rings[q]) expect(overlapOf(a, b)).toBeLessThanOrEqual(0.01);
+        for (const a of rings[p])
+          for (const b of rings[q]) expect(overlapOf(a, b)).toBeLessThanOrEqual(0.01);
     const twin = s.own.find((c) => identical(pieceKeyOf(c.a), pieceKeyOf(c.b)))!;
     expect(twin).toBeDefined();
     expect(gapOf(s.result, twin)).toBeLessThan(0.25 * lenOf(twin));
-    expect(det(s.result.T.get(pieceKeyOf(twin.a))!) * det(s.result.T.get(pieceKeyOf(twin.b))!)).toBeLessThan(0);
+    expect(
+      det(s.result.T.get(pieceKeyOf(twin.a))!) * det(s.result.T.get(pieceKeyOf(twin.b))!),
+    ).toBeLessThan(0);
     expect(s.result.stacked.some((st) => st.includes(pieceKeyOf(twin.a)))).toBe(false);
     // One whole: every input meets another along a seam (a deep collar curve meets a flat stand
     // edge at its ends, so the seam's middles may part — the pieces still touch).
@@ -802,6 +837,99 @@ describe('stepLayout apart', () => {
     expect(stepLayout([['A', 'B']], [inner], geoms).apart).toEqual([]);
     expect(stepLayout([['C']], [], geoms).apart).toEqual([]);
   });
+
+  it('a run across a piece standing apart hangs along the pieces drawn joined (card 57 op 80, 70 op 50)', () => {
+    // A yoke no seam lays upright stands beside the body; the sleeve's armhole run crosses it.
+    const g = geomsOf(
+      rect('A', 100, 300),
+      rect('B', 100, 300),
+      rect('Y', 120, 60),
+      rect('S', 150, 200),
+    );
+    const run: SeamCandidate = { ...candidateOf({ a: ['S#0'], b: ['A#2', 'B#2', 'Y#0'] }, g)! };
+    for (const leaves of [
+      [['A', 'B', 'Y'], ['S']],
+      [['A', 'B'], ['S']],
+    ]) {
+      const L = stepLayout(leaves, [inner, run], g);
+      expect(L.clusters).toHaveLength(1);
+      expect(L.onRuns).toContain('S');
+      const body = boxOf([
+        ...world(g.get('A')!, L.T.get('A')!),
+        ...world(g.get('B')!, L.T.get('B')!),
+      ]);
+      const s = boxOf(world(g.get('S')!, L.T.get('S')!));
+      // Above the body's top, over its width.
+      expect(s.y0).toBeGreaterThanOrEqual(body.y1 - 1);
+      expect((s.x0 + s.x1) / 2).toBeGreaterThan(body.x0);
+      expect((s.x0 + s.x1) / 2).toBeLessThan(body.x1);
+    }
+  });
+});
+
+describe('stepLayout on card 77: a pocket bag lies on the piece it is sewn to (as card 59 op 380)', () => {
+  const geoms = card77Geoms();
+  const graph = card77Graph();
+  const innerLines = card77InnerLines();
+  const ops = CARD77_OPS;
+  const pieceKeys = CARD77_PIECE_KEYS;
+  // The picker's result and canvas for the step's one proposal.
+  const stepOf = (op: number) => {
+    const index = card77Step(op);
+    const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
+    const byKey = new Map();
+    const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+    const [sug] = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
+    const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
+    const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
+    const own = seamOfSides(sug, geoms, innerLines)!;
+    const seamPieces = new Set([...sug.a, ...sug.b].map(pieceOfTarget));
+    const focused = leaves.map((l) => focusPieces(l, seamPieces, inner)).filter((l) => l.length);
+    const result = stepLayout(focused, [...inner, own], geoms);
+    const canvas = stepLayout(focused, [...inner, own], geoms, { explode: 0.08 });
+    const inputOf = (k: string) => focused.findIndex((l) => l.includes(k));
+    const box = (k: string) => boxOf(world(geoms.get(k)!, result.T.get(k)!));
+    const markOf = (k: string) =>
+      boxOf(innerLines.get(k)![0].map((p) => apply(result.T.get(k)!, p)));
+    return { result, canvas, inputOf, box, markOf };
+  };
+  const det = (T: readonly number[]) => T[0] * T[3] - T[1] * T[2];
+  const within = (b: ReturnType<typeof boxOf>, of: ReturnType<typeof boxOf>) =>
+    b.x0 >= of.x0 - 1 && b.x1 <= of.x1 + 1 && b.y0 >= of.y0 - 1 && b.y1 <= of.y1 + 1;
+
+  it('op 420: the bag lies on the front upright, on the front’s pocket mark, its layer', () => {
+    const s = stepOf(420);
+    expect(s.result.layers).toEqual([[s.inputOf('PCK_R_BTTM'), s.inputOf('P_R_MAIN')]]);
+    const T = s.result.T.get('PCK_R_BTTM')!;
+    expect(tiltOf(T)).toBeLessThan(0.01);
+    expect(det(T)).toBeGreaterThan(0);
+    const bag = s.box('PCK_R_BTTM');
+    expect(within(bag, s.box('P_R_MAIN'))).toBe(true);
+    // Seam edge on the waist, the rest of its outline on the dashed mark the front carries for it.
+    const mark = s.markOf('P_R_MAIN');
+    expect(bag.x0).toBeCloseTo(mark.x0, 0);
+    expect(bag.x1).toBeCloseTo(mark.x1, 0);
+    expect(bag.y0).toBeCloseTo(mark.y0, 0);
+    expect(bag.y1).toBeCloseTo(s.box('P_R_MAIN').y1, 0);
+  });
+
+  it('op 450: the two halves of the bag sewn round their edge are drawn one on the other', () => {
+    const s = stepOf(450);
+    expect(s.result.layers).toEqual([[s.inputOf('PCK_L_BTTM'), s.inputOf('PCK_L_MAIN')]]);
+    const T = s.result.T.get('PCK_L_BTTM')!;
+    expect(tiltOf(T)).toBeLessThan(0.01);
+    expect(det(T)).toBeGreaterThan(0);
+    const half = s.box('PCK_L_BTTM');
+    const main = s.box('PCK_L_MAIN');
+    expect(within(half, main)).toBe(true);
+    // Its round edge on the other half's bottom, its top on the line the other half carries.
+    expect(half.y0).toBeCloseTo(main.y0, 0);
+    expect(half.y1).toBeCloseTo(s.markOf('PCK_L_MAIN').y1, 0);
+  });
+
+  it('the exploded canvas stands every piece beside: no layer there', () => {
+    for (const op of [420, 450]) expect(stepOf(op).canvas.layers).toEqual([]);
+  });
 });
 
 describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoked body', () => {
@@ -878,5 +1006,150 @@ describe('stepLayout on card 77 op 1020: the sleeves into the armholes of a yoke
     const [l, r] = views;
     expect(mid(box(l.result, 'SLV_L'))).toBeLessThan(mid(box(l.result, 'BP_MAIN')));
     expect(mid(box(r.result, 'SLV_R'))).toBeGreaterThan(mid(box(r.result, 'BP_MAIN')));
+  });
+});
+
+describe('stepLayout on card 63: a hand placement beats the guess (the back pocket bags)', () => {
+  const geoms = card63Geoms();
+  const graph = card63Graph();
+  const innerLines = card63InnerLines();
+  const ops = CARD63_OPS;
+  const pieceKeys = CARD63_PIECE_KEYS;
+  // The picker's RESULT for the step's first proposal: the pieces on the seam (`whole`: every
+  // piece of the inputs, as a later step's unit shows them).
+  const stepOf = (op: number, opts: Parameters<typeof stepLayout>[3] = {}, whole = false) => {
+    const index = card63Step(op);
+    const leaves = inputGroups(ops, index, pieceKeys).map((g) => g.pieces);
+    const byKey = new Map();
+    const used = new Set(usedEdgesBeforeStep(ops, index, byKey));
+    const [sug] = suggestStepPairs(ops, index, pieceKeys, geoms, used, null, byKey);
+    const split = splitLaid(graph.chosen, leaves, geoms, innerLines, byKey);
+    const inner = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
+    const own = seamOfSides(sug, geoms, innerLines)!;
+    const seamPieces = new Set([...sug.a, ...sug.b].map(pieceOfTarget));
+    const focused = whole
+      ? leaves
+      : leaves.map((l) => focusPieces(l, seamPieces, inner)).filter((l) => l.length);
+    const result = stepLayout(focused, [...inner, own], geoms, { explode: 0, ...opts });
+    const inputOf = (k: string) => focused.findIndex((l) => l.includes(k));
+    const box = (k: string) => boxOf(world(geoms.get(k)!, result.T.get(k)!));
+    // The laid piece's seam run against its partner's, both drawn: the larger end gap, mm.
+    const gap = (k: string) => {
+      const h = result.hand.get(k)!;
+      const a = [h.target.partRun[0], h.target.partRun.at(-1)!].map((p) =>
+        apply(result.T.get(k)!, p),
+      );
+      const b = [h.target.partnerRun[0], h.target.partnerRun.at(-1)!].map((p) =>
+        apply(result.T.get(h.target.partner)!, p),
+      );
+      const d = (p: Pt2, q: Pt2) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+      return Math.min(
+        Math.max(d(a[0], b[0]), d(a[1], b[1])),
+        Math.max(d(a[0], b[1]), d(a[1], b[0])),
+      );
+    };
+    return { result, inputOf, box, gap };
+  };
+  const det = (T: readonly number[]) => T[0] * T[3] - T[1] * T[2];
+  const within = (b: ReturnType<typeof boxOf>, of: ReturnType<typeof boxOf>) =>
+    b.x0 >= of.x0 - 1 && b.x1 <= of.x1 + 1 && b.y0 >= of.y0 - 1 && b.y1 <= of.y1 + 1;
+  const bagIn: HandOn = { inside: true, rotDeg: 0, flip: false, slideMm: 0, partner: 'Back_L' };
+  const leftHand = new Map([['PCK_BACK_1L', bagIn]]);
+
+  it('no hand: the layout as before, an empty placement map changes nothing', () => {
+    const round = (b: ReturnType<typeof boxOf>) =>
+      [b.x0, b.x1, b.y0, b.y1].map((v) => Math.round(v * 10) / 10);
+    // Boxes of the pieces as drawn before hand placement existed (mm, 0.1).
+    const before: [number, boolean, Record<string, number[]>][] = [
+      [100, false, { PCK_BACK_1L: [-8.3, 241.4, 1010, 1189.9], Back_L: [0, 396, 0, 1026.6] }],
+      [70, false, { PCK_BACK_1R: [154.5, 404.2, 1010, 1189.9], Back_R: [0, 396, 0, 1026.6] }],
+      [160, true, { PCK_BACK_1L: [-9.5, 240.1, 1021.7, 1201.6], Back_L: [0, 396, 0, 1026.6] }],
+      [130, true, { PCK_BACK_1R: [155.8, 405.5, 1021.7, 1201.6], Back_R: [0, 396, 0, 1026.6] }],
+    ];
+    for (const [op, whole, boxes] of before) {
+      const s = stepOf(op, {}, whole);
+      for (const [k, b] of Object.entries(boxes)) expect(round(s.box(k))).toEqual(b);
+      expect(s.result.layers).toEqual([]);
+      expect(s.result.hand.size).toBe(0);
+      const empty = stepOf(op, { hand: new Map(), twinHand: new Map() }, whole).result;
+      expect([...empty.T]).toEqual([...s.result.T]);
+      expect(empty.layers).toEqual(s.result.layers);
+      expect(empty.apart).toEqual(s.result.apart);
+    }
+  });
+
+  it('op 100: the bag placed inside lies in the back, upright, a layer under the back', () => {
+    const none = stepOf(100);
+    const s = stepOf(100, { hand: leftHand });
+    expect(s.result.layers).toEqual([[s.inputOf('PCK_BACK_1L'), s.inputOf('Back_L')]]);
+    expect(s.result.hand.get('PCK_BACK_1L')).toMatchObject({ place: bagIn, twin: false });
+    expect(within(s.box('PCK_BACK_1L'), s.box('Back_L'))).toBe(true);
+    // Hangs from the back's top edge (it stood above it), its seam on the back's seam.
+    expect(s.box('PCK_BACK_1L').y1).toBeCloseTo(s.box('Back_L').y1, 0);
+    expect(none.box('PCK_BACK_1L').y1).toBeGreaterThan(s.box('Back_L').y1 + 100);
+    expect(s.gap('PCK_BACK_1L')).toBeLessThan(0.5);
+    // Upright: the turn it had standing above (the top edge's slope), not turned over or mirrored.
+    const T = s.result.T.get('PCK_BACK_1L')!;
+    expect(det(T)).toBeGreaterThan(0);
+    expect(T[3]).toBeGreaterThan(0);
+    expect(tiltOf(T)).toBeCloseTo(tiltOf(none.result.T.get('PCK_BACK_1L')!), 3);
+    // The back stays where it was.
+    expect([...s.result.T.get('Back_L')!]).toEqual([...none.result.T.get('Back_L')!]);
+  });
+
+  it('opened out (not inside): placed on the seam, not a layer', () => {
+    const s = stepOf(100, { hand: new Map([['PCK_BACK_1L', { ...bagIn, inside: false }]]) });
+    expect(s.result.layers).toEqual([]);
+    expect(s.gap('PCK_BACK_1L')).toBeLessThan(0.5);
+    expect(s.box('PCK_BACK_1L').y0).toBeGreaterThan(s.box('Back_L').y1 - 30);
+  });
+
+  it('turn and flip keep the bag’s seam on the back’s seam (Δ≈0)', () => {
+    for (const inside of [false, true])
+      for (const flip of [false, true])
+        for (const rotDeg of [0, 90, 180, 270]) {
+          const place = { inside, flip, rotDeg, slideMm: 0, partner: 'Back_L' };
+          const s = stepOf(100, { hand: new Map([['PCK_BACK_1L', place]]) });
+          expect(s.gap('PCK_BACK_1L')).toBeLessThan(0.5);
+          expect(s.result.layers.length).toBe(inside ? 1 : 0);
+        }
+  });
+
+  it('op 70: the right bag draws the left bag’s placement, mirrored, when it has none', () => {
+    const left = stepOf(100, { hand: leftHand });
+    const s = stepOf(70, { hand: new Map(), twinHand: leftHand });
+    expect(s.result.layers).toEqual([[s.inputOf('PCK_BACK_1R'), s.inputOf('Back_R')]]);
+    expect(s.result.hand.get('PCK_BACK_1R')).toMatchObject({
+      place: { inside: true, rotDeg: 0, flip: false, partner: 'Back_R' },
+      twin: true,
+    });
+    expect(s.gap('PCK_BACK_1R')).toBeLessThan(0.5);
+    // The left bag's box in the left back, reflected across the back.
+    const [bl, kl, br, kr] = [
+      left.box('PCK_BACK_1L'),
+      left.box('Back_L'),
+      s.box('PCK_BACK_1R'),
+      s.box('Back_R'),
+    ];
+    expect(br.x0 - kr.x0).toBeCloseTo(kl.x1 - bl.x1, 0);
+    expect(kr.x1 - br.x1).toBeCloseTo(bl.x0 - kl.x0, 0);
+    expect(br.y0).toBeCloseTo(bl.y0, 0);
+    expect(br.y1).toBeCloseTo(bl.y1, 0);
+    // Its own placement wins over the twin's.
+    const own = new Map([['PCK_BACK_1R', { ...bagIn, inside: false, partner: 'Back_R' }]]);
+    const mine = stepOf(70, { hand: own, twinHand: leftHand });
+    expect(mine.result.layers).toEqual([]);
+    expect(mine.result.hand.get('PCK_BACK_1R')?.twin).toBe(false);
+  });
+
+  it('a later step draws the stored placement the same way (op 160 left, op 130 right)', () => {
+    const left = stepOf(160, { hand: leftHand }, true);
+    expect(left.result.pieceLayers).toEqual([['PCK_BACK_1L', 'Back_L']]);
+    expect(within(left.box('PCK_BACK_1L'), left.box('Back_L'))).toBe(true);
+    expect(left.gap('PCK_BACK_1L')).toBeLessThan(0.5);
+    const right = stepOf(130, { hand: new Map(), twinHand: leftHand }, true);
+    expect(right.result.pieceLayers).toEqual([['PCK_BACK_1R', 'Back_R']]);
+    expect(right.result.hand.get('PCK_BACK_1R')?.twin).toBe(true);
+    expect(within(right.box('PCK_BACK_1R'), right.box('Back_R'))).toBe(true);
   });
 });

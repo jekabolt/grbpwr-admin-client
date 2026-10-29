@@ -62,11 +62,13 @@ export function readSeamGraph(
   hints?: readonly SkeletonUnitHint[],
   /** Who assigns edges (assignment/): absent = the greedy as shipped. */
   assign?: SeamAssignmentInput,
+  /** Geometry already segmented by the assembly reader; absent keeps the normal A1 pass. */
+  segmented?: readonly PieceGeom[],
 ): SeamGraph {
   const refused = skeletonRefusal(facts);
   if (refused) return EMPTY_GRAPH([refused]);
   if (!decisions) {
-    const first = buildSeamGraph(facts, ALL_RULES, undefined, assign);
+    const first = buildSeamGraph(facts, ALL_RULES, undefined, assign, segmented);
     return keepAssignment(
       first,
       compositeSeams(first, groupUnits(first, facts, template, pins, hints)),
@@ -81,6 +83,7 @@ export function readSeamGraph(
       return resolved;
     },
     assign,
+    segmented,
   );
   return keepAssignment(
     first,
