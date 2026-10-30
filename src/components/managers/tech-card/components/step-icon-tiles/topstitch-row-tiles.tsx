@@ -34,6 +34,9 @@ export function TopstitchRowTiles({
   // and clearing the field passes through empty — neither may unmount the field being typed in.
   const [exact, setExact] = useState(rows >= 4);
   const showExact = exact || rows >= 4;
+  // What the count field shows while it is being typed in. The form only takes a whole 4–10:
+  // an empty field or «47» stays a draft here, and leaving the field puts the stored count back.
+  const [draft, setDraft] = useState<string | null>(null);
 
   return (
     <TileRow
@@ -62,16 +65,25 @@ export function TopstitchRowTiles({
           ))}
         </Tiles>
         {showExact && (
-          <InputField
-            name={`operations.${index}.topstitchRows`}
-            type='number'
-            valueAsNumber
-            label='rows'
-            min={4}
-            max={MAX_TOPSTITCH_ROWS}
-            step={1}
-            className='w-14'
-          />
+          <div onBlur={() => setDraft(null)}>
+            <InputField
+              name={`operations.${index}.topstitchRows`}
+              type='number'
+              valueAsNumber
+              label='rows'
+              min={4}
+              max={MAX_TOPSTITCH_ROWS}
+              step={1}
+              className='w-14'
+              value={draft ?? (rows > 0 ? String(rows) : '')}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setDraft(e.target.value);
+                const n = Number(e.target.value);
+                if (Number.isInteger(n) && n >= 4 && n <= MAX_TOPSTITCH_ROWS)
+                  write('topstitchRows', n);
+              }}
+            />
+          </div>
         )}
       </div>
     </TileRow>
