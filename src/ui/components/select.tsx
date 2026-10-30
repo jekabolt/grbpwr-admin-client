@@ -105,6 +105,9 @@ export default function SelectComponent({
   return (
     <Select.Root
       {...props}
+      // Без этого выбранный пустой пункт («plain») рисовался пустым полем: Radix искал `''`
+      // среди пунктов, а они несут подстановку.
+      value={props.value === '' && offersEmptyOption ? EMPTY_SENTINEL : props.value}
       onValueChange={(value: string) => {
         const v = outward(value);
         if (v === '' && !offersEmptyOption) return;
