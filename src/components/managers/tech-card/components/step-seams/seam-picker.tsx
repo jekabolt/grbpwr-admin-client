@@ -30,6 +30,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
+import { seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -63,7 +64,6 @@ import {
 import {
   boxOf,
   fitBox,
-  focusPieces,
   insideRing,
   midAlong,
   PARTNER_REL,
@@ -537,13 +537,10 @@ export function SeamPickerBody({
     ...(partner ? [partner] : []),
   ];
   const seamPieces = new Set(seamIds.map(pieceOfTarget));
-  const focus = seamPieces.size > 0 && inners.length === 0;
-  const focusRaw = groups
-    .map((g) => ({
-      name: g.name,
-      pieces: focus ? focusPieces(g.pieces, seamPieces, innerSeams) : g.pieces,
-    }))
-    .filter((g) => g.pieces.length > 0);
+  // A lone pick with no partner keeps every piece: the other side is where the next pick goes.
+  const cut = inners.length === 0 ? seamFocus(groups, seamPieces, innerSeams) : null;
+  const focus = !!cut;
+  const focusRaw = cut ?? groups.filter((g) => g.pieces.length > 0);
   const focused = useStable(
     focusRaw,
     focusRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
