@@ -6,6 +6,7 @@ import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
 import { CARD58_OPS, CARD58_PIECE_KEYS, card58Geoms, card58Step } from './card58.fixture';
+import { CARD6_OPS, CARD6_PIECE_KEYS, CARD6_SEAMS, card6Geoms, card6Step } from './card6.fixture';
 import {
   deltaMm,
   dropKeys,
@@ -710,6 +711,53 @@ describe('card 77: both sleeves on their armholes, one proposal per side', () =>
       const sleeves = [...p.a, ...p.b].filter((id) => /^SLV_/.test(id));
       expect(sleeves).toHaveLength(1);
     }
+  });
+});
+
+describe('card 6: layered seams keep their structural edge', () => {
+  const geoms = card6Geoms();
+  const proposal = (operationNumber: number) => {
+    const index = card6Step(operationNumber);
+    return suggestStepPairs(
+      CARD6_OPS,
+      index,
+      CARD6_PIECE_KEYS,
+      geoms,
+      usedEdgesBeforeStep(CARD6_OPS, index, CARD6_SEAMS),
+      null,
+      CARD6_SEAMS,
+    )[0];
+  };
+
+  it('260: never joins the two sleeve plackets edge to edge', () => {
+    expect(proposal(260)).toBeUndefined();
+  });
+
+  it('720: the centre-front placket takes the upper and main front chain', () => {
+    expect(proposal(720)).toMatchObject({
+      a: ['PLCK_L#0'],
+      b: ['P_L_U#2', 'P_L_MAIN#2'],
+      aLen: expect.closeTo(701.4, 1),
+      bLen: expect.closeTo(701.4, 1),
+    });
+  });
+
+  it('770: the right yoke joins the main front above the pocket layer', () => {
+    expect(proposal(770)).toMatchObject({
+      a: ['P_R_U#4'],
+      b: ['P_R_MAIN#1'],
+      aLen: expect.closeTo(194.4, 0),
+      bLen: expect.closeTo(194.4, 0),
+    });
+  });
+
+  it('870: the stacked main-collar neck remains available for the second collar', () => {
+    expect(proposal(870)).toMatchObject({
+      a: ['clr_main#2', 'clr_main_2#2'],
+      b: ['CLR_SECOND#1'],
+      aLen: expect.closeTo(421, 1),
+      bLen: expect.closeTo(420.9, 1),
+    });
   });
 });
 
