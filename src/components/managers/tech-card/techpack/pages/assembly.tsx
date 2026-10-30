@@ -22,14 +22,18 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
   confidentSeam,
   stepLayout,
+  type StepLayout,
 } from 'components/managers/tech-card/components/step-seams/step-picture';
-import type { Pt2 } from 'lib/assembly-skeleton/types';
-import { pieceKeyOf } from 'lib/assembly-skeleton/union';
-import { apply } from 'lib/assembly-skeleton/union/affine';
+import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
+import { pairOverlap, pieceKeyOf, rasterize } from 'lib/assembly-skeleton/union';
+import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
+import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
+import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -54,7 +58,6 @@ import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
 import { own, useT, type PdfT } from '../i18n';
-
 const ASM_CSS = String.raw`
 .asm-cols { display: grid; min-height: 0; flex: 1 1 0; column-gap: 24px; }
 .asm-cols[data-orient=land] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -124,10 +127,112 @@ const picturePieceSignature = (keys: Iterable<string>) => [...new Set(keys)].sor
 const pictureClusterArea = (picture: StepPicture, keys: readonly string[]) =>
   keys.reduce((sum, key) => sum + Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0), 0);
 
-/**
- * Sewn bodies in a laid editor picture. `stepLayout.apart` is the placer telling us which pieces
- * did not join its main body; confident sewn seams then recover the smaller bodies among them.
- */
+const isLiningPiece = (picture: StepPicture, key: string) => {
+  const tokens = nameTokens(picture.geoms.get(key)?.name ?? '');
+  return tokens.some((token) => ROLE_BOOK.liningTokens?.includes(token));
+};
+
+/** Strict seam components used to discard genuinely unpaired trouser leftovers. */
+function connectedPictureClusters(picture: StepPicture): string[][] {
+  const keys = [...picture.layout.T.keys()];
+  const adjacent = new Map(keys.map((key) => [key, new Set<string>()]));
+  const link = (a: string, b: string) => {
+    if (a === b || !adjacent.has(a) || !adjacent.has(b)) return;
+    adjacent.get(a)!.add(b);
+    adjacent.get(b)!.add(a);
+  };
+  const extent = (key: string) => {
+    const transform = picture.layout.T.get(key);
+    const geom = picture.geoms.get(key);
+    return transform && geom ? boxOf(geom.rs.map((point) => apply(transform, point))) : null;
+  };
+  const touches = (a: string, b: string) => {
+    const transformA = picture.layout.T.get(a);
+    const transformB = picture.layout.T.get(b);
+    const geomA = picture.geoms.get(a);
+    const geomB = picture.geoms.get(b);
+    const A = extent(a);
+    const B = extent(b);
+    if (
+      !transformA ||
+      !transformB ||
+      !geomA ||
+      !geomB ||
+      !A ||
+      !B ||
+      Math.max(A.x0 - B.x1, B.x0 - A.x1, A.y0 - B.y1, B.y0 - A.y1, 0) > 2
+    )
+      return false;
+    const left = geomA.rs.map((point) => apply(transformA, point));
+    const right = geomB.rs.map((point) => apply(transformB, point));
+    return left.some((point) =>
+      right.some((other) => Math.hypot(point[0] - other[0], point[1] - other[1]) <= 2),
+    );
+  };
+
+  for (const seam of picture.frameSeams) {
+    if (seam.kind === 'closure-not-seam') continue;
+    const sides =
+      seam.kind === 'surface' && seam.surface
+        ? [[seam.surface.host], [seam.surface.part]]
+        : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
+    for (const a of sides[0]) for (const b of sides[1]) if (touches(a, b)) link(a, b);
+  }
+
+  for (const stack of picture.layout.stacked) for (const key of stack.slice(1)) link(stack[0], key);
+  for (const [piece, partner] of picture.layout.pieceLayers) link(piece, partner);
+  for (let left = 0; left < keys.length; left++)
+    for (let right = left + 1; right < keys.length; right++)
+      if (
+        touches(keys[left], keys[right]) &&
+        [keys[left], keys[right]].some(
+          (key) => readName(picture.geoms.get(key)?.name ?? '').role === 'waistband',
+        )
+      )
+        link(keys[left], keys[right]);
+
+  const clusters: string[][] = [];
+  const seen = new Set<string>();
+  for (const start of keys) {
+    if (seen.has(start)) continue;
+    const cluster: string[] = [];
+    const queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const key = queue.shift()!;
+      cluster.push(key);
+      for (const next of adjacent.get(key) ?? [])
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+    }
+    clusters.push(cluster);
+  }
+  const anchorArea = (cluster: readonly string[]) =>
+    Math.max(...cluster.map((key) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0)), 0);
+  const anchorShape = (cluster: readonly string[]) =>
+    Math.max(
+      ...cluster.map((key) => {
+        const geom = picture.geoms.get(key);
+        if (!geom) return 0;
+        const box = boxOf(geom.rs);
+        const width = Math.max(box.x1 - box.x0, 1);
+        const height = Math.max(box.y1 - box.y0, 1);
+        const shell = isLiningPiece(picture, key) ? 0.2 : 1;
+        return shell * Math.abs(geom.areaMm2) * (Math.min(width, height) / Math.max(width, height));
+      }),
+      0,
+    );
+  return clusters.sort(
+    (a, b) =>
+      anchorShape(b) - anchorShape(a) ||
+      anchorArea(b) - anchorArea(a) ||
+      pictureClusterArea(picture, b) - pictureClusterArea(picture, a),
+  );
+}
+
+/** Sewn bodies in a laid picture, preserving its main body and recovering smaller loose bodies. */
 export function editorPictureClusters(picture: StepPicture): string[][] {
   const keys = [...picture.layout.T.keys()];
   const apart = new Set(picture.layout.apart);
@@ -139,7 +244,6 @@ export function editorPictureClusters(picture: StepPicture): string[][] {
     adjacent.get(a)!.add(b);
     adjacent.get(b)!.add(a);
   };
-
   for (const seam of picture.frameSeams) {
     if (!confidentSeam(seam)) continue;
     const sides =
@@ -148,7 +252,6 @@ export function editorPictureClusters(picture: StepPicture): string[][] {
         : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
     for (const a of sides[0]) for (const b of sides[1]) link(a, b);
   }
-
   const clusters: string[][] = main.length ? [main] : [];
   const seen = new Set<string>();
   for (const start of loose) {
@@ -190,6 +293,9 @@ function pictureWithClusters(picture: StepPicture, clusters: readonly (readonly 
       stacked: picture.layout.stacked
         .map((stack) => stack.filter((key) => keep.has(key)))
         .filter((stack) => stack.length > 1),
+      pieceLayers: picture.layout.pieceLayers.filter(
+        ([piece, partner]) => keep.has(piece) && keep.has(partner),
+      ),
       onRuns: picture.layout.onRuns.filter((key) => keep.has(key)),
       apart: picture.layout.apart.filter((key) => keep.has(key)),
       bbox: boxOf(points),
@@ -197,9 +303,15 @@ function pictureWithClusters(picture: StepPicture, clusters: readonly (readonly 
   };
 }
 
-function focusNonJoinPicture(picture: StepPicture, action: AsmAction | undefined): StepPicture {
-  const clusters = editorPictureClusters(picture);
-  if (clusters.length <= 1) return picture;
+function focusNonJoinPicture(
+  picture: StepPicture,
+  action: AsmAction | undefined,
+  strict = false,
+  preserveStored = false,
+): StepPicture {
+  const clusters = strict ? connectedPictureClusters(picture) : editorPictureClusters(picture);
+  if (!clusters.length) return picture;
+  if (clusters.length === 1) return pictureWithClusters(picture, clusters);
   const marks = editorActionMarks(action, picture.geoms);
   const markedPieces = new Set(
     [...marks.lines, ...marks.glyphs]
@@ -208,8 +320,1106 @@ function focusNonJoinPicture(picture: StepPicture, action: AsmAction | undefined
   );
   const selected = markedPieces.size
     ? clusters.filter((cluster) => cluster.some((key) => markedPieces.has(key)))
-    : clusters.slice(0, 1);
-  return pictureWithClusters(picture, selected.length ? selected : clusters.slice(0, 1));
+    : strict
+      ? clusters.filter((cluster, index) => {
+          if (index === 0) return true;
+          if (
+            pictureClusterArea(picture, cluster) <
+            0.45 * pictureClusterArea(picture, clusters[0])
+          )
+            return false;
+          const hands = (keys: readonly string[]) =>
+            new Set(
+              keys.flatMap((key) => {
+                const geom = picture.geoms.get(key);
+                const hand = geom?.hand ?? readName(geom?.name ?? '').hand;
+                return hand ? [hand] : [];
+              }),
+            );
+          const mainHands = hands(clusters[0]);
+          const candidateHands = hands(cluster);
+          const mainIsLining = clusters[0].every((key) => isLiningPiece(picture, key));
+          const candidateIsLining = cluster.every((key) => isLiningPiece(picture, key));
+          return (
+            mainIsLining === candidateIsLining &&
+            ((mainHands.has('L') && candidateHands.has('R')) ||
+              (mainHands.has('R') && candidateHands.has('L')))
+          );
+        })
+      : clusters.slice(0, 1);
+  const focused = pictureWithClusters(picture, selected.length ? selected : clusters.slice(0, 1));
+  if (
+    !strict &&
+    markedPieces.size > 0 &&
+    focused.layout.T.size > 1 &&
+    focused.layout.T.size * 2 < picture.layout.T.size
+  )
+    return compactFinalPicture(focused, true);
+  return strict && !preserveStored ? dockLoosePicture(focused) : focused;
+}
+
+const visiblePictureKeys = (picture: StepPicture) => {
+  const stacked = new Set(picture.layout.stacked.flatMap((group) => group.slice(1)));
+  const layeredInputs = new Set(picture.layout.layers.map(([input]) => input));
+  const layeredPieces = new Set(picture.layout.pieceLayers.map(([piece]) => piece));
+  return [...picture.layout.T.keys()].filter(
+    (key) =>
+      !stacked.has(key) &&
+      !layeredInputs.has(picture.layout.input.get(key) ?? -1) &&
+      !layeredPieces.has(key),
+  );
+};
+
+function dockLoosePicture(picture: StepPicture, mode: 'move' | 'layer' = 'move'): StepPicture {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < 2) return picture;
+  const rings = new Map(
+    keys.map((key) => [
+      key,
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+    ]),
+  );
+  const touches = (left: readonly Pt2[], right: readonly Pt2[]) => {
+    const a = boxOf(left);
+    const b = boxOf(right);
+    if (Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1, 0) > 2) return false;
+    if (pairOverlap(rasterize(left, 2), rasterize(right, 2)) > 0) return true;
+    const grid = new Map<string, Pt2[]>();
+    for (const point of right) {
+      const cell = `${Math.floor(point[0] / 2)}:${Math.floor(point[1] / 2)}`;
+      grid.set(cell, [...(grid.get(cell) ?? []), point]);
+    }
+    return left.some(([x, y]) => {
+      const gx = Math.floor(x / 2);
+      const gy = Math.floor(y / 2);
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++)
+          if (
+            (grid.get(`${gx + dx}:${gy + dy}`) ?? []).some(
+              (point) => Math.hypot(x - point[0], y - point[1]) <= 2,
+            )
+          )
+            return true;
+      return false;
+    });
+  };
+  const parent = new Map(keys.map((key) => [key, key]));
+  const find = (key: string): string => {
+    const up = parent.get(key)!;
+    if (up === key) return key;
+    const root = find(up);
+    parent.set(key, root);
+    return root;
+  };
+  const join = (a: string, b: string) => parent.set(find(a), find(b));
+  for (let left = 0; left < keys.length; left++)
+    for (let right = left + 1; right < keys.length; right++)
+      if (touches(rings.get(keys[left])!, rings.get(keys[right])!)) join(keys[left], keys[right]);
+  const grouped = new Map<string, string[]>();
+  for (const key of keys) grouped.set(find(key), [...(grouped.get(find(key)) ?? []), key]);
+  const groups = [...grouped.values()].sort((a, b) => {
+    const groupArea = (group: readonly string[]) => {
+      const box = boxOf(group.flatMap((key) => rings.get(key)!));
+      return (box.x1 - box.x0) * (box.y1 - box.y0);
+    };
+    return groupArea(b) - groupArea(a);
+  });
+  if (groups.length < 2) return picture;
+  if (mode === 'layer') {
+    const partner = groups[0][0];
+    const existing = new Set(picture.layout.pieceLayers.map(([piece]) => piece));
+    const pieceLayers: [string, string][] = [
+      ...picture.layout.pieceLayers,
+      ...groups
+        .slice(1)
+        .flat()
+        .filter((piece) => !existing.has(piece))
+        .map((piece) => [piece, partner] as [string, string]),
+    ];
+    return { ...picture, layout: { ...picture.layout, pieceLayers } };
+  }
+  const extrema = (points: readonly Pt2[]) => ({
+    left: points.reduce((best, point) => (point[0] < best[0] ? point : best)),
+    right: points.reduce((best, point) => (point[0] > best[0] ? point : best)),
+    low: points.reduce((best, point) => (point[1] < best[1] ? point : best)),
+    high: points.reduce((best, point) => (point[1] > best[1] ? point : best)),
+  });
+  const moves = new Map<string, Pt2>();
+  let placedRings = groups[0].map((key) => rings.get(key)!);
+  let placed = placedRings.flat();
+  for (const group of groups.slice(1)) {
+    const groupRings = group.map((key) => rings.get(key)!);
+    const points = groupRings.flat();
+    const host = extrema(placed);
+    const part = extrema(points);
+    const hostBox = boxOf(placed);
+    const partBox = boxOf(points);
+    const candidates: Pt2[] = [
+      [host.right[0] - part.left[0], host.right[1] - part.left[1]],
+      [host.left[0] - part.right[0], host.left[1] - part.right[1]],
+      [host.high[0] - part.low[0], host.high[1] - part.low[1]],
+      [host.low[0] - part.high[0], host.low[1] - part.high[1]],
+      [hostBox.x1 - partBox.x0, (hostBox.y0 + hostBox.y1 - partBox.y0 - partBox.y1) / 2],
+      [hostBox.x0 - partBox.x1, (hostBox.y0 + hostBox.y1 - partBox.y0 - partBox.y1) / 2],
+      [(hostBox.x0 + hostBox.x1 - partBox.x0 - partBox.x1) / 2, hostBox.y1 - partBox.y0],
+      [(hostBox.x0 + hostBox.x1 - partBox.x0 - partBox.x1) / 2, hostBox.y0 - partBox.y1],
+    ];
+    const collar = group.some(
+      (key) => readName(picture.geoms.get(key)?.name ?? '').role === 'collar',
+    );
+    const centre = (hostBox.x0 + hostBox.x1) / 2;
+    const neck = placed
+      .filter(([x]) => Math.abs(x - centre) <= 0.25 * (hostBox.x1 - hostBox.x0))
+      .reduce((best, point) => (point[1] > best[1] ? point : best), host.high);
+    const collarLow = points
+      .filter(
+        ([x]) => Math.abs(x - (partBox.x0 + partBox.x1) / 2) <= 0.35 * (partBox.x1 - partBox.x0),
+      )
+      .reduce((best, point) => (point[1] < best[1] ? point : best), part.low);
+    const touchingCandidates = candidates.filter((delta) =>
+      groupRings.some((ring) =>
+        placedRings.some((placedRing) =>
+          touches(
+            ring.map(([x, y]) => [x + delta[0], y + delta[1]] as Pt2),
+            placedRing,
+          ),
+        ),
+      ),
+    );
+    const move = collar
+      ? ([neck[0] - collarLow[0], neck[1] - collarLow[1]] as Pt2)
+      : touchingCandidates.reduce((best, candidate) => {
+          const score = (delta: Pt2) =>
+            frameFill([...placed, ...points.map(([x, y]) => [x + delta[0], y + delta[1]] as Pt2)]);
+          return score(candidate) > score(best) ? candidate : best;
+        });
+    for (const key of group) moves.set(key, move);
+    placedRings = [
+      ...placedRings,
+      ...groupRings.map((ring) => ring.map(([x, y]) => [x + move[0], y + move[1]] as Pt2)),
+    ];
+    placed = placedRings.flat();
+  }
+  const T = new Map(
+    [...picture.layout.T].map(([key, transform]) => {
+      const [dx, dy] = moves.get(key) ?? [0, 0];
+      return [
+        key,
+        [
+          transform[0],
+          transform[1],
+          transform[2],
+          transform[3],
+          transform[4] + dx,
+          transform[5] + dy,
+        ] as Affine,
+      ] as const;
+    }),
+  );
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
+}
+
+const frameFill = (points: readonly Pt2[]) => {
+  const box = boxOf(points);
+  const width = Math.max(box.x1 - box.x0, 1);
+  const height = Math.max(box.y1 - box.y0, 1);
+  const scale = Math.min(204 / width, 178 / height);
+  return (width * scale * height * scale) / (204 * 178);
+};
+
+const ringArea = (ring: readonly Pt2[]) =>
+  Math.abs(
+    ring.reduce((sum, point, index) => {
+      const next = ring[(index + 1) % ring.length];
+      return sum + point[0] * next[1] - next[0] * point[1];
+    }, 0) / 2,
+  );
+
+function convexHull(points: readonly Pt2[]): Pt2[] {
+  const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (sorted.length < 3) return sorted;
+  const cross = (origin: Pt2, a: Pt2, b: Pt2) =>
+    (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0]);
+  const half = (source: readonly Pt2[]) => {
+    const out: Pt2[] = [];
+    for (const point of source) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], point) <= 0)
+        out.pop();
+      out.push(point);
+    }
+    return out;
+  };
+  return [...half(sorted).slice(0, -1), ...half([...sorted].reverse()).slice(0, -1)];
+}
+
+const hullCompactness = (rings: readonly (readonly Pt2[])[]) => {
+  const hull = convexHull(rings.flat());
+  const hullArea = ringArea(hull);
+  return hullArea > 0 ? rings.reduce((sum, ring) => sum + ringArea(ring), 0) / hullArea : 1;
+};
+
+const ringAspect = (ring: readonly Pt2[]) => {
+  const box = boxOf(ring);
+  const width = Math.max(box.x1 - box.x0, 1);
+  const height = Math.max(box.y1 - box.y0, 1);
+  return Math.max(width / height, height / width);
+};
+
+const ringsAspect = (rings: readonly (readonly Pt2[])[]) => ringAspect(rings.flat());
+
+/** Reduce a finished sleeved garment to one outer front view, keeping construction layers behind. */
+function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
+  const visible = visiblePictureKeys(picture);
+  const role = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const sleeves = visible.filter((key) => role(key).role === 'sleeve');
+  const collars = visible.filter((key) => ['collar', 'stand'].includes(role(key).role ?? ''));
+  const bodies = visible.filter(
+    (key) =>
+      !sleeves.includes(key) &&
+      !collars.includes(key) &&
+      !['pocket', 'facing', 'placket', 'fly', 'cuff', 'waistband'].includes(role(key).role ?? ''),
+  );
+  if (sleeves.length < 2 || bodies.length < 2) return null;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const pickPair = (keys: readonly string[]) => {
+    const byHand = (hand: 'L' | 'R') =>
+      keys.filter((key) => role(key).hand === hand).sort((a, b) => area(b) - area(a))[0];
+    const pair = [byHand('L'), byHand('R')].filter((key): key is string => !!key);
+    for (const key of [...keys].sort((a, b) => area(b) - area(a))) {
+      if (pair.length >= 2) break;
+      if (!pair.includes(key)) pair.push(key);
+    }
+    return pair.slice(0, 2);
+  };
+  const bodyPair = pickPair(bodies);
+  const sleevePair = pickPair(sleeves);
+  if (bodyPair.length < 2 || sleevePair.length < 2) return null;
+  const oneBodyView =
+    new Set(bodyPair.map((key) => role(key).role)).has('front') &&
+    new Set(bodyPair.map((key) => role(key).role)).has('back') &&
+    bodyPair.every((key) => !role(key).hand);
+  const bodyLeaders = oneBodyView
+    ? [bodyPair.find((key) => role(key).role === 'front') ?? bodyPair[0]]
+    : bodyPair;
+
+  const T = new Map(picture.layout.T);
+  const ring = (key: string) => picture.geoms.get(key)?.rs ?? [];
+  const place = (key: string, dx: number, dy: number) => T.set(key, [1, 0, 0, 1, dx, dy] as Affine);
+  let x = 0;
+  for (const key of bodyLeaders) {
+    const box = boxOf(ring(key));
+    place(key, x - box.x0, -box.y0);
+    x += box.x1 - box.x0;
+  }
+  if (bodyLeaders.length > 1) {
+    const leftBody = ring(bodyLeaders[0]).map((point) => apply(T.get(bodyLeaders[0])!, point));
+    const rightBody = ring(bodyLeaders[1]).map((point) => apply(T.get(bodyLeaders[1])!, point));
+    let bodyContact: { distance: number; left: Pt2; right: Pt2 } | null = null;
+    for (const left of leftBody)
+      for (const right of rightBody) {
+        const distance = Math.hypot(left[0] - right[0], left[1] - right[1]);
+        if (!bodyContact || distance < bodyContact.distance)
+          bodyContact = { distance, left, right };
+      }
+    if (bodyContact)
+      T.set(
+        bodyLeaders[1],
+        compose(
+          translate(
+            bodyContact.left[0] - bodyContact.right[0],
+            bodyContact.left[1] - bodyContact.right[1],
+          ),
+          T.get(bodyLeaders[1])!,
+        ),
+      );
+  }
+  const bodyPoints = bodyLeaders.flatMap((key) =>
+    ring(key).map((point) => apply(T.get(key)!, point)),
+  );
+  let bodyBox = boxOf(bodyPoints);
+  const [leftSleeve, rightSleeve] = sleevePair;
+  const leftBox = boxOf(ring(leftSleeve));
+  const rightBox = boxOf(ring(rightSleeve));
+  place(leftSleeve, bodyBox.x0 - leftBox.x1, bodyBox.y1 - leftBox.y1);
+  place(rightSleeve, bodyBox.x1 - rightBox.x0, bodyBox.y1 - rightBox.y1);
+  const snap = (key: string, hosts: readonly string[]) => {
+    const part = ring(key).map((point) => apply(T.get(key)!, point));
+    const target = hosts.flatMap((host) => ring(host).map((point) => apply(T.get(host)!, point)));
+    let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
+    for (const partPoint of part)
+      for (const targetPoint of target) {
+        const distance = Math.hypot(partPoint[0] - targetPoint[0], partPoint[1] - targetPoint[1]);
+        if (!nearest || distance < nearest.distance)
+          nearest = { distance, part: partPoint, target: targetPoint };
+      }
+    if (!nearest) return;
+    const transform = T.get(key)!;
+    T.set(key, [
+      transform[0],
+      transform[1],
+      transform[2],
+      transform[3],
+      transform[4] + nearest.target[0] - nearest.part[0],
+      transform[5] + nearest.target[1] - nearest.part[1],
+    ] as Affine);
+  };
+  snap(leftSleeve, [bodyLeaders[0]]);
+  snap(rightSleeve, [bodyLeaders[bodyLeaders.length - 1]]);
+  const insetSleeve = (key: string, host: string, direction: number) => {
+    const width = Math.max(boxOf(ring(key)).x1 - boxOf(ring(key)).x0, 1);
+    for (let moved = 1; moved <= 0.25 * width; moved += 1) {
+      const candidate = compose(translate(direction, 0), T.get(key)!);
+      const sleeveRing = ring(key).map((point) => apply(candidate, point));
+      const hostRing = ring(host).map((point) => apply(T.get(host)!, point));
+      if (pairOverlap(rasterize(sleeveRing, 2), rasterize(hostRing, 2)) > 0.145) break;
+      T.set(key, candidate);
+    }
+  };
+  insetSleeve(leftSleeve, bodyLeaders[0], 1);
+  insetSleeve(rightSleeve, bodyLeaders[bodyLeaders.length - 1], -1);
+  T.set(leftSleeve, compose(translate(0, -2), T.get(leftSleeve)!));
+  T.set(rightSleeve, compose(translate(0, -2), T.get(rightSleeve)!));
+
+  const pieceLayers = [...picture.layout.pieceLayers];
+  const layerOn = (key: string, leaders: readonly string[]) => {
+    const hand = role(key).hand;
+    const leader = leaders.find((candidate) => hand && role(candidate).hand === hand) ?? leaders[0];
+    pieceLayers.push([key, leader]);
+    T.set(key, T.get(leader)!);
+  };
+  for (const key of bodies) if (!bodyLeaders.includes(key)) layerOn(key, bodyLeaders);
+  for (const key of sleeves) if (!sleevePair.includes(key)) layerOn(key, sleevePair);
+
+  const collar = [...collars].sort((a, b) => area(b) - area(a))[0];
+  if (collar) {
+    bodyBox = boxOf([
+      ...bodyPoints,
+      ...sleevePair.flatMap((key) => ring(key).map((point) => apply(T.get(key)!, point))),
+    ]);
+    const collarBox = boxOf(ring(collar));
+    place(
+      collar,
+      (bodyBox.x0 + bodyBox.x1 - collarBox.x0 - collarBox.x1) / 2,
+      bodyBox.y1 - collarBox.y0,
+    );
+    snap(collar, bodyLeaders);
+    for (const key of collars) if (key !== collar) layerOn(key, [collar]);
+  }
+  const leaders = new Set([...bodyLeaders, ...sleevePair, ...(collar ? [collar] : [])]);
+  for (const key of visible)
+    if (!leaders.has(key) && !pieceLayers.some(([piece]) => piece === key))
+      layerOn(key, bodyLeaders);
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return {
+    ...picture,
+    layout: { ...picture.layout, T, pieceLayers, bbox: boxOf(points) },
+  };
+}
+
+/** Reduce trouser construction layers to the upright front/back topology used on the worktable. */
+function trouserFrontPicture(picture: StepPicture): StepPicture | null {
+  const visible = visiblePictureKeys(picture);
+  if (visible.length < 2) return null;
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const panels = visible.filter((key) => {
+    if (!['front', 'back'].includes(reading(key).role ?? '')) return false;
+    const box = boxOf(picture.geoms.get(key)?.rs ?? []);
+    return box.y1 - box.y0 >= 1.35 * Math.max(box.x1 - box.x0, 1);
+  });
+  if (panels.length < 2) return null;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const leaders: string[] = [];
+  for (const hand of ['L', 'R'] as const)
+    for (const role of ['back', 'front']) {
+      const key = panels
+        .filter((candidate) => reading(candidate).hand === hand && reading(candidate).role === role)
+        .sort((a, b) => area(b) - area(a))[0];
+      if (key) leaders.push(key);
+    }
+  if (leaders.length < 2)
+    for (const key of [...panels].sort((a, b) => area(b) - area(a))) {
+      if (leaders.length >= Math.min(4, panels.length)) break;
+      if (!leaders.includes(key)) leaders.push(key);
+    }
+  if (leaders.length < 2) return null;
+
+  const T = new Map(picture.layout.T);
+  let x = 0;
+  let high = -Infinity;
+  leaders.forEach((key, index) => {
+    const box = boxOf(picture.geoms.get(key)?.rs ?? []);
+    T.set(key, translate(x - box.x0, -box.y0));
+    if (index > 0) {
+      const hostKey = leaders[index - 1];
+      const host = (picture.geoms.get(hostKey)?.rs ?? []).map((point) =>
+        apply(T.get(hostKey)!, point),
+      );
+      const part = (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+      let nearest: { distance: number; host: Pt2; part: Pt2 } | null = null;
+      for (const hostPoint of host)
+        for (const partPoint of part) {
+          const distance = Math.hypot(hostPoint[0] - partPoint[0], hostPoint[1] - partPoint[1]);
+          if (!nearest || distance < nearest.distance)
+            nearest = { distance, host: hostPoint, part: partPoint };
+        }
+      if (nearest)
+        T.set(
+          key,
+          compose(
+            translate(nearest.host[0] - nearest.part[0], nearest.host[1] - nearest.part[1]),
+            T.get(key)!,
+          ),
+        );
+    }
+    const placed = boxOf(
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point)),
+    );
+    x = placed.x1;
+    high = Math.max(high, placed.y1);
+  });
+  const pieceLayers = [...picture.layout.pieceLayers];
+  const hidden = new Set(pieceLayers.map(([piece]) => piece));
+  const hideOn = (key: string, candidates: readonly string[]) => {
+    if (hidden.has(key)) return;
+    const hand = reading(key).hand;
+    const partner =
+      candidates.find((candidate) => hand && reading(candidate).hand === hand) ?? candidates[0];
+    pieceLayers.push([key, partner]);
+    hidden.add(key);
+  };
+  for (const key of panels) if (!leaders.includes(key)) hideOn(key, leaders);
+
+  const waistbands = visible.filter((key) => reading(key).role === 'waistband');
+  const shownWaistbands: string[] = [];
+  for (const hand of ['L', 'R'] as const) {
+    const leader = waistbands
+      .filter((key) => reading(key).hand === hand)
+      .sort((left, right) => area(right) - area(left))[0];
+    if (leader) shownWaistbands.push(leader);
+  }
+  if (!shownWaistbands.length && waistbands.length)
+    shownWaistbands.push([...waistbands].sort((left, right) => area(right) - area(left))[0]);
+  for (const key of waistbands)
+    if (!shownWaistbands.includes(key))
+      hideOn(key, shownWaistbands.length ? shownWaistbands : leaders);
+  let bandX = 0;
+  shownWaistbands.forEach((key, index) => {
+    const box = boxOf(picture.geoms.get(key)?.rs ?? []);
+    T.set(key, translate(bandX - box.x0, high - box.y0));
+    const hosts = [...leaders, ...shownWaistbands.slice(0, index)].flatMap((host) =>
+      (picture.geoms.get(host)?.rs ?? []).map((point) => apply(T.get(host)!, point)),
+    );
+    const part = (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+    let nearest: { distance: number; host: Pt2; part: Pt2 } | null = null;
+    for (const hostPoint of hosts)
+      for (const partPoint of part) {
+        const distance = Math.hypot(hostPoint[0] - partPoint[0], hostPoint[1] - partPoint[1]);
+        if (!nearest || distance < nearest.distance)
+          nearest = { distance, host: hostPoint, part: partPoint };
+      }
+    if (nearest)
+      T.set(
+        key,
+        compose(
+          translate(nearest.host[0] - nearest.part[0], nearest.host[1] - nearest.part[1]),
+          T.get(key)!,
+        ),
+      );
+    bandX = boxOf((picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point))).x1;
+  });
+  for (const key of visible)
+    if (!leaders.includes(key) && !waistbands.includes(key)) hideOn(key, leaders);
+
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, pieceLayers, bbox: boxOf(points) } };
+}
+
+/** Nest the cut layers of a collar unit along one neckline-width run. */
+function collarUnitPicture(picture: StepPicture): StepPicture | null {
+  const keys = visiblePictureKeys(picture);
+  if (
+    keys.length < 2 ||
+    !keys.every((key) =>
+      ['collar', 'stand', 'rib', 'cuff', 'waistband', 'hemband'].includes(
+        readName(picture.geoms.get(key)?.name ?? '').role ?? '',
+      ),
+    )
+  )
+    return null;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const ordered = [...keys].sort((a, b) => area(b) - area(a));
+  const T = new Map(picture.layout.T);
+  const roles = new Set(
+    ordered.map((key) => readName(picture.geoms.get(key)?.name ?? '').role ?? ''),
+  );
+  if (roles.size === 1) {
+    const leader = ordered[0];
+    for (const key of ordered.slice(1)) T.set(key, T.get(leader)!);
+    return {
+      ...picture,
+      layout: {
+        ...picture.layout,
+        T,
+        stacked: [...picture.layout.stacked, ordered],
+        bbox: boxOf(picture.geoms.get(leader)?.rs ?? []),
+      },
+    };
+  }
+  let previous: ReturnType<typeof boxOf> | null = null;
+  for (const key of ordered) {
+    const ring = picture.geoms.get(key)?.rs ?? [];
+    const current = boxOf(ring);
+    if (!previous) T.set(key, translate(-current.x0, -current.y0));
+    else {
+      const overlap = 0.13 * Math.min(previous.y1 - previous.y0, current.y1 - current.y0);
+      T.set(
+        key,
+        translate(
+          (previous.x0 + previous.x1 - current.x0 - current.x1) / 2,
+          previous.y1 - current.y0 - overlap,
+        ),
+      );
+    }
+    previous = boxOf(ring.map((point) => apply(T.get(key)!, point)));
+  }
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
+}
+
+/** Lay repeated side panels on the edges of their compact polygon base. */
+function radialBasePicture(picture: StepPicture): StepPicture | null {
+  const visible = visiblePictureKeys(picture);
+  if (visible.length < 6) return null;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const panels = visible.reduce<string[]>((best, seed) => {
+    const seedArea = area(seed);
+    const cohort = visible.filter(
+      (key) => Math.abs(area(key) - seedArea) <= 0.04 * Math.max(seedArea, 1),
+    );
+    return cohort.length > best.length ? cohort : best;
+  }, []);
+  if (panels.length < 6) return null;
+  const panelArea = area(panels[0]);
+  const base = [...picture.geoms]
+    .filter(([key, geom]) => {
+      if (panels.includes(key) || geom.edges.length < 6 || geom.edges.length > 12) return false;
+      const box = boxOf(geom.rs);
+      const width = Math.max(box.x1 - box.x0, 1);
+      const height = Math.max(box.y1 - box.y0, 1);
+      const ratio = width / height;
+      const candidateArea = Math.abs(geom.areaMm2);
+      return (
+        ratio >= 0.72 &&
+        ratio <= 1.38 &&
+        candidateArea >= 0.2 * panelArea &&
+        candidateArea <= 0.75 * panelArea
+      );
+    })
+    .sort(([, left], [, right]) => right.edges.length - left.edges.length)[0];
+  if (!base) return null;
+  const [baseKey, baseGeom] = base;
+  const baseEdges = [...baseGeom.edges]
+    .filter((edge) => edge.pts.length >= 2)
+    .sort((left, right) => right.lenMm - left.lenMm)
+    .slice(0, Math.min(8, panels.length));
+  if (baseEdges.length < 6) return null;
+
+  const T = new Map<string, Affine>([[baseKey, [1, 0, 0, 1, 0, 0]]]);
+  const baseCentre: Pt2 = [
+    baseGeom.rs.reduce((sum, point) => sum + point[0], 0) / baseGeom.rs.length,
+    baseGeom.rs.reduce((sum, point) => sum + point[1], 0) / baseGeom.rs.length,
+  ];
+  const baseRaster = rasterize(baseGeom.rs, 2);
+  baseEdges.forEach((baseEdge, index) => {
+    const key = panels[index];
+    const geom = picture.geoms.get(key)!;
+    const panelEdge = [...geom.edges]
+      .filter((edge) => edge.pts.length >= 2)
+      .sort(
+        (left, right) =>
+          Math.abs(left.lenMm - baseEdge.lenMm) - Math.abs(right.lenMm - baseEdge.lenMm),
+      )[0];
+    if (!panelEdge) return;
+    const baseStart = baseEdge.pts[0];
+    const baseEnd = baseEdge.pts[baseEdge.pts.length - 1];
+    const partStart = panelEdge.pts[0];
+    const partEnd = panelEdge.pts[panelEdge.pts.length - 1];
+    const candidates = [
+      rigid(baseStart, baseEnd, partStart, partEnd, false),
+      rigid(baseStart, baseEnd, partStart, partEnd, true),
+      rigid(baseEnd, baseStart, partStart, partEnd, false),
+      rigid(baseEnd, baseStart, partStart, partEnd, true),
+    ];
+    const score = (candidate: Affine) => {
+      const ring = geom.rs.map((point) => apply(candidate, point));
+      const centre: Pt2 = [
+        ring.reduce((sum, point) => sum + point[0], 0) / ring.length,
+        ring.reduce((sum, point) => sum + point[1], 0) / ring.length,
+      ];
+      const distance = Math.hypot(centre[0] - baseCentre[0], centre[1] - baseCentre[1]);
+      return distance - 1000 * pairOverlap(rasterize(ring, 2), baseRaster);
+    };
+    T.set(
+      key,
+      candidates.reduce((best, candidate) => (score(candidate) > score(best) ? candidate : best)),
+    );
+  });
+  if (T.size < 7) return null;
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return {
+    ...picture,
+    layout: {
+      ...picture.layout,
+      T,
+      input: new Map([...T.keys()].map((key, index) => [key, index])),
+      ghosts: [],
+      stacked: [],
+      layers: [],
+      pieceLayers: [],
+      apart: [],
+      bbox: boxOf(points),
+    },
+  };
+}
+
+/** Collapse construction plies that describe one panel rather than three separate products. */
+function panelUnitPicture(picture: StepPicture): StepPicture | null {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < 3) return null;
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const roles = new Set(keys.map((key) => reading(key).role));
+  const hands = new Set(keys.map((key) => reading(key).hand).filter(Boolean));
+  const samePanelRole =
+    roles.size === 1 &&
+    ['front', 'back', 'side', 'sleeve'].includes([...roles][0] ?? '') &&
+    hands.size <= 1;
+  const rectangularUnit =
+    keys.length <= 5 &&
+    [...roles].every((role) => role == null || role === 'waistband') &&
+    keys.every((key) => {
+      const geom = picture.geoms.get(key)!;
+      const box = boxOf(geom.rs);
+      const boxArea = Math.max((box.x1 - box.x0) * (box.y1 - box.y0), 1);
+      return area(key) / boxArea >= 0.8;
+    });
+  if (!samePanelRole && !rectangularUnit) return null;
+  const ordered = [...keys].sort((left, right) => area(right) - area(left));
+  return {
+    ...picture,
+    layout: {
+      ...picture.layout,
+      stacked: [...picture.layout.stacked, ordered],
+      bbox: boxOf(picture.geoms.get(ordered[0])?.rs ?? []),
+    },
+  };
+}
+
+/** Re-attach named edge treatments after compact packing. */
+function restoreEdgeTreatments(picture: StepPicture): StepPicture {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const T = new Map(picture.layout.T);
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+  const move = (key: string, dx: number, dy: number) =>
+    T.set(key, compose(translate(dx, dy), T.get(key)!));
+  const collarRoles = new Set(['collar', 'stand', 'rib']);
+  const collars = visible.filter((key) => collarRoles.has(reading(key).role ?? ''));
+  const body = visible.filter((key) => !collars.includes(key) && reading(key).role !== 'cuff');
+  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
+  const collarBody = body.filter((key) =>
+    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
+  );
+  if (collars.length && collarBody.length) {
+    const leader = [...collars].sort(
+      (left, right) =>
+        Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
+        Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
+    )[0];
+    const initial = ring(leader);
+    const centrePoint: Pt2 = [
+      initial.reduce((sum, point) => sum + point[0], 0) / initial.length,
+      initial.reduce((sum, point) => sum + point[1], 0) / initial.length,
+    ];
+    const covariance = initial.reduce<[number, number, number]>(
+      (sum, point) => {
+        const x = point[0] - centrePoint[0];
+        const y = point[1] - centrePoint[1];
+        return [sum[0] + x * x, sum[1] + x * y, sum[2] + y * y];
+      },
+      [0, 0, 0],
+    );
+    const angle = 0.5 * Math.atan2(2 * covariance[1], covariance[0] - covariance[2]);
+    if (Math.abs(Math.sin(angle)) > 0.12) {
+      const cosine = Math.cos(-angle);
+      const sine = Math.sin(-angle);
+      const straighten: Affine = [cosine, sine, -sine, cosine, 0, 0];
+      T.set(
+        leader,
+        compose(
+          translate(centrePoint[0], centrePoint[1]),
+          compose(straighten, compose(translate(-centrePoint[0], -centrePoint[1]), T.get(leader)!)),
+        ),
+      );
+    }
+    const bodyPoints = collarBody.flatMap(ring);
+    const bodyBox = boxOf(bodyPoints);
+    const centre = (bodyBox.x0 + bodyBox.x1) / 2;
+    const necks = collarBody.flatMap((key) => {
+      const points = ring(key);
+      const box = boxOf(points);
+      const height = Math.max(box.y1 - box.y0, 1);
+      const crown = points.filter((point) => point[1] >= box.y1 - 0.02 * height);
+      const stride = Math.max(1, Math.floor(crown.length / 24));
+      return crown.filter((_, index) => index % stride === 0);
+    });
+    const points = ring(leader);
+    const box = boxOf(points);
+    const low = Math.min(...points.map((point) => point[1]));
+    const contact = points
+      .filter((point) => point[1] <= low + 0.15 * Math.max(box.y1 - box.y0, 1))
+      .reduce((best, point) =>
+        Math.abs(point[0] - (box.x0 + box.x1) / 2) < Math.abs(best[0] - (box.x0 + box.x1) / 2)
+          ? point
+          : best,
+      );
+    const neck = necks.reduce((best, point) => {
+      const score = (candidate: Pt2) => {
+        const moved = points.map(
+          ([x, y]) => [x + candidate[0] - contact[0], y + candidate[1] - contact[1]] as Pt2,
+        );
+        const raster = rasterize(moved, 2);
+        const overlap = Math.max(
+          ...body.map((key) => pairOverlap(raster, rasterize(ring(key), 2))),
+          0,
+        );
+        return overlap + 0.00001 * Math.abs(candidate[0] - centre);
+      };
+      return score(point) < score(best) ? point : best;
+    });
+    move(leader, neck[0] - contact[0], neck[1] - contact[1]);
+    const collarCentreX = () => {
+      const collarBox = boxOf(ring(leader));
+      return (collarBox.x0 + collarBox.x1) / 2;
+    };
+    const sleeveGroups = new Map<string, string[]>();
+    for (const sleeve of sleeves) {
+      const group = reading(sleeve).hand ?? sleeve;
+      sleeveGroups.set(group, [...(sleeveGroups.get(group) ?? []), sleeve]);
+    }
+    for (const group of sleeveGroups.values()) {
+      const sleeveBox = boxOf(group.flatMap(ring));
+      const direction = (sleeveBox.x0 + sleeveBox.x1) / 2 < collarCentreX() ? -2 : 2;
+      const maxShift = 0.35 * Math.max(sleeveBox.x1 - sleeveBox.x0, 1);
+      for (let shifted = 0; shifted <= maxShift; shifted += 2) {
+        const collarRaster = rasterize(ring(leader), 2);
+        const overlap = Math.max(
+          ...group.map((sleeve) => pairOverlap(collarRaster, rasterize(ring(sleeve), 2))),
+          0,
+        );
+        if (overlap <= 0.15) break;
+        for (const sleeve of group) move(sleeve, direction, 0);
+      }
+    }
+    const maxOverlap = () => {
+      const collarRing = ring(leader);
+      const collarRaster = rasterize(collarRing, 2);
+      return Math.max(...body.map((key) => pairOverlap(collarRaster, rasterize(ring(key), 2))), 0);
+    };
+    const clearance = 0.15 * Math.max(bodyBox.x1 - bodyBox.x0, bodyBox.y1 - bodyBox.y0, 1);
+    for (let offset = 2; maxOverlap() > 0.15 && offset <= clearance; offset += 2)
+      move(leader, 0, 2);
+  }
+
+  const cuffs = visible.filter((key) => reading(key).role === 'cuff');
+  const bodyPoints = body.filter((key) => !sleeves.includes(key)).flatMap(ring);
+  const bodyCentre = bodyPoints.length
+    ? (bodyPoints
+        .reduce<Pt2>((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
+        .map((value) => value / bodyPoints.length) as Pt2)
+    : ([0, 0] as Pt2);
+  for (const cuff of cuffs) {
+    const hand = reading(cuff).hand;
+    const sleeve =
+      sleeves.find((key) => hand && reading(key).hand === hand) ??
+      sleeves.sort(
+        (left, right) =>
+          Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
+          Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
+      )[0];
+    if (!sleeve) continue;
+    const sleevePoints = ring(sleeve);
+    const end = sleevePoints.reduce((best, point) =>
+      Math.hypot(point[0] - bodyCentre[0], point[1] - bodyCentre[1]) >
+      Math.hypot(best[0] - bodyCentre[0], best[1] - bodyCentre[1])
+        ? point
+        : best,
+    );
+    const cuffPoints = ring(cuff);
+    const contact = cuffPoints.reduce((best, point) =>
+      Math.hypot(point[0] - end[0], point[1] - end[1]) <
+      Math.hypot(best[0] - end[0], best[1] - end[1])
+        ? point
+        : best,
+    );
+    move(cuff, end[0] - contact[0], end[1] - contact[1]);
+  }
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  const collarLeader = [...collars].sort(
+    (left, right) =>
+      Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
+      Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
+  )[0];
+  const collarStack = collarLeader
+    ? [collarLeader, ...collars.filter((key) => key !== collarLeader)]
+    : [];
+  return {
+    ...picture,
+    layout: {
+      ...picture.layout,
+      T,
+      stacked:
+        collarStack.length > 1 ? [...picture.layout.stacked, collarStack] : picture.layout.stacked,
+      bbox: boxOf(points),
+    },
+  };
+}
+
+/** Compact an unstored final result without scaling or rotating any cut piece. */
+function compactFinalPicture(picture: StepPicture, force = false): StepPicture {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < (force ? 2 : 3)) return picture;
+  const readings = keys.map((key) => readName(picture.geoms.get(key)?.name ?? ''));
+  if (
+    !force &&
+    readings.some((reading) => reading.role === 'waistband') &&
+    readings.some(
+      (reading) => ['front', 'back'].includes(reading.role ?? '') && reading.hand === 'L',
+    ) &&
+    readings.some(
+      (reading) => ['front', 'back'].includes(reading.role ?? '') && reading.hand === 'R',
+    )
+  )
+    return picture;
+  const sleeved = sleevedFinalPicture(picture);
+  if (sleeved) return sleeved;
+  if (force) {
+    const trousers = trouserFrontPicture(picture);
+    if (trousers) return trousers;
+  }
+  const rings = new Map(
+    keys.map((key) => [
+      key,
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+    ]),
+  );
+  const current = frameFill([...rings.values()].flat());
+  if (!force && current >= 0.6) return picture;
+  const collarUnit = collarUnitPicture(picture);
+  if (collarUnit) return collarUnit;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const extrema = (points: readonly Pt2[]) => ({
+    left: points.reduce((best, point) => (point[0] < best[0] ? point : best)),
+    right: points.reduce((best, point) => (point[0] > best[0] ? point : best)),
+    low: points.reduce((best, point) => (point[1] < best[1] ? point : best)),
+    high: points.reduce((best, point) => (point[1] > best[1] ? point : best)),
+  });
+  let best: { quality: number; moves: Map<string, Pt2> } | null = null;
+  const largest = Math.max(...keys.map(area), 1);
+  const anchors = keys.filter((key) => area(key) >= 0.55 * largest);
+  for (const anchor of anchors) {
+    const rest = keys.filter((key) => key !== anchor).sort((a, b) => area(b) - area(a));
+    const moves = new Map<string, Pt2>([[anchor, [0, 0]]]);
+    const placedRings: Pt2[][] = [[...rings.get(anchor)!]];
+    for (const key of rest) {
+      const placed = placedRings.flat();
+      const host = extrema(placed);
+      const part = extrema(rings.get(key)!);
+      const hostBox = boxOf(placed);
+      const partBox = boxOf(rings.get(key)!);
+      const contact = Math.max(
+        1.9,
+        0.12 * Math.min(partBox.x1 - partBox.x0, partBox.y1 - partBox.y0),
+      );
+      const candidates: Pt2[] = [
+        [host.right[0] - part.left[0] + contact, host.right[1] - part.left[1]],
+        [host.left[0] - part.right[0] - contact, host.left[1] - part.right[1]],
+        [host.high[0] - part.low[0], host.high[1] - part.low[1] + contact],
+        [host.low[0] - part.high[0], host.low[1] - part.high[1] - contact],
+        [
+          hostBox.x1 - partBox.x0 - contact,
+          (hostBox.y0 + hostBox.y1 - partBox.y0 - partBox.y1) / 2,
+        ],
+        [
+          hostBox.x0 - partBox.x1 + contact,
+          (hostBox.y0 + hostBox.y1 - partBox.y0 - partBox.y1) / 2,
+        ],
+        [
+          (hostBox.x0 + hostBox.x1 - partBox.x0 - partBox.x1) / 2,
+          hostBox.y1 - partBox.y0 - contact,
+        ],
+        [
+          (hostBox.x0 + hostBox.x1 - partBox.x0 - partBox.x1) / 2,
+          hostBox.y0 - partBox.y1 + contact,
+        ],
+      ];
+      const move = candidates.reduce((winner, candidate) => {
+        const score = (delta: Pt2) => {
+          const moved = rings.get(key)!.map(([x, y]) => [x + delta[0], y + delta[1]] as Pt2);
+          const overlap = placedRings.reduce(
+            (worst, ring) => Math.max(worst, pairOverlap(rasterize(moved, 2), rasterize(ring, 2))),
+            0,
+          );
+          const compactness = hullCompactness([...placedRings, moved]);
+          const aspect = ringsAspect([...placedRings, moved]);
+          return (
+            compactness -
+            Math.abs(Math.log(aspect / (204 / 178))) * 0.12 -
+            Math.max(0, aspect - 4) * 0.25 -
+            Math.max(0, overlap - 0.15) * 10
+          );
+        };
+        return score(candidate) > score(winner) ? candidate : winner;
+      });
+      moves.set(key, move);
+      placedRings.push(rings.get(key)!.map(([x, y]) => [x + move[0], y + move[1]] as Pt2));
+    }
+    const compactness = hullCompactness(placedRings);
+    const aspect = ringsAspect(placedRings);
+    const quality =
+      compactness -
+      Math.abs(Math.log(aspect / (204 / 178))) * 0.12 -
+      Math.max(0, aspect - 4) * 0.25;
+    if (!best || quality > best.quality) best = { quality, moves };
+  }
+  if (!best) return picture;
+
+  const moveOf = new Map(best.moves);
+  for (const stack of picture.layout.stacked)
+    for (const follower of stack.slice(1))
+      if (moveOf.has(stack[0])) moveOf.set(follower, moveOf.get(stack[0])!);
+  for (const [piece, partner] of picture.layout.pieceLayers)
+    if (moveOf.has(partner)) moveOf.set(piece, moveOf.get(partner)!);
+  for (const [layerInput, partnerInput] of picture.layout.layers) {
+    const partner = [...picture.layout.input].find(
+      ([key, input]) => input === partnerInput && moveOf.has(key),
+    );
+    if (!partner) continue;
+    for (const [key, input] of picture.layout.input)
+      if (input === layerInput) moveOf.set(key, moveOf.get(partner[0])!);
+  }
+  let T = new Map(
+    [...picture.layout.T].map(([key, transform]) => {
+      const [dx, dy] = moveOf.get(key) ?? [0, 0];
+      return [
+        key,
+        [
+          transform[0],
+          transform[1],
+          transform[2],
+          transform[3],
+          transform[4] + dx,
+          transform[5] + dy,
+        ] as Affine,
+      ] as const;
+    }),
+  );
+  let points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  const visiblePoints = keys.flatMap((key) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point)),
+  );
+  const rotatedVisible = visiblePoints.map(([x, y]) => [-y, x] as Pt2);
+  if (frameFill(visiblePoints) < 0.6 && frameFill(rotatedVisible) > frameFill(visiblePoints)) {
+    T = new Map([...T].map(([key, [a, b, c, d, e, f]]) => [key, [-b, a, -d, c, -f, e] as Affine]));
+    points = points.map(([x, y]) => [-y, x] as Pt2);
+  }
+  return dockLoosePicture({
+    ...picture,
+    layout: { ...picture.layout, T, bbox: boxOf(points) },
+  });
+}
+
+/** Reuse the last compact stored-seam silhouette when a trouser closeout expands every layer. */
+function storedGarmentFinalPicture(
+  final: StepPicture,
+  earlier: readonly StepPicture[],
+): StepPicture | null {
+  const finalKeys = new Set(final.layout.T.keys());
+  const finalRoles = visiblePictureKeys(final).map((key) =>
+    readName(final.geoms.get(key)?.name ?? ''),
+  );
+  if (
+    !finalRoles.some((reading) => reading.role === 'waistband') ||
+    !finalRoles.some((reading) => reading.role === 'front') ||
+    !finalRoles.some((reading) => reading.role === 'back')
+  )
+    return null;
+
+  const source = [...earlier].reverse().find((picture) => {
+    const keys = visiblePictureKeys(picture);
+    if (keys.length !== 2 || keys.some((key) => !finalKeys.has(key))) return false;
+    const roles = keys.map((key) => readName(picture.geoms.get(key)?.name ?? '').role);
+    return roles.includes('front') && roles.includes('back');
+  });
+  if (!source) return null;
+
+  const keys = visiblePictureKeys(source);
+  const focused = pictureWithClusters(final, [keys]);
+  const T = new Map(
+    [...focused.layout.T].map(([key, transform]) => [key, source.layout.T.get(key) ?? transform]),
+  );
+  const points = [...T].flatMap(([key, transform]) =>
+    (focused.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...focused, layout: { ...focused.layout, T, bbox: boxOf(points) } };
+}
+
+/** Collapse a repeated-panel net to the latest closed body for the finishing operation. */
+function closedPanelFinalPicture(
+  final: StepPicture,
+  earlier: readonly StepPicture[],
+): StepPicture | null {
+  const keys = visiblePictureKeys(final);
+  if (keys.length < 6) return null;
+  const panels = keys.filter((key) => {
+    const reading = readName(final.geoms.get(key)?.name ?? '');
+    if (reading.role) return false;
+    const geom = final.geoms.get(key);
+    if (!geom) return false;
+    const box = boxOf(geom.rs);
+    const width = Math.max(box.x1 - box.x0, 1);
+    const height = Math.max(box.y1 - box.y0, 1);
+    return Math.max(width, height) / Math.min(width, height) < 5;
+  });
+  if (panels.length < 6) return null;
+  const areas = panels.map((key) => Math.abs(final.geoms.get(key)?.areaMm2 ?? 0));
+  if (Math.max(...areas) > 1.1 * Math.max(Math.min(...areas), 1)) return null;
+
+  const source = [...earlier].reverse().find((picture) => {
+    const sourceKeys = visiblePictureKeys(picture);
+    if (sourceKeys.length !== 1) return false;
+    const points = sourceKeys.flatMap((key) =>
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+    );
+    return points.length > 2 && frameFill(points) >= 0.6;
+  });
+  return source ? { ...source, op: final.op, marks: final.marks } : null;
 }
 
 const sceneOperations = (techCard: common_TechCard): SceneOp[] =>
@@ -224,13 +1434,42 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] =>
     fullnessRatio: operation.stitching?.fullnessRatio?.value,
   }));
 
+function semanticPieceKeys(
+  texts: readonly (string | undefined)[],
+  geoms: ReadonlyMap<string, { name: string; areaMm2: number }>,
+): string[] {
+  for (const text of texts) {
+    const wanted = readName(text ?? '');
+    if (!wanted.role) continue;
+    const matches = [...geoms]
+      .filter(([, geom]) => {
+        const actual = readName(geom.name);
+        return (
+          actual.role === wanted.role &&
+          (!wanted.hand || !actual.hand || actual.hand === wanted.hand)
+        );
+      })
+      .sort(([, left], [, right]) => Math.abs(right.areaMm2) - Math.abs(left.areaMm2));
+    if (matches.length) return matches.slice(0, wanted.hand ? 1 : 2).map(([key]) => key);
+  }
+  return [];
+}
+
 /** Editor scenes for print: joins show their tile; later work shows that join's assembled result. */
 export function editorOperationPictures(
   techCard: common_TechCard,
   model: AssemblyModel,
 ): Map<number, StepPicture> | null {
   try {
-    const graph = seamGraphOfCard(techCard, model.pieces);
+    const resolvedCard = model.techCard ?? techCard;
+    const hasStoredSeams = !!resolvedCard.seams?.length;
+    // A stored seam graph is the editor's source of truth. Keep its established tile/finishing
+    // behaviour; the inferred cumulative layout is for DXFs that do not have that graph yet.
+    const useInferredLayout = !!model.garment && !hasStoredSeams;
+    const graph =
+      useInferredLayout && model.garment
+        ? model.garment.graph
+        : seamGraphOfCard(resolvedCard, model.pieces);
     const geoms = new Map([...model.pieces].map(([key, piece]) => [key, piece.geom]));
     const innerLines = new Map(
       [...model.pieces].map(([key, piece]) => [
@@ -240,21 +1479,30 @@ export function editorOperationPictures(
     );
     const pieceKeys = new Set([
       ...geoms.keys(),
-      ...(techCard.techCard?.pieces ?? []).flatMap((piece) =>
+      ...(resolvedCard.techCard?.pieces ?? []).flatMap((piece) =>
         piece.lineKey ? [piece.lineKey] : [],
       ),
     ]);
-    const byKey = seamRowsOfCard(techCard);
+    const byKey = seamRowsOfCard(resolvedCard);
     const names = new Map(
-      (techCard.techCard?.pieces ?? []).flatMap((piece) =>
+      (resolvedCard.techCard?.pieces ?? []).flatMap((piece) =>
         piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
       ),
     );
-    const operations = sceneOperations(techCard);
+    const operations = sceneOperations(resolvedCard);
     const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
     const rowByNumber = new Map(model.rows.map((row) => [row.n, row]));
     const pictures = new Map<number, StepPicture>();
+    const assembledByUnit = new Map<string, StepLayout>();
     const assembledByPieces = new Map<string, StepPicture>();
+    const seamsAt = (number: number) =>
+      useInferredLayout && model.garment
+        ? model.garment.pairings
+            .filter(
+              (pairing) => pairing.operationNumber == null || pairing.operationNumber <= number,
+            )
+            .map((pairing) => pairing.seam)
+        : graph.chosen;
     const sceneAt = (operation: SceneOp, index: number) =>
       stepPictureOfOp(operation, graph, geoms, {
         operations,
@@ -263,7 +1511,30 @@ export function editorOperationPictures(
         innerLines,
         byKey,
         nameOf: (key) => names.get(key) ?? key,
+        explode: useInferredLayout ? 0 : undefined,
       });
+    const assembledLayout = (picture: StepPicture, number: number) =>
+      stepLayout(
+        picture.leaves,
+        useInferredLayout ? seamsAt(number) : picture.frameSeams,
+        geoms,
+        useInferredLayout
+          ? {
+              explode: 0,
+              rasterMm: STEP_TILE_RASTER_MM,
+              inputLayouts: picture.groups.map((group) => assembledByUnit.get(group.key)),
+              stackIdentical: true,
+              joinedOverlap: 0.15,
+              honorRanges: true,
+              garmentLayout: true,
+            }
+          : {
+              explode: 0,
+              rasterMm: STEP_TILE_RASTER_MM,
+              joinedOverlap: 0,
+              honorRanges: false,
+            },
+      );
 
     operations.forEach((operation, index) => {
       const number = operation.operationNumber ?? 0;
@@ -272,49 +1543,204 @@ export function editorOperationPictures(
       try {
         if (joins.has(number)) {
           const picture = sceneAt(operation, index);
-          if (picture.layout.T.size) pictures.set(number, picture);
-          const layout = stepLayout(picture.leaves, picture.frameSeams, geoms, {
-            explode: 0,
-            rasterMm: STEP_TILE_RASTER_MM,
-          });
+          const frameSeams = useInferredLayout ? seamsAt(number) : picture.frameSeams;
+          const layout = assembledLayout(picture, number);
           if (layout.T.size) {
-            const assembled = { ...picture, marks: [], layoutLeaves: picture.leaves, layout };
-            assembledByPieces.set(
-              picturePieceSignature(picture.leaves.flatMap((leaf) => leaf)),
-              assembled,
-            );
+            const assembled = { ...picture, frameSeams, layoutLeaves: picture.leaves, layout };
+            const result = useInferredLayout
+              ? focusNonJoinPicture(assembled, undefined, true)
+              : assembled;
+            pictures.set(number, useInferredLayout ? result : dockLoosePicture(assembled));
+            const output = operation.outputUnitKey?.trim();
+            if (output) assembledByUnit.set(output, result.layout);
+            else if (picture.groups.length === 1)
+              assembledByUnit.set(picture.groups[0].key, result.layout);
+            if (!useInferredLayout)
+              assembledByPieces.set(
+                picturePieceSignature(picture.leaves.flatMap((leaf) => leaf)),
+                dockLoosePicture({ ...assembled, marks: [] }, 'layer'),
+              );
+            return;
           }
-          return;
         }
 
-        const targetKeys = (model.targets.get(number) ?? []).map((item) => item.p);
+        const exactTargetKeys = [
+          ...new Set([
+            ...(model.targets.get(number) ?? []).map((item) => item.p),
+            ...inputGroups(operations, index, pieceKeys).flatMap((group) => group.pieces),
+            ...(operation.inputKeys ?? []).flatMap((key) => [
+              ...(assembledByUnit.get(key)?.T.keys() ?? []),
+            ]),
+          ]),
+        ].filter((key) => geoms.has(key));
+        const nextOutputTexts = operations
+          .slice(index + 1, index + 3)
+          .flatMap((next) => [next.outputUnitKey, next.outputUnitName]);
+        const targetKeys = exactTargetKeys.length
+          ? exactTargetKeys
+          : semanticPieceKeys(
+              [
+                operation.outputUnitKey,
+                operation.outputUnitName,
+                ...(operation.inputKeys ?? []).map((key) => names.get(key) ?? key),
+                ...nextOutputTexts,
+              ],
+              geoms,
+            );
         if (!targetKeys.length) return;
-        const signature = picturePieceSignature(targetKeys);
-        const assembled = assembledByPieces.get(signature);
-        if (assembled) {
-          const result = { ...assembled, op: operation, marks: [] };
-          pictures.set(number, focusNonJoinPicture(result, row.action));
-          return;
+        if (!useInferredLayout) {
+          const assembled = assembledByPieces.get(picturePieceSignature(targetKeys));
+          if (assembled) {
+            const focused = focusNonJoinPicture(
+              { ...assembled, op: operation, marks: [] },
+              row.action,
+            );
+            pictures.set(number, dockLoosePicture(focused, 'layer'));
+            return;
+          }
         }
-
         const picture = sceneAt(operation, index);
         const target = new Set(targetKeys);
-        const leaves = picture.leaves
-          .map((leaf) => leaf.filter((key) => target.has(key)))
-          .filter((leaf) => leaf.length > 0);
+        const leaves = useInferredLayout
+          ? picture.leaves.length
+            ? picture.leaves
+            : [[...target].filter((key) => geoms.has(key))]
+          : picture.leaves
+              .map((leaf) => leaf.filter((key) => target.has(key)))
+              .filter((leaf) => leaf.length > 0);
         const layoutLeaves = leaves.length ? leaves : [[...target]];
-        const layout = stepLayout(layoutLeaves, picture.innerSeams, geoms, {
-          explode: 0,
-          rasterMm: STEP_TILE_RASTER_MM,
-        });
+        const inputLayouts = picture.groups.length
+          ? picture.groups.map((group) => assembledByUnit.get(group.key))
+          : [undefined];
+        const layout = stepLayout(
+          layoutLeaves,
+          useInferredLayout ? seamsAt(number) : picture.innerSeams,
+          geoms,
+          {
+            explode: 0,
+            rasterMm: STEP_TILE_RASTER_MM,
+            inputLayouts,
+            stackIdentical: true,
+            joinedOverlap: 0.15,
+            honorRanges: true,
+            garmentLayout: true,
+          },
+        );
         if (layout.T.size) {
-          const result = { ...picture, marks: [], layoutLeaves, layout };
-          pictures.set(number, focusNonJoinPicture(result, row.action));
+          const result = {
+            ...picture,
+            frameSeams: useInferredLayout ? seamsAt(number) : picture.frameSeams,
+            marks: [],
+            layoutLeaves,
+            layout,
+          };
+          const shown = useInferredLayout
+            ? result
+            : dockLoosePicture(focusNonJoinPicture(result, row.action), 'layer');
+          pictures.set(number, shown);
+          const output = operation.outputUnitKey?.trim();
+          if (output) assembledByUnit.set(output, shown.layout);
         }
       } catch {
         // One malformed operation falls back to its legacy picture without taking the card down.
       }
     });
+    const final = [...pictures.entries()]
+      .sort(([left], [right]) => right - left)
+      .find(([, picture]) => visiblePictureKeys(picture).length > 2);
+    if (final) {
+      const earlier = [...pictures]
+        .filter(([number]) => number < final[0])
+        .sort(([left], [right]) => left - right)
+        .map(([, picture]) => picture);
+      const closed = useInferredLayout ? closedPanelFinalPicture(final[1], earlier) : null;
+      const finished = useInferredLayout
+        ? closed ?? compactFinalPicture(final[1])
+        : storedGarmentFinalPicture(final[1], earlier);
+      if (finished) pictures.set(final[0], finished);
+      if (closed) {
+        const priorFinal = [...pictures.entries()]
+          .filter(([number]) => number < final[0])
+          .sort(([left], [right]) => right - left)
+          .find(([, picture]) => visiblePictureKeys(picture).length > 2);
+        if (priorFinal) pictures.set(priorFinal[0], compactFinalPicture(priorFinal[1]));
+      }
+    }
+    for (const [number, picture] of pictures) {
+      const rawKeys = visiblePictureKeys(picture);
+      const rawRings = rawKeys.map((key) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+      );
+      const rawNeedsCompact = rawRings.length > 1 && hullCompactness(rawRings) < 0.355;
+      const rawNeedsAspect =
+        rawRings.length > 1 &&
+        !rawRings.every((ring) => ringAspect(ring) >= 4) &&
+        ringsAspect(rawRings) > 4;
+      const hasEdgeTreatments = visiblePictureKeys(picture).some((key) =>
+        ['collar', 'stand', 'rib', 'cuff'].includes(
+          readName(picture.geoms.get(key)?.name ?? '').role ?? '',
+        ),
+      );
+      const needsStructuralRepair = useInferredLayout || rawNeedsCompact || rawNeedsAspect;
+      const radial = needsStructuralRepair ? radialBasePicture(picture) : null;
+      const panelTopology = trouserFrontPicture(picture);
+      const panelRings = panelTopology
+        ? visiblePictureKeys(panelTopology).map((key) =>
+            (panelTopology.geoms.get(key)?.rs ?? []).map((point) =>
+              apply(panelTopology.layout.T.get(key)!, point),
+            ),
+          )
+        : [];
+      const rawCompactness = hullCompactness(rawRings);
+      const panelGain = panelRings.length
+        ? hullCompactness(panelRings) - rawCompactness
+        : -Infinity;
+      const readings = rawKeys.map((key) => readName(picture.geoms.get(key)?.name ?? ''));
+      const hasFrontPair = ['L', 'R'].every((hand) =>
+        readings.some((reading) => reading.role === 'front' && reading.hand === hand),
+      );
+      const hasBack = readings.some((reading) => reading.role === 'back');
+      const isBottom = ['trousers', 'bottom', 'jumpsuit'].includes(model.garment?.category ?? '');
+      const rotatedLegPanels = rawKeys.filter((key, index) => {
+        const reading = readings[index];
+        if (!['front', 'back'].includes(reading.role ?? '')) return false;
+        const geomBox = boxOf(picture.geoms.get(key)?.rs ?? []);
+        const worldBox = boxOf(rawRings[index]);
+        return (
+          geomBox.y1 - geomBox.y0 > geomBox.x1 - geomBox.x0 &&
+          worldBox.x1 - worldBox.x0 > worldBox.y1 - worldBox.y0
+        );
+      });
+      const trouser =
+        panelTopology &&
+        ((isBottom &&
+          ((rawCompactness < 0.6 && (rawNeedsCompact || panelGain > 0.025)) ||
+            rotatedLegPanels.length >= 2)) ||
+          (!isBottom && hasFrontPair && hasBack && panelGain > 0.08))
+          ? panelTopology
+          : null;
+      const sleeved = needsStructuralRepair ? sleevedFinalPicture(picture) : null;
+      const panelUnit = needsStructuralRepair ? panelUnitPicture(picture) : null;
+      let revised = radial ?? trouser ?? sleeved ?? panelUnit ?? picture;
+      const rings = visiblePictureKeys(revised).map((key) =>
+        (revised.geoms.get(key)?.rs ?? []).map((point) => apply(revised.layout.T.get(key)!, point)),
+      );
+      if (rings.length < 2) {
+        pictures.set(number, revised);
+        continue;
+      }
+      const needsCompact = hullCompactness(rings) < 0.355;
+      const needsAspect = !rings.every((ring) => ringAspect(ring) >= 4) && ringsAspect(rings) > 4;
+      const needsFinalFrame =
+        number === final?.[0] && rings.length > 2 && frameFill(rings.flat()) < 0.59;
+      if (needsCompact || needsAspect || needsFinalFrame)
+        revised = compactFinalPicture(revised, true);
+      const restored =
+        needsStructuralRepair || hasEdgeTreatments || revised !== picture
+          ? restoreEdgeTreatments(revised)
+          : revised;
+      pictures.set(number, hasEdgeTreatments ? dockLoosePicture(restored) : restored);
+    }
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.

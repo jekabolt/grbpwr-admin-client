@@ -27,6 +27,7 @@ import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
+import { assembleGarment, type GarmentAssembly } from './garment-assembly';
 
 type CardInsert = NonNullable<common_TechCard['techCard']>;
 type GeomValue = PieceGeom | { geom: PieceGeom };
@@ -196,18 +197,18 @@ export function seamRowsOfCard(techCard: common_TechCard): ReadonlyMap<string, S
  * Form-free card graph. Print calls this with common_TechCard + assembly pieces; the live editor
  * calls the same entry with form-derived card fields + PieceShapeMap.
  */
-export function seamGraphOfCard(
+export function garmentAssemblyOfCard(
   techCard: common_TechCard,
   geometry: CardSeamGeometry,
   options: SeamGraphOfCardOptions = {},
-): SeamGraph {
+): GarmentAssembly {
   const built = isFormGeometry(geometry)
     ? factsOfFormCard(techCard, geometry)
     : factsOfSegmentedCard(techCard, geometry);
   const rows = [...seamRowsOfCard(techCard).values()];
   const decisions = options.decisions?.(built.facts) ?? decisionsFor(rows, built.facts);
   const operations = techCard.techCard?.operations ?? [];
-  return readSeamGraph(
+  const graph = readSeamGraph(
     built.facts,
     undefined,
     {},
@@ -216,4 +217,13 @@ export function seamGraphOfCard(
     seamAssignmentInputOf(operations, new Set(built.facts.pieces.map((piece) => piece.pieceKey))),
     built.segmented,
   );
+  return assembleGarment({ techCard, graph, category: built.facts.category });
+}
+
+export function seamGraphOfCard(
+  techCard: common_TechCard,
+  geometry: CardSeamGeometry,
+  options: SeamGraphOfCardOptions = {},
+): SeamGraph {
+  return garmentAssemblyOfCard(techCard, geometry, options).graph;
 }
