@@ -414,7 +414,8 @@ function seamOfCandidate(
   return {
     key: candidate.provenance?.seamKey ?? `proto-edge-${operation}-${index}`,
     kind: candidate.kind,
-    note: candidate.evidence.rule ?? '',
+    // evidence.rule is the matcher's reasoning, not a technologist's note — never printed
+    note: '',
     a,
     b,
     pieces: [...new Set([...a, ...b].map((part) => part.piece))],
