@@ -25,7 +25,9 @@ export function outcomeOf(
   if (!best) return { outcome: 'manual', margin: 0, support: 0 };
   const margin = second ? second.score - best.score : Infinity;
   const support = supportOf(best);
-  if (best.score > T_GUESS) return { outcome: 'manual', margin, support };
+  // A hint reorders pairs; it never turns a pair geometry rejects into a guess.
+  if (best.score > T_GUESS || best.score - hintDeltaOf(best) > T_GUESS)
+    return { outcome: 'manual', margin, support };
   const sure = best.score <= T_CONF && (margin >= M_CONF || support >= 2);
   return { outcome: CONFIDENT_ON && sure ? 'confident' : 'guess', margin, support };
 }
@@ -34,10 +36,12 @@ export function outcomeOf(
  *  already holds the pair as a guess (an AI word never lifts a pair geometry rejects). */
 const HINTS: ReadonlySet<string> = new Set(['ai', 'prior']);
 
+const hintDeltaOf = (best: Ranked) =>
+  (best.signals ?? []).filter((s) => HINTS.has(s.term)).reduce((t, s) => t + s.delta, 0);
+
 function supportOf(best: Ranked): number {
   const signals = best.signals ?? [];
-  const hintDelta = signals.filter((s) => HINTS.has(s.term)).reduce((t, s) => t + s.delta, 0);
-  const geometryHolds = best.score - hintDelta <= T_GUESS;
+  const geometryHolds = best.score - hintDeltaOf(best) <= T_GUESS;
   const terms = new Set<string>();
   for (const s of signals) {
     if (s.delta >= 0) continue;

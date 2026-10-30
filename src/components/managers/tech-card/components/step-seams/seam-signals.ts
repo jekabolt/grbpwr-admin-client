@@ -4,6 +4,7 @@
 // Each term lives in signals/; this file is the registry and the caps.
 
 import { clothSignal } from './signals/cloth';
+import { priorSignal } from './signals/prior';
 import type { SeamSignal, SignalCtx, SignalFn, SignalSide } from './signals/types';
 import { zoneSignal } from './signals/zone';
 
@@ -16,7 +17,7 @@ export const MAX_DELTA = 0.08;
  *  a real length mismatch. */
 export const MIN_SUM = -0.12;
 
-const REGISTRY: readonly SignalFn[] = [zoneSignal, clothSignal];
+const REGISTRY: readonly SignalFn[] = [zoneSignal, clothSignal, priorSignal];
 
 export function signalsOf(
   a: SignalSide,

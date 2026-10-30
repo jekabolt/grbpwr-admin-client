@@ -13,6 +13,11 @@ function codeRole(name: string): string | null {
   return CODES[first] ?? null;
 }
 
+/** The role a bare piece name reads as: the role book, else an owner code. */
+export function roleOfName(name: string): string | null {
+  return readName(name).role ?? codeRole(name);
+}
+
 /** The piece's role: its own reading, a panel role through its mirror twin, else an owner code. */
 export function roleOfGeom(piece: PieceGeom, geoms: ReadonlyMap<string, PieceGeom>): string | null {
   const own = readName(piece.name).role;
