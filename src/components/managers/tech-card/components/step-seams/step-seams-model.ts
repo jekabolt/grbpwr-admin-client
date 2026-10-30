@@ -29,6 +29,9 @@ import { runSamples } from 'lib/seams/frame';
 
 import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
 
+import { outcomeOf } from './seam-ranker';
+import { isLayerCloth, withSignals } from './seam-signals';
+
 export type Pt = [number, number];
 
 /** A pickable target: an edge (`P#3`) or an inner line (`P:i2`). */
@@ -55,6 +58,8 @@ export type FormOpLike = {
   operationType?: string;
   /** `join_lockstitch`, `press_flat`, `buttonhole`…: what the step does. */
   work?: string;
+  /** The garment zone the step works in (`front`, `sleeve`…): a hint for the seam signals. */
+  zone?: string;
 };
 
 export type InputGroup = { key: string; pieces: string[] };
@@ -1375,19 +1380,6 @@ export function scoredPairs(
 
 // ─── what earlier steps sewed ─────────────────────────────────────────────────────────────────────
 
-/** Pocketing and lining pieces may be added at a host edge before its structural seam closes it. */
-function isAddedLayer(piece: string, geoms: ReadonlyMap<string, PieceGeom>): boolean {
-  const geom = geoms.get(piece);
-  if (!geom) return false;
-  const cloth = String(geom.cloth ?? '').toLowerCase();
-  return (
-    cloth === 'pocketing' ||
-    cloth === 'lining' ||
-    roleOfPiece(geom, geoms) === 'pocket' ||
-    /(^|[_\s-])(pck|pocket|lining|lin)(?=$|[_\s-])/i.test(geom.name)
-  );
-}
-
 function consumptionOf(
   a: readonly EdgeId[],
   b: readonly EdgeId[],
@@ -1398,8 +1390,8 @@ function consumptionOf(
   // can leave an edge open; otherwise guesses would keep accumulating partners across the card.
   if (!stored) return { a: true, b: true };
   if (isLayerSeam(a, b, geoms)) return { a: false, b: false };
-  const addedA = a.length > 0 && a.every((id) => isAddedLayer(pieceOf(id), geoms));
-  const addedB = b.length > 0 && b.every((id) => isAddedLayer(pieceOf(id), geoms));
+  const addedA = a.length > 0 && a.every((id) => isLayerCloth(pieceOf(id), geoms));
+  const addedB = b.length > 0 && b.every((id) => isLayerCloth(pieceOf(id), geoms));
   if (addedA !== addedB) return addedA ? { a: true, b: false } : { a: false, b: true };
   return { a: true, b: true };
 }
@@ -1630,7 +1622,11 @@ export function suggestPair(
 }
 
 /** One of the seams a step proposes, with the side of the body it sits on when the pieces say. */
-export type StepProposal = Suggestion & { hand: Hand };
+export type StepProposal = Suggestion & {
+  hand: Hand;
+  /** false: the best guess, shown marked as one (the ranker's `confident` is gated off for now). */
+  confident: boolean;
+};
 
 /** «left» / «right» by the proposal's hand, else «seam n». */
 export function proposalLabel(proposal: StepProposal, index: number): string {
@@ -1688,6 +1684,7 @@ function proposalsOf(
   used: ReadonlySet<EdgeId>,
   ease: number | null,
   connecting?: Scored[],
+  op?: FormOpLike,
 ): StepProposal[] {
   const handOf = handReader(geoms);
   const groupOf = new Map<string, number>();
@@ -1710,9 +1707,14 @@ function proposalsOf(
     joined.add(joinOf(cand.a, cand.b));
     hands.add(hand);
     for (const id of [...cand.a.ids, ...cand.b.ids]) taken.add(id);
-    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand });
+    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand, confident });
   };
-  const scored = wholeOverPartial(scoredPairs(groups, geoms, state, used, ease, false));
+  const scored = wholeOverPartial(
+    withSignals(scoredPairs(groups, geoms, state, used, ease, false), { op, geoms }),
+  );
+  // The ranker's «manual» (no guess worth showing) is not applied yet: on all cards every step it
+  // would drop still lays a whole RESULT, so the score alone does not tell a wrong pair.
+  const confident = outcomeOf(scored[0], scored[1]).outcome === 'confident';
   const long = (c: Scored) => Math.min(c.a.lenMm, c.b.lenMm) >= CONNECT_MIN_MM;
   const roleOfKey = (p: string) => {
     const g = geoms.get(p);
@@ -1785,10 +1787,19 @@ export function suggestStepPairs(
     if (!selfJoin(op, groups[0], geoms)) return [];
     const best = selfPairs(groups[0], geoms, new Set([...used, ...state.stored]))[0];
     return best
-      ? [{ a: best.a.ids, b: best.b.ids, aLen: best.aLen, bLen: best.bLen, hand: null }]
+      ? [
+          {
+            a: best.a.ids,
+            b: best.b.ids,
+            aLen: best.aLen,
+            bLen: best.bLen,
+            hand: null,
+            confident: false,
+          },
+        ]
       : [];
   }
-  return proposalsOf(groups, geoms, state, used, ease);
+  return proposalsOf(groups, geoms, state, used, ease, undefined, op);
 }
 
 /**
