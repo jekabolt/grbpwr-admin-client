@@ -30,6 +30,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
+import { placeHasDrop, seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -63,7 +64,6 @@ import {
 import {
   boxOf,
   fitBox,
-  focusPieces,
   insideRing,
   midAlong,
   PARTNER_REL,
@@ -363,7 +363,10 @@ export function SeamPickerBody({
     groups.length >= 2
       ? groups[0].pieces.length > 0 && groups.slice(1).some((group) => group.pieces.length > 0)
       : (groups[0]?.pieces.length ?? 0) >= 2;
-  const placeReady = !!placePartPiece && placeHosts.length > 0;
+  const placeReady =
+    !!placePartPiece &&
+    placeHosts.length > 0 &&
+    placeHasDrop(placeHosts, placePartPiece, (id) => used.has(id) || sewnInside.has(id), ease);
 
   // ── what «accept» would write ──
   const inners = [...sel.a, ...sel.b].filter((t) => parseInner(t));
@@ -537,13 +540,10 @@ export function SeamPickerBody({
     ...(partner ? [partner] : []),
   ];
   const seamPieces = new Set(seamIds.map(pieceOfTarget));
-  const focus = seamPieces.size > 0 && inners.length === 0;
-  const focusRaw = groups
-    .map((g) => ({
-      name: g.name,
-      pieces: focus ? focusPieces(g.pieces, seamPieces, innerSeams) : g.pieces,
-    }))
-    .filter((g) => g.pieces.length > 0);
+  // A lone pick with no partner keeps every piece: the other side is where the next pick goes.
+  const cut = inners.length === 0 ? seamFocus(groups, seamPieces, innerSeams) : null;
+  const focus = !!cut;
+  const focusRaw = cut ?? groups.filter((g) => g.pieces.length > 0);
   const focused = useStable(
     focusRaw,
     focusRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),

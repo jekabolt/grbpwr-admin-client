@@ -1,4 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { OpIconArt } from './OpIconArt';
 import { BAR_BASE, ICONS, ICON_ALIASES, OVERLAYS, type IconKey } from './icons.gen';
 import {
   opIcon,
@@ -268,21 +271,21 @@ describe('opIcon modifiers and fallbacks', () => {
       bars: 3,
       more: 4,
     });
-    expect(
-      opIcon(
-        {
-          seamKind: 'lapped_raw',
-          topstitchRows: 7,
-          topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
-        },
-        card,
-      ),
-    ).toEqual({
+    const rowsSeven = opIcon(
+      {
+        seamKind: 'lapped_raw',
+        topstitchRows: 7,
+        topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_EDGE',
+      },
+      card,
+    );
+    expect(rowsSeven).toEqual({
       key: 'lapped_raw',
       bars: 3,
       more: 7,
       at: 'edge',
     });
+    expect(renderToStaticMarkup(createElement(OpIconArt, { icon: rowsSeven }))).toContain('×7');
   });
 
   it('uses the two-hole drawing regardless of the four-hole pattern', () => {

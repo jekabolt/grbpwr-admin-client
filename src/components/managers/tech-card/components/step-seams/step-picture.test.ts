@@ -821,6 +821,19 @@ describe('focusPieces', () => {
   it('one piece of the seam needs no bridge', () => {
     expect(focusPieces(['A', 'B'], new Set(['A']), [sure('A#1', 'B#3')])).toEqual(['A']);
   });
+
+  it('a part placed on a host keeps its host, and the host its part (card 6 op 260, op 770)', () => {
+    const onHost = {
+      ...sure('A#1', 'C#3'),
+      kind: 'surface',
+      surface: { host: 'B', part: 'C' },
+    } as unknown as SeamCandidate;
+    // The placket carries the seam; the sleeve it sits on stays drawn.
+    expect(focusPieces(['B', 'C'], new Set(['C']), [onHost])).toEqual(['B', 'C']);
+    // Two seam pieces bridged by a sewn seam keep the part placed on one of them.
+    const inner = [sure('A#1', 'B#3'), onHost];
+    expect(focusPieces(['A', 'B', 'C'], new Set(['A', 'B']), inner)).toEqual(['A', 'B', 'C']);
+  });
 });
 
 describe('stepLayout apart', () => {

@@ -312,13 +312,16 @@ export function focusPieces(
   inner: readonly SeamCandidate[],
 ): string[] {
   const own = pieces.filter((k) => seamPieces.has(k));
-  if (own.length < 2) return own;
+  if (!own.length) return own;
   const here = new Set(pieces);
   const adj = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
+  // A part placed on a host (a placket on its sleeve slit, a pocket on the yoke) is never drawn
+  // without it, whichever of the two carries the seam.
+  const onto = new Map<string, Set<string>>();
+  const link = (m: Map<string, Set<string>>, a: string, b: string) => {
     if (a === b || !here.has(a) || !here.has(b)) return;
-    if (!adj.has(a)) adj.set(a, new Set());
-    adj.get(a)!.add(b);
+    if (!m.has(a)) m.set(a, new Set());
+    m.get(a)!.add(b);
   };
   for (const c of inner) {
     if (!confidentSeam(c)) continue;
@@ -327,10 +330,19 @@ export function focusPieces(
     const B = surface ? [surface.part] : (c.bParts ?? [c.b]).map(pieceKeyOf);
     for (const a of A)
       for (const b of B) {
-        link(a, b);
-        link(b, a);
+        link(adj, a, b);
+        link(adj, b, a);
+        if (surface) {
+          link(onto, a, b);
+          link(onto, b, a);
+        }
       }
   }
+  const withHosts = (keep: Set<string>) => {
+    for (const k of [...keep]) for (const n of onto.get(k) ?? []) keep.add(n);
+    return pieces.filter((k) => keep.has(k));
+  };
+  if (own.length < 2) return withHosts(new Set(own));
   // Breadth-first from the seam's first piece; every other one joins by its shortest path.
   const from = new Map<string, string | null>([[own[0], null]]);
   const queue = [own[0]];
@@ -344,7 +356,7 @@ export function focusPieces(
   }
   const keep = new Set(own);
   for (const k of own.slice(1)) for (let p = from.get(k); p; p = from.get(p)) keep.add(p);
-  return pieces.filter((k) => keep.has(k));
+  return withHosts(keep);
 }
 
 const EMPTY_LAYOUT: StepLayout = {

@@ -29,6 +29,9 @@ import { runSamples } from 'lib/seams/frame';
 
 import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
 
+import { outcomeOf } from './seam-ranker';
+import { isLayerCloth, withSignals } from './seam-signals';
+
 export type Pt = [number, number];
 
 /** A pickable target: an edge (`P#3`) or an inner line (`P:i2`). */
@@ -55,6 +58,8 @@ export type FormOpLike = {
   operationType?: string;
   /** `join_lockstitch`, `press_flat`, `buttonhole`…: what the step does. */
   work?: string;
+  /** The garment zone the step works in (`front`, `sleeve`…): a hint for the seam signals. */
+  zone?: string;
 };
 
 export type InputGroup = { key: string; pieces: string[] };
@@ -418,7 +423,10 @@ const TUBE_CLASSES: ReadonlySet<InputClass> = new Set(['sleeve', 'cuff', 'band']
 type InputClass = 'body' | 'sleeve' | 'neck' | 'cuff' | 'band' | 'other';
 
 function roleOfPiece(piece: PieceGeom, geoms: ReadonlyMap<string, PieceGeom>): string | null {
-  const own = readName(piece.name).role;
+  const read = readName(piece.name).role;
+  // FLP is the production cards' other spelling of a placket (PLCK is in the role book).
+  // Without the fallback two halves of one sleeve slit look like an exact edge seam.
+  const own = read ?? (/(^|[_\s-])(flp|plck)(?=$|[_\s-])/i.test(piece.name) ? 'placket' : null);
   if (roleDef(own)?.level === 'panel') return own;
   for (const twin of piece.twinOf ?? []) {
     if (twin.kind !== 'mirror') continue;
@@ -435,8 +443,9 @@ function classOf(group: { pieces: readonly string[] }, geoms: ReadonlyMap<string
       .filter((piece): piece is PieceGeom => !!piece)
       .map((piece) => roleOfPiece(piece, geoms)),
   );
-  if ([...roles].some((role) => !!role && BODY_ROLES.has(role))) return 'body' as const;
+  // A sleeve unit commonly already contains its slit placket; it remains a sleeve input.
   if (roles.has('sleeve')) return 'sleeve' as const;
+  if ([...roles].some((role) => !!role && BODY_ROLES.has(role))) return 'body' as const;
   if ([...roles].some((role) => !!role && NECK_ROLES.has(role))) return 'neck' as const;
   if (roles.has('cuff')) return 'cuff' as const;
   if (roles.has('waistband') || roles.has('hemband')) return 'band' as const;
@@ -457,6 +466,8 @@ function pairRoleCost(a: string | null, b: string | null, sameHand: boolean): nu
   // Two fronts meet only as the panels of ONE front (a left front's centre and side panels);
   // a left and a right front, or fronts no name hands, never meet edge to edge.
   if (a === 'front' && b === 'front') return sameHand ? 0.02 : Infinity;
+  // Two plackets sit on the two sides of a slit; they do not sew to each other edge to edge.
+  if (a === 'placket' && b === 'placket') return Infinity;
   if (pair.has('front') && pair.has('back')) return -0.06;
   if (pair.has('front') && pair.has('placket')) return -0.06;
   if (pair.has('sleeve') && pair.has('cuff')) return -0.08;
@@ -522,11 +533,11 @@ export type SewnPair = {
   score: number;
 };
 
-/** Where a chain lands when it crosses a sewn edge: the other side's last edge. */
-type Landing = { edge: Edge; piece: string };
+/** One partner at a junction, and whether adding it closed the edge that owns this landing. */
+type Landing = { edge: Edge; piece: string; consumes: boolean };
 
 type SewnState = {
-  /** A stacked seam (a pocket bag and a panel on one edge) lands on each of its partners. */
+  /** Every partner at an edge; one host can carry several layers at the same junction. */
   cross: Map<EdgeId, Landing[]>;
   /** Edges of stored seams of earlier steps: no side at all. */
   stored: Set<EdgeId>;
@@ -534,6 +545,8 @@ type SewnState = {
   owned: Set<EdgeId>;
   /** Edges of stored or implied seams: no chain material. */
   sewn: Set<EdgeId>;
+  /** Earlier rows that deliberately left an edge available for another structural seam. */
+  reusable: Set<EdgeId>;
   /** Every seam sewn so far, in step order. */
   pairs: SewnPair[];
 };
@@ -543,6 +556,7 @@ const emptyState = (): SewnState => ({
   stored: new Set(),
   owned: new Set(),
   sewn: new Set(),
+  reusable: new Set(),
   pairs: [],
 });
 const cloneState = (s: SewnState): SewnState => ({
@@ -550,6 +564,7 @@ const cloneState = (s: SewnState): SewnState => ({
   stored: new Set(s.stored),
   owned: new Set(s.owned),
   sewn: new Set(s.sewn),
+  reusable: new Set(s.reusable),
   pairs: [...s.pairs],
 });
 
@@ -769,7 +784,7 @@ function chainCtx(
   const same = (id: EdgeId) => [id, ...(alias.get(id) ?? [])];
   const canon = (l: Landing): Landing => {
     const edge = leaderEdge.get(l.edge.id);
-    return edge ? { edge, piece: edge.pieceKey } : l;
+    return edge ? { edge, piece: edge.pieceKey, consumes: l.consumes } : l;
   };
   return {
     isSewn: (id) => same(id).some((x) => state.sewn.has(x)),
@@ -1030,6 +1045,7 @@ type ScoreCtx = {
   implied: boolean;
   centre: ReadonlySet<EdgeId>;
   handOf: HandReader;
+  reusable: ReadonlySet<EdgeId>;
 };
 
 function scoreSides(
@@ -1062,7 +1078,13 @@ function scoreSides(
       if (roleVeto(ga, gb) && roleA === roleOf(ga) && roleB === roleOf(gb)) return null;
       const cost = pairRoleCost(roleA, roleB, !!ga.hand && ga.hand === gb.hand);
       if (!Number.isFinite(cost)) return null;
-      roleSum += cost;
+      // Opposite-hand pocket pieces belong to opposite fronts; an exact length alone must not
+      // join them across the garment. Same-hand pocket halves still close normally.
+      const pocketCross =
+        roleA === 'pocket' && roleB === 'pocket' && !!ga.hand && !!gb.hand && ga.hand !== gb.hand
+          ? 0.08
+          : 0;
+      roleSum += cost + pocketCross;
       pairs++;
       if (ga.twinOf.some((t) => t.key === pb && t.kind === 'identical')) {
         twins = true;
@@ -1115,13 +1137,24 @@ function scoreSides(
   const handA = sideHand(a, ctx.handOf);
   const handB = sideHand(b, ctx.handOf);
   const hands = handA && handB && handA !== handB ? HAND_CROSS : 0;
+  // A confirmed added layer deliberately leaves its host open. When that edge appears again,
+  // the structural seam wins narrowly over an equally exact pocket-bag closure.
+  const pendingHost = [...a.ids, ...b.ids].some((id) => ctx.reusable.has(id)) ? -0.05 : 0;
   const fits = (s: Side, input: InputClass) =>
     s.pieces.every((p) => {
       const g = geoms.get(p);
       return !g || roleFits(input, roleOfPiece(g, geoms));
     });
   const endpoint = (fits(a, classA) ? -0.025 : 0.1) + (fits(b, classB) ? -0.025 : 0.1);
-  const shape = curveCost(a.turnDeg, b.turnDeg);
+  const stackedLayer = a.ids.length > a.edges.length || b.ids.length > b.edges.length;
+  // A later piece lies on a stacked layer instead of opening across it. Its matching curve keeps
+  // the same face-up bend; ordinary edge seams still prefer opposite bends.
+  const shape =
+    stackedLayer && isCurve(a.turnDeg) && isCurve(b.turnDeg)
+      ? a.turnDeg * b.turnDeg > 0
+        ? -0.1
+        : -0.06
+      : curveCost(a.turnDeg, b.turnDeg);
   const lengthTie = -Math.min(a.lenMm, b.lenMm, 1000) / 1_000_000;
   const links = LINK_COST * (a.ids.length + b.ids.length - 2);
   const na = Math.hypot(a.nx, a.ny);
@@ -1142,6 +1175,7 @@ function scoreSides(
     links +
     oppose +
     hands +
+    pendingHost +
     layerFit;
   return { score, a, b, layer, aLen: sewn.aLen, bLen: sewn.bLen };
 }
@@ -1221,7 +1255,9 @@ function stackable(
   used: ReadonlySet<EdgeId>,
 ): Set<EdgeId> {
   const own = new Set(group.pieces);
-  const out = new Set<EdgeId>();
+  const out = new Set([...state.reusable].filter((id) => own.has(pieceOf(id))));
+  // Preserve the earlier implied-seam exemption: once both partners are inside this input, its
+  // outline may take another layer. Confirmed rows use the explicit reusable flags above.
   for (const pair of state.pairs) {
     if (pair.layer || pair.stored) continue;
     const inside = [...pair.a, ...pair.b].every((id) => own.has(pieceOf(id)) && !used.has(id));
@@ -1232,10 +1268,83 @@ function stackable(
 }
 
 /**
+ * An identical pair sewn as layers still presents one physical side to a later piece. Keep both
+ * edge ids on the proposal so the next seam closes both layers, but measure and score it once.
+ */
+function stackedSides(
+  group: { pieces: readonly string[] },
+  geoms: ReadonlyMap<string, PieceGeom>,
+  state: SewnState,
+  used: ReadonlySet<EdgeId>,
+): { sides: Side[]; ids: Set<EdgeId> } {
+  const own = new Set(group.pieces);
+  const order = new Map(group.pieces.map((piece, index) => [piece, index]));
+  const sides: Side[] = [];
+  const ids = new Set<EdgeId>();
+  const seen = new Set<string>();
+  for (const pair of state.pairs) {
+    if (!pair.layer) continue;
+    const pa = [...new Set(pair.a.map(pieceOf))];
+    const pb = [...new Set(pair.b.map(pieceOf))];
+    if (pa.length !== 1 || pb.length !== 1 || !own.has(pa[0]) || !own.has(pb[0])) continue;
+    const bByK = new Map(
+      pair.b.flatMap((id) => {
+        const edge = edgeOf(id, geoms);
+        return edge ? [[edge.k, edge] as const] : [];
+      }),
+    );
+    for (const aId of new Set(pair.a)) {
+      const a = edgeOf(aId, geoms);
+      const b = a ? bByK.get(a.k) : undefined;
+      if (!a || !b) continue;
+      if (Math.abs(a.lenMm - b.lenMm) > LAYER_EDGE_REL * Math.max(a.lenMm, b.lenMm, 1)) continue;
+      if (
+        [a.id, b.id].some((id) => (used.has(id) || state.owned.has(id)) && !state.reusable.has(id))
+      )
+        continue;
+      const key = [a.id, b.id].sort().join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const leader = (order.get(a.pieceKey) ?? 0) <= (order.get(b.pieceKey) ?? 0) ? a : b;
+      const follower = leader === a ? b : a;
+      const side = sideOfEdges([leader]);
+      side.ids = [leader.id, follower.id];
+      side.pieces = [leader.pieceKey, follower.pieceKey];
+      sides.push(side);
+      ids.add(leader.id);
+      ids.add(follower.id);
+    }
+  }
+  return { sides, ids };
+}
+
+/**
+ * The one consumed edge an untouched identical twin may still meet. A layer can be laid onto the
+ * structural seam already carried by its twin, but only edge-for-edge; no unrelated piece and no
+ * other edge of the twin inherits this exemption.
+ */
+function consumedTwinHost(
+  a: readonly EdgeId[],
+  b: readonly EdgeId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  state: SewnState,
+): EdgeId | null {
+  if (a.length !== 1 || b.length !== 1) return null;
+  const ea = edgeOf(a[0], geoms);
+  const eb = edgeOf(b[0], geoms);
+  if (!ea || !eb || ea.k !== eb.k) return null;
+  if (!isLayerSeam(a, b, geoms) && !isLayerSeam(b, a, geoms)) return null;
+  const closedA = state.sewn.has(ea.id);
+  const closedB = state.sewn.has(eb.id);
+  if (closedA === closedB) return null;
+  return closedA ? ea.id : eb.id;
+}
+
+/**
  * Every plausible pair across two different input units, best first. With three or more
  * inputs, two of opposite hands (a left and a right sleeve round a body) are never paired.
  */
-function scoredPairs(
+export function scoredPairs(
   groups: readonly { pieces: readonly string[] }[],
   geoms: ReadonlyMap<string, PieceGeom>,
   state: SewnState,
@@ -1249,10 +1358,12 @@ function scoredPairs(
     implied,
     centre: implied ? centreEdges(geoms) : new Set(),
     handOf: handReader(geoms),
+    reusable: state.reusable,
   };
   const sidesOf = (group: { pieces: readonly string[] }): Side[] => {
     const followers = layerFollowers(group.pieces, geoms);
     const stack = stackable(group, state, used);
+    const stacked = stackedSides(group, geoms, state, used);
     const singles = group.pieces.flatMap((p) => {
       const g = geoms.get(p);
       if (!g || followers.has(p)) return [];
@@ -1262,13 +1373,14 @@ function scoredPairs(
       return plainEdges(g)
         .filter(
           (e) =>
-            !used.has(e.id) &&
+            !stacked.ids.has(e.id) &&
+            (!used.has(e.id) || stack.has(e.id)) &&
             (!(implied ? state.sewn : state.owned).has(e.id) || stack.has(e.id)) &&
             e.lenMm >= MIN_SIDE_MM,
         )
         .map((e) => sideOfEdges([e]));
     });
-    return [...singles, ...chainSides(group.pieces, geoms, state, used)];
+    return [...stacked.sides, ...singles, ...chainSides(group.pieces, geoms, state, used)];
   };
   const sides = groups.map(sidesOf);
   const classes = groups.map((group) => classOf(group, geoms));
@@ -1283,6 +1395,44 @@ function scoredPairs(
           if (scored) out.push(scored);
         }
       }
+      // A twin layer stacks onto the matching edge of its twin's earlier structural seam. Build
+      // this pair directly so making the consumed host available cannot pair it with any other
+      // piece, or even with a different edge of the same twin.
+      for (const pa of groups[i].pieces) {
+        const ga = geoms.get(pa);
+        if (!ga) continue;
+        for (const pb of groups[j].pieces) {
+          const gb = geoms.get(pb);
+          if (!gb) continue;
+          const twins =
+            ga.twinOf.some((t) => t.key === pb && t.kind === 'identical') ||
+            gb.twinOf.some((t) => t.key === pa && t.kind === 'identical');
+          if (!twins) continue;
+          const bByK = new Map(plainEdges(gb).map((edge) => [edge.k, edge]));
+          for (const ea of plainEdges(ga)) {
+            const eb = bByK.get(ea.k);
+            if (!eb || Math.min(ea.lenMm, eb.lenMm) < MIN_SIDE_MM) continue;
+            const host = consumedTwinHost([ea.id], [eb.id], geoms, state);
+            if (!host) continue;
+            const fresh = host === ea.id ? eb.id : ea.id;
+            if (
+              used.has(fresh) ||
+              state.sewn.has(fresh) ||
+              state.owned.has(fresh) ||
+              state.reusable.has(fresh)
+            )
+              continue;
+            const scored = scoreSides(
+              sideOfEdges([ea]),
+              sideOfEdges([eb]),
+              classes[i],
+              classes[j],
+              ctx,
+            );
+            if (scored) out.push(scored);
+          }
+        }
+      }
     }
   }
   return out.sort((x, y) => x.score - y.score);
@@ -1290,7 +1440,23 @@ function scoredPairs(
 
 // ─── what earlier steps sewed ─────────────────────────────────────────────────────────────────────
 
-/** Records a seam: its edges leave the pool; unless it is a layer seam, it becomes a junction. */
+function consumptionOf(
+  a: readonly EdgeId[],
+  b: readonly EdgeId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  stored: boolean,
+): { a: boolean; b: boolean } {
+  // A guessed layer/pocket match is not evidence of a layered construction. Only a confirmed row
+  // can leave an edge open; otherwise guesses would keep accumulating partners across the card.
+  if (!stored) return { a: true, b: true };
+  if (isLayerSeam(a, b, geoms)) return { a: false, b: false };
+  const addedA = a.length > 0 && a.every((id) => isLayerCloth(pieceOf(id), geoms));
+  const addedB = b.length > 0 && b.every((id) => isLayerCloth(pieceOf(id), geoms));
+  if (addedA !== addedB) return addedA ? { a: true, b: false } : { a: false, b: true };
+  return { a: true, b: true };
+}
+
+/** Records a seam: consumed edges leave the pool; every partner remains a chain junction. */
 function sew(
   state: SewnState,
   a: readonly EdgeId[],
@@ -1298,11 +1464,21 @@ function sew(
   geoms: ReadonlyMap<string, PieceGeom>,
   opts: { stored: boolean; junction: boolean; own?: boolean; score?: number },
 ) {
-  for (const id of [...a, ...b]) {
-    state.sewn.add(id);
-    if (opts.stored) state.stored.add(id);
-    if (opts.stored || opts.own) state.owned.add(id);
-  }
+  const consumes = consumptionOf(a, b, geoms, opts.stored);
+  const record = (ids: readonly EdgeId[], consume: boolean) => {
+    for (const id of ids) {
+      if (consume) {
+        state.sewn.add(id);
+        state.reusable.delete(id);
+        if (opts.stored) state.stored.add(id);
+        if (opts.stored || opts.own) state.owned.add(id);
+      } else {
+        state.reusable.add(id);
+      }
+    }
+  };
+  record(a, consumes.a);
+  record(b, consumes.b);
   if (a.length && b.length)
     state.pairs.push({
       a: [...a],
@@ -1316,13 +1492,13 @@ function sew(
   const lastA = edgeOf(a[a.length - 1], geoms);
   const lastB = edgeOf(b[b.length - 1], geoms);
   if (!lastA || !lastB) return;
-  const land = (id: EdgeId, edge: Edge) => {
+  const land = (id: EdgeId, edge: Edge, consume: boolean) => {
     const landings = state.cross.get(id) ?? [];
     if (!landings.some((l) => l.edge.id === edge.id))
-      state.cross.set(id, [...landings, { edge, piece: edge.pieceKey }]);
+      state.cross.set(id, [...landings, { edge, piece: edge.pieceKey, consumes: consume }]);
   };
-  land(a[0], lastB);
-  land(b[0], lastA);
+  land(a[0], lastB, consumes.a);
+  land(b[0], lastA, consumes.b);
 }
 
 function isLayerSeam(
@@ -1404,15 +1580,34 @@ function applyStep(
   // sleeve finds the armhole, not the yoke edge (card 59, op 610 → 670).
   const connecting: Scored[] = [];
   proposalsOf(groups, geoms, state, state.stored, ease, connecting);
-  const guesses = scoredPairs(groups, geoms, state, state.stored, ease, true);
+  const rowRoot = groups.length ? find(0) : -1;
+  const layerRowsComplete =
+    rows.some((row) => isLayerSeam(row.a, row.b, geoms)) &&
+    groups.every((_, group) => find(group) === rowRoot);
+  const guesses = layerRowsComplete
+    ? []
+    : scoredPairs(groups, geoms, state, state.stored, ease, true);
   const pairKey = (c: Scored) => [...c.a.ids, '|', ...c.b.ids].join(',');
   const guessable = new Set(guesses.map(pairKey));
-  const own = connecting.filter((c, n) => n === 0 || guessable.has(pairKey(c)));
+  const stillConnects = (c: Scored) => {
+    const i = find(groupOf.get(c.a.pieces[0]) ?? -1);
+    const j = find(groupOf.get(c.b.pieces[0]) ?? -1);
+    return i >= 0 && j >= 0 && i !== j;
+  };
+  // A stored row may already have connected the inputs. Do not promote another proposal merely
+  // because proposalsOf starts from a fresh component set; only conservative guesses may add a
+  // second seam inside that stored unit.
+  const own = connecting.filter(
+    (c, n) => stillConnects(c) && (n === 0 || guessable.has(pairKey(c))),
+  );
   for (const cand of [...own, ...guesses]) {
     const ids = [...cand.a.ids, ...cand.b.ids];
+    const twinHost = consumedTwinHost(cand.a.ids, cand.b.ids, geoms, state);
     // An edge this step already took is gone; one an earlier step sewed inside the input is
-    // stacked on, once.
-    if (ids.some((id) => taken.has(id) && !(stack.has(id) && stack.delete(id)))) continue;
+    // stacked on, once. The matching edge of an identical twin may likewise layer directly onto
+    // that earlier structural seam.
+    if (ids.some((id) => taken.has(id) && id !== twinHost && !(stack.has(id) && stack.delete(id))))
+      continue;
     const first = connect(cand.a.ids, cand.b.ids);
     if (!first && cand.score > GUESS_OK) continue;
     for (const id of ids) taken.add(id);
@@ -1434,7 +1629,7 @@ type StateCache = {
 const stateCache = new WeakMap<readonly FormOpLike[], StateCache>();
 
 /** The sewn state before a step, built step by step and kept per ops array. */
-function stateBefore(
+export function stateBefore(
   ops: readonly FormOpLike[],
   index: number,
   pieceKeys: ReadonlySet<string>,
@@ -1490,7 +1685,23 @@ export function suggestPair(
 }
 
 /** One of the seams a step proposes, with the side of the body it sits on when the pieces say. */
-export type StepProposal = Suggestion & { hand: Hand };
+export type StepProposal = Suggestion & {
+  hand: Hand;
+  /** false: the best guess, shown marked as one (the ranker's `confident` is gated off for now). */
+  confident: boolean;
+};
+
+export type StepSurface = {
+  /** Piece that owns the stored inner line. */
+  host: string;
+  /** Inner-line index (`innerId(host, inner)`). */
+  inner: number;
+  /** Singleton input to place on the other side of the line. */
+  part: string;
+  /** Reflected stored placement, when its host frame still resolves exactly. */
+  place?: SeamPlacement;
+  confident: boolean;
+};
 
 /** «left» / «right» by the proposal's hand, else «seam n». */
 export function proposalLabel(proposal: StepProposal, index: number): string {
@@ -1548,6 +1759,7 @@ function proposalsOf(
   used: ReadonlySet<EdgeId>,
   ease: number | null,
   connecting?: Scored[],
+  op?: FormOpLike,
 ): StepProposal[] {
   const handOf = handReader(geoms);
   const groupOf = new Map<string, number>();
@@ -1570,9 +1782,14 @@ function proposalsOf(
     joined.add(joinOf(cand.a, cand.b));
     hands.add(hand);
     for (const id of [...cand.a.ids, ...cand.b.ids]) taken.add(id);
-    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand });
+    out.push({ a: cand.a.ids, b: cand.b.ids, aLen: cand.aLen, bLen: cand.bLen, hand, confident });
   };
-  const scored = wholeOverPartial(scoredPairs(groups, geoms, state, used, ease, false));
+  const scored = wholeOverPartial(
+    withSignals(scoredPairs(groups, geoms, state, used, ease, false), { op, geoms }),
+  );
+  // The ranker's «manual» (no guess worth showing) is not applied yet: on all cards every step it
+  // would drop still lays a whole RESULT, so the score alone does not tell a wrong pair.
+  const confident = outcomeOf(scored[0], scored[1]).outcome === 'confident';
   const long = (c: Scored) => Math.min(c.a.lenMm, c.b.lenMm) >= CONNECT_MIN_MM;
   const roleOfKey = (p: string) => {
     const g = geoms.get(p);
@@ -1645,10 +1862,19 @@ export function suggestStepPairs(
     if (!selfJoin(op, groups[0], geoms)) return [];
     const best = selfPairs(groups[0], geoms, new Set([...used, ...state.stored]))[0];
     return best
-      ? [{ a: best.a.ids, b: best.b.ids, aLen: best.aLen, bLen: best.bLen, hand: null }]
+      ? [
+          {
+            a: best.a.ids,
+            b: best.b.ids,
+            aLen: best.aLen,
+            bLen: best.bLen,
+            hand: null,
+            confident: false,
+          },
+        ]
       : [];
   }
-  return proposalsOf(groups, geoms, state, used, ease);
+  return proposalsOf(groups, geoms, state, used, ease, undefined, op);
 }
 
 /**
@@ -1667,6 +1893,198 @@ export function suggestStepPair(
   seams?: ReadonlyMap<string, StoredSeam>,
 ): Suggestion | null {
   return suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, seams)[0] ?? null;
+}
+
+type StoredSurface = {
+  host: string;
+  inner: number;
+  part: string;
+  hostAnchor: EdgeAnchor;
+  placement?: SeamPlacement;
+};
+
+const storedInner = (anchor: EdgeAnchor): number | null => {
+  const match = /^i(\d+)$/.exec(anchor.edgeHint);
+  return match ? Number(match[1]) : null;
+};
+
+/** Confirmed surface rows attached to earlier steps, read in their stored host/part direction. */
+function storedSurfacesBefore(
+  ops: readonly FormOpLike[],
+  index: number,
+  seams: ReadonlyMap<string, StoredSeam>,
+): StoredSurface[] {
+  const out: StoredSurface[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < index; i++) {
+    for (const key of ops[i]?.seamKeys ?? []) {
+      const seam = seams.get(key);
+      if (
+        !seam ||
+        seen.has(seam.seamKey) ||
+        seam.status !== 'confirmed' ||
+        seam.stale ||
+        seam.kind !== 'surface'
+      )
+        continue;
+      seen.add(seam.seamKey);
+      const aInner = seam.sideA.map((anchor) => ({ anchor, inner: storedInner(anchor) }));
+      const bInner = seam.sideB.map((anchor) => ({ anchor, inner: storedInner(anchor) }));
+      const inners = [...aInner, ...bInner].filter(
+        (hit): hit is { anchor: EdgeAnchor; inner: number } => hit.inner !== null,
+      );
+      if (inners.length !== 1) continue;
+      const hit = inners[0];
+      const hostSide = aInner.some((candidate) => candidate.anchor === hit.anchor)
+        ? seam.sideA
+        : seam.sideB;
+      const partSide = hostSide === seam.sideA ? seam.sideB : seam.sideA;
+      const parts = [...new Set(partSide.map((anchor) => anchor.piece))];
+      if (parts.length !== 1 || parts[0] === hit.anchor.piece) continue;
+      const placement =
+        partSide.find((anchor) => anchor.placement)?.placement ?? hit.anchor.placement;
+      out.push({
+        host: hit.anchor.piece,
+        inner: hit.inner,
+        part: parts[0],
+        hostAnchor: hit.anchor,
+        ...(placement ? { placement } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+const normalisedDeg = (deg: number) => {
+  const turn = ((((deg + 180) % 360) + 360) % 360) - 180;
+  return Math.abs(turn) < 1e-9 ? 0 : turn;
+};
+
+/** Reflect a surface placement across a straight stored inner line in the host's drawing frame. */
+function reflectSurfacePlacement(
+  host: PieceGeom,
+  anchor: EdgeAnchor,
+  placement: SeamPlacement,
+): SeamPlacement | undefined {
+  const values = [placement.xMm, placement.yMm, placement.rotDeg];
+  if (anchor.samples.length < 2 || values.some((value) => !Number.isFinite(value)))
+    return undefined;
+  // An anchor does not store its grain turn. A matching zero-turn signature is the only frame we
+  // can invert without guessing; other valid rows still get a centred placement from the picker.
+  const frame = frameOf(host);
+  if (anchor.contourSig !== contourSig(host, frame)) return undefined;
+  const line = anchor.samples.map(
+    ([u, v]): Pt => [frame.x0 + u * frame.w, -(frame.y0 + v * frame.h)],
+  );
+  const a = line[0];
+  const b = line[line.length - 1];
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return undefined;
+  const distance = ([x, y]: Pt) => Math.abs(dy * (x - a[0]) - dx * (y - a[1])) / length;
+  const straightTol = Math.max(EXACT_MM, anchor.lenMm * EXACT_REL);
+  if (line.some((point) => distance(point) > straightTol)) return undefined;
+  if (Math.abs(length - anchor.lenMm) > straightTol) return undefined;
+
+  const hostTop = -(frame.y0 + frame.h);
+  const point: Pt = [frame.x0 + placement.xMm, hostTop + placement.yMm];
+  const along = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / (length * length);
+  const foot: Pt = [a[0] + along * dx, a[1] + along * dy];
+  const reflected: Pt = [2 * foot[0] - point[0], 2 * foot[1] - point[1]];
+  const lineDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return {
+    xMm: reflected[0] - frame.x0,
+    yMm: reflected[1] - hostTop,
+    rotDeg: normalisedDeg(2 * lineDeg - placement.rotDeg - 180),
+    flip: !placement.flip,
+  };
+}
+
+/**
+ * A singleton piece placed opposite its twin on an earlier stored inner-line seam. Outer-edge
+ * proposals always win; this is only the missing second side of an already established slit.
+ */
+export function suggestStepSurface(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  seams?: ReadonlyMap<string, StoredSeam>,
+): StepSurface | null {
+  const op = ops[index];
+  if (!op || !seams || (sewsNothing(op) && !keyedOf(op))) return null;
+  const groups = inputGroups(ops, index, pieceKeys);
+  const singles = groups.filter((group) => group.pieces.length === 1);
+  if (groups.length < 2 || singles.length === 0) return null;
+  if (
+    suggestStepPairs(
+      ops,
+      index,
+      pieceKeys,
+      geoms,
+      usedEdgesBeforeStep(ops, index, seams),
+      easeOf(op),
+      seams,
+    ).length
+  )
+    return null;
+
+  const related = (part: string, other: string) => {
+    const partGeom = geoms.get(part);
+    const otherGeom = geoms.get(other);
+    if (!partGeom || !otherGeom) return false;
+    const twins =
+      partGeom.twinOf.some((twin) => twin.key === other) ||
+      otherGeom.twinOf.some((twin) => twin.key === part);
+    const partRole = roleOfPiece(partGeom, geoms);
+    const otherRole = roleOfPiece(otherGeom, geoms);
+    return twins || (!!partRole && partRole === otherRole);
+  };
+
+  const inputPieces = new Set(groups.flatMap((group) => group.pieces));
+  const surfaces = storedSurfacesBefore(ops, index, seams);
+  const candidates = singles.flatMap((single) => {
+    const part = single.pieces[0];
+    const partGeom = geoms.get(part);
+    const longEdge = partGeom
+      ? plainEdges(partGeom).reduce<Edge | null>(
+          (best, edge) => (!best || edge.lenMm > best.lenMm ? edge : best),
+          null,
+        )
+      : null;
+    if (!partGeom || !longEdge) return [];
+    return surfaces.flatMap((surface) => {
+      const hostGroup = groups.find(
+        (group) => group !== single && group.pieces.includes(surface.host),
+      );
+      const lineLen = surface.hostAnchor.lenMm;
+      if (
+        !hostGroup ||
+        !inputPieces.has(surface.part) ||
+        part === surface.part ||
+        !related(part, surface.part) ||
+        !(lineLen > 0) ||
+        Math.abs(longEdge.lenMm - lineLen) / Math.max(longEdge.lenMm, lineLen) > SUGGEST_REL
+      )
+        return [];
+      return [{ ...surface, suggestedPart: part }];
+    });
+  });
+  if (candidates.length !== 1) return null;
+  const candidate = candidates[0];
+  const hostGeom = geoms.get(candidate.host);
+  const place =
+    candidate.placement && hostGeom
+      ? reflectSurfacePlacement(hostGeom, candidate.hostAnchor, candidate.placement)
+      : undefined;
+  return {
+    host: candidate.host,
+    inner: candidate.inner,
+    part: candidate.suggestedPart,
+    ...(place ? { place } : {}),
+    confident: false,
+  };
 }
 
 /** Compact words shared by the row and picker: `BP_U-5 ↔ BP_MAIN-1`. */

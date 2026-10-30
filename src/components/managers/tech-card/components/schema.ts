@@ -119,7 +119,12 @@ import {
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
 // остался бы на поле, которого нет на экране.
 import { SLIT_OVERCAST_WORK } from './operation-work';
-import { FOUR_HOLE_PATTERNS, SEAM_KIND_BINDING_STYLE, seamKindDef } from './step-icon-tiles/rules';
+import {
+  FOUR_HOLE_PATTERNS,
+  MAX_TOPSTITCH_ROWS,
+  SEAM_KIND_BINDING_STYLE,
+  seamKindDef,
+} from './step-icon-tiles/rules';
 import { z } from 'zod';
 import {
   blankFuse,
@@ -1338,7 +1343,14 @@ const operationSchema = z
     seamAllowanceMm: z.string().optional().default(''), // millimetres; '0' is a REAL value, '' is inherit
     topstitchMode: z.string().optional().default('TECH_CARD_TOPSTITCH_MODE_UNKNOWN'),
     topstitchWidthMm: z.string().optional().default(''),
-    topstitchRows: z.number().optional().default(0),
+    topstitchRows: z
+      .number()
+      .max(
+        MAX_TOPSTITCH_ROWS,
+        `topstitch row count runs 1–${MAX_TOPSTITCH_ROWS} in whole numbers — clear the field to remove it`,
+      )
+      .optional()
+      .default(0),
     attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
     attachmentSizeMm: z.string().optional().default(''),
 

@@ -241,8 +241,34 @@ export const PRESS_TOWARD_TILES: readonly PressTile[] = [
 
 // --- topstitch rows --------------------------------------------------------------------------
 
-/** 0 = unset; the server caps rows at 4 (entity.MaxTopstitchRows). */
+/** Maximum exact row count accepted by the client and server. */
+export const MAX_TOPSTITCH_ROWS = 10;
+
+/** 0 = unset; 4 is the entry point for the exact 4–10 count. */
 export const TOPSTITCH_ROW_TILES = [0, 1, 2, 3, 4] as const;
+
+export type TopstitchRowTileState = {
+  value: (typeof TOPSTITCH_ROW_TILES)[number];
+  label: string;
+  pressed: boolean;
+  iconRows: number;
+  nextRows: number;
+};
+
+/** The 4+ tile owns every exact count from four upward, including visible out-of-range data. */
+export function topstitchRowTileStates(rows: number): TopstitchRowTileState[] {
+  return TOPSTITCH_ROW_TILES.map((value) => {
+    const more = value === 4;
+    const pressed = more ? rows >= 4 : rows === value;
+    return {
+      value,
+      label: more ? '4+' : String(value),
+      pressed,
+      iconRows: more ? Math.max(rows, 4) : value,
+      nextRows: pressed ? 0 : value,
+    };
+  });
+}
 
 export function topstitchAtOf(mode: string): TopstitchAt | undefined {
   if (mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return 'edge';
