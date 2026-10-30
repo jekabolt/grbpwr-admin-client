@@ -612,10 +612,19 @@ export function StepPictureSvg({
         return [];
       return (geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
     });
+    for (const line of actionLines) {
+      const transform = layout.T.get(line.piece);
+      if (transform) points.push(...line.points.map((point) => apply(transform, point)));
+    }
+    for (const glyph of actionGlyphs) {
+      const transform = layout.T.get(glyph.piece);
+      if (transform) points.push(apply(transform, glyph.point));
+    }
     if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
     return points.length ? boxOf(points) : layout.bbox;
-  }, [layout, geoms, look]);
-  const fit = useMemo(() => fitBox(fitBounds, w, h, pad), [fitBounds, w, h, pad]);
+  }, [layout, geoms, look, actionLines, actionGlyphs]);
+  const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
+  const fit = useMemo(() => fitBox(fitBounds, w, h, fitPad), [fitBounds, w, h, fitPad]);
 
   const pieces = useMemo(() => {
     const out: { key: string; ring: Pt2[]; input: number; centre: Pt2 }[] = [];
@@ -782,7 +791,7 @@ export function StepPictureSvg({
       height={h}
       viewBox={`0 0 ${w} ${h}`}
       className={className}
-      style={{ overflow: 'visible', fontSize: L.font }}
+      style={{ overflow: 'hidden', fontSize: L.font }}
       aria-hidden={onPick ? undefined : true}
     >
       <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>

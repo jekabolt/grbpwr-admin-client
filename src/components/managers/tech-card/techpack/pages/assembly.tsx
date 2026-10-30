@@ -30,7 +30,7 @@ import {
   type StepLayout,
 } from 'components/managers/tech-card/components/step-seams/step-picture';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
-import { pairOverlap, pieceKeyOf, rasterize } from 'lib/assembly-skeleton/union';
+import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
@@ -721,6 +721,273 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
   };
 }
 
+/** Lay an anonymous shirt net as body panels with sleeves at its upper side seams. */
+function anonymousShirtPicture(picture: StepPicture): StepPicture | null {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  if (visible.some((key) => reading(key).role === 'sleeve')) return null;
+  const knownBodies = visible.filter((key) =>
+    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
+  );
+  const anonymous = visible.filter((key) => !reading(key).role);
+  if (!knownBodies.length || anonymous.length < 2) return null;
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const anchor = [...knownBodies].sort((left, right) => area(right) - area(left))[0];
+  const rawAspect = (key: string) => {
+    const box = boxOf(picture.geoms.get(key)?.rs ?? []);
+    const width = Math.max(box.x1 - box.x0, 1);
+    const height = Math.max(box.y1 - box.y0, 1);
+    return Math.max(width / height, height / width);
+  };
+  const panels = anonymous
+    .filter((key) => rawAspect(key) < 1.5)
+    .sort((left, right) => area(right) - area(left))
+    .slice(0, 2);
+  const sleeves = anonymous
+    .filter((key) => !panels.includes(key) && rawAspect(key) <= 4.5)
+    .sort((left, right) => area(right) - area(left))
+    .slice(0, 2);
+  if (!sleeves.length) return null;
+
+  const T = new Map(picture.layout.T);
+  const rotateQuarter = (key: string) => {
+    const points = (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+    const box = boxOf(points);
+    const at: Pt2 = [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
+    const quarter: Affine = [0, 1, -1, 0, 0, 0];
+    T.set(
+      key,
+      compose(
+        translate(at[0], at[1]),
+        compose(quarter, compose(translate(-at[0], -at[1]), T.get(key)!)),
+      ),
+    );
+  };
+  const anchorBox = boxOf(
+    (picture.geoms.get(anchor)?.rs ?? []).map((point) => apply(T.get(anchor)!, point)),
+  );
+  if (anchorBox.x1 - anchorBox.x0 > 1.3 * (anchorBox.y1 - anchorBox.y0)) rotateQuarter(anchor);
+  for (const key of sleeves) {
+    const box = boxOf((picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point)));
+    if (box.y1 - box.y0 > 1.3 * (box.x1 - box.x0)) rotateQuarter(key);
+  }
+  const ring = (key: string, transform = T.get(key)!) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
+  const shift = (key: string, dx: number, dy: number) =>
+    T.set(key, compose(translate(dx, dy), T.get(key)!));
+  const snap = (key: string, hosts: readonly string[]) => {
+    const part = ring(key);
+    const target = hosts.flatMap((host) => ring(host));
+    let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
+    for (const partPoint of part)
+      for (const targetPoint of target) {
+        const distance = Math.hypot(partPoint[0] - targetPoint[0], partPoint[1] - targetPoint[1]);
+        if (!nearest || distance < nearest.distance)
+          nearest = { distance, part: partPoint, target: targetPoint };
+      }
+    if (nearest)
+      shift(key, nearest.target[0] - nearest.part[0], nearest.target[1] - nearest.part[1]);
+  };
+  const putBeside = (key: string, target: ReturnType<typeof boxOf>, side: 'L' | 'R') => {
+    const box = boxOf(ring(key));
+    shift(
+      key,
+      side === 'L' ? target.x0 - box.x1 : target.x1 - box.x0,
+      (target.y0 + target.y1 - box.y0 - box.y1) / 2,
+    );
+  };
+  let bodyBox = boxOf(ring(anchor));
+  const orderedPanels = [...panels].sort(
+    (left, right) =>
+      (boxOf(ring(left)).x0 + boxOf(ring(left)).x1) / 2 -
+      (boxOf(ring(right)).x0 + boxOf(ring(right)).x1) / 2,
+  );
+  orderedPanels.forEach((key, index) => {
+    putBeside(key, bodyBox, index === 0 ? 'L' : 'R');
+    snap(key, [anchor, ...orderedPanels.slice(0, index)]);
+    bodyBox = boxOf([
+      ...ring(anchor),
+      ...orderedPanels.slice(0, index + 1).flatMap((candidate) => ring(candidate)),
+    ]);
+  });
+  const bodyLeaders = [anchor];
+  bodyBox = boxOf(bodyLeaders.flatMap((key) => ring(key)));
+  const orderedSleeves = [...sleeves].sort(
+    (left, right) =>
+      (boxOf(ring(left)).x0 + boxOf(ring(left)).x1) / 2 -
+      (boxOf(ring(right)).x0 + boxOf(ring(right)).x1) / 2,
+  );
+  orderedSleeves.forEach((key, index) => {
+    const side = index === 0 ? 'L' : 'R';
+    const box = boxOf(ring(key));
+    shift(
+      key,
+      side === 'L' ? bodyBox.x0 - box.x1 : bodyBox.x1 - box.x0,
+      bodyBox.y1 - 0.1 * (bodyBox.y1 - bodyBox.y0) - box.y1,
+    );
+    snap(key, bodyLeaders);
+  });
+
+  const pieceLayers = [...picture.layout.pieceLayers];
+  const hostBox = boxOf(ring(anchor));
+  orderedPanels.forEach((key, index) => {
+    const box = boxOf(ring(key));
+    shift(
+      key,
+      index === 0 ? hostBox.x0 - box.x0 : hostBox.x1 - box.x1,
+      (hostBox.y0 + hostBox.y1 - box.y0 - box.y1) / 2,
+    );
+    if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, anchor]);
+  });
+  const leaders = new Set([...bodyLeaders, ...panels, ...sleeves]);
+  for (const key of visible) {
+    if (leaders.has(key)) continue;
+    const host = anchor;
+    const hostBox = boxOf(ring(host));
+    const box = boxOf(ring(key));
+    shift(
+      key,
+      (hostBox.x0 + hostBox.x1 - box.x0 - box.x1) / 2,
+      (hostBox.y0 + hostBox.y1 - box.y0 - box.y1) / 2,
+    );
+    if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, host]);
+  }
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, pieceLayers, bbox: boxOf(points) } };
+}
+
+/** Stored seams still need a front-view silhouette when sleeve units land on opposite corners. */
+function sleevedPictureNeedsRepair(picture: StepPicture): boolean {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
+  const bodies = visible.filter((key) =>
+    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
+  );
+  if (sleeves.length < 2 || bodies.length < 2) return false;
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
+  const bodyBox = boxOf(bodies.flatMap((key) => ring(key)));
+  const bodyCentreY = (bodyBox.y0 + bodyBox.y1) / 2;
+  const bodyHeight = Math.max(bodyBox.y1 - bodyBox.y0, 1);
+  const offsets = sleeves.map((key) => {
+    const box = boxOf(ring(key));
+    return (box.y0 + box.y1) / 2 - bodyCentreY;
+  });
+  return (
+    offsets.some((offset) => offset > 0.55 * bodyHeight) &&
+    offsets.some((offset) => offset < -0.55 * bodyHeight)
+  );
+}
+
+/** Move only the dangling sleeve units; stored body seam placements remain byte-for-byte intact. */
+function repairStoredSleevesPicture(picture: StepPicture): StepPicture {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
+  const bodies = visible.filter((key) =>
+    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
+  );
+  const T = new Map(picture.layout.T);
+  const host = bodies.find((key) => reading(key).role === 'front') ?? bodies[0];
+  const ring = (key: string, transform = T.get(key)!) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
+  const shift = (key: string, dx: number, dy: number) =>
+    T.set(key, compose(translate(dx, dy), T.get(key)!));
+  const snap = (key: string) => {
+    const part = ring(key);
+    const target = host ? ring(host) : [];
+    let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
+    for (const partPoint of part)
+      for (const targetPoint of target) {
+        const distance = Math.hypot(partPoint[0] - targetPoint[0], partPoint[1] - targetPoint[1]);
+        if (!nearest || distance < nearest.distance)
+          nearest = { distance, part: partPoint, target: targetPoint };
+      }
+    if (nearest)
+      shift(key, nearest.target[0] - nearest.part[0], nearest.target[1] - nearest.part[1]);
+  };
+  const bodyBox = boxOf(host ? ring(host) : bodies.flatMap((key) => ring(key)));
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const groups = new Map<string, string[]>();
+  for (const key of sleeves) {
+    const hand = reading(key).hand ?? key;
+    groups.set(hand, [...(groups.get(hand) ?? []), key]);
+  }
+  const pieceLayers = [...picture.layout.pieceLayers];
+  for (const [hand, group] of groups) {
+    const leader = [...group].sort((left, right) => area(right) - area(left))[0];
+    const box = boxOf(ring(leader));
+    const left =
+      hand === 'L' || (hand !== 'R' && (box.x0 + box.x1) / 2 < (bodyBox.x0 + bodyBox.x1) / 2);
+    shift(leader, left ? bodyBox.x0 - box.x1 : bodyBox.x1 - box.x0, bodyBox.y1 - box.y1);
+    snap(leader);
+    if (host) {
+      const direction = left ? 1 : -1;
+      const width = Math.max(box.x1 - box.x0, 1);
+      for (let inset = 0; inset < 0.2 * width; inset += 1) {
+        const candidate = compose(translate(direction, 0), T.get(leader)!);
+        if (pairOverlap(rasterize(ring(leader, candidate), 2), rasterize(ring(host), 2)) > 0.14)
+          break;
+        T.set(leader, candidate);
+      }
+    }
+    for (const key of group) {
+      if (key === leader) continue;
+      if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, leader]);
+      T.set(key, T.get(leader)!);
+    }
+  }
+  const leaders = new Set([
+    ...(host ? [host] : bodies),
+    ...[...groups.values()].map(
+      (group) => [...group].sort((left, right) => area(right) - area(left))[0],
+    ),
+    ...visible.filter((key) => ['collar', 'stand', 'rib'].includes(reading(key).role ?? '')),
+  ]);
+  for (const key of visible)
+    if (host && !leaders.has(key) && !pieceLayers.some(([piece]) => piece === key))
+      pieceLayers.push([key, host]);
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, pieceLayers, bbox: boxOf(points) } };
+}
+
+/** A stored closeout keeps every affine, but no longer redraws loose sleeve/detail units. */
+function layerStoredCloseoutPicture(picture: StepPicture): StepPicture | null {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const collars = visible.filter((key) =>
+    ['collar', 'stand', 'rib'].includes(reading(key).role ?? ''),
+  );
+  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
+  const bodies = visible.filter((key) =>
+    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
+  );
+  if (!collars.length || sleeves.length < 2 || bodies.length < 2) return null;
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
+  const bodyBox = boxOf(bodies.flatMap((key) => ring(key)));
+  const centreY = (bodyBox.y0 + bodyBox.y1) / 2;
+  const height = Math.max(bodyBox.y1 - bodyBox.y0, 1);
+  const offsets = sleeves.map((key) => {
+    const box = boxOf(ring(key));
+    return (box.y0 + box.y1) / 2 - centreY;
+  });
+  if (!offsets.every((offset) => offset > 0.55 * height || offset < -0.55 * height)) return null;
+  const host = bodies.find((key) => reading(key).role === 'front') ?? bodies[0];
+  const pieceLayers = [...picture.layout.pieceLayers];
+  const details = visible.filter((key) =>
+    ['sleeve', 'cuff', 'placket', 'pocket', 'facing', 'fly'].includes(reading(key).role ?? ''),
+  );
+  for (const key of details)
+    if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, host]);
+  return { ...picture, layout: { ...picture.layout, pieceLayers } };
+}
+
 /** Reduce trouser construction layers to the upright front/back topology used on the worktable. */
 function trouserFrontPicture(picture: StepPicture): StepPicture | null {
   const visible = visiblePictureKeys(picture);
@@ -1026,164 +1293,317 @@ function panelUnitPicture(picture: StepPicture): StepPicture | null {
   };
 }
 
-/** Re-attach named edge treatments after compact packing. */
+/** Re-attach named edge treatments by their sewing edge, centred along the receiving edge. */
 function restoreEdgeTreatments(picture: StepPicture): StepPicture {
   const visible = visiblePictureKeys(picture);
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const T = new Map(picture.layout.T);
-  const ring = (key: string) =>
-    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+  const ring = (key: string, transform = T.get(key)!) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
   const move = (key: string, dx: number, dy: number) =>
     T.set(key, compose(translate(dx, dy), T.get(key)!));
-  const collarRoles = new Set(['collar', 'stand', 'rib']);
-  const collars = visible.filter((key) => collarRoles.has(reading(key).role ?? ''));
-  const body = visible.filter((key) => !collars.includes(key) && reading(key).role !== 'cuff');
-  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
-  const collarBody = body.filter((key) =>
-    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
-  );
-  if (collars.length && collarBody.length) {
-    const leader = [...collars].sort(
-      (left, right) =>
-        Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
-        Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
-    )[0];
-    const initial = ring(leader);
-    const centrePoint: Pt2 = [
-      initial.reduce((sum, point) => sum + point[0], 0) / initial.length,
-      initial.reduce((sum, point) => sum + point[1], 0) / initial.length,
-    ];
-    const covariance = initial.reduce<[number, number, number]>(
+  const centre = (points: readonly Pt2[]): Pt2 => [
+    points.reduce((sum, point) => sum + point[0], 0) / points.length,
+    points.reduce((sum, point) => sum + point[1], 0) / points.length,
+  ];
+  const axisFrame = (points: readonly Pt2[]) => {
+    const origin = centre(points);
+    const covariance = points.reduce<[number, number, number]>(
       (sum, point) => {
-        const x = point[0] - centrePoint[0];
-        const y = point[1] - centrePoint[1];
+        const x = point[0] - origin[0];
+        const y = point[1] - origin[1];
         return [sum[0] + x * x, sum[1] + x * y, sum[2] + y * y];
       },
       [0, 0, 0],
     );
     const angle = 0.5 * Math.atan2(2 * covariance[1], covariance[0] - covariance[2]);
-    if (Math.abs(Math.sin(angle)) > 0.12) {
-      const cosine = Math.cos(-angle);
-      const sine = Math.sin(-angle);
-      const straighten: Affine = [cosine, sine, -sine, cosine, 0, 0];
-      T.set(
-        leader,
+    const axis: Pt2 = [Math.cos(angle), Math.sin(angle)];
+    const projections = points.map(
+      (point) => (point[0] - origin[0]) * axis[0] + (point[1] - origin[1]) * axis[1],
+    );
+    const low = Math.min(...projections);
+    const high = Math.max(...projections);
+    return {
+      angle,
+      axis,
+      midpoint: [
+        origin[0] + axis[0] * (low + high) * 0.5,
+        origin[1] + axis[1] * (low + high) * 0.5,
+      ] as Pt2,
+      span: Math.max(high - low, 1),
+    };
+  };
+  const treatmentRoles = new Set(['collar', 'stand', 'rib', 'cuff', 'hemband']);
+  const treatments = visible.filter((key) => treatmentRoles.has(reading(key).role ?? ''));
+  const body = visible.filter((key) => !treatments.includes(key));
+  const bodyPoints = body.flatMap((key) => ring(key));
+  const bodyCentre = bodyPoints.length ? centre(bodyPoints) : ([0, 0] as Pt2);
+  const targetRoles = (role: string | null) =>
+    role === 'cuff'
+      ? new Set(['sleeve'])
+      : role === 'hemband'
+        ? new Set(['front', 'back', 'side', 'sleeve'])
+        : new Set(['front', 'back', 'yoke', 'side']);
+  const seamSides = (key: string) =>
+    picture.frameSeams.flatMap((seam) => {
+      if (seam.kind === 'surface' || seam.kind === 'closure-not-seam') return [];
+      const a = seam.aParts?.length ? seam.aParts : [seam.a];
+      const b = seam.bParts?.length ? seam.bParts : [seam.b];
+      if (a.some((id) => pieceKeyOf(id) === key)) return [{ own: a, target: b }];
+      if (b.some((id) => pieceKeyOf(id) === key)) return [{ own: b, target: a }];
+      return [];
+    });
+  const edgePoints = (ids: readonly string[], onlyKey?: string) =>
+    ids.flatMap((id) => {
+      const key = pieceKeyOf(id);
+      if ((onlyKey && key !== onlyKey) || !T.has(key)) return [];
+      const edge = resolveEdge(id, picture.geoms);
+      return edge?.pts.map((point) => apply(T.get(key)!, point)) ?? [];
+    });
+  const align = (key: string) => {
+    const allowed = targetRoles(reading(key).role);
+    const role = reading(key).role;
+    const collarLike = ['collar', 'stand', 'rib'].includes(role ?? '');
+    const matches = (collarLike ? [] : seamSides(key))
+      .map((sides) => ({
+        own: edgePoints(sides.own, key),
+        target: edgePoints(
+          sides.target.filter((id) => allowed.has(reading(pieceKeyOf(id)).role ?? '')),
+        ),
+      }))
+      .filter((match) => match.own.length > 1 && match.target.length > 1)
+      .sort((left, right) => axisFrame(right.target).span - axisFrame(left.target).span);
+    let sourcePoints: Pt2[];
+    let targetPoints: Pt2[];
+    let crownTarget = false;
+    let connectedTarget = true;
+    if (matches.length) {
+      sourcePoints = matches[0].own;
+      targetPoints = matches[0].target;
+    } else {
+      const candidates = body.filter((candidate) => allowed.has(reading(candidate).role ?? ''));
+      if (!candidates.length) return false;
+      const area = (candidate: string) => Math.abs(picture.geoms.get(candidate)?.areaMm2 ?? 0);
+      const anchor = [...candidates].sort((left, right) => area(right) - area(left))[0];
+      const cluster = new Set([anchor]);
+      const touchesCluster = (candidate: string) => {
+        const candidateBox = boxOf(ring(candidate));
+        return [...cluster].some((member) => {
+          const memberBox = boxOf(ring(member));
+          const horizontalOverlap =
+            Math.min(candidateBox.x1, memberBox.x1) - Math.max(candidateBox.x0, memberBox.x0);
+          const minimumWidth = Math.min(
+            candidateBox.x1 - candidateBox.x0,
+            memberBox.x1 - memberBox.x0,
+          );
+          const verticalGap = Math.max(
+            candidateBox.y0 - memberBox.y1,
+            memberBox.y0 - candidateBox.y1,
+            0,
+          );
+          return verticalGap <= 2 && horizontalOverlap >= 0.02 * Math.max(minimumWidth, 1);
+        });
+      };
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const candidate of candidates)
+          if (!cluster.has(candidate) && touchesCluster(candidate)) {
+            cluster.add(candidate);
+            changed = true;
+          }
+      }
+      connectedTarget = cluster.size === candidates.length;
+      const targetRing = [...cluster].flatMap((candidate) => ring(candidate));
+      const targetBox = boxOf(targetRing);
+      const sewingEdges = seamSides(key)
+        .filter((sides) =>
+          sides.target.some((id) => allowed.has(reading(pieceKeyOf(id)).role ?? '')),
+        )
+        .map((sides) => edgePoints(sides.own, key))
+        .filter((points) => points.length > 1)
+        .sort((left, right) => axisFrame(right).span - axisFrame(left).span);
+      sourcePoints = sewingEdges[0] ?? ring(key);
+      if (['collar', 'stand', 'rib'].includes(role ?? '')) {
+        crownTarget = true;
+        const sourceSpan = axisFrame(sourcePoints).span;
+        const targetSpan = Math.min(sourceSpan, 0.6 * (targetBox.x1 - targetBox.x0));
+        const boxCentre = (targetBox.x0 + targetBox.x1) / 2;
+        const centreCrown = targetRing.filter(
+          (point) => Math.abs(point[0] - boxCentre) <= 0.2 * (targetBox.x1 - targetBox.x0),
+        );
+        const y = Math.max(
+          ...(centreCrown.length ? centreCrown : targetRing).map((point) => point[1]),
+        );
+        const crown = (centreCrown.length ? centreCrown : targetRing).filter(
+          (point) => point[1] >= y - 0.02 * Math.max(targetBox.y1 - targetBox.y0, 1),
+        );
+        const x = crown.reduce((best, point) =>
+          Math.abs(point[0] - boxCentre) < Math.abs(best[0] - boxCentre) ? point : best,
+        )[0];
+        targetPoints = [
+          [x - targetSpan / 2, y],
+          [x + targetSpan / 2, y],
+        ];
+      } else {
+        const height = Math.max(targetBox.y1 - targetBox.y0, 1);
+        targetPoints = targetRing.filter((point) => point[1] >= targetBox.y1 - 0.08 * height);
+      }
+      if (targetPoints.length < 2) return false;
+    }
+    const source = axisFrame(sourcePoints);
+    const target = axisFrame(targetPoints);
+    const receivers = body.filter((candidate) => allowed.has(reading(candidate).role ?? ''));
+    const receiver = receivers.reduce((best, candidate) => {
+      const nearest = (piece: string) =>
+        Math.min(
+          ...ring(piece).map((point) =>
+            Math.hypot(point[0] - target.midpoint[0], point[1] - target.midpoint[1]),
+          ),
+        );
+      return nearest(candidate) < nearest(best) ? candidate : best;
+    }, receivers[0]);
+    const receiverCentre = receiver ? centre(ring(receiver)) : bodyCentre;
+    const candidate = (turn: number) => {
+      const angle = target.angle - source.angle + turn;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const rotation: Affine = [cosine, sine, -sine, cosine, 0, 0];
+      return compose(
+        translate(target.midpoint[0], target.midpoint[1]),
         compose(
-          translate(centrePoint[0], centrePoint[1]),
-          compose(straighten, compose(translate(-centrePoint[0], -centrePoint[1]), T.get(leader)!)),
+          rotation,
+          compose(translate(-source.midpoint[0], -source.midpoint[1]), T.get(key)!),
         ),
       );
-    }
-    const bodyPoints = collarBody.flatMap(ring);
-    const bodyBox = boxOf(bodyPoints);
-    const centre = (bodyBox.x0 + bodyBox.x1) / 2;
-    const necks = collarBody.flatMap((key) => {
-      const points = ring(key);
-      const box = boxOf(points);
-      const height = Math.max(box.y1 - box.y0, 1);
-      const crown = points.filter((point) => point[1] >= box.y1 - 0.02 * height);
-      const stride = Math.max(1, Math.floor(crown.length / 24));
-      return crown.filter((_, index) => index % stride === 0);
-    });
-    const points = ring(leader);
-    const box = boxOf(points);
-    const low = Math.min(...points.map((point) => point[1]));
-    const contact = points
-      .filter((point) => point[1] <= low + 0.15 * Math.max(box.y1 - box.y0, 1))
-      .reduce((best, point) =>
-        Math.abs(point[0] - (box.x0 + box.x1) / 2) < Math.abs(best[0] - (box.x0 + box.x1) / 2)
-          ? point
-          : best,
-      );
-    const neck = necks.reduce((best, point) => {
-      const score = (candidate: Pt2) => {
-        const moved = points.map(
-          ([x, y]) => [x + candidate[0] - contact[0], y + candidate[1] - contact[1]] as Pt2,
-        );
-        const raster = rasterize(moved, 2);
-        const overlap = Math.max(
-          ...body.map((key) => pairOverlap(raster, rasterize(ring(key), 2))),
-          0,
-        );
-        return overlap + 0.00001 * Math.abs(candidate[0] - centre);
-      };
-      return score(point) < score(best) ? point : best;
-    });
-    move(leader, neck[0] - contact[0], neck[1] - contact[1]);
-    const collarCentreX = () => {
-      const collarBox = boxOf(ring(leader));
-      return (collarBox.x0 + collarBox.x1) / 2;
     };
-    const sleeveGroups = new Map<string, string[]>();
-    for (const sleeve of sleeves) {
-      const group = reading(sleeve).hand ?? sleeve;
-      sleeveGroups.set(group, [...(sleeveGroups.get(group) ?? []), sleeve]);
+    const score = (transform: Affine) => {
+      const treatment = ring(key, transform);
+      const treatmentRaster = rasterize(treatment, 2);
+      const overlap = Math.max(
+        ...body.map((candidate) => pairOverlap(treatmentRaster, rasterize(ring(candidate), 2))),
+        0,
+      );
+      const at = centre(treatment);
+      return overlap - 0.000001 * Math.hypot(at[0] - bodyCentre[0], at[1] - bodyCentre[1]);
+    };
+    const forward = candidate(0);
+    const reverse = candidate(Math.PI);
+    T.set(key, score(forward) <= score(reverse) ? forward : reverse);
+    const treatmentBox = boxOf(ring(key));
+    const treatmentCentre: Pt2 = [
+      (treatmentBox.x0 + treatmentBox.x1) / 2,
+      (treatmentBox.y0 + treatmentBox.y1) / 2,
+    ];
+    const dx = treatmentCentre[0] - target.midpoint[0];
+    const dy = treatmentCentre[1] - target.midpoint[1];
+    const distance = Math.hypot(dx, dy);
+    const allowance = 0.095 * target.span;
+    if (distance > allowance)
+      move(
+        key,
+        (-dx * (distance - allowance)) / distance,
+        (-dy * (distance - allowance)) / distance,
+      );
+    const clearSleeves = () => {
+      if (!collarLike) return;
+      const sleeveGroups = new Map<string, string[]>();
+      for (const sleeve of body.filter((candidate) => reading(candidate).role === 'sleeve')) {
+        const group = reading(sleeve).hand ?? sleeve;
+        sleeveGroups.set(group, [...(sleeveGroups.get(group) ?? []), sleeve]);
+      }
+      const collarCentreX = () => {
+        const box = boxOf(ring(key));
+        return (box.x0 + box.x1) / 2;
+      };
+      for (const group of sleeveGroups.values()) {
+        const sleeveBox = boxOf(group.flatMap((sleeve) => ring(sleeve)));
+        const direction = (sleeveBox.x0 + sleeveBox.x1) / 2 < collarCentreX() ? -2 : 2;
+        const maximum = 0.35 * Math.max(sleeveBox.x1 - sleeveBox.x0, 1);
+        for (let shifted = 0; shifted <= maximum; shifted += 2) {
+          const collarRaster = rasterize(ring(key), 2);
+          const overlap = Math.max(
+            ...group.map((sleeve) => pairOverlap(collarRaster, rasterize(ring(sleeve), 2))),
+            0,
+          );
+          if (overlap <= 0.15) break;
+          for (const sleeve of group) move(sleeve, direction, 0);
+        }
+      }
+    };
+    clearSleeves();
+    const outwardX = target.midpoint[0] - receiverCentre[0];
+    const outwardY = target.midpoint[1] - receiverCentre[1];
+    const outwardLength = Math.hypot(outwardX, outwardY) || 1;
+    const ux = crownTarget ? 0 : outwardX / outwardLength;
+    const uy = crownTarget ? 1 : outwardY / outwardLength;
+    const maxOverlap = () => {
+      const treatmentRaster = rasterize(ring(key), 2);
+      const obstacles = crownTarget
+        ? body.filter((candidate) => reading(candidate).role !== 'sleeve')
+        : body;
+      return Math.max(
+        ...obstacles.map((candidate) =>
+          pairOverlap(treatmentRaster, rasterize(ring(candidate), 2)),
+        ),
+        0,
+      );
+    };
+    const clearance = Math.max(
+      boxOf(ring(key)).x1 - boxOf(ring(key)).x0,
+      boxOf(ring(key)).y1 - boxOf(ring(key)).y0,
+    );
+    const allowedOverlap = collarLike ? 0.05 : 0.15;
+    for (let offset = 0; maxOverlap() > allowedOverlap && offset < clearance; offset += 1) {
+      move(key, ux, uy);
     }
-    for (const group of sleeveGroups.values()) {
-      const sleeveBox = boxOf(group.flatMap(ring));
-      const direction = (sleeveBox.x0 + sleeveBox.x1) / 2 < collarCentreX() ? -2 : 2;
-      const maxShift = 0.35 * Math.max(sleeveBox.x1 - sleeveBox.x0, 1);
-      for (let shifted = 0; shifted <= maxShift; shifted += 2) {
-        const collarRaster = rasterize(ring(leader), 2);
-        const overlap = Math.max(
-          ...group.map((sleeve) => pairOverlap(collarRaster, rasterize(ring(sleeve), 2))),
-          0,
+    clearSleeves();
+    const finalBox = boxOf(ring(key));
+    const finalCentre: Pt2 = [(finalBox.x0 + finalBox.x1) / 2, (finalBox.y0 + finalBox.y1) / 2];
+    const along =
+      (finalCentre[0] - target.midpoint[0]) * target.axis[0] +
+      (finalCentre[1] - target.midpoint[1]) * target.axis[1];
+    if (Math.abs(along) > allowance) {
+      const correction = along - Math.sign(along) * allowance;
+      move(key, -correction * target.axis[0], -correction * target.axis[1]);
+    }
+    if (collarLike && connectedTarget) {
+      let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
+      const sample = (points: readonly Pt2[]) => {
+        const stride = Math.max(1, Math.floor(points.length / 96));
+        return points.filter((_, index) => index % stride === 0);
+      };
+      for (const point of sample(ring(key)))
+        for (const receiverKey of receivers)
+          for (const targetPoint of sample(ring(receiverKey))) {
+            const distance = Math.hypot(point[0] - targetPoint[0], point[1] - targetPoint[1]);
+            if (!nearest || distance < nearest.distance)
+              nearest = { distance, part: point, target: targetPoint };
+          }
+      if (nearest && nearest.distance > 1) {
+        const share = (nearest.distance - 1) / nearest.distance;
+        move(
+          key,
+          (nearest.target[0] - nearest.part[0]) * share,
+          (nearest.target[1] - nearest.part[1]) * share,
         );
-        if (overlap <= 0.15) break;
-        for (const sleeve of group) move(sleeve, direction, 0);
       }
     }
-    const maxOverlap = () => {
-      const collarRing = ring(leader);
-      const collarRaster = rasterize(collarRing, 2);
-      return Math.max(...body.map((key) => pairOverlap(collarRaster, rasterize(ring(key), 2))), 0);
-    };
-    const clearance = 0.15 * Math.max(bodyBox.x1 - bodyBox.x0, bodyBox.y1 - bodyBox.y0, 1);
-    for (let offset = 2; maxOverlap() > 0.15 && offset <= clearance; offset += 2)
-      move(leader, 0, 2);
-  }
+    return true;
+  };
 
-  const cuffs = visible.filter((key) => reading(key).role === 'cuff');
-  const bodyPoints = body.filter((key) => !sleeves.includes(key)).flatMap(ring);
-  const bodyCentre = bodyPoints.length
-    ? (bodyPoints
-        .reduce<Pt2>((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0, 0])
-        .map((value) => value / bodyPoints.length) as Pt2)
-    : ([0, 0] as Pt2);
-  for (const cuff of cuffs) {
-    const hand = reading(cuff).hand;
-    const sleeve =
-      sleeves.find((key) => hand && reading(key).hand === hand) ??
-      sleeves.sort(
-        (left, right) =>
-          Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
-          Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
-      )[0];
-    if (!sleeve) continue;
-    const sleevePoints = ring(sleeve);
-    const end = sleevePoints.reduce((best, point) =>
-      Math.hypot(point[0] - bodyCentre[0], point[1] - bodyCentre[1]) >
-      Math.hypot(best[0] - bodyCentre[0], best[1] - bodyCentre[1])
-        ? point
-        : best,
-    );
-    const cuffPoints = ring(cuff);
-    const contact = cuffPoints.reduce((best, point) =>
-      Math.hypot(point[0] - end[0], point[1] - end[1]) <
-      Math.hypot(best[0] - end[0], best[1] - end[1])
-        ? point
-        : best,
-    );
-    move(cuff, end[0] - contact[0], end[1] - contact[1]);
-  }
-  const points = [...T].flatMap(([key, transform]) =>
-    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
-  );
+  const collarRoles = new Set(['collar', 'stand', 'rib']);
+  const collars = treatments.filter((key) => collarRoles.has(reading(key).role ?? ''));
   const collarLeader = [...collars].sort(
     (left, right) =>
       Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
       Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
   )[0];
+  if (collarLeader) align(collarLeader);
+  for (const key of treatments) if (!collars.includes(key)) align(key);
+
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
   const collarStack = collarLeader
     ? [collarLeader, ...collars.filter((key) => key !== collarLeader)]
     : [];
@@ -1682,6 +2102,11 @@ export function editorOperationPictures(
         ),
       );
       const needsStructuralRepair = useInferredLayout || rawNeedsCompact || rawNeedsAspect;
+      const anonymous = needsStructuralRepair ? anonymousShirtPicture(picture) : null;
+      const storedSleeves = sleevedPictureNeedsRepair(picture)
+        ? repairStoredSleevesPicture(picture)
+        : null;
+      const storedCloseout = storedSleeves ? null : layerStoredCloseoutPicture(picture);
       const radial = needsStructuralRepair ? radialBasePicture(picture) : null;
       const panelTopology = trouserFrontPicture(picture);
       const panelRings = panelTopology
@@ -1721,7 +2146,15 @@ export function editorOperationPictures(
           : null;
       const sleeved = needsStructuralRepair ? sleevedFinalPicture(picture) : null;
       const panelUnit = needsStructuralRepair ? panelUnitPicture(picture) : null;
-      let revised = radial ?? trouser ?? sleeved ?? panelUnit ?? picture;
+      let revised =
+        anonymous ??
+        storedSleeves ??
+        storedCloseout ??
+        radial ??
+        trouser ??
+        sleeved ??
+        panelUnit ??
+        picture;
       const rings = visiblePictureKeys(revised).map((key) =>
         (revised.geoms.get(key)?.rs ?? []).map((point) => apply(revised.layout.T.get(key)!, point)),
       );
@@ -1733,13 +2166,35 @@ export function editorOperationPictures(
       const needsAspect = !rings.every((ring) => ringAspect(ring) >= 4) && ringsAspect(rings) > 4;
       const needsFinalFrame =
         number === final?.[0] && rings.length > 2 && frameFill(rings.flat()) < 0.59;
-      if (needsCompact || needsAspect || needsFinalFrame)
+      if (!anonymous && (needsCompact || needsAspect || needsFinalFrame))
         revised = compactFinalPicture(revised, true);
       const restored =
         needsStructuralRepair || hasEdgeTreatments || revised !== picture
           ? restoreEdgeTreatments(revised)
           : revised;
-      pictures.set(number, hasEdgeTreatments ? dockLoosePicture(restored) : restored);
+      const docked = hasEdgeTreatments ? dockLoosePicture(restored) : restored;
+      pictures.set(number, hasEdgeTreatments ? restoreEdgeTreatments(docked) : docked);
+    }
+    for (const operation of operations) {
+      const number = operation.operationNumber ?? 0;
+      const row = rowByNumber.get(number);
+      if (!row?.action || !['button', 'buttonhole'].includes(row.action.tech)) continue;
+      const current = pictures.get(number);
+      if (!current || visiblePictureKeys(current).length > 2) continue;
+      const action = editorActionMarks(row.action, geoms);
+      const marked = new Set([...action.lines, ...action.glyphs].map((mark) => mark.piece));
+      const assembled = [...pictures.entries()]
+        .filter(([candidate]) => candidate < number)
+        .sort(([left], [right]) => right - left)
+        .map(([, picture]) => picture)
+        .find(
+          (picture) =>
+            visiblePictureKeys(picture).length > 2 &&
+            [...marked].every((key) => picture.layout.T.has(key)) &&
+            picture.layout.pieceLayers.some(([piece]) => marked.has(piece)),
+        );
+      if (marked.size && assembled)
+        pictures.set(number, { ...assembled, op: operation, marks: [] });
     }
     return pictures;
   } catch {

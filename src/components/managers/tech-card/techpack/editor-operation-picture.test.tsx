@@ -114,9 +114,23 @@ function joinedResult(input: AssemblyInput, operationNumber: number) {
 }
 
 const renderedBox = (picture: ReturnType<typeof sceneOf>) => {
-  const fit = fitBox(picture.layout.bbox, 212, 186, 4);
+  const hidden = new Set([
+    ...picture.layout.stacked.flatMap((group) => group.slice(1)),
+    ...picture.layout.pieceLayers.map(([piece]) => piece),
+  ]);
+  const visible = [...picture.layout.T].filter(([key]) => !hidden.has(key));
+  const fit = fitBox(
+    boxOf(
+      visible.flatMap(([key, affine]) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(affine, point)),
+      ),
+    ),
+    212,
+    186,
+    4,
+  );
   return boxOf(
-    [...picture.layout.T].flatMap(([key, affine]) =>
+    visible.flatMap(([key, affine]) =>
       (picture.geoms.get(key)?.rs ?? []).map((point) => toPx(fit, apply(affine, point))),
     ),
   );
@@ -381,6 +395,18 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
         expect(clusters, `op ${row.n}`).toHaveLength(1);
         continue;
       }
+      if (
+        row.action &&
+        ['button', 'buttonhole'].includes(row.action.tech) &&
+        picture.layout.T.size > 2
+      ) {
+        expect(
+          [...markedPieces].every((key) => picture.layout.T.has(key)),
+          `op ${row.n}`,
+        ).toBe(true);
+        expect(picture.layout.T.size, `op ${row.n}`).toBeGreaterThan(2);
+        continue;
+      }
       for (const cluster of clusters)
         expect(
           cluster.some((key) => markedPieces.has(key)),
@@ -402,23 +428,22 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
   it.each([
     [1080, 'buttonhole'],
     [1090, 'button'],
-  ] as const)('fills operation %i with only marked sewn clusters', (operationNumber, kind) => {
+  ] as const)('keeps operation %i on the assembled garment', (operationNumber, kind) => {
     const picture = pictures.get(operationNumber)!;
+    const assembled = pictures.get(1060)!;
     const row = model.rows.find((candidate) => candidate.n === operationNumber)!;
     const action = editorActionMarks(row.action, fullGarment.geoms);
     const markedPieces = new Set([...action.lines, ...action.glyphs].map((mark) => mark.piece));
-    const expectedPieces = fullClusters
-      .filter((cluster) => cluster.some((key) => markedPieces.has(key)))
-      .flat();
 
-    expect(expectedPieces.length).toBeGreaterThan(0);
-    expect(new Set(picture.layout.T.keys())).toEqual(new Set(expectedPieces));
+    expect(markedPieces.size).toBeGreaterThan(0);
+    expect(new Set(picture.layout.T.keys())).toEqual(new Set(assembled.layout.T.keys()));
+    expect(picture.layout.T.size).toBeGreaterThan(2);
     expectReadableFit(picture);
 
     const markup = renderedPicture(picture, action);
     const drawn = renderedBox(picture);
     const spots = [...markup.matchAll(/data-asm-x="([^"]+)" data-asm-y="([^"]+)"/g)];
-    expect(markup.match(/data-piece-outline=/g)).toHaveLength(expectedPieces.length);
+    expect(markup.match(/data-piece-outline=/g)?.length ?? 0).toBeGreaterThan(2);
     expect(markup).toContain(`data-asm-mark="${kind}"`);
     expect(markup).toContain('stroke-width="3"');
     expect(spots).toHaveLength(action.glyphs.length);

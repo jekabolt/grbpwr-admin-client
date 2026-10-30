@@ -445,7 +445,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
-      `<!doctype html><style>:root{--color-textColor:${hex}000;--color-labelColor:${hex}777;--color-bgColor:${hex}fff}body{display:grid;grid-template-columns:repeat(4,212px);gap:24px}article{break-inside:avoid}b{font:12px sans-serif}</style>${picturesHtml}`,
+      `<!doctype html><meta charset="utf-8"><style>:root{--color-textColor:${hex}000;--color-labelColor:${hex}777;--color-bgColor:${hex}fff}body{display:grid;grid-template-columns:repeat(4,212px);gap:24px}article{break-inside:avoid}b{font:12px sans-serif}</style>${picturesHtml}`,
     );
   });
 });

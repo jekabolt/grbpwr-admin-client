@@ -3,7 +3,7 @@ import { env } from 'node:process';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { pairOverlap, rasterize } from 'lib/assembly-skeleton/union';
+import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
@@ -171,9 +171,13 @@ function ringsTouch(a: readonly [number, number][], b: readonly [number, number]
   return nearSegments(a, b) || nearSegments(b, a);
 }
 
+const pictureSvgCache = new WeakMap<StepPicture, string>();
+
 function pictureSvg(picture: StepPicture, actionRow: Parameters<typeof editorActionMarks>[0]) {
+  const cached = pictureSvgCache.get(picture);
+  if (cached) return cached;
   const action = editorActionMarks(actionRow, picture.geoms);
-  return renderToStaticMarkup(
+  const markup = renderToStaticMarkup(
     <StepPictureSvg
       w={212}
       h={186}
@@ -186,6 +190,8 @@ function pictureSvg(picture: StepPicture, actionRow: Parameters<typeof editorAct
       actionGlyphs={action.glyphs}
     />,
   );
+  pictureSvgCache.set(picture, markup);
+  return markup;
 }
 
 const fillCache = new Map<string, string[]>();
@@ -300,7 +306,7 @@ describe.each(CARDS)('garment assembly corpus $id', ({ id, path }) => {
       mkdirSync(OUT, { recursive: true });
       writeFileSync(
         `${OUT}/${id}.html`,
-        `<!doctype html><style>:root{--color-textColor:${hex}000;--color-labelColor:${hex}777;--color-bgColor:${hex}fff}body{display:grid;grid-template-columns:repeat(6,212px);gap:16px}b,i{font:12px sans-serif;display:block}</style>${cells.join('')}`,
+        `<!doctype html><meta charset="utf-8"><style>:root{--color-textColor:${hex}000;--color-labelColor:${hex}777;--color-bgColor:${hex}fff}body{display:grid;grid-template-columns:repeat(6,212px);gap:16px}b,i{font:12px sans-serif;display:block}</style>${cells.join('')}`,
       );
     },
     120_000,
@@ -340,7 +346,82 @@ it('keeps every multi-piece corpus picture compact', () => {
   console.info(`[corpus compactness] ${minimums.join(' · ')}`);
 }, 120_000);
 
+it('keeps every rendered path inside the picture box', () => {
+  const pointsOfPath = (path: string) => {
+    const points: Pt2[] = [];
+    let current: Pt2 = [0, 0];
+    for (const command of path.matchAll(/([MLHVZ])([^MLHVZ]*)/gi)) {
+      const kind = command[1].toUpperCase();
+      const values = [...command[2].matchAll(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)].map(
+        (match) => Number(match[0]),
+      );
+      if (kind === 'M' || kind === 'L')
+        for (let index = 0; index + 1 < values.length; index += 2) {
+          current = [values[index], values[index + 1]];
+          points.push(current);
+        }
+      if (kind === 'H')
+        for (const value of values) {
+          current = [value, current[1]];
+          points.push(current);
+        }
+      if (kind === 'V')
+        for (const value of values) {
+          current = [current[0], value];
+          points.push(current);
+        }
+    }
+    return points;
+  };
+  for (const { id, path } of CARDS) {
+    if (!existsSync(path)) continue;
+    const { model, pictures } = corpusAt(path);
+    for (const [operation, picture] of pictures) {
+      const row = model.rows.find((candidate) => candidate.n === operation);
+      const markup = pictureSvg(picture, row?.action);
+      for (const [index, match] of [...markup.matchAll(/<path\b[^>]*\sd="([^"]+)"/g)].entries()) {
+        const points = pointsOfPath(match[1]);
+        if (!points.length) continue;
+        const box = boxOf(points);
+        expect.soft(box.x0, `${id} ${operation}: path ${index} x0`).toBeGreaterThanOrEqual(-2);
+        expect.soft(box.x1, `${id} ${operation}: path ${index} x1`).toBeLessThanOrEqual(214);
+        expect.soft(box.y0, `${id} ${operation}: path ${index} y0`).toBeGreaterThanOrEqual(-2);
+        expect.soft(box.y1, `${id} ${operation}: path ${index} y1`).toBeLessThanOrEqual(188);
+      }
+    }
+  }
+}, 120_000);
+
 it('keeps neckline and cuff pieces on their garment edges', () => {
+  const axisFrame = (points: readonly Pt2[]) => {
+    const origin: Pt2 = [
+      points.reduce((sum, point) => sum + point[0], 0) / points.length,
+      points.reduce((sum, point) => sum + point[1], 0) / points.length,
+    ];
+    const covariance = points.reduce<[number, number, number]>(
+      (sum, point) => {
+        const x = point[0] - origin[0];
+        const y = point[1] - origin[1];
+        return [sum[0] + x * x, sum[1] + x * y, sum[2] + y * y];
+      },
+      [0, 0, 0],
+    );
+    const angle = 0.5 * Math.atan2(2 * covariance[1], covariance[0] - covariance[2]);
+    const axis: Pt2 = [Math.cos(angle), Math.sin(angle)];
+    const projections = points.map(
+      (point) => (point[0] - origin[0]) * axis[0] + (point[1] - origin[1]) * axis[1],
+    );
+    const low = Math.min(...projections);
+    const high = Math.max(...projections);
+    return {
+      axis,
+      midpoint: [
+        origin[0] + axis[0] * (low + high) * 0.5,
+        origin[1] + axis[1] * (low + high) * 0.5,
+      ] as Pt2,
+      span: Math.max(high - low, 1),
+    };
+  };
   const pointSegment = (point: Pt2, start: Pt2, end: Pt2) => {
     const dx = end[0] - start[0];
     const dy = end[1] - start[1];
@@ -372,7 +453,7 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
       const keys = visibleKeys(picture);
       for (const key of keys) {
         const role = readName(input.pieces.get(key)?.geom.name ?? '').role;
-        if (!['collar', 'stand', 'rib', 'cuff'].includes(role ?? '')) continue;
+        if (!['collar', 'stand', 'rib', 'cuff', 'hemband'].includes(role ?? '')) continue;
         const candidates = keys.filter((candidate) => {
           const targetRole = readName(input.pieces.get(candidate)?.geom.name ?? '').role;
           return role === 'cuff'
@@ -394,6 +475,127 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
         expect
           .soft(match.distance, `${id} ${operation}: ${role} contact`)
           .toBeLessThanOrEqual(0.15 * span);
+        const allowed =
+          role === 'cuff'
+            ? new Set(['sleeve'])
+            : role === 'hemband'
+              ? new Set(['front', 'back', 'side', 'sleeve'])
+              : new Set(['front', 'back', 'yoke', 'side']);
+        const seamTargets = picture.frameSeams.flatMap((seam) => {
+          if (seam.kind === 'surface' || seam.kind === 'closure-not-seam') return [];
+          const a = seam.aParts?.length ? seam.aParts : [seam.a];
+          const b = seam.bParts?.length ? seam.bParts : [seam.b];
+          const target = a.some((edge) => pieceKeyOf(edge) === key)
+            ? b
+            : b.some((edge) => pieceKeyOf(edge) === key)
+              ? a
+              : [];
+          const edges = target.filter((edge) =>
+            allowed.has(readName(input.pieces.get(pieceKeyOf(edge))?.geom.name ?? '').role ?? ''),
+          );
+          const points = edges.flatMap((edge) => {
+            const targetKey = pieceKeyOf(edge);
+            const transform = picture.layout.T.get(targetKey);
+            const resolved = resolveEdge(edge, picture.geoms);
+            return transform && resolved
+              ? resolved.pts.map((point) => apply(transform, point))
+              : [];
+          });
+          return points.length > 1
+            ? [
+                {
+                  points,
+                  targetCount: new Set(edges.map((edge) => pieceKeyOf(edge))).size,
+                },
+              ]
+            : [];
+        });
+        const collarLike = ['collar', 'stand', 'rib'].includes(role ?? '');
+        const anchor = [...candidates].sort(
+          (left, right) =>
+            Math.abs(input.pieces.get(right)?.geom.areaMm2 ?? 0) -
+            Math.abs(input.pieces.get(left)?.geom.areaMm2 ?? 0),
+        )[0];
+        const cluster = new Set([anchor]);
+        for (let changed = true; changed; ) {
+          changed = false;
+          for (const candidate of candidates) {
+            if (cluster.has(candidate)) continue;
+            const candidateBox = boxOf(worldRing(input, picture, candidate));
+            const touches = [...cluster].some((member) => {
+              const memberBox = boxOf(worldRing(input, picture, member));
+              const horizontalOverlap =
+                Math.min(candidateBox.x1, memberBox.x1) - Math.max(candidateBox.x0, memberBox.x0);
+              const minimumWidth = Math.min(
+                candidateBox.x1 - candidateBox.x0,
+                memberBox.x1 - memberBox.x0,
+              );
+              const verticalGap = Math.max(
+                candidateBox.y0 - memberBox.y1,
+                memberBox.y0 - candidateBox.y1,
+                0,
+              );
+              return verticalGap <= 2 && horizontalOverlap >= 0.02 * Math.max(minimumWidth, 1);
+            });
+            if (touches) {
+              cluster.add(candidate);
+              changed = true;
+            }
+          }
+        }
+        const semanticCandidates = collarLike ? [...cluster] : candidates;
+        const semanticRing = semanticCandidates.flatMap((candidate) =>
+          worldRing(input, picture, candidate),
+        );
+        const semanticBox = boxOf(semanticRing);
+        const boxCentre = (semanticBox.x0 + semanticBox.x1) / 2;
+        const centreCrown = semanticRing.filter(
+          (point) => Math.abs(point[0] - boxCentre) <= 0.2 * (semanticBox.x1 - semanticBox.x0),
+        );
+        const crownY = Math.max(
+          ...(centreCrown.length ? centreCrown : semanticRing).map((point) => point[1]),
+        );
+        const crown = (centreCrown.length ? centreCrown : semanticRing).filter(
+          (point) => point[1] >= crownY - 0.02 * Math.max(semanticBox.y1 - semanticBox.y0, 1),
+        );
+        const semanticCentre = crown.reduce((best, point) =>
+          Math.abs(point[0] - boxCentre) < Math.abs(best[0] - boxCentre) ? point : best,
+        )[0];
+        const seamTarget = seamTargets
+          .filter(() => !collarLike)
+          .sort(
+            (left, right) => axisFrame(right.points).span - axisFrame(left.points).span,
+          )[0]?.points;
+        const targetEdge =
+          seamTarget ??
+          (collarLike
+            ? ([
+                [semanticCentre - 0.3 * (semanticBox.x1 - semanticBox.x0), crownY],
+                [semanticCentre + 0.3 * (semanticBox.x1 - semanticBox.x0), crownY],
+              ] as Pt2[])
+            : undefined);
+        if (targetEdge?.length > 1) {
+          const target = axisFrame(targetEdge);
+          const partBox = boxOf(part);
+          const partCentre: Pt2 = [(partBox.x0 + partBox.x1) / 2, (partBox.y0 + partBox.y1) / 2];
+          const partAxis = axisFrame(part).axis;
+          const angle =
+            (Math.acos(
+              Math.min(1, Math.abs(partAxis[0] * target.axis[0] + partAxis[1] * target.axis[1])),
+            ) *
+              180) /
+            Math.PI;
+          expect
+            .soft(
+              Math.abs(
+                (partCentre[0] - target.midpoint[0]) * target.axis[0] +
+                  (partCentre[1] - target.midpoint[1]) * target.axis[1],
+              ),
+              `${id} ${operation}: ${role} centred`,
+            )
+            .toBeLessThanOrEqual(0.1 * target.span + 1e-6);
+          expect.soft(angle, `${id} ${operation}: ${role} axis`).toBeLessThanOrEqual(20);
+        }
         if (role !== 'cuff') {
           const height = Math.max(targetBox.y1 - targetBox.y0, 1);
           expect
