@@ -146,10 +146,81 @@ export function candidateOf(
 
 const FLIP_Y: Affine = [1, 0, 0, -1, 0, 0];
 
+const segCross = (p: Pt2, q: Pt2, r: Pt2, s: Pt2) => {
+  const d = (q[0] - p[0]) * (s[1] - r[1]) - (q[1] - p[1]) * (s[0] - r[0]);
+  if (Math.abs(d) < 1e-9) return false;
+  const t = ((r[0] - p[0]) * (s[1] - r[1]) - (r[1] - p[1]) * (s[0] - r[0])) / d;
+  const u = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d;
+  return t > 0 && t < 1 && u > 0 && u < 1;
+};
+const toLine = (p: Pt2, line: readonly Pt2[]) => {
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const [a, b] = [line[i - 1], line[i]];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const t = Math.max(
+      0,
+      Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)),
+    );
+    best = Math.min(best, Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy));
+  }
+  return best;
+};
+/** The middle of a line (its ends trimmed), where a crossing is a crossing and not a shared end. */
+const inner = (pts: readonly Pt2[]) => {
+  const cut = Math.floor(pts.length * 0.1);
+  return pts.slice(cut, pts.length - cut);
+};
+
+/**
+ * The part's sewn edge laid along the host's line (rs frame): end on end, its own way up; turned
+ * over only when, its own way up, the two curves would cross (a stand on a collar's line). Null
+ * when the edge or the line is not there to lay by.
+ */
+function alongLine(
+  line: readonly Pt2[],
+  edge: string | undefined,
+  pg: PieceGeom,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Affine | null {
+  if (!edge || line.length < 2 || pieceKeyOf(edge) !== pg.pieceKey) return null;
+  const e = resolveEdge(edge, geoms);
+  if (!e || e.pts.length < 2) return null;
+  const l0 = line[0];
+  const l1 = line[line.length - 1];
+  const lineIn = inner(line);
+  let best: { M: Affine; score: number } | null = null;
+  for (const rev of [false, true])
+    for (const mir of [false, true]) {
+      const q0 = rev ? e.pts[e.pts.length - 1] : e.pts[0];
+      const q1 = rev ? e.pts[0] : e.pts[e.pts.length - 1];
+      const R = rigid(l0, l1, q0, q1, mir);
+      const m0 = apply(R, q0);
+      const m1 = apply(R, q1);
+      // Centred on the line: a longer edge overhangs both its ends alike.
+      const M = compose(
+        translate((l0[0] + l1[0] - m0[0] - m1[0]) / 2, (l0[1] + l1[1] - m0[1] - m1[1]) / 2),
+        R,
+      );
+      const laid = inner(e.pts.map((p) => apply(M, p)));
+      let crosses = 0;
+      for (let i = 1; i < laid.length; i++)
+        for (let k = 1; k < lineIn.length; k++)
+          if (segCross(laid[i - 1], laid[i], lineIn[k - 1], lineIn[k])) crosses++;
+      const gap = laid.reduce((s, p) => s + toLine(p, line), 0) / (laid.length || 1);
+      const score =
+        (crosses > 0 ? 1e6 : 0) + (pieceTilt(pg, M) > UPRIGHT ? 1e4 : 0) + (mir ? 1e3 : 0) + gap;
+      if (!best || score < best.score) best = { M, score };
+    }
+  return best?.M ?? null;
+}
+
 /**
  * A surface seam as the placer reads it: `part` laid on `host` by a hand placement (the part's
  * cut-bbox corner from the host's, mm, then turned — the numbers the picker stores and the techpack
- * lays it by), else centred on the host's mark `line` (rs frame, y up) in its own orientation.
+ * lays it by), else its sewn `edge` along the host's mark `line` (rs frame, y up), else centred on
+ * the line in its own orientation.
  */
 export function surfaceSeam(
   host: string,
@@ -157,10 +228,22 @@ export function surfaceSeam(
   line: readonly Pt2[],
   geoms: ReadonlyMap<string, PieceGeom>,
   placement?: SeamPlacement,
+  edge?: string,
 ): SeamCandidate | null {
   const hg = geoms.get(host);
   const pg = geoms.get(part);
   if (!hg || !pg || host === part || hg.rs.length < 3 || pg.rs.length < 3) return null;
+  const along = placement ? null : alongLine(line, edge, pg, geoms);
+  if (along) {
+    return {
+      a: `${host}#?`,
+      b: `${part}#?`,
+      score: 1,
+      evidence: EVIDENCE,
+      kind: 'surface',
+      surface: { host, part, mark: 'hand', T: along, fit: 1 },
+    };
+  }
   // The drawing frame (y down) is where the placement was measured.
   const down = (pts: readonly Pt2[]) => pts.map((p) => apply(FLIP_Y, p));
   const hb = boxOf(down(hg.rs));
@@ -213,7 +296,7 @@ export function seamOfSides(
   const other = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(t));
   if (!other) return null;
   const line = innerLines.get(h.piece)?.[h.k] ?? [];
-  return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement);
+  return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
 }
 
 /**

@@ -578,6 +578,7 @@ export function SeamPickerBody({
           innerLines.get(host.piece)?.[host.k] ?? [],
           geoms,
           placement,
+          sel[hostSide === 'a' ? 'b' : 'a'][0],
         )
       : pair
         ? seamOfSides(pair, geoms, innerLines)
