@@ -60,6 +60,7 @@ import {
   surfaceRow,
   type Pt,
   type TargetId,
+  targetsLen,
 } from './step-seams-model';
 import {
   boxOf,
@@ -90,7 +91,7 @@ import {
 
 type Side = 'a' | 'b';
 type Sel = { a: TargetId[]; b: TargetId[] };
-type Place = { x: number; y: number; rot: number; host?: string };
+type Place = { x: number; y: number; rot: number; host?: string; flip?: boolean };
 type PlaceDrop =
   | { kind: 'snap'; hostEdge: EdgeId; partEdge: EdgeId }
   | { kind: 'surface'; host: string; inner: number; part: string; place: Place };
@@ -253,6 +254,7 @@ export function SeamPickerBody({
     stored,
     used,
     suggestions,
+    surfaceSuggestion,
     innerSeams,
     proposalSeams,
     crossSeams,
@@ -292,7 +294,9 @@ export function SeamPickerBody({
     },
     [pieces, geoms],
   );
-  const sideLen = (ids: readonly TargetId[]) => ids.reduce((s, id) => s + lenOf(id), 0);
+  // A stack of identical plies runs one layer long (the model's own count).
+  const sideLen = (ids: readonly TargetId[]) =>
+    targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
 
   // ── the partner of a lone picked side: the other side's edge closest in length ──
   const sewnInside = useMemo(() => {
@@ -369,20 +373,46 @@ export function SeamPickerBody({
     placeHasDrop(placeHosts, placePartPiece, (id) => used.has(id) || sewnInside.has(id), ease);
 
   // ── what «accept» would write ──
-  const inners = [...sel.a, ...sel.b].filter((t) => parseInner(t));
+  // Nothing picked: the slit proposal (a lone part onto its twin's line) stands as the pick.
+  const auto =
+    !placing && !sel.a.length && !sel.b.length && surfaceSuggestion ? surfaceSuggestion : null;
+  const autoSide: Side | null = auto
+    ? groups.length < 2
+      ? 'a'
+      : sideOf(auto.host, groups, chosen)
+    : null;
+  const pick: Sel = auto
+    ? {
+        a: autoSide === 'a' ? [innerId(auto.host, auto.inner)] : [],
+        b: autoSide === 'b' ? [innerId(auto.host, auto.inner)] : [],
+      }
+    : sel;
+  const placeNow: Place | null =
+    place ??
+    (auto?.place
+      ? {
+          x: auto.place.xMm,
+          y: auto.place.yMm,
+          rot: auto.place.rotDeg,
+          host: auto.host,
+          flip: auto.place.flip,
+        }
+      : null);
+  const inners = [...pick.a, ...pick.b].filter((t) => parseInner(t));
   const surface = inners.length === 1;
-  const hostSide: Side | null = surface ? (sel.a.includes(inners[0]) ? 'a' : 'b') : null;
+  const hostSide: Side | null = surface ? (pick.a.includes(inners[0]) ? 'a' : 'b') : null;
   const host = surface ? parseInner(inners[0]) : null;
   const hostGroup = host ? groups.findIndex((g) => g.pieces.includes(host.piece)) : -1;
   const partKey = useMemo(() => {
     if (!host || !hostSide) return null;
+    if (auto && pieces?.has(auto.part)) return auto.part;
     const other = sel[hostSide === 'a' ? 'b' : 'a'];
     if (other.length) return pieceOfTarget(other[0]);
     if (placePartKey && placePartKey !== host.piece && pieces?.has(placePartKey))
       return placePartKey;
     const g = groups.find((_, gi) => gi !== hostGroup);
     return g?.pieces.find((p) => pieces?.has(p)) ?? null;
-  }, [host, hostSide, sel, placePartKey, groups, hostGroup, pieces]);
+  }, [host, hostSide, auto, sel, placePartKey, groups, hostGroup, pieces]);
 
   /**
    * The pair on the table: the user's own (both sides, or one side + its partner), else the
@@ -410,7 +440,7 @@ export function SeamPickerBody({
     !frozen &&
     !busy &&
     !!cardId &&
-    (surface ? !!partKey && sel[hostSide!].length === 1 : inners.length === 0 && !!pair);
+    (surface ? !!partKey && pick[hostSide!].length === 1 : inners.length === 0 && !!pair);
 
   // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
   // the whole card's (the right bag mirrors the left one placed a step later).
@@ -440,14 +470,14 @@ export function SeamPickerBody({
   );
 
   const placement = useMemo((): SeamPlacement | undefined => {
-    if (!place || !host) return undefined;
+    if (!placeNow || !host) return undefined;
     return {
-      xMm: Math.round(place.x * 10) / 10,
-      yMm: Math.round(place.y * 10) / 10,
-      rotDeg: place.rot,
-      flip: false,
+      xMm: Math.round(placeNow.x * 10) / 10,
+      yMm: Math.round(placeNow.y * 10) / 10,
+      rotDeg: placeNow.rot,
+      flip: !!placeNow.flip,
     };
-  }, [place, host]);
+  }, [placeNow?.x, placeNow?.y, placeNow?.rot, placeNow?.flip, host]);
 
   const buildRow = useCallback(
     (s: Sel): StoredSeam | null => {
@@ -488,7 +518,7 @@ export function SeamPickerBody({
 
   const commit = async () => {
     if (!canAccept) return;
-    const row = buildRow(surface || !pair ? sel : { a: [...pair.a], b: [...pair.b] });
+    const row = buildRow(surface || !pair ? pick : { a: [...pair.a], b: [...pair.b] });
     if (!row) {
       setRefused('cannot pair');
       return;
@@ -535,8 +565,8 @@ export function SeamPickerBody({
   const seamIds = [
     ...(suggestion ? [...suggestion.a, ...suggestion.b] : []),
     ...(pair ? [...pair.a, ...pair.b] : []),
-    ...sel.a,
-    ...sel.b,
+    ...pick.a,
+    ...pick.b,
     ...(partner ? [partner] : []),
   ];
   const seamPieces = new Set(seamIds.map(pieceOfTarget));
@@ -619,7 +649,10 @@ export function SeamPickerBody({
     const first = s.sides.a[0] ?? s.sides.b[0];
     if (first) nos.push({ id: first, i });
   });
-  if (sel.a.length || sel.b.length) {
+  if (auto) {
+    sideMarks(pick.a, 'proposal');
+    sideMarks(pick.b, 'proposal');
+  } else if (sel.a.length || sel.b.length) {
     sideMarks(sel.a, 'pick');
     sideMarks(sel.b, 'pick');
     if (partner) sideMarks([partner], 'pick');
@@ -653,6 +686,14 @@ export function SeamPickerBody({
         setPlace(null);
         setPlacePartKey(null);
       }
+      return;
+    }
+    if (auto && pieces?.has(auto.part)) {
+      // The slit proposal becomes the pick to move from where it stands.
+      setSel(pick);
+      setPlacePartKey(auto.part);
+      setPlace(placeNow ?? placeSceneOf(placeHosts, pieces.get(auto.part)!).initial);
+      setPlacing(true);
       return;
     }
     if (!placePartPiece || !placeHosts.length || !activePlacePartKey) return;

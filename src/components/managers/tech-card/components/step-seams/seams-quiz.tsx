@@ -12,7 +12,12 @@ import {
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, GroupLabel, Text } from 'ui';
 import { seamOfSides } from './step-picture';
-import { hasMultipleStepPieces, type FormOpLike, type StepProposal } from './step-seams-model';
+import {
+  hasMultipleStepPieces,
+  innerId,
+  type FormOpLike,
+  type StepProposal,
+} from './step-seams-model';
 import { useStepSeams } from './step-seams-context';
 import { frameSeamsOf, useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
 import { SeamTile } from './step-seams-row';
@@ -227,19 +232,25 @@ const QuizTile = memo(
     }
     const proposal = proposalRef.current ?? scene.suggestions[0] ?? null;
     const seams = useMemo(() => {
-      const own = proposal ? seamOfSides(proposal, scene.geoms, scene.innerLines) : null;
+      const own = proposal
+        ? seamOfSides(proposal, scene.geoms, scene.innerLines)
+        : scene.surfaceProposal;
       return frameSeamsOf(scene.innerSeams, scene.storedSeams, own ? [own] : [], scene.crossSeams);
     }, [
       proposal,
+      scene.surfaceProposal,
       scene.crossSeams,
       scene.geoms,
       scene.innerLines,
       scene.innerSeams,
       scene.storedSeams,
     ]);
+    const surface = proposal ? null : scene.surfaceSuggestion;
     const marks = proposal
       ? [...proposal.a, ...proposal.b].map((id) => ({ id, tone: 'proposal' as const }))
-      : [];
+      : surface
+        ? [{ id: innerId(surface.host, surface.inner), tone: 'proposal' as const }]
+        : [];
 
     return (
       <SeamTile
@@ -249,7 +260,7 @@ const QuizTile = memo(
         dashed
         current={current}
         status={status}
-        emptyLabel={proposal ? undefined : 'no seam'}
+        emptyLabel={proposal || surface ? undefined : 'no seam'}
         onOpen={onOpen}
       />
     );

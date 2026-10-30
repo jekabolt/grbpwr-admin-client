@@ -22,8 +22,10 @@ import {
   pieceOfTarget,
   sewnBeforeStep,
   suggestStepPairs,
+  suggestStepSurface,
   usedEdgesBeforeStep,
   type FormOpLike,
+  type StepSurface,
   type Suggestion,
   type TargetId,
 } from './step-seams-model';
@@ -41,6 +43,7 @@ import {
   seamOfSides,
   splitSeams,
   spotInside,
+  surfaceSeam,
   spreadLabels,
   stepLayout,
   toPx,
@@ -350,6 +353,25 @@ export function stepPictureOfOp(
     ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
     : [];
   const suggestion: Suggestion | null = suggestions[0] ?? null;
+  // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket).
+  const surfaceRaw =
+    ready && !suggestions.length ? suggestStepSurface(ops, index, pieceKeys, geoms, byKey) : null;
+  const surfaceSuggestion: StepSurface | null =
+    surfaceRaw &&
+    !stored.some((seam) =>
+      [...seam.sides.a, ...seam.sides.b].some((id) => pieceOfTarget(id) === surfaceRaw.part),
+    )
+      ? surfaceRaw
+      : null;
+  const surfaceProposal = surfaceSuggestion
+    ? surfaceSeam(
+        surfaceSuggestion.host,
+        surfaceSuggestion.part,
+        innerLines.get(surfaceSuggestion.host)?.[surfaceSuggestion.inner] ?? [],
+        geoms,
+        surfaceSuggestion.place,
+      )
+    : null;
   const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
   const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
   const storedSeams = stored
@@ -366,9 +388,10 @@ export function stepPictureOfOp(
   // editor's pick affordance when that reading has no seam between these operation inputs.
   const proposalSeams = crossSeams.length
     ? []
-    : suggestions
-        .map((candidate) => seamOfSides(candidate, geoms, innerLines))
-        .filter((candidate): candidate is SeamCandidate => !!candidate);
+    : [
+        ...suggestions.map((candidate) => seamOfSides(candidate, geoms, innerLines)),
+        surfaceProposal,
+      ].filter((candidate): candidate is SeamCandidate => !!candidate);
   const frameSeams = frameSeamsOf(
     innerSeams,
     storedSeams,
@@ -383,7 +406,9 @@ export function stepPictureOfOp(
             const sides = candidateSides(candidate);
             return [...sides.a, ...sides.b];
           })
-        : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
+        : surfaceSuggestion
+          ? [innerId(surfaceSuggestion.host, surfaceSuggestion.inner)]
+          : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
   ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
   const layoutLeaves = focusedStepLeaves(
     leaves,
@@ -403,6 +428,8 @@ export function stepPictureOfOp(
     used,
     suggestion,
     suggestions,
+    surfaceSuggestion,
+    surfaceProposal,
     innerSeams,
     proposalSeams,
     frameSeams,
