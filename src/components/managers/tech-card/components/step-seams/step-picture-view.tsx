@@ -33,6 +33,7 @@ import {
   earlierInner,
   fitBox,
   focusPieces,
+  insideRing,
   inputName,
   labelSpot,
   pathOf,
@@ -612,17 +613,9 @@ export function StepPictureSvg({
         return [];
       return (geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
     });
-    for (const line of actionLines) {
-      const transform = layout.T.get(line.piece);
-      if (transform) points.push(...line.points.map((point) => apply(transform, point)));
-    }
-    for (const glyph of actionGlyphs) {
-      const transform = layout.T.get(glyph.piece);
-      if (transform) points.push(apply(transform, glyph.point));
-    }
     if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
     return points.length ? boxOf(points) : layout.bbox;
-  }, [layout, geoms, look, actionLines, actionGlyphs]);
+  }, [layout, geoms, look]);
   const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
   const fit = useMemo(() => fitBox(fitBounds, w, h, fitPad), [fitBounds, w, h, fitPad]);
 
@@ -706,19 +699,96 @@ export function StepPictureSvg({
     return out;
   }, [onPick, look, layout, geoms, innerLines, fit]);
 
-  const markLines = marks
-    .map((m) => ({ m, pts: ptsOf(m.id) }))
-    .filter((x): x is { m: EdgeMark; pts: Pt2[] } => !!x.pts);
+  const directPartner = new Map(layout.pieceLayers);
+  const inputPartner = new Map(layout.layers);
+  const stackLeader = new Map(
+    layout.stacked.flatMap((stack) => stack.slice(1).map((key) => [key, stack[0]] as const)),
+  );
+  const actionHost = (key: string) => {
+    const direct = directPartner.get(key) ?? stackLeader.get(key);
+    if (direct) return base.find((piece) => piece.key === direct);
+    const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
+    return (
+      base.find((piece) => piece.key === key) ??
+      base.find((piece) => partnerInput != null && piece.input === partnerInput)
+    );
+  };
+  const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
+    let best = ring[0] ?? point;
+    let distance = Infinity;
+    ring.forEach((start, index) => {
+      const end = ring[(index + 1) % ring.length];
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length2 = dx * dx + dy * dy;
+      const share = length2
+        ? Math.max(
+            0,
+            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+          )
+        : 0;
+      const candidate: Pt2 = [start[0] + share * dx, start[1] + share * dy];
+      const candidateDistance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+      if (candidateDistance < distance) {
+        best = candidate;
+        distance = candidateDistance;
+      }
+    });
+    return { point: best, distance };
+  };
+  const pointsOnDrawnPiece = (key: string, points: readonly Pt2[]) => {
+    const host = actionHost(key);
+    if (!host) return null;
+    const hidden = host.key !== key;
+    return points.map((point) => {
+      const nearest = nearestOnRing(point, host.ring);
+      return hidden || (!insideRing(point, host.ring) && nearest.distance > 4)
+        ? nearest.point
+        : point;
+    });
+  };
+  const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
+  const markLines = marks.flatMap((m) => {
+    const points = ptsOf(m.id);
+    const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
+    return shown ? [{ m, pts: shown }] : [];
+  });
   const actionLinePaths = actionLines.flatMap((line) => {
     const T = layout.T.get(line.piece);
-    return T && line.points.length
-      ? [{ line, points: line.points.map((point) => toPx(fit, apply(T, point))) }]
-      : [];
+    const raw =
+      T && line.points.length ? line.points.map((point) => toPx(fit, apply(T, point))) : [];
+    const points = pointsOnDrawnPiece(line.piece, raw);
+    return points?.length ? [{ line, points }] : [];
   });
   const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
-    if (!T) return [];
-    const at = toPx(fit, apply(T, glyph.point));
+    const host = actionHost(glyph.piece);
+    if (!T || !host) return [];
+    const wanted = toPx(fit, apply(T, glyph.point));
+    const hostBox = boxOf(host.ring);
+    const margin = glyph.kind === 'label' ? 9 : glyph.kind === 'buttonhole' ? 7 : 4.2;
+    const fits = (point: Pt2) =>
+      insideRing(point, host.ring) &&
+      point[0] >= hostBox.x0 + margin &&
+      point[0] <= hostBox.x1 - margin &&
+      point[1] >= hostBox.y0 + margin &&
+      point[1] <= hostBox.y1 - margin;
+    const safe = spotInside(host.ring);
+    let at = wanted;
+    if (host.key !== glyph.piece || !fits(at)) {
+      at = safe;
+      for (let step = 1; step <= 10; step++) {
+        const share = step / 10;
+        const candidate: Pt2 = [
+          wanted[0] + (safe[0] - wanted[0]) * share,
+          wanted[1] + (safe[1] - wanted[1]) * share,
+        ];
+        if (fits(candidate)) {
+          at = candidate;
+          break;
+        }
+      }
+    }
     const direction = glyph.direction ?? ([1, 0] as Pt2);
     const toward = toPx(
       fit,
@@ -729,7 +799,6 @@ export function StepPictureSvg({
     const length = Math.hypot(dx, dy) || 1;
     return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
   });
-  const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const labels = markLines
     .filter(({ m }) => m.label)
     .map(({ m, pts }) => ({

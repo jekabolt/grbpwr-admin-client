@@ -120,6 +120,37 @@ const stripLike = (ring: readonly Pt2[]) => {
   return Math.max(width, height) >= 4 * Math.min(width, height);
 };
 
+const pointsOfPath = (path: string) => {
+  const points: Pt2[] = [];
+  let current: Pt2 = [0, 0];
+  for (const command of path.matchAll(/([MLHVZ])([^MLHVZ]*)/gi)) {
+    const kind = command[1].toUpperCase();
+    const values = [...command[2].matchAll(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)].map((match) =>
+      Number(match[0]),
+    );
+    if (kind === 'M' || kind === 'L')
+      for (let index = 0; index + 1 < values.length; index += 2) {
+        current = [values[index], values[index + 1]];
+        points.push(current);
+      }
+    if (kind === 'H')
+      for (const value of values) {
+        current = [value, current[1]];
+        points.push(current);
+      }
+    if (kind === 'V')
+      for (const value of values) {
+        current = [current[0], value];
+        points.push(current);
+      }
+  }
+  return points;
+};
+
+const pathTags = (markup: string) =>
+  [...markup.matchAll(/<path\b[^>]*>/g)].map((match) => match[0]);
+const attribute = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]+)"`).exec(tag)?.[1];
+
 function ringsTouch(a: readonly [number, number][], b: readonly [number, number][]) {
   const distance = 2;
   if (bboxGap(boxOf(a), boxOf(b)) > distance) return false;
@@ -347,32 +378,6 @@ it('keeps every multi-piece corpus picture compact', () => {
 }, 120_000);
 
 it('keeps every rendered path inside the picture box', () => {
-  const pointsOfPath = (path: string) => {
-    const points: Pt2[] = [];
-    let current: Pt2 = [0, 0];
-    for (const command of path.matchAll(/([MLHVZ])([^MLHVZ]*)/gi)) {
-      const kind = command[1].toUpperCase();
-      const values = [...command[2].matchAll(/-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi)].map(
-        (match) => Number(match[0]),
-      );
-      if (kind === 'M' || kind === 'L')
-        for (let index = 0; index + 1 < values.length; index += 2) {
-          current = [values[index], values[index + 1]];
-          points.push(current);
-        }
-      if (kind === 'H')
-        for (const value of values) {
-          current = [value, current[1]];
-          points.push(current);
-        }
-      if (kind === 'V')
-        for (const value of values) {
-          current = [current[0], value];
-          points.push(current);
-        }
-    }
-    return points;
-  };
   for (const { id, path } of CARDS) {
     if (!existsSync(path)) continue;
     const { model, pictures } = corpusAt(path);
@@ -387,6 +392,197 @@ it('keeps every rendered path inside the picture box', () => {
         expect.soft(box.x1, `${id} ${operation}: path ${index} x1`).toBeLessThanOrEqual(214);
         expect.soft(box.y0, `${id} ${operation}: path ${index} y0`).toBeGreaterThanOrEqual(-2);
         expect.soft(box.y1, `${id} ${operation}: path ${index} y1`).toBeLessThanOrEqual(188);
+      }
+    }
+  }
+}, 120_000);
+
+it('keeps consecutive assembly layouts monotonic', () => {
+  const inputSignature = (operation: { inputKeys?: string[] }) =>
+    [...new Set((operation.inputKeys ?? []).filter(Boolean))].sort().join('\u0000');
+  for (const { id, path } of CARDS) {
+    if (!existsSync(path)) continue;
+    const { input, model, pictures } = corpusAt(path);
+    const operations = input.techCard.techCard?.operations ?? [];
+    for (let index = 1; index < operations.length; index++) {
+      const previousOperation = operations[index - 1];
+      const operation = operations[index];
+      const previousNumber = previousOperation.operationNumber ?? 0;
+      const number = operation.operationNumber ?? 0;
+      const previous = pictures.get(previousNumber);
+      const current = pictures.get(number);
+      const row = model.rows.find((candidate) => candidate.n === number);
+      // A sewing card deliberately moves its inputs together; finishing operations must not.
+      if (!previous || !current || row?.card) continue;
+      const previousOutput = previousOperation.outputUnitKey?.trim();
+      const sameAssembly =
+        (!!previousOutput && (operation.inputKeys ?? []).includes(previousOutput)) ||
+        (!!inputSignature(operation) &&
+          inputSignature(operation) === inputSignature(previousOperation));
+      if (!sameAssembly) continue;
+      const previousKeys = visibleKeys(previous);
+      const currentKeys = new Set(visibleKeys(current));
+      const common = previousKeys.filter((key) => currentKeys.has(key));
+      if (common.length < 2) continue;
+      const centre = (picture: StepPicture, key: string): Pt2 => {
+        const ring = worldRing(input, picture, key);
+        return [
+          ring.reduce((sum, point) => sum + point[0], 0) / ring.length,
+          ring.reduce((sum, point) => sum + point[1], 0) / ring.length,
+        ];
+      };
+      const previousBox = boxOf(common.flatMap((key) => worldRing(input, previous, key)));
+      const currentBox = boxOf(common.flatMap((key) => worldRing(input, current, key)));
+      const scale = (box: ReturnType<typeof boxOf>) =>
+        Math.min(204 / Math.max(box.x1 - box.x0, 1), 178 / Math.max(box.y1 - box.y0, 1));
+      const previousScale = scale(previousBox);
+      const currentScale = scale(currentBox);
+      const anchor = [...common].sort(
+        (left, right) =>
+          Math.abs(input.pieces.get(right)?.geom.areaMm2 ?? 0) -
+          Math.abs(input.pieces.get(left)?.geom.areaMm2 ?? 0),
+      )[0];
+      const previousAnchor = centre(previous, anchor);
+      const currentAnchor = centre(current, anchor);
+      for (const key of common) {
+        const before = centre(previous, key);
+        const after = centre(current, key);
+        const movement = Math.hypot(
+          (before[0] - previousAnchor[0]) * previousScale -
+            (after[0] - currentAnchor[0]) * currentScale,
+          (before[1] - previousAnchor[1]) * previousScale -
+            (after[1] - currentAnchor[1]) * currentScale,
+        );
+        expect
+          .soft(
+            movement,
+            `${id} ${previousNumber}→${number}: moved ${input.pieces.get(key)?.name ?? key}`,
+          )
+          .toBeLessThanOrEqual(2);
+      }
+    }
+  }
+}, 120_000);
+
+it('keeps body pieces separate with inferred and stored seams', () => {
+  const bodyRoles = new Set(['front', 'back', 'yoke', 'side', 'sleeve']);
+  for (const { id, path } of CARDS) {
+    if (!existsSync(path)) continue;
+    const { input, pictures } = corpusAt(path);
+    for (const [operation, picture] of pictures) {
+      const keys = visibleKeys(picture).filter((key) =>
+        bodyRoles.has(readName(input.pieces.get(key)?.geom.name ?? '').role ?? ''),
+      );
+      for (let left = 0; left < keys.length; left++)
+        for (let right = left + 1; right < keys.length; right++)
+          expect
+            .soft(
+              pairOverlap(
+                rasterize(worldRing(input, picture, keys[left]), 2),
+                rasterize(worldRing(input, picture, keys[right]), 2),
+              ),
+              `${id} ${operation}: body overlap`,
+            )
+            .toBeLessThanOrEqual(0.15);
+    }
+  }
+}, 120_000);
+
+it('keeps marks on pieces and pictures at readable scale', () => {
+  for (const { id, path } of CARDS) {
+    if (!existsSync(path)) continue;
+    const { model, pictures } = corpusAt(path);
+    for (const [operation, picture] of pictures) {
+      const row = model.rows.find((candidate) => candidate.n === operation);
+      const markup = pictureSvg(picture, row?.action);
+      const tags = pathTags(markup);
+      const outlines = tags
+        .filter((tag) => attribute(tag, 'data-piece-outline'))
+        .map((tag) => ({
+          key: attribute(tag, 'data-piece-outline')!,
+          points: pointsOfPath(attribute(tag, 'd') ?? ''),
+        }))
+        .filter(({ points }) => points.length > 1);
+      if (!outlines.length) continue;
+      const pieceBox = boxOf(outlines.flatMap(({ points }) => points));
+      const width = pieceBox.x1 - pieceBox.x0;
+      const height = pieceBox.y1 - pieceBox.y0;
+      const allStrips = outlines.every(({ points }) => stripLike(points));
+      const pictureAspect = Math.max(width / Math.max(height, 1), height / Math.max(width, 1));
+      if (!allStrips && pictureAspect < 3) {
+        expect.soft(width, `${id} ${operation}: picture width`).toBeGreaterThanOrEqual(53);
+        expect.soft(height, `${id} ${operation}: picture height`).toBeGreaterThanOrEqual(46.5);
+      }
+      const marks = tags.filter(
+        (tag) => attribute(tag, 'data-asm-mark') || attribute(tag, 'data-seam-mark'),
+      );
+      for (const [index, tag] of marks.entries()) {
+        const points = pointsOfPath(attribute(tag, 'd') ?? '');
+        if (!points.length) continue;
+        const markBox = boxOf(points);
+        expect
+          .soft(markBox.x0, `${id} ${operation}: mark ${index} x0`)
+          .toBeGreaterThanOrEqual(pieceBox.x0 - 4);
+        expect
+          .soft(markBox.x1, `${id} ${operation}: mark ${index} x1`)
+          .toBeLessThanOrEqual(pieceBox.x1 + 4);
+        expect
+          .soft(markBox.y0, `${id} ${operation}: mark ${index} y0`)
+          .toBeGreaterThanOrEqual(pieceBox.y0 - 4);
+        expect
+          .soft(markBox.y1, `${id} ${operation}: mark ${index} y1`)
+          .toBeLessThanOrEqual(pieceBox.y1 + 4);
+        expect
+          .soft(
+            points.every((point) =>
+              outlines.some(({ points: ring }) => bboxGap(boxOf([point]), boxOf(ring)) <= 6),
+            ),
+            `${id} ${operation}: free mark ${index}`,
+          )
+          .toBe(true);
+      }
+      const largestArea = Math.max(
+        ...outlines.map(({ key }) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0)),
+        1,
+      );
+      const pointSegmentDistance = (point: Pt2, start: Pt2, end: Pt2) => {
+        const dx = end[0] - start[0];
+        const dy = end[1] - start[1];
+        const length2 = dx * dx + dy * dy;
+        const share = length2
+          ? Math.max(
+              0,
+              Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+            )
+          : 0;
+        return Math.hypot(point[0] - start[0] - share * dx, point[1] - start[1] - share * dy);
+      };
+      for (const { key, points } of outlines) {
+        if (outlines.length < 2) continue;
+        const raw = picture.geoms.get(key)?.rs ?? [];
+        const role = readName(picture.geoms.get(key)?.name ?? '').role;
+        const isTreatment = ['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband'].includes(
+          role ?? '',
+        );
+        const isSmallStrip =
+          stripLike(raw) && Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0) <= 0.55 * largestArea;
+        if (!isTreatment && !isSmallStrip) continue;
+        const targets = outlines.filter((outline) => outline.key !== key);
+        const closePoints = points.filter((point) =>
+          targets.some(({ points: target }) =>
+            target.some(
+              (start, index) =>
+                pointSegmentDistance(point, start, target[(index + 1) % target.length]) <= 6,
+            ),
+          ),
+        );
+        const contactBox = closePoints.length ? boxOf(closePoints) : null;
+        const contactSpan = contactBox
+          ? Math.max(contactBox.x1 - contactBox.x0, contactBox.y1 - contactBox.y0)
+          : 0;
+        expect
+          .soft(contactSpan, `${id} ${operation}: free strip ${picture.geoms.get(key)?.name}`)
+          .toBeGreaterThanOrEqual(4);
       }
     }
   }
@@ -453,7 +649,8 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
       const keys = visibleKeys(picture);
       for (const key of keys) {
         const role = readName(input.pieces.get(key)?.geom.name ?? '').role;
-        if (!['collar', 'stand', 'rib', 'cuff', 'hemband'].includes(role ?? '')) continue;
+        if (!['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband'].includes(role ?? ''))
+          continue;
         const candidates = keys.filter((candidate) => {
           const targetRole = readName(input.pieces.get(candidate)?.geom.name ?? '').role;
           return role === 'cuff'
@@ -561,11 +758,18 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
         const semanticCentre = crown.reduce((best, point) =>
           Math.abs(point[0] - boxCentre) < Math.abs(best[0] - boxCentre) ? point : best,
         )[0];
+        const partBox = boxOf(part);
+        const partCentre: Pt2 = [(partBox.x0 + partBox.x1) / 2, (partBox.y0 + partBox.y1) / 2];
         const seamTarget = seamTargets
           .filter(() => !collarLike)
-          .sort(
-            (left, right) => axisFrame(right.points).span - axisFrame(left.points).span,
-          )[0]?.points;
+          .sort((left, right) => {
+            const leftTarget = axisFrame(left.points).midpoint;
+            const rightTarget = axisFrame(right.points).midpoint;
+            return (
+              Math.hypot(partCentre[0] - leftTarget[0], partCentre[1] - leftTarget[1]) -
+              Math.hypot(partCentre[0] - rightTarget[0], partCentre[1] - rightTarget[1])
+            );
+          })[0]?.points;
         const targetEdge =
           seamTarget ??
           (collarLike
@@ -576,8 +780,6 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
             : undefined);
         if (targetEdge?.length > 1) {
           const target = axisFrame(targetEdge);
-          const partBox = boxOf(part);
-          const partCentre: Pt2 = [(partBox.x0 + partBox.x1) / 2, (partBox.y0 + partBox.y1) / 2];
           const partAxis = axisFrame(part).axis;
           const angle =
             (Math.acos(
@@ -585,15 +787,19 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
             ) *
               180) /
             Math.PI;
-          expect
-            .soft(
-              Math.abs(
-                (partCentre[0] - target.midpoint[0]) * target.axis[0] +
-                  (partCentre[1] - target.midpoint[1]) * target.axis[1],
-              ),
-              `${id} ${operation}: ${role} centred`,
-            )
-            .toBeLessThanOrEqual(0.1 * target.span + 1e-6);
+          const roleCount = [...picture.layout.T.keys()].filter(
+            (candidate) => readName(input.pieces.get(candidate)?.geom.name ?? '').role === role,
+          ).length;
+          if (role !== 'waistband' || roleCount === 1)
+            expect
+              .soft(
+                Math.abs(
+                  (partCentre[0] - target.midpoint[0]) * target.axis[0] +
+                    (partCentre[1] - target.midpoint[1]) * target.axis[1],
+                ),
+                `${id} ${operation}: ${role} centred`,
+              )
+              .toBeLessThanOrEqual(0.1 * target.span + 1e-6);
           expect.soft(angle, `${id} ${operation}: ${role} axis`).toBeLessThanOrEqual(20);
         }
         if (role !== 'cuff') {

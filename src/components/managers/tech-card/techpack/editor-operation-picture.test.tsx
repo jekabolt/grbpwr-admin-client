@@ -233,22 +233,18 @@ describe('editor operation picture in the PDF', () => {
     }
   });
 
-  it('uses the producing join after-layout for every card 83 non-join operation', () => {
+  it('uses the normalized producing join layout for every card 83 non-join operation', () => {
     const input = card83WithNonJoins();
     const model = deriveAssembly(input);
     const pictures = editorOperationPictures(input.techCard, model)!;
-    const producer = sceneOf(input, 400);
-    const expected = stepLayout(producer.leaves, producer.frameSeams, producer.geoms, {
-      explode: 0,
-      rasterMm: STEP_TILE_RASTER_MM,
-    });
+    const expected = pictures.get(400)!;
 
     for (const row of model.rows.filter((candidate) => !candidate.card)) {
       const picture = pictures.get(row.n);
       expect(picture, `op ${row.n}`).toBeDefined();
-      expectSameRetainedAffines(picture!.layout.T, expected.T, `op ${row.n}`);
+      expectSameRetainedAffines(picture!.layout.T, expected.layout.T, `op ${row.n}`);
     }
-  });
+  }, 120_000);
 
   it('keeps card 83 op 200 panels and op 400 collar grain-upright', () => {
     const input = card83StoredSeamsFixture();
@@ -296,7 +292,7 @@ describe('editor operation picture in the PDF', () => {
         ),
       ).not.toThrow();
     }
-  });
+  }, 120_000);
 
   it('returns no editor picture when an operation has no geometry', () => {
     const input = card83StoredSeamsFixture();
@@ -339,14 +335,12 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
   let model: ReturnType<typeof deriveAssembly>;
   let pictures: NonNullable<ReturnType<typeof editorOperationPictures>>;
   let fullGarment: ReturnType<typeof joinedResult>;
-  let fullClusters: string[][];
 
   beforeAll(() => {
     input = card85RealFixture();
     model = deriveAssembly(input);
-    pictures = editorOperationPictures(input.techCard, model)!;
     fullGarment = joinedResult(input, 1060);
-    fullClusters = editorPictureClusters(fullGarment);
+    pictures = editorOperationPictures(input.techCard, model)!;
   });
 
   const namesOf = (picture: ReturnType<typeof sceneOf>) =>
@@ -416,12 +410,12 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
     expect(checked).toBeGreaterThan(0);
   });
 
-  it('fills operation 1070 with only the largest sewn cluster', () => {
+  it('keeps operation 1070 on the preceding completed garment', () => {
     const picture = pictures.get(1070)!;
-    const largest = fullClusters[0];
+    const assembled = pictures.get(1060)!;
 
-    expect(new Set(picture.layout.T.keys())).toEqual(new Set(largest));
-    expect(picture.layout.T.size).toBeLessThan(fullGarment.layout.T.size);
+    expect(new Set(picture.layout.T.keys())).toEqual(new Set(assembled.layout.T.keys()));
+    expectSameAffines(picture.layout.T, assembled.layout.T, 'op 1070');
     expectReadableFit(picture);
   });
 

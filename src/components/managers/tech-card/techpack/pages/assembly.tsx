@@ -26,6 +26,7 @@ import { inputGroups } from 'components/managers/tech-card/components/step-seams
 import {
   boxOf,
   confidentSeam,
+  invert,
   stepLayout,
   type StepLayout,
 } from 'components/managers/tech-card/components/step-seams/step-picture';
@@ -370,6 +371,131 @@ const visiblePictureKeys = (picture: StepPicture) => {
   );
 };
 
+/** Structural pieces include ones a stored scene mistakenly classified as construction layers. */
+const structuralPictureKeys = (picture: StepPicture) => {
+  const stacked = new Set(picture.layout.stacked.flatMap((group) => group.slice(1)));
+  const layeredInputs = new Set(picture.layout.layers.map(([input]) => input));
+  return [...picture.layout.T.keys()].filter(
+    (key) =>
+      !stacked.has(key) &&
+      !layeredInputs.has(picture.layout.input.get(key) ?? -1) &&
+      !isLiningPiece(picture, key),
+  );
+};
+
+/** Preserve an established unit while docking newly added body panels around its outside. */
+function separateAddedBodyPieces(picture: StepPicture, preserved: ReadonlySet<string>) {
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const keys = visiblePictureKeys(picture);
+  const T = new Map(picture.layout.T);
+  const ring = (key: string, transform = T.get(key)!) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
+  const overlap = (key: string, transform: Affine, others: readonly string[]) =>
+    Math.max(
+      ...others.map((other) =>
+        pairOverlap(rasterize(ring(key, transform), 2), rasterize(ring(other), 2)),
+      ),
+      0,
+    );
+  const attached = (key: string, transform: Affine, others: readonly string[]) => {
+    const sample = (points: readonly Pt2[]) => {
+      const stride = Math.max(1, Math.floor(points.length / 64));
+      return points.filter((_, index) => index % stride === 0);
+    };
+    const part = sample(ring(key, transform));
+    return others.some((other) => {
+      const target = sample(ring(other));
+      const a = boxOf(part);
+      const b = boxOf(target);
+      if (Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1, 0) > 2) return false;
+      return part.some((point) =>
+        target.some(
+          (otherPoint) => Math.hypot(point[0] - otherPoint[0], point[1] - otherPoint[1]) <= 2,
+        ),
+      );
+    });
+  };
+  const placed = keys.filter((key) => preserved.has(key));
+  for (const key of keys.filter((candidate) => !preserved.has(candidate))) {
+    if (!placed.length) {
+      placed.push(key);
+      continue;
+    }
+    const currentPoints = [...placed.flatMap((candidate) => ring(candidate)), ...ring(key)];
+    if (
+      overlap(key, T.get(key)!, placed) <= 0.15 &&
+      attached(key, T.get(key)!, placed) &&
+      frameFill(currentPoints) >= 0.59
+    ) {
+      placed.push(key);
+      continue;
+    }
+    const clusterBox = boxOf(placed.flatMap((candidate) => ring(candidate)));
+    const partBox = boxOf(ring(key));
+    const directions: Pt2[] =
+      reading(key).role === 'sleeve'
+        ? [
+            [-1, 0],
+            [1, 0],
+          ]
+        : [
+            [-1, 0],
+            [1, 0],
+            [0, -1],
+            [0, 1],
+          ];
+    const candidates = directions.map(([directionX, directionY]) => {
+      const dx = directionX
+        ? directionX < 0
+          ? clusterBox.x0 - partBox.x1
+          : clusterBox.x1 - partBox.x0
+        : (clusterBox.x0 + clusterBox.x1 - partBox.x0 - partBox.x1) / 2;
+      const dy = directionY
+        ? directionY < 0
+          ? clusterBox.y0 - partBox.y1
+          : clusterBox.y1 - partBox.y0
+        : (clusterBox.y0 + clusterBox.y1 - partBox.y0 - partBox.y1) / 2;
+      let transform = compose(translate(dx, dy), T.get(key)!);
+      const sample = (points: readonly Pt2[]) => {
+        const stride = Math.max(1, Math.floor(points.length / 96));
+        return points.filter((_, index) => index % stride === 0);
+      };
+      const part = sample(ring(key, transform));
+      const target = placed.flatMap((candidate) => sample(ring(candidate)));
+      let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
+      for (const partPoint of part)
+        for (const targetPoint of target) {
+          const distance = Math.hypot(partPoint[0] - targetPoint[0], partPoint[1] - targetPoint[1]);
+          if (!nearest || distance < nearest.distance)
+            nearest = { distance, part: partPoint, target: targetPoint };
+        }
+      if (nearest)
+        transform = compose(
+          translate(nearest.target[0] - nearest.part[0], nearest.target[1] - nearest.part[1]),
+          transform,
+        );
+      const extent = Math.max(partBox.x1 - partBox.x0, partBox.y1 - partBox.y0, 1);
+      for (let moved = 0; moved <= extent && overlap(key, transform, placed) > 0.145; moved += 1)
+        transform = compose(translate(directionX, directionY), transform);
+      const points = [...placed.flatMap((candidate) => ring(candidate)), ...ring(key, transform)];
+      const box = boxOf(points);
+      return {
+        transform,
+        score:
+          overlap(key, transform, placed) * 1e9 -
+          frameFill(points) * 1e6 +
+          (box.x1 - box.x0) * (box.y1 - box.y0),
+      };
+    });
+    T.set(key, candidates.sort((left, right) => left.score - right.score)[0].transform);
+    placed.push(key);
+  }
+  const points = [...T].flatMap(([key, transform]) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+  );
+  return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
+}
+
 function dockLoosePicture(picture: StepPicture, mode: 'move' | 'layer' = 'move'): StepPicture {
   const keys = visiblePictureKeys(picture);
   if (keys.length < 2) return picture;
@@ -572,7 +698,7 @@ const ringsAspect = (rings: readonly (readonly Pt2[])[]) => ringAspect(rings.fla
 
 /** Reduce a finished sleeved garment to one outer front view, keeping construction layers behind. */
 function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
-  const visible = visiblePictureKeys(picture);
+  const visible = structuralPictureKeys(picture);
   const role = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const sleeves = visible.filter((key) => role(key).role === 'sleeve');
   const collars = visible.filter((key) => ['collar', 'stand'].includes(role(key).role ?? ''));
@@ -597,13 +723,7 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
   const bodyPair = pickPair(bodies);
   const sleevePair = pickPair(sleeves);
   if (bodyPair.length < 2 || sleevePair.length < 2) return null;
-  const oneBodyView =
-    new Set(bodyPair.map((key) => role(key).role)).has('front') &&
-    new Set(bodyPair.map((key) => role(key).role)).has('back') &&
-    bodyPair.every((key) => !role(key).hand);
-  const bodyLeaders = oneBodyView
-    ? [bodyPair.find((key) => role(key).role === 'front') ?? bodyPair[0]]
-    : bodyPair;
+  const bodyLeaders = bodyPair;
 
   const T = new Map(picture.layout.T);
   const ring = (key: string) => picture.geoms.get(key)?.rs ?? [];
@@ -635,6 +755,14 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
           T.get(bodyLeaders[1])!,
         ),
       );
+    const width = Math.max(boxOf(ring(bodyLeaders[1])).x1 - boxOf(ring(bodyLeaders[1])).x0, 1);
+    for (let moved = 1; moved <= 0.2 * width; moved += 1) {
+      const candidate = compose(translate(-1, 0), T.get(bodyLeaders[1])!);
+      const leftRing = ring(bodyLeaders[0]).map((point) => apply(T.get(bodyLeaders[0])!, point));
+      const rightRing = ring(bodyLeaders[1]).map((point) => apply(candidate, point));
+      if (pairOverlap(rasterize(leftRing, 2), rasterize(rightRing, 2)) > 0.145) break;
+      T.set(bodyLeaders[1], candidate);
+    }
   }
   const bodyPoints = bodyLeaders.flatMap((key) =>
     ring(key).map((point) => apply(T.get(key)!, point)),
@@ -643,7 +771,11 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
   const [leftSleeve, rightSleeve] = sleevePair;
   const leftBox = boxOf(ring(leftSleeve));
   const rightBox = boxOf(ring(rightSleeve));
-  place(leftSleeve, bodyBox.x0 - leftBox.x1, bodyBox.y1 - leftBox.y1);
+  const sameSleeveHand =
+    !!role(leftSleeve).hand && role(leftSleeve).hand === role(rightSleeve).hand;
+  if (sameSleeveHand)
+    T.set(leftSleeve, [-1, 0, 0, 1, bodyBox.x0 + leftBox.x0, bodyBox.y1 - leftBox.y1] as Affine);
+  else place(leftSleeve, bodyBox.x0 - leftBox.x1, bodyBox.y1 - leftBox.y1);
   place(rightSleeve, bodyBox.x1 - rightBox.x0, bodyBox.y1 - rightBox.y1);
   const snap = (key: string, hosts: readonly string[]) => {
     const part = ring(key).map((point) => apply(T.get(key)!, point));
@@ -683,18 +815,20 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
   T.set(leftSleeve, compose(translate(0, -2), T.get(leftSleeve)!));
   T.set(rightSleeve, compose(translate(0, -2), T.get(rightSleeve)!));
 
-  const pieceLayers = [...picture.layout.pieceLayers];
+  const shown = new Set([...bodyLeaders, ...sleevePair]);
+  const pieceLayers = picture.layout.pieceLayers.filter(([piece]) => !shown.has(piece));
   const layerOn = (key: string, leaders: readonly string[]) => {
     const hand = role(key).hand;
     const leader = leaders.find((candidate) => hand && role(candidate).hand === hand) ?? leaders[0];
-    pieceLayers.push([key, leader]);
-    T.set(key, T.get(leader)!);
+    if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, leader]);
   };
   for (const key of bodies) if (!bodyLeaders.includes(key)) layerOn(key, bodyLeaders);
   for (const key of sleeves) if (!sleevePair.includes(key)) layerOn(key, sleevePair);
 
   const collar = [...collars].sort((a, b) => area(b) - area(a))[0];
   if (collar) {
+    for (let index = pieceLayers.length - 1; index >= 0; index--)
+      if (pieceLayers[index][0] === collar) pieceLayers.splice(index, 1);
     bodyBox = boxOf([
       ...bodyPoints,
       ...sleevePair.flatMap((key) => ring(key).map((point) => apply(T.get(key)!, point))),
@@ -860,12 +994,24 @@ function anonymousShirtPicture(picture: StepPicture): StepPicture | null {
 
 /** Stored seams still need a front-view silhouette when sleeve units land on opposite corners. */
 function sleevedPictureNeedsRepair(picture: StepPicture): boolean {
-  const visible = visiblePictureKeys(picture);
+  const rawVisible = visiblePictureKeys(picture);
+  const visible = structuralPictureKeys(picture);
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
-  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
-  const bodies = visible.filter((key) =>
+  const rawSleeves = rawVisible.filter((key) => reading(key).role === 'sleeve');
+  const rawBodies = rawVisible.filter((key) =>
     ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
   );
+  if (rawSleeves.length < 2 && rawBodies.length < 2) return false;
+  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
+  const bodies = visible.filter((key) => {
+    const role = reading(key).role;
+    return (
+      role !== 'sleeve' &&
+      !['collar', 'stand', 'pocket', 'facing', 'placket', 'fly', 'cuff', 'waistband'].includes(
+        role ?? '',
+      )
+    );
+  });
   if (sleeves.length < 2 || bodies.length < 2) return false;
   const ring = (key: string) =>
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
@@ -876,9 +1022,38 @@ function sleevedPictureNeedsRepair(picture: StepPicture): boolean {
     const box = boxOf(ring(key));
     return (box.y0 + box.y1) / 2 - bodyCentreY;
   });
+  const sameHand =
+    !!reading(sleeves[0]).hand && reading(sleeves[0]).hand === reading(sleeves[1]).hand;
+  const hiddenStructural = visible.some((key) => !visiblePictureKeys(picture).includes(key));
+  const fragmentedConstruction = visible.length > 6;
+  const overlap = [...bodies, ...sleeves].some((key, index, keys) =>
+    keys.slice(index + 1).some((other) => {
+      const left = rasterize(ring(key), 2);
+      const right = rasterize(ring(other), 2);
+      return pairOverlap(left, right) > 0.15;
+    }),
+  );
+  const detachedSleeve = sleeves.some((key) => {
+    const sample = (points: readonly Pt2[]) => {
+      const stride = Math.max(1, Math.floor(points.length / 64));
+      return points.filter((_, index) => index % stride === 0);
+    };
+    const sleeve = sample(ring(key));
+    return bodies.every((body) => {
+      const target = sample(ring(body));
+      return sleeve.every((point) =>
+        target.every((other) => Math.hypot(point[0] - other[0], point[1] - other[1]) > 2),
+      );
+    });
+  });
   return (
-    offsets.some((offset) => offset > 0.55 * bodyHeight) &&
-    offsets.some((offset) => offset < -0.55 * bodyHeight)
+    sameHand ||
+    hiddenStructural ||
+    fragmentedConstruction ||
+    overlap ||
+    detachedSleeve ||
+    (offsets.some((offset) => offset > 0.55 * bodyHeight) &&
+      offsets.some((offset) => offset < -0.55 * bodyHeight))
   );
 }
 
@@ -1023,13 +1198,34 @@ function trouserFrontPicture(picture: StepPicture): StepPicture | null {
     T.set(key, translate(x - box.x0, -box.y0));
     if (index > 0) {
       const hostKey = leaders[index - 1];
+      const mirroredPair =
+        reading(hostKey).role === reading(key).role &&
+        !!reading(hostKey).hand &&
+        !!reading(key).hand &&
+        reading(hostKey).hand !== reading(key).hand;
+      if (mirroredPair) {
+        const placed = boxOf(
+          (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point)),
+        );
+        x = placed.x1;
+        high = Math.max(high, placed.y1);
+        return;
+      }
       const host = (picture.geoms.get(hostKey)?.rs ?? []).map((point) =>
         apply(T.get(hostKey)!, point),
       );
       const part = (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+      const hostBox = boxOf(host);
+      const partBox = boxOf(part);
+      const hostEdge = host.filter(
+        (point) => point[0] >= hostBox.x1 - 0.1 * Math.max(hostBox.x1 - hostBox.x0, 1),
+      );
+      const partEdge = part.filter(
+        (point) => point[0] <= partBox.x0 + 0.1 * Math.max(partBox.x1 - partBox.x0, 1),
+      );
       let nearest: { distance: number; host: Pt2; part: Pt2 } | null = null;
-      for (const hostPoint of host)
-        for (const partPoint of part) {
+      for (const hostPoint of hostEdge.length ? hostEdge : host)
+        for (const partPoint of partEdge.length ? partEdge : part) {
           const distance = Math.hypot(hostPoint[0] - partPoint[0], hostPoint[1] - partPoint[1]);
           if (!nearest || distance < nearest.distance)
             nearest = { distance, host: hostPoint, part: partPoint };
@@ -1263,9 +1459,86 @@ function radialBasePicture(picture: StepPicture): StepPicture | null {
 /** Collapse construction plies that describe one panel rather than three separate products. */
 function panelUnitPicture(picture: StepPicture): StepPicture | null {
   const keys = visiblePictureKeys(picture);
-  if (keys.length < 3) return null;
+  if (keys.length < 2) return null;
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const repeated = keys
+    .flatMap((left, index) =>
+      keys.slice(index + 1).map((right) => {
+        const leftReading = reading(left);
+        const rightReading = reading(right);
+        const leftBox = boxOf(picture.geoms.get(left)?.rs ?? []);
+        const rightBox = boxOf(picture.geoms.get(right)?.rs ?? []);
+        const leftDims = [leftBox.x1 - leftBox.x0, leftBox.y1 - leftBox.y0].sort((a, b) => a - b);
+        const rightDims = [rightBox.x1 - rightBox.x0, rightBox.y1 - rightBox.y0].sort(
+          (a, b) => a - b,
+        );
+        const shapeRatio = Math.max(
+          leftDims[0] / Math.max(rightDims[0], 1),
+          rightDims[0] / Math.max(leftDims[0], 1),
+          leftDims[1] / Math.max(rightDims[1], 1),
+          rightDims[1] / Math.max(leftDims[1], 1),
+        );
+        return {
+          left,
+          right,
+          alike:
+            !!leftReading.role &&
+            leftReading.role === rightReading.role &&
+            leftReading.hand === rightReading.hand &&
+            Math.min(area(left), area(right)) / Math.max(area(left), area(right), 1) >= 0.9 &&
+            shapeRatio <= 1.12,
+        };
+      }),
+    )
+    .find((pair) => pair.alike);
+  if (repeated) {
+    const neighbours = keys.filter((key) => key !== repeated.left && key !== repeated.right);
+    const distanceToUnit = (key: string) => {
+      if (!neighbours.length) return Infinity;
+      const transform = picture.layout.T.get(key)!;
+      const sample = (points: readonly Pt2[]) => {
+        const stride = Math.max(1, Math.floor(points.length / 96));
+        return points.filter((_, index) => index % stride === 0);
+      };
+      const own = sample(
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+      );
+      let best = Infinity;
+      for (const other of neighbours) {
+        const otherTransform = picture.layout.T.get(other)!;
+        const target = sample(
+          (picture.geoms.get(other)?.rs ?? []).map((point) => apply(otherTransform, point)),
+        );
+        for (const point of own)
+          for (const otherPoint of target)
+            best = Math.min(best, Math.hypot(point[0] - otherPoint[0], point[1] - otherPoint[1]));
+      }
+      return best;
+    };
+    const leftDistance = distanceToUnit(repeated.left);
+    const rightDistance = distanceToUnit(repeated.right);
+    const leader =
+      leftDistance !== rightDistance
+        ? leftDistance < rightDistance
+          ? repeated.left
+          : repeated.right
+        : area(repeated.left) >= area(repeated.right)
+          ? repeated.left
+          : repeated.right;
+    const follower = leader === repeated.left ? repeated.right : repeated.left;
+    const T = new Map(picture.layout.T);
+    T.set(follower, T.get(leader)!);
+    return {
+      ...picture,
+      layout: {
+        ...picture.layout,
+        T,
+        stacked: [...picture.layout.stacked, [leader, follower]],
+      },
+    };
+  }
+  if (keys.length < 3) return null;
   const roles = new Set(keys.map((key) => reading(key).role));
   const hands = new Set(keys.map((key) => reading(key).hand).filter(Boolean));
   const samePanelRole =
@@ -1294,7 +1567,10 @@ function panelUnitPicture(picture: StepPicture): StepPicture | null {
 }
 
 /** Re-attach named edge treatments by their sewing edge, centred along the receiving edge. */
-function restoreEdgeTreatments(picture: StepPicture): StepPicture {
+function restoreEdgeTreatments(
+  picture: StepPicture,
+  preservedTreatments: ReadonlySet<string> = new Set(),
+): StepPicture {
   const visible = visiblePictureKeys(picture);
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const T = new Map(picture.layout.T);
@@ -1333,7 +1609,7 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
       span: Math.max(high - low, 1),
     };
   };
-  const treatmentRoles = new Set(['collar', 'stand', 'rib', 'cuff', 'hemband']);
+  const treatmentRoles = new Set(['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband']);
   const treatments = visible.filter((key) => treatmentRoles.has(reading(key).role ?? ''));
   const body = visible.filter((key) => !treatments.includes(key));
   const bodyPoints = body.flatMap((key) => ring(key));
@@ -1361,15 +1637,19 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
       return edge?.pts.map((point) => apply(T.get(key)!, point)) ?? [];
     });
   const align = (key: string) => {
+    if (preservedTreatments.has(key)) return true;
     const allowed = targetRoles(reading(key).role);
     const role = reading(key).role;
+    const hand = reading(key).hand;
+    const receives = (candidate: string) => {
+      const target = reading(candidate);
+      return allowed.has(target.role ?? '') && (!hand || !target.hand || target.hand === hand);
+    };
     const collarLike = ['collar', 'stand', 'rib'].includes(role ?? '');
     const matches = (collarLike ? [] : seamSides(key))
       .map((sides) => ({
         own: edgePoints(sides.own, key),
-        target: edgePoints(
-          sides.target.filter((id) => allowed.has(reading(pieceKeyOf(id)).role ?? '')),
-        ),
+        target: edgePoints(sides.target.filter((id) => receives(pieceKeyOf(id)))),
       }))
       .filter((match) => match.own.length > 1 && match.target.length > 1)
       .sort((left, right) => axisFrame(right.target).span - axisFrame(left.target).span);
@@ -1381,7 +1661,7 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
       sourcePoints = matches[0].own;
       targetPoints = matches[0].target;
     } else {
-      const candidates = body.filter((candidate) => allowed.has(reading(candidate).role ?? ''));
+      const candidates = body.filter(receives);
       if (!candidates.length) return false;
       const area = (candidate: string) => Math.abs(picture.geoms.get(candidate)?.areaMm2 ?? 0);
       const anchor = [...candidates].sort((left, right) => area(right) - area(left))[0];
@@ -1416,9 +1696,7 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
       const targetRing = [...cluster].flatMap((candidate) => ring(candidate));
       const targetBox = boxOf(targetRing);
       const sewingEdges = seamSides(key)
-        .filter((sides) =>
-          sides.target.some((id) => allowed.has(reading(pieceKeyOf(id)).role ?? '')),
-        )
+        .filter((sides) => sides.target.some((id) => receives(pieceKeyOf(id))))
         .map((sides) => edgePoints(sides.own, key))
         .filter((points) => points.length > 1)
         .sort((left, right) => axisFrame(right).span - axisFrame(left).span);
@@ -1452,7 +1730,7 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
     }
     const source = axisFrame(sourcePoints);
     const target = axisFrame(targetPoints);
-    const receivers = body.filter((candidate) => allowed.has(reading(candidate).role ?? ''));
+    const receivers = body.filter(receives);
     const receiver = receivers.reduce((best, candidate) => {
       const nearest = (piece: string) =>
         Math.min(
@@ -1464,7 +1742,8 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
     }, receivers[0]);
     const receiverCentre = receiver ? centre(ring(receiver)) : bodyCentre;
     const candidate = (turn: number) => {
-      const angle = target.angle - source.angle + turn;
+      const targetAngle = role === 'waistband' ? 0 : target.angle;
+      const angle = targetAngle - source.angle + turn;
       const cosine = Math.cos(angle);
       const sine = Math.sin(angle);
       const rotation: Affine = [cosine, sine, -sine, cosine, 0, 0];
@@ -1588,6 +1867,48 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
         );
       }
     }
+    if (role === 'waistband' && receivers.length) {
+      const receiverTop = Math.max(...receivers.map((candidate) => boxOf(ring(candidate)).y1));
+      const treatmentBottom = boxOf(ring(key)).y0;
+      if (treatmentBottom < receiverTop + 0.01) move(key, 0, receiverTop + 0.01 - treatmentBottom);
+      const placedBottom = boxOf(ring(key)).y0;
+      const bandPoints = ring(key).filter((point) => point[1] <= placedBottom + 0.5);
+      const crownPoints = receivers
+        .flatMap((candidate) => ring(candidate))
+        .filter((point) => point[1] >= receiverTop - 0.5);
+      const pointSegmentDistance = (point: Pt2, start: Pt2, end: Pt2) => {
+        const dx = end[0] - start[0];
+        const dy = end[1] - start[1];
+        const length2 = dx * dx + dy * dy;
+        const share = length2
+          ? Math.max(
+              0,
+              Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+            )
+          : 0;
+        return Math.hypot(point[0] - start[0] - share * dx, point[1] - start[1] - share * dy);
+      };
+      const receiverRings = receivers.map((candidate) => ring(candidate));
+      let contactDistance = Infinity;
+      for (const point of ring(key))
+        for (const receiverRing of receiverRings)
+          for (let index = 0; index < receiverRing.length; index++)
+            contactDistance = Math.min(
+              contactDistance,
+              pointSegmentDistance(
+                point,
+                receiverRing[index],
+                receiverRing[(index + 1) % receiverRing.length],
+              ),
+            );
+      let closest: { band: Pt2; crown: Pt2; distance: number } | null = null;
+      for (const band of bandPoints)
+        for (const crown of crownPoints) {
+          const distance = Math.abs(band[0] - crown[0]);
+          if (!closest || distance < closest.distance) closest = { band, crown, distance };
+        }
+      if (contactDistance > 2 && closest) move(key, closest.crown[0] - closest.band[0], 0);
+    }
     return true;
   };
 
@@ -1600,6 +1921,53 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
   )[0];
   if (collarLeader) align(collarLeader);
   for (const key of treatments) if (!collars.includes(key)) align(key);
+  const placedTreatments: string[] = [];
+  for (const key of treatments) {
+    if (preservedTreatments.has(key)) {
+      placedTreatments.push(key);
+      continue;
+    }
+    const overlapping = placedTreatments.filter(
+      (other) => pairOverlap(rasterize(ring(key), 2), rasterize(ring(other), 2)) > 0.15,
+    );
+    if (overlapping.length) {
+      const obstaclePoints = overlapping.flatMap((other) => ring(other));
+      const obstacleBox = boxOf(obstaclePoints);
+      const partBox = boxOf(ring(key));
+      const candidates: Pt2[] = [
+        [obstacleBox.x0 - partBox.x1, 0],
+        [obstacleBox.x1 - partBox.x0, 0],
+        [0, obstacleBox.y0 - partBox.y1],
+        [0, obstacleBox.y1 - partBox.y0],
+      ];
+      const best = candidates
+        .map(([dx, dy]) => {
+          const moved = ring(key, compose(translate(dx, dy), T.get(key)!));
+          const overlap = Math.max(
+            ...overlapping.map((other) =>
+              pairOverlap(rasterize(moved, 2), rasterize(ring(other), 2)),
+            ),
+            0,
+          );
+          const bodyOverlap = Math.max(
+            ...body.map((candidate) =>
+              pairOverlap(rasterize(moved, 2), rasterize(ring(candidate), 2)),
+            ),
+            0,
+          );
+          const frame = boxOf([...bodyPoints, ...obstaclePoints, ...moved]);
+          return {
+            dx,
+            dy,
+            score:
+              Math.max(overlap, bodyOverlap) * 1e9 + (frame.x1 - frame.x0) * (frame.y1 - frame.y0),
+          };
+        })
+        .sort((left, right) => left.score - right.score)[0];
+      move(key, best.dx, best.dy);
+    }
+    placedTreatments.push(key);
+  }
 
   const points = [...T].flatMap(([key, transform]) =>
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
@@ -1620,7 +1988,11 @@ function restoreEdgeTreatments(picture: StepPicture): StepPicture {
 }
 
 /** Compact an unstored final result without scaling or rotating any cut piece. */
-function compactFinalPicture(picture: StepPicture, force = false): StepPicture {
+function compactFinalPicture(
+  picture: StepPicture,
+  force = false,
+  allowSleeved = true,
+): StepPicture {
   const keys = visiblePictureKeys(picture);
   if (keys.length < (force ? 2 : 3)) return picture;
   const readings = keys.map((key) => readName(picture.geoms.get(key)?.name ?? ''));
@@ -1635,7 +2007,7 @@ function compactFinalPicture(picture: StepPicture, force = false): StepPicture {
     )
   )
     return picture;
-  const sleeved = sleevedFinalPicture(picture);
+  const sleeved = allowSleeved ? sleevedFinalPicture(picture) : null;
   if (sleeved) return sleeved;
   if (force) {
     const trousers = trouserFrontPicture(picture);
@@ -2086,6 +2458,7 @@ export function editorOperationPictures(
         if (priorFinal) pictures.set(priorFinal[0], compactFinalPicture(priorFinal[1]));
       }
     }
+    const completeAssemblies = new Set<number>();
     for (const [number, picture] of pictures) {
       const rawKeys = visiblePictureKeys(picture);
       const rawRings = rawKeys.map((key) =>
@@ -2097,18 +2470,22 @@ export function editorOperationPictures(
         !rawRings.every((ring) => ringAspect(ring) >= 4) &&
         ringsAspect(rawRings) > 4;
       const hasEdgeTreatments = visiblePictureKeys(picture).some((key) =>
-        ['collar', 'stand', 'rib', 'cuff'].includes(
+        ['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband'].includes(
           readName(picture.geoms.get(key)?.name ?? '').role ?? '',
         ),
       );
       const needsStructuralRepair = useInferredLayout || rawNeedsCompact || rawNeedsAspect;
-      const anonymous = needsStructuralRepair ? anonymousShirtPicture(picture) : null;
-      const storedSleeves = sleevedPictureNeedsRepair(picture)
-        ? repairStoredSleevesPicture(picture)
+      const allowTopologyRepair = useInferredLayout || joins.has(number);
+      const anonymous =
+        allowTopologyRepair && needsStructuralRepair ? anonymousShirtPicture(picture) : null;
+      const shouldRepairSleeves = allowTopologyRepair && sleevedPictureNeedsRepair(picture);
+      const storedSleeves = shouldRepairSleeves
+        ? sleevedFinalPicture(picture) ?? repairStoredSleevesPicture(picture)
         : null;
       const storedCloseout = storedSleeves ? null : layerStoredCloseoutPicture(picture);
-      const radial = needsStructuralRepair ? radialBasePicture(picture) : null;
-      const panelTopology = trouserFrontPicture(picture);
+      const radial =
+        allowTopologyRepair && needsStructuralRepair ? radialBasePicture(picture) : null;
+      const panelTopology = allowTopologyRepair ? trouserFrontPicture(picture) : null;
       const panelRings = panelTopology
         ? visiblePictureKeys(panelTopology).map((key) =>
             (panelTopology.geoms.get(key)?.rs ?? []).map((point) =>
@@ -2144,36 +2521,80 @@ export function editorOperationPictures(
           (!isBottom && hasFrontPair && hasBack && panelGain > 0.08))
           ? panelTopology
           : null;
-      const sleeved = needsStructuralRepair ? sleevedFinalPicture(picture) : null;
-      const panelUnit = needsStructuralRepair ? panelUnitPicture(picture) : null;
+      const sleeved =
+        allowTopologyRepair && needsStructuralRepair && (useInferredLayout || shouldRepairSleeves)
+          ? sleevedFinalPicture(picture)
+          : null;
+      const panelUnit =
+        allowTopologyRepair && needsStructuralRepair ? panelUnitPicture(picture) : null;
       let revised =
         anonymous ??
         storedSleeves ??
         storedCloseout ??
+        sleeved ??
         radial ??
         trouser ??
-        sleeved ??
         panelUnit ??
         picture;
+      if (storedSleeves || sleeved) completeAssemblies.add(number);
       const rings = visiblePictureKeys(revised).map((key) =>
         (revised.geoms.get(key)?.rs ?? []).map((point) => apply(revised.layout.T.get(key)!, point)),
       );
       if (rings.length < 2) {
-        pictures.set(number, revised);
+        const shown = new Set(visiblePictureKeys(revised));
+        pictures.set(number, {
+          ...revised,
+          layout: {
+            ...revised.layout,
+            apart: completeAssemblies.has(number)
+              ? []
+              : revised.layout.apart.filter((key) => shown.has(key)),
+          },
+        });
         continue;
       }
       const needsCompact = hullCompactness(rings) < 0.355;
       const needsAspect = !rings.every((ring) => ringAspect(ring) >= 4) && ringsAspect(rings) > 4;
+      const bodyRings = visiblePictureKeys(revised)
+        .filter((key) =>
+          ['front', 'back', 'yoke', 'side', 'sleeve'].includes(
+            readName(revised.geoms.get(key)?.name ?? '').role ?? '',
+          ),
+        )
+        .map((key) =>
+          (revised.geoms.get(key)?.rs ?? []).map((point) =>
+            apply(revised.layout.T.get(key)!, point),
+          ),
+        );
+      const bodyNeedsAspect =
+        bodyRings.length > 1 &&
+        !bodyRings.every((ring) => ringAspect(ring) >= 4) &&
+        ringsAspect(bodyRings) > 4;
       const needsFinalFrame =
         number === final?.[0] && rings.length > 2 && frameFill(rings.flat()) < 0.59;
-      if (!anonymous && (needsCompact || needsAspect || needsFinalFrame))
-        revised = compactFinalPicture(revised, true);
+      if (
+        !anonymous &&
+        ((allowTopologyRepair && (needsCompact || needsFinalFrame)) ||
+          needsAspect ||
+          bodyNeedsAspect)
+      )
+        revised = compactFinalPicture(revised, true, useInferredLayout || shouldRepairSleeves);
       const restored =
         needsStructuralRepair || hasEdgeTreatments || revised !== picture
           ? restoreEdgeTreatments(revised)
           : revised;
       const docked = hasEdgeTreatments ? dockLoosePicture(restored) : restored;
-      pictures.set(number, hasEdgeTreatments ? restoreEdgeTreatments(docked) : docked);
+      const finalPicture = hasEdgeTreatments ? restoreEdgeTreatments(docked) : docked;
+      const shown = new Set(visiblePictureKeys(finalPicture));
+      pictures.set(number, {
+        ...finalPicture,
+        layout: {
+          ...finalPicture.layout,
+          apart: completeAssemblies.has(number)
+            ? []
+            : finalPicture.layout.apart.filter((key) => shown.has(key)),
+        },
+      });
     }
     for (const operation of operations) {
       const number = operation.operationNumber ?? 0;
@@ -2196,6 +2617,124 @@ export function editorOperationPictures(
       if (marked.size && assembled)
         pictures.set(number, { ...assembled, op: operation, marks: [] });
     }
+    for (let index = 1; index < operations.length; index++) {
+      const previousOperation = operations[index - 1];
+      const operation = operations[index];
+      const previousNumber = previousOperation.operationNumber ?? 0;
+      const number = operation.operationNumber ?? 0;
+      const previous = pictures.get(previousNumber);
+      const current = pictures.get(number);
+      const inputSignature = (op: SceneOp) =>
+        [...new Set((op.inputKeys ?? []).filter(Boolean))].sort().join('\u0000');
+      const output = previousOperation.outputUnitKey?.trim();
+      const sameAssembly =
+        (!!output && (operation.inputKeys ?? []).includes(output)) ||
+        (!!inputSignature(operation) &&
+          inputSignature(operation) === inputSignature(previousOperation));
+      if (!previous || !current || !sameAssembly || rowByNumber.get(number)?.card?.turn) continue;
+      const keepsWholeUnit =
+        /^(?:attach_label|bind_tape_edge|hem_turned|press_flat|press_final|press_open|topstitch|buttonhole|button_attach)$/i.test(
+          operation.work ?? '',
+        );
+      const bottomFinishing =
+        ['trousers', 'bottom', 'jumpsuit'].includes(model.garment?.category ?? '') &&
+        /^(?:hem_turned|press_flat|press_final|press_open)$/i.test(operation.work ?? '');
+      if (
+        !joins.has(number) &&
+        keepsWholeUnit &&
+        (completeAssemblies.has(previousNumber) ||
+          /press_final/i.test(operation.work ?? '') ||
+          bottomFinishing)
+      ) {
+        const currentKeys = visiblePictureKeys(current);
+        const fullestPrevious = bottomFinishing
+          ? [...pictures.entries()]
+              .filter(
+                ([candidate, picture]) =>
+                  candidate < number && currentKeys.every((key) => picture.layout.T.has(key)),
+              )
+              .sort(
+                ([leftNumber, left], [rightNumber, right]) =>
+                  visiblePictureKeys(right).length - visiblePictureKeys(left).length ||
+                  rightNumber - leftNumber,
+              )[0]?.[1]
+          : null;
+        pictures.set(number, {
+          ...(fullestPrevious ?? previous),
+          op: operation,
+          marks: current.marks,
+        });
+        completeAssemblies.add(number);
+        continue;
+      }
+      if (joins.has(number)) continue;
+      const previousKeys = visiblePictureKeys(previous);
+      const previousTreatments = new Set(
+        previousKeys.filter((key) =>
+          ['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband'].includes(
+            readName(current.geoms.get(key)?.name ?? '').role ?? '',
+          ),
+        ),
+      );
+      const prepared = {
+        ...current,
+        layout: {
+          ...current.layout,
+          pieceLayers: current.layout.pieceLayers.filter(
+            ([piece]) => !previousTreatments.has(piece),
+          ),
+        },
+      };
+      const currentKeys = new Set(visiblePictureKeys(prepared));
+      const common = previousKeys.filter((key) => currentKeys.has(key));
+      if (common.length < 2) continue;
+      const anchor = [...common].sort(
+        (left, right) =>
+          Math.abs(prepared.geoms.get(right)?.areaMm2 ?? 0) -
+          Math.abs(prepared.geoms.get(left)?.areaMm2 ?? 0),
+      )[0];
+      const previousAnchor = previous.layout.T.get(anchor);
+      const currentAnchor = prepared.layout.T.get(anchor);
+      if (!previousAnchor || !currentAnchor) continue;
+      const correction = compose(previousAnchor, invert(currentAnchor));
+      const T = new Map(
+        [...prepared.layout.T].map(([key, transform]) => [key, compose(correction, transform)]),
+      );
+      for (const [key, original] of prepared.layout.T) {
+        if (common.includes(key)) continue;
+        const role = readName(prepared.geoms.get(key)?.name ?? '').role;
+        if (!['front', 'back', 'yoke', 'side', 'sleeve'].includes(role ?? '')) continue;
+        const corrected = T.get(key)!;
+        T.set(key, [
+          original[0],
+          original[1],
+          original[2],
+          original[3],
+          corrected[4],
+          corrected[5],
+        ]);
+      }
+      for (const key of common) {
+        const transform = previous.layout.T.get(key);
+        if (transform) T.set(key, transform);
+      }
+      const preserved = new Set(common);
+      const points = [...T].flatMap(([key, transform]) =>
+        (prepared.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+      );
+      const stabilized = separateAddedBodyPieces(
+        {
+          ...prepared,
+          layout: {
+            ...prepared.layout,
+            T,
+            bbox: boxOf(points),
+          },
+        },
+        preserved,
+      );
+      pictures.set(number, restoreEdgeTreatments(stabilized, preserved));
+    }
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.
@@ -2215,6 +2754,32 @@ export function editorActionMarks(
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
   if (!action) return { lines: [], glyphs: [] };
   const lines: PictureActionLine[] = [];
+  const closestOutlinePoint = (piece: string, point: Pt2): Pt2 => {
+    const ring = geoms.get(piece)?.rs ?? [];
+    if (ring.length < 2) return point;
+    let closest = ring[0];
+    let best = Infinity;
+    for (let index = 0; index < ring.length; index++) {
+      const start = ring[index];
+      const end = ring[(index + 1) % ring.length];
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length2 = dx * dx + dy * dy;
+      const t = length2
+        ? Math.max(
+            0,
+            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+          )
+        : 0;
+      const candidate: Pt2 = [start[0] + t * dx, start[1] + t * dy];
+      const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+      if (distance < best) {
+        best = distance;
+        closest = candidate;
+      }
+    }
+    return closest;
+  };
   const offsetTowardCentre = (piece: string, points: readonly Pt2[], distance: number) => {
     const geom = geoms.get(piece);
     if (!geom) return [...points];
@@ -2228,7 +2793,7 @@ export function editorActionMarks(
     });
   };
   action.edgeParts.forEach((part, index) => {
-    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
+    const points = part.pts.map(([x, y]) => closestOutlinePoint(part.piece, [x, -y]));
     if (!points.length) return;
     if (action.tech === 'topstitch') {
       lines.push({
