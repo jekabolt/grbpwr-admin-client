@@ -47,4 +47,20 @@ describe('work application variants', () => {
 
     expect(applied.clears.seamKind).toBe('');
   });
+
+  it('keeps the edge kinds of a topstitch when the work becomes topstitch', () => {
+    for (const seamKind of ['faced_split', 'hem_raw', 'hem_closed']) {
+      const applied = workApplication({
+        item: work('topstitch'),
+        kind: OPERATION_KIND_BY_ID.get('A2'),
+        current: {
+          operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+          machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+          seamKind,
+        },
+        park: { machines: [], presses: [] },
+      });
+      expect(applied.clears.seamKind).toBeUndefined();
+    }
+  });
 });

@@ -274,15 +274,21 @@ const hemBase = commonShapes(shapesOf('hem_turned ×2'), shapesOf('hem_turned ×
 // A turned edge (collar, cuff, flap: two plies sewn face to face, turned, topstitched) and a single
 // raw-edge hem have no row cards on the sheet: their bars are drawn here, across the whole edge,
 // and the base drops the sheet's own one-row mark.
-const facedBase = shapesOf('faced_split').slice(0, 2);
+// The turned edge with rows is the owner's own drawing, not the catalog card: three full plies,
+// two folds on the right joining ply 1–2 and 2–3 (a «3»), and the bars go straight through all
+// three. The seam catalog keeps the faced_split card; only the rows base is this glyph.
+const facedBase = [
+  { type: 'p', d: 'M3 6 H22 a3 3 0 0 1 0 6 H3', dashed: false },
+  { type: 'p', d: 'M22 12 a3 3 0 0 1 0 6 H3', dashed: false },
+];
 const hemRawBase = shapesOf('hem_raw').slice(0, 2);
 const vbars = (xs, y0, y1) =>
   xs.map((x) => ({ type: 'p', d: `M${x} ${y0} V${y1}`, dashed: false }));
 const bars = {
   faced: {
-    1: vbars([17], 3, 21),
-    2: vbars([17, 13.5], 3, 21),
-    3: vbars([17, 13.5, 10], 3, 21),
+    1: vbars([18], 3, 21),
+    2: vbars([18, 15], 3, 21),
+    3: vbars([18, 15, 12], 3, 21),
   },
   hem_raw: {
     1: vbars([19], 6, 16),
@@ -386,7 +392,7 @@ export const BAR_BASE: Partial<Record<IconKey, { family: BarFamily; shapes: read
   topstitch:{family:'topstitch',shapes:ICONS.topstitch,zone:[10,17,7,22.5]},
   lapped_raw:{family:'lapped_raw',shapes:${shapesTs(lappedBase)},zone:[13,19,8,17]},
   hem_closed:{family:'hem_closed',shapes:${shapesTs(hemBase)},zone:[12,18.5,6,16]},
-  faced_split:{family:'faced',shapes:${shapesTs(facedBase)},zone:[10,17,3,21]},
+  faced_split:{family:'faced',shapes:${shapesTs(facedBase)},zone:[12,18,3,21]},
   hem_raw:{family:'hem_raw',shapes:${shapesTs(hemRawBase)},zone:[16,21,6,16]},
 };
 `;

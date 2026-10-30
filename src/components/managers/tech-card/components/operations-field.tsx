@@ -255,6 +255,7 @@ import {
   PressTowardTiles,
   SeamKindTiles,
   StepHeaderIcon,
+  TopstitchEdgeSelect,
   TopstitchRowTiles,
   WorkVariantTiles,
 } from './step-icon-tiles';
@@ -4444,7 +4445,7 @@ function OperationEditor({
     fuse: ['workVariant'],
     'press-action': ['pressAction'],
     join: ['seamKind'],
-    topstitch: ['topstitchMode', 'topstitchWidthMm', 'topstitchRows'],
+    topstitch: ['seamKind', 'topstitchMode', 'topstitchWidthMm', 'topstitchRows'],
     bind: ['seamKind', 'bindingStyle'],
     hem: ['seamKind', 'topstitchWidthMm'],
     buttonhole: ['buttonholeStyle', 'cutLengthMm', 'buttonholeOrientation', 'placementCount'],
@@ -4630,14 +4631,14 @@ function OperationEditor({
           )}
           {howKind === 'topstitch' && (
             <div className='space-y-2'>
-              <TopstitchRowTiles index={index} label='' />
-              <div className='grid grid-cols-2 gap-2'>
+              <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
                 <SelectField
                   name={`operations.${index}.topstitchMode`}
                   label='at'
                   items={topstitchModeOptionsFor(topstitchMode)}
                   className={selectNoGrow}
                 />
+                <TopstitchEdgeSelect index={index} className={selectNoGrow} />
                 {showTopstitchWidth && (
                   <DecimalField
                     name={`operations.${index}.topstitchWidthMm`}
@@ -4646,6 +4647,7 @@ function OperationEditor({
                   />
                 )}
               </div>
+              <TopstitchRowTiles index={index} label='' />
             </div>
           )}
           {howKind === 'buttonhole' && (
@@ -5047,7 +5049,8 @@ function OperationEditor({
 
             {howKind !== 'fuse' && <WorkVariantTiles index={index} className='sm:col-span-2' />}
             {!['join', 'bind', 'hem'].includes(howKind) &&
-              (!['buttonhole', 'button', 'topstitch'].includes(howKind) || !!seamKind) && (
+              howKind !== 'topstitch' &&
+              (!['buttonhole', 'button'].includes(howKind) || !!seamKind) && (
                 <SeamKindTiles
                   index={index}
                   family={showStitching || seamKind ? 'stored' : null}

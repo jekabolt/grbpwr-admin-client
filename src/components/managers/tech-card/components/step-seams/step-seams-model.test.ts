@@ -154,6 +154,10 @@ describe('inputGroups', () => {
       { key: 'ARM', pieces: ['SLV', 'CUFF'] },
     ]);
   });
+  it('keeps a single-piece output as a resolvable unit alias', () => {
+    const aliases = [{ inputKeys: ['FP'], outputUnitKey: 'FRONT' }, { inputKeys: ['FRONT'] }];
+    expect(inputGroups(aliases, 1, pieces)).toEqual([{ key: 'FRONT', pieces: ['FP'] }]);
+  });
   it('drops an input it cannot resolve', () => {
     expect(inputGroups([{ inputKeys: ['GHOST', 'FP'] }], 0, pieces)).toEqual([
       { key: 'FP', pieces: ['FP'] },

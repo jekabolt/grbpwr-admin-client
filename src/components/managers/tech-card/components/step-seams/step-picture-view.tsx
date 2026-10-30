@@ -33,6 +33,7 @@ import {
   earlierInner,
   fitBox,
   focusPieces,
+  hideLabels as hideLabelSpots,
   insideRing,
   inputName,
   labelSpot,
@@ -562,8 +563,8 @@ export type PictureView = { k: number; x: number; y: number };
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
  * beside on the canvas); `nos` put a stored seam's number beside it; `names` (one per input) sit on
- * the input's centre, or under it with `namesBelow`. With `onPick` every edge and inner line is a
- * door.
+ * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge is a door;
+ * inner lines stay visible but are placed only by dragging in the picker.
  */
 export function StepPictureSvg({
   w,
@@ -727,6 +728,7 @@ export function StepPictureSvg({
   const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
     let best = ring[0] ?? point;
     let distance = Infinity;
+    let segment = 0;
     ring.forEach((start, index) => {
       const end = ring[(index + 1) % ring.length];
       const dx = end[0] - start[0];
@@ -743,14 +745,32 @@ export function StepPictureSvg({
       if (candidateDistance < distance) {
         best = candidate;
         distance = candidateDistance;
+        segment = index;
       }
     });
-    return { point: best, distance };
+    return { point: best, distance, segment };
   };
   const pointsOnDrawnPiece = (key: string, points: readonly Pt2[]) => {
     const host = actionHost(key);
     if (!host) return null;
     const hidden = host.key !== key;
+    if (hidden && points.length > 1 && host.ring.length > 2) {
+      const start = nearestOnRing(points[0], host.ring);
+      const end = nearestOnRing(points[points.length - 1], host.ring);
+      const count = host.ring.length;
+      const forward: Pt2[] = [];
+      for (let index = (start.segment + 1) % count; index !== (end.segment + 1) % count; ) {
+        forward.push(host.ring[index]);
+        index = (index + 1) % count;
+      }
+      const backward: Pt2[] = [];
+      for (let index = start.segment; index !== end.segment; ) {
+        backward.push(host.ring[index]);
+        index = (index - 1 + count) % count;
+      }
+      const arc = forward.length <= backward.length ? forward : backward;
+      return [start.point, ...arc, end.point];
+    }
     return points.map((point) => {
       const nearest = nearestOnRing(point, host.ring);
       return hidden || (!insideRing(point, host.ring) && nearest.distance > 4)
@@ -810,15 +830,29 @@ export function StepPictureSvg({
     const length = Math.hypot(dx, dy) || 1;
     return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
   });
+  const hideCrowdedLabels = look === 'canvas' || look === 'result';
+  const pieceSize = new Map(
+    pieces.map((piece) => {
+      const box = boxOf(piece.ring);
+      return [piece.key, Math.min(box.x1 - box.x0, box.y1 - box.y0)] as const;
+    }),
+  );
+  const offsetOf = (id: TargetId, extra = 0) => {
+    if (!hideCrowdedLabels) return 16 + extra;
+    const size = pieceSize.get(pieceOfId(id)) ?? 0;
+    return Math.max(3, Math.min(16, size * 0.09)) + extra;
+  };
   const labels = markLines
     .filter(({ m }) => m.label)
     .map(({ m, pts }) => ({
       m,
-      s: labelSpot(pts, centreOf.get(pieceOfId(m.id)) ?? pts[0], 16),
+      s: labelSpot(pts, centreOf.get(pieceOfId(m.id)) ?? pts[0], offsetOf(m.id)),
     }));
   const noSpots = nos.flatMap(({ id, i }) => {
     const pts = ptsOf(id);
-    return pts ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], 18) }] : [];
+    return pts
+      ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], offsetOf(id, 2)) }]
+      : [];
   });
   // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
   // never across the gap between pieces that only stand together.
@@ -843,26 +877,39 @@ export function StepPictureSvg({
     const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
-  // One collision pass: the unit names stand first, where they are (a name is what a shape IS);
-  // the mm then slide along their own edges clear of them, a breath apart (the name's box is read
-  // a little wider than the type), then the numbers. Mono type, ~0.62 em a character; the names'
-  // letter spacing on top.
-  const spots = spreadLabels([
-    ...nameSpots.map(({ text, s }) => ({
-      ...s,
-      w: text.length * L.font * 0.66 + 16,
-      h: L.font + 8,
-    })),
-    ...labels.map(({ m, s }) => ({
-      ...s,
-      w: (m.label ?? '').length * L.font * 0.62,
-      h: L.font + 2,
-    })),
-    ...noSpots.map(({ s }) => ({ ...s, anchor: 'middle' as const, w: 20, h: 20 })),
-  ]);
-  const nameAt = (i: number) => spots[i];
-  const labelAt = (i: number) => spots[nameSpots.length + i];
-  const noAt = (i: number) => spots[nameSpots.length + labels.length + i];
+  const nameBoxes = nameSpots.map(({ text, s }) => ({
+    ...s,
+    w: text.length * L.font * 0.66 + 16,
+    h: L.font + 8,
+  }));
+  const labelBoxes = labels.map(({ m, s }) => ({
+    ...s,
+    w: (m.label ?? '').length * L.font * 0.62,
+    h: L.font + 2,
+  }));
+  const noBoxes = noSpots.map(({ s }) => ({
+    ...s,
+    anchor: 'middle' as const,
+    w: 20,
+    h: 20,
+    required: true,
+  }));
+  // Print and tiles retain the established sliding order. Canvas/result keep every number at its
+  // own edge, then admit mm labels and names only while they fit without a collision.
+  const spots = hideCrowdedLabels
+    ? hideLabelSpots([...noBoxes, ...labelBoxes, ...nameBoxes], {
+        x0: 0,
+        y0: 0,
+        x1: w,
+        y1: h,
+      })
+    : spreadLabels([...nameBoxes, ...labelBoxes, ...noBoxes]);
+  const nameAt = (i: number) =>
+    hideCrowdedLabels ? spots[noSpots.length + labels.length + i] : spots[i];
+  const labelAt = (i: number) =>
+    hideCrowdedLabels ? spots[noSpots.length + i] : spots[nameSpots.length + i];
+  const noAt = (i: number) =>
+    hideCrowdedLabels ? spots[i] : spots[nameSpots.length + labels.length + i];
 
   if (w < 2 || h < 2) return null;
   return (
@@ -1036,27 +1083,30 @@ export function StepPictureSvg({
         );
       })}
       {look !== 'tile' &&
-        labels.map(({ m, s }, i) => (
-          <text
-            key={`l:${m.id}`}
-            x={labelAt(i)[0]}
-            y={labelAt(i)[1]}
-            textAnchor={s.anchor}
-            dominantBaseline='central'
-            fill={m.tone === 'pick' ? PICK : INK}
-            stroke={FILL}
-            strokeWidth={4}
-            paintOrder='stroke'
-            className='tabular-nums'
-            pointerEvents='none'
-          >
-            {m.label}
-          </text>
-        ))}
+        labels.map(({ m, s }, i) => {
+          const at = labelAt(i);
+          return at ? (
+            <text
+              key={`l:${m.id}`}
+              x={at[0]}
+              y={at[1]}
+              textAnchor={s.anchor}
+              dominantBaseline='central'
+              fill={m.tone === 'pick' ? PICK : INK}
+              stroke={FILL}
+              strokeWidth={4}
+              paintOrder='stroke'
+              className='tabular-nums'
+              pointerEvents='none'
+            >
+              {m.label}
+            </text>
+          ) : null;
+        })}
       {look !== 'tile' &&
         noSpots.map(({ id, i }, n) => {
           const at = noAt(n);
-          return (
+          return at ? (
             <g key={`n:${id}`} pointerEvents='none' data-pair-no={i + 1}>
               <rect
                 x={at[0] - 9}
@@ -1078,43 +1128,48 @@ export function StepPictureSvg({
                 {pairNo(i)}
               </text>
             </g>
-          );
+          ) : null;
         })}
       {look !== 'tile' &&
-        nameSpots.map((s, i) => (
-          <text
-            key={`u:${i}`}
-            x={nameAt(i)[0]}
-            y={nameAt(i)[1]}
-            textAnchor='middle'
-            dominantBaseline='central'
-            fill={GREY}
-            stroke={FILL}
-            strokeWidth={4}
-            paintOrder='stroke'
-            letterSpacing='0.04em'
-            pointerEvents='none'
-            data-unit-name=''
-          >
-            {s.text}
-          </text>
-        ))}
+        nameSpots.map((s, i) => {
+          const at = nameAt(i);
+          return at ? (
+            <text
+              key={`u:${i}`}
+              x={at[0]}
+              y={at[1]}
+              textAnchor='middle'
+              dominantBaseline='central'
+              fill={GREY}
+              stroke={FILL}
+              strokeWidth={4}
+              paintOrder='stroke'
+              letterSpacing='0.04em'
+              pointerEvents='none'
+              data-unit-name=''
+            >
+              {s.text}
+            </text>
+          ) : null;
+        })}
       {onPick &&
-        doors.map((x) => (
-          <path
-            key={`h:${x.id}`}
-            d={x.d}
-            fill='none'
-            stroke='transparent'
-            strokeWidth={14}
-            pointerEvents='stroke'
-            className='cursor-pointer'
-            onPointerEnter={() => onHover?.(x.id)}
-            onPointerLeave={() => onHover?.(null)}
-            onClick={() => onPick(x.id)}
-            data-seam-target={x.id}
-          />
-        ))}
+        doors
+          .filter((x) => !x.inner)
+          .map((x) => (
+            <path
+              key={`h:${x.id}`}
+              d={x.d}
+              fill='none'
+              stroke='transparent'
+              strokeWidth={14}
+              pointerEvents='stroke'
+              className='cursor-pointer'
+              onPointerEnter={() => onHover?.(x.id)}
+              onPointerLeave={() => onHover?.(null)}
+              onClick={() => onPick(x.id)}
+              data-seam-target={x.id}
+            />
+          ))}
     </svg>
   );
 }

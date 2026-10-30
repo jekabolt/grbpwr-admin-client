@@ -73,6 +73,30 @@ describe('operation icon registry', () => {
   });
 });
 
+describe('a turned edge with rows', () => {
+  it('draws three plies folded into a «3», bars straight through all three', () => {
+    expect(BAR_BASE.faced_split?.family).toBe('faced');
+    expect(BAR_BASE.faced_split?.shapes).toEqual([
+      ['p', 'M3 6 H22 a3 3 0 0 1 0 6 H3'],
+      ['p', 'M22 12 a3 3 0 0 1 0 6 H3'],
+    ]);
+    expect(OVERLAYS.bars.faced[1]).toEqual([['p', 'M18 3 V21']]);
+    expect(OVERLAYS.bars.faced[2]).toEqual([
+      ['p', 'M18 3 V21'],
+      ['p', 'M15 3 V21'],
+    ]);
+    expect(OVERLAYS.bars.faced[3]).toEqual([
+      ['p', 'M18 3 V21'],
+      ['p', 'M15 3 V21'],
+      ['p', 'M12 3 V21'],
+    ]);
+  });
+
+  it('keeps the catalog card for a turned edge without rows', () => {
+    expect(ICONS.faced_split).not.toEqual(BAR_BASE.faced_split?.shapes);
+  });
+});
+
 describe('opIcon card 38 golden expectations', () => {
   const rows: Array<[number, OpIconInput, OpIcon]> = [
     [

@@ -9,7 +9,7 @@
 // surface seam.
 
 import * as Dialog from '@radix-ui/react-dialog';
-import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
@@ -50,6 +50,7 @@ import { stepWords } from './step-words';
 import {
   deltaMm,
   fmtMm,
+  innerId,
   longestEdge,
   parseInner,
   pieceOfTarget,
@@ -63,6 +64,9 @@ import {
   boxOf,
   fitBox,
   focusPieces,
+  insideRing,
+  midAlong,
+  PARTNER_REL,
   partnerOf,
   pathOf,
   seamOfSides,
@@ -86,7 +90,10 @@ import {
 
 type Side = 'a' | 'b';
 type Sel = { a: TargetId[]; b: TargetId[] };
-type Place = { x: number; y: number; rot: number };
+type Place = { x: number; y: number; rot: number; host?: string };
+type PlaceDrop =
+  | { kind: 'snap'; hostEdge: EdgeId; partEdge: EdgeId }
+  | { kind: 'surface'; host: string; inner: number; part: string; place: Place };
 const EMPTY: Sel = { a: [], b: [] };
 const SIDES = [
   { value: 'a', label: 'side A' },
@@ -100,6 +107,68 @@ const NONE: readonly (readonly string[])[] = [];
 const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
 const mmText = (v: number) => `${fmtMm(v)} mm`;
+
+type PlaceHost = {
+  piece: AsmPiece;
+  tx: number;
+  ty: number;
+  box: ReturnType<typeof boxOf>;
+};
+
+type PlaceScene = {
+  hosts: PlaceHost[];
+  partBox: ReturnType<typeof boxOf>;
+  initial: Place;
+  viewBox: [number, number, number, number];
+};
+
+/** Host pieces stand in one mm frame; translations keep their raw pattern frames from overlapping. */
+const placeSceneOf = (hosts: readonly AsmPiece[], part: AsmPiece): PlaceScene => {
+  const source = hosts.map((piece) => ({ piece, box: boxOf(piece.cut) }));
+  const partBox = boxOf(part.cut);
+  const partWidth = partBox.x1 - partBox.x0;
+  const partHeight = partBox.y1 - partBox.y0;
+  const hostHeight = Math.max(1, ...source.map(({ box }) => box.y1 - box.y0));
+  const span = Math.max(
+    partWidth,
+    partHeight,
+    ...source.flatMap(({ box }) => [box.x1 - box.x0, box.y1 - box.y0]),
+    1,
+  );
+  const gap = Math.max(25, span * 0.08);
+  let x = 0;
+  const placed = source.map(({ piece, box }) => {
+    const width = box.x1 - box.x0;
+    const height = box.y1 - box.y0;
+    const y = (hostHeight - height) / 2;
+    const host = {
+      piece,
+      tx: x - box.x0,
+      ty: y - box.y0,
+      box: { x0: x, y0: y, x1: x + width, y1: y + height },
+    };
+    x += width + gap;
+    return host;
+  });
+  const partX = x;
+  const partY = Math.max(0, (hostHeight - partHeight) / 2);
+  const margin = span;
+  const x1 = Math.max(placed.at(-1)?.box.x1 ?? 0, partX + partWidth);
+  const y1 = Math.max(hostHeight, partY + partHeight);
+  return {
+    hosts: placed,
+    partBox,
+    initial: { x: partX, y: partY, rot: 0 },
+    viewBox: [-margin, -margin, x1 + margin * 2, y1 + margin * 2],
+  };
+};
+
+const worldPlace = (scene: PlaceScene, place: Place): Place => {
+  const host = place.host ? scene.hosts.find((item) => item.piece.key === place.host) : undefined;
+  return host
+    ? { x: host.box.x0 + place.x, y: host.box.y0 + place.y, rot: place.rot }
+    : { x: place.x, y: place.y, rot: place.rot };
+};
 
 /** Stored placements with this session's edits on top (null: cleared). */
 const withOverrides = (
@@ -200,6 +269,8 @@ export function SeamPickerBody({
   const [chosen, setChosen] = useState<Side>('a');
   const [hover, setHover] = useState<TargetId | null>(null);
   const [place, setPlace] = useState<Place | null>(null);
+  const [placing, setPlacing] = useState(false);
+  const [placePartKey, setPlacePartKey] = useState<string | null>(null);
   const [selectedPiece, setSelectedPiece] = useState<string | null>(null);
   const [handOverrides, setHandOverrides] = useState<Map<string, HandOn | null>>(() => new Map());
   const [busy, setBusy] = useState(false);
@@ -256,6 +327,44 @@ export function SeamPickerBody({
     return partnerOf(len, cands, (a, b) => deltaMm(a, b, ease));
   }, [lone, sel, groups, geoms, used, sewnInside, ease, lenOf]);
 
+  const placePartCandidate = useMemo(() => {
+    if (!pieces) return null;
+    if (groups.length >= 2) {
+      if (selectedPiece && !groups[0].pieces.includes(selectedPiece) && pieces.has(selectedPiece))
+        return selectedPiece;
+      return (
+        groups
+          .slice(1)
+          .flatMap((group) => group.pieces)
+          .find((key) => pieces.has(key)) ?? null
+      );
+    }
+    const group = groups[0];
+    if (!group || group.pieces.length < 2) return null;
+    const pickedB = sel.b.map(pieceOfTarget).find((key) => pieces.has(key));
+    if (pickedB) return pickedB;
+    const pickedA = new Set(sel.a.map(pieceOfTarget));
+    return (
+      group.pieces.find((key, index) => index > 0 && !pickedA.has(key) && pieces.has(key)) ?? null
+    );
+  }, [pieces, groups, selectedPiece, sel]);
+  const activePlacePartKey = placePartKey ?? placePartCandidate;
+  const placeHostKeys = useMemo(() => {
+    if (!activePlacePartKey) return [];
+    return groups.length >= 2
+      ? groups[0].pieces
+      : (groups[0]?.pieces ?? []).filter((key) => key !== activePlacePartKey);
+  }, [activePlacePartKey, groups]);
+  const placeHosts = placeHostKeys
+    .map((key) => pieces?.get(key))
+    .filter((piece): piece is AsmPiece => !!piece);
+  const placePartPiece = activePlacePartKey ? pieces?.get(activePlacePartKey) : undefined;
+  const hasPlaceSides =
+    groups.length >= 2
+      ? groups[0].pieces.length > 0 && groups.slice(1).some((group) => group.pieces.length > 0)
+      : (groups[0]?.pieces.length ?? 0) >= 2;
+  const placeReady = !!placePartPiece && placeHosts.length > 0;
+
   // ── what «accept» would write ──
   const inners = [...sel.a, ...sel.b].filter((t) => parseInner(t));
   const surface = inners.length === 1;
@@ -266,9 +375,11 @@ export function SeamPickerBody({
     if (!host || !hostSide) return null;
     const other = sel[hostSide === 'a' ? 'b' : 'a'];
     if (other.length) return pieceOfTarget(other[0]);
+    if (placePartKey && placePartKey !== host.piece && pieces?.has(placePartKey))
+      return placePartKey;
     const g = groups.find((_, gi) => gi !== hostGroup);
     return g?.pieces.find((p) => pieces?.has(p)) ?? null;
-  }, [host, hostSide, sel, groups, hostGroup, pieces]);
+  }, [host, hostSide, sel, placePartKey, groups, hostGroup, pieces]);
 
   /**
    * The pair on the table: the user's own (both sides, or one side + its partner), else the
@@ -364,6 +475,8 @@ export function SeamPickerBody({
   const reset = () => {
     setSel(EMPTY);
     setPlace(null);
+    setPlacing(false);
+    setPlacePartKey(null);
     setSelectedPiece(null);
     setHandOverrides(new Map());
     setChosen('a');
@@ -405,7 +518,7 @@ export function SeamPickerBody({
   };
 
   const toggle = (id: TargetId) => {
-    if (frozen || place) return;
+    if (frozen || placing || parseInner(id)) return;
     const side = sideOf(pieceOfTarget(id), groups, chosen);
     setRefused('');
     const has = sel[side].includes(id);
@@ -531,21 +644,44 @@ export function SeamPickerBody({
   const phone = canvas.w > 0 && canvas.w < 600;
   const zoom = usePictureZoom(canvas.w, canvas.h, index);
 
-  // ── «place»: the part follows the pointer over its host (mm in the drawing frame) ──
-  const hostPiece = host ? pieces?.get(host.piece) : undefined;
-  const partPiece = partKey ? pieces?.get(partKey) : undefined;
+  // ── «place»: drag the B-side part over the other side, then choose a snapped edge pair or mark ──
   const startPlace = () => {
-    if (place) return setPlace(null);
-    if (!hostPiece || !partPiece || !host) return;
-    const hb = boxOf(hostPiece.cut);
-    const lb = boxOf(hostPiece.inner[host.k] ?? hostPiece.cut);
-    const pb = boxOf(partPiece.cut);
-    // Start with the part centred on the mark, relative to the host's bbox corner.
-    setPlace({
-      x: (lb.x0 + lb.x1) / 2 - (pb.x1 - pb.x0) / 2 - hb.x0,
-      y: (lb.y0 + lb.y1) / 2 - (pb.y1 - pb.y0) / 2 - hb.y0,
-      rot: 0,
+    if (placing) {
+      setPlacing(false);
+      if (!surface) {
+        setPlace(null);
+        setPlacePartKey(null);
+      }
+      return;
+    }
+    if (!placePartPiece || !placeHosts.length || !activePlacePartKey) return;
+    setPlacePartKey(activePlacePartKey);
+    if (!surface || !place) setPlace(placeSceneOf(placeHosts, placePartPiece).initial);
+    setPlacing(true);
+  };
+
+  const finishPlace = (drop: PlaceDrop) => {
+    setRefused('');
+    if (drop.kind === 'snap') {
+      const hostSide: Side =
+        groups.length < 2 ? 'a' : sideOf(pieceOfTarget(drop.hostEdge), groups, chosen);
+      const partSide: Side = hostSide === 'a' ? 'b' : 'a';
+      setSel({
+        a: hostSide === 'a' ? [drop.hostEdge] : [drop.partEdge],
+        b: partSide === 'b' ? [drop.partEdge] : [drop.hostEdge],
+      });
+      setPlace(null);
+      setPlacing(false);
+      setPlacePartKey(null);
+      return;
+    }
+    const hostSide: Side = groups.length < 2 ? 'a' : sideOf(drop.host, groups, chosen);
+    setSel({
+      a: hostSide === 'a' ? [innerId(drop.host, drop.inner)] : [],
+      b: hostSide === 'b' ? [innerId(drop.host, drop.inner)] : [],
     });
+    setPlace(drop.place);
+    setPlacePartKey(drop.part);
   };
 
   const switchProposal = (v: string) => {
@@ -556,7 +692,7 @@ export function SeamPickerBody({
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea')) return;
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && !place && zoom.onKey(e.key)) {
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !placing && zoom.onKey(e.key)) {
       e.preventDefault();
     } else if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
@@ -568,12 +704,16 @@ export function SeamPickerBody({
   };
 
   const escape = () => {
-    if (selectedPiece) {
-      setSelectedPiece(null);
+    if (placing) {
+      setPlacing(false);
+      if (!surface) {
+        setPlace(null);
+        setPlacePartKey(null);
+      }
       return true;
     }
-    if (place) {
-      setPlace(null);
+    if (selectedPiece) {
+      setSelectedPiece(null);
       return true;
     }
     if (sel.a.length || sel.b.length) {
@@ -737,10 +877,10 @@ export function SeamPickerBody({
             }}
             className={cn(
               'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden select-none',
-              zoom.zoomed && !place && 'cursor-grab active:cursor-grabbing',
+              zoom.zoomed && !placing && 'cursor-grab active:cursor-grabbing',
             )}
             data-seam-picker-canvas=''
-            {...(place ? {} : zoom.handlers)}
+            {...(placing ? {} : zoom.handlers)}
           >
             {loading && !drawn ? (
               <div className='absolute inset-0 grid place-items-center'>
@@ -750,15 +890,18 @@ export function SeamPickerBody({
               <div className='absolute inset-0 grid place-items-center'>
                 <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
               </div>
-            ) : place && hostPiece && partPiece && host ? (
+            ) : placing && place && placePartPiece && placeHosts.length ? (
               <PlaceView
                 w={canvas.w}
                 h={canvas.h}
-                host={hostPiece}
-                line={hostPiece.inner[host.k] ?? []}
-                part={partPiece}
+                hosts={placeHosts}
+                part={placePartPiece}
                 place={place}
-                onPlace={setPlace}
+                used={used}
+                sewnInside={sewnInside}
+                ease={ease}
+                selectedInner={host ? { piece: host.piece, k: host.k } : null}
+                onDrop={finishPlace}
               />
             ) : (
               <StepPictureSvg
@@ -781,7 +924,7 @@ export function SeamPickerBody({
                 className='absolute inset-0'
               />
             )}
-            {drawn && !place && (
+            {drawn && !placing && (
               <div className='absolute top-2 right-3 flex items-center gap-3' data-seam-zoom=''>
                 <Button
                   type='button'
@@ -892,18 +1035,18 @@ export function SeamPickerBody({
               no seam
             </Text>
           ) : null}
-          {surface && !frozen && (
+          {hasPlaceSides && !frozen && (
             <Button
               type='button'
               variant='underline'
               size='xs'
               onClick={startPlace}
-              disabled={!hostPiece || !partPiece}
+              disabled={!placeReady}
             >
-              {place ? 'done' : 'place'}
+              {placing ? 'done' : 'place'}
             </Button>
           )}
-          {place && (
+          {placing && place && (
             <Button
               type='button'
               variant='underline'
@@ -1173,116 +1316,329 @@ function ResultHandOverlay({
   );
 }
 
-/**
- * «place»: the host in its drawing frame (mm, y down) with its mark in the pick blue, the part on
- * top following the pointer. The stored placement is the part's bbox corner relative to the host's,
- * then turned — the same numbers the surface seam has always stored. The drag lives here (the
- * picker hears the drop only); the host layer is drawn once.
- */
+type SnapPair = {
+  hostEdge: EdgeId;
+  partEdge: EdgeId;
+  hostPoints: Pt[];
+  partPoints: Pt[];
+  distance: number;
+  delta: number;
+};
+
+const pointLineDistance = (point: Pt, line: readonly Pt[]) => {
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1];
+    const b = line[i];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length2 = dx * dx + dy * dy;
+    const share = length2
+      ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length2))
+      : 0;
+    best = Math.min(best, Math.hypot(point[0] - a[0] - share * dx, point[1] - a[1] - share * dy));
+  }
+  return best;
+};
+
+/** «place»: one mm frame for every host contour and the live B-side part. */
 function PlaceView({
   w,
   h,
-  host,
-  line,
+  hosts,
   part,
   place,
-  onPlace,
+  used,
+  sewnInside,
+  ease,
+  selectedInner,
+  onDrop,
 }: {
   w: number;
   h: number;
-  host: AsmPiece;
-  line: Pt[];
+  hosts: readonly AsmPiece[];
   part: AsmPiece;
   place: Place;
-  onPlace: (p: Place) => void;
+  used: ReadonlySet<EdgeId>;
+  sewnInside: ReadonlySet<EdgeId>;
+  ease: number | null;
+  selectedInner: { piece: string; k: number } | null;
+  onDrop: (drop: PlaceDrop) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const [live, setLive] = useState(place);
-  useEffect(() => setLive(place), [place]);
-  const hb = useMemo(() => boxOf(host.cut), [host]);
-  const pb = useMemo(() => boxOf(part.cut), [part]);
-  const m = Math.max(pb.x1 - pb.x0, pb.y1 - pb.y0);
-  const vb = [hb.x0 - m, hb.y0 - m, hb.x1 - hb.x0 + 2 * m, hb.y1 - hb.y0 + 2 * m];
-  const hostLayer = useMemo(
-    () => (
-      <>
-        <path
-          d={pathOf(host.cut, true)}
-          fill='var(--color-bgColor)'
-          stroke='var(--color-textColor)'
-          strokeWidth={2}
-          vectorEffect='non-scaling-stroke'
-        />
-        <path
-          d={pathOf(line)}
-          fill='none'
-          stroke='var(--color-warning)'
-          strokeWidth={3}
-          vectorEffect='non-scaling-stroke'
-        />
-      </>
-    ),
-    [host, line],
+  const scene = useMemo(() => placeSceneOf(hosts, part), [hosts, part]);
+  const [live, setLive] = useState(() => worldPlace(scene, place));
+  const [snap, setSnap] = useState<SnapPair | null>(null);
+  const drag = useRef<{
+    x: number;
+    y: number;
+    px: number;
+    py: number;
+    live: Place;
+    snap: SnapPair | null;
+  } | null>(null);
+  useEffect(() => {
+    setLive(worldPlace(scene, place));
+    setSnap(null);
+  }, [place, scene]);
+
+  const partPoint = useCallback(
+    (point: Pt, at: Place): Pt => {
+      const angle = (at.rot * Math.PI) / 180;
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const dx = point[0] - scene.partBox.x0;
+      const dy = point[1] - scene.partBox.y0;
+      return [at.x + dx * c - dy * s, at.y + dx * s + dy * c];
+    },
+    [scene.partBox],
   );
-  const partLayer = useMemo(
-    () => (
-      <path
-        d={pathOf(part.cut, true)}
-        fill='var(--color-bgColor)'
-        fillOpacity={0.85}
-        stroke='var(--color-textColor)'
-        strokeWidth={1.2}
-        strokeDasharray='6 4'
-        vectorEffect='non-scaling-stroke'
-      />
-    ),
+  const hostEdges = useMemo(
+    () =>
+      scene.hosts.flatMap((host) =>
+        plainEdges(host.piece.geom).map((edge) => ({
+          edge,
+          points: edge.pts.map(([x, y]) => [x + host.tx, -y + host.ty] as Pt),
+        })),
+      ),
+    [scene.hosts],
+  );
+  const partEdges = useMemo(
+    () =>
+      plainEdges(part.geom).map((edge) => ({
+        edge,
+        points: edge.pts.map(([x, y]) => [x, -y] as Pt),
+      })),
     [part],
   );
+  const available = useCallback(
+    (edge: Edge) => !used.has(edge.id) && !sewnInside.has(edge.id) && edge.lenMm >= 30,
+    [used, sewnInside],
+  );
+  const findSnap = useCallback(
+    (at: Place): SnapPair | null => {
+      let best: SnapPair | null = null;
+      for (const partEdge of partEdges) {
+        if (!available(partEdge.edge)) continue;
+        const partPoints = partEdge.points.map((point) => partPoint(point, at));
+        const partStart = partPoints[0];
+        const partEnd = partPoints[partPoints.length - 1];
+        if (!partStart || !partEnd) continue;
+        const partVector: Pt = [partEnd[0] - partStart[0], partEnd[1] - partStart[1]];
+        const partMid = midAlong(partPoints).p;
+        for (const hostEdge of hostEdges) {
+          if (!available(hostEdge.edge)) continue;
+          const hostStart = hostEdge.points[0];
+          const hostEnd = hostEdge.points[hostEdge.points.length - 1];
+          if (!hostStart || !hostEnd) continue;
+          const hostVector: Pt = [hostEnd[0] - hostStart[0], hostEnd[1] - hostStart[1]];
+          const denominator = Math.hypot(...partVector) * Math.hypot(...hostVector);
+          if (!denominator) continue;
+          const parallel =
+            Math.abs(partVector[0] * hostVector[0] + partVector[1] * hostVector[1]) / denominator;
+          if (parallel < 0.9) continue;
+          const delta = deltaMm(partEdge.edge.lenMm, hostEdge.edge.lenMm, ease);
+          if (delta / Math.max(partEdge.edge.lenMm, hostEdge.edge.lenMm) > PARTNER_REL) continue;
+          const hostMid = midAlong(hostEdge.points).p;
+          const distance = Math.hypot(partMid[0] - hostMid[0], partMid[1] - hostMid[1]);
+          const near = Math.max(25, Math.min(partEdge.edge.lenMm, hostEdge.edge.lenMm) * 0.15);
+          if (distance > near) continue;
+          if (
+            !best ||
+            distance < best.distance ||
+            (Math.abs(distance - best.distance) < 1e-6 && delta < best.delta)
+          )
+            best = {
+              hostEdge: hostEdge.edge.id,
+              partEdge: partEdge.edge.id,
+              hostPoints: hostEdge.points,
+              partPoints,
+              distance,
+              delta,
+            };
+        }
+      }
+      return best;
+    },
+    [available, ease, hostEdges, partEdges, partPoint],
+  );
+
+  const surfaceAt = (at: Place): Extract<PlaceDrop, { kind: 'surface' }> | null => {
+    const centre = partPoint(
+      [(scene.partBox.x0 + scene.partBox.x1) / 2, (scene.partBox.y0 + scene.partBox.y1) / 2],
+      at,
+    );
+    let nearest: { host: PlaceHost; inner: number; distance: number } | null = null;
+    for (const host of scene.hosts) {
+      const ring = host.piece.cut.map(([x, y]) => [x + host.tx, y + host.ty] as Pt);
+      if (!host.piece.inner.length || !insideRing(centre, ring)) continue;
+      for (let inner = 0; inner < host.piece.inner.length; inner++) {
+        const line = host.piece.inner[inner];
+        const points = line.map(([x, y]) => [x + host.tx, y + host.ty] as Pt);
+        const distance = pointLineDistance(centre, points);
+        if (!nearest || distance < nearest.distance) nearest = { host, inner, distance };
+      }
+    }
+    if (!nearest) return null;
+    return {
+      kind: 'surface',
+      host: nearest.host.piece.key,
+      inner: nearest.inner,
+      part: part.key,
+      place: {
+        x: at.x - nearest.host.box.x0,
+        y: at.y - nearest.host.box.y0,
+        rot: at.rot,
+        host: nearest.host.piece.key,
+      },
+    };
+  };
+
   const toMm = (e: PointerEvent) => {
     const ctm = svgRef.current?.getScreenCTM();
     if (!ctm) return null;
     const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
     return { x: p.x, y: p.y };
   };
-  const drop = () => {
-    if (!drag.current) return;
+  const drop = (cancelled = false) => {
+    const state = drag.current;
+    if (!state) return;
     drag.current = null;
-    onPlace(live);
+    if (!cancelled && state.snap) {
+      onDrop({
+        kind: 'snap',
+        hostEdge: state.snap.hostEdge,
+        partEdge: state.snap.partEdge,
+      });
+      return;
+    }
+    const surface = !cancelled ? surfaceAt(state.live) : null;
+    if (surface) {
+      onDrop(surface);
+      return;
+    }
+    setLive(worldPlace(scene, place));
+    setSnap(null);
   };
-  const ox = hb.x0 + live.x;
-  const oy = hb.y0 + live.y;
   if (w < 2 || h < 2) return null;
   return (
     <svg
       ref={svgRef}
       width={w}
       height={h}
-      viewBox={vb.map((v) => v.toFixed(1)).join(' ')}
+      viewBox={scene.viewBox.map((v) => v.toFixed(1)).join(' ')}
       preserveAspectRatio='xMidYMid meet'
-      className='absolute inset-0'
+      className='absolute inset-0 touch-none'
       onPointerMove={(e) => {
         const g = drag.current;
         if (!g) return;
         const p = toMm(e);
-        if (p) setLive({ ...live, x: g.px + p.x - g.x, y: g.py + p.y - g.y });
+        if (!p) return;
+        const next = { ...g.live, x: g.px + p.x - g.x, y: g.py + p.y - g.y };
+        const nextSnap = findSnap(next);
+        g.live = next;
+        g.snap = nextSnap;
+        setLive(next);
+        setSnap(nextSnap);
       }}
-      onPointerUp={drop}
-      onPointerCancel={drop}
+      onPointerUp={() => drop()}
+      onPointerCancel={() => drop(true)}
       data-seam-place=''
     >
-      {hostLayer}
+      {scene.hosts.map((host) => (
+        <g
+          key={host.piece.key}
+          transform={`translate(${host.tx.toFixed(1)} ${host.ty.toFixed(1)})`}
+        >
+          <path
+            d={pathOf(host.piece.cut, true)}
+            fill='var(--color-bgColor)'
+            stroke='var(--color-labelColor)'
+            strokeWidth={1.2}
+            vectorEffect='non-scaling-stroke'
+          />
+          {plainEdges(host.piece.geom).map((edge) => (
+            <path
+              key={edge.id}
+              d={pathOf(edge.pts.map(([x, y]) => [x, -y] as Pt))}
+              fill='none'
+              stroke='var(--color-textColor)'
+              strokeWidth={1.4}
+              vectorEffect='non-scaling-stroke'
+              data-seam-place-host-edge={edge.id}
+            />
+          ))}
+          {host.piece.inner.map((line, k) => {
+            const selected = selectedInner?.piece === host.piece.key && selectedInner.k === k;
+            return (
+              <path
+                key={`${host.piece.key}:inner:${k}`}
+                d={pathOf(line)}
+                fill='none'
+                stroke={selected ? 'var(--color-warning)' : 'var(--color-borderColor)'}
+                strokeWidth={selected ? 3 : 1}
+                strokeDasharray={selected ? undefined : '6 4'}
+                vectorEffect='non-scaling-stroke'
+              />
+            );
+          })}
+        </g>
+      ))}
+      {snap && (
+        <path
+          d={pathOf(snap.hostPoints)}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={4}
+          strokeLinecap='round'
+          vectorEffect='non-scaling-stroke'
+          pointerEvents='none'
+          data-seam-place-snap='host'
+        />
+      )}
       <g
-        transform={`translate(${ox.toFixed(1)} ${oy.toFixed(1)}) rotate(${live.rot}) translate(${(-pb.x0).toFixed(1)} ${(-pb.y0).toFixed(1)})`}
+        transform={`translate(${live.x.toFixed(1)} ${live.y.toFixed(1)}) rotate(${live.rot}) translate(${(-scene.partBox.x0).toFixed(1)} ${(-scene.partBox.y0).toFixed(1)})`}
         className='cursor-move'
         onPointerDown={(e) => {
           const p = toMm(e);
           if (!p) return;
-          (e.target as Element).setPointerCapture?.(e.pointerId);
-          drag.current = { x: p.x, y: p.y, px: live.x, py: live.y };
+          e.preventDefault();
+          svgRef.current?.setPointerCapture?.(e.pointerId);
+          const initialSnap = findSnap(live);
+          drag.current = {
+            x: p.x,
+            y: p.y,
+            px: live.x,
+            py: live.y,
+            live,
+            snap: initialSnap,
+          };
+          setSnap(initialSnap);
         }}
       >
-        {partLayer}
+        <path
+          d={pathOf(part.cut, true)}
+          fill='var(--color-bgColor)'
+          fillOpacity={0.85}
+          stroke='var(--color-textColor)'
+          strokeWidth={1.2}
+          strokeDasharray='6 4'
+          vectorEffect='non-scaling-stroke'
+        />
+        {snap && (
+          <path
+            d={pathOf(
+              partEdges.find(({ edge }) => edge.id === snap.partEdge)?.points ?? snap.partPoints,
+            )}
+            fill='none'
+            stroke='var(--color-warning)'
+            strokeWidth={4}
+            strokeLinecap='round'
+            vectorEffect='non-scaling-stroke'
+            pointerEvents='none'
+            data-seam-place-snap='part'
+          />
+        )}
       </g>
     </svg>
   );

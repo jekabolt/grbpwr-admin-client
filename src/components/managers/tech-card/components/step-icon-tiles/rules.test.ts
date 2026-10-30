@@ -15,12 +15,16 @@ import {
   kindFitsClass,
   NO_ATTACH_PATTERN,
   NO_BINDING_STYLE,
+  NO_SEAM_CLASS,
   patternAfterHoles,
   patternTiles,
   PRESS_TOWARD_TILES,
   SEAM_KIND_BINDING_STYLE,
   seamKindGroups,
   seamKindPick,
+  TOPSTITCH_EDGE_KINDS,
+  topstitchEdgeOptions,
+  topstitchEdgePick,
   topstitchRowIcon,
 } from './rules';
 
@@ -246,5 +250,104 @@ describe('the form row reads as the wire op does', () => {
         opIcon(opIconInputOf(o), {}),
       );
     });
+  });
+});
+
+describe('the edge of a topstitch step', () => {
+  const FACED = 'TECH_CARD_SEAM_CLASS_EF_FACED';
+  const HEM_RAW = 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW';
+  const HEM_TURNED = 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED';
+  const EDGE = 'TECH_CARD_TOPSTITCH_MODE_EDGE';
+  const step = (over: Partial<Parameters<typeof topstitchEdgePick>[1]> = {}) => ({
+    seamKind: '',
+    seamClass: NO_SEAM_CLASS,
+    bindingStyle: NO_BINDING_STYLE,
+    topstitchMode: EDGE,
+    ...over,
+  });
+
+  it('labels map to seam kinds and back', () => {
+    const items = topstitchEdgeOptions('');
+    expect(items.map((i) => [i.label, i.value])).toEqual([
+      ['plain', ''],
+      ['turned', 'faced_split'],
+      ['hem single', 'hem_raw'],
+      ['hem double', 'hem_closed'],
+    ]);
+    for (const kind of ['faced_split', 'hem_raw', 'hem_closed']) {
+      const shown = topstitchEdgeOptions(kind);
+      expect(shown).toEqual(items);
+      expect(shown.find((i) => i.value === kind)?.label).toBe(
+        items.find((i) => i.value === kind)?.label,
+      );
+    }
+  });
+
+  it('shows any other stored kind as it stands', () => {
+    expect(topstitchEdgeOptions('seam_open').at(-1)).toEqual({
+      value: 'seam_open',
+      label: 'pressed open',
+    });
+    expect(topstitchEdgeOptions('future_kind').at(-1)).toEqual({
+      value: 'future_kind',
+      label: 'future_kind — unknown to this app version',
+    });
+  });
+
+  it('writes the class of the edge it picks', () => {
+    expect(topstitchEdgePick('faced_split', step())).toEqual({
+      seamKind: 'faced_split',
+      seamClass: FACED,
+    });
+    expect(topstitchEdgePick('hem_raw', step())).toEqual({
+      seamKind: 'hem_raw',
+      seamClass: HEM_RAW,
+    });
+    expect(topstitchEdgePick('hem_closed', step())).toEqual({
+      seamKind: 'hem_closed',
+      seamClass: HEM_TURNED,
+    });
+  });
+
+  it('keeps a step without a mode a topstitch', () => {
+    expect(
+      topstitchEdgePick('faced_split', step({ topstitchMode: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN' })),
+    ).toEqual({ seamKind: 'faced_split', seamClass: FACED, topstitchMode: EDGE });
+  });
+
+  it('plain clears the kind and the class it brought, and only that class', () => {
+    expect(topstitchEdgePick('', step({ seamKind: 'faced_split', seamClass: FACED }))).toEqual({
+      seamKind: '',
+      seamClass: NO_SEAM_CLASS,
+    });
+    expect(
+      topstitchEdgePick(
+        '',
+        step({ seamKind: 'faced_split', seamClass: 'TECH_CARD_SEAM_CLASS_OS_TOPSTITCH' }),
+      ),
+    ).toEqual({ seamKind: '' });
+  });
+
+  it('a topstitch step on a turned edge with two rows draws the turned glyph', () => {
+    expect(topstitchRowIcon(2, EDGE, 'faced_split')).toEqual({
+      key: 'faced_split',
+      bars: 2,
+      at: 'edge',
+    });
+    expect(
+      opIcon(
+        formRowOpIconInput({
+          operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+          machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+          work: 'topstitch',
+          seamKind: 'faced_split',
+          seamClass: FACED,
+          topstitchMode: EDGE,
+          topstitchRows: 2,
+        }),
+        {},
+      ),
+    ).toMatchObject({ key: 'faced_split', bars: 2 });
+    expect(TOPSTITCH_EDGE_KINDS).toEqual(new Set(['faced_split', 'hem_raw', 'hem_closed']));
   });
 });
