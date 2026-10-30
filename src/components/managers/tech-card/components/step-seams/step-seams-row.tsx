@@ -210,6 +210,7 @@ export function SeamTile({
   current,
   status,
   emptyLabel,
+  caption,
   ...rest
 }: {
   /** The seam's number on the step — the one the picker shows beside it. */
@@ -226,6 +227,8 @@ export function SeamTile({
   current?: boolean;
   status?: 'done' | 'skipped';
   emptyLabel?: string;
+  /** A word under the pieces: «pick» on a step with no guess, chosen by hand. */
+  caption?: string;
   'data-step-seam'?: string;
 }) {
   const ids = marks.map((m) => m.id).join(',');
@@ -303,6 +306,11 @@ export function SeamTile({
             aria-label='remove'
           />
         </span>
+      )}
+      {caption && (
+        <Text size='nano' variant='label' component='span' className='absolute bottom-0.5 left-1'>
+          {caption}
+        </Text>
       )}
       {status === 'done' && (
         <Text size='nano' component='span' className='absolute right-1 bottom-0.5'>

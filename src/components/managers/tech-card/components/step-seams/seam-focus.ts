@@ -52,3 +52,11 @@ export function placeHasDrop(
     ),
   );
 }
+
+/**
+ * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
+ * with the user's own pick one click away. A proposal without the flag reads as sure.
+ */
+export function isGuess(p: object | null | undefined): boolean {
+  return !!p && (p as { confident?: boolean }).confident === false;
+}

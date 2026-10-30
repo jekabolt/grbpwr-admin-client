@@ -246,6 +246,8 @@ const QuizTile = memo(
       scene.storedSeams,
     ]);
     const surface = proposal ? null : scene.surfaceSuggestion;
+    // No guess yet the pieces are there: the tile draws them for a pick by hand.
+    const drawable = scene.leaves.some((ks) => ks.some((k) => scene.geoms.has(k)));
     const marks = proposal
       ? [...proposal.a, ...proposal.b].map((id) => ({ id, tone: 'proposal' as const }))
       : surface
@@ -257,10 +259,11 @@ const QuizTile = memo(
         scene={scene}
         seams={seams}
         marks={marks}
-        dashed
+        dashed={!!proposal || !!surface}
         current={current}
         status={status}
-        emptyLabel={proposal || surface ? undefined : 'no seam'}
+        emptyLabel={proposal || surface || drawable ? undefined : 'no seam'}
+        caption={proposal || surface || !drawable ? undefined : 'pick'}
         onOpen={onOpen}
       />
     );

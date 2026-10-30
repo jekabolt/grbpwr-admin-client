@@ -30,7 +30,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
-import { placeHasDrop, seamFocus } from './seam-focus';
+import { isGuess, placeHasDrop, seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -279,6 +279,8 @@ export function SeamPickerBody({
   const [refused, setRefused] = useState('');
   const [prop, setProp] = useState(initialProposal);
   const suggestion = suggestions[prop] ?? suggestions[0] ?? null;
+  // «own»: the guess is put aside and the canvas waits for the user's own edges.
+  const [mine, setMine] = useState(false);
   const propOptions = useMemo(
     () => suggestions.map((p, i) => ({ value: String(i), label: proposalLabel(p, i) })),
     [suggestions],
@@ -375,7 +377,9 @@ export function SeamPickerBody({
   // ── what «accept» would write ──
   // Nothing picked: the slit proposal (a lone part onto its twin's line) stands as the pick.
   const auto =
-    !placing && !sel.a.length && !sel.b.length && surfaceSuggestion ? surfaceSuggestion : null;
+    !placing && !mine && !sel.a.length && !sel.b.length && surfaceSuggestion
+      ? surfaceSuggestion
+      : null;
   const autoSide: Side | null = auto
     ? groups.length < 2
       ? 'a'
@@ -426,7 +430,7 @@ export function SeamPickerBody({
       return lone === 'a'
         ? { a: sel.a, b: [partner], own: true }
         : { a: [partner], b: sel.b, own: true };
-    if (!sel.a.length && !sel.b.length && suggestion)
+    if (!sel.a.length && !sel.b.length && suggestion && !mine)
       return {
         a: suggestion.a,
         b: suggestion.b,
@@ -671,6 +675,7 @@ export function SeamPickerBody({
     : stored.length === 1 && edgeToEdge(stored[0].sides)
       ? deltaMm(sideLen(stored[0].sides.a), sideLen(stored[0].sides.b), ease)
       : null;
+  const guess = (!!pair && !pair.own && isGuess(suggestion)) || (!!auto && !auto.confident);
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();
@@ -1073,9 +1078,15 @@ export function SeamPickerBody({
               {`Δ ${fmtMm(delta)} mm`}
             </Text>
           ) : empty && !loading ? (
-            <Text size='micro' variant='error' data-step-seams-status=''>
-              no seam
-            </Text>
+            drawn ? (
+              <Text size='micro' variant='label' data-step-seams-status='pick'>
+                pick
+              </Text>
+            ) : (
+              <Text size='micro' variant='error' data-step-seams-status=''>
+                no seam
+              </Text>
+            )
           ) : null}
           {hasPlaceSides && !frozen && (
             <Button
@@ -1143,16 +1154,36 @@ export function SeamPickerBody({
           {!frozen && (
             <Button
               type='button'
-              variant='main'
+              variant={guess ? 'secondary' : 'main'}
               size='sm'
               onClick={() => void commit()}
               disabled={!canAccept}
               loading={busy}
-              data-seam-accept=''
+              data-seam-accept={guess ? 'guess' : ''}
             >
               accept
             </Button>
           )}
+          {!frozen && guess && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setMine(true)}
+              data-seam-own=''
+            >
+              own
+            </Button>
+          )}
+          {!frozen &&
+            mine &&
+            (suggestion || surfaceSuggestion) &&
+            !sel.a.length &&
+            !sel.b.length && (
+              <Button type='button' variant='underline' size='xs' onClick={() => setMine(false)}>
+                guess
+              </Button>
+            )}
           {footerActions}
         </div>
       </div>
