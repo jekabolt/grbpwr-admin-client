@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { seamFocus } from './seam-focus';
+import type { PieceGeom } from 'lib/assembly-skeleton/types';
+
+import { placeHasDrop, seamFocus } from './seam-focus';
 
 const collar = [
   { name: 'Main collar', pieces: ['MAIN'] },
@@ -32,5 +34,31 @@ describe('seamFocus', () => {
 
   it('nothing on the table: no focus', () => {
     expect(seamFocus(collar, new Set(), [])).toBeNull();
+  });
+});
+
+describe('placeHasDrop', () => {
+  const piece = (key: string, lens: number[], inner = 0) => ({
+    inner: Array.from({ length: inner }, () => []),
+    geom: {
+      pieceKey: key,
+      edges: lens.map((lenMm, i) => ({ id: `${key}#${i}`, kind: 'edge', lenMm })),
+    } as unknown as PieceGeom,
+  });
+  const free = () => false;
+
+  it('a host inner line takes the part', () => {
+    expect(placeHasDrop([piece('H', [100], 1)], piece('P', [400]), free, null)).toBe(true);
+  });
+
+  it('a free host edge of the part’s length takes it, a taken one does not', () => {
+    const host = piece('H', [439, 120]);
+    const part = piece('P', [439.2, 60]);
+    expect(placeHasDrop([host], part, free, null)).toBe(true);
+    expect(placeHasDrop([host], part, (id) => id === 'H#0', null)).toBe(false);
+  });
+
+  it('nothing near in length and no inner line: nowhere to drop (the collar sewn all round)', () => {
+    expect(placeHasDrop([piece('H', [421, 120])], piece('P', [200, 80]), free, null)).toBe(false);
   });
 });

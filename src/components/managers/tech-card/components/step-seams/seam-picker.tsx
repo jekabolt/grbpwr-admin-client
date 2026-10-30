@@ -30,7 +30,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
-import { seamFocus } from './seam-focus';
+import { placeHasDrop, seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -363,7 +363,10 @@ export function SeamPickerBody({
     groups.length >= 2
       ? groups[0].pieces.length > 0 && groups.slice(1).some((group) => group.pieces.length > 0)
       : (groups[0]?.pieces.length ?? 0) >= 2;
-  const placeReady = !!placePartPiece && placeHosts.length > 0;
+  const placeReady =
+    !!placePartPiece &&
+    placeHosts.length > 0 &&
+    placeHasDrop(placeHosts, placePartPiece, (id) => used.has(id) || sewnInside.has(id), ease);
 
   // ── what «accept» would write ──
   const inners = [...sel.a, ...sel.b].filter((t) => parseInner(t));

@@ -183,7 +183,55 @@ export function innerSeamsOf(
   byKey: ReadonlyMap<string, StoredSeam>,
 ): SeamCandidate[] {
   const sewn = sewnBeforeStep(ops, index, pieceKeys, geoms, byKey);
-  return [...split.inner, ...earlierInner(sewn, leaves, geoms, innerLines, split.engine)];
+  return [
+    ...split.inner,
+    ...earlierInner(sewn, leaves, geoms, innerLines, split.engine),
+    ...earlierSurface(ops, index, leaves, geoms, innerLines, byKey, split.inner),
+  ];
+}
+
+/**
+ * The parts earlier steps placed on a host inside one input (a placket on its sleeve slit, a pocket
+ * on the yoke), laid by their rows: the engine's edge state never carries them, yet without them the
+ * part stands apart from its host and the picture drops the host.
+ */
+export function earlierSurface(
+  ops: readonly FormOpLike[],
+  index: number,
+  leaves: readonly (readonly string[])[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, Pt2[][]>,
+  byKey: ReadonlyMap<string, StoredSeam>,
+  have: readonly SeamCandidate[],
+): SeamCandidate[] {
+  const inputOf = new Map<string, number>();
+  leaves.forEach((ks, i) => ks.forEach((k) => inputOf.set(k, i)));
+  const seen = new Set(have.flatMap((c) => (c.provenance ? [c.provenance.seamKey] : [])));
+  const out: SeamCandidate[] = [];
+  for (const op of ops.slice(0, Math.min(index, ops.length)))
+    for (const key of op.seamKeys ?? []) {
+      const row = byKey.get(key);
+      if (
+        !row ||
+        seen.has(key) ||
+        row.kind !== 'surface' ||
+        row.status !== 'confirmed' ||
+        row.stale
+      )
+        continue;
+      seen.add(key);
+      const sides = {
+        a: row.sideA.flatMap(targetsOfAnchor),
+        b: row.sideB.flatMap(targetsOfAnchor),
+      };
+      const at = [...row.sideA, ...row.sideB].find((x) => x.placement)?.placement;
+      const c = seamOfSides(sides, geoms, innerLines, at);
+      const s = c?.kind === 'surface' ? c.surface : undefined;
+      if (!c || !s) continue;
+      const i = inputOf.get(s.host);
+      if (i != null && inputOf.get(s.part) === i) out.push(c);
+    }
+  return out;
 }
 
 /** Every piece the card knows: by geometry, and by line key on the card's piece rows. */
