@@ -557,6 +557,8 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+export type PictureView = { k: number; x: number; y: number };
+
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
  * beside on the canvas); `nos` put a stored seam's number beside it; `names` (one per input) sit on
@@ -581,6 +583,7 @@ export function StepPictureSvg({
   hover,
   onHover,
   onPick,
+  view,
   className,
 }: {
   w: number;
@@ -601,6 +604,8 @@ export function StepPictureSvg({
   hover?: TargetId | null;
   onHover?: (id: TargetId | null) => void;
   onPick?: (id: TargetId) => void;
+  /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
+  view?: PictureView;
   className?: string;
 }) {
   const L = LOOK[look];
@@ -617,7 +622,13 @@ export function StepPictureSvg({
     return points.length ? boxOf(points) : layout.bbox;
   }, [layout, geoms, look]);
   const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
-  const fit = useMemo(() => fitBox(fitBounds, w, h, fitPad), [fitBounds, w, h, fitPad]);
+  const vk = view?.k ?? 1;
+  const vx = view?.x ?? 0;
+  const vy = view?.y ?? 0;
+  const fit = useMemo(() => {
+    const f = fitBox(fitBounds, w, h, fitPad);
+    return { s: f.s * vk, tx: f.tx * vk + vx, ty: f.ty * vk + vy };
+  }, [fitBounds, w, h, fitPad, vk, vx, vy]);
 
   const pieces = useMemo(() => {
     const out: { key: string; ring: Pt2[]; input: number; centre: Pt2 }[] = [];
