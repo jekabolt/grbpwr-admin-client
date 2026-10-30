@@ -1965,6 +1965,8 @@ export type LabelBox = {
   t: Pt2;
   w: number;
   h: number;
+  /** A hide-mode label that reserves its spot even when it collides or leaves the frame. */
+  required?: boolean;
   /** Boxes this label must also stay off (other inputs' shapes, for a unit's name). */
   avoid?: readonly Box[];
 };
@@ -1998,10 +2000,26 @@ export function spreadLabels(labels: readonly LabelBox[]): Pt2[] {
   });
 }
 
+/** Canvas/result labels stay at their own spot; optional labels that collide or leave the frame hide. */
+export function hideLabels(labels: readonly LabelBox[], bounds: Box): (Pt2 | null)[] {
+  const placed: Box[] = [];
+  return labels.map((label) => {
+    const rect = rectOf(label, label.at);
+    const outside =
+      rect.x0 < bounds.x0 || rect.y0 < bounds.y0 || rect.x1 > bounds.x1 || rect.y1 > bounds.y1;
+    const blocked =
+      placed.some((placedRect) => hits(placedRect, rect)) ||
+      label.avoid?.some((avoid) => hits(avoid, rect));
+    if (!label.required && (outside || blocked)) return null;
+    placed.push(rect);
+    return label.at;
+  });
+}
+
 // ─── partner, names ───────────────────────────────────────────────────────────────────────────────
 
 /** A partner is offered within this share of the longer side. */
-const PARTNER_REL = 0.1;
+export const PARTNER_REL = 0.1;
 
 /**
  * The edge on the other side closest in length to a picked side (ease applied), none within 10 %
