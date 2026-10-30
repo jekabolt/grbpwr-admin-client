@@ -17,6 +17,7 @@ import {
 } from './operation-kinds';
 import type { OperationFormStringField } from './operation-options';
 import { isWorkVariant } from '../op-icons/work-variants';
+import { TOPSTITCH_EDGE_KINDS } from './step-icon-tiles/rules';
 
 // КАТАЛОГ РАБОТ — СЕРВЕРНЫЕ ДАННЫЕ, А НЕ СПИСОК В БАНДЛЕ.
 //
@@ -907,7 +908,14 @@ export function workApplication(input: {
   // нет, ни одного якоря не писала, и снимать чужой факт «на всякий случай» было бы ровно тем
   // стиранием, которого фаза «перестать терять» не допускает.
   const clears = k ? kindClears(k, after) : {};
-  if (operationHowKind(k?.id, item.token) === 'topstitch' && (current.seamKind ?? '').trim()) {
+  // The edge a topstitch runs on (turned, single or double hem) is its own seam kind and stays;
+  // any other kind is a join's and goes.
+  const keptKind = (current.seamKind ?? '').trim();
+  if (
+    operationHowKind(k?.id, item.token) === 'topstitch' &&
+    keptKind &&
+    !TOPSTITCH_EDGE_KINDS.has(keptKind)
+  ) {
     clears.seamKind = '';
   }
 

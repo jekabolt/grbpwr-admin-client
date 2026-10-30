@@ -80,6 +80,25 @@ describe('op icon fields round-trip card → form → payload', () => {
     expect(payload.operationWorkAware).toBe(true);
   });
 
+  it('a topstitch step keeps its edge across a save', () => {
+    const turned = op({
+      operationNumber: 50,
+      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+      work: 'topstitch',
+      seamKind: 'faced_split',
+      seamClass: 'TECH_CARD_SEAM_CLASS_EF_FACED',
+      topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', rows: 2 } as never,
+    });
+    const back = mapTechCardToForm(card([turned]));
+    expect(back.operations?.[0]?.seamKind).toBe('faced_split');
+    const out = mapFormToTechCardInsert(back).operations?.[0];
+    expect(out?.seamKind).toBe('faced_split');
+    expect(out?.seamClass).toBe('TECH_CARD_SEAM_CLASS_EF_FACED');
+    expect(out?.topstitch?.mode).toBe('TECH_CARD_TOPSTITCH_MODE_EDGE');
+    expect(out?.topstitch?.rows).toBe(2);
+  });
+
   it('sends a cleared value as cleared', () => {
     const cleared = mapTechCardToForm(card([bind]));
     cleared.operations![0]!.seamKind = '';

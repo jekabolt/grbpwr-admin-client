@@ -265,6 +265,58 @@ export function topstitchRowIcon(rows: number, mode: string, base?: IconKey): Op
   };
 }
 
+// --- the edge a topstitch step runs on ------------------------------------------------------
+
+export const NO_TOPSTITCH_MODE = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
+export const EDGE_TOPSTITCH_MODE = 'TECH_CARD_TOPSTITCH_MODE_EDGE';
+
+/** The «edge» select on a topstitch step: which edge the rows run on. Stored as the seam kind;
+ *  '' = a plain topstitch, no edge of its own. */
+export const TOPSTITCH_EDGE_ITEMS: readonly { value: string; label: string }[] = [
+  { value: '', label: 'plain' },
+  { value: 'faced_split', label: 'turned' },
+  { value: 'hem_raw', label: 'hem single' },
+  { value: 'hem_closed', label: 'hem double' },
+];
+
+/** The seam kinds a topstitch step may carry as its edge — choosing the topstitch work keeps them. */
+export const TOPSTITCH_EDGE_KINDS: ReadonlySet<string> = new Set(
+  TOPSTITCH_EDGE_ITEMS.map((item) => item.value).filter(Boolean),
+);
+
+/** The four edges, plus the step's own kind as it stands when it is none of them (never cleared
+ *  by being shown). */
+export function topstitchEdgeOptions(current: string): { value: string; label: string }[] {
+  const v = (current ?? '').trim();
+  if (!v || TOPSTITCH_EDGE_KINDS.has(v)) return [...TOPSTITCH_EDGE_ITEMS];
+  const label = seamKindDef(v) ? seamKindLabel(v) : `${v} — unknown to this app version`;
+  return [...TOPSTITCH_EDGE_ITEMS, { value: v, label }];
+}
+
+export type TopstitchEdgeWrite = SeamKindWrite & { topstitchMode?: string };
+
+/**
+ * What picking an edge writes. An edge is a seam kind, so it writes its class explicitly (the
+ * server and the schema want kind and class to agree), and on a step with no topstitch mode yet it
+ * also writes the topstitch anchor: the new class would otherwise stop the step reading as a
+ * topstitch. «plain» clears the kind and the class that kind brought, nothing else.
+ */
+export function topstitchEdgePick(
+  token: string,
+  current: { seamKind: string; seamClass: string; bindingStyle: string; topstitchMode: string },
+): TopstitchEdgeWrite {
+  if (!token) {
+    const cleared: TopstitchEdgeWrite = seamKindPick('', current);
+    const before = seamKindDef(current.seamKind);
+    return before && before.seamClass === current.seamClass
+      ? { ...cleared, seamClass: NO_SEAM_CLASS }
+      : cleared;
+  }
+  const picked: TopstitchEdgeWrite = seamKindPick(token, current);
+  const noMode = !current.topstitchMode || current.topstitchMode === NO_TOPSTITCH_MODE;
+  return noMode ? { ...picked, topstitchMode: EDGE_TOPSTITCH_MODE } : picked;
+}
+
 // --- the flat form row, read as an icon ------------------------------------------------------
 
 /** The fields of a flat form operation the icon reads; names match the RHF operation row. */
