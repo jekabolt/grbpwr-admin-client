@@ -759,6 +759,15 @@ describe('card 6: layered seams keep their structural edge', () => {
       bLen: expect.closeTo(420.9, 1),
     });
   });
+
+  it('940: the second stand layer stacks on its twin over the collar seam', () => {
+    expect(proposal(940)).toMatchObject({
+      a: ['nck_2#3'],
+      b: ['nck#3'],
+      aLen: expect.closeTo(482.6, 1),
+      bLen: expect.closeTo(482.6, 1),
+    });
+  });
 });
 
 describe('join steps by type and work', () => {

@@ -1319,6 +1319,28 @@ function stackedSides(
 }
 
 /**
+ * The one consumed edge an untouched identical twin may still meet. A layer can be laid onto the
+ * structural seam already carried by its twin, but only edge-for-edge; no unrelated piece and no
+ * other edge of the twin inherits this exemption.
+ */
+function consumedTwinHost(
+  a: readonly EdgeId[],
+  b: readonly EdgeId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  state: SewnState,
+): EdgeId | null {
+  if (a.length !== 1 || b.length !== 1) return null;
+  const ea = edgeOf(a[0], geoms);
+  const eb = edgeOf(b[0], geoms);
+  if (!ea || !eb || ea.k !== eb.k) return null;
+  if (!isLayerSeam(a, b, geoms) && !isLayerSeam(b, a, geoms)) return null;
+  const closedA = state.sewn.has(ea.id);
+  const closedB = state.sewn.has(eb.id);
+  if (closedA === closedB) return null;
+  return closedA ? ea.id : eb.id;
+}
+
+/**
  * Every plausible pair across two different input units, best first. With three or more
  * inputs, two of opposite hands (a left and a right sleeve round a body) are never paired.
  */
@@ -1371,6 +1393,44 @@ export function scoredPairs(
         for (const b of sides[j]) {
           const scored = scoreSides(a, b, classes[i], classes[j], ctx);
           if (scored) out.push(scored);
+        }
+      }
+      // A twin layer stacks onto the matching edge of its twin's earlier structural seam. Build
+      // this pair directly so making the consumed host available cannot pair it with any other
+      // piece, or even with a different edge of the same twin.
+      for (const pa of groups[i].pieces) {
+        const ga = geoms.get(pa);
+        if (!ga) continue;
+        for (const pb of groups[j].pieces) {
+          const gb = geoms.get(pb);
+          if (!gb) continue;
+          const twins =
+            ga.twinOf.some((t) => t.key === pb && t.kind === 'identical') ||
+            gb.twinOf.some((t) => t.key === pa && t.kind === 'identical');
+          if (!twins) continue;
+          const bByK = new Map(plainEdges(gb).map((edge) => [edge.k, edge]));
+          for (const ea of plainEdges(ga)) {
+            const eb = bByK.get(ea.k);
+            if (!eb || Math.min(ea.lenMm, eb.lenMm) < MIN_SIDE_MM) continue;
+            const host = consumedTwinHost([ea.id], [eb.id], geoms, state);
+            if (!host) continue;
+            const fresh = host === ea.id ? eb.id : ea.id;
+            if (
+              used.has(fresh) ||
+              state.sewn.has(fresh) ||
+              state.owned.has(fresh) ||
+              state.reusable.has(fresh)
+            )
+              continue;
+            const scored = scoreSides(
+              sideOfEdges([ea]),
+              sideOfEdges([eb]),
+              classes[i],
+              classes[j],
+              ctx,
+            );
+            if (scored) out.push(scored);
+          }
         }
       }
     }
@@ -1542,9 +1602,12 @@ function applyStep(
   );
   for (const cand of [...own, ...guesses]) {
     const ids = [...cand.a.ids, ...cand.b.ids];
+    const twinHost = consumedTwinHost(cand.a.ids, cand.b.ids, geoms, state);
     // An edge this step already took is gone; one an earlier step sewed inside the input is
-    // stacked on, once.
-    if (ids.some((id) => taken.has(id) && !(stack.has(id) && stack.delete(id)))) continue;
+    // stacked on, once. The matching edge of an identical twin may likewise layer directly onto
+    // that earlier structural seam.
+    if (ids.some((id) => taken.has(id) && id !== twinHost && !(stack.has(id) && stack.delete(id))))
+      continue;
     const first = connect(cand.a.ids, cand.b.ids);
     if (!first && cand.score > GUESS_OK) continue;
     for (const id of ids) taken.add(id);

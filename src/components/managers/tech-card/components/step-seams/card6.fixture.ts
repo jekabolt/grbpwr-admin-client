@@ -15,6 +15,8 @@ const PIECES = [
   'clr_main_2',
   'CLR_SECOND',
   'CLR_SECOND_2',
+  'nck',
+  'nck_2',
   'P_L_U',
   'P_L_MAIN',
   'PCK_L_MAIN',
@@ -54,7 +56,9 @@ export const CARD6_OPS: FormOpLike[] = [
   op(660, ['UPPER LEFT', 'LOWER LEFT'], 'LEFT FRONT PANEL'),
   op(720, ['PLCK_L', 'LEFT FRONT PANEL']),
   op(770, ['UPPER RIGHT', 'LOWER RIGHT']),
-  op(870, ['MAIN COLLAR', 'SECOND COLLAR']),
+  op(870, ['MAIN COLLAR', 'SECOND COLLAR'], 'COLLAR BASE'),
+  op(910, ['COLLAR BASE', 'nck'], 'COLLAR WITH NECK DETAIL'),
+  op(940, ['nck_2', 'COLLAR WITH NECK DETAIL']),
 ];
 
 export const card6Step = (operationNumber: number) =>
