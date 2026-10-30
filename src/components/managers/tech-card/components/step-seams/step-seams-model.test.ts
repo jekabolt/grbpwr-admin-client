@@ -821,6 +821,8 @@ describe('card 6: layered seams keep their structural edge', () => {
       aLen: expect.closeTo(421, 1),
       bLen: expect.closeTo(420.9, 1),
     });
+    // The two collar layers lie on top of each other: the stacked side runs 421, not 842.
+    expect(targetsLen(proposal(870)!.a, geoms, () => 0)).toBeCloseTo(421, 0);
   });
 
   it('940: the second stand layer stacks on its twin over the collar seam', () => {

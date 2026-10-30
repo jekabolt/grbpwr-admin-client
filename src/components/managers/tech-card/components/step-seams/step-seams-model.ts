@@ -244,15 +244,28 @@ export function sideOf(
 
 // ─── lengths ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Length of a side's targets, mm (inner lines by their own length). */
+/**
+ * Length of a side's targets, mm (inner lines by their own length). A stacked side (an edge and
+ * the same edge of its identical twin layer) runs once: the layers lie on top of each other.
+ */
 export function targetsLen(
   ids: readonly TargetId[],
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLen: (piece: string, k: number) => number,
 ): number {
+  const counted: Edge[] = [];
+  const isLayerOf = (e: Edge, c: Edge) =>
+    c.k === e.k &&
+    c.pieceKey !== e.pieceKey &&
+    !!geoms.get(c.pieceKey)?.twinOf.some((t) => t.key === e.pieceKey && t.kind === 'identical') &&
+    Math.abs(c.lenMm - e.lenMm) <= LAYER_EDGE_REL * Math.max(c.lenMm, e.lenMm, 1);
   return ids.reduce((s, id) => {
     const inner = parseInner(id);
-    return s + (inner ? innerLen(inner.piece, inner.k) : edgeOf(id, geoms)?.lenMm ?? 0);
+    if (inner) return s + innerLen(inner.piece, inner.k);
+    const edge = edgeOf(id, geoms);
+    if (!edge || counted.some((c) => isLayerOf(edge, c))) return s;
+    counted.push(edge);
+    return s + edge.lenMm;
   }, 0);
 }
 
