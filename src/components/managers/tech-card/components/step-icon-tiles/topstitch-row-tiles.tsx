@@ -1,15 +1,16 @@
+import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Tiles } from 'ui';
+import { InputField, Tiles } from 'ui';
 import type { TechCardFormData } from '../schema';
 import { IconTile, TileRow, useStepFieldErrors } from './icon-tile';
-import { TOPSTITCH_ROW_TILES, topstitchRowIcon } from './rules';
+import { MAX_TOPSTITCH_ROWS, topstitchRowIcon, topstitchRowTileStates } from './rules';
 import { useStepOpIcon } from './step-icon';
 import { useStepWrite } from './use-step-write';
 
 const NO_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
 
 /**
- * Rows of topstitching as tiles 0–4, each previewing its bars (the server caps rows at four).
+ * Rows of topstitching as exact tiles 0–3 plus 4+, which reveals the exact 4–10 count.
  * 0 = unset; clicking the picked count clears it back to 0.
  */
 export function TopstitchRowTiles({
@@ -28,28 +29,51 @@ export function TopstitchRowTiles({
     NO_TOPSTITCH) as string;
   const base = useStepOpIcon(index).key;
   const errors = useStepFieldErrors(index, ['topstitchRows']);
-  const counts: readonly number[] = (TOPSTITCH_ROW_TILES as readonly number[]).includes(rows)
-    ? TOPSTITCH_ROW_TILES
-    : [...TOPSTITCH_ROW_TILES, rows];
+  const tiles = topstitchRowTileStates(rows);
+  // The count field stays open from «4+» until a 0–3 tile is picked: typing «10» passes through «1»,
+  // and clearing the field passes through empty — neither may unmount the field being typed in.
+  const [exact, setExact] = useState(rows >= 4);
+  const showExact = exact || rows >= 4;
 
   return (
     <TileRow
       field={`operations.${index}.topstitchRows`}
       label={label}
-      errors={errors}
+      errors={showExact ? undefined : errors}
       className={className}
     >
-      <Tiles min={72}>
-        {counts.map((n) => (
-          <IconTile
-            key={n}
-            icon={topstitchRowIcon(n, mode, base)}
-            label={String(n)}
-            selected={rows === n}
-            onClick={() => write('topstitchRows', rows === n ? 0 : n)}
+      <div className='flex items-end gap-2'>
+        <Tiles min={72} className='min-w-0 flex-1'>
+          {tiles.map((tile) => (
+            <IconTile
+              key={tile.value}
+              icon={topstitchRowIcon(tile.iconRows, mode, base)}
+              label={tile.label}
+              selected={tile.value === 4 ? tile.pressed || exact : tile.pressed && !exact}
+              onClick={() => {
+                const more = tile.value === 4 && !(tile.pressed || exact);
+                setExact(more);
+                write(
+                  'topstitchRows',
+                  tile.value === 4 ? (more ? Math.max(rows, 4) : 0) : tile.nextRows,
+                );
+              }}
+            />
+          ))}
+        </Tiles>
+        {showExact && (
+          <InputField
+            name={`operations.${index}.topstitchRows`}
+            type='number'
+            valueAsNumber
+            label='rows'
+            min={4}
+            max={MAX_TOPSTITCH_ROWS}
+            step={1}
+            className='w-14'
           />
-        ))}
-      </Tiles>
+        )}
+      </div>
     </TileRow>
   );
 }

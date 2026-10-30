@@ -26,6 +26,7 @@ import {
   topstitchEdgeOptions,
   topstitchEdgePick,
   topstitchRowIcon,
+  topstitchRowTileStates,
 } from './rules';
 
 const BOUND = 'TECH_CARD_SEAM_CLASS_BS_BOUND';
@@ -177,6 +178,34 @@ describe('press toward tiles', () => {
 });
 
 describe('topstitch rows', () => {
+  it.each([
+    { rows: 0, pressed: false, iconRows: 4, nextRows: 4 },
+    { rows: 3, pressed: false, iconRows: 4, nextRows: 4 },
+    { rows: 4, pressed: true, iconRows: 4, nextRows: 0 },
+    { rows: 7, pressed: true, iconRows: 7, nextRows: 0 },
+    { rows: 10, pressed: true, iconRows: 10, nextRows: 0 },
+  ])('makes 4+ the exact-count toggle at $rows rows', (expected) => {
+    const states = topstitchRowTileStates(expected.rows);
+    expect(states.filter((tile) => tile.pressed).map((tile) => tile.label)).toEqual([
+      expected.pressed ? '4+' : String(expected.rows),
+    ]);
+    expect(states.at(-1)).toEqual({
+      value: 4,
+      label: '4+',
+      pressed: expected.pressed,
+      iconRows: expected.iconRows,
+      nextRows: expected.nextRows,
+    });
+  });
+
+  it('keeps an out-of-range stored count visible for correction', () => {
+    expect(topstitchRowTileStates(11).at(-1)).toMatchObject({
+      label: '4+',
+      pressed: true,
+      iconRows: 11,
+    });
+  });
+
   it('previews bars up to three, then the count', () => {
     expect(topstitchRowIcon(0, '')).toEqual({ key: 'topstitch' });
     expect(topstitchRowIcon(2, 'TECH_CARD_TOPSTITCH_MODE_EDGE')).toEqual({

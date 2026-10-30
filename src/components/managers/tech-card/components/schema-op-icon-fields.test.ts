@@ -172,4 +172,18 @@ describe('op icon field checks mirror the server', () => {
   it('refuses a type without its work', () => {
     expect(issuesAt([op({ ...zip, work: '' })])).toContain('workVariant');
   });
+
+  it('refuses more than ten topstitch rows', () => {
+    expect(
+      issuesAt([
+        op({
+          operationNumber: 50,
+          operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+          machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+          work: 'topstitch',
+          topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_EDGE', rows: 11 },
+        }),
+      ]),
+    ).toContain('topstitchRows');
+  });
 });
