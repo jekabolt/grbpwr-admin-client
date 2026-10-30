@@ -128,110 +128,49 @@ const picturePieceSignature = (keys: Iterable<string>) => [...new Set(keys)].sor
 const pictureClusterArea = (picture: StepPicture, keys: readonly string[]) =>
   keys.reduce((sum, key) => sum + Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0), 0);
 
-const isLiningPiece = (picture: StepPicture, key: string) => {
-  const tokens = nameTokens(picture.geoms.get(key)?.name ?? '');
-  return tokens.some((token) => ROLE_BOOK.liningTokens?.includes(token));
+const sameCutGeometry = (picture: StepPicture, left: string, right: string) => {
+  const a = picture.geoms.get(left);
+  const b = picture.geoms.get(right);
+  if (!a || !b) return false;
+  if (
+    a.twinOf.some((twin) => twin.key === right && twin.kind === 'identical') ||
+    b.twinOf.some((twin) => twin.key === left && twin.kind === 'identical')
+  )
+    return true;
+  const aBox = boxOf(a.rs);
+  const bBox = boxOf(b.rs);
+  const near = (first: number, second: number) =>
+    Math.abs(first - second) <= 0.01 * Math.max(Math.abs(first), Math.abs(second), 1);
+  return (
+    near(Math.abs(a.areaMm2), Math.abs(b.areaMm2)) &&
+    near(aBox.x1 - aBox.x0, bBox.x1 - bBox.x0) &&
+    near(aBox.y1 - aBox.y0, bBox.y1 - bBox.y0)
+  );
 };
 
-/** Strict seam components used to discard genuinely unpaired trouser leftovers. */
-function connectedPictureClusters(picture: StepPicture): string[][] {
-  const keys = [...picture.layout.T.keys()];
-  const adjacent = new Map(keys.map((key) => [key, new Set<string>()]));
-  const link = (a: string, b: string) => {
-    if (a === b || !adjacent.has(a) || !adjacent.has(b)) return;
-    adjacent.get(a)!.add(b);
-    adjacent.get(b)!.add(a);
-  };
-  const extent = (key: string) => {
-    const transform = picture.layout.T.get(key);
-    const geom = picture.geoms.get(key);
-    return transform && geom ? boxOf(geom.rs.map((point) => apply(transform, point))) : null;
-  };
-  const touches = (a: string, b: string) => {
-    const transformA = picture.layout.T.get(a);
-    const transformB = picture.layout.T.get(b);
-    const geomA = picture.geoms.get(a);
-    const geomB = picture.geoms.get(b);
-    const A = extent(a);
-    const B = extent(b);
-    if (
-      !transformA ||
-      !transformB ||
-      !geomA ||
-      !geomB ||
-      !A ||
-      !B ||
-      Math.max(A.x0 - B.x1, B.x0 - A.x1, A.y0 - B.y1, B.y0 - A.y1, 0) > 2
-    )
-      return false;
-    const left = geomA.rs.map((point) => apply(transformA, point));
-    const right = geomB.rs.map((point) => apply(transformB, point));
-    return left.some((point) =>
-      right.some((other) => Math.hypot(point[0] - other[0], point[1] - other[1]) <= 2),
+/** An explicitly named inner copy of the same outer cut piece is a construction layer. */
+const isInteriorDuplicate = (picture: StepPicture, key: string) => {
+  const geom = picture.geoms.get(key);
+  if (!geom || !nameTokens(geom.name).includes('inner')) return false;
+  const reading = readName(geom.name);
+  return [...picture.geoms].some(([candidate, other]) => {
+    const otherReading = readName(other.name);
+    return (
+      candidate !== key &&
+      nameTokens(other.name).includes('outer') &&
+      reading.family === otherReading.family &&
+      sameCutGeometry(picture, key, candidate)
     );
-  };
+  });
+};
 
-  for (const seam of picture.frameSeams) {
-    if (seam.kind === 'closure-not-seam') continue;
-    const sides =
-      seam.kind === 'surface' && seam.surface
-        ? [[seam.surface.host], [seam.surface.part]]
-        : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
-    for (const a of sides[0]) for (const b of sides[1]) if (touches(a, b)) link(a, b);
-  }
-
-  for (const stack of picture.layout.stacked) for (const key of stack.slice(1)) link(stack[0], key);
-  for (const [piece, partner] of picture.layout.pieceLayers) link(piece, partner);
-  for (let left = 0; left < keys.length; left++)
-    for (let right = left + 1; right < keys.length; right++)
-      if (
-        touches(keys[left], keys[right]) &&
-        [keys[left], keys[right]].some(
-          (key) => readName(picture.geoms.get(key)?.name ?? '').role === 'waistband',
-        )
-      )
-        link(keys[left], keys[right]);
-
-  const clusters: string[][] = [];
-  const seen = new Set<string>();
-  for (const start of keys) {
-    if (seen.has(start)) continue;
-    const cluster: string[] = [];
-    const queue = [start];
-    seen.add(start);
-    while (queue.length) {
-      const key = queue.shift()!;
-      cluster.push(key);
-      for (const next of adjacent.get(key) ?? [])
-        if (!seen.has(next)) {
-          seen.add(next);
-          queue.push(next);
-        }
-    }
-    clusters.push(cluster);
-  }
-  const anchorArea = (cluster: readonly string[]) =>
-    Math.max(...cluster.map((key) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0)), 0);
-  const anchorShape = (cluster: readonly string[]) =>
-    Math.max(
-      ...cluster.map((key) => {
-        const geom = picture.geoms.get(key);
-        if (!geom) return 0;
-        const box = boxOf(geom.rs);
-        const width = Math.max(box.x1 - box.x0, 1);
-        const height = Math.max(box.y1 - box.y0, 1);
-        const shell = isLiningPiece(picture, key) ? 0.2 : 1;
-        return shell * Math.abs(geom.areaMm2) * (Math.min(width, height) / Math.max(width, height));
-      }),
-      0,
-    );
-  return clusters.sort(
-    (a, b) =>
-      anchorShape(b) - anchorShape(a) ||
-      anchorArea(b) - anchorArea(a) ||
-      pictureClusterArea(picture, b) - pictureClusterArea(picture, a),
+const isLiningPiece = (picture: StepPicture, key: string) => {
+  const tokens = nameTokens(picture.geoms.get(key)?.name ?? '');
+  return (
+    tokens.some((token) => ROLE_BOOK.liningTokens?.includes(token)) ||
+    isInteriorDuplicate(picture, key)
   );
-}
+};
 
 /** Sewn bodies in a laid picture, preserving its main body and recovering smaller loose bodies. */
 export function editorPictureClusters(picture: StepPicture): string[][] {
@@ -274,91 +213,6 @@ export function editorPictureClusters(picture: StepPicture): string[][] {
   return clusters.sort((a, b) => pictureClusterArea(picture, b) - pictureClusterArea(picture, a));
 }
 
-function pictureWithClusters(picture: StepPicture, clusters: readonly (readonly string[])[]) {
-  const keep = new Set(clusters.flatMap((cluster) => [...cluster]));
-  const T = new Map([...picture.layout.T].filter(([key]) => keep.has(key)));
-  const points = [...T].flatMap(([key, affine]) =>
-    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(affine, point)),
-  );
-  if (!points.length) return picture;
-  return {
-    ...picture,
-    layoutLeaves: picture.layoutLeaves
-      .map((leaf) => leaf.filter((key) => keep.has(key)))
-      .filter((leaf) => leaf.length > 0),
-    layout: {
-      ...picture.layout,
-      T,
-      input: new Map([...picture.layout.input].filter(([key]) => keep.has(key))),
-      ghosts: picture.layout.ghosts.filter((ghost) => keep.has(ghost.key)),
-      stacked: picture.layout.stacked
-        .map((stack) => stack.filter((key) => keep.has(key)))
-        .filter((stack) => stack.length > 1),
-      pieceLayers: picture.layout.pieceLayers.filter(
-        ([piece, partner]) => keep.has(piece) && keep.has(partner),
-      ),
-      onRuns: picture.layout.onRuns.filter((key) => keep.has(key)),
-      apart: picture.layout.apart.filter((key) => keep.has(key)),
-      bbox: boxOf(points),
-    },
-  };
-}
-
-function focusNonJoinPicture(
-  picture: StepPicture,
-  action: AsmAction | undefined,
-  strict = false,
-  preserveStored = false,
-): StepPicture {
-  const clusters = strict ? connectedPictureClusters(picture) : editorPictureClusters(picture);
-  if (!clusters.length) return picture;
-  if (clusters.length === 1) return pictureWithClusters(picture, clusters);
-  const marks = editorActionMarks(action, picture.geoms);
-  const markedPieces = new Set(
-    [...marks.lines, ...marks.glyphs]
-      .map((mark) => mark.piece)
-      .filter((key) => picture.layout.T.has(key)),
-  );
-  const selected = markedPieces.size
-    ? clusters.filter((cluster) => cluster.some((key) => markedPieces.has(key)))
-    : strict
-      ? clusters.filter((cluster, index) => {
-          if (index === 0) return true;
-          if (
-            pictureClusterArea(picture, cluster) <
-            0.45 * pictureClusterArea(picture, clusters[0])
-          )
-            return false;
-          const hands = (keys: readonly string[]) =>
-            new Set(
-              keys.flatMap((key) => {
-                const geom = picture.geoms.get(key);
-                const hand = geom?.hand ?? readName(geom?.name ?? '').hand;
-                return hand ? [hand] : [];
-              }),
-            );
-          const mainHands = hands(clusters[0]);
-          const candidateHands = hands(cluster);
-          const mainIsLining = clusters[0].every((key) => isLiningPiece(picture, key));
-          const candidateIsLining = cluster.every((key) => isLiningPiece(picture, key));
-          return (
-            mainIsLining === candidateIsLining &&
-            ((mainHands.has('L') && candidateHands.has('R')) ||
-              (mainHands.has('R') && candidateHands.has('L')))
-          );
-        })
-      : clusters.slice(0, 1);
-  const focused = pictureWithClusters(picture, selected.length ? selected : clusters.slice(0, 1));
-  if (
-    !strict &&
-    markedPieces.size > 0 &&
-    focused.layout.T.size > 1 &&
-    focused.layout.T.size * 2 < picture.layout.T.size
-  )
-    return compactFinalPicture(focused, true);
-  return strict && !preserveStored ? dockLoosePicture(focused) : focused;
-}
-
 const visiblePictureKeys = (picture: StepPicture) => {
   const stacked = new Set(picture.layout.stacked.flatMap((group) => group.slice(1)));
   const layeredInputs = new Set(picture.layout.layers.map(([input]) => input));
@@ -370,6 +224,125 @@ const visiblePictureKeys = (picture: StepPicture) => {
       !layeredPieces.has(key),
   );
 };
+
+const seamPieceSides = (seam: StepPicture['frameSeams'][number]): [string[], string[]] =>
+  seam.kind === 'surface' && seam.surface
+    ? [[seam.surface.host], [seam.surface.part]]
+    : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
+
+/** A stored or derived sewing decision, not a merely plausible residual candidate. */
+const sewnPairing = (seam: StepPicture['frameSeams'][number]) =>
+  confidentSeam(seam) || (!!seam.sewn && seam.score >= 0.9);
+
+/** B3 layers that deliberately represent construction inside their finished host. */
+function explicitConstructionLayer(picture: StepPicture, piece: string, host?: string): boolean {
+  const reading = readName(picture.geoms.get(piece)?.name ?? '');
+  if (
+    isLiningPiece(picture, piece) ||
+    ['pocket', 'facing', 'placket', 'fly'].includes(reading.role ?? '')
+  )
+    return true;
+  if (!host) return false;
+  const hostReading = readName(picture.geoms.get(host)?.name ?? '');
+  const area = Math.abs(picture.geoms.get(piece)?.areaMm2 ?? 0);
+  const hostArea = Math.abs(picture.geoms.get(host)?.areaMm2 ?? 0);
+  return (
+    !!reading.role &&
+    reading.role === hostReading.role &&
+    reading.family === hostReading.family &&
+    reading.hand === hostReading.hand &&
+    hostArea >= 3 * area
+  );
+}
+
+/** Dominant sewn-and-touching cluster, captured before completeness normalization moves loose units. */
+function dominantSeamCluster(picture: StepPicture): string[] {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < 2) return keys;
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
+  const touches = (left: readonly Pt2[], right: readonly Pt2[]) => {
+    if (
+      Math.max(
+        boxOf(left).x0 - boxOf(right).x1,
+        boxOf(right).x0 - boxOf(left).x1,
+        boxOf(left).y0 - boxOf(right).y1,
+        boxOf(right).y0 - boxOf(left).y1,
+        0,
+      ) > 3
+    )
+      return false;
+    const near = (points: readonly Pt2[], target: readonly Pt2[]) =>
+      points.some((point) =>
+        target.some((start, index) => {
+          const end = target[(index + 1) % target.length];
+          const dx = end[0] - start[0];
+          const dy = end[1] - start[1];
+          const length2 = dx * dx + dy * dy;
+          const share = length2
+            ? Math.max(
+                0,
+                Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+              )
+            : 0;
+          return (
+            Math.hypot(point[0] - start[0] - share * dx, point[1] - start[1] - share * dy) <= 3
+          );
+        }),
+      );
+    return near(left, right) || near(right, left);
+  };
+  const adjacent = new Map(keys.map((key) => [key, new Set<string>()]));
+  const link = (a: string, b: string) => {
+    if (a === b || !adjacent.has(a) || !adjacent.has(b) || !touches(ring(a), ring(b))) return;
+    adjacent.get(a)!.add(b);
+    adjacent.get(b)!.add(a);
+  };
+  for (const seam of picture.frameSeams) {
+    if (!confidentSeam(seam)) continue;
+    const sides =
+      seam.kind === 'surface' && seam.surface
+        ? [[seam.surface.host], [seam.surface.part]]
+        : [(seam.aParts ?? [seam.a]).map(pieceKeyOf), (seam.bParts ?? [seam.b]).map(pieceKeyOf)];
+    for (const a of sides[0]) for (const b of sides[1]) link(a, b);
+  }
+  const components: string[][] = [];
+  const seen = new Set<string>();
+  for (const start of keys) {
+    if (seen.has(start)) continue;
+    const component: string[] = [];
+    const queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const key = queue.shift()!;
+      component.push(key);
+      for (const next of adjacent.get(key) ?? [])
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+    }
+    components.push(component);
+  }
+  const anchor = (component: readonly string[]) =>
+    Math.max(
+      ...component.map((key) => {
+        const geom = picture.geoms.get(key);
+        if (!geom) return 0;
+        const box = boxOf(geom.rs);
+        return (
+          Math.abs(geom.areaMm2) *
+          (Math.min(box.x1 - box.x0, box.y1 - box.y0) /
+            Math.max(box.x1 - box.x0, box.y1 - box.y0, 1))
+        );
+      }),
+      0,
+    );
+  return components.sort(
+    (a, b) =>
+      anchor(b) - anchor(a) || pictureClusterArea(picture, b) - pictureClusterArea(picture, a),
+  )[0];
+}
 
 /** Structural pieces include ones a stored scene mistakenly classified as construction layers. */
 const structuralPictureKeys = (picture: StepPicture) => {
@@ -496,6 +469,464 @@ function separateAddedBodyPieces(picture: StepPicture, preserved: ReadonlySet<st
   return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
 }
 
+/** Keep every confidently sewn component; only genuinely unpaired pieces become B3 layers. */
+function layerUnpairedPieces(
+  picture: StepPicture,
+  originalApart: ReadonlySet<string> = new Set(picture.layout.apart),
+  preferred: ReadonlySet<string> = new Set(),
+): StepPicture {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < 2) return picture;
+  const adjacent = new Map(keys.map((key) => [key, new Set<string>()]));
+  const link = (a: string, b: string) => {
+    if (a === b || !adjacent.has(a) || !adjacent.has(b)) return;
+    adjacent.get(a)!.add(b);
+    adjacent.get(b)!.add(a);
+  };
+  for (const seam of picture.frameSeams) {
+    if (!sewnPairing(seam)) continue;
+    const sides = seamPieceSides(seam);
+    for (const a of sides[0]) for (const b of sides[1]) link(a, b);
+  }
+
+  const components: string[][] = [];
+  const seen = new Set<string>();
+  for (const start of keys) {
+    if (seen.has(start)) continue;
+    const component: string[] = [];
+    const queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const key = queue.shift()!;
+      component.push(key);
+      for (const next of adjacent.get(key) ?? [])
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
+    }
+    components.push(component);
+  }
+  const anchorShape = (component: readonly string[]) =>
+    Math.max(
+      ...component.map((key) => {
+        const geom = picture.geoms.get(key);
+        if (!geom) return 0;
+        const box = boxOf(geom.rs);
+        const width = Math.max(box.x1 - box.x0, 1);
+        const height = Math.max(box.y1 - box.y0, 1);
+        const shell = isLiningPiece(picture, key) ? 0.2 : 1;
+        return shell * Math.abs(geom.areaMm2) * (Math.min(width, height) / Math.max(width, height));
+      }),
+      0,
+    );
+  components.sort(
+    (a, b) =>
+      anchorShape(b) - anchorShape(a) ||
+      pictureClusterArea(picture, b) - pictureClusterArea(picture, a),
+  );
+  const established = originalApart.size ? keys.filter((key) => !originalApart.has(key)) : [];
+  const preferredKeys = keys.filter((key) => preferred.has(key));
+  const seeds = preferredKeys.length
+    ? preferredKeys
+    : established.length
+      ? established
+      : components[0];
+  const sewn = new Set(seeds);
+  const seamQueue = [...seeds];
+  while (seamQueue.length) {
+    const key = seamQueue.shift()!;
+    for (const next of adjacent.get(key) ?? [])
+      if (!sewn.has(next)) {
+        sewn.add(next);
+        seamQueue.push(next);
+      }
+  }
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const rings = new Map(
+    keys.map((key) => [
+      key,
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+    ]),
+  );
+  const touches = (left: readonly Pt2[], right: readonly Pt2[]) => {
+    const distance = 3;
+    const a = boxOf(left);
+    const b = boxOf(right);
+    if (Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1, 0) > distance) return false;
+    if (pairOverlap(rasterize(left, 2), rasterize(right, 2)) > 0) return true;
+    const pointSegmentDistance = (point: Pt2, start: Pt2, end: Pt2) => {
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length2 = dx * dx + dy * dy;
+      const share = length2
+        ? Math.max(
+            0,
+            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+          )
+        : 0;
+      return Math.hypot(point[0] - start[0] - share * dx, point[1] - start[1] - share * dy);
+    };
+    const near = (points: readonly Pt2[], ring: readonly Pt2[]) =>
+      points.some((point) =>
+        ring.some(
+          (start, index) =>
+            pointSegmentDistance(point, start, ring[(index + 1) % ring.length]) <= distance,
+        ),
+      );
+    return near(left, right) || near(right, left);
+  };
+  const physicalAdjacent = new Map(keys.map((key) => [key, new Set<string>()]));
+  for (const left of keys)
+    for (const right of keys)
+      if (left < right && touches(rings.get(left)!, rings.get(right)!)) {
+        physicalAdjacent.get(left)!.add(right);
+        physicalAdjacent.get(right)!.add(left);
+      }
+  const physicalComponents: string[][] = [];
+  const physicallySeen = new Set<string>();
+  for (const start of keys) {
+    if (physicallySeen.has(start)) continue;
+    const component: string[] = [];
+    const queue = [start];
+    physicallySeen.add(start);
+    while (queue.length) {
+      const key = queue.shift()!;
+      component.push(key);
+      for (const next of physicalAdjacent.get(key) ?? [])
+        if (!physicallySeen.has(next)) {
+          physicallySeen.add(next);
+          queue.push(next);
+        }
+    }
+    physicalComponents.push(component);
+  }
+  const protectedComponents = physicalComponents
+    .filter((component) => component.some((key) => sewn.has(key)))
+    .sort(
+      (a, b) =>
+        anchorShape(b) - anchorShape(a) ||
+        pictureClusterArea(picture, b) - pictureClusterArea(picture, a),
+    );
+  const hosts = protectedComponents[0];
+  const shown = new Set(protectedComponents.flat());
+  const explicitLayers = new Map(picture.layout.pieceLayers);
+  for (const key of shown)
+    if (!preferred.has(key) && explicitConstructionLayer(picture, key, explicitLayers.get(key)))
+      shown.delete(key);
+  const hidden = keys.filter((key) => !shown.has(key));
+  if (!hidden.length) return picture;
+  const existing = new Set(picture.layout.pieceLayers.map(([piece]) => piece));
+  const hostFor = (piece: string) => {
+    const wanted = reading(piece);
+    return [...hosts].sort((left, right) => {
+      const score = (candidate: string) => {
+        const actual = reading(candidate);
+        return (
+          (wanted.role && actual.role === wanted.role ? 1e12 : 0) +
+          (wanted.hand && actual.hand === wanted.hand ? 1e9 : 0) +
+          Math.abs(picture.geoms.get(candidate)?.areaMm2 ?? 0)
+        );
+      };
+      return score(right) - score(left);
+    })[0];
+  };
+  const pieceLayers: [string, string][] = [
+    ...picture.layout.pieceLayers,
+    ...hidden
+      .filter((piece) => !existing.has(piece))
+      .map((piece) => [piece, hostFor(piece)] as [string, string]),
+  ];
+  return { ...picture, layout: { ...picture.layout, pieceLayers } };
+}
+
+/** Keep the primary shell; construction details remain present as layers on their host. */
+function layerSecondaryPieces(picture: StepPicture, operation: SceneOp): StepPicture {
+  const baseVisible = visiblePictureKeys(picture);
+  if (baseVisible.length < 2) return picture;
+  const all = [...picture.layout.T.keys()];
+  const aspect = (key: string) => {
+    const box = boxOf(picture.geoms.get(key)?.rs ?? []);
+    const width = Math.max(box.x1 - box.x0, 1);
+    const height = Math.max(box.y1 - box.y0, 1);
+    return Math.max(width, height) / Math.min(width, height);
+  };
+  const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
+  const largest = Math.max(...baseVisible.map(area), 1);
+  const directSew = /(?:join|sew|stitch|overlock|serge|attach|bind|zigzag)/i.test(
+    operation.work ?? '',
+  );
+  const directInputs = new Set(
+    (operation.inputKeys ?? []).map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, '')),
+  );
+  const directlyNamed = (key: string) => {
+    const geom = picture.geoms.get(key);
+    return [key, geom?.name ?? ''].some((value) =>
+      directInputs.has(value.toLowerCase().replace(/[^a-z0-9]+/g, '')),
+    );
+  };
+  const secondaryRoles = new Set(['pocket', 'facing', 'placket', 'fly']);
+  const treatmentRoles = new Set(['collar', 'stand', 'rib', 'cuff', 'hemband', 'waistband']);
+  const knownSecondary = (key: string) =>
+    isLiningPiece(picture, key) ||
+    secondaryRoles.has(readName(picture.geoms.get(key)?.name ?? '').role ?? '');
+  const areaPrimaries = baseVisible.filter(
+    (key) => aspect(key) < 5 && area(key) >= 0.12 * largest && !knownSecondary(key),
+  );
+  const constructionLayers = new Set(
+    areaPrimaries.filter((key) =>
+      areaPrimaries.some(
+        (host) =>
+          host !== key && area(host) > area(key) && explicitConstructionLayer(picture, key, host),
+      ),
+    ),
+  );
+  const shellPrimaries = areaPrimaries.filter((key) => !constructionLayers.has(key));
+  const pairedToShell = (key: string) =>
+    picture.frameSeams.some((seam) => {
+      if (!sewnPairing(seam)) return false;
+      const [left, right] = seamPieceSides(seam);
+      return (
+        (left.includes(key) && right.some((candidate) => shellPrimaries.includes(candidate))) ||
+        (right.includes(key) && left.some((candidate) => shellPrimaries.includes(candidate)))
+      );
+    });
+  const dockedStrips = all.filter(
+    (key) =>
+      !knownSecondary(key) &&
+      treatmentRoles.has(readName(picture.geoms.get(key)?.name ?? '').role ?? '') &&
+      aspect(key) >= 5 &&
+      pairedToShell(key),
+  );
+  const visible = [...new Set([...baseVisible, ...dockedStrips])];
+  const primaries = new Set([...shellPrimaries, ...dockedStrips]);
+  const directDetails = visible.filter(
+    (key) =>
+      !primaries.has(key) && !isInteriorDuplicate(picture, key) && directSew && directlyNamed(key),
+  );
+  const toLayer = visible.filter((key) => !primaries.has(key) && !directDetails.includes(key));
+  if (primaries.size < 2) {
+    const interior = visible.filter((key) => isInteriorDuplicate(picture, key));
+    if (!interior.length) return picture;
+    toLayer.splice(0, toLayer.length, ...interior);
+  }
+  if (!toLayer.length && !directDetails.length) return picture;
+  const restoredStrips = new Set(dockedStrips);
+  const retainedLayers = picture.layout.pieceLayers.filter(([piece]) => !restoredStrips.has(piece));
+  const existing = new Set(retainedLayers.map(([piece]) => piece));
+  const hosts = primaries.size ? [...primaries] : visible.filter((key) => !toLayer.includes(key));
+  if (!hosts.length) return picture;
+  const hostFor = (piece: string) => {
+    const wanted = readName(picture.geoms.get(piece)?.name ?? '');
+    return [...hosts].sort((left, right) => {
+      const score = (candidate: string) => {
+        const actual = readName(picture.geoms.get(candidate)?.name ?? '');
+        return (
+          (wanted.family && actual.family === wanted.family ? 1e12 : 0) +
+          (wanted.hand && actual.hand === wanted.hand ? 1e9 : 0) +
+          area(candidate)
+        );
+      };
+      return score(right) - score(left);
+    })[0];
+  };
+  const pieceLayers: [string, string][] = [
+    ...retainedLayers,
+    ...toLayer
+      .filter((key) => !existing.has(key))
+      .map((key) => [key, hostFor(key)] as [string, string]),
+  ];
+  const T = new Map(picture.layout.T);
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point));
+  for (const key of directDetails) {
+    const pieceBox = boxOf(ring(key));
+    const alreadyDocked = hosts.some((candidate) => {
+      const candidateBox = boxOf(ring(candidate));
+      const gap = Math.max(
+        pieceBox.x0 - candidateBox.x1,
+        candidateBox.x0 - pieceBox.x1,
+        pieceBox.y0 - candidateBox.y1,
+        candidateBox.y0 - pieceBox.y1,
+        0,
+      );
+      const horizontal =
+        Math.min(pieceBox.x1, candidateBox.x1) - Math.max(pieceBox.x0, candidateBox.x0);
+      const vertical =
+        Math.min(pieceBox.y1, candidateBox.y1) - Math.max(pieceBox.y0, candidateBox.y0);
+      return gap <= 3 && Math.max(horizontal, vertical) >= 4;
+    });
+    if (alreadyDocked) continue;
+    const host = hostFor(key);
+    const hostBox = boxOf(ring(host));
+    const width = Math.max(pieceBox.x1 - pieceBox.x0, 1);
+    const height = Math.max(pieceBox.y1 - pieceBox.y0, 1);
+    const vertical = height >= width;
+    const dx = vertical
+      ? [hostBox.x0 - pieceBox.x1, hostBox.x1 - pieceBox.x0].sort(
+          (left, right) => Math.abs(left) - Math.abs(right),
+        )[0]
+      : (hostBox.x0 + hostBox.x1 - pieceBox.x0 - pieceBox.x1) / 2;
+    const dy = vertical
+      ? (hostBox.y0 + hostBox.y1 - pieceBox.y0 - pieceBox.y1) / 2
+      : [hostBox.y0 - pieceBox.y1, hostBox.y1 - pieceBox.y0].sort(
+          (top, bottom) => Math.abs(top) - Math.abs(bottom),
+        )[0];
+    T.set(key, compose(translate(dx, dy), T.get(key)!));
+  }
+  const shown = visible.filter((key) => !toLayer.includes(key));
+  const points = shown.flatMap((key) => ring(key));
+  const stacked = picture.layout.stacked
+    .map((group) => group.filter((key, index) => index === 0 || !restoredStrips.has(key)))
+    .filter((group) => group.length > 0);
+  let result: StepPicture = {
+    ...picture,
+    layout: { ...picture.layout, T, pieceLayers, stacked, bbox: boxOf(points) },
+  };
+  const sleeves = shown.filter(
+    (key) => readName(picture.geoms.get(key)?.name ?? '').role === 'sleeve',
+  );
+  const bodies = shown.filter(
+    (key) =>
+      !sleeves.includes(key) &&
+      !treatmentRoles.has(readName(picture.geoms.get(key)?.name ?? '').role ?? ''),
+  );
+  if (sleeves.length === 2 && bodies.length >= 2) {
+    const shownBox = boxOf(points);
+    const width = shownBox.x1 - shownBox.x0;
+    const height = shownBox.y1 - shownBox.y0;
+    const targetAspect = 1.82;
+    const lift = Math.max(0, width / targetAspect - height);
+    const sleeveBoxes = sleeves.map((key) => boxOf(ring(key)));
+    const sleeveTop = Math.min(...sleeveBoxes.map((box) => box.y0));
+    const sleeveHeights = sleeveBoxes.map((box) => box.y1 - box.y0);
+    if (lift > 0 && sleeveTop <= shownBox.y0 + 3 && lift <= 0.08 * Math.min(...sleeveHeights)) {
+      const moved = new Map(result.layout.T);
+      const shiftWithLayers = (leader: string) => {
+        const followers = new Set([
+          leader,
+          ...pieceLayers.filter(([, host]) => host === leader).map(([piece]) => piece),
+          ...stacked.filter(([host]) => host === leader).flatMap((group) => group.slice(1)),
+        ]);
+        for (const key of followers) {
+          const transform = moved.get(key);
+          if (transform) moved.set(key, compose(translate(0, -lift), transform));
+        }
+      };
+      for (const sleeve of sleeves) shiftWithLayers(sleeve);
+      const tightenedPoints = shown.flatMap((key) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(moved.get(key)!, point)),
+      );
+      result = {
+        ...result,
+        layout: { ...result.layout, T: moved, bbox: boxOf(tightenedPoints) },
+      };
+    }
+  }
+  if (restoredStrips.size) {
+    const moved = new Map(result.layout.T);
+    for (const strip of restoredStrips) {
+      const matches = result.frameSeams.flatMap((seam) => {
+        if (!sewnPairing(seam) || seam.kind === 'surface' || seam.kind === 'closure-not-seam')
+          return [];
+        const a = seam.aParts?.length ? seam.aParts : [seam.a];
+        const b = seam.bParts?.length ? seam.bParts : [seam.b];
+        const partEdges = a.filter((edge) => pieceKeyOf(edge) === strip);
+        const targetEdges = b.filter((edge) => shellPrimaries.includes(pieceKeyOf(edge)));
+        const reversePart = b.filter((edge) => pieceKeyOf(edge) === strip);
+        const reverseTarget = a.filter((edge) => shellPrimaries.includes(pieceKeyOf(edge)));
+        const parts = partEdges.length && targetEdges.length ? partEdges : reversePart;
+        const targets = partEdges.length && targetEdges.length ? targetEdges : reverseTarget;
+        const edgePoints = (edges: readonly string[]) =>
+          edges.flatMap((edge) => {
+            const key = pieceKeyOf(edge);
+            const transform = moved.get(key);
+            const resolved = resolveEdge(edge, result.geoms);
+            return transform && resolved
+              ? resolved.pts.map((point) => apply(transform, point))
+              : [];
+          });
+        const partPoints = edgePoints(parts);
+        const targetPoints = edgePoints(targets);
+        return partPoints.length > 1 && targetPoints.length > 1
+          ? [
+              {
+                partPoints,
+                targetPoints,
+                targetKeys: [...new Set(targets.map(pieceKeyOf))],
+              },
+            ]
+          : [];
+      });
+      const match = matches.sort(
+        (left, right) => right.targetKeys.length - left.targetKeys.length,
+      )[0];
+      if (!match) continue;
+      const partBox = boxOf(match.partPoints);
+      const targetBox = boxOf(match.targetPoints);
+      let dx = (targetBox.x0 + targetBox.x1 - partBox.x0 - partBox.x1) / 2;
+      let dy = (targetBox.y0 + targetBox.y1 - partBox.y0 - partBox.y1) / 2;
+      const stripRing = (result.geoms.get(strip)?.rs ?? []).map((point) =>
+        apply(moved.get(strip)!, point),
+      );
+      const targetRings = match.targetKeys.map((key) =>
+        (result.geoms.get(key)?.rs ?? []).map((point) => apply(moved.get(key)!, point)),
+      );
+      const overlapAt = (offsetX: number, offsetY: number) => {
+        const ring = stripRing.map(([x, y]) => [x + dx + offsetX, y + dy + offsetY] as Pt2);
+        return targetRings.reduce(
+          (largestOverlap, target) =>
+            Math.max(largestOverlap, pairOverlap(rasterize(ring, 2), rasterize(target, 2))),
+          0,
+        );
+      };
+      if (overlapAt(0, 0) > 0.15) {
+        const horizontal = targetBox.x1 - targetBox.x0 >= targetBox.y1 - targetBox.y0;
+        const directions: Pt2[] = horizontal
+          ? [
+              [0, 1],
+              [0, -1],
+            ]
+          : [
+              [1, 0],
+              [-1, 0],
+            ];
+        const stripBox = boxOf(stripRing);
+        const minor = Math.min(stripBox.x1 - stripBox.x0, stripBox.y1 - stripBox.y0);
+        let clearance: { direction: Pt2; distance: number } | null = null;
+        for (const direction of directions) {
+          for (let distance = 1; distance <= minor; distance += 1) {
+            if (overlapAt(direction[0] * distance, direction[1] * distance) > 0.15) continue;
+            if (!clearance || distance < clearance.distance) clearance = { direction, distance };
+            break;
+          }
+        }
+        if (clearance) {
+          dx += clearance.direction[0] * clearance.distance;
+          dy += clearance.direction[1] * clearance.distance;
+        }
+      }
+      const followers = new Set([
+        strip,
+        ...pieceLayers.filter(([, host]) => host === strip).map(([piece]) => piece),
+        ...stacked.filter(([host]) => host === strip).flatMap((group) => group.slice(1)),
+      ]);
+      for (const key of followers) {
+        const transform = moved.get(key);
+        if (transform) moved.set(key, compose(translate(dx, dy), transform));
+      }
+    }
+    const dockedPoints = shown.flatMap((key) =>
+      (result.geoms.get(key)?.rs ?? []).map((point) => apply(moved.get(key)!, point)),
+    );
+    result = {
+      ...result,
+      layout: { ...result.layout, T: moved, bbox: boxOf(dockedPoints) },
+    };
+  }
+  return shown.length === 2 && toLayer.length ? dockLoosePicture(result) : result;
+}
+
 function dockLoosePicture(picture: StepPicture, mode: 'move' | 'layer' = 'move'): StepPicture {
   const keys = visiblePictureKeys(picture);
   if (keys.length < 2) return picture;
@@ -508,21 +939,21 @@ function dockLoosePicture(picture: StepPicture, mode: 'move' | 'layer' = 'move')
   const touches = (left: readonly Pt2[], right: readonly Pt2[]) => {
     const a = boxOf(left);
     const b = boxOf(right);
-    if (Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1, 0) > 2) return false;
+    if (Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1, 0) > 3) return false;
     if (pairOverlap(rasterize(left, 2), rasterize(right, 2)) > 0) return true;
     const grid = new Map<string, Pt2[]>();
     for (const point of right) {
-      const cell = `${Math.floor(point[0] / 2)}:${Math.floor(point[1] / 2)}`;
+      const cell = `${Math.floor(point[0] / 3)}:${Math.floor(point[1] / 3)}`;
       grid.set(cell, [...(grid.get(cell) ?? []), point]);
     }
     return left.some(([x, y]) => {
-      const gx = Math.floor(x / 2);
-      const gy = Math.floor(y / 2);
+      const gx = Math.floor(x / 3);
+      const gy = Math.floor(y / 3);
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++)
           if (
             (grid.get(`${gx + dx}:${gy + dy}`) ?? []).some(
-              (point) => Math.hypot(x - point[0], y - point[1]) <= 2,
+              (point) => Math.hypot(x - point[0], y - point[1]) <= 3,
             )
           )
             return true;
@@ -646,6 +1077,93 @@ function dockLoosePicture(picture: StepPicture, mode: 'move' | 'layer' = 'move')
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
   );
   return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
+}
+
+/** Conceal only B3 construction layers that collide with their finished shell. */
+function layerOverlappingConstruction(picture: StepPicture): StepPicture {
+  const visible = visiblePictureKeys(picture);
+  if (visible.length < 2) return picture;
+  const ring = (key: string) =>
+    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
+  const pieceLayers = [...picture.layout.pieceLayers];
+  const hidden = new Set(pieceLayers.map(([piece]) => piece));
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const representedSleeve = (key: string) => {
+    const role = reading(key);
+    if (role.role !== 'sleeve') return true;
+    return visible.some((other) => {
+      if (other === key || hidden.has(other)) return false;
+      const candidate = reading(other);
+      return candidate.role === 'sleeve' && candidate.hand === role.hand;
+    });
+  };
+  for (let left = 0; left < visible.length; left++)
+    for (let right = left + 1; right < visible.length; right++) {
+      const a = visible[left];
+      const b = visible[right];
+      if (hidden.has(a) || hidden.has(b)) continue;
+      if (pairOverlap(rasterize(ring(a), 2), rasterize(ring(b), 2)) <= 0.15) continue;
+      const candidate = [a, b]
+        .filter((key) => {
+          const role = reading(key).role;
+          return (
+            representedSleeve(key) &&
+            (isLiningPiece(picture, key) ||
+              ['pocket', 'facing', 'placket', 'fly'].includes(role ?? ''))
+          );
+        })
+        .sort(
+          (first, second) =>
+            Math.abs(picture.geoms.get(first)?.areaMm2 ?? 0) -
+            Math.abs(picture.geoms.get(second)?.areaMm2 ?? 0),
+        )[0];
+      if (!candidate) continue;
+      const host = candidate === a ? b : a;
+      pieceLayers.push([candidate, host]);
+      hidden.add(candidate);
+    }
+  return pieceLayers.length === picture.layout.pieceLayers.length
+    ? picture
+    : { ...picture, layout: { ...picture.layout, pieceLayers } };
+}
+
+/** A completed lined garment shows the shell; its lining remains present as a B3 inner layer. */
+function layerFinishedLining(picture: StepPicture): StepPicture {
+  const visible = visiblePictureKeys(picture);
+  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
+  const shell = visible.filter((key) => !isLiningPiece(picture, key));
+  const shellBodies = shell.filter(
+    (key) =>
+      ![
+        'sleeve',
+        'collar',
+        'stand',
+        'rib',
+        'cuff',
+        'hemband',
+        'waistband',
+        'pocket',
+        'facing',
+        'placket',
+        'fly',
+      ].includes(reading(key).role ?? ''),
+  );
+  const shellSleeves = shell.filter((key) => reading(key).role === 'sleeve');
+  const lining = visible.filter((key) => isLiningPiece(picture, key));
+  if (shellBodies.length < 2 || shellSleeves.length < 2 || !lining.length) return picture;
+  const pieceLayers = [...picture.layout.pieceLayers];
+  for (const key of lining) {
+    const piece = reading(key);
+    const host =
+      shell.find((candidate) => {
+        const target = reading(candidate);
+        return (
+          target.role === piece.role && (!piece.hand || !target.hand || target.hand === piece.hand)
+        );
+      }) ?? shellBodies[0];
+    if (!pieceLayers.some(([layer]) => layer === key)) pieceLayers.push([key, host]);
+  }
+  return { ...picture, layout: { ...picture.layout, pieceLayers } };
 }
 
 const frameFill = (points: readonly Pt2[]) => {
@@ -777,12 +1295,32 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
     T.set(leftSleeve, [-1, 0, 0, 1, bodyBox.x0 + leftBox.x0, bodyBox.y1 - leftBox.y1] as Affine);
   else place(leftSleeve, bodyBox.x0 - leftBox.x1, bodyBox.y1 - leftBox.y1);
   place(rightSleeve, bodyBox.x1 - rightBox.x0, bodyBox.y1 - rightBox.y1);
-  const snap = (key: string, hosts: readonly string[]) => {
+  const snap = (key: string, hosts: readonly string[], side?: 'L' | 'R') => {
     const part = ring(key).map((point) => apply(T.get(key)!, point));
     const target = hosts.flatMap((host) => ring(host).map((point) => apply(T.get(host)!, point)));
+    const partBox = boxOf(part);
+    const targetBox = boxOf(target);
+    const partCandidates = side
+      ? part.filter(
+          (point) =>
+            point[1] >= partBox.y0 + 0.45 * (partBox.y1 - partBox.y0) &&
+            (side === 'L'
+              ? point[0] >= partBox.x1 - 0.18 * (partBox.x1 - partBox.x0)
+              : point[0] <= partBox.x0 + 0.18 * (partBox.x1 - partBox.x0)),
+        )
+      : part;
+    const targetCandidates = side
+      ? target.filter(
+          (point) =>
+            point[1] >= targetBox.y0 + 0.45 * (targetBox.y1 - targetBox.y0) &&
+            (side === 'L'
+              ? point[0] <= targetBox.x0 + 0.18 * (targetBox.x1 - targetBox.x0)
+              : point[0] >= targetBox.x1 - 0.18 * (targetBox.x1 - targetBox.x0)),
+        )
+      : target;
     let nearest: { distance: number; part: Pt2; target: Pt2 } | null = null;
-    for (const partPoint of part)
-      for (const targetPoint of target) {
+    for (const partPoint of partCandidates.length ? partCandidates : part)
+      for (const targetPoint of targetCandidates.length ? targetCandidates : target) {
         const distance = Math.hypot(partPoint[0] - targetPoint[0], partPoint[1] - targetPoint[1]);
         if (!nearest || distance < nearest.distance)
           nearest = { distance, part: partPoint, target: targetPoint };
@@ -798,8 +1336,8 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
       transform[5] + nearest.target[1] - nearest.part[1],
     ] as Affine);
   };
-  snap(leftSleeve, [bodyLeaders[0]]);
-  snap(rightSleeve, [bodyLeaders[bodyLeaders.length - 1]]);
+  snap(leftSleeve, [bodyLeaders[0]], 'L');
+  snap(rightSleeve, [bodyLeaders[bodyLeaders.length - 1]], 'R');
   const insetSleeve = (key: string, host: string, direction: number) => {
     const width = Math.max(boxOf(ring(key)).x1 - boxOf(ring(key)).x0, 1);
     for (let moved = 1; moved <= 0.25 * width; moved += 1) {
@@ -829,10 +1367,7 @@ function sleevedFinalPicture(picture: StepPicture): StepPicture | null {
   if (collar) {
     for (let index = pieceLayers.length - 1; index >= 0; index--)
       if (pieceLayers[index][0] === collar) pieceLayers.splice(index, 1);
-    bodyBox = boxOf([
-      ...bodyPoints,
-      ...sleevePair.flatMap((key) => ring(key).map((point) => apply(T.get(key)!, point))),
-    ]);
+    bodyBox = boxOf(bodyPoints);
     const collarBox = boxOf(ring(collar));
     place(
       collar,
@@ -998,10 +1533,6 @@ function sleevedPictureNeedsRepair(picture: StepPicture): boolean {
   const visible = structuralPictureKeys(picture);
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const rawSleeves = rawVisible.filter((key) => reading(key).role === 'sleeve');
-  const rawBodies = rawVisible.filter((key) =>
-    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
-  );
-  if (rawSleeves.length < 2 && rawBodies.length < 2) return false;
   const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
   const bodies = visible.filter((key) => {
     const role = reading(key).role;
@@ -1013,6 +1544,7 @@ function sleevedPictureNeedsRepair(picture: StepPicture): boolean {
     );
   });
   if (sleeves.length < 2 || bodies.length < 2) return false;
+  if (rawSleeves.length < 2) return true;
   const ring = (key: string) =>
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
   const bodyBox = boxOf(bodies.flatMap((key) => ring(key)));
@@ -1129,38 +1661,6 @@ function repairStoredSleevesPicture(picture: StepPicture): StepPicture {
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
   );
   return { ...picture, layout: { ...picture.layout, T, pieceLayers, bbox: boxOf(points) } };
-}
-
-/** A stored closeout keeps every affine, but no longer redraws loose sleeve/detail units. */
-function layerStoredCloseoutPicture(picture: StepPicture): StepPicture | null {
-  const visible = visiblePictureKeys(picture);
-  const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
-  const collars = visible.filter((key) =>
-    ['collar', 'stand', 'rib'].includes(reading(key).role ?? ''),
-  );
-  const sleeves = visible.filter((key) => reading(key).role === 'sleeve');
-  const bodies = visible.filter((key) =>
-    ['front', 'back', 'yoke', 'side'].includes(reading(key).role ?? ''),
-  );
-  if (!collars.length || sleeves.length < 2 || bodies.length < 2) return null;
-  const ring = (key: string) =>
-    (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point));
-  const bodyBox = boxOf(bodies.flatMap((key) => ring(key)));
-  const centreY = (bodyBox.y0 + bodyBox.y1) / 2;
-  const height = Math.max(bodyBox.y1 - bodyBox.y0, 1);
-  const offsets = sleeves.map((key) => {
-    const box = boxOf(ring(key));
-    return (box.y0 + box.y1) / 2 - centreY;
-  });
-  if (!offsets.every((offset) => offset > 0.55 * height || offset < -0.55 * height)) return null;
-  const host = bodies.find((key) => reading(key).role === 'front') ?? bodies[0];
-  const pieceLayers = [...picture.layout.pieceLayers];
-  const details = visible.filter((key) =>
-    ['sleeve', 'cuff', 'placket', 'pocket', 'facing', 'fly'].includes(reading(key).role ?? ''),
-  );
-  for (const key of details)
-    if (!pieceLayers.some(([piece]) => piece === key)) pieceLayers.push([key, host]);
-  return { ...picture, layout: { ...picture.layout, pieceLayers } };
 }
 
 /** Reduce trouser construction layers to the upright front/back topology used on the worktable. */
@@ -1360,7 +1860,11 @@ function collarUnitPicture(picture: StepPicture): StepPicture | null {
 
 /** Lay repeated side panels on the edges of their compact polygon base. */
 function radialBasePicture(picture: StepPicture): StepPicture | null {
-  const visible = visiblePictureKeys(picture);
+  const layeredInputs = new Set(picture.layout.layers.map(([input]) => input));
+  const layeredPieces = new Set(picture.layout.pieceLayers.map(([piece]) => piece));
+  const visible = [...picture.layout.T.keys()].filter(
+    (key) => !layeredInputs.has(picture.layout.input.get(key) ?? -1) && !layeredPieces.has(key),
+  );
   if (visible.length < 6) return null;
   const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
   const panels = visible.reduce<string[]>((best, seed) => {
@@ -1396,7 +1900,9 @@ function radialBasePicture(picture: StepPicture): StepPicture | null {
     .slice(0, Math.min(8, panels.length));
   if (baseEdges.length < 6) return null;
 
-  const T = new Map<string, Affine>([[baseKey, [1, 0, 0, 1, 0, 0]]]);
+  const T = new Map(picture.layout.T);
+  T.set(baseKey, [1, 0, 0, 1, 0, 0]);
+  const positioned = new Set([baseKey]);
   const baseCentre: Pt2 = [
     baseGeom.rs.reduce((sum, point) => sum + point[0], 0) / baseGeom.rs.length,
     baseGeom.rs.reduce((sum, point) => sum + point[1], 0) / baseGeom.rs.length,
@@ -1435,25 +1941,32 @@ function radialBasePicture(picture: StepPicture): StepPicture | null {
       key,
       candidates.reduce((best, candidate) => (score(candidate) > score(best) ? candidate : best)),
     );
+    positioned.add(key);
   });
-  if (T.size < 7) return null;
+  if (positioned.size < 7) return null;
   const points = [...T].flatMap(([key, transform]) =>
     (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
   );
-  return {
-    ...picture,
-    layout: {
-      ...picture.layout,
-      T,
-      input: new Map([...T.keys()].map((key, index) => [key, index])),
-      ghosts: [],
-      stacked: [],
-      layers: [],
-      pieceLayers: [],
-      apart: [],
-      bbox: boxOf(points),
+  const input = new Map(picture.layout.input);
+  if (!input.has(baseKey)) input.set(baseKey, input.size);
+  const stacked = picture.layout.stacked
+    .map((stack) => stack.filter((key, index) => index === 0 || !positioned.has(key)))
+    .filter((stack) => stack.length > 1);
+  const pieceLayers = picture.layout.pieceLayers.filter(([piece]) => !positioned.has(piece));
+  return separateAddedBodyPieces(
+    {
+      ...picture,
+      layout: {
+        ...picture.layout,
+        T,
+        input,
+        stacked,
+        pieceLayers,
+        bbox: boxOf(points),
+      },
     },
-  };
+    positioned,
+  );
 }
 
 /** Collapse construction plies that describe one panel rather than three separate products. */
@@ -1638,6 +2151,7 @@ function restoreEdgeTreatments(
     });
   const align = (key: string) => {
     if (preservedTreatments.has(key)) return true;
+    const originalTransform = T.get(key)!;
     const allowed = targetRoles(reading(key).role);
     const role = reading(key).role;
     const hand = reading(key).hand;
@@ -1867,16 +2381,52 @@ function restoreEdgeTreatments(
         );
       }
     }
+    if (collarLike) {
+      const centredBox = boxOf(ring(key));
+      const centred: Pt2 = [
+        (centredBox.x0 + centredBox.x1) / 2,
+        (centredBox.y0 + centredBox.y1) / 2,
+      ];
+      const offset =
+        (centred[0] - target.midpoint[0]) * target.axis[0] +
+        (centred[1] - target.midpoint[1]) * target.axis[1];
+      if (Math.abs(offset) > allowance) {
+        const correction = offset - Math.sign(offset) * allowance;
+        move(key, -correction * target.axis[0], -correction * target.axis[1]);
+      }
+    }
     if (role === 'waistband' && receivers.length) {
-      const receiverTop = Math.max(...receivers.map((candidate) => boxOf(ring(candidate)).y1));
-      const treatmentBottom = boxOf(ring(key)).y0;
-      if (treatmentBottom < receiverTop + 0.01) move(key, 0, receiverTop + 0.01 - treatmentBottom);
+      const receiverPoints = receivers.flatMap((candidate) => ring(candidate));
+      const receiverTop = Math.max(...receiverPoints.map((point) => point[1]));
+      const treatment = ring(key);
+      const treatmentBox = boxOf(treatment);
+      const receiverBox = boxOf(receiverPoints);
+      const overlapLeft = Math.max(treatmentBox.x0, receiverBox.x0);
+      const overlapRight = Math.min(treatmentBox.x1, receiverBox.x1);
+      const span = Math.max(overlapRight - overlapLeft, 1);
+      const differences: number[] = [];
+      for (let index = 0; index < 48; index++) {
+        const x = overlapLeft + (span * (index + 0.5)) / 48;
+        const radius = Math.max(span / 48, 1);
+        const bandSlice = treatment.filter((point) => Math.abs(point[0] - x) <= radius);
+        const crownSlice = receiverPoints.filter((point) => Math.abs(point[0] - x) <= radius);
+        if (!bandSlice.length || !crownSlice.length) continue;
+        const sewingY = Math.min(...bandSlice.map((point) => point[1]));
+        const crownY = Math.max(...crownSlice.map((point) => point[1]));
+        differences.push(crownY - sewingY);
+      }
+      if (differences.length >= 6) {
+        move(key, 0, Math.max(...differences));
+      } else {
+        const treatmentBottom = treatmentBox.y0;
+        if (treatmentBottom < receiverTop) move(key, 0, receiverTop - treatmentBottom);
+      }
       const placedBottom = boxOf(ring(key)).y0;
       const bandPoints = ring(key).filter((point) => point[1] <= placedBottom + 0.5);
       const crownPoints = receivers
         .flatMap((candidate) => ring(candidate))
         .filter((point) => point[1] >= receiverTop - 0.5);
-      const pointSegmentDistance = (point: Pt2, start: Pt2, end: Pt2) => {
+      const nearestOnSegment = (point: Pt2, start: Pt2, end: Pt2) => {
         const dx = end[0] - start[0];
         const dy = end[1] - start[1];
         const length2 = dx * dx + dy * dy;
@@ -1886,28 +2436,66 @@ function restoreEdgeTreatments(
               Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
             )
           : 0;
-        return Math.hypot(point[0] - start[0] - share * dx, point[1] - start[1] - share * dy);
+        const target: Pt2 = [start[0] + share * dx, start[1] + share * dy];
+        return { target, distance: Math.hypot(point[0] - target[0], point[1] - target[1]) };
       };
       const receiverRings = receivers.map((candidate) => ring(candidate));
-      let contactDistance = Infinity;
-      for (const point of ring(key))
+      let contact: { band: Pt2; target: Pt2; distance: number } | null = null;
+      for (const band of ring(key))
         for (const receiverRing of receiverRings)
-          for (let index = 0; index < receiverRing.length; index++)
-            contactDistance = Math.min(
-              contactDistance,
-              pointSegmentDistance(
-                point,
-                receiverRing[index],
-                receiverRing[(index + 1) % receiverRing.length],
-              ),
+          for (let index = 0; index < receiverRing.length; index++) {
+            const nearest = nearestOnSegment(
+              band,
+              receiverRing[index],
+              receiverRing[(index + 1) % receiverRing.length],
             );
+            if (!contact || nearest.distance < contact.distance)
+              contact = { band, target: nearest.target, distance: nearest.distance };
+          }
       let closest: { band: Pt2; crown: Pt2; distance: number } | null = null;
       for (const band of bandPoints)
         for (const crown of crownPoints) {
           const distance = Math.abs(band[0] - crown[0]);
           if (!closest || distance < closest.distance) closest = { band, crown, distance };
         }
-      if (contactDistance > 2 && closest) move(key, closest.crown[0] - closest.band[0], 0);
+      if (contact && contact.distance > 0.1) {
+        const share = 1;
+        move(
+          key,
+          (contact.target[0] - contact.band[0]) * share,
+          (contact.target[1] - contact.band[1]) * share,
+        );
+      } else if (closest) move(key, closest.crown[0] - closest.band[0], 0);
+
+      // An explicit multi-panel sewing edge is the authoritative crown. Clearance and
+      // compaction may leave a visually obvious gap even though another outline point
+      // happens to touch, so finish by docking the transformed sewing edge itself.
+      if (matches.length) {
+        const correction = compose(T.get(key)!, invert(originalTransform));
+        const transformedSource = sourcePoints.map((point) => apply(correction, point));
+        const sampled = (points: readonly Pt2[]) => {
+          const stride = Math.max(1, Math.floor(points.length / 160));
+          return points.filter((_, index) => index % stride === 0);
+        };
+        let seamContact: { source: Pt2; target: Pt2; distance: number } | null = null;
+        for (const sourcePoint of sampled(transformedSource))
+          for (const targetPoint of sampled(targetPoints)) {
+            const distance = Math.hypot(
+              sourcePoint[0] - targetPoint[0],
+              sourcePoint[1] - targetPoint[1],
+            );
+            if (!seamContact || distance < seamContact.distance)
+              seamContact = { source: sourcePoint, target: targetPoint, distance };
+          }
+        if (seamContact && seamContact.distance > 0.1)
+          move(
+            key,
+            seamContact.target[0] - seamContact.source[0],
+            seamContact.target[1] - seamContact.source[1],
+          );
+        for (let offset = 0; maxOverlap() > allowedOverlap && offset < clearance; offset += 1)
+          move(key, ux, uy);
+      }
     }
     return true;
   };
@@ -2147,73 +2735,6 @@ function compactFinalPicture(
   });
 }
 
-/** Reuse the last compact stored-seam silhouette when a trouser closeout expands every layer. */
-function storedGarmentFinalPicture(
-  final: StepPicture,
-  earlier: readonly StepPicture[],
-): StepPicture | null {
-  const finalKeys = new Set(final.layout.T.keys());
-  const finalRoles = visiblePictureKeys(final).map((key) =>
-    readName(final.geoms.get(key)?.name ?? ''),
-  );
-  if (
-    !finalRoles.some((reading) => reading.role === 'waistband') ||
-    !finalRoles.some((reading) => reading.role === 'front') ||
-    !finalRoles.some((reading) => reading.role === 'back')
-  )
-    return null;
-
-  const source = [...earlier].reverse().find((picture) => {
-    const keys = visiblePictureKeys(picture);
-    if (keys.length !== 2 || keys.some((key) => !finalKeys.has(key))) return false;
-    const roles = keys.map((key) => readName(picture.geoms.get(key)?.name ?? '').role);
-    return roles.includes('front') && roles.includes('back');
-  });
-  if (!source) return null;
-
-  const keys = visiblePictureKeys(source);
-  const focused = pictureWithClusters(final, [keys]);
-  const T = new Map(
-    [...focused.layout.T].map(([key, transform]) => [key, source.layout.T.get(key) ?? transform]),
-  );
-  const points = [...T].flatMap(([key, transform]) =>
-    (focused.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
-  );
-  return { ...focused, layout: { ...focused.layout, T, bbox: boxOf(points) } };
-}
-
-/** Collapse a repeated-panel net to the latest closed body for the finishing operation. */
-function closedPanelFinalPicture(
-  final: StepPicture,
-  earlier: readonly StepPicture[],
-): StepPicture | null {
-  const keys = visiblePictureKeys(final);
-  if (keys.length < 6) return null;
-  const panels = keys.filter((key) => {
-    const reading = readName(final.geoms.get(key)?.name ?? '');
-    if (reading.role) return false;
-    const geom = final.geoms.get(key);
-    if (!geom) return false;
-    const box = boxOf(geom.rs);
-    const width = Math.max(box.x1 - box.x0, 1);
-    const height = Math.max(box.y1 - box.y0, 1);
-    return Math.max(width, height) / Math.min(width, height) < 5;
-  });
-  if (panels.length < 6) return null;
-  const areas = panels.map((key) => Math.abs(final.geoms.get(key)?.areaMm2 ?? 0));
-  if (Math.max(...areas) > 1.1 * Math.max(Math.min(...areas), 1)) return null;
-
-  const source = [...earlier].reverse().find((picture) => {
-    const sourceKeys = visiblePictureKeys(picture);
-    if (sourceKeys.length !== 1) return false;
-    const points = sourceKeys.flatMap((key) =>
-      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
-    );
-    return points.length > 2 && frameFill(points) >= 0.6;
-  });
-  return source ? { ...source, op: final.op, marks: final.marks } : null;
-}
-
 const sceneOperations = (techCard: common_TechCard): SceneOp[] =>
   (techCard.techCard?.operations ?? []).map((operation) => ({
     operationNumber: operation.operationNumber,
@@ -2340,7 +2861,7 @@ export function editorOperationPictures(
           if (layout.T.size) {
             const assembled = { ...picture, frameSeams, layoutLeaves: picture.leaves, layout };
             const result = useInferredLayout
-              ? focusNonJoinPicture(assembled, undefined, true)
+              ? layerUnpairedPieces(assembled, new Set(), new Set(dominantSeamCluster(assembled)))
               : assembled;
             pictures.set(number, useInferredLayout ? result : dockLoosePicture(assembled));
             const output = operation.outputUnitKey?.trim();
@@ -2350,7 +2871,7 @@ export function editorOperationPictures(
             if (!useInferredLayout)
               assembledByPieces.set(
                 picturePieceSignature(picture.leaves.flatMap((leaf) => leaf)),
-                dockLoosePicture({ ...assembled, marks: [] }, 'layer'),
+                dockLoosePicture({ ...assembled, marks: [] }),
               );
             return;
           }
@@ -2383,11 +2904,7 @@ export function editorOperationPictures(
         if (!useInferredLayout) {
           const assembled = assembledByPieces.get(picturePieceSignature(targetKeys));
           if (assembled) {
-            const focused = focusNonJoinPicture(
-              { ...assembled, op: operation, marks: [] },
-              row.action,
-            );
-            pictures.set(number, dockLoosePicture(focused, 'layer'));
+            pictures.set(number, dockLoosePicture({ ...assembled, op: operation, marks: [] }));
             return;
           }
         }
@@ -2426,9 +2943,7 @@ export function editorOperationPictures(
             layoutLeaves,
             layout,
           };
-          const shown = useInferredLayout
-            ? result
-            : dockLoosePicture(focusNonJoinPicture(result, row.action), 'layer');
+          const shown = useInferredLayout ? result : dockLoosePicture(result);
           pictures.set(number, shown);
           const output = operation.outputUnitKey?.trim();
           if (output) assembledByUnit.set(output, shown.layout);
@@ -2440,24 +2955,7 @@ export function editorOperationPictures(
     const final = [...pictures.entries()]
       .sort(([left], [right]) => right - left)
       .find(([, picture]) => visiblePictureKeys(picture).length > 2);
-    if (final) {
-      const earlier = [...pictures]
-        .filter(([number]) => number < final[0])
-        .sort(([left], [right]) => left - right)
-        .map(([, picture]) => picture);
-      const closed = useInferredLayout ? closedPanelFinalPicture(final[1], earlier) : null;
-      const finished = useInferredLayout
-        ? closed ?? compactFinalPicture(final[1])
-        : storedGarmentFinalPicture(final[1], earlier);
-      if (finished) pictures.set(final[0], finished);
-      if (closed) {
-        const priorFinal = [...pictures.entries()]
-          .filter(([number]) => number < final[0])
-          .sort(([left], [right]) => right - left)
-          .find(([, picture]) => visiblePictureKeys(picture).length > 2);
-        if (priorFinal) pictures.set(priorFinal[0], compactFinalPicture(priorFinal[1]));
-      }
-    }
+    if (final) pictures.set(final[0], compactFinalPicture(final[1]));
     const completeAssemblies = new Set<number>();
     for (const [number, picture] of pictures) {
       const rawKeys = visiblePictureKeys(picture);
@@ -2482,7 +2980,6 @@ export function editorOperationPictures(
       const storedSleeves = shouldRepairSleeves
         ? sleevedFinalPicture(picture) ?? repairStoredSleevesPicture(picture)
         : null;
-      const storedCloseout = storedSleeves ? null : layerStoredCloseoutPicture(picture);
       const radial =
         allowTopologyRepair && needsStructuralRepair ? radialBasePicture(picture) : null;
       const panelTopology = allowTopologyRepair ? trouserFrontPicture(picture) : null;
@@ -2528,14 +3025,8 @@ export function editorOperationPictures(
       const panelUnit =
         allowTopologyRepair && needsStructuralRepair ? panelUnitPicture(picture) : null;
       let revised =
-        anonymous ??
-        storedSleeves ??
-        storedCloseout ??
-        sleeved ??
-        radial ??
-        trouser ??
-        panelUnit ??
-        picture;
+        anonymous ?? storedSleeves ?? sleeved ?? radial ?? trouser ?? panelUnit ?? picture;
+      revised = layerFinishedLining(layerOverlappingConstruction(revised));
       if (storedSleeves || sleeved) completeAssemblies.add(number);
       const rings = visiblePictureKeys(revised).map((key) =>
         (revised.geoms.get(key)?.rs ?? []).map((point) => apply(revised.layout.T.get(key)!, point)),
@@ -2584,7 +3075,26 @@ export function editorOperationPictures(
           ? restoreEdgeTreatments(revised)
           : revised;
       const docked = hasEdgeTreatments ? dockLoosePicture(restored) : restored;
-      const finalPicture = hasEdgeTreatments ? restoreEdgeTreatments(docked) : docked;
+      const layeredPicture = layerFinishedLining(
+        layerOverlappingConstruction(hasEdgeTreatments ? restoreEdgeTreatments(docked) : docked),
+      );
+      const layeredRings = visiblePictureKeys(layeredPicture).map((key) =>
+        (layeredPicture.geoms.get(key)?.rs ?? []).map((point) =>
+          apply(layeredPicture.layout.T.get(key)!, point),
+        ),
+      );
+      const compactedPicture =
+        layeredRings.length > 1 &&
+        (hullCompactness(layeredRings) < 0.355 ||
+          (number === final?.[0] && frameFill(layeredRings.flat()) < 0.59))
+          ? compactFinalPicture(layeredPicture, true)
+          : layeredPicture;
+      const redockedPicture = dockLoosePicture(compactedPicture);
+      const finalPicture = layerFinishedLining(
+        layerOverlappingConstruction(
+          hasEdgeTreatments ? restoreEdgeTreatments(redockedPicture) : redockedPicture,
+        ),
+      );
       const shown = new Set(visiblePictureKeys(finalPicture));
       pictures.set(number, {
         ...finalPicture,
@@ -2596,27 +3106,6 @@ export function editorOperationPictures(
         },
       });
     }
-    for (const operation of operations) {
-      const number = operation.operationNumber ?? 0;
-      const row = rowByNumber.get(number);
-      if (!row?.action || !['button', 'buttonhole'].includes(row.action.tech)) continue;
-      const current = pictures.get(number);
-      if (!current || visiblePictureKeys(current).length > 2) continue;
-      const action = editorActionMarks(row.action, geoms);
-      const marked = new Set([...action.lines, ...action.glyphs].map((mark) => mark.piece));
-      const assembled = [...pictures.entries()]
-        .filter(([candidate]) => candidate < number)
-        .sort(([left], [right]) => right - left)
-        .map(([, picture]) => picture)
-        .find(
-          (picture) =>
-            visiblePictureKeys(picture).length > 2 &&
-            [...marked].every((key) => picture.layout.T.has(key)) &&
-            picture.layout.pieceLayers.some(([piece]) => marked.has(piece)),
-        );
-      if (marked.size && assembled)
-        pictures.set(number, { ...assembled, op: operation, marks: [] });
-    }
     for (let index = 1; index < operations.length; index++) {
       const previousOperation = operations[index - 1];
       const operation = operations[index];
@@ -2627,6 +3116,12 @@ export function editorOperationPictures(
       const inputSignature = (op: SceneOp) =>
         [...new Set((op.inputKeys ?? []).filter(Boolean))].sort().join('\u0000');
       const output = previousOperation.outputUnitKey?.trim();
+      const continuesWholeUnit =
+        (!!output &&
+          (operation.inputKeys ?? []).filter((key) => key.trim()).length === 1 &&
+          (operation.inputKeys ?? []).includes(output)) ||
+        (!!inputSignature(operation) &&
+          inputSignature(operation) === inputSignature(previousOperation));
       const sameAssembly =
         (!!output && (operation.inputKeys ?? []).includes(output)) ||
         (!!inputSignature(operation) &&
@@ -2639,13 +3134,7 @@ export function editorOperationPictures(
       const bottomFinishing =
         ['trousers', 'bottom', 'jumpsuit'].includes(model.garment?.category ?? '') &&
         /^(?:hem_turned|press_flat|press_final|press_open)$/i.test(operation.work ?? '');
-      if (
-        !joins.has(number) &&
-        keepsWholeUnit &&
-        (completeAssemblies.has(previousNumber) ||
-          /press_final/i.test(operation.work ?? '') ||
-          bottomFinishing)
-      ) {
+      if (!joins.has(number) && keepsWholeUnit && continuesWholeUnit) {
         const currentKeys = visiblePictureKeys(current);
         const fullestPrevious = bottomFinishing
           ? [...pictures.entries()]
@@ -2734,6 +3223,64 @@ export function editorOperationPictures(
         preserved,
       );
       pictures.set(number, restoreEdgeTreatments(stabilized, preserved));
+    }
+    for (let index = operations.length - 2; index >= 0; index--) {
+      const operation = operations[index];
+      const nextOperation = operations[index + 1];
+      const number = operation.operationNumber ?? 0;
+      const nextNumber = nextOperation.operationNumber ?? 0;
+      const output = operation.outputUnitKey?.trim();
+      const picture = pictures.get(number);
+      const nextPicture = pictures.get(nextNumber);
+      if (
+        !output ||
+        !(nextOperation.inputKeys ?? []).includes(output) ||
+        !picture ||
+        !nextPicture ||
+        rowByNumber.get(nextNumber)?.card?.turn
+      )
+        continue;
+      const keys = visiblePictureKeys(picture);
+      const nextKeys = new Set(visiblePictureKeys(nextPicture));
+      if (
+        keys.length < 3 ||
+        keys.length !== nextKeys.size ||
+        keys.some((key) => !nextKeys.has(key))
+      )
+        continue;
+      const rings = keys.map((key) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+      );
+      const nextRings = keys.map((key) =>
+        (nextPicture.geoms.get(key)?.rs ?? []).map((point) =>
+          apply(nextPicture.layout.T.get(key)!, point),
+        ),
+      );
+      const currentCompactness = hullCompactness(rings);
+      const nextCompactness = hullCompactness(nextRings);
+      if (currentCompactness >= 0.5 || nextCompactness < currentCompactness + 0.08) continue;
+      const T = new Map(picture.layout.T);
+      for (const key of keys) T.set(key, nextPicture.layout.T.get(key)!);
+      const points = [...T].flatMap(([key, transform]) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+      );
+      pictures.set(number, {
+        ...picture,
+        layout: { ...picture.layout, T, bbox: boxOf(points) },
+      });
+    }
+    for (const [number, picture] of pictures)
+      if (sleevedPictureNeedsRepair(picture)) {
+        const repaired = sleevedFinalPicture(picture);
+        if (repaired) {
+          pictures.set(number, repaired);
+          completeAssemblies.add(number);
+        }
+      }
+    for (const operation of operations) {
+      const number = operation.operationNumber ?? 0;
+      const picture = pictures.get(number);
+      if (picture) pictures.set(number, layerSecondaryPieces(picture, operation));
     }
     return pictures;
   } catch {

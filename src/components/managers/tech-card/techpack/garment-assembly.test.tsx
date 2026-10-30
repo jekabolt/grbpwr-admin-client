@@ -196,7 +196,10 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
   const intervalOverlap = (a0: number, a1: number, b0: number, b1: number) =>
     Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
   const drawnKeys = (picture: StepPicture) => {
-    const hidden = new Set(picture.layout.stacked.flatMap((stack) => stack.slice(1)));
+    const hidden = new Set([
+      ...picture.layout.stacked.flatMap((stack) => stack.slice(1)),
+      ...picture.layout.pieceLayers.map(([piece]) => piece),
+    ]);
     return [...picture.layout.T.keys()].filter((key) => !hidden.has(key));
   };
   const drawnShape = (input: AssemblyInput, picture: StepPicture, key: string) => {
@@ -367,7 +370,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     expect(yOverlap / minHeight).toBeGreaterThan(0.7);
   });
 
-  it('lays operation 650 waistband immediately above the legs', () => {
+  it('lays operation 650 waistband against the combined leg waist', () => {
     const input = input81();
     const picture = pictures81()?.get(650);
     expect(picture).toBeDefined();
@@ -381,8 +384,17 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     const legBox = worldBox(input, picture!, legs);
     const legHeight = legBox.y1 - legBox.y0;
     expect(bands).toHaveLength(4);
-    expect(bandBox.y0).toBeGreaterThanOrEqual(legBox.y1);
-    expect((bandBox.y0 - legBox.y1) / legHeight).toBeLessThanOrEqual(0.05);
+    expect(bandBox.y1).toBeGreaterThan(legBox.y1);
+    expect((legBox.y1 - bandBox.y0) / legHeight).toBeLessThanOrEqual(0.05);
+    const visibleBands = bands.filter((band) => drawnKeys(picture!).includes(band));
+    expect(visibleBands).toHaveLength(2);
+    for (const band of visibleBands) {
+      const bandShape = drawnShape(input, picture!, band);
+      expect(
+        legs.some((leg) => touch(bandShape, drawnShape(input, picture!, leg))),
+        input.pieces.get(band)?.name,
+      ).toBe(true);
+    }
   }, 120_000);
 
   it('uses outlines and background only in operation SVGs', () => {

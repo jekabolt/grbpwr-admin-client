@@ -341,14 +341,14 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
     model = deriveAssembly(input);
     fullGarment = joinedResult(input, 1060);
     pictures = editorOperationPictures(input.techCard, model)!;
-  });
+  }, 30_000);
 
   const namesOf = (picture: ReturnType<typeof sceneOf>) =>
     [...picture.layout.T.keys()].map((key) => model.pieces.get(key)?.name);
 
-  it('keeps operation 920 and removes the unmarked sleeve from operation 1010', () => {
+  it('keeps operation 920 and retains the upstream sleeve at operation 1010', () => {
     expect(namesOf(pictures.get(920)!)).toEqual(['FLP_R_MAIN']);
-    expect(namesOf(pictures.get(1010)!)).toEqual(['FLP_R_MAIN', 'FLP_R']);
+    expect(namesOf(pictures.get(1010)!)).toEqual(['FLP_R_MAIN', 'SLV_R', 'FLP_R']);
   });
 
   it.each([
@@ -367,45 +367,42 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
         ? clusters.filter((cluster) => cluster.some((key) => markedPieces.has(key))).flat()
         : clusters[0];
 
-      expect(new Set(pictures.get(operationNumber)!.layout.T.keys())).toEqual(new Set(expected));
+      const actual = new Set(pictures.get(operationNumber)!.layout.T.keys());
+      for (const key of source.layout.T.keys()) expect(actual.has(key), key).toBe(true);
+      for (const key of expected) expect(actual.has(key), key).toBe(true);
     },
   );
 
-  it('keeps every non-join picture on marked clusters, or the largest unmarked cluster', () => {
+  it('keeps every non-join picture upstream-complete', () => {
+    const pieceKeys = new Set(input.pieces.keys());
+    const producers = new Map(
+      (input.techCard.techCard?.operations ?? [])
+        .filter((operation) => operation.outputUnitKey)
+        .map((operation) => [operation.outputUnitKey!, operation]),
+    );
+    const upstreamPieces = (keys: readonly string[]) => {
+      const found = new Set<string>();
+      const visited = new Set<string>();
+      const visit = (key: string) => {
+        if (visited.has(key)) return;
+        visited.add(key);
+        if (pieceKeys.has(key)) found.add(key);
+        const producer = producers.get(key);
+        for (const inputKey of producer?.inputKeys ?? []) visit(inputKey);
+      };
+      for (const key of keys) visit(key);
+      return found;
+    };
     let checked = 0;
     for (const row of model.rows.filter((candidate) => !candidate.card)) {
       const picture = pictures.get(row.n);
       if (!picture) continue;
       checked += 1;
-      const action = editorActionMarks(row.action, picture.geoms);
-      const markedPieces = new Set(
-        [...action.lines, ...action.glyphs]
-          .map((mark) => mark.piece)
-          .filter((key) => picture.layout.T.has(key)),
+      const operation = input.techCard.techCard?.operations?.find(
+        (candidate) => candidate.operationNumber === row.n,
       );
-      const clusters = editorPictureClusters(picture);
-
-      if (!markedPieces.size) {
-        expect(clusters, `op ${row.n}`).toHaveLength(1);
-        continue;
-      }
-      if (
-        row.action &&
-        ['button', 'buttonhole'].includes(row.action.tech) &&
-        picture.layout.T.size > 2
-      ) {
-        expect(
-          [...markedPieces].every((key) => picture.layout.T.has(key)),
-          `op ${row.n}`,
-        ).toBe(true);
-        expect(picture.layout.T.size, `op ${row.n}`).toBeGreaterThan(2);
-        continue;
-      }
-      for (const cluster of clusters)
-        expect(
-          cluster.some((key) => markedPieces.has(key)),
-          `op ${row.n} · ${cluster.join(', ')}`,
-        ).toBe(true);
+      for (const key of upstreamPieces(operation?.inputKeys ?? []))
+        expect(picture.layout.T.has(key), `op ${row.n} · ${key}`).toBe(true);
     }
     expect(checked).toBeGreaterThan(0);
   });

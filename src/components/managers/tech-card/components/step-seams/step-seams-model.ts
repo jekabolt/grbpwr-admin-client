@@ -91,11 +91,11 @@ function membershipBefore(
     const output = (op?.outputUnitKey ?? '').trim();
     if (!output || op?.assemblyBlockDetached) continue;
     const inputs = [...new Set((op.inputKeys ?? []).flatMap(ownersOf))];
-    if (inputs.length < 2) continue;
+    if (!inputs.length) continue;
     const pieces = [
       ...new Set(inputs.flatMap((key) => components.get(key) ?? units.get(key) ?? [])),
     ];
-    if (pieces.length < 2) continue;
+    if (!pieces.length) continue;
     for (const key of inputs) components.delete(key);
     components.set(output, pieces);
     units.set(output, pieces);

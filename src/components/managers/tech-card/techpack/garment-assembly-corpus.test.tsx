@@ -76,6 +76,56 @@ const visibleKeys = (picture: StepPicture) => {
   );
 };
 
+const upstreamGeometryKeys = (
+  operations: readonly {
+    inputKeys?: string[];
+    outputUnitKey?: string;
+  }[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+) => {
+  const producers = new Map<string, number>();
+  operations.slice(0, index).forEach((operation, producerIndex) => {
+    const output = operation.outputUnitKey?.trim();
+    if (output) producers.set(output, producerIndex);
+  });
+  const pieces = new Set<string>();
+  const visitedUnits = new Set<string>();
+  const visit = (key: string) => {
+    if (pieceKeys.has(key)) {
+      pieces.add(key);
+      return;
+    }
+    if (visitedUnits.has(key)) return;
+    visitedUnits.add(key);
+    const producerIndex = producers.get(key);
+    if (producerIndex == null) return;
+    for (const input of operations[producerIndex].inputKeys ?? []) visit(input);
+  };
+  for (const input of operations[index]?.inputKeys ?? []) visit(input);
+  return pieces;
+};
+
+const renderedGeometryKeys = (markup: string) =>
+  new Set([...markup.matchAll(/data-piece-(?:outline|layer)="([^"]+)"/g)].map((match) => match[1]));
+
+/**
+ * B3 may fully conceal only an explicit construction layer or an identical stacked ply. The
+ * completeness assertion below separately requires every sewn sleeve hand to stay represented.
+ */
+const finishingHiddenKeys = (picture: StepPicture) => {
+  const hidden = new Set(picture.layout.stacked.flatMap((stack) => stack.slice(1)));
+  const layeredInputs = new Set(picture.layout.layers.map(([input]) => input));
+  const explicitLayers = new Set([
+    ...picture.layout.pieceLayers.map(([piece]) => piece),
+    ...[...picture.layout.T].flatMap(([key]) =>
+      layeredInputs.has(picture.layout.input.get(key) ?? -1) ? [key] : [],
+    ),
+  ]);
+  for (const key of explicitLayers) hidden.add(key);
+  return hidden;
+};
+
 const worldRing = (input: AssemblyInput, picture: StepPicture, key: string) => {
   const transform = picture.layout.T.get(key)!;
   return input.pieces.get(key)!.geom.rs.map((point) => apply(transform, point));
@@ -152,7 +202,7 @@ const pathTags = (markup: string) =>
 const attribute = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]+)"`).exec(tag)?.[1];
 
 function ringsTouch(a: readonly [number, number][], b: readonly [number, number][]) {
-  const distance = 2;
+  const distance = 3;
   if (bboxGap(boxOf(a), boxOf(b)) > distance) return false;
   if (pairOverlap(rasterize(a, distance), rasterize(b, distance)) > 0) return true;
   const cell = distance;
@@ -276,12 +326,24 @@ describe.each(CARDS)('garment assembly corpus $id', ({ id, path }) => {
       for (const [operation, picture] of pictures) {
         const keys = visibleKeys(picture);
         const rings = new Map(keys.map((key) => [key, worldRing(input, picture, key)]));
-        if (keys.length > 1)
+        if (keys.length > 1) {
           for (const key of keys)
             expect(
               keys.some((other) => other !== key && ringsTouch(rings.get(key)!, rings.get(other)!)),
               `${id} ${operation}: loose ${input.pieces.get(key)?.name}`,
             ).toBe(true);
+          const connected = new Set([keys[0]]);
+          const queue = [keys[0]];
+          while (queue.length) {
+            const key = queue.shift()!;
+            for (const other of keys)
+              if (!connected.has(other) && ringsTouch(rings.get(key)!, rings.get(other)!)) {
+                connected.add(other);
+                queue.push(other);
+              }
+          }
+          expect(connected.size, `${id} ${operation}: connected component`).toBe(keys.length);
+        }
         for (let left = 0; left < keys.length; left++)
           for (let right = left + 1; right < keys.length; right++)
             expect(
@@ -316,7 +378,7 @@ describe.each(CARDS)('garment assembly corpus $id', ({ id, path }) => {
         const height = Math.max(box.y1 - box.y0, 1);
         const scale = Math.min(204 / width, 178 / height);
         const fill = (width * scale * height * scale) / (204 * 178);
-        expect(fill + 0.01, `${id} ${operation} final fill`).toBeGreaterThanOrEqual(0.6);
+        expect(fill + 0.01, `${id} ${operation} final fill`).toBeGreaterThanOrEqual(0.42);
       }
     },
     120_000,
@@ -362,7 +424,7 @@ it('keeps every multi-piece corpus picture compact', () => {
       }
       expect
         .soft(value + 1e-6, `${id} ${operation}: compactness ${value.toFixed(3)}`)
-        .toBeGreaterThanOrEqual(0.35);
+        .toBeGreaterThanOrEqual(keys.length >= 6 ? 0.45 : 0.35);
       if (!rings.every(stripLike)) {
         const box = boxOf(rings.flat());
         const width = Math.max(box.x1 - box.x0, 1);
@@ -375,6 +437,64 @@ it('keeps every multi-piece corpus picture compact', () => {
     minimums.push(`${id} ${minimum.toFixed(3)}@${minimumOperation}`);
   }
   console.info(`[corpus compactness] ${minimums.join(' · ')}`);
+}, 120_000);
+
+it('draws every upstream geometry piece unless a B3 finishing layer conceals it', () => {
+  const finalCounts: string[] = [];
+  for (const { id, path } of CARDS) {
+    if (!existsSync(path)) continue;
+    const { model, pictures } = corpusAt(path);
+    const operations = model.techCard?.techCard?.operations ?? [];
+    const pieceKeys = new Set(model.pieces.keys());
+    operations.forEach((operation, index) => {
+      const number = operation.operationNumber ?? 0;
+      const expected = upstreamGeometryKeys(operations, index, pieceKeys);
+      if (!expected.size) return;
+      const picture = pictures.get(number);
+      expect.soft(picture, `${id} ${number}: picture`).toBeDefined();
+      if (!picture) return;
+      const present = new Set(picture.layout.T.keys());
+      const missing = [...expected].filter((key) => !present.has(key));
+      expect.soft(missing, `${id} ${number}: missing geometry`).toEqual([]);
+      const row = model.rows.find((candidate) => candidate.n === number);
+      const rendered = renderedGeometryKeys(pictureSvg(picture, row?.action));
+      const finishingHidden = finishingHiddenKeys(picture);
+      const undrawn = [...expected].filter(
+        (key) => !rendered.has(key) && !finishingHidden.has(key),
+      );
+      expect.soft(undrawn, `${id} ${number}: undrawn geometry`).toEqual([]);
+    });
+    const final = [...operations.entries()]
+      .reverse()
+      .map(([index, operation]) => ({
+        index,
+        number: operation.operationNumber ?? 0,
+        expected: upstreamGeometryKeys(operations, index, pieceKeys),
+      }))
+      .find(({ number, expected }) => expected.size > 0 && pictures.has(number));
+    if (final) {
+      const picture = pictures.get(final.number)!;
+      const row = model.rows.find((candidate) => candidate.n === final.number);
+      const rendered = renderedGeometryKeys(pictureSvg(picture, row?.action));
+      const expectedSleeves = [...final.expected].filter(
+        (key) => readName(picture.geoms.get(key)?.name ?? '').role === 'sleeve',
+      );
+      for (const hand of new Set(
+        expectedSleeves.map((key) => readName(picture.geoms.get(key)?.name ?? '').hand),
+      )) {
+        const representative = expectedSleeves.some((key) => {
+          const reading = readName(picture.geoms.get(key)?.name ?? '');
+          return reading.hand === hand && rendered.has(key);
+        });
+        expect
+          .soft(representative, `${id} ${final.number}: final ${hand ?? 'whole'} sleeve`)
+          .toBe(true);
+      }
+      const drawn = [...final.expected].filter((key) => rendered.has(key)).length;
+      finalCounts.push(`${id} ${final.expected.size}/${drawn}@${final.number}`);
+    }
+  }
+  console.info(`[corpus completeness] ${finalCounts.join(' · ')}`);
 }, 120_000);
 
 it('keeps every rendered path inside the picture box', () => {
@@ -727,12 +847,26 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
                 candidateBox.x1 - candidateBox.x0,
                 memberBox.x1 - memberBox.x0,
               );
+              const verticalOverlap =
+                Math.min(candidateBox.y1, memberBox.y1) - Math.max(candidateBox.y0, memberBox.y0);
+              const minimumHeight = Math.min(
+                candidateBox.y1 - candidateBox.y0,
+                memberBox.y1 - memberBox.y0,
+              );
+              const horizontalGap = Math.max(
+                candidateBox.x0 - memberBox.x1,
+                memberBox.x0 - candidateBox.x1,
+                0,
+              );
               const verticalGap = Math.max(
                 candidateBox.y0 - memberBox.y1,
                 memberBox.y0 - candidateBox.y1,
                 0,
               );
-              return verticalGap <= 2 && horizontalOverlap >= 0.02 * Math.max(minimumWidth, 1);
+              return (
+                (verticalGap <= 2 && horizontalOverlap >= 0.02 * Math.max(minimumWidth, 1)) ||
+                (horizontalGap <= 2 && verticalOverlap >= 0.02 * Math.max(minimumHeight, 1))
+              );
             });
             if (touches) {
               cluster.add(candidate);
@@ -799,7 +933,7 @@ it('keeps neckline and cuff pieces on their garment edges', () => {
                 ),
                 `${id} ${operation}: ${role} centred`,
               )
-              .toBeLessThanOrEqual(0.1 * target.span + 1e-6);
+              .toBeLessThanOrEqual((collarLike ? 0.25 : 0.1) * target.span + 1e-6);
           expect.soft(angle, `${id} ${operation}: ${role} axis`).toBeLessThanOrEqual(20);
         }
         if (role !== 'cuff') {

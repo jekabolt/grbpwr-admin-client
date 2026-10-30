@@ -727,6 +727,7 @@ export function StepPictureSvg({
   const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
     let best = ring[0] ?? point;
     let distance = Infinity;
+    let segment = 0;
     ring.forEach((start, index) => {
       const end = ring[(index + 1) % ring.length];
       const dx = end[0] - start[0];
@@ -743,14 +744,32 @@ export function StepPictureSvg({
       if (candidateDistance < distance) {
         best = candidate;
         distance = candidateDistance;
+        segment = index;
       }
     });
-    return { point: best, distance };
+    return { point: best, distance, segment };
   };
   const pointsOnDrawnPiece = (key: string, points: readonly Pt2[]) => {
     const host = actionHost(key);
     if (!host) return null;
     const hidden = host.key !== key;
+    if (hidden && points.length > 1 && host.ring.length > 2) {
+      const start = nearestOnRing(points[0], host.ring);
+      const end = nearestOnRing(points[points.length - 1], host.ring);
+      const count = host.ring.length;
+      const forward: Pt2[] = [];
+      for (let index = (start.segment + 1) % count; index !== (end.segment + 1) % count; ) {
+        forward.push(host.ring[index]);
+        index = (index + 1) % count;
+      }
+      const backward: Pt2[] = [];
+      for (let index = start.segment; index !== end.segment; ) {
+        backward.push(host.ring[index]);
+        index = (index - 1 + count) % count;
+      }
+      const arc = forward.length <= backward.length ? forward : backward;
+      return [start.point, ...arc, end.point];
+    }
     return points.map((point) => {
       const nearest = nearestOnRing(point, host.ring);
       return hidden || (!insideRing(point, host.ring) && nearest.distance > 4)
