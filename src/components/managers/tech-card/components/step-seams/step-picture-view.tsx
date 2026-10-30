@@ -7,7 +7,7 @@ import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleto
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
@@ -33,6 +33,7 @@ import {
   earlierInner,
   fitBox,
   focusPieces,
+  insideRing,
   inputName,
   labelSpot,
   pathOf,
@@ -312,9 +313,13 @@ export function stepPictureOfOp(
   const crossSeams = stored.length
     ? []
     : split.cross.filter((candidate) => candidate.kind !== 'surface');
-  const proposalSeams = suggestions
-    .map((candidate) => seamOfSides(candidate, geoms, innerLines))
-    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  // Missing stored rows use the card-wide garment reading. The local suggestion remains only the
+  // editor's pick affordance when that reading has no seam between these operation inputs.
+  const proposalSeams = crossSeams.length
+    ? []
+    : suggestions
+        .map((candidate) => seamOfSides(candidate, geoms, innerLines))
+        .filter((candidate): candidate is SeamCandidate => !!candidate);
   const frameSeams = frameSeamsOf(
     innerSeams,
     storedSeams,
@@ -324,7 +329,12 @@ export function stepPictureOfOp(
   const marks: EdgeMark[] = (
     stored.length
       ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
-      : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
+      : crossSeams.length
+        ? crossSeams.flatMap((candidate) => {
+            const sides = candidateSides(candidate);
+            return [...sides.a, ...sides.b];
+          })
+        : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
   ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
   const layoutLeaves = focusedStepLeaves(
     leaves,
@@ -505,13 +515,49 @@ const LOOK: Record<'canvas' | 'result' | 'tile' | 'print', Look> = {
   print: { outline: 1.75, hair: 0.7, mark: 3, stored: 3, dash: '5 3', font: 9 },
 };
 
+const pointSegmentDistance = (point: Pt2, a: Pt2, b: Pt2) => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length2 = dx * dx + dy * dy;
+  const share = length2
+    ? Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length2))
+    : 0;
+  return Math.hypot(point[0] - a[0] - share * dx, point[1] - a[1] - share * dy);
+};
+
+/** Only the contour beside its host stays visible when a piece is folded behind that host. */
+function layerRuns(ring: readonly Pt2[], host: readonly Pt2[], distance: number): Pt2[][] {
+  if (ring.length < 2 || host.length < 2) return [];
+  const stride = Math.max(1, Math.ceil(host.length / 64));
+  const contour = host.filter((_, index) => index % stride === 0);
+  const near = ring.map((point) =>
+    contour.some(
+      (start, index) =>
+        pointSegmentDistance(point, start, contour[(index + 1) % contour.length]) <= distance,
+    ),
+  );
+  if (near.every(Boolean)) return [[...ring]];
+  const firstGap = near.findIndex((value) => !value);
+  const runs: Pt2[][] = [];
+  let run: Pt2[] = [];
+  for (let offset = 1; offset <= ring.length; offset++) {
+    const index = (firstGap + offset) % ring.length;
+    if (near[index]) run.push(ring[index]);
+    else if (run.length) {
+      if (run.length > 1) runs.push(run);
+      run = [];
+    }
+  }
+  if (run.length > 1) runs.push(run);
+  return runs;
+}
+
 const INK = 'var(--color-textColor)';
 const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
-/** A layer lying on its partner (a pocket bag on the front): the inner-rule grey. */
-const UNDER = 'var(--color-hairline)';
+export type PictureView = { k: number; x: number; y: number };
 
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
@@ -537,6 +583,7 @@ export function StepPictureSvg({
   hover,
   onHover,
   onPick,
+  view,
   className,
 }: {
   w: number;
@@ -557,10 +604,31 @@ export function StepPictureSvg({
   hover?: TargetId | null;
   onHover?: (id: TargetId | null) => void;
   onPick?: (id: TargetId) => void;
+  /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
+  view?: PictureView;
   className?: string;
 }) {
   const L = LOOK[look];
-  const fit = useMemo(() => fitBox(layout.bbox, w, h, pad), [layout.bbox, w, h, pad]);
+  const fitBounds = useMemo(() => {
+    const layered = new Set(layout.layers.map(([layer]) => layer));
+    const laidIn = new Set(layout.pieceLayers.map(([key]) => key));
+    const stacked = new Set(layout.stacked.flatMap((group) => group.slice(1)));
+    const points = [...layout.T].flatMap(([key, transform]) => {
+      if (stacked.has(key) || layered.has(layout.input.get(key) ?? -1) || laidIn.has(key))
+        return [];
+      return (geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
+    });
+    if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
+    return points.length ? boxOf(points) : layout.bbox;
+  }, [layout, geoms, look]);
+  const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
+  const vk = view?.k ?? 1;
+  const vx = view?.x ?? 0;
+  const vy = view?.y ?? 0;
+  const fit = useMemo(() => {
+    const f = fitBox(fitBounds, w, h, fitPad);
+    return { s: f.s * vk, tx: f.tx * vk + vx, ty: f.ty * vk + vy };
+  }, [fitBounds, w, h, fitPad, vk, vx, vy]);
 
   const pieces = useMemo(() => {
     const out: { key: string; ring: Pt2[]; input: number; centre: Pt2 }[] = [];
@@ -573,20 +641,41 @@ export function StepPictureSvg({
     return out;
   }, [layout, geoms, fit]);
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
-  // A layer goes under its partner's outline: the partner's fill, the layer in grey, the partner's
-  // outline again on top (its outer half, as the fills leave it).
-  // A piece laid by hand inside its partner within one unit is a layer too.
+  // A folded-on layer is a thin contour over its host. Identical plies share one outline.
   const { base, under } = useMemo(() => {
     const layered = new Set(layout.layers.map(([l]) => l));
     const laidIn = new Set(layout.pieceLayers.map(([k]) => k));
+    const directPartner = new Map(layout.pieceLayers);
+    const inputPartner = new Map(layout.layers);
+    const stackedFollowers = new Set(layout.stacked.flatMap((stack) => stack.slice(1)));
     const isUnder = (p: { key: string; input: number }) =>
       layered.has(p.input) || laidIn.has(p.key);
+    const visible = pieces.filter((piece) => !stackedFollowers.has(piece.key));
+    const bases = visible.filter((piece) => !isUnder(piece));
     return {
-      base: pieces.filter((p) => !isUnder(p)),
-      under: pieces.filter(isUnder),
+      base: bases,
+      under: visible.filter(isUnder).map((piece) => {
+        const direct = directPartner.get(piece.key);
+        const partnerInput = inputPartner.get(piece.input);
+        const candidates = direct
+          ? bases.filter((candidate) => candidate.key === direct)
+          : bases.filter((candidate) => candidate.input === partnerInput);
+        const partner = candidates.reduce<(typeof bases)[number] | undefined>((best, candidate) => {
+          if (!best) return candidate;
+          const distance = Math.hypot(
+            candidate.centre[0] - piece.centre[0],
+            candidate.centre[1] - piece.centre[1],
+          );
+          const bestDistance = Math.hypot(
+            best.centre[0] - piece.centre[0],
+            best.centre[1] - piece.centre[1],
+          );
+          return distance < bestDistance ? candidate : best;
+        }, undefined);
+        return { ...piece, runs: partner ? layerRuns(piece.ring, partner.ring, 6) : [] };
+      }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
-  const maskId = `step-under-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -621,19 +710,96 @@ export function StepPictureSvg({
     return out;
   }, [onPick, look, layout, geoms, innerLines, fit]);
 
-  const markLines = marks
-    .map((m) => ({ m, pts: ptsOf(m.id) }))
-    .filter((x): x is { m: EdgeMark; pts: Pt2[] } => !!x.pts);
+  const directPartner = new Map(layout.pieceLayers);
+  const inputPartner = new Map(layout.layers);
+  const stackLeader = new Map(
+    layout.stacked.flatMap((stack) => stack.slice(1).map((key) => [key, stack[0]] as const)),
+  );
+  const actionHost = (key: string) => {
+    const direct = directPartner.get(key) ?? stackLeader.get(key);
+    if (direct) return base.find((piece) => piece.key === direct);
+    const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
+    return (
+      base.find((piece) => piece.key === key) ??
+      base.find((piece) => partnerInput != null && piece.input === partnerInput)
+    );
+  };
+  const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
+    let best = ring[0] ?? point;
+    let distance = Infinity;
+    ring.forEach((start, index) => {
+      const end = ring[(index + 1) % ring.length];
+      const dx = end[0] - start[0];
+      const dy = end[1] - start[1];
+      const length2 = dx * dx + dy * dy;
+      const share = length2
+        ? Math.max(
+            0,
+            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+          )
+        : 0;
+      const candidate: Pt2 = [start[0] + share * dx, start[1] + share * dy];
+      const candidateDistance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+      if (candidateDistance < distance) {
+        best = candidate;
+        distance = candidateDistance;
+      }
+    });
+    return { point: best, distance };
+  };
+  const pointsOnDrawnPiece = (key: string, points: readonly Pt2[]) => {
+    const host = actionHost(key);
+    if (!host) return null;
+    const hidden = host.key !== key;
+    return points.map((point) => {
+      const nearest = nearestOnRing(point, host.ring);
+      return hidden || (!insideRing(point, host.ring) && nearest.distance > 4)
+        ? nearest.point
+        : point;
+    });
+  };
+  const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
+  const markLines = marks.flatMap((m) => {
+    const points = ptsOf(m.id);
+    const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
+    return shown ? [{ m, pts: shown }] : [];
+  });
   const actionLinePaths = actionLines.flatMap((line) => {
     const T = layout.T.get(line.piece);
-    return T && line.points.length
-      ? [{ line, points: line.points.map((point) => toPx(fit, apply(T, point))) }]
-      : [];
+    const raw =
+      T && line.points.length ? line.points.map((point) => toPx(fit, apply(T, point))) : [];
+    const points = pointsOnDrawnPiece(line.piece, raw);
+    return points?.length ? [{ line, points }] : [];
   });
   const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
-    if (!T) return [];
-    const at = toPx(fit, apply(T, glyph.point));
+    const host = actionHost(glyph.piece);
+    if (!T || !host) return [];
+    const wanted = toPx(fit, apply(T, glyph.point));
+    const hostBox = boxOf(host.ring);
+    const margin = glyph.kind === 'label' ? 9 : glyph.kind === 'buttonhole' ? 7 : 4.2;
+    const fits = (point: Pt2) =>
+      insideRing(point, host.ring) &&
+      point[0] >= hostBox.x0 + margin &&
+      point[0] <= hostBox.x1 - margin &&
+      point[1] >= hostBox.y0 + margin &&
+      point[1] <= hostBox.y1 - margin;
+    const safe = spotInside(host.ring);
+    let at = wanted;
+    if (host.key !== glyph.piece || !fits(at)) {
+      at = safe;
+      for (let step = 1; step <= 10; step++) {
+        const share = step / 10;
+        const candidate: Pt2 = [
+          wanted[0] + (safe[0] - wanted[0]) * share,
+          wanted[1] + (safe[1] - wanted[1]) * share,
+        ];
+        if (fits(candidate)) {
+          at = candidate;
+          break;
+        }
+      }
+    }
     const direction = glyph.direction ?? ([1, 0] as Pt2);
     const toward = toPx(
       fit,
@@ -644,7 +810,6 @@ export function StepPictureSvg({
     const length = Math.hypot(dx, dy) || 1;
     return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
   });
-  const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const labels = markLines
     .filter(({ m }) => m.label)
     .map(({ m, pts }) => ({
@@ -706,46 +871,35 @@ export function StepPictureSvg({
       height={h}
       viewBox={`0 0 ${w} ${h}`}
       className={className}
-      style={{ overflow: 'visible', fontSize: L.font }}
+      style={{ overflow: 'hidden', fontSize: L.font }}
       aria-hidden={onPick ? undefined : true}
     >
       <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
-        {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} />
-        ))}
-      </g>
-      <g fill={FILL} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
         {base.map((p) => (
           <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
         ))}
       </g>
       {under.length > 0 && (
-        <>
-          <g fill={UNDER} stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
-            {under.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
-            ))}
-          </g>
-          <mask id={maskId} maskUnits='userSpaceOnUse' x={-w} y={-h} width={3 * w} height={3 * h}>
-            <rect x={-w} y={-h} width={3 * w} height={3 * h} fill='white' />
-            {base.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} fill='black' />
-            ))}
-          </mask>
-          <g
-            fill='none'
-            stroke={INK}
-            strokeWidth={L.outline}
-            strokeLinejoin='round'
-            mask={`url(#${maskId})`}
-          >
-            {base.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} />
-            ))}
-          </g>
-        </>
+        <g
+          fill='none'
+          stroke={GREY}
+          strokeWidth={L.hair}
+          strokeDasharray={L.dash}
+          strokeLinejoin='round'
+        >
+          {under.flatMap((piece) =>
+            piece.runs.map((run, index) => (
+              <path key={`${piece.key}:${index}`} d={pathOf(run)} data-piece-layer={piece.key} />
+            )),
+          )}
+        </g>
       )}
-      {ghosts.length > 0 && (
+      <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+        {base.map((p) => (
+          <path key={p.key} d={pathOf(p.ring, true)} />
+        ))}
+      </g>
+      {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
           stroke={GREY}
@@ -758,7 +912,7 @@ export function StepPictureSvg({
           ))}
         </g>
       )}
-      {look !== 'tile' &&
+      {look === 'canvas' &&
         ghostName &&
         ghosts.map((g) => {
           const c = centroidOf(g.ring);

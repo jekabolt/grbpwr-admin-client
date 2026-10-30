@@ -30,6 +30,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
+import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
   DEFAULT_HAND,
@@ -528,6 +529,7 @@ export function SeamPickerBody({
   const [canvasEl, canvas] = useBoxSize();
   const [resultEl, result] = useBoxSize();
   const phone = canvas.w > 0 && canvas.w < 600;
+  const zoom = usePictureZoom(canvas.w, canvas.h, index);
 
   // ── «place»: the part follows the pointer over its host (mm in the drawing frame) ──
   const hostPiece = host ? pieces?.get(host.piece) : undefined;
@@ -554,7 +556,9 @@ export function SeamPickerBody({
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea')) return;
-    if (e.key === 'Enter' && canAccept) {
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !place && zoom.onKey(e.key)) {
+      e.preventDefault();
+    } else if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
     } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
@@ -727,9 +731,16 @@ export function SeamPickerBody({
       <div className='flex min-h-0 flex-1 flex-col border border-borderColor bg-bgColor'>
         <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
           <div
-            ref={canvasEl}
-            className='relative min-h-0 min-w-0 flex-1 touch-none select-none'
+            ref={(node) => {
+              canvasEl(node);
+              zoom.ref(node);
+            }}
+            className={cn(
+              'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden select-none',
+              zoom.zoomed && !place && 'cursor-grab active:cursor-grabbing',
+            )}
             data-seam-picker-canvas=''
+            {...(place ? {} : zoom.handlers)}
           >
             {loading && !drawn ? (
               <div className='absolute inset-0 grid place-items-center'>
@@ -766,8 +777,37 @@ export function SeamPickerBody({
                 hover={hover}
                 onHover={setHover}
                 onPick={frozen ? undefined : toggle}
+                view={zoom.view}
                 className='absolute inset-0'
               />
+            )}
+            {drawn && !place && (
+              <div className='absolute top-2 right-3 flex items-center gap-3' data-seam-zoom=''>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={zoom.zoomOut}
+                  disabled={!zoom.zoomed}
+                  aria-label='zoom out'
+                >
+                  −
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={zoom.zoomIn}
+                  aria-label='zoom in'
+                >
+                  +
+                </Button>
+                {zoom.zoomed && (
+                  <Button type='button' variant='underline' size='xs' onClick={zoom.fit}>
+                    fit
+                  </Button>
+                )}
+              </div>
             )}
           </div>
           <div

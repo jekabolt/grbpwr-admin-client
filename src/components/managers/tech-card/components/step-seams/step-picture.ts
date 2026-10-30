@@ -8,6 +8,8 @@
 // frame's inner lines (y down) come in as [x, −y].
 
 import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { readName } from 'lib/assembly-skeleton/skeleton/model';
+import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import {
   pairOverlap,
   pieceKeyOf,
@@ -360,6 +362,39 @@ const EMPTY_LAYOUT: StepLayout = {
 };
 
 const worldOf = (g: PieceGeom, T: Affine) => g.rs.map((p) => apply(T, p));
+
+/** A polyline window in millimetres along its own direction. */
+function rangedLine(pts: readonly Pt2[], range?: readonly [number, number]): Pt2[] {
+  if (!range || pts.length < 2) return [...pts];
+  const start = Math.max(0, Math.min(range[0], range[1]));
+  const end = Math.max(start, Math.max(range[0], range[1]));
+  const out: Pt2[] = [];
+  let at = 0;
+  for (let index = 1; index < pts.length; index++) {
+    const a = pts[index - 1];
+    const b = pts[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const next = at + length;
+    if (length > 0 && next >= start && at <= end) {
+      const pointAt = (distance: number): Pt2 => {
+        const share = Math.max(0, Math.min(1, (distance - at) / length));
+        return [a[0] + share * (b[0] - a[0]), a[1] + share * (b[1] - a[1])];
+      };
+      const from = pointAt(Math.max(start, at));
+      const to = pointAt(Math.min(end, next));
+      if (
+        !out.length ||
+        Math.hypot(out[out.length - 1][0] - from[0], out[out.length - 1][1] - from[1]) > 1e-6
+      )
+        out.push(from);
+      out.push(to);
+    }
+    at = next;
+    if (at >= end) break;
+  }
+  return out.length >= 2 ? out : [...pts];
+}
+
 const extentOf = (b: Box) => Math.max(b.x1 - b.x0, b.y1 - b.y0);
 const squareAt = (x: number, y: number, s: number): Pt2[] => [
   [x, y],
@@ -372,6 +407,8 @@ const squareAt = (x: number, y: number, s: number): Pt2[] => [
 const APART = 0.08;
 /** Overlap two laid shapes may still share: a hair, what rasters of touching edges read. */
 const TOUCH = 0.01;
+/** A joined seam may cross a narrow allowance, but never cover a meaningful share of a piece. */
+const JOINED_OVERLAP = 0.15;
 /** An input that lands on another is pushed off the seam by this share of the unit, a step at a time. */
 const PUSH = 0.02;
 const PUSH_MAX = 12;
@@ -549,15 +586,32 @@ export function stepLayout(
     rasterMm?: number;
     hand?: ReadonlyMap<string, HandOn>;
     twinHand?: ReadonlyMap<string, HandOn>;
+    /** Earlier output layouts, one per input; each is kept rigid while this step joins the inputs. */
+    inputLayouts?: readonly (StepLayout | undefined)[];
+    /** Finished trouser plies are stacked rather than opened like an instructional seam tile. */
+    stackIdentical?: boolean;
+    /** Legal joined overlap for inferred cut shapes; stored editor layouts keep the old zero. */
+    joinedOverlap?: number;
+    /** Use partial seam windows; stored editor layouts retain their historical full-edge fit. */
+    honorRanges?: boolean;
+    /** Opt into cumulative whole-garment packing; ordinary editor tiles keep legacy semantics. */
+    garmentLayout?: boolean;
   } = {},
 ): StepLayout {
   const input = inputIndex(leaves);
   const drawable = (k: string) => (geoms.get(k)?.rs.length ?? 0) >= 3;
-  const keys = [...input.keys()].filter(drawable);
+  // A previous output is authoritative: pieces deliberately omitted there because the card has
+  // no seam for them must not reappear as a row of leftovers in every later operation.
+  const keys = [...input].flatMap(([key, index]) =>
+    drawable(key) && (!opts.inputLayouts?.[index] || opts.inputLayouts[index]?.T.has(key))
+      ? [key]
+      : [],
+  );
   if (keys.length === 0) return EMPTY_LAYOUT;
   const drawnKeys = new Set(keys);
   const raster = opts.rasterMm ? { rasterMm: opts.rasterMm } : {};
   const explode = opts.explode ?? 0;
+  const rigidInputs = !!opts.inputLayouts?.some(Boolean);
   const ins = leaves.map((_, i) => i).filter((i) => [...input.values()].includes(i));
   const inOf = (id: EdgeId) => input.get(pieceKeyOf(id));
   const keysOf = (i: number) => keys.filter((k) => input.get(k) === i);
@@ -584,7 +638,19 @@ export function stepLayout(
     const ks = keysOf(i);
     if (!ks.length) continue;
     const inner = seams.filter((c) => inOf(c.a) === i && inOf(c.b) === i && confidentSeam(c));
-    const laid = layInput(ks, inner, geoms, raster);
+    const previous = opts.inputLayouts?.[i];
+    const seeded = !!previous && ks.every((key) => previous.T.has(key));
+    const laid = seeded
+      ? {
+          T: new Map(ks.map((key) => [key, previous.T.get(key)!])),
+          stacked: previous.stacked
+            .map((stack) => stack.filter((key) => ks.includes(key)))
+            .filter((stack) => stack.length > 1),
+          onRuns: previous.onRuns.filter((key) => ks.includes(key)),
+          apart: previous.apart.filter((key) => ks.includes(key)),
+          hostOf: new Map<string, string>(),
+        }
+      : layInput(ks, inner, geoms, raster);
     // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
     // partner's run as the placement says (the bag a step before laid inside the back stays there).
     let laidApart = laid.apart;
@@ -604,22 +670,38 @@ export function stepLayout(
     stacked.push(...laid.stacked);
     onRuns.push(...laid.onRuns);
     apart.push(...laidApart);
+    if (seeded)
+      pieceLayers.push(
+        ...previous.pieceLayers.filter(
+          ([piece, partner]) => ks.includes(piece) && ks.includes(partner),
+        ),
+      );
+    if (seeded)
+      for (const [layerInput, partnerInput] of previous.layers) {
+        const partner = [...previous.input].find(([, input]) => input === partnerInput)?.[0];
+        if (!partner || !ks.includes(partner)) continue;
+        for (const [piece, input] of previous.input)
+          if (input === layerInput && ks.includes(piece)) pieceLayers.push([piece, partner]);
+      }
     localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
   }
   const standing = new Set(apart);
   // A layer under its identical twin is not a shape of its own: it leans as the twin's edge says.
   const followers = new Set(stacked.flatMap((s) => s.slice(1)));
-  // Ghosts: a square a quarter of the largest input, in a row after their input's pieces.
+  // Geometry-less pieces are useful doors on the editor canvas, but a print construction picture
+  // must never invent a cut shape for them. The operation still prints its resolved outlines.
   const unit = Math.max(...[...localBox.values()].map(extentOf), 1);
   const side = 0.25 * unit;
   const ghostsLocal: Ghost[] = [];
-  for (const i of ins) {
-    const missing = [...input].filter(([k, gi]) => gi === i && !drawable(k)).map(([k]) => k);
-    const b = localBox.get(i);
-    let x = b ? b.x1 + APART * unit : 0;
-    for (const k of missing) {
-      ghostsLocal.push({ key: k, input: i, ring: squareAt(x, b ? b.y0 : 0, side) });
-      x += side + APART * unit;
+  if (!opts.garmentLayout) {
+    for (const i of ins) {
+      const missing = [...input].filter(([k, gi]) => gi === i && !drawable(k)).map(([k]) => k);
+      const b = localBox.get(i);
+      let x = b ? b.x1 + APART * unit : 0;
+      for (const k of missing) {
+        ghostsLocal.push({ key: k, input: i, ring: squareAt(x, b ? b.y0 : 0, side) });
+        x += side + APART * unit;
+      }
     }
   }
   const ringsOf = (i: number, M: Affine = IDENTITY): Pt2[][] => [
@@ -781,6 +863,8 @@ export function stepLayout(
       const kb = pieceKeyOf(theirs);
       const ea = resolveEdge(theirs, geoms)!;
       const eb = resolveEdge(mine, geoms)!;
+      const rangeOf = (id: EdgeId) =>
+        opts.honorRanges === true ? (id === c.a ? c.range?.a : c.range?.b) : undefined;
       const Tt = compose(Ht, local.get(kb)!);
       // Their side across several pieces of their input (an armhole of front + back): one run —
       // along the pieces drawn joined; one standing apart (a yoke no upright seam lays on the
@@ -797,8 +881,19 @@ export function stepLayout(
               (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
             )
           : null;
-      const A = run ?? ea.pts.map((p) => apply(Tt, p));
-      const B = eb.pts.map((p) => apply(local.get(ka)!, p));
+      const A = run ?? rangedLine(ea.pts, rangeOf(theirs)).map((p) => apply(Tt, p));
+      const B = rangedLine(eb.pts, rangeOf(mine)).map((p) => apply(local.get(ka)!, p));
+      const myParts = ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
+      const myRun =
+        myParts.length > 1 && myParts.every((id) => inOf(id) === j)
+          ? runOf(
+              myParts.flatMap((id): RunPart[] => {
+                const e = resolveEdge(id, geoms);
+                return e ? [{ key: e.pieceKey, pts: e.pts, len: e.len }] : [];
+              }),
+              (k) => local.get(k),
+            )
+          : null;
       const a0 = A[0];
       const a1 = A[A.length - 1];
       const mineKeys = keysOf(j);
@@ -808,6 +903,45 @@ export function stepLayout(
         mineKeys.every(
           (k) => followers.has(k) || pieceTilt(geoms.get(k)!, compose(M, local.get(k)!)) <= UPRIGHT,
         );
+      if (stack && explode === 0 && opts.stackIdentical) {
+        onEachOther.add(pairKey(i, j));
+        crossStacks.push([kb, ka]);
+        return compose(Tt, invert(local.get(ka)!));
+      }
+      if (opts.garmentLayout && !asLayer && /crotch:/.test(c.evidence.rule ?? '')) {
+        const mineBox = boxOf(mineKeys.flatMap((key) => worldOf(geoms.get(key)!, local.get(key)!)));
+        const hostBox = boxOf(
+          keysOf(i).flatMap((key) => worldOf(geoms.get(key)!, compose(Ht, local.get(key)!))),
+        );
+        const isLeft = mineKeys.some((key) => {
+          const geom = geoms.get(key)!;
+          return (geom.hand ?? readName(geom.name).hand) === 'L';
+        });
+        // A completed left/right half stays rigid. Put the halves beside each other, waist level,
+        // with their centre edges touching; edge-midpoint alignment nests the wide halves.
+        const x = isLeft ? hostBox.x0 - mineBox.x1 : hostBox.x1 - mineBox.x0;
+        return translate(x, hostBox.y1 - mineBox.y1);
+      }
+      if (opts.garmentLayout && !asLayer && /waistband follows/.test(c.evidence.rule ?? '')) {
+        const target = midAlong(A).p;
+        const source = midAlong(myRun ?? B).p;
+        const mineBox = boxOf(mineKeys.flatMap((key) => worldOf(geoms.get(key)!, local.get(key)!)));
+        const hostBox = boxOf(
+          keysOf(i).flatMap((key) => worldOf(geoms.get(key)!, compose(Ht, local.get(key)!))),
+        );
+        // The waistband is sewn along the waist and rises above it; aligning edge midpoints alone
+        // put the complete band below the legs when its paired long edge was digitised on top.
+        return translate(target[0] - source[0], hostBox.y1 - mineBox.y0);
+      }
+      if (
+        opts.garmentLayout &&
+        !asLayer &&
+        /trouser leg:|complete input units joined/.test(c.evidence.rule ?? '')
+      ) {
+        const target = midAlong(A).p;
+        const source = midAlong(myRun ?? B).p;
+        return translate(target[0] - source[0], target[1] - source[1]);
+      }
       // Off the seam: along the laid edge's normal, away from the input it belongs to (for a run,
       // away from all the pieces it runs across).
       const hc = run
@@ -838,13 +972,27 @@ export function stepLayout(
       const settle = (M0: Affine, cost: number) => {
         let M = M0;
         let o = overlapAt(j, M);
+        // The seam-aligned position is the only one guaranteed to touch. Keep it when the fine
+        // reading says the cut shapes only share a legal seam allowance; pushing every positive
+        // raster cell away made thin pieces float a few millimetres from their partner.
+        const legalJoinedOverlap = opts.joinedOverlap ?? 0;
+        if (o <= legalJoinedOverlap) {
+          const h = overlapFine(j, M);
+          if (h <= legalJoinedOverlap) {
+            const score = cost + h * unit;
+            if (!best || score < best.score) best = { M, score };
+            return;
+          }
+        }
         let off = 0;
         for (let n = 1; o > TOUCH && n <= PUSH_MAX; n++) {
           off = n * PUSH * unit;
           M = compose(translate(nx * off, ny * off), M0);
           o = overlapAt(j, M);
         }
-        if (o > TOUCH) return;
+        if (o > TOUCH) {
+          return;
+        }
         // Clear of the hair too: read at the fine step (a cap's tip on the shoulder is thinner than
         // a coarse row), a quarter step at a time, two coarse steps further at most, keeping the
         // place that reads least. A place that still reads a hair is no place: the input stands
@@ -860,7 +1008,9 @@ export function stepLayout(
             off = at;
           }
         }
-        if (h > 0) return;
+        if (h > 0) {
+          return;
+        }
         const score = cost + off;
         if (!best || score < best.score) best = { M, score };
       };
@@ -888,26 +1038,18 @@ export function stepLayout(
         // the partner's own edge (a pocket bag on the front's opening, a facing, a lining, one half
         // of a bag on the other). It stays there as it is, seam edge on seam edge — never folded,
         // never opened out over the seam — clear of every other input.
-        if (explode > 0 || run) return null;
+        const folded =
+          !!opts.garmentLayout && /detail folded onto garment/.test(c.evidence.rule ?? '');
+        if (explode > 0 || (run && !folded)) return null;
         // Its own side over several of its pieces (a bag's top across its two halves) lies on
         // theirs whole.
-        const myParts = ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
-        const myRun =
-          myParts.length > 1 && myParts.every((id) => inOf(id) === j)
-            ? runOf(
-                myParts.flatMap((id): RunPart[] => {
-                  const e = resolveEdge(id, geoms);
-                  return e ? [{ key: e.pieceKey, pts: e.pts, len: e.len }] : [];
-                }),
-                (k) => local.get(k),
-              )
-            : null;
         let layer: { M: Affine; cost: number } | null = null;
         for (const t of trials(myRun ?? B)) {
-          if (t.mir || tiltOf(t.M) > LAYER_TURN || !upright(t.M)) continue;
-          if (shareOn(j, t.M, i) <= LAYER) continue;
+          if (!folded && (t.mir || tiltOf(t.M) > LAYER_TURN || !upright(t.M))) continue;
+          if (shareOn(j, t.M, i) <= (folded ? 0.5 : LAYER)) continue;
           if (overlapAt(j, t.M, i) > TOUCH || overlapFine(j, t.M, i) > 0) continue;
-          if (!layer || t.endErr < layer.cost) layer = { M: t.M, cost: t.endErr };
+          const cost = t.endErr - (folded ? shareOn(j, t.M, i) * 100 : 0);
+          if (!layer || cost < layer.cost) layer = { M: t.M, cost };
         }
         if (!layer) return null;
         onEachOther.add(pairKey(i, j));
@@ -951,7 +1093,7 @@ export function stepLayout(
         const M = translate(hc[0] - mc[0], hc[1] - mc[1]);
         best = { M, score: -overlapAt(j, M) * 1000 + (upright(M) ? 0 : 500) };
       }
-      for (const { M: M0, endErr, mir } of trials(B)) {
+      for (const { M: M0, endErr, mir } of trials(myRun ?? B)) {
         if (stack) {
           // The option that covers the twin best, its own way up when that covers half of it.
           const score = -overlapAt(j, M0) * 1000 + endErr + (upright(M0) ? 0 : 500);
@@ -1047,6 +1189,12 @@ export function stepLayout(
           // Clear places first; a layer on its partner only once no seam lays any input clear.
           for (const asLayer of [false, true]) {
             for (const c of cross) {
+              if (
+                opts.garmentLayout &&
+                !asLayer &&
+                /detail folded onto garment/.test(c.evidence.rule ?? '')
+              )
+                continue;
               const ia = inOf(c.a)!;
               const ib = inOf(c.b)!;
               // Only from THIS cluster's inputs: a seam to an earlier cluster's input was refused
@@ -1093,28 +1241,70 @@ export function stepLayout(
           if (d > 1e-6) G.set(i, compose(translate((dx / d) * gap, (dy / d) * gap), G.get(i)!));
         }
       });
-    // Shelves: the biggest cluster first, the rest in rows to the right and below it, about as
-    // wide as the whole is tall (a late step's ten parts stay big enough to read).
-    const cbox = clusters.map((cl) => boxOf(cl.flatMap((i) => ringsOf(i, G.get(i)!).flat())));
-    const gapMm = APART * unit;
-    const sumArea = cbox.reduce((s, b) => s + (b.x1 - b.x0 + gapMm) * (b.y1 - b.y0 + gapMm), 0);
-    const rowW = Math.max(cbox[0].x1 - cbox[0].x0, 1.3 * Math.sqrt(sumArea));
-    let x = cbox[0].x0;
-    let top = cbox[0].y1;
-    let rowLow = Infinity;
-    clusters.forEach((cl, n) => {
-      const b = cbox[n];
-      const w = b.x1 - b.x0;
-      if (n > 0 && x + w > cbox[0].x0 + rowW && x > cbox[0].x0) {
-        x = cbox[0].x0;
-        top = rowLow - gapMm;
-        rowLow = Infinity;
-      }
-      const M = translate(x - b.x0, top - b.y1);
-      for (const i of cl) G.set(i, compose(M, G.get(i)!));
-      rowLow = Math.min(rowLow, top - (b.y1 - b.y0));
-      x += w + gapMm;
-    });
+    if (opts.garmentLayout) {
+      // Whole-garment pictures dock independent rigid clusters at outline support points.
+      const extrema = (points: readonly Pt2[]) => ({
+        left: points.reduce((best, point) => (point[0] < best[0] ? point : best)),
+        right: points.reduce((best, point) => (point[0] > best[0] ? point : best)),
+        low: points.reduce((best, point) => (point[1] < best[1] ? point : best)),
+        high: points.reduce((best, point) => (point[1] > best[1] ? point : best)),
+      });
+      const placed: Pt2[] = [];
+      clusters.forEach((cl, n) => {
+        let points = cl.flatMap((i) => ringsOf(i, G.get(i)!).flat());
+        if (n > 0 && placed.length && points.length) {
+          const host = extrema(placed);
+          const part = extrema(points);
+          const candidates: Pt2[] = [
+            [host.right[0] - part.left[0], host.right[1] - part.left[1]],
+            [host.left[0] - part.right[0], host.left[1] - part.right[1]],
+            [host.high[0] - part.low[0], host.high[1] - part.low[1]],
+            [host.low[0] - part.high[0], host.low[1] - part.high[1]],
+          ];
+          const score = ([dx, dy]: Pt2) => {
+            const joined = [...placed, ...points.map(([x, y]) => [x + dx, y + dy] as Pt2)];
+            const b = boxOf(joined);
+            const width = Math.max(b.x1 - b.x0, 1);
+            const height = Math.max(b.y1 - b.y0, 1);
+            return (
+              Math.abs(Math.log(width / height / (204 / 178))) * width * height + width * height
+            );
+          };
+          const [dx, dy] = candidates.reduce((best, candidate) =>
+            score(candidate) < score(best) ? candidate : best,
+          );
+          const M = translate(dx, dy);
+          for (const i of cl) G.set(i, compose(M, G.get(i)!));
+          points = points.map((point) => apply(M, point));
+        }
+        placed.push(...points);
+      });
+    } else {
+      // Editor tiles keep the established shelves: exploded and unresolved inputs stand apart.
+      const cbox = clusters.map((cl) => boxOf(cl.flatMap((i) => ringsOf(i, G.get(i)!).flat())));
+      const gapMm = APART * unit;
+      const sumArea = cbox.reduce(
+        (sum, box) => sum + (box.x1 - box.x0 + gapMm) * (box.y1 - box.y0 + gapMm),
+        0,
+      );
+      const rowW = Math.max(cbox[0].x1 - cbox[0].x0, 1.3 * Math.sqrt(sumArea));
+      let x = cbox[0].x0;
+      let top = cbox[0].y1;
+      let rowLow = Infinity;
+      clusters.forEach((cluster, index) => {
+        const box = cbox[index];
+        const width = box.x1 - box.x0;
+        if (index > 0 && x + width > cbox[0].x0 + rowW && x > cbox[0].x0) {
+          x = cbox[0].x0;
+          top = rowLow - gapMm;
+          rowLow = Infinity;
+        }
+        const move = translate(x - box.x0, top - box.y1);
+        for (const inputIndex of cluster) G.set(inputIndex, compose(move, G.get(inputIndex)!));
+        rowLow = Math.min(rowLow, top - (box.y1 - box.y0));
+        x += width + gapMm;
+      });
+    }
 
     // Draw order: a part laid on its host after the host, so it shows on top.
     const onTop = new Set(
@@ -1140,6 +1330,8 @@ export function stepLayout(
         const i = ins[p];
         const j = ins[q];
         if (onEachOther.has(pairKey(i, j))) continue;
+        if (rigidInputs && clusters.some((cluster) => cluster.includes(i) && cluster.includes(j)))
+          continue;
         let o = 0;
         for (const a of R.get(i)!) for (const b of R.get(j)!) o = Math.max(o, pairOverlap(a, b));
         // A hand placement holds: the guessed input gives way to it.
@@ -1157,6 +1349,466 @@ export function stepLayout(
     if (onto) T.set(k, compose(onto, snapOf(h)));
   }
 
+  const stacksOut = [...stacked, ...crossStacks];
+  if (opts.garmentLayout) {
+    // A seeded earlier output can contain more than one disconnected body even when this step has a
+    // single input, so cluster packing above cannot see it. Keep each existing body rigid and dock
+    // every smaller one at an outline support point. This is the final corpus-wide invariant: every
+    // visible cut outline belongs to one touching picture, never a loose row beside it.
+    const rings = new Map(keys.map((key) => [key, worldOf(geoms.get(key)!, T.get(key)!)]));
+    const root = new Map(keys.map((key) => [key, key]));
+    const find = (key: string): string => {
+      const parent = root.get(key)!;
+      if (parent === key) return key;
+      const resolved = find(parent);
+      root.set(key, resolved);
+      return resolved;
+    };
+    const join = (a: string, b: string) => root.set(find(a), find(b));
+    for (const stack of [...stacked, ...crossStacks])
+      for (const key of stack.slice(1))
+        if (root.has(stack[0]) && root.has(key)) join(stack[0], key);
+    for (const [piece, partner] of pieceLayers)
+      if (root.has(piece) && root.has(partner)) join(piece, partner);
+    for (const [layerInput, partnerInput] of layersOut) {
+      const layer = keys.find((key) => input.get(key) === layerInput);
+      const partner = keys.find((key) => input.get(key) === partnerInput);
+      if (layer && partner) join(layer, partner);
+    }
+    const close = (a: readonly Pt2[], b: readonly Pt2[]) => {
+      const A = boxOf(a);
+      const B = boxOf(b);
+      const distance = 2;
+      if (Math.max(A.x0 - B.x1, B.x0 - A.x1, A.y0 - B.y1, B.y0 - A.y1, 0) > distance) return false;
+      const grid = new Map<string, Pt2[]>();
+      for (const point of b) {
+        const cell = `${Math.floor(point[0] / distance)}:${Math.floor(point[1] / distance)}`;
+        grid.set(cell, [...(grid.get(cell) ?? []), point]);
+      }
+      return a.some(([x, y]) => {
+        const gx = Math.floor(x / distance);
+        const gy = Math.floor(y / distance);
+        for (let dx = -1; dx <= 1; dx++)
+          for (let dy = -1; dy <= 1; dy++)
+            if (
+              (grid.get(`${gx + dx}:${gy + dy}`) ?? []).some(
+                (point) => Math.hypot(x - point[0], y - point[1]) <= distance,
+              )
+            )
+              return true;
+        return false;
+      });
+    };
+    for (let left = 0; left < keys.length; left++)
+      for (let right = left + 1; right < keys.length; right++)
+        if (close(rings.get(keys[left])!, rings.get(keys[right])!)) join(keys[left], keys[right]);
+    const bodies = new Map<string, string[]>();
+    for (const key of keys) bodies.set(find(key), [...(bodies.get(find(key)) ?? []), key]);
+    const groups = [...bodies.values()].sort((a, b) => {
+      const area = (group: readonly string[]) => {
+        const box = boxOf(group.flatMap((key) => rings.get(key)!));
+        return (box.x1 - box.x0) * (box.y1 - box.y0);
+      };
+      return area(b) - area(a);
+    });
+    const hiddenForDock = new Set([
+      ...[...stacked, ...crossStacks].flatMap((group) => group.slice(1)),
+      ...pieceLayers.map(([piece]) => piece),
+      ...keys.filter((key) => layersOut.some(([layer]) => input.get(key) === layer)),
+    ]);
+    const docked: Pt2[] = [];
+    for (const [index, group] of groups.entries()) {
+      let points = group.filter((key) => !hiddenForDock.has(key)).flatMap((key) => rings.get(key)!);
+      if (!points.length) continue;
+      if (index > 0 && docked.length) {
+        const supports = (outline: readonly Pt2[]) => ({
+          left: outline.reduce((best, point) => (point[0] < best[0] ? point : best)),
+          right: outline.reduce((best, point) => (point[0] > best[0] ? point : best)),
+          low: outline.reduce((best, point) => (point[1] < best[1] ? point : best)),
+          high: outline.reduce((best, point) => (point[1] > best[1] ? point : best)),
+        });
+        const host = supports(docked);
+        const part = supports(points);
+        const candidates: Pt2[] = [
+          [host.right[0] - part.left[0], host.right[1] - part.left[1]],
+          [host.left[0] - part.right[0], host.left[1] - part.right[1]],
+          [host.high[0] - part.low[0], host.high[1] - part.low[1]],
+          [host.low[0] - part.high[0], host.low[1] - part.high[1]],
+        ];
+        const score = ([dx, dy]: Pt2) => {
+          const box = boxOf([...docked, ...points.map(([x, y]) => [x + dx, y + dy] as Pt2)]);
+          const width = Math.max(box.x1 - box.x0, 1);
+          const height = Math.max(box.y1 - box.y0, 1);
+          return Math.abs(Math.log(width / height / (204 / 178))) * width * height + width * height;
+        };
+        const [dx, dy] = candidates.reduce((best, candidate) =>
+          score(candidate) < score(best) ? candidate : best,
+        );
+        const move = translate(dx, dy);
+        for (const key of group) {
+          T.set(key, compose(move, T.get(key)!));
+          rings.set(
+            key,
+            rings.get(key)!.map((point) => apply(move, point)),
+          );
+        }
+        for (const ghost of ghosts)
+          if (group.some((key) => input.get(key) === ghost.input))
+            ghost.ring = ghost.ring.map((point) => apply(move, point));
+        points = points.map((point) => apply(move, point));
+      }
+      docked.push(...points);
+    }
+
+    // A pair can be two cut plies of one detail. A larger run of identical panels is construction
+    // repetition (gore, bag side, patchwork), and must be assembled rather than collapsed.
+    const hidden = new Set(stacksOut.flatMap((group) => group.slice(1)));
+    const surfaceRoles = new Set(['pocket', 'facing', 'placket', 'fly']);
+    const isSurfaceDetail = (key: string) => {
+      const reading = readName(geoms.get(key)!.name);
+      const role = ROLE_BOOK.roles.find((candidate) => candidate.id === reading.role);
+      return (
+        !!reading.role &&
+        surfaceRoles.has(reading.role) &&
+        !!reading.family &&
+        !!role?.tokens.includes(reading.family)
+      );
+    };
+    for (let left = 0; left < keys.length; left++)
+      for (let right = left + 1; right < keys.length; right++) {
+        const a = keys[left];
+        const b = keys[right];
+        const overlap = pairOverlap(rasterize(rings.get(a)!, 2), rasterize(rings.get(b)!, 2));
+        if (overlap <= JOINED_OVERLAP) continue;
+        const layer = isSurfaceDetail(a) ? a : isSurfaceDetail(b) ? b : null;
+        const partner = layer === a ? b : layer === b ? a : null;
+        if (layer && partner && !pieceLayers.some(([piece]) => piece === layer))
+          pieceLayers.push([layer, partner]);
+      }
+    const hiddenOutline = () =>
+      new Set([
+        ...hidden,
+        ...pieceLayers.map(([piece]) => piece),
+        ...keys.filter((key) => layersOut.some(([layer]) => input.get(key) === layer)),
+      ]);
+    const supportMove = (host: readonly Pt2[], part: readonly Pt2[]) => {
+      const supports = (outline: readonly Pt2[]) => ({
+        left: outline.reduce((best, point) => (point[0] < best[0] ? point : best)),
+        right: outline.reduce((best, point) => (point[0] > best[0] ? point : best)),
+        low: outline.reduce((best, point) => (point[1] < best[1] ? point : best)),
+        high: outline.reduce((best, point) => (point[1] > best[1] ? point : best)),
+      });
+      const h = supports(host);
+      const p = supports(part);
+      const candidates: Pt2[] = [
+        [h.right[0] - p.left[0], h.right[1] - p.left[1]],
+        [h.left[0] - p.right[0], h.left[1] - p.right[1]],
+        [h.high[0] - p.low[0], h.high[1] - p.low[1]],
+        [h.low[0] - p.high[0], h.low[1] - p.high[1]],
+      ];
+      const visible = keys.filter((key) => !hiddenOutline().has(key));
+      const score = ([dx, dy]: Pt2) => {
+        const moved = part.map(([x, y]) => [x + dx, y + dy] as Pt2);
+        const overlap = visible.reduce(
+          (sum, key) => sum + pairOverlap(rasterize(moved, 2), rasterize(rings.get(key)!, 2)),
+          0,
+        );
+        const box = boxOf([...host, ...moved]);
+        const width = Math.max(box.x1 - box.x0, 1);
+        const height = Math.max(box.y1 - box.y0, 1);
+        const area = width * height;
+        return (
+          overlap * area * 100 + Math.abs(Math.log(width / height / (204 / 178))) * area + area
+        );
+      };
+      return candidates.reduce((best, candidate) =>
+        score(candidate) < score(best) ? candidate : best,
+      );
+    };
+    const movePiece = (key: string, [dx, dy]: Pt2) => {
+      const move = translate(dx, dy);
+      T.set(key, compose(move, T.get(key)!));
+      rings.set(
+        key,
+        rings.get(key)!.map((point) => apply(move, point)),
+      );
+    };
+
+    // Resolve any accidental covering left after rigid earlier-output placement. Semantic surface
+    // layers and identical plies were classified above; every other pair meets at its outline only.
+    for (let pass = 0; pass < keys.length; pass++) {
+      const visible = keys.filter((key) => !hiddenOutline().has(key));
+      let fixed = false;
+      for (let left = 0; left < visible.length && !fixed; left++)
+        for (let right = left + 1; right < visible.length && !fixed; right++) {
+          const a = visible[left];
+          const b = visible[right];
+          if (
+            pairOverlap(rasterize(rings.get(a)!, 2), rasterize(rings.get(b)!, 2)) <= JOINED_OVERLAP
+          )
+            continue;
+          const area = (key: string) => {
+            const box = boxOf(rings.get(key)!);
+            return (box.x1 - box.x0) * (box.y1 - box.y0);
+          };
+          const mover = area(a) <= area(b) ? a : b;
+          const host = mover === a ? b : a;
+          movePiece(mover, supportMove(rings.get(host)!, rings.get(mover)!));
+          fixed = true;
+        }
+      if (!fixed) break;
+    }
+
+    // Hiding a folded layer can expose a formerly layer-to-layer contact. Dock any resulting loose
+    // visible outline once more, against the largest visible body.
+    for (let pass = 0; pass < keys.length; pass++) {
+      const visible = keys.filter((key) => !hiddenOutline().has(key));
+      const loose = visible.find(
+        (key) =>
+          !visible.some((other) => other !== key && close(rings.get(key)!, rings.get(other)!)),
+      );
+      if (!loose || visible.length < 2) break;
+      const hosts = visible.filter((key) => key !== loose);
+      const host = hosts.reduce((best, key) => {
+        const area = (candidate: string) => {
+          const box = boxOf(rings.get(candidate)!);
+          return (box.x1 - box.x0) * (box.y1 - box.y0);
+        };
+        return area(key) > area(best) ? key : best;
+      });
+      movePiece(loose, supportMove(rings.get(host)!, rings.get(loose)!));
+    }
+
+    // Long tapes/bindings on a narrow product sit outside the body edge they finish, not centred on
+    // it. This also lets a tall bag use the print box without distorting any cut geometry.
+    const visible = keys.filter((key) => !hiddenOutline().has(key));
+    const thin = visible.filter((key) => {
+      const box = boxOf(rings.get(key)!);
+      return box.y1 - box.y0 > 4 * Math.max(box.x1 - box.x0, 1);
+    });
+    const body = visible.filter((key) => !thin.includes(key));
+    if (thin.length === 2 && body.length === 1) {
+      const bodyBox = boxOf(body.flatMap((key) => rings.get(key)!));
+      const full = boxOf(visible.flatMap((key) => rings.get(key)!));
+      const bodyWidth = Math.max(bodyBox.x1 - bodyBox.x0, 1);
+      const tapeLike = thin.every((key) => {
+        const box = boxOf(rings.get(key)!);
+        return box.x1 - box.x0 <= 0.15 * bodyWidth;
+      });
+      if (tapeLike && (full.x1 - full.x0) / Math.max(full.y1 - full.y0, 1) < (204 / 178) * 0.6) {
+        const centre = (bodyBox.x0 + bodyBox.x1) / 2;
+        for (const key of thin) {
+          const box = boxOf(rings.get(key)!);
+          const left = (box.x0 + box.x1) / 2 < centre;
+          movePiece(key, [left ? bodyBox.x0 - box.x1 : bodyBox.x1 - box.x0, 0]);
+        }
+      }
+    }
+
+    // Last safety pass after edge tapes move: keep one largest anchor fixed and dock every outline
+    // that still has no neighbour. Later docks use the whole connected anchor, so none is undone.
+    const finalVisible = keys.filter((key) => !hiddenOutline().has(key));
+    if (finalVisible.length > 1) {
+      const area = (key: string) => {
+        const box = boxOf(rings.get(key)!);
+        return (box.x1 - box.x0) * (box.y1 - box.y0);
+      };
+      const anchor = finalVisible.reduce((best, key) => (area(key) > area(best) ? key : best));
+      const anchored = [anchor];
+      for (const key of finalVisible) {
+        if (key === anchor) continue;
+        if (anchored.some((other) => close(rings.get(key)!, rings.get(other)!))) {
+          anchored.push(key);
+          continue;
+        }
+        const host = anchored.flatMap((other) => rings.get(other)!);
+        movePiece(key, supportMove(host, rings.get(key)!));
+        anchored.push(key);
+      }
+    }
+
+    // A completed waistband is the product's top edge. Repeated band sections form one horizontal
+    // run immediately above the assembled body; generic compact packing must not shelve them below.
+    const waistbands = finalVisible.filter(
+      (key) => readName(geoms.get(key)!.name).role === 'waistband',
+    );
+    const belowWaist = finalVisible.filter((key) => !waistbands.includes(key));
+    const waistPanels = belowWaist.filter((key) => {
+      const box = boxOf(rings.get(key)!);
+      const width = Math.max(box.x1 - box.x0, 1);
+      const height = Math.max(box.y1 - box.y0, 1);
+      return Math.max(width, height) < 5 * Math.min(width, height);
+    });
+    const raisedWaistbands = new Set<string>();
+    if (waistbands.length && waistPanels.length >= 2) {
+      waistbands.forEach((key) => raisedWaistbands.add(key));
+      const bodyBox = boxOf(belowWaist.flatMap((key) => rings.get(key)!));
+      const body = belowWaist.flatMap((key) => rings.get(key)!);
+      const high = body.reduce((best, point) => (point[1] > best[1] ? point : best));
+      let x = 0;
+      waistbands.forEach((key, index) => {
+        const box = boxOf(rings.get(key)!);
+        if (index === 0) {
+          const low = rings.get(key)!.reduce((best, point) => (point[1] < best[1] ? point : best));
+          movePiece(key, [high[0] - low[0], bodyBox.y1 - box.y0]);
+        } else movePiece(key, [x - box.x0, bodyBox.y1 - box.y0]);
+        x = boxOf(rings.get(key)!).x1;
+      });
+    }
+
+    // A collar is the neckline finish, not generic tape. Put its lower centre on the body's upper
+    // centre; this remains name-language agnostic through the shared role dictionary.
+    const collars = finalVisible.filter((key) => readName(geoms.get(key)!.name).role === 'collar');
+    const collarBody = finalVisible.filter((key) => !collars.includes(key));
+    if (collars.length && collarBody.length) {
+      const body = collarBody.flatMap((key) => rings.get(key)!);
+      const bodyBox = boxOf(body);
+      const centre = (bodyBox.x0 + bodyBox.x1) / 2;
+      const neck = body
+        .filter(([x]) => Math.abs(x - centre) <= 0.25 * (bodyBox.x1 - bodyBox.x0))
+        .reduce((best, point) => (point[1] > best[1] ? point : best));
+      for (const key of collars) {
+        const points = rings.get(key)!;
+        const box = boxOf(points);
+        const middle = (box.x0 + box.x1) / 2;
+        const low = points
+          .filter(([x]) => Math.abs(x - middle) <= 0.35 * (box.x1 - box.x0))
+          .reduce((best, point) => (point[1] < best[1] ? point : best));
+        movePiece(key, [neck[0] - low[0], neck[1] - low[1]]);
+      }
+    }
+
+    // Tapes, bindings and belt-length strips are edge treatments, not a second product silhouette.
+    // Keep a usable strip on the matching body edge; a strip longer than the whole body is shown as
+    // a folded construction trace instead of stretching the frame away from the product.
+    if (finalVisible.length > 1) {
+      const main = finalVisible.reduce((best, key) => {
+        const rank = (candidate: string) => {
+          const geom = geoms.get(candidate)!;
+          const box = boxOf(rings.get(candidate)!);
+          const width = Math.max(box.x1 - box.x0, 1);
+          const height = Math.max(box.y1 - box.y0, 1);
+          return Math.abs(geom.areaMm2) * (Math.min(width, height) / Math.max(width, height));
+        };
+        const a = rank(best);
+        const b = rank(key);
+        return b > a ? key : best;
+      });
+      const bodyBox = boxOf(rings.get(main)!);
+      const bodyWidth = Math.max(bodyBox.x1 - bodyBox.x0, 1);
+      const bodyHeight = Math.max(bodyBox.y1 - bodyBox.y0, 1);
+      const bodySpan = Math.max(bodyWidth, bodyHeight);
+      let verticalSide = 0;
+      for (const key of finalVisible) {
+        if (
+          key === main ||
+          raisedWaistbands.has(key) ||
+          collars.includes(key) ||
+          pieceLayers.some(([piece]) => piece === key)
+        )
+          continue;
+        const box = boxOf(rings.get(key)!);
+        const width = Math.max(box.x1 - box.x0, 1);
+        const height = Math.max(box.y1 - box.y0, 1);
+        const span = Math.max(width, height);
+        if (span < 4 * Math.min(width, height)) continue;
+        if (span > 1.2 * bodySpan) {
+          pieceLayers.push([key, main]);
+          continue;
+        }
+        if (height >= width) {
+          const left = verticalSide++ % 2 === 0;
+          movePiece(key, [
+            left ? bodyBox.x0 - box.x1 : bodyBox.x1 - box.x0,
+            (bodyBox.y0 + bodyBox.y1 - box.y0 - box.y1) / 2,
+          ]);
+        } else {
+          movePiece(key, [(bodyBox.x0 + bodyBox.x1 - box.x0 - box.x1) / 2, bodyBox.y1 - box.y0]);
+        }
+        const partner = finalVisible.find(
+          (other) =>
+            other !== key &&
+            !pieceLayers.some(([piece]) => piece === other) &&
+            pairOverlap(rasterize(rings.get(key)!, 2), rasterize(rings.get(other)!, 2)) >
+              JOINED_OVERLAP,
+        );
+        if (partner) pieceLayers.push([key, partner]);
+      }
+    }
+
+    // Semantic edge treatments above are the last motions in the layout. Re-assert the two hard
+    // print invariants afterwards: visible cut pieces neither cover one another nor float. This is
+    // deliberately geometry-only, so it also covers unnamed/Russian pattern pieces.
+    for (let pass = 0; pass < keys.length; pass++) {
+      const visible = keys.filter((key) => !hiddenOutline().has(key));
+      let fixed = false;
+      for (let left = 0; left < visible.length && !fixed; left++)
+        for (let right = left + 1; right < visible.length && !fixed; right++) {
+          const a = visible[left];
+          const b = visible[right];
+          if (
+            pairOverlap(rasterize(rings.get(a)!, 2), rasterize(rings.get(b)!, 2)) <= JOINED_OVERLAP
+          )
+            continue;
+          const boxArea = (key: string) => {
+            const box = boxOf(rings.get(key)!);
+            return (box.x1 - box.x0) * (box.y1 - box.y0);
+          };
+          const mover = boxArea(a) <= boxArea(b) ? a : b;
+          const host = mover === a ? b : a;
+          movePiece(mover, supportMove(rings.get(host)!, rings.get(mover)!));
+          fixed = true;
+        }
+      if (!fixed) break;
+    }
+
+    const settled = keys.filter((key) => !hiddenOutline().has(key));
+    if (settled.length > 1) {
+      const boxArea = (key: string) => {
+        const box = boxOf(rings.get(key)!);
+        return (box.x1 - box.x0) * (box.y1 - box.y0);
+      };
+      const anchor = settled.reduce((best, key) => (boxArea(key) > boxArea(best) ? key : best));
+      const anchored = [anchor];
+      for (const key of settled) {
+        if (key === anchor) continue;
+        if (anchored.some((other) => close(rings.get(key)!, rings.get(other)!))) {
+          anchored.push(key);
+          continue;
+        }
+        movePiece(
+          key,
+          supportMove(
+            anchored.flatMap((other) => rings.get(other)!),
+            rings.get(key)!,
+          ),
+        );
+        anchored.push(key);
+      }
+    }
+
+    // Overlap repair may have moved a narrow band off a dense waist seam. The product silhouette
+    // gets the last word: restore the complete band as one centred run immediately above the body.
+    if (raisedWaistbands.size) {
+      const body = belowWaist.flatMap((key) => rings.get(key)!);
+      const widths = waistbands.map((key) => {
+        const box = boxOf(rings.get(key)!);
+        return box.x1 - box.x0;
+      });
+      const high = body.reduce((best, point) => (point[1] > best[1] ? point : best));
+      const first = waistbands[0];
+      const low = rings.get(first)!.reduce((best, point) => (point[1] < best[1] ? point : best));
+      movePiece(first, [high[0] - low[0], high[1] - low[1]]);
+      let x = boxOf(rings.get(first)!).x1;
+      waistbands.forEach((key, index) => {
+        if (index === 0) return;
+        const box = boxOf(rings.get(key)!);
+        movePiece(key, [x - box.x0, high[1] - box.y0]);
+        x += widths[index];
+      });
+    }
+  }
+
   const bbox = boxOf([
     ...keys.flatMap((k) => worldOf(geoms.get(k)!, T.get(k)!)),
     ...ghosts.flatMap((g) => g.ring),
@@ -1165,7 +1817,7 @@ export function stepLayout(
     T,
     input,
     ghosts,
-    stacked: [...stacked, ...crossStacks],
+    stacked: stacksOut,
     onRuns: [...onRuns, ...crossRuns],
     apart,
     clusters: clustersOut,

@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { after, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { build } from 'esbuild';
+
+// This contract probe also runs under `node --test`; register with whichever runner loaded it.
+const runner = process.env.VITEST ? await import('vitest') : await import('node:test');
+const test = runner.test;
+const after = 'afterAll' in runner ? runner.afterAll : runner.after;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../../../../..');

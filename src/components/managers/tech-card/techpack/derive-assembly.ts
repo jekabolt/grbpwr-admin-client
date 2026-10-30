@@ -42,9 +42,10 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
-import { readName } from 'lib/assembly-skeleton/skeleton/model';
+import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
-import type { Edge, PieceGeom, PieceMark } from 'lib/assembly-skeleton/types';
+import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   contourSig,
@@ -66,6 +67,8 @@ import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
+import { garmentAssemblyOfCard, type CardSeamGeometry } from '../components/card-seam-graph';
+import type { GarmentAssembly } from '../components/garment-assembly';
 
 export type Pt = [number, number];
 type Matrix = [number, number, number, number, number, number];
@@ -96,6 +99,156 @@ export type AssemblyInput = {
   grainDeg: ReadonlyMap<string, number>;
   t?: PdfT;
 };
+
+type PieceSemantic = {
+  roles: Set<string>;
+  hand: ReturnType<typeof readName>['hand'];
+  family: string | null;
+  tokens: Set<string>;
+};
+
+const pieceSemantic = (name: string): PieceSemantic => {
+  const reading = readName(name);
+  const tokens = new Set(nameTokens(name));
+  const bare = new Set([...tokens].map((token) => token.replace(/^\d+|\d+$/g, '')).filter(Boolean));
+  return {
+    roles: new Set(
+      ROLE_BOOK.roles
+        .filter((role) => role.tokens.some((token) => bare.has(token)))
+        .map((role) => role.id),
+    ),
+    hand: reading.hand,
+    family: reading.family,
+    tokens,
+  };
+};
+
+const semanticName = (value: string) =>
+  nameTokens(value)
+    .filter(
+      (token) =>
+        !/^\d+$/.test(token) &&
+        !ROLE_BOOK.ignoreTokens.includes(token) &&
+        !ROLE_BOOK.hands.L.includes(token) &&
+        !ROLE_BOOK.hands.R.includes(token),
+    )
+    .map(
+      (token) =>
+        ROLE_BOOK.roles.find((role) => role.tokens.includes(token.replace(/^\d+|\d+$/g, '')))?.id ??
+        token,
+    )
+    .join(':');
+
+const tokenSimilarity = (left: ReadonlySet<string>, right: ReadonlySet<string>) => {
+  const shared = [...left].filter((token) => right.has(token)).length;
+  return shared / Math.max(left.size + right.size - shared, 1);
+};
+
+/**
+ * Old operation rows can survive a pattern revision with their former piece line keys. Resolve
+ * those rows against the current DXF by the card's multilingual role dictionary and names. The
+ * result is local to the print model; it never rewrites the stored card.
+ */
+export function operationPieceAliases(
+  techCard: common_TechCard,
+  pieces: ReadonlyMap<string, AsmPiece>,
+): ReadonlyMap<string, string> {
+  const insert = techCard.techCard;
+  const operations = insert?.operations ?? [];
+  const rows = insert?.pieces ?? [];
+  const rowByKey = new Map(
+    rows.flatMap((row) => (row.lineKey ? [[row.lineKey, row] as const] : [])),
+  );
+  const unitKeys = new Set(
+    operations.map((operation) => operation.outputUnitKey).filter((key): key is string => !!key),
+  );
+  const referenced = new Set(
+    operations.flatMap((operation) => [
+      ...(operation.inputKeys ?? []).filter((key) => !unitKeys.has(key)),
+      ...(operation.pieceLineKeys ?? []),
+    ]),
+  );
+  const unresolved = [...referenced].filter((key) => key && !pieces.has(key) && rowByKey.has(key));
+  if (!unresolved.length) return new Map();
+
+  const aliasNames = new Map<string, string[]>();
+  for (const alias of insert?.pieceDxfAliases?.items ?? []) {
+    const key = (alias.pieceLineKey ?? '').trim();
+    const name = (alias.blockName ?? '').trim();
+    if (pieces.has(key) && name) aliasNames.set(key, [...(aliasNames.get(key) ?? []), name]);
+  }
+  const labels = [...pieces].map(([key, piece]) => {
+    const rowName = rowByKey.get(key)?.name?.trim();
+    const names = [piece.name, piece.code, piece.geom.name, rowName, ...(aliasNames.get(key) ?? [])]
+      .filter((name): name is string => !!name?.trim())
+      .map((name) => name.trim());
+    return { key, names: [...new Set(names)] };
+  });
+  const directlyUsed = new Set([...referenced].filter((key) => pieces.has(key)));
+
+  const proposals = unresolved.map((sourceKey) => {
+    const sourceName = rowByKey.get(sourceKey)?.name?.trim() || sourceKey;
+    const source = pieceSemantic(sourceName);
+    const sourceCanonical = semanticName(sourceName);
+    const candidates = labels
+      .flatMap(({ key, names }) => {
+        let best = -Infinity;
+        for (const name of names) {
+          const candidate = pieceSemantic(name);
+          const sharedRoles = [...source.roles].filter((role) => candidate.roles.has(role)).length;
+          if (source.roles.size && !sharedRoles) continue;
+          const candidateCanonical = semanticName(name);
+          const score =
+            (sourceCanonical && sourceCanonical === candidateCanonical ? 120 : 0) +
+            sharedRoles * 50 +
+            (source.family && source.family === candidate.family ? 16 : 0) +
+            (source.hand && candidate.hand ? (source.hand === candidate.hand ? 12 : -18) : 0) +
+            tokenSimilarity(source.tokens, candidate.tokens) * 20;
+          best = Math.max(best, score);
+        }
+        return Number.isFinite(best) && best >= 45 ? [{ key, score: best }] : [];
+      })
+      .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
+    return { sourceKey, candidates };
+  });
+  proposals.sort((a, b) => {
+    const gap = (proposal: (typeof proposals)[number]) =>
+      (proposal.candidates[0]?.score ?? -Infinity) -
+      (proposal.candidates[1]?.score ?? proposal.candidates[0]?.score ?? -Infinity);
+    return gap(b) - gap(a) || (b.candidates[0]?.score ?? 0) - (a.candidates[0]?.score ?? 0);
+  });
+
+  const result = new Map<string, string>();
+  const used = new Set(directlyUsed);
+  for (const proposal of proposals) {
+    const match = proposal.candidates.find((candidate) => !used.has(candidate.key));
+    if (!match) continue;
+    result.set(proposal.sourceKey, match.key);
+    used.add(match.key);
+  }
+  return result;
+}
+
+function withResolvedOperationPieces(
+  techCard: common_TechCard,
+  pieces: ReadonlyMap<string, AsmPiece>,
+): common_TechCard {
+  const aliases = operationPieceAliases(techCard, pieces);
+  const insert = techCard.techCard;
+  if (!aliases.size || !insert) return techCard;
+  const resolve = (keys: string[] | undefined) => keys?.map((key) => aliases.get(key) ?? key);
+  return {
+    ...techCard,
+    techCard: {
+      ...insert,
+      operations: (insert.operations ?? []).map((operation) => ({
+        ...operation,
+        inputKeys: resolve(operation.inputKeys),
+        pieceLineKeys: resolve(operation.pieceLineKeys),
+      })),
+    },
+  };
+}
 
 export type Tech =
   | 'press'
@@ -215,6 +368,79 @@ type AsmSeam = {
   relaxedStored?: boolean;
 };
 
+function candidatePart(
+  id: string,
+  range: [number, number] | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): SeamPart | null {
+  const edge = resolveEdge(id, geoms);
+  if (!edge || edge.pts.length < 2) return null;
+  const start = range ? Math.max(0, Math.min(1, range[0] / Math.max(edge.len, 1e-6))) : 0;
+  const end = range ? Math.max(start, Math.min(1, range[1] / Math.max(edge.len, 1e-6))) : 1;
+  const points = start <= 0.001 && end >= 0.999 ? edge.pts : sliceRun(edge.pts, start, end);
+  return {
+    piece: edge.pieceKey,
+    pts: points.map(([x, y]) => [x, -y]),
+    lenMm: edge.len * (end - start),
+    share: end - start,
+    turn: turnOf(points),
+    edgeId: edge.id,
+  };
+}
+
+function seamOfCandidate(
+  candidate: SeamCandidate,
+  operation: number,
+  index: number,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): AsmSeam | null {
+  if (candidate.kind === 'closure-not-seam') return null;
+  const side = (which: 'a' | 'b') => {
+    const ids =
+      which === 'a' ? candidate.aParts ?? [candidate.a] : candidate.bParts ?? [candidate.b];
+    const range = ids.length === 1 ? candidate.range?.[which] : undefined;
+    return ids
+      .map((id) => candidatePart(id, range, geoms))
+      .filter((part): part is SeamPart => !!part);
+  };
+  const a = side('a');
+  const b = side('b');
+  if (!a.length || !b.length) return null;
+  const host = candidate.surface ? geoms.get(candidate.surface.host) : undefined;
+  const markIndex = candidate.surface
+    ? (host?.marks ?? []).findIndex((mark) => mark.id === candidate.surface!.mark)
+    : -1;
+  const mark = markIndex >= 0 ? host?.marks?.[markIndex] : undefined;
+  return {
+    key: candidate.provenance?.seamKey ?? `proto-edge-${operation}-${index}`,
+    kind: candidate.kind,
+    // evidence.rule is the matcher's reasoning, not a technologist's note — never printed
+    note: '',
+    a,
+    b,
+    pieces: [...new Set([...a, ...b].map((part) => part.piece))],
+    ...(candidate.surface && mark
+      ? {
+          inner: {
+            piece: candidate.surface.host,
+            index: markIndex,
+            pts: mark.pts.map(([x, y]) => [x, -y] as Pt),
+          },
+          surfaceRole: 'inner' as const,
+        }
+      : {}),
+  };
+}
+
+function seamInOperationOrder(seam: AsmSeam, operation: Op | undefined): AsmSeam {
+  if (!operation) return seam;
+  const groupOf = (parts: readonly SeamPart[]) =>
+    operation.groups.findIndex((group) => parts.some((part) => group.has(part.piece)));
+  const a = groupOf(seam.a);
+  const b = groupOf(seam.b);
+  return a >= 0 && b >= 0 && a > b ? { ...seam, a: seam.b, b: seam.a } : seam;
+}
+
 type Item = { p: string; T: Matrix; old?: boolean };
 
 type CardInput = { pieces: string[]; label: string; incoming: boolean };
@@ -277,6 +503,15 @@ export type AssemblyModel = {
   /** Every missing assembly fact, for the terminal Gaps list. */
   gaps: Gap[];
   emptyGap?: Gap;
+  /** The one card-wide topology from which missing operation seams were selected. */
+  garment?: GarmentAssembly;
+  /** Operation inputs resolved against the active DXF without mutating the stored card. */
+  techCard: common_TechCard;
+};
+
+export type DeriveAssemblyOptions = {
+  /** Test/diagnostic escape hatch for measuring the superseded per-operation inference. */
+  globalAssembly?: boolean;
 };
 
 const I: Matrix = [1, 0, 0, 1, 0, 0];
@@ -1972,6 +2207,7 @@ function buildCards(
   pieces: ReadonlyMap<string, AsmPiece>,
   sink?: GapSink,
   t: PdfT = englishT,
+  inferMissing = true,
 ): Built {
   const cards = new Map<number, JoinCard>();
   const units = new Map<string, Item[]>();
@@ -2055,17 +2291,19 @@ function buildCards(
       ? storedSeams
       : inheritedSurface
         ? [inheritedSurface]
-        : inferredSeams(
-            pieces,
-            groups,
-            op,
-            roles,
-            sewnEdgeIds(
-              op.ins.flatMap((input) =>
-                input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : [],
+        : inferMissing
+          ? inferredSeams(
+              pieces,
+              groups,
+              op,
+              roles,
+              sewnEdgeIds(
+                op.ins.flatMap((input) =>
+                  input.kind === 'unit' ? unitSeams.get(input.key) ?? [] : [],
+                ),
               ),
-            ),
-          );
+            )
+          : [];
     const gaps: Gap[] = [];
     const groupOf = (p: string) => groups.find((g) => g.some((it) => it.p === p));
     const itemOf = (p: string) => groups.flatMap((g) => g).find((it) => it.p === p);
@@ -2772,14 +3010,47 @@ function mirrorSets(
 
 // ── the model ───────────────────────────────────────────────────────────────────────────────────
 
-export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyModel {
+export function deriveAssembly(
+  input: AssemblyInput,
+  sink?: GapSink,
+  options: DeriveAssemblyOptions = {},
+): AssemblyModel {
   const t = input.t ?? englishT;
   const gapSink = sink ?? new GapSink();
-  const ops = readOps(input);
+  const techCard = withResolvedOperationPieces(input.techCard, input.pieces);
+  const resolvedInput = { ...input, techCard };
+  const ops = readOps(resolvedInput);
+  const completeGeometry = [...input.pieces.values()].every(
+    (piece) =>
+      Array.isArray(piece.geom?.rs) && piece.geom.rs.length >= 3 && Array.isArray(piece.geom.edges),
+  );
+  const richGeometry = [...input.pieces.values()].some((piece) => piece.geom?.edges?.length > 1);
+  const garment =
+    options.globalAssembly === false || !completeGeometry || !richGeometry
+      ? undefined
+      : garmentAssemblyOfCard(techCard, input.pieces as CardSeamGeometry);
+  const geoms = new Map([...input.pieces].map(([key, piece]) => [key, piece.geom]));
+  const garmentSeams = new Map<number, AsmSeam[]>();
+  if (garment)
+    for (const [operation, candidates] of garment.byOperation) {
+      const seams = candidates
+        .map((candidate, index) => seamOfCandidate(candidate, operation, index, geoms))
+        .filter((seam): seam is AsmSeam => !!seam);
+      if (seams.length)
+        garmentSeams.set(
+          operation,
+          seams.map((seam) =>
+            seamInOperationOrder(
+              seam,
+              ops.find((candidate) => candidate.n === operation),
+            ),
+          ),
+        );
+    }
   const emptyGap = ops.length
     ? undefined
     : assemblyGap(gapSink, 'pdf_operations_missing', t('gaps.operations'), 0, 'operations');
-  const { seams, unresolved } = locateSeams(input);
+  const { seams, unresolved } = locateSeams(resolvedInput);
   const owned = new Set(ops.flatMap((op) => op.raw.seamKeys ?? []));
   const guessed = bindSeams(
     seams.filter((seam) => !owned.has(seam.key)),
@@ -2791,9 +3062,21 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     guessed,
   };
   const bound = new Map(
-    ops.filter((op) => op.join).map((op) => [op.n, seamsOfOp(op.raw, catalog)]),
+    ops
+      .filter((op) => op.join)
+      .map((op) => {
+        const stored = seamsOfOp(op.raw, catalog);
+        return [op.n, stored.length ? stored : garmentSeams.get(op.n) ?? []] as const;
+      }),
   );
-  const { cards, units, targets, targetSeams } = buildCards(ops, bound, input.pieces, gapSink, t);
+  const { cards, units, targets, targetSeams } = buildCards(
+    ops,
+    bound,
+    input.pieces,
+    gapSink,
+    t,
+    !garment,
+  );
   const actions = buildActions(ops, input.pieces, targets, targetSeams);
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
@@ -2822,7 +3105,14 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     }
     words.set(
       op.n,
-      wordsOf(op, { input, unitName, unitStep, card: cards.get(op.n), twinNote, sink: gapSink }),
+      wordsOf(op, {
+        input: resolvedInput,
+        unitName,
+        unitStep,
+        card: cards.get(op.n),
+        twinNote,
+        sink: gapSink,
+      }),
     );
   }
 
@@ -2858,6 +3148,8 @@ export function deriveAssembly(input: AssemblyInput, sink?: GapSink): AssemblyMo
     unresolved,
     gaps: gapSink.list().filter((gap) => gap.section === '06'),
     emptyGap,
+    garment,
+    techCard,
   };
 }
 
