@@ -6,7 +6,14 @@ import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
 import { CARD58_OPS, CARD58_PIECE_KEYS, card58Geoms, card58Step } from './card58.fixture';
-import { CARD6_OPS, CARD6_PIECE_KEYS, CARD6_SEAMS, card6Geoms, card6Step } from './card6.fixture';
+import {
+  CARD6_OPS,
+  CARD6_PIECE_KEYS,
+  CARD6_SEAMS,
+  card6Geoms,
+  card6InnerLines,
+  card6Step,
+} from './card6.fixture';
 import {
   deltaMm,
   dropKeys,
@@ -25,6 +32,7 @@ import {
   suggestPair,
   suggestStepPair,
   suggestStepPairs,
+  suggestStepSurface,
   suggestionWords,
   surfaceRow,
   targetsLen,
@@ -728,9 +736,64 @@ describe('card 6: layered seams keep their structural edge', () => {
       CARD6_SEAMS,
     )[0];
   };
+  const surface = (operationNumber: number) =>
+    suggestStepSurface(CARD6_OPS, card6Step(operationNumber), CARD6_PIECE_KEYS, geoms, CARD6_SEAMS);
 
   it('260: never joins the two sleeve plackets edge to edge', () => {
     expect(proposal(260)).toBeUndefined();
+  });
+
+  it('260: places the second placket across the same sleeve slit', () => {
+    const suggested = surface(260)!;
+    expect(suggested).toMatchObject({
+      host: 'SLV_R',
+      inner: 0,
+      part: 'FLP_R_MAIN',
+      confident: false,
+    });
+    expect(suggested.place).toBeDefined();
+
+    const previous = CARD6_SEAMS.get('sleeve slit')!.sideB[0].placement!;
+    const host = geoms.get('SLV_R')!;
+    const line = card6InnerLines()
+      .get('SLV_R')![0]
+      .map(([x, y]): Pt2 => [x, -y]);
+    const start = line[0];
+    const end = line[line.length - 1];
+    const dx = end[0] - start[0];
+    const dy = end[1] - start[1];
+    const length = Math.hypot(dx, dy);
+    const hostLeft = Math.min(...host.rs.map(([x]) => x));
+    const hostTop = -Math.max(...host.rs.map(([, y]) => y));
+    const components = (place: NonNullable<typeof suggested.place>) => {
+      const x = hostLeft + place.xMm - start[0];
+      const y = hostTop + place.yMm - start[1];
+      return {
+        along: (x * dx + y * dy) / length,
+        offset: (x * -dy + y * dx) / length,
+      };
+    };
+    const before = components(previous);
+    const after = components(suggested.place!);
+    expect(after.along).toBeCloseTo(before.along, 5);
+    expect(after.offset).toBeCloseTo(-before.offset, 5);
+  });
+
+  it('finds the second placket when the first placket and host remain separate inputs', () => {
+    const ops = [
+      { ...CARD6_OPS[0], outputUnitKey: '' },
+      { ...CARD6_OPS[3], inputKeys: ['FLP_R_MAIN', 'FLP_R', 'SLV_R'] },
+    ];
+    expect(suggestStepSurface(ops, 1, CARD6_PIECE_KEYS, geoms, CARD6_SEAMS)).toMatchObject({
+      host: 'SLV_R',
+      inner: 0,
+      part: 'FLP_R_MAIN',
+    });
+  });
+
+  it.each([720, 770, 870])('%i: an outer-edge proposal suppresses the surface rule', (op) => {
+    expect(proposal(op)).toBeDefined();
+    expect(surface(op)).toBeNull();
   });
 
   it('720: the centre-front placket takes the upper and main front chain', () => {

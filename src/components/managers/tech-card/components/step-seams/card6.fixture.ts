@@ -1,10 +1,11 @@
 // Card 6 «starvation»: only the pieces, operations and stored rows needed by the seam-starvation
 // regressions. Its pattern is the same checked-in DXF outline capture used by card 77/85.
 
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
-import type { EdgeAnchor, StoredSeam } from 'lib/seams';
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { contourSig, frameOf, type EdgeAnchor, type StoredSeam } from 'lib/seams';
+import { runSamples } from 'lib/seams/frame';
 
-import { card77Geoms } from './card77.fixture';
+import { card77Geoms, card77InnerLines } from './card77.fixture';
 import type { FormOpLike } from './step-seams-model';
 
 const PIECES = [
@@ -69,6 +70,11 @@ export function card6Geoms(): Map<string, PieceGeom> {
   return new Map(PIECES.flatMap((key) => (all.has(key) ? [[key, all.get(key)!]] : [])));
 }
 
+export function card6InnerLines(): Map<string, Pt2[][]> {
+  const all = card77InnerLines();
+  return new Map(PIECES.flatMap((key) => (all.has(key) ? [[key, all.get(key)!]] : [])));
+}
+
 const anchor = (edgeHint: string): EdgeAnchor => ({
   piece: edgeHint.slice(0, edgeHint.lastIndexOf('#')),
   samples: [
@@ -104,8 +110,34 @@ const row = (
   note: '',
 });
 
+const sleeveSlitRow = (): StoredSeam => {
+  const host = card6Geoms().get('SLV_R')!;
+  const line = card6InnerLines().get('SLV_R')![0];
+  const frame = frameOf(host);
+  const lenMm = line.reduce(
+    (sum, point, index) =>
+      index ? sum + Math.hypot(point[0] - line[index - 1][0], point[1] - line[index - 1][1]) : sum,
+    0,
+  );
+  const placement = { xMm: 150, yMm: 560, rotDeg: 0, flip: false };
+  const hostAnchor: EdgeAnchor = {
+    ...anchor('SLV_R#0'),
+    samples: runSamples(frame, { pts: line }),
+    perimShare: lenMm / host.perimMm,
+    lenMm,
+    edgeHint: 'i0',
+    contourSig: contourSig(host, frame),
+    placement,
+  };
+  return {
+    ...row('sleeve slit', ['SLV_R#0'], ['FLP_R#0'], 'surface'),
+    sideA: [hostAnchor],
+    sideB: [{ ...anchor('FLP_R#0'), placement }],
+  };
+};
+
 export const CARD6_SEAMS: ReadonlyMap<string, StoredSeam> = new Map([
-  ['sleeve slit', row('sleeve slit', ['SLV_R#0'], ['FLP_R#0'], 'surface')],
+  ['sleeve slit', sleeveSlitRow()],
   ['main neck', row('main neck', ['clr_main#2'], ['clr_main_2#2'])],
   [
     'main outer',

@@ -1691,6 +1691,18 @@ export type StepProposal = Suggestion & {
   confident: boolean;
 };
 
+export type StepSurface = {
+  /** Piece that owns the stored inner line. */
+  host: string;
+  /** Inner-line index (`innerId(host, inner)`). */
+  inner: number;
+  /** Singleton input to place on the other side of the line. */
+  part: string;
+  /** Reflected stored placement, when its host frame still resolves exactly. */
+  place?: SeamPlacement;
+  confident: boolean;
+};
+
 /** «left» / «right» by the proposal's hand, else «seam n». */
 export function proposalLabel(proposal: StepProposal, index: number): string {
   return proposal.hand === 'L' ? 'left' : proposal.hand === 'R' ? 'right' : `seam ${index + 1}`;
@@ -1881,6 +1893,198 @@ export function suggestStepPair(
   seams?: ReadonlyMap<string, StoredSeam>,
 ): Suggestion | null {
   return suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, seams)[0] ?? null;
+}
+
+type StoredSurface = {
+  host: string;
+  inner: number;
+  part: string;
+  hostAnchor: EdgeAnchor;
+  placement?: SeamPlacement;
+};
+
+const storedInner = (anchor: EdgeAnchor): number | null => {
+  const match = /^i(\d+)$/.exec(anchor.edgeHint);
+  return match ? Number(match[1]) : null;
+};
+
+/** Confirmed surface rows attached to earlier steps, read in their stored host/part direction. */
+function storedSurfacesBefore(
+  ops: readonly FormOpLike[],
+  index: number,
+  seams: ReadonlyMap<string, StoredSeam>,
+): StoredSurface[] {
+  const out: StoredSurface[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < index; i++) {
+    for (const key of ops[i]?.seamKeys ?? []) {
+      const seam = seams.get(key);
+      if (
+        !seam ||
+        seen.has(seam.seamKey) ||
+        seam.status !== 'confirmed' ||
+        seam.stale ||
+        seam.kind !== 'surface'
+      )
+        continue;
+      seen.add(seam.seamKey);
+      const aInner = seam.sideA.map((anchor) => ({ anchor, inner: storedInner(anchor) }));
+      const bInner = seam.sideB.map((anchor) => ({ anchor, inner: storedInner(anchor) }));
+      const inners = [...aInner, ...bInner].filter(
+        (hit): hit is { anchor: EdgeAnchor; inner: number } => hit.inner !== null,
+      );
+      if (inners.length !== 1) continue;
+      const hit = inners[0];
+      const hostSide = aInner.some((candidate) => candidate.anchor === hit.anchor)
+        ? seam.sideA
+        : seam.sideB;
+      const partSide = hostSide === seam.sideA ? seam.sideB : seam.sideA;
+      const parts = [...new Set(partSide.map((anchor) => anchor.piece))];
+      if (parts.length !== 1 || parts[0] === hit.anchor.piece) continue;
+      const placement =
+        partSide.find((anchor) => anchor.placement)?.placement ?? hit.anchor.placement;
+      out.push({
+        host: hit.anchor.piece,
+        inner: hit.inner,
+        part: parts[0],
+        hostAnchor: hit.anchor,
+        ...(placement ? { placement } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+const normalisedDeg = (deg: number) => {
+  const turn = ((((deg + 180) % 360) + 360) % 360) - 180;
+  return Math.abs(turn) < 1e-9 ? 0 : turn;
+};
+
+/** Reflect a surface placement across a straight stored inner line in the host's drawing frame. */
+function reflectSurfacePlacement(
+  host: PieceGeom,
+  anchor: EdgeAnchor,
+  placement: SeamPlacement,
+): SeamPlacement | undefined {
+  const values = [placement.xMm, placement.yMm, placement.rotDeg];
+  if (anchor.samples.length < 2 || values.some((value) => !Number.isFinite(value)))
+    return undefined;
+  // An anchor does not store its grain turn. A matching zero-turn signature is the only frame we
+  // can invert without guessing; other valid rows still get a centred placement from the picker.
+  const frame = frameOf(host);
+  if (anchor.contourSig !== contourSig(host, frame)) return undefined;
+  const line = anchor.samples.map(
+    ([u, v]): Pt => [frame.x0 + u * frame.w, -(frame.y0 + v * frame.h)],
+  );
+  const a = line[0];
+  const b = line[line.length - 1];
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return undefined;
+  const distance = ([x, y]: Pt) => Math.abs(dy * (x - a[0]) - dx * (y - a[1])) / length;
+  const straightTol = Math.max(EXACT_MM, anchor.lenMm * EXACT_REL);
+  if (line.some((point) => distance(point) > straightTol)) return undefined;
+  if (Math.abs(length - anchor.lenMm) > straightTol) return undefined;
+
+  const hostTop = -(frame.y0 + frame.h);
+  const point: Pt = [frame.x0 + placement.xMm, hostTop + placement.yMm];
+  const along = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / (length * length);
+  const foot: Pt = [a[0] + along * dx, a[1] + along * dy];
+  const reflected: Pt = [2 * foot[0] - point[0], 2 * foot[1] - point[1]];
+  const lineDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return {
+    xMm: reflected[0] - frame.x0,
+    yMm: reflected[1] - hostTop,
+    rotDeg: normalisedDeg(2 * lineDeg - placement.rotDeg - 180),
+    flip: !placement.flip,
+  };
+}
+
+/**
+ * A singleton piece placed opposite its twin on an earlier stored inner-line seam. Outer-edge
+ * proposals always win; this is only the missing second side of an already established slit.
+ */
+export function suggestStepSurface(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  seams?: ReadonlyMap<string, StoredSeam>,
+): StepSurface | null {
+  const op = ops[index];
+  if (!op || !seams || (sewsNothing(op) && !keyedOf(op))) return null;
+  const groups = inputGroups(ops, index, pieceKeys);
+  const singles = groups.filter((group) => group.pieces.length === 1);
+  if (groups.length < 2 || singles.length === 0) return null;
+  if (
+    suggestStepPairs(
+      ops,
+      index,
+      pieceKeys,
+      geoms,
+      usedEdgesBeforeStep(ops, index, seams),
+      easeOf(op),
+      seams,
+    ).length
+  )
+    return null;
+
+  const related = (part: string, other: string) => {
+    const partGeom = geoms.get(part);
+    const otherGeom = geoms.get(other);
+    if (!partGeom || !otherGeom) return false;
+    const twins =
+      partGeom.twinOf.some((twin) => twin.key === other) ||
+      otherGeom.twinOf.some((twin) => twin.key === part);
+    const partRole = roleOfPiece(partGeom, geoms);
+    const otherRole = roleOfPiece(otherGeom, geoms);
+    return twins || (!!partRole && partRole === otherRole);
+  };
+
+  const inputPieces = new Set(groups.flatMap((group) => group.pieces));
+  const surfaces = storedSurfacesBefore(ops, index, seams);
+  const candidates = singles.flatMap((single) => {
+    const part = single.pieces[0];
+    const partGeom = geoms.get(part);
+    const longEdge = partGeom
+      ? plainEdges(partGeom).reduce<Edge | null>(
+          (best, edge) => (!best || edge.lenMm > best.lenMm ? edge : best),
+          null,
+        )
+      : null;
+    if (!partGeom || !longEdge) return [];
+    return surfaces.flatMap((surface) => {
+      const hostGroup = groups.find(
+        (group) => group !== single && group.pieces.includes(surface.host),
+      );
+      const lineLen = surface.hostAnchor.lenMm;
+      if (
+        !hostGroup ||
+        !inputPieces.has(surface.part) ||
+        part === surface.part ||
+        !related(part, surface.part) ||
+        !(lineLen > 0) ||
+        Math.abs(longEdge.lenMm - lineLen) / Math.max(longEdge.lenMm, lineLen) > SUGGEST_REL
+      )
+        return [];
+      return [{ ...surface, suggestedPart: part }];
+    });
+  });
+  if (candidates.length !== 1) return null;
+  const candidate = candidates[0];
+  const hostGeom = geoms.get(candidate.host);
+  const place =
+    candidate.placement && hostGeom
+      ? reflectSurfacePlacement(hostGeom, candidate.hostAnchor, candidate.placement)
+      : undefined;
+  return {
+    host: candidate.host,
+    inner: candidate.inner,
+    part: candidate.suggestedPart,
+    ...(place ? { place } : {}),
+    confident: false,
+  };
 }
 
 /** Compact words shared by the row and picker: `BP_U-5 ↔ BP_MAIN-1`. */
