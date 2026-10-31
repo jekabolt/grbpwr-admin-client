@@ -1,33 +1,3 @@
-import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
-import { plainEdges } from '../assembly-seams/words';
-import { PARTNER_REL } from './step-picture';
-import { deltaMm } from './step-seams-model';
-
-type PlacePiece = { inner: readonly unknown[]; geom: PieceGeom };
-
-/**
- * Whether «place» has anywhere to drop the part: an inner line on a host to lay it on, or a free
- * host edge a free part edge can snap to by length. Without either the drag can only spring back.
- */
-export function placeHasDrop(
-  hosts: readonly PlacePiece[],
-  part: PlacePiece,
-  taken: (id: EdgeId) => boolean,
-  ease: number | null,
-): boolean {
-  if (hosts.some((h) => h.inner.length > 0)) return true;
-  const free = (g: PieceGeom) =>
-    plainEdges(g)
-      .filter((e) => !taken(e.id) && e.lenMm >= 30)
-      .map((e) => e.lenMm);
-  const partLens = free(part.geom);
-  return hosts.some((h) =>
-    free(h.geom).some((hl) =>
-      partLens.some((pl) => deltaMm(pl, hl, ease) / Math.max(pl, hl) <= PARTNER_REL),
-    ),
-  );
-}
-
 /**
  * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
  * with the user's own pick one click away. A proposal without the flag reads as sure.
