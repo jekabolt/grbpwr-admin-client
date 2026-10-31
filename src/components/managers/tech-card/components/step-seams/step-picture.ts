@@ -12,6 +12,7 @@ import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import {
   intersectArea,
+  fitLayerToHostUnion,
   pairOverlap,
   pieceKeyOf,
   pieceTilt,
@@ -577,6 +578,7 @@ function layInput(
   onRuns: string[];
   apart: string[];
   hostOf: Map<string, string>;
+  outlineLayers: { piece: string; clearApart: string[] }[];
 } {
   const L = unionLayout(keys, inner, geoms, {
     ...raster,
@@ -603,6 +605,40 @@ function layInput(
   const beside = keys.filter((k) => T.has(k) && rootOf(k) !== main);
   // One piece alone is the input, not a piece beside it.
   const apart = keys.length > 1 ? [...left, ...beside] : [];
+  const components = new Map<string, string[]>();
+  for (const key of keys) {
+    const root = rootOf(key);
+    components.set(root, [...(components.get(root) ?? []), key]);
+  }
+  const shellRoots = [...components].filter(([, group]) =>
+    group.some((key) => !isLayerCloth(key, geoms)),
+  );
+  const shellRoot = shellRoots.reduce<string | null>((best, [root, group]) => {
+    const area = group.reduce((sum, key) => sum + (geoms.get(key)?.areaMm2 ?? 0), 0);
+    if (!best) return root;
+    const bestArea = (components.get(best) ?? []).reduce(
+      (sum, key) => sum + (geoms.get(key)?.areaMm2 ?? 0),
+      0,
+    );
+    return area > bestArea ? root : best;
+  }, null);
+  // Only a layer-only component disconnected by the confident seams is eligible. If that layer
+  // was large enough to root the input, a successful fit also resolves the shell component that
+  // the old root choice labelled apart.
+  const outlineLayers =
+    layers && components.size > 1 && shellRoot
+      ? [...components].flatMap(([root, group]) => {
+          if (group.some((key) => !isLayerCloth(key, geoms))) return [];
+          return group
+            .filter((piece) => isLayerCloth(piece, geoms))
+            .map((piece) => ({
+              piece,
+              clearApart: apart.filter(
+                (key) => rootOf(key) === root || (root === main && rootOf(key) === shellRoot),
+              ),
+            }));
+        })
+      : [];
   if (left.length) {
     const placed = [...T].flatMap(([k, t]) => worldOf(geoms.get(k)!, t));
     const all = placed.length ? boxOf(placed) : { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -614,7 +650,7 @@ function layInput(
       x += b.x1 - b.x0;
     }
   }
-  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart, hostOf };
+  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart, hostOf, outlineLayers };
 }
 
 /**
@@ -738,6 +774,7 @@ export function stepLayout(
   const stacked: string[][] = [];
   const onRuns: string[] = [];
   const apart: string[] = [];
+  const outlineLayers: { piece: string; clearApart: string[] }[] = [];
   const pieceLayers: [string, string][] = [];
   for (const i of ins) {
     const ks = keysOf(i);
@@ -754,6 +791,7 @@ export function stepLayout(
           onRuns: previous.onRuns.filter((key) => ks.includes(key)),
           apart: previous.apart.filter((key) => ks.includes(key)),
           hostOf: new Map<string, string>(),
+          outlineLayers: [],
         }
       : layInput(ks, inner, geoms, raster, opts.bagsAsLayers !== false && !opts.garmentLayout);
     // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
@@ -775,6 +813,7 @@ export function stepLayout(
     stacked.push(...laid.stacked);
     onRuns.push(...laid.onRuns);
     apart.push(...laidApart);
+    outlineLayers.push(...laid.outlineLayers);
     if (seeded)
       pieceLayers.push(
         ...previous.pieceLayers.filter(
@@ -1477,6 +1516,65 @@ export function stepLayout(
     if (onto) T.set(k, compose(onto, snapOf(h)));
   }
 
+  // Confident seams keep shaping every input and the operation exactly as before. Only now, once
+  // those rigid units are in their final joined place, try a disconnected layer against the
+  // exposed outline of the non-layer pieces in its cluster. A weak match leaves it apart.
+  const fittedApart = new Set<string>();
+  if (explode === 0 && opts.bagsAsLayers !== false && !opts.garmentLayout) {
+    for (const candidate of outlineLayers) {
+      const ownInput = input.get(candidate.piece);
+      const cluster = clustersOut.find((group) => ownInput != null && group.includes(ownInput));
+      if (!cluster) continue;
+      const inCluster = new Set(cluster);
+      // A partial seam can say which assembled input is the host without saying where on it the
+      // layer belongs. Keep the candidate's own input too: at the mirrored operation the upper
+      // front travels with the bag while the partial seam names the main-front input.
+      const hostInputs = new Set(ownInput == null ? [] : [ownInput]);
+      const sidePieces = (c: SeamCandidate, side: 'a' | 'b') =>
+        ((side === 'a' ? c.aParts : c.bParts) ?? [side === 'a' ? c.a : c.b]).map(pieceKeyOf);
+      for (const seam of seams) {
+        if (seam.kind === 'surface' && seam.surface?.part === candidate.piece) {
+          const hostInput = input.get(seam.surface.host);
+          if (hostInput != null && inCluster.has(hostInput)) hostInputs.add(hostInput);
+          continue;
+        }
+        const a = sidePieces(seam, 'a');
+        const b = sidePieces(seam, 'b');
+        const other = a.includes(candidate.piece) ? b : b.includes(candidate.piece) ? a : [];
+        for (const key of other) {
+          const hostInput = input.get(key);
+          if (hostInput != null && inCluster.has(hostInput) && !isLayerCloth(key, geoms))
+            hostInputs.add(hostInput);
+        }
+      }
+      const hostKeys = (inputs: ReadonlySet<number>) =>
+        keys.filter(
+          (key) =>
+            key !== candidate.piece &&
+            inputs.has(input.get(key)!) &&
+            !isLayerCloth(key, geoms) &&
+            T.has(key),
+        );
+      const fitOptions = {
+        rasterMm: fine,
+        uprightMax: UPRIGHT,
+      };
+      let fit = fitLayerToHostUnion(candidate.piece, hostKeys(hostInputs), T, geoms, fitOptions);
+      // Some mirrored cards do not carry the weak partial into this step's seam list. The own
+      // input then contains only the upper host: it cannot contain the full bag, so (and only so)
+      // retry the non-layer union of the joined cluster.
+      if (!fit)
+        fit = fitLayerToHostUnion(candidate.piece, hostKeys(inCluster), T, geoms, fitOptions);
+      if (!fit) continue;
+      // Map order is paint order: a fitted bag covers the host instead of disappearing behind it.
+      T.delete(candidate.piece);
+      T.set(candidate.piece, fit.T);
+      standing.delete(candidate.piece);
+      fittedApart.add(candidate.piece);
+      for (const key of candidate.clearApart) fittedApart.add(key);
+    }
+  }
+
   const stacksOut = [...stacked, ...crossStacks];
   if (opts.garmentLayout) {
     // A seeded earlier output can contain more than one disconnected body even when this step has a
@@ -1947,7 +2045,7 @@ export function stepLayout(
     ghosts,
     stacked: stacksOut,
     onRuns: [...onRuns, ...crossRuns],
-    apart,
+    apart: apart.filter((key) => !fittedApart.has(key)),
     clusters: clustersOut,
     layers: layersOut,
     pieceLayers,
