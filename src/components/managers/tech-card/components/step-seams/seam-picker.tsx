@@ -49,7 +49,7 @@ import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
-import { isGuess, pickTarget, placeHasDrop, seamFocus } from './seam-focus';
+import { isGuess, pickTarget, placeHasDrop } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -77,7 +77,6 @@ import {
   type PoseSnap,
 } from './step-pose';
 import { stepWords } from './step-words';
-import { hintedEdgesFor } from './signals/hinted-edges';
 import { StepHintRow } from './step-hint-row';
 import {
   deltaMm,
@@ -86,7 +85,6 @@ import {
   longestEdge,
   parseInner,
   pieceOfTarget,
-  proposalLabel,
   sideOf,
   surfaceRow,
   type Pt,
@@ -99,7 +97,6 @@ import {
   insideRing,
   midAlong,
   PARTNER_REL,
-  partnerOf,
   pathOf,
   seamOfSides,
   seamSig,
@@ -135,7 +132,12 @@ const SIDES = [
 
 /** Share of the extent the inputs stand apart on the canvas. */
 const EXPLODE = 0.08;
-const NONE: readonly (readonly string[])[] = [];
+
+const sameSel = (x: Sel, y: Sel) =>
+  x.a.length === y.a.length &&
+  x.b.length === y.b.length &&
+  x.a.every((id) => y.a.includes(id)) &&
+  x.b.every((id) => y.b.includes(id));
 
 const polyLen = (pts: readonly Pt[]) =>
   pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : s), 0);
@@ -287,10 +289,7 @@ export function SeamPickerBody({
     used,
     suggestions,
     surfaceSuggestion,
-    surfaceSuggestions,
     innerSeams,
-    proposalSeams,
-    crossSeams,
     storedSeams,
     pieceName: nameOf,
   } = scene;
@@ -311,20 +310,15 @@ export function SeamPickerBody({
   const [handOverrides, setHandOverrides] = useState<Map<string, HandOn | null>>(() => new Map());
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
-  const [prop, setProp] = useState(initialProposal);
-  const suggestion = suggestions[prop] ?? suggestions[0] ?? null;
-  // «own»: the guess is put aside and the canvas waits for the user's own edges.
-  const [mine, setMine] = useState(false);
+  // «guess» only fills the pick from the proposal the picker opened on; the owner sees it and accepts.
+  const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
+  const [filled, setFilled] = useState<Sel | null>(null);
   // «place» with no seam in hand (P8): pieces moved by hand, kept here until «done».
   const [posing, setPosing] = useState(false);
   const [poseEdits, setPoseEdits] = useState<Map<string, PosePin | null>>(() => new Map());
   const [poseSel, setPoseSel] = useState<string | null>(null);
   const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
   const [poseDrag, setPoseDrag] = useState<{ group: string[]; D: Affine } | null>(null);
-  const propOptions = useMemo(
-    () => suggestions.map((p, i) => ({ value: String(i), label: proposalLabel(p, i) })),
-    [suggestions],
-  );
 
   const pieces = geo?.pieces;
   const lenOf = useCallback(
@@ -340,38 +334,12 @@ export function SeamPickerBody({
   const sideLen = (ids: readonly TargetId[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
 
-  // ── the partner of a lone picked side: the other side's edge closest in length ──
   const sewnInside = useMemo(() => {
     const s = new Set<EdgeId>();
     for (const c of innerSeams)
       for (const id of [c.a, c.b, ...(c.aParts ?? []), ...(c.bParts ?? [])]) s.add(id);
     return s;
   }, [innerSeams]);
-  const lone: Side | null =
-    sel.a.length > 0 && sel.b.length === 0
-      ? 'a'
-      : sel.b.length > 0 && sel.a.length === 0
-        ? 'b'
-        : null;
-  const partner = useMemo(() => {
-    if (!lone || sel[lone].some((t) => parseInner(t))) return null;
-    const mine = new Set(sel[lone].map(pieceOfTarget));
-    const other =
-      groups.length >= 2
-        ? lone === 'a'
-          ? groups.slice(1).flatMap((g) => g.pieces)
-          : groups[0].pieces
-        : groups[0]?.pieces ?? [];
-    const cands = other.flatMap((p) => {
-      const g = geoms.get(p);
-      if (!g || mine.has(p)) return [];
-      return plainEdges(g)
-        .filter((e) => !used.has(e.id) && !sewnInside.has(e.id))
-        .map((e) => ({ id: e.id, lenMm: e.lenMm }));
-    });
-    const len = sel[lone].reduce((s, id) => s + lenOf(id), 0);
-    return partnerOf(len, cands, (a, b) => deltaMm(a, b, ease));
-  }, [lone, sel, groups, geoms, used, sewnInside, ease, lenOf]);
 
   const placePartCandidate = useMemo(() => {
     if (!pieces) return null;
@@ -414,77 +382,22 @@ export function SeamPickerBody({
     placeHosts.length > 0 &&
     placeHasDrop(placeHosts, placePartPiece, (id) => used.has(id) || sewnInside.has(id), ease);
 
-  // ── what «accept» would write ──
-  // Nothing picked: the slit proposal (a lone part onto its twin's line) stands as the pick.
-  const auto =
-    !placing && !mine && !sel.a.length && !sel.b.length && surfaceSuggestion
-      ? surfaceSuggestion
-      : null;
-  const autoSide: Side | null = auto
-    ? groups.length < 2
-      ? 'a'
-      : sideOf(auto.host, groups, chosen)
-    : null;
-  const pick: Sel = auto
-    ? {
-        a: autoSide === 'a' ? [innerId(auto.host, auto.inner)] : [],
-        b: autoSide === 'b' ? [innerId(auto.host, auto.inner)] : [],
-      }
-    : sel;
-  const placeNow: Place | null =
-    place ??
-    (auto?.place
-      ? {
-          x: auto.place.xMm,
-          y: auto.place.yMm,
-          rot: auto.place.rotDeg,
-          host: auto.host,
-          flip: auto.place.flip,
-        }
-      : null);
+  // ── what «accept» would write: only what the owner picked ──
+  const pick: Sel = sel;
+  const placeNow: Place | null = place;
   const inners = [...pick.a, ...pick.b].filter((t) => parseInner(t));
   const surface = inners.length === 1;
   const hostSide: Side | null = surface ? (pick.a.includes(inners[0]) ? 'a' : 'b') : null;
   const host = surface ? parseInner(inners[0]) : null;
-  const hostGroup = host ? groups.findIndex((g) => g.pieces.includes(host.piece)) : -1;
-  const partKey = useMemo(() => {
-    if (!host || !hostSide) return null;
-    if (auto && pieces?.has(auto.part)) return auto.part;
-    const other = sel[hostSide === 'a' ? 'b' : 'a'];
-    if (other.length) return pieceOfTarget(other[0]);
-    if (placePartKey && placePartKey !== host.piece && pieces?.has(placePartKey))
-      return placePartKey;
-    const g = groups.find((_, gi) => gi !== hostGroup);
-    return g?.pieces.find((p) => pieces?.has(p)) ?? null;
-  }, [host, hostSide, auto, sel, placePartKey, groups, hostGroup, pieces]);
+  // The part laid on a line is the piece of the edges picked on the other side — never a fallback.
+  const partSide = hostSide ? sel[hostSide === 'a' ? 'b' : 'a'] : [];
+  const partKey = partSide.length ? pieceOfTarget(partSide[0]) : null;
 
-  /**
-   * The pair on the table: the user's own (both sides, or one side + its partner), else the
-   * proposal — with the lengths as sewn, which its notches may read shorter than the edges (a
-   * neckline's folds and pleat stay out of the collar seam).
-   */
-  const pair: (SeamSides & { own: boolean; aLen?: number; bLen?: number }) | null = (() => {
-    if (inners.length) return null;
-    if (sel.a.length && sel.b.length) return { a: sel.a, b: sel.b, own: true };
-    if (lone && partner)
-      return lone === 'a'
-        ? { a: sel.a, b: [partner], own: true }
-        : { a: [partner], b: sel.b, own: true };
-    if (!sel.a.length && !sel.b.length && suggestion && !mine)
-      return {
-        a: suggestion.a,
-        b: suggestion.b,
-        own: false,
-        aLen: suggestion.aLen,
-        bLen: suggestion.bLen,
-      };
-    return null;
-  })();
+  /** The pair on the table: both sides picked by hand, edge to edge. */
+  const pair: SeamSides | null =
+    !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
   const canAccept =
-    !frozen &&
-    !busy &&
-    !!cardId &&
-    (surface ? !!partKey && pick[hostSide!].length === 1 : inners.length === 0 && !!pair);
+    !frozen && !busy && !!cardId && (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
 
   // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
   // the whole card's (the right bag mirrors the left one placed a step later).
@@ -564,8 +477,8 @@ export function SeamPickerBody({
       if (!h || !g || !line || !partKey || !geo) return null;
       const hs: Side = s.a.includes(ins[0]) ? 'a' : 'b';
       const picked = s[hs === 'a' ? 'b' : 'a'];
-      const runs = picked.length ? runsOfSide(picked, geoms) : [longestEdge(geoms.get(partKey))];
-      const parts = runs
+      if (!picked.length) return null;
+      const parts = runsOfSide(picked, geoms)
         .map((id) => (id ? anchorOfRunId(anchorCtx.pieces, id, geo.grainDeg) : null))
         .filter((a): a is EdgeAnchor => !!a);
       return surfaceRow(
@@ -586,11 +499,12 @@ export function SeamPickerBody({
     setHandOverrides(new Map());
     setChosen('a');
     setRefused('');
+    setFilled(null);
   };
 
   const commit = async () => {
     if (!canAccept) return;
-    const row = buildRow(surface || !pair ? pick : { a: [...pair.a], b: [...pair.b] });
+    const row = buildRow(pick);
     if (!row) {
       setRefused('cannot pair');
       return;
@@ -618,14 +532,15 @@ export function SeamPickerBody({
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
-    const guessed = (!!pair && !pair.own) || !!auto;
+    // Accepted as «guess» filled it: the proposal's acceptance; any change made it the owner's own.
+    const guessed = !!filled && sameSel(filled, pick);
     recordSeamDecision({
       cardId: cardId ?? 0,
       operationNumber: op?.operationNumber ?? 0,
-      action: (pair && !pair.own && !surface) || auto ? 'accept' : 'own',
+      action: guessed ? 'accept' : 'own',
       seamKey: ok,
-      tier: guessed ? (guess ? 'guess' : 'confident') : 'none',
-      shown: auto ? { a: [...pick.a], b: [...pick.b] } : suggestion,
+      tier: guessed ? (isGuess(suggestion ?? surfaceSuggestion) ? 'guess' : 'confident') : 'none',
+      shown: filled ? { a: [...filled.a], b: [...filled.b] } : null,
     });
     reset();
     onAccepted?.();
@@ -641,61 +556,11 @@ export function SeamPickerBody({
     if (!has && groups.length < 2 && side === 'a' && sel.a.length === 0) setChosen('b');
   };
 
-  // ── the canvas: only the pieces of the seam on the table (the proposal's, and whatever a
-  // re-pick touches) with the pieces of their unit between them, apart; RESULT: them joined ──
-  const seamIds = [
-    ...(suggestion ? [...suggestion.a, ...suggestion.b] : []),
-    ...(pair ? [...pair.a, ...pair.b] : []),
-    ...pick.a,
-    ...pick.b,
-    ...(partner ? [partner] : []),
-  ];
-  const seamPieces = new Set(seamIds.map(pieceOfTarget));
-  // A lone pick with no partner keeps every piece: the other side is where the next pick goes.
-  // A hand pick (or «own») sees the whole block: the base a patch was sewn on stays a door.
-  const byHand = mine || sel.a.length > 0 || sel.b.length > 0;
-  const cut = inners.length === 0 && !byHand ? seamFocus(groups, seamPieces, innerSeams) : null;
-  const focus = !!cut;
-  const focusRaw = cut ?? groups.filter((g) => g.pieces.length > 0);
-  const focused = useStable(
-    focusRaw,
-    focusRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
-  );
-  const focusLeaves = useMemo(() => focused.map((g) => g.pieces), [focused]);
-  // Along the step's proposals (the right sleeve's armhole on the right; a third input on its own
-  // seam), never the live pick.
-  const frameRaw = frameSeamsOf(innerSeams, storedSeams, proposalSeams, crossSeams);
+  // ── the canvas: every piece of every input; laid only along the owner's stored seams (and the
+  // ones sewn inside an input), so a step with no row shows its inputs apart ──
+  const frameRaw = frameSeamsOf(innerSeams, storedSeams, [], []);
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-  const laidFocus = useStepLayout(
-    focus ? focusLeaves : leaves,
-    frameSeams,
-    geoms,
-    EXPLODE,
-    undefined,
-    laidHands,
-  );
-  // A piece of the seam no earlier seam attaches to its unit is not drawn loose with a bit of the
-  // seam on it: the focused canvas is laid again without it (the seam's label goes on the rest).
-  const apart = new Set(focus ? laidFocus.apart : []);
-  const shownRaw = apart.size
-    ? focused
-        .map((g) => ({ name: g.name, pieces: g.pieces.filter((p) => !apart.has(p)) }))
-        .filter((g) => g.pieces.length > 0)
-    : focused;
-  const shown = useStable(
-    shownRaw,
-    shownRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
-  );
-  const seamLeaves = useMemo(() => shown.map((g) => g.pieces), [shown]);
-  const laidShown = useStepLayout(
-    apart.size ? seamLeaves : NONE,
-    frameSeams,
-    geoms,
-    EXPLODE,
-    undefined,
-    laidHands,
-  );
-  const layout = apart.size ? laidShown : laidFocus;
+  const layout = useStepLayout(leaves, frameSeams, geoms, EXPLODE, undefined, laidHands);
   // A surface pick lies on its host's line in RESULT (by «place», else centred on the line).
   const pairSeam =
     surface && host && partKey
@@ -710,13 +575,12 @@ export function SeamPickerBody({
       : pair
         ? seamOfSides(pair, geoms, innerLines)
         : null;
-  const resultRaw = [...innerSeams, ...(focus ? [] : storedSeams), ...(pairSeam ? [pairSeam] : [])];
+  const resultRaw = [...innerSeams, ...storedSeams, ...(pairSeam ? [pairSeam] : [])];
   const resultSeams = useStable<SeamCandidate[]>(resultRaw, seamSig(resultRaw));
   const handTargets = useMemo(() => handTargetsOf(resultSeams, geoms), [resultSeams, geoms]);
-  const resultLeaves = focus ? seamLeaves : leaves;
   const joined = useMemo(
-    () => stepLayout(resultLeaves, resultSeams, geoms, { explode: 0, ...laidHands }),
-    [resultLeaves, resultSeams, geoms, laidHands],
+    () => stepLayout(leaves, resultSeams, geoms, { explode: 0, ...laidHands }),
+    [leaves, resultSeams, geoms, laidHands],
   );
   // «place» with no seam in hand: every piece of the step joined as its views draw it, by hand.
   const poseLayout = useMemo(
@@ -742,7 +606,7 @@ export function SeamPickerBody({
   const nos: NoMark[] = [];
   // One label per side, on its longest edge that is drawn (a neckline's on the back neck, not on
   // a front's end of it; a piece laid apart has none).
-  const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone'], lenMm?: number) => {
+  const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) => {
     let at = 0;
     let longest = -1;
     ids.forEach((id, k) => {
@@ -754,7 +618,7 @@ export function SeamPickerBody({
       }
     });
     ids.forEach((id, k) =>
-      marks.push({ id, tone, label: k === at ? mmText(lenMm ?? sideLen(ids)) : undefined }),
+      marks.push({ id, tone, label: k === at ? mmText(sideLen(ids)) : undefined }),
     );
   };
   // A stored seam reads as a proposal does: its edges with their lengths, its number on the first.
@@ -764,47 +628,18 @@ export function SeamPickerBody({
     const first = s.sides.a[0] ?? s.sides.b[0];
     if (first) nos.push({ id: first, i });
   });
-  if (auto) {
-    sideMarks(pick.a, 'proposal');
-    sideMarks(pick.b, 'proposal');
-    // The other sleeve's placket waits on its own slit.
-    surfaceSuggestions
-      .slice(1)
-      .forEach((other) => sideMarks([innerId(other.host, other.inner)], 'proposal'));
-  } else if (sel.a.length || sel.b.length) {
-    sideMarks(sel.a, 'pick');
-    sideMarks(sel.b, 'pick');
-    if (partner) sideMarks([partner], 'pick');
-  } else if (pair) {
-    const tone: EdgeMark['tone'] = pair.own ? 'pick' : 'proposal';
-    sideMarks(pair.a, tone, pair.aLen);
-    sideMarks(pair.b, tone, pair.bLen);
-  }
-  // The card's joins map (line F): the edges its word fits, a hint under the rest, never a pick.
-  // AI = blue dashed, the owner's row = ink dashed; a decided step shows none.
-  const hinted = stored.length
-    ? null
-    : hintedEdgesFor(op, scene.ctx?.guessHints, geoms, (piece) =>
-        (innerLines.get(piece) ?? []).map((_, k) => innerId(piece, k)),
-      );
-  const hintMarks: EdgeMark[] = [];
-  if (hinted) {
-    const shown = new Set<string>(marks.map((m) => m.id));
-    const tone: EdgeMark['tone'] = hinted.state === 'ai' ? 'hint' : 'proposal';
-    for (const id of [...hinted.a.edges, ...hinted.b.edges])
-      if (!shown.has(id)) hintMarks.push({ id: id as TargetId, tone });
-  }
+  sideMarks(sel.a, 'pick');
+  sideMarks(sel.b, 'pick');
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
   const delta = pair
-    ? deltaMm(pair.aLen ?? sideLen(pair.a), pair.bLen ?? sideLen(pair.b), ease)
+    ? deltaMm(sideLen(pair.a), sideLen(pair.b), ease)
     : stored.length === 1 && edgeToEdge(stored[0].sides)
       ? deltaMm(sideLen(stored[0].sides.a), sideLen(stored[0].sides.b), ease)
       : null;
-  const guess = (!!pair && !pair.own && isGuess(suggestion)) || (!!auto && !auto.confident);
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
 
   const [canvasEl, canvas] = useBoxSize();
@@ -820,14 +655,6 @@ export function SeamPickerBody({
         setPlace(null);
         setPlacePartKey(null);
       }
-      return;
-    }
-    if (auto && pieces?.has(auto.part)) {
-      // The slit proposal becomes the pick to move from where it stands.
-      setSel(pick);
-      setPlacePartKey(auto.part);
-      setPlace(placeNow ?? placeSceneOf(placeHosts, pieces.get(auto.part)!).initial);
-      setPlacing(true);
       return;
     }
     if (!placePartPiece || !placeHosts.length || !activePlacePartKey) return;
@@ -984,9 +811,24 @@ export function SeamPickerBody({
     exitPose();
   };
 
-  const switchProposal = (v: string) => {
-    reset();
-    setProp(Number(v));
+  // «guess»: the proposal's two sides become the pick, shown as the owner's — nothing is laid or saved.
+  const fillGuess = () => {
+    if (frozen || placing || posing) return;
+    const next: Sel | null = suggestion
+      ? { a: [...suggestion.a], b: [...suggestion.b] }
+      : surfaceSuggestion
+        ? (() => {
+            const line = innerId(surfaceSuggestion.host, surfaceSuggestion.inner);
+            const edge = longestEdge(geoms.get(surfaceSuggestion.part));
+            const hostAt = sideOf(surfaceSuggestion.host, groups, 'a');
+            const part = edge ? [edge] : [];
+            return hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] };
+          })()
+        : null;
+    if (!next) return;
+    setRefused('');
+    setSel(next);
+    setFilled(next);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -1000,9 +842,6 @@ export function SeamPickerBody({
     } else if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
-    } else if (!posing && /^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
-      e.preventDefault();
-      switchProposal(String(Number(e.key) - 1));
     }
   };
 
@@ -1039,15 +878,15 @@ export function SeamPickerBody({
   const sidesName = (a: TargetId | undefined, b: TargetId | undefined) =>
     [groupName(a), groupName(b)].filter(Boolean).join(' · ');
   const pairName = pair ? sidesName(pair.a[0], pair.b[0]) : '';
-  // The seam's number on the step: after the stored ones, a proposal by its place among them.
-  const pairNo = stored.length + (pair?.own ? 0 : prop);
+  // The seam's number on the step: after the stored ones.
+  const pairNo = stored.length;
   // The step's words as its row shows them («join / seam · armhole»), else the unit it makes.
   const stepName = stepWords(op, workCatalog) || op?.outputUnitName?.trim() || '';
 
   const loading = geo?.dep.status === 'pending';
   const drawn = layout.T.size > 0;
   // A seam on the table (a pick, a slit proposal): «place» lays its part; else it moves pieces.
-  const seamInHand = surface || !!auto || sel.a.length > 0 || sel.b.length > 0;
+  const seamInHand = surface || sel.a.length > 0 || sel.b.length > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
   // The selected piece's placement as drawn: its own, or its twin's mirrored.
   const selectedLaid = selectedPiece ? joined.hand.get(selectedPiece) : undefined;
@@ -1161,14 +1000,6 @@ export function SeamPickerBody({
           </Text>
         )}
         <StepHintRow op={op} />
-        {propOptions.length > 1 && (
-          <ViewSwitch
-            value={String(prop)}
-            options={propOptions}
-            onChange={switchProposal}
-            label='seam'
-          />
-        )}
         {groups.length < 2 && !frozen && (
           <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
         )}
@@ -1258,9 +1089,9 @@ export function SeamPickerBody({
                 layout={layout}
                 geoms={geoms}
                 innerLines={innerLines}
-                marks={hintMarks.length ? [...marks, ...hintMarks] : marks}
+                marks={marks}
                 nos={nos}
-                names={(focus ? shown : groups).map((g) => g.name)}
+                names={groups.map((g) => g.name)}
                 namesBelow={phone}
                 ghostName={nameOf}
                 hover={hover}
@@ -1528,34 +1359,29 @@ export function SeamPickerBody({
           {!frozen && !posing && (
             <Button
               type='button'
-              variant={guess ? 'secondary' : 'main'}
+              variant='main'
               size='sm'
               onClick={() => void commit()}
               disabled={!canAccept}
               loading={busy}
-              data-seam-accept={guess ? 'guess' : ''}
+              data-seam-accept=''
             >
               accept
             </Button>
           )}
-          {!frozen && !posing && guess && (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              onClick={() => setMine(true)}
-              data-seam-own=''
-            >
-              own
-            </Button>
-          )}
           {!frozen &&
             !posing &&
-            mine &&
+            !placing &&
             (suggestion || surfaceSuggestion) &&
             !sel.a.length &&
             !sel.b.length && (
-              <Button type='button' variant='underline' size='xs' onClick={() => setMine(false)}>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={fillGuess}
+                data-seam-guess=''
+              >
                 guess
               </Button>
             )}
