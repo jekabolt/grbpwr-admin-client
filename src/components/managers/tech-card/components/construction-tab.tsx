@@ -31,6 +31,7 @@ import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamsDoor } from './assembly-seams/seams-door';
 import { SeamHintsBar } from './step-seams/seam-hints-map';
+import { StepResultProvider } from './step-seams/step-result-context';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { gapSubjects } from '../techpack/gap-findings';
@@ -658,92 +659,96 @@ export function ConstructionTab({
               рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
               его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
               <StepSeamsProvider techCard={techCard} frozen={frozen} active={active}>
-                <SeamHintsBar />
-                <ConstructionAudit
-                  techCardId={techCard?.id}
-                  active={active}
-                  onGoTab={onGoTab}
-                  // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
-                  // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
-                  // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
-                  // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
-                  // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
-                  // и исчезали бы молча.
-                  frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
-                  // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
-                  // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
-                  // несохранённых правок.
-                  operationCount={(techCard?.techCard?.operations ?? []).length}
-                  gaps={pdfGaps ?? undefined}
-                  gapSubject={gapSubject}
-                />
-                <CardStandards />
-                <section className='border border-borderColor bg-bgColor p-4'>
-                  {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
-                    by OperationsField: its warnings read the rail's own subscriptions. */}
-                  <OperationsField
-                    activePin={pin.active}
-                    onActivePinChange={pin.setActive}
-                    activeBom={bom.active}
-                    onActiveBomChange={bom.setActive}
-                    colorwayArticles={colorwayArticles}
-                    pieceClothByColorway={pieceClothByColorway}
-                    pieceShapes={pieceShapes.shapeByKey}
-                    orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
-                    // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
-                    // принимает намерение «снять разметку» только против карточки, которая её несёт,
-                    // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
-                    // распакована (восстановленный черновик).
-                    storedHasUnits={(techCard?.techCard?.operations ?? []).some(
-                      (o) => (o?.outputUnitKey ?? '').trim() !== '',
-                    )}
-                    // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
-                    // замораживает тело. Схема получает его ЯВНО, а не через внешний
-                    // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                <StepResultProvider>
+                  <SeamHintsBar />
+                  <ConstructionAudit
+                    techCardId={techCard?.id}
+                    active={active}
+                    onGoTab={onGoTab}
+                    // ТОТ ЖЕ ПРЕДИКАТ, ЧТО ГЛУШИТ ВКЛАДКУ ФИЛДСЕТОМ (ниже, у OperationsField, и в
+                    // index.tsx). Панель по нему решает, КУДА уходит поданная претензия: на живой
+                    // карточке — в форму, обычным сохранением; на выпущенной сохранения нет вовсе, и
+                    // претензия идёт на сервер напрямую. Разойдись этот признак с филдсетом — на
+                    // замороженной карточке претензии писались бы в форму, которую уже не сохранить,
+                    // и исчезали бы молча.
                     frozen={
                       techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'
                     }
-                    // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
-                    operationMediaUrls={operationMediaUrls}
-                    // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
-                    // от него зависит, показывать ли путь отступления «снять фотографии шагов».
-                    storedHasMedia={(techCard?.techCard?.operations ?? []).some(
-                      (o) => (o?.media ?? []).length > 0,
-                    )}
-                    onSave={onSave}
-                    saving={saving}
-                    applyRequest={skeleton.applyRequest}
-                    onSkeletonApplied={skeleton.onSkeletonApplied}
-                    skeletonUndoRequest={skeleton.skeletonUndoRequest}
-                    onSkeletonUndone={skeleton.onSkeletonUndone}
-                    onSkeletonUndoable={skeleton.onSkeletonUndoable}
-                    emptyAction={skeleton.emptyAction}
-                    headerAction={
-                      <>
-                        {shapesAffordance(pieceShapes, onGoTab)}
-                        {skeleton.headerAction}
-                      </>
-                    }
-                    // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
-                    // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
-                    // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
-                    // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
-                    //
-                    // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
-                    // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
-                    // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
-                    // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
-                    // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
-                    sketchNote={
-                      <LiveConstructionSketch
-                        mediaById={mediaById}
-                        activePin={pin.active}
-                        onActivePinChange={pin.setActive}
-                      />
-                    }
+                    // Шагов на СОХРАНЁННОЙ карточке — для строки «reviewing N operations…». Не из формы:
+                    // разбор гоняется по сохранённым фактам, и число из формы обещало бы разбор
+                    // несохранённых правок.
+                    operationCount={(techCard?.techCard?.operations ?? []).length}
+                    gaps={pdfGaps ?? undefined}
+                    gapSubject={gapSubject}
                   />
-                  {skeleton.panel}
-                </section>
+                  <CardStandards />
+                  <section className='border border-borderColor bg-bgColor p-4'>
+                    {/* The block header (title, warnings, the pattern's state, the skeleton door) is drawn
+                    by OperationsField: its warnings read the rail's own subscriptions. */}
+                    <OperationsField
+                      activePin={pin.active}
+                      onActivePinChange={pin.setActive}
+                      activeBom={bom.active}
+                      onActiveBomChange={bom.setActive}
+                      colorwayArticles={colorwayArticles}
+                      pieceClothByColorway={pieceClothByColorway}
+                      pieceShapes={pieceShapes.shapeByKey}
+                      orphanBlocks={pieceShapes.unlinkedBlocks ?? []}
+                      // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+                      // принимает намерение «снять разметку» только против карточки, которая её несёт,
+                      // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+                      // распакована (восстановленный черновик).
+                      storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                        (o) => (o?.outputUnitKey ?? '').trim() !== '',
+                      )}
+                      // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+                      // замораживает тело. Схема получает его ЯВНО, а не через внешний
+                      // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+                      frozen={
+                        techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'
+                      }
+                      // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+                      operationMediaUrls={operationMediaUrls}
+                      // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+                      // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+                      storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                        (o) => (o?.media ?? []).length > 0,
+                      )}
+                      onSave={onSave}
+                      saving={saving}
+                      applyRequest={skeleton.applyRequest}
+                      onSkeletonApplied={skeleton.onSkeletonApplied}
+                      skeletonUndoRequest={skeleton.skeletonUndoRequest}
+                      onSkeletonUndone={skeleton.onSkeletonUndone}
+                      onSkeletonUndoable={skeleton.onSkeletonUndoable}
+                      emptyAction={skeleton.emptyAction}
+                      headerAction={
+                        <>
+                          {shapesAffordance(pieceShapes, onGoTab)}
+                          {skeleton.headerAction}
+                        </>
+                      }
+                      // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
+                      // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
+                      // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у
+                      // инлайна. `operations-field.tsx` узел только прокидывает и о содержимом не знает.
+                      //
+                      // ПЛАТА, КОТОРУЮ ЗДЕСЬ ЗАПЛАТИТЬ НЕЧЕМ: пока фулскрин открыт, инлайновая колонка
+                      // остаётся смонтированной под оверлеем, то есть эскиза в дереве два. Про открытость
+                      // фулскрина знает `operations-field.tsx` (URL `?fs=1` живёт там), и погасить
+                      // колонку отсюда нельзя, не заведя ещё одного писателя этого состояния. Оба
+                      // экземпляра ЧИТАЮЩИЕ — расходиться им нечем, кроме выбранной проекции.
+                      sketchNote={
+                        <LiveConstructionSketch
+                          mediaById={mediaById}
+                          activePin={pin.active}
+                          onActivePinChange={pin.setActive}
+                        />
+                      }
+                    />
+                    {skeleton.panel}
+                  </section>
+                </StepResultProvider>
               </StepSeamsProvider>
             </div>
           </div>
