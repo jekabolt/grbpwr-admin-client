@@ -19,6 +19,17 @@ describe('hintedEdgesFor', () => {
     expect(marked!.a.edges.size).toBeGreaterThan(0);
   });
 
+  it('a front edge is upright: no yoke line, no hem on step 720', () => {
+    const marked = hintedEdgesFor({ operationNumber: 720 }, hints, geoms);
+    expect(marked!.b.edges.size).toBeGreaterThan(0);
+    for (const id of marked!.b.edges) {
+      const piece = id.slice(0, id.lastIndexOf('#'));
+      const edge = geoms.get(piece)?.edges.find((candidate) => candidate.id === id);
+      const [a, b] = [edge!.pts[0], edge!.pts[edge!.pts.length - 1]];
+      expect(Math.abs(b[1] - a[1])).toBeGreaterThanOrEqual(Math.abs(b[0] - a[0]));
+    }
+  });
+
   it('marks the yoke bottom and the front top for step 770', () => {
     const marked = hintedEdgesFor({ operationNumber: 770 }, hints, geoms);
     expect(marked?.a.edges.has('P_R_U#4')).toBe(true);

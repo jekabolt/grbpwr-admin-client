@@ -50,6 +50,14 @@ const verticalVote = (runs: readonly Run[], at: 'top' | 'bottom') => {
   return y <= 0.35 ? true : y >= 0.5 ? false : null;
 };
 
+/** The edge runs more up the piece than across it (a centre front, not a yoke line or a hem). */
+const runsUpright = (edge: Edge) => {
+  const a = edge.pts[0];
+  const b = edge.pts[edge.pts.length - 1];
+  if (!a || !b) return false;
+  return Math.abs(b[1] - a[1]) >= Math.abs(b[0] - a[0]);
+};
+
 const curvedVote = (runs: readonly Run[]) => {
   const turns = runs.map(({ edge }) => Math.abs(edge.turnDeg));
   if (turns.some((turn) => turn >= 20)) return true;
@@ -90,6 +98,7 @@ const predicates: Readonly<Record<SeamEdgeWord, EdgeWordPredicate>> = {
         const centre = geom.hand === 'L' ? -1 : 1;
         if (
           xSideOf(geom, edge) !== centre ||
+          !runsUpright(edge) ||
           Math.abs(edge.turnDeg) > 8 ||
           edge.lenMm < 0.1 * geom.perimMm
         )
