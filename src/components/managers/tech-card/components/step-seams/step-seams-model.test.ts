@@ -781,8 +781,11 @@ describe('card 6: layered seams keep their structural edge', () => {
 
   it('finds the second placket when the first placket and host remain separate inputs', () => {
     const ops = [
-      { ...CARD6_OPS[0], outputUnitKey: '' },
-      { ...CARD6_OPS[3], inputKeys: ['FLP_R_MAIN', 'FLP_R', 'SLV_R'] },
+      { ...CARD6_OPS[card6Step(90)], outputUnitKey: '' },
+      {
+        ...CARD6_OPS[card6Step(260)],
+        inputKeys: ['FLP_R_MAIN', 'FLP_R', 'SLV_R'],
+      },
     ];
     expect(suggestStepSurface(ops, 1, CARD6_PIECE_KEYS, geoms, CARD6_SEAMS)).toMatchObject({
       host: 'SLV_R',
@@ -832,6 +835,17 @@ describe('card 6: layered seams keep their structural edge', () => {
       aLen: expect.closeTo(482.6, 1),
       bLen: expect.closeTo(482.6, 1),
     });
+  });
+
+  it('1060: the stacked stand lower edge joins the body neckline', () => {
+    const suggested = proposal(1060)!;
+    const sides = [suggested.a, suggested.b];
+    expect(sides).toContainEqual(['nck_2#1', 'nck#1']);
+    expect(sides).toContainEqual(['P_R_U#1', 'BP_U_1#2', 'P_L_U#1']);
+    expect([suggested.aLen, suggested.bLen].sort((a, b) => a - b)).toEqual([
+      expect.closeTo(432.3, 1),
+      expect.closeTo(446.1, 1),
+    ]);
   });
 });
 
