@@ -542,8 +542,10 @@ export function SeamPickerBody({
       tier: guessed ? (isGuess(suggestion ?? surfaceSuggestion) ? 'guess' : 'confident') : 'none',
       shown: filled ? { a: [...filled.a], b: [...filled.b] } : null,
     });
+    // One ACCEPT, one seam: the picker is done — back to the step card (the quiz moves on).
     reset();
     onAccepted?.();
+    onClose?.();
   };
 
   const toggle = (id: TargetId) => {
@@ -877,6 +879,13 @@ export function SeamPickerBody({
   };
   const sidesName = (a: TargetId | undefined, b: TargetId | undefined) =>
     [groupName(a), groupName(b)].filter(Boolean).join(' · ');
+  // The footer lists a pair once: a row stored twice, or the pick of a stored pair, is not repeated.
+  const sidesSig = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
+    [[...s.a].sort().join('+'), [...s.b].sort().join('+')].sort().join('~');
+  const listed = stored.filter(
+    (s, i) => stored.findIndex((o) => sidesSig(o.sides) === sidesSig(s.sides)) === i,
+  );
+  const pairListed = !!pair && listed.some((s) => sidesSig(s.sides) === sidesSig(pair));
   const pairName = pair ? sidesName(pair.a[0], pair.b[0]) : '';
   // The seam's number on the step: after the stored ones.
   const pairNo = stored.length;
@@ -1186,15 +1195,15 @@ export function SeamPickerBody({
               {error}
             </Text>
           )}
-          {stored.map((s, i) => (
+          {listed.map((s) => (
             <span key={s.key} className='flex min-w-0 items-center gap-2' data-seam-stored={s.key}>
-              <PairNo i={i} />
+              <PairNo i={stored.indexOf(s)} />
               <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
                 {sidesName(s.sides.a[0], s.sides.b[0])}
               </Text>
             </span>
           ))}
-          {pair && (
+          {pair && !pairListed && (
             <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
               <PairNo i={pairNo} />
               <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
