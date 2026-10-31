@@ -31,6 +31,7 @@ import { useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
+import { recordSeamDecision } from './seam-decisions';
 import { isGuess, placeHasDrop, seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
@@ -561,6 +562,15 @@ export function SeamPickerBody({
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
+    const guessed = (!!pair && !pair.own) || !!auto;
+    recordSeamDecision({
+      cardId: cardId ?? 0,
+      operationNumber: op?.operationNumber ?? 0,
+      action: (pair && !pair.own && !surface) || auto ? 'accept' : 'own',
+      seamKey: ok,
+      tier: guessed ? (guess ? 'guess' : 'confident') : 'none',
+      shown: auto ? { a: [...pick.a], b: [...pick.b] } : suggestion,
+    });
     reset();
     onAccepted?.();
   };
