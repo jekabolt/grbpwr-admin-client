@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "roles": [
+    {
+      "piece": "FLP_R_MAIN",
+      "role": "placket",
+      "hand": "R",
+      "conf": "high",
+      "why": "sleeve slit"
+    },
+    {
+      "piece": "CLR_SECOND",
+      "role": "stand",
+      "hand": null,
+      "conf": "high",
+      "why": "collar neckline"
+    }
+  ],
+  "joins": [
+    {
+      "op": 260,
+      "a": { "pieces": ["FLP_R_MAIN"], "edge": "long" },
+      "b": { "pieces": ["SLV_R"], "edge": "slit" },
+      "relation": "surface",
+      "conf": "high"
+    },
+    {
+      "op": 720,
+      "a": { "pieces": ["PLCK_L"], "edge": "long" },
+      "b": { "pieces": ["P_L_U", "P_L_MAIN"], "edge": "front_edge" },
+      "relation": "boundary",
+      "conf": "high"
+    },
+    {
+      "op": 770,
+      "a": { "pieces": ["P_R_U"], "edge": "bottom" },
+      "b": { "pieces": ["P_R_MAIN"], "edge": "top" },
+      "relation": "layer",
+      "conf": "high"
+    },
+    {
+      "op": 870,
+      "a": { "pieces": ["CLR_SECOND"], "edge": "curved" },
+      "b": { "pieces": ["clr_main", "clr_main_2"], "edge": "neckline" },
+      "relation": "boundary",
+      "conf": "high"
+    }
+  ],
+  "not_inferred": []
+}
