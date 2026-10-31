@@ -255,6 +255,7 @@ export function SeamPickerBody({
     used,
     suggestions,
     surfaceSuggestion,
+    surfaceSuggestions,
     innerSeams,
     proposalSeams,
     crossSeams,
@@ -656,6 +657,10 @@ export function SeamPickerBody({
   if (auto) {
     sideMarks(pick.a, 'proposal');
     sideMarks(pick.b, 'proposal');
+    // The other sleeve's placket waits on its own slit.
+    surfaceSuggestions
+      .slice(1)
+      .forEach((other) => sideMarks([innerId(other.host, other.inner)], 'proposal'));
   } else if (sel.a.length || sel.b.length) {
     sideMarks(sel.a, 'pick');
     sideMarks(sel.b, 'pick');

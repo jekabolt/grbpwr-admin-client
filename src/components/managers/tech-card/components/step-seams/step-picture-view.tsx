@@ -22,7 +22,7 @@ import {
   pieceOfTarget,
   sewnBeforeStep,
   suggestStepPairs,
-  suggestStepSurface,
+  suggestStepSurfaces,
   usedEdgesBeforeStep,
   type FormOpLike,
   type StepSurface,
@@ -353,25 +353,30 @@ export function stepPictureOfOp(
     ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
     : [];
   const suggestion: Suggestion | null = suggestions[0] ?? null;
-  // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket).
-  const surfaceRaw =
-    ready && !suggestions.length ? suggestStepSurface(ops, index, pieceKeys, geoms, byKey) : null;
-  const surfaceSuggestion: StepSurface | null =
-    surfaceRaw &&
-    !stored.some((seam) =>
-      [...seam.sides.a, ...seam.sides.b].some((id) => pieceOfTarget(id) === surfaceRaw.part),
-    )
-      ? surfaceRaw
-      : null;
-  const surfaceProposal = surfaceSuggestion
-    ? surfaceSeam(
-        surfaceSuggestion.host,
-        surfaceSuggestion.part,
-        innerLines.get(surfaceSuggestion.host)?.[surfaceSuggestion.inner] ?? [],
+  // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket);
+  // two lone plackets each get their own sleeve, and one accepted leaves the other standing.
+  const surfaceSuggestions: StepSurface[] = (
+    ready && !suggestions.length ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey) : []
+  ).filter(
+    (surface) =>
+      !stored.some((seam) =>
+        [...seam.sides.a, ...seam.sides.b].some((id) => pieceOfTarget(id) === surface.part),
+      ),
+  );
+  const surfaceSuggestion: StepSurface | null = surfaceSuggestions[0] ?? null;
+  const surfaceProposals = surfaceSuggestions
+    .map((surface) =>
+      surfaceSeam(
+        surface.host,
+        surface.part,
+        innerLines.get(surface.host)?.[surface.inner] ?? [],
         geoms,
-        surfaceSuggestion.place,
-      )
-    : null;
+        surface.place,
+      ),
+    )
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const surfaceProposal = surfaceProposals[0] ?? null;
+  const surfaceMarks = surfaceSuggestions.map((surface) => innerId(surface.host, surface.inner));
   const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
   const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
   const storedSeams = stored
@@ -390,26 +395,28 @@ export function stepPictureOfOp(
     ? []
     : [
         ...suggestions.map((candidate) => seamOfSides(candidate, geoms, innerLines)),
-        surfaceProposal,
+        ...surfaceProposals,
       ].filter((candidate): candidate is SeamCandidate => !!candidate);
   const frameSeams = frameSeamsOf(
     innerSeams,
     storedSeams,
-    stored.length ? [] : proposalSeams,
+    stored.length ? surfaceProposals : proposalSeams,
     crossSeams,
   );
-  const marks: EdgeMark[] = (
-    stored.length
+  const marks: EdgeMark[] = [
+    ...(stored.length
       ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
       : crossSeams.length
         ? crossSeams.flatMap((candidate) => {
             const sides = candidateSides(candidate);
             return [...sides.a, ...sides.b];
           })
-        : surfaceSuggestion
-          ? [innerId(surfaceSuggestion.host, surfaceSuggestion.inner)]
+        : surfaceMarks.length
+          ? []
           : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
-  ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
+    ).map((id): EdgeMark => ({ id, tone: stored.length ? 'stored' : 'proposal' })),
+    ...(crossSeams.length ? [] : surfaceMarks).map((id): EdgeMark => ({ id, tone: 'proposal' })),
+  ];
   const layoutLeaves = focusedStepLeaves(
     leaves,
     marks.map((mark) => mark.id),
@@ -429,7 +436,9 @@ export function stepPictureOfOp(
     suggestion,
     suggestions,
     surfaceSuggestion,
+    surfaceSuggestions,
     surfaceProposal,
+    surfaceProposals,
     innerSeams,
     proposalSeams,
     frameSeams,

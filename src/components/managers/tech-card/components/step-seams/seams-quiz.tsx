@@ -232,26 +232,30 @@ const QuizTile = memo(
     }
     const proposal = proposalRef.current ?? scene.suggestions[0] ?? null;
     const seams = useMemo(() => {
-      const own = proposal
-        ? seamOfSides(proposal, scene.geoms, scene.innerLines)
-        : scene.surfaceProposal;
-      return frameSeamsOf(scene.innerSeams, scene.storedSeams, own ? [own] : [], scene.crossSeams);
+      const own = proposal ? seamOfSides(proposal, scene.geoms, scene.innerLines) : null;
+      return frameSeamsOf(
+        scene.innerSeams,
+        scene.storedSeams,
+        own ? [own] : proposal ? [] : scene.surfaceProposals,
+        scene.crossSeams,
+      );
     }, [
       proposal,
-      scene.surfaceProposal,
+      scene.surfaceProposals,
       scene.crossSeams,
       scene.geoms,
       scene.innerLines,
       scene.innerSeams,
       scene.storedSeams,
     ]);
-    const surface = proposal ? null : scene.surfaceSuggestion;
+    const surfaces = proposal ? [] : scene.surfaceSuggestions;
+    const surface = surfaces.length > 0;
     // No guess yet the pieces are there: the tile draws them for a pick by hand.
     const drawable = scene.leaves.some((ks) => ks.some((k) => scene.geoms.has(k)));
     const marks = proposal
       ? [...proposal.a, ...proposal.b].map((id) => ({ id, tone: 'proposal' as const }))
       : surface
-        ? [{ id: innerId(surface.host, surface.inner), tone: 'proposal' as const }]
+        ? surfaces.map((s) => ({ id: innerId(s.host, s.inner), tone: 'proposal' as const }))
         : [];
 
     return (
