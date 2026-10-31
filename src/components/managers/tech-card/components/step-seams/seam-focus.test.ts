@@ -107,6 +107,9 @@ describe('pieceWord', () => {
     expect(pieceWord('YK')).toBe('yoke');
     expect(pieceWord('LIN_FP_L')).toBe('lining front piece');
     expect(pieceWord('Left Sleeve')).toBe('left sleeve');
+    expect(pieceWord('BP_U_1')).toBe('back piece');
+    expect(pieceWord('BP_MAIN')).toBe('back piece');
+    expect(pieceWord('P_L_MAIN')).toBe('front');
   });
 });
 

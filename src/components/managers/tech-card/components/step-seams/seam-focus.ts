@@ -56,21 +56,29 @@ export function seamEdgeWord(
   return word === 'front_edge' ? 'front edge' : word ?? '';
 }
 
-/** Card codes the import dictionary does not list (card 6 names pieces SLV_L, FLP_L_MAIN). */
-const PIECE_WORD_ALIASES: Readonly<Record<string, string>> = { SLV: 'sleeve', FLP: 'placket' };
+/** Card codes the import dictionary does not list (card 6: SLV_L, FLP_L_MAIN, P_L_MAIN). */
+const PIECE_WORD_ALIASES: Readonly<Record<string, string>> = {
+  SLV: 'sleeve',
+  FLP: 'placket',
+  P: 'front',
+};
 const SIDE_TOKENS = new Set(['L', 'R', 'F', 'B', 'MAIN', '#']);
 
-/** A piece name in plain words: `SLV_L` → «sleeve», `FLP_L_MAIN` → «placket»; prose names stay. */
+/**
+ * A piece name in plain words: `SLV_L` → «sleeve», `FLP_L_MAIN` → «placket», `BP_U_1` → «back
+ * piece»; prose names stay. Unknown one- or two-letter tails (U, P P) are dropped, not spelled.
+ */
 export function pieceWord(name: string): string {
   if (!/[_]|^[A-Z0-9#]+$/.test(name)) return name.trim().toLowerCase();
-  const words = name
-    .split(/[_\s]+/)
-    .filter((token) => token && !SIDE_TOKENS.has(token.toUpperCase()) && !/^\d+$/.test(token))
-    .map((token) => {
-      const code = token.toUpperCase();
-      return PIECE_WORD_ALIASES[code] ?? (codeName(code) || token.toLowerCase());
-    });
-  return [...new Set(words)].join(' ');
+  const tokens = name.split(/[_\s]+/).filter(Boolean);
+  const words = tokens.flatMap((token) => {
+    const code = token.toUpperCase();
+    if (SIDE_TOKENS.has(code) || /^\d+$/.test(code)) return [];
+    const known = PIECE_WORD_ALIASES[code] ?? codeName(code);
+    if (known) return [known];
+    return code.length > 2 ? [token.toLowerCase()] : [];
+  });
+  return [...new Set(words)].join(' ') || tokens[0].toLowerCase();
 }
 
 /** Piece words plus a useful edge word, never an input/unit name. */
