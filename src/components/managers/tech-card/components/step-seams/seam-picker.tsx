@@ -214,6 +214,8 @@ export function SeamPickerBody({
   const [snapOn, setSnapOn] = useState(false);
   const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
   const [poseDrag, setPoseDrag] = useState<{ group: string[]; D: Affine } | null>(null);
+  // A step of one block has nothing to sit against: its drag moves the whole picture, stored nowhere.
+  const [poseFree, setPoseFree] = useState<Affine | null>(null);
   const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
 
   const pieces = geo?.pieces;
@@ -416,14 +418,15 @@ export function SeamPickerBody({
     return { ...canvasLayout, T };
   }, [posing, canvasLayout, poseEdits, geoms, poseHung, poseBlocks]);
   const poseShown = useMemo(() => {
-    if (!poseLayout || !poseDrag) return poseLayout;
+    if (!poseLayout || (!poseDrag && !poseFree)) return poseLayout;
     const T = new Map(poseLayout.T);
-    for (const k of poseDrag.group) {
+    if (poseFree) for (const [k, t] of T) T.set(k, compose(poseFree, t));
+    for (const k of poseDrag?.group ?? []) {
       const t = T.get(k);
-      if (t) T.set(k, compose(poseDrag.D, t));
+      if (t) T.set(k, compose(poseDrag!.D, t));
     }
     return { ...poseLayout, T };
-  }, [poseLayout, poseDrag]);
+  }, [poseLayout, poseDrag, poseFree]);
   const marks: EdgeMark[] = [];
   const nos: NoMark[] = [];
   // One label per side, on its longest edge that is drawn (a neckline's on the back neck, not on
@@ -472,6 +475,7 @@ export function SeamPickerBody({
     setPosing(false);
     setPoseEdits(new Map());
     setHandEdits(new Map());
+    setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
     setPoseSnap(null);
@@ -483,6 +487,7 @@ export function SeamPickerBody({
     setRefused('');
     setPoseEdits(new Map());
     setHandEdits(new Map());
+    setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
     setPoseSnap(null);
@@ -516,6 +521,10 @@ export function SeamPickerBody({
   };
   const dropPose = (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => {
     setPoseDrag(null);
+    if (!pickup.host) {
+      setPoseFree((free) => (free ? compose(D, free) : D));
+      return;
+    }
     const T0 = poseLayout?.T.get(piece);
     if (!T0) return;
     const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
@@ -524,7 +533,8 @@ export function SeamPickerBody({
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
-    const T0 = piece ? poseLayout?.T.get(piece) : undefined;
+    const free = piece ? !pickupOf(piece).host : false;
+    const T0 = piece ? (free ? poseShown : poseLayout)?.T.get(piece) : undefined;
     const g = piece ? geoms.get(piece) : undefined;
     if (!piece || !T0 || !g || busy) return;
     const D =
@@ -538,8 +548,9 @@ export function SeamPickerBody({
                 g.rs.map((point) => apply(T0, point)),
                 0,
               );
-    putPose(piece, compose(D, T0), pickupOf(piece));
     setPoseSnap(null);
+    if (free) setPoseFree((current) => (current ? compose(D, current) : D));
+    else putPose(piece, compose(D, T0), pickupOf(piece));
   };
 
   const editedStepRows = stepRows.map((row) => handEdits.get(row.seamKey) ?? row);
@@ -592,6 +603,7 @@ export function SeamPickerBody({
 
   const resetPose = () => {
     if (busy) return;
+    setPoseFree(null);
     const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
     setPoseEdits((current) => {
       if (!selected) return new Map();
@@ -946,7 +958,7 @@ export function SeamPickerBody({
                 variant='underline'
                 size='xs'
                 onClick={resetPose}
-                disabled={(!poseEdits.size && !handEdits.size) || busy}
+                disabled={(!poseEdits.size && !handEdits.size && !poseFree) || busy}
                 data-seam-pose-reset=''
               >
                 reset
