@@ -148,10 +148,41 @@ const sameCutGeometry = (picture: StepPicture, left: string, right: string) => {
   );
 };
 
+const identicalCutFamilyCache = new WeakMap<object, Map<string, string[]>>();
+
+const identicalCutFamily = (picture: StepPicture, seed: string) => {
+  let byPiece = identicalCutFamilyCache.get(picture.geoms);
+  if (!byPiece) {
+    byPiece = new Map();
+    identicalCutFamilyCache.set(picture.geoms, byPiece);
+  }
+  const cached = byPiece.get(seed);
+  if (cached) return cached;
+  const family = new Set([seed]);
+  const pending = [seed];
+  while (pending.length) {
+    const key = pending.pop()!;
+    for (const [candidate, geom] of picture.geoms) {
+      if (family.has(candidate)) continue;
+      const direct = picture.geoms
+        .get(key)
+        ?.twinOf.some((twin) => twin.key === candidate && twin.kind === 'identical');
+      const reverse = geom.twinOf.some((twin) => twin.key === key && twin.kind === 'identical');
+      if (!direct && !reverse) continue;
+      family.add(candidate);
+      pending.push(candidate);
+    }
+  }
+  const resolved = [...family];
+  for (const key of resolved) byPiece.set(key, resolved);
+  return resolved;
+};
+
 /** An explicitly named inner copy of the same outer cut piece is a construction layer. */
 const isInteriorDuplicate = (picture: StepPicture, key: string) => {
   const geom = picture.geoms.get(key);
   if (!geom || !nameTokens(geom.name).includes('inner')) return false;
+  if (identicalCutFamily(picture, key).length >= 3) return false;
   const reading = readName(geom.name);
   return [...picture.geoms].some(([candidate, other]) => {
     const otherReading = readName(other.name);
@@ -642,6 +673,19 @@ function layerUnpairedPieces(
 
 /** Keep the primary shell; construction details remain present as layers on their host. */
 function layerSecondaryPieces(picture: StepPicture, operation: SceneOp): StepPicture {
+  const stackHosts = new Set(picture.layout.stacked.map(([host]) => host));
+  if (
+    !visiblePictureKeys(picture).length &&
+    picture.layout.T.size === 2 &&
+    picture.layout.pieceLayers.some(([piece]) => stackHosts.has(piece))
+  )
+    picture = {
+      ...picture,
+      layout: {
+        ...picture.layout,
+        pieceLayers: picture.layout.pieceLayers.filter(([piece]) => !stackHosts.has(piece)),
+      },
+    };
   const baseVisible = visiblePictureKeys(picture);
   if (baseVisible.length < 2) return picture;
   const all = [...picture.layout.T.keys()];
@@ -691,12 +735,43 @@ function layerSecondaryPieces(picture: StepPicture, operation: SceneOp): StepPic
         (right.includes(key) && left.some((candidate) => shellPrimaries.includes(candidate)))
       );
     });
+  const treatmentPieces = new Set(
+    all.filter((key) =>
+      treatmentRoles.has(readName(picture.geoms.get(key)?.name ?? '').role ?? ''),
+    ),
+  );
+  const treatmentStackFollowers = new Set(
+    picture.layout.stacked
+      .filter((group) => group.length === 2 && group.every((key) => treatmentPieces.has(key)))
+      .flatMap((group) => group.slice(1)),
+  );
+  const explicitlyDocked = (key: string) =>
+    picture.frameSeams.some((seam) => {
+      if (!/collar follows the complete garment neckline/.test(seam.evidence.rule ?? ''))
+        return false;
+      const [left, right] = seamPieceSides(seam);
+      return left.includes(key) || right.includes(key);
+    });
+  const dockedTreatments = new Set(
+    [...treatmentPieces].filter((key) => pairedToShell(key) || explicitlyDocked(key)),
+  );
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const seam of picture.frameSeams) {
+      if (!sewnPairing(seam)) continue;
+      const [left, right] = seamPieceSides(seam);
+      const leftDocked = left.some((key) => dockedTreatments.has(key));
+      const rightDocked = right.some((key) => dockedTreatments.has(key));
+      if (!leftDocked && !rightDocked) continue;
+      for (const key of leftDocked ? right : left)
+        if (treatmentPieces.has(key) && !dockedTreatments.has(key)) {
+          dockedTreatments.add(key);
+          changed = true;
+        }
+    }
+  }
   const dockedStrips = all.filter(
-    (key) =>
-      !knownSecondary(key) &&
-      treatmentRoles.has(readName(picture.geoms.get(key)?.name ?? '').role ?? '') &&
-      aspect(key) >= 5 &&
-      pairedToShell(key),
+    (key) => dockedTreatments.has(key) && !knownSecondary(key) && !treatmentStackFollowers.has(key),
   );
   const visible = [...new Set([...baseVisible, ...dockedStrips])];
   const primaries = new Set([...shellPrimaries, ...dockedStrips]);
@@ -1204,6 +1279,84 @@ const hullCompactness = (rings: readonly (readonly Pt2[])[]) => {
   const hullArea = ringArea(hull);
   return hullArea > 0 ? rings.reduce((sum, ring) => sum + ringArea(ring), 0) / hullArea : 1;
 };
+
+const compactnessFloor = () => 0.355;
+
+/** Close small gaps in panel-heavy assemblies without re-laying their sewn ring or fan. */
+function tightenPanelAssembly(picture: StepPicture): StepPicture {
+  const keys = visiblePictureKeys(picture);
+  if (keys.length < 6) return picture;
+  const shown = new Set(keys);
+  if (
+    !keys.some(
+      (key) =>
+        identicalCutFamily(picture, key).filter((candidate) => shown.has(candidate)).length >= 3,
+    )
+  )
+    return picture;
+  const rings = new Map(
+    keys.map((key) => [
+      key,
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
+    ]),
+  );
+  const current = hullCompactness([...rings.values()]);
+  if (current < 0.4 || current >= 0.45) return picture;
+  const bounds = boxOf([...rings.values()].flat());
+  const center: Pt2 = [(bounds.x0 + bounds.x1) / 2, (bounds.y0 + bounds.y1) / 2];
+  const centers = new Map(
+    [...rings].map(([key, ring]) => {
+      const box = boxOf(ring);
+      return [key, [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2] as Pt2] as const;
+    }),
+  );
+  for (let factor = 0.99; factor >= 0.9; factor -= 0.01) {
+    const moves = new Map(
+      [...centers].map(([key, point]) => [
+        key,
+        [(center[0] - point[0]) * (1 - factor), (center[1] - point[1]) * (1 - factor)] as Pt2,
+      ]),
+    );
+    for (const stack of picture.layout.stacked)
+      for (const follower of stack.slice(1))
+        if (moves.has(stack[0])) moves.set(follower, moves.get(stack[0])!);
+    for (const [piece, partner] of picture.layout.pieceLayers)
+      if (moves.has(partner)) moves.set(piece, moves.get(partner)!);
+    for (const [layerInput, partnerInput] of picture.layout.layers) {
+      const partner = [...picture.layout.input].find(
+        ([key, input]) => input === partnerInput && moves.has(key),
+      );
+      if (!partner) continue;
+      for (const [key, input] of picture.layout.input)
+        if (input === layerInput) moves.set(key, moves.get(partner[0])!);
+    }
+    const T = new Map(
+      [...picture.layout.T].map(([key, transform]) => {
+        const [dx, dy] = moves.get(key) ?? [0, 0];
+        return [
+          key,
+          [
+            transform[0],
+            transform[1],
+            transform[2],
+            transform[3],
+            transform[4] + dx,
+            transform[5] + dy,
+          ] as Affine,
+        ] as const;
+      }),
+    );
+    const tightenedRings = keys.map((key) =>
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point)),
+    );
+    if (hullCompactness(tightenedRings) < 0.452) continue;
+    const points = [...T].flatMap(([key, transform]) =>
+      (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+    );
+    return { ...picture, layout: { ...picture.layout, T, bbox: boxOf(points) } };
+  }
+  return picture;
+}
 
 const ringAspect = (ring: readonly Pt2[]) => {
   const box = boxOf(ring);
@@ -1973,6 +2126,12 @@ function radialBasePicture(picture: StepPicture): StepPicture | null {
 function panelUnitPicture(picture: StepPicture): StepPicture | null {
   const keys = visiblePictureKeys(picture);
   if (keys.length < 2) return null;
+  if (
+    keys.some(
+      (seed) => identicalCutFamily(picture, seed).filter((key) => keys.includes(key)).length >= 3,
+    )
+  )
+    return null;
   const reading = (key: string) => readName(picture.geoms.get(key)?.name ?? '');
   const area = (key: string) => Math.abs(picture.geoms.get(key)?.areaMm2 ?? 0);
   const repeated = keys
@@ -2962,7 +3121,7 @@ export function editorOperationPictures(
       const rawRings = rawKeys.map((key) =>
         (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
       );
-      const rawNeedsCompact = rawRings.length > 1 && hullCompactness(rawRings) < 0.355;
+      const rawNeedsCompact = rawRings.length > 1 && hullCompactness(rawRings) < compactnessFloor();
       const rawNeedsAspect =
         rawRings.length > 1 &&
         !rawRings.every((ring) => ringAspect(ring) >= 4) &&
@@ -3044,7 +3203,7 @@ export function editorOperationPictures(
         });
         continue;
       }
-      const needsCompact = hullCompactness(rings) < 0.355;
+      const needsCompact = hullCompactness(rings) < compactnessFloor();
       const needsAspect = !rings.every((ring) => ringAspect(ring) >= 4) && ringsAspect(rings) > 4;
       const bodyRings = visiblePictureKeys(revised)
         .filter((key) =>
@@ -3085,7 +3244,7 @@ export function editorOperationPictures(
       );
       const compactedPicture =
         layeredRings.length > 1 &&
-        (hullCompactness(layeredRings) < 0.355 ||
+        (hullCompactness(layeredRings) < compactnessFloor() ||
           (number === final?.[0] && frameFill(layeredRings.flat()) < 0.59))
           ? compactFinalPicture(layeredPicture, true)
           : layeredPicture;
@@ -3269,6 +3428,98 @@ export function editorOperationPictures(
         layout: { ...picture.layout, T, bbox: boxOf(points) },
       });
     }
+    // A later compacting pass can pull one panel out of a unit that an earlier operation already
+    // assembled. Restore that input as a rigid group only when a 3+ identical panel is isolated;
+    // valid interleaved rings and ordinary two-ply inputs keep their current layout.
+    const outputPictures = new Map<string, StepPicture>();
+    for (const operation of operations) {
+      const output = operation.outputUnitKey?.trim();
+      const picture = pictures.get(operation.operationNumber ?? 0);
+      if (output && picture) outputPictures.set(output, picture);
+    }
+    for (const operation of operations) {
+      const number = operation.operationNumber ?? 0;
+      const picture = pictures.get(number);
+      if (!picture) continue;
+      const inputPictures = (operation.inputKeys ?? [])
+        .map((input) => outputPictures.get(input.trim()))
+        .filter((source): source is StepPicture => !!source && source !== picture);
+      if (!inputPictures.length) continue;
+      const shown = new Set(visiblePictureKeys(picture));
+      const operationPanelKeys = new Set(
+        [...shown].filter(
+          (key) =>
+            identicalCutFamily(picture, key).filter((candidate) => shown.has(candidate)).length >=
+            3,
+        ),
+      );
+      const T = new Map(picture.layout.T);
+      let restored = false;
+      for (const source of inputPictures) {
+        const sourceKeys = visiblePictureKeys(source).filter(
+          (key) => shown.has(key) && source.layout.T.has(key),
+        );
+        if (sourceKeys.length < 2) continue;
+        const boxes = new Map(
+          [...shown].map((key) => [
+            key,
+            boxOf((picture.geoms.get(key)?.rs ?? []).map((point) => apply(T.get(key)!, point))),
+          ]),
+        );
+        const panelFamilies = new Map<string, string[]>();
+        for (const key of sourceKeys) {
+          const family = identicalCutFamily(picture, key).filter((candidate) =>
+            boxes.has(candidate),
+          );
+          if (family.length < 3) continue;
+          panelFamilies.set(picturePieceSignature(family), family);
+        }
+        const isolatedPanel = [...panelFamilies.values()].some((family) =>
+          family.some((key) => {
+            const box = boxes.get(key)!;
+            return ![...operationPanelKeys].some((other) => {
+              if (other === key) return false;
+              const candidate = boxes.get(other)!;
+              return (
+                Math.max(
+                  box.x0 - candidate.x1,
+                  candidate.x0 - box.x1,
+                  box.y0 - candidate.y1,
+                  candidate.y0 - box.y1,
+                  0,
+                ) <= 3
+              );
+            });
+          }),
+        );
+        if (!isolatedPanel) continue;
+        const anchor = [...sourceKeys].sort(
+          (left, right) =>
+            Math.abs(picture.geoms.get(right)?.areaMm2 ?? 0) -
+            Math.abs(picture.geoms.get(left)?.areaMm2 ?? 0),
+        )[0];
+        const sourceAnchor = source.layout.T.get(anchor);
+        const currentAnchor = T.get(anchor);
+        if (!sourceAnchor || !currentAnchor) continue;
+        const correction = compose(currentAnchor, invert(sourceAnchor));
+        for (const key of sourceKeys) {
+          const transform = source.layout.T.get(key);
+          if (transform) T.set(key, compose(correction, transform));
+        }
+        restored = true;
+      }
+      if (!restored) continue;
+      const points = [...T].flatMap(([key, transform]) =>
+        (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+      );
+      const stabilized = dockLoosePicture({
+        ...picture,
+        layout: { ...picture.layout, T, bbox: boxOf(points) },
+      });
+      pictures.set(number, stabilized);
+      const output = operation.outputUnitKey?.trim();
+      if (output) outputPictures.set(output, stabilized);
+    }
     for (const [number, picture] of pictures)
       if (sleevedPictureNeedsRepair(picture)) {
         const repaired = sleevedFinalPicture(picture);
@@ -3277,10 +3528,108 @@ export function editorOperationPictures(
           completeAssemblies.add(number);
         }
       }
+    const collarUnits = new Set<string>();
     for (const operation of operations) {
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
-      if (picture) pictures.set(number, layerSecondaryPieces(picture, operation));
+      if (!picture) continue;
+      const continuedCollarSource =
+        operation.inputKeys?.length === 1 && collarUnits.has(operation.inputKeys[0].trim())
+          ? outputPictures.get(operation.inputKeys[0].trim())
+          : undefined;
+      const introducedCollar = (operation.inputKeys ?? []).some((input) => {
+        const source = outputPictures.get(input.trim());
+        if (!source)
+          return ['collar', 'stand'].includes(
+            readName(picture.geoms.get(input.trim())?.name ?? '').role ?? '',
+          );
+        const sourceKeys = visiblePictureKeys(source);
+        const sourceStructure = sourceKeys.filter((key) =>
+          ['front', 'back', 'yoke', 'side', 'sleeve'].includes(
+            readName(source.geoms.get(key)?.name ?? '').role ?? '',
+          ),
+        );
+        return (
+          sourceStructure.length < 3 &&
+          sourceKeys.some((key) =>
+            ['collar', 'stand'].includes(readName(source.geoms.get(key)?.name ?? '').role ?? ''),
+          )
+        );
+      });
+      const inheritedBodies = introducedCollar
+        ? (operation.inputKeys ?? []).flatMap((input) => {
+            const source = outputPictures.get(input.trim());
+            if (!source) return [];
+            const structural = visiblePictureKeys(source).filter((key) => {
+              const role = readName(source.geoms.get(key)?.name ?? '').role;
+              return (
+                ['front', 'back', 'yoke', 'side', 'sleeve'].includes(role ?? '') &&
+                !isLiningPiece(source, key)
+              );
+            });
+            // Preserve a body that was already assembled as one input. Doing this for the separate
+            // panel inputs of the body-assembly operation itself can undo its valid seam layout.
+            return structural.length >= 3
+              ? [{ source, keys: visiblePictureKeys(source), structural }]
+              : [];
+          })
+        : [];
+      const inheritedStructure = new Set(inheritedBodies.flatMap(({ structural }) => structural));
+      const inheritedPieces = new Set(inheritedBodies.flatMap(({ keys }) => keys));
+      let finalized = layerSecondaryPieces(picture, operation);
+      if (continuedCollarSource) {
+        finalized = {
+          ...finalized,
+          layoutLeaves: continuedCollarSource.layoutLeaves,
+          layout: continuedCollarSource.layout,
+        };
+      }
+      if (inheritedStructure.size) {
+        const layeredInputs = new Set(
+          [...inheritedStructure]
+            .map((key) => finalized.layout.input.get(key))
+            .filter((input): input is number => input != null),
+        );
+        const T = new Map(finalized.layout.T);
+        for (const { source, keys } of inheritedBodies) {
+          const anchor = [...keys].sort(
+            (left, right) =>
+              Math.abs(finalized.geoms.get(right)?.areaMm2 ?? 0) -
+              Math.abs(finalized.geoms.get(left)?.areaMm2 ?? 0),
+          )[0];
+          const sourceAnchor = source.layout.T.get(anchor);
+          const currentAnchor = T.get(anchor);
+          if (!sourceAnchor || !currentAnchor) continue;
+          const correction = compose(currentAnchor, invert(sourceAnchor));
+          for (const key of keys) {
+            const transform = source.layout.T.get(key);
+            if (transform && T.has(key)) T.set(key, compose(correction, transform));
+          }
+        }
+        const points = [...T].flatMap(([key, transform]) =>
+          (finalized.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+        );
+        finalized = {
+          ...finalized,
+          layout: {
+            ...finalized.layout,
+            T,
+            bbox: boxOf(points),
+            layers: finalized.layout.layers.filter(([input]) => !layeredInputs.has(input)),
+            pieceLayers: finalized.layout.pieceLayers.filter(
+              ([piece]) => !inheritedStructure.has(piece),
+            ),
+          },
+        };
+        finalized = separateAddedBodyPieces(finalized, inheritedPieces);
+      }
+      finalized = tightenPanelAssembly(dockLoosePicture(restoreEdgeTreatments(finalized)));
+      pictures.set(number, finalized);
+      const output = operation.outputUnitKey?.trim();
+      if (output) {
+        outputPictures.set(output, finalized);
+        if (introducedCollar) collarUnits.add(output);
+      }
     }
     return pictures;
   } catch {

@@ -256,8 +256,9 @@ export function orderSideAlongOutline(
 }
 
 const isIdentical = (s: SeamCandidate, a: PieceGeom, bKey: string) =>
-  s.evidence?.twin === 'identical' ||
-  a.twinOf.some((t) => t.key === bKey && t.kind === 'identical');
+  !/^ring \(.*identical panels sewn side to side/.test(s.evidence?.rule ?? '') &&
+  (s.evidence?.twin === 'identical' ||
+    a.twinOf.some((t) => t.key === bKey && t.kind === 'identical'));
 
 type Link = {
   seam: SeamCandidate;

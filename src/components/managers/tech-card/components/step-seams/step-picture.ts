@@ -552,8 +552,9 @@ const identicalPair = (
   ka: string,
   kb: string,
 ) =>
-  c.evidence?.twin === 'identical' ||
-  !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
+  !/^ring \(.*identical panels sewn side to side/.test(c.evidence?.rule ?? '') &&
+  (c.evidence?.twin === 'identical' ||
+    !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical'));
 
 /**
  * An input on its own: its pieces along its inner seams, upright and clear of each other (a seam
