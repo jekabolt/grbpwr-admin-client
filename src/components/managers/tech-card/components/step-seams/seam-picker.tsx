@@ -10,6 +10,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
@@ -485,7 +486,16 @@ export function SeamPickerBody({
   }, [placeNow?.x, placeNow?.y, placeNow?.rot, placeNow?.flip, host]);
 
   const buildRow = useCallback(
-    (s: Sel): StoredSeam | null => {
+    (clicked: Sel): StoredSeam | null => {
+      // Edges clicked out of order still run along each piece's outline.
+      const along = (ids: readonly TargetId[]) => {
+        const byPiece = new Map<string, TargetId[]>();
+        ids.forEach((id) =>
+          byPiece.set(pieceOfTarget(id), [...(byPiece.get(pieceOfTarget(id)) ?? []), id]),
+        );
+        return [...byPiece.values()].flatMap((run) => orderSideAlongOutline(run, geoms));
+      };
+      const s: Sel = { a: along(clicked.a), b: along(clicked.b) };
       const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
       if (ins.length === 0) {
         const row = rowFromHand(s.a, s.b, geoms, anchorCtx, { direction: 'reversed' });
