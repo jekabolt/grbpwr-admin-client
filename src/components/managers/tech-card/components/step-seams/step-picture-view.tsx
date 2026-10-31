@@ -647,8 +647,8 @@ export type PictureView = { k: number; x: number; y: number };
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
  * beside on the canvas); `nos` put a stored seam's number beside it; `names` (one per input) sit on
- * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge is a door;
- * inner lines stay visible but are placed only by dragging in the picker.
+ * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge and inner line
+ * of every piece is a door — the base a patch was sewn on keeps its slit.
  */
 export function StepPictureSvg({
   w,
@@ -1237,23 +1237,21 @@ export function StepPictureSvg({
           ) : null;
         })}
       {onPick &&
-        doors
-          .filter((x) => !x.inner)
-          .map((x) => (
-            <path
-              key={`h:${x.id}`}
-              d={x.d}
-              fill='none'
-              stroke='transparent'
-              strokeWidth={14}
-              pointerEvents='stroke'
-              className='cursor-pointer'
-              onPointerEnter={() => onHover?.(x.id)}
-              onPointerLeave={() => onHover?.(null)}
-              onClick={() => onPick(x.id)}
-              data-seam-target={x.id}
-            />
-          ))}
+        doors.map((x) => (
+          <path
+            key={`h:${x.id}`}
+            d={x.d}
+            fill='none'
+            stroke='transparent'
+            strokeWidth={14}
+            pointerEvents='stroke'
+            className='cursor-pointer'
+            onPointerEnter={() => onHover?.(x.id)}
+            onPointerLeave={() => onHover?.(null)}
+            onClick={() => onPick(x.id)}
+            data-seam-target={x.id}
+          />
+        ))}
     </svg>
   );
 }

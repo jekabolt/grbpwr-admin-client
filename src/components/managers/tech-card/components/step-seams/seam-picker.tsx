@@ -32,7 +32,7 @@ import { edgeOf, plainEdges } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
-import { isGuess, placeHasDrop, seamFocus } from './seam-focus';
+import { isGuess, pickTarget, placeHasDrop, seamFocus } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
@@ -576,11 +576,11 @@ export function SeamPickerBody({
   };
 
   const toggle = (id: TargetId) => {
-    if (frozen || placing || parseInner(id)) return;
+    if (frozen || placing) return;
     const side = sideOf(pieceOfTarget(id), groups, chosen);
     setRefused('');
     const has = sel[side].includes(id);
-    setSel({ ...sel, [side]: has ? sel[side].filter((x) => x !== id) : [...sel[side], id] });
+    setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
     // One input: the first pick on A moves the switch to B.
     if (!has && groups.length < 2 && side === 'a' && sel.a.length === 0) setChosen('b');
   };
@@ -596,7 +596,9 @@ export function SeamPickerBody({
   ];
   const seamPieces = new Set(seamIds.map(pieceOfTarget));
   // A lone pick with no partner keeps every piece: the other side is where the next pick goes.
-  const cut = inners.length === 0 ? seamFocus(groups, seamPieces, innerSeams) : null;
+  // A hand pick (or «own») sees the whole block: the base a patch was sewn on stays a door.
+  const byHand = mine || sel.a.length > 0 || sel.b.length > 0;
+  const cut = inners.length === 0 && !byHand ? seamFocus(groups, seamPieces, innerSeams) : null;
   const focus = !!cut;
   const focusRaw = cut ?? groups.filter((g) => g.pieces.length > 0);
   const focused = useStable(
