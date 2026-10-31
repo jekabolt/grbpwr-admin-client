@@ -12,9 +12,14 @@ import { boxOf } from '../components/step-seams/step-picture';
 import { StepPictureSvg, type StepPicture } from '../components/step-seams/step-picture-view';
 import { inputGroups } from '../components/step-seams/step-seams-model';
 import { deriveAssembly, type AssemblyInput } from './derive-assembly';
-import { editorActionMarks, editorOperationPictures } from './pages/assembly';
+import {
+  closedLoopFinishedJoin,
+  editorActionMarks,
+  editorOperationPictures,
+} from './pages/assembly';
 
 const ROOT = '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/techpack-pdf-v3/data';
+const GOLDEN_ROOT = '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/techpack-pdf-v3/golden';
 const OUT = env.DUMP_DIR ?? 'tmp-dump/corpus';
 const CORPUS_TEST_TIMEOUT = 600_000;
 const CARDS = [1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 19].map((id) => ({
@@ -605,6 +610,221 @@ it(
         ).toBe(true);
       }
     }
+  },
+  CORPUS_TEST_TIMEOUT,
+);
+
+describe.each([
+  ['beta64', 120, 150],
+  ['beta66', 140, 170],
+  ['prod12', 120, 150],
+  ['prod14', 140, 170],
+] as const)('finished ring join %s', (id, bottomOperation, joinOperation) => {
+  it(
+    'keeps both rings intact and docks the later strip',
+    () => {
+      const corpus = corpusCard(id);
+      if (!corpus) return;
+      const { input, pictures } = corpus;
+      const sourceKeys = (number: number) => {
+        const picture = pictures.get(number);
+        expect(picture, `${id} ${number}`).toBeDefined();
+        return largestIdenticalFamily(input, new Set(visibleKeys(picture!)));
+      };
+      const top = sourceKeys(10);
+      const bottom = sourceKeys(bottomOperation);
+      expect(top, `${id}: top ring`).toHaveLength(8);
+      expect(bottom, `${id}: bottom ring`).toHaveLength(8);
+      expect(
+        closedLoopFinishedJoin(pictures.get(joinOperation)!, [
+          pictures.get(10)!,
+          pictures.get(bottomOperation)!,
+        ]),
+        `${id} ${joinOperation}: closed-loop join`,
+      ).toBe(true);
+      const centre = (picture: StepPicture, key: string): Pt2 => {
+        const ring = worldRing(input, picture, key);
+        return [
+          ring.reduce((sum, point) => sum + point[0], 0) / ring.length,
+          ring.reduce((sum, point) => sum + point[1], 0) / ring.length,
+        ];
+      };
+      const distances = (picture: StepPicture, keys: readonly string[]) =>
+        keys.flatMap((left, leftIndex) =>
+          keys.slice(leftIndex + 1).map((right) => {
+            const a = centre(picture, left);
+            const b = centre(picture, right);
+            return Math.hypot(a[0] - b[0], a[1] - b[1]);
+          }),
+        );
+      const connected = (picture: StepPicture, keys: readonly string[]) => {
+        const reached = new Set([keys[0]]);
+        const queue = [keys[0]];
+        while (queue.length) {
+          const key = queue.shift()!;
+          for (const candidate of keys)
+            if (
+              !reached.has(candidate) &&
+              ringsTouch(worldRing(input, picture, key), worldRing(input, picture, candidate))
+            ) {
+              reached.add(candidate);
+              queue.push(candidate);
+            }
+        }
+        return reached.size === keys.length;
+      };
+      const topDistances = distances(pictures.get(10)!, top);
+      const bottomDistances = distances(pictures.get(bottomOperation)!, bottom);
+      for (const [number, picture] of [...pictures].filter(([number]) => number >= joinOperation)) {
+        const shown = new Set(visibleKeys(picture));
+        expect(
+          top.every((key) => shown.has(key)),
+          `${id} ${number}: top ring`,
+        ).toBe(true);
+        expect(
+          bottom.every((key) => shown.has(key)),
+          `${id} ${number}: bottom ring`,
+        ).toBe(true);
+        expect(connected(picture, top), `${id} ${number}: connected top ring`).toBe(true);
+        expect(connected(picture, bottom), `${id} ${number}: connected bottom ring`).toBe(true);
+        distances(picture, top).forEach((distance, index) =>
+          expect(distance, `${id} ${number}: top ring shape ${index}`).toBeCloseTo(
+            topDistances[index],
+            3,
+          ),
+        );
+        distances(picture, bottom).forEach((distance, index) =>
+          expect(distance, `${id} ${number}: bottom ring shape ${index}`).toBeCloseTo(
+            bottomDistances[index],
+            3,
+          ),
+        );
+      }
+
+      for (const number of [240, 250, 260, 270, 280]) {
+        const picture = pictures.get(number);
+        expect(picture, `${id} ${number}`).toBeDefined();
+        const shown = visibleKeys(picture!);
+        const strips = shown.filter((key) => stripLike(worldRing(input, picture!, key)));
+        const body = shown.filter((key) => !strips.includes(key));
+        expect(body.length, `${id} ${number}: body`).toBeGreaterThanOrEqual(16);
+        expect(strips.length, `${id} ${number}: strip`).toBeGreaterThanOrEqual(1);
+        const reached = new Set(body);
+        for (let changed = true; changed; ) {
+          changed = false;
+          for (const strip of strips) {
+            if (reached.has(strip)) continue;
+            if (
+              [...reached].some((host) =>
+                ringsTouch(worldRing(input, picture!, strip), worldRing(input, picture!, host)),
+              )
+            ) {
+              reached.add(strip);
+              changed = true;
+            }
+          }
+        }
+        expect(
+          strips.every((strip) => reached.has(strip)),
+          `${id} ${number}: docked strip`,
+        ).toBe(true);
+      }
+    },
+    CORPUS_TEST_TIMEOUT,
+  );
+});
+
+it(
+  'matches round-11 docking except on the four closed-loop bag cards',
+  () => {
+    const closedLoopCards = new Set(['beta64', 'beta66', 'prod12', 'prod14']);
+    for (const { id, path } of CARDS) {
+      if (!existsSync(path)) continue;
+      const round = closedLoopCards.has(id) ? 'corpus-r12' : 'corpus-r11b';
+      const baseline = `${GOLDEN_ROOT}/${round}/html/${id}.html`;
+      if (!existsSync(baseline)) continue;
+      const { model, pictures } = corpusAt(path);
+      const cells = model.rows.map((row) => {
+        const picture = pictures.get(row.n);
+        const label = `<b>${row.n}</b>`;
+        return picture
+          ? `<article data-op='${row.n}'>${label}${pictureSvg(picture, row.action)}</article>`
+          : `<article data-op='${row.n}'>${label}<i>—</i></article>`;
+      });
+      const hex = String.fromCharCode(35);
+      const actual = `<!doctype html><meta charset="utf-8"><style>:root{--color-textColor:${hex}000;--color-labelColor:${hex}777;--color-bgColor:${hex}fff}body{display:grid;grid-template-columns:repeat(6,212px);gap:16px}b,i{font:12px sans-serif;display:block}</style>${cells.join('')}`;
+      expect(actual, `${id} uses ${round}`).toBe(readFileSync(baseline, 'utf8'));
+    }
+  },
+  CORPUS_TEST_TIMEOUT,
+);
+
+it(
+  'keeps sleeves in their armholes and trouser halves uncrossed',
+  () => {
+    for (const [id, numbers] of [
+      ['beta61', [450, 460, 470, 480]],
+      ['beta85', [1020, 1030, 1040, 1050, 1060, 1070, 1080, 1090]],
+    ] as const) {
+      const corpus = corpusCard(id);
+      if (!corpus) continue;
+      for (const number of numbers) {
+        const picture = corpus.pictures.get(number);
+        expect(picture, `${id} ${number}`).toBeDefined();
+        const shown = visibleKeys(picture!);
+        const sleeves = shown.filter(
+          (key) => readName(picture!.geoms.get(key)?.name ?? '').role === 'sleeve',
+        );
+        const body = shown.filter((key) =>
+          ['front', 'back', 'yoke', 'side'].includes(
+            readName(picture!.geoms.get(key)?.name ?? '').role ?? '',
+          ),
+        );
+        if (!sleeves.length || !body.length) continue;
+        const sleeveGroups = new Map<string, string[]>();
+        for (const key of sleeves) {
+          const hand = readName(picture!.geoms.get(key)?.name ?? '').hand ?? key;
+          sleeveGroups.set(hand, [...(sleeveGroups.get(hand) ?? []), key]);
+        }
+        for (const [hand, sleeve] of sleeveGroups)
+          expect(
+            sleeve.some((key) =>
+              body.some((host) =>
+                ringsTouch(
+                  worldRing(corpus.input, picture!, key),
+                  worldRing(corpus.input, picture!, host),
+                ),
+              ),
+            ),
+            `${id} ${number}: ${hand} sleeve docked`,
+          ).toBe(true);
+      }
+    }
+
+    const trousers = corpusCard('beta63');
+    if (!trousers) return;
+    let checkedTrouserPictures = 0;
+    for (const number of [330, 340, 350, 360, 370, 380, 390, 400, 410, 420]) {
+      const picture = trousers.pictures.get(number);
+      expect(picture, `beta63 ${number}`).toBeDefined();
+      const pieces = visibleKeys(picture!).filter((key) =>
+        ['front', 'back', 'side'].includes(
+          readName(picture!.geoms.get(key)?.name ?? '').role ?? '',
+        ),
+      );
+      if (pieces.length < 2) continue;
+      checkedTrouserPictures++;
+      for (let left = 0; left < pieces.length; left++)
+        for (let right = left + 1; right < pieces.length; right++)
+          expect(
+            pairOverlap(
+              rasterize(worldRing(trousers.input, picture!, pieces[left]), 2),
+              rasterize(worldRing(trousers.input, picture!, pieces[right]), 2),
+            ),
+            `beta63 ${number}: crossed halves`,
+          ).toBeLessThanOrEqual(0.1);
+    }
+    expect(checkedTrouserPictures, 'beta63 trouser pictures').toBeGreaterThanOrEqual(9);
   },
   CORPUS_TEST_TIMEOUT,
 );
