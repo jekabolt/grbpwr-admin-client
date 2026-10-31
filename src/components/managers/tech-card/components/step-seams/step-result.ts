@@ -29,6 +29,10 @@ export type StepResult = {
   ignoredPoses: readonly string[];
   /** Stable audit labels (`self:key`, `later:key@index`, or a carried earlier label). */
   cycles: readonly string[];
+  /** The full engine layout the views draw through (`T` equals `transforms`, poses applied). */
+  layout: StepLayout;
+  /** This op or any op it is seeded from (recursively) has an owner seam or pose row. */
+  owned: boolean;
 };
 
 export type StepResultsInput = {
@@ -290,6 +294,8 @@ function computeStep(
     blockTransforms,
   );
   const transforms = new Map(layout.T);
+  const ownRow =
+    stored.length > 0 || (op?.poseKeys ?? []).some((key) => input.poses?.has(key) ?? false);
   const result: StepResult = {
     opIndex: index,
     transforms,
@@ -301,6 +307,8 @@ function computeStep(
     })),
     ignoredPoses,
     cycles: unique(inputs.flatMap((group) => group.cycles)),
+    layout,
+    owned: ownRow || inputs.some((group) => group.seed?.result.owned ?? false),
   };
   return { result, layout };
 }

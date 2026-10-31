@@ -177,6 +177,25 @@ describe('stepResults: one carried owner result per operation', () => {
       closeAffine(posed[2].transforms.get(piece)!, posed[1].transforms.get(piece)!);
   });
 
+  it('exposes the drawn layout and the owned flag', () => {
+    const results = stepResults(chainInput);
+    for (const result of results)
+      for (const [piece, T] of result.transforms) closeAffine(result.layout.T.get(piece)!, T);
+    expect(operationResult(results, 30).owned).toBe(true);
+    expect(operationResult(results, 430).owned).toBe(true);
+    expect(operationResult(results, 1030).owned).toBe(true);
+    expect(operationResult(results, 150).owned).toBe(
+      (CARD6_CHAIN_OPS[card6ChainStep(150)].seamKeys ?? []).some((key) =>
+        CARD6_CHAIN_SEAMS.has(key),
+      ),
+    );
+  });
+
+  it('marks a rowless card as not owned', () => {
+    const results = stepResults({ ...chainInput, byKey: new Map(), poses: new Map() });
+    expect(results.every((result) => !result.owned)).toBe(true);
+  });
+
   it('does not re-apply #380 poses at #430', () => {
     const results = stepResults(chainInput);
     const at380 = operationResult(results, 380);
