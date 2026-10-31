@@ -37,6 +37,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
   const result = useStepResult(index);
   const ownedLayout = result?.owned ? result.layout : undefined;
+  const ownedLayers = result?.owned ? result.layers : undefined;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();
@@ -120,6 +121,7 @@ export function StepSeamsRow({ index }: { index: number }) {
             scene={scene}
             seams={storedFrame}
             layout={ownedLayout}
+            layers={ownedLayers}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
@@ -168,6 +170,7 @@ export function SeamTile({
   scene,
   seams,
   layout: suppliedLayout,
+  layers,
   marks,
   dashed,
   missing,
@@ -187,6 +190,8 @@ export function SeamTile({
   seams: readonly SeamCandidate[];
   /** An owner result bypasses tile focus, crop, proposal and inferred placement. */
   layout?: StepLayout;
+  /** Authoritative bottom-to-top order for an owner result. */
+  layers?: readonly string[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
@@ -256,6 +261,7 @@ export function SeamTile({
           pad={2}
           look='tile'
           layout={layout}
+          layers={layers}
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}

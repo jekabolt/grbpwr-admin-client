@@ -115,9 +115,11 @@ const CELL_PAD_X = 12;
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
 
+type ResultStepPicture = StepPicture & { resultLayers?: readonly string[] };
+
 type Row = AsmRow & {
   pic?: SvgMarkup;
-  editorPic?: StepPicture;
+  editorPic?: ResultStepPicture;
   sil?: SvgMarkup | null;
   photoCount: number;
 };
@@ -3272,7 +3274,7 @@ function restoreFinishedInputPictures(
 export function editorOperationPictures(
   techCard: common_TechCard,
   model: AssemblyModel,
-): Map<number, StepPicture> | null {
+): Map<number, ResultStepPicture> | null {
   try {
     const resolvedCard = model.techCard ?? techCard;
     // A pose row (P8) is not a seam: a card with poses only still reads its layout inferred.
@@ -3324,7 +3326,7 @@ export function editorOperationPictures(
     );
     const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
     const rowByNumber = new Map(model.rows.map((row) => [row.n, row]));
-    const pictures = new Map<number, StepPicture>();
+    const pictures = new Map<number, ResultStepPicture>();
     const assembledByUnit = new Map<string, StepLayout>();
     const assembledByPieces = new Map<string, StepPicture>();
     const seamsAt = (number: number) =>
@@ -3389,6 +3391,7 @@ export function editorOperationPictures(
             marks: [],
             layoutLeaves: picture.leaves,
             layout,
+            resultLayers: ownerResult.layers,
           });
           const output = operation.outputUnitKey?.trim();
           if (output) assembledByUnit.set(output, ownerResult.layout);
@@ -4337,6 +4340,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           pad={4}
           look='print'
           layout={r.editorPic.layout}
+          layers={r.editorPic.resultLayers}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}

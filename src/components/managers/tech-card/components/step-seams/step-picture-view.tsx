@@ -5,10 +5,25 @@
 
 import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { resolveEdge } from 'lib/assembly-skeleton/union';
+import {
+  LOWER_LAYER_FILL,
+  LOWER_LAYER_STROKE,
+  LOWER_LAYER_STROKE_SCALE,
+  STACKED_TWIN_OFFSET_MM,
+  lowerLayerKeys,
+  orderedLayerKeys,
+  resolveEdge,
+} from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
@@ -671,6 +686,18 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+
+const twinLabelOf = (
+  look: keyof typeof LOOK,
+  key: string,
+  number: number,
+  geoms: ReadonlyMap<string, PieceGeom>,
+) => {
+  if (look === 'tile') return String(number);
+  const name = geoms.get(key)?.name.trim();
+  return name && name !== key && !ULID.test(name) ? name : String(number);
+};
 /**
  * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
  * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more (card 6:
@@ -718,6 +745,7 @@ export function StepPictureSvg({
   pad,
   look,
   layout,
+  layers,
   geoms,
   innerLines,
   marks = [],
@@ -739,6 +767,8 @@ export function StepPictureSvg({
   pad: number;
   look: keyof typeof LOOK;
   layout: StepLayout;
+  /** Authoritative bottom-to-top owner order. Omitted pictures keep the legacy drawing byte-for-byte. */
+  layers?: readonly string[];
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   marks?: readonly EdgeMark[];
@@ -759,8 +789,28 @@ export function StepPictureSvg({
   className?: string;
 }) {
   const L = LOOK[look];
+  const twinNumbers = useMemo(() => {
+    const numbers = new Map<string, number>();
+    layout.stacked.forEach((stack) =>
+      stack.slice(1).forEach((piece, index) => numbers.set(piece, index + 2)),
+    );
+    return numbers;
+  }, [layout.stacked]);
   const ownBounds = useMemo(() => pictureBounds(layout, geoms, look), [layout, geoms, look]);
-  const fitBounds = bounds ?? ownBounds;
+  const layeredBounds = useMemo(() => {
+    if (!layers) return null;
+    const points = [...layout.T].flatMap(([key, transform]) => {
+      const twin = twinNumbers.get(key);
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) : 0;
+      return (geoms.get(key)?.rs ?? []).map((point) => {
+        const [x, y] = apply(transform, point);
+        return [x + offset, y - offset] as Pt2;
+      });
+    });
+    if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
+    return points.length ? boxOf(points) : layout.bbox;
+  }, [geoms, layers, layout, look, twinNumbers]);
+  const fitBounds = bounds ?? layeredBounds ?? ownBounds;
   const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
@@ -775,11 +825,49 @@ export function StepPictureSvg({
     for (const [key, T] of layout.T) {
       const g = geoms.get(key);
       if (!g) continue;
-      const ring = g.rs.map((p) => toPx(fit, apply(T, p)));
+      const twin = layers ? twinNumbers.get(key) : undefined;
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const ring = g.rs.map((p) => {
+        const [x, y] = toPx(fit, apply(T, p));
+        return [x + offset, y + offset] as Pt2;
+      });
       out.push({ key, ring, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
     }
     return out;
-  }, [layout, geoms, fit]);
+  }, [layout, geoms, fit, layers, twinNumbers]);
+  const ownedOrder = useMemo(
+    () =>
+      layers
+        ? orderedLayerKeys(
+            layers,
+            layout.stacked,
+            pieces.map((piece) => piece.key),
+          )
+        : [],
+    [layers, layout.stacked, pieces],
+  );
+  const ownedLowerKeys = useMemo(() => {
+    if (!layers) return new Set<string>();
+    const boxes = pieces.map((piece) => ({ key: piece.key, ...boxOf(piece.ring) }));
+    const lower = new Set(lowerLayerKeys(ownedOrder, boxes));
+    twinNumbers.forEach((_, piece) => lower.add(piece));
+    return lower;
+  }, [layers, ownedOrder, pieces, twinNumbers]);
+  const orderedOwnedPieces = useMemo(() => {
+    const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
+    return ownedOrder.flatMap((key) => {
+      const piece = byKey.get(key);
+      return piece ? [piece] : [];
+    });
+  }, [ownedOrder, pieces]);
+  const ownedLower = useMemo(
+    () => orderedOwnedPieces.filter((piece) => ownedLowerKeys.has(piece.key)),
+    [orderedOwnedPieces, ownedLowerKeys],
+  );
+  const ownedTop = useMemo(
+    () => orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key)),
+    [orderedOwnedPieces, ownedLowerKeys],
+  );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
   const { base, under } = useMemo(() => {
@@ -816,6 +904,7 @@ export function StepPictureSvg({
       }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
+  const visibleBase = layers ? ownedTop : base;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -836,7 +925,7 @@ export function StepPictureSvg({
   const marksDrawn = useMemo(() => {
     if (look === 'print') return [];
     const out: { id: string; d: string }[] = [];
-    for (const p of base) {
+    for (const p of visibleBase) {
       const T = layout.T.get(p.key);
       if (!T) continue;
       (innerLines?.get(p.key) ?? []).forEach((l, k) => {
@@ -845,27 +934,47 @@ export function StepPictureSvg({
       });
     }
     return out;
-  }, [look, base, layout, innerLines, fit]);
+  }, [look, visibleBase, layout, innerLines, fit]);
 
   const doors = useMemo(() => {
     if (!onPick && look !== 'canvas') return [];
     const out: { id: TargetId; d: string; inner: boolean }[] = [];
-    for (const [key, T] of layout.T) {
+    // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
+    // a stacked twin's edges follow its drawn offset.
+    const keys = layers ? ownedOrder : [...layout.T.keys()];
+    for (const key of keys) {
+      const T = layout.T.get(key);
       const g = geoms.get(key);
-      if (!g) continue;
-      for (const e of plainEdges(g))
-        out.push({ id: e.id, d: pathOf(e.pts.map((p) => toPx(fit, apply(T, p)))), inner: false });
+      if (!T || !g) continue;
+      const twin = layers ? twinNumbers.get(key) : undefined;
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const px = (p: Pt2): Pt2 => {
+        const [x, y] = toPx(fit, apply(T, p));
+        return [x + offset, y + offset];
+      };
+      for (const e of plainEdges(g)) out.push({ id: e.id, d: pathOf(e.pts.map(px)), inner: false });
       (innerLines?.get(key) ?? []).forEach((l, k) => {
         if (spanMm(l) < DOOR_SPAN_MM) return;
-        out.push({
-          id: innerId(key, k),
-          d: pathOf(l.map((p) => toPx(fit, apply(T, p)))),
-          inner: true,
-        });
+        out.push({ id: innerId(key, k), d: pathOf(l.map(px)), inner: true });
       });
     }
     return out;
-  }, [onPick, look, layout, geoms, innerLines, fit]);
+  }, [onPick, look, layout, geoms, innerLines, fit, layers, ownedOrder, twinNumbers]);
+  // A second click on the same spot takes the edge of the layer below (owned pictures only).
+  const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
+  const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
+    if (!layers) return id;
+    const { clientX: x, clientY: y } = event;
+    const hits = document
+      .elementsFromPoint(x, y)
+      .map((el) => el.getAttribute('data-seam-target'))
+      .filter((hit): hit is TargetId => !!hit);
+    const last = lastPick.current;
+    const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
+    const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+    lastPick.current = { x, y, id: chosen };
+    return chosen;
+  };
 
   const directPartner = new Map(layout.pieceLayers);
   const inputPartner = new Map(layout.layers);
@@ -874,11 +983,11 @@ export function StepPictureSvg({
   );
   const actionHost = (key: string) => {
     const direct = directPartner.get(key) ?? stackLeader.get(key);
-    if (direct) return base.find((piece) => piece.key === direct);
+    if (direct) return visibleBase.find((piece) => piece.key === direct);
     const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
     return (
-      base.find((piece) => piece.key === key) ??
-      base.find((piece) => partnerInput != null && piece.input === partnerInput)
+      visibleBase.find((piece) => piece.key === key) ??
+      visibleBase.find((piece) => partnerInput != null && piece.input === partnerInput)
     );
   };
   const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
@@ -1077,31 +1186,61 @@ export function StepPictureSvg({
       style={{ overflow: 'hidden', fontSize: L.font }}
       aria-hidden={onPick ? undefined : true}
     >
-      <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
-        {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
-        ))}
-      </g>
-      {under.length > 0 && (
-        <g
-          fill='none'
-          stroke={GREY}
-          strokeWidth={L.hair}
-          strokeDasharray={L.dash}
-          strokeLinejoin='round'
-        >
-          {under.flatMap((piece) =>
-            piece.runs.map((run, index) => (
-              <path key={`${piece.key}:${index}`} d={pathOf(run)} data-piece-layer={piece.key} />
-            )),
+      {layers ? (
+        <>
+          <g fill={FILL} stroke='none'>
+            {ownedLower.map((piece) => (
+              <path
+                key={piece.key}
+                d={pathOf(piece.ring, true)}
+                data-lower-layer-base={piece.key}
+              />
+            ))}
+          </g>
+          <g fill={FILL} stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
+            {ownedTop.map((piece) => (
+              <path key={piece.key} d={pathOf(piece.ring, true)} data-piece-outline={piece.key} />
+            ))}
+          </g>
+          <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+            {ownedTop.map((piece) => (
+              <path key={piece.key} d={pathOf(piece.ring, true)} />
+            ))}
+          </g>
+        </>
+      ) : (
+        <>
+          <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
+            ))}
+          </g>
+          {under.length > 0 && (
+            <g
+              fill='none'
+              stroke={GREY}
+              strokeWidth={L.hair}
+              strokeDasharray={L.dash}
+              strokeLinejoin='round'
+            >
+              {under.flatMap((piece) =>
+                piece.runs.map((run, index) => (
+                  <path
+                    key={`${piece.key}:${index}`}
+                    d={pathOf(run)}
+                    data-piece-layer={piece.key}
+                  />
+                )),
+              )}
+            </g>
           )}
-        </g>
+          <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} />
+            ))}
+          </g>
+        </>
       )}
-      <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
-        {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} />
-        ))}
-      </g>
       {marksDrawn.length > 0 && (
         <g
           fill='none'
@@ -1117,6 +1256,20 @@ export function StepPictureSvg({
           ))}
         </g>
       )}
+      {layers &&
+        ownedLower.map((piece) => (
+          <path
+            key={`lower:${piece.key}`}
+            d={pathOf(piece.ring, true)}
+            fill={LOWER_LAYER_FILL}
+            stroke={LOWER_LAYER_STROKE}
+            strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
+            strokeLinejoin='round'
+            vectorEffect='non-scaling-stroke'
+            pointerEvents='none'
+            data-lower-layer={piece.key}
+          />
+        ))}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
@@ -1325,6 +1478,30 @@ export function StepPictureSvg({
             </text>
           ) : null;
         })}
+      {layers &&
+        ownedLower.flatMap((piece) => {
+          const number = twinNumbers.get(piece.key);
+          if (!number) return [];
+          const at = spotInside(piece.ring);
+          return [
+            <text
+              key={`twin:${piece.key}`}
+              x={at[0]}
+              y={at[1]}
+              textAnchor='middle'
+              dominantBaseline='central'
+              fill={INK}
+              stroke={FILL}
+              strokeWidth={3}
+              paintOrder='stroke'
+              fontSize={L.font}
+              pointerEvents='none'
+              data-twin-number={number}
+            >
+              {twinLabelOf(look, piece.key, number, geoms)}
+            </text>,
+          ];
+        })}
       {onPick &&
         // Lines first: where an edge runs beside a line, the edge takes the click.
         [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
@@ -1338,7 +1515,7 @@ export function StepPictureSvg({
             className='cursor-pointer'
             onPointerEnter={() => onHover?.(x.id)}
             onPointerLeave={() => onHover?.(null)}
-            onClick={() => onPick(x.id)}
+            onClick={(event) => onPick(pickAt(event, x.id))}
             data-seam-target={x.id}
           />
         ))}

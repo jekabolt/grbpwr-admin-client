@@ -233,6 +233,7 @@ const QuizTile = memo(
     const scene = useStepScene(index);
     const result = useStepResult(index);
     const ownedLayout = result?.owned ? result.layout : undefined;
+    const ownedLayers = result?.owned ? result.layers : undefined;
     const proposalRef = useRef<StepProposal | null | undefined>(undefined);
     if (proposalRef.current === undefined && scene.geo?.dep.status !== 'pending') {
       proposalRef.current = scene.suggestions[0] ?? null;
@@ -270,6 +271,7 @@ const QuizTile = memo(
         scene={scene}
         seams={seams}
         layout={ownedLayout}
+        layers={ownedLayers}
         marks={ownedLayout ? [] : marks}
         dashed={!ownedLayout && (!!proposal || !!surface)}
         current={current}

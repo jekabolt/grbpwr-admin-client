@@ -6,9 +6,14 @@
 // узла в рельсе), рисуется байт-в-байт как раньше. Контекст, а не проп, потому что эти поверхности
 // живут в трёх разных деревьях (полотно, полка, рельс) и пропу пришлось бы пройти пять слоёв ради
 // данных, которых пока нет.
-import type { UnionPicture } from 'lib/assembly-skeleton/union';
+import {
+  LOWER_LAYER_FILL,
+  LOWER_LAYER_STROKE,
+  LOWER_LAYER_STROKE_SCALE,
+  type UnionPicture,
+} from 'lib/assembly-skeleton/union';
 import { cn } from 'lib/utility';
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, type ComponentProps, type ReactNode } from 'react';
 import { fmtCm } from './nesting/dxf-geometry';
 import { UnitShape } from './nesting/unit-shape';
 import { TILE_BOX } from './piece-silhouette';
@@ -41,6 +46,121 @@ export function useUnitPicture(unitKey: string | null | undefined): UnionPicture
 // Паддинги обёртки — те же, что у PieceTile (`p-1 pb-3.5`): 4+4 и 4+14.
 const TILE_PAD_X = 8;
 const TILE_PAD_Y = 18;
+const SHAPE_BOX_FALLBACK = { w: 48, h: 38 };
+const TWIN_BADGE_PX = 9;
+
+const shapePoints = (points: readonly [number, number][]) =>
+  points.map(([x, y]) => `${x},${y}`).join(' ');
+
+/** Owner-result graph drawing. Legacy unit pictures continue through UnitShape unchanged. */
+function LowerLayerUnitShape({
+  picture,
+  className,
+  hatchW,
+  hatchH,
+  label,
+  plain,
+}: ComponentProps<typeof UnitShape>) {
+  const lower = new Set(picture.lowerLayers ?? []);
+  const pad = Math.max(picture.w, picture.h, 1) * 0.06;
+  const box = { x: -pad, y: -pad, w: picture.w + 2 * pad, h: picture.h + 2 * pad };
+  const px = Math.min(
+    (hatchW && hatchW > 0 ? hatchW : SHAPE_BOX_FALLBACK.w) / box.w,
+    (hatchH && hatchH > 0 ? hatchH : SHAPE_BOX_FALLBACK.h) / box.h,
+  );
+  const u = 1 / (px || 1);
+  const bases = picture.shapes.filter((shape) => lower.has(shape.pieceKey));
+  const top = picture.shapes.filter((shape) => !lower.has(shape.pieceKey));
+
+  return (
+    <svg
+      xmlns='http://www.w3.org/2000/svg'
+      viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
+      className={className ?? 'block h-full w-full'}
+      role='img'
+      aria-label={label ?? `unit pictogram, ${picture.pieceCount} pieces`}
+    >
+      {bases.map((shape) => (
+        <polygon
+          key={`base:${shape.pieceKey}`}
+          points={shapePoints(shape.pts)}
+          fill='var(--color-bgColor)'
+          stroke='none'
+          data-lower-layer-base={shape.pieceKey}
+        />
+      ))}
+      {top.map((shape) => (
+        <g key={shape.pieceKey}>
+          <polygon
+            points={shapePoints(shape.pts)}
+            fill='var(--color-bgColor)'
+            stroke='var(--color-textColor)'
+            strokeWidth={1}
+            strokeLinejoin='round'
+            vectorEffect='non-scaling-stroke'
+          />
+          {!plain &&
+            shape.lines.map((line, index) => (
+              <polyline
+                key={index}
+                points={shapePoints(line)}
+                fill='none'
+                stroke='var(--color-textColor)'
+                strokeWidth={0.6}
+                strokeLinejoin='round'
+                vectorEffect='non-scaling-stroke'
+              />
+            ))}
+        </g>
+      ))}
+      {bases.map((shape) => (
+        <polygon
+          key={`overlay:${shape.pieceKey}`}
+          points={shapePoints(shape.pts)}
+          fill={LOWER_LAYER_FILL}
+          stroke={LOWER_LAYER_STROKE}
+          strokeWidth={LOWER_LAYER_STROKE_SCALE}
+          strokeLinejoin='round'
+          vectorEffect='non-scaling-stroke'
+          pointerEvents='none'
+          data-lower-layer={shape.pieceKey}
+        />
+      ))}
+      {bases.flatMap((shape) => {
+        const number = picture.twinLabels?.[shape.pieceKey];
+        if (!number) return [];
+        const x = Math.max(...shape.pts.map(([value]) => value));
+        const y = Math.min(...shape.pts.map(([, value]) => value)) + TWIN_BADGE_PX * u;
+        return [
+          <text
+            key={`twin:${shape.pieceKey}`}
+            x={Math.min(x, picture.w)}
+            y={Math.max(y, 0)}
+            textAnchor='end'
+            fill='var(--color-textColor)'
+            stroke='var(--color-bgColor)'
+            strokeWidth={3 * u}
+            paintOrder='stroke'
+            fontSize={TWIN_BADGE_PX * u}
+            fontWeight={700}
+            pointerEvents='none'
+            data-twin-number={number}
+          >
+            {number}
+          </text>,
+        ];
+      })}
+    </svg>
+  );
+}
+
+function UnitPictureShape(props: ComponentProps<typeof UnitShape>) {
+  return props.picture.lowerLayers?.length ? (
+    <LowerLayerUnitShape {...props} />
+  ) : (
+    <UnitShape {...props} />
+  );
+}
 
 const names = (keys: readonly string[], nameOf?: (k: string) => string) =>
   keys.map((k) => nameOf?.(k) || k).join(' + ');
@@ -99,7 +219,7 @@ export function UnitTile({
       )}
     >
       <span className='flex size-full items-center justify-center p-1 pb-3.5'>
-        <UnitShape
+        <UnitPictureShape
           picture={picture}
           hatchW={Math.max(1, pxBox.w - TILE_PAD_X)}
           hatchH={Math.max(1, pxBox.h - TILE_PAD_Y)}
@@ -135,7 +255,7 @@ export function UnitGlyph({
   const title = unitShapeTitle(name, picture);
   return (
     <span title={title} className={cn('mr-1.5 inline-flex h-7 w-10 shrink-0', boxClassName)}>
-      <UnitShape picture={picture} plain label={title} />
+      <UnitPictureShape picture={picture} plain label={title} />
     </span>
   );
 }

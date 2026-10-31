@@ -57,7 +57,7 @@ export function UnitPictureTile({
   }, [graph?.chosen, inputs, geoms, innerLines, byKey, ops, pieceKeys]);
   const inner = useStable(innerRaw, seamSig(innerRaw));
   const inferredLayout = useStepLayout(inputs, inner, geoms, 0, RASTER_MM);
-  const ownedLayout = useMemo(() => {
+  const ownedResult = useMemo(() => {
     let producer = -1;
     for (let index = 0; index < Math.min(stepIndex, ops.length); index++) {
       const operation = ops[index];
@@ -65,9 +65,9 @@ export function UnitPictureTile({
         producer = index;
     }
     const result = producer >= 0 ? results?.[producer] : undefined;
-    return result?.owned ? result.layout : undefined;
+    return result?.owned ? result : undefined;
   }, [ops, results, stepIndex, unitKey]);
-  const layout = ownedLayout ?? inferredLayout;
+  const layout = ownedResult?.layout ?? inferredLayout;
   const [boxEl, box] = useBoxSize();
   if (layout.T.size === 0) return <Tile name={name} sub='unit' className='justify-center' />;
   return (
@@ -83,6 +83,7 @@ export function UnitPictureTile({
             pad={1}
             look='tile'
             layout={layout}
+            layers={ownedResult?.layers}
             geoms={geoms}
             innerLines={innerLines}
           />
