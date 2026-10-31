@@ -21,7 +21,7 @@ import {
 import { boxOf, invert } from './step-picture';
 import { placementT, poseAfterDrop, posePickup } from './step-pose';
 import { StepResultProvider, useStepResult } from './step-result-context';
-import { stepResults, type StepResult, type StepResultsInput } from './step-result';
+import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
 import type { FormOpLike } from './step-seams-model';
 
 const closeAffine = (actual: Affine, expected: Affine, digits = 6) =>
@@ -149,8 +149,8 @@ describe('stepResults: one carried owner result per operation', () => {
   });
 
   it('returns the same cached objects to independent callers and the context hook', () => {
-    const first = stepResults(chainInput);
-    const second = stepResults({ ...chainInput });
+    const first = stepResults(chainInput, OWNER_FIT);
+    const second = stepResults({ ...chainInput }, OWNER_FIT);
     const index = card6ChainStep(430);
     let fromHook: StepResult | undefined;
     const Reader = () => {

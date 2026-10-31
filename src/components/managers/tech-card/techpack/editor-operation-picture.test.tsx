@@ -23,7 +23,7 @@ import {
   card6ChainGeoms,
   card6ChainInnerLines,
 } from '../components/step-seams/card6-chain.fixture';
-import { stepResults } from '../components/step-seams/step-result';
+import { OWNER_FIT, stepResults } from '../components/step-seams/step-result';
 import {
   card83RealFixture,
   card83StoredSeamsFixture,
@@ -329,14 +329,17 @@ describe('editor operation picture in the PDF', () => {
   it('uses card 6 owner results and preserves the rowless print layout', () => {
     const ownedInput = card6ChainInput(true);
     const ownedPictures = editorOperationPictures(ownedInput.techCard, deriveAssembly(ownedInput))!;
-    const expected = stepResults({
-      ops: CARD6_TEST_OPERATIONS,
-      byKey: CARD6_TEST_SEAMS,
-      poses: CARD6_TEST_POSES,
-      geoms: card6TestGeoms(),
-      innerLines: card6TestInnerLines(),
-      pieceKeys: CARD6_TEST_PIECES,
-    })[CARD6_TEST_OPERATIONS.findIndex((operation) => operation.operationNumber === 430)];
+    const expected = stepResults(
+      {
+        ops: CARD6_TEST_OPERATIONS,
+        byKey: CARD6_TEST_SEAMS,
+        poses: CARD6_TEST_POSES,
+        geoms: card6TestGeoms(),
+        innerLines: card6TestInnerLines(),
+        pieceKeys: CARD6_TEST_PIECES,
+      },
+      OWNER_FIT,
+    )[CARD6_TEST_OPERATIONS.findIndex((operation) => operation.operationNumber === 430)];
     expectSameAffines(ownedPictures.get(430)!.layout.T, expected.transforms, 'owned op 430');
 
     const rowlessInput = card6ChainInput(false);

@@ -35,7 +35,10 @@ import {
   pinPoses,
   posePinsOf,
 } from 'components/managers/tech-card/components/step-seams/step-pose';
-import { stepResults } from 'components/managers/tech-card/components/step-seams/step-result';
+import {
+  OWNER_FIT,
+  stepResults,
+} from 'components/managers/tech-card/components/step-seams/step-result';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
@@ -3310,14 +3313,17 @@ export function editorOperationPictures(
     // With no stored row every result is provably rowless; keep that legacy path allocation-free.
     const ownerResults =
       byKey.size || poses.size
-        ? stepResults({
-            ops: operations,
-            byKey,
-            poses,
-            geoms,
-            innerLines,
-            pieceKeys,
-          })
+        ? stepResults(
+            {
+              ops: operations,
+              byKey,
+              poses,
+              geoms,
+              innerLines,
+              pieceKeys,
+            },
+            OWNER_FIT,
+          )
         : [];
     const ownedNumbers = new Set(
       ownerResults.flatMap((result, index) =>

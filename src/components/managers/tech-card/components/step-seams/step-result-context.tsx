@@ -6,7 +6,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
 import { useCardGeoms, useCardPieceKeys, usePoseRows, useSeamRows } from './step-picture-view';
-import { stepResults, type StepResult, type StepResultsInput } from './step-result';
+import { OWNER_FIT, stepResults, type StepResult, type StepResultsInput } from './step-result';
 import type { FormOpLike } from './step-seams-model';
 
 const StepResultsContext = createContext<readonly StepResult[] | null>(null);
@@ -30,7 +30,7 @@ function ResultsValueProvider({
   input: StepResultsInput;
   children: ReactNode;
 }) {
-  const value = stepResults(input);
+  const value = stepResults(input, OWNER_FIT);
   return <StepResultsContext.Provider value={value}>{children}</StepResultsContext.Provider>;
 }
 

@@ -363,6 +363,10 @@ export function stepResultsSignature(
   });
 }
 
+/** Owner-row steps are laid by the owner's hand only — no auto turns or mirrors (E2). Every
+ * caller passes this same option: the cache keeps one entry per card. */
+export const OWNER_FIT: StepResultsOptions = { manualFit: true };
+
 /**
  * Compute every operation in one forward pass and memoise the complete card result. The surface
  * path is `storedRowsOfStep → candidateOfStoredSeam → seamOfSides/surfaceSeam`; the surface is
