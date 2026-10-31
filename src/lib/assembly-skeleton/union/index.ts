@@ -1,6 +1,7 @@
 // Union pictogram (lane C): layout of a unit's pieces along its seams → drawable picture.
 export {
   unionLayout,
+  orderSideAlongOutline,
   resolveEdge,
   pieceKeyOf,
   pieceTilt,

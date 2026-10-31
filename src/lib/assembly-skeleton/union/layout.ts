@@ -222,6 +222,39 @@ export function resolveEdge(
   return { id, pieceKey, pts, len: e.lenMm > 0 ? e.lenMm : polyLen(pts) };
 }
 
+/**
+ * A side's edges of one piece in the order the outline runs (`#0,#3,#1` clicked → `#3,#0,#1`), so
+ * its run is one contiguous line end to end. A side across pieces, or with a gap, comes back as is.
+ */
+export function orderSideAlongOutline(
+  ids: readonly EdgeId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): EdgeId[] {
+  if (ids.length < 2) return [...ids];
+  const key = pieceKeyOf(ids[0]);
+  const g = geoms.get(key);
+  if (!g || ids.some((id) => pieceKeyOf(id) !== key || id.includes('+', key.length)))
+    return [...ids];
+  const n = g.edges.filter((e) => e.kind === 'edge').length;
+  const ks = ids.map((id) => Number(id.slice(key.length + 1)));
+  if (
+    !n ||
+    ks.some((k) => !Number.isInteger(k) || k < 0 || k >= n) ||
+    new Set(ks).size !== ks.length
+  )
+    return [...ids];
+  const has = new Set(ks);
+  // The run starts at the edge whose outline predecessor is not on the side.
+  const starts = ks.filter((k) => !has.has((k - 1 + n) % n));
+  if (starts.length !== 1) return [...ids];
+  const out: EdgeId[] = [];
+  for (let k = starts[0], i = 0; i < ks.length; i++, k = (k + 1) % n) {
+    if (!has.has(k)) return [...ids];
+    out.push(ids[ks.indexOf(k)]);
+  }
+  return out;
+}
+
 const isIdentical = (s: SeamCandidate, a: PieceGeom, bKey: string) =>
   s.evidence?.twin === 'identical' ||
   a.twinOf.some((t) => t.key === bKey && t.kind === 'identical');
@@ -304,7 +337,7 @@ export function unionLayout(
     const partsOf = (ids: readonly EdgeId[] | undefined): RunPart[] | undefined => {
       if (!ids || ids.length < 2) return undefined;
       const parts: RunPart[] = [];
-      for (const id of ids) {
+      for (const id of orderSideAlongOutline(ids, G)) {
         const e = resolveEdge(id, G);
         if (!e || !inUnit.has(e.pieceKey)) return undefined;
         parts.push({ key: e.pieceKey, pts: e.pts, len: e.len });
@@ -420,6 +453,19 @@ export function unionLayout(
         : null;
     let best: Trial | null = null;
     let bestScore = Infinity;
+    const leaderT = placed.get(fromLeader)?.T;
+    const leaderGeom = G.get(fromLeader);
+    if (stack && leaderT && leaderGeom) {
+      // A layer cut alike goes straight ON its twin, its way up, whichever edges the row names (a
+      // collar's two layers sewn round their outer edge): drawn alike, it covers it whole.
+      const cl = centroid(leaderGeom.rs);
+      const ct = centroid(toGeom.rs);
+      const T = compose(leaderT, translate(cl[0] - ct[0], cl[1] - ct[1]));
+      const lr = rasters.get(fromLeader);
+      const overlap = lr ? pairOverlap(rasterOf(l.toKey, T), lr) : 0;
+      bestScore = -overlap * 1000;
+      best = { T, overlap, endErr: 0, mode: 'stack', via: l.from.id };
+    }
     for (const rev of [false, true])
       for (const mir of [false, true]) {
         const q0 = rev ? B[B.length - 1] : B[0];

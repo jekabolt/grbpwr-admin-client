@@ -527,6 +527,8 @@ export const tiltOf = (T: Affine) => Math.atan2(Math.abs(T[2]), T[3]);
  * hair — a sleeve hung off a slightly leaning armhole lies sideways, not upside down.
  */
 export const UPRIGHT = Math.PI / 2 + Math.PI / 36;
+/** Two laid edges closer than this on average lie on each other (stacked layers), mm. */
+const STACKED_MM = 3;
 
 /**
  * A seam the picture may shape a unit by: one a person stored, one the solver is sure of, an edge
@@ -965,7 +967,28 @@ export function stepLayout(
       // along the pieces drawn joined; one standing apart (a yoke no upright seam lays on the
       // fronts' shoulders) or not drawn is not part of the opening.
       const gone = (id: EdgeId) => inOf(id) == null || standing.has(pieceKeyOf(id));
-      const theirParts = ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
+      // Layers stacked on each other (a collar's two layers, their neck edges one on the other)
+      // make one line, not a run doubling back on itself: the first layer's edge stands for both.
+      const oneLayer = (ids: EdgeId[], at: (k: string) => Affine | undefined) => {
+        const kept: Pt2[][] = [];
+        return ids.filter((id) => {
+          const e = resolveEdge(id, geoms);
+          const T = at(pieceKeyOf(id));
+          if (!e || !T) return true;
+          const pts = e.pts.map((p) => apply(T, p));
+          const onKept = kept.some(
+            (q) =>
+              pts.reduce((s, p) => s + toLine(p, q), 0) / pts.length < STACKED_MM &&
+              q.reduce((s, p) => s + toLine(p, pts), 0) / q.length < STACKED_MM,
+          );
+          if (!onKept) kept.push(pts);
+          return !onKept;
+        });
+      };
+      const theirParts = oneLayer(
+        ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
+        (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
+      );
       const run =
         theirParts.length > 1 && theirParts.every((id) => inOf(id) === i)
           ? runOf(
@@ -978,7 +1001,10 @@ export function stepLayout(
           : null;
       const A = run ?? rangedLine(ea.pts, rangeOf(theirs)).map((p) => apply(Tt, p));
       const B = rangedLine(eb.pts, rangeOf(mine)).map((p) => apply(local.get(ka)!, p));
-      const myParts = ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
+      const myParts = oneLayer(
+        ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
+        (k) => local.get(k),
+      );
       const myRun =
         myParts.length > 1 && myParts.every((id) => inOf(id) === j)
           ? runOf(

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Affine, Edge, PieceGeom, Pt2, SeamCandidate } from '../types';
 import { apply, IDENTITY } from './affine';
-import { runOf, unionLayout } from './layout';
+import { orderSideAlongOutline, runOf, unionLayout } from './layout';
 
 /** A piece from its ring (CCW) and the ring indexes its corners sit at; edge k runs corner k → k+1. */
 function piece(key: string, ring: Pt2[], corners: number[]): PieceGeom {
@@ -162,5 +162,41 @@ describe('unionLayout push-off', () => {
       pushOffMax: 0.02,
     });
     expect(L.overflow).toEqual(['YOKE']);
+  });
+});
+
+describe('identical layers', () => {
+  // A collar layer: an uneven quad, so only the straight copy covers its twin.
+  const ring: Pt2[] = [
+    [0, 0],
+    [120, 0],
+    [200, 60],
+    [10, 90],
+  ];
+  const geoms = new Map([
+    ['A', piece('A', ring, [0, 1, 2, 3])],
+    ['B', piece('B', ring, [0, 1, 2, 3])],
+  ]);
+
+  it('orderSideAlongOutline: a side clicked out of order runs along the outline', () => {
+    expect(orderSideAlongOutline(['B#0', 'B#3', 'B#1'], geoms)).toEqual(['B#3', 'B#0', 'B#1']);
+    expect(orderSideAlongOutline(['B#2', 'B#0'], geoms)).toEqual(['B#2', 'B#0']);
+    expect(orderSideAlongOutline(['A#0', 'B#1'], geoms)).toEqual(['A#0', 'B#1']);
+  });
+
+  it('a layer sewn to its twin by a side clicked out of order goes straight on it', () => {
+    const row = {
+      ...seam('A#0', 'B#0'),
+      aParts: ['A#3', 'A#0', 'A#1'],
+      bParts: ['B#0', 'B#3', 'B#1'],
+      evidence: { twin: 'identical' },
+    } as unknown as SeamCandidate;
+    const L = unionLayout(['A', 'B'], [row], geoms, { rasterMm: 2 });
+    const T = (k: string) => L.placements.find((p) => p.pieceKey === k)!.T;
+    for (const p of ring) {
+      const a = apply(T('A'), p);
+      const b = apply(T('B'), p);
+      expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeLessThan(1);
+    }
   });
 });
