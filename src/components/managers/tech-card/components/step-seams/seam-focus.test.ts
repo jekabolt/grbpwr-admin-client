@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { card6Geoms, card6InnerLines } from './card6.fixture';
-import { isGuess, pickTarget } from './seam-focus';
+import { cycleLayerHit, isGuess, pickTarget } from './seam-focus';
 import { stepLayout } from './step-picture';
 import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
 
@@ -49,6 +49,22 @@ describe('pickTarget', () => {
     expect(pick({ a: [], b: ['FABRIC:2', 'PATCH_2:0'] }, 'a', 'FABRIC:i0').b).toEqual([
       'PATCH_2:0',
     ]);
+  });
+});
+
+describe('cycleLayerHit', () => {
+  const hits = ['TOP', 'MIDDLE', 'BOTTOM'];
+
+  it('starts on top, walks down at the same spot, then wraps', () => {
+    const at: [number, number] = [100, 80];
+    expect(cycleLayerHit(hits, at, null)).toBe('TOP');
+    expect(cycleLayerHit(hits, at, { piece: 'TOP', at })).toBe('MIDDLE');
+    expect(cycleLayerHit(hits, [103, 82], { piece: 'MIDDLE', at })).toBe('BOTTOM');
+    expect(cycleLayerHit(hits, at, { piece: 'BOTTOM', at })).toBe('TOP');
+  });
+
+  it('restarts on top after the pointer leaves the click tolerance', () => {
+    expect(cycleLayerHit(hits, [20, 20], { piece: 'TOP', at: [10, 10] })).toBe('TOP');
   });
 });
 
