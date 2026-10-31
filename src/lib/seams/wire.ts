@@ -4,9 +4,10 @@
 
 import type {
   EdgeAnchor,
+  StoredPose,
+  StoredRow,
   StoredSeam,
   StoredSeamDirection,
-  StoredSeamKind,
   StoredSeamSource,
   StoredSeamStatus,
   TechCardSeamAnchorWire,
@@ -21,13 +22,16 @@ const STATUS: Record<StoredSeamStatus, TechCardSeamStatusWire> = {
   confirmed: 'TECH_CARD_SEAM_STATUS_CONFIRMED',
   rejected: 'TECH_CARD_SEAM_STATUS_REJECTED',
 };
-const KIND: Record<StoredSeamKind, TechCardSeamKindWire> = {
+const KIND: Record<StoredRow['kind'], TechCardSeamKindWire> = {
   edge: 'TECH_CARD_SEAM_KIND_EDGE',
   partial: 'TECH_CARD_SEAM_KIND_PARTIAL',
   composite: 'TECH_CARD_SEAM_KIND_COMPOSITE',
   surface: 'TECH_CARD_SEAM_KIND_SURFACE',
   closure: 'TECH_CARD_SEAM_KIND_CLOSURE',
+  pose: 'TECH_CARD_SEAM_KIND_POSE',
 };
+/** The wire kind of a pose row (P8): not a seam, never handed to a seam reader. */
+export const POSE_KIND_WIRE: TechCardSeamKindWire = KIND.pose;
 const DIRECTION: Record<StoredSeamDirection, TechCardSeamDirectionWire> = {
   reversed: 'TECH_CARD_SEAM_DIRECTION_REVERSED',
   same: 'TECH_CARD_SEAM_DIRECTION_SAME',
@@ -91,8 +95,8 @@ const anchorFromWire = (w: TechCardSeamAnchorWire): EdgeAnchor => {
   };
 };
 
-/** The row to send in UpsertTechCardSeams (output-only fields left out). */
-export function toWire(s: StoredSeam): TechCardSeamWire {
+/** The row to send in UpsertTechCardSeams (output-only fields left out): a seam or a pose. */
+export function toWire(s: StoredRow): TechCardSeamWire {
   return {
     seamKey: s.seamKey,
     status: STATUS[s.status],
@@ -106,11 +110,8 @@ export function toWire(s: StoredSeam): TechCardSeamWire {
   };
 }
 
-/**
- * A row as the card read returns it, or null when it cannot be read (an unknown status or kind —
- * a newer server; the caller lists it as unreadable rather than guessing).
- */
-export function fromWire(w: TechCardSeamWire): StoredSeam | null {
+/** Any row as the card read returns it (a seam or a pose), or null when it cannot be read. */
+function rowFromWire(w: TechCardSeamWire): StoredRow | null {
   const status = w.status && STATUS_IN.get(w.status);
   const kind = w.kind && KIND_IN.get(w.kind);
   if (!status || !kind || !w.seamKey) return null;
@@ -129,7 +130,63 @@ export function fromWire(w: TechCardSeamWire): StoredSeam | null {
     ...(w.createdAt ? { createdAt: w.createdAt } : {}),
     ...(w.updatedBy ? { updatedBy: w.updatedBy } : {}),
     ...(w.updatedAt ? { updatedAt: w.updatedAt } : {}),
-  };
+  } as StoredRow;
+}
+
+/**
+ * A SEAM as the card read returns it, or null when it cannot be read (an unknown status or kind —
+ * a newer server; the caller lists it as unreadable rather than guessing) or is not a seam (a pose:
+ * `poseFromWire`).
+ */
+export function fromWire(w: TechCardSeamWire): StoredSeam | null {
+  const row = rowFromWire(w);
+  return row && row.kind !== 'pose' ? row : null;
+}
+
+export const isPoseWire = (w: Pick<TechCardSeamWire, 'kind'>): boolean => w.kind === KIND.pose;
+
+/** A pose row (P8) as the card read returns it, or null: not a pose, or not of the pose's shape. */
+export function poseFromWire(w: TechCardSeamWire): StoredPose | null {
+  const row = rowFromWire(w);
+  if (row?.kind !== 'pose' || row.status !== 'confirmed') return null;
+  if (row.sideA.length !== 1 || row.sideB.length !== 1 || !row.sideA[0].placement) return null;
+  return row;
+}
+
+/**
+ * THE split of the card's seam rows (P8): the seams every seam reader gets, the poses only the
+ * step pictures read, and how many rows neither (a newer server's status or kind, a malformed pose).
+ * Every loader of `TechCard.seams` / an RPC echo goes through here or through `fromWire`.
+ */
+export function splitWire(wire: readonly TechCardSeamWire[] | undefined): {
+  seams: StoredSeam[];
+  poses: StoredPose[];
+  unreadable: number;
+} {
+  const seams: StoredSeam[] = [];
+  const poses: StoredPose[] = [];
+  let unreadable = 0;
+  for (const w of wire ?? []) {
+    if (isPoseWire(w)) {
+      const pose = poseFromWire(w);
+      if (pose) poses.push(pose);
+      else unreadable += 1;
+      continue;
+    }
+    const seam = fromWire(w);
+    if (seam) seams.push(seam);
+    else unreadable += 1;
+  }
+  return { seams, poses, unreadable };
+}
+
+/** The keys of the card's pose rows: what a step's `seamKeys` holds that is not a seam. */
+export function poseKeysOfWire(
+  wire: readonly Pick<TechCardSeamWire, 'kind' | 'seamKey'>[] | undefined,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const w of wire ?? []) if (isPoseWire(w) && w.seamKey) keys.add(w.seamKey);
+  return keys;
 }
 
 /** Signature of a stored list for a provider's memo key (`seamKey:status:updatedAt:stale`). */

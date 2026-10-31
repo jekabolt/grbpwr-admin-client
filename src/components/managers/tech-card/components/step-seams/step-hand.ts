@@ -1,8 +1,9 @@
 import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid } from 'lib/assembly-skeleton/union/affine';
-import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
+import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
 import { runsOfSide } from '../assembly-seams/seam-actions';
+import { posePinsOf, type PosePin } from './step-pose';
 import { parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 
 /** A piece placed by hand along one of its stored seam runs. */
@@ -76,24 +77,35 @@ export function handsFromSeams(rows: readonly StoredSeam[]): Map<string, HandOn>
   return hand;
 }
 
-/** The hand placements a step's views lay: its own and every earlier step's; twins read the card's. */
+/**
+ * The hand placements a step's views lay: its own and every earlier step's; twins read the card's.
+ * `pose` (P8): the pieces placed by hand at a free spot, pinned last (absent: none).
+ */
 export type StepHands = {
   hand: ReadonlyMap<string, HandOn>;
   twinHand: ReadonlyMap<string, HandOn>;
+  pose?: ReadonlyMap<string, PosePin>;
 };
 
 /**
  * The placements stored on this step's seams and the earlier ones' (a later step inherits them),
- * and the whole card's for twins (the right bag mirrors the left one placed a step later).
+ * and the whole card's for twins (the right bag mirrors the left one placed a step later); the
+ * poses this step's and the earlier steps' `poseKeys` name, the same way.
  */
 export function stepHandsOf(
-  ops: readonly { seamKeys?: readonly string[] }[],
+  ops: readonly { seamKeys?: readonly string[]; poseKeys?: readonly string[] }[],
   index: number,
   byKey: ReadonlyMap<string, StoredSeam>,
+  poses?: ReadonlyMap<string, StoredPose>,
 ): StepHands {
   const rows = (steps: readonly { seamKeys?: readonly string[] }[]) =>
     steps.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
-  return { hand: handsFromSeams(rows(ops.slice(0, index + 1))), twinHand: handsFromSeams(rows(ops)) };
+  const pose = posePinsOf(ops.slice(0, index + 1), poses);
+  return {
+    hand: handsFromSeams(rows(ops.slice(0, index + 1))),
+    twinHand: handsFromSeams(rows(ops)),
+    ...(pose.size ? { pose } : {}),
+  };
 }
 
 /** Put or clear a hand placement on every anchor of the moved piece, leaving its partner alone. */

@@ -130,7 +130,7 @@ import { normBlock, sizeTokensOf, splitBlockSize, uniOf } from './nesting/block-
 import { isFetchFailure } from './nesting/dxf-warnings';
 import { defaultContourLayer, layerOptions } from './nesting/contour-layer';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { hydrateSeams, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { hydrateSeams, posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { toWire, type TechCardSeamWire } from 'lib/seams';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import {
@@ -2035,6 +2035,7 @@ export function PatternsField({
     const seamKeys = () => [
       ...seamAnchorKeys(cardRead?.seams),
       ...seamAnchorKeys(rowsOf(useSeamsStore.getState())),
+      ...seamAnchorKeys(posesOf(useSeamsStore.getState())),
     ];
     const refsNow = () =>
       externalPieceRefs(piecesNow(), cardRead?.colorways, cardRead?.pieceAreaScopes, seamKeys());
@@ -2042,8 +2043,9 @@ export function PatternsField({
     // reshaped piece. The store owns saved + optimistic rows once it holds this card.
     const seamsNow = (): TechCardSeamWire[] => {
       const st = useSeamsStore.getState();
+      // Pose rows (P8) too: a pose of a deleted piece goes with it, as its seams do.
       return techCardId && st.cardId === techCardId
-        ? rowsOf(st).map(toWire)
+        ? [...rowsOf(st), ...posesOf(st)].map(toWire)
         : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
     };
     const reconcileSeams = (rows: TechCardSeamWire[]) =>
@@ -2912,7 +2914,7 @@ export function PatternsField({
     const st = useSeamsStore.getState();
     const seams =
       techCardId && st.cardId === techCardId
-        ? rowsOf(st).map(toWire)
+        ? [...rowsOf(st), ...posesOf(st)].map(toWire)
         : ((cardRead?.seams ?? []) as TechCardSeamWire[]);
     const refs = [
       ...(cardRead?.colorways ?? []).flatMap((c) =>

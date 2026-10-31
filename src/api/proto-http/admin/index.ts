@@ -11337,13 +11337,18 @@ export type common_TechCardSeamStatus =
 // TechCardSeamKind is the shape of a seam: one edge to one edge, a sub-range of a longer edge, a
 // walk across several pieces (sleeve cap into a front + back armhole), a patch onto a face, or a
 // closure (zip / button front) that is NOT sewn shut.
+// POSE is NOT a seam: it is a piece placed by hand in a step (P8). side_a = the one anchor of the
+// moved piece with its placement in the host's frame (as a surface placement), side_b = the one
+// anchor of the host piece. status confirmed. Nothing that counts seams counts a pose; a pose
+// never changes a seam and a seam never moves a posed piece.
 export type common_TechCardSeamKind =
   | "TECH_CARD_SEAM_KIND_UNKNOWN"
   | "TECH_CARD_SEAM_KIND_EDGE"
   | "TECH_CARD_SEAM_KIND_PARTIAL"
   | "TECH_CARD_SEAM_KIND_COMPOSITE"
   | "TECH_CARD_SEAM_KIND_SURFACE"
-  | "TECH_CARD_SEAM_KIND_CLOSURE";
+  | "TECH_CARD_SEAM_KIND_CLOSURE"
+  | "TECH_CARD_SEAM_KIND_POSE";
 // TechCardSeamDirection is how the two sides walk against each other. REVERSED is the normal seam
 // (face-up pieces walk a shared seam oppositely); SAME when one side is a flipped instance. UNKNOWN
 // is legal on write: the reader then picks the pairing itself.

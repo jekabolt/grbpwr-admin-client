@@ -14,10 +14,28 @@ import { resolveSeamDecisions } from './resolve';
 import type { ResolveOptions, Resolved, StoredSeam } from './types';
 
 export * from './types';
-export { anchorOf, anchorOfRunId, newSeamKey, seamFromCandidate, storedKindOf } from './anchor';
+export {
+  anchorOf,
+  anchorOfRunId,
+  newSeamKey,
+  outlineAnchor,
+  poseOf,
+  poseRow,
+  seamFromCandidate,
+  storedKindOf,
+} from './anchor';
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';
-export { fromWire, seamsSig, toWire } from './wire';
+export {
+  POSE_KIND_WIRE,
+  fromWire,
+  isPoseWire,
+  poseFromWire,
+  poseKeysOfWire,
+  seamsSig,
+  splitWire,
+  toWire,
+} from './wire';
 export {
   TRANSFER,
   edgeMapOf,

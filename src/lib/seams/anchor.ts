@@ -7,6 +7,8 @@ import { contourSig, frameOf, runById, runSamples, type SeamRun } from './frame'
 import {
   SEAMS,
   type EdgeAnchor,
+  type SeamPlacement,
+  type StoredPose,
   type StoredSeam,
   type StoredSeamDirection,
   type StoredSeamKind,
@@ -121,6 +123,74 @@ export function seamFromCandidate(
     ...(o.by ? { createdBy: o.by, updatedBy: o.by } : {}),
     ...(o.at ? { createdAt: o.at, updatedAt: o.at } : {}),
   };
+}
+
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+
+/**
+ * The anchor of a piece's WHOLE outline (a pose row's side, P8): the sewing loop from its first
+ * point round to it again, perim share 1. Nothing resolves it as a run — it names the piece and
+ * passes the row validation (five samples in [0, 1], perim share in (0, 1], a length).
+ */
+export function outlineAnchor(
+  piece: PieceGeom,
+  grainDeg = 0,
+  placement?: SeamPlacement,
+): EdgeAnchor {
+  const f = frameOf(piece, grainDeg);
+  const ring = piece.rs.length ? [...piece.rs, piece.rs[0]] : [];
+  let len = 0;
+  for (let i = 1; i < ring.length; i++)
+    len += Math.hypot(ring[i][0] - ring[i - 1][0], ring[i][1] - ring[i - 1][1]);
+  const samples: [number, number][] = ring.length
+    ? runSamples(f, { pts: ring }).map(([u, v]) => [r(clamp01(u), 3), r(clamp01(v), 3)])
+    : [0, 0.25, 0.5, 0.75, 1].map(() => [0, 0]);
+  return {
+    piece: piece.pieceKey,
+    samples,
+    perimShare: 1,
+    lenMm: Math.max(0.1, r(piece.perimMm || len, 1)),
+    notches: piece.notchIdx.length,
+    turnDeg: 0,
+    range: [0, 1],
+    edgeHint: 'outline',
+    contourSig: contourSig(piece, f),
+    ...(placement ? { placement } : {}),
+  };
+}
+
+/**
+ * A pose row (P8): `piece` placed by hand in a step, `placement` = it in `host`'s frame as a surface
+ * placement is encoded. The server's rules: confirmed, one anchor per side, the placement on side A.
+ */
+export function poseRow(o: {
+  seamKey: string;
+  piece: PieceGeom;
+  host: PieceGeom;
+  placement: SeamPlacement;
+  grainDeg?: ReadonlyMap<string, number>;
+}): StoredPose {
+  return {
+    seamKey: o.seamKey,
+    status: 'confirmed',
+    kind: 'pose',
+    direction: 'unknown',
+    source: 'manual',
+    sideA: [outlineAnchor(o.piece, o.grainDeg?.get(o.piece.pieceKey) ?? 0, o.placement)],
+    sideB: [outlineAnchor(o.host, o.grainDeg?.get(o.host.pieceKey) ?? 0)],
+    anchoredSize: '',
+    note: '',
+  };
+}
+
+/** What a pose row says: the moved piece, its host, the placement in the host's frame. */
+export function poseOf(
+  row: StoredPose,
+): { piece: string; host: string; placement: SeamPlacement } | null {
+  const a = row.sideA[0];
+  const b = row.sideB[0];
+  if (!a?.placement || !b || !a.piece || !b.piece || a.piece === b.piece) return null;
+  return { piece: a.piece, host: b.piece, placement: a.placement };
 }
 
 /** Edge ids a stored side stands for, by its hints (diagnostics only — never for resolution). */

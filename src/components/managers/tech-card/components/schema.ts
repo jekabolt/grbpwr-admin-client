@@ -72,6 +72,7 @@ import {
 } from 'utils/decimal';
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
+import { poseKeysOfWire } from 'lib/seams/wire';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
 import {
   UNSET_PURPOSE,
@@ -1507,6 +1508,10 @@ const operationSchema = z
     outputUnitName: z.string().optional().default(''),
     // Seams this step sews, in order: card seam keys (TechCard.seams). Set by the step's picker.
     seamKeys: z.array(z.string()).default([]),
+    // The step's POSE rows (P8, a piece placed by hand): card seam keys of kind POSE. The wire
+    // keeps them in op.seamKeys with the seams; the form splits them off on read (no seam reader
+    // ever sees a pose key) and merges them back on save.
+    poseKeys: z.array(z.string()).default([]),
     // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
     // went with the break — the chip row was always the real answer.
     bomLineKeys: z.array(z.string()).default([]),
@@ -2589,6 +2594,7 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
 
 export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   const insert = techCard.techCard;
+  const poseKeySet = poseKeysOfWire(techCard.seams);
   // Resolve BOM line identities up front (§2.3) so downstream refs can be keyed by stable line_key.
   // A line saved before line_key existed has none and gets a fresh key on read (persists on next
   // save); a line that HAS one keeps it, whatever shape it is.
@@ -2835,7 +2841,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       inputKeys: (o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? []).filter(Boolean),
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
-      seamKeys: (o.seamKeys ?? []).filter(Boolean),
+      seamKeys: (o.seamKeys ?? []).filter((k) => !!k && !poseKeySet.has(k)),
+      poseKeys: (o.seamKeys ?? []).filter((k) => !!k && poseKeySet.has(k)),
       bomLineKeys: (o.bomLineKeys ?? []).filter((key) => !!key && bomSectionByKey.has(key.trim())),
       // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
       // тип на проводе, в форме и в БД — круговой рейс без округлений.
@@ -3942,7 +3949,12 @@ export function mapFormToTechCardInsert(
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
         // Carried through unchanged (dedup only): the server refuses a key the card does not hold.
-        seamKeys: [...new Set((o.seamKeys ?? []).map((k) => k.trim()).filter(Boolean))],
+        // The step's pose keys (P8) ride the same wire list, after its seams.
+        seamKeys: [
+          ...new Set(
+            [...(o.seamKeys ?? []), ...(o.poseKeys ?? [])].map((k) => k.trim()).filter(Boolean),
+          ),
+        ],
         bomLineKeys: opBomKeys,
         // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
         // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие

@@ -7,11 +7,11 @@ import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
-import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
+import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
-import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
+import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
 import { PAIR_INK, pairNo } from './palette';
@@ -49,6 +49,7 @@ import {
   spreadLabels,
   stepLayout,
   toPx,
+  type Box,
   type SeamSides,
   type StepLayout,
 } from './step-picture';
@@ -71,6 +72,7 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       inputKeys: op?.inputKeys,
       outputUnitKey: op?.outputUnitKey,
       seamKeys: op?.seamKeys,
+      poseKeys: op?.poseKeys,
       operationNumber: op?.operationNumber,
       assemblyBlockDetached: op?.assemblyBlockDetached,
       fullnessRatio: op?.fullnessRatio,
@@ -259,12 +261,24 @@ export function useSeamRows(): ReadonlyMap<string, StoredSeam> {
   );
 }
 
+/** The card's pose rows (P8, pieces placed by hand) by key, server and pending alike. */
+export function usePoseRows(): ReadonlyMap<string, StoredPose> {
+  const poses = useSeamsStore((s) => s.poses);
+  const posePending = useSeamsStore((s) => s.posePending);
+  return useMemo(
+    () => new Map(posesOf({ poses, posePending }).map((r) => [r.seamKey, r])),
+    [poses, posePending],
+  );
+}
+
 export type StepPictureOptions = {
   operations: readonly SceneOp[];
   index: number;
   pieceKeys: ReadonlySet<string>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   byKey?: ReadonlyMap<string, StoredSeam>;
+  /** The pose rows by key (P8): the steps' `poseKeys` name them. */
+  poses?: ReadonlyMap<string, StoredPose>;
   nameOf?: (pieceKey: string) => string;
   ready?: boolean;
   explode?: number;
@@ -304,6 +318,7 @@ export function stepPictureOfOp(
     pieceKeys,
     innerLines = new Map<string, Pt2[][]>(),
     byKey = new Map<string, StoredSeam>(),
+    poses,
     nameOf = (key: string) => key,
     ready = true,
     explode = STEP_TILE_EXPLODE,
@@ -316,8 +331,9 @@ export function stepPictureOfOp(
   }));
   const leaves = groups.map((group) => group.pieces);
   const keys = [...(active?.seamKeys ?? [])];
-  // Hand placements stored on this step's seams and the earlier ones': every view lays them.
-  const hands = stepHandsOf(ops, index, byKey);
+  // Hand placements stored on this step's seams and the earlier ones', and the pieces placed by
+  // hand (poses): every view lays them.
+  const hands = stepHandsOf(ops, index, byKey, poses);
   const ease = (() => {
     const ratio = Number.parseFloat(String(active?.fullnessRatio ?? '').replace(',', '.'));
     return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
@@ -487,6 +503,7 @@ export function useStepScene(index: number) {
     [geo?.pieces, cardName],
   );
   const byKey = useSeamRows();
+  const poses = usePoseRows();
   const ready = !!geo && geo.dep.status !== 'pending';
   const picture = useMemo(
     () =>
@@ -496,10 +513,11 @@ export function useStepScene(index: number) {
         pieceKeys,
         innerLines,
         byKey,
+        poses,
         nameOf: pieceName,
         ready,
       }),
-    [op, graph, geoms, ops, index, pieceKeys, innerLines, byKey, pieceName, ready],
+    [op, graph, geoms, ops, index, pieceKeys, innerLines, byKey, poses, pieceName, ready],
   );
 
   return {
@@ -508,6 +526,7 @@ export function useStepScene(index: number) {
     geo,
     pieceKeys,
     pieceName,
+    poses,
     ...picture,
   };
 }
@@ -667,6 +686,26 @@ export const spanMm = (line: readonly Pt2[]) => {
 export type PictureView = { k: number; x: number; y: number };
 
 /**
+ * What a picture is fitted to: every drawn piece but a stacked follower and a layer laid in or on
+ * another (their host carries them), and on the canvas its ghosts.
+ */
+export function pictureBounds(
+  layout: StepLayout,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  look: keyof typeof LOOK,
+): Box {
+  const layered = new Set(layout.layers.map(([layer]) => layer));
+  const laidIn = new Set(layout.pieceLayers.map(([key]) => key));
+  const stacked = new Set(layout.stacked.flatMap((group) => group.slice(1)));
+  const points = [...layout.T].flatMap(([key, transform]) => {
+    if (stacked.has(key) || layered.has(layout.input.get(key) ?? -1) || laidIn.has(key)) return [];
+    return (geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
+  });
+  if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
+  return points.length ? boxOf(points) : layout.bbox;
+}
+
+/**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
  * beside on the canvas); `nos` put a stored seam's number beside it; `names` (one per input) sit on
  * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge and inner line
@@ -691,6 +730,7 @@ export function StepPictureSvg({
   onHover,
   onPick,
   view,
+  bounds,
   className,
 }: {
   w: number;
@@ -713,21 +753,13 @@ export function StepPictureSvg({
   onPick?: (id: TargetId) => void;
   /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
   view?: PictureView;
+  /** Fit to this box instead of the picture's own (a piece dragged by hand keeps the frame). */
+  bounds?: Box;
   className?: string;
 }) {
   const L = LOOK[look];
-  const fitBounds = useMemo(() => {
-    const layered = new Set(layout.layers.map(([layer]) => layer));
-    const laidIn = new Set(layout.pieceLayers.map(([key]) => key));
-    const stacked = new Set(layout.stacked.flatMap((group) => group.slice(1)));
-    const points = [...layout.T].flatMap(([key, transform]) => {
-      if (stacked.has(key) || layered.has(layout.input.get(key) ?? -1) || laidIn.has(key))
-        return [];
-      return (geoms.get(key)?.rs ?? []).map((point) => apply(transform, point));
-    });
-    if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
-    return points.length ? boxOf(points) : layout.bbox;
-  }, [layout, geoms, look]);
+  const ownBounds = useMemo(() => pictureBounds(layout, geoms, look), [layout, geoms, look]);
+  const fitBounds = bounds ?? ownBounds;
   const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;

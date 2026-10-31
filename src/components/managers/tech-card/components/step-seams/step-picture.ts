@@ -31,6 +31,7 @@ import type { SeamPlacement } from 'lib/seams';
 import { isLayerCloth } from './seam-signals';
 import { handTargetsOf, laidHands, snapHand, type HandOn, type LaidHand } from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
+import { pinPoses, placementT, type PosePin } from './step-pose';
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 /** One seam as two lists of edges (a side may run over several edges). */
@@ -262,21 +263,13 @@ export function surfaceSeam(
       flip: false,
     };
   }
-  const th = (at.rotDeg * Math.PI) / 180;
-  const c = Math.cos(th);
-  const s = Math.sin(th);
-  const flip: Affine = at.flip ? [-1, 0, 0, 1, 2 * pb.x0, 0] : IDENTITY;
-  const M = compose(
-    translate(hb.x0 + at.xMm, hb.y0 + at.yMm),
-    compose([c, s, -s, c, 0, 0], compose(translate(-pb.x0, -pb.y0), flip)),
-  );
   return {
     a: `${host}#?`,
     b: `${part}#?`,
     score: 1,
     evidence: EVIDENCE,
     kind: 'surface',
-    surface: { host, part, mark: 'hand', T: compose(FLIP_Y, compose(M, FLIP_Y)), fit: 1 },
+    surface: { host, part, mark: 'hand', T: placementT(hg, pg, at), fit: 1 },
   };
 }
 
@@ -383,6 +376,14 @@ export type StepLayout = {
   pieceLayers: [string, string][];
   /** The hand placements laid, by piece: its own, or its twin's mirrored. */
   hand: Map<string, LaidHand>;
+  /**
+   * What each piece hangs on in the picture, [piece, what it hangs on]: its host inside its input,
+   * the partner of its hand placement, the piece of the input it was laid against (P8: a posed
+   * piece takes the pieces hung on it along; the picker drags the same group).
+   */
+  hung?: [string, string][];
+  /** The pieces a pose (P8) pinned, where their rows say. */
+  posed?: string[];
   /** Extent of every drawn piece and ghost, picture frame. */
   bbox: Box;
 };
@@ -737,6 +738,11 @@ export function stepLayout(
     garmentLayout?: boolean;
     /** A pocket bag or lining lies on its own piece inside a unit; the tech pack opts out. */
     bagsAsLayers?: boolean;
+    /**
+     * Pieces placed by hand (P8, pose rows): pinned LAST, each on its host where its row says, the
+     * pieces hung on it along — after every seam, explode and shelf, so nothing pulls it away.
+     */
+    pose?: ReadonlyMap<string, PosePin>;
   } = {},
 ): StepLayout {
   const input = inputIndex(leaves);
@@ -776,6 +782,8 @@ export function stepLayout(
   const apart: string[] = [];
   const outlineLayers: { piece: string; clearApart: string[] }[] = [];
   const pieceLayers: [string, string][] = [];
+  // What each piece hangs on inside its input: [piece, host] (`StepLayout.hung`).
+  const hungIn: [string, string][] = [];
   for (const i of ins) {
     const ks = keysOf(i);
     if (!ks.length) continue;
@@ -794,6 +802,10 @@ export function stepLayout(
           outlineLayers: [],
         }
       : layInput(ks, inner, geoms, raster, opts.bagsAsLayers !== false && !opts.garmentLayout);
+    if (seeded) {
+      for (const [k, h] of previous.hung ?? [])
+        if (ks.includes(k) && ks.includes(h)) hungIn.push([k, h]);
+    } else for (const [k, h] of laid.hostOf) hungIn.push([k, h]);
     // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
     // partner's run as the placement says (the bag a step before laid inside the back stays there).
     let laidApart = laid.apart;
@@ -924,8 +936,11 @@ export function stepLayout(
   let crossRuns: string[] = [];
   // Inputs laid on the input they are sewn to: [layer, partner].
   let layersOut: [number, number][] = [];
+  // An input laid against another → the piece there it was laid on (a seam's, a hand's partner).
+  const inputOn = new Map<number, string>();
   for (;;) {
     G.clear();
+    inputOn.clear();
     crossStacks = [];
     // Pairs drawn on each other on purpose: a layer on its identical twin, a part on its host, a
     // layer on its partner.
@@ -1317,6 +1332,7 @@ export function stepLayout(
           );
         } else continue;
         settle(j, M);
+        inputOn.set(j, j === ik ? p : k);
         held.add(ik);
         held.add(ip);
         onEachOther.add(pairKey(ik, ip));
@@ -1371,6 +1387,12 @@ export function stepLayout(
               const M = along(c, j, asLayer);
               if (!M) continue;
               settle(j, M);
+              inputOn.set(
+                j,
+                c.kind === 'surface' && c.surface
+                  ? c.surface.host
+                  : pieceKeyOf(inOf(c.a) === j ? c.b : c.a),
+              );
               cl.push(j);
               inCl.add(j);
               used.push(c);
@@ -2035,6 +2057,17 @@ export function stepLayout(
     }
   }
 
+  // What hangs on what, the whole picture: inside an input, by hand, an input on the piece it was
+  // laid against (each of its roots), a stacked layer on its leader.
+  const hung: [string, string][] = [...hungIn];
+  const hangs = new Set(hungIn.map(([k]) => k));
+  for (const [j, on] of inputOn)
+    for (const k of keysOf(j)) if (!hangs.has(k) && k !== on) hung.push([k, on]);
+  for (const [k, h] of hands) hung.push([k, h.target.partner]);
+  for (const group of stacksOut) for (const k of group.slice(1)) hung.push([k, group[0]]);
+  // Poses last (P8): every seam, explode and shelf has had its say.
+  const posed = opts.pose?.size ? pinPoses(T, opts.pose, geoms, hung).pinned : [];
+
   const bbox = boxOf([
     ...keys.flatMap((k) => worldOf(geoms.get(k)!, T.get(k)!)),
     ...ghosts.flatMap((g) => g.ring),
@@ -2050,6 +2083,8 @@ export function stepLayout(
     layers: layersOut,
     pieceLayers,
     hand: hands,
+    hung,
+    ...(posed.length ? { posed } : {}),
     bbox,
   };
 }

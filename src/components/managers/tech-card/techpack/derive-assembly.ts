@@ -52,6 +52,7 @@ import {
   frameOf,
   fromWire,
   resolveSeamDecisions,
+  poseKeysOfWire,
   runsOfPiece,
   SEAMS,
   type AnchorHit,
@@ -1036,11 +1037,16 @@ function bindSeams(
   return out;
 }
 
-type SeamCatalog = { byKey: ReadonlyMap<string, AsmSeam>; guessed: ReadonlyMap<number, AsmSeam[]> };
+type SeamCatalog = {
+  byKey: ReadonlyMap<string, AsmSeam>;
+  guessed: ReadonlyMap<number, AsmSeam[]>;
+  /** The card's pose row keys (P8): an op's key that names one is not a seam of the step. */
+  poses?: ReadonlySet<string>;
+};
 
-/** Seams of one step: the stored op.seamKeys, else the guess. */
+/** Seams of one step: the stored op.seamKeys (pose rows left out), else the guess. */
 export function seamsOfOp(op: common_TechCardOperation, card: SeamCatalog): AsmSeam[] {
-  const keys = op.seamKeys ?? [];
+  const keys = (op.seamKeys ?? []).filter((key) => !card.poses?.has(key));
   return keys.length
     ? keys.flatMap((key) => {
         const seam = card.byKey.get(key);
@@ -3060,6 +3066,7 @@ export function deriveAssembly(
   const catalog: SeamCatalog = {
     byKey: new Map(seams.map((seam) => [seam.key, seam])),
     guessed,
+    poses: poseKeysOfWire(resolvedInput.techCard.seams),
   };
   const bound = new Map(
     ops

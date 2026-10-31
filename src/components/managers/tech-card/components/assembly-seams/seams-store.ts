@@ -7,7 +7,10 @@
 //     facts signature — so a decision re-reads the graph the ASSEMBLY MAP, the pictograms and the
 //     doll draw;
 //   • the SEAMS review reads `resolved` (stale / orphan / applied rows) and `facts` (grain lines for
-//     the anchors, piece inputs for the POM role words) off the very read the graph came from.
+//     the anchors, piece inputs for the POM role words) off the very read the graph came from;
+//   • a POSE row (P8, a piece placed by hand in a step) rides the same table but is not a seam: the
+//     one split is `readWire` (lib/seams `splitWire`) — poses land in `poses` / `posePending`, read
+//     by `posesOf`, and never reach `server`, `rowsOf`, the resolver or the review.
 //
 // A store and not a context: the provider sits ABOVE the door that hydrates it (the door is a child
 // of the map, the map a child of the provider), and a context only flows down.
@@ -15,15 +18,19 @@
 import type { SeamDecisions, PieceGeom, SkeletonFacts } from 'lib/assembly-skeleton/types';
 import {
   decisionsFor,
-  fromWire,
   grainDegOf,
+  splitWire,
   type Resolved,
+  type StoredPose,
   type StoredSeam,
   type TechCardSeamWire,
 } from 'lib/seams';
 import { create } from 'zustand';
 
 export type PendingOp = { kind: 'upsert'; row: StoredSeam } | { kind: 'delete'; row?: StoredSeam };
+export type PosePendingOp =
+  | { kind: 'upsert'; row: StoredPose }
+  | { kind: 'delete'; row?: StoredPose };
 
 type SeamsState = {
   /** The card these rows belong to; another card resets the store. */
@@ -34,6 +41,10 @@ type SeamsState = {
   unreadable: number;
   /** Optimistic writes in flight, by seam key. */
   pending: Record<string, PendingOp>;
+  /** The pose rows of the last server list (P8) — never seams, never in `server`. */
+  poses: StoredPose[];
+  /** Optimistic pose writes in flight, by seam key. */
+  posePending: Record<string, PosePendingOp>;
   /** The server's refusal of the last write of a row, in its words, by seam key. */
   errors: Record<string, string>;
   /** The provider's verdict on the rows it read the graph with (null: no rows, or not read yet). */
@@ -50,6 +61,8 @@ const EMPTY: SeamsState = {
   server: [],
   unreadable: 0,
   pending: {},
+  poses: [],
+  posePending: {},
   errors: {},
   resolved: null,
   facts: null,
@@ -59,19 +72,31 @@ const EMPTY: SeamsState = {
 
 export const useSeamsStore = create<SeamsState>(() => EMPTY);
 
-/** Server rows with the optimistic writes laid over them, in server order, new rows last. */
-export function rowsOf(s: Pick<SeamsState, 'server' | 'pending'>): StoredSeam[] {
-  const out: StoredSeam[] = [];
+function overlay<T extends { seamKey: string }>(
+  server: readonly T[],
+  pending: Readonly<Record<string, { kind: 'upsert'; row: T } | { kind: 'delete' }>>,
+): T[] {
+  const out: T[] = [];
   const seen = new Set<string>();
-  for (const r of s.server) {
+  for (const r of server) {
     seen.add(r.seamKey);
-    const p = s.pending[r.seamKey];
+    const p = pending[r.seamKey];
     if (p?.kind === 'delete') continue;
     out.push(p?.kind === 'upsert' ? p.row : r);
   }
-  for (const [key, p] of Object.entries(s.pending))
+  for (const [key, p] of Object.entries(pending))
     if (p.kind === 'upsert' && !seen.has(key)) out.push(p.row);
   return out;
+}
+
+/** Server rows with the optimistic writes laid over them, in server order, new rows last. */
+export function rowsOf(s: Pick<SeamsState, 'server' | 'pending'>): StoredSeam[] {
+  return overlay(s.server, s.pending);
+}
+
+/** The pose rows (P8) with the optimistic pose writes laid over them — the seams' twin of `rowsOf`. */
+export function posesOf(s: Pick<SeamsState, 'poses' | 'posePending'>): StoredPose[] {
+  return overlay(s.poses, s.posePending);
 }
 
 /**
@@ -122,33 +147,36 @@ export function reuseKeys(rows: readonly StoredSeam[], have: readonly StoredSeam
   });
 }
 
-/** The card read's rows, readable ones only; how many were not. */
+/**
+ * The card read's rows: THE split of a stored list — seams (readable ones) in `rows`, pose rows in
+ * `poses`, how many were neither. Every list from the server enters the store through here.
+ */
 export function readWire(wire: readonly TechCardSeamWire[] | undefined): {
   rows: StoredSeam[];
+  poses: StoredPose[];
   unreadable: number;
 } {
-  const rows: StoredSeam[] = [];
-  let unreadable = 0;
-  for (const w of wire ?? []) {
-    const r = fromWire(w);
-    if (r) rows.push(r);
-    else unreadable += 1;
-  }
-  return { rows, unreadable };
+  const { seams, poses, unreadable } = splitWire(wire);
+  return { rows: seams, poses, unreadable };
 }
 
 /** The card read arrived (or the card changed): its rows become the server's list. */
 export function hydrateSeams(cardId: number | null, wire: readonly TechCardSeamWire[] | undefined) {
-  const { rows, unreadable } = readWire(wire);
+  const { rows, poses, unreadable } = readWire(wire);
   const s = useSeamsStore.getState();
   if (s.cardId !== cardId) {
-    useSeamsStore.setState({ ...EMPTY, cardId, server: rows, unreadable });
+    useSeamsStore.setState({ ...EMPTY, cardId, server: rows, poses, unreadable });
     return;
   }
   // Another list (a re-upload stamped rows stale, a colleague decided): the last verdict was read
   // on the old rows and must not vouch for the new ones until the provider re-reads.
   const changed = rowsSig(rows) !== rowsSig(s.server);
-  useSeamsStore.setState({ server: rows, unreadable, ...(changed ? { resolved: null } : {}) });
+  useSeamsStore.setState({
+    server: rows,
+    poses,
+    unreadable,
+    ...(changed ? { resolved: null } : {}),
+  });
 }
 
 export function resetSeams() {

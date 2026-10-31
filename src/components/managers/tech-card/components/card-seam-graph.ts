@@ -12,7 +12,7 @@ import type {
   SkeletonPieceInput,
 } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
-import { decisionsFor, fromWire, type StoredSeam } from 'lib/seams';
+import { decisionsFor, fromWire, splitWire, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { seamAssignmentInputOf } from './assembly-seams/seam-assignment-input';
 import {
@@ -191,6 +191,11 @@ export function seamRowsOfCard(techCard: common_TechCard): ReadonlyMap<string, S
     return row ? [row] : [];
   });
   return new Map(rows.map((row) => [row.seamKey, row]));
+}
+
+/** The card's pose rows (P8, pieces placed by hand in a step) by key — never seams. */
+export function poseRowsOfCard(techCard: common_TechCard): ReadonlyMap<string, StoredPose> {
+  return new Map(splitWire(techCard.seams).poses.map((row) => [row.seamKey, row]));
 }
 
 /**
