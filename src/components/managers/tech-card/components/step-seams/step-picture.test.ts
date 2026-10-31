@@ -1111,8 +1111,9 @@ describe('stepLayout on card 63: a hand placement beats the guess (the back pock
     const before: [number, boolean, Record<string, number[]>][] = [
       [100, false, { PCK_BACK_1L: [-8.3, 241.4, 1010, 1189.9], Back_L: [0, 396, 0, 1026.6] }],
       [70, false, { PCK_BACK_1R: [154.5, 404.2, 1010, 1189.9], Back_R: [0, 396, 0, 1026.6] }],
-      [160, true, { PCK_BACK_1L: [-9.5, 240.1, 1021.7, 1201.6], Back_L: [0, 396, 0, 1026.6] }],
-      [130, true, { PCK_BACK_1R: [155.8, 405.5, 1021.7, 1201.6], Back_R: [0, 396, 0, 1026.6] }],
+      // A whole unit lays its bag as a layer: on the back, hanging from its top, never opened out.
+      [160, true, { PCK_BACK_1L: [9.6, 259.3, 846.7, 1026.6], Back_L: [0, 396, 0, 1026.6] }],
+      [130, true, { PCK_BACK_1R: [136.6, 386.3, 846.7, 1026.6], Back_R: [0, 396, 0, 1026.6] }],
     ];
     for (const [op, whole, boxes] of before) {
       const s = stepOf(op, {}, whole);

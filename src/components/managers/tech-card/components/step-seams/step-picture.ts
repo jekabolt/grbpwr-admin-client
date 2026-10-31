@@ -11,6 +11,7 @@ import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly
 import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import {
+  intersectArea,
   pairOverlap,
   pieceKeyOf,
   pieceTilt,
@@ -19,12 +20,14 @@ import {
   runOf,
   sidewaysTrials,
   unionLayout,
+  unionRaster,
   type Raster,
   type RunPart,
 } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
+import { isLayerCloth } from './seam-signals';
 import { handTargetsOf, laidHands, snapHand, type HandOn, type LaidHand } from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 
@@ -567,6 +570,7 @@ function layInput(
   inner: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
   raster: { rasterMm?: number },
+  layers: boolean,
 ): {
   T: Map<string, Affine>;
   stacked: string[][];
@@ -579,6 +583,7 @@ function layInput(
     overlapMax: TOUCH,
     uprightMax: UPRIGHT,
     pushOffMax: PUSH * PUSH_MAX,
+    isLayer: layers ? (k) => isLayerCloth(k, geoms) : undefined,
   });
   const T = new Map<string, Affine>(L.placements.map((p) => [p.pieceKey, p.T]));
   const left = keys.filter((k) => !T.has(k));
@@ -694,6 +699,8 @@ export function stepLayout(
     honorRanges?: boolean;
     /** Opt into cumulative whole-garment packing; ordinary editor tiles keep legacy semantics. */
     garmentLayout?: boolean;
+    /** A pocket bag or lining lies on its own piece inside a unit; the tech pack opts out. */
+    bagsAsLayers?: boolean;
   } = {},
 ): StepLayout {
   const input = inputIndex(leaves);
@@ -748,7 +755,7 @@ export function stepLayout(
           apart: previous.apart.filter((key) => ks.includes(key)),
           hostOf: new Map<string, string>(),
         }
-      : layInput(ks, inner, geoms, raster);
+      : layInput(ks, inner, geoms, raster, opts.bagsAsLayers !== false && !opts.garmentLayout);
     // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
     // partner's run as the placement says (the bag a step before laid inside the back stays there).
     let laidApart = laid.apart;
@@ -912,13 +919,12 @@ export function stepLayout(
     };
     /** The share of input `j` laid by `M` that lies on laid input `i`: all its pieces, not one. */
     const shareOn = (j: number, M: Affine, i: number) => {
-      const theirs = placedRasters.get(i) ?? [];
+      // Their pieces as one cover: a bag lying on its back must not count that back twice.
+      const theirs = unionRaster(placedRasters.get(i) ?? []);
       let on = 0;
       let all = 0;
       for (const r of rastersOf(j, M)) {
-        let o = 0;
-        for (const p of theirs) o += pairOverlap(r, p) * Math.min(r.area, p.area);
-        on += Math.min(o, r.area);
+        if (theirs) on += intersectArea(r, theirs);
         all += r.area;
       }
       return all > 0 ? on / all : 0;

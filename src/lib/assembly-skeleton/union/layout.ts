@@ -52,6 +52,12 @@ export type UnionOptions = {
    * share of the host's extent (0.24 = twelve steps of 2 %). Absent = such a link is refused.
    */
   pushOffMax?: number;
+  /**
+   * A piece that lies on its partner as a layer (a pocket bag on the front it is sewn to, a lining):
+   * laid straight on it along the seam, never mirrored open across it, and not counted against
+   * its host or the pieces that come after. Absent = none.
+   */
+  isLayer?: (pieceKey: string) => boolean;
 };
 
 /** How far a placement leans a piece from its own up, mirrored or not. */
@@ -276,7 +282,7 @@ type Trial = {
   T: Affine;
   overlap: number;
   endErr: number;
-  mode: 'edge' | 'stack' | 'hung' | 'surface' | 'run';
+  mode: 'edge' | 'stack' | 'hung' | 'surface' | 'run' | 'layer';
   via?: EdgeId;
   /** A surface part laid by its placement mark — not a guess. */
   exact?: boolean;
@@ -442,6 +448,8 @@ export function unionLayout(
     const a1 = A[A.length - 1];
     const B = l.to.pts;
     const stack = isIdentical(l.seam, G.get(l.fromKey)!, l.toKey);
+    const layer =
+      !stack && !run && !!opts.isLayer?.(l.toKey) && !opts.isLayer(l.fromKey) && !!l.from;
     const fromLeader = leaderOf.get(l.fromKey) ?? l.fromKey;
     // A piece set into a run (a sleeve into an opened armhole) points away from what it is sewn
     // to: the run's normal is its way up, whatever the page says.
@@ -471,6 +479,7 @@ export function unionLayout(
       for (const mir of [false, true]) {
         const q0 = rev ? B[B.length - 1] : B[0];
         const q1 = rev ? B[0] : B[B.length - 1];
+        if (layer && mir) continue;
         let T = rigid(a0, a1, q0, q1, mir);
         if (run) {
           // A cap on an armhole run hangs from its middle, not from one end of it.
@@ -496,6 +505,12 @@ export function unionLayout(
           const lr = rasters.get(fromLeader);
           overlap = lr ? pairOverlap(r, lr) : 0;
           score = -overlap * 1000 + endErr;
+        } else if (layer) {
+          // A layer lies ON its host along the seam (the bag on the front, its own side up): the
+          // option that lies most on the host, clear of everything else.
+          const hr = rasters.get(fromLeader);
+          overlap = maxOverlap(r, fromLeader);
+          score = overlap * 1000 - (hr ? pairOverlap(r, hr) : 0) * 100 + endErr;
         } else {
           overlap = maxOverlap(r);
           // Mirror costs 5 points of overlap: pieces sewn and opened lie FACE UP side by side, so a
@@ -504,7 +519,13 @@ export function unionLayout(
         }
         if (score < bestScore) {
           bestScore = score;
-          best = { T, overlap, endErr, mode: stack ? 'stack' : 'edge', via: l.from.id };
+          best = {
+            T,
+            overlap,
+            endErr,
+            mode: stack ? 'stack' : layer ? 'layer' : 'edge',
+            via: l.from.id,
+          };
         }
       }
     if (!best && away && !stack) {
@@ -587,6 +608,10 @@ export function unionLayout(
       const leader = leaderOf.get(l.fromKey) ?? l.fromKey;
       leaderOf.set(k, leader);
       stacks.set(leader, [...(stacks.get(leader) ?? [leader]), k]);
+      put(k, t.T, { attachedVia: t.via }, false);
+      return;
+    }
+    if (t.mode === 'layer') {
       put(k, t.T, { attachedVia: t.via }, false);
       return;
     }

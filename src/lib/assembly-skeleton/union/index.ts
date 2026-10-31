@@ -12,5 +12,5 @@ export {
   type UnionOptions,
 } from './layout';
 export { unionPicture, type UnionPicture, type UnionShape } from './picture';
-export { rasterize, intersectArea, pairOverlap, type Raster } from './overlap';
+export { rasterize, intersectArea, pairOverlap, unionRaster, type Raster } from './overlap';
 export { unitLeaves, unitPictures, type UnitStep } from './unit-pictures';

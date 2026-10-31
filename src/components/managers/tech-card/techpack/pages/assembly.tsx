@@ -3331,6 +3331,7 @@ export function editorOperationPictures(
               rasterMm: STEP_TILE_RASTER_MM,
               joinedOverlap: 0,
               honorRanges: false,
+              bagsAsLayers: false,
             },
       );
     operations.forEach((operation, index) => {

@@ -200,3 +200,45 @@ describe('identical layers', () => {
     }
   });
 });
+
+describe('a layer on its host', () => {
+  // A front and a bag sewn to its top edge: opened out the bag would be mirrored over the seam.
+  const front = piece(
+    'F',
+    [
+      [0, 0],
+      [200, 0],
+      [200, 300],
+      [0, 300],
+    ],
+    [0, 1, 2, 3],
+  );
+  const bag = piece(
+    'BAG',
+    [
+      [0, 0],
+      [150, 0],
+      [200, 120],
+      [0, 120],
+    ],
+    [0, 1, 2, 3],
+  );
+  const geoms = new Map([
+    ['F', front],
+    ['BAG', bag],
+  ]);
+  const row = seam('F#2', 'BAG#2');
+
+  it('lies on the front along the seam, its own side up, never mirrored', () => {
+    const L = unionLayout(['F', 'BAG'], [row], geoms, {
+      rasterMm: 2,
+      overlapMax: 0.01,
+      isLayer: (k) => k === 'BAG',
+    });
+    const b = L.placements.find((p) => p.pieceKey === 'BAG')!;
+    expect(b.mirrored).toBe(false);
+    const ys = bag.rs.map((p) => apply(b.T, p)[1]);
+    expect(Math.max(...ys)).toBeCloseTo(300, 0);
+    expect(Math.min(...ys)).toBeGreaterThan(150);
+  });
+});
