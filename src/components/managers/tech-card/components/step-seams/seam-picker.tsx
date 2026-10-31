@@ -776,6 +776,7 @@ export function SeamPickerBody({
                   pad={phone ? 28 : 64}
                   look='canvas'
                   layout={poseShown}
+                  layers={shownPoseLayers}
                   geoms={geoms}
                   innerLines={innerLines}
                   ghostName={nameOf}
@@ -814,6 +815,7 @@ export function SeamPickerBody({
                 pad={phone ? 28 : 64}
                 look='canvas'
                 layout={canvasLayout}
+                layers={stepResult?.layers}
                 geoms={geoms}
                 innerLines={innerLines}
                 marks={marks}
