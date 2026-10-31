@@ -1799,6 +1799,26 @@ export type TechCardSeamSource =
   | "TECH_CARD_SEAM_SOURCE_ORDER"
   | "TECH_CARD_SEAM_SOURCE_MANUAL"
   | "TECH_CARD_SEAM_SOURCE_AI";
+// TechCardSeamDecisionAction is what the technologist did when closing one join step of the seam
+// picker / quiz with the engine's guess in front of them.
+export type TechCardSeamDecisionAction =
+  | "TECH_CARD_SEAM_DECISION_ACTION_UNKNOWN"
+  // Saved the engine's guess unchanged.
+  | "TECH_CARD_SEAM_DECISION_ACTION_ACCEPT"
+  // Saved a pick of their own instead of the guess.
+  | "TECH_CARD_SEAM_DECISION_ACTION_OWN"
+  // Skipped the step; no seam row was written (seam_key empty).
+  | "TECH_CARD_SEAM_DECISION_ACTION_SKIP"
+  // Rejected a proposal (the rejected seam row is seam_key).
+  | "TECH_CARD_SEAM_DECISION_ACTION_REFUSE";
+// TechCardSeamGuessTier is the confidence tier of the guess the UI showed for the step.
+export type TechCardSeamGuessTier =
+  // The client had no tier to report.
+  | "TECH_CARD_SEAM_GUESS_TIER_UNKNOWN"
+  | "TECH_CARD_SEAM_GUESS_TIER_CONFIDENT"
+  | "TECH_CARD_SEAM_GUESS_TIER_GUESS"
+  // The engine had no guess for the step.
+  | "TECH_CARD_SEAM_GUESS_TIER_NONE";
 // TechCardMarkerPieceSetStatus compares a раскладка's stored fingerprint of the card's cut-piece set
 // against the set the card carries TODAY (Ф3.6).
 // Three states and not a bool, because two are not enough: a marker taken before Ф3 carries no
@@ -4655,6 +4675,28 @@ export type TechCardSeamPlacement = {
   yMm: number | undefined;
   rotDeg: number | undefined;
   flip: boolean | undefined;
+};
+
+// TechCardSeamDecision is ONE immutable record of what the technologist did with a seam guess
+// (AddTechCardSeamDecisions). Append-only, apart from the seam row itself: tech_card_seam keeps
+// only the outcome (accept and own both land as source=manual, a skip leaves no row), this log keeps
+// the decision so the guess can be measured.
+export type TechCardSeamDecision = {
+  // The step: operation_number of the card's operation; 0 = the card-level seam review (no step).
+  operationNumber: number | undefined;
+  action: TechCardSeamDecisionAction | undefined;
+  // TechCardSeam.seam_key of the row written (accept / own) or rejected (refuse); empty on skip.
+  seamKey: string | undefined;
+  // Tier of the guess shown; UNKNOWN when the client has none.
+  tier: TechCardSeamGuessTier | undefined;
+  // The proposal shown, as client-built JSON ({"a":[{piece,k,len}],"b":[…]}), ≤ 8 KB; may be empty.
+  shown: string | undefined;
+  // Client git sha / ranker version, ≤ 40 chars.
+  clientVersion: string | undefined;
+  // OUTPUT ONLY (ignored on write).
+  id: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.

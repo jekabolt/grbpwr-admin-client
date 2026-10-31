@@ -14,6 +14,7 @@ import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
 import { seamOfSides } from './step-picture';
+import { recordSeamDecision } from './seam-decisions';
 import { useAttachStepSeam } from './step-seams-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
@@ -95,10 +96,19 @@ export function StepSeamsRow({ index }: { index: number }) {
       );
       if (!row) return;
       setBusy(true);
-      await attach(row);
+      const key = await attach(row);
       setBusy(false);
+      if (key && opNumber)
+        recordSeamDecision({
+          cardId: ctx.cardId,
+          operationNumber: opNumber,
+          action: 'accept',
+          seamKey: key,
+          tier: suggestion.confident ? 'confident' : 'guess',
+          shown: suggestion,
+        });
     },
-    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach],
+    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach, opNumber],
   );
 
   if (!ctx || !hasMultiplePieces) return null;
@@ -210,6 +220,7 @@ export function SeamTile({
   current,
   status,
   emptyLabel,
+  caption,
   ...rest
 }: {
   /** The seam's number on the step — the one the picker shows beside it. */
@@ -226,6 +237,8 @@ export function SeamTile({
   current?: boolean;
   status?: 'done' | 'skipped';
   emptyLabel?: string;
+  /** A word under the pieces: «pick» on a step with no guess, chosen by hand. */
+  caption?: string;
   'data-step-seam'?: string;
 }) {
   const ids = marks.map((m) => m.id).join(',');
@@ -240,6 +253,7 @@ export function SeamTile({
     scene.geoms,
     STEP_TILE_EXPLODE,
     STEP_TILE_RASTER_MM,
+    scene.hands,
   );
   return (
     <span
@@ -303,6 +317,11 @@ export function SeamTile({
             aria-label='remove'
           />
         </span>
+      )}
+      {caption && (
+        <Text size='nano' variant='label' component='span' className='absolute bottom-0.5 left-1'>
+          {caption}
+        </Text>
       )}
       {status === 'done' && (
         <Text size='nano' component='span' className='absolute right-1 bottom-0.5'>

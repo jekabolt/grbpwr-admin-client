@@ -1,0 +1,428 @@
+{
+  "joins": [
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["FLP_L"]
+      },
+      "b": {
+        "edge": "slit",
+        "pieces": ["SLV_L"]
+      },
+      "op": 30,
+      "why": "placket strip onto sleeve slit",
+      "conf": "medium",
+      "relation": "surface"
+    },
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["FLP_R"]
+      },
+      "b": {
+        "edge": "slit",
+        "pieces": ["SLV_R"]
+      },
+      "op": 90,
+      "why": "placket strip onto sleeve slit",
+      "conf": "medium",
+      "relation": "surface"
+    },
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["FLP_R_MAIN"]
+      },
+      "b": {
+        "edge": "slit",
+        "pieces": ["SLV_R", "FLP_R"]
+      },
+      "op": 260,
+      "why": "overlap placket onto sleeve slit",
+      "conf": "medium",
+      "relation": "surface"
+    },
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["FLP_L_MAIN"]
+      },
+      "b": {
+        "edge": "slit",
+        "pieces": ["SLV_L", "FLP_L"]
+      },
+      "op": 380,
+      "why": "overlap placket onto sleeve slit",
+      "conf": "medium",
+      "relation": "surface"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["BP_U"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["BP_MAIN"]
+      },
+      "op": 470,
+      "why": "yoke to back panel",
+      "conf": "medium",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["BP_U_1"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["BP_U", "BP_MAIN"]
+      },
+      "op": 490,
+      "why": "second yoke piece to back",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "top",
+        "pieces": ["PCK_L_BTTM"]
+      },
+      "b": {
+        "edge": "hem",
+        "pieces": ["P_L_MAIN"]
+      },
+      "op": 540,
+      "why": "lower panel to front hem",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["P_L_U"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["PCK_L_MAIN"]
+      },
+      "op": 570,
+      "why": "upper front to panel",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["P_R_U"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["PCK_R_MAIN"]
+      },
+      "op": 610,
+      "why": "upper front to panel",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "top",
+        "pieces": ["PCK_R_BTTM"]
+      },
+      "b": {
+        "edge": "hem",
+        "pieces": ["P_R_MAIN"]
+      },
+      "op": 630,
+      "why": "lower panel to front hem",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["P_L_U", "PCK_L_MAIN"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["P_L_MAIN", "PCK_L_BTTM"]
+      },
+      "op": 660,
+      "why": "upper front unit to lower front unit",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["PLCK_L"]
+      },
+      "b": {
+        "edge": "front_edge",
+        "pieces": ["P_L_U", "PCK_L_MAIN", "P_L_MAIN", "PCK_L_BTTM"]
+      },
+      "op": 720,
+      "why": "placket to front edge",
+      "conf": "high",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["P_R_U", "PCK_R_MAIN"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["P_R_MAIN", "PCK_R_BTTM"]
+      },
+      "op": 770,
+      "why": "upper right unit to lower right unit",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "long",
+        "pieces": ["PLCK_R"]
+      },
+      "b": {
+        "edge": "front_edge",
+        "pieces": ["P_R_U", "PCK_R_MAIN", "P_R_MAIN", "PCK_R_BTTM"]
+      },
+      "op": 830,
+      "why": "placket to front edge",
+      "conf": "high",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "curved",
+        "pieces": ["clr_main"]
+      },
+      "b": {
+        "edge": "curved",
+        "pieces": ["clr_main_2"]
+      },
+      "op": 150,
+      "why": "collar pieces joined",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "curved",
+        "pieces": ["CLR_SECOND"]
+      },
+      "b": {
+        "edge": "curved",
+        "pieces": ["CLR_SECOND_2"]
+      },
+      "op": 200,
+      "why": "collar pieces joined",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "curved",
+        "pieces": ["clr_main", "clr_main_2"]
+      },
+      "b": {
+        "edge": "curved",
+        "pieces": ["CLR_SECOND", "CLR_SECOND_2"]
+      },
+      "op": 870,
+      "why": "collar leaf to collar leaf",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "top",
+        "pieces": ["nck"]
+      },
+      "b": {
+        "edge": "curved",
+        "pieces": ["clr_main", "clr_main_2", "CLR_SECOND", "CLR_SECOND_2"]
+      },
+      "op": 910,
+      "why": "stand to collar",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "top",
+        "pieces": ["nck_2"]
+      },
+      "b": {
+        "edge": "top",
+        "pieces": ["nck"]
+      },
+      "op": 940,
+      "why": "second stand piece to first",
+      "conf": "low",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "armhole",
+        "pieces": ["SLV_L", "SLV_R"]
+      },
+      "b": {
+        "edge": "armhole",
+        "pieces": ["BP_MAIN", "P_L_MAIN", "P_R_MAIN"]
+      },
+      "op": 1030,
+      "why": "sleeve head into armhole",
+      "conf": "medium",
+      "relation": "boundary"
+    },
+    {
+      "a": {
+        "edge": "bottom",
+        "pieces": ["nck_2"]
+      },
+      "b": {
+        "edge": "neckline",
+        "pieces": ["BP_U", "BP_U_1", "P_L_U", "P_R_U"]
+      },
+      "op": 1060,
+      "why": "stand bottom to neckline",
+      "conf": "medium",
+      "relation": "boundary"
+    }
+  ],
+  "roles": [
+    {
+      "why": "small strip at sleeve slit, left sleeve",
+      "conf": "low",
+      "hand": "L",
+      "role": "placket",
+      "piece": "FLP_L"
+    },
+    {
+      "why": "small strip at sleeve slit, right sleeve",
+      "conf": "low",
+      "hand": "R",
+      "role": "placket",
+      "piece": "FLP_R"
+    },
+    {
+      "why": "sleeve placket overlap with buttonhole, left",
+      "conf": "low",
+      "hand": "L",
+      "role": "placket",
+      "piece": "FLP_L_MAIN"
+    },
+    {
+      "why": "sleeve placket overlap with buttonhole, right",
+      "conf": "low",
+      "hand": "R",
+      "role": "placket",
+      "piece": "FLP_R_MAIN"
+    },
+    {
+      "why": "upper back piece with neck curve, shoulder",
+      "conf": "low",
+      "hand": "",
+      "role": "yoke",
+      "piece": "BP_U"
+    },
+    {
+      "why": "upper back piece with neck curve, shoulder",
+      "conf": "low",
+      "hand": "",
+      "role": "yoke",
+      "piece": "BP_U_1"
+    },
+    {
+      "why": "upper front piece, front yoke",
+      "conf": "low",
+      "hand": "L",
+      "role": "yoke",
+      "piece": "P_L_U"
+    },
+    {
+      "why": "upper front piece, front yoke",
+      "conf": "low",
+      "hand": "R",
+      "role": "yoke",
+      "piece": "P_R_U"
+    },
+    {
+      "why": "collar leaf",
+      "conf": "low",
+      "hand": "",
+      "role": "collar",
+      "piece": "clr_main"
+    },
+    {
+      "why": "collar leaf",
+      "conf": "low",
+      "hand": "",
+      "role": "collar",
+      "piece": "clr_main_2"
+    },
+    {
+      "why": "collar leaf, under side",
+      "conf": "low",
+      "hand": "",
+      "role": "collar",
+      "piece": "CLR_SECOND"
+    },
+    {
+      "why": "collar leaf, under side",
+      "conf": "low",
+      "hand": "",
+      "role": "collar",
+      "piece": "CLR_SECOND_2"
+    },
+    {
+      "why": "front-shaped piece, lower-front panel lining, not a pocket",
+      "conf": "low",
+      "hand": "L",
+      "role": "other",
+      "piece": "PCK_L_MAIN"
+    },
+    {
+      "why": "front-shaped piece, lower-front panel lining, not a pocket",
+      "conf": "low",
+      "hand": "R",
+      "role": "other",
+      "piece": "PCK_R_MAIN"
+    },
+    {
+      "why": "rectangular lower panel piece",
+      "conf": "low",
+      "hand": "L",
+      "role": "other",
+      "piece": "PCK_L_BTTM"
+    },
+    {
+      "why": "rectangular lower panel piece",
+      "conf": "low",
+      "hand": "R",
+      "role": "other",
+      "piece": "PCK_R_BTTM"
+    },
+    {
+      "why": "long front placket strip",
+      "conf": "low",
+      "hand": "L",
+      "role": "placket",
+      "piece": "PLCK_L"
+    },
+    {
+      "why": "long front placket strip",
+      "conf": "low",
+      "hand": "R",
+      "role": "placket",
+      "piece": "PLCK_R"
+    }
+  ],
+  "not_inferred": ["op:970", "op:980", "piece:SLV_L", "piece:SLV_R", "piece:nck", "piece:nck_2"],
+  "schema_version": 1
+}

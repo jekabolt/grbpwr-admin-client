@@ -13,6 +13,7 @@ import { adminService } from 'api/api';
 import { TechCardImportReport } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
+import { wakeSeamHints } from 'lib/seam-hints/wake';
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -151,6 +152,8 @@ export function TechCardImport() {
         setRefusal('the import finished but named no card');
         return;
       }
+      // An imported card gets its roles and joins map by itself (§5a).
+      wakeSeamHints(id);
       // The card opening is the receipt.
       navigate(`/tech-cards/${id}`);
     },

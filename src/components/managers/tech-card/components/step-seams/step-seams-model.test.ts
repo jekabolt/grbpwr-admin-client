@@ -33,6 +33,7 @@ import {
   suggestStepPair,
   suggestStepPairs,
   suggestStepSurface,
+  suggestStepSurfaces,
   suggestionWords,
   surfaceRow,
   targetsLen,
@@ -261,6 +262,25 @@ describe('suggestPair', () => {
     const s = suggestPair([{ pieces: ['FP'] }, { pieces: ['BP'] }], geoms, new Set(), null)!;
     expect(s.a).toEqual(['FP#0']);
     expect(s.b).toEqual(['BP#3']);
+  });
+  it('does not give a layer tie-break to a loose twinOf match', () => {
+    const a = shaped('A', 'A', [
+      { len: 100, turn: 20 },
+      { len: 110, turn: -30, notches: [20, 70] },
+      { len: 50 },
+    ]);
+    const b = shaped('B', 'B', [
+      { len: 100, turn: 20 },
+      { len: 110, turn: -30, notches: [20, 70] },
+      { len: 60 },
+    ]);
+    const geoms = new Map([
+      ['A', { ...a, twinOf: [{ key: 'B', kind: 'identical' }] } as PieceGeom],
+      ['B', { ...b, twinOf: [{ key: 'A', kind: 'identical' }] } as PieceGeom],
+    ]);
+    expect(
+      suggestPair([{ pieces: ['A'] }, { pieces: ['B'] }], geoms, new Set(), null),
+    ).toMatchObject({ a: ['A#1'], b: ['B#1'] });
   });
 });
 
@@ -563,7 +583,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
 
   it('400: the collar stand meets the neckline by its notches; the front folds and the back pleat stay out', () => {
     const s = suggest(400)!;
-    expect(s.a).toEqual(['CLR_1#6']);
+    expect(s.a).toEqual(['CLR_1#6', 'CLR#6']);
     expect(s.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
     // Edge to edge the neckline is 579 mm against 439 — a quarter of it is two 35 mm fold-backs
     // and a 70 mm box pleat between notches; sewn, the two sides are the same length.
@@ -572,10 +592,14 @@ describe('card 83: chains across the seams earlier steps made', () => {
     expect(targetsLen(s.b, geoms, () => 0)).toBeCloseTo(579.3, 0);
   });
 
-  it('50: identical collar layers are sewn along their outer edge, the neck edge left for the body', () => {
-    expect(suggest(50)).toMatchObject({ a: ['CLR_1#2'], b: ['CLR#2'] });
+  it('50: matching collar notches beat the designated-layer tie-break', () => {
+    expect(geoms.get('CLR_1')?.twinOf).toContainEqual({ key: 'CLR', kind: 'identical' });
+    expect(geoms.get('CLR_1')?.edges.find((edge) => edge.id === 'CLR_1#6')?.notchesMm).toHaveLength(
+      5,
+    );
+    expect(suggest(50)).toMatchObject({ a: ['CLR_1#6'], b: ['CLR#6'] });
     expect(sewnBeforeStep(ops, at(130), keys, geoms)).toMatchObject([
-      { a: ['CLR_1#2'], b: ['CLR#2'], layer: true },
+      { a: ['CLR_1#6'], b: ['CLR#6'], layer: true },
     ]);
   });
 
@@ -658,7 +682,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
       null,
       rows,
     )!;
-    expect(neck.a).toEqual(['CLR_1#6']);
+    expect(neck.a).toEqual(['CLR_1#6', 'CLR#6']);
     expect(neck.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
   });
 
@@ -720,6 +744,15 @@ describe('card 77: both sleeves on their armholes, one proposal per side', () =>
       expect(sleeves).toHaveLength(1);
     }
   });
+
+  it('740: cold surface guess puts the loose left flap on the sleeve slit', () => {
+    expect(suggestStepSurface(ops, at(740), keys, geoms)).toEqual({
+      host: 'SLV_L',
+      inner: 0,
+      part: 'FLP_L',
+      confident: false,
+    });
+  });
 });
 
 describe('card 6: layered seams keep their structural edge', () => {
@@ -779,10 +812,124 @@ describe('card 6: layered seams keep their structural edge', () => {
     expect(after.offset).toBeCloseTo(-before.offset, 5);
   });
 
+  it('380: keeps the stored-mirror rule for the left sleeve too', () => {
+    const suggested = surface(380)!;
+    expect(suggested).toMatchObject({
+      host: 'SLV_L',
+      inner: 0,
+      part: 'FLP_L_MAIN',
+      confident: false,
+    });
+    expect(suggested.place).toBeDefined();
+  });
+
+  it('assigns two cold flaps to different sleeve slits by hand', () => {
+    const flapL = shaped('FLP_L', 'FLP_L', [{ len: 150 }, { len: 40 }], 'L');
+    const flapR = shaped('FLP_R', 'FLP_R', [{ len: 150 }, { len: 40 }], 'R');
+    const sleeveL = shaped('SLV_L', 'SLV_L', [{ len: 400 }, { len: 300 }], 'L');
+    const sleeveR = shaped('SLV_R', 'SLV_R', [{ len: 400 }, { len: 300 }], 'R');
+    sleeveL.marks = [
+      {
+        id: 'SLV_L@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    sleeveR.marks = [
+      {
+        id: 'SLV_R@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    const coldGeoms = new Map([
+      ['FLP_L', flapL],
+      ['SLV_R', sleeveR],
+      ['FLP_R', flapR],
+      ['SLV_L', sleeveL],
+    ]);
+    expect(
+      suggestStepSurfaces(
+        [{ inputKeys: ['FLP_L', 'SLV_R', 'FLP_R', 'SLV_L'] }],
+        0,
+        new Set(coldGeoms.keys()),
+        coldGeoms,
+      ),
+    ).toEqual([
+      { host: 'SLV_R', inner: 0, part: 'FLP_R', confident: false },
+      { host: 'SLV_L', inner: 0, part: 'FLP_L', confident: false },
+    ]);
+  });
+
+  it('offers the other flap after the first cold surface is stored on this step', () => {
+    const flap = shaped('FLP_L', 'FLP_L', [{ len: 150 }, { len: 40 }], 'L');
+    const other = shaped('FLP_L_MAIN', 'FLP_L_MAIN', [{ len: 150 }, { len: 40 }], 'L');
+    const sleeve = shaped('SLV_L', 'SLV_L', [{ len: 400 }, { len: 300 }], 'L');
+    sleeve.marks = [
+      {
+        id: 'SLV_L@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    const coldGeoms = new Map([
+      ['FLP_L', flap],
+      ['FLP_L_MAIN', other],
+      ['SLV_L', sleeve],
+    ]);
+    const first = surfaceRow(
+      {
+        geom: sleeve,
+        k: 0,
+        line: [
+          [10, -10],
+          [10, -160],
+        ],
+        grainDeg: 0,
+      },
+      storedSeam('part', 'FLP_L#0', 'SLV_L#0').sideA,
+      undefined,
+      'first',
+    )!;
+    expect(
+      suggestStepSurface(
+        [{ inputKeys: ['FLP_L', 'FLP_L_MAIN', 'SLV_L'], seamKeys: ['first'] }],
+        0,
+        new Set(coldGeoms.keys()),
+        coldGeoms,
+        new Map([['first', first]]),
+      ),
+    ).toMatchObject({ host: 'SLV_L', inner: 0, part: 'FLP_L_MAIN' });
+  });
+
   it('finds the second placket when the first placket and host remain separate inputs', () => {
     const ops = [
-      { ...CARD6_OPS[0], outputUnitKey: '' },
-      { ...CARD6_OPS[3], inputKeys: ['FLP_R_MAIN', 'FLP_R', 'SLV_R'] },
+      { ...CARD6_OPS[card6Step(90)], outputUnitKey: '' },
+      {
+        ...CARD6_OPS[card6Step(260)],
+        inputKeys: ['FLP_R_MAIN', 'FLP_R', 'SLV_R'],
+      },
     ];
     expect(suggestStepSurface(ops, 1, CARD6_PIECE_KEYS, geoms, CARD6_SEAMS)).toMatchObject({
       host: 'SLV_R',
@@ -821,6 +968,8 @@ describe('card 6: layered seams keep their structural edge', () => {
       aLen: expect.closeTo(421, 1),
       bLen: expect.closeTo(420.9, 1),
     });
+    // The two collar layers lie on top of each other: the stacked side runs 421, not 842.
+    expect(targetsLen(proposal(870)!.a, geoms, () => 0)).toBeCloseTo(421, 0);
   });
 
   it('940: the second stand layer stacks on its twin over the collar seam', () => {
@@ -830,6 +979,25 @@ describe('card 6: layered seams keep their structural edge', () => {
       aLen: expect.closeTo(482.6, 1),
       bLen: expect.closeTo(482.6, 1),
     });
+  });
+
+  it('1060: the stacked stand lower edge joins the body neckline', () => {
+    const suggested = proposal(1060)!;
+    const sides = [suggested.a, suggested.b];
+    expect(sides).toContainEqual(['nck_2#1', 'nck#1']);
+    expect(sides).toContainEqual(['P_R_U#1', 'BP_U_1#2', 'P_L_U#1']);
+    expect([suggested.aLen, suggested.bLen].sort((a, b) => a - b)).toEqual([
+      expect.closeTo(432.3, 1),
+      expect.closeTo(446.1, 1),
+    ]);
+  });
+
+  it('keeps the long stand edge for its plies and the short edge for the neckline', () => {
+    const layer = proposal(940)!;
+    expect([layer.a, layer.b]).toEqual([['nck_2#3'], ['nck#3']]);
+
+    const neckline = proposal(1060)!;
+    expect([neckline.a, neckline.b]).toContainEqual(['nck_2#1', 'nck#1']);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   type ClientFinding,
 } from 'components/managers/tech-card/components/finding-seen';
 import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
+import { wakeSeamHints } from 'lib/seam-hints/wake';
 import { useMemo } from 'react';
 
 export type TechCardFilter = {
@@ -425,6 +426,8 @@ export function useUpdateTechCard() {
         saveSessionId,
       }),
     onSuccess: (_data, variables) => {
+      // Operations or patterns may have moved: the card's hints map catches up by itself (§5a).
+      wakeSeamHints(variables.id);
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       queryClient.invalidateQueries({ queryKey: techCardKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });

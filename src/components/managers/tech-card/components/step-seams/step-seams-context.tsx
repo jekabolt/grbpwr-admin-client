@@ -8,6 +8,7 @@
 //   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever.
 
 import type { common_TechCard } from 'api/proto-http/admin';
+import { useSeamHints, type SeamHints, type SeamHintsState } from 'lib/seam-hints';
 import type { StoredSeam, TechCardSeamWire } from 'lib/seams';
 import {
   createContext,
@@ -34,6 +35,10 @@ export type StepSeamsCtx = {
   geometry: AssemblyGeometry;
   /** A piece's words by its line key: the card's name, else the key. */
   nameOf: (pieceKey: string) => string;
+  /** The card's AI hints and the owner's rows (line F): the owner screen reads this. */
+  seamHints: SeamHintsState;
+  /** The hints by piece key for the guess (`SignalOp.hints`); empty = today's guess. */
+  guessHints: SeamHints;
 };
 
 const Ctx = createContext<StepSeamsCtx | null>(null);
@@ -41,15 +46,15 @@ const Ctx = createContext<StepSeamsCtx | null>(null);
 /** Null outside a provider: the row then draws nothing (print, stands, other tabs). */
 export const useStepSeams = () => useContext(Ctx);
 
-/** Store one seam row, then attach the server's canonical key to this form step. */
+/** Store one seam row, then attach the server's canonical key to this form step; that key, or null. */
 export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   return useCallback(
-    async (row: StoredSeam): Promise<boolean> => {
-      if (!ctx) return false;
+    async (row: StoredSeam): Promise<string | null> => {
+      if (!ctx) return null;
       const ok = await ctx.writes.upsert([row]);
-      if (!ok) return false;
+      if (!ok) return null;
       const sig = rowPairSig(row);
       const stored = rowsOf(useSeamsStore.getState()).find(
         (candidate) => rowPairSig(candidate) === sig,
@@ -59,7 +64,7 @@ export function useAttachStepSeam(index: number) {
       setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
         shouldDirty: true,
       });
-      return true;
+      return key;
     },
     [ctx, getValues, index, setValue],
   );
@@ -68,10 +73,13 @@ export function useAttachStepSeam(index: number) {
 export function StepSeamsProvider({
   techCard,
   frozen,
+  active = false,
   children,
 }: {
   techCard: common_TechCard | undefined;
   frozen: boolean;
+  /** The construction screen is in view (all card tabs stay mounted). */
+  active?: boolean;
   children: ReactNode;
 }) {
   const cardId = techCard?.id;
@@ -111,6 +119,15 @@ export function StepSeamsProvider({
     });
   }, [cardId, getValues, setValue]);
 
+  const seamHints = useSeamHints(
+    cardId,
+    techCard,
+    geometry.pieces,
+    geometry.dep.status !== 'pending',
+    active,
+  );
+  const guessHints = seamHints.forGuess;
+
   const names = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of techCard?.techCard?.pieces ?? [])
@@ -119,8 +136,17 @@ export function StepSeamsProvider({
   }, [techCard?.techCard?.pieces]);
 
   const value = useMemo<StepSeamsCtx>(
-    () => ({ techCard, cardId, frozen, writes, geometry, nameOf: (k) => names.get(k) ?? k }),
-    [techCard, cardId, frozen, writes, geometry, names],
+    () => ({
+      techCard,
+      cardId,
+      frozen,
+      writes,
+      geometry,
+      nameOf: (k) => names.get(k) ?? k,
+      seamHints,
+      guessHints,
+    }),
+    [techCard, cardId, frozen, writes, geometry, names, seamHints, guessHints],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

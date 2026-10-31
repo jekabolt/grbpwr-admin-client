@@ -1,0 +1,2214 @@
+{
+  "builtAt": "2026-10-30",
+  "labels": [
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR",
+          "lenMm": 69.9,
+          "share": 0.0605,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_1",
+          "lenMm": 69.9,
+          "share": 0.0605,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP",
+          "lenMm": 413.4,
+          "share": 0.1652,
+          "turnDeg": -13.5,
+          "notches": 1
+        }
+      ],
+      "b": [
+        {
+          "name": "BP",
+          "lenMm": 413.4,
+          "share": 0.1652,
+          "turnDeg": -13.5,
+          "notches": 1
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "closure",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 429.6,
+          "share": 0.372,
+          "turnDeg": 38.6,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 429.6,
+          "share": 0.372,
+          "turnDeg": 38.6,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_R",
+          "lenMm": 325,
+          "share": 0.1993,
+          "turnDeg": 0,
+          "notches": 4
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_R",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 325,
+          "share": 0.1993,
+          "turnDeg": 0,
+          "notches": 4
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_L",
+          "lenMm": 286.5,
+          "share": 0.3252,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR",
+          "lenMm": 49.1,
+          "share": 0.0426,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_1",
+          "lenMm": 49.1,
+          "share": 0.0426,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "pants",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "Back_L",
+          "lenMm": 350.3,
+          "share": 0.1307,
+          "turnDeg": -222.9,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "Back_R",
+          "lenMm": 350.3,
+          "share": 0.1307,
+          "turnDeg": -222.8,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "pants",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FRONT_L",
+          "lenMm": 776.1,
+          "share": 0.289,
+          "turnDeg": -64.9,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "Back_L",
+          "lenMm": 777,
+          "share": 0.2899,
+          "turnDeg": -46.5,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "pants",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FRONT_R",
+          "lenMm": 776.1,
+          "share": 0.289,
+          "turnDeg": -64.9,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "Back_R",
+          "lenMm": 777,
+          "share": 0.2899,
+          "turnDeg": -46.5,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 484.9,
+          "share": 0.3882,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 484.8,
+          "share": 0.2019,
+          "turnDeg": 67.9,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 167.2,
+          "share": 0.1339,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 168.7,
+          "share": 0.0703,
+          "turnDeg": -250.9,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 512.5,
+          "share": 0.2135,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_L_MAIN",
+          "lenMm": 512.4,
+          "share": 0.3102,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 512.5,
+          "share": 0.2135,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_R_MAIN",
+          "lenMm": 512.4,
+          "share": 0.3102,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP_U",
+          "lenMm": 105.7,
+          "share": 0.0846,
+          "turnDeg": -12.4,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_R_U",
+          "lenMm": 106.8,
+          "share": 0.1434,
+          "turnDeg": -195.1,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 105.7,
+          "share": 0.0846,
+          "turnDeg": -12.4,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_R_U",
+          "lenMm": 106.8,
+          "share": 0.1434,
+          "turnDeg": -195.1,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U",
+          "lenMm": 484.9,
+          "share": 0.3882,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 484.8,
+          "share": 0.2019,
+          "turnDeg": 67.9,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "P_L_U",
+          "lenMm": 194.4,
+          "share": 0.2612,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "P_L_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1177,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "P_R_U",
+          "lenMm": 194.4,
+          "share": 0.2612,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "P_R_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1177,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP_U",
+          "lenMm": 105.7,
+          "share": 0.0846,
+          "turnDeg": -12.4,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_L_U",
+          "lenMm": 106.8,
+          "share": 0.1434,
+          "turnDeg": -195.1,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 498.6,
+          "share": 0.4702,
+          "turnDeg": 157.8,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main",
+          "lenMm": 498.6,
+          "share": 0.4702,
+          "turnDeg": 158,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "clr_main",
+          "lenMm": 69.1,
+          "share": 0.0652,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main",
+          "lenMm": 498.6,
+          "share": 0.4702,
+          "turnDeg": 158,
+          "notches": 0
+        },
+        {
+          "name": "clr_main",
+          "lenMm": 69.1,
+          "share": 0.0652,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 69.1,
+          "share": 0.0652,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 498.6,
+          "share": 0.4702,
+          "turnDeg": 157.8,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 69.1,
+          "share": 0.0652,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 167.2,
+          "share": 0.1339,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 168.6,
+          "share": 0.0702,
+          "turnDeg": -250.4,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 429,
+          "share": 0.4591,
+          "turnDeg": 58,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_SECOND_2",
+          "lenMm": 429,
+          "share": 0.4591,
+          "turnDeg": 58.1,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_SECOND_2",
+          "lenMm": 505.4,
+          "share": 0.5409,
+          "turnDeg": 58.1,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 38.2,
+          "share": 0.0409,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 429,
+          "share": 0.4591,
+          "turnDeg": 58,
+          "notches": 0
+        },
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 38.2,
+          "share": 0.0409,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "FLP_L",
+          "lenMm": 176.8,
+          "share": 0.3718,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_L_MAIN",
+          "lenMm": 178.4,
+          "share": 0.2759,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "partial",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 272.3,
+          "share": 0.1381,
+          "turnDeg": -0.1,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_L",
+          "lenMm": 176.8,
+          "share": 0.3718,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "FLP_L_MAIN",
+          "lenMm": 110.5,
+          "share": 0.1709,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "PLCK_L",
+          "lenMm": 110,
+          "share": 0.0657,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "partial",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "FLP_L_MAIN",
+          "lenMm": 183.4,
+          "share": 0.2836,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_L",
+          "lenMm": 176.8,
+          "share": 0.3718,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "FLP_R",
+          "lenMm": 176.8,
+          "share": 0.3718,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_R_MAIN",
+          "lenMm": 178.4,
+          "share": 0.2759,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "clr_main",
+          "lenMm": 423.5,
+          "share": 0.3994,
+          "turnDeg": -245.6,
+          "notches": 0
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 423.5,
+          "share": 0.3994,
+          "turnDeg": -245.6,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 429,
+          "share": 0.4591,
+          "turnDeg": -59.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_SECOND_2",
+          "lenMm": 429,
+          "share": 0.4591,
+          "turnDeg": -59.3,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "rejected",
+      "a": [
+        {
+          "name": "nck_2",
+          "lenMm": 496.5,
+          "share": 0.4912,
+          "turnDeg": 253.3,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "nck",
+          "lenMm": 496.5,
+          "share": 0.4912,
+          "turnDeg": 253.3,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "nck_2",
+          "lenMm": 448.2,
+          "share": 0.4435,
+          "turnDeg": -253.3,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main",
+          "lenMm": 423.5,
+          "share": 0.3994,
+          "turnDeg": -245.6,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "nck",
+          "lenMm": 448.2,
+          "share": 0.4435,
+          "turnDeg": -253.3,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 423.5,
+          "share": 0.3994,
+          "turnDeg": -245.6,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "nck",
+          "lenMm": 33,
+          "share": 0.0327,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "nck",
+          "lenMm": 33,
+          "share": 0.0327,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "nck",
+          "lenMm": 448.2,
+          "share": 0.4435,
+          "turnDeg": -253.3,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "nck_2",
+          "lenMm": 33,
+          "share": 0.0326,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "nck_2",
+          "lenMm": 448.2,
+          "share": 0.4435,
+          "turnDeg": -253.3,
+          "notches": 0
+        },
+        {
+          "name": "nck_2",
+          "lenMm": 33,
+          "share": 0.0326,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FL",
+          "lenMm": 413.4,
+          "share": 0.2212,
+          "turnDeg": -17.7,
+          "notches": 1
+        }
+      ],
+      "b": [
+        {
+          "name": "BP",
+          "lenMm": 413.4,
+          "share": 0.1652,
+          "turnDeg": -13.5,
+          "notches": 1
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FL",
+          "lenMm": 164.4,
+          "share": 0.088,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP",
+          "lenMm": 164.4,
+          "share": 0.0657,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_R",
+          "lenMm": 325,
+          "share": 0.1993,
+          "turnDeg": 0,
+          "notches": 4
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_R",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FL",
+          "lenMm": 213.7,
+          "share": 0.1144,
+          "turnDeg": -320.1,
+          "notches": 1
+        },
+        {
+          "name": "BP",
+          "lenMm": 252.8,
+          "share": 0.101,
+          "turnDeg": -309.8,
+          "notches": 1
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_L",
+          "lenMm": 469,
+          "share": 0.2876,
+          "turnDeg": 117.6,
+          "notches": 3
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 325,
+          "share": 0.1993,
+          "turnDeg": 0,
+          "notches": 4
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_L",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 439.2,
+          "share": 0.3997,
+          "turnDeg": -30,
+          "notches": 5
+        }
+      ],
+      "b": [
+        {
+          "name": "FR",
+          "lenMm": 154,
+          "share": 0.0824,
+          "turnDeg": -229.1,
+          "notches": 2
+        },
+        {
+          "name": "BP",
+          "lenMm": 271.3,
+          "share": 0.1084,
+          "turnDeg": -322.8,
+          "notches": 2
+        },
+        {
+          "name": "FL",
+          "lenMm": 154,
+          "share": 0.0824,
+          "turnDeg": -229.1,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 541.2,
+          "share": 0.2744,
+          "turnDeg": 156.9,
+          "notches": 3
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 105.7,
+          "share": 0.0846,
+          "turnDeg": -12.4,
+          "notches": 0
+        },
+        {
+          "name": "BP_MAIN",
+          "lenMm": 168.7,
+          "share": 0.0703,
+          "turnDeg": -250.9,
+          "notches": 0
+        },
+        {
+          "name": "P_L_MAIN",
+          "lenMm": 120.1,
+          "share": 0.0727,
+          "turnDeg": -211.7,
+          "notches": 1
+        },
+        {
+          "name": "P_L_U",
+          "lenMm": 146.8,
+          "share": 0.1972,
+          "turnDeg": -81.8,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "surface",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FL",
+          "lenMm": 595.8,
+          "share": 0.3189,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "PLCK",
+          "lenMm": 595.9,
+          "share": 0.4501,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "PLCK",
+          "lenMm": 595.9,
+          "share": 0.4501,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_M_R",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        },
+        {
+          "name": "SLV_M_R",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        },
+        {
+          "name": "SLV_M_R",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_R_1",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        },
+        {
+          "name": "SLV_M_R_1",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        },
+        {
+          "name": "SLV_M_R_1",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_R",
+          "lenMm": 418.5,
+          "share": 0.2566,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_R",
+          "lenMm": 418.5,
+          "share": 0.2566,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_M_L",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        },
+        {
+          "name": "SLV_M_L",
+          "lenMm": 412.5,
+          "share": 0.5,
+          "turnDeg": 0,
+          "notches": 5
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_M_L_1",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        },
+        {
+          "name": "SLV_M_L_1",
+          "lenMm": 272.5,
+          "share": 0.3303,
+          "turnDeg": 0,
+          "notches": 3
+        },
+        {
+          "name": "SLV_M_L_1",
+          "lenMm": 140,
+          "share": 0.1697,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 418.5,
+          "share": 0.2566,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "SLV_L",
+          "lenMm": 418.5,
+          "share": 0.2566,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 122.5,
+          "share": 0.1115,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 502.1,
+          "share": 0.4569,
+          "turnDeg": 37.4,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 439.2,
+          "share": 0.3997,
+          "turnDeg": -30,
+          "notches": 5
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 439.2,
+          "share": 0.3997,
+          "turnDeg": -30,
+          "notches": 5
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 122.5,
+          "share": 0.1115,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 414.6,
+          "share": 0.3773,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 122.5,
+          "share": 0.1115,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 502.1,
+          "share": 0.4569,
+          "turnDeg": 37.4,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "semaphore shirt",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_1",
+          "lenMm": 484.6,
+          "share": 0.441,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 35,
+          "share": 0.0319,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_1",
+          "lenMm": 17.5,
+          "share": 0.0159,
+          "turnDeg": -1.3,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR",
+          "lenMm": 70,
+          "share": 0.0637,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 484.6,
+          "share": 0.441,
+          "turnDeg": 38.6,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 52.5,
+          "share": 0.0478,
+          "turnDeg": -1.3,
+          "notches": 0
+        },
+        {
+          "name": "CLR",
+          "lenMm": 52.5,
+          "share": 0.0478,
+          "turnDeg": -1.3,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "clr_main",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main",
+          "lenMm": 484.9,
+          "share": 0.4727,
+          "turnDeg": 158.2,
+          "notches": 1
+        },
+        {
+          "name": "clr_main",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 484.9,
+          "share": 0.4727,
+          "turnDeg": 158.2,
+          "notches": 1
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "clr_main",
+          "lenMm": 421,
+          "share": 0.4104,
+          "turnDeg": -245.6,
+          "notches": 1
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 421,
+          "share": 0.4104,
+          "turnDeg": -245.6,
+          "notches": 1
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U",
+          "lenMm": 167.2,
+          "share": 0.1339,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 168.6,
+          "share": 0.0702,
+          "turnDeg": -250.4,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U",
+          "lenMm": 167.2,
+          "share": 0.1339,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_MAIN",
+          "lenMm": 168.7,
+          "share": 0.0703,
+          "turnDeg": -250.9,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 218.6,
+          "share": 0.175,
+          "turnDeg": -321.7,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_U",
+          "lenMm": 218.6,
+          "share": 0.175,
+          "turnDeg": -321.7,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_U_1",
+          "lenMm": 484.9,
+          "share": 0.3882,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP_U",
+          "lenMm": 484.9,
+          "share": 0.3882,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "clr_main",
+          "lenMm": 604.9,
+          "share": 0.5896,
+          "turnDeg": 158.2,
+          "notches": 1
+        }
+      ],
+      "b": [
+        {
+          "name": "clr_main_2",
+          "lenMm": 484.9,
+          "share": 0.4727,
+          "turnDeg": 158.2,
+          "notches": 1
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "clr_main_2",
+          "lenMm": 60,
+          "share": 0.0585,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "surface",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_L",
+          "lenMm": 146.9,
+          "share": 0.0745,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_L",
+          "lenMm": 159.5,
+          "share": 0.377,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "surface",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "SLV_R",
+          "lenMm": 146.9,
+          "share": 0.0745,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FLP_R",
+          "lenMm": 159.5,
+          "share": 0.377,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "composite",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 30.1,
+          "share": 0.0334,
+          "turnDeg": 0,
+          "notches": 0
+        },
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 420.9,
+          "share": 0.4667,
+          "turnDeg": -59.4,
+          "notches": 0
+        },
+        {
+          "name": "CLR_SECOND",
+          "lenMm": 30.1,
+          "share": 0.0334,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "CLR_SECOND_2",
+          "lenMm": 481,
+          "share": 0.5333,
+          "turnDeg": 58.1,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "P_L_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1177,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "PCK_L_BTTM",
+          "lenMm": 194.4,
+          "share": 0.2703,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "surface",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "PCK_L_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1809,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_L_U",
+          "lenMm": 194.4,
+          "share": 0.2612,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "surface",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "PCK_R_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1809,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "P_R_U",
+          "lenMm": 194.4,
+          "share": 0.2612,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ]
+    },
+    {
+      "family": "starvation",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "P_R_MAIN",
+          "lenMm": 194.4,
+          "share": 0.1177,
+          "turnDeg": 0,
+          "notches": 2
+        }
+      ],
+      "b": [
+        {
+          "name": "PCK_R_BTTM",
+          "lenMm": 194.4,
+          "share": 0.2703,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "check shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "BP_2",
+          "lenMm": 493.3,
+          "share": 0.3783,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "BP",
+          "lenMm": 493.3,
+          "share": 0.3783,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "check shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "",
+          "lenMm": 488.5,
+          "share": 0.2397,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "",
+          "lenMm": 487.9,
+          "share": 0.2024,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "check shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "",
+          "lenMm": 488.5,
+          "share": 0.2397,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "",
+          "lenMm": 487.8,
+          "share": 0.2024,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "check shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "",
+          "lenMm": 514,
+          "share": 0.436,
+          "turnDeg": 29.4,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "",
+          "lenMm": 514,
+          "share": 0.436,
+          "turnDeg": 29.4,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "check shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "",
+          "lenMm": 220.1,
+          "share": 0.158,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "",
+          "lenMm": 221.4,
+          "share": 0.1589,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    },
+    {
+      "family": "test shirt",
+      "kind": "edge",
+      "status": "confirmed",
+      "a": [
+        {
+          "name": "FP_L",
+          "lenMm": 469.5,
+          "share": 0.241,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ],
+      "b": [
+        {
+          "name": "FP_R",
+          "lenMm": 469.5,
+          "share": 0.241,
+          "turnDeg": 0,
+          "notches": 0
+        }
+      ]
+    }
+  ]
+}

@@ -697,6 +697,41 @@ describe('surfaceSeam', () => {
     expect((b.y0 + b.y1) / 2).toBeCloseTo(300);
   });
 
+  it('with its sewn edge named it lies along the line, centred, its own way up', () => {
+    const flat = surfaceSeam(
+      'H',
+      'P',
+      [
+        [100, 300],
+        [300, 300],
+      ],
+      geoms,
+      undefined,
+      'P#0',
+    )!;
+    const b = partBox(flat);
+    expect(b.x0).toBeCloseTo(150);
+    expect(b.x1).toBeCloseTo(250);
+    expect(b.y0).toBeCloseTo(300);
+    expect(b.y1).toBeCloseTo(400);
+    // A slanted line (a collar's neck arch): the edge turns with it, its middle on the line's.
+    const slant = surfaceSeam(
+      'H',
+      'P',
+      [
+        [100, 300],
+        [260, 420],
+      ],
+      geoms,
+      undefined,
+      'P#0',
+    )!;
+    const e = resolveEdge('P#0', geoms)!.pts.map((p) => apply(slant.surface!.T, p));
+    expect((e[0][0] + e[1][0]) / 2).toBeCloseTo(180);
+    expect((e[0][1] + e[1][1]) / 2).toBeCloseTo(360);
+    expect((e[1][1] - e[0][1]) / (e[1][0] - e[0][0])).toBeCloseTo(0.75);
+  });
+
   it('a surface seam between two inputs lays the part on its host', () => {
     const c = surfaceSeam('H', 'P', [], geoms, { xMm: 50, yMm: 60, rotDeg: 0, flip: false })!;
     const L = stepLayout([['H'], ['P']], [c], geoms);
@@ -1076,8 +1111,9 @@ describe('stepLayout on card 63: a hand placement beats the guess (the back pock
     const before: [number, boolean, Record<string, number[]>][] = [
       [100, false, { PCK_BACK_1L: [-8.3, 241.4, 1010, 1189.9], Back_L: [0, 396, 0, 1026.6] }],
       [70, false, { PCK_BACK_1R: [154.5, 404.2, 1010, 1189.9], Back_R: [0, 396, 0, 1026.6] }],
-      [160, true, { PCK_BACK_1L: [-9.5, 240.1, 1021.7, 1201.6], Back_L: [0, 396, 0, 1026.6] }],
-      [130, true, { PCK_BACK_1R: [155.8, 405.5, 1021.7, 1201.6], Back_R: [0, 396, 0, 1026.6] }],
+      // A whole unit lays its bag as a layer: on the back, hanging from its top, never opened out.
+      [160, true, { PCK_BACK_1L: [9.6, 259.3, 846.7, 1026.6], Back_L: [0, 396, 0, 1026.6] }],
+      [130, true, { PCK_BACK_1R: [136.6, 386.3, 846.7, 1026.6], Back_R: [0, 396, 0, 1026.6] }],
     ];
     for (const [op, whole, boxes] of before) {
       const s = stepOf(op, {}, whole);

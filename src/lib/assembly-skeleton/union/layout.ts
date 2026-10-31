@@ -52,6 +52,12 @@ export type UnionOptions = {
    * share of the host's extent (0.24 = twelve steps of 2 %). Absent = such a link is refused.
    */
   pushOffMax?: number;
+  /**
+   * A piece that lies on its partner as a layer (a pocket bag on the front it is sewn to, a lining):
+   * laid straight on it along the seam, never mirrored open across it, and not counted against
+   * its host or the pieces that come after. Absent = none.
+   */
+  isLayer?: (pieceKey: string) => boolean;
 };
 
 /** How far a placement leans a piece from its own up, mirrored or not. */
@@ -222,9 +228,43 @@ export function resolveEdge(
   return { id, pieceKey, pts, len: e.lenMm > 0 ? e.lenMm : polyLen(pts) };
 }
 
+/**
+ * A side's edges of one piece in the order the outline runs (`#0,#3,#1` clicked → `#3,#0,#1`), so
+ * its run is one contiguous line end to end. A side across pieces, or with a gap, comes back as is.
+ */
+export function orderSideAlongOutline(
+  ids: readonly EdgeId[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): EdgeId[] {
+  if (ids.length < 2) return [...ids];
+  const key = pieceKeyOf(ids[0]);
+  const g = geoms.get(key);
+  if (!g || ids.some((id) => pieceKeyOf(id) !== key || id.includes('+', key.length)))
+    return [...ids];
+  const n = g.edges.filter((e) => e.kind === 'edge').length;
+  const ks = ids.map((id) => Number(id.slice(key.length + 1)));
+  if (
+    !n ||
+    ks.some((k) => !Number.isInteger(k) || k < 0 || k >= n) ||
+    new Set(ks).size !== ks.length
+  )
+    return [...ids];
+  const has = new Set(ks);
+  // The run starts at the edge whose outline predecessor is not on the side.
+  const starts = ks.filter((k) => !has.has((k - 1 + n) % n));
+  if (starts.length !== 1) return [...ids];
+  const out: EdgeId[] = [];
+  for (let k = starts[0], i = 0; i < ks.length; i++, k = (k + 1) % n) {
+    if (!has.has(k)) return [...ids];
+    out.push(ids[ks.indexOf(k)]);
+  }
+  return out;
+}
+
 const isIdentical = (s: SeamCandidate, a: PieceGeom, bKey: string) =>
-  s.evidence?.twin === 'identical' ||
-  a.twinOf.some((t) => t.key === bKey && t.kind === 'identical');
+  !/^ring \(.*identical panels sewn side to side/.test(s.evidence?.rule ?? '') &&
+  (s.evidence?.twin === 'identical' ||
+    a.twinOf.some((t) => t.key === bKey && t.kind === 'identical'));
 
 type Link = {
   seam: SeamCandidate;
@@ -242,7 +282,7 @@ type Trial = {
   T: Affine;
   overlap: number;
   endErr: number;
-  mode: 'edge' | 'stack' | 'hung' | 'surface' | 'run';
+  mode: 'edge' | 'stack' | 'hung' | 'surface' | 'run' | 'layer';
   via?: EdgeId;
   /** A surface part laid by its placement mark — not a guess. */
   exact?: boolean;
@@ -304,7 +344,7 @@ export function unionLayout(
     const partsOf = (ids: readonly EdgeId[] | undefined): RunPart[] | undefined => {
       if (!ids || ids.length < 2) return undefined;
       const parts: RunPart[] = [];
-      for (const id of ids) {
+      for (const id of orderSideAlongOutline(ids, G)) {
         const e = resolveEdge(id, G);
         if (!e || !inUnit.has(e.pieceKey)) return undefined;
         parts.push({ key: e.pieceKey, pts: e.pts, len: e.len });
@@ -408,6 +448,8 @@ export function unionLayout(
     const a1 = A[A.length - 1];
     const B = l.to.pts;
     const stack = isIdentical(l.seam, G.get(l.fromKey)!, l.toKey);
+    const layer =
+      !stack && !run && !!opts.isLayer?.(l.toKey) && !opts.isLayer(l.fromKey) && !!l.from;
     const fromLeader = leaderOf.get(l.fromKey) ?? l.fromKey;
     // A piece set into a run (a sleeve into an opened armhole) points away from what it is sewn
     // to: the run's normal is its way up, whatever the page says.
@@ -420,10 +462,24 @@ export function unionLayout(
         : null;
     let best: Trial | null = null;
     let bestScore = Infinity;
+    const leaderT = placed.get(fromLeader)?.T;
+    const leaderGeom = G.get(fromLeader);
+    if (stack && leaderT && leaderGeom) {
+      // A layer cut alike goes straight ON its twin, its way up, whichever edges the row names (a
+      // collar's two layers sewn round their outer edge): drawn alike, it covers it whole.
+      const cl = centroid(leaderGeom.rs);
+      const ct = centroid(toGeom.rs);
+      const T = compose(leaderT, translate(cl[0] - ct[0], cl[1] - ct[1]));
+      const lr = rasters.get(fromLeader);
+      const overlap = lr ? pairOverlap(rasterOf(l.toKey, T), lr) : 0;
+      bestScore = -overlap * 1000;
+      best = { T, overlap, endErr: 0, mode: 'stack', via: l.from.id };
+    }
     for (const rev of [false, true])
       for (const mir of [false, true]) {
         const q0 = rev ? B[B.length - 1] : B[0];
         const q1 = rev ? B[0] : B[B.length - 1];
+        if (layer && mir) continue;
         let T = rigid(a0, a1, q0, q1, mir);
         if (run) {
           // A cap on an armhole run hangs from its middle, not from one end of it.
@@ -449,6 +505,12 @@ export function unionLayout(
           const lr = rasters.get(fromLeader);
           overlap = lr ? pairOverlap(r, lr) : 0;
           score = -overlap * 1000 + endErr;
+        } else if (layer) {
+          // A layer lies ON its host along the seam (the bag on the front, its own side up): the
+          // option that lies most on the host, clear of everything else.
+          const hr = rasters.get(fromLeader);
+          overlap = maxOverlap(r, fromLeader);
+          score = overlap * 1000 - (hr ? pairOverlap(r, hr) : 0) * 100 + endErr;
         } else {
           overlap = maxOverlap(r);
           // Mirror costs 5 points of overlap: pieces sewn and opened lie FACE UP side by side, so a
@@ -457,7 +519,13 @@ export function unionLayout(
         }
         if (score < bestScore) {
           bestScore = score;
-          best = { T, overlap, endErr, mode: stack ? 'stack' : 'edge', via: l.from.id };
+          best = {
+            T,
+            overlap,
+            endErr,
+            mode: stack ? 'stack' : layer ? 'layer' : 'edge',
+            via: l.from.id,
+          };
         }
       }
     if (!best && away && !stack) {
@@ -540,6 +608,10 @@ export function unionLayout(
       const leader = leaderOf.get(l.fromKey) ?? l.fromKey;
       leaderOf.set(k, leader);
       stacks.set(leader, [...(stacks.get(leader) ?? [leader]), k]);
+      put(k, t.T, { attachedVia: t.via }, false);
+      return;
+    }
+    if (t.mode === 'layer') {
       put(k, t.T, { attachedVia: t.via }, false);
       return;
     }

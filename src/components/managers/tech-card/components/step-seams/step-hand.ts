@@ -76,6 +76,26 @@ export function handsFromSeams(rows: readonly StoredSeam[]): Map<string, HandOn>
   return hand;
 }
 
+/** The hand placements a step's views lay: its own and every earlier step's; twins read the card's. */
+export type StepHands = {
+  hand: ReadonlyMap<string, HandOn>;
+  twinHand: ReadonlyMap<string, HandOn>;
+};
+
+/**
+ * The placements stored on this step's seams and the earlier ones' (a later step inherits them),
+ * and the whole card's for twins (the right bag mirrors the left one placed a step later).
+ */
+export function stepHandsOf(
+  ops: readonly { seamKeys?: readonly string[] }[],
+  index: number,
+  byKey: ReadonlyMap<string, StoredSeam>,
+): StepHands {
+  const rows = (steps: readonly { seamKeys?: readonly string[] }[]) =>
+    steps.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
+  return { hand: handsFromSeams(rows(ops.slice(0, index + 1))), twinHand: handsFromSeams(rows(ops)) };
+}
+
 /** Put or clear a hand placement on every anchor of the moved piece, leaving its partner alone. */
 export function withHandPlace(
   row: StoredSeam,

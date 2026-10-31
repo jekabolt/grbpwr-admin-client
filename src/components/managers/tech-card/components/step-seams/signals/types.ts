@@ -3,6 +3,7 @@
 // the geometric score of a pair the model already built (lower score = better pair).
 
 import type { EdgeId, PieceGeom } from 'lib/assembly-skeleton/types';
+import type { SeamHints } from 'lib/seam-hints';
 
 /** One side of a candidate pair, as the model scored it. */
 export type SignalSide = {
@@ -13,7 +14,14 @@ export type SignalSide = {
 };
 
 /** The step the pair is proposed for (form op fields, both enum and short spellings). */
-export type SignalOp = { zone?: string; work?: string; operationType?: string };
+export type SignalOp = {
+  zone?: string;
+  work?: string;
+  operationType?: string;
+  operationNumber?: number;
+  /** Runtime carrier used by the model's existing `{ op, geoms }` signal call. */
+  hints?: SeamHints;
+};
 
 /**
  * What every term may read. Lanes add their own optional input here (learned priors, the card's
@@ -22,6 +30,7 @@ export type SignalOp = { zone?: string; work?: string; operationType?: string };
 export type SignalCtx = {
   op: SignalOp | undefined;
   geoms: ReadonlyMap<string, PieceGeom>;
+  hints?: SeamHints;
 };
 
 /** One signal's say on a pair: `delta` is added to the score (negative = the pair fits better). */

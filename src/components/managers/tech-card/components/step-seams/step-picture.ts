@@ -11,6 +11,8 @@ import type { Affine, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly
 import { readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import {
+  intersectArea,
+  fitLayerToHostUnion,
   pairOverlap,
   pieceKeyOf,
   pieceTilt,
@@ -19,12 +21,14 @@ import {
   runOf,
   sidewaysTrials,
   unionLayout,
+  unionRaster,
   type Raster,
   type RunPart,
 } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
+import { isLayerCloth } from './seam-signals';
 import { handTargetsOf, laidHands, snapHand, type HandOn, type LaidHand } from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 
@@ -146,10 +150,81 @@ export function candidateOf(
 
 const FLIP_Y: Affine = [1, 0, 0, -1, 0, 0];
 
+const segCross = (p: Pt2, q: Pt2, r: Pt2, s: Pt2) => {
+  const d = (q[0] - p[0]) * (s[1] - r[1]) - (q[1] - p[1]) * (s[0] - r[0]);
+  if (Math.abs(d) < 1e-9) return false;
+  const t = ((r[0] - p[0]) * (s[1] - r[1]) - (r[1] - p[1]) * (s[0] - r[0])) / d;
+  const u = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d;
+  return t > 0 && t < 1 && u > 0 && u < 1;
+};
+const toLine = (p: Pt2, line: readonly Pt2[]) => {
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const [a, b] = [line[i - 1], line[i]];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const t = Math.max(
+      0,
+      Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)),
+    );
+    best = Math.min(best, Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy));
+  }
+  return best;
+};
+/** The middle of a line (its ends trimmed), where a crossing is a crossing and not a shared end. */
+const inner = (pts: readonly Pt2[]) => {
+  const cut = Math.floor(pts.length * 0.1);
+  return pts.slice(cut, pts.length - cut);
+};
+
+/**
+ * The part's sewn edge laid along the host's line (rs frame): end on end, its own way up; turned
+ * over only when, its own way up, the two curves would cross (a stand on a collar's line). Null
+ * when the edge or the line is not there to lay by.
+ */
+function alongLine(
+  line: readonly Pt2[],
+  edge: string | undefined,
+  pg: PieceGeom,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Affine | null {
+  if (!edge || line.length < 2 || pieceKeyOf(edge) !== pg.pieceKey) return null;
+  const e = resolveEdge(edge, geoms);
+  if (!e || e.pts.length < 2) return null;
+  const l0 = line[0];
+  const l1 = line[line.length - 1];
+  const lineIn = inner(line);
+  let best: { M: Affine; score: number } | null = null;
+  for (const rev of [false, true])
+    for (const mir of [false, true]) {
+      const q0 = rev ? e.pts[e.pts.length - 1] : e.pts[0];
+      const q1 = rev ? e.pts[0] : e.pts[e.pts.length - 1];
+      const R = rigid(l0, l1, q0, q1, mir);
+      const m0 = apply(R, q0);
+      const m1 = apply(R, q1);
+      // Centred on the line: a longer edge overhangs both its ends alike.
+      const M = compose(
+        translate((l0[0] + l1[0] - m0[0] - m1[0]) / 2, (l0[1] + l1[1] - m0[1] - m1[1]) / 2),
+        R,
+      );
+      const laid = inner(e.pts.map((p) => apply(M, p)));
+      let crosses = 0;
+      for (let i = 1; i < laid.length; i++)
+        for (let k = 1; k < lineIn.length; k++)
+          if (segCross(laid[i - 1], laid[i], lineIn[k - 1], lineIn[k])) crosses++;
+      const gap = laid.reduce((s, p) => s + toLine(p, line), 0) / (laid.length || 1);
+      const score =
+        (crosses > 0 ? 1e6 : 0) + (pieceTilt(pg, M) > UPRIGHT ? 1e4 : 0) + (mir ? 1e3 : 0) + gap;
+      if (!best || score < best.score) best = { M, score };
+    }
+  return best?.M ?? null;
+}
+
 /**
  * A surface seam as the placer reads it: `part` laid on `host` by a hand placement (the part's
  * cut-bbox corner from the host's, mm, then turned — the numbers the picker stores and the techpack
- * lays it by), else centred on the host's mark `line` (rs frame, y up) in its own orientation.
+ * lays it by), else its sewn `edge` along the host's mark `line` (rs frame, y up), else centred on
+ * the line in its own orientation.
  */
 export function surfaceSeam(
   host: string,
@@ -157,10 +232,22 @@ export function surfaceSeam(
   line: readonly Pt2[],
   geoms: ReadonlyMap<string, PieceGeom>,
   placement?: SeamPlacement,
+  edge?: string,
 ): SeamCandidate | null {
   const hg = geoms.get(host);
   const pg = geoms.get(part);
   if (!hg || !pg || host === part || hg.rs.length < 3 || pg.rs.length < 3) return null;
+  const along = placement ? null : alongLine(line, edge, pg, geoms);
+  if (along) {
+    return {
+      a: `${host}#?`,
+      b: `${part}#?`,
+      score: 1,
+      evidence: EVIDENCE,
+      kind: 'surface',
+      surface: { host, part, mark: 'hand', T: along, fit: 1 },
+    };
+  }
   // The drawing frame (y down) is where the placement was measured.
   const down = (pts: readonly Pt2[]) => pts.map((p) => apply(FLIP_Y, p));
   const hb = boxOf(down(hg.rs));
@@ -213,7 +300,7 @@ export function seamOfSides(
   const other = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(t));
   if (!other) return null;
   const line = innerLines.get(h.piece)?.[h.k] ?? [];
-  return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement);
+  return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
 }
 
 /**
@@ -444,6 +531,8 @@ export const tiltOf = (T: Affine) => Math.atan2(Math.abs(T[2]), T[3]);
  * hair — a sleeve hung off a slightly leaning armhole lies sideways, not upside down.
  */
 export const UPRIGHT = Math.PI / 2 + Math.PI / 36;
+/** Two laid edges closer than this on average lie on each other (stacked layers), mm. */
+const STACKED_MM = 3;
 
 /**
  * A seam the picture may shape a unit by: one a person stored, one the solver is sure of, an edge
@@ -467,8 +556,9 @@ const identicalPair = (
   ka: string,
   kb: string,
 ) =>
-  c.evidence?.twin === 'identical' ||
-  !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical');
+  !/^ring \(.*identical panels sewn side to side/.test(c.evidence?.rule ?? '') &&
+  (c.evidence?.twin === 'identical' ||
+    !!geoms.get(ka)?.twinOf.some((t) => t.key === kb && t.kind === 'identical'));
 
 /**
  * An input on its own: its pieces along its inner seams, upright and clear of each other (a seam
@@ -481,18 +571,21 @@ function layInput(
   inner: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
   raster: { rasterMm?: number },
+  layers: boolean,
 ): {
   T: Map<string, Affine>;
   stacked: string[][];
   onRuns: string[];
   apart: string[];
   hostOf: Map<string, string>;
+  outlineLayers: { piece: string; clearApart: string[] }[];
 } {
   const L = unionLayout(keys, inner, geoms, {
     ...raster,
     overlapMax: TOUCH,
     uprightMax: UPRIGHT,
     pushOffMax: PUSH * PUSH_MAX,
+    isLayer: layers ? (k) => isLayerCloth(k, geoms) : undefined,
   });
   const T = new Map<string, Affine>(L.placements.map((p) => [p.pieceKey, p.T]));
   const left = keys.filter((k) => !T.has(k));
@@ -512,6 +605,40 @@ function layInput(
   const beside = keys.filter((k) => T.has(k) && rootOf(k) !== main);
   // One piece alone is the input, not a piece beside it.
   const apart = keys.length > 1 ? [...left, ...beside] : [];
+  const components = new Map<string, string[]>();
+  for (const key of keys) {
+    const root = rootOf(key);
+    components.set(root, [...(components.get(root) ?? []), key]);
+  }
+  const shellRoots = [...components].filter(([, group]) =>
+    group.some((key) => !isLayerCloth(key, geoms)),
+  );
+  const shellRoot = shellRoots.reduce<string | null>((best, [root, group]) => {
+    const area = group.reduce((sum, key) => sum + (geoms.get(key)?.areaMm2 ?? 0), 0);
+    if (!best) return root;
+    const bestArea = (components.get(best) ?? []).reduce(
+      (sum, key) => sum + (geoms.get(key)?.areaMm2 ?? 0),
+      0,
+    );
+    return area > bestArea ? root : best;
+  }, null);
+  // Only a layer-only component disconnected by the confident seams is eligible. If that layer
+  // was large enough to root the input, a successful fit also resolves the shell component that
+  // the old root choice labelled apart.
+  const outlineLayers =
+    layers && components.size > 1 && shellRoot
+      ? [...components].flatMap(([root, group]) => {
+          if (group.some((key) => !isLayerCloth(key, geoms))) return [];
+          return group
+            .filter((piece) => isLayerCloth(piece, geoms))
+            .map((piece) => ({
+              piece,
+              clearApart: apart.filter(
+                (key) => rootOf(key) === root || (root === main && rootOf(key) === shellRoot),
+              ),
+            }));
+        })
+      : [];
   if (left.length) {
     const placed = [...T].flatMap(([k, t]) => worldOf(geoms.get(k)!, t));
     const all = placed.length ? boxOf(placed) : { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -523,7 +650,7 @@ function layInput(
       x += b.x1 - b.x0;
     }
   }
-  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart, hostOf };
+  return { T, stacked: L.stacked, onRuns: L.onRuns ?? [], apart, hostOf, outlineLayers };
 }
 
 /**
@@ -608,6 +735,8 @@ export function stepLayout(
     honorRanges?: boolean;
     /** Opt into cumulative whole-garment packing; ordinary editor tiles keep legacy semantics. */
     garmentLayout?: boolean;
+    /** A pocket bag or lining lies on its own piece inside a unit; the tech pack opts out. */
+    bagsAsLayers?: boolean;
   } = {},
 ): StepLayout {
   const input = inputIndex(leaves);
@@ -645,6 +774,7 @@ export function stepLayout(
   const stacked: string[][] = [];
   const onRuns: string[] = [];
   const apart: string[] = [];
+  const outlineLayers: { piece: string; clearApart: string[] }[] = [];
   const pieceLayers: [string, string][] = [];
   for (const i of ins) {
     const ks = keysOf(i);
@@ -661,8 +791,9 @@ export function stepLayout(
           onRuns: previous.onRuns.filter((key) => ks.includes(key)),
           apart: previous.apart.filter((key) => ks.includes(key)),
           hostOf: new Map<string, string>(),
+          outlineLayers: [],
         }
-      : layInput(ks, inner, geoms, raster);
+      : layInput(ks, inner, geoms, raster, opts.bagsAsLayers !== false && !opts.garmentLayout);
     // A piece placed by hand on a partner of this input: its side of the unit snaps onto the
     // partner's run as the placement says (the bag a step before laid inside the back stays there).
     let laidApart = laid.apart;
@@ -682,6 +813,7 @@ export function stepLayout(
     stacked.push(...laid.stacked);
     onRuns.push(...laid.onRuns);
     apart.push(...laidApart);
+    outlineLayers.push(...laid.outlineLayers);
     if (seeded)
       pieceLayers.push(
         ...previous.pieceLayers.filter(
@@ -826,13 +958,12 @@ export function stepLayout(
     };
     /** The share of input `j` laid by `M` that lies on laid input `i`: all its pieces, not one. */
     const shareOn = (j: number, M: Affine, i: number) => {
-      const theirs = placedRasters.get(i) ?? [];
+      // Their pieces as one cover: a bag lying on its back must not count that back twice.
+      const theirs = unionRaster(placedRasters.get(i) ?? []);
       let on = 0;
       let all = 0;
       for (const r of rastersOf(j, M)) {
-        let o = 0;
-        for (const p of theirs) o += pairOverlap(r, p) * Math.min(r.area, p.area);
-        on += Math.min(o, r.area);
+        if (theirs) on += intersectArea(r, theirs);
         all += r.area;
       }
       return all > 0 ? on / all : 0;
@@ -882,7 +1013,28 @@ export function stepLayout(
       // along the pieces drawn joined; one standing apart (a yoke no upright seam lays on the
       // fronts' shoulders) or not drawn is not part of the opening.
       const gone = (id: EdgeId) => inOf(id) == null || standing.has(pieceKeyOf(id));
-      const theirParts = ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
+      // Layers stacked on each other (a collar's two layers, their neck edges one on the other)
+      // make one line, not a run doubling back on itself: the first layer's edge stands for both.
+      const oneLayer = (ids: EdgeId[], at: (k: string) => Affine | undefined) => {
+        const kept: Pt2[][] = [];
+        return ids.filter((id) => {
+          const e = resolveEdge(id, geoms);
+          const T = at(pieceKeyOf(id));
+          if (!e || !T) return true;
+          const pts = e.pts.map((p) => apply(T, p));
+          const onKept = kept.some(
+            (q) =>
+              pts.reduce((s, p) => s + toLine(p, q), 0) / pts.length < STACKED_MM &&
+              q.reduce((s, p) => s + toLine(p, pts), 0) / q.length < STACKED_MM,
+          );
+          if (!onKept) kept.push(pts);
+          return !onKept;
+        });
+      };
+      const theirParts = oneLayer(
+        ((theirs === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
+        (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
+      );
       const run =
         theirParts.length > 1 && theirParts.every((id) => inOf(id) === i)
           ? runOf(
@@ -895,7 +1047,10 @@ export function stepLayout(
           : null;
       const A = run ?? rangedLine(ea.pts, rangeOf(theirs)).map((p) => apply(Tt, p));
       const B = rangedLine(eb.pts, rangeOf(mine)).map((p) => apply(local.get(ka)!, p));
-      const myParts = ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id));
+      const myParts = oneLayer(
+        ((mine === c.a ? c.aParts : c.bParts) ?? []).filter((id) => !gone(id)),
+        (k) => local.get(k),
+      );
       const myRun =
         myParts.length > 1 && myParts.every((id) => inOf(id) === j)
           ? runOf(
@@ -1359,6 +1514,65 @@ export function stepLayout(
     const h = hands.get(k)!;
     const onto = T.get(h.target.partner);
     if (onto) T.set(k, compose(onto, snapOf(h)));
+  }
+
+  // Confident seams keep shaping every input and the operation exactly as before. Only now, once
+  // those rigid units are in their final joined place, try a disconnected layer against the
+  // exposed outline of the non-layer pieces in its cluster. A weak match leaves it apart.
+  const fittedApart = new Set<string>();
+  if (explode === 0 && opts.bagsAsLayers !== false && !opts.garmentLayout) {
+    for (const candidate of outlineLayers) {
+      const ownInput = input.get(candidate.piece);
+      const cluster = clustersOut.find((group) => ownInput != null && group.includes(ownInput));
+      if (!cluster) continue;
+      const inCluster = new Set(cluster);
+      // A partial seam can say which assembled input is the host without saying where on it the
+      // layer belongs. Keep the candidate's own input too: at the mirrored operation the upper
+      // front travels with the bag while the partial seam names the main-front input.
+      const hostInputs = new Set(ownInput == null ? [] : [ownInput]);
+      const sidePieces = (c: SeamCandidate, side: 'a' | 'b') =>
+        ((side === 'a' ? c.aParts : c.bParts) ?? [side === 'a' ? c.a : c.b]).map(pieceKeyOf);
+      for (const seam of seams) {
+        if (seam.kind === 'surface' && seam.surface?.part === candidate.piece) {
+          const hostInput = input.get(seam.surface.host);
+          if (hostInput != null && inCluster.has(hostInput)) hostInputs.add(hostInput);
+          continue;
+        }
+        const a = sidePieces(seam, 'a');
+        const b = sidePieces(seam, 'b');
+        const other = a.includes(candidate.piece) ? b : b.includes(candidate.piece) ? a : [];
+        for (const key of other) {
+          const hostInput = input.get(key);
+          if (hostInput != null && inCluster.has(hostInput) && !isLayerCloth(key, geoms))
+            hostInputs.add(hostInput);
+        }
+      }
+      const hostKeys = (inputs: ReadonlySet<number>) =>
+        keys.filter(
+          (key) =>
+            key !== candidate.piece &&
+            inputs.has(input.get(key)!) &&
+            !isLayerCloth(key, geoms) &&
+            T.has(key),
+        );
+      const fitOptions = {
+        rasterMm: fine,
+        uprightMax: UPRIGHT,
+      };
+      let fit = fitLayerToHostUnion(candidate.piece, hostKeys(hostInputs), T, geoms, fitOptions);
+      // Some mirrored cards do not carry the weak partial into this step's seam list. The own
+      // input then contains only the upper host: it cannot contain the full bag, so (and only so)
+      // retry the non-layer union of the joined cluster.
+      if (!fit)
+        fit = fitLayerToHostUnion(candidate.piece, hostKeys(inCluster), T, geoms, fitOptions);
+      if (!fit) continue;
+      // Map order is paint order: a fitted bag covers the host instead of disappearing behind it.
+      T.delete(candidate.piece);
+      T.set(candidate.piece, fit.T);
+      standing.delete(candidate.piece);
+      fittedApart.add(candidate.piece);
+      for (const key of candidate.clearApart) fittedApart.add(key);
+    }
   }
 
   const stacksOut = [...stacked, ...crossStacks];
@@ -1831,7 +2045,7 @@ export function stepLayout(
     ghosts,
     stacked: stacksOut,
     onRuns: [...onRuns, ...crossRuns],
-    apart,
+    apart: apart.filter((key) => !fittedApart.has(key)),
     clusters: clustersOut,
     layers: layersOut,
     pieceLayers,

@@ -81,6 +81,34 @@ export function intersectArea(A: Raster, B: Raster): number {
   return sum * A.step;
 }
 
+/** One raster covering every given one: pieces stacked on each other count once. */
+export function unionRaster(list: readonly Raster[]): Raster | null {
+  if (!list.length) return null;
+  const step = list[0].step;
+  if (list.some((r) => r.step !== step)) throw new Error('rasters on different grids');
+  const i0 = Math.min(...list.map((r) => r.i0));
+  const i1 = Math.max(...list.map((r) => r.i0 + r.rows.length));
+  const rows: number[][] = [];
+  let area = 0;
+  for (let i = i0; i < i1; i++) {
+    const spans: [number, number][] = [];
+    for (const r of list) {
+      const row = r.rows[i - r.i0];
+      if (row) for (let k = 0; k < row.length; k += 2) spans.push([row[k], row[k + 1]]);
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    const out: number[] = [];
+    for (const [lo, hi] of spans) {
+      if (out.length && lo <= out[out.length - 1])
+        out[out.length - 1] = Math.max(out[out.length - 1], hi);
+      else out.push(lo, hi);
+    }
+    for (let k = 0; k < out.length; k += 2) area += out[k + 1] - out[k];
+    rows.push(out);
+  }
+  return { i0, step, rows, area: area * step };
+}
+
 /** Overlap of a pair as a share of the SMALLER piece: a yoke buried in a back reads as 100 %. */
 export function pairOverlap(A: Raster, B: Raster): number {
   const small = Math.min(A.area, B.area);

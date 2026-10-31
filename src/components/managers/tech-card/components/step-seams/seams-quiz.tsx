@@ -12,7 +12,13 @@ import {
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, GroupLabel, Text } from 'ui';
 import { seamOfSides } from './step-picture';
-import { hasMultipleStepPieces, type FormOpLike, type StepProposal } from './step-seams-model';
+import {
+  hasMultipleStepPieces,
+  innerId,
+  type FormOpLike,
+  type StepProposal,
+} from './step-seams-model';
+import { recordSeamDecision } from './seam-decisions';
 import { useStepSeams } from './step-seams-context';
 import { frameSeamsOf, useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
 import { SeamTile } from './step-seams-row';
@@ -106,6 +112,9 @@ export function SeamsQuiz() {
   };
 
   const complete = (index: number, outcome: Outcome) => {
+    const operationNumber = ops[index]?.operationNumber;
+    if (outcome === 'skipped' && ctx?.cardId && operationNumber)
+      recordSeamDecision({ cardId: ctx.cardId, operationNumber, action: 'skip' });
     const next = { ...outcomes, [index]: outcome };
     setOutcomes(next);
     advance(index, next);
@@ -228,28 +237,41 @@ const QuizTile = memo(
     const proposal = proposalRef.current ?? scene.suggestions[0] ?? null;
     const seams = useMemo(() => {
       const own = proposal ? seamOfSides(proposal, scene.geoms, scene.innerLines) : null;
-      return frameSeamsOf(scene.innerSeams, scene.storedSeams, own ? [own] : [], scene.crossSeams);
+      return frameSeamsOf(
+        scene.innerSeams,
+        scene.storedSeams,
+        own ? [own] : proposal ? [] : scene.surfaceProposals,
+        scene.crossSeams,
+      );
     }, [
       proposal,
+      scene.surfaceProposals,
       scene.crossSeams,
       scene.geoms,
       scene.innerLines,
       scene.innerSeams,
       scene.storedSeams,
     ]);
+    const surfaces = proposal ? [] : scene.surfaceSuggestions;
+    const surface = surfaces.length > 0;
+    // No guess yet the pieces are there: the tile draws them for a pick by hand.
+    const drawable = scene.leaves.some((ks) => ks.some((k) => scene.geoms.has(k)));
     const marks = proposal
       ? [...proposal.a, ...proposal.b].map((id) => ({ id, tone: 'proposal' as const }))
-      : [];
+      : surface
+        ? surfaces.map((s) => ({ id: innerId(s.host, s.inner), tone: 'proposal' as const }))
+        : [];
 
     return (
       <SeamTile
         scene={scene}
         seams={seams}
         marks={marks}
-        dashed
+        dashed={!!proposal || !!surface}
         current={current}
         status={status}
-        emptyLabel={proposal ? undefined : 'no seam'}
+        emptyLabel={proposal || surface || drawable ? undefined : 'no seam'}
+        caption={proposal || surface || !drawable ? undefined : 'pick'}
         onOpen={onOpen}
       />
     );

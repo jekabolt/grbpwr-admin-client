@@ -3,6 +3,7 @@
 // assembled, the outer outline bold (an ink stroke under every piece, the fills covering it inside),
 // the inner seams hairline. Marked edges: proposal = ink dashed, own pick = blue, stored = ink bold.
 
+import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
@@ -14,6 +15,7 @@ import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
 import { PAIR_INK, pairNo } from './palette';
+import { stepHandsOf, type StepHands } from './step-hand';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
@@ -22,8 +24,10 @@ import {
   pieceOfTarget,
   sewnBeforeStep,
   suggestStepPairs,
+  suggestStepSurfaces,
   usedEdgesBeforeStep,
   type FormOpLike,
+  type StepSurface,
   type Suggestion,
   type TargetId,
 } from './step-seams-model';
@@ -41,6 +45,7 @@ import {
   seamOfSides,
   splitSeams,
   spotInside,
+  surfaceSeam,
   spreadLabels,
   stepLayout,
   toPx,
@@ -311,6 +316,8 @@ export function stepPictureOfOp(
   }));
   const leaves = groups.map((group) => group.pieces);
   const keys = [...(active?.seamKeys ?? [])];
+  // Hand placements stored on this step's seams and the earlier ones': every view lays them.
+  const hands = stepHandsOf(ops, index, byKey);
   const ease = (() => {
     const ratio = Number.parseFloat(String(active?.fullnessRatio ?? '').replace(',', '.'));
     return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
@@ -350,6 +357,30 @@ export function stepPictureOfOp(
     ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
     : [];
   const suggestion: Suggestion | null = suggestions[0] ?? null;
+  // No pair to propose: a lone part may go into the slit its twin was sewn on (the second placket);
+  // two lone plackets each get their own sleeve, and one accepted leaves the other standing.
+  const surfaceSuggestions: StepSurface[] = (
+    ready && !suggestions.length ? suggestStepSurfaces(ops, index, pieceKeys, geoms, byKey) : []
+  ).filter(
+    (surface) =>
+      !stored.some((seam) =>
+        [...seam.sides.a, ...seam.sides.b].some((id) => pieceOfTarget(id) === surface.part),
+      ),
+  );
+  const surfaceSuggestion: StepSurface | null = surfaceSuggestions[0] ?? null;
+  const surfaceProposals = surfaceSuggestions
+    .map((surface) =>
+      surfaceSeam(
+        surface.host,
+        surface.part,
+        innerLines.get(surface.host)?.[surface.inner] ?? [],
+        geoms,
+        surface.place,
+      ),
+    )
+    .filter((candidate): candidate is SeamCandidate => !!candidate);
+  const surfaceProposal = surfaceProposals[0] ?? null;
+  const surfaceMarks = surfaceSuggestions.map((surface) => innerId(surface.host, surface.inner));
   const split = splitLaid(graph?.chosen ?? [], leaves, geoms, innerLines, byKey);
   const innerSeams = innerSeamsOf(split, ops, index, pieceKeys, leaves, geoms, innerLines, byKey);
   const storedSeams = stored
@@ -366,25 +397,30 @@ export function stepPictureOfOp(
   // editor's pick affordance when that reading has no seam between these operation inputs.
   const proposalSeams = crossSeams.length
     ? []
-    : suggestions
-        .map((candidate) => seamOfSides(candidate, geoms, innerLines))
-        .filter((candidate): candidate is SeamCandidate => !!candidate);
+    : [
+        ...suggestions.map((candidate) => seamOfSides(candidate, geoms, innerLines)),
+        ...surfaceProposals,
+      ].filter((candidate): candidate is SeamCandidate => !!candidate);
   const frameSeams = frameSeamsOf(
     innerSeams,
     storedSeams,
-    stored.length ? [] : proposalSeams,
+    stored.length ? surfaceProposals : proposalSeams,
     crossSeams,
   );
-  const marks: EdgeMark[] = (
-    stored.length
+  const marks: EdgeMark[] = [
+    ...(stored.length
       ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
       : crossSeams.length
         ? crossSeams.flatMap((candidate) => {
             const sides = candidateSides(candidate);
             return [...sides.a, ...sides.b];
           })
-        : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
-  ).map((id) => ({ id, tone: stored.length ? 'stored' : 'proposal' }));
+        : surfaceMarks.length
+          ? []
+          : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
+    ).map((id): EdgeMark => ({ id, tone: stored.length ? 'stored' : 'proposal' })),
+    ...(crossSeams.length ? [] : surfaceMarks).map((id): EdgeMark => ({ id, tone: 'proposal' })),
+  ];
   const layoutLeaves = focusedStepLeaves(
     leaves,
     marks.map((mark) => mark.id),
@@ -403,6 +439,10 @@ export function stepPictureOfOp(
     used,
     suggestion,
     suggestions,
+    surfaceSuggestion,
+    surfaceSuggestions,
+    surfaceProposal,
+    surfaceProposals,
     innerSeams,
     proposalSeams,
     frameSeams,
@@ -410,7 +450,8 @@ export function stepPictureOfOp(
     storedSeams,
     marks,
     layoutLeaves,
-    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm }),
+    hands,
+    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm, ...hands }),
   };
 }
 
@@ -426,15 +467,18 @@ export function useStepScene(index: number) {
     name: 'operations',
     compute: (value) => sceneOpsSignature((value ?? []) as SceneOp[], index),
   });
+  const { ctx, geo, geoms, innerLines } = useCardGeoms();
+  // The card's AI hints (line F) ride on the steps they name, as `SignalOp.hints`; none → the
+  // steps as they are, today's guess.
+  const guessHints = ctx?.guessHints;
   // A fresh array per signature: setValue on a step mutates the form's array in place, so the raw
   // reference would keep every memo below on the old step facts.
   const ops = useMemo(
-    () => [...((getValues('operations') ?? []) as SceneOp[])],
+    () => [...withSeamHints((getValues('operations') ?? []) as SceneOp[], guessHints)],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [opsSig, getValues],
+    [opsSig, getValues, guessHints],
   );
   const op = ops[index];
-  const { ctx, geo, geoms, innerLines } = useCardGeoms();
   const pieceKeys = useCardPieceKeys();
 
   const cardName = ctx?.nameOf;
@@ -495,10 +539,11 @@ export function useStepLayout(
   geoms: ReadonlyMap<string, PieceGeom>,
   explode: number,
   rasterMm?: number,
+  hands?: StepHands,
 ): StepLayout {
   return useMemo(
-    () => stepLayout(leaves, seams, geoms, { explode, rasterMm }),
-    [leaves, seams, geoms, explode, rasterMm],
+    () => stepLayout(leaves, seams, geoms, { explode, rasterMm, ...hands }),
+    [leaves, seams, geoms, explode, rasterMm, hands],
   );
 }
 
@@ -525,7 +570,8 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 
 // ─── the svg ──────────────────────────────────────────────────────────────────────────────────────
 
-export type Tone = 'proposal' | 'pick' | 'stored';
+/** `hint` — an edge the card's AI joins map names for this step (line F): blue dashed. */
+export type Tone = 'proposal' | 'pick' | 'stored' | 'hint';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
 export type PictureActionLine = {
@@ -606,13 +652,25 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+/**
+ * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
+ * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more.
+ */
+export const DOOR_SPAN_MM = 50;
+export const spanMm = (line: readonly Pt2[]) => {
+  if (!line.length) return 0;
+  const xs = line.map((p) => p[0]);
+  const ys = line.map((p) => p[1]);
+  return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+};
+
 export type PictureView = { k: number; x: number; y: number };
 
 /**
  * The step picture fitted into w × h px. `marks` colour edges and inner lines by tone (with their mm
  * beside on the canvas); `nos` put a stored seam's number beside it; `names` (one per input) sit on
- * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge is a door;
- * inner lines stay visible but are placed only by dragging in the picker.
+ * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge and inner line
+ * of every piece is a door — the base a patch was sewn on keeps its slit.
  */
 export function StepPictureSvg({
   w,
@@ -748,13 +806,14 @@ export function StepPictureSvg({
       if (!g) continue;
       for (const e of plainEdges(g))
         out.push({ id: e.id, d: pathOf(e.pts.map((p) => toPx(fit, apply(T, p)))), inner: false });
-      (innerLines?.get(key) ?? []).forEach((l, k) =>
+      (innerLines?.get(key) ?? []).forEach((l, k) => {
+        if (spanMm(l) < DOOR_SPAN_MM) return;
         out.push({
           id: innerId(key, k),
           d: pathOf(l.map((p) => toPx(fit, apply(T, p)))),
           inner: true,
-        }),
-      );
+        });
+      });
     }
     return out;
   }, [onPick, look, layout, geoms, innerLines, fit]);
@@ -1050,10 +1109,12 @@ export function StepPictureSvg({
           key={`${m.tone}:${m.id}`}
           d={pathOf(pts)}
           fill='none'
-          stroke={m.tone === 'pick' ? PICK : m.tone === 'stored' ? PAIR_INK : INK}
+          stroke={
+            m.tone === 'pick' || m.tone === 'hint' ? PICK : m.tone === 'stored' ? PAIR_INK : INK
+          }
           strokeWidth={m.tone === 'stored' ? L.stored : L.mark}
-          strokeDasharray={m.tone === 'proposal' ? L.dash : undefined}
-          strokeLinecap={m.tone === 'proposal' ? 'butt' : 'round'}
+          strokeDasharray={m.tone === 'proposal' || m.tone === 'hint' ? L.dash : undefined}
+          strokeLinecap={m.tone === 'proposal' || m.tone === 'hint' ? 'butt' : 'round'}
           pointerEvents='none'
           data-seam-mark={m.tone}
         />
@@ -1201,23 +1262,22 @@ export function StepPictureSvg({
           ) : null;
         })}
       {onPick &&
-        doors
-          .filter((x) => !x.inner)
-          .map((x) => (
-            <path
-              key={`h:${x.id}`}
-              d={x.d}
-              fill='none'
-              stroke='transparent'
-              strokeWidth={14}
-              pointerEvents='stroke'
-              className='cursor-pointer'
-              onPointerEnter={() => onHover?.(x.id)}
-              onPointerLeave={() => onHover?.(null)}
-              onClick={() => onPick(x.id)}
-              data-seam-target={x.id}
-            />
-          ))}
+        // Lines first: where an edge runs beside a line, the edge takes the click.
+        [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
+          <path
+            key={`h:${x.id}`}
+            d={x.d}
+            fill='none'
+            stroke='transparent'
+            strokeWidth={14}
+            pointerEvents='stroke'
+            className='cursor-pointer'
+            onPointerEnter={() => onHover?.(x.id)}
+            onPointerLeave={() => onHover?.(null)}
+            onClick={() => onPick(x.id)}
+            data-seam-target={x.id}
+          />
+        ))}
     </svg>
   );
 }

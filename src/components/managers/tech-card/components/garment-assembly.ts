@@ -17,6 +17,8 @@ import type {
 import { edgeIdsOf } from 'lib/assembly-skeleton/geometry';
 import { legPanels, type LegPanel } from 'lib/assembly-skeleton/geometry/legs';
 import { pieceKeyOf, unionLayout } from 'lib/assembly-skeleton/union';
+import type { DeclaredJoin } from 'lib/doll/joins';
+import { ringsFromJoins, type Ring } from 'lib/doll/rings';
 
 import { inputGroups, isJoinStep, type FormOpLike } from './step-seams/step-seams-model';
 
@@ -363,6 +365,7 @@ function mappedEdge(id: EdgeId, target: PieceGeom, geoms: ReadonlyMap<string, Pi
 function plyComplements(
   chosen: readonly SeamCandidate[],
   geoms: ReadonlyMap<string, PieceGeom>,
+  separatePanels: ReadonlySet<string> = new Set(),
 ): SeamCandidate[] {
   const families = twinFamilies(geoms);
   const known = new Set(chosen.flatMap((candidate) => [...candidatePairKeys(candidate)]));
@@ -381,6 +384,7 @@ function plyComplements(
       for (const bId of bIds) {
         const matchingPly = /collar follows/.test(candidate.evidence.rule ?? '');
         const plies = (key: string) => {
+          if (separatePanels.has(key)) return [key];
           const family = families.get(key) ?? [key];
           if (!matchingPly) return family;
           const mate = family.find((candidateKey) => candidateKey !== key);
@@ -435,6 +439,51 @@ function operationContext(techCard: common_TechCard, geoms: ReadonlyMap<string, 
       assignedOperations.push(operation.operationNumber ?? 0);
   });
   return { operations, pieceKeys, assignedOperations };
+}
+
+function declaredJoins(
+  operations: readonly Operation[],
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): DeclaredJoin[] {
+  return operations.flatMap((operation, index) => {
+    if (!isJoinStep(operations, index, pieceKeys, geoms)) return [];
+    const parts = inputGroups(operations, index, pieceKeys)
+      .map((group) => [...group.pieces])
+      .filter((pieces) => pieces.length);
+    if (parts.length < 2) return [];
+    return [
+      {
+        label:
+          operation.outputUnitKey?.trim() || `operation ${operation.operationNumber ?? index + 1}`,
+        parts,
+      },
+    ];
+  });
+}
+
+function markRingSideSeams(candidate: SeamCandidate, rings: readonly Ring[]): SeamCandidate {
+  if (candidate.aParts?.length || candidate.bParts?.length) return candidate;
+  const a = pieceKeyOf(candidate.a);
+  const b = pieceKeyOf(candidate.b);
+  const ring = rings.find((item) => item.pieces.includes(a) && item.pieces.includes(b));
+  if (
+    !ring ||
+    !ring.sides.get(a)?.includes(candidate.a) ||
+    !ring.sides.get(b)?.includes(candidate.b)
+  )
+    return candidate;
+  return {
+    ...candidate,
+    score: Math.max(candidate.score, 0.99),
+    sewn: true,
+    assignment: { margin: 99, confidence: 'sure' },
+    evidence: {
+      ...candidate.evidence,
+      twin: 'identical',
+      rule: `ring (from the technologist's order «${ring.join}»): identical panels sewn side to side — ${a} meets ${b}`,
+    },
+  };
 }
 
 function necklineRepairs(
@@ -719,7 +768,17 @@ function edgeRange(candidate: SeamCandidate, side: 'a' | 'b'): GarmentEdgeRange 
 export function assembleGarment(input: GarmentAssemblyInput): GarmentAssembly {
   const geoms = new Map(input.graph.pieces.map((piece) => [piece.pieceKey, piece]));
   const { operations, pieceKeys, assignedOperations } = operationContext(input.techCard, geoms);
-  let chosen = [...input.graph.chosen];
+  const ringReading = ringsFromJoins(
+    input.graph,
+    declaredJoins(operations, pieceKeys, geoms),
+    new Set(),
+    (key) => pocketLike(geoms.get(key)!),
+  );
+  const refusedRingSeams = new Set(ringReading.refused.map((item) => item.seam));
+  let chosen = [
+    ...input.graph.chosen.filter((candidate) => !refusedRingSeams.has(candidate)),
+    ...ringReading.added.map((proposal) => proposal.seam),
+  ].map((candidate) => markRingSideSeams(candidate, ringReading.rings));
   const repairs = trouserRepairs(input.techCard, geoms, input.category, chosen);
   for (const [operation, seams] of necklineRepairs(input.techCard, geoms))
     repairs.add.set(operation, [...(repairs.add.get(operation) ?? []), ...seams]);
@@ -749,7 +808,7 @@ export function assembleGarment(input: GarmentAssemblyInput): GarmentAssembly {
   });
 
   const repaired = [...repairs.add.values()].flat();
-  const complements = plyComplements([...chosen, ...repaired], geoms);
+  const complements = plyComplements([...chosen, ...repaired], geoms, ringReading.panels);
   const storedOperations = new Set(
     chosen
       .filter((candidate) => candidate.provenance)
