@@ -9,6 +9,7 @@ import {
   decodeHandPlace,
   handsFromSeams,
   laidHands,
+  laidOwnHands,
   pickHandTarget,
   snapHand,
   stepHandsOf,
@@ -122,7 +123,10 @@ describe('hand placement storage', () => {
     const ops = [{ seamKeys: [] }, { seamKeys: ['seam-hand'] }, { seamKeys: [] }];
 
     expect(stepHandsOf(ops, 0, byKey).hand.size).toBe(0);
-    expect(stepHandsOf(ops, 0, byKey).twinHand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
+    expect(stepHandsOf(ops, 0, byKey).twinHand.get('PART')).toEqual({
+      ...hand,
+      partner: 'PARTNER',
+    });
     expect(stepHandsOf(ops, 1, byKey).hand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
     expect(stepHandsOf(ops, 2, byKey).hand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
   });
@@ -248,6 +252,16 @@ describe("a twin lays its twin's placement", () => {
       new Map([['BAG_L', left]]),
     );
     expect(laid.get('BAG_R')).toMatchObject({ place: own, twin: false });
+  });
+
+  it('the manual path lays an own hand but never borrows its twin', () => {
+    const targets = targetsOf('BAG_R', 'BACK_R');
+    expect(laidOwnHands(targets, new Map([['BAG_L', left]]))).toEqual(new Map());
+    const own: HandOn = { inside: false, rotDeg: 0, flip: false, slideMm: 0, partner: 'BACK_R' };
+    expect(laidOwnHands(targets, new Map([['BAG_R', own]])).get('BAG_R')).toMatchObject({
+      place: own,
+      twin: false,
+    });
   });
 
   it('only on a seam to a twin of the partner it was set on', () => {

@@ -402,6 +402,29 @@ export function laidHands(
   return out;
 }
 
+/**
+ * Only the placements written for the piece itself. The manual result path uses this instead of
+ * borrowing and mirroring a twin's hand: an unplaced twin remains unplaced.
+ */
+export function laidOwnHands(
+  targets: ReadonlyMap<string, readonly HandTarget[]>,
+  hand: ReadonlyMap<string, HandOn>,
+  drawn: (piece: string) => boolean = () => true,
+): Map<string, LaidHand> {
+  const out = new Map<string, LaidHand>();
+  for (const [piece, all] of targets) {
+    if (!drawn(piece)) continue;
+    const own = hand.get(piece);
+    if (!own) continue;
+    const target = pickHandTarget(
+      all.filter((candidate) => drawn(candidate.partner)),
+      own,
+    );
+    if (target) out.set(piece, { place: own, target, twin: false });
+  }
+  return out;
+}
+
 /** Placements equal as stored (the partner they name aside). */
 export const sameHand = (a: HandPlace | undefined, b: HandPlace | undefined) =>
   !a || !b

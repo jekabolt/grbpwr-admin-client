@@ -29,7 +29,14 @@ import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleto
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import type { SeamPlacement } from 'lib/seams';
 import { isLayerCloth } from './seam-signals';
-import { handTargetsOf, laidHands, snapHand, type HandOn, type LaidHand } from './step-hand';
+import {
+  handTargetsOf,
+  laidHands,
+  laidOwnHands,
+  snapHand,
+  type HandOn,
+  type LaidHand,
+} from './step-hand';
 import { GUESS_OK, parseInner, pieceOfTarget, type SewnPair } from './step-seams-model';
 import { pinPoses, placementT, type PosePin } from './step-pose';
 
@@ -739,6 +746,12 @@ export function stepLayout(
     /** A pocket bag or lining lies on its own piece inside a unit; the tech pack opts out. */
     bagsAsLayers?: boolean;
     /**
+     * Owner-row fit: keep unplaced inputs grain-up and face-up, and join unplaced edge rows by
+     * translation only. Explicit owner hands stay as placed; inferred and rowless layouts keep
+     * the established fitting trials.
+     */
+    manualFit?: boolean;
+    /**
      * Pieces placed by hand (P8, pose rows): pinned LAST, each on its host where its row says, the
      * pieces hung on it along — after every seam, explode and shelf, so nothing pulls it away.
      */
@@ -763,13 +776,15 @@ export function stepLayout(
   const inOf = (id: EdgeId) => input.get(pieceKeyOf(id));
   const keysOf = (i: number) => keys.filter((k) => input.get(k) === i);
 
-  // Hand placements: a piece's own, else its twin's mirrored — on a seam to a drawn partner.
+  // Default hand placements borrow a mirrored twin; manual fit accepts only the piece's own hand.
   const handOwn = opts.hand ?? NO_HAND;
   const hands =
     handOwn.size || opts.twinHand?.size
-      ? laidHands(handTargetsOf(seams, geoms), geoms, handOwn, opts.twinHand ?? handOwn, (k) =>
-          drawnKeys.has(k),
-        )
+      ? opts.manualFit
+        ? laidOwnHands(handTargetsOf(seams, geoms), handOwn, (k) => drawnKeys.has(k))
+        : laidHands(handTargetsOf(seams, geoms), geoms, handOwn, opts.twinHand ?? handOwn, (k) =>
+            drawnKeys.has(k),
+          )
       : new Map<string, LaidHand>();
   const snapOf = (h: LaidHand, place: HandOn = h.place) =>
     snapHand(h.target.part, h.target.partnerGeom, h.target.partRun, h.target.partnerRun, place);
@@ -801,7 +816,14 @@ export function stepLayout(
           hostOf: new Map<string, string>(),
           outlineLayers: [],
         }
-      : layInput(ks, inner, geoms, raster, opts.bagsAsLayers !== false && !opts.garmentLayout);
+      : layInput(
+          ks,
+          // Manual fit re-lays nothing inside an input except the owner's surface rows.
+          opts.manualFit ? inner.filter((c) => c.kind === 'surface') : inner,
+          geoms,
+          raster,
+          opts.bagsAsLayers !== false && !opts.garmentLayout,
+        );
     if (seeded) {
       for (const [k, h] of previous.hung ?? [])
         if (ks.includes(k) && ks.includes(h)) hungIn.push([k, h]);
@@ -812,6 +834,7 @@ export function stepLayout(
     for (const [k, h] of hands) {
       const p = h.target.partner;
       if (input.get(k) !== i || input.get(p) !== i) continue;
+      if (opts.manualFit) continue;
       const from = laid.T.get(k);
       const onto = laid.T.get(p);
       if (!from || !onto) continue;
@@ -1076,6 +1099,11 @@ export function stepLayout(
               (k) => local.get(k),
             )
           : null;
+      if (opts.manualFit) {
+        const target = midAlong(A).p;
+        const source = midAlong(myRun ?? B).p;
+        return translate(target[0] - source[0], target[1] - source[1]);
+      }
       const a0 = A[0];
       const a1 = A[A.length - 1];
       const mineKeys = keysOf(j);
@@ -1519,7 +1547,10 @@ export function stepLayout(
         const i = ins[p];
         const j = ins[q];
         if (onEachOther.has(pairKey(i, j))) continue;
-        if (rigidInputs && clusters.some((cluster) => cluster.includes(i) && cluster.includes(j)))
+        if (
+          (rigidInputs || opts.manualFit) &&
+          clusters.some((cluster) => cluster.includes(i) && cluster.includes(j))
+        )
           continue;
         let o = 0;
         for (const a of R.get(i)!) for (const b of R.get(j)!) o = Math.max(o, pairOverlap(a, b));

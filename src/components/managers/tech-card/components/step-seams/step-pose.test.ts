@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply, compose } from 'lib/assembly-skeleton/union/affine';
+import { apply, compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import {
   fromWire,
   newSeamKey,
@@ -25,6 +25,15 @@ import {
   useSeamsStore,
 } from '../assembly-seams/seams-store';
 import {
+  CARD6_CHAIN_OPS,
+  CARD6_CHAIN_PIECE_KEYS,
+  CARD6_CHAIN_POSES,
+  CARD6_CHAIN_SEAMS,
+  card6ChainGeoms,
+  card6ChainInnerLines,
+  card6ChainStep,
+} from './card6-chain.fixture';
+import {
   CARD6_OPS,
   CARD6_PIECE_KEYS,
   CARD6_SEAMS,
@@ -38,13 +47,19 @@ import { stepPictureOfOp, type SceneOp } from './step-picture-view';
 import {
   placementOf,
   placementT,
+  poseAfterDrop,
+  poseBlockGroup,
   poseGroup,
   poseHostOf,
+  posePickup,
   posePinsOf,
   pinPoses,
   snapPose,
   turnAbout,
+  turnToGrain,
+  upright,
 } from './step-pose';
+import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
 
 const square = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
@@ -264,6 +279,60 @@ describe('stepLayout: a pose is pinned last', () => {
 });
 
 describe('picker helpers', () => {
+  it('picks up every piece of the #380 sleeve block at #430', () => {
+    const geoms = card6ChainGeoms();
+    const result = stepResults(
+      {
+        ops: CARD6_CHAIN_OPS,
+        byKey: CARD6_CHAIN_SEAMS,
+        poses: CARD6_CHAIN_POSES,
+        geoms,
+        innerLines: card6ChainInnerLines(),
+        pieceKeys: CARD6_CHAIN_PIECE_KEYS,
+      },
+      { manualFit: true },
+    )[card6ChainStep(430)];
+    const sleeve = result.blocks.find((block) => block.inputKey === 'SLEEVE-2')!;
+    for (const piece of sleeve.pieces) {
+      const pickup = posePickup(piece, result, geoms);
+      expect(pickup.group).toEqual(sleeve.pieces);
+      expect(pickup.host).toBeNull();
+    }
+  });
+
+  it('keeps the pickup host when the drop lands near another input', () => {
+    const g = new Map(
+      [
+        square('A', 0, 0, 40, 40),
+        square('B', 200, 0, 100, 100),
+        square('C', 500, 0, 200, 200),
+        square('D', 50, 0, 30, 30),
+      ].map((piece) => [piece.pieceKey, piece]),
+    );
+    const layout = {
+      blocks: [{ pieces: ['A'] }, { pieces: ['B'] }, { pieces: ['C'] }, { pieces: ['D'] }],
+      transforms: new Map<string, Affine>([
+        ['A', IDENTITY],
+        ['B', IDENTITY],
+        ['C', IDENTITY],
+        ['D', IDENTITY],
+      ]),
+      hung: [
+        ['A', 'B'],
+        ['D', 'A'],
+      ] as const,
+    };
+    const pickup = posePickup('A', layout, g);
+    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B' });
+    expect(poseBlockGroup('A', pickup.host, layout)).toEqual(['A', 'D']);
+    expect(posePickup('C', layout, g).host).toBe('B');
+
+    const dropped: Affine = [1, 0, 0, 1, 510, 10];
+    const row = poseAfterDrop('A', dropped, pickup, layout, g)!;
+    expect(row.host).toBe('B');
+    expect(placementT(g.get('B')!, g.get('A')!, row.placement)).toEqual(dropped);
+  });
+
   it('snaps a vertex onto a vertex first, else onto the outline', () => {
     const ring: Pt2[] = [
       [0, 0],
@@ -312,6 +381,25 @@ describe('picker helpers', () => {
     expect(apply(turnAbout(ring, 1), [20, 5]).map((v) => Math.round(v))).toEqual([10, 15]);
     expect(apply(turnAbout(ring, -1), [20, 5]).map((v) => Math.round(v))).toEqual([10, -5]);
     expect(apply(turnAbout(ring, 0), [0, 0])).toEqual([20, 0]);
+  });
+
+  it('turns from grain-up quarters and clears a mirror on upright', () => {
+    const piece = square('TURN', 0, 0, 20, 10);
+    let T = IDENTITY;
+    for (let turn = 0; turn < 4; turn++) T = compose(turnToGrain(piece, T, 1), T);
+    expect(near(T, IDENTITY)).toBe(true);
+
+    const angle = (37 * Math.PI) / 180;
+    const off: Affine = [Math.cos(angle), Math.sin(angle), -Math.sin(angle), Math.cos(angle), 5, 8];
+    const snapped = compose(turnToGrain(piece, off, 1), off);
+    const degrees = (Math.atan2(snapped[1], snapped[0]) * 180) / Math.PI;
+    expect(degrees / 90).toBeCloseTo(Math.round(degrees / 90), 8);
+    expect(degrees).toBeCloseTo(90, 8);
+
+    const mirrored: Affine = [-1, 0, 0, 1, 30, 40];
+    const standing = compose(upright(piece, mirrored), mirrored);
+    expect(near(standing, [1, 0, 0, 1, 10, 40])).toBe(true);
+    expect(standing[0] * standing[3] - standing[1] * standing[2]).toBeGreaterThan(0);
   });
 });
 

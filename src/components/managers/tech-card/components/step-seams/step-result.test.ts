@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { Affine, PieceGeom } from 'lib/assembly-skeleton/types';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose } from 'lib/assembly-skeleton/union/affine';
 import { poseRow, type StoredPose } from 'lib/seams';
 
@@ -18,6 +19,7 @@ import {
   card6ChainStep,
 } from './card6-chain.fixture';
 import { boxOf, invert } from './step-picture';
+import { placementT, poseAfterDrop, posePickup } from './step-pose';
 import { StepResultProvider, useStepResult } from './step-result-context';
 import { stepResults, type StepResult, type StepResultsInput } from './step-result';
 import type { FormOpLike } from './step-seams-model';
@@ -36,6 +38,25 @@ const expectRigidMove = (before: StepResult, after: StepResult, pieces: readonly
     closeAffine(after.transforms.get(piece)!, compose(delta, before.transforms.get(piece)!));
 };
 
+const midAlong = (points: readonly (readonly [number, number])[]): [number, number] => {
+  const lengths = points
+    .slice(1)
+    .map((point, index) => Math.hypot(point[0] - points[index][0], point[1] - points[index][1]));
+  let left = lengths.reduce((sum, length) => sum + length, 0) / 2;
+  for (let index = 0; index < lengths.length; index++) {
+    const length = lengths[index];
+    if (left <= length || index === lengths.length - 1) {
+      const share = length ? left / length : 0;
+      return [
+        points[index][0] + (points[index + 1][0] - points[index][0]) * share,
+        points[index][1] + (points[index + 1][1] - points[index][1]) * share,
+      ];
+    }
+    left -= length;
+  }
+  return [...points[0]];
+};
+
 const chainGeoms = card6ChainGeoms();
 const chainInnerLines = card6ChainInnerLines();
 const chainInput: StepResultsInput = {
@@ -51,6 +72,69 @@ const operationResult = (results: readonly StepResult[], operationNumber: number
   results[card6ChainStep(operationNumber)];
 
 describe('stepResults: one carried owner result per operation', () => {
+  it('manualFit keeps the right placket face-up and an unplaced pocket grain-up', () => {
+    const results = stepResults(chainInput, { manualFit: true });
+    for (const operationNumber of [90, 260]) {
+      const T = operationResult(results, operationNumber).transforms.get('FLP_R')!;
+      expect(T[0] * T[3] - T[1] * T[2]).toBeGreaterThan(0);
+    }
+
+    const pocket = operationResult(results, 540).transforms.get('PCK_L_BTTM')!;
+    closeAffine([pocket[0], pocket[1], pocket[2], pocket[3], 0, 0], [1, 0, 0, 1, 0, 0]);
+  });
+
+  it('manualFit joins an unplaced edge row at the two picked edge midpoints', () => {
+    const result = operationResult(stepResults(chainInput, { manualFit: true }), 540);
+    const host = resolveEdge('P_L_MAIN#1', chainGeoms)!;
+    const part = resolveEdge('PCK_L_BTTM#1', chainGeoms)!;
+    const hostMid = midAlong(
+      host.pts.map((point) => apply(result.transforms.get(host.pieceKey)!, point)),
+    );
+    const partMid = midAlong(
+      part.pts.map((point) => apply(result.transforms.get(part.pieceKey)!, point)),
+    );
+    expect(Math.hypot(hostMid[0] - partMid[0], hostMid[1] - partMid[1])).toBeLessThanOrEqual(0.5);
+  });
+
+  it('manualFit leaves the placement-less surface path unchanged', () => {
+    const automatic = operationResult(stepResults(chainInput), 30);
+    const manual = operationResult(stepResults(chainInput, { manualFit: true }), 30);
+    for (const piece of automatic.transforms.keys())
+      closeAffine(manual.transforms.get(piece)!, automatic.transforms.get(piece)!);
+  });
+
+  it('keeps a pickup-authored pose because its fixed host is in another input', () => {
+    const before = operationResult(stepResults(chainInput, { manualFit: true }), 380);
+    const piece = 'FLP_L_MAIN';
+    const pickup = posePickup(piece, before, chainGeoms);
+    expect(pickup.host).not.toBeNull();
+    const droppedT = compose([1, 0, 0, 1, 35, -20], before.transforms.get(piece)!);
+    const dropped = poseAfterDrop(piece, droppedT, pickup, before, chainGeoms)!;
+    const key = 'pickup-authored pose';
+    const row = poseRow({
+      seamKey: key,
+      piece: chainGeoms.get(piece)!,
+      host: chainGeoms.get(dropped.host)!,
+      placement: dropped.placement,
+    });
+    const ops = CARD6_CHAIN_OPS.map((op) =>
+      op.operationNumber === 380 ? { ...op, poseKeys: [...(op.poseKeys ?? []), key] } : op,
+    );
+    const result = operationResult(
+      stepResults(
+        { ...chainInput, ops, poses: new Map([...CARD6_CHAIN_POSES, [key, row]]) },
+        { manualFit: true },
+      ),
+      380,
+    );
+
+    expect(result.ignoredPoses).not.toContain(key);
+    closeAffine(
+      relative(result, piece, dropped.host),
+      placementT(chainGeoms.get(dropped.host)!, chainGeoms.get(piece)!, dropped.placement),
+    );
+  });
+
   it('carries #30 → #380 → #430 → #1030 as one affine per sleeve block', () => {
     const results = stepResults(chainInput);
     const at380 = operationResult(results, 380);

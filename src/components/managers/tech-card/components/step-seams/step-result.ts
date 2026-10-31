@@ -9,7 +9,7 @@ import { poseOf, type StoredPose, type StoredSeam } from 'lib/seams';
 import { decodeHandPlace, handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
-import { pinPoses, type PosePin } from './step-pose';
+import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
 import { storedRowsOfStep, type StepStoredRow } from './step-rows';
 
 export type StepResultBlock = {
@@ -25,6 +25,8 @@ export type StepResult = {
   /** Bottom → top. */
   layers: readonly string[];
   blocks: readonly StepResultBlock[];
+  /** Piece-level [input, host] links in this operation's result, for rigid PLACE pickup. */
+  hung: readonly (readonly [string, string])[];
   /** Current-step pose keys ignored because piece and host are already in one rigid input. */
   ignoredPoses: readonly string[];
   /** Stable audit labels (`self:key`, `later:key@index`, or a carried earlier label). */
@@ -42,6 +44,11 @@ export type StepResultsInput = {
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines: ReadonlyMap<string, Pt2[][]>;
   pieceKeys: ReadonlySet<string>;
+};
+
+export type StepResultsOptions = {
+  /** Use only owner-preserving, translation-only fit for unplaced edge rows. */
+  manualFit?: boolean;
 };
 
 type ComputedStep = {
@@ -156,7 +163,7 @@ function applyCurrentPoses(
     return first ? { first, T: layout.T.get(first)! } : null;
   });
   pinPoses(layout.T, pins, geoms, [], {
-    groupOf: (piece) => inputs[inputOf.get(piece)!]?.pieces ?? [piece],
+    groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks: inputs, hung: layout.hung }),
   });
   before.forEach((snapshot, groupIndex) => {
     if (!snapshot) return;
@@ -249,6 +256,7 @@ function neutralLayout(
 
 function computeStep(
   input: StepResultsInput,
+  opts: StepResultsOptions,
   index: number,
   latestByOutput: ReadonlyMap<string, ComputedStep>,
   outputAt: ReadonlyMap<string, readonly number[]>,
@@ -271,6 +279,7 @@ function computeStep(
       twinHand: EMPTY_HANDS,
       inputLayouts: inputs.map((group) => group.seed?.layout),
       bagsAsLayers: false,
+      manualFit: opts.manualFit === true,
     },
   );
 
@@ -305,6 +314,7 @@ function computeStep(
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
       T: blockTransforms[groupIndex],
     })),
+    hung: layout.hung ?? [],
     ignoredPoses,
     cycles: unique(inputs.flatMap((group) => group.cycles)),
     layout,
@@ -332,7 +342,10 @@ const sortedEntries = <T>(map: ReadonlyMap<string, T>) =>
   [...map].sort(([left], [right]) => left.localeCompare(right));
 
 /** Content signature; geometry is the outer WeakMap identity and inner-line identity is explicit. */
-export function stepResultsSignature(input: StepResultsInput): string {
+export function stepResultsSignature(
+  input: StepResultsInput,
+  opts: StepResultsOptions = {},
+): string {
   return JSON.stringify({
     ops: input.ops.map((op) => ({
       inputKeys: op.inputKeys,
@@ -346,6 +359,7 @@ export function stepResultsSignature(input: StepResultsInput): string {
     poses: sortedEntries(input.poses ?? new Map()),
     pieceKeys: [...input.pieceKeys].sort(),
     innerLines: identityOf(input.innerLines as object),
+    ...(opts.manualFit ? { manualFit: true } : {}),
   });
 }
 
@@ -361,8 +375,11 @@ export function stepResultsSignature(input: StepResultsInput): string {
  * needed, and no seam alignment. One input keeps its seeded transforms unchanged. The same rules
  * naturally cover rowless raw pieces.
  */
-export function stepResults(input: StepResultsInput): readonly StepResult[] {
-  const signature = stepResultsSignature(input);
+export function stepResults(
+  input: StepResultsInput,
+  opts: StepResultsOptions = {},
+): readonly StepResult[] {
+  const signature = stepResultsSignature(input, opts);
   const hit = cache.get(input.geoms as object);
   if (hit?.signature === signature) return hit.results;
 
@@ -374,7 +391,7 @@ export function stepResults(input: StepResultsInput): readonly StepResult[] {
   const latestByOutput = new Map<string, ComputedStep>();
   const computed: ComputedStep[] = [];
   input.ops.forEach((op, index) => {
-    const step = computeStep(input, index, latestByOutput, outputAt);
+    const step = computeStep(input, opts, index, latestByOutput, outputAt);
     computed.push(step);
     const output = (op.outputUnitKey ?? '').trim();
     if (output) latestByOutput.set(output, step);

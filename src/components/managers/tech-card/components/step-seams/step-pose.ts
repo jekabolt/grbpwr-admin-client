@@ -123,6 +123,118 @@ export function poseGroup(
   return seen.has(host) ? [piece] : [...seen];
 }
 
+/** The result metadata needed to choose a rigid PLACE pickup. */
+export type PoseBlockLayout = {
+  blocks: readonly { pieces: readonly string[] }[];
+  transforms: ReadonlyMap<string, Affine>;
+  /** Piece-level [input, host] links from this step's laid result. */
+  hung?: readonly (readonly [string, string])[];
+};
+
+/** The rigid pieces and fixed host captured when PLACE starts dragging. */
+export type PosePickup = { group: string[]; host: string | null };
+
+const blockIndexOf = (layout: Pick<PoseBlockLayout, 'blocks'>) => {
+  const out = new Map<string, number>();
+  layout.blocks.forEach((block, index) => {
+    for (const piece of block.pieces) if (!out.has(piece)) out.set(piece, index);
+  });
+  return out;
+};
+
+/**
+ * The grabbed input block plus input blocks hanging from it by this step. The fixed host's block is
+ * always cut out, so replaying the row moves exactly the same rigid side of the join.
+ */
+export function poseBlockGroup(
+  piece: string,
+  host: string | null,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'hung'>,
+): string[] {
+  const input = blockIndexOf(layout);
+  const own = input.get(piece);
+  if (own == null) return [piece];
+  const hostInput = host == null ? null : input.get(host);
+  const links = (layout.hung ?? []).flatMap(([child, parent]) => {
+    const from = input.get(child);
+    const to = input.get(parent);
+    return from == null || to == null || from === to ? [] : [[from, to] as const];
+  });
+  const included = new Set([own]);
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [child, parent] of links) {
+      if (!included.has(parent) || included.has(child) || child === hostInput) continue;
+      included.add(child);
+      changed = true;
+    }
+  }
+  return layout.blocks.flatMap((block, index) => (included.has(index) ? block.pieces : []));
+}
+
+/**
+ * Capture a PLACE drag. A seam-linked parent is the fixed host; otherwise the largest other input
+ * by total cut area supplies its largest drawn piece. The group and host are stable until drop.
+ */
+export function posePickup(
+  piece: string,
+  layout: PoseBlockLayout,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PosePickup {
+  const input = blockIndexOf(layout);
+  const own = input.get(piece);
+  if (own == null) return { group: [piece], host: null };
+  let host: string | null = null;
+  for (const [child, parent] of layout.hung ?? []) {
+    if (input.get(child) !== own || input.get(parent) == null || input.get(parent) === own)
+      continue;
+    host = parent;
+    break;
+  }
+  if (!host) {
+    const areaOfPiece = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+    const candidates = layout.blocks
+      .map((block, index) => ({
+        index,
+        area: block.pieces.reduce((sum, key) => sum + areaOfPiece(key), 0),
+      }))
+      .filter(({ index }) => index !== own);
+    const other = candidates.reduce<(typeof candidates)[number] | null>(
+      (best, candidate) => (!best || candidate.area > best.area ? candidate : best),
+      null,
+    );
+    const pieces = other?.index == null ? [] : layout.blocks[other.index].pieces;
+    host =
+      pieces.reduce<string | null>(
+        (best, key) => (!best || areaOfPiece(key) > areaOfPiece(best) ? key : best),
+        null,
+      ) ?? null;
+  }
+  return { group: poseBlockGroup(piece, host, layout), host };
+}
+
+/** A dropped pose value ready to be wrapped in `poseRow`. */
+export type DroppedPose = { piece: string; host: string; placement: SeamPlacement };
+
+/**
+ * Encode a drop against the host captured at pickup. No snap target or nearby piece participates,
+ * so the row cannot be re-hosted while it is written.
+ */
+export function poseAfterDrop(
+  piece: string,
+  droppedT: Affine,
+  pickup: Pick<PosePickup, 'host'>,
+  layout: Pick<PoseBlockLayout, 'transforms'>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): DroppedPose | null {
+  const host = pickup.host;
+  const pieceGeom = geoms.get(piece);
+  const hostGeom = host ? geoms.get(host) : undefined;
+  const hostT = host ? layout.transforms.get(host) : undefined;
+  if (!host || !pieceGeom || !hostGeom || !hostT || host === piece) return null;
+  return { piece, host, placement: poseAt(hostGeom, pieceGeom, hostT, droppedT) };
+}
+
 function invert(T: Affine): Affine {
   const [a, b, c, d, e, f] = T;
   const k = a * d - b * c || 1;
@@ -273,6 +385,51 @@ export function turnAbout(ring: readonly Pt2[], quarter: -1 | 0 | 1): Affine {
         ? [0, -1, 1, 0, 0, 0]
         : [-1, 0, 0, 1, 0, 0];
   return compose(translate(cx, cy), compose(L, translate(-cx, -cy)));
+}
+
+const quarterLinear = (quarter: number): Affine => {
+  const normalized = ((quarter % 4) + 4) % 4;
+  if (normalized === 1) return [0, 1, -1, 0, 0, 0];
+  if (normalized === 2) return [-1, 0, 0, -1, 0, 0];
+  if (normalized === 3) return [0, -1, 1, 0, 0, 0];
+  return IDENTITY;
+};
+
+/** Delta that replaces `T`'s linear part while keeping the piece's cut-box centre fixed. */
+const grainDelta = (piece: PieceGeom, T: Affine, linear: Affine): Affine => {
+  const b = box(piece.rs);
+  const centre: Pt2 = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const fixed = apply(T, centre);
+  const turned = apply(linear, centre);
+  const next: Affine = [
+    linear[0],
+    linear[1],
+    linear[2],
+    linear[3],
+    fixed[0] - turned[0],
+    fixed[1] - turned[1],
+  ];
+  return compose(next, invert(T));
+};
+
+/**
+ * ⟲ (`1`) or ⟳ (`-1`) to the next exact 90° grain-up multiple. Applying the returned delta to
+ * `T` never carries an off-angle such as 37° forward by another 90°.
+ */
+export function turnToGrain(piece: PieceGeom, T: Affine, direction: -1 | 1): Affine {
+  const flipped = T[0] * T[3] - T[1] * T[2] < 0;
+  const angle = Math.atan2(flipped ? -T[1] : T[1], flipped ? -T[0] : T[0]) / (Math.PI / 2);
+  // A saved angle a hair off a quarter (89.99°) counts as that quarter: ⟲ must visibly turn.
+  const eps = 0.25 / 90;
+  const quarter = direction === 1 ? Math.floor(angle + eps) + 1 : Math.ceil(angle - eps) - 1;
+  const rotation = quarterLinear(quarter);
+  const linear = flipped ? compose(rotation, [-1, 0, 0, 1, 0, 0]) : rotation;
+  return grainDelta(piece, T, linear);
+}
+
+/** Delta to rotation 0 in the grain-up frame, with any mirror cleared. */
+export function upright(piece: PieceGeom, T: Affine): Affine {
+  return grainDelta(piece, T, IDENTITY);
 }
 
 /** The placement of `piece` laid at `T` on `host` laid at `hostT` (both picture frame). */
