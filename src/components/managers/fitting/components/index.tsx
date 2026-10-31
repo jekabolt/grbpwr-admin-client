@@ -372,6 +372,7 @@ function FittingWorkspaceScreen({
           onOpenChange={setDetailsOpen}
           models={models ?? []}
           readOnly={readOnly}
+          sampleSizeId={sampleSizeId}
         />
       </FittingWorkspaceContext.Provider>
     </Form>
