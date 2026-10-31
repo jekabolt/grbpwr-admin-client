@@ -1,4 +1,5 @@
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { codeName } from 'lib/pattern-import/dictionary/codes';
 import type { StoredSeam } from 'lib/seams';
 
 import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
@@ -55,6 +56,23 @@ export function seamEdgeWord(
   return word === 'front_edge' ? 'front edge' : word ?? '';
 }
 
+/** Card codes the import dictionary does not list (card 6 names pieces SLV_L, FLP_L_MAIN). */
+const PIECE_WORD_ALIASES: Readonly<Record<string, string>> = { SLV: 'sleeve', FLP: 'placket' };
+const SIDE_TOKENS = new Set(['L', 'R', 'F', 'B', 'MAIN', '#']);
+
+/** A piece name in plain words: `SLV_L` → «sleeve», `FLP_L_MAIN` → «placket»; prose names stay. */
+export function pieceWord(name: string): string {
+  if (!/[_]|^[A-Z0-9#]+$/.test(name)) return name.trim().toLowerCase();
+  const words = name
+    .split(/[_\s]+/)
+    .filter((token) => token && !SIDE_TOKENS.has(token.toUpperCase()) && !/^\d+$/.test(token))
+    .map((token) => {
+      const code = token.toUpperCase();
+      return PIECE_WORD_ALIASES[code] ?? (codeName(code) || token.toLowerCase());
+    });
+  return [...new Set(words)].join(' ');
+}
+
 /** Piece words plus a useful edge word, never an input/unit name. */
 export function seamSideName(
   ids: readonly string[],
@@ -62,7 +80,7 @@ export function seamSideName(
   nameOf: (piece: string) => string,
   pieceOf: (id: string) => string,
 ): string {
-  const names = [...new Set(ids.map((id) => nameOf(pieceOf(id))).filter(Boolean))];
+  const names = [...new Set(ids.map((id) => pieceWord(nameOf(pieceOf(id)))).filter(Boolean))];
   const edge = seamEdgeWord(ids, geoms);
   return [...names, edge].filter(Boolean).join(' ');
 }
