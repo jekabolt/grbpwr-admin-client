@@ -6,11 +6,67 @@
 // unionLayout keeps only those with both ends inside the unit. A unit none of whose pieces has a
 // contour gets no picture — the surfaces then draw exactly what they drew before.
 
-import type { SeamGraph } from '../types';
+import type { Affine, PieceGeom, SeamGraph, UnionLayout } from '../types';
+import { apply } from './affine';
 import { unionLayout } from './layout';
 import { unionPicture, type UnionPicture } from './picture';
 
 export type UnitStep = { inputs: readonly string[]; outputUnitKey: string };
+
+type StepLayoutPicture = {
+  T: ReadonlyMap<string, Affine>;
+  stacked: readonly (readonly string[])[];
+  onRuns: readonly string[];
+  hung?: readonly (readonly [piece: string, host: string])[];
+};
+
+const layoutBox = (
+  layout: StepLayoutPicture,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): UnionLayout['bbox'] => {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [piece, transform] of layout.T)
+    for (const point of geoms.get(piece)?.rs ?? []) {
+      const [x, y] = apply(transform, point);
+      x0 = Math.min(x0, x);
+      y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x);
+      y1 = Math.max(y1, y);
+    }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : { x0: 0, y0: 0, x1: 0, y1: 0 };
+};
+
+/** Adapt the editor's authoritative mm layout to the existing unit-pictogram renderer. */
+export function unionPictureOfLayout(
+  layout: StepLayoutPicture,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  layers: readonly string[],
+): UnionPicture {
+  const ordered = [...new Set([...layers, ...layout.T.keys()])].filter(
+    (piece) => layout.T.has(piece) && geoms.has(piece),
+  );
+  const union: UnionLayout = {
+    placements: ordered.map((piece) => {
+      const T = layout.T.get(piece)!;
+      return {
+        pieceKey: piece,
+        T,
+        mirrored: T[0] * T[3] - T[1] * T[2] < 0,
+      };
+    }),
+    bbox: layoutBox(layout, geoms),
+    stacked: layout.stacked.map((stack) => [...stack]),
+    hung: [...new Set((layout.hung ?? []).map(([piece]) => piece))],
+    onRuns: [...layout.onRuns],
+    overflow: [],
+    underlay: [],
+    overlap: 0,
+  };
+  return unionPicture(union, geoms);
+}
 
 /** Unit key → its leaf piece keys, resolved through earlier units (cycles and unknowns dropped). */
 export function unitLeaves(

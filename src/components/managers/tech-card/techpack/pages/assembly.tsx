@@ -35,6 +35,7 @@ import {
   pinPoses,
   posePinsOf,
 } from 'components/managers/tech-card/components/step-seams/step-pose';
+import { stepResults } from 'components/managers/tech-card/components/step-seams/step-result';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
@@ -3304,6 +3305,23 @@ export function editorOperationPictures(
       ),
     );
     const operations = sceneOperations(resolvedCard);
+    // With no stored row every result is provably rowless; keep that legacy path allocation-free.
+    const ownerResults =
+      byKey.size || poses.size
+        ? stepResults({
+            ops: operations,
+            byKey,
+            poses,
+            geoms,
+            innerLines,
+            pieceKeys,
+          })
+        : [];
+    const ownedNumbers = new Set(
+      ownerResults.flatMap((result, index) =>
+        result.owned ? [operations[index]?.operationNumber ?? 0] : [],
+      ),
+    );
     const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
     const rowByNumber = new Map(model.rows.map((row) => [row.n, row]));
     const pictures = new Map<number, StepPicture>();
@@ -3358,6 +3376,24 @@ export function editorOperationPictures(
       const row = rowByNumber.get(number);
       if (!row) return;
       try {
+        const ownerResult = ownerResults[index];
+        if (ownerResult?.owned && ownerResult.layout.T.size) {
+          const picture = sceneAt(operation, index);
+          const layout: StepLayout = {
+            ...ownerResult.layout,
+            T: new Map(ownerResult.layout.T),
+            input: new Map(ownerResult.layout.input),
+          };
+          pictures.set(number, {
+            ...picture,
+            marks: [],
+            layoutLeaves: picture.leaves,
+            layout,
+          });
+          const output = operation.outputUnitKey?.trim();
+          if (output) assembledByUnit.set(output, ownerResult.layout);
+          return;
+        }
         if (joins.has(number)) {
           const picture = sceneAt(operation, index);
           const frameSeams = useInferredLayout ? seamsAt(number) : picture.frameSeams;
@@ -3460,9 +3496,10 @@ export function editorOperationPictures(
     const final = [...pictures.entries()]
       .sort(([left], [right]) => right - left)
       .find(([, picture]) => visiblePictureKeys(picture).length > 2);
-    if (final) pictures.set(final[0], compactFinalPicture(final[1]));
+    if (final && !ownedNumbers.has(final[0])) pictures.set(final[0], compactFinalPicture(final[1]));
     const completeAssemblies = new Set<number>();
     for (const [number, picture] of pictures) {
+      if (ownedNumbers.has(number)) continue;
       const rawKeys = visiblePictureKeys(picture);
       const rawRings = rawKeys.map((key) =>
         (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
@@ -3616,6 +3653,7 @@ export function editorOperationPictures(
       const operation = operations[index];
       const previousNumber = previousOperation.operationNumber ?? 0;
       const number = operation.operationNumber ?? 0;
+      if (ownedNumbers.has(number)) continue;
       const previous = pictures.get(previousNumber);
       const current = pictures.get(number);
       const inputSignature = (op: SceneOp) =>
@@ -3734,6 +3772,7 @@ export function editorOperationPictures(
       const nextOperation = operations[index + 1];
       const number = operation.operationNumber ?? 0;
       const nextNumber = nextOperation.operationNumber ?? 0;
+      if (ownedNumbers.has(number)) continue;
       const output = operation.outputUnitKey?.trim();
       const picture = pictures.get(number);
       const nextPicture = pictures.get(nextNumber);
@@ -3804,6 +3843,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      if (ownedNumbers.has(number)) continue;
       const producedInputs = (operation.inputKeys ?? []).flatMap((input) => {
         const key = input.trim();
         const source = outputPictures.get(key);
@@ -3834,7 +3874,8 @@ export function editorOperationPictures(
       }
     }
     for (const [number, picture] of pictures)
-      if (sleevedPictureNeedsRepair(picture)) {
+      if (ownedNumbers.has(number)) continue;
+      else if (sleevedPictureNeedsRepair(picture)) {
         const repaired = sleevedFinalPicture(picture);
         if (repaired) {
           pictures.set(number, repaired);
@@ -3846,6 +3887,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      if (ownedNumbers.has(number)) continue;
       const continuedCollarSource =
         operation.inputKeys?.length === 1 && collarUnits.has(operation.inputKeys[0].trim())
           ? outputPictures.get(operation.inputKeys[0].trim())
@@ -3953,6 +3995,11 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      const output = operation.outputUnitKey?.trim();
+      if (ownedNumbers.has(number)) {
+        if (output) finalOutputs.set(output, picture);
+        continue;
+      }
       const sources = (operation.inputKeys ?? []).flatMap((input) => {
         const key = input.trim();
         const source = finalOutputs.get(key);
@@ -3962,7 +4009,6 @@ export function editorOperationPictures(
         ? restoreEdgeTreatments(restoreFinishedInputPictures(picture, sources))
         : picture;
       pictures.set(number, finalPicture);
-      const output = operation.outputUnitKey?.trim();
       if (output) finalOutputs.set(output, finalPicture);
     }
 
@@ -4019,6 +4065,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = finishedPictures.get(number);
       if (!picture) return;
+      if (ownedNumbers.has(number)) return;
       const shown = visiblePictureKeys(picture);
       const shownSet = new Set(shown);
       const panelRingKeys = shown.filter(
@@ -4061,6 +4108,7 @@ export function editorOperationPictures(
         const number = operation.operationNumber ?? 0;
         const picture = pictures.get(number);
         if (!picture) return;
+        if (ownedNumbers.has(number)) return;
         const pins = posePinsOf(operations.slice(0, index + 1), poses);
         if (!pins.size) return;
         const T = new Map(picture.layout.T);
@@ -4077,6 +4125,15 @@ export function editorOperationPictures(
           },
         });
       });
+    // The legacy print normalizers above may adjust their private copies. Owner operations finish
+    // on the shared result itself so every view reads the exact same transforms.
+    operations.forEach((operation, index) => {
+      const ownerResult = ownerResults[index];
+      const number = operation.operationNumber ?? 0;
+      const picture = pictures.get(number);
+      if (!ownerResult?.owned || !picture) return;
+      pictures.set(number, { ...picture, marks: [], layout: ownerResult.layout });
+    });
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { pieceTilt } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
+import { toWire } from 'lib/seams';
 
 import { seamGraphOfCard, seamRowsOfCard } from '../components/card-seam-graph';
 import {
@@ -16,13 +17,21 @@ import {
 } from '../components/step-seams/step-picture-view';
 import { boxOf, fitBox, stepLayout, toPx } from '../components/step-seams/step-picture';
 import {
+  CARD6_CHAIN_OPS,
+  CARD6_CHAIN_POSES,
+  CARD6_CHAIN_SEAMS,
+  card6ChainGeoms,
+  card6ChainInnerLines,
+} from '../components/step-seams/card6-chain.fixture';
+import { stepResults } from '../components/step-seams/step-result';
+import {
   card83RealFixture,
   card83StoredSeamsFixture,
   card85StoredSeamFixture,
 } from './assembly-inference.fixture';
 import { card85RealFixture, card85RealFixtureAvailable } from './assembly-card85-real.fixture';
 import { asmProtoFlags, setAsmProtoFlags } from './asm-proto-flags';
-import { deriveAssembly, type AssemblyInput } from './derive-assembly';
+import { deriveAssembly, type AsmPiece, type AssemblyInput } from './derive-assembly';
 import {
   AssemblyPage,
   editorActionMarks,
@@ -197,6 +206,77 @@ function card83WithNonJoins(): AssemblyInput {
   };
 }
 
+const CARD6_TEST_OPERATIONS = CARD6_CHAIN_OPS.filter((operation) =>
+  [30, 380, 430].includes(operation.operationNumber ?? -1),
+);
+const CARD6_TEST_PIECES = new Set(['SLV_L', 'FLP_L', 'FLP_L_MAIN']);
+const CARD6_TEST_SEAMS = new Map(
+  [...CARD6_CHAIN_SEAMS].filter(([key]) =>
+    CARD6_TEST_OPERATIONS.some((operation) => operation.seamKeys?.includes(key)),
+  ),
+);
+const CARD6_TEST_POSES = new Map(
+  [...CARD6_CHAIN_POSES].filter(([key]) =>
+    CARD6_TEST_OPERATIONS.some((operation) => operation.poseKeys?.includes(key)),
+  ),
+);
+const card6TestGeoms = () =>
+  new Map([...card6ChainGeoms()].filter(([key]) => CARD6_TEST_PIECES.has(key)));
+const card6TestInnerLines = () =>
+  new Map([...card6ChainInnerLines()].filter(([key]) => CARD6_TEST_PIECES.has(key)));
+
+function card6ChainInput(owned: boolean): AssemblyInput {
+  const geoms = card6TestGeoms();
+  const innerLines = card6TestInnerLines();
+  const pieces = new Map<string, AsmPiece>(
+    [...geoms].map(([key, geom]) => [
+      key,
+      {
+        key,
+        name: geom.name,
+        code: geom.name,
+        cut: geom.rs.map(([x, y]) => [x, -y] as Pt2),
+        inner: (innerLines.get(key) ?? []).map((line) => line.map(([x, y]) => [x, -y] as Pt2)),
+        notch: [],
+        pocketing: false,
+        area: Math.abs(geom.areaMm2),
+        geom,
+      },
+    ]),
+  );
+  const operations = CARD6_TEST_OPERATIONS.map((operation) => ({
+    operationNumber: operation.operationNumber,
+    operationType: operation.operationType,
+    work: operation.work,
+    inputKeys: operation.inputKeys ?? [],
+    outputUnitKey: operation.outputUnitKey,
+    seamKeys: [...(operation.seamKeys ?? []), ...(operation.poseKeys ?? [])],
+  }));
+  const rows = owned
+    ? [...CARD6_TEST_SEAMS.values(), ...CARD6_TEST_POSES.values()].map(toWire)
+    : [];
+  return {
+    techCard: {
+      id: 6,
+      techCard: {
+        pieces: [...pieces].map(([lineKey, piece]) => ({ lineKey, name: piece.name })),
+        operations,
+      },
+      seams: rows,
+    } as AssemblyInput['techCard'],
+    pieces,
+    grainDeg: new Map([...pieces.keys()].map((key) => [key, 0])),
+  };
+}
+
+const affineSnapshot = (transforms: ReadonlyMap<string, readonly number[]>) =>
+  [...transforms]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, affine]) => [key, affine.map((value) => Number(value.toFixed(6)))]) as [
+    string,
+    number[],
+  ][];
+
 describe('editor operation picture in the PDF', () => {
   afterEach(() => {
     setAsmProtoFlags();
@@ -244,6 +324,31 @@ describe('editor operation picture in the PDF', () => {
       expect(picture, `op ${row.n}`).toBeDefined();
       expectSameRetainedAffines(picture!.layout.T, expected.layout.T, `op ${row.n}`);
     }
+  }, 120_000);
+
+  it('uses card 6 owner results and preserves the rowless print layout', () => {
+    const ownedInput = card6ChainInput(true);
+    const ownedPictures = editorOperationPictures(ownedInput.techCard, deriveAssembly(ownedInput))!;
+    const expected = stepResults({
+      ops: CARD6_TEST_OPERATIONS,
+      byKey: CARD6_TEST_SEAMS,
+      poses: CARD6_TEST_POSES,
+      geoms: card6TestGeoms(),
+      innerLines: card6TestInnerLines(),
+      pieceKeys: CARD6_TEST_PIECES,
+    })[CARD6_TEST_OPERATIONS.findIndex((operation) => operation.operationNumber === 430)];
+    expectSameAffines(ownedPictures.get(430)!.layout.T, expected.transforms, 'owned op 430');
+
+    const rowlessInput = card6ChainInput(false);
+    const rowlessPictures = editorOperationPictures(
+      rowlessInput.techCard,
+      deriveAssembly(rowlessInput),
+    )!;
+    expect(affineSnapshot(rowlessPictures.get(430)!.layout.T)).toEqual([
+      ['FLP_L', [1, 0, 0, 1, -52.1, 411.9]],
+      ['FLP_L_MAIN', [1, -0.000627, 0.000627, 1, 468, 571.5]],
+      ['SLV_L', [1, 0, 0, 1, 0, 0]],
+    ]);
   }, 120_000);
 
   it('keeps card 83 op 200 panels and op 400 collar grain-upright', () => {

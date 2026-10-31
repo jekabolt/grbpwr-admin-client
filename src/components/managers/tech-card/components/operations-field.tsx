@@ -4796,6 +4796,8 @@ function OperationEditor({
           <span key={`u:${key}`} className='relative inline-flex size-18 border border-borderColor'>
             <UnitPictureTile
               leaves={assembly.res.units.get(key)?.leaves ?? []}
+              unitKey={key}
+              stepIndex={index}
               name={unitDisplayName({
                 key,
                 outputUnitName: assembly.res.units.get(key)?.name,

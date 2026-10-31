@@ -12,7 +12,8 @@ import { Button, Close, GroupLabel, Text } from 'ui';
 import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
-import { seamOfSides } from './step-picture';
+import { seamOfSides, type StepLayout } from './step-picture';
+import { useStepResult } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
   focusedStepLeaves,
@@ -34,6 +35,8 @@ const TILE_H = 60;
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
+  const result = useStepResult(index);
+  const ownedLayout = result?.owned ? result.layout : undefined;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();
@@ -116,6 +119,7 @@ export function StepSeamsRow({ index }: { index: number }) {
             no={i}
             scene={scene}
             seams={storedFrame}
+            layout={ownedLayout}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
@@ -163,6 +167,7 @@ export function StepSeamsRow({ index }: { index: number }) {
 export function SeamTile({
   scene,
   seams,
+  layout: suppliedLayout,
   marks,
   dashed,
   missing,
@@ -180,6 +185,8 @@ export function SeamTile({
   scene: StepScene;
   /** The seams the tile lays its pieces along. */
   seams: readonly SeamCandidate[];
+  /** An owner result bypasses tile focus, crop, proposal and inferred placement. */
+  layout?: StepLayout;
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
@@ -199,7 +206,7 @@ export function SeamTile({
     () => focusedStepLeaves(scene.leaves, ids.split(',').filter(Boolean), scene.innerSeams),
     [scene.leaves, scene.innerSeams, ids],
   );
-  const layout = useStepLayout(
+  const inferredLayout = useStepLayout(
     leavesRaw,
     seams,
     scene.geoms,
@@ -207,6 +214,7 @@ export function SeamTile({
     STEP_TILE_RASTER_MM,
     scene.hands,
   );
+  const layout = suppliedLayout ?? inferredLayout;
   return (
     <span
       role={onOpen ? 'button' : undefined}

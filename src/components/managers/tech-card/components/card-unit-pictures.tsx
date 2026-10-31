@@ -20,7 +20,7 @@
 // Правка шагов пересчитывает одни раскладки узлов, граф не трогает.
 import { assignmentMode } from 'lib/assembly-skeleton/assignment';
 import type { SeamGraph, SkeletonProposal } from 'lib/assembly-skeleton/types';
-import { unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
+import { unionPictureOfLayout, unitPictures, type UnionPicture } from 'lib/assembly-skeleton/union';
 import type { PieceDTO } from 'lib/nesting/types';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -31,7 +31,9 @@ import { seamGraphOfCard } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum, type TechCardFormData } from './schema';
-import { UnitPicturesProvider, UnitTile } from './unit-silhouette';
+import { useStepResults } from './step-seams/step-result-context';
+import { useStepSeams } from './step-seams/step-seams-context';
+import { UnitPicturesProvider, UnitTile, useUnitPictures } from './unit-silhouette';
 import type { PieceShapeMap } from './use-piece-shapes';
 
 const cache = new WeakMap<SkeletonProposal, Map<string, UnionPicture>>();
@@ -251,6 +253,53 @@ export function CardUnitPicturesProvider({
       <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>
     </SeamGraphContext.Provider>
   );
+}
+
+/** Replace graph pictures with the latest authoritative owner result for each produced unit. */
+export function StepResultUnitPicturesProvider({ children }: { children: ReactNode }) {
+  const parent = useUnitPictures();
+  const results = useStepResults();
+  const stepSeams = useStepSeams();
+  const geoms = useMemo(
+    () =>
+      new Map(
+        [...(stepSeams?.geometry.pieces ?? [])].map(([key, piece]) => [key, piece.geom] as const),
+      ),
+    [stepSeams?.geometry.pieces],
+  );
+  const watched = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOp[];
+  const operationsSignature = watched
+    .map(
+      (operation) =>
+        `${(operation.outputUnitKey ?? '').trim()}:${operation.assemblyBlockDetached ? 1 : 0}`,
+    )
+    .join('|');
+  const operations = useMemo(
+    () => [...watched],
+    // React Hook Form mutates operation rows in place; their content signature is the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [operationsSignature],
+  );
+  const pictures = useMemo(() => {
+    if (!results) return parent;
+    const latest = new Map<string, number>();
+    operations.forEach((operation, index) => {
+      const output = (operation.outputUnitKey ?? '').trim();
+      if (output && !operation.assemblyBlockDetached) latest.set(output, index);
+    });
+    const next = new Map(parent ?? []);
+    let changed = false;
+    for (const [unit, index] of latest) {
+      const result = results[index];
+      if (!result?.owned) continue;
+      const picture = unionPictureOfLayout(result.layout, geoms, result.layers);
+      if (!picture.shapes.length) continue;
+      next.set(unit, picture);
+      changed = true;
+    }
+    return changed ? next : parent;
+  }, [geoms, operations, parent, results]);
+  return <UnitPicturesProvider pictures={pictures}>{children}</UnitPicturesProvider>;
 }
 
 export type CardSeamGraph = { graph: SeamGraph | null; settling: boolean };

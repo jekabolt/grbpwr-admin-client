@@ -18,4 +18,4 @@ export {
   type LayerOutlineFitOptions,
 } from './layer-fit';
 export { rasterize, intersectArea, pairOverlap, unionRaster, type Raster } from './overlap';
-export { unitLeaves, unitPictures, type UnitStep } from './unit-pictures';
+export { unionPictureOfLayout, unitLeaves, unitPictures, type UnitStep } from './unit-pictures';
