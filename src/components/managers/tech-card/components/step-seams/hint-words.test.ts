@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { mergeSeamHints, seamHintsSchema } from 'lib/seam-hints';
 import recordedFixture from 'lib/seam-hints/__fixtures__/card6.json';
+import { setOwnerCodes } from 'lib/seam-hints/dictionary';
 
-import { joinWords, roleReader } from './hint-words';
+import { joinWords, roleReader, roleView } from './hint-words';
 
 const hints = mergeSeamHints(seamHintsSchema.parse(recordedFixture), []);
 const roleOf = roleReader(hints, []);
@@ -30,5 +31,29 @@ describe('joinWords on the recorded card 6 run', () => {
     ]);
     const row = hints.joins.find((join) => join.op === 720)!;
     expect(joinWords(row, own).what).toBe('facing');
+  });
+});
+
+describe('role precedence: own > DB dictionary row > AI > static default', () => {
+  afterEach(() => setOwnerCodes([]));
+  const aiRole = (piece: string) => hints.roles.find((row) => row.piece === piece);
+
+  it('the AI beats the static default', () => {
+    // P_L_U reads «front» by the static codes (first token p); the model said yoke.
+    expect(roleView('P_L_U', undefined, undefined)?.src).toBe('book');
+    expect(roleView('P_L_U', aiRole('P_L_U'), undefined)).toMatchObject({
+      role: 'yoke',
+      src: 'ai',
+    });
+  });
+
+  it('a DB dictionary row beats the AI', () => {
+    setOwnerCodes([{ code: 'BP', role: 'back', hand: null }]);
+    expect(roleView('BP_U', aiRole('BP_U'), undefined)).toMatchObject({ role: 'back', src: 'all' });
+  });
+
+  it('the static default speaks only when the AI has no role', () => {
+    expect(aiRole('BP_MAIN')).toBeUndefined();
+    expect(roleView('BP_MAIN', undefined, undefined)?.src).toBe('book');
   });
 });
