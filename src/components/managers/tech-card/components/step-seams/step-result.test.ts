@@ -18,6 +18,14 @@ import {
   card6ChainInnerLines,
   card6ChainStep,
 } from './card6-chain.fixture';
+import {
+  CARD6_OPS,
+  CARD6_PIECE_KEYS,
+  CARD6_SEAMS,
+  card6Geoms,
+  card6InnerLines,
+  card6Step,
+} from './card6.fixture';
 import { boxOf, invert } from './step-picture';
 import { placementT, poseAfterDrop, posePickup } from './step-pose';
 import { StepResultProvider, useStepResult } from './step-result-context';
@@ -273,6 +281,21 @@ describe('stepResults: one carried owner result per operation', () => {
         CARD6_CHAIN_SEAMS.has(key),
       ),
     );
+  });
+
+  it('lays a pocket bag sewn along one edge under its front (#540, no hand saved)', () => {
+    const results = stepResults(
+      {
+        ops: CARD6_OPS,
+        byKey: CARD6_SEAMS,
+        geoms: card6Geoms(),
+        innerLines: card6InnerLines(),
+        pieceKeys: CARD6_PIECE_KEYS,
+      },
+      { manualFit: true },
+    );
+    const at540 = results[card6Step(540)];
+    expect(at540.layers.indexOf('PCK_L_BTTM')).toBeLessThan(at540.layers.indexOf('P_L_MAIN'));
   });
 
   it('marks a rowless card as not owned', () => {

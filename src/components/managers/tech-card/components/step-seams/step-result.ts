@@ -3,12 +3,12 @@
 // the layout of the latest earlier operation that produced it through `stepLayout.inputLayouts`.
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
+import { apply, compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseOf, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { decodeHandPlace, handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
-import { invert, stepLayout, type StepLayout } from './step-picture';
+import { boxOf, invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
 import { storedRowsOfStep, type StepStoredRow } from './step-rows';
 
@@ -210,12 +210,15 @@ function orderedLayers(base: readonly string[], relations: readonly LayerRelatio
  * Bottom→top rule: each carried block retains its previous total order; otherwise pieces start in
  * operation input order. A current surface part (pocket bag, facing, placket in a slit) is below
  * its host. An edge anchor whose decoded `HandPlace.inside` is true is below its opposite-side
- * partner. Unconstrained pieces keep their stable input order.
+ * partner. An edge pair with no saved hand whose laid outlines mostly overlap (a pocket bag or a
+ * facing sewn along one edge and lying on its partner) puts the smaller piece below the bigger.
+ * Unconstrained pieces keep their stable input order.
  */
 function layersOf(
   inputs: readonly ResolvedInput[],
   rows: readonly StepStoredRow[],
   transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
 ): string[] {
   const base = inputs.flatMap((group) => {
     const carried = group.seed?.result.layers.filter((piece) => group.pieces.includes(piece)) ?? [];
@@ -240,11 +243,47 @@ function layersOf(
         const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
         if (partner) relations.push([anchor.piece, partner]);
       }
+    const handSet = [...stored.row.sideA, ...stored.row.sideB].some(
+      (anchor) => decodeHandPlace(anchor.placement) != null,
+    );
+    if (handSet) continue;
+    for (const a of unique(stored.row.sideA.map((anchor) => anchor.piece)))
+      for (const b of unique(stored.row.sideB.map((anchor) => anchor.piece))) {
+        if (a === b) continue;
+        const under = lyingOn(a, b, transforms, geoms);
+        if (under) relations.push(under);
+      }
   }
   return orderedLayers(
     base.filter((piece) => transforms.has(piece)),
     relations,
   );
+}
+
+/** Box overlap share of the smaller laid piece at which it counts as lying on its partner. */
+const LYING_ON = 0.5;
+
+/** `[smaller, bigger]` when the smaller laid piece mostly lies on the bigger one, else null. */
+function lyingOn(
+  a: string,
+  b: string,
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): LayerRelation | null {
+  const ga = geoms.get(a);
+  const gb = geoms.get(b);
+  const Ta = transforms.get(a);
+  const Tb = transforms.get(b);
+  if (!ga || !gb || !Ta || !Tb || ga.rs.length < 3 || gb.rs.length < 3) return null;
+  const ba = boxOf(ga.rs.map((p) => apply(Ta, p)));
+  const bb = boxOf(gb.rs.map((p) => apply(Tb, p)));
+  const w = Math.min(ba.x1, bb.x1) - Math.max(ba.x0, bb.x0);
+  const h = Math.min(ba.y1, bb.y1) - Math.max(ba.y0, bb.y0);
+  if (w <= 0 || h <= 0) return null;
+  const area = (box: typeof ba) => (box.x1 - box.x0) * (box.y1 - box.y0);
+  const [small, big] = Math.abs(ga.areaMm2) <= Math.abs(gb.areaMm2) ? [a, b] : [b, a];
+  const share = (w * h) / Math.min(area(ba), area(bb));
+  return share >= LYING_ON ? [small, big] : null;
 }
 
 function neutralLayout(
@@ -308,7 +347,7 @@ function computeStep(
   const result: StepResult = {
     opIndex: index,
     transforms,
-    layers: layersOf(inputs, stored, transforms),
+    layers: layersOf(inputs, stored, transforms, input.geoms),
     blocks: inputs.map((group, groupIndex) => ({
       inputKey: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),
