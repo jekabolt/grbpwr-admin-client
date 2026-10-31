@@ -436,3 +436,34 @@ export function upright(piece: PieceGeom, T: Affine): Affine {
 export function poseAt(host: PieceGeom, piece: PieceGeom, hostT: Affine, T: Affine): SeamPlacement {
   return placementOf(host, piece, compose(invert(hostT), T));
 }
+
+/** A twin's rs frame onto this piece's rs frame: their boxes laid on each other, mirrored in x. */
+function twinMap(from: PieceGeom, to: PieceGeom, kind: 'mirror' | 'identical'): Affine {
+  const f = box(from.rs);
+  const t = box(to.rs);
+  return kind === 'mirror'
+    ? [-1, 0, 0, 1, t.x0 + f.x1, t.y0 - f.y0]
+    : [1, 0, 0, 1, t.x0 - f.x0, t.y0 - f.y0];
+}
+
+/**
+ * `mirror left` for a surface or pose placement: the twin part (the left placket) laid at `at` on
+ * the twin host (the left sleeve) gives the placement that lays `part` on `host` (the right ones)
+ * as its mirror image. `hostKind`/`partKind`: how each right piece relates to its left twin
+ * (`PieceGeom.twinOf`); a part that is its own twin passes itself with 'identical'. Two mirror
+ * twins keep the face (no flip added); a mirrored host with an identical part lays it face down.
+ */
+export function mirrorPlacement(
+  twinHost: PieceGeom,
+  twinPart: PieceGeom,
+  at: SeamPlacement,
+  host: PieceGeom,
+  part: PieceGeom,
+  hostKind: 'mirror' | 'identical',
+  partKind: 'mirror' | 'identical',
+): SeamPlacement {
+  const R = placementT(twinHost, twinPart, at);
+  const Sh = twinMap(twinHost, host, hostKind);
+  const Sp = twinMap(twinPart, part, partKind);
+  return placementOf(host, part, compose(Sh, compose(R, invert(Sp))));
+}

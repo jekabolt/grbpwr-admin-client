@@ -58,6 +58,7 @@ import {
   turnAbout,
   turnToGrain,
   upright,
+  mirrorPlacement,
 } from './step-pose';
 import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
@@ -506,5 +507,54 @@ describe('card 6 op 720: the placket placed by hand at a free spot', () => {
     for (const key of ['P_L_MAIN', 'P_L_U', 'PCK_L_MAIN', 'PCK_L_BTTM'])
       if (before.layout.T.has(key))
         expect(near(posed.layout.T.get(key)!, before.layout.T.get(key)!)).toBe(true);
+  });
+});
+
+describe('mirrorPlacement: mirror left for surface and pose rows', () => {
+  const tri = (key: string, pts: Pt2[]): PieceGeom =>
+    ({
+      ...square(key, 0, 0, 1, 1),
+      rect: false,
+      corners: [0, 1, 2],
+      rs: pts,
+      areaMm2: 5000,
+    }) as PieceGeom;
+  const leftHost = square('SLV_L', 0, 0, 400, 600);
+  const rightHost = square('SLV_R', 1000, 50, 400, 600);
+  const leftPart = tri('FLP_L', [
+    [0, 0],
+    [40, 0],
+    [0, 160],
+  ]);
+  // The right placket: the left one mirrored in x, somewhere else on the sheet.
+  const rightPart = tri('FLP_R', [
+    [540, 20],
+    [500, 20],
+    [540, 180],
+  ]);
+  const mirrorX = (pts: readonly Pt2[], host: PieceGeom): Pt2[] => {
+    const xs = host.rs.map(([x]) => x);
+    const ys = host.rs.map(([, y]) => y);
+    const [x0, x1, y0] = [Math.min(...xs), Math.max(...xs), Math.min(...ys)];
+    return pts.map(([x, y]) => [x1 - (x - x0), y - y0]);
+  };
+
+  it.each([
+    { xMm: 30, yMm: 80, rotDeg: 0, flip: false },
+    { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: false },
+    { xMm: 12, yMm: 300, rotDeg: 37, flip: true },
+  ] as SeamPlacement[])('lays the right part as the mirror of the left (%o)', (at) => {
+    const right = mirrorPlacement(leftHost, leftPart, at, rightHost, rightPart, 'mirror', 'mirror');
+    expect(right.flip).toBe(at.flip);
+    const leftLaid = leftPart.rs.map((p) => apply(placementT(leftHost, leftPart, at), p));
+    const rightLaid = rightPart.rs.map((p) => apply(placementT(rightHost, rightPart, right), p));
+    // In each host's own box frame, the right outline is the left one mirrored.
+    const want = mirrorX(leftLaid, leftHost).map(([x, y]) => [x, y]);
+    const xs = rightHost.rs.map(([x]) => x);
+    const ys = rightHost.rs.map(([, y]) => y);
+    const got = rightLaid.map(([x, y]) => [x - Math.min(...xs), y - Math.min(...ys)]);
+    const sort = (pts: number[][]) =>
+      [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((p) => p.map((v) => +v.toFixed(1)));
+    expect(sort(got)).toEqual(sort(want));
   });
 });
