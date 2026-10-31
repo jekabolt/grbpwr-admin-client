@@ -11,6 +11,7 @@ import {
   type FormOpLike,
 } from '../step-seams-model';
 import handFixture from 'lib/seam-hints/__fixtures__/card6-hand.json';
+import recordedFixture from 'lib/seam-hints/__fixtures__/card6.json';
 import { aiSignal, AI_MATCH, AI_MISMATCH } from './ai';
 import { edgeWordVote } from './edge-words';
 import type { SignalSide } from './types';
@@ -145,5 +146,23 @@ describe('AI seam signal: absent hints', () => {
         };
       });
     expect(results(empty)).toEqual(results(CARD6_OPS));
+  });
+});
+
+describe('AI seam signal: the recorded run (beta copy of card 6, sides name whole units)', () => {
+  const recorded = mergeSeamHints(seamHintsSchema.parse(recordedFixture), []);
+  const ops = opsWith(recorded);
+
+  it('matches the true 720 pair inside the unit-wide sides', () => {
+    const ctx = { op: ops[card6Step(720)], geoms };
+    expect(aiSignal(side('PLCK_L#0'), side('P_L_U#2', 'P_L_MAIN#2'), ctx)?.delta).toBe(AI_MATCH);
+  });
+
+  it('keeps the right pair first on 720, 770, 870 and the slit surface on 260', () => {
+    expect(proposal(ops, 720)).toMatchObject({ a: ['PLCK_L#0'], b: ['P_L_U#2', 'P_L_MAIN#2'] });
+    expect(proposal(ops, 770)).toMatchObject({ a: ['P_R_U#4'], b: ['P_R_MAIN#1'] });
+    const collar = proposal(ops, 870)!;
+    expect([collar.a, collar.b]).toContainEqual(['CLR_SECOND#1']);
+    expect(surface(ops, 260)).toMatchObject({ host: 'SLV_R', inner: 0, part: 'FLP_R_MAIN' });
   });
 });

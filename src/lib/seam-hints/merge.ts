@@ -10,7 +10,7 @@ export type SeamHintRowState = 'ai' | SeamHintOverrideState;
 export type EffectiveRoleHint = SeamRoleHint & { state: SeamHintRowState };
 export type EffectiveJoinHint = SeamJoinHint & { state: SeamHintRowState };
 
-/** The typed value a future fetch hook hands to the seam signal. */
+/** The typed value the owner screen draws and the seam signal reads. */
 export type SeamHints = {
   schema_version: 1;
   roles: EffectiveRoleHint[];
@@ -27,7 +27,8 @@ export const EMPTY_SEAM_HINTS: SeamHints = {
 
 /**
  * Merge the immutable AI run with the owner's rows. Owner rows replace rows with the same key;
- * `off` remains as a tombstone so the owner view can show it, but consumers must not vote with it.
+ * `off` remains as a tombstone (keeping the AI's words when the owner sent none) so the owner view
+ * can show it, but consumers must not vote with it. An off row with nothing under it is dropped.
  */
 export function mergeSeamHints(
   ai: SeamHintsJson | null | undefined,
@@ -41,24 +42,33 @@ export function mergeSeamHints(
 
   for (const row of overrides) {
     if (row.kind === 'role') {
-      roles.set(row.hint_key, {
-        piece: row.hint_key,
-        ...row.value_json,
-        state: row.state,
-      });
+      const under = roles.get(row.hint_key);
+      if (row.value)
+        roles.set(row.hint_key, {
+          piece: row.hint_key,
+          role: row.value.role,
+          hand: row.value.hand ?? null,
+          conf: 'high',
+          state: row.state,
+        });
+      else if (under) roles.set(row.hint_key, { ...under, state: row.state });
     } else {
-      joins.set(row.hint_key, {
-        op: Number(row.hint_key),
-        ...row.value_json,
-        state: row.state,
-      });
+      const under = joins.get(row.hint_key);
+      if (row.value)
+        joins.set(row.hint_key, {
+          op: Number(row.hint_key),
+          ...row.value,
+          conf: 'high',
+          state: row.state,
+        });
+      else if (under) joins.set(row.hint_key, { ...under, state: row.state });
     }
   }
 
   return {
     schema_version: 1,
     roles: [...roles.values()],
-    joins: [...joins.values()],
+    joins: [...joins.values()].sort((x, y) => x.op - y.op),
     not_inferred: [...(ai?.not_inferred ?? [])],
   };
 }

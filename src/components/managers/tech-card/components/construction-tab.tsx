@@ -656,7 +656,7 @@ export function ConstructionTab({
               {/* СНАЧАЛА ОТЧЁТ, ПОТОМ ТО, О ЧЁМ ОН. Аудит говорит и про стандарты карточки, и про весь
               рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
               его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
-              <StepSeamsProvider techCard={techCard} frozen={frozen}>
+              <StepSeamsProvider techCard={techCard} frozen={frozen} active={active}>
                 <ConstructionAudit
                   techCardId={techCard?.id}
                   active={active}

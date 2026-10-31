@@ -6,6 +6,7 @@ import {
   common_TechCardMachineType,
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
+import { withSeamHints } from 'lib/seam-hints';
 import { notify } from 'lib/stores/store';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { cn } from 'lib/utility';
@@ -1249,6 +1250,7 @@ function OperationsHeaderWarnings({
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
   const seams = useStepSeams();
   const seamGeometry = seams?.geometry;
+  const seamGuessHints = seams?.guessHints;
   const seamServer = useSeamsStore((state) => state.server);
   const seamPending = useSeamsStore((state) => state.pending);
   const seamsByKey = useMemo(
@@ -1272,7 +1274,8 @@ function OperationsHeaderWarnings({
   }, [seams?.techCard?.techCard?.pieces, seamGeometry?.pieces]);
   const missingSeamSteps = useMemo(() => {
     if (!seams || seamGeometry?.dep.status === 'pending') return [];
-    const ops = operations as FormOpLike[];
+    // The card's hints ride on the steps they name (SignalOp.hints); none → the same array.
+    const ops = withSeamHints(operations as FormOpLike[], seamGuessHints) as FormOpLike[];
     return ops.flatMap((operation, index) => {
       if (
         (operation.seamKeys?.length ?? 0) > 0 ||
@@ -1293,7 +1296,15 @@ function OperationsHeaderWarnings({
         ? []
         : [index];
     });
-  }, [operations, seamGeometry?.dep.status, seamGeoms, seamPieceKeys, seams, seamsByKey]);
+  }, [
+    operations,
+    seamGeometry?.dep.status,
+    seamGeoms,
+    seamGuessHints,
+    seamPieceKeys,
+    seams,
+    seamsByKey,
+  ]);
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     lineKey?: string;
     name?: string;

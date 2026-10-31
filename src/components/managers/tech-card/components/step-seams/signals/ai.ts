@@ -10,10 +10,12 @@ import { zoneAllows } from './zone';
 export const AI_MATCH = -0.05;
 export const AI_MISMATCH = 0.03;
 
-const sameSet = (left: readonly string[], right: readonly string[]) => {
-  const a = new Set(left);
-  const b = new Set(right);
-  return a.size === b.size && [...a].every((piece) => b.has(piece));
+// A row side may name the whole unit a step joins (the model sees units: «the left front panel» =
+// its four pieces), while a candidate side holds only the pieces whose edges meet. So the
+// candidate's pieces must lie within the row's side, not equal it (card 6 / beta #87, op 720).
+const within = (candidate: readonly string[], row: readonly string[]) => {
+  const named = new Set(row);
+  return candidate.length > 0 && candidate.every((piece) => named.has(piece));
 };
 
 const hintsOf = (ctx: SignalCtx): SeamHints | undefined => ctx.hints ?? ctx.op?.hints;
@@ -23,8 +25,8 @@ function orientationOf(
   a: SignalSide,
   b: SignalSide,
 ): readonly [EffectiveJoinHint['a'], EffectiveJoinHint['b']] | null {
-  if (sameSet(a.pieces, row.a.pieces) && sameSet(b.pieces, row.b.pieces)) return [row.a, row.b];
-  if (sameSet(a.pieces, row.b.pieces) && sameSet(b.pieces, row.a.pieces)) return [row.b, row.a];
+  if (within(a.pieces, row.a.pieces) && within(b.pieces, row.b.pieces)) return [row.a, row.b];
+  if (within(a.pieces, row.b.pieces) && within(b.pieces, row.a.pieces)) return [row.b, row.a];
   return null;
 }
 
