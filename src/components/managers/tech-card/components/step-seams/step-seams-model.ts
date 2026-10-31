@@ -423,8 +423,44 @@ const EXACT_REL = 0.01;
 const EXACT_BONUS = 0.03;
 /** Identical layers: an edge and the same edge of the twin layer read as one within this share. */
 const LAYER_EDGE_REL = 0.01;
-/** Identical layers: sewn along their designated edges (bonus), elsewhere a mistake (penalty). */
-const LAYER_FIT = 0.03;
+
+/**
+ * Corresponding edge indices for a reciprocal identical twin whose complete rings align. The
+ * skeleton's `twinOf` shortlist is deliberately looser; layer behavior needs the stronger,
+ * edge-for-edge relation. A cyclic offset is valid because equal pieces can start at another
+ * contour corner.
+ */
+function layerEdgeMaps(a: PieceGeom | undefined, b: PieceGeom | undefined): Map<number, number>[] {
+  if (!a || !b || a.pieceKey === b.pieceKey) return [];
+  if (!a.twinOf.some((t) => t.key === b.pieceKey && t.kind === 'identical')) return [];
+  if (!b.twinOf.some((t) => t.key === a.pieceKey && t.kind === 'identical')) return [];
+  const ae = plainEdges(a);
+  const be = plainEdges(b);
+  if (!ae.length || ae.length !== be.length) return [];
+  const fits = (x: Edge, y: Edge) => {
+    if (Math.abs(x.lenMm - y.lenMm) > LAYER_EDGE_REL * Math.max(x.lenMm, y.lenMm, 1)) return false;
+    if (Math.abs(x.turnDeg - y.turnDeg) > 2) return false;
+    if (x.notchesMm.length !== y.notchesMm.length) return false;
+    return x.notchesMm.every(
+      (notch, index) =>
+        Math.abs(notch / Math.max(x.lenMm, 1) - y.notchesMm[index] / Math.max(y.lenMm, 1)) <=
+        LAYER_EDGE_REL,
+    );
+  };
+  const maps: Map<number, number>[] = [];
+  for (let shift = 0; shift < ae.length; shift++) {
+    if (!ae.every((edge, index) => fits(edge, be[(index + shift) % be.length]))) continue;
+    maps.push(new Map(ae.map((edge, index) => [edge.k, be[(index + shift) % be.length].k])));
+    // Matching indices are the strongest anchor. Only accept a shifted contour start when the
+    // rings do not align directly; repeated equal-length edges must not create false mappings.
+    if (shift === 0) return maps;
+  }
+  return maps;
+}
+
+const alignedLayerTwins = (a: PieceGeom | undefined, b: PieceGeom | undefined) =>
+  layerEdgeMaps(a, b).length > 0;
+
 /** Two edges of one piece close it on itself when their lengths agree within this share. */
 const SELF_REL = 0.03;
 /**
@@ -843,7 +879,7 @@ function chainCtx(
     return edge ? { edge, piece: edge.pieceKey, consumes: l.consumes } : l;
   };
   return {
-    isSewn: (id) => same(id).some((x) => state.sewn.has(x)),
+    isSewn: (id) => same(id).some((x) => state.sewn.has(x) && !state.reusable.has(x)),
     landings: (id) => {
       const out: Landing[] = [];
       for (const x of same(id))
@@ -1061,9 +1097,15 @@ function chainSides(
 
 type Scored = {
   score: number;
+  /** Length mismatch before role and shape signals; corresponding twin edges use this as anchor. */
+  fitRel: number;
   a: Side;
   b: Side;
   layer: boolean;
+  /** A corresponding pair of true collar/stand plies. */
+  neckLayer?: boolean;
+  /** The skeleton's designated layer edge; used only after the fit score ties. */
+  layerPreferred?: boolean;
   /** What the sides sew together, mm — the full sides, or what their notches align. */
   aLen: number;
   bLen: number;
@@ -1127,8 +1169,9 @@ function scoreSides(
   let roleSum = 0;
   let pairs = 0;
   let layer = false;
+  let neckLayer = false;
   let twins = false;
-  let layerFit = 0;
+  let layerPreferred = false;
   for (const pa of a.pieces) {
     for (const pb of b.pieces) {
       const ga = geoms.get(pa);
@@ -1149,17 +1192,28 @@ function scoreSides(
       roleSum += cost + pocketCross;
       pairs++;
       if (ga.twinOf.some((t) => t.key === pb && t.kind === 'identical')) {
+        const aligned = alignedLayerTwins(ga, gb);
+        if (!aligned) continue;
         twins = true;
+        const layerPair = !chain && isLayerSeam(a.ids, b.ids, geoms);
+        if (!layerPair) continue;
+        const ea = layerPair ? edgeOf(a.ids[0], geoms) : null;
+        const eb = layerPair ? edgeOf(b.ids[0], geoms) : null;
+        const corresponding =
+          !!ea && !!eb && layerEdgeMaps(ga, gb).some((map) => map.get(ea.k) === eb.k);
+        if (!corresponding) {
+          if (ctx.implied) return null;
+          continue;
+        }
         // Identical layers are sewn once, along their designated edges (a collar's outer edge,
-        // its neck edge left open for the body), never along a chain: a guess takes nothing
-        // else, a proposal ranks the designated pair first.
+        // its neck edge left open for the body), never along a chain. The designation breaks an
+        // equal-fit tie; it does not outweigh length, edge-index, notch, or shape evidence.
         const designated =
-          !chain &&
-          identicalSeamEdge(ga)?.id === a.ids[0] &&
-          identicalSeamEdge(gb)?.id === b.ids[0];
+          identicalSeamEdge(ga)?.id === a.ids[0] && identicalSeamEdge(gb)?.id === b.ids[0];
         if (ctx.implied && !designated) return null;
-        layerFit = designated ? -LAYER_FIT : LAYER_FIT;
-        layer = !chain;
+        layerPreferred ||= designated;
+        layer = true;
+        neckLayer ||= !!roleA && !!roleB && NECK_ROLES.has(roleA) && NECK_ROLES.has(roleB);
       }
     }
   }
@@ -1235,10 +1289,39 @@ function scoreSides(
     links +
     oppose +
     hands +
-    pendingHost +
-    layerFit;
-  return { score, a, b, layer, aLen: sewn.aLen, bLen: sewn.bLen };
+    pendingHost;
+  return {
+    score,
+    fitRel: rel,
+    a,
+    b,
+    layer,
+    neckLayer,
+    layerPreferred,
+    aLen: sewn.aLen,
+    bLen: sewn.bLen,
+  };
 }
+
+const compareScored = (x: Scored, y: Scored) => {
+  const pieceSet = (cand: Scored) => [...cand.a.pieces, ...cand.b.pieces].sort().join('|');
+  if (x.neckLayer && y.neckLayer && pieceSet(x) === pieceSet(y)) {
+    const xLen = Math.min(x.a.lenMm, x.b.lenMm);
+    const yLen = Math.min(y.a.lenMm, y.b.lenMm);
+    if (Math.abs(xLen - yLen) > LAYER_EDGE_REL * Math.max(xLen, yLen, 1)) return yLen - xLen;
+    const preferred = Number(!!y.layerPreferred) - Number(!!x.layerPreferred);
+    if (preferred) return preferred;
+  }
+  // Collar and stand plies with an edge-for-edge ring match are the operation's strongest
+  // anchor. Among their corresponding edges the longer boundary closes the plies; the shorter,
+  // usually concave boundary remains for the neckline or stand. Equal long edges still rank by
+  // their ordinary notch, shape, and designated-edge evidence.
+  const anchor = (cand: Scored) => (cand.neckLayer && cand.fitRel <= EXACT_REL ? 0 : 1);
+  const anchored = anchor(x) - anchor(y);
+  if (anchored) return anchored;
+  const fit = x.score - y.score;
+  return fit || Number(!!y.layerPreferred) - Number(!!x.layerPreferred);
+};
 
 /**
  * Pairs that close one input on itself: two free edges of one piece, not neighbours, one on each
@@ -1279,16 +1362,18 @@ function selfPairs(
         if (rel > SELF_REL) continue;
         out.push({
           score: rel - Math.min(a.lenMm, b.lenMm, 1000) / 1_000_000,
+          fitRel: rel,
           a: sideOfEdges([a]),
           b: sideOfEdges([b]),
           layer: false,
+          neckLayer: false,
           aLen: a.lenMm,
           bLen: b.lenMm,
         });
       }
     }
   }
-  return out.sort((x, y) => x.score - y.score);
+  return out.sort(compareScored);
 }
 
 /** The one hand an input's pieces agree on (a left sleeve with its cuff); null when none or mixed. */
@@ -1464,6 +1549,7 @@ export function scoredPairs(
       return geom ? roleOfPiece(geom, geoms) === 'stand' : false;
     });
   const out: Scored[] = [];
+  const anchoredLayers = new Set<string>();
   for (let i = 0; i < groups.length; i++) {
     for (let j = i + 1; j < groups.length; j++) {
       if (groups.length >= 3 && hands[i] && hands[j] && hands[i] !== hands[j]) continue;
@@ -1513,13 +1599,23 @@ export function scoredPairs(
               classes[j],
               ctx,
             );
-            if (scored) out.push(scored);
+            if (scored) {
+              anchoredLayers.add(pieceOf(fresh));
+              out.push(scored);
+            }
           }
         }
       }
     }
   }
-  return out.sort((x, y) => x.score - y.score);
+  return out
+    .filter(
+      (cand) =>
+        groups.length !== 2 ||
+        cand.layer ||
+        ![...cand.a.pieces, ...cand.b.pieces].some((piece) => anchoredLayers.has(piece)),
+    )
+    .sort(compareScored);
 }
 
 // ─── what earlier steps sewed ─────────────────────────────────────────────────────────────────────
@@ -1529,9 +1625,28 @@ function consumptionOf(
   b: readonly EdgeId[],
   geoms: ReadonlyMap<string, PieceGeom>,
   stored: boolean,
+  wholeLayer: boolean,
 ): { a: boolean; b: boolean } {
-  // A guessed layer/pocket match is not evidence of a layered construction. Only a confirmed row
-  // can leave an edge open; otherwise guesses would keep accumulating partners across the card.
+  // A non-designated notched or concave edge of identical plies is their attachment edge, not
+  // their closing seam: both plies remain available for the structural seam that follows. The
+  // designated edge, and an unmarked straight edge such as a cuff's outer edge, are closed.
+  if (!stored && !wholeLayer && isLayerSeam(a, b, geoms)) {
+    const edges = [...a, ...b].flatMap((id) => edgeOf(id, geoms) ?? []);
+    if (
+      edges.length === a.length + b.length &&
+      edges.every((edge) => {
+        const piece = geoms.get(edge.pieceKey);
+        return (
+          !!piece &&
+          (edge.notchesMm.length > 0 || edge.turnDeg <= -CURVE_DEG) &&
+          identicalSeamEdge(piece)?.id !== edge.id
+        );
+      })
+    )
+      return { a: false, b: false };
+  }
+  // A guessed pocket match is not evidence of a layered construction. Only a confirmed row can
+  // leave an unmarked edge open; otherwise guesses would keep accumulating partners across cards.
   if (!stored) return { a: true, b: true };
   if (isLayerSeam(a, b, geoms)) return { a: false, b: false };
   const addedA = a.length > 0 && a.every((id) => isLayerCloth(pieceOf(id), geoms));
@@ -1554,7 +1669,7 @@ function sew(
     wholeLayer?: boolean;
   },
 ) {
-  const consumes = consumptionOf(a, b, geoms, opts.stored);
+  const consumes = consumptionOf(a, b, geoms, opts.stored, !!opts.wholeLayer);
   const record = (ids: readonly EdgeId[], consume: boolean) => {
     for (const id of ids) {
       if (consume) {
@@ -1692,9 +1807,13 @@ function applyStep(
   const layerRowsComplete =
     rows.some((row) => isLayerSeam(row.a, row.b, geoms)) &&
     groups.every((_, group) => find(group) === rowRoot);
-  const allGuesses = layerRowsComplete
-    ? []
-    : scoredPairs(groups, geoms, state, occupied, ease, true);
+  // One two-input layer proposal is the operation's seam. Once the fit chooses its edge, another
+  // corresponding edge of the same plies must not return as an implied second seam.
+  const layerProposalComplete = groups.length === 2 && connecting.some((cand) => cand.layer);
+  const allGuesses =
+    layerRowsComplete || layerProposalComplete
+      ? []
+      : scoredPairs(groups, geoms, state, occupied, ease, true);
   // A collar operation exposes one proposed join. Do not silently consume another unrelated
   // edge pair behind it (the stand's lower edge must remain for the neckline); identical twins
   // may still stack because that adds a layer to the join. Other two-input units can genuinely
@@ -1855,10 +1974,10 @@ export function wholeOverPartial(scored: readonly Scored[]): Scored[] {
     if (w) promoted.set(w, Math.min(promoted.get(w) ?? w.score, c.score));
     return !w;
   });
-  if (!promoted.size) return kept;
+  if (!promoted.size) return [...kept].sort(compareScored);
   return kept
     .map((c) => (promoted.has(c) ? { ...c, score: promoted.get(c)! } : c))
-    .sort((x, y) => x.score - y.score);
+    .sort(compareScored);
 }
 
 /**

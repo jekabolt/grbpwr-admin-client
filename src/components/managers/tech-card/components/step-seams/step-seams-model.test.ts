@@ -262,6 +262,25 @@ describe('suggestPair', () => {
     expect(s.a).toEqual(['FP#0']);
     expect(s.b).toEqual(['BP#3']);
   });
+  it('does not give a layer tie-break to a loose twinOf match', () => {
+    const a = shaped('A', 'A', [
+      { len: 100, turn: 20 },
+      { len: 110, turn: -30, notches: [20, 70] },
+      { len: 50 },
+    ]);
+    const b = shaped('B', 'B', [
+      { len: 100, turn: 20 },
+      { len: 110, turn: -30, notches: [20, 70] },
+      { len: 60 },
+    ]);
+    const geoms = new Map([
+      ['A', { ...a, twinOf: [{ key: 'B', kind: 'identical' }] } as PieceGeom],
+      ['B', { ...b, twinOf: [{ key: 'A', kind: 'identical' }] } as PieceGeom],
+    ]);
+    expect(
+      suggestPair([{ pieces: ['A'] }, { pieces: ['B'] }], geoms, new Set(), null),
+    ).toMatchObject({ a: ['A#1'], b: ['B#1'] });
+  });
 });
 
 describe('suggestStepPair', () => {
@@ -563,7 +582,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
 
   it('400: the collar stand meets the neckline by its notches; the front folds and the back pleat stay out', () => {
     const s = suggest(400)!;
-    expect(s.a).toEqual(['CLR_1#6']);
+    expect(s.a).toEqual(['CLR_1#6', 'CLR#6']);
     expect(s.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
     // Edge to edge the neckline is 579 mm against 439 — a quarter of it is two 35 mm fold-backs
     // and a 70 mm box pleat between notches; sewn, the two sides are the same length.
@@ -572,10 +591,14 @@ describe('card 83: chains across the seams earlier steps made', () => {
     expect(targetsLen(s.b, geoms, () => 0)).toBeCloseTo(579.3, 0);
   });
 
-  it('50: identical collar layers are sewn along their outer edge, the neck edge left for the body', () => {
-    expect(suggest(50)).toMatchObject({ a: ['CLR_1#2'], b: ['CLR#2'] });
+  it('50: matching collar notches beat the designated-layer tie-break', () => {
+    expect(geoms.get('CLR_1')?.twinOf).toContainEqual({ key: 'CLR', kind: 'identical' });
+    expect(geoms.get('CLR_1')?.edges.find((edge) => edge.id === 'CLR_1#6')?.notchesMm).toHaveLength(
+      5,
+    );
+    expect(suggest(50)).toMatchObject({ a: ['CLR_1#6'], b: ['CLR#6'] });
     expect(sewnBeforeStep(ops, at(130), keys, geoms)).toMatchObject([
-      { a: ['CLR_1#2'], b: ['CLR#2'], layer: true },
+      { a: ['CLR_1#6'], b: ['CLR#6'], layer: true },
     ]);
   });
 
@@ -658,7 +681,7 @@ describe('card 83: chains across the seams earlier steps made', () => {
       null,
       rows,
     )!;
-    expect(neck.a).toEqual(['CLR_1#6']);
+    expect(neck.a).toEqual(['CLR_1#6', 'CLR#6']);
     expect(neck.b).toEqual(['FR#1', 'BP#2', 'FL#3']);
   });
 
@@ -846,6 +869,14 @@ describe('card 6: layered seams keep their structural edge', () => {
       expect.closeTo(432.3, 1),
       expect.closeTo(446.1, 1),
     ]);
+  });
+
+  it('keeps the long stand edge for its plies and the short edge for the neckline', () => {
+    const layer = proposal(940)!;
+    expect([layer.a, layer.b]).toEqual([['nck_2#3'], ['nck#3']]);
+
+    const neckline = proposal(1060)!;
+    expect([neckline.a, neckline.b]).toContainEqual(['nck_2#1', 'nck#1']);
   });
 });
 
