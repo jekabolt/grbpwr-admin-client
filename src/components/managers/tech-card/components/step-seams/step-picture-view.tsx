@@ -3,6 +3,7 @@
 // assembled, the outer outline bold (an ink stroke under every piece, the fills covering it inside),
 // the inner seams hairline. Marked edges: proposal = ink dashed, own pick = blue, stored = ink bold.
 
+import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
@@ -466,15 +467,18 @@ export function useStepScene(index: number) {
     name: 'operations',
     compute: (value) => sceneOpsSignature((value ?? []) as SceneOp[], index),
   });
+  const { ctx, geo, geoms, innerLines } = useCardGeoms();
+  // The card's AI hints (line F) ride on the steps they name, as `SignalOp.hints`; none → the
+  // steps as they are, today's guess.
+  const guessHints = ctx?.guessHints;
   // A fresh array per signature: setValue on a step mutates the form's array in place, so the raw
   // reference would keep every memo below on the old step facts.
   const ops = useMemo(
-    () => [...((getValues('operations') ?? []) as SceneOp[])],
+    () => [...withSeamHints((getValues('operations') ?? []) as SceneOp[], guessHints)],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [opsSig, getValues],
+    [opsSig, getValues, guessHints],
   );
   const op = ops[index];
-  const { ctx, geo, geoms, innerLines } = useCardGeoms();
   const pieceKeys = useCardPieceKeys();
 
   const cardName = ctx?.nameOf;
@@ -566,7 +570,8 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 
 // ─── the svg ──────────────────────────────────────────────────────────────────────────────────────
 
-export type Tone = 'proposal' | 'pick' | 'stored';
+/** `hint` — an edge the card's AI joins map names for this step (line F): blue dashed. */
+export type Tone = 'proposal' | 'pick' | 'stored' | 'hint';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
 export type PictureActionLine = {
@@ -1104,10 +1109,12 @@ export function StepPictureSvg({
           key={`${m.tone}:${m.id}`}
           d={pathOf(pts)}
           fill='none'
-          stroke={m.tone === 'pick' ? PICK : m.tone === 'stored' ? PAIR_INK : INK}
+          stroke={
+            m.tone === 'pick' || m.tone === 'hint' ? PICK : m.tone === 'stored' ? PAIR_INK : INK
+          }
           strokeWidth={m.tone === 'stored' ? L.stored : L.mark}
-          strokeDasharray={m.tone === 'proposal' ? L.dash : undefined}
-          strokeLinecap={m.tone === 'proposal' ? 'butt' : 'round'}
+          strokeDasharray={m.tone === 'proposal' || m.tone === 'hint' ? L.dash : undefined}
+          strokeLinecap={m.tone === 'proposal' || m.tone === 'hint' ? 'butt' : 'round'}
           pointerEvents='none'
           data-seam-mark={m.tone}
         />

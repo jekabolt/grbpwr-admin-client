@@ -50,6 +50,8 @@ import {
 } from './step-hand';
 import { useAttachStepSeam } from './step-seams-context';
 import { stepWords } from './step-words';
+import { hintedEdgesFor } from './signals/hinted-edges';
+import { StepHintRow } from './step-hint-row';
 import {
   deltaMm,
   fmtMm,
@@ -692,6 +694,20 @@ export function SeamPickerBody({
     sideMarks(pair.a, tone, pair.aLen);
     sideMarks(pair.b, tone, pair.bLen);
   }
+  // The card's joins map (line F): the edges its word fits, a hint under the rest, never a pick.
+  // AI = blue dashed, the owner's row = ink dashed; a decided step shows none.
+  const hinted = stored.length
+    ? null
+    : hintedEdgesFor(op, scene.ctx?.guessHints, geoms, (piece) =>
+        (innerLines.get(piece) ?? []).map((_, k) => innerId(piece, k)),
+      );
+  const hintMarks: EdgeMark[] = [];
+  if (hinted) {
+    const shown = new Set<string>(marks.map((m) => m.id));
+    const tone: EdgeMark['tone'] = hinted.state === 'ai' ? 'hint' : 'proposal';
+    for (const id of [...hinted.a.edges, ...hinted.b.edges])
+      if (!shown.has(id)) hintMarks.push({ id: id as TargetId, tone });
+  }
   const resultMarks: EdgeMark[] = marks.map(({ id, tone }) => ({ id, tone }));
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
@@ -924,6 +940,7 @@ export function SeamPickerBody({
             {stepName}
           </Text>
         )}
+        <StepHintRow op={op} />
         {propOptions.length > 1 && (
           <ViewSwitch
             value={String(prop)}
@@ -986,7 +1003,7 @@ export function SeamPickerBody({
                 layout={layout}
                 geoms={geoms}
                 innerLines={innerLines}
-                marks={marks}
+                marks={hintMarks.length ? [...marks, ...hintMarks] : marks}
                 nos={nos}
                 names={(focus ? shown : groups).map((g) => g.name)}
                 namesBelow={phone}
