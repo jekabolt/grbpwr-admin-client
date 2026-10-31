@@ -33,6 +33,7 @@ import {
   suggestStepPair,
   suggestStepPairs,
   suggestStepSurface,
+  suggestStepSurfaces,
   suggestionWords,
   surfaceRow,
   targetsLen,
@@ -743,6 +744,15 @@ describe('card 77: both sleeves on their armholes, one proposal per side', () =>
       expect(sleeves).toHaveLength(1);
     }
   });
+
+  it('740: cold surface guess puts the loose left flap on the sleeve slit', () => {
+    expect(suggestStepSurface(ops, at(740), keys, geoms)).toEqual({
+      host: 'SLV_L',
+      inner: 0,
+      part: 'FLP_L',
+      confident: false,
+    });
+  });
 });
 
 describe('card 6: layered seams keep their structural edge', () => {
@@ -800,6 +810,117 @@ describe('card 6: layered seams keep their structural edge', () => {
     const after = components(suggested.place!);
     expect(after.along).toBeCloseTo(before.along, 5);
     expect(after.offset).toBeCloseTo(-before.offset, 5);
+  });
+
+  it('380: keeps the stored-mirror rule for the left sleeve too', () => {
+    const suggested = surface(380)!;
+    expect(suggested).toMatchObject({
+      host: 'SLV_L',
+      inner: 0,
+      part: 'FLP_L_MAIN',
+      confident: false,
+    });
+    expect(suggested.place).toBeDefined();
+  });
+
+  it('assigns two cold flaps to different sleeve slits by hand', () => {
+    const flapL = shaped('FLP_L', 'FLP_L', [{ len: 150 }, { len: 40 }], 'L');
+    const flapR = shaped('FLP_R', 'FLP_R', [{ len: 150 }, { len: 40 }], 'R');
+    const sleeveL = shaped('SLV_L', 'SLV_L', [{ len: 400 }, { len: 300 }], 'L');
+    const sleeveR = shaped('SLV_R', 'SLV_R', [{ len: 400 }, { len: 300 }], 'R');
+    sleeveL.marks = [
+      {
+        id: 'SLV_L@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    sleeveR.marks = [
+      {
+        id: 'SLV_R@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    const coldGeoms = new Map([
+      ['FLP_L', flapL],
+      ['SLV_R', sleeveR],
+      ['FLP_R', flapR],
+      ['SLV_L', sleeveL],
+    ]);
+    expect(
+      suggestStepSurfaces(
+        [{ inputKeys: ['FLP_L', 'SLV_R', 'FLP_R', 'SLV_L'] }],
+        0,
+        new Set(coldGeoms.keys()),
+        coldGeoms,
+      ),
+    ).toEqual([
+      { host: 'SLV_R', inner: 0, part: 'FLP_R', confident: false },
+      { host: 'SLV_L', inner: 0, part: 'FLP_L', confident: false },
+    ]);
+  });
+
+  it('offers the other flap after the first cold surface is stored on this step', () => {
+    const flap = shaped('FLP_L', 'FLP_L', [{ len: 150 }, { len: 40 }], 'L');
+    const other = shaped('FLP_L_MAIN', 'FLP_L_MAIN', [{ len: 150 }, { len: 40 }], 'L');
+    const sleeve = shaped('SLV_L', 'SLV_L', [{ len: 400 }, { len: 300 }], 'L');
+    sleeve.marks = [
+      {
+        id: 'SLV_L@0',
+        kind: 'other',
+        layer: '8',
+        closed: false,
+        pts: [
+          [10, 10],
+          [10, 160],
+        ],
+        bbox: { w: 0, h: 150, cx: 10, cy: 85 },
+        lenMm: 150,
+      },
+    ];
+    const coldGeoms = new Map([
+      ['FLP_L', flap],
+      ['FLP_L_MAIN', other],
+      ['SLV_L', sleeve],
+    ]);
+    const first = surfaceRow(
+      {
+        geom: sleeve,
+        k: 0,
+        line: [
+          [10, -10],
+          [10, -160],
+        ],
+        grainDeg: 0,
+      },
+      storedSeam('part', 'FLP_L#0', 'SLV_L#0').sideA,
+      undefined,
+      'first',
+    )!;
+    expect(
+      suggestStepSurface(
+        [{ inputKeys: ['FLP_L', 'FLP_L_MAIN', 'SLV_L'], seamKeys: ['first'] }],
+        0,
+        new Set(coldGeoms.keys()),
+        coldGeoms,
+        new Map([['first', first]]),
+      ),
+    ).toMatchObject({ host: 'SLV_L', inner: 0, part: 'FLP_L_MAIN' });
   });
 
   it('finds the second placket when the first placket and host remain separate inputs', () => {

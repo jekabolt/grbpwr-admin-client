@@ -2199,6 +2199,9 @@ function storedSurfacesBefore(
 
 type SurfaceCandidate = StoredSurface & { suggestedPart: string };
 
+/** Each side contributes 5% tolerance: sewing-line and inner-line readings use different layers. */
+const SURFACE_FIT_REL = 0.05;
+
 /** The one singleton input that completes the other side of an earlier surface placement. */
 function surfaceCandidateOf(
   groups: readonly { pieces: readonly string[] }[],
@@ -2250,6 +2253,105 @@ function surfaceCandidateOf(
   return candidates.length === 1 ? candidates[0] : null;
 }
 
+type ColdSurfaceCandidate = StepSurface & {
+  fit: number;
+  handFit: number;
+  hostOrder: number;
+  partOrder: number;
+};
+
+/** Cold placket placements, before either side of the slit has a stored surface row. */
+function coldSurfaceCandidatesOf(
+  groups: readonly { pieces: readonly string[] }[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  alreadyPlaced: ReadonlySet<string>,
+): StepSurface[] {
+  const ordered = groups.flatMap((group) => group.pieces);
+  const order = new Map(ordered.map((piece, index) => [piece, index]));
+  const singletonParts = groups
+    .filter((group) => group.pieces.length === 1)
+    .flatMap((group) => group.pieces);
+  // An assembled sleeve unit can already contain its first placket. Prefer the loose input; only
+  // inspect a unit's own pieces when the step has no singleton placket input at all.
+  const loose = singletonParts.some((piece) => {
+    const geom = geoms.get(piece);
+    return geom && roleOfPiece(geom, geoms) === 'placket';
+  })
+    ? singletonParts
+    : ordered;
+  const parts = loose.filter((piece) => {
+    const geom = geoms.get(piece);
+    return geom && roleOfPiece(geom, geoms) === 'placket' && !alreadyPlaced.has(piece);
+  });
+
+  const candidates: ColdSurfaceCandidate[] = [];
+  for (const part of parts) {
+    const partGeom = geoms.get(part)!;
+    const longEdge = plainEdges(partGeom).reduce<Edge | null>(
+      (best, edge) => (!best || edge.lenMm > best.lenMm ? edge : best),
+      null,
+    );
+    if (!longEdge) continue;
+    for (const host of ordered) {
+      if (host === part) continue;
+      const hostGeom = geoms.get(host);
+      if (!hostGeom || roleOfPiece(hostGeom, geoms) === 'placket') continue;
+      if (partGeom.hand && hostGeom.hand && partGeom.hand !== hostGeom.hand) continue;
+      for (const [fallbackInner, mark] of (hostGeom.marks ?? []).entries()) {
+        if (
+          mark.layer !== '8' ||
+          mark.closed ||
+          mark.kind === 'buttonhole' ||
+          mark.kind === 'drill' ||
+          !(mark.lenMm > 0)
+        )
+          continue;
+        // Classified marks keep their source order. The id is the drawing's inner-line index for
+        // these surviving layer-8 paths; the fallback also covers hand-built test geometry.
+        const innerMatch = /@(\d+)$/.exec(mark.id);
+        const inner = innerMatch ? Number(innerMatch[1]) : fallbackInner;
+        const difference = Math.abs(longEdge.lenMm - mark.lenMm);
+        if (difference > SURFACE_FIT_REL * (longEdge.lenMm + mark.lenMm)) continue;
+        candidates.push({
+          host,
+          inner,
+          part,
+          confident: false,
+          fit: difference / Math.max(longEdge.lenMm, mark.lenMm, 1),
+          handFit: partGeom.hand && hostGeom.hand && partGeom.hand === hostGeom.hand ? 0 : 1,
+          hostOrder: order.get(host) ?? Infinity,
+          partOrder: order.get(part) ?? Infinity,
+        });
+      }
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      a.handFit - b.handFit ||
+      a.fit - b.fit ||
+      a.hostOrder - b.hostOrder ||
+      a.partOrder - b.partOrder ||
+      a.inner - b.inner,
+  );
+  const partsTaken = new Set<string>();
+  const slitsTaken = new Set<string>();
+  const out: StepSurface[] = [];
+  for (const candidate of candidates) {
+    const slit = `${candidate.host}:i${candidate.inner}`;
+    if (partsTaken.has(candidate.part) || slitsTaken.has(slit)) continue;
+    partsTaken.add(candidate.part);
+    slitsTaken.add(slit);
+    out.push({
+      host: candidate.host,
+      inner: candidate.inner,
+      part: candidate.part,
+      confident: false,
+    });
+  }
+  return out;
+}
+
 const normalisedDeg = (deg: number) => {
   const turn = ((((deg + 180) % 360) + 360) % 360) - 180;
   return Math.abs(turn) < 1e-9 ? 0 : turn;
@@ -2297,9 +2399,56 @@ function reflectSurfacePlacement(
 }
 
 /**
- * A singleton piece placed opposite its twin on an earlier stored inner-line seam. Outer-edge
- * proposals always win; this is only the missing second side of an already established slit.
+ * Surface suggestions for a step. A stored first side is mirrored before the cold rule looks for
+ * loose plackets and unused layer-8 slits. Outer-edge proposals always win.
  */
+export function suggestStepSurfaces(
+  ops: readonly FormOpLike[],
+  index: number,
+  pieceKeys: ReadonlySet<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  seams?: ReadonlyMap<string, StoredSeam>,
+): StepSurface[] {
+  const op = ops[index];
+  if (!op || (sewsNothing(op) && !keyedOf(op))) return [];
+  const groups = inputGroups(ops, index, pieceKeys);
+  const knownSeams = seams ?? new Map<string, StoredSeam>();
+  if (
+    suggestStepPairs(
+      ops,
+      index,
+      pieceKeys,
+      geoms,
+      usedEdgesBeforeStep(ops, index, knownSeams),
+      easeOf(op),
+      seams,
+    ).length
+  )
+    return [];
+  // Include this step: after its first surface row is saved, a second call can offer the other
+  // placket without waiting for a later operation.
+  const stored = storedSurfacesBefore(ops, index + 1, knownSeams);
+  const candidate = surfaceCandidateOf(groups, geoms, stored);
+  if (candidate) {
+    const hostGeom = geoms.get(candidate.host);
+    const place =
+      candidate.placement && hostGeom
+        ? reflectSurfacePlacement(hostGeom, candidate.hostAnchor, candidate.placement)
+        : undefined;
+    return [
+      {
+        host: candidate.host,
+        inner: candidate.inner,
+        part: candidate.suggestedPart,
+        ...(place ? { place } : {}),
+        confident: false,
+      },
+    ];
+  }
+  return coldSurfaceCandidatesOf(groups, geoms, new Set(stored.map((surface) => surface.part)));
+}
+
+/** The picker's single-surface API: first by hand/fit, with the stored mirror rule still first. */
 export function suggestStepSurface(
   ops: readonly FormOpLike[],
   index: number,
@@ -2307,35 +2456,7 @@ export function suggestStepSurface(
   geoms: ReadonlyMap<string, PieceGeom>,
   seams?: ReadonlyMap<string, StoredSeam>,
 ): StepSurface | null {
-  const op = ops[index];
-  if (!op || !seams || (sewsNothing(op) && !keyedOf(op))) return null;
-  const groups = inputGroups(ops, index, pieceKeys);
-  if (
-    suggestStepPairs(
-      ops,
-      index,
-      pieceKeys,
-      geoms,
-      usedEdgesBeforeStep(ops, index, seams),
-      easeOf(op),
-      seams,
-    ).length
-  )
-    return null;
-  const candidate = surfaceCandidateOf(groups, geoms, storedSurfacesBefore(ops, index, seams));
-  if (!candidate) return null;
-  const hostGeom = geoms.get(candidate.host);
-  const place =
-    candidate.placement && hostGeom
-      ? reflectSurfacePlacement(hostGeom, candidate.hostAnchor, candidate.placement)
-      : undefined;
-  return {
-    host: candidate.host,
-    inner: candidate.inner,
-    part: candidate.suggestedPart,
-    ...(place ? { place } : {}),
-    confident: false,
-  };
+  return suggestStepSurfaces(ops, index, pieceKeys, geoms, seams)[0] ?? null;
 }
 
 /** Compact words shared by the row and picker: `BP_U-5 ↔ BP_MAIN-1`. */
