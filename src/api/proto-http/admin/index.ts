@@ -14279,6 +14279,8 @@ export type SuggestTechCardSeamHintsResponse = {
   cached: boolean | undefined;
   costUsd: string | undefined;
   calls: number | undefined;
+  rolesAsked: boolean | undefined;
+  askedOps: number[] | undefined;
 };
 
 export type GetTechCardSeamHintsRequest = {
@@ -14295,6 +14297,9 @@ export type GetTechCardSeamHintsResponse = {
   stale: boolean | undefined;
   overrides: TechCardSeamHintOverride[] | undefined;
   inputDigest: string | undefined;
+  rolesStale: boolean | undefined;
+  staleOps: number[] | undefined;
+  missingOps: number[] | undefined;
 };
 
 // TechCardSeamHintOverride is the owner's word on one hint. Never touched by a run.
@@ -20774,14 +20779,20 @@ export interface AdminService {
   // bounds input_json (the client-built input: pieces, units, ops, sketch_media_ids, atlas_png as
   // base64), loads the sketches itself (each must be on the card's technical sheet, else
   // InvalidArgument), adds the owner's matching dictionary rows and overrides, and digests the
-  // canonical input. Same digest → the stored run, no call (cached=true). force reruns and replaces
-  // the run of that digest (a second force within a minute returns the stored run). The answer is
+  // canonical input. INCREMENTAL (SPEC-F §5a): the roles are stored per pieces digest (pieces +
+  // matched dictionary + sketch hashes), the joins per (op number, op digest = op fields + its input
+  // pieces + the roles digest); the model is asked only for what is missing (roles_asked, asked_ops),
+  // with the known roles and joins as context. Nothing missing → the stored hint, no call
+  // (cached=true). force asks the roles and every op again (a second force within a minute reads the
+  // store). hints_json is always the merged hint of this input. The answer is
   // validated: unknown pieces / ops / words are dropped, a dropped step or piece lands in
   // not_inferred. A hint never writes a seam; overrides survive reruns. wr(tech_cards): spends the key.
   SuggestTechCardSeamHints(request: SuggestTechCardSeamHintsRequest): Promise<SuggestTechCardSeamHintsResponse>;
-  // GetTechCardSeamHints reads the stored hint of a card without calling the model: the run of
-  // input_digest (or of the digest of input_json, computed exactly as Suggest does), else the card's
-  // newest run with stale=true; plus the card's overrides. No run → empty hints_json. rd(tech_cards).
+  // GetTechCardSeamHints reads the stored hint of a card without calling the model. With input_json:
+  // the merged hint of exactly that input — the roles of its pieces digest (else the newest roles,
+  // roles_stale) and per op the row of its current digest (else its newest row, stale_ops; none at
+  // all, missing_ops). Without input_json: the newest of everything, stale when input_digest is set.
+  // Plus the card's overrides. Nothing stored → empty hints_json. rd(tech_cards).
   GetTechCardSeamHints(request: GetTechCardSeamHintsRequest): Promise<GetTechCardSeamHintsResponse>;
   // SetTechCardSeamHintOverride writes the owner's word on one hint: kind role (hint_key = piece
   // name, value_json {"role","hand"}) or join (hint_key = operation number, value_json
