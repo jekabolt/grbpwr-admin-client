@@ -18,6 +18,7 @@ import {
   type FormOpLike,
   type StepProposal,
 } from './step-seams-model';
+import { recordSeamDecision } from './seam-decisions';
 import { useStepSeams } from './step-seams-context';
 import { frameSeamsOf, useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
 import { SeamTile } from './step-seams-row';
@@ -111,6 +112,9 @@ export function SeamsQuiz() {
   };
 
   const complete = (index: number, outcome: Outcome) => {
+    const operationNumber = ops[index]?.operationNumber;
+    if (outcome === 'skipped' && ctx?.cardId && operationNumber)
+      recordSeamDecision({ cardId: ctx.cardId, operationNumber, action: 'skip' });
     const next = { ...outcomes, [index]: outcome };
     setOutcomes(next);
     advance(index, next);

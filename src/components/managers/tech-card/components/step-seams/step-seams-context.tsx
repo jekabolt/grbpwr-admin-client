@@ -41,15 +41,15 @@ const Ctx = createContext<StepSeamsCtx | null>(null);
 /** Null outside a provider: the row then draws nothing (print, stands, other tabs). */
 export const useStepSeams = () => useContext(Ctx);
 
-/** Store one seam row, then attach the server's canonical key to this form step. */
+/** Store one seam row, then attach the server's canonical key to this form step; that key, or null. */
 export function useAttachStepSeam(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   return useCallback(
-    async (row: StoredSeam): Promise<boolean> => {
-      if (!ctx) return false;
+    async (row: StoredSeam): Promise<string | null> => {
+      if (!ctx) return null;
       const ok = await ctx.writes.upsert([row]);
-      if (!ok) return false;
+      if (!ok) return null;
       const sig = rowPairSig(row);
       const stored = rowsOf(useSeamsStore.getState()).find(
         (candidate) => rowPairSig(candidate) === sig,
@@ -59,7 +59,7 @@ export function useAttachStepSeam(index: number) {
       setValue(`operations.${index}.seamKeys`, [...current.filter((item) => item !== key), key], {
         shouldDirty: true,
       });
-      return true;
+      return key;
     },
     [ctx, getValues, index, setValue],
   );

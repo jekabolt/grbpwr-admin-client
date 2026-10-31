@@ -14,6 +14,7 @@ import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { PairNo } from './pair-no';
 import { seamOfSides } from './step-picture';
+import { recordSeamDecision } from './seam-decisions';
 import { useAttachStepSeam } from './step-seams-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
@@ -95,10 +96,19 @@ export function StepSeamsRow({ index }: { index: number }) {
       );
       if (!row) return;
       setBusy(true);
-      await attach(row);
+      const key = await attach(row);
       setBusy(false);
+      if (key && opNumber)
+        recordSeamDecision({
+          cardId: ctx.cardId,
+          operationNumber: opNumber,
+          action: 'accept',
+          seamKey: key,
+          tier: suggestion.confident ? 'confident' : 'guess',
+          shown: suggestion,
+        });
     },
-    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach],
+    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach, opNumber],
   );
 
   if (!ctx || !hasMultiplePieces) return null;

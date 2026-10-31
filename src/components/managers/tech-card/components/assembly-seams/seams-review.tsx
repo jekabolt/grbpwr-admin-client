@@ -26,6 +26,7 @@ import {
   rowFromProposal,
   type AnchorCtx,
 } from './seam-actions';
+import { recordSeamDecision } from '../step-seams/seam-decisions';
 import { SeamRail } from './seam-rail';
 import type { RowDoors } from './seam-row';
 import { SeamsSheet } from './seams-sheet';
@@ -182,7 +183,15 @@ export function SeamsReview({
         note,
       });
       if (!row) return gone();
-      void writes.upsert([row], it.id);
+      void writes.upsert([row], it.id).then((ok) => {
+        if (ok && cardId)
+          recordSeamDecision({
+            cardId,
+            operationNumber: 0,
+            action: 'refuse',
+            seamKey: row.seamKey,
+          });
+      });
       advance(it);
     },
     flip: (it) => {

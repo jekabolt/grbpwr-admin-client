@@ -14210,6 +14210,58 @@ export type DeleteTechCardSeamsResponse = {
   deleted: number | undefined;
 };
 
+export type AddTechCardSeamDecisionsRequest = {
+  techCardId: number | undefined;
+  // 1..50 decisions; output-only fields (id, created_by, created_at) are ignored.
+  decisions: common_TechCardSeamDecision[] | undefined;
+};
+
+// TechCardSeamDecision is ONE immutable record of what the technologist did with a seam guess
+// (AddTechCardSeamDecisions). Append-only, apart from the seam row itself: tech_card_seam keeps
+// only the outcome (accept and own both land as source=manual, a skip leaves no row), this log keeps
+// the decision so the guess can be measured.
+export type common_TechCardSeamDecision = {
+  // The step: operation_number of the card's operation; 0 = the card-level seam review (no step).
+  operationNumber: number | undefined;
+  action: common_TechCardSeamDecisionAction | undefined;
+  // TechCardSeam.seam_key of the row written (accept / own) or rejected (refuse); empty on skip.
+  seamKey: string | undefined;
+  // Tier of the guess shown; UNKNOWN when the client has none.
+  tier: common_TechCardSeamGuessTier | undefined;
+  // The proposal shown, as client-built JSON ({"a":[{piece,k,len}],"b":[…]}), ≤ 8 KB; may be empty.
+  shown: string | undefined;
+  // Client git sha / ranker version, ≤ 40 chars.
+  clientVersion: string | undefined;
+  // OUTPUT ONLY (ignored on write).
+  id: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSeamDecisionAction is what the technologist did when closing one join step of the seam
+// picker / quiz with the engine's guess in front of them.
+export type common_TechCardSeamDecisionAction =
+  | "TECH_CARD_SEAM_DECISION_ACTION_UNKNOWN"
+  // Saved the engine's guess unchanged.
+  | "TECH_CARD_SEAM_DECISION_ACTION_ACCEPT"
+  // Saved a pick of their own instead of the guess.
+  | "TECH_CARD_SEAM_DECISION_ACTION_OWN"
+  // Skipped the step; no seam row was written (seam_key empty).
+  | "TECH_CARD_SEAM_DECISION_ACTION_SKIP"
+  // Rejected a proposal (the rejected seam row is seam_key).
+  | "TECH_CARD_SEAM_DECISION_ACTION_REFUSE";
+// TechCardSeamGuessTier is the confidence tier of the guess the UI showed for the step.
+export type common_TechCardSeamGuessTier =
+  // The client had no tier to report.
+  | "TECH_CARD_SEAM_GUESS_TIER_UNKNOWN"
+  | "TECH_CARD_SEAM_GUESS_TIER_CONFIDENT"
+  | "TECH_CARD_SEAM_GUESS_TIER_GUESS"
+  // The engine had no guess for the step.
+  | "TECH_CARD_SEAM_GUESS_TIER_NONE";
+export type AddTechCardSeamDecisionsResponse = {
+  written: number | undefined;
+};
+
 export type ReceiveMaterialStockRequest = {
   materialId: number | undefined;
   quantity: googletype_Decimal | undefined;
@@ -20626,6 +20678,12 @@ export interface AdminService {
   // or a decision the technologist takes back). Unknown keys are not an error. Same lock, same
   // released-card refusal, same echo of the full list as UpsertTechCardSeams.
   DeleteTechCardSeams(request: DeleteTechCardSeamsRequest): Promise<DeleteTechCardSeamsResponse>;
+  // AddTechCardSeamDecisions appends what the technologist did with the seam guesses — accept,
+  // own pick, skip, refuse — one immutable row each, ≤ 50 per call. A log beside the seams: it never
+  // touches tech_card_seam, never moves lock_version, enters no digest, and works on a released card
+  // (a note about the review, not card content). Write only; nothing reads it over the API.
+  // wr(tech_cards), the same right as UpsertTechCardSeams.
+  AddTechCardSeamDecisions(request: AddTechCardSeamDecisionsRequest): Promise<AddTechCardSeamDecisionsResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -27398,6 +27456,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardSeams",
       }) as Promise<DeleteTechCardSeamsResponse>;
+    },
+    AddTechCardSeamDecisions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seam-decisions`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddTechCardSeamDecisions",
+      }) as Promise<AddTechCardSeamDecisionsResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
