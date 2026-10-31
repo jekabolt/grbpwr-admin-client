@@ -30,6 +30,7 @@ import { useCardCategoryNames } from './skeleton-card-inputs';
 import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamsDoor } from './assembly-seams/seams-door';
+import { SeamHintsBar } from './step-seams/seam-hints-map';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { gapSubjects } from '../techpack/gap-findings';
@@ -657,6 +658,7 @@ export function ConstructionTab({
               рельс операций под ними, поэтому стоит НАД обоими: под списком из ста двадцати шагов
               его бы не нашёл никто, а найденное в конце экрана читается как приложение. */}
               <StepSeamsProvider techCard={techCard} frozen={frozen} active={active}>
+                <SeamHintsBar />
                 <ConstructionAudit
                   techCardId={techCard?.id}
                   active={active}

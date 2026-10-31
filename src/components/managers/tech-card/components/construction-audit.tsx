@@ -14,7 +14,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
   Accordion,
@@ -49,11 +49,6 @@ import type { Gap } from '../techpack/gaps';
 import { gapNav, gapsToClientFindings } from '../techpack/gap-findings';
 import { revealField } from 'utils/field-errors';
 import { SeamsQuiz } from './step-seams/seams-quiz';
-
-// The AI hints map (unit-seams F): drawn only on the owner's press, so its code loads then too.
-const SeamHintsMap = lazy(() =>
-  import('./step-seams/seam-hints-map').then((module) => ({ default: module.SeamHintsMap })),
-);
 
 // CONSTRUCTION AUDIT — the machine layer's report on the SAVED card, sitting above everything it is
 // a report ABOUT. Advisory throughout: nothing here disables a control or refuses a save.
@@ -837,7 +832,6 @@ export function ConstructionAudit({
   const { getValues, setValue, formState } = useFormContext<TechCardFormData>();
   const { data, isPending, isError } = useTechCardConstructionAudit(techCardId, active);
   const analyze = useAnalyzeTechCardConstruction();
-  const [hintsOpen, setHintsOpen] = useState(false);
   const addIssue = useAddTechCardIssue();
   const setSeen = useSetTechCardFindingSeen();
   const { canWrite } = usePermissions();
@@ -1149,15 +1143,6 @@ export function ConstructionAudit({
       >
         {inFlight ? 'analyzing…' : run ? 're-run (ai)' : 'analyze (ai)'}
       </Chip>
-      {/* The hints map opens here, beside the analyze door: reading it spends nothing. */}
-      <Chip
-        nonForm
-        selected={hintsOpen}
-        pressed={hintsOpen}
-        onClick={() => setHintsOpen((v) => !v)}
-      >
-        hints
-      </Chip>
     </div>
   ) : null;
 
@@ -1237,12 +1222,6 @@ export function ConstructionAudit({
           деньги, и человек видел бы схлопнувшуюся панель вместо начавшегося прогона. Цена решения
           честная и небольшая: чтобы заказать разбор, блок нужно раскрыть. */}
       {analyzeControl && <div className='mb-2 flex justify-end'>{analyzeControl}</div>}
-
-      {hintsOpen && techCardId && (
-        <Suspense fallback={null}>
-          <SeamHintsMap />
-        </Suspense>
-      )}
 
       <SeamsQuiz />
 
