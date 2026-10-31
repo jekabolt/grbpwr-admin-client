@@ -6,13 +6,30 @@
 // length, dashed. Nothing is stored until «accept» (or Enter): then the pair becomes ONE card seam
 // (composite when a side holds several runs, surface when one side is an inner line) and its key
 // goes onto the step, after the ones already there. «place» drags the part onto its host for a
-// surface seam.
+// surface seam; with no seam in hand it moves any piece of the step by hand (P8 pose: snap onto an
+// edge or a vertex, ⟲ ⟳ ⇋, «auto» back to the layout, «done» stores the poses).
 
 import * as Dialog from '@radix-ui/react-dialog';
-import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import type {
+  Affine,
+  Edge,
+  EdgeId,
+  PieceGeom,
+  Pt2,
+  SeamCandidate,
+} from 'lib/assembly-skeleton/types';
 import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
-import { apply } from 'lib/assembly-skeleton/union/affine';
-import { anchorOfRunId, type EdgeAnchor, type SeamPlacement, type StoredSeam } from 'lib/seams';
+import { apply, compose, translate } from 'lib/assembly-skeleton/union/affine';
+import {
+  anchorOfRunId,
+  newSeamKey,
+  poseOf,
+  poseRow,
+  type EdgeAnchor,
+  type SeamPlacement,
+  type StoredPose,
+  type StoredSeam,
+} from 'lib/seams';
 import { cn } from 'lib/utility';
 import {
   useCallback,
@@ -48,7 +65,17 @@ import {
   type HandTarget,
   withHandPlace,
 } from './step-hand';
-import { useAttachStepSeam } from './step-seams-context';
+import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
+import {
+  poseAt,
+  poseGroup,
+  poseHostOf,
+  posePinsOf,
+  snapPose,
+  turnAbout,
+  type PosePin,
+  type PoseSnap,
+} from './step-pose';
 import { stepWords } from './step-words';
 import { hintedEdgesFor } from './signals/hinted-edges';
 import { StepHintRow } from './step-hint-row';
@@ -83,6 +110,7 @@ import {
   type StepLayout,
 } from './step-picture';
 import {
+  pictureBounds,
   StepPictureSvg,
   useBoxSize,
   useStable,
@@ -269,6 +297,7 @@ export function SeamPickerBody({
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
   const cardId = scene.ctx?.cardId;
   const attach = useAttachStepSeam(index);
+  const attachPose = useAttachStepPose(index);
   const errors = useSeamsStore((s) => s.errors);
   const { catalog: workCatalog } = useOperationWorkCatalog();
 
@@ -286,6 +315,12 @@ export function SeamPickerBody({
   const suggestion = suggestions[prop] ?? suggestions[0] ?? null;
   // «own»: the guess is put aside and the canvas waits for the user's own edges.
   const [mine, setMine] = useState(false);
+  // «place» with no seam in hand (P8): pieces moved by hand, kept here until «done».
+  const [posing, setPosing] = useState(false);
+  const [poseEdits, setPoseEdits] = useState<Map<string, PosePin | null>>(() => new Map());
+  const [poseSel, setPoseSel] = useState<string | null>(null);
+  const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
+  const [poseDrag, setPoseDrag] = useState<{ group: string[]; D: Affine } | null>(null);
   const propOptions = useMemo(
     () => suggestions.map((p, i) => ({ value: String(i), label: proposalLabel(p, i) })),
     [suggestions],
@@ -453,11 +488,40 @@ export function SeamPickerBody({
 
   // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
   // the whole card's (the right bag mirrors the left one placed a step later).
-  const savedHands = useMemo(() => stepHandsOf(ops, index, byKey), [ops, index, byKey]);
+  const poses = scene.poses;
+  const savedHands = useMemo(
+    () => stepHandsOf(ops, index, byKey, poses),
+    [ops, index, byKey, poses],
+  );
   const storedHand = savedHands.hand;
   const cardHand = savedHands.twinHand;
   const hand = useMemo(() => withOverrides(storedHand, handOverrides), [storedHand, handOverrides]);
   const twinHand = useMemo(() => withOverrides(cardHand, handOverrides), [cardHand, handOverrides]);
+  // Poses (P8): the earlier steps' and this one's, with the pieces moved here and not yet stored.
+  const inheritedPose = useMemo(() => posePinsOf(ops.slice(0, index), poses), [ops, index, poses]);
+  const ownPoseRows = useMemo(() => {
+    const out = new Map<string, StoredPose>();
+    for (const key of op?.poseKeys ?? []) {
+      const row = poses.get(key);
+      const pose = row ? poseOf(row) : null;
+      if (row && pose) out.set(pose.piece, row);
+    }
+    return out;
+  }, [op?.poseKeys, poses]);
+  const savedPose = savedHands.pose;
+  const livePose = useMemo(() => {
+    const next = new Map(savedPose ?? []);
+    for (const [piece, pin] of poseEdits) {
+      next.delete(piece);
+      const now = pin ?? inheritedPose.get(piece);
+      if (now) next.set(piece, now);
+    }
+    return next;
+  }, [savedPose, poseEdits, inheritedPose]);
+  const laidHands = useMemo(
+    () => ({ hand, twinHand, ...(livePose.size ? { pose: livePose } : {}) }),
+    [hand, twinHand, livePose],
+  );
   const pairPieces = useMemo(
     () => new Set(pair ? [...pair.a, ...pair.b].map(pieceOfTarget) : []),
     [pair],
@@ -568,7 +632,7 @@ export function SeamPickerBody({
   };
 
   const toggle = (id: TargetId) => {
-    if (frozen || placing) return;
+    if (frozen || placing || posing) return;
     const side = sideOf(pieceOfTarget(id), groups, chosen);
     setRefused('');
     const has = sel[side].includes(id);
@@ -602,10 +666,14 @@ export function SeamPickerBody({
   // seam), never the live pick.
   const frameRaw = frameSeamsOf(innerSeams, storedSeams, proposalSeams, crossSeams);
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-  const laidFocus = useStepLayout(focus ? focusLeaves : leaves, frameSeams, geoms, EXPLODE, undefined, {
-    hand,
-    twinHand,
-  });
+  const laidFocus = useStepLayout(
+    focus ? focusLeaves : leaves,
+    frameSeams,
+    geoms,
+    EXPLODE,
+    undefined,
+    laidHands,
+  );
   // A piece of the seam no earlier seam attaches to its unit is not drawn loose with a bit of the
   // seam on it: the focused canvas is laid again without it (the seam's label goes on the rest).
   const apart = new Set(focus ? laidFocus.apart : []);
@@ -625,7 +693,7 @@ export function SeamPickerBody({
     geoms,
     EXPLODE,
     undefined,
-    { hand, twinHand },
+    laidHands,
   );
   const layout = apart.size ? laidShown : laidFocus;
   // A surface pick lies on its host's line in RESULT (by «place», else centred on the line).
@@ -647,9 +715,27 @@ export function SeamPickerBody({
   const handTargets = useMemo(() => handTargetsOf(resultSeams, geoms), [resultSeams, geoms]);
   const resultLeaves = focus ? seamLeaves : leaves;
   const joined = useMemo(
-    () => stepLayout(resultLeaves, resultSeams, geoms, { explode: 0, hand, twinHand }),
-    [resultLeaves, resultSeams, geoms, hand, twinHand],
+    () => stepLayout(resultLeaves, resultSeams, geoms, { explode: 0, ...laidHands }),
+    [resultLeaves, resultSeams, geoms, laidHands],
   );
+  // «place» with no seam in hand: every piece of the step joined as its views draw it, by hand.
+  const poseLayout = useMemo(
+    () => (posing ? stepLayout(leaves, frameSeams, geoms, { explode: 0, ...laidHands }) : null),
+    [posing, leaves, frameSeams, geoms, laidHands],
+  );
+  const poseBounds = useMemo(
+    () => (poseLayout ? pictureBounds(poseLayout, geoms, 'canvas') : undefined),
+    [poseLayout, geoms],
+  );
+  const poseShown = useMemo(() => {
+    if (!poseLayout || !poseDrag) return poseLayout;
+    const T = new Map(poseLayout.T);
+    for (const k of poseDrag.group) {
+      const t = T.get(k);
+      if (t) T.set(k, compose(poseDrag.D, t));
+    }
+    return { ...poseLayout, T };
+  }, [poseLayout, poseDrag]);
   const hasResult = storedSeams.length > 0 || !!pairSeam;
 
   const marks: EdgeMark[] = [];
@@ -774,6 +860,130 @@ export function SeamPickerBody({
     setPlacePartKey(drop.part);
   };
 
+  // ── «place» with no seam in hand (P8): any piece moved by hand, stored as a pose on «done» ──
+  const exitPose = () => {
+    setPosing(false);
+    setPoseEdits(new Map());
+    setPoseSel(null);
+    setPoseSnap(null);
+    setPoseDrag(null);
+  };
+  const startPose = () => {
+    if (posing) {
+      exitPose();
+      return;
+    }
+    setSelectedPiece(null);
+    setRefused('');
+    setPoseEdits(new Map());
+    setPoseSel(null);
+    setPoseSnap(null);
+    setPosing(true);
+  };
+  /** The host a piece stands on: its pose's, else the block's root. */
+  const poseHost = (piece: string, group: readonly string[]) => {
+    if (!poseLayout) return null;
+    const was = livePose.get(piece)?.host;
+    return was && was !== piece && poseLayout.T.has(was) && !group.includes(was)
+      ? was
+      : poseHostOf(piece, group, poseLayout, geoms);
+  };
+  /** What moves with a piece: the pieces hung on it, unless its host hangs on it too. */
+  const poseGroupOf = (piece: string): string[] => {
+    if (!poseLayout) return [piece];
+    const host = livePose.get(piece)?.host ?? poseHostOf(piece, [piece], poseLayout, geoms);
+    return host
+      ? poseGroup(piece, host, poseLayout.hung ?? []).filter((k) => poseLayout.T.has(k))
+      : [piece];
+  };
+  const putPose = (piece: string, T: Affine, host: string | null) => {
+    const hostT = host ? poseLayout?.T.get(host) : undefined;
+    const pg = geoms.get(piece);
+    const hg = host ? geoms.get(host) : undefined;
+    if (!host || !hostT || !pg || !hg) {
+      setRefused('no host');
+      return;
+    }
+    setRefused('');
+    setPoseEdits((current) => {
+      const next = new Map(current);
+      next.set(piece, { host, placement: poseAt(hg, pg, hostT, T) });
+      return next;
+    });
+  };
+  const dropPose = (piece: string, group: string[], D: Affine, snap: PoseSnap | null) => {
+    setPoseDrag(null);
+    const T0 = poseLayout?.T.get(piece);
+    if (!T0) return;
+    const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
+    putPose(piece, compose(moved, T0), snap?.host ?? poseHost(piece, group));
+    setPoseSnap(snap ? snap.at : null);
+  };
+  const turnPose = (quarter: -1 | 0 | 1) => {
+    const piece = poseSel;
+    const T0 = piece ? poseLayout?.T.get(piece) : undefined;
+    const g = piece ? geoms.get(piece) : undefined;
+    if (!piece || !T0 || !g || busy) return;
+    const D = turnAbout(
+      g.rs.map((p) => apply(T0, p)),
+      quarter,
+    );
+    putPose(piece, compose(D, T0), poseHost(piece, poseGroupOf(piece)));
+    setPoseSnap(null);
+  };
+  const posedHere = (piece: string | null) =>
+    !!piece &&
+    (!!poseEdits.get(piece) || (ownPoseRows.has(piece) && poseEdits.get(piece) !== null));
+  const autoPose = () => {
+    const piece = poseSel;
+    if (!piece || !posedHere(piece) || busy) return;
+    setPoseEdits((current) => {
+      const next = new Map(current);
+      if (ownPoseRows.has(piece)) next.set(piece, null);
+      else next.delete(piece);
+      return next;
+    });
+    setPoseSnap(null);
+  };
+  const finishPose = async () => {
+    if (!posing || busy) return;
+    const put: StoredPose[] = [];
+    const drop: StoredPose[] = [];
+    for (const [piece, pin] of poseEdits) {
+      const own = ownPoseRows.get(piece);
+      if (!pin) {
+        if (own) drop.push(own);
+        continue;
+      }
+      const pg = geoms.get(piece);
+      const hg = geoms.get(pin.host);
+      if (!pg || !hg) continue;
+      put.push(
+        poseRow({
+          seamKey: own?.seamKey ?? newSeamKey(),
+          piece: pg,
+          host: hg,
+          placement: pin.placement,
+          grainDeg: geo?.grainDeg,
+        }),
+      );
+    }
+    if (!put.length && !drop.length) {
+      exitPose();
+      return;
+    }
+    setBusy(true);
+    setRefused('');
+    const ok = await attachPose(put, drop);
+    setBusy(false);
+    if (!ok) {
+      const key = put[0]?.seamKey ?? drop[0]?.seamKey ?? '';
+      setRefused(useSeamsStore.getState().errors[key] ?? 'not saved');
+      return;
+    }
+    exitPose();
+  };
+
   const switchProposal = (v: string) => {
     reset();
     setProp(Number(v));
@@ -782,18 +992,26 @@ export function SeamPickerBody({
   const onKeyDown = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea')) return;
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && !placing && zoom.onKey(e.key)) {
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !placing && !posing && zoom.onKey(e.key)) {
       e.preventDefault();
+    } else if (e.key === 'Enter' && posing) {
+      e.preventDefault();
+      void finishPose();
     } else if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
-    } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
+    } else if (!posing && /^[1-9]$/.test(e.key) && Number(e.key) <= propOptions.length) {
       e.preventDefault();
       switchProposal(String(Number(e.key) - 1));
     }
   };
 
   const escape = () => {
+    if (posing) {
+      if (poseSel) setPoseSel(null);
+      else exitPose();
+      return true;
+    }
     if (placing) {
       setPlacing(false);
       if (!surface) {
@@ -828,6 +1046,8 @@ export function SeamPickerBody({
 
   const loading = geo?.dep.status === 'pending';
   const drawn = layout.T.size > 0;
+  // A seam on the table (a pick, a slit proposal): «place» lays its part; else it moves pieces.
+  const seamInHand = surface || !!auto || sel.a.length > 0 || sel.b.length > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
   // The selected piece's placement as drawn: its own, or its twin's mirrored.
   const selectedLaid = selectedPiece ? joined.hand.get(selectedPiece) : undefined;
@@ -968,10 +1188,10 @@ export function SeamPickerBody({
             }}
             className={cn(
               'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden select-none',
-              zoom.zoomed && !placing && 'cursor-grab active:cursor-grabbing',
+              zoom.zoomed && !placing && !posing && 'cursor-grab active:cursor-grabbing',
             )}
             data-seam-picker-canvas=''
-            {...(placing ? {} : zoom.handlers)}
+            {...(placing || posing ? {} : zoom.handlers)}
           >
             {loading && !drawn ? (
               <div className='absolute inset-0 grid place-items-center'>
@@ -981,6 +1201,41 @@ export function SeamPickerBody({
               <div className='absolute inset-0 grid place-items-center'>
                 <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
               </div>
+            ) : posing && poseShown ? (
+              <>
+                <StepPictureSvg
+                  w={canvas.w}
+                  h={canvas.h}
+                  pad={phone ? 28 : 64}
+                  look='canvas'
+                  layout={poseShown}
+                  geoms={geoms}
+                  innerLines={innerLines}
+                  ghostName={nameOf}
+                  bounds={poseBounds}
+                  className='absolute inset-0'
+                />
+                <PoseOverlay
+                  w={canvas.w}
+                  h={canvas.h}
+                  pad={phone ? 28 : 64}
+                  bounds={poseBounds ?? poseShown.bbox}
+                  layout={poseShown}
+                  geoms={geoms}
+                  nameOf={nameOf}
+                  selected={poseSel}
+                  snapAt={poseDrag ? null : poseSnap}
+                  disabled={frozen || busy}
+                  groupOf={poseGroupOf}
+                  onSelect={(piece) => {
+                    setPoseSel(piece);
+                    setPoseSnap(null);
+                  }}
+                  onDrag={(group, D) => setPoseDrag({ group, D })}
+                  onDrop={dropPose}
+                  onCancel={() => setPoseDrag(null)}
+                />
+              </>
             ) : placing && place && placePartPiece && placeHosts.length ? (
               <PlaceView
                 w={canvas.w}
@@ -1015,7 +1270,7 @@ export function SeamPickerBody({
                 className='absolute inset-0'
               />
             )}
-            {drawn && !placing && (
+            {drawn && !placing && !posing && (
               <div className='absolute top-2 right-3 flex items-center gap-3' data-seam-zoom=''>
                 <Button
                   type='button'
@@ -1117,6 +1372,11 @@ export function SeamPickerBody({
             </span>
           )}
           <span className='flex-1' />
+          {posing && poseSnap && (
+            <Text size='micro' variant='label' data-seam-pose-snap=''>
+              snap
+            </Text>
+          )}
           {delta != null ? (
             <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
               {`Δ ${fmtMm(delta)} mm`}
@@ -1132,7 +1392,7 @@ export function SeamPickerBody({
               </Text>
             )
           ) : null}
-          {hasPlaceSides && !frozen && (
+          {hasPlaceSides && !frozen && !posing && (placing || seamInHand) && (
             <Button
               type='button'
               variant='underline'
@@ -1141,6 +1401,64 @@ export function SeamPickerBody({
               disabled={!placeReady}
             >
               {placing ? 'done' : 'place'}
+            </Button>
+          )}
+          {posing && (
+            <>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                aria-label='turn left'
+                onClick={() => turnPose(1)}
+                disabled={!poseSel || busy}
+              >
+                ⟲
+              </Button>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                aria-label='turn right'
+                onClick={() => turnPose(-1)}
+                disabled={!poseSel || busy}
+              >
+                ⟳
+              </Button>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                aria-label='flip'
+                onClick={() => turnPose(0)}
+                disabled={!poseSel || busy}
+              >
+                ⇋
+              </Button>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={autoPose}
+                disabled={!posedHere(poseSel) || busy}
+                data-seam-pose-auto=''
+              >
+                auto
+              </Button>
+            </>
+          )}
+          {!frozen && !placing && drawn && !!cardId && (posing || !seamInHand) && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className={posing ? 'text-warning' : undefined}
+              aria-pressed={posing}
+              onClick={startPose}
+              disabled={busy}
+              data-seam-pose=''
+            >
+              place
             </Button>
           )}
           {placing && place && (
@@ -1153,7 +1471,7 @@ export function SeamPickerBody({
               turn
             </Button>
           )}
-          {selectedPiece && (
+          {selectedPiece && !posing && (
             <>
               <Button
                 type='button'
@@ -1190,12 +1508,24 @@ export function SeamPickerBody({
               </Button>
             </>
           )}
-          {(sel.a.length > 0 || sel.b.length > 0) && (
+          {(sel.a.length > 0 || sel.b.length > 0) && !posing && (
             <Button type='button' variant='underline' size='xs' onClick={reset}>
               clear
             </Button>
           )}
-          {!frozen && (
+          {!frozen && posing && (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              onClick={() => void finishPose()}
+              loading={busy}
+              data-seam-pose-done=''
+            >
+              done
+            </Button>
+          )}
+          {!frozen && !posing && (
             <Button
               type='button'
               variant={guess ? 'secondary' : 'main'}
@@ -1208,7 +1538,7 @@ export function SeamPickerBody({
               accept
             </Button>
           )}
-          {!frozen && guess && (
+          {!frozen && !posing && guess && (
             <Button
               type='button'
               variant='underline'
@@ -1220,6 +1550,7 @@ export function SeamPickerBody({
             </Button>
           )}
           {!frozen &&
+            !posing &&
             mine &&
             (suggestion || surfaceSuggestion) &&
             !sel.a.length &&
@@ -1427,6 +1758,188 @@ function ResultHandOverlay({
           strokeLinejoin='round'
           pointerEvents='none'
           data-hand-selected=''
+        />
+      )}
+    </svg>
+  );
+}
+
+/** A drop snaps within this many screen px (P8 pose). */
+const POSE_SNAP_PX = 8;
+
+/**
+ * «place» with no seam in hand (P8): every drawn piece a handle — a press selects it, a drag moves
+ * it with the pieces hung on it, a drop snaps a vertex of theirs onto another piece's vertex or
+ * outline within POSE_SNAP_PX. The picture under it is the same layout with the drag laid in.
+ */
+function PoseOverlay({
+  w,
+  h,
+  pad,
+  bounds,
+  layout,
+  geoms,
+  nameOf,
+  selected,
+  snapAt,
+  disabled,
+  groupOf,
+  onSelect,
+  onDrag,
+  onDrop,
+  onCancel,
+}: {
+  w: number;
+  h: number;
+  pad: number;
+  bounds: ReturnType<typeof boxOf>;
+  layout: StepLayout;
+  geoms: ReadonlyMap<string, PieceGeom>;
+  nameOf: (piece: string) => string;
+  selected: string | null;
+  snapAt: Pt2 | null;
+  disabled: boolean;
+  groupOf: (piece: string) => string[];
+  onSelect: (piece: string | null) => void;
+  onDrag: (group: string[], D: Affine) => void;
+  onDrop: (piece: string, group: string[], D: Affine, snap: PoseSnap | null) => void;
+  onCancel: () => void;
+}) {
+  const fit = useMemo(() => fitBox(bounds, w, h, pad), [bounds, w, h, pad]);
+  const stacked = useMemo(() => new Set(layout.stacked.flatMap((g) => g.slice(1))), [layout]);
+  const pieces = useMemo(
+    () =>
+      [...layout.T].flatMap(([piece, transform]) => {
+        const geom = geoms.get(piece);
+        if (!geom || geom.rs.length < 3 || stacked.has(piece)) return [];
+        return [{ piece, ring: geom.rs.map((point) => toPx(fit, apply(transform, point))) }];
+      }),
+    [layout, geoms, fit, stacked],
+  );
+  const drag = useRef<{
+    piece: string;
+    group: string[];
+    clientX: number;
+    clientY: number;
+    moved: boolean;
+    /** The shift last handed to `onDrag`: the layout drawn under the drop carries it. */
+    D: Affine;
+  } | null>(null);
+  const scale = Math.max(fit.s, 1e-6);
+  const shiftOf = (e: PointerEvent, state: NonNullable<typeof drag.current>): Affine =>
+    translate((e.clientX - state.clientX) / scale, -(e.clientY - state.clientY) / scale);
+
+  const finish = (cancelled = false) => {
+    const state = drag.current;
+    if (!state) return;
+    drag.current = null;
+    if (cancelled || !state.moved) {
+      onCancel();
+      return;
+    }
+    const D = state.D;
+    const group = new Set(state.group);
+    // The layout under the drag already carries D: the dragged rings are read as drawn.
+    const ringOf = (k: string, T: Affine) => (geoms.get(k)?.rs ?? []).map((p) => apply(T, p));
+    const moving = state.group.flatMap((k) => {
+      const T = layout.T.get(k);
+      return T ? ringOf(k, T) : [];
+    });
+    const others = [...layout.T].flatMap(([k, T]) =>
+      group.has(k) || stacked.has(k) || (geoms.get(k)?.rs.length ?? 0) < 3
+        ? []
+        : [{ piece: k, ring: ringOf(k, T) }],
+    );
+    onDrop(state.piece, state.group, D, snapPose(moving, others, POSE_SNAP_PX / scale));
+  };
+
+  if (w < 2 || h < 2) return null;
+  const selectedRing = pieces.find((item) => item.piece === selected)?.ring;
+  const hitPieces = selected
+    ? [
+        ...pieces.filter((item) => item.piece !== selected),
+        ...pieces.filter((item) => item.piece === selected),
+      ]
+    : pieces;
+  const snapPx = snapAt ? toPx(fit, snapAt) : null;
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className='absolute inset-0 touch-none'
+      onPointerMove={(e) => {
+        const state = drag.current;
+        if (!state) return;
+        if (!state.moved && Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) <= 2)
+          return;
+        state.moved = true;
+        state.D = shiftOf(e, state);
+        onDrag(state.group, state.D);
+      }}
+      onPointerUp={() => finish()}
+      onPointerCancel={() => finish(true)}
+      data-seam-pose-canvas=''
+    >
+      {hitPieces.map((item) => (
+        <path
+          key={item.piece}
+          d={pathOf(item.ring, true)}
+          fill='transparent'
+          stroke='transparent'
+          pointerEvents='all'
+          tabIndex={0}
+          role='button'
+          aria-label={nameOf(item.piece)}
+          aria-pressed={selected === item.piece}
+          className={cn(
+            disabled ? 'cursor-pointer' : 'cursor-move',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+          )}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            e.stopPropagation();
+            onSelect(selected === item.piece ? null : item.piece);
+          }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            onSelect(item.piece);
+            if (disabled) return;
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            drag.current = {
+              piece: item.piece,
+              group: groupOf(item.piece),
+              clientX: e.clientX,
+              clientY: e.clientY,
+              moved: false,
+              D: [1, 0, 0, 1, 0, 0],
+            };
+          }}
+          data-seam-pose-piece={item.piece}
+        />
+      ))}
+      {selectedRing && (
+        <path
+          d={pathOf(selectedRing, true)}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={2.6}
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-seam-pose-selected=''
+        />
+      )}
+      {snapPx && (
+        <circle
+          cx={snapPx[0]}
+          cy={snapPx[1]}
+          r={6}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={2.4}
+          pointerEvents='none'
+          data-seam-pose-snap-at=''
         />
       )}
     </svg>

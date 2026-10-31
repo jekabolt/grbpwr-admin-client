@@ -51,6 +51,8 @@ export type FormOpLike = {
   inputKeys?: readonly string[];
   outputUnitKey?: string;
   seamKeys?: readonly string[];
+  /** The step's pose rows (P8, a piece placed by hand) — card seam keys that are not seams. */
+  poseKeys?: readonly string[];
   operationNumber?: number;
   assemblyBlockDetached?: boolean;
   fullnessRatio?: string | number;
@@ -2553,9 +2555,16 @@ export function dropKeys<T extends FormOpLike>(ops: readonly T[], gone: Readonly
   let changed = false;
   const next = ops.map((o) => {
     const keys = o.seamKeys ?? [];
-    if (!keys.some((k) => gone.has(k))) return o;
+    const poses = o.poseKeys ?? [];
+    const seamHit = keys.some((k) => gone.has(k));
+    const poseHit = poses.some((k) => gone.has(k));
+    if (!seamHit && !poseHit) return o;
     changed = true;
-    return { ...o, seamKeys: keys.filter((k) => !gone.has(k)) };
+    return {
+      ...o,
+      ...(seamHit ? { seamKeys: keys.filter((k) => !gone.has(k)) } : {}),
+      ...(poseHit ? { poseKeys: poses.filter((k) => !gone.has(k)) } : {}),
+    };
   });
   return changed ? next : null;
 }

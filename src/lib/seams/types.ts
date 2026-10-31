@@ -54,6 +54,7 @@ export type EdgeAnchor = {
 export type SeamPlacement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
 
 export type StoredSeamStatus = 'confirmed' | 'rejected';
+/** The kinds of a SEAM. A pose rides the same table but is not one (`StoredPose`). */
 export type StoredSeamKind = 'edge' | 'partial' | 'composite' | 'surface' | 'closure';
 export type StoredSeamDirection = 'reversed' | 'same' | 'unknown';
 export type StoredSeamSource = 'graph' | 'doll' | 'order' | 'manual' | 'ai';
@@ -78,6 +79,18 @@ export type StoredSeam = {
   updatedBy?: string;
   updatedAt?: string;
 };
+
+/**
+ * A row of tech_card_seam that is NOT a seam (P8, kind `pose`): a piece placed by hand in a step.
+ * `sideA` = the one anchor of the moved piece, its `placement` = the piece in the host's frame as a
+ * surface placement is encoded; `sideB` = the one anchor of the host piece. Linked to its step by
+ * the op's seam keys like a seam, but it never reaches a seam reader: the wire loaders split it off
+ * (`splitWire`), and a stale pose is still laid (the owner's last word), never counted.
+ */
+export type StoredPose = Omit<StoredSeam, 'kind'> & { kind: 'pose' };
+
+/** Any row of the card's seam table: a seam or a pose. */
+export type StoredRow = StoredSeam | StoredPose;
 
 // ── wire shape (proto common.TechCardSeam as protojson / the generated HTTP client sends it) ──
 
@@ -113,7 +126,8 @@ export type TechCardSeamKindWire =
   | 'TECH_CARD_SEAM_KIND_PARTIAL'
   | 'TECH_CARD_SEAM_KIND_COMPOSITE'
   | 'TECH_CARD_SEAM_KIND_SURFACE'
-  | 'TECH_CARD_SEAM_KIND_CLOSURE';
+  | 'TECH_CARD_SEAM_KIND_CLOSURE'
+  | 'TECH_CARD_SEAM_KIND_POSE';
 export type TechCardSeamDirectionWire =
   | 'TECH_CARD_SEAM_DIRECTION_UNKNOWN'
   | 'TECH_CARD_SEAM_DIRECTION_REVERSED'

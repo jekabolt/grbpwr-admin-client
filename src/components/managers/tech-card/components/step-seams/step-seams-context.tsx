@@ -5,11 +5,12 @@
 //   it) is folded away;
 // - a seam that leaves the card (removed in the review, dropped by a DXF re-upload, deleted by a
 //   colleague) leaves every step's `seamKeys` at once — the server refuses a save that names a key
-//   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever.
+//   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever;
+// - the same for a POSE row (P8, a piece placed by hand) and the steps' `poseKeys`.
 
 import type { common_TechCard } from 'api/proto-http/admin';
 import { useSeamHints, type SeamHints, type SeamHintsState } from 'lib/seam-hints';
-import type { StoredSeam, TechCardSeamWire } from 'lib/seams';
+import type { StoredPose, StoredSeam, TechCardSeamWire } from 'lib/seams';
 import {
   createContext,
   useCallback,
@@ -70,6 +71,35 @@ export function useAttachStepSeam(index: number) {
   );
 }
 
+/**
+ * Store a step's pose rows (P8) and keep this form step's `poseKeys` with them: `put` is upserted
+ * (a replaced pose carries its old key), `drop` deleted. True when the server took every write.
+ */
+export function useAttachStepPose(index: number) {
+  const ctx = useStepSeams();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  return useCallback(
+    async (put: readonly StoredPose[], drop: readonly StoredPose[] = []): Promise<boolean> => {
+      if (!ctx) return false;
+      const field = `operations.${index}.poseKeys` as const;
+      const keys = () => ((getValues(field) ?? []) as string[]).slice();
+      if (put.length) {
+        if (!(await ctx.writes.upsertPoses([...put]))) return false;
+        const add = new Set(put.map((r) => r.seamKey));
+        setValue(field, [...keys().filter((k) => !add.has(k)), ...add], { shouldDirty: true });
+      }
+      if (drop.length) {
+        if (!(await ctx.writes.removePoses([...drop]))) return false;
+        const gone = new Set(drop.map((r) => r.seamKey));
+        const left = keys().filter((k) => !gone.has(k));
+        if (left.length !== keys().length) setValue(field, left, { shouldDirty: true });
+      }
+      return true;
+    },
+    [ctx, getValues, index, setValue],
+  );
+}
+
 export function StepSeamsProvider({
   techCard,
   frozen,
@@ -105,16 +135,22 @@ export function StepSeamsProvider({
   useEffect(() => {
     if (!cardId) return;
     return useSeamsStore.subscribe((s, prev) => {
-      if (s.cardId !== cardId || prev.cardId !== cardId || s.server === prev.server) return;
-      const now = new Set(s.server.map((r) => r.seamKey));
-      const gone = new Set(prev.server.map((r) => r.seamKey).filter((k) => !now.has(k)));
+      if (s.cardId !== cardId || prev.cardId !== cardId) return;
+      if (s.server === prev.server && s.poses === prev.poses) return;
+      const now = new Set([...s.server, ...s.poses].map((r) => r.seamKey));
+      const gone = new Set(
+        [...prev.server, ...prev.poses].map((r) => r.seamKey).filter((k) => !now.has(k)),
+      );
       if (!gone.size) return;
       const ops = getValues('operations') ?? [];
       const next = dropKeys(ops, gone);
       if (!next) return;
       next.forEach((o, i) => {
-        if (o !== ops[i])
+        if (o === ops[i]) return;
+        if (o.seamKeys !== ops[i].seamKeys)
           setValue(`operations.${i}.seamKeys`, o.seamKeys ?? [], { shouldDirty: true });
+        if (o.poseKeys !== ops[i].poseKeys)
+          setValue(`operations.${i}.poseKeys`, o.poseKeys ?? [], { shouldDirty: true });
       });
     });
   }, [cardId, getValues, setValue]);

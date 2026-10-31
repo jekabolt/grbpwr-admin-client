@@ -10,6 +10,7 @@ import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-h
 import type { PrintOrient } from 'components/managers/print/scope';
 import { AnnotationCanvas } from 'components/managers/tech-card/components/annotation-canvas';
 import {
+  poseRowsOfCard,
   seamGraphOfCard,
   seamRowsOfCard,
 } from 'components/managers/tech-card/components/card-seam-graph';
@@ -30,11 +31,16 @@ import {
   stepLayout,
   type StepLayout,
 } from 'components/managers/tech-card/components/step-seams/step-picture';
+import {
+  pinPoses,
+  posePinsOf,
+} from 'components/managers/tech-card/components/step-seams/step-pose';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
+import { isPoseWire, poseKeysOfWire } from 'lib/seams';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
   annotationFromWire,
@@ -2894,17 +2900,25 @@ function compactFinalPicture(
   });
 }
 
-const sceneOperations = (techCard: common_TechCard): SceneOp[] =>
-  (techCard.techCard?.operations ?? []).map((operation) => ({
-    operationNumber: operation.operationNumber,
-    operationType: operation.operationType,
-    work: operation.work,
-    inputKeys: operation.inputKeys ?? [],
-    outputUnitKey: operation.outputUnitKey,
-    outputUnitName: operation.outputUnitName,
-    seamKeys: operation.seamKeys ?? [],
-    fullnessRatio: operation.stitching?.fullnessRatio?.value,
-  }));
+// An op's keys name seams and pose rows alike (P8): the card's rows tell them apart, as the form does.
+const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
+  const poseKeys = poseKeysOfWire(techCard.seams);
+  return (techCard.techCard?.operations ?? []).map((operation) => {
+    const keys = operation.seamKeys ?? [];
+    const posed = keys.filter((key) => poseKeys.has(key));
+    return {
+      operationNumber: operation.operationNumber,
+      operationType: operation.operationType,
+      work: operation.work,
+      inputKeys: operation.inputKeys ?? [],
+      outputUnitKey: operation.outputUnitKey,
+      outputUnitName: operation.outputUnitName,
+      seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
+      ...(posed.length ? { poseKeys: posed } : {}),
+      fullnessRatio: operation.stitching?.fullnessRatio?.value,
+    };
+  });
+};
 
 function semanticPieceKeys(
   texts: readonly (string | undefined)[],
@@ -3260,7 +3274,8 @@ export function editorOperationPictures(
 ): Map<number, StepPicture> | null {
   try {
     const resolvedCard = model.techCard ?? techCard;
-    const hasStoredSeams = !!resolvedCard.seams?.length;
+    // A pose row (P8) is not a seam: a card with poses only still reads its layout inferred.
+    const hasStoredSeams = !!resolvedCard.seams?.some((wire) => !isPoseWire(wire));
     // A stored seam graph is the editor's source of truth. Keep its established tile/finishing
     // behaviour; the inferred cumulative layout is for DXFs that do not have that graph yet.
     const useInferredLayout = !!model.garment && !hasStoredSeams;
@@ -3282,6 +3297,7 @@ export function editorOperationPictures(
       ),
     ]);
     const byKey = seamRowsOfCard(resolvedCard);
+    const poses = poseRowsOfCard(resolvedCard);
     const names = new Map(
       (resolvedCard.techCard?.pieces ?? []).flatMap((piece) =>
         piece.lineKey ? [[piece.lineKey, piece.name?.trim() || piece.lineKey] as const] : [],
@@ -3308,6 +3324,7 @@ export function editorOperationPictures(
         pieceKeys,
         innerLines,
         byKey,
+        poses,
         nameOf: (key) => names.get(key) ?? key,
         explode: useInferredLayout ? 0 : undefined,
       });
@@ -4037,6 +4054,29 @@ export function editorOperationPictures(
       pictures.set(number, docked);
       finishedPictures.set(number, docked);
     });
+    // Poses last (P8): every repair, turn and dock above has had its say; a piece placed by hand
+    // goes back where its row says on its host, the pieces hung on it with it.
+    if (poses.size)
+      operations.forEach((operation, index) => {
+        const number = operation.operationNumber ?? 0;
+        const picture = pictures.get(number);
+        if (!picture) return;
+        const pins = posePinsOf(operations.slice(0, index + 1), poses);
+        if (!pins.size) return;
+        const T = new Map(picture.layout.T);
+        if (!pinPoses(T, pins, picture.geoms, picture.layout.hung ?? []).moved) return;
+        const points = [...T].flatMap(([key, transform]) =>
+          (picture.geoms.get(key)?.rs ?? []).map((point) => apply(transform, point)),
+        );
+        pictures.set(number, {
+          ...picture,
+          layout: {
+            ...picture.layout,
+            T,
+            bbox: points.length ? boxOf(points) : picture.layout.bbox,
+          },
+        });
+      });
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.

@@ -15,7 +15,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { notify } from 'lib/stores/store';
 import { refuseGesture } from '../refuse-gesture';
 import type { PieceGeom, SeamGraph } from 'lib/assembly-skeleton/types';
-import { toWire, type StoredSeam, type TechCardSeamWire } from 'lib/seams';
+import {
+  toWire,
+  type StoredPose,
+  type StoredRow,
+  type StoredSeam,
+  type TechCardSeamWire,
+} from 'lib/seams';
 import { useCallback, useMemo, useRef } from 'react';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
@@ -28,6 +34,7 @@ import {
   rowsOf,
   useSeamsStore,
   type PendingOp,
+  type PosePendingOp,
 } from './seams-store';
 
 export type SeamReviewRead = {
@@ -62,7 +69,7 @@ export function useSeamReview(): SeamReviewRead {
 }
 
 /** A row as the generated client sends it: output-only fields left empty. */
-const wireOut = (row: StoredSeam): common_TechCardSeam => ({
+const wireOut = (row: StoredRow): common_TechCardSeam => ({
   ...(toWire(row) as Omit<
     common_TechCardSeam,
     'stale' | 'createdBy' | 'createdAt' | 'updatedBy' | 'updatedAt'
@@ -86,6 +93,10 @@ export type SeamWrites = {
   upsert: (rows: StoredSeam[], errorAt?: string) => Promise<boolean>;
   /** Delete these rows; resolves true when the server took it. */
   remove: (rows: StoredSeam[]) => Promise<boolean>;
+  /** Insert or replace these pose rows (P8, by seam key); true when the server took them. */
+  upsertPoses: (rows: StoredPose[]) => Promise<boolean>;
+  /** Delete these pose rows; true when the server took it. */
+  removePoses: (rows: StoredPose[]) => Promise<boolean>;
   frozen: boolean;
 };
 
@@ -104,16 +115,20 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       // The card may have changed while the call flew: then its echo belongs to nobody here.
       if (s.cardId !== (cardId ?? null)) return;
       const pending = { ...s.pending };
+      const posePending = { ...s.posePending };
       const errors = { ...s.errors };
       for (const k of [...keys, ...(errorAt ? [errorAt] : [])]) {
         delete pending[k];
+        delete posePending[k];
         if (error) errors[k] = error;
         else delete errors[k];
       }
+      const read = echo ? readWire(echo) : null;
       useSeamsStore.setState({
         pending,
+        posePending,
         errors,
-        ...(echo ? { server: readWire(echo).rows, serverAt: Date.now() } : {}),
+        ...(read ? { server: read.rows, poses: read.poses, serverAt: Date.now() } : {}),
       });
       if (cardId) qc.invalidateQueries({ queryKey: techCardKeys.detail(cardId) });
     },
@@ -126,6 +141,7 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
       call: () => Promise<{ seams: common_TechCardSeam[] | undefined }>,
       verb: string,
       errorAt?: string,
+      poseOps: Record<string, PosePendingOp> = {},
     ): Promise<boolean> => {
       if (frozen) {
         refuseGesture('SEAMS', 'frozen', FROZEN_REFUSAL);
@@ -139,13 +155,17 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
         );
         return false;
       }
-      const keys = Object.keys(ops);
+      const keys = [...Object.keys(ops), ...Object.keys(poseOps)];
       const s = useSeamsStore.getState();
       // One write per row at a time: a second intent on a row in flight is dropped, never raced.
-      if (keys.some((k) => s.pending[k])) return false;
+      if (keys.some((k) => s.pending[k] || s.posePending[k])) return false;
       const errors = { ...s.errors };
       for (const k of [...keys, ...(errorAt ? [errorAt] : [])]) delete errors[k];
-      useSeamsStore.setState({ pending: { ...s.pending, ...ops }, errors });
+      useSeamsStore.setState({
+        pending: { ...s.pending, ...ops },
+        posePending: { ...s.posePending, ...poseOps },
+        errors,
+      });
       try {
         const res = await call();
         settle(keys, (res.seams ?? []) as TechCardSeamWire[]);
@@ -220,5 +240,35 @@ export function useSeamWrites(cardId: number | undefined, frozen: boolean): Seam
     [cardId, run, undoHistory],
   );
 
-  return { upsert, remove, frozen };
+  // A pose (P8) is one row per piece per step, keyed by the caller (it replaces its own key), so no
+  // pair reuse: the server list is not consulted first.
+  const upsertPoses = useCallback(
+    async (rows: StoredPose[]) =>
+      run(
+        {},
+        () => adminService.UpsertTechCardSeams({ techCardId: cardId, seams: rows.map(wireOut) }),
+        'placement',
+        undefined,
+        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'upsert' as const, row }])),
+      ),
+    [cardId, run],
+  );
+
+  const removePoses = useCallback(
+    async (rows: StoredPose[]) =>
+      run(
+        {},
+        () =>
+          adminService.DeleteTechCardSeams({
+            techCardId: cardId,
+            seamKeys: rows.map((r) => r.seamKey),
+          }),
+        'placement removal',
+        undefined,
+        Object.fromEntries(rows.map((row) => [row.seamKey, { kind: 'delete' as const, row }])),
+      ),
+    [cardId, run],
+  );
+
+  return { upsert, remove, upsertPoses, removePoses, frozen };
 }
