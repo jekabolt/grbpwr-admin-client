@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 
 import { isGuess, placeHasDrop, seamFocus, pickTarget } from './seam-focus';
+import { DOOR_SPAN_MM, spanMm } from './step-picture-view';
 
 const collar = [
   { name: 'Main collar', pieces: ['MAIN'] },
@@ -105,5 +106,25 @@ describe('pickTarget', () => {
     expect(pick({ a: [], b: ['FABRIC:2', 'PATCH_2:0'] }, 'a', 'FABRIC:i0').b).toEqual([
       'PATCH_2:0',
     ]);
+  });
+});
+
+describe('inner-line doors', () => {
+  it('a sleeve slit is a door, a button circle and a buttonhole stroke are not', () => {
+    const slit: [number, number][] = [
+      [0, 0],
+      [0, 159.5],
+    ];
+    const circle = Array.from({ length: 17 }, (_, i): [number, number] => [
+      5 * Math.cos((i / 16) * 2 * Math.PI),
+      5 * Math.sin((i / 16) * 2 * Math.PI),
+    ]);
+    const buttonhole: [number, number][] = [
+      [0, 0],
+      [25, 0],
+    ];
+    expect(spanMm(slit)).toBeGreaterThanOrEqual(DOOR_SPAN_MM);
+    expect(spanMm(circle)).toBeLessThan(DOOR_SPAN_MM);
+    expect(spanMm(buttonhole)).toBeLessThan(DOOR_SPAN_MM);
   });
 });

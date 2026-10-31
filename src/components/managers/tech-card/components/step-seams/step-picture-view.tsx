@@ -642,6 +642,18 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+/**
+ * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
+ * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more.
+ */
+export const DOOR_SPAN_MM = 50;
+export const spanMm = (line: readonly Pt2[]) => {
+  if (!line.length) return 0;
+  const xs = line.map((p) => p[0]);
+  const ys = line.map((p) => p[1]);
+  return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+};
+
 export type PictureView = { k: number; x: number; y: number };
 
 /**
@@ -784,13 +796,14 @@ export function StepPictureSvg({
       if (!g) continue;
       for (const e of plainEdges(g))
         out.push({ id: e.id, d: pathOf(e.pts.map((p) => toPx(fit, apply(T, p)))), inner: false });
-      (innerLines?.get(key) ?? []).forEach((l, k) =>
+      (innerLines?.get(key) ?? []).forEach((l, k) => {
+        if (spanMm(l) < DOOR_SPAN_MM) return;
         out.push({
           id: innerId(key, k),
           d: pathOf(l.map((p) => toPx(fit, apply(T, p)))),
           inner: true,
-        }),
-      );
+        });
+      });
     }
     return out;
   }, [onPick, look, layout, geoms, innerLines, fit]);
@@ -1237,7 +1250,8 @@ export function StepPictureSvg({
           ) : null;
         })}
       {onPick &&
-        doors.map((x) => (
+        // Lines first: where an edge runs beside a line, the edge takes the click.
+        [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
           <path
             key={`h:${x.id}`}
             d={x.d}
