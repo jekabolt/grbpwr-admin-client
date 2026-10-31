@@ -144,6 +144,10 @@ export function pinPoses(
   pose: ReadonlyMap<string, PosePin>,
   geoms: ReadonlyMap<string, PieceGeom>,
   links: readonly (readonly [string, string])[],
+  opts: {
+    /** Additive override for result layouts: every member of the piece's rigid input moves. */
+    groupOf?: (piece: string, host: string) => readonly string[];
+  } = {},
 ): { pinned: string[]; moved: boolean } {
   const pins = [...pose].filter(
     ([k, p]) =>
@@ -155,7 +159,13 @@ export function pinPoses(
   );
   if (!pins.length) return { pinned: [], moved: false };
   const groups = new Map(
-    pins.map(([k, p]) => [k, poseGroup(k, p.host, links).filter((m) => T.has(m))] as const),
+    pins.map(
+      ([k, p]) =>
+        [
+          k,
+          (opts.groupOf?.(k, p.host) ?? poseGroup(k, p.host, links)).filter((m) => T.has(m)),
+        ] as const,
+    ),
   );
   let any = false;
   for (let pass = 0; pass <= pins.length; pass++) {
