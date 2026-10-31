@@ -6,7 +6,7 @@ import { LOWER_LAYER_FILL, LOWER_LAYER_STROKE } from 'lib/assembly-skeleton/unio
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
 import { boxOf, type StepLayout } from './step-picture';
-import { StepPictureSvg } from './step-picture-view';
+import { StepPictureSvg, type EdgeMark } from './step-picture-view';
 
 const rectangle = (pieceKey: string, name: string, width: number, height: number) =>
   ({
@@ -29,8 +29,12 @@ const rectangle = (pieceKey: string, name: string, width: number, height: number
     twinOf: [],
   }) as PieceGeom;
 
+const bag = {
+  ...rectangle('bag', 'pocket bag', 70, 70),
+  edges: [{ id: 'bag#0', k: 0, pts: [[0, 0] as Pt2, [70, 0] as Pt2], len: 70 }],
+} as unknown as PieceGeom;
 const geoms = new Map([
-  ['bag', rectangle('bag', 'pocket bag', 70, 70)],
+  ['bag', bag],
   ['front', rectangle('front', 'front', 100, 100)],
 ]);
 const transforms = new Map([
@@ -65,16 +69,21 @@ const layout: StepLayout = {
   bbox: boxOf(points),
 };
 
-const renderPicture = (layers?: readonly string[]) =>
+const renderPicture = (
+  layers?: readonly string[],
+  marks?: readonly EdgeMark[],
+  picture: StepLayout = layout,
+) =>
   renderToStaticMarkup(
     <StepPictureSvg
       w={120}
       h={100}
       pad={4}
       look='tile'
-      layout={layout}
+      layout={picture}
       layers={layers}
       geoms={geoms}
+      marks={marks}
     />,
   );
 
@@ -87,6 +96,22 @@ describe('StepPictureSvg lower layers', () => {
     expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
     expect(overlay).toContain(`stroke="${LOWER_LAYER_STROKE}"`);
     expect(overlay).toContain('pointer-events="none"');
+  });
+
+  it('marks a picked edge on the lower piece above its grey overlay', () => {
+    // One input carried as a block: no input partner to borrow a host from.
+    const markup = renderPicture(['bag', 'front'], [{ id: 'bag#0', tone: 'pick' }], {
+      ...layout,
+      input: new Map([
+        ['bag', 0],
+        ['front', 0],
+      ]),
+      layers: [],
+    });
+    const mark = markup.indexOf('data-seam-mark="pick"');
+
+    expect(mark).toBeGreaterThan(-1);
+    expect(mark).toBeGreaterThan(markup.indexOf('data-lower-layer="bag"'));
   });
 
   it('does not add a lower overlay to a rowless picture', () => {

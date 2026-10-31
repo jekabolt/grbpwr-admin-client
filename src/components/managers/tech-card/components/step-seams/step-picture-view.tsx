@@ -982,6 +982,9 @@ export function StepPictureSvg({
     layout.stacked.flatMap((stack) => stack.slice(1).map((key) => [key, stack[0]] as const)),
   );
   const actionHost = (key: string) => {
+    // Every owned piece is drawn in layers mode — a lower one hosts its own marks.
+    const own = layers ? orderedOwnedPieces.find((piece) => piece.key === key) : undefined;
+    if (own) return own;
     const direct = directPartner.get(key) ?? stackLeader.get(key);
     if (direct) return visibleBase.find((piece) => piece.key === direct);
     const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
