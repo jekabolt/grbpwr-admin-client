@@ -3320,6 +3320,7 @@ export function editorOperationPictures(
           ? {
               explode: 0,
               rasterMm: STEP_TILE_RASTER_MM,
+              ...picture.hands,
               inputLayouts: picture.groups.map((group) => assembledByUnit.get(group.key)),
               stackIdentical: true,
               joinedOverlap: 0.15,
@@ -3329,6 +3330,7 @@ export function editorOperationPictures(
           : {
               explode: 0,
               rasterMm: STEP_TILE_RASTER_MM,
+              ...picture.hands,
               joinedOverlap: 0,
               honorRanges: false,
               bagsAsLayers: false,
@@ -3413,6 +3415,7 @@ export function editorOperationPictures(
           {
             explode: 0,
             rasterMm: STEP_TILE_RASTER_MM,
+            ...picture.hands,
             inputLayouts,
             stackIdentical: true,
             joinedOverlap: 0.15,

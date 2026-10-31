@@ -11,6 +11,7 @@ import {
   laidHands,
   pickHandTarget,
   snapHand,
+  stepHandsOf,
   targetOfSides,
   twinRowOf,
   type HandOn,
@@ -96,6 +97,34 @@ describe('hand placement storage', () => {
     // Read back with the partner across the seam it was set on.
     expect(handsFromSeams([read]).get(part.pieceKey)).toEqual({ ...hand, partner: 'PARTNER' });
     expect(read.sideB[0].placement).toBeUndefined();
+  });
+
+  it("every view of a step reads its own and the earlier steps' placements; twins the card's", () => {
+    const part = rect('PART', 100, 60);
+    const partner = rect('PARTNER', 160, 200);
+    const hand: HandPlace = { inside: false, rotDeg: 90, flip: false, slideMm: 4 };
+    const row = withHandPlace(
+      {
+        seamKey: 'seam-hand',
+        status: 'confirmed',
+        kind: 'edge',
+        direction: 'reversed',
+        source: 'manual',
+        sideA: [anchorOfRunId([part, partner], 'PART#0')!],
+        sideB: [anchorOfRunId([part, partner], 'PARTNER#0')!],
+        anchoredSize: 'base',
+        note: '',
+      } satisfies StoredSeam,
+      part.pieceKey,
+      hand,
+    );
+    const byKey = new Map([[row.seamKey, row]]);
+    const ops = [{ seamKeys: [] }, { seamKeys: ['seam-hand'] }, { seamKeys: [] }];
+
+    expect(stepHandsOf(ops, 0, byKey).hand.size).toBe(0);
+    expect(stepHandsOf(ops, 0, byKey).twinHand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
+    expect(stepHandsOf(ops, 1, byKey).hand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
+    expect(stepHandsOf(ops, 2, byKey).hand.get('PART')).toEqual({ ...hand, partner: 'PARTNER' });
   });
 });
 

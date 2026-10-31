@@ -37,7 +37,7 @@ import { usePictureZoom } from './picture-zoom';
 import {
   clampHandSlide,
   DEFAULT_HAND,
-  handsFromSeams,
+  stepHandsOf,
   handTargetsOf,
   isHandSeamKind,
   pickHandTarget,
@@ -451,19 +451,9 @@ export function SeamPickerBody({
 
   // Hand placements: this step's and the earlier ones' (a later step inherits them); the twins read
   // the whole card's (the right bag mirrors the left one placed a step later).
-  const storedHand = useMemo(() => {
-    const rows = ops
-      .slice(0, index + 1)
-      .flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []));
-    return handsFromSeams(rows);
-  }, [ops, index, byKey]);
-  const cardHand = useMemo(
-    () =>
-      handsFromSeams(
-        ops.flatMap((step) => (step.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? [])),
-      ),
-    [ops, byKey],
-  );
+  const savedHands = useMemo(() => stepHandsOf(ops, index, byKey), [ops, index, byKey]);
+  const storedHand = savedHands.hand;
+  const cardHand = savedHands.twinHand;
   const hand = useMemo(() => withOverrides(storedHand, handOverrides), [storedHand, handOverrides]);
   const twinHand = useMemo(() => withOverrides(cardHand, handOverrides), [cardHand, handOverrides]);
   const pairPieces = useMemo(
@@ -610,7 +600,10 @@ export function SeamPickerBody({
   // seam), never the live pick.
   const frameRaw = frameSeamsOf(innerSeams, storedSeams, proposalSeams, crossSeams);
   const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-  const laidFocus = useStepLayout(focus ? focusLeaves : leaves, frameSeams, geoms, EXPLODE);
+  const laidFocus = useStepLayout(focus ? focusLeaves : leaves, frameSeams, geoms, EXPLODE, undefined, {
+    hand,
+    twinHand,
+  });
   // A piece of the seam no earlier seam attaches to its unit is not drawn loose with a bit of the
   // seam on it: the focused canvas is laid again without it (the seam's label goes on the rest).
   const apart = new Set(focus ? laidFocus.apart : []);
@@ -624,7 +617,14 @@ export function SeamPickerBody({
     shownRaw.map((g) => `${g.name}:${g.pieces.join(',')}`).join(';'),
   );
   const seamLeaves = useMemo(() => shown.map((g) => g.pieces), [shown]);
-  const laidShown = useStepLayout(apart.size ? seamLeaves : NONE, frameSeams, geoms, EXPLODE);
+  const laidShown = useStepLayout(
+    apart.size ? seamLeaves : NONE,
+    frameSeams,
+    geoms,
+    EXPLODE,
+    undefined,
+    { hand, twinHand },
+  );
   const layout = apart.size ? laidShown : laidFocus;
   // A surface pick lies on its host's line in RESULT (by «place», else centred on the line).
   const pairSeam =

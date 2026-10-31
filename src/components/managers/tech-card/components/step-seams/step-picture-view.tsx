@@ -14,6 +14,7 @@ import { rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
 import { PAIR_INK, pairNo } from './palette';
+import { stepHandsOf, type StepHands } from './step-hand';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
@@ -314,6 +315,8 @@ export function stepPictureOfOp(
   }));
   const leaves = groups.map((group) => group.pieces);
   const keys = [...(active?.seamKeys ?? [])];
+  // Hand placements stored on this step's seams and the earlier ones': every view lays them.
+  const hands = stepHandsOf(ops, index, byKey);
   const ease = (() => {
     const ratio = Number.parseFloat(String(active?.fullnessRatio ?? '').replace(',', '.'));
     return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
@@ -446,7 +449,8 @@ export function stepPictureOfOp(
     storedSeams,
     marks,
     layoutLeaves,
-    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm }),
+    hands,
+    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm, ...hands }),
   };
 }
 
@@ -531,10 +535,11 @@ export function useStepLayout(
   geoms: ReadonlyMap<string, PieceGeom>,
   explode: number,
   rasterMm?: number,
+  hands?: StepHands,
 ): StepLayout {
   return useMemo(
-    () => stepLayout(leaves, seams, geoms, { explode, rasterMm }),
-    [leaves, seams, geoms, explode, rasterMm],
+    () => stepLayout(leaves, seams, geoms, { explode, rasterMm, ...hands }),
+    [leaves, seams, geoms, explode, rasterMm, hands],
   );
 }
 

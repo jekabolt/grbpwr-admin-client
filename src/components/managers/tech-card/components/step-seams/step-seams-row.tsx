@@ -253,6 +253,7 @@ export function SeamTile({
     scene.geoms,
     STEP_TILE_EXPLODE,
     STEP_TILE_RASTER_MM,
+    scene.hands,
   );
   return (
     <span
