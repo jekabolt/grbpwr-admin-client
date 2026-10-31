@@ -673,7 +673,8 @@ const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
 /**
  * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
- * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more.
+ * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more (card 6:
+ * marks 3–26 mm, slits 101 mm and up). Only picking reads it: every inner line is drawn.
  */
 export const DOOR_SPAN_MM = 50;
 export const spanMm = (line: readonly Pt2[]) => {
@@ -829,6 +830,22 @@ export function StepPictureSvg({
     const raw = inner ? innerLines?.get(inner.piece)?.[inner.k] : resolveEdge(id, geoms)?.pts;
     return raw?.length ? raw.map((p) => toPx(fit, apply(T, p))) : null;
   };
+
+  // Every inner line of a drawn piece — a button, a buttonhole, a slit — as a hairline that takes no
+  // click; on the canvas a door (a slit, a placement line) keeps its faint dash instead.
+  const marksDrawn = useMemo(() => {
+    if (look === 'print') return [];
+    const out: { id: string; d: string }[] = [];
+    for (const p of base) {
+      const T = layout.T.get(p.key);
+      if (!T) continue;
+      (innerLines?.get(p.key) ?? []).forEach((l, k) => {
+        if (l.length < 2 || (look === 'canvas' && spanMm(l) >= DOOR_SPAN_MM)) return;
+        out.push({ id: innerId(p.key, k), d: pathOf(l.map((q) => toPx(fit, apply(T, q)))) });
+      });
+    }
+    return out;
+  }, [look, base, layout, innerLines, fit]);
 
   const doors = useMemo(() => {
     if (!onPick && look !== 'canvas') return [];
@@ -1085,6 +1102,21 @@ export function StepPictureSvg({
           <path key={p.key} d={pathOf(p.ring, true)} />
         ))}
       </g>
+      {marksDrawn.length > 0 && (
+        <g
+          fill='none'
+          stroke={INK}
+          strokeWidth={L.hair}
+          strokeLinecap='round'
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-inner-marks=''
+        >
+          {marksDrawn.map((x) => (
+            <path key={x.id} d={x.d} />
+          ))}
+        </g>
+      )}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
