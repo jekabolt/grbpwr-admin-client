@@ -14262,6 +14262,90 @@ export type AddTechCardSeamDecisionsResponse = {
   written: number | undefined;
 };
 
+export type SuggestTechCardSeamHintsRequest = {
+  techCardId: number | undefined;
+  // The client-built input (≤ 3 MiB): {"pieces":[{name,purpose,fused,symmetry,dict_role,aspect,area,
+  // perimeter,notches,inner_lines}],"units":[{name,inputs}],"ops":[{number,zone,work,operation_type,
+  // inputs,output}],"sketch_media_ids":[…≤ 4],"atlas_png":"<base64 PNG ≤ 2 MiB, not digested>"}.
+  inputJson: string | undefined;
+  force: boolean | undefined;
+};
+
+export type SuggestTechCardSeamHintsResponse = {
+  hintsJson: string | undefined;
+  inputDigest: string | undefined;
+  model: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  cached: boolean | undefined;
+  costUsd: string | undefined;
+  calls: number | undefined;
+};
+
+export type GetTechCardSeamHintsRequest = {
+  techCardId: number | undefined;
+  inputDigest: string | undefined;
+  inputJson: string | undefined;
+};
+
+export type GetTechCardSeamHintsResponse = {
+  hintsJson: string | undefined;
+  runDigest: string | undefined;
+  model: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  stale: boolean | undefined;
+  overrides: TechCardSeamHintOverride[] | undefined;
+  inputDigest: string | undefined;
+};
+
+// TechCardSeamHintOverride is the owner's word on one hint. Never touched by a run.
+export type TechCardSeamHintOverride = {
+  kind: string | undefined;
+  hintKey: string | undefined;
+  valueJson: string | undefined;
+  state: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+};
+
+export type SetTechCardSeamHintOverrideRequest = {
+  techCardId: number | undefined;
+  kind: string | undefined;
+  hintKey: string | undefined;
+  valueJson: string | undefined;
+  state: string | undefined;
+};
+
+export type SetTechCardSeamHintOverrideResponse = {
+  overrides: TechCardSeamHintOverride[] | undefined;
+};
+
+// PieceCodeDictionaryEntry is one row of the owner's code dictionary («все карты»).
+export type PieceCodeDictionaryEntry = {
+  code: string | undefined;
+  role: string | undefined;
+  hand: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+};
+
+export type ListPieceCodeDictionaryRequest = {
+};
+
+export type ListPieceCodeDictionaryResponse = {
+  entries: PieceCodeDictionaryEntry[] | undefined;
+};
+
+export type SetPieceCodeDictionaryEntryRequest = {
+  code: string | undefined;
+  role: string | undefined;
+  hand: string | undefined;
+};
+
+export type SetPieceCodeDictionaryEntryResponse = {
+  entry: PieceCodeDictionaryEntry | undefined;
+  deleted: boolean | undefined;
+};
+
 export type ReceiveMaterialStockRequest = {
   materialId: number | undefined;
   quantity: googletype_Decimal | undefined;
@@ -20684,6 +20768,34 @@ export interface AdminService {
   // (a note about the review, not card content). Write only; nothing reads it over the API.
   // wr(tech_cards), the same right as UpsertTechCardSeams.
   AddTechCardSeamDecisions(request: AddTechCardSeamDecisionsRequest): Promise<AddTechCardSeamDecisionsResponse>;
+  // SuggestTechCardSeamHints (unit-seams line F) — the AI HINT per tech card: a role per piece (closed
+  // vocab) and a joins map per join step (which pieces go onto which, an edge word each side, a
+  // relation). ONE vision+JSON call (chat.techcard_seams, temperature 0) per card input: the server
+  // bounds input_json (the client-built input: pieces, units, ops, sketch_media_ids, atlas_png as
+  // base64), loads the sketches itself (each must be on the card's technical sheet, else
+  // InvalidArgument), adds the owner's matching dictionary rows and overrides, and digests the
+  // canonical input. Same digest → the stored run, no call (cached=true). force reruns and replaces
+  // the run of that digest (a second force within a minute returns the stored run). The answer is
+  // validated: unknown pieces / ops / words are dropped, a dropped step or piece lands in
+  // not_inferred. A hint never writes a seam; overrides survive reruns. wr(tech_cards): spends the key.
+  SuggestTechCardSeamHints(request: SuggestTechCardSeamHintsRequest): Promise<SuggestTechCardSeamHintsResponse>;
+  // GetTechCardSeamHints reads the stored hint of a card without calling the model: the run of
+  // input_digest (or of the digest of input_json, computed exactly as Suggest does), else the card's
+  // newest run with stale=true; plus the card's overrides. No run → empty hints_json. rd(tech_cards).
+  GetTechCardSeamHints(request: GetTechCardSeamHintsRequest): Promise<GetTechCardSeamHintsResponse>;
+  // SetTechCardSeamHintOverride writes the owner's word on one hint: kind role (hint_key = piece
+  // name, value_json {"role","hand"}) or join (hint_key = operation number, value_json
+  // {"a":{pieces,edge},"b":{pieces,edge},"relation"}); state ok | fixed | off; empty state deletes
+  // the row. Returns the card's full override list. Precedence the client applies: owner fix for
+  // this card > dictionary row > AI > static default. wr(tech_cards).
+  SetTechCardSeamHintOverride(request: SetTechCardSeamHintOverrideRequest): Promise<SetTechCardSeamHintOverrideResponse>;
+  // ListPieceCodeDictionary lists the owner's code dictionary («все карты»): a normalized upper
+  // token of a piece name → role (+ hand). rd(tech_cards).
+  ListPieceCodeDictionary(request: ListPieceCodeDictionaryRequest): Promise<ListPieceCodeDictionaryResponse>;
+  // SetPieceCodeDictionaryEntry upserts one dictionary row (code normalized upper, 1..32 of
+  // A-Z 0-9 _ -; role from the closed vocab; hand L, R or empty); an empty role deletes the row.
+  // wr(tech_cards).
+  SetPieceCodeDictionaryEntry(request: SetPieceCodeDictionaryEntryRequest): Promise<SetPieceCodeDictionaryEntryResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -27476,6 +27588,103 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddTechCardSeamDecisions",
       }) as Promise<AddTechCardSeamDecisionsResponse>;
+    },
+    SuggestTechCardSeamHints(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seam-hints:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestTechCardSeamHints",
+      }) as Promise<SuggestTechCardSeamHintsResponse>;
+    },
+    GetTechCardSeamHints(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seam-hints:get`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardSeamHints",
+      }) as Promise<GetTechCardSeamHintsResponse>;
+    },
+    SetTechCardSeamHintOverride(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/seam-hints/override`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetTechCardSeamHintOverride",
+      }) as Promise<SetTechCardSeamHintOverrideResponse>;
+    },
+    ListPieceCodeDictionary(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/piece-code-dictionary`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListPieceCodeDictionary",
+      }) as Promise<ListPieceCodeDictionaryResponse>;
+    },
+    SetPieceCodeDictionaryEntry(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/piece-code-dictionary/${request.code}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetPieceCodeDictionaryEntry",
+      }) as Promise<SetPieceCodeDictionaryEntryResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
