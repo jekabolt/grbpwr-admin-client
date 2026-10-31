@@ -3,13 +3,13 @@
 // applied with no crop or automatic turn. The owner's own pick is blue, a stored seam ink bold with
 // its number; there is no second RESULT picture.
 // Clicking edges collects the sides (with two or more inputs the side is the input's, with one it is
-// the A / B switch); nothing is picked for the owner — «guess» only fills both sides from the
+// the piece click order); nothing is picked for the owner — «guess» only fills both sides from the
 // proposal, in plain sight. Nothing is stored until «accept» (or Enter), live only with both sides
 // picked: then the pair becomes ONE card seam (composite when a side holds several runs, surface when
 // one side is an inner line), its key goes onto the step after the ones already there, and the
-// picker closes. «place» starts from that same result and moves any piece by hand, with or without
-// a pick (P8 pose: snap onto an edge or a vertex, ⟲ ⟳ ⇋, «auto» back to the layout, «done» stores
-// the poses, the pick stays as it was).
+// picker closes. «place» starts from that same result and moves any rigid input block by hand, with
+// or without a pick (snap is optional; ⟲ ⟳ ⇋, upright, layer choice and reset stay pending until
+// «done» stores them; the pick stays as it was).
 
 import * as Dialog from '@radix-ui/react-dialog';
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
@@ -34,26 +34,42 @@ import {
   type PointerEvent,
   type ReactNode,
 } from 'react';
-import { Button, Close, Placeholder, Text, ViewSwitch } from 'ui';
+import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
 import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
-import { useSeamsStore } from '../assembly-seams/seams-store';
+import { rowPairSig, useSeamsStore } from '../assembly-seams/seams-store';
 import { edgeOf } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
-import { cycleLayerHit, isGuess, pickTarget, type LayerHit } from './seam-focus';
+import {
+  cycleLayerHit,
+  isGuess,
+  mirrorLeftRows,
+  pickTarget,
+  seamSideName,
+  sideForClick,
+  type LayerHit,
+} from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
-import { stepHandsOf } from './step-hand';
+import {
+  decodeHandPlace,
+  DEFAULT_HAND,
+  isHandSeamKind,
+  stepHandsOf,
+  withHandPlace,
+} from './step-hand';
 import { useStepResult } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
 import {
-  poseAt,
-  poseGroup,
-  poseHostOf,
   pinPoses,
-  posePinsOf,
+  poseAfterDrop,
+  poseBlockGroup,
+  posePickup,
   snapPose,
+  turnToGrain,
   turnAbout,
+  upright,
+  type PosePickup,
   type PosePin,
   type PoseSnap,
 } from './step-pose';
@@ -66,7 +82,6 @@ import {
   longestEdge,
   parseInner,
   pieceOfTarget,
-  sideOf,
   surfaceRow,
   type Pt,
   type TargetId,
@@ -98,10 +113,6 @@ import {
 type Side = 'a' | 'b';
 type Sel = { a: TargetId[]; b: TargetId[] };
 const EMPTY: Sel = { a: [], b: [] };
-const SIDES = [
-  { value: 'a', label: 'side A' },
-  { value: 'b', label: 'side B' },
-] as const;
 
 /** Share of the extent the inputs stand apart on the canvas. */
 const EXPLODE = 0.08;
@@ -188,19 +199,22 @@ export function SeamPickerBody({
   const { catalog: workCatalog } = useOperationWorkCatalog();
 
   const [sel, setSel] = useState<Sel>(EMPTY);
-  const [chosen, setChosen] = useState<Side>('a');
   const [hover, setHover] = useState<TargetId | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   // «guess» only fills the pick from the proposal the picker opened on; the owner sees it and accepts.
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
   const [filled, setFilled] = useState<Sel | null>(null);
+  const [mirroredPick, setMirroredPick] = useState<StoredSeam | null>(null);
   // «place» (P8): pieces moved by hand, kept here until «done».
   const [posing, setPosing] = useState(false);
-  const [poseEdits, setPoseEdits] = useState<Map<string, PosePin | null>>(() => new Map());
+  const [poseEdits, setPoseEdits] = useState<Map<string, PosePin>>(() => new Map());
+  const [handEdits, setHandEdits] = useState<Map<string, StoredSeam>>(() => new Map());
   const [poseSel, setPoseSel] = useState<string | null>(null);
+  const [snapOn, setSnapOn] = useState(false);
   const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
   const [poseDrag, setPoseDrag] = useState<{ group: string[]; D: Affine } | null>(null);
+  const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
 
   const pieces = geo?.pieces;
   const lenOf = useCallback(
@@ -238,8 +252,7 @@ export function SeamPickerBody({
     () => stepHandsOf(ops, index, byKey, poses),
     [ops, index, byKey, poses],
   );
-  // Poses (P8): the earlier steps' and this one's, with the pieces moved here and not yet stored.
-  const inheritedPose = useMemo(() => posePinsOf(ops.slice(0, index), poses), [ops, index, poses]);
+  // This step's stored pose rows retain their key when PLACE updates them.
   const ownPoseRows = useMemo(() => {
     const out = new Map<string, StoredPose>();
     for (const key of op?.poseKeys ?? []) {
@@ -249,16 +262,6 @@ export function SeamPickerBody({
     }
     return out;
   }, [op?.poseKeys, poses]);
-  const savedPose = savedHands.pose;
-  const livePose = useMemo(() => {
-    const next = new Map(savedPose ?? []);
-    for (const [piece, pin] of poseEdits) {
-      next.delete(piece);
-      const now = pin ?? inheritedPose.get(piece);
-      if (now) next.set(piece, now);
-    }
-    return next;
-  }, [savedPose, poseEdits, inheritedPose]);
 
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
@@ -301,14 +304,54 @@ export function SeamPickerBody({
 
   const reset = () => {
     setSel(EMPTY);
-    setChosen('a');
     setRefused('');
     setFilled(null);
+    setMirroredPick(null);
+  };
+
+  const draftRow = useMemo(
+    () => (pair || surface ? buildRow(pick) : null),
+    [buildRow, pick, surface],
+  );
+
+  const stepRows = useMemo(
+    () => (op?.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []),
+    [op?.seamKeys, byKey],
+  );
+  const mirrorTargets = useMemo(() => {
+    const rows = [...stepRows];
+    if (draftRow && !rows.some((row) => rowPairSig(row) === rowPairSig(draftRow)))
+      rows.push(draftRow);
+    return mirrorLeftRows(rows, [...byKey.values()], geoms);
+  }, [stepRows, draftRow, byKey, geoms]);
+
+  const mirrorLeft = async () => {
+    if (!mirrorTargets.length || busy) return;
+    const pending = draftRow
+      ? mirrorTargets.find((update) => update.row.seamKey === draftRow.seamKey)
+      : undefined;
+    if (pending) setMirroredPick(pending.row);
+    const storedUpdates = mirrorTargets.filter(
+      (update) => !draftRow || update.row.seamKey !== draftRow.seamKey,
+    );
+    if (!storedUpdates.length) return;
+    setBusy(true);
+    setRefused('');
+    for (const update of storedUpdates) {
+      if (await attach(update.row)) continue;
+      setBusy(false);
+      setRefused(useSeamsStore.getState().errors[update.row.seamKey] ?? 'not saved');
+      return;
+    }
+    setBusy(false);
   };
 
   const commit = async () => {
     if (!canAccept) return;
-    const row = buildRow(pick);
+    const row =
+      mirroredPick && draftRow && rowPairSig(mirroredPick) === rowPairSig(draftRow)
+        ? mirroredPick
+        : draftRow;
     if (!row) {
       setRefused('cannot pair');
       return;
@@ -339,12 +382,10 @@ export function SeamPickerBody({
 
   const toggle = (id: TargetId) => {
     if (frozen || posing) return;
-    const side = sideOf(pieceOfTarget(id), groups, chosen);
+    const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
     setRefused('');
-    const has = sel[side].includes(id);
     setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
-    // One input: the first pick on A moves the switch to B.
-    if (!has && groups.length < 2 && side === 'a' && sel.a.length === 0) setChosen('b');
+    setMirroredPick(null);
   };
 
   // The old frame is retained only as a fallback outside the card-level result provider.
@@ -356,21 +397,24 @@ export function SeamPickerBody({
     () => stepResult?.layers ?? [...canvasLayout.T.keys()],
     [stepResult?.layers, canvasLayout],
   );
+  const poseBlocks = useMemo(
+    () => stepResult?.blocks ?? groups.map((group) => ({ pieces: group.pieces })),
+    [stepResult?.blocks, groups],
+  );
+  const poseHung = useMemo(
+    () => stepResult?.hung ?? canvasLayout.hung ?? [],
+    [stepResult?.hung, canvasLayout.hung],
+  );
   // PLACE starts from the exact result transforms. Unsaved drops are pinned over a fresh map so
   // the shared cached result remains immutable.
   const poseLayout = useMemo(() => {
     if (!posing) return null;
     const T = new Map(canvasLayout.T);
-    const edits = new Map(
-      [...poseEdits].flatMap(([piece, pin]) => (pin ? [[piece, pin] as const] : [])),
-    );
-    pinPoses(T, edits, geoms, canvasLayout.hung ?? []);
+    pinPoses(T, poseEdits, geoms, poseHung, {
+      groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks: poseBlocks, hung: poseHung }),
+    });
     return { ...canvasLayout, T };
-  }, [posing, canvasLayout, poseEdits, geoms]);
-  const poseBounds = useMemo(
-    () => (poseLayout ? pictureBounds(poseLayout, geoms, 'canvas') : undefined),
-    [poseLayout, geoms],
-  );
+  }, [posing, canvasLayout, poseEdits, geoms, poseHung, poseBlocks]);
   const poseShown = useMemo(() => {
     if (!poseLayout || !poseDrag) return poseLayout;
     const T = new Map(poseLayout.T);
@@ -427,82 +471,141 @@ export function SeamPickerBody({
   const exitPose = () => {
     setPosing(false);
     setPoseEdits(new Map());
+    setHandEdits(new Map());
     setPoseSel(null);
+    setSnapOn(false);
     setPoseSnap(null);
     setPoseDrag(null);
+    setPoseBounds(undefined);
   };
   const startPose = () => {
-    if (posing) {
-      exitPose();
-      return;
-    }
+    if (posing) return;
     setRefused('');
     setPoseEdits(new Map());
+    setHandEdits(new Map());
     setPoseSel(null);
+    setSnapOn(false);
     setPoseSnap(null);
+    setPoseBounds(pictureBounds(canvasLayout, geoms, 'canvas'));
     setPosing(true);
   };
-  /** The host a piece stands on: its pose's, else the block's root. */
-  const poseHost = (piece: string, group: readonly string[]) => {
-    if (!poseLayout) return null;
-    const was = livePose.get(piece)?.host;
-    return was && was !== piece && poseLayout.T.has(was) && !group.includes(was)
-      ? was
-      : poseHostOf(piece, group, poseLayout, geoms);
-  };
-  /** What moves with a piece: the pieces hung on it, unless its host hangs on it too. */
-  const poseGroupOf = (piece: string): string[] => {
-    if (!poseLayout) return [piece];
-    const host = livePose.get(piece)?.host ?? poseHostOf(piece, [piece], poseLayout, geoms);
-    return host
-      ? poseGroup(piece, host, poseLayout.hung ?? []).filter((k) => poseLayout.T.has(k))
-      : [piece];
-  };
-  const putPose = (piece: string, T: Affine, host: string | null) => {
-    const hostT = host ? poseLayout?.T.get(host) : undefined;
-    const pg = geoms.get(piece);
-    const hg = host ? geoms.get(host) : undefined;
-    if (!host || !hostT || !pg || !hg) {
+  const pickupOf = (piece: string): PosePickup =>
+    posePickup(
+      piece,
+      { blocks: poseBlocks, transforms: poseLayout?.T ?? canvasLayout.T, hung: poseHung },
+      geoms,
+    );
+  const putPose = (piece: string, T: Affine, pickup: PosePickup) => {
+    const dropped = poseAfterDrop(
+      piece,
+      T,
+      pickup,
+      { transforms: poseLayout?.T ?? canvasLayout.T },
+      geoms,
+    );
+    if (!dropped) {
       setRefused('no host');
       return;
     }
     setRefused('');
     setPoseEdits((current) => {
       const next = new Map(current);
-      next.set(piece, { host, placement: poseAt(hg, pg, hostT, T) });
+      next.set(piece, { host: dropped.host, placement: dropped.placement });
       return next;
     });
   };
-  const dropPose = (piece: string, group: string[], D: Affine, snap: PoseSnap | null) => {
+  const dropPose = (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => {
     setPoseDrag(null);
     const T0 = poseLayout?.T.get(piece);
     if (!T0) return;
     const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
-    putPose(piece, compose(moved, T0), snap?.host ?? poseHost(piece, group));
-    setPoseSnap(snap ? snap.at : null);
+    putPose(piece, compose(moved, T0), pickup);
+    setPoseSnap(snapOn && snap ? snap.at : null);
   };
-  const turnPose = (quarter: -1 | 0 | 1) => {
+  const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
     const T0 = piece ? poseLayout?.T.get(piece) : undefined;
     const g = piece ? geoms.get(piece) : undefined;
     if (!piece || !T0 || !g || busy) return;
-    const D = turnAbout(
-      g.rs.map((p) => apply(T0, p)),
-      quarter,
-    );
-    putPose(piece, compose(D, T0), poseHost(piece, poseGroupOf(piece)));
+    const D =
+      command === 'left'
+        ? turnToGrain(g, T0, 1)
+        : command === 'right'
+          ? turnToGrain(g, T0, -1)
+          : command === 'upright'
+            ? upright(g, T0)
+            : turnAbout(
+                g.rs.map((point) => apply(T0, point)),
+                0,
+              );
+    putPose(piece, compose(D, T0), pickupOf(piece));
     setPoseSnap(null);
   };
-  const posedHere = (piece: string | null) =>
-    !!piece &&
-    (!!poseEdits.get(piece) || (ownPoseRows.has(piece) && poseEdits.get(piece) !== null));
-  const autoPose = () => {
+
+  const editedStepRows = stepRows.map((row) => handEdits.get(row.seamKey) ?? row);
+  const layerTarget = (() => {
     const piece = poseSel;
-    if (!piece || !posedHere(piece) || busy) return;
+    const host = piece ? pickupOf(piece).host : null;
+    if (!piece || !host) return null;
+    for (const row of editedStepRows) {
+      if (!isHandSeamKind(row.kind)) continue;
+      for (const [own, other] of [
+        [row.sideA, row.sideB],
+        [row.sideB, row.sideA],
+      ] as const) {
+        const anchor = own.find((candidate) => candidate.piece === piece);
+        if (!anchor || !other.some((candidate) => candidate.piece === host)) continue;
+        return { row, piece, host, hand: decodeHandPlace(anchor.placement) ?? DEFAULT_HAND };
+      }
+    }
+    return null;
+  })();
+  const setLayer = (inside: boolean) => {
+    if (!layerTarget || busy) return;
+    const row = withHandPlace(layerTarget.row, layerTarget.piece, {
+      ...layerTarget.hand,
+      inside,
+    });
+    setHandEdits((current) => new Map(current).set(row.seamKey, row));
+  };
+  const shownPoseLayers = useMemo(() => {
+    const order = [...poseLayers];
+    const move = (piece: string, host: string, under: boolean) => {
+      const from = order.indexOf(piece);
+      if (from < 0 || !order.includes(host)) return;
+      order.splice(from, 1);
+      const at = order.indexOf(host);
+      order.splice(under ? at : at + 1, 0, piece);
+    };
+    for (const row of handEdits.values())
+      for (const [own, other] of [
+        [row.sideA, row.sideB],
+        [row.sideB, row.sideA],
+      ] as const)
+        for (const anchor of own) {
+          const hand = decodeHandPlace(anchor.placement);
+          const host = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
+          if (hand && host) move(anchor.piece, host, hand.inside);
+        }
+    return order;
+  }, [poseLayers, handEdits]);
+
+  const resetPose = () => {
+    if (busy) return;
+    const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
     setPoseEdits((current) => {
+      if (!selected) return new Map();
       const next = new Map(current);
-      if (ownPoseRows.has(piece)) next.set(piece, null);
-      else next.delete(piece);
+      for (const piece of current.keys())
+        if (pickupOf(piece).group.some((member) => selected.has(member))) next.delete(piece);
+      return next;
+    });
+    setHandEdits((current) => {
+      if (!selected) return new Map();
+      const next = new Map(current);
+      for (const [key, row] of current)
+        if ([...row.sideA, ...row.sideB].some((anchor) => selected.has(anchor.piece)))
+          next.delete(key);
       return next;
     });
     setPoseSnap(null);
@@ -510,13 +613,8 @@ export function SeamPickerBody({
   const finishPose = async () => {
     if (!posing || busy) return;
     const put: StoredPose[] = [];
-    const drop: StoredPose[] = [];
     for (const [piece, pin] of poseEdits) {
       const own = ownPoseRows.get(piece);
-      if (!pin) {
-        if (own) drop.push(own);
-        continue;
-      }
       const pg = geoms.get(piece);
       const hg = geoms.get(pin.host);
       if (!pg || !hg) continue;
@@ -530,16 +628,22 @@ export function SeamPickerBody({
         }),
       );
     }
-    if (!put.length && !drop.length) {
+    if (!put.length && !handEdits.size) {
       exitPose();
       return;
     }
     setBusy(true);
     setRefused('');
-    const ok = await attachPose(put, drop);
+    for (const row of handEdits.values()) {
+      if (await attach(row)) continue;
+      setBusy(false);
+      setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
+      return;
+    }
+    const ok = !put.length || (await attachPose(put));
     setBusy(false);
     if (!ok) {
-      const key = put[0]?.seamKey ?? drop[0]?.seamKey ?? '';
+      const key = put[0]?.seamKey ?? '';
       setRefused(useSeamsStore.getState().errors[key] ?? 'not saved');
       return;
     }
@@ -555,7 +659,7 @@ export function SeamPickerBody({
         ? (() => {
             const line = innerId(surfaceSuggestion.host, surfaceSuggestion.inner);
             const edge = longestEdge(geoms.get(surfaceSuggestion.part));
-            const hostAt = sideOf(surfaceSuggestion.host, groups, 'a');
+            const hostAt = sideForClick(surfaceSuggestion.host, groups, EMPTY, pieceOfTarget);
             const part = edge ? [edge] : [];
             return hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] };
           })()
@@ -564,6 +668,7 @@ export function SeamPickerBody({
     setRefused('');
     setSel(next);
     setFilled(next);
+    setMirroredPick(null);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -593,23 +698,21 @@ export function SeamPickerBody({
     return false;
   };
 
-  const groupName = (id: TargetId | undefined) => {
-    if (!id) return '';
-    const k = pieceOfTarget(id);
-    return groups.find((g) => g.pieces.includes(k))?.name ?? nameOf(k);
-  };
-  const sidesName = (a: TargetId | undefined, b: TargetId | undefined) =>
-    [groupName(a), groupName(b)].filter(Boolean).join(' · ');
+  const sideName = (ids: readonly TargetId[]) => seamSideName(ids, geoms, nameOf, pieceOfTarget);
+  const seamName = (sides: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
+    [sideName(sides.a), sideName(sides.b)].filter(Boolean).join(' · ');
   // The footer lists a pair once: a row stored twice, or the pick of a stored pair, is not repeated.
   const sidesSig = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     [[...s.a].sort().join('+'), [...s.b].sort().join('+')].sort().join('~');
   const listed = stored.filter(
     (s, i) => stored.findIndex((o) => sidesSig(o.sides) === sidesSig(s.sides)) === i,
   );
-  const pairListed = !!pair && listed.some((s) => sidesSig(s.sides) === sidesSig(pair));
-  const pairName = pair ? sidesName(pair.a[0], pair.b[0]) : '';
-  // The seam's number on the step: after the stored ones.
-  const pairNo = stored.length;
+  const clearSide = (side: Side) => {
+    setSel((current) => ({ ...current, [side]: [] }));
+    setFilled(null);
+    setMirroredPick(null);
+    setRefused('');
+  };
   // The step's words as its row shows them («join / seam · armhole»), else the unit it makes.
   const stepName = stepWords(op, workCatalog) || op?.outputUnitName?.trim() || '';
 
@@ -636,9 +739,6 @@ export function SeamPickerBody({
           </Text>
         )}
         <StepHintRow op={op} />
-        {groups.length < 2 && !frozen && (
-          <ViewSwitch value={chosen} options={SIDES} onChange={setChosen} label='side' />
-        )}
         {onClose && (
           <div className='ml-auto'>
             <Close onClick={onClose} aria-label='close' />
@@ -690,19 +790,20 @@ export function SeamPickerBody({
                   bounds={poseBounds ?? poseShown.bbox}
                   view={zoom.view}
                   layout={poseShown}
-                  layerOrder={poseLayers}
+                  layerOrder={shownPoseLayers}
                   geoms={geoms}
                   nameOf={nameOf}
                   selected={poseSel}
                   snapAt={poseDrag ? null : poseSnap}
                   disabled={frozen || busy}
-                  groupOf={poseGroupOf}
+                  pickupOf={pickupOf}
                   onSelect={(piece) => {
                     setPoseSel(piece);
                     setPoseSnap(null);
                   }}
                   onDrag={(group, D) => setPoseDrag({ group, D })}
                   onDrop={dropPose}
+                  snap={snapOn}
                   onCancel={() => setPoseDrag(null)}
                 />
               </>
@@ -762,56 +863,19 @@ export function SeamPickerBody({
           className='sticky bottom-0 box-content flex h-21 flex-none items-center gap-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
           data-seam-bar=''
         >
-          {error && (
-            <Text size='micro' variant='error' className='min-w-0 truncate'>
-              {error}
-            </Text>
-          )}
-          {listed.map((s) => (
-            <span key={s.key} className='flex min-w-0 items-center gap-2' data-seam-stored={s.key}>
-              <PairNo i={stored.indexOf(s)} />
-              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                {sidesName(s.sides.a[0], s.sides.b[0])}
-              </Text>
-            </span>
-          ))}
-          {pair && !pairListed && (
-            <span className='flex min-w-0 items-center gap-2' data-seam-pair=''>
-              <PairNo i={pairNo} />
-              <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                {pairName}
-              </Text>
-            </span>
-          )}
-          <span className='flex-1' />
-          {posing && poseSnap && (
-            <Text size='micro' variant='label' data-seam-pose-snap=''>
-              snap
-            </Text>
-          )}
-          {delta != null ? (
-            <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
-              {`Δ ${fmtMm(delta)} mm`}
-            </Text>
-          ) : empty && !loading ? (
-            drawn ? (
-              <Text size='micro' variant='label' data-step-seams-status='pick'>
-                pick
-              </Text>
-            ) : (
-              <Text size='micro' variant='error' data-step-seams-status=''>
-                no seam
-              </Text>
-            )
-          ) : null}
-          {posing && (
+          {posing ? (
             <>
+              {error && (
+                <Text size='micro' variant='error' className='min-w-0 truncate'>
+                  {error}
+                </Text>
+              )}
               <Button
                 type='button'
                 variant='underline'
                 size='xs'
                 aria-label='turn left'
-                onClick={() => turnPose(1)}
+                onClick={() => transformPose('left')}
                 disabled={!poseSel || busy}
               >
                 ⟲
@@ -821,7 +885,7 @@ export function SeamPickerBody({
                 variant='underline'
                 size='xs'
                 aria-label='turn right'
-                onClick={() => turnPose(-1)}
+                onClick={() => transformPose('right')}
                 disabled={!poseSel || busy}
               >
                 ⟳
@@ -830,8 +894,8 @@ export function SeamPickerBody({
                 type='button'
                 variant='underline'
                 size='xs'
-                aria-label='flip'
-                onClick={() => turnPose(0)}
+                aria-label='mirror'
+                onClick={() => transformPose('mirror')}
                 disabled={!poseSel || busy}
               >
                 ⇋
@@ -840,74 +904,177 @@ export function SeamPickerBody({
                 type='button'
                 variant='underline'
                 size='xs'
-                onClick={autoPose}
-                disabled={!posedHere(poseSel) || busy}
-                data-seam-pose-auto=''
+                onClick={() => transformPose('upright')}
+                disabled={!poseSel || busy}
               >
-                auto
+                upright
               </Button>
-            </>
-          )}
-          {!frozen && drawn && !!cardId && (
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className={posing ? 'text-warning' : undefined}
-              aria-pressed={posing}
-              onClick={startPose}
-              disabled={busy}
-              data-seam-pose=''
-            >
-              place
-            </Button>
-          )}
-          {(sel.a.length > 0 || sel.b.length > 0) && !posing && (
-            <Button type='button' variant='underline' size='xs' onClick={reset}>
-              clear
-            </Button>
-          )}
-          {!frozen && posing && (
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              onClick={() => void finishPose()}
-              loading={busy}
-              data-seam-pose-done=''
-            >
-              done
-            </Button>
-          )}
-          {!frozen && !posing && (
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              onClick={() => void commit()}
-              disabled={!canAccept}
-              loading={busy}
-              data-seam-accept=''
-            >
-              accept
-            </Button>
-          )}
-          {!frozen &&
-            !posing &&
-            (suggestion || surfaceSuggestion) &&
-            !sel.a.length &&
-            !sel.b.length && (
+              <Chip
+                selected={snapOn}
+                pressed={snapOn}
+                onClick={() => {
+                  setSnapOn((on) => !on);
+                  setPoseSnap(null);
+                }}
+                disabled={busy}
+              >
+                snap
+              </Chip>
+              <ChipRow>
+                <Chip
+                  selected={!!layerTarget?.hand.inside}
+                  pressed={!!layerTarget?.hand.inside}
+                  onClick={() => setLayer(true)}
+                  disabled={!layerTarget || busy}
+                >
+                  under
+                </Chip>
+                <Chip
+                  selected={!!layerTarget && !layerTarget.hand.inside}
+                  pressed={!!layerTarget && !layerTarget.hand.inside}
+                  onClick={() => setLayer(false)}
+                  disabled={!layerTarget || busy}
+                >
+                  over
+                </Chip>
+              </ChipRow>
+              <span className='flex-1' />
               <Button
                 type='button'
                 variant='underline'
                 size='xs'
-                onClick={fillGuess}
-                data-seam-guess=''
+                onClick={resetPose}
+                disabled={(!poseEdits.size && !handEdits.size) || busy}
+                data-seam-pose-reset=''
               >
-                guess
+                reset
               </Button>
-            )}
-          {footerActions}
+              <Button
+                type='button'
+                variant='main'
+                size='sm'
+                onClick={() => void finishPose()}
+                loading={busy}
+                data-seam-pose-done=''
+              >
+                done
+              </Button>
+            </>
+          ) : (
+            <>
+              {error && (
+                <Text size='micro' variant='error' className='min-w-0 truncate'>
+                  {error}
+                </Text>
+              )}
+              {listed.map((s) => (
+                <span
+                  key={s.key}
+                  className='flex min-w-0 items-center gap-2'
+                  data-seam-stored={s.key}
+                >
+                  <PairNo i={stored.indexOf(s)} />
+                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                    {seamName(s.sides)}
+                  </Text>
+                </span>
+              ))}
+              <ChipRow>
+                <Chip
+                  selected={sel.a.length > 0}
+                  onClick={() => clearSide('a')}
+                  disabled={!sel.a.length}
+                  data-seam-side='1'
+                >
+                  {sel.a.length ? `1 ${sideName(sel.a)} ${mmText(sideLen(sel.a))}` : '1'}
+                </Chip>
+                <Chip
+                  selected={sel.b.length > 0}
+                  onClick={() => clearSide('b')}
+                  disabled={!sel.b.length}
+                  data-seam-side='2'
+                >
+                  {sel.b.length ? `2 ${sideName(sel.b)} ${mmText(sideLen(sel.b))}` : '2'}
+                </Chip>
+              </ChipRow>
+              {delta != null ? (
+                <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
+                  {`Δ ${fmtMm(delta)} mm`}
+                </Text>
+              ) : empty && !loading ? (
+                drawn ? (
+                  <Text size='micro' variant='label' data-step-seams-status='pick'>
+                    pick
+                  </Text>
+                ) : (
+                  <Text size='micro' variant='error' data-step-seams-status=''>
+                    no seam
+                  </Text>
+                )
+              ) : null}
+              <span className='flex-1' />
+              {!frozen && (suggestion || surfaceSuggestion) && !sel.a.length && !sel.b.length && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={fillGuess}
+                  data-seam-guess=''
+                >
+                  guess
+                </Button>
+              )}
+              {!frozen && mirrorTargets.length > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => void mirrorLeft()}
+                  disabled={busy}
+                  data-seam-mirror-left=''
+                >
+                  mirror left
+                </Button>
+              )}
+              {!frozen && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={reset}
+                  disabled={!sel.a.length && !sel.b.length}
+                >
+                  clear
+                </Button>
+              )}
+              {!frozen && drawn && !!cardId && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={startPose}
+                  disabled={busy}
+                  data-seam-pose=''
+                >
+                  place
+                </Button>
+              )}
+              {!frozen && (
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  onClick={() => void commit()}
+                  disabled={!canAccept}
+                  loading={busy}
+                  data-seam-accept=''
+                >
+                  accept
+                </Button>
+              )}
+              {footerActions}
+            </>
+          )}
         </div>
       </div>
     </>
@@ -969,8 +1136,9 @@ function PoseOverlay({
   nameOf,
   selected,
   snapAt,
+  snap,
   disabled,
-  groupOf,
+  pickupOf,
   onSelect,
   onDrag,
   onDrop,
@@ -989,11 +1157,12 @@ function PoseOverlay({
   nameOf: (piece: string) => string;
   selected: string | null;
   snapAt: Pt2 | null;
+  snap: boolean;
   disabled: boolean;
-  groupOf: (piece: string) => string[];
+  pickupOf: (piece: string) => PosePickup;
   onSelect: (piece: string | null) => void;
   onDrag: (group: string[], D: Affine) => void;
-  onDrop: (piece: string, group: string[], D: Affine, snap: PoseSnap | null) => void;
+  onDrop: (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => void;
   onCancel: () => void;
 }) {
   const fit = useMemo(() => {
@@ -1019,7 +1188,7 @@ function PoseOverlay({
   const lastHit = useRef<LayerHit | null>(null);
   const drag = useRef<{
     piece: string;
-    group: string[];
+    pickup: PosePickup;
     clientX: number;
     clientY: number;
     moved: boolean;
@@ -1040,10 +1209,10 @@ function PoseOverlay({
       return;
     }
     const D = state.D;
-    const group = new Set(state.group);
+    const group = new Set(state.pickup.group);
     // The layout under the drag already carries D: the dragged rings are read as drawn.
     const ringOf = (k: string, T: Affine) => (geoms.get(k)?.rs ?? []).map((p) => apply(T, p));
-    const moving = state.group.flatMap((k) => {
+    const moving = state.pickup.group.flatMap((k) => {
       const T = layout.T.get(k);
       return T ? ringOf(k, T) : [];
     });
@@ -1052,7 +1221,12 @@ function PoseOverlay({
         ? []
         : [{ piece: k, ring: ringOf(k, T) }],
     );
-    onDrop(state.piece, state.group, D, snapPose(moving, others, POSE_SNAP_PX / scale));
+    onDrop(
+      state.piece,
+      state.pickup,
+      D,
+      snap ? snapPose(moving, others, POSE_SNAP_PX / scale) : null,
+    );
   };
 
   if (w < 2 || h < 2) return null;
@@ -1072,7 +1246,7 @@ function PoseOverlay({
         state.moved = true;
         lastHit.current = null;
         state.D = shiftOf(e, state);
-        onDrag(state.group, state.D);
+        onDrag(state.pickup.group, state.D);
       }}
       onPointerUp={() => finish()}
       onPointerCancel={() => finish(true)}
@@ -1124,7 +1298,7 @@ function PoseOverlay({
             e.currentTarget.setPointerCapture?.(e.pointerId);
             drag.current = {
               piece,
-              group: groupOf(piece),
+              pickup: pickupOf(piece),
               clientX: e.clientX,
               clientY: e.clientY,
               moved: false,

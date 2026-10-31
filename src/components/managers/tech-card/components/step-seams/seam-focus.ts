@@ -1,3 +1,9 @@
+import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import type { StoredSeam } from 'lib/seams';
+
+import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
+import { edgeWordVote } from './signals/edge-words';
+
 /**
  * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
  * with the user's own pick one click away. A proposal without the flag reads as sure.
@@ -7,6 +13,95 @@ export function isGuess(p: object | null | undefined): boolean {
 }
 
 type PickSides = { a: readonly string[]; b: readonly string[] };
+
+/**
+ * One-input steps collect sides by piece click order: all runs of the first piece stay on side 1,
+ * then the first different piece opens side 2. Multi-input steps retain their input-owned sides.
+ */
+export function sideForClick(
+  piece: string,
+  groups: readonly { pieces: readonly string[] }[],
+  picked: PickSides,
+  pieceOf: (id: string) => string,
+): 'a' | 'b' {
+  if (groups.length >= 2) return groups[0].pieces.includes(piece) ? 'a' : 'b';
+  if (picked.a.some((id) => pieceOf(id) === piece)) return 'a';
+  if (picked.b.some((id) => pieceOf(id) === piece)) return 'b';
+  return picked.a.length ? 'b' : 'a';
+}
+
+const NAMED_EDGE_WORDS = ['neckline', 'armhole', 'shoulder', 'hem', 'front_edge'] as const;
+
+/** A coarse, human edge word when geometry decides one; every inner line reads as a slit. */
+export function seamEdgeWord(
+  ids: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): string {
+  if (ids.some((id) => /:i\d+$/.test(id))) return 'slit';
+  const edges = ids.flatMap((id) => {
+    const at = id.lastIndexOf('#');
+    const geom = at < 0 ? undefined : geoms.get(id.slice(0, at));
+    const edge = geom?.edges.find((candidate) => candidate.id === id);
+    return edge ? [edge] : [];
+  });
+  if (!edges.length) return '';
+  const side = {
+    pieces: [...new Set(edges.map((edge) => edge.pieceKey))],
+    ids: edges.map((edge) => edge.id),
+    lenMm: edges.reduce((sum, edge) => sum + edge.lenMm, 0),
+    turnDeg: edges.reduce((sum, edge) => sum + edge.turnDeg, 0),
+  };
+  const word = NAMED_EDGE_WORDS.find((candidate) => edgeWordVote(candidate, side, geoms) === true);
+  return word === 'front_edge' ? 'front edge' : word ?? '';
+}
+
+/** Piece words plus a useful edge word, never an input/unit name. */
+export function seamSideName(
+  ids: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  nameOf: (piece: string) => string,
+  pieceOf: (id: string) => string,
+): string {
+  const names = [...new Set(ids.map((id) => nameOf(pieceOf(id))).filter(Boolean))];
+  const edge = seamEdgeWord(ids, geoms);
+  return [...names, edge].filter(Boolean).join(' ');
+}
+
+export type TwinMirrorUpdate = { row: StoredSeam; piece: string };
+
+/**
+ * Copy explicit left-hand edge placements onto matching rows in this step. Surface/free-pose
+ * placements deliberately stay out: their spatial fields have no hand-placement interpretation.
+ */
+export function mirrorLeftRows(
+  stepRows: readonly StoredSeam[],
+  cardRows: readonly StoredSeam[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): TwinMirrorUpdate[] {
+  const updates = new Map<string, TwinMirrorUpdate>();
+  for (const source of cardRows) {
+    if (!isHandSeamKind(source.kind)) continue;
+    for (const [own, other] of [
+      [source.sideA, source.sideB],
+      [source.sideB, source.sideA],
+    ] as const) {
+      for (const anchor of own) {
+        if (geoms.get(anchor.piece)?.hand !== 'L') continue;
+        const hand = decodeHandPlace(anchor.placement);
+        const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
+        if (!hand || !partner) continue;
+        const target = twinRowOf(stepRows, anchor.piece, partner, hand, geoms);
+        if (!target?.place) continue;
+        const key = `${target.row.seamKey}:${target.twin}`;
+        updates.set(key, {
+          row: withHandPlace(target.row, target.twin, target.place),
+          piece: target.twin,
+        });
+      }
+    }
+  }
+  return [...updates.values()];
+}
 
 export type LayerHit = { piece: string; at: readonly [number, number] };
 

@@ -2,8 +2,18 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import type { EdgeAnchor, StoredSeam } from 'lib/seams';
+
 import { card6Geoms, card6InnerLines } from './card6.fixture';
-import { cycleLayerHit, isGuess, pickTarget } from './seam-focus';
+import {
+  cycleLayerHit,
+  isGuess,
+  mirrorLeftRows,
+  pickTarget,
+  seamSideName,
+  sideForClick,
+} from './seam-focus';
+import { decodeHandPlace, withHandPlace } from './step-hand';
 import { stepLayout } from './step-picture';
 import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
 
@@ -49,6 +59,90 @@ describe('pickTarget', () => {
     expect(pick({ a: [], b: ['FABRIC:2', 'PATCH_2:0'] }, 'a', 'FABRIC:i0').b).toEqual([
       'PATCH_2:0',
     ]);
+  });
+});
+
+describe('click-order sides', () => {
+  const pieceOf = (id: string) => id.split(':')[0];
+  const oneInput = [{ pieces: ['SLEEVE', 'PLACKET'] }];
+
+  it('keeps runs of the first piece on side 1 and opens side 2 on another piece', () => {
+    expect(sideForClick('SLEEVE', oneInput, { a: [], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('SLEEVE', oneInput, { a: ['SLEEVE:0'], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('PLACKET', oneInput, { a: ['SLEEVE:0'], b: [] }, pieceOf)).toBe('b');
+  });
+
+  it('keeps input-owned sides for multi-input steps', () => {
+    const groups = [{ pieces: ['BODY'] }, { pieces: ['SLEEVE', 'PLACKET'] }];
+    expect(sideForClick('BODY', groups, { a: [], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('PLACKET', groups, { a: [], b: [] }, pieceOf)).toBe('b');
+  });
+});
+
+describe('side names', () => {
+  const geoms = card6Geoms();
+  const nameOf = (piece: string) =>
+    piece === 'SLV_L' ? 'sleeve' : piece === 'FLP_L_MAIN' ? 'placket' : piece;
+  const pieceOf = (id: string) =>
+    /:i\d+$/.test(id) ? id.replace(/:i\d+$/, '') : id.slice(0, id.lastIndexOf('#'));
+
+  it('names an inner line as the piece slit', () => {
+    expect(seamSideName(['SLV_L:i0'], geoms, nameOf, (id) => id.replace(/:i\d+$/, ''))).toBe(
+      'sleeve slit',
+    );
+  });
+
+  it('keeps a generic placket run at the human piece name', () => {
+    const placket = geoms.get('FLP_L_MAIN')!;
+    const longest = placket.edges.reduce((best, edge) => (edge.lenMm > best.lenMm ? edge : best));
+    expect(seamSideName([longest.id], geoms, nameOf, pieceOf)).toBe('placket');
+  });
+});
+
+describe('mirror left', () => {
+  const anchor = (piece: string): EdgeAnchor => ({
+    piece,
+    samples: [
+      [0, 0],
+      [1, 0],
+    ],
+    perimShare: 0.1,
+    lenMm: 100,
+    notches: 0,
+    turnDeg: 0,
+    range: [0, 1],
+    edgeHint: `${piece}#0`,
+    contourSig: 'same',
+  });
+  const row = (key: string, piece: string, partner: string): StoredSeam => ({
+    seamKey: key,
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchor(piece)],
+    sideB: [anchor(partner)],
+    anchoredSize: '',
+    note: '',
+  });
+
+  it('copies an explicit left edge placement only onto the matching right row', () => {
+    const geoms = card6Geoms();
+    const left = withHandPlace(row('left', 'SLV_L', 'P_L_MAIN'), 'SLV_L', {
+      inside: true,
+      rotDeg: 90,
+      flip: false,
+      slideMm: 12,
+    });
+    const right = row('right', 'SLV_R', 'P_R_MAIN');
+    const [update] = mirrorLeftRows([right], [left, right], geoms);
+    expect(update.piece).toBe('SLV_R');
+    expect(decodeHandPlace(update.row.sideA[0].placement)).toEqual({
+      inside: true,
+      rotDeg: 90,
+      flip: false,
+      slideMm: -12,
+    });
   });
 });
 
