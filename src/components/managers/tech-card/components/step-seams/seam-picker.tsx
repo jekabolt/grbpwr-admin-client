@@ -652,10 +652,33 @@ export function SeamPickerBody({
   const shownPoseLayers = shownPoseStacking.layers;
   const shownPoseLower = shownPoseStacking.lower;
 
-  const resetPose = () => {
+  const resetPose = async () => {
     if (busy) return;
-    setPoseFree(null);
     const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
+    const inScope = (piece: string) => !selected || selected.has(piece);
+    const unsaved =
+      (!selected && !!poseFree) ||
+      [...poseEdits.keys()].some((piece) =>
+        selected ? pickupOf(piece).group.some((member) => selected.has(member)) : true,
+      ) ||
+      [...poseChanges.drop].some(inScope) ||
+      [...handEdits.values()].some((row) =>
+        [...row.sideA, ...row.sideB].some((anchor) => inScope(anchor.piece)),
+      ) ||
+      [...poseLayerEdits.keys()].some(inScope);
+    // Nothing unsaved left to undo: «reset» removes this step's saved poses (the picked block's,
+    // else all of them) and the step is laid automatically again.
+    if (!unsaved) {
+      const drop = [...ownPoseRows].filter(([piece]) => inScope(piece)).map(([, row]) => row);
+      if (!drop.length) return;
+      setBusy(true);
+      setRefused('');
+      const ok = await attachPose([], drop);
+      setBusy(false);
+      if (!ok) setRefused(useSeamsStore.getState().errors[drop[0].seamKey] ?? 'not saved');
+      return;
+    }
+    setPoseFree(null);
     setPoseChanges((current) => {
       if (!selected) return { edits: new Map(), drop: new Set() };
       const next = new Map(current.edits);
@@ -1031,9 +1054,14 @@ export function SeamPickerBody({
                 type='button'
                 variant='underline'
                 size='xs'
-                onClick={resetPose}
+                onClick={() => void resetPose()}
                 disabled={
-                  (!poseEdits.size && !handEdits.size && !poseLayerEdits.size && !poseFree) || busy
+                  (!poseEdits.size &&
+                    !handEdits.size &&
+                    !poseLayerEdits.size &&
+                    !poseFree &&
+                    !ownPoseRows.size) ||
+                  busy
                 }
                 data-seam-pose-reset=''
               >
