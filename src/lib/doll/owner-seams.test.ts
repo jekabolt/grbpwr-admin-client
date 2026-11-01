@@ -120,7 +120,16 @@ const withoutTimes = (report: DollReport): DollReport => ({
 });
 
 describe('paper doll owner seams', () => {
-  it('sews an unbound confirmed row, rejects a rejected row, and adds no proposals', () => {
+  const pieceKeys = new Set(['A', 'B', 'C']);
+  const geomsOf = (graph: SeamGraph) =>
+    new Map(graph.pieces.map((piece) => [piece.pieceKey, piece]));
+  const stepAB = (seamKeys: string[]) => ({
+    inputKeys: ['A', 'B'],
+    outputUnitKey: 'AB',
+    seamKeys,
+  });
+
+  it('sews a confirmed row through the step that names it, never a rejected row, no proposals', () => {
     const { facts, graph, row, extra } = fixture();
     const rejected = seamFromCandidate(extra, graph.pieces, {
       seamKey: 'rejected-row',
@@ -137,16 +146,21 @@ describe('paper doll owner seams', () => {
     const selected = dollOwnerSeamsOf({
       rows: [row, rejected],
       poses: new Map(),
-      operations: [],
-      geoms: new Map(graph.pieces.map((piece) => [piece.pieceKey, piece])),
+      operations: [stepAB([row.seamKey])],
+      geoms: geomsOf(graph),
       innerLines: new Map(),
       stepResults: [],
+      graph,
+      pieceKeys,
     });
     if (!selected) throw new Error('owner rows were not selected');
     expect(selected.rows).toEqual([row, rejected]);
     expect(selected.candidates).toHaveLength(1);
     expect(selected.candidates[0].seamKey).toBe(row.seamKey);
-    expect(selected.candidates[0].inStep).toBe(false);
+    expect(selected.candidates[0].inStep).toBe(true);
+    expect(selected.candidates[0].guess).toBeUndefined();
+    expect(selected.inStepKeys).toEqual([row.seamKey]);
+    expect(selected.guessed).toBe(0);
 
     const report = solveDoll({
       graph,
@@ -164,6 +178,7 @@ describe('paper doll owner seams', () => {
             confirmed: selected.confirmed,
             inSteps: selected.inSteps,
             rejected: selected.rejected,
+            guessed: selected.guessed,
           },
         },
       },
@@ -178,15 +193,120 @@ describe('paper doll owner seams', () => {
     expect(report.seams.some((candidate) => candidate.state === 'proposed')).toBe(false);
     expect(report.seams.some((candidate) => candidate.origin === 'doll-proposed')).toBe(false);
     expect(report.seams.every((candidate) => candidate.decidedBy === 'person')).toBe(true);
-    expect(report.seams[0].inStep).toBe(false);
+    expect(report.seams[0].inStep).toBe(true);
+    expect(report.seams[0].guessed).toBeUndefined();
     expect(report.orderJoins).toEqual([]);
     expect(
       report.floating.some((piece) => piece.pieceKey === 'C' && piece.reason.includes('no seam')),
     ).toBe(true);
     expect(report.rows?.words).toContain(
-      'rows: confirmed 1 (in steps 0 · not in any step 1) · rejected 1 (not sewn)',
+      'rows: confirmed 1 · sewn by steps 1 · no step 0 (not sewn) · rejected 1 (not sewn) · guessed 0 (steps without a row, dashed)',
     );
     expect(report.rows?.words).toContain('no seam: side');
+  });
+
+  it('leaves a confirmed row no step names unsewn and lists it by its pieces', () => {
+    const { facts, graph, row } = fixture();
+    const selected = dollOwnerSeamsOf({
+      rows: [row],
+      poses: new Map(),
+      operations: [],
+      geoms: geomsOf(graph),
+      innerLines: new Map(),
+      stepResults: [],
+      graph,
+      pieceKeys,
+    });
+    if (!selected) throw new Error('owner rows were not selected');
+    expect(selected.candidates).toEqual([]);
+    expect(selected.inStepKeys).toEqual([]);
+    expect(selected.confirmed).toBe(1);
+    expect(selected.inSteps).toBe(0);
+
+    const report = solveDoll({
+      graph,
+      facts,
+      options: {
+        ...fast,
+        seams: {
+          mode: 'owner',
+          rows: selected.rows,
+          size: 'M',
+          candidates: selected.candidates,
+          inStepKeys: selected.inStepKeys,
+          selection: {
+            confirmed: selected.confirmed,
+            inSteps: selected.inSteps,
+            rejected: selected.rejected,
+            guessed: selected.guessed,
+          },
+        },
+      },
+    });
+    expect(report.seams).toHaveLength(0);
+    expect(report.contradictions).toEqual([]);
+    expect(report.floating.map((piece) => piece.pieceKey).sort()).toEqual(['A', 'B', 'C']);
+    expect(report.rows?.words).toContain(
+      'rows: confirmed 1 · sewn by steps 0 · no step 1 (not sewn) · rejected 0 (not sewn) · guessed 0 (steps without a row, dashed)',
+    );
+    expect(report.rows?.words).toContain('not sewn, no step names it: front #1 ↔ front_1 #3');
+    expect(report.rows?.words.join('\n')).not.toContain(row.seamKey);
+  });
+
+  it('sews a rowless sewing step by the guess its step picture draws, as a dashed doll guess', () => {
+    const { facts, graph, row, extra } = fixture();
+    const selected = dollOwnerSeamsOf({
+      rows: [row],
+      poses: new Map(),
+      operations: [stepAB([row.seamKey]), { inputKeys: ['AB', 'C'], outputUnitKey: 'ABC' }],
+      geoms: geomsOf(graph),
+      innerLines: new Map(),
+      stepResults: [],
+      graph,
+      pieceKeys,
+    });
+    if (!selected) throw new Error('owner rows were not selected');
+    expect(selected.candidates.map((candidate) => candidate.seamKey)).toEqual([
+      row.seamKey,
+      'guess:1:0',
+    ]);
+    expect(selected.candidates[1].guess).toEqual({ step: 2 });
+    expect(selected.candidates[1].candidate.a).toBe(extra.a);
+    expect(selected.candidates[1].candidate.b).toBe(extra.b);
+    expect(selected.guessed).toBe(1);
+    expect(selected.inSteps).toBe(1);
+
+    const report = solveDoll({
+      graph,
+      facts,
+      options: {
+        ...fast,
+        seams: {
+          mode: 'owner',
+          rows: selected.rows,
+          size: 'M',
+          candidates: selected.candidates,
+          inStepKeys: selected.inStepKeys,
+          selection: {
+            confirmed: selected.confirmed,
+            inSteps: selected.inSteps,
+            rejected: selected.rejected,
+            guessed: selected.guessed,
+          },
+        },
+      },
+    });
+    expect(report.seams).toHaveLength(2);
+    const guess = report.seams.find((seam) => seam.guessed);
+    expect(guess?.decidedBy).toBe('doll');
+    expect(guess?.note).toContain('step 2 names no row');
+    expect([...(guess?.a ?? []), ...(guess?.b ?? [])].some((id) => id.startsWith('C#'))).toBe(true);
+    expect(report.seams.filter((seam) => seam.decidedBy === 'person')).toHaveLength(1);
+    expect(report.contradictions).toEqual([]);
+    expect(report.floating.some((piece) => piece.pieceKey === 'C')).toBe(false);
+    expect(report.rows?.words).toContain(
+      'rows: confirmed 1 · sewn by steps 1 · no step 0 (not sewn) · rejected 0 (not sewn) · guessed 1 (steps without a row, dashed)',
+    );
   });
 
   it('keeps an impossible owner seam confirmed and reports the contradiction', () => {

@@ -337,8 +337,12 @@ const candidateSides = (candidate: SeamCandidate): SeamSides => ({
   b: candidate.bParts?.length ? [...candidate.bParts] : [candidate.b],
 });
 
-/** Pure operation scene shared by the editor hook and the PDF renderer. */
-export function stepPictureOfOp(
+/**
+ * The seams of one operation as the step picture reads them, without the layout: the rows stored
+ * on the step, the card's reading across its inputs (`crossSeams`) and, when that says nothing,
+ * the model's proposal (`proposalSeams`). The paper doll sews a rowless step from the same guess.
+ */
+export function stepSeamsOfOp(
   op: SceneOp | undefined,
   graph: { chosen: readonly SeamCandidate[] } | null | undefined,
   geoms: ReadonlyMap<string, PieceGeom>,
@@ -353,8 +357,6 @@ export function stepPictureOfOp(
     poses,
     nameOf = (key: string) => key,
     ready = true,
-    explode = STEP_TILE_EXPLODE,
-    rasterMm = STEP_TILE_RASTER_MM,
   } = options;
   const active = op ?? ops[index];
   const groups = inputGroups(ops, index, pieceKeys).map((group) => ({
@@ -449,6 +451,69 @@ export function stepPictureOfOp(
         ...suggestions.map((candidate) => seamOfSides(candidate, geoms, innerLines)),
         ...surfaceProposals,
       ].filter((candidate): candidate is SeamCandidate => !!candidate);
+  return {
+    active,
+    innerLines,
+    byKey,
+    groups,
+    leaves,
+    keys,
+    ease,
+    hands,
+    stored,
+    used,
+    suggestion,
+    suggestions,
+    surfaceSuggestion,
+    surfaceSuggestions,
+    surfaceProposal,
+    surfaceProposals,
+    surfaceMarks,
+    innerSeams,
+    storedSeams,
+    crossSeams,
+    proposalSeams,
+  };
+}
+
+/** The edges a rowless step is drawn sewn by: the card's reading across its inputs, else the proposal. */
+export function stepGuessOf(
+  seams: Pick<ReturnType<typeof stepSeamsOfOp>, 'crossSeams' | 'proposalSeams'>,
+) {
+  return seams.crossSeams.length ? seams.crossSeams : seams.proposalSeams;
+}
+
+/** Pure operation scene shared by the editor hook and the PDF renderer. */
+export function stepPictureOfOp(
+  op: SceneOp | undefined,
+  graph: { chosen: readonly SeamCandidate[] } | null | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  options: StepPictureOptions,
+) {
+  const { explode = STEP_TILE_EXPLODE, rasterMm = STEP_TILE_RASTER_MM } = options;
+  const {
+    active,
+    innerLines,
+    byKey,
+    groups,
+    leaves,
+    keys,
+    ease,
+    hands,
+    stored,
+    used,
+    suggestion,
+    suggestions,
+    surfaceSuggestion,
+    surfaceSuggestions,
+    surfaceProposal,
+    surfaceProposals,
+    surfaceMarks,
+    innerSeams,
+    storedSeams,
+    crossSeams,
+    proposalSeams,
+  } = stepSeamsOfOp(op, graph, geoms, options);
   const frameSeams = frameSeamsOf(
     innerSeams,
     storedSeams,

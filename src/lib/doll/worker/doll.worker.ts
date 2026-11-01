@@ -42,7 +42,7 @@ export type DollWorkerRequest =
             candidates?: readonly DollOwnerCandidate[];
             inStepKeys?: readonly string[];
             layers?: readonly DollLayerRelation[];
-            selection?: { confirmed: number; inSteps: number; rejected: number };
+            selection?: { confirmed: number; inSteps: number; rejected: number; guessed?: number };
           };
         };
         /** Facts of the sizes the stored rows were confirmed on (other than the solved one). */

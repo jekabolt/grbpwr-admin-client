@@ -26,12 +26,19 @@ export type Vec3 = [number, number, number];
 /** An explicit owner stacking claim, in the editor's bottom → top order. */
 export type DollLayerRelation = readonly [under: string, over: string];
 
-/** The step editor's exact conversion of one confirmed owner row. */
+/**
+ * One seam the doll sews in owner mode: the step editor's exact conversion of a confirmed row an
+ * operation names, or (`guess`) the edge guess the step picture draws for a sewing step that names
+ * no row — sewn as a doll guess, drawn dashed, never a contradiction when it does not close.
+ */
 export type DollOwnerCandidate = {
+  /** The row's key, or a synthetic `guess:<step index>:<n>` for a guess. */
   seamKey: string;
   candidate: SeamCandidate;
-  /** Whether an operation names this row in its seam keys. */
+  /** Whether an operation names this row in its seam keys (always true since the doll sews by steps). */
   inStep: boolean;
+  /** Set on a guess: the operation (its number in the order) it was guessed for. */
+  guess?: { step: number };
 };
 
 /** A point in the piece's seam (u, v) frame (lib/seams/frame.ts `toUV`): the unit square. */
@@ -134,22 +141,24 @@ export type DollOptions = {
    */
   seams?: {
     /**
-     * `owner` is the assembly editor contract: every confirmed card row is sewn, whether or not an
-     * operation names it. Omitted keeps the historical L4 behaviour for probes and callers that
-     * hand the doll all card rows.
+     * `owner` is the assembly editor contract: the doll sews BY STEPS — `candidates` are the rows
+     * the operations name (in step order) plus the guesses of sewing steps that name no row; a
+     * confirmed row no step names is listed, not sewn. Omitted keeps the historical L4 behaviour
+     * for probes and callers that hand the doll all card rows.
      */
     mode?: 'owner';
+    /** Every card row (rejected pairs stay excluded, stale / orphan rows keep their words). */
     rows: readonly StoredSeam[];
     size: string;
     sizes?: readonly SizePieces[];
-    /** Exact candidates produced from confirmed rows; closures deliberately have none. */
+    /** What is sewn: exact candidates of the named rows, then guesses; closures have none. */
     candidates?: readonly DollOwnerCandidate[];
     /** Confirmed row keys named by an operation, including closures without exact candidates. */
     inStepKeys?: readonly string[];
     /** Explicit under/over claims read by step-result, including claims carried by pose rows. */
     layers?: readonly DollLayerRelation[];
     /** Counts for the owner-row report. */
-    selection?: { confirmed: number; inSteps: number; rejected: number };
+    selection?: { confirmed: number; inSteps: number; rejected: number; guessed?: number };
   };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
@@ -234,6 +243,8 @@ export type DollSeamReport = {
   decidedBy?: 'person' | 'doll' | 'engine';
   /** Owner mode: whether an operation names this confirmed row. */
   inStep?: boolean;
+  /** Owner mode: a sewing step named no row — sewn by the step picture's guess (drawn dashed). */
+  guessed?: boolean;
   /** In words, with millimetres. */
   note: string;
   /** Global vertex ids of side A / side B polylines (for drawing). */

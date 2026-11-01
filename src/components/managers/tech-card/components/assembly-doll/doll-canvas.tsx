@@ -453,14 +453,8 @@ export function DollCanvas({
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
         const open = s.state === 'open' || s.state === 'twisted';
-        const m =
-          s.decidedBy === 'person' && s.inStep === false
-            ? dashed
-            : open
-              ? heavy
-              : s.state === 'proposed'
-                ? dashed
-                : closed;
+        // A step's guess (no row) is dashed whatever its state; an open seam heavy.
+        const m = s.guessed ? dashed : open ? heavy : s.state === 'proposed' ? dashed : closed;
         for (const path of open ? [s.pathA, s.pathB] : [s.pathA])
           if (path.length >= 2) a.seams.add(line(pathPoints(P, path), m));
         if (open) {

@@ -462,6 +462,8 @@ type Work = {
   confirmed?: boolean;
   /** Owner mode: whether an operation names this confirmed row. */
   inStep?: boolean;
+  /** Owner mode: a sewing step named no row — sewn by its step picture's guess (drawn dashed). */
+  guess?: { step: number };
   /** L4: a doll proposal on a pair a person rejected — not sewn, not reported as a seam. */
   rejectedByPerson?: boolean;
   /** L4: a closure drawn overlapped (the buttoned centre fronts). */
@@ -536,9 +538,17 @@ export function solveDoll(input: DollInput): DollReport {
   const ownerInStepKeys = new Set([
     ...(opt.seams?.inStepKeys ?? []),
     ...(opt.seams?.candidates ?? [])
-      .filter((candidate) => candidate.inStep)
+      .filter((candidate) => candidate.inStep && !candidate.guess)
       .map((candidate) => candidate.seamKey),
   ]);
+  /** Owner mode: the step each guess candidate was guessed for, by its synthetic key. */
+  const guessStepOf = new Map(
+    (opt.seams?.candidates ?? [])
+      .filter((candidate) => candidate.guess)
+      .map((candidate) => [candidate.seamKey, candidate.guess!.step] as const),
+  );
+  const isGuess = (c: SeamCandidate) =>
+    c.provenance?.source === 'doll' && guessStepOf.has(c.provenance.seamKey);
   const declaredJoins = owner ? undefined : opt.joins;
   const proposalsAllowed = !owner && opt.proposeComposite !== false;
   let resolvedRows: SizeResolved | undefined;
@@ -566,9 +576,12 @@ export function solveDoll(input: DollInput): DollReport {
               .map(({ words }) => words),
           );
           r.words = r.words.filter((words) => !ignoredWords.has(words));
-          r.forced = S.candidates.flatMap(({ seamKey, candidate }) => {
-            const row = rowByKey.get(seamKey);
-            if (!row || row.status !== 'confirmed') return [];
+          // By steps: a closure row no step names is not drawn buttoned either.
+          if (S.inStepKeys)
+            r.closures = r.closures.filter((c) => ownerInStepKeys.has(c.provenance?.seamKey ?? ''));
+          r.forced = S.candidates.flatMap(({ seamKey, candidate, guess }) => {
+            const row = guess ? undefined : rowByKey.get(seamKey);
+            if (!guess && (!row || row.status !== 'confirmed')) return [];
             const present = candidate.surface
               ? pieceKeys.has(candidate.surface.host) && pieceKeys.has(candidate.surface.part)
               : [
@@ -578,10 +591,10 @@ export function solveDoll(input: DollInput): DollReport {
                   .flatMap(edgeIdsOf)
                   .every((edge) => edgeIds.has(edge));
             if (!present) return [];
-            return [
-              {
-                ...candidate,
-                provenance: {
+            // A guess rides as a confirmed candidate (ownerGraphOf keeps those) under a synthetic
+            // provenance the doll recognises (`isGuess`): sewn, drawn dashed, never a contradiction.
+            const provenance = row
+              ? {
                   seamKey,
                   status: row.status,
                   source: row.source,
@@ -589,9 +602,17 @@ export function solveDoll(input: DollInput): DollReport {
                   by: row.updatedBy || row.createdBy || 'owner',
                   at: row.updatedAt || row.createdAt || '',
                   how: 'hint' as const,
-                },
-              },
-            ];
+                }
+              : {
+                  seamKey,
+                  status: 'confirmed' as const,
+                  source: 'doll' as const,
+                  direction: 'unknown' as const,
+                  by: 'doll',
+                  at: '',
+                  how: 'shape' as const,
+                };
+            return [{ ...candidate, provenance }];
           });
         }
         resolvedRows = r;
@@ -645,7 +666,7 @@ export function solveDoll(input: DollInput): DollReport {
     }
     return false;
   };
-  const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed';
+  const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed' && !isGuess(c);
   const excludedPairs = (resolvedRows?.excluded ?? []).filter((x) => !x.surface);
   /** A pair of runs a person rejected (any edge of a on one side, any of b on the other). */
   const isExcluded = (a: readonly EdgeId[], b: readonly EdgeId[]) => {
@@ -4329,6 +4350,8 @@ export function solveDoll(input: DollInput): DollReport {
     );
     if (conf) w0.confirmed = true;
     if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
+    if (owner && isGuess(s.seam))
+      w0.guess = { step: guessStepOf.get(s.seam.provenance!.seamKey) ?? 0 };
     if (s.seam.partRange) {
       // (keys on the side's original edge ids → the grouped side's ids, position for position)
       const pr: Record<string, [number, number]> = {};
@@ -4694,6 +4717,7 @@ export function solveDoll(input: DollInput): DollReport {
           fromOrder: w0.fromOrder,
           confirmed: w0.confirmed,
           inStep: w0.inStep,
+          guess: w0.guess,
           A: A2,
           B: B2,
           target: 1,
@@ -7052,6 +7076,8 @@ export function solveDoll(input: DollInput): DollReport {
         note = `CONTRADICTION — ${words}`;
       } else note = `confirmed by a person · ${note}`;
     } else if (w.confirmed && w.overlap) note = `confirmed by a person · ${note}`;
+    else if (w.guess)
+      note = `step ${w.guess.step} names no row — the step picture's guess · ${note}`;
     seams.push({
       id: w.id,
       a: w.a,
@@ -7076,12 +7102,13 @@ export function solveDoll(input: DollInput): DollReport {
         ? {
             decidedBy: w.confirmed
               ? ('person' as const)
-              : w.origin === 'graph' && !w.fromOrder
+              : w.origin === 'graph' && !w.fromOrder && !w.guess
                 ? ('engine' as const)
                 : ('doll' as const),
           }
         : {}),
       ...(owner && w.confirmed ? { inStep: w.inStep ?? false } : {}),
+      ...(w.guess ? { guessed: true } : {}),
     });
   }
   // A contradiction next to a confirmed seam stretched > 20 % on the same pieces: that seam is the
@@ -7120,12 +7147,24 @@ export function solveDoll(input: DollInput): DollReport {
       note:
         owner && isConf(s)
           ? 'confirmed by a person · layer seam — the layers are drawn as one piece'
-          : 'layer seam — the layers are drawn as one piece',
+          : owner && isGuess(s)
+            ? `step ${guessStepOf.get(s.provenance!.seamKey)} names no row — the step picture's guess · layer seam — the layers are drawn as one piece`
+            : 'layer seam — the layers are drawn as one piece',
       pathA: new Uint32Array(0),
       pathB: new Uint32Array(0),
-      ...(owner ? { decidedBy: isConf(s) ? ('person' as const) : ('engine' as const) } : {}),
+      ...(owner
+        ? {
+            decidedBy: isConf(s)
+              ? ('person' as const)
+              : isGuess(s)
+                ? ('doll' as const)
+                : ('engine' as const),
+          }
+        : {}),
       ...(owner && isConf(s) ? { inStep: ownerInStepKeys.has(s.provenance?.seamKey ?? '') } : {}),
+      ...(owner && isGuess(s) ? { guessed: true } : {}),
     });
+  const undrawnGuesses: NonNullable<DollReport['notSewn']> = [];
   if (owner) {
     const reported = new Set(seams.map((seam) => seam.id));
     for (const candidate of graphIn.chosen) {
@@ -7137,6 +7176,17 @@ export function solveDoll(input: DollInput): DollReport {
         continue;
       const id = `${candidate.a}~${candidate.b}`;
       if (reported.has(id)) continue;
+      if (isGuess(candidate)) {
+        // A guess the doll could not draw is no contradiction: said, not counted open.
+        undrawnGuesses.push({
+          id,
+          a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
+          b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
+          note: `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
+        });
+        reported.add(id);
+        continue;
+      }
       const existing = preContradictions.find((words) => words.startsWith(`${id}:`));
       const words =
         existing ??
@@ -7168,6 +7218,7 @@ export function solveDoll(input: DollInput): DollReport {
 
   // Graph pairings the doll will not sew: words, not seams (never counted open).
   const notSewn: NonNullable<DollReport['notSewn']> = [
+    ...undrawnGuesses,
     ...suspects.map(({ s: sm, note }) => ({
       id: `${sm.seam.a}~${sm.seam.b}`,
       a: sm.a,
@@ -7627,14 +7678,35 @@ export function solveDoll(input: DollInput): DollReport {
           0;
         const inSteps =
           opt.seams?.selection?.inSteps ??
-          opt.seams?.candidates?.filter((candidate) => candidate.inStep).length ??
+          opt.seams?.candidates?.filter((candidate) => candidate.inStep && !candidate.guess)
+            .length ??
           0;
         const rejected =
           opt.seams?.selection?.rejected ??
           opt.seams?.rows.filter((row) => row.status === 'rejected').length ??
           0;
+        const guessed = opt.seams?.selection?.guessed ?? guessStepOf.size;
+        // A confirmed row no step names: not sewn, named by its pieces and edges (never by key).
+        const nameOfPiece = new Map(
+          input.facts.pieces.map((piece) => [piece.pieceKey, piece.name.trim() || piece.pieceKey]),
+        );
+        const sideWords = (side: readonly { piece: string; edgeHint: string }[]) =>
+          side
+            .map((anchor) => {
+              const at = anchor.edgeHint.lastIndexOf('#');
+              const edge = at >= 0 ? anchor.edgeHint.slice(at) : anchor.edgeHint;
+              return `${nameOfPiece.get(anchor.piece) ?? anchor.piece} ${edge}`.trim();
+            })
+            .join(' + ');
+        const unbound = (opt.seams?.inStepKeys ? opt.seams.rows : [])
+          .filter((row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey))
+          .map(
+            (row) =>
+              `not sewn, no step names it: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}${row.kind === 'closure' ? ' (closure)' : ''}`,
+          );
         return [
-          `rows: confirmed ${confirmed} (in steps ${inSteps} · not in any step ${Math.max(0, confirmed - inSteps)}) · rejected ${rejected} (not sewn)`,
+          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · no step ${Math.max(0, confirmed - inSteps)} (not sewn) · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
+          ...unbound,
           ...input.facts.pieces
             .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
             .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
@@ -7811,7 +7883,7 @@ export function solveDoll(input: DollInput): DollReport {
           closures: closureReps,
           rows: {
             applied: resolvedRows?.applied.length ?? 0,
-            confirmed: resolvedRows?.forced.length ?? 0,
+            confirmed: (resolvedRows?.forced ?? []).filter((c) => !isGuess(c)).length,
             rejected: excludedPairs.length,
             closures: resolvedRows?.closures.length ?? 0,
             words: [

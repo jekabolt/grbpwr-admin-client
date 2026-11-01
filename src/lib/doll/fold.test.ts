@@ -107,7 +107,7 @@ function fixture(sewPlacket = true) {
       mode: 'owner',
       rows: rows.map((r) => r.row),
       size: 'M',
-      candidates: rows.map((r) => ({ seamKey: r.row.seamKey, candidate: r.owner })),
+      candidates: rows.map((r) => ({ seamKey: r.row.seamKey, candidate: r.owner, inStep: true })),
     },
   };
   return { facts, graph, options };
