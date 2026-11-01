@@ -857,13 +857,6 @@
   "src/components/managers/tech-card/components/assembly-schematic.tsx": {
     "design/no-local-primitive": 1
   },
-  "src/components/managers/tech-card/components/assembly-seams/seams-review.tsx": {
-    "design/no-arbitrary-px": 1
-  },
-  "src/components/managers/tech-card/components/assembly-seams/seams-sheet.tsx": {
-    "design/no-hex-color": 6,
-    "design/no-style-design": 3
-  },
   "src/components/managers/tech-card/components/assembly-shelf.tsx": {
     "design/no-arbitrary-px": 1
   },

@@ -135,7 +135,7 @@ for (const code of codes) {
   await shot(`${safe}-schematic`, '[data-stand-section]');
 
   // ASSEMBLY MAP (the card's own order): STEP on the first machine step, on a join with read
-  // edges, on a join with none; then PIECES
+  // edges, and on a join with none
   if (await page.locator('[data-assembly-map]').count()) {
     const list = page.locator('[aria-label="sequence view"] [role="radio"]', { hasText: 'list' });
     if (await list.count()) await list.first().click();
@@ -155,7 +155,8 @@ for (const code of codes) {
         .first()
         .getAttribute('data-map-step')
         .catch(() => null);
-      if (shown != null && Number(shown) !== i) console.log(`  map shows step index ${shown}, picked ${i}`);
+      if (shown != null && Number(shown) !== i)
+        console.log(`  map shows step index ${shown}, picked ${i}`);
       const facts = await page.locator('[data-map-facts]').allInnerTexts();
       const sides = await page.locator('[data-map-pair] [data-map-side]').count();
       console.log(
@@ -166,21 +167,6 @@ for (const code of codes) {
     const w = pickOf.withEdges;
     if (w.length) await showStep(w[Math.floor(w.length / 2)], 'read');
     if (pickOf.unread.length) await showStep(pickOf.unread[0], 'unread');
-    const pv = page.locator('[aria-label="assembly map view"] [role="radio"]', {
-      hasText: 'pieces',
-    });
-    if (await pv.count()) {
-      await pv.first().click();
-      await page.waitForTimeout(400);
-      const fam = await page.locator('[data-map-family]').count();
-      const nums = await page.locator('[data-map-number]').count();
-      console.log(`  map PIECES: ${fam} families, ${nums} edge numbers`);
-      await shot(`${safe}-map-pieces`, '[data-stand-map]');
-      const sv = page.locator('[aria-label="assembly map view"] [role="radio"]', {
-        hasText: 'step',
-      });
-      if (await sv.count()) await sv.first().click();
-    }
   } else console.log('  no assembly map on the stand');
 
   const door = page.locator('[data-skeleton-door="header"]');

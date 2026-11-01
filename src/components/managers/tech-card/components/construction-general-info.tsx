@@ -117,7 +117,7 @@ export function ConstructionGeneralInfo({
   /**
    * A released card, on its own. The fit is a style fact: its `drafted` pill locks on the grant of
    * its writer (`products:write`, UpdateStyle), as CARD DETAILS does, and not on `tech_cards:write`
-   * folded into `readOnly` (seam review, S-m2).
+   * folded into `readOnly` (permission matrix, S-m2).
    */
   frozen?: boolean;
 }) {

@@ -244,19 +244,6 @@ export function seamSignature(tiles: readonly SewnTile[]): string | null {
   return `${sec.word}|${st && st.kind !== 'empty' ? st.word : ''}`;
 }
 
-/** Полоса словами одной строкой — подсказка номера на PIECES и строка ключа печати. */
-export const sewnWords = (tiles: readonly SewnTile[]): string =>
-  tiles
-    .map(
-      (t) =>
-        (t.kind === 'empty'
-          ? `${t.word} not set`
-          : t.kind === 'stitch' && t.iso
-            ? `ISO ${t.word}`
-            : t.word) + (t.kind !== 'empty' && t.std ? ' (std)' : ''),
-    )
-    .join(' · ');
-
 /** Полоса коротко — строка ключа на бумаге: «LS 301 · press open · topstitch 6 mm ×2». */
 export const sewnShort = (tiles: readonly SewnTile[]): string =>
   tiles

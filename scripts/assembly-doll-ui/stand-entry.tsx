@@ -1,5 +1,5 @@
 // UI stand of the 3D paper doll (01-DESIGN-L0 §6, P3): the CONSTRUCTION column in miniature — the
-// REAL AssemblyMap (with its 3D chip) + the REAL SeamsDoor under the REAL providers, with the REAL
+// REAL AssemblyMap (with its 3D chip) under the REAL providers, with the REAL
 // piece-shape chain (usePieceShapes over the card's DXF parse) and the REAL DictionaryProvider.
 //
 // NOTHING LEAVES THE PAGE: `fetch` is replaced before anything runs. The dictionary, the size chart
@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import type { common_TechCard } from 'api/proto-http/admin';
 import { ActiveStepProvider } from 'components/managers/tech-card/components/assembly-map/active-step';
 import { AssemblyMap } from 'components/managers/tech-card/components/assembly-map/assembly-map';
-import { SeamsDoor } from 'components/managers/tech-card/components/assembly-seams/seams-door';
+import { useHydrateSeams } from 'components/managers/tech-card/components/assembly-seams/seams-store';
 import {
   CardUnitPicturesProvider,
   useCardSeamGraph,
@@ -84,10 +84,7 @@ const MEASURES = [
 let SIZES = SIZES0;
 let CATEGORIES: { id: number; name: string; parentId?: number }[] = [];
 
-const table = new Map<string, TechCardSeamWire>();
 const calls: { method: string; path: string }[] = [];
-/** Bodies of every seam write the page sent (what the stand checks the keys of). */
-const puts: { seamKey: string; status: string }[][] = [];
 let chartCells: { sizeId: number; measurementNameId: number; value: { value: string } }[] = [];
 
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -101,25 +98,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (/\/api\/admin\/dictionary$/.test(url.pathname))
     return json({ dictionary: { sizes: SIZES, measurements: MEASURES, categories: CATEGORIES } });
   if (/\/size-chart$/.test(url.pathname)) return json({ chart: { cells: chartCells } });
-  if (/\/tech-card\/\d+\/seams:delete$/.test(url.pathname)) {
-    const body = init?.body ? JSON.parse(String(init.body)) : {};
-    for (const k of body?.seamKeys ?? []) table.delete(k);
-    return json({ seams: [...table.values()] });
-  }
-  // The card read (a write reads the card's rows again when its list is old): today's table.
-  if (/\/tech-card\/\d+$/.test(url.pathname) && method === 'GET')
-    return json({ techCard: { id: 6, seams: [...table.values()] } });
-  if (/\/tech-card\/\d+\/seams$/.test(url.pathname) && method === 'PUT') {
-    const body = init?.body ? JSON.parse(String(init.body)) : {};
-    puts.push(
-      (body?.seams ?? []).map((r: TechCardSeamWire) => ({
-        seamKey: r.seamKey ?? '',
-        status: r.status ?? '',
-      })),
-    );
-    for (const r of body?.seams ?? []) table.set(r.seamKey, { ...r, stale: false });
-    return json({ seams: [...table.values()] });
-  }
   return json({});
 };
 
@@ -154,9 +132,10 @@ function SeedParse({ bundle, children }: { bundle: DxfBundle; children: ReactNod
   return seeded ? <>{children}</> : null;
 }
 
-function Column({ c, card, frozen }: { c: StandCard; card: common_TechCard; frozen: boolean }) {
+function Column({ c, card }: { c: StandCard; card: common_TechCard }) {
   const { shapeByKey } = usePieceShapes(false);
   const [cloth] = useState(() => (c.cloth ? new Map(c.cloth) : null));
+  useHydrateSeams(card.id ?? null, card.seams as TechCardSeamWire[] | undefined);
   return (
     <ActiveStepProvider>
       <CardUnitPicturesProvider shapes={shapeByKey} cloth={cloth} categoryNames={c.categoryNames}>
@@ -170,7 +149,6 @@ function Column({ c, card, frozen }: { c: StandCard; card: common_TechCard; froz
               </div>
             }
           />
-          <SeamsDoor techCard={card} frozen={frozen} shapes={shapeByKey} />
         </div>
       </CardUnitPicturesProvider>
     </ActiveStepProvider>
@@ -182,13 +160,11 @@ function Harness({
   form,
   card,
   bundle,
-  frozen,
 }: {
   c: StandCard;
   form: TechCardFormData;
   card: common_TechCard;
   bundle: DxfBundle;
-  frozen: boolean;
 }) {
   const methods = useForm<TechCardFormData>({ mode: 'onChange', defaultValues: form });
   const [qc] = useState(
@@ -202,7 +178,7 @@ function Harness({
             <FormProvider {...methods}>
               <form className='min-h-screen bg-pageBg p-6'>
                 <SeedParse bundle={bundle}>
-                  <Column c={c} card={card} frozen={frozen} />
+                  <Column c={c} card={card} />
                 </SeedParse>
               </form>
             </FormProvider>
@@ -250,19 +226,15 @@ declare global {
     __doll: {
       mount: (
         c: StandCard,
-        o?: { gold?: StoredSeam[]; frozen?: boolean; seams?: TechCardSeamWire[] },
+        o?: { gold?: StoredSeam[]; seams?: TechCardSeamWire[] },
       ) => Promise<number>;
-      /** Rows the way the review writes them (seamFromCandidate on the live graph), by piece NAME
-       *  pairs «BP_2#5» ↔ «BP#5». */
+      /** Rows anchored with seamFromCandidate on the live graph, by piece NAME pairs
+       *  «BP_2#5» ↔ «BP#5». */
       rowsFor: (
         pairs: [string, string, 'graph' | 'manual', ('same' | 'reversed')?][],
         size: string,
         keys?: string[],
       ) => TechCardSeamWire[];
-      /** Another client writes straight to the server (not into this page's card read). */
-      serverWrite: (w: TechCardSeamWire[]) => void;
-      table: () => TechCardSeamWire[];
-      puts: () => typeof puts;
       hasGraph: () => boolean;
       calls: () => typeof calls;
       solves: () => Record<
@@ -276,7 +248,6 @@ declare global {
           size: string;
         }
       >;
-      seamsSeen: () => number;
     };
     __dollFrames?: number;
   }
@@ -286,7 +257,6 @@ window.__doll = {
   mount: async (c, o = {}) => {
     root?.unmount();
     graph = null;
-    table.clear();
     useDollStore.setState({ solves: {}, poms: {}, live: null, hoverPom: null, open: false });
     SIZES = c.dictionary?.sizes ?? SIZES0;
     CATEGORIES = c.dictionary?.categories ?? [];
@@ -308,7 +278,6 @@ window.__doll = {
     };
     lastForm = form;
     const seams = o.seams ?? (o.gold ? goldWire(o.gold, form) : []);
-    for (const w of seams) table.set(w.seamKey!, w);
     chartCells = (c.chart ?? []).flatMap((x) => {
       const s = SIZES.find((z) => z.name === x.size.toLowerCase());
       const m = MEASURES.find((z) => z.name === x.name);
@@ -324,7 +293,7 @@ window.__doll = {
       seams,
       techCard: { styleNumber: form.styleNumber },
     } as unknown as common_TechCard;
-    root.render(<Harness c={c} form={form} card={card} bundle={bundle} frozen={!!o.frozen} />);
+    root.render(<Harness c={c} form={form} card={card} bundle={bundle} />);
     return parseMs;
   },
   hasGraph: () => !!graph,
@@ -362,11 +331,6 @@ window.__doll = {
         : [];
     });
   },
-  serverWrite: (ws) => {
-    for (const w of ws) table.set(w.seamKey!, w);
-  },
-  table: () => [...table.values()],
-  puts: () => puts,
   calls: () => calls,
   solves: () =>
     Object.fromEntries(
@@ -382,5 +346,4 @@ window.__doll = {
         },
       ]),
     ),
-  seamsSeen: () => table.size,
 };

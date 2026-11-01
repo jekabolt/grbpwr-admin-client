@@ -666,7 +666,7 @@ export function StudioTab({
                   {/* `ai ✦` of the DESCRIPTION and the draft's GENERATE are writes of this card
                       (EnhanceText and DraftDesignIdea need tech_cards:write), so the board locks on
                       the grant as GENERAL INFORMATION does — one rule per door on every surface
-                      (seam review, S-m2). */}
+                      (permission matrix, S-m2). */}
                   <MoodBoard
                     techCardId={techCardId}
                     disabled={readOnly || !canWriteCard}

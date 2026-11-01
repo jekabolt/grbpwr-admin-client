@@ -33,7 +33,6 @@ import {
 import { useCardCategoryNames } from './skeleton-card-inputs';
 import { ActiveStepProvider } from './assembly-map/active-step';
 import { AssemblyMap } from './assembly-map/assembly-map';
-import { SeamsDoor } from './assembly-seams/seams-door';
 import { SeamHintsBar } from './step-seams/seam-hints-map';
 import { StepResultProvider } from './step-seams/step-result-context';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
@@ -391,7 +390,7 @@ export function ConstructionTab({
   // и раньше писался у них выражением, а не через эту переменную.
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
-  // shared hook the pieces tab reuses for its mini-diagram.
+  // shared hook used by the construction drawing and operation rail.
   const pin = useCrossHighlight<number>();
   const bom = useCrossHighlight<string>();
 
@@ -654,8 +653,6 @@ export function ConstructionTab({
                 <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
                   <AssemblyColumn
                     techCard={techCard}
-                    frozen={frozen}
-                    shapes={pieceShapes.shapeByKey}
                     mediaById={mediaById}
                     activePin={pin.active}
                     onActivePinChange={pin.setActive}
@@ -770,24 +767,16 @@ const ASSEMBLY_COLUMN_W = 320;
 /**
  * КОЛОНКА КАРТЫ СБОРКИ — СВОРАЧИВАЕТСЯ, КАК ПАНЕЛЬ CALLOUTS СТУДИИ (T11). Тот же орган
  * (`CalloutsPanel`), только слева и без жеста ширины: свёрнутая — полоска «assembly map»;
- * открытая — прежние 320px (карта, SEAMS, PIECE CODES), шеврон ‹ в
+ * открытая — прежние 320px (карта, PIECE CODES), шеврон ‹ в
  * шапке карты. Без предпочтения колонка свёрнута. Правая колонка не меняется — только шире.
- *
- * Свёрнутая колонка ПРЯЧЕТСЯ АТРИБУТОМ, а не размонтируется: `SeamsDoor` гидрирует стор решений
- * швов при монтировании, и без него N на полоске не узнать (и граф швов карты, пиктограмм и куклы
- * читает тот же стор). Число неизвестно (нет графа) — полоска пишет одно имя.
  */
 function AssemblyColumn({
   techCard,
-  frozen,
-  shapes,
   mediaById,
   activePin,
   onActivePinChange,
 }: {
   techCard: common_TechCard | undefined;
-  frozen: boolean;
-  shapes: PieceShapes['shapeByKey'];
   mediaById: Map<number, common_MediaFull>;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
@@ -826,7 +815,6 @@ function AssemblyColumn({
         }
         action={<PanelCollapseDoor panel={panel} tag='amap' side='left' label='assembly map' />}
       />
-      <SeamsDoor techCard={techCard} frozen={frozen} shapes={shapes} />
       <PieceLegend />
     </CalloutsPanel>
   );

@@ -2,16 +2,14 @@ import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button, HeaderNote, Section, ViewSwitch, type ViewSwitchOption } from 'ui';
 import { activeOf, useActiveStep, useActiveStepStore } from './active-step';
-import { PiecesView } from './pieces-view';
 import { StepView } from './step-view';
 import { useMapModel } from './use-map-model';
 import { openDoll } from '../assembly-doll/doll-store';
 
-export type MapView = 'step' | 'pieces' | 'sketch';
+export type MapView = 'step' | 'sketch';
 
 const CORE_VIEWS = [
   { value: 'step', label: 'step' },
-  { value: 'pieces', label: 'pieces' },
 ] as const satisfies readonly ViewSwitchOption<MapView>[];
 
 const SKETCH_VIEW = {
@@ -24,7 +22,6 @@ const viewKey = (id: string | undefined) => `plm.techcard.assembly-map.view.${id
 function readView(id: string | undefined, hasSketch: boolean): MapView {
   try {
     const v = localStorage.getItem(viewKey(id));
-    if (v === 'pieces') return v;
     if (v === 'sketch' && hasSketch) return v;
     return 'step';
   } catch {
@@ -62,7 +59,6 @@ export function AssemblyMap({
   const count = model.ops.length;
   const chosen = activeOf(snap);
   const index = chosen != null && chosen < count ? chosen : model.firstMachine;
-  const pick = (i: number) => store?.select(i, 'map');
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented || shownView === 'sketch' || count === 0) return;
     const t = e.target as HTMLElement;
@@ -110,13 +106,6 @@ export function AssemblyMap({
           index != null ? (
             <StepView model={model} index={index} />
           ) : null
-        ) : shownView === 'pieces' ? (
-          <PiecesView
-            model={model}
-            active={chosen != null && chosen < count ? chosen : null}
-            onHover={(i) => store?.hover(i)}
-            onPick={pick}
-          />
         ) : (
           sketch
         )}

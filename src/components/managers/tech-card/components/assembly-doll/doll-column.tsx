@@ -4,10 +4,8 @@
 // still is the door into the fullscreen view; the map's 3D chip opens it too.
 
 import { lazy, Suspense, useEffect } from 'react';
-import { useWatch } from 'react-hook-form';
 import { Chip, Text } from 'ui';
 
-import type { TechCardFormData } from '../schema';
 import {
   closeDoll,
   isSolving,
@@ -25,8 +23,6 @@ const DollOverlay = lazy(() => import('./doll-overlay'));
 export function DollColumn() {
   const card = useDollCard();
   const open = useDollStore((s) => s.open);
-  const approval = useWatch<TechCardFormData>({ name: 'approvalState' }) as string | undefined;
-  const frozen = approval === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   const key = card ? dollKey(card, card.baseSize, false) : null;
   const solve = useDollStore((s) => (key ? s.solves[key] : undefined));
 
@@ -100,7 +96,7 @@ export function DollColumn() {
       </Text>
       {open && (
         <Suspense fallback={null}>
-          <DollOverlay open={open} onClose={closeDoll} frozen={frozen} />
+          <DollOverlay open={open} onClose={closeDoll} />
         </Suspense>
       )}
     </div>

@@ -1,10 +1,9 @@
 // THE STEP'S SEAMS, WIRING (assembly-schema T8). One provider over the operations rail hands every
 // step card the saved card, its frozen state and ONE seam writer; it also keeps the form honest:
 //
-// - the card's seam rows are in the seams store even while the assembly map (whose door hydrates
-//   it) is folded away;
-// - a seam that leaves the card (removed in the review, dropped by a DXF re-upload, deleted by a
-//   colleague) leaves every step's `seamKeys` at once — the server refuses a save that names a key
+// - the card's seam rows are in the seams store even while the assembly map is folded away;
+// - a seam that leaves the card (dropped by a DXF re-upload or deleted by a colleague) leaves every
+//   step's `seamKeys` at once — the server refuses a save that names a key
 //   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever;
 // - the same for a POSE row (P8, a piece placed by hand) and the steps' `poseKeys`.
 
@@ -123,8 +122,7 @@ export function StepSeamsProvider({
   const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard, active || loadGeometry);
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
-  // The store follows the card read here too: the assembly map's door hydrates it only while the
-  // map is open, and resets it when the door unmounts.
+  // The store follows the card read while the construction surface is mounted.
   const wire = techCard?.seams as TechCardSeamWire[] | undefined;
   const wireRef = useRef(wire);
   wireRef.current = wire;

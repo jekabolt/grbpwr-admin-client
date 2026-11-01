@@ -3,7 +3,7 @@
 //
 // The archives the owner exported from prod and imported on beta (tech-card archive format,
 // tmp/plans/assembly-3d-doll/prod-archives/prod-card-<id>.zip) are mounted one by one in the REAL
-// construction column (scripts/assembly-doll-ui/stand-entry.tsx: AssemblyMap + SeamsDoor under the
+// construction column (scripts/assembly-doll-ui/stand-entry.tsx: AssemblyMap under the
 // real providers, the real DXF parse, the real block links and findPiece, the card's sizes, BOM,
 // operations and gender through mapTechCardToForm). The 3D chip is pressed, the doll is solved in
 // the real worker, and the overlay's own words are read back: the state line, the size it read, the
@@ -286,7 +286,7 @@ for (const id of ids) {
       words,
       rows: [...document.querySelectorAll('[data-doll-row]')].map((li) => ({
         kind: li.getAttribute('data-doll-row'),
-        text: (li.textContent ?? '').replace(/fix in seams review|check$/g, '').trim(),
+        text: (li.textContent ?? '').replace(/check$/g, '').trim(),
       })),
     };
   });

@@ -2,10 +2,9 @@
 // pieces wrapped round a proxy and pulled shut along the seam graph, for two questions only: does
 // the graph close into a garment, and where do the card's measures sit on it.
 //
-// Three blocks on the grey ground, as the SEAMS review: the header (size, state, the honesty line),
-// the DOLL beside the MEASURES rail, and the ASSEMBLY CHECK strip. Nothing here writes to the card:
-// a seam is fixed in the SEAMS review (opened over this view, on that seam), and the doll is
-// rebuilt from the decisions after the provider's re-read.
+// Three blocks on the grey ground: the header (size, state, the honesty line), the DOLL beside the
+// MEASURES rail, and the ASSEMBLY CHECK strip. Nothing here writes to the card; the doll is rebuilt
+// from decisions made in the assembly order after the provider's re-read.
 //
 // Lazy-loaded (three.js stays out of the card's bundle until the view is opened).
 
@@ -14,14 +13,12 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { EdgeId } from 'lib/assembly-skeleton/types';
 import { liftMeasureLine } from 'lib/doll/lift';
-import type { DollSeamReport } from 'lib/doll/types';
 import { compareToSizeChart, POM, type ChartCell } from 'lib/pom';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Chip, ChipRow, GroupLabel, Section, Text, ViewSwitch, type ViewSwitchOption } from 'ui';
 
-import { SeamsReview } from '../assembly-seams/seams-review';
 import { useHeldSeamGraph } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
 import { DollCanvas, type CameraPreset, type PomLine } from './doll-canvas';
@@ -59,15 +56,7 @@ function densify(pts: readonly [number, number][], stepMm = 8): [number, number]
 
 const secs = (ms: number | undefined) => (ms == null ? '' : `${(ms / 1000).toFixed(1)} s`);
 
-export default function DollOverlay({
-  open,
-  onClose,
-  frozen,
-}: {
-  open: boolean;
-  onClose: () => void;
-  frozen: boolean;
-}) {
+export default function DollOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
   const card = useDollCard();
   const { graph } = useHeldSeamGraph();
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
@@ -79,7 +68,6 @@ export default function DollOverlay({
   const [lining, setLining] = useState(false);
   const [showPom, setShowPom] = useState(false);
   const [camera, setCamera] = useState<CameraPreset | null>('front');
-  const [fix, setFix] = useState<{ a: EdgeId[]; b: EdgeId[] } | null | false>(false);
   const at = size && card?.sizes.includes(size) ? size : card?.baseSize ?? '';
   const hasLining = !!card?.factsOf(card.baseSize)?.pieces.some((p) => p.cloth === 'lining');
 
@@ -183,8 +171,6 @@ export default function DollOverlay({
     [report, geoms, roles, names, onBase],
   );
 
-  const fixSeam = (s: DollSeamReport | null) => setFix(s && onBase ? { a: s.a, b: s.b } : null);
-
   const state = !card
     ? 'reading the pattern…'
     : !solve || solve.status === 'solving'
@@ -220,14 +206,9 @@ export default function DollOverlay({
             title='paper doll'
             question={title}
             action={
-              <>
-                <Chip quiet onClick={() => setFix(null)} data-doll-door='seams'>
-                  seams review
-                </Chip>
-                <Chip quiet onClick={onClose} data-doll-door='close'>
-                  close · esc
-                </Chip>
-              </>
+              <Chip quiet onClick={onClose} data-doll-door='close'>
+                close · esc
+              </Chip>
             }
           >
             <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
@@ -380,31 +361,13 @@ export default function DollOverlay({
             className='max-h-[30vh] overflow-y-auto'
           >
             {report ? (
-              <DollReportRows
-                rows={rows}
-                onFix={fixSeam}
-                fixHint={
-                  onBase ? null : `the review reads size ${card?.baseSize}: it opens unfocused`
-                }
-              />
+              <DollReportRows rows={rows} />
             ) : (
               <Text size='micro' variant='label' component='p'>
                 {solve?.status === 'error' ? state : 'the report comes when the doll settles'}
               </Text>
             )}
           </Section>
-
-          {fix !== false && card && (
-            <SeamsReview
-              open
-              onClose={() => setFix(false)}
-              cardId={card.cardId ?? undefined}
-              frozen={frozen}
-              title={title}
-              size={card.baseSize}
-              focus={fix}
-            />
-          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

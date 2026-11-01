@@ -1,23 +1,11 @@
 // THE ASSEMBLY CHECK STRIP (01-DESIGN-L0 §4, §6): the DollReport as rows — what the doll could not
-// close as drawn, worst first, each in words with millimetres and a door into the SEAMS review
-// focused on that seam. The doll never writes to the card: fixing happens in SEAMS, and the doll
-// is rebuilt from the decisions after the re-read.
+// close as drawn, worst first, each in words with millimetres. The doll never writes to the card.
 
-import type { DollSeamReport } from 'lib/doll/types';
-import { Chip, Pill, Text } from 'ui';
+import { Pill, Text } from 'ui';
 
 import type { ReportRow } from './words';
 
-export function DollReportRows({
-  rows,
-  onFix,
-  fixHint,
-}: {
-  rows: readonly ReportRow[];
-  onFix: (seam: DollSeamReport | null) => void;
-  /** Why the door opens the review unfocused (another size), or null. */
-  fixHint: string | null;
-}) {
+export function DollReportRows({ rows }: { rows: readonly ReportRow[] }) {
   if (rows.length === 0)
     return (
       <Text size='micro' variant='label' component='p' className='py-1' data-doll-report-empty=''>
@@ -60,16 +48,6 @@ export function DollReportRows({
             </Text>
           )}
           {r.check && <Pill tone='attention'>check</Pill>}
-          {r.kind === 'seam' && (
-            <Chip
-              quiet
-              onClick={() => onFix(r.seam)}
-              title={fixHint ?? 'open the seams review on this seam'}
-              data-doll-door='fix'
-            >
-              fix in seams review
-            </Chip>
-          )}
         </li>
       ))}
     </ul>
