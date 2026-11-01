@@ -23,6 +23,12 @@ import type { DeclaredJoin } from './joins';
 
 export type Vec3 = [number, number, number];
 
+/** An explicit owner stacking claim, in the editor's bottom → top order. */
+export type DollLayerRelation = readonly [under: string, over: string];
+
+/** The step editor's exact conversion of one operation-bound row. */
+export type DollOwnerCandidate = { seamKey: string; candidate: SeamCandidate };
+
 export type DollOptions = {
   /** Interior mesh step, mm; default adaptive (≈ 7 000 vertices for the whole garment). */
   gridMm?: number;
@@ -69,7 +75,20 @@ export type DollOptions = {
    * collar unit gives the neck path (tucks / pleats on it folded), a strip sewn by a confirmed seam
    * onto the top of the body is the waistband ring. No rows → the doll exactly as before.
    */
-  seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
+  seams?: {
+    /**
+     * `owner` is the assembly editor contract: only rows attached to operations are sewn. Omitted
+     * keeps the historical L4 behaviour for probes and callers that hand the doll all card rows.
+     */
+    mode?: 'owner';
+    rows: readonly StoredSeam[];
+    size: string;
+    sizes?: readonly SizePieces[];
+    /** Exact candidates produced by `storedRowsOfStep`; closures deliberately have none. */
+    candidates?: readonly DollOwnerCandidate[];
+    /** Explicit under/over claims read by step-result, including claims carried by pose rows. */
+    layers?: readonly DollLayerRelation[];
+  };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
   /**

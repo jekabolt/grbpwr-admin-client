@@ -15,7 +15,7 @@ import type {
   SkeletonFacts,
 } from 'lib/assembly-skeleton/types';
 
-import type { DollGroupId } from './types';
+import type { DollGroupId, DollLayerRelation } from './types';
 
 export type GroupedPiece = {
   key: string;
@@ -130,6 +130,10 @@ export function groupPieces(
      * its facing, two belt strips into a strap) still stacks.
      */
     panels?: ReadonlySet<string>;
+    /** Explicit bottom → top claims from the step editor. */
+    layers?: readonly DollLayerRelation[];
+    /** No same-shape/area stacking unless an owner claim or seam says so. */
+    owner?: boolean;
   } = {},
 ): Grouping {
   const warnings: string[] = [];
@@ -279,6 +283,24 @@ export function groupPieces(
 
   // ── 3. layers: identical twins sewn to each other, same-shape layers of a ring ──────────
   const leaderOf = new Map<string, string>();
+  const layerNext = new Map<string, string[]>();
+  for (const [under, over] of opts.layers ?? [])
+    layerNext.set(under, [...(layerNext.get(under) ?? []), over]);
+  const isUnder = (under: string, over: string) => {
+    const todo = [under];
+    const seen = new Set(todo);
+    while (todo.length) {
+      const key = todo.shift()!;
+      for (const candidate of layerNext.get(key) ?? []) {
+        if (candidate === over) return true;
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          todo.push(candidate);
+        }
+      }
+    }
+    return false;
+  };
   const lead = (k: string) => {
     let x = k;
     while (leaderOf.has(x)) x = leaderOf.get(x)!;
@@ -290,7 +312,14 @@ export function groupPieces(
     if (la === lb) return;
     const ga = geomOf.get(la)!;
     const gb = geomOf.get(lb)!;
-    const [L, F] = areaOf(ga) >= areaOf(gb) ? [la, lb] : [lb, la];
+    // The drawn leader is the visible (over) ply. Area remains the exact historical fallback.
+    const [L, F] = isUnder(la, lb)
+      ? [lb, la]
+      : isUnder(lb, la)
+        ? [la, lb]
+        : areaOf(ga) >= areaOf(gb)
+          ? [la, lb]
+          : [lb, la];
     leaderOf.set(F, L);
   };
   const noStack = opts.panels ?? new Set<string>();
@@ -314,6 +343,7 @@ export function groupPieces(
       const b = keys[j];
       const g = group.get(a)!;
       if (g !== group.get(b) || !RING_GROUPS.has(g) || role.get(a) !== role.get(b)) continue;
+      if (opts.owner && !isUnder(a, b) && !isUnder(b, a)) continue;
       if (noStack.has(a) || noStack.has(b)) continue;
       const [wa, ha] = dims(geomOf.get(a)!);
       const [wb, hb] = dims(geomOf.get(b)!);

@@ -6,7 +6,15 @@
 import { edgeIdsOf, orderUnits } from 'lib/assembly-skeleton/geometry';
 import { legPanels, sameLeg } from 'lib/assembly-skeleton/geometry/legs';
 import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
-import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { apply, det } from 'lib/assembly-skeleton/union/affine';
+import type {
+  Edge,
+  EdgeId,
+  PieceGeom,
+  Pt2,
+  SeamCandidate,
+  SeamGraph,
+} from 'lib/assembly-skeleton/types';
 import { grainDegOf } from 'lib/seams/frame';
 import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
@@ -85,6 +93,48 @@ const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide,
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth from the
 // neck edge. The pattern carries no roll-line mark; a shirt collar stands ~40 % and falls ~60 %.
 const ROLL_FRAC = 0.4;
+
+/** Keep only candidates that came from an owner row, and rebuild their connected components. */
+function ownerGraphOf(graph: SeamGraph, warnings: readonly string[] = []): SeamGraph {
+  const chosen = graph.chosen.filter((seam) => seam.provenance?.status === 'confirmed');
+  const rejected = graph.rejected.filter(
+    (seam) => seam.kind === 'closure-not-seam' && seam.provenance?.status === 'confirmed',
+  );
+  const parent = new Map(graph.pieces.map((piece) => [piece.pieceKey, piece.pieceKey]));
+  const find = (key: string): string => {
+    const next = parent.get(key);
+    if (!next || next === key) return key;
+    const root = find(next);
+    parent.set(key, root);
+    return root;
+  };
+  const join = (left: string, right: string) => {
+    const a = find(left);
+    const b = find(right);
+    if (a !== b) parent.set(b, a);
+  };
+  for (const seam of chosen) {
+    if (seam.kind === 'closure-not-seam') continue;
+    const keys = [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))]
+      .map(pk)
+      .filter((key) => parent.has(key));
+    for (let index = 1; index < keys.length; index++) join(keys[0], keys[index]);
+  }
+  const components = new Map<string, string[]>();
+  for (const { pieceKey } of graph.pieces) {
+    const root = find(pieceKey);
+    components.set(root, [...(components.get(root) ?? []), pieceKey]);
+  }
+  return {
+    ...graph,
+    chosen,
+    rejected,
+    components: [...components.values()],
+    warnings: [...warnings],
+    assignment: undefined,
+    shadow: undefined,
+  };
+}
 
 type Panel = GroupedPiece & {
   idx: number;
@@ -192,12 +242,15 @@ export function solveDoll(input: DollInput): DollReport {
   const t0 = now();
   const opt = input.options ?? {};
   const warnings: string[] = [];
-  // L4: stored seams. The graph is re-read with them resolved for this size (confirmed seams taken
-  // first, rejected pairs dropped, closures blocking their edges). No rows → exactly as before.
-  const l4 = !!opt.seams?.rows.length;
+  // L4: stored seams. Owner mode is stricter: after resolution only the confirmed owner candidates
+  // remain. The historical rows-without-mode path is unchanged for probes and archived goldens.
+  const owner = opt.seams?.mode === 'owner';
+  const l4 = owner || !!opt.seams?.rows.length;
+  const declaredJoins = owner ? undefined : opt.joins;
+  const proposalsAllowed = !owner && opt.proposeComposite !== false;
   let resolvedRows: SizeResolved | undefined;
   let graphIn = input.graph;
-  if (l4) {
+  if (l4 && opt.seams?.rows.length) {
     const S = opt.seams!;
     const grain = grainDegOf(input.facts);
     graphIn = readSeamGraph(
@@ -209,6 +262,45 @@ export function solveDoll(input: DollInput): DollReport {
           { size: S.size, pieces, grainDeg: grain },
           ...(S.sizes ?? []).filter((x) => x.size !== S.size),
         ]).get(S.size)!;
+        if (owner && S.candidates) {
+          const rowByKey = new Map(S.rows.map((row) => [row.seamKey, row]));
+          const edgeIds = new Set(pieces.flatMap((piece) => piece.edges.map((edge) => edge.id)));
+          const pieceKeys = new Set(pieces.map((piece) => piece.pieceKey));
+          const exactKeys = new Set(S.candidates.map(({ seamKey }) => seamKey));
+          const ignoredWords = new Set(
+            [...r.stale, ...r.orphan]
+              .filter(({ seam }) => exactKeys.has(seam.seamKey))
+              .map(({ words }) => words),
+          );
+          r.words = r.words.filter((words) => !ignoredWords.has(words));
+          r.forced = S.candidates.flatMap(({ seamKey, candidate }) => {
+            const row = rowByKey.get(seamKey);
+            if (!row || row.status !== 'confirmed') return [];
+            const present = candidate.surface
+              ? pieceKeys.has(candidate.surface.host) && pieceKeys.has(candidate.surface.part)
+              : [
+                  ...(candidate.aParts ?? edgeIdsOf(candidate.a)),
+                  ...(candidate.bParts ?? edgeIdsOf(candidate.b)),
+                ]
+                  .flatMap(edgeIdsOf)
+                  .every((edge) => edgeIds.has(edge));
+            if (!present) return [];
+            return [
+              {
+                ...candidate,
+                provenance: {
+                  seamKey,
+                  status: row.status,
+                  source: row.source,
+                  direction: row.direction,
+                  by: row.updatedBy || row.createdBy || 'owner',
+                  at: row.updatedAt || row.createdAt || '',
+                  how: 'hint' as const,
+                },
+              },
+            ];
+          });
+        }
         resolvedRows = r;
         return r;
       },
@@ -217,6 +309,38 @@ export function solveDoll(input: DollInput): DollReport {
       opt.assignment,
     );
   }
+  if (owner) graphIn = ownerGraphOf(graphIn, resolvedRows?.words);
+  const layerRelations = opt.seams?.layers ?? [];
+  const layerScore = new Map<string, number>();
+  for (const [under, over] of layerRelations) {
+    layerScore.set(under, (layerScore.get(under) ?? 0) - 1);
+    layerScore.set(over, (layerScore.get(over) ?? 0) + 1);
+  }
+  /** Today's role/area offset is used only when none of these pieces has an explicit claim. */
+  const claimedLayer = (keys: Iterable<string>, fallback: number): number => {
+    const scores = [...keys].flatMap((key) => (layerScore.has(key) ? [layerScore.get(key)!] : []));
+    if (!scores.length) return fallback;
+    const score = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    return score === 0 ? 0 : score > 0 ? 3 : -3;
+  };
+  const isUnder = (under: Iterable<string>, over: Iterable<string>): boolean => {
+    const targets = new Set(over);
+    const next = new Map<string, string[]>();
+    for (const [a, b] of layerRelations) next.set(a, [...(next.get(a) ?? []), b]);
+    const todo = [...under];
+    const seen = new Set(todo);
+    while (todo.length) {
+      const key = todo.shift()!;
+      for (const candidate of next.get(key) ?? []) {
+        if (targets.has(candidate)) return true;
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          todo.push(candidate);
+        }
+      }
+    }
+    return false;
+  };
   const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed';
   const excludedPairs = (resolvedRows?.excluded ?? []).filter((x) => !x.surface);
   /** A pair of runs a person rejected (any edge of a on one side, any of b on the other). */
@@ -479,6 +603,7 @@ export function solveDoll(input: DollInput): DollReport {
     lining,
     dropSeams: opt.dropSeams,
     hardware: hardwareOf,
+    ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   const suspect0 = suspectsIn(G0);
   // NOT A GARMENT (bags, covers, flat accessories): the card names no garment and no piece reads as
@@ -518,8 +643,8 @@ export function solveDoll(input: DollInput): DollReport {
   // tops; two rings meet base to base. The graph's pairings across two rings are refused. Their
   // panels are never stacked as plies.
   const ringNotSewn: NonNullable<DollReport['notSewn']> = [];
-  const ringsR = opt.joins?.length
-    ? ringsFromJoins(graph, opt.joins, notShell, (k) => {
+  const ringsR = declaredJoins?.length
+    ? ringsFromJoins(graph, declaredJoins, notShell, (k) => {
         const g = graph.pieces.find((x) => x.pieceKey === k);
         return !!g && isSurfacePiece(g, graph);
       })
@@ -549,9 +674,9 @@ export function solveDoll(input: DollInput): DollReport {
   // (trousers only for now: a shirt's order is read by the free-loop proposals as before)
   const legsCat0 =
     facts.category === 'trousers' || facts.category === 'jumpsuit' || facts.category === 'bottom';
-  if (legsCat0 && (opt.joins?.length || hardwareOf.size)) {
+  if (legsCat0 && (declaredJoins?.length || hardwareOf.size)) {
     const skipK = unitSkipKeys(graph, facts, lining, hardwareOf);
-    const u = orderUnits(graph, opt.joins ?? [], skipK, hardwareOf);
+    const u = orderUnits(graph, declaredJoins ?? [], skipK, hardwareOf);
     graph = u.graph;
     for (const x of u.added) {
       unitNotes.set(`${x.seam.a}~${x.seam.b}`, x.note);
@@ -570,15 +695,15 @@ export function solveDoll(input: DollInput): DollReport {
   // POCKET BAGS (joins.ts): two pocket pieces the order puts on different sides of one operation,
   // with equal edges, are sewn to each other round the bag — reported as a seam, drawn on the panel
   // they are sewn onto (surface pieces are not solved).
-  const bagSeams = opt.joins?.length ? pocketBagJoins(graph, opt.joins, notShell) : [];
+  const bagSeams = declaredJoins?.length ? pocketBagJoins(graph, declaredJoins, notShell) : [];
   for (const x of bagSeams) {
     orderJoins.push({ join: x.join, seam: `${x.seam.a}~${x.seam.b}`, note: x.note });
     warnings.push(x.note);
   }
-  if (opt.joins?.length) {
+  if (declaredJoins?.length) {
     const r = completeFromJoins(
       graph,
-      opt.joins,
+      declaredJoins,
       notShell,
       new Set([...suspect0].filter(([, v]) => v.kind === 'drop').map(([k]) => k)),
       facts.category === 'trousers' || facts.category === 'jumpsuit',
@@ -611,7 +736,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const l of r.left) warnings.push(`technologist's order — not found: ${l}`);
     if (opt.debug)
       warnings.push(
-        `debug: order joins ${opt.joins.length} · added ${r.added.map((x) => `${x.seam.a}~${x.seam.b}`).join(' ')} · by loops ${r.byLoops.map((x) => x.part.join('+')).join(' | ')} · ignored ${[...suspect0.keys()].join(' ')}`,
+        `debug: order joins ${declaredJoins.length} · added ${r.added.map((x) => `${x.seam.a}~${x.seam.b}`).join(' ')} · by loops ${r.byLoops.map((x) => x.part.join('+')).join(' | ')} · ignored ${[...suspect0.keys()].join(' ')}`,
       );
     orderSurface.push(...r.surface);
     for (const x of r.surface)
@@ -624,6 +749,7 @@ export function solveDoll(input: DollInput): DollReport {
     dropSeams: opt.dropSeams,
     hardware: hardwareOf,
     panels: ringsR?.panels,
+    ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   warnings.push(...G.warnings);
   // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
@@ -719,6 +845,7 @@ export function solveDoll(input: DollInput): DollReport {
   // run below). Proposed by the doll, said in words.
   const dollNote = new Map<string, string>();
   const bandExt: { key: string; mm: number } | null = (() => {
+    if (owner) return null;
     const band = G.pieces.filter((P) => P.group === 'WAISTBAND');
     if (band.length !== 2) return null;
     const [A, B] = band;
@@ -2586,7 +2713,7 @@ export function solveDoll(input: DollInput): DollReport {
       const hosts: Panel[] = [];
       let host = null as Panel | null;
       let join = '';
-      for (const J of opt.joins ?? []) {
+      for (const J of declaredJoins ?? []) {
         const mine = J.parts.findIndex((X) => X.some((k) => keys.has(k)));
         if (mine < 0) continue;
         for (const [i, X] of J.parts.entries()) {
@@ -2954,7 +3081,14 @@ export function solveDoll(input: DollInput): DollReport {
             const per = torsoAt(yy)!.tab[torsoAt(yy)!.tab.length - 1];
             th = thP + (TAU * (u - uP) * (1 - EPS_WRAP)) / per;
           }
-          setPos(v, torsoPoint(th, yy, CLEAR + layer + (P.role === 'placket' ? 2 : 0)));
+          setPos(
+            v,
+            torsoPoint(
+              th,
+              yy,
+              CLEAR + claimedLayer([P.key], layer + (P.role === 'placket' ? 2 : 0)),
+            ),
+          );
           if (y > vSh + 10) pos[3 * v + 1] = y; // above the shoulder line: keep the height
           proxyOf[v] = tIdx;
           placed[v] = 1;
@@ -4087,6 +4221,7 @@ export function solveDoll(input: DollInput): DollReport {
     kind: Work['kind'],
     born: number,
   ) => {
+    if (owner) return;
     const ch = charts.get(gid);
     const list = groups.get(gid);
     if (!ch || !list) return;
@@ -4235,7 +4370,7 @@ export function solveDoll(input: DollInput): DollReport {
       for (const a of (sc.aParts ?? [sc.a]).map(pk))
         for (const b of (sc.bParts ?? [sc.b]).map(pk)) linkedP.add(`${a}|${b}`).add(`${b}|${a}`);
     const geomMap = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
-    for (const J of opt.joins ?? [])
+    for (const J of declaredJoins ?? [])
       J.parts.forEach((X, i) =>
         J.parts.forEach((Y, j) => {
           if (j <= i) return;
@@ -4248,7 +4383,7 @@ export function solveDoll(input: DollInput): DollReport {
         }),
       );
   }
-  for (const f of facingPairs(new Set(['BODY']), 100, 0.15)) {
+  for (const f of owner ? [] : facingPairs(new Set(['BODY']), 100, 0.15)) {
     const A = pathOf([f.x.e.id])!;
     const B = pathOf([f.y.e.id])!;
     const Px = panelByKey.get(pk(f.x.e.id));
@@ -4968,7 +5103,7 @@ export function solveDoll(input: DollInput): DollReport {
       'proposed-composite',
       passes,
     );
-    if (sewnNear(gid, 'BODY') || opt.proposeComposite === false) continue;
+    if (sewnNear(gid, 'BODY') || !proposalsAllowed) continue;
     // L4: a sleeve a person sewed to the body by a confirmed seam is not proposed again.
     if (
       l4 &&
@@ -5073,7 +5208,7 @@ export function solveDoll(input: DollInput): DollReport {
       };
     }
   }
-  if (!confNeck && neckGroups.length && groups.has('BODY') && opt.proposeComposite !== false) {
+  if (!confNeck && neckGroups.length && groups.has('BODY') && proposalsAllowed) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
@@ -5456,7 +5591,7 @@ export function solveDoll(input: DollInput): DollReport {
         (a.keys.has(pk(sm.a[0])) && b.keys.has(pk(sm.b[0]))) ||
         (b.keys.has(pk(sm.a[0])) && a.keys.has(pk(sm.b[0]))),
     ) ||
-    (opt.joins ?? []).some((J) =>
+    (declaredJoins ?? []).some((J) =>
       J.parts.some(
         (X, i) =>
           X.some((k) => a.keys.has(k)) &&
@@ -5582,9 +5717,11 @@ export function solveDoll(input: DollInput): DollReport {
   const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
     if (!neck) return;
     const N0n = neck;
-    const ordered = [...units].sort((x, y) => y.area - x.area);
+    const ordered = [...units].sort((x, y) =>
+      isUnder(x.keys, y.keys) ? 1 : isUnder(y.keys, x.keys) ? -1 : y.area - x.area,
+    );
     ordered.forEach((U, idx) => {
-      const layer = 3 * (ordered.length - 1 - idx);
+      const layer = claimedLayer(U.keys, 3 * (ordered.length - 1 - idx));
       // L4: the unit the confirmed neck seam names is mapped by the folded plan on ITS base.
       const cn =
         confNeck && U.keys.has(pk((confNeck.unit === 'a' ? confNeck.g.a : confNeck.g.b)[0]))
@@ -5683,7 +5820,7 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const work = cn
         ? confWork
-        : graphSewn || off
+        : graphSewn || off || owner
           ? null
           : anchoredWork(
               id,
@@ -5735,7 +5872,9 @@ export function solveDoll(input: DollInput): DollReport {
   }
   if (groups.has('COLLAR')) {
     const units = unitsOf('COLLAR');
-    const ordered = [...units].sort((x, y) => y.area - x.area);
+    const ordered = [...units].sort((x, y) =>
+      isUnder(x.keys, y.keys) ? 1 : isUnder(y.keys, x.keys) ? -1 : y.area - x.area,
+    );
     for (let i = 1; i < ordered.length; i++)
       if (!joinedUnits(ordered[i], ordered[0]))
         warnings.push(
@@ -5791,7 +5930,7 @@ export function solveDoll(input: DollInput): DollReport {
       for (const P of stand) for (let i = 0; i < P.count; i++) standV.push(P.offset + i);
       const planOf = new Map<Unit, ReturnType<typeof topAnchors>>();
       ordered.forEach((U0, idx) => {
-        const layer = 3 * (ordered.length - 1 - idx);
+        const layer = claimedLayer(U0.keys, 3 * (ordered.length - 1 - idx));
         // Turned down = the drawn piece rotated 180° (u and v both reversed): its face shows.
         const U: Unit = { ...U0, attach: [...U0.attach].reverse(), other: [...U0.other].reverse() };
         const plan = topAnchors(U, top);
@@ -5890,7 +6029,7 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const work = confFall
           ? confW
-          : graphSewn
+          : graphSewn || owner
             ? null
             : anchoredWork(
                 label,
@@ -5964,7 +6103,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const P of groups.get(gid)!) buildPanel(P);
     for (const sm of G.seams)
       if (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set([gid]))) graphWork(sm, passes);
-    if (runs && wrist && !graphTouches(gid, new Set([sl])) && opt.proposeComposite !== false)
+    if (runs && wrist && !graphTouches(gid, new Set([sl])) && proposalsAllowed)
       propose(
         `${s === 'L' ? 'left' : 'right'} cuff ↔ wrist`,
         { verts: runs.top, closed: false },
@@ -6040,7 +6179,7 @@ export function solveDoll(input: DollInput): DollReport {
       2,
     );
     for (const P of groups.get(gid)!) buildPanel(P);
-    if (runs && target && opt.proposeComposite !== false) {
+    if (runs && target && proposalsAllowed) {
       let run = gid === 'WAISTBAND' ? runs.bottom : runs.top;
       // Halves joined end to end: the run is their long edges, not the short ends it turns into.
       if (gid === 'WAISTBAND' && dollNote.size) {
@@ -6126,7 +6265,7 @@ export function solveDoll(input: DollInput): DollReport {
     if (!P.layers.length) return null;
     const keys = new Set([P.key, ...P.layers]);
     const want = new Set<string>();
-    for (const J of opt.joins ?? [])
+    for (const J of declaredJoins ?? [])
       if (J.parts.some((X) => X.some((k) => keys.has(k))))
         for (const X of J.parts) for (const k of X) if (!keys.has(k)) want.add(k);
     const others = [...want].slice(0, 4);
@@ -6512,7 +6651,7 @@ export function solveDoll(input: DollInput): DollReport {
       ...(l4 ? { decidedBy: 'doll' as const } : {}),
     });
   // Free edges facing each other (a seam the pattern has not got): reported open, never solved.
-  const freeAll = panels
+  const freeAll = (owner ? [] : panels)
     .filter((P) => P.group !== 'FLOAT')
     .flatMap((P) =>
       freeEdges(P)
@@ -6636,11 +6775,20 @@ export function solveDoll(input: DollInput): DollReport {
   const surfacePanels: DollReport['panels'] = [];
   const surfacePos: number[] = [];
   {
+    const ownerSurface = new Map(
+      graph.chosen.flatMap((candidate) =>
+        owner && candidate.kind === 'surface' && candidate.surface
+          ? [[candidate.surface.part, candidate.surface] as const]
+          : [],
+      ),
+    );
     // (trousers for now: a top's pockets / facings stay listed as before — except the two pieces
     // of a pocket bag the order sews round: drawn on their panel on any garment)
     const bagPieces = new Set(bagSeams.flatMap((x) => [pk(x.seam.a), pk(x.seam.b)]));
     const surf = G.skipped
-      .filter((x) => x.surface && (legsCat0 || bagPieces.has(x.pieceKey)))
+      .filter(
+        (x) => x.surface && (ownerSurface.has(x.pieceKey) || legsCat0 || bagPieces.has(x.pieceKey)),
+      )
       .map((x) => x.pieceKey);
     // Hosts are the garment's panels (a leg, the body) — never a band, a collar or a cuff.
     const drawnArea = new Map(
@@ -6648,7 +6796,9 @@ export function solveDoll(input: DollInput): DollReport {
         .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
         .map((P) => [P.key, Math.abs(P.geom.areaMm2)]),
     );
-    const hosts = surfaceHosts(surf, opt.joins ?? [], drawnArea);
+    const hosts = surfaceHosts(surf, declaredJoins ?? [], drawnArea);
+    for (const [part, surface] of ownerSurface)
+      hosts.set(part, { host: surface.host, join: 'owner row' });
     const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
     const stack = new Map<string, number>();
     let M = N;
@@ -6662,13 +6812,22 @@ export function solveDoll(input: DollInput): DollReport {
           host: null,
           join: null,
           placed: false,
-          note: opt.joins?.length
+          note: declaredJoins?.length
             ? 'no join of the order sews it to a drawn panel — not placed'
             : "no technologist's order to say which panel carries it — not placed",
         });
         continue;
       }
-      const fit = surfaceFit(S, H.geom);
+      const ownerPlacement = ownerSurface.get(k);
+      const fit = ownerPlacement
+        ? {
+            map: (point: Pt2) => apply(ownerPlacement.T, point),
+            flip: det(ownerPlacement.T) < 0,
+            cover: 1,
+            past: 0,
+            how: 'owner placement',
+          }
+        : surfaceFit(S, H.geom);
       if (!fit) {
         surfaceRep.push({
           pieceKey: k,
@@ -6694,6 +6853,7 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const lift = 2 + 2 * (stack.get(H.key) ?? 0);
       stack.set(H.key, (stack.get(H.key) ?? 0) + 1);
+      const layerDirection = isUnder([H.key], [k]) ? 1 : -1;
       const hp = H.mesh.pts;
       for (const q of mesh.pts) {
         const p = fit.map(q);
@@ -6737,7 +6897,7 @@ export function solveDoll(input: DollInput): DollReport {
         const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
         // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
         // to (a patch pocket would lie over it — the drawing does not tell which).
-        for (let d = 0; d < 3; d++) surfacePos.push(X[d] - (liftQ * Nn[d]) / nl);
+        for (let d = 0; d < 3; d++) surfacePos.push(X[d] + (layerDirection * liftQ * Nn[d]) / nl);
       }
       const flip = flipH !== fit.flip;
       const tris = new Uint32Array(mesh.tris.length);
@@ -6759,7 +6919,10 @@ export function solveDoll(input: DollInput): DollReport {
         layers: [],
       });
       M += mesh.pts.length;
-      const note = `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
+      const side = layerDirection > 0 ? 'over' : 'under';
+      const note = owner
+        ? `sewn onto ${H.key} (${hk.join}) — ${fit.how}; drawn ${lift} mm ${side} its face, not solved`
+        : `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
       surfaceRep.push({
         pieceKey: k,
         host: H.key,

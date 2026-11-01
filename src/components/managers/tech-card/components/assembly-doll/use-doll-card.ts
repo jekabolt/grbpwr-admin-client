@@ -27,6 +27,7 @@ import {
   type DeclaredHardware,
   type DeclaredJoin,
 } from 'lib/doll/joins';
+import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
 import type { StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -38,6 +39,9 @@ import { sizeTokensOf } from '../nesting/block-code';
 import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-refs';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
+import { useStepResults } from '../step-seams/step-result-context';
+import { storedRowsOfStep } from '../step-seams/step-rows';
+import { useCardGeoms, usePoseRows } from '../step-seams/step-picture-view';
 
 export type DollCard = {
   cardId: number | null;
@@ -51,7 +55,13 @@ export type DollCard = {
   factsOf: (size: string) => SkeletonFacts | null;
   /** Pieces without a contour in that size (left out of its doll, said so). */
   missingOf: (size: string) => string[];
+  /** Only rows attached to an operation and accepted by the step editor's row conversion. */
   rows: StoredSeam[];
+  /** Owner mode is also active for a bound pose even when it contributes no seam. */
+  owner: {
+    candidates: readonly DollOwnerCandidate[];
+    layers: readonly DollLayerRelation[];
+  } | null;
   rowsSig: string;
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
@@ -81,8 +91,7 @@ export function useDollCard(): DollCard | null {
   const cardId = useSeamsStore((s) => s.cardId);
   const server = useSeamsStore((s) => s.server);
   const pending = useSeamsStore((s) => s.pending);
-  const rows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
-  const sig = useMemo(() => rowsSig(rows), [rows]);
+  const allRows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
 
   const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
@@ -95,6 +104,55 @@ export function useDollCard(): DollCard | null {
   const cardSizes = useMemo(
     () => sizeIds.map((id) => sizeById.get(id) ?? '').filter(Boolean),
     [sizeIds, sizeById],
+  );
+
+  // The doll is mounted under StepResultProvider. Select rows through the exact conversion used by
+  // the step editor; a legacy row not named by an operation is deliberately invisible here. A
+  // closure is a stored owner action but not a seam candidate, so it rides beside converted rows.
+  const { geoms: cardGeoms, innerLines } = useCardGeoms();
+  const poseRows = usePoseRows();
+  const stepResults = useStepResults();
+  const ownerSeams = useMemo(() => {
+    const byKey = new Map(allRows.map((row) => [row.seamKey, row]));
+    const selected = new Map<
+      string,
+      { row: StoredSeam; candidate?: DollOwnerCandidate['candidate'] }
+    >();
+    let bound = false;
+    for (const op of operations) {
+      for (const key of op.seamKeys ?? []) {
+        const row = byKey.get(key);
+        if (!row) continue;
+        bound = true;
+        if (row.kind === 'closure') selected.set(key, { row });
+      }
+      for (const stored of storedRowsOfStep(op, byKey, cardGeoms, innerLines))
+        selected.set(stored.key, { row: stored.row, candidate: stored.candidate });
+      if ((op.poseKeys ?? []).some((key) => poseRows.has(key))) bound = true;
+    }
+    if (!bound) return null;
+    const seen = new Set<string>();
+    const layers = (stepResults ?? []).flatMap((result) =>
+      result.stacked.filter(([under, over]) => {
+        const key = `${under}\u0000${over}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }),
+    );
+    return {
+      rows: [...selected.values()].map(({ row }) => row),
+      candidates: [...selected].flatMap(([seamKey, stored]) =>
+        stored.candidate ? [{ seamKey, candidate: stored.candidate }] : [],
+      ),
+      layers,
+    };
+  }, [allRows, operations, cardGeoms, innerLines, poseRows, stepResults]);
+  const rows = ownerSeams?.rows ?? [];
+  const sig = useMemo(
+    () =>
+      `${ownerSeams ? 'owner' : 'engine'}|${rowsSig(rows)}|${JSON.stringify(ownerSeams?.layers ?? [])}`,
+    [ownerSeams, rows],
   );
 
   // The same parse the piece tiles drew from — passive: a cold card downloads nothing here.
@@ -233,6 +291,7 @@ export function useDollCard(): DollCard | null {
       factsOf,
       missingOf,
       rows,
+      owner: ownerSeams ? { candidates: ownerSeams.candidates, layers: ownerSeams.layers } : null,
       rowsSig: sig,
       joins,
       hardware,
@@ -241,7 +300,7 @@ export function useDollCard(): DollCard | null {
       readId: idOf(facts),
       inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
     };
-  }, [facts, sized, rows, sig, joins, hardware, gender, cardId, cardSizes]);
+  }, [facts, sized, rows, ownerSeams, sig, joins, hardware, gender, cardId, cardSizes]);
 }
 
 /** The key a solve is cached under: the read, the size, the rows, lining. */
@@ -267,12 +326,23 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
     options: {
       lining,
       oneSize: c.sizes.length === 1,
-      joins: c.joins,
+      ...(!c.owner ? { joins: c.joins } : {}),
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
-      ...(c.rows.length ? { seams: { rows: c.rows, size } } : {}),
+      ...(c.owner
+        ? {
+            proposeComposite: false,
+            seams: {
+              mode: 'owner' as const,
+              rows: c.rows,
+              size,
+              candidates: c.owner.candidates,
+              layers: c.owner.layers,
+            },
+          }
+        : {}),
       // VITE_SEAM_ASSIGNMENT: the worker reads the graph the way the flag says (greedy = as before).
-      ...(assignment ? { assignment } : {}),
+      ...(!c.owner && assignment ? { assignment } : {}),
     },
     ...(anchors.length ? { anchors } : {}),
   };
