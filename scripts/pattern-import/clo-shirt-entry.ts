@@ -4,7 +4,9 @@
 // pocket bottoms drift apart by size, in world axes they stay exact mirrors). This is intentionally
 // independent of expand.ts's grade propagation: it derives the expected boundary and notch
 // coordinates from the source entities and the RUL rows, then compares those coordinates with the
-// emitted per-size blocks, and checks every piece's area never shrinks from XS to XL.
+// emitted per-size blocks (boundary, notches, ruled internal lines), checks every piece's area
+// never shrinks from XS to XL, and that the source block spelling stays the display name while
+// pairing uses a canonical identity.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -17,11 +19,13 @@ import {
   type PieceBlock,
 } from 'lib/pattern-import/adapters/rul/model';
 import type { RulTable } from 'lib/pattern-import/adapters/rul/types';
+import { readName } from 'lib/pattern-import/semantics/names';
 
 const GOLDEN =
   process.env.PATIMPORT_CLO_SHIRT ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/dxf-rul-export/golden-clo-shirt';
 const OUT = process.env.PATIMPORT_CLO_SHIRT_OUT ?? resolve(GOLDEN, 'clo-shirt-grading-golden.svg');
+const LINES_OUT = process.env.PATIMPORT_CLO_SHIRT_LINES_OUT ?? resolve(GOLDEN, 'lines-after.svg');
 const SAME = 0.01;
 const EXACT = 1.1e-6;
 
@@ -35,6 +39,10 @@ const ab = (path: string) => {
 };
 const point = (entity: ModelEntity) => entity.slots.map(({ x, y }) => ({ x, y }));
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+const chainLength = (entity: ModelEntity) => {
+  const points = point(entity);
+  return points.slice(1).reduce((sum, at, index) => sum + distance(points[index], at), 0);
+};
 
 function axesOf(piece: PieceBlock): Axes {
   const refs = piece.entities.filter(
@@ -214,6 +222,38 @@ const drawing: DrawPiece[] = [];
 let boundaryChecks = 0;
 let notchChecks = 0;
 let movedNotches = 0;
+let internalChecks = 0;
+let movedInternals = 0;
+let nameChecks = 0;
+
+for (const piece of source) {
+  const sourceName = (piece.pieceLabel ?? expanded.pieces[piece.block.name]).trim();
+  const name = readName({
+    dxfIdentity: sourceName,
+    texts: [],
+    isSizeToken: (token) => table.sizes.some((size) => size.toUpperCase() === token.toUpperCase()),
+  });
+  if (!name || name.displayName !== sourceName)
+    throw new Error(
+      `${piece.block.name}: display name ${JSON.stringify(name?.displayName)} != source ${JSON.stringify(sourceName)}`,
+    );
+  nameChecks++;
+}
+const pocketName = readName({
+  dxfIdentity: 'PCK_R_MAIN',
+  texts: [],
+  isSizeToken: () => false,
+});
+if (
+  !pocketName ||
+  pocketName.code !== 'PCK_MAIN' ||
+  pocketName.hand !== 'R' ||
+  pocketName.displayName !== 'PCK_R_MAIN'
+)
+  throw new Error(`PCK_R_MAIN source/canonical split failed: ${JSON.stringify(pocketName)}`);
+console.log(
+  `PASS names · ${nameChecks} source display names kept · PCK_R_MAIN pairs as PCK_MAIN/R`,
+);
 
 for (const piece of source) {
   const axes = axesOf(piece);
@@ -224,6 +264,25 @@ for (const piece of source) {
   );
   const baseBoundary = point(boundary);
   const baseNotches = notches.map((notch) => point(notch)[0]);
+  const placketLines =
+    piece.block.name === 'PLCK_L_XS'
+      ? piece.entities.filter(
+          (entity) =>
+            entity.kind === 'chain' &&
+            entity.layer === '8' &&
+            !entity.closed &&
+            chainLength(entity) > 600,
+        )
+      : [];
+  if (piece.block.name === 'PLCK_L_XS') {
+    if (placketLines.length !== 5)
+      throw new Error(`PLCK_L_XS: expected five long layer-8 lines, got ${placketLines.length}`);
+    const rules = placketLines.flatMap((line) =>
+      point(line).map((at) => ruleAt(piece, line.layer, at, table)),
+    );
+    if (rules.some((rule) => rule === null) || [...new Set(rules)].sort().join() !== '4,5')
+      throw new Error(`PLCK_L_XS: expected explicit endpoint rules #4/#5, got ${rules.join(',')}`);
+  }
   const boundaries: Point[][] = [];
   const notchSizes: Point[][] = [];
   for (const [size, sizeName] of table.sizes.entries()) {
@@ -265,6 +324,36 @@ for (const piece of source) {
       notchChecks++;
       return expected;
     });
+    if (placketLines.length) {
+      const gotLines = output.entities.filter(
+        (entity) =>
+          entity.kind === 'chain' &&
+          entity.layer === '8' &&
+          !entity.closed &&
+          chainLength(entity) > 600,
+      );
+      if (gotLines.length !== placketLines.length)
+        throw new Error(
+          `${piece.block.name} ${sizeName}: long internal line count ${gotLines.length} != ${placketLines.length}`,
+        );
+      placketLines.forEach((line, lineIndex) =>
+        point(line).forEach((at, vertex) => {
+          const rule = ruleAt(piece, line.layer, at, table);
+          if (rule === null)
+            throw new Error(
+              `${piece.block.name}: long line ${lineIndex} vertex ${vertex} has no rule`,
+            );
+          const move = moveOf(table, axes, rule, size);
+          assertNear(
+            gotLines[lineIndex].slots[vertex],
+            { x: at.x + move.x, y: at.y + move.y },
+            `${piece.block.name} ${sizeName} internal ${lineIndex}:${vertex} rule #${rule}`,
+          );
+          if (size > 0 && Math.hypot(move.x, move.y) > EXACT) movedInternals++;
+          internalChecks++;
+        }),
+      );
+    }
     boundaries.push(expectedBoundary);
     notchSizes.push(expectedNotches);
   }
@@ -284,6 +373,13 @@ for (const piece of source) {
 }
 
 if (!movedNotches) throw new Error('the golden case exercised no moving notch');
+if (!movedInternals || internalChecks !== 5 * 2 * table.sizes.length)
+  throw new Error(
+    `PLCK_L explicit internal rules were not exercised (${internalChecks} checks, ${movedInternals} moves)`,
+  );
+console.log(
+  `PASS PLCK_L_XS · five 685.432 mm lines · explicit endpoint rules #4/#5 · ${internalChecks} coordinates`,
+);
 
 const colors = ['#111111', '#1687a7', '#2ca25f', '#d9a400', '#9b5de5'];
 const xml = (value: string) =>
@@ -335,7 +431,76 @@ svg.push('</svg>');
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, `${svg.join('\n')}\n`);
 
+type LineDrawing = {
+  name: string;
+  sizes: { name: string; chains: { layer: string; closed: boolean; points: Point[] }[] }[];
+};
+const lineDrawing: LineDrawing[] = ['PLCK_L_XS', 'PLCK_R_XS'].map((block) => {
+  const sourcePiece = source.find((piece) => piece.block.name === block);
+  if (!sourcePiece) throw new Error(`${block}: source piece missing`);
+  const stem = expanded.pieces[block];
+  return {
+    name: sourcePiece.pieceLabel ?? stem,
+    sizes: table.sizes.map((size) => {
+      const output = graded.get(`${stem}_${size.replace(/[\s_]+/g, '-')}`);
+      if (!output) throw new Error(`${block}: expanded ${size} missing`);
+      return {
+        name: size,
+        chains: output.entities.flatMap((entity) =>
+          entity.kind === 'chain' && ['1', '8', '14'].includes(entity.layer)
+            ? [{ layer: entity.layer, closed: entity.closed, points: point(entity) }]
+            : [],
+        ),
+      };
+    }),
+  };
+});
+const linesWidth = 1200;
+const linesHeight = 900;
+const linesSvg: string[] = [
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${linesWidth}" height="${linesHeight}" viewBox="0 0 ${linesWidth} ${linesHeight}">`,
+  '<rect width="100%" height="100%" fill="#f3f3f3"/>',
+  '<style>text{font-family:Arial,sans-serif;fill:#222}.head{font-size:20px}.piece{font-size:17px}.panel{fill:#fff;stroke:#ccc}.cut{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}.sew{fill:none;stroke-width:.8;stroke-dasharray:4 3;opacity:.55;vector-effect:non-scaling-stroke}.internal{fill:none;stroke-width:1;opacity:.85;vector-effect:non-scaling-stroke}</style>',
+  '<text class="head" x="24" y="34">CLO shirt · placket internals after RUL expansion</text>',
+  `<text x="24" y="58">${xml(table.sizes.join(' · '))} · layer 1 cut · layer 14 sew · layer 8 internal</text>`,
+];
+lineDrawing.forEach((piece, pieceIndex) => {
+  const left = 24 + pieceIndex * 588;
+  const top = 78;
+  const all = piece.sizes.flatMap((size) => size.chains.flatMap((chain) => chain.points));
+  const minX = Math.min(...all.map((at) => at.x));
+  const maxX = Math.max(...all.map((at) => at.x));
+  const minY = Math.min(...all.map((at) => at.y));
+  const maxY = Math.max(...all.map((at) => at.y));
+  const scale = Math.min(500 / Math.max(maxX - minX, 1), 720 / Math.max(maxY - minY, 1));
+  const spanX = (maxX - minX) * scale;
+  const x0 = left + (552 - spanX) / 2;
+  const y0 = top + 778;
+  const drawLine = (points: Point[], closed: boolean) =>
+    [...points, ...(closed ? [points[0]] : [])]
+      .map(
+        (at) =>
+          `${(x0 + (at.x - minX) * scale).toFixed(2)},${(y0 - (at.y - minY) * scale).toFixed(2)}`,
+      )
+      .join(' ');
+  linesSvg.push(`<rect class="panel" x="${left}" y="${top}" width="552" height="798"/>`);
+  linesSvg.push(`<text class="piece" x="${left + 14}" y="${top + 26}">${xml(piece.name)}</text>`);
+  piece.sizes.forEach((size, sizeIndex) => {
+    const color = colors[sizeIndex];
+    size.chains.forEach((chain) => {
+      const cls = chain.layer === '1' ? 'cut' : chain.layer === '14' ? 'sew' : 'internal';
+      linesSvg.push(
+        `<polyline class="${cls}" points="${drawLine(chain.points, chain.closed)}" stroke="${color}"/>`,
+      );
+    });
+  });
+});
+linesSvg.push('</svg>');
+mkdirSync(dirname(LINES_OUT), { recursive: true });
+writeFileSync(LINES_OUT, `${linesSvg.join('\n')}\n`);
+
 console.log(
-  `PASS golden · ${source.length} pieces · ${table.sizes.length} sizes · ${boundaryChecks} boundary coordinates · ${notchChecks} notch coordinates`,
+  `PASS golden · ${source.length} pieces · ${table.sizes.length} sizes · ${boundaryChecks} boundary coordinates · ${notchChecks} notch coordinates · ${internalChecks} internal coordinates · ${nameChecks} names`,
 );
 console.log(`SVG ${OUT}`);
+console.log(`SVG ${LINES_OUT}`);

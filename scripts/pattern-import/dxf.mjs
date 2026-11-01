@@ -23,6 +23,7 @@ const CORPUS =
   process.env.PATIMPORT_CORPUS ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
 const PLAN = resolve(CORPUS, '..');
+const ARTIFACTS = process.env.PATIMPORT_DXF_OUT;
 const outfile = resolve(tmpdir(), `patimport-dxf-${process.pid}.mjs`);
 await esbuild({
   entryPoints: [resolve(HERE, 'dxf-entry.ts')],
@@ -1161,7 +1162,7 @@ function irOf(read, seg) {
     seg,
   });
 }
-const SYN17 = resolve(CORPUS, 'synthetic/f17');
+const SYN17 = ARTIFACTS ? resolve(ARTIFACTS, 'synthetic/f17') : resolve(CORPUS, 'synthetic/f17');
 mkdirSync(SYN17, { recursive: true });
 const parityFiles = [
   resolve(PLAN, 'k2-work/golden-min.dxf'),
@@ -1301,8 +1302,9 @@ await expectKind('a PDF', enc('%PDF-1.7\n%âãÏÓ\n1 0 obj\n'), 'not-dxf');
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-mkdirSync(resolve(PLAN, 'reports'), { recursive: true });
-writeFileSync(resolve(PLAN, `reports/F8-${stamp}.json`), JSON.stringify(report, null, 2));
+const REPORTS = ARTIFACTS ? resolve(ARTIFACTS, 'reports') : resolve(PLAN, 'reports');
+mkdirSync(REPORTS, { recursive: true });
+writeFileSync(resolve(REPORTS, `F8-${stamp}.json`), JSON.stringify(report, null, 2));
 const md = [
   `# F8 probe — ${report.date}`,
   '',
@@ -1326,6 +1328,6 @@ const md = [
   ...checks.map((c) => `- ${c.ok ? '✓' : '✗'} ${c.what}${c.d ? ` — ${c.d}` : ''}`),
   '',
 ].join('\n');
-writeFileSync(resolve(PLAN, `reports/F8-${stamp}.md`), md);
+writeFileSync(resolve(REPORTS, `F8-${stamp}.md`), md);
 console.log(bad ? `\n${bad} FAILED` : `\nall ${checks.length} ok`);
 process.exit(bad ? 1 : 0);

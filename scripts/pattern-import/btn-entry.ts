@@ -627,7 +627,7 @@ export async function main(): Promise<number> {
   for (const [name, b] of blocksOf(a.text)) expandedMin.set(name, minOf(b.outline));
   const afterText = await sectionB(dxfText, rulText, a.byStem);
   const svg = sectionC(afterText, process.env.PATIMPORT_BTN_BEFORE);
-  const out = resolve(GOLDEN, 'btn-after.svg');
+  const out = process.env.PATIMPORT_BTN_OUT ?? resolve(GOLDEN, 'btn-after.svg');
   writeFileSync(out, svg);
   console.log(`picture: ${out}`);
   console.log(bad ? `\n${bad} FAIL` : '\nall PASS');

@@ -185,8 +185,10 @@ function baseDxf(
     sample?: string;
     texts?: string;
     drill?: string;
+    drillAt?: [number, number];
   } = {},
 ) {
+  const [drillX, drillY] = o.drillAt ?? [100, 150];
   const pts: [number, number][] = [
     [0, 0],
     [200, 0],
@@ -215,8 +217,8 @@ function baseDxf(
         T('1', 0, 300, '# 2'),
       ].join(''),
     P('4', 100, 0),
-    P('13', 100, 150),
-    o.drill ?? T('13', 100, 150, '# 3'),
+    P('13', drillX, drillY),
+    o.drill ?? T('13', drillX, drillY, '# 3'),
     '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n50\r\n 20\r\n50\r\n 30\r\n0.0\r\n 11\r\n50\r\n 21\r\n250\r\n 31\r\n0.0\r\n',
     o.extra ?? '',
     T('1', 20, 280, 'Piece Name: FRONT'),
@@ -309,6 +311,20 @@ async function sectionB(t: RulTable) {
     'warnings say what was interpolated / left',
     ex.warnings.some((w) => /interpolation/.test(w)),
     ex.warnings.join(' | '),
+  );
+  const exInternal = expandRul({
+    dxf: enc(baseDxf({ drillAt: [120, 150], extra: P('8', 100, 150) })),
+    dxfName: 'FRONT-internal.dxf',
+    rul: t,
+    rulName: 'B9000.rul',
+  });
+  const internal48 = blocksOf(exInternal.text).get('FRONT_48')!.pts['8'][0];
+  const internalDx = (2 * R2.at(-1)! + R3.at(-1)!) / 4;
+  check(
+    'B',
+    'rule-less layer-8 point uses its mean-value place in the graded outline',
+    near(internal48, 100 + internalDx, 150) && exInternal.stats.interior === 1,
+    `${JSON.stringify(internal48)} · interior ${exInternal.stats.interior}`,
   );
   writeFileSync(resolve(OUT, 'B9000-FRONT.expanded.dxf'), ex.text);
   // the importer's own reader sees 8 sizes of one piece

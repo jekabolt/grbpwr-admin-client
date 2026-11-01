@@ -8,11 +8,12 @@
 //      of the block at that place; `# -1` is a point explicitly without a rule;
 //   2. the other points of a line that has graded points move by the arc-length interpolation of
 //      the two graded points around them (closed lines wrap; open lines hold the end's grade);
-//   3. a line without a rule of its own follows the graded lines its points lie on, and its other
-//      points interpolate between those; an isolated point (drill, notch, turn/curve marker) follows
-//      its rule, else the graded line it lies on; a button / drill MARK (a small closed shape and
-//      what is drawn inside it) moves as one thing by the grade of its centre — its rule, the graded
-//      line it lies on, else its proportional place inside the graded outline;
+//   3. a line without a rule of its own follows the graded lines its points lie on; an internal
+//      coordinate on no line takes the mean-value (Floater) grade of its place in the layer-1
+//      outline; an isolated point (drill, notch, turn/curve marker) follows its rule, else the
+//      graded line it lies on; a button / drill MARK (a small closed shape and what is drawn inside
+//      it) moves as one thing by the grade of its centre — its rule, the graded line it lies on,
+//      else its proportional place inside the graded outline;
 //   4. everything else stays as drawn in every size (an ungraded line, a label) — said in a note.
 // Refused, never partially graded: a malformed table, a rule number the table lacks, a rule text
 // that sits on no point, two rules at one place, a DXF that already holds several sizes or is drawn
@@ -49,6 +50,8 @@ export type RulExpandStats = {
   interpolated: number;
   /** Coordinates that follow the graded line they lie on (notches, line ends on the boundary). */
   following: number;
+  /** Rule-less internal coordinates graded by their mean-value place inside the layer-1 outline. */
+  interior: number;
   /** Coordinates of pieces with rules that stay as drawn (no rule, on no graded line). */
   still: number;
   /** Pieces with no rule at all (identical in every size). */
@@ -168,6 +171,7 @@ type PieceGrades = {
   ruled: number;
   interpolated: number;
   following: number;
+  interior: number;
   still: number;
   rules: Set<number>;
 };
@@ -322,14 +326,19 @@ function gradePiece(
     ruled: 0,
     interpolated: 0,
     following: 0,
+    interior: 0,
     still: 0,
     rules: new Set(),
   };
   const gradable = (m: ModelEntity) => m.kind === 'chain' || m.kind === 'point';
+  // Keep absent rule text distinct from CLO's explicit `# -1`: only the former may use the
+  // proportional interior fallback below. Both continue to interpolate/follow exactly as before.
+  const sourceRule: (number | null | undefined)[][] = ents.map((m) => m.slots.map(() => undefined));
   ents.forEach((m, e) => {
     if (!gradable(m)) return;
     m.slots.forEach((s, k) => {
       const r = ruleAt(m, s.x, s.y);
+      sourceRule[e][k] = r;
       if (typeof r === 'number') {
         out.of[e][k] = [{ rule: r, w: 1 }];
         out.rules.add(r);
@@ -481,6 +490,26 @@ function gradePiece(
       if (m.kind === 'chain') graded.add(e);
     }
   }
+
+  // 3a · genuinely rule-less internal geometry follows the piece rather than staying at the
+  // sample coordinates. Boundary endpoints take the exact grade of that edge; every other vertex
+  // takes the mean-value (Floater) grade of its place in the layer-1 outline. Run this after rigid
+  // marks so a circle/buttonhole keeps its shape, and only for coordinates with no source rule
+  // text: an explicit rule was handled above, while `# -1` keeps its existing interpolation/follow
+  // semantics.
+  ents.forEach((m, e) => {
+    if (!gradable(m) || graded.has(e) || (m.layer !== '8' && m.layer !== '14')) return;
+    m.slots.forEach((s, k) => {
+      if (out.of[e][k] || sourceRule[e][k] !== undefined) return;
+      const edge = follow(m, e, s);
+      const g = edge ?? inside(s);
+      if (!g) return;
+      out.of[e][k] = g;
+      if (edge) out.following++;
+      else out.interior++;
+    });
+    if (m.kind === 'chain' && out.of[e].every(Boolean)) graded.add(e);
+  });
 
   // to a fixed point: a line graded by following can carry the points that lie on it in turn
   for (let grew = true; grew; ) {
@@ -940,9 +969,10 @@ export function expandRul(input: ExpandInput): RulExpansion {
       ruled: a.ruled + g.ruled,
       interpolated: a.interpolated + g.interpolated,
       following: a.following + g.following,
+      interior: a.interior + g.interior,
       still: a.still + (g.rules.size ? g.still : 0),
     }),
-    { ruled: 0, interpolated: 0, following: 0, still: 0 },
+    { ruled: 0, interpolated: 0, following: 0, interior: 0, still: 0 },
   );
   if (ungradedPieces.length)
     warnings.push(
@@ -951,6 +981,10 @@ export function expandRul(input: ExpandInput): RulExpansion {
   if (tot.interpolated)
     warnings.push(
       `${tot.interpolated} curve point${tot.interpolated > 1 ? 's' : ''} without a rule graded by arc-length interpolation between the graded points around them — the source CAD may smooth a graded curve differently`,
+    );
+  if (tot.interior)
+    warnings.push(
+      `${tot.interior} internal point${tot.interior > 1 ? 's' : ''} without a source rule graded by mean-value position inside the layer-1 outline`,
     );
   if (tot.still)
     warnings.push(

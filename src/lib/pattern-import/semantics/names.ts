@@ -3,9 +3,10 @@
 // Where a name comes from, strongest first:
 //   1. `pieceOverrides[seed]` — the operator's or the AI's answer (code, mods, displayName,
 //      nameOrigin incl. 'ai-auto', aiConfidence) — taken as given, only CHECKED;
-//   2. the DXF block identity (F8 `dxf.identity`: block name minus size / AAMA PIECE NAME) —
-//      upper-cased, the author's `UNI` token read as "ungraded" and removed, modifiers put in
-//      grammar order (R/L → F/B → n → #), a trailing size token of the run removed;
+//   2. the DXF block identity (F8 `dxf.identity`: block name minus size / AAMA PIECE NAME) — the
+//      source spelling stays the display name; its internal identity is upper-cased, the author's
+//      `UNI` token read as "ungraded" and removed, modifiers put in grammar order (R/L → F/B → n
+//      → #), a trailing size token of the run removed;
 //   3. printed text inside the piece (`dictionary/ readPieceText`: EN/DE/RU/FR/NL/PL/ES/DA) → code
 //      + F/B; a lining label makes the code `LIN_<code>` (K1: lining names differ from the shell's).
 // Size tokens are NEVER part of an identity: the card reads the last token as the size (FP_L vs L)
@@ -242,7 +243,7 @@ export function readName(opts: {
     if (p && !identityGrammarProblem([p.code, ...p.mods].join('_'))) {
       return {
         ...p,
-        displayName: override?.displayName ?? defaultDisplayName(p.code, p.mods, p.hand),
+        displayName: override?.displayName ?? dxfIdentity.trim(),
         nameOrigin: 'text',
         notes: [`name from the DXF block ${dxfIdentity}`, ...p.notes],
       };
