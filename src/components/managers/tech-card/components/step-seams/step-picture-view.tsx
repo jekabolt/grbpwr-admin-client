@@ -879,6 +879,85 @@ export const spanMm = (line: readonly Pt2[]) => {
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 };
 
+/**
+ * How far a drawn outline may leave the dense ring, in garment mm. A step picture is 0.3–0.5 px/mm
+ * and `pathOf` rounds to 0.1 px, so 0.3 mm is under a sixth of a pixel (0.04 mm on paper, a fifth of
+ * the 0.7 px line's own width) — the plotted line is the same; the markup is not. Measured on
+ * cards 83 / 81 / 85: the 1 mm resample (`g.rs`, 300–2500 points a piece) is drawn 43 / 300 / 512
+ * times per document, 59k / 324k / 586k path vertices and 1.3 / 6.9 / 12.7 MB of markup for the
+ * print pipeline to lay out and encode; this pass keeps 1.0k / 7.5k / 11.2k of those points.
+ */
+export const DRAWN_RING_TOL_MM = 0.3;
+
+const distToSegment = (p: Pt2, a: Pt2, b: Pt2): number => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+};
+
+/**
+ * Douglas–Peucker over a closed ring (first point not repeated), keeping the original point
+ * objects. The ring is cut at its first point and the point farthest from it, so neither chord
+ * degenerates; each half is then thinned on its own.
+ */
+function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
+  const n = ring.length;
+  if (n < 4) return [...ring];
+  const at = (i: number) => ring[i % n];
+  let far = 1;
+  let farD = 0;
+  for (let i = 1; i < n; i++) {
+    const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
+    if (d > farD) {
+      far = i;
+      farD = d;
+    }
+  }
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[far] = 1;
+  const stack: [number, number][] = [
+    [0, far],
+    [far, n],
+  ];
+  while (stack.length) {
+    const [s, e] = stack.pop()!;
+    let worst = -1;
+    let worstAt = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = distToSegment(at(i), at(s), at(e));
+      if (d > worst) {
+        worst = d;
+        worstAt = i;
+      }
+    }
+    if (worst > tol) {
+      keep[worstAt] = 1;
+      stack.push([s, worstAt], [worstAt, e]);
+    }
+  }
+  const out: Pt2[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(ring[i]);
+  return out;
+}
+
+const drawnRings = new WeakMap<readonly Pt2[], readonly Pt2[]>();
+
+/**
+ * The outline a piece is drawn with: `g.rs` thinned to DRAWN_RING_TOL_MM. Only the drawn path uses
+ * it — centres, name spots, doors, marks and hit tests keep the dense ring. Cached per ring, so a
+ * piece is thinned once a session, not once per step it appears in.
+ */
+export function drawnRing(rs: readonly Pt2[]): readonly Pt2[] {
+  const hit = drawnRings.get(rs);
+  if (hit) return hit;
+  const out = simplifyClosed(rs, DRAWN_RING_TOL_MM);
+  drawnRings.set(rs, out);
+  return out;
+}
+
 export type PictureView = { k: number; x: number; y: number };
 
 /**
@@ -1027,17 +1106,20 @@ export function StepPictureSvg({
   }, [fitBounds, w, h, fitPad, vk, vx, vy]);
 
   const pieces = useMemo(() => {
-    const out: { key: string; ring: Pt2[]; input: number; centre: Pt2 }[] = [];
+    const out: { key: string; ring: Pt2[]; drawn: Pt2[]; input: number; centre: Pt2 }[] = [];
     for (const [key, T] of layout.T) {
       const g = geoms.get(key);
       if (!g) continue;
       const twin = layers ? twinNumbers.get(key) : undefined;
       const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-      const ring = g.rs.map((p) => {
+      const px = (p: Pt2): Pt2 => {
         const [x, y] = toPx(fit, apply(T, p));
-        return [x + offset, y + offset] as Pt2;
-      });
-      out.push({ key, ring, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
+        return [x + offset, y + offset];
+      };
+      // `ring` measures (centre, spots, hits); `drawn` is what the paths plot.
+      const ring = g.rs.map(px);
+      const drawn = drawnRing(g.rs).map(px);
+      out.push({ key, ring, drawn, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
     }
     return out;
   }, [layout, geoms, fit, layers, twinNumbers]);
@@ -1456,19 +1538,19 @@ export function StepPictureSvg({
             {ownedLower.map((piece) => (
               <path
                 key={piece.key}
-                d={pathOf(piece.ring, true)}
+                d={pathOf(piece.drawn, true)}
                 data-lower-layer-base={piece.key}
               />
             ))}
           </g>
           <g fill={FILL} stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
             {ownedTop.map((piece) => (
-              <path key={piece.key} d={pathOf(piece.ring, true)} data-piece-outline={piece.key} />
+              <path key={piece.key} d={pathOf(piece.drawn, true)} data-piece-outline={piece.key} />
             ))}
           </g>
           <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
             {ownedTop.map((piece) => (
-              <path key={piece.key} d={pathOf(piece.ring, true)} />
+              <path key={piece.key} d={pathOf(piece.drawn, true)} />
             ))}
           </g>
         </>
@@ -1476,7 +1558,7 @@ export function StepPictureSvg({
         <>
           <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
             {base.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
+              <path key={p.key} d={pathOf(p.drawn, true)} data-piece-outline={p.key} />
             ))}
           </g>
           {under.length > 0 && (
@@ -1500,7 +1582,7 @@ export function StepPictureSvg({
           )}
           <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
             {base.map((p) => (
-              <path key={p.key} d={pathOf(p.ring, true)} />
+              <path key={p.key} d={pathOf(p.drawn, true)} />
             ))}
           </g>
         </>
@@ -1524,7 +1606,7 @@ export function StepPictureSvg({
         ownedLower.map((piece) => (
           <path
             key={`lower:${piece.key}`}
-            d={pathOf(piece.ring, true)}
+            d={pathOf(piece.drawn, true)}
             fill={LOWER_LAYER_FILL}
             stroke={LOWER_LAYER_STROKE}
             strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
