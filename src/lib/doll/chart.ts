@@ -124,6 +124,11 @@ export function buildChart(
   rootKey: string,
   /** Lay the root (and every later component's root) mirrored: the root is drawn face down. */
   rootMirror = false,
+  /**
+   * A folded piece's footprint as the polygons of its plies (its `rs` is the contour mapped through
+   * the folds: self-overlapping, blind to an even-odd test) — the overlap test reads these instead.
+   */
+  footprints?: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
 ): Chart {
   const geom = new Map(pieces.map((g) => [g.pieceKey, g]));
   const place = new Map<string, ChartPlace>();
@@ -153,23 +158,23 @@ export function buildChart(
     if (out) return out;
     const g = geom.get(k)!;
     const b = bbox(g.rs);
-    const ring = g.rs.filter((_, i) => i % 4 === 0);
+    const rings = footprints?.get(k) ?? [g.rs.filter((_, i) => i % 4 === 0)];
     out = [];
     const step = Math.max(6, Math.sqrt(((b.x1 - b.x0) * (b.y1 - b.y0)) / 400));
     for (let y = b.y0 + step / 2; y < b.y1; y += step)
-      for (let x = b.x0 + step / 2; x < b.x1; x += step) if (inside([x, y], ring)) out.push([x, y]);
+      for (let x = b.x0 + step / 2; x < b.x1; x += step)
+        if (rings.some((ring) => inside([x, y], ring))) out.push([x, y]);
     samplesOf.set(k, out);
     return out;
   };
-  const ringsOf = new Map<string, Pt2[]>();
-  const placedRing = (k: string) => {
+  const ringsOf = new Map<string, Pt2[][]>();
+  const placedRings = (k: string) => {
     let r = ringsOf.get(k);
     if (!r) {
       const p = place.get(k)!;
-      r = geom
-        .get(k)!
-        .rs.filter((_, i) => i % 4 === 0)
-        .map((q) => toChart(p, q));
+      r = (footprints?.get(k) ?? [geom.get(k)!.rs.filter((_, i) => i % 4 === 0)]).map((ring) =>
+        ring.map((q) => toChart(p, q)),
+      );
       ringsOf.set(k, r);
     }
     return r;
@@ -185,9 +190,9 @@ export function buildChart(
         Math.min(b.y1, c.y1) <= Math.max(b.y0, c.y0)
       )
         continue;
-      const ring = placedRing(o);
+      const rings = placedRings(o);
       let n = 0;
-      for (const q of pts) if (inside(q, ring)) n++;
+      for (const q of pts) if (rings.some((ring) => inside(q, ring))) n++;
       if (n / pts.length > 0.2)
         return `${o} ${Math.round((100 * n) / pts.length)}% mirror=${p.mirror}`;
     }
