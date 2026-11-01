@@ -1809,6 +1809,23 @@ export type TechCardSeamSource =
   | "TECH_CARD_SEAM_SOURCE_ORDER"
   | "TECH_CARD_SEAM_SOURCE_MANUAL"
   | "TECH_CARD_SEAM_SOURCE_AI";
+// TechCardPieceFoldKind is which way the flipping part of the piece goes.
+export type TechCardPieceFoldKind =
+  | "TECH_CARD_PIECE_FOLD_KIND_UNKNOWN"
+  // The flap lands on the piece's inside face (toward the body).
+  | "TECH_CARD_PIECE_FOLD_KIND_INWARD"
+  // The flap lands on the piece's outside face.
+  | "TECH_CARD_PIECE_FOLD_KIND_OUTWARD";
+// TechCardPieceFoldSource is where the fold line came from.
+export type TechCardPieceFoldSource =
+  | "TECH_CARD_PIECE_FOLD_SOURCE_UNKNOWN"
+  // The line is drawn in the DXF (layer 8 of an unfolded piece, the layer-6 axis of a band) and the
+  // owner gave it a kind.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_DXF"
+  // Drawn or edited by the owner.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_OWNER"
+  // A suggestion (a fold mark parallel to an edge) the owner accepted unchanged.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_ACCEPTED_HINT";
 // TechCardSeamDecisionAction is what the technologist did when closing one join step of the seam
 // picker / quiz with the engine's guess in front of them.
 export type TechCardSeamDecisionAction =
@@ -4346,6 +4363,12 @@ export type TechCard = {
   // These are deleted sheets, newest first. They stay visible here so snapshot_id can restore the
   // whole pre-delete card and history_id can remove an unwanted retained revision.
   removedPatternHistory: TechCardPatternRevision[] | undefined;
+  // OUTPUT-ONLY: the fold lines on the card's pieces (placket folded in half, cuff, hem turn-up),
+  // in seq order per piece, with the server's staleness verdict resolved on this read. Written ONLY
+  // through UpsertTechCardPieceFolds / DeleteTechCardPieceFolds — never through TechCardInsert, so a
+  // full card save cannot erase them; those RPCs never bump lock_version and the rows enter no
+  // section digest (the seams doctrine, seams = 32). Ignored on write.
+  pieceFolds: TechCardPieceFold[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -4688,6 +4711,45 @@ export type TechCardSeamPlacement = {
   yMm: number | undefined;
   rotDeg: number | undefined;
   flip: boolean | undefined;
+};
+
+// TechCardPieceFold is one stored fold line, keyed by a client-minted ULID.
+export type TechCardPieceFold = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  foldKey: string | undefined;
+  // tech_card_piece.line_key of the folded piece — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // 1-based order of application on this piece; unique per piece.
+  seq: number | undefined;
+  kind: TechCardPieceFoldKind | undefined;
+  // Exactly two points of the straight fold line in the piece's frame (u, v in [0, 1]); the client
+  // extends the line to the contour.
+  line: TechCardSeamSample[] | undefined;
+  // A point on the part that flips — which side moves is data, not «the smaller area».
+  flipAt: TechCardSeamSample | undefined;
+  // EDGE LOCATOR, all or nothing. edge_samples = five points of the edge the fold runs along (the
+  // shape of TechCardSeamAnchor.samples, walk order), offset_mm = the fold's distance from that edge
+  // inward, mm (> 0). On another size or after a re-upload the client finds the edge again and lays
+  // the line at offset_mm from it; without a locator it uses `line` as is. edge_hint = the engine's
+  // run id when written ('PLCK_L#2') — fast path + diagnostics, never trusted alone.
+  edgeHint: string | undefined;
+  edgeSamples: TechCardSeamSample[] | undefined;
+  offsetMm: number | undefined;
+  // The piece contour's signature when written (the fast path's guard).
+  contourSig: string | undefined;
+  source: TechCardPieceFoldSource | undefined;
+  // Size code the line was written on — honesty for display.
+  anchoredSize: string | undefined;
+  // The owner's words, at most 255 characters.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance, as on TechCardSeam — stale =
+  // the source of the piece (sheets AND block→piece links of its fabric scopes) moved since the row
+  // was written; a stale row is shown and offered for re-confirm, not applied as is.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardSeamDecision is ONE immutable record of what the technologist did with a seam guess
