@@ -184,16 +184,24 @@ describe('inputGroups', () => {
 describe('step seam eligibility', () => {
   const pieces = new Set(['FP', 'BP']);
 
-  it('does not show a seam row when WITH is one already assembled unit', () => {
-    const ops = [{ inputKeys: ['FP', 'BP'], outputUnitKey: 'BODY' }, { inputKeys: ['FP', 'BP'] }];
+  it('shows a seam row when WITH is one already assembled unit', () => {
+    const ops = [
+      { inputKeys: ['FP', 'BP'], outputUnitKey: 'BODY' },
+      { inputKeys: ['FP', 'BP'], work: 'join_lockstitch' },
+    ];
     expect(stepInputPieces(ops, 1, pieces)).toEqual(['FP', 'BP']);
     expect(inputGroups(ops, 1, pieces)).toEqual([{ key: 'BODY', pieces: ['FP', 'BP'] }]);
-    expect(isJoinStep(ops, 1, pieces)).toBe(false);
-    expect(hasMultipleStepPieces(ops, 1, pieces)).toBe(false);
+    expect(isJoinStep(ops, 1, pieces)).toBe(true);
+    expect(hasMultipleStepPieces(ops, 1, pieces)).toBe(true);
   });
 
   it('recognises two separate live inputs as a join', () => {
     expect(isJoinStep([{ inputKeys: ['FP', 'BP'] }], 0, pieces)).toBe(true);
+  });
+
+  it('keeps a single real piece hidden', () => {
+    expect(isJoinStep([{ inputKeys: ['FP'] }], 0, pieces)).toBe(false);
+    expect(hasMultipleStepPieces([{ inputKeys: ['FP'] }], 0, pieces)).toBe(false);
   });
 
   it('does not count materials, photos, duplicates, or unresolved keys as pieces', () => {
@@ -206,6 +214,88 @@ describe('step seam eligibility', () => {
     ];
     expect(stepInputPieces(ops, 0, pieces)).toEqual(['FP']);
     expect(hasMultipleStepPieces(ops, 0, pieces)).toBe(false);
+  });
+
+  it('expands BASE and proposes open shoulder seams, not its sewn sides', () => {
+    const unitPieces = new Set(['BACK', 'FRONT_L', 'FRONT_R']);
+    const geoms = new Map([
+      [
+        'BACK',
+        shaped('BACK', 'back', [
+          { len: 120 },
+          { len: 300 },
+          { len: 135 },
+          { len: 310 },
+          { len: 160 },
+        ]),
+      ],
+      [
+        'FRONT_L',
+        shaped(
+          'FRONT_L',
+          'left front',
+          [{ len: 120 }, { len: 300 }, { len: 145 }, { len: 400 }],
+          'L',
+        ),
+      ],
+      [
+        'FRONT_R',
+        shaped(
+          'FRONT_R',
+          'right front',
+          [{ len: 135 }, { len: 310 }, { len: 155 }, { len: 420 }],
+          'R',
+        ),
+      ],
+    ]);
+    const seams = new Map([
+      ['left side', storedSeam('left side', 'BACK#1', 'FRONT_L#1')],
+      ['right side', storedSeam('right side', 'BACK#3', 'FRONT_R#1')],
+    ]);
+    const ops = [
+      {
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'join_lockstitch',
+        inputKeys: ['BACK', 'FRONT_L', 'FRONT_R'],
+        outputUnitKey: 'BASE',
+        seamKeys: ['left side', 'right side'],
+      },
+      {
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        work: 'join_lockstitch',
+        zone: 'shoulder',
+        inputKeys: ['BASE'],
+      },
+    ];
+
+    expect(stepInputPieces(ops, 1, unitPieces)).toEqual(['BACK', 'FRONT_L', 'FRONT_R']);
+    expect(inputGroups(ops, 1, unitPieces)).toEqual([
+      { key: 'BASE', pieces: ['BACK', 'FRONT_L', 'FRONT_R'] },
+    ]);
+    expect(hasMultipleStepPieces(ops, 1, unitPieces, geoms)).toBe(true);
+
+    const suggestions = suggestStepPairs(
+      ops,
+      1,
+      unitPieces,
+      geoms,
+      usedEdgesBeforeStep(ops, 1, seams),
+      null,
+      seams,
+    );
+    const shoulderPairs = [
+      ['BACK#0', 'FRONT_L#0'],
+      ['BACK#2', 'FRONT_R#0'],
+    ].map((pair) => pair.sort().join('|'));
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(
+      suggestions.every((suggestion) =>
+        shoulderPairs.includes([...suggestion.a, ...suggestion.b].sort().join('|')),
+      ),
+    ).toBe(true);
+    expect(suggestions.flatMap((suggestion) => [...suggestion.a, ...suggestion.b])).not.toContain(
+      'BACK#1',
+    );
   });
 });
 
@@ -721,6 +811,30 @@ describe('card 77: both sleeves on their armholes, one proposal per side', () =>
     // a straight edge on a shaped one; only the lengths that agree closely enough are a seam.
     const s = suggestStepPair(ops, at(270), keys, geoms, new Set(), null)!;
     expect(sorted([...s.a, ...s.b])).toEqual(['BP_MAIN#1', 'BP_U#5']);
+  });
+
+  it('690: the single BASE input exposes its leaf pieces and shoulder proposals', () => {
+    const shoulderOps = ops.map((op) =>
+      op.operationNumber === 690 ? { ...op, zone: 'shoulder' } : op,
+    );
+    const index = at(690);
+    const leaves = stepInputPieces(shoulderOps, index, keys);
+    const groups = inputGroups(shoulderOps, index, keys);
+    const all = suggestStepPairs(shoulderOps, index, keys, geoms, new Set(), null);
+
+    expect(groups).toEqual([{ key: 'BASE', pieces: leaves }]);
+    expect(leaves).toEqual(
+      expect.arrayContaining(['BP_MAIN', 'BP_U', 'BP_U_1', 'P_L_MAIN', 'P_R_MAIN']),
+    );
+    expect(hasMultipleStepPieces(shoulderOps, index, keys, geoms)).toBe(true);
+    expect(all.map((proposal, proposalIndex) => proposalLabel(proposal, proposalIndex))).toEqual([
+      'left',
+      'right',
+    ]);
+    expect(all.map((proposal) => sorted([...proposal.a, ...proposal.b]))).toEqual([
+      ['BP_U_1#3', 'P_L_U#0'],
+      ['BP_U_1#1', 'P_R_U#2'],
+    ]);
   });
 
   it('1020: each sleeve cap meets the whole armhole of its side — back, yoke, upper and lower front', () => {
