@@ -4,6 +4,7 @@ import { Button, HeaderNote, Section, ViewSwitch, type ViewSwitchOption } from '
 import { activeOf, useActiveStep, useActiveStepStore } from './active-step';
 import { StepView } from './step-view';
 import { useMapModel } from './use-map-model';
+import { DollDoor } from '../assembly-doll/doll-column';
 import { openDoll } from '../assembly-doll/doll-store';
 
 export type MapView = 'step' | 'sketch';
@@ -73,43 +74,48 @@ export function AssemblyMap({
     ? [...CORE_VIEWS, SKETCH_VIEW]
     : CORE_VIEWS;
 
+  // The doll mounts beside the map, not inside it: its dialog is portalled, but React events still
+  // bubble to the map's arrow-key handler, which would walk the steps under the open doll.
   return (
-    <div
-      data-assembly-map={shownView}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      aria-label='assembly map'
-      className='focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-    >
-      <Section
-        title='assembly map'
-        action={
-          <>
-            {model.unsewnPieceCount > 0 && (
-              <HeaderNote tone='warn'>! {model.unsewnPieceCount}</HeaderNote>
-            )}
-            <ViewSwitch<MapView>
-              quiet
-              label='assembly map view'
-              value={shownView}
-              onChange={setView}
-              options={views}
-            />
-            <Button type='button' variant='underline' size='xs' onClick={openDoll}>
-              3d
-            </Button>
-            {action}
-          </>
-        }
+    <>
+      <div
+        data-assembly-map={shownView}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        aria-label='assembly map'
+        className='focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
       >
-        {shownView === 'step' ? (
-          index != null ? (
-            <StepView model={model} index={index} />
-          ) : null
-        ) : (
-          sketch
-        )}
-      </Section>
-    </div>
+        <Section
+          title='assembly map'
+          action={
+            <>
+              {model.unsewnPieceCount > 0 && (
+                <HeaderNote tone='warn'>! {model.unsewnPieceCount}</HeaderNote>
+              )}
+              <ViewSwitch<MapView>
+                quiet
+                label='assembly map view'
+                value={shownView}
+                onChange={setView}
+                options={views}
+              />
+              <Button type='button' variant='underline' size='xs' onClick={openDoll}>
+                3d
+              </Button>
+              {action}
+            </>
+          }
+        >
+          {shownView === 'step' ? (
+            index != null ? (
+              <StepView model={model} index={index} />
+            ) : null
+          ) : (
+            sketch
+          )}
+        </Section>
+      </div>
+      <DollDoor />
+    </>
   );
 }
