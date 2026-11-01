@@ -31,6 +31,7 @@ import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { PAIR_INK, pairNo } from './palette';
 import { stepHandsOf, type StepHands } from './step-hand';
+import { withPoseHosts, type PosePin } from './step-pose';
 import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import {
@@ -305,15 +306,23 @@ export type StepPictureOptions = {
 export const STEP_TILE_EXPLODE = 0.12;
 export const STEP_TILE_RASTER_MM = 4;
 
-/** Pieces the editor's SEAMS tile keeps for the seam targets it is showing. */
+/**
+ * Pieces the editor's SEAMS tile keeps for the seam targets it is showing — a kept posed piece with
+ * its host, so it is drawn in its pose.
+ */
 export function focusedStepLeaves(
   leaves: readonly (readonly string[])[],
   targets: readonly TargetId[],
   innerSeams: readonly SeamCandidate[],
+  pose?: ReadonlyMap<string, PosePin>,
 ): string[][] {
   if (!targets.length) return leaves.map((leaf) => [...leaf]);
   const own = new Set(targets.map(pieceOfTarget));
-  return leaves.map((leaf) => focusPieces(leaf, own, innerSeams)).filter((leaf) => leaf.length > 0);
+  const cut = leaves.map((leaf) => focusPieces(leaf, own, innerSeams));
+  const kept = new Set(cut.flat());
+  const keep = withPoseHosts(kept, new Set(leaves.flat()), pose);
+  const out = keep.size > kept.size ? leaves.map((leaf) => leaf.filter((k) => keep.has(k))) : cut;
+  return out.filter((leaf) => leaf.length > 0);
 }
 
 const candidateSides = (candidate: SeamCandidate): SeamSides => ({
@@ -457,6 +466,7 @@ export function stepPictureOfOp(
     leaves,
     marks.map((mark) => mark.id),
     innerSeams,
+    hands.pose,
   );
   return {
     op: active,

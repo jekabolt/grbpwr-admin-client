@@ -97,6 +97,28 @@ export function posePinsOf(
 }
 
 /**
+ * What a focused picture keeps, with the host of every kept posed piece put back (and its host's in
+ * turn): a pose is laid on its host, so a posed piece drawn without it would fall back to the
+ * layout. `drawable`: the step's pieces — a host off the step stays out.
+ */
+export function withPoseHosts(
+  keep: Iterable<string>,
+  drawable: ReadonlySet<string>,
+  pose: ReadonlyMap<string, PosePin> | undefined,
+): Set<string> {
+  const out = new Set(keep);
+  if (!pose?.size) return out;
+  const queue = [...out];
+  while (queue.length) {
+    const host = pose.get(queue.pop()!)?.host;
+    if (!host || out.has(host) || !drawable.has(host)) continue;
+    out.add(host);
+    queue.push(host);
+  }
+  return out;
+}
+
+/**
  * What moves with a posed piece: the pieces hung on it (`links`: [piece, what it hangs on]) — its
  * side once its own hold is cut; the piece alone when its host hangs on that side too.
  */

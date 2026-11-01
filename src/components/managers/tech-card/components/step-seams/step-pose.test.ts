@@ -43,7 +43,7 @@ import {
 } from './card6.fixture';
 import { stepHandsOf } from './step-hand';
 import { invert, stepLayout } from './step-picture';
-import { stepPictureOfOp, type SceneOp } from './step-picture-view';
+import { focusedStepLeaves, stepPictureOfOp, type SceneOp } from './step-picture-view';
 import {
   placementOf,
   placementT,
@@ -493,6 +493,33 @@ describe('card 6 op 720: the placket placed by hand at a free spot', () => {
     const whole = stepLayout(base.leaves, base.frameSeams, geoms, { explode: 0, ...base.hands });
     expect(whole.posed).toEqual(['PLCK_L']);
     expect(near(relOf(whole.T, 'PLCK_L', 'P_L_MAIN'), want)).toBe(true);
+  });
+
+  it('a tile focused on other seams draws the placket in its pose, its host along', () => {
+    // A seam of the placket and the upper front: the cut keeps no lower front, the placket's host.
+    const tile = sceneAt(720);
+    const targets = ['PLCK_L#e0', 'P_L_U#e0'];
+    const bare = focusedStepLeaves(tile.leaves, targets, tile.innerSeams);
+    expect(bare.flat()).toContain('PLCK_L');
+    expect(bare.flat()).not.toContain('P_L_MAIN');
+    const lone = stepLayout(bare, tile.frameSeams, geoms, { explode: 0.12, ...tile.hands });
+    expect(lone.posed).toBeUndefined();
+
+    const cut = focusedStepLeaves(tile.leaves, targets, tile.innerSeams, tile.hands.pose);
+    expect(cut.flat()).toEqual(expect.arrayContaining([...bare.flat(), 'P_L_MAIN']));
+    const laid = stepLayout(cut, tile.frameSeams, geoms, { explode: 0.12, ...tile.hands });
+    expect(laid.posed).toEqual(['PLCK_L']);
+    expect(near(relOf(laid.T, 'PLCK_L', 'P_L_MAIN'), want)).toBe(true);
+
+    // No pose, or a cut without the placket: the very cut as before.
+    const plain = sceneAt(720, false);
+    expect(focusedStepLeaves(plain.leaves, targets, plain.innerSeams, plain.hands.pose)).toEqual(
+      bare,
+    );
+    const front = ['P_L_U#e0', 'P_L_MAIN#e0'];
+    expect(focusedStepLeaves(tile.leaves, front, tile.innerSeams, tile.hands.pose)).toEqual(
+      focusedStepLeaves(tile.leaves, front, tile.innerSeams),
+    );
   });
 
   it('an earlier step does not see it; no pose rows → the very layout as before', () => {

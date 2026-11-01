@@ -210,8 +210,14 @@ export function SeamTile({
   const ids = marks.map((m) => m.id).join(',');
   // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
   const leavesRaw = useMemo(
-    () => focusedStepLeaves(scene.leaves, ids.split(',').filter(Boolean), scene.innerSeams),
-    [scene.leaves, scene.innerSeams, ids],
+    () =>
+      focusedStepLeaves(
+        scene.leaves,
+        ids.split(',').filter(Boolean),
+        scene.innerSeams,
+        scene.hands.pose,
+      ),
+    [scene.leaves, scene.innerSeams, ids, scene.hands.pose],
   );
   const inferredLayout = useStepLayout(
     leavesRaw,
