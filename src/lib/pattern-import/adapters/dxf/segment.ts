@@ -965,6 +965,30 @@ function dedupeNotches(
     }
     const d = distToContour(n.at, target);
     if (d > reach) {
+      // CLO writes every notch twice, on the cut line and on the seam line. The seam copy pairs
+      // with its cut twin above when the two sit one allowance apart along the notch; where THAT
+      // edge's allowance is not the piece's (the placket's 25 mm hem under a 7 mm seam, a flap's
+      // 23 mm top), or the seam copy has no twin (a 1 mm seam-line mark), the pair is missed and
+      // the copy travelled on as a notch of its own: beyond reach, so unprojected ('none'), then
+      // kept by semantics (it lies on the seam ring) and snapped by the writer 20 mm onto the cut
+      // line, on top of its twin — a double notch the card parser drops (G5). Keeping the cut
+      // line, a notch drawn ON the seam line and out of reach of the cut line is that seam copy:
+      // folded into the cut notch it points at, else dropped — never a notch of its own.
+      if (on === 'cut' && n.on === 'seam') {
+        const twin = raw.findIndex((m, j) => {
+          if (j === i || !live[j] || m.on !== 'cut') return false;
+          const v = { x: m.at.x - n.at.x, y: m.at.y - n.at.y };
+          const L = Math.hypot(v.x, v.y);
+          return (
+            L >= 0.5 &&
+            Math.abs(v.x * n.dir.x + v.y * n.dir.y) / L >= 0.9 &&
+            Math.abs(n.dir.x * m.dir.x + n.dir.y * m.dir.y) >= 0.8
+          );
+        });
+        if (twin >= 0) raw[twin].paths.push(...n.paths);
+        piece.notchStats.twins++;
+        continue;
+      }
       out.push({ ...n, on: 'none', distMm: d });
       continue;
     }

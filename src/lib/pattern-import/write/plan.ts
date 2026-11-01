@@ -55,6 +55,8 @@ export function halfOnFoldText(piecesPerGarment: number): string {
 /** Simplification tolerance for written polylines, mm (well under the 0.05 mm sagitta). */
 export const WRITE_SIMPLIFY_MM = 0.01;
 export const DEFAULT_NOTCH_DEPTH_MM = 5;
+/** A notch farther than this from the cut line was not drawn on it (semantics keeps ≤ 1.5 mm). */
+const NOTCH_SNAP_WARN_MM = 1.5;
 export const GRAIN_SHAFT_MM = 180;
 export const GRAIN_BARB_BACK_MM = 27;
 export const GRAIN_BARB_SIDE_MM = 13.5;
@@ -239,6 +241,12 @@ function grainArrow(g: GrainFeature): PlannedGrain | null {
 
 function plannedNotch(cut: PtMm[], n: NotchFeature, warnings: string[], who: string): PlannedNotch {
   const { q, seg } = closestOnPolyline(n.at, cut, true);
+  // A notch is written on the cut line; semantics keeps one within 1.5 mm of the cut or seam ring
+  // (build.ts). One farther off was drawn on another line (a seam-line copy the adapter did not
+  // fold) and lands on top of its twin — the written count still matches, so say so here.
+  const moved = dist(n.at, q);
+  if (moved > NOTCH_SNAP_WARN_MM)
+    warnings.push(`${who}: notch snapped ${moved.toFixed(1)} mm onto the cut line`);
   const a = cut[seg];
   const b = cut[(seg + 1) % cut.length];
   const L = dist(a, b) || 1;
