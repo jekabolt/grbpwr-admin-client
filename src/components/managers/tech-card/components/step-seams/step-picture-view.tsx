@@ -2001,28 +2001,21 @@ export function StepPictureSvg({
               data-asm-holes={glyph.holes ?? 4}
               data-asm-pattern={glyph.pattern ?? 'other'}
             >
-              <circle
-                cx={at[0]}
-                cy={at[1]}
-                r={radius}
-                strokeWidth={L.hair}
-                strokeDasharray={draw === 'dashed' ? L.dash : undefined}
-              />
-              {draw === 'solid' && geometry.thread && (
+              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.hair} />
+              {geometry.thread && (
                 <path d={geometry.thread} fill='none' strokeWidth={L.hair} data-button-thread='' />
               )}
-              {draw === 'solid' &&
-                geometry.holes.map((point, index) => (
-                  <circle
-                    key={index}
-                    cx={point[0]}
-                    cy={point[1]}
-                    r={Math.max(0.8, radius * 0.1)}
-                    fill={INK}
-                    stroke='none'
-                    data-button-hole=''
-                  />
-                ))}
+              {geometry.holes.map((point, index) => (
+                <circle
+                  key={index}
+                  cx={point[0]}
+                  cy={point[1]}
+                  r={Math.max(0.8, radius * 0.1)}
+                  fill={INK}
+                  stroke='none'
+                  data-button-hole=''
+                />
+              ))}
             </g>
           );
         }

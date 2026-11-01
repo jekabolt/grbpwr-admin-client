@@ -156,7 +156,7 @@ describe('layerStyle', () => {
     expect(result.marks.get('hole')).toEqual({ id: 'hole', draw: 'solid', at: [5, 6] });
     expect(result.marks.get('button-under')).toEqual({
       id: 'button-under',
-      draw: 'dashed',
+      draw: 'hidden',
       at: [5, 6],
     });
     expect(result.marks.get('label-under')?.draw).toBe('hidden');
@@ -258,7 +258,7 @@ describe('layerStyle', () => {
     expect(result.lower).toEqual(['bag']);
     expect(result.pieces.get('bag')).toMatchObject({ depth: 1, coveredBy: ['front'] });
     expect(result.pieces.get('front')).toMatchObject({ depth: 0, covered: [], coveredBy: [] });
-    expect(result.marks.get('b')?.draw).toBe('dashed');
+    expect(result.marks.get('b')?.draw).toBe('hidden');
     expect(result.marks.get('p')?.draw).toBe('solid');
 
     const none = layerStyle({

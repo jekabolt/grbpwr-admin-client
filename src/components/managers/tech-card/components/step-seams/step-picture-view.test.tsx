@@ -313,7 +313,7 @@ describe('StepPictureSvg lower layers', () => {
     expect(markup).not.toContain('data-covered-layer=');
   });
 
-  it('draws a covered button as an empty dashed outline', () => {
+  it('hides a covered button under the piece above it', () => {
     const markup = renderPicture({
       layers: ['bag', 'front'],
       lower: ['bag'],
@@ -323,14 +323,8 @@ describe('StepPictureSvg lower layers', () => {
         { id: 'covered-button', piece: 'bag', kind: 'button', point: [30, 30], sizeMm: 15 },
       ],
     });
-    const group = markup.match(/<g[^>]*data-asm-mark="button"[^>]*>[\s\S]*?<\/g>/)?.[0] ?? '';
 
-    expect(group).toContain('stroke-dasharray=');
-    expect(group).not.toContain('data-button-hole=');
-    expect(group).not.toContain('data-button-thread=');
-    expect(markup.indexOf('data-asm-mark="button"')).toBeGreaterThan(
-      markup.indexOf('data-piece-outline="front"'),
-    );
+    expect(markup).not.toContain('data-asm-mark="button"');
   });
 
   it('keeps a claimed coincident twin at zero offset with its dashed edge underneath', () => {
