@@ -1,8 +1,9 @@
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import { codeName } from 'lib/pattern-import/dictionary/codes';
-import type { StoredSeam } from 'lib/seams';
+import { poseOf, type SeamPlacement, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
+import { mirrorPlacement } from './step-pose';
 import { edgeWordVote } from './signals/edge-words';
 
 /**
@@ -95,9 +96,39 @@ export function seamSideName(
 
 export type TwinMirrorUpdate = { row: StoredSeam; piece: string };
 
+/** The right twin of a left piece among `keys`, with how it relates (`PieceGeom.twinOf`). */
+function rightTwinOf(
+  left: string,
+  keys: Iterable<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): { key: string; kind: 'mirror' | 'identical' } | null {
+  for (const key of keys) {
+    if (key === left) continue;
+    const link = geoms.get(key)?.twinOf.find((twin) => twin.key === left);
+    if (link) return { key, kind: link.kind };
+  }
+  return null;
+}
+
+/** A left host + part laid at `at`, re-laid on their right twins; null when a twin is missing. */
+function mirroredOnTwins(
+  hostL: string,
+  partL: string,
+  at: SeamPlacement,
+  hostR: string,
+  partR: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): SeamPlacement | null {
+  const host = rightTwinOf(hostL, [hostR], geoms);
+  const part = rightTwinOf(partL, [partR], geoms);
+  const [gHL, gPL, gHR, gPR] = [hostL, partL, hostR, partR].map((key) => geoms.get(key));
+  if (!host || !part || !gHL || !gPL || !gHR || !gPR) return null;
+  return mirrorPlacement(gHL, gPL, at, gHR, gPR, host.kind, part.kind);
+}
+
 /**
- * Copy explicit left-hand edge placements onto matching rows in this step. Surface/free-pose
- * placements deliberately stay out: their spatial fields have no hand-placement interpretation.
+ * Copy explicit left-hand placements onto matching rows in this step: edge rows by hand place,
+ * surface rows by the left part's placement re-laid on the right host.
  */
 export function mirrorLeftRows(
   stepRows: readonly StoredSeam[],
@@ -106,6 +137,30 @@ export function mirrorLeftRows(
 ): TwinMirrorUpdate[] {
   const updates = new Map<string, TwinMirrorUpdate>();
   for (const source of cardRows) {
+    if (source.kind === 'surface') {
+      const at = source.sideA[0]?.placement;
+      const hostL = source.sideA[0]?.piece;
+      const partL = source.sideB[0]?.piece;
+      if (!at || !hostL || !partL) continue;
+      if (geoms.get(hostL)?.hand !== 'L' && geoms.get(partL)?.hand !== 'L') continue;
+      for (const target of stepRows) {
+        const hostR = target.sideA[0]?.piece;
+        const partR = target.sideB[0]?.piece;
+        if (target.kind !== 'surface' || target.seamKey === source.seamKey || !hostR || !partR)
+          continue;
+        const placement = mirroredOnTwins(hostL, partL, at, hostR, partR, geoms);
+        if (!placement) continue;
+        updates.set(`${target.seamKey}:${partR}`, {
+          row: {
+            ...target,
+            sideA: target.sideA.map((anchor) => ({ ...anchor, placement })),
+            sideB: target.sideB.map((anchor) => ({ ...anchor, placement })),
+          },
+          piece: partR,
+        });
+      }
+      continue;
+    }
     if (!isHandSeamKind(source.kind)) continue;
     for (const [own, other] of [
       [source.sideA, source.sideB],
@@ -127,6 +182,30 @@ export function mirrorLeftRows(
     }
   }
   return [...updates.values()];
+}
+
+export type TwinPose = { piece: string; host: string; placement: SeamPlacement };
+
+/**
+ * Right pieces of this step posed as the mirror of their left twins' stored poses (piece and host
+ * both have a right twin here). Only on the owner's `mirror left` click; nothing calls it alone.
+ */
+export function mirrorLeftPoses(
+  stepPieces: readonly string[],
+  cardPoses: Iterable<StoredPose>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): TwinPose[] {
+  const out = new Map<string, TwinPose>();
+  for (const row of cardPoses) {
+    const pose = poseOf(row);
+    if (!pose || geoms.get(pose.piece)?.hand !== 'L') continue;
+    const piece = rightTwinOf(pose.piece, stepPieces, geoms)?.key;
+    const host = rightTwinOf(pose.host, stepPieces, geoms)?.key;
+    if (!piece || !host) continue;
+    const placement = mirroredOnTwins(pose.host, pose.piece, pose.placement, host, piece, geoms);
+    if (placement) out.set(piece, { piece, host, placement });
+  }
+  return [...out.values()];
 }
 
 export type LayerHit = { piece: string; at: readonly [number, number] };

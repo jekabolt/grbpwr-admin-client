@@ -44,6 +44,7 @@ import { recordSeamDecision } from './seam-decisions';
 import {
   cycleLayerHit,
   isGuess,
+  mirrorLeftPoses,
   mirrorLeftRows,
   pickTarget,
   seamSideName,
@@ -326,9 +327,18 @@ export function SeamPickerBody({
       rows.push(draftRow);
     return mirrorLeftRows(rows, [...byKey.values()], geoms);
   }, [stepRows, draftRow, byKey, geoms]);
+  const mirrorPoses = useMemo(
+    () =>
+      mirrorLeftPoses(
+        groups.flatMap((group) => group.pieces),
+        poses.values(),
+        geoms,
+      ),
+    [groups, poses, geoms],
+  );
 
   const mirrorLeft = async () => {
-    if (!mirrorTargets.length || busy) return;
+    if ((!mirrorTargets.length && !mirrorPoses.length) || busy) return;
     const pending = draftRow
       ? mirrorTargets.find((update) => update.row.seamKey === draftRow.seamKey)
       : undefined;
@@ -336,13 +346,32 @@ export function SeamPickerBody({
     const storedUpdates = mirrorTargets.filter(
       (update) => !draftRow || update.row.seamKey !== draftRow.seamKey,
     );
-    if (!storedUpdates.length) return;
+    const poseRows = mirrorPoses.flatMap((pose) => {
+      const pg = geoms.get(pose.piece);
+      const hg = geoms.get(pose.host);
+      if (!pg || !hg) return [];
+      return [
+        poseRow({
+          seamKey: ownPoseRows.get(pose.piece)?.seamKey ?? newSeamKey(),
+          piece: pg,
+          host: hg,
+          placement: pose.placement,
+          grainDeg: geo?.grainDeg,
+        }),
+      ];
+    });
+    if (!storedUpdates.length && !poseRows.length) return;
     setBusy(true);
     setRefused('');
     for (const update of storedUpdates) {
       if (await attach(update.row)) continue;
       setBusy(false);
       setRefused(useSeamsStore.getState().errors[update.row.seamKey] ?? 'not saved');
+      return;
+    }
+    if (poseRows.length && !(await attachPose(poseRows))) {
+      setBusy(false);
+      setRefused(useSeamsStore.getState().errors[poseRows[0].seamKey] ?? 'not saved');
       return;
     }
     setBusy(false);
@@ -1038,7 +1067,7 @@ export function SeamPickerBody({
                   guess
                 </Button>
               )}
-              {!frozen && mirrorTargets.length > 0 && (
+              {!frozen && (mirrorTargets.length > 0 || mirrorPoses.length > 0) && (
                 <Button
                   type='button'
                   variant='underline'

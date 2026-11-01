@@ -2,12 +2,13 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { EdgeAnchor, StoredSeam } from 'lib/seams';
+import { newSeamKey, poseRow, type EdgeAnchor, type StoredSeam } from 'lib/seams';
 
 import { card6Geoms, card6InnerLines } from './card6.fixture';
 import {
   cycleLayerHit,
   isGuess,
+  mirrorLeftPoses,
   mirrorLeftRows,
   pickTarget,
   pieceWord,
@@ -15,6 +16,7 @@ import {
   sideForClick,
 } from './seam-focus';
 import { decodeHandPlace, withHandPlace } from './step-hand';
+import { mirrorPlacement } from './step-pose';
 import { stepLayout } from './step-picture';
 import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
 
@@ -157,6 +159,72 @@ describe('mirror left', () => {
       flip: false,
       slideMm: -12,
     });
+  });
+});
+
+describe('mirror left: surface and pose', () => {
+  const geoms = card6Geoms();
+  const at = { xMm: 30, yMm: 120, rotDeg: 37, flip: false };
+  const twinKind = (right: string, left: string) =>
+    geoms.get(right)!.twinOf.find((twin) => twin.key === left)!.kind;
+  const expected = () =>
+    mirrorPlacement(
+      geoms.get('SLV_L')!,
+      geoms.get('FLP_L_MAIN')!,
+      at,
+      geoms.get('SLV_R')!,
+      geoms.get('FLP_R_MAIN')!,
+      twinKind('SLV_R', 'SLV_L'),
+      twinKind('FLP_R_MAIN', 'FLP_L_MAIN'),
+    );
+
+  it('poses the right placket on the right sleeve as the left pose mirrored', () => {
+    const left = poseRow({
+      seamKey: newSeamKey(),
+      piece: geoms.get('FLP_L_MAIN')!,
+      host: geoms.get('SLV_L')!,
+      placement: at,
+    });
+    const [pose, ...rest] = mirrorLeftPoses(['SLV_R', 'FLP_R_MAIN'], [left], geoms);
+    expect(rest).toHaveLength(0);
+    expect(pose).toEqual({ piece: 'FLP_R_MAIN', host: 'SLV_R', placement: expected() });
+    expect(mirrorLeftPoses(['SLV_R'], [left], geoms)).toHaveLength(0);
+  });
+
+  it('re-lays a right surface row from its left twin, both anchors', () => {
+    const anchor = (piece: string, placement?: typeof at): EdgeAnchor => ({
+      piece,
+      samples: [
+        [0, 0],
+        [1, 0],
+      ],
+      perimShare: 0.1,
+      lenMm: 100,
+      notches: 0,
+      turnDeg: 0,
+      range: [0, 1],
+      edgeHint: `${piece}#0`,
+      contourSig: 'same',
+      ...(placement ? { placement } : {}),
+    });
+    const surface = (key: string, host: string, part: string, placement?: typeof at) => ({
+      seamKey: key,
+      status: 'confirmed' as const,
+      kind: 'surface' as const,
+      direction: 'unknown' as const,
+      source: 'manual' as const,
+      sideA: [anchor(host, placement)],
+      sideB: [anchor(part, placement)],
+      anchoredSize: '',
+      note: '',
+    });
+    const left = surface('left', 'SLV_L', 'FLP_L_MAIN', at);
+    const right = surface('right', 'SLV_R', 'FLP_R_MAIN');
+    const [update, ...rest] = mirrorLeftRows([right], [left, right], geoms);
+    expect(rest).toHaveLength(0);
+    expect(update.piece).toBe('FLP_R_MAIN');
+    expect(update.row.sideA[0].placement).toEqual(expected());
+    expect(update.row.sideB[0].placement).toEqual(expected());
   });
 });
 
