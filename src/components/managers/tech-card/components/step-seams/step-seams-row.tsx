@@ -1,21 +1,22 @@
 // «SEAMS» GROUP OF A STEP CARD (assembly-schema T8, picker v2 owner OK 27.10): its own group, header
 // «seams» with `+ seam` (the picker) at the right. Below it every stored seam as a small step picture
-// — the inputs with the seam's edges ink solid — and a ✕ that takes the key off this step only (the
-// seam stays on the card); with nothing stored, the length proposal as a dashed picture that opens
-// the picker (a seam is stored only there, by hand), else red `no seam`. `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
+// — the inputs with the seam's edges ink solid — with remove and flip beside it; remove deletes the
+// card row only when no other step uses it. With nothing stored, the proposal is a dashed picture
+// that opens the picker (a seam is stored only there, by hand), else red `no seam`.
+// `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Close, GroupLabel, Text } from 'ui';
-import type { TechCardFormData } from '../schema';
+import { Button, GroupLabel, Text } from 'ui';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import { useSeamsStore } from '../assembly-seams/seams-store';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
 import { seamOfSides, type StepLayout } from './step-picture';
 import { useStepResults } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
+import { useStepSeamActions } from './step-seams-context';
 import {
   focusedStepLeaves,
   frameSeamsOf,
@@ -42,7 +43,8 @@ export function StepSeamsRow({ index }: { index: number }) {
   const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
-  const { setValue, getValues } = useFormContext<TechCardFormData>();
+  const seamActions = useStepSeamActions(index);
+  const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
   // The proposal the picker opens on; null = closed.
   const [openAt, setOpenAt] = useState<number | null>(null);
@@ -87,15 +89,6 @@ export function StepSeamsRow({ index }: { index: number }) {
   const { cardId, frozen } = ctx;
   const pending = geo?.dep.status === 'pending';
 
-  const drop = (key: string) => {
-    const cur = (getValues(`operations.${index}.seamKeys`) ?? []) as string[];
-    setValue(
-      `operations.${index}.seamKeys`,
-      cur.filter((k) => k !== key),
-      { shouldDirty: true },
-    );
-  };
-
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
       <GroupLabel
@@ -116,21 +109,44 @@ export function StepSeamsRow({ index }: { index: number }) {
         seams
       </GroupLabel>
       <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-        {stored.map(({ key, row, sides }, i) => (
-          <SeamTile
-            key={key}
-            no={i}
-            scene={scene}
-            seams={storedFrame}
-            layout={ownedLayout}
-            layers={ownedLayers}
-            marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
-            missing={!row}
-            onRemove={frozen ? undefined : () => drop(key)}
-            onOpen={cardId ? () => setOpen(true) : undefined}
-            data-step-seam={key}
-          />
-        ))}
+        {stored.map(({ key, row, sides }, i) => {
+          const writing = !!pendingWrites[key];
+          return (
+            <div key={key} className='flex flex-none items-center gap-2'>
+              <SeamTile
+                no={i}
+                scene={scene}
+                seams={storedFrame}
+                layout={ownedLayout}
+                layers={ownedLayers}
+                marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
+                missing={!row}
+                onOpen={cardId ? () => setOpen(true) : undefined}
+                data-step-seam={key}
+              />
+              <div className='flex items-center gap-1.5'>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  disabled={frozen || writing}
+                  onClick={() => void seamActions.remove(key, row)}
+                >
+                  remove
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  disabled={frozen || writing || !row}
+                  onClick={() => row && void seamActions.flip(row)}
+                >
+                  flip
+                </Button>
+              </div>
+            </div>
+          );
+        })}
         {keys.length === 0 &&
           suggestions.map((sug, i) => (
             <SeamTile
@@ -179,7 +195,6 @@ export function SeamTile({
   dashed,
   missing,
   no,
-  onRemove,
   onOpen,
   current,
   status,
@@ -199,7 +214,6 @@ export function SeamTile({
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
-  onRemove?: () => void;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
   onOpen?: () => void;
   current?: boolean;
@@ -280,18 +294,6 @@ export function SeamTile({
       {no != null && (
         <span className='absolute top-0 left-0'>
           <PairNo i={no} />
-        </span>
-      )}
-      {onRemove && (
-        <span className='absolute top-0 right-0'>
-          <Close
-            size='sm'
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-            aria-label='remove'
-          />
         </span>
       )}
       {caption && (

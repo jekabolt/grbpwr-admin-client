@@ -22,9 +22,11 @@ import {
 import { useFormContext } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
+import { flipped } from '../assembly-seams/seam-actions';
 import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
+import { planStepSeamRemoval } from './step-seam-actions';
 import { dropKeys } from './step-seams-model';
 
 export type StepSeamsCtx = {
@@ -68,6 +70,38 @@ export function useAttachStepSeam(index: number) {
     },
     [ctx, getValues, index, setValue],
   );
+}
+
+/** Remove or flip one of this step's stored seams through the shared seam writer. */
+export function useStepSeamActions(index: number) {
+  const ctx = useStepSeams();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+
+  const remove = useCallback(
+    async (seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
+      if (!ctx || ctx.frozen) return false;
+      const operations = getValues('operations') ?? [];
+      const removal = planStepSeamRemoval(operations, index, seamKey);
+      if (removal.deleteRow && row && !(await ctx.writes.remove([row]))) return false;
+      const field = `operations.${index}.seamKeys` as const;
+      const seamKeys = removal.deleteRow
+        ? ((getValues(field) ?? []) as string[]).filter((key) => key !== seamKey)
+        : removal.seamKeys;
+      setValue(field, seamKeys, { shouldDirty: true });
+      return true;
+    },
+    [ctx, getValues, index, setValue],
+  );
+
+  const flip = useCallback(
+    async (row: StoredSeam): Promise<boolean> => {
+      if (!ctx || ctx.frozen) return false;
+      return ctx.writes.upsert([{ ...row, direction: flipped(row.direction) }]);
+    },
+    [ctx],
+  );
+
+  return { remove, flip };
 }
 
 /**
