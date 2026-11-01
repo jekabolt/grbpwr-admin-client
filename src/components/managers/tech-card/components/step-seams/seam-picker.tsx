@@ -39,7 +39,6 @@ import {
 import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
 import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
 import { rowPairSig, useSeamsStore } from '../assembly-seams/seams-store';
-import { edgeOf } from '../assembly-seams/words';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
@@ -226,15 +225,6 @@ export function SeamPickerBody({
   const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
 
   const pieces = geo?.pieces;
-  const lenOf = useCallback(
-    (id: TargetId) => {
-      const inner = parseInner(id);
-      return inner
-        ? polyLen(pieces?.get(inner.piece)?.inner[inner.k] ?? [])
-        : edgeOf(id, geoms)?.lenMm ?? 0;
-    },
-    [pieces, geoms],
-  );
   // A stack of identical plies runs one layer long (the model's own count).
   const sideLen = (ids: readonly TargetId[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
@@ -448,24 +438,11 @@ export function SeamPickerBody({
   }, [poseLayout, poseDrag, poseFree]);
   const marks: EdgeMark[] = [];
   const nos: NoMark[] = [];
-  // One label per side, on its longest edge that is drawn (a neckline's on the back neck, not on
-  // a front's end of it; a piece laid apart has none).
+  // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
   const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) => {
-    let at = 0;
-    let longest = -1;
-    ids.forEach((id, k) => {
-      if (!canvasLayout.T.has(pieceOfTarget(id))) return;
-      const l = lenOf(id);
-      if (l > longest) {
-        longest = l;
-        at = k;
-      }
-    });
-    ids.forEach((id, k) =>
-      marks.push({ id, tone, label: k === at ? mmText(sideLen(ids)) : undefined }),
-    );
+    ids.forEach((id) => marks.push({ id, tone }));
   };
-  // A stored seam reads as a proposal does: its edges with their lengths, its number on the first.
+  // A stored seam reads as a proposal does: its edges, its number on the first.
   stored.forEach((s, i) => {
     sideMarks(s.sides.a, 'stored');
     sideMarks(s.sides.b, 'stored');
