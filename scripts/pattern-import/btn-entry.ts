@@ -4,7 +4,8 @@
 // graded, radius constant across sizes. Bundled by btn.mjs.
 //   A  expandRul: every button circle is still a circle of the sample's radius in every size, its
 //      cross lines move with it; on the placket (PLCK_R) the centre moves per size step by
-//      -3 + 8·t mm across the piece's layer-7 grade axis (the RUL y direction)
+//      -3 + 8·t mm along the placket (the RUL y direction = the drawing's y: no layer-5 grade
+//      reference in a CLO export, and the layer-7 grain line is not the grade axis)
 //   B  the product path, Session → write (r12, storage 'rul'): our per-size DXF draws each button
 //      as a circle of the source diameter at the expanded centre; the base + RUL package expands
 //      back to the same circles
@@ -146,14 +147,13 @@ function sectionA(
   const blocks = blocksOf(ex.text);
   const source = pieceBlocks(buildAst(loadDxf(enc(dxfText)).tok.tags));
   const plckSource = source.find((piece) => piece.block.name === 'PLCK_R_XS');
-  const gradeRef = plckSource?.entities.find(
-    (entity) => entity.layer === '7' && entity.kind === 'chain' && entity.slots.length >= 2,
-  );
-  if (!gradeRef) throw new Error('PLCK_R_XS: no layer-7 grade reference');
-  const ga = gradeRef.slots[0];
-  const gb = gradeRef.slots[gradeRef.slots.length - 1];
-  const gl = Math.hypot(gb.x - ga.x, gb.y - ga.y);
-  const gradeAxis = { x: (gb.x - ga.x) / gl, y: (gb.y - ga.y) / gl };
+  if (!plckSource) throw new Error('PLCK_R_XS: not in the golden');
+  // CLO exports no layer-5 grade reference, so the RUL's axes are the drawing's x / y (D6673);
+  // the layer-7 grain line is NOT the grade axis — along it the buttons would walk ACROSS the
+  // 4 cm placket, 4 mm a size, instead of along it as the placket lengthens
+  if (plckSource.entities.some((entity) => entity.layer === '5' && entity.kind === 'chain'))
+    throw new Error('PLCK_R_XS: a layer-5 grade reference appeared — the axes below assume none');
+  const gradeAxis = { x: 1, y: 0 };
   const byStem = buttonsByStem(blocks);
   check(
     'A',
@@ -197,9 +197,9 @@ function sectionA(
   });
   check(
     'A',
-    'PLCK_R: each centre moves by -3 + 8·t per size step across layer 7',
+    'PLCK_R: each centre moves by -3 + 8·t per size step along the placket (RUL y = drawing y)',
     placket,
-    why || `Δ/step ${steps.join(' ')} across (${f2(gradeAxis.x)}, ${f2(gradeAxis.y)})`,
+    why || `Δ/step ${steps.join(' ')} along (${f2(-gradeAxis.y)}, ${f2(gradeAxis.x)})`,
   );
 
   // every button moves WITH its piece: linear in size, and never beyond what the outline's own

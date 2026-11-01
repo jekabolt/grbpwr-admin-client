@@ -1,7 +1,10 @@
-// Golden CLO shirt: the real AAMA DXF + RUL pair must expand point-for-point in the piece's
-// layer-7 grade axes. This is intentionally independent of expand.ts's grade propagation: it
-// derives the expected boundary and notch coordinates from the source entities and the RUL rows,
-// then compares those coordinates with the emitted per-size blocks.
+// Golden CLO shirt: the real AAMA DXF + RUL pair must expand point-for-point in the piece's grade
+// axes — D6673's layer-5 grade reference line when the piece has one, else the drawing's x / y
+// (CLO exports no layer 5; its layer-7 grain line is NOT the grade axis: along it the mirrored
+// pocket bottoms drift apart by size, in world axes they stay exact mirrors). This is intentionally
+// independent of expand.ts's grade propagation: it derives the expected boundary and notch
+// coordinates from the source entities and the RUL rows, then compares those coordinates with the
+// emitted per-size blocks, and checks every piece's area never shrinks from XS to XL.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -35,15 +38,24 @@ const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 
 function axesOf(piece: PieceBlock): Axes {
   const refs = piece.entities.filter(
-    (entity) => entity.layer === '7' && entity.kind === 'chain' && entity.slots.length >= 2,
+    (entity) => entity.layer === '5' && entity.kind === 'chain' && entity.slots.length >= 2,
   );
-  if (refs.length !== 1)
-    throw new Error(`${piece.block.name}: expected one layer-7 grade reference`);
+  if (refs.length > 1)
+    throw new Error(`${piece.block.name}: expected at most one layer-5 grade reference`);
+  if (!refs.length) return { cos: 1, sin: 0 };
   const a = refs[0].slots[0];
   const b = refs[0].slots[refs[0].slots.length - 1];
   const angle = Math.atan2(b.y - a.y, b.x - a.x);
   return { cos: Math.cos(angle), sin: Math.sin(angle) };
 }
+
+const areaOf = (points: Point[]) =>
+  Math.abs(
+    points.reduce((sum, at, index) => {
+      const next = points[(index + 1) % points.length];
+      return sum + at.x * next.y - next.x * at.y;
+    }, 0) / 2,
+  );
 
 function moveOf(table: RulTable, axes: Axes, rule: number, size: number): Point {
   const delta = table.rules.get(rule)?.[size];
@@ -256,6 +268,15 @@ for (const piece of source) {
     boundaries.push(expectedBoundary);
     notchSizes.push(expectedNotches);
   }
+  // a piece never shrinks up the size run (the sign of the axes: along the grain line the pocket
+  // bottoms lost area from S on; a `_UNI` piece, all rules 0, stays equal)
+  const areas = boundaries.map(areaOf);
+  areas.forEach((area, index) => {
+    if (index > 0 && area < areas[index - 1] - 1e-6)
+      throw new Error(
+        `${piece.block.name}: area shrinks ${table.sizes[index - 1]} → ${table.sizes[index]} (${areas.map((value) => value.toFixed(1)).join(' → ')})`,
+      );
+  });
   drawing.push({ name: piece.pieceLabel ?? piece.block.name, boundaries, notches: notchSizes });
   console.log(
     `PASS ${piece.block.name} · ${boundary.slots.length} boundary vertices · ${notches.length} notches · ${table.sizes.length} sizes`,

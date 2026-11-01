@@ -486,8 +486,8 @@ function gradePiece(
   for (let grew = true; grew; ) {
     grew = false;
     ents.forEach((m, e) => {
-      // Layer 7 defines the piece's grade axes (and is also the grain line consumed downstream).
-      // It is reference geometry, not a mark that follows a boundary it happens to touch.
+      // Layer 7 is the grain line (reference geometry consumed downstream), not a mark that
+      // follows a boundary it happens to touch: without rules of its own it stays as drawn.
       if (!gradable(m) || graded.has(e) || m.layer === '7') return;
       let got = false;
       m.slots.forEach((s, k) => {
@@ -520,13 +520,16 @@ function gradePiece(
 }
 
 /**
- * The piece's grade axes: D6673 measures the deltas along the grade reference line (layer 7) when
+ * The piece's grade axes: D6673 measures the deltas along the grade reference line (layer 5) when
  * the piece has one, else along the drawing's x / y. Two reference lines that disagree → refused.
+ * The grain line (layer 7) is NOT the grade reference: CLO exports no layer 5 and its rules are in
+ * the drawing's x / y — the golden shirt's pocket bottoms (grain 90°, mirrored hands) only expand to
+ * exact mirrors with growing areas in world axes; along the grain they drift apart by size.
  */
 function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   const angles: number[] = [];
   for (const m of p.entities) {
-    if (m.layer !== '7' || m.kind !== 'chain' || m.slots.length < 2) continue;
+    if (m.layer !== '5' || m.kind !== 'chain' || m.slots.length < 2) continue;
     const a = m.slots[0];
     const b = m.slots[m.slots.length - 1];
     if (Math.hypot(b.x - a.x, b.y - a.y) <= 0) continue;
@@ -536,7 +539,7 @@ function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   const t = angles[0];
   if (angles.some((a) => Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))) > 1e-6))
     throw refuse(
-      `${label}: its grade reference lines (layer 7) point different ways — the grade axes are not defined`,
+      `${label}: its grade reference lines (layer 5) point different ways — the grade axes are not defined`,
     );
   return { cos: Math.cos(t), sin: Math.sin(t) };
 }

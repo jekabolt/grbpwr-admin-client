@@ -1,7 +1,7 @@
 // PATTERN-IMPORT · RUL — AAMA/ASTM base DXF + grade rule table, both directions. Bundled by rul.mjs.
 //   A  the RUL grammar: the D6673 guide's AccuMark example read; writer → reader round trip
 //   B  a hand-written base DXF + that table: every size's coordinates exact (rules, curve-point
-//      interpolation, a notch following the boundary, ENGLISH units, a layer-7 grade axis)
+//      interpolation, a notch following the boundary, ENGLISH units, a layer-5 grade axis)
 //   C  refusals (rul-invalid / rul-alone; the F17 binary .rul stays AccuMark)
 //   D  the session: DXF + RUL dropped together, zipped together → a DXF run with every size;
 //      then the whole wizard path to write with `storage: 'rul'`
@@ -168,8 +168,9 @@ function sectionA(): RulTable {
 // ── B · a hand-written base DXF ───────────────────────────────────────────────────────────────
 // FRONT, drawn in 36: a 200 × 300 box on layer 1, corners A(0,0) #1, B(200,0) #2, C(200,300) #3,
 // D(0,300) #2; a curve vertex E(200,150) on B–C with `# -1`; a notch POINT on layer 4 at (100,0)
-// (on A–B, no rule: follows the boundary); a drill on layer 13 at (100,150) with #3; a horizontal
-// layer-7 grade reference (so RUL x = drawing x); labels; model-space Units / Sample Size.
+// (on A–B, no rule: follows the boundary); a drill on layer 13 at (100,150) with #3; a grain LINE
+// on layer 7 without rules (stays as drawn — the grain is not the grade axis, D6673 layer 5 is);
+// labels; model-space Units / Sample Size.
 const T = (layer: string, x: number, y: number, s: string) =>
   `  0\r\nTEXT\r\n  8\r\n${layer}\r\n 10\r\n${x}\r\n 20\r\n${y}\r\n 30\r\n0.0\r\n 40\r\n0.25\r\n  1\r\n${s}\r\n`;
 const P = (layer: string, x: number, y: number) =>
@@ -184,7 +185,6 @@ function baseDxf(
     sample?: string;
     texts?: string;
     drill?: string;
-    gradeRef?: string;
   } = {},
 ) {
   const pts: [number, number][] = [
@@ -217,8 +217,7 @@ function baseDxf(
     P('4', 100, 0),
     P('13', 100, 150),
     o.drill ?? T('13', 100, 150, '# 3'),
-    o.gradeRef ??
-      '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n50\r\n 20\r\n50\r\n 30\r\n0.0\r\n 11\r\n250\r\n 21\r\n50\r\n 31\r\n0.0\r\n',
+    '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n50\r\n 20\r\n50\r\n 30\r\n0.0\r\n 11\r\n50\r\n 21\r\n250\r\n 31\r\n0.0\r\n',
     o.extra ?? '',
     T('1', 20, 280, 'Piece Name: FRONT'),
     T('1', 20, 270, `Size: ${o.size ?? '36'}`),
@@ -237,17 +236,16 @@ function baseDxf(
 type Blk = {
   cut: { x: number; y: number }[];
   pts: Record<string, { x: number; y: number }[]>;
-  gradeRef: { x: number; y: number }[];
+  grain: { x: number; y: number }[];
 };
 function blocksOf(text: string): Map<string, Blk> {
   const raw = buildAst(loadDxf(enc(text)).tok.tags);
   const out = new Map<string, Blk>();
   for (const p of pieceBlocks(raw)) {
-    const b: Blk = { cut: [], pts: {}, gradeRef: [] };
+    const b: Blk = { cut: [], pts: {}, grain: [] };
     for (const m of p.entities) {
       if (m.kind === 'chain' && m.layer === '1') b.cut = m.slots.map((s) => ({ x: s.x, y: s.y }));
-      if (m.kind === 'chain' && m.layer === '7')
-        b.gradeRef = m.slots.map((s) => ({ x: s.x, y: s.y }));
+      if (m.kind === 'chain' && m.layer === '7') b.grain = m.slots.map((s) => ({ x: s.x, y: s.y }));
       if (m.kind === 'point') (b.pts[m.layer] ??= []).push({ x: m.slots[0].x, y: m.slots[0].y });
     }
     out.set(p.block.name, b);
@@ -295,14 +293,14 @@ async function sectionB(t: RulTable) {
       exact = false;
       why ||= `${s} drill ${JSON.stringify(b.pts['13'][0])}`;
     }
-    if (!near(b.gradeRef[0], 50, 50) || !near(b.gradeRef[1], 250, 50)) {
+    if (!near(b.grain[0], 50, 50) || !near(b.grain[1], 50, 250)) {
       exact = false;
-      why ||= `${s} grade reference moved`;
+      why ||= `${s} grain moved`;
     }
   });
   check(
     'B',
-    'every size exact: ruled corners, curve point E interpolated, notch follows A–B, drill by its rule, grade reference as drawn',
+    'every size exact: ruled corners, curve point E interpolated, notch follows A–B, drill by its rule, grain as drawn',
     exact,
     why || `stats ${JSON.stringify(ex.stats)}`,
   );
@@ -355,11 +353,11 @@ async function sectionB(t: RulTable) {
     near(bM.cut[1], 200 - 37.98 / 25.4, 0),
     JSON.stringify(bM.cut[1]),
   );
-  // a layer-7 grade reference line pointing +y: the table's dx runs along +y
-  const L7 =
-    '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n-10\r\n 20\r\n0\r\n 30\r\n0.0\r\n 11\r\n-10\r\n 21\r\n100\r\n 31\r\n0.0\r\n';
+  // a layer-5 grade reference line pointing +y: the table's dx runs along +y
+  const L5 =
+    '  0\r\nLINE\r\n  8\r\n5\r\n 10\r\n-10\r\n 20\r\n0\r\n 30\r\n0.0\r\n 11\r\n-10\r\n 21\r\n100\r\n 31\r\n0.0\r\n';
   const exR = expandRul({
-    dxf: enc(baseDxf({ gradeRef: L7 })),
+    dxf: enc(baseDxf({ extra: L5 })),
     dxfName: 'FRONT-axis.dxf',
     rul: t,
     rulName: 'B9000.rul',
@@ -367,9 +365,18 @@ async function sectionB(t: RulTable) {
   const bR = blocksOf(exR.text).get('FRONT_48')!;
   check(
     'B',
-    'layer-7 grade axis at 90°: dx is applied along +y',
+    'layer-5 grade axis at 90°: dx is applied along +y',
     near(bR.cut[1], 200, -37.98),
     JSON.stringify(bR.cut[1]),
+  );
+  // the grain line (layer 7, vertical in the base) is not the grade axis: with no layer 5 the
+  // table's dx runs along the drawing's x (CLO exports no layer 5; its rules are in world x / y)
+  const bW = blocksOf(ex.text).get('FRONT_48')!;
+  check(
+    'B',
+    'no layer 5: dx runs along the drawing x, not along the vertical grain line',
+    near(bW.cut[1], 200 - 37.98, 0),
+    JSON.stringify(bW.cut[1]),
   );
 }
 
@@ -520,12 +527,13 @@ function sectionC(t: RulTable) {
       /does not name an integer rule/,
     ],
     [
-      'two layer-7 axes disagree',
+      'two layer-5 axes disagree',
       () =>
         expandRul({
           dxf: enc(
             baseDxf({
-              extra: '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n0\r\n 20\r\n0\r\n 11\r\n0\r\n 21\r\n10\r\n',
+              extra:
+                '  0\r\nLINE\r\n  8\r\n5\r\n 10\r\n0\r\n 20\r\n0\r\n 11\r\n0\r\n 21\r\n10\r\n  0\r\nLINE\r\n  8\r\n5\r\n 10\r\n0\r\n 20\r\n0\r\n 11\r\n10\r\n 21\r\n0\r\n',
             }),
           ),
           dxfName: 'f.dxf',
@@ -973,9 +981,8 @@ async function sectionE() {
         );
         continue;
       }
-      // Areas grow overall (sign sanity on real data). A real CLO sleeve drops 0.047 % from XS to
-      // S before growing through 2XL, so a small non-monotone step is valid grading, not an axis
-      // error; a reversed axis / wrong unit still produces a much larger drop.
+      // areas grow away from the sample (sign sanity on real data; the CLO sleeve that "dropped
+      // 0.047 % from XS to S" did so only with the deltas turned along its grain line)
       const area = (pts: { x: number; y: number }[]) =>
         Math.abs(
           pts.reduce((a, p, i) => {
@@ -985,7 +992,7 @@ async function sectionE() {
         );
       const blocks = blocksOf(ex.text);
       const sizes = ex.sizes;
-      let sane = 0;
+      let mono = 0;
       let tot = 0;
       const odd: string[] = [];
       for (const stem of new Set(Object.values(ex.pieces))) {
@@ -994,15 +1001,14 @@ async function sectionE() {
           .map((c) => (c.length > 2 ? area(c) : 0));
         if (a.some((x) => !x)) continue;
         tot++;
-        if (a[a.length - 1] >= a[0] - 1e-6 && a.every((x, i) => i === 0 || x >= a[i - 1] * 0.999))
-          sane++;
+        if (a.every((x, i) => i === 0 || x >= a[i - 1] - 1e-6)) mono++;
         else odd.push(`${stem}: ${a.map((value) => value.toFixed(1)).join('→')}`);
       }
       check(
         'E',
-        `${who}: cut areas grow overall (sign / units sanity)`,
-        tot > 0 && sane === tot,
-        `${sane}/${tot} pieces sane${odd.length ? ` · ${odd.join(' | ')}` : ''}`,
+        `${who}: cut areas grow with the size (sign / units sanity)`,
+        tot > 0 && mono === tot,
+        `${mono}/${tot} pieces monotone${odd.length ? ` · ${odd.join(' | ')}` : ''}`,
       );
     } catch (e) {
       check(

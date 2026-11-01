@@ -588,8 +588,10 @@ export function packRul(
     }
   for (const f of fams) {
     const b = f.bySize.get(base)!;
+    // D6673: the deltas run along the grade reference line (layer 5) when the piece has one, else
+    // the drawing's x / y — never the grain line (layer 7), which expandRul leaves alone too.
     const referenceAngles = b.entities.flatMap((entity) => {
-      if (entity.layer !== '7' || entity.kind !== 'chain' || entity.slots.length < 2) return [];
+      if (entity.layer !== '5' || entity.kind !== 'chain' || entity.slots.length < 2) return [];
       const first = entity.slots[0];
       const last = entity.slots[entity.slots.length - 1];
       return Math.hypot(last.x - first.x, last.y - first.y) > 0
@@ -604,13 +606,13 @@ export function packRul(
           1e-6,
       )
     ) {
-      reasons.push(`${f.piece}: its layer-7 grade reference lines point different ways`);
+      reasons.push(`${f.piece}: its layer-5 grade reference lines point different ways`);
       continue;
     }
     const gradeCos = Math.cos(referenceAngle);
     const gradeSin = Math.sin(referenceAngle);
     // Drawing-space movement → the RUL's axes. expandRul applies the inverse transform along the
-    // layer-7 grade reference, so writer and reader remain exact for rotated pieces.
+    // layer-5 grade reference, so writer and reader remain exact for rotated pieces.
     const ruleDelta = (basePoint: PtMm, sizePoint: PtMm): RulDelta => {
       const x = (sizePoint.x - basePoint.x) * mmU;
       const y = (sizePoint.y - basePoint.y) * mmU;
