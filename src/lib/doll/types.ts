@@ -29,6 +29,52 @@ export type DollLayerRelation = readonly [under: string, over: string];
 /** The step editor's exact conversion of one operation-bound row. */
 export type DollOwnerCandidate = { seamKey: string; candidate: SeamCandidate };
 
+/** A point in the piece's seam (u, v) frame (lib/seams/frame.ts `toUV`): the unit square. */
+export type UV = readonly [u: number, v: number];
+
+/**
+ * One fold of a piece (a placket folded on itself, a cuff, a hem): the line a–b in the piece's
+ * seam (u, v) frame; the side holding `flipAt` turns over it — `inward` toward the body (under the
+ * rest of the piece), `outward` away from it. A piece's folds apply in `seq` order, each on the
+ * result of the previous ones («double» = two folds). Storage writes them; the doll only applies.
+ */
+export type DollFold = {
+  seq: number;
+  a: UV;
+  b: UV;
+  flipAt: UV;
+  kind: 'inward' | 'outward';
+};
+
+/** One fold as drawn: the numbers the proof asks for, per fold, in mm and degrees. */
+export type DollFoldReport = {
+  pieceKey: string;
+  seq: number;
+  kind: DollFold['kind'];
+  /** The crease was creased into the mesh and the fold drawn; otherwise `note` says why not. */
+  applied: boolean;
+  /**
+   * The crease's kink, mm: the farthest any crease vertex sits from the chord of its two
+   * neighbours (≤ 1.5 wanted). A crease following the body's curve stays near 0.
+   */
+  creaseDevMm: number;
+  /** Angle between the pattern-face normals across the crease, degrees: 180 = folded flat. */
+  dihedralMinDeg: number;
+  dihedralMeanDeg: number;
+  /**
+   * Signed gap between the plies, mm, over every vertex of one ply that lies over a triangle of
+   * another in the folded footprint (positive = in stack order); null when no vertex does.
+   */
+  plyGapMm: { min: number; median: number; max: number; pairs: number } | null;
+  /** Of those vertex ↔ triangle pairs, how many have the vertex through the other ply (0 wanted). */
+  interpenetrating: number;
+  /** Extent across the fold line: the piece as cut, as folded (flat), and as drawn (3D), mm. */
+  cutWidthMm: number;
+  finishedWidthMm: number;
+  drawnWidthMm: number;
+  note: string;
+};
+
 export type DollOptions = {
   /** Interior mesh step, mm; default adaptive (≈ 7 000 vertices for the whole garment). */
   gridMm?: number;
@@ -48,6 +94,12 @@ export type DollOptions = {
   dropSeams?: string[];
   /** Extra lines in `warnings` (charts, loops) for probes. */
   debug?: boolean;
+  /**
+   * Folds per piece key (a placket folded on itself, a cuff, a hem), each list in `seq` order.
+   * The piece is meshed with the crease, laid out and placed by its folded footprint, its plies
+   * stacked ~1 mm apart and kept from passing through each other. No folds → the doll as before.
+   */
+  folds?: Record<string, DollFold[]>;
   /**
    * Declared joins (the technologist's order, or the skeleton's units): which pieces must be sewn
    * together. A join the graph has no seam for is searched for between those pieces only and
@@ -251,6 +303,8 @@ export type DollReport = {
   }[];
   /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
   collar?: DollCollarReport;
+  /** The folds asked for (`options.folds`), each with its numbers as drawn; absent without folds. */
+  folds?: DollFoldReport[];
   /** The honesty line every view carries. */
   honesty: string;
   /**
