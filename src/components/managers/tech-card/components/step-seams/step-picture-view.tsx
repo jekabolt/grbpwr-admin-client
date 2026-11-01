@@ -381,7 +381,6 @@ export function stepSeamsOfOp(
     ready = true,
   } = options;
   const active = op ?? ops[index];
-  const stepHighlight = stepHighlightOf(ops, index, byKey);
   const groups = inputGroups(ops, index, pieceKeys).map((group) => ({
     ...group,
     name: inputName(group.key, index, ops, (key) => pieceKeys.has(key), nameOf),
@@ -590,7 +589,7 @@ export function stepPictureOfOp(
     crossSeams,
     storedSeams,
     marks,
-    stepEdges: stepHighlight.targets,
+    stepEdges: stepHighlightOf(options.operations, options.index, byKey).targets,
     layoutLeaves,
     hands,
     layout: skipLayout
