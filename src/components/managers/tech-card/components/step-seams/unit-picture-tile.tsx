@@ -8,7 +8,9 @@ import { useWatch } from 'react-hook-form';
 import { Tile } from 'ui';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
+import { drawsStepResult } from './draws-result';
 import { seamSig } from './step-picture';
+import { useStepResults } from './step-result-context';
 import {
   innerSeamsOf,
   splitLaid,
@@ -27,11 +29,17 @@ const RASTER_MM = 4;
 
 export function UnitPictureTile({
   leaves,
+  unitKey,
+  stepIndex,
   name,
   className,
 }: {
   /** The unit's pieces, by line key. */
   leaves: readonly string[];
+  /** Unit consumed by the current step. */
+  unitKey: string;
+  /** Current operation index; only earlier producers can own this unit. */
+  stepIndex: number;
   name: string;
   className?: string;
 }) {
@@ -40,6 +48,7 @@ export function UnitPictureTile({
   const byKey = useSeamRows();
   const pieceKeys = useCardPieceKeys();
   const ops = (useWatch<TechCardFormData>({ name: 'operations' }) ?? []) as FormOpLike[];
+  const results = useStepResults();
   const inputs = useStable([leaves], leaves.join(','));
   // The unit along the seams the card holds inside it: the engine's, and the steps' own (stored
   // or implied) — the whole card's, a unit is what every step so far made of its pieces.
@@ -48,7 +57,18 @@ export function UnitPictureTile({
     return innerSeamsOf(s, ops, ops.length, pieceKeys, inputs, geoms, innerLines, byKey);
   }, [graph?.chosen, inputs, geoms, innerLines, byKey, ops, pieceKeys]);
   const inner = useStable(innerRaw, seamSig(innerRaw));
-  const layout = useStepLayout(inputs, inner, geoms, 0, RASTER_MM);
+  const inferredLayout = useStepLayout(inputs, inner, geoms, 0, RASTER_MM);
+  const ownedResult = useMemo(() => {
+    let producer = -1;
+    for (let index = 0; index < Math.min(stepIndex, ops.length); index++) {
+      const operation = ops[index];
+      if (!operation?.assemblyBlockDetached && (operation?.outputUnitKey ?? '').trim() === unitKey)
+        producer = index;
+    }
+    const result = producer >= 0 ? results?.[producer] : undefined;
+    return producer >= 0 && drawsStepResult(results, producer) ? result : undefined;
+  }, [ops, results, stepIndex, unitKey]);
+  const layout = ownedResult?.layout ?? inferredLayout;
   const [boxEl, box] = useBoxSize();
   if (layout.T.size === 0) return <Tile name={name} sub='unit' className='justify-center' />;
   return (
@@ -64,6 +84,7 @@ export function UnitPictureTile({
             pad={1}
             look='tile'
             layout={layout}
+            layers={ownedResult?.layers}
             geoms={geoms}
             innerLines={innerLines}
           />

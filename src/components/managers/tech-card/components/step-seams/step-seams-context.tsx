@@ -72,8 +72,9 @@ export function useAttachStepSeam(index: number) {
 }
 
 /**
- * Store a step's pose rows (P8) and keep this form step's `poseKeys` with them: `put` is upserted
- * (a replaced pose carries its old key), `drop` deleted. True when the server took every write.
+ * Store a step's pose rows (P8) and keep this form step's `poseKeys` with them: `drop` is deleted
+ * before `put` is upserted (so a replacement cannot briefly make a host cycle). True when the
+ * server took every write.
  */
 export function useAttachStepPose(index: number) {
   const ctx = useStepSeams();
@@ -83,16 +84,16 @@ export function useAttachStepPose(index: number) {
       if (!ctx) return false;
       const field = `operations.${index}.poseKeys` as const;
       const keys = () => ((getValues(field) ?? []) as string[]).slice();
-      if (put.length) {
-        if (!(await ctx.writes.upsertPoses([...put]))) return false;
-        const add = new Set(put.map((r) => r.seamKey));
-        setValue(field, [...keys().filter((k) => !add.has(k)), ...add], { shouldDirty: true });
-      }
       if (drop.length) {
         if (!(await ctx.writes.removePoses([...drop]))) return false;
         const gone = new Set(drop.map((r) => r.seamKey));
         const left = keys().filter((k) => !gone.has(k));
         if (left.length !== keys().length) setValue(field, left, { shouldDirty: true });
+      }
+      if (put.length) {
+        if (!(await ctx.writes.upsertPoses([...put]))) return false;
+        const add = new Set(put.map((r) => r.seamKey));
+        setValue(field, [...keys().filter((k) => !add.has(k)), ...add], { shouldDirty: true });
       }
       return true;
     },

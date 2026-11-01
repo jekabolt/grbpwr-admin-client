@@ -17,7 +17,15 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
 import { notify } from 'lib/stores/store';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { BackLink, Button, Chip, ChipRow, Input, Text } from 'ui';
@@ -29,11 +37,16 @@ import { skuToSeasonLabel } from '../components/season-util';
 import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
-import { CardUnitPicturesProvider } from '../components/card-unit-pictures';
+import {
+  CardUnitPicturesProvider,
+  StepResultUnitPicturesProvider,
+  useCardSeamGraph,
+} from '../components/card-unit-pictures';
 import { firstColorwayCloth, useCardCategoryNames } from '../components/skeleton-card-inputs';
+import { StepResultProvider } from '../components/step-seams/step-result-context';
+import { StepSeamsProvider } from '../components/step-seams/step-seams-context';
 import { useUnitPictures } from '../components/unit-silhouette';
 import { assemblyPrintModel, type PrintCardInput } from './model';
-import { useCardSeamGraph } from '../components/card-unit-pictures';
 import {
   typesetMap,
   typesetRoute,
@@ -282,8 +295,8 @@ function Document({
 
 /**
  * Пиктограммы узлов на бумаге — той же арифметикой и по тем же контурам, что на экране
- * (`CardUnitPicturesProvider`); выключаются тем же выбором «силуэты», что и силуэты деталей. Без
- * DXF карта пустая, и лист набирается как раньше.
+ * (`CardUnitPicturesProvider` → `StepResultProvider` → result override); выключаются тем же выбором
+ * «силуэты», что и силуэты деталей. Без DXF карта пустая, и лист набирается как раньше.
  */
 function PrintUnitPictures({
   enabled,
@@ -309,7 +322,11 @@ function PrintUnitPictures({
       cloth={cloth}
       categoryNames={categoryNames}
     >
-      {children}
+      <StepSeamsProvider techCard={techCard} frozen>
+        <StepResultProvider>
+          <StepResultUnitPicturesProvider>{children}</StepResultUnitPicturesProvider>
+        </StepResultProvider>
+      </StepSeamsProvider>
     </CardUnitPicturesProvider>
   );
 }
@@ -621,11 +638,11 @@ export function TechCardAssemblyPrint() {
                   className='w-[76px] tabular-nums'
                   disabled={!doc}
                   value={sideValue(side)}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
                     onSideChange(side, e.target.value)
                   }
                   onBlur={() => setSizeEdit(null)}
-                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
                     if (e.key === 'Enter') e.currentTarget.blur();
                   }}
                 />

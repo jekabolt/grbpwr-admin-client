@@ -280,7 +280,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     }
   });
 
-  it('keeps every back-pocket piece in the top quarter of its back leg', () => {
+  it('keeps every back-pocket piece apart from its back leg', () => {
     const input = input81();
     const pictures = pictures81()!;
     for (const operation of [370, 440]) {
@@ -289,12 +289,13 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
       const legKey = keys.find((key) => /^Back_[LR]$/i.test(input.pieces.get(key)?.name ?? ''))!;
       const pockets = keys.filter((key) => /^PCK_BACK/i.test(input.pieces.get(key)?.name ?? ''));
       const leg = drawnShape(input, picture, legKey);
-      const height = leg.bbox.y1 - leg.bbox.y0;
       expect(pockets).toHaveLength(2);
       for (const pocketKey of pockets) {
         const pocket = drawnShape(input, picture, pocketKey);
-        expect(touch(leg, pocket), `${operation}: ${input.pieces.get(pocketKey)?.name}`).toBe(true);
-        expect((leg.bbox.y1 - pocket.bbox.y0) / height).toBeLessThanOrEqual(0.25);
+        expect(touch(leg, pocket), `${operation}: ${input.pieces.get(pocketKey)?.name}`).toBe(
+          false,
+        );
+        expect(pairOverlap(leg.raster, pocket.raster)).toBeLessThanOrEqual(0.15);
       }
     }
   });
@@ -324,7 +325,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     );
   });
 
-  it('draws no loose multi-piece operation', () => {
+  it('keeps every rowless multi-piece operation apart', () => {
     const input = input81();
     const pictures = pictures81()!;
     expect(pictures.size).toBeGreaterThan(60);
@@ -332,11 +333,12 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
       const keys = drawnKeys(picture);
       if (keys.length <= 1) continue;
       const shapes = new Map(keys.map((key) => [key, drawnShape(input, picture, key)]));
-      for (const key of keys)
-        expect(
-          keys.some((other) => other !== key && touch(shapes.get(key)!, shapes.get(other)!)),
-          `${operation}: ${input.pieces.get(key)?.name}`,
-        ).toBe(true);
+      for (let left = 0; left < keys.length; left++)
+        for (let right = left + 1; right < keys.length; right++)
+          expect(
+            touch(shapes.get(keys[left])!, shapes.get(keys[right])!),
+            `${operation}: ${input.pieces.get(keys[left])?.name} / ${input.pieces.get(keys[right])?.name}`,
+          ).toBe(false);
     }
   });
 
@@ -359,7 +361,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
       expect(shown.has(name), name).toBe(true);
 
     expect(editorPictureClusters(picture!)).toHaveLength(1);
-    expect(picture!.layout.clusters.filter((cluster) => cluster.length > 0)).toHaveLength(1);
+    expect(picture!.layout.clusters.filter((cluster) => cluster.length > 0)).toHaveLength(2);
     const halves = picture!.groups.map((group) => worldBox(input, picture!, group.pieces));
     expect(halves).toHaveLength(2);
     const xOverlap = intervalOverlap(halves[0].x0, halves[0].x1, halves[1].x0, halves[1].x1);
@@ -370,7 +372,7 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     expect(yOverlap / minHeight).toBeGreaterThan(0.7);
   });
 
-  it('lays operation 650 waistband against the combined leg waist', () => {
+  it('keeps operation 650 waistband apart from the combined legs', () => {
     const input = input81();
     const picture = pictures81()?.get(650);
     expect(picture).toBeDefined();
@@ -380,25 +382,20 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
     const legs = [...picture!.layout.T.keys()].filter((key) =>
       isLeg(input.pieces.get(key)?.name ?? ''),
     );
-    const bandBox = worldBox(input, picture!, bands);
-    const legBox = worldBox(input, picture!, legs);
-    const legHeight = legBox.y1 - legBox.y0;
     expect(bands).toHaveLength(4);
-    expect(bandBox.y1).toBeGreaterThan(legBox.y1);
-    expect((legBox.y1 - bandBox.y0) / legHeight).toBeLessThanOrEqual(0.05);
     const visibleBands = bands.filter((band) => drawnKeys(picture!).includes(band));
-    expect(visibleBands).toHaveLength(2);
+    expect(visibleBands).toHaveLength(4);
     for (const band of visibleBands) {
       const bandShape = drawnShape(input, picture!, band);
-      expect(
-        legs.some((leg) => touch(bandShape, drawnShape(input, picture!, leg))),
-        input.pieces.get(band)?.name,
-      ).toBe(true);
+      for (const leg of legs)
+        expect(
+          touch(bandShape, drawnShape(input, picture!, leg)),
+          `${input.pieces.get(band)?.name} / ${input.pieces.get(leg)?.name}`,
+        ).toBe(false);
     }
   }, 120_000);
 
   it('uses outlines and background only in operation SVGs', () => {
-    const input = input81();
     const model = model81();
     const pictures = pictures81()!;
     for (const row of model.rows) {
@@ -427,7 +424,6 @@ describe.skipIf(!card81RealFixtureAvailable())('pants card 81', () => {
   });
 
   it.skipIf(env.DUMP !== '1')('dumps every operation picture', () => {
-    const input = input81();
     const model = model81();
     const pictures = pictures81() ?? new Map();
     const picturesHtml = model.rows

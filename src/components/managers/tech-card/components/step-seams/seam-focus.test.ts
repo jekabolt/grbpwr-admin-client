@@ -1,68 +1,24 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { newSeamKey, poseRow, type EdgeAnchor, type StoredSeam } from 'lib/seams';
 
-import { isGuess, placeHasDrop, seamFocus, pickTarget } from './seam-focus';
-import { DOOR_SPAN_MM, spanMm } from './step-picture-view';
-
-const collar = [
-  { name: 'Main collar', pieces: ['MAIN'] },
-  { name: 'Second collar', pieces: ['SECOND'] },
-];
-
-describe('seamFocus', () => {
-  it('a pair on the table keeps only its pieces', () => {
-    const groups = [...collar, { name: 'Band', pieces: ['BAND'] }];
-    expect(seamFocus(groups, new Set(['MAIN', 'SECOND']), [])).toEqual(collar);
-  });
-
-  it('a lone pick with no partner keeps the other input on the canvas', () => {
-    // The collar after «place»: the second collar's edge picked alone hid the main collar, so
-    // nothing on it could be picked and accept stayed grey.
-    expect(seamFocus(collar, new Set(['SECOND']), [])).toBeNull();
-  });
-
-  it('one input: a lone pick keeps the rest of its pieces', () => {
-    const one = [{ name: 'Front', pieces: ['F', 'P'] }];
-    expect(seamFocus(one, new Set(['F']), [])).toBeNull();
-    expect(seamFocus(one, new Set(['F', 'P']), [])).toEqual(one);
-  });
-
-  it('a seam between two later inputs still hides an input it does not touch', () => {
-    const groups = [{ name: 'Body', pieces: ['BODY'] }, ...collar];
-    expect(seamFocus(groups, new Set(['MAIN', 'SECOND']), [])).toEqual(collar);
-  });
-
-  it('nothing on the table: no focus', () => {
-    expect(seamFocus(collar, new Set(), [])).toBeNull();
-  });
-});
-
-describe('placeHasDrop', () => {
-  const piece = (key: string, lens: number[], inner = 0) => ({
-    inner: Array.from({ length: inner }, () => []),
-    geom: {
-      pieceKey: key,
-      edges: lens.map((lenMm, i) => ({ id: `${key}#${i}`, kind: 'edge', lenMm })),
-    } as unknown as PieceGeom,
-  });
-  const free = () => false;
-
-  it('a host inner line takes the part', () => {
-    expect(placeHasDrop([piece('H', [100], 1)], piece('P', [400]), free, null)).toBe(true);
-  });
-
-  it('a free host edge of the part’s length takes it, a taken one does not', () => {
-    const host = piece('H', [439, 120]);
-    const part = piece('P', [439.2, 60]);
-    expect(placeHasDrop([host], part, free, null)).toBe(true);
-    expect(placeHasDrop([host], part, (id) => id === 'H#0', null)).toBe(false);
-  });
-
-  it('nothing near in length and no inner line: nowhere to drop (the collar sewn all round)', () => {
-    expect(placeHasDrop([piece('H', [421, 120])], piece('P', [200, 80]), free, null)).toBe(false);
-  });
-});
+import { card6Geoms, card6InnerLines } from './card6.fixture';
+import {
+  cycleLayerHit,
+  isGuess,
+  mirrorLeftPoses,
+  mirrorLeftRows,
+  pickTarget,
+  pieceWord,
+  seamSideName,
+  sideForClick,
+} from './seam-focus';
+import { decodeHandPlace, withHandPlace } from './step-hand';
+import { mirrorPlacement } from './step-pose';
+import { stepLayout } from './step-picture';
+import { DOOR_SPAN_MM, spanMm, StepPictureSvg } from './step-picture-view';
 
 describe('isGuess', () => {
   it('only a proposal flagged not confident is a guess', () => {
@@ -109,6 +65,196 @@ describe('pickTarget', () => {
   });
 });
 
+describe('click-order sides', () => {
+  const pieceOf = (id: string) => id.split(':')[0];
+  const oneInput = [{ pieces: ['SLEEVE', 'PLACKET'] }];
+
+  it('keeps runs of the first piece on side 1 and opens side 2 on another piece', () => {
+    expect(sideForClick('SLEEVE', oneInput, { a: [], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('SLEEVE', oneInput, { a: ['SLEEVE:0'], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('PLACKET', oneInput, { a: ['SLEEVE:0'], b: [] }, pieceOf)).toBe('b');
+  });
+
+  it('keeps input-owned sides for multi-input steps', () => {
+    const groups = [{ pieces: ['BODY'] }, { pieces: ['SLEEVE', 'PLACKET'] }];
+    expect(sideForClick('BODY', groups, { a: [], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('PLACKET', groups, { a: [], b: [] }, pieceOf)).toBe('b');
+  });
+});
+
+describe('side names', () => {
+  const geoms = card6Geoms();
+  const nameOf = (piece: string) =>
+    piece === 'SLV_L' ? 'sleeve' : piece === 'FLP_L_MAIN' ? 'placket' : piece;
+  const pieceOf = (id: string) =>
+    /:i\d+$/.test(id) ? id.replace(/:i\d+$/, '') : id.slice(0, id.lastIndexOf('#'));
+
+  it('names an inner line as the piece slit', () => {
+    expect(seamSideName(['SLV_L:i0'], geoms, nameOf, (id) => id.replace(/:i\d+$/, ''))).toBe(
+      'sleeve slit',
+    );
+  });
+
+  it('keeps a generic placket run at the human piece name', () => {
+    const placket = geoms.get('FLP_L_MAIN')!;
+    const longest = placket.edges.reduce((best, edge) => (edge.lenMm > best.lenMm ? edge : best));
+    expect(seamSideName([longest.id], geoms, nameOf, pieceOf)).toBe('placket');
+  });
+});
+
+describe('pieceWord', () => {
+  it('turns card codes into plain words and keeps prose names', () => {
+    expect(pieceWord('SLV_L')).toBe('sleeve');
+    expect(pieceWord('FLP_L_MAIN')).toBe('placket');
+    expect(pieceWord('YK')).toBe('yoke');
+    expect(pieceWord('LIN_FP_L')).toBe('lining front piece');
+    expect(pieceWord('Left Sleeve')).toBe('left sleeve');
+    expect(pieceWord('BP_U_1')).toBe('back piece');
+    expect(pieceWord('BP_MAIN')).toBe('back piece');
+    expect(pieceWord('P_L_MAIN')).toBe('front');
+  });
+});
+
+describe('mirror left', () => {
+  const anchor = (piece: string): EdgeAnchor => ({
+    piece,
+    samples: [
+      [0, 0],
+      [1, 0],
+    ],
+    perimShare: 0.1,
+    lenMm: 100,
+    notches: 0,
+    turnDeg: 0,
+    range: [0, 1],
+    edgeHint: `${piece}#0`,
+    contourSig: 'same',
+  });
+  const row = (key: string, piece: string, partner: string): StoredSeam => ({
+    seamKey: key,
+    status: 'confirmed',
+    kind: 'edge',
+    direction: 'reversed',
+    source: 'manual',
+    sideA: [anchor(piece)],
+    sideB: [anchor(partner)],
+    anchoredSize: '',
+    note: '',
+  });
+
+  it('copies an explicit left edge placement only onto the matching right row', () => {
+    const geoms = card6Geoms();
+    const left = withHandPlace(row('left', 'SLV_L', 'P_L_MAIN'), 'SLV_L', {
+      inside: true,
+      rotDeg: 90,
+      flip: false,
+      slideMm: 12,
+    });
+    const right = row('right', 'SLV_R', 'P_R_MAIN');
+    const [update] = mirrorLeftRows([right], [left, right], geoms);
+    expect(update.piece).toBe('SLV_R');
+    expect(decodeHandPlace(update.row.sideA[0].placement)).toEqual({
+      inside: true,
+      rotDeg: 90,
+      flip: false,
+      slideMm: -12,
+    });
+  });
+
+  it('copies a left flag set without a move onto the right twin, leaving its place alone', () => {
+    const geoms = card6Geoms();
+    const base = row('left', 'SLV_L', 'P_L_MAIN');
+    const left = { ...base, sideA: [{ ...base.sideA[0], layer: 'over' as const }] };
+    const right = row('right', 'SLV_R', 'P_R_MAIN');
+    const [update] = mirrorLeftRows([right], [left, right], geoms);
+    expect(update.piece).toBe('SLV_R');
+    expect(update.row.sideA[0].layer).toBe('over');
+    expect(update.row.sideA[0].placement).toBeUndefined();
+  });
+});
+
+describe('mirror left: surface and pose', () => {
+  const geoms = card6Geoms();
+  const at = { xMm: 30, yMm: 120, rotDeg: 37, flip: false };
+  const twinKind = (right: string, left: string) =>
+    geoms.get(right)!.twinOf.find((twin) => twin.key === left)!.kind;
+  const expected = () =>
+    mirrorPlacement(
+      geoms.get('SLV_L')!,
+      geoms.get('FLP_L_MAIN')!,
+      at,
+      geoms.get('SLV_R')!,
+      geoms.get('FLP_R_MAIN')!,
+      twinKind('SLV_R', 'SLV_L'),
+      twinKind('FLP_R_MAIN', 'FLP_L_MAIN'),
+    );
+
+  it('poses the right placket on the right sleeve as the left pose mirrored', () => {
+    const left = poseRow({
+      seamKey: newSeamKey(),
+      piece: geoms.get('FLP_L_MAIN')!,
+      host: geoms.get('SLV_L')!,
+      placement: at,
+    });
+    const [pose, ...rest] = mirrorLeftPoses(['SLV_R', 'FLP_R_MAIN'], [left], geoms);
+    expect(rest).toHaveLength(0);
+    expect(pose).toEqual({ piece: 'FLP_R_MAIN', host: 'SLV_R', placement: expected() });
+    expect(mirrorLeftPoses(['SLV_R'], [left], geoms)).toHaveLength(0);
+  });
+
+  it('re-lays a right surface row from its left twin, both anchors', () => {
+    const anchor = (piece: string, placement?: typeof at): EdgeAnchor => ({
+      piece,
+      samples: [
+        [0, 0],
+        [1, 0],
+      ],
+      perimShare: 0.1,
+      lenMm: 100,
+      notches: 0,
+      turnDeg: 0,
+      range: [0, 1],
+      edgeHint: `${piece}#0`,
+      contourSig: 'same',
+      ...(placement ? { placement } : {}),
+    });
+    const surface = (key: string, host: string, part: string, placement?: typeof at) => ({
+      seamKey: key,
+      status: 'confirmed' as const,
+      kind: 'surface' as const,
+      direction: 'unknown' as const,
+      source: 'manual' as const,
+      sideA: [anchor(host, placement)],
+      sideB: [anchor(part, placement)],
+      anchoredSize: '',
+      note: '',
+    });
+    const left = surface('left', 'SLV_L', 'FLP_L_MAIN', at);
+    const right = surface('right', 'SLV_R', 'FLP_R_MAIN');
+    const [update, ...rest] = mirrorLeftRows([right], [left, right], geoms);
+    expect(rest).toHaveLength(0);
+    expect(update.piece).toBe('FLP_R_MAIN');
+    expect(update.row.sideA[0].placement).toEqual(expected());
+    expect(update.row.sideB[0].placement).toEqual(expected());
+  });
+});
+
+describe('cycleLayerHit', () => {
+  const hits = ['TOP', 'MIDDLE', 'BOTTOM'];
+
+  it('starts on top, walks down at the same spot, then wraps', () => {
+    const at: [number, number] = [100, 80];
+    expect(cycleLayerHit(hits, at, null)).toBe('TOP');
+    expect(cycleLayerHit(hits, at, { piece: 'TOP', at })).toBe('MIDDLE');
+    expect(cycleLayerHit(hits, [103, 82], { piece: 'MIDDLE', at })).toBe('BOTTOM');
+    expect(cycleLayerHit(hits, at, { piece: 'BOTTOM', at })).toBe('TOP');
+  });
+
+  it('restarts on top after the pointer leaves the click tolerance', () => {
+    expect(cycleLayerHit(hits, [20, 20], { piece: 'TOP', at: [10, 10] })).toBe('TOP');
+  });
+});
+
 describe('inner-line doors', () => {
   it('a sleeve slit is a door, a button circle and a buttonhole stroke are not', () => {
     const slit: [number, number][] = [
@@ -126,5 +272,49 @@ describe('inner-line doors', () => {
     expect(spanMm(slit)).toBeGreaterThanOrEqual(DOOR_SPAN_MM);
     expect(spanMm(circle)).toBeLessThan(DOOR_SPAN_MM);
     expect(spanMm(buttonhole)).toBeLessThan(DOOR_SPAN_MM);
+  });
+});
+
+describe('buttons and buttonholes are drawn (card 6)', () => {
+  const geoms = card6Geoms();
+  const innerLines = card6InnerLines();
+  const svg = (piece: string, look: 'canvas' | 'tile', pick?: boolean) =>
+    renderToStaticMarkup(
+      createElement(StepPictureSvg, {
+        w: 400,
+        h: 400,
+        pad: 4,
+        look,
+        layout: stepLayout([[piece]], [], geoms, { explode: 0 }),
+        geoms,
+        innerLines,
+        onPick: pick ? () => {} : undefined,
+      }),
+    );
+  const count = (html: string, re: RegExp) => (html.match(re) ?? []).length;
+  const marksOf = (html: string) => {
+    const group = html.match(/<g[^>]*data-inner-marks=""[^>]*>(.*?)<\/g>/)?.[1] ?? '';
+    return count(group, /<path /g);
+  };
+
+  it('the placket marks stay under the door span, its slits and fold lines above it', () => {
+    for (const piece of ['PLCK_L', 'PLCK_R', 'FLP_L', 'SLV_L']) {
+      const spans = innerLines.get(piece)!.map(spanMm);
+      expect(spans.filter((s) => s < DOOR_SPAN_MM).every((s) => s <= 30)).toBe(true);
+      expect(spans.filter((s) => s >= DOOR_SPAN_MM).every((s) => s >= 100)).toBe(true);
+    }
+  });
+
+  it('the canvas draws every mark as a hairline and picks only the doors', () => {
+    const lines = innerLines.get('PLCK_R')!;
+    const small = lines.filter((l) => spanMm(l) < DOOR_SPAN_MM).length;
+    const html = svg('PLCK_R', 'canvas', true);
+    expect(small).toBeGreaterThan(10);
+    expect(marksOf(html)).toBe(small);
+    expect(count(html, /data-seam-target="[^"]*:i\d+"/g)).toBe(lines.length - small);
+  });
+
+  it('a tile draws every inner line, buttons and slits alike', () => {
+    expect(marksOf(svg('PLCK_L', 'tile'))).toBe(innerLines.get('PLCK_L')!.length);
   });
 });

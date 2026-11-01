@@ -1,57 +1,18 @@
-import type { EdgeId, PieceGeom, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { plainEdges } from '../assembly-seams/words';
-import { focusPieces, PARTNER_REL } from './step-picture';
-import { deltaMm } from './step-seams-model';
+import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import { codeName } from 'lib/pattern-import/dictionary/codes';
+import {
+  poseOf,
+  type EdgeAnchor,
+  type SeamLayer,
+  type SeamPlacement,
+  type StoredPose,
+  type StoredSeam,
+  withSeamLayer,
+} from 'lib/seams';
 
-type Group = { name: string; pieces: readonly string[] };
-
-/**
- * The canvas's groups cut to the pieces of the seam on the table, or null when that cut would
- * leave a side of the step with nothing drawn: a lone pick whose partner is not found would hide
- * the other input, and with it every edge the next pick needs (the collar on «place»).
- */
-export function seamFocus(
-  groups: readonly Group[],
-  seamPieces: ReadonlySet<string>,
-  inner: readonly SeamCandidate[],
-): { name: string; pieces: string[] }[] | null {
-  if (!seamPieces.size) return null;
-  const cut = groups.map((g) => ({
-    name: g.name,
-    pieces: focusPieces(g.pieces, seamPieces, inner),
-  }));
-  const kept = cut.filter((g) => g.pieces.length > 0);
-  const twoSides =
-    groups.length >= 2
-      ? kept.length >= 2
-      : (kept[0]?.pieces.length ?? 0) >= 2 || (groups[0]?.pieces.length ?? 0) < 2;
-  return twoSides ? kept : null;
-}
-
-type PlacePiece = { inner: readonly unknown[]; geom: PieceGeom };
-
-/**
- * Whether «place» has anywhere to drop the part: an inner line on a host to lay it on, or a free
- * host edge a free part edge can snap to by length. Without either the drag can only spring back.
- */
-export function placeHasDrop(
-  hosts: readonly PlacePiece[],
-  part: PlacePiece,
-  taken: (id: EdgeId) => boolean,
-  ease: number | null,
-): boolean {
-  if (hosts.some((h) => h.inner.length > 0)) return true;
-  const free = (g: PieceGeom) =>
-    plainEdges(g)
-      .filter((e) => !taken(e.id) && e.lenMm >= 30)
-      .map((e) => e.lenMm);
-  const partLens = free(part.geom);
-  return hosts.some((h) =>
-    free(h.geom).some((hl) =>
-      partLens.some((pl) => deltaMm(pl, hl, ease) / Math.max(pl, hl) <= PARTNER_REL),
-    ),
-  );
-}
+import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
+import { mirrorPlacement } from './step-pose';
+import { edgeWordVote } from './signals/edge-words';
 
 /**
  * A proposal the model could not back (it won on length alone, or barely): shown as the best guess,
@@ -62,6 +23,218 @@ export function isGuess(p: object | null | undefined): boolean {
 }
 
 type PickSides = { a: readonly string[]; b: readonly string[] };
+
+/**
+ * One-input steps collect sides by piece click order: all runs of the first piece stay on side 1,
+ * then the first different piece opens side 2. Multi-input steps retain their input-owned sides.
+ */
+export function sideForClick(
+  piece: string,
+  groups: readonly { pieces: readonly string[] }[],
+  picked: PickSides,
+  pieceOf: (id: string) => string,
+): 'a' | 'b' {
+  if (groups.length >= 2) return groups[0].pieces.includes(piece) ? 'a' : 'b';
+  if (picked.a.some((id) => pieceOf(id) === piece)) return 'a';
+  if (picked.b.some((id) => pieceOf(id) === piece)) return 'b';
+  return picked.a.length ? 'b' : 'a';
+}
+
+const NAMED_EDGE_WORDS = ['neckline', 'armhole', 'shoulder', 'hem', 'front_edge'] as const;
+
+/** A coarse, human edge word when geometry decides one; every inner line reads as a slit. */
+export function seamEdgeWord(
+  ids: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): string {
+  if (ids.some((id) => /:i\d+$/.test(id))) return 'slit';
+  const edges = ids.flatMap((id) => {
+    const at = id.lastIndexOf('#');
+    const geom = at < 0 ? undefined : geoms.get(id.slice(0, at));
+    const edge = geom?.edges.find((candidate) => candidate.id === id);
+    return edge ? [edge] : [];
+  });
+  if (!edges.length) return '';
+  const side = {
+    pieces: [...new Set(edges.map((edge) => edge.pieceKey))],
+    ids: edges.map((edge) => edge.id),
+    lenMm: edges.reduce((sum, edge) => sum + edge.lenMm, 0),
+    turnDeg: edges.reduce((sum, edge) => sum + edge.turnDeg, 0),
+  };
+  const word = NAMED_EDGE_WORDS.find((candidate) => edgeWordVote(candidate, side, geoms) === true);
+  return word === 'front_edge' ? 'front edge' : word ?? '';
+}
+
+/** Card codes the import dictionary does not list (card 6: SLV_L, FLP_L_MAIN, P_L_MAIN). */
+const PIECE_WORD_ALIASES: Readonly<Record<string, string>> = {
+  SLV: 'sleeve',
+  FLP: 'placket',
+  P: 'front',
+};
+const SIDE_TOKENS = new Set(['L', 'R', 'F', 'B', 'MAIN', '#']);
+
+/**
+ * A piece name in plain words: `SLV_L` → «sleeve», `FLP_L_MAIN` → «placket», `BP_U_1` → «back
+ * piece»; prose names stay. Unknown one- or two-letter tails (U, P P) are dropped, not spelled.
+ */
+export function pieceWord(name: string): string {
+  if (!/[_]|^[A-Z0-9#]+$/.test(name)) return name.trim().toLowerCase();
+  const tokens = name.split(/[_\s]+/).filter(Boolean);
+  const words = tokens.flatMap((token) => {
+    const code = token.toUpperCase();
+    if (SIDE_TOKENS.has(code) || /^\d+$/.test(code)) return [];
+    const known = PIECE_WORD_ALIASES[code] ?? codeName(code);
+    if (known) return [known];
+    return code.length > 2 ? [token.toLowerCase()] : [];
+  });
+  return [...new Set(words)].join(' ') || tokens[0].toLowerCase();
+}
+
+/** Piece words plus a useful edge word, never an input/unit name. */
+export function seamSideName(
+  ids: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+  nameOf: (piece: string) => string,
+  pieceOf: (id: string) => string,
+): string {
+  const names = [...new Set(ids.map((id) => pieceWord(nameOf(pieceOf(id)))).filter(Boolean))];
+  const edge = seamEdgeWord(ids, geoms);
+  return [...names, edge].filter(Boolean).join(' ');
+}
+
+export type TwinMirrorUpdate = { row: StoredSeam; piece: string };
+
+/** The right twin of a left piece among `keys`, with how it relates (`PieceGeom.twinOf`). */
+function rightTwinOf(
+  left: string,
+  keys: Iterable<string>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): { key: string; kind: 'mirror' | 'identical' } | null {
+  for (const key of keys) {
+    if (key === left) continue;
+    const link = geoms.get(key)?.twinOf.find((twin) => twin.key === left);
+    if (link) return { key, kind: link.kind };
+  }
+  return null;
+}
+
+/** A left host + part laid at `at`, re-laid on their right twins; null when a twin is missing. */
+function mirroredOnTwins(
+  hostL: string,
+  partL: string,
+  at: SeamPlacement,
+  hostR: string,
+  partR: string,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): SeamPlacement | null {
+  const host = rightTwinOf(hostL, [hostR], geoms);
+  const part = rightTwinOf(partL, [partR], geoms);
+  const [gHL, gPL, gHR, gPR] = [hostL, partL, hostR, partR].map((key) => geoms.get(key));
+  if (!host || !part || !gHL || !gPL || !gHR || !gPR) return null;
+  return mirrorPlacement(gHL, gPL, at, gHR, gPR, host.kind, part.kind);
+}
+
+/**
+ * Copy explicit left-hand placements onto matching rows in this step: edge rows by hand place,
+ * surface rows by the left part's placement re-laid on the right host.
+ */
+export function mirrorLeftRows(
+  stepRows: readonly StoredSeam[],
+  cardRows: readonly StoredSeam[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): TwinMirrorUpdate[] {
+  const updates = new Map<string, TwinMirrorUpdate>();
+  for (const source of cardRows) {
+    if (source.kind === 'surface') {
+      const at = source.sideA[0]?.placement;
+      const hostL = source.sideA[0]?.piece;
+      const partL = source.sideB[0]?.piece;
+      if (!at || !hostL || !partL) continue;
+      if (geoms.get(hostL)?.hand !== 'L' && geoms.get(partL)?.hand !== 'L') continue;
+      for (const target of stepRows) {
+        const hostR = target.sideA[0]?.piece;
+        const partR = target.sideB[0]?.piece;
+        if (target.kind !== 'surface' || target.seamKey === source.seamKey || !hostR || !partR)
+          continue;
+        const placement = mirroredOnTwins(hostL, partL, at, hostR, partR, geoms);
+        if (!placement) continue;
+        updates.set(`${target.seamKey}:${partR}`, {
+          row: {
+            ...target,
+            sideA: target.sideA.map((anchor) =>
+              withLayer({ ...anchor, placement }, source.sideA[0]),
+            ),
+            sideB: target.sideB.map((anchor) =>
+              withLayer({ ...anchor, placement }, source.sideB[0]),
+            ),
+          },
+          piece: partR,
+        });
+      }
+      continue;
+    }
+    if (!isHandSeamKind(source.kind)) continue;
+    for (const [own, other] of [
+      [source.sideA, source.sideB],
+      [source.sideB, source.sideA],
+    ] as const) {
+      for (const anchor of own) {
+        if (geoms.get(anchor.piece)?.hand !== 'L') continue;
+        const hand = decodeHandPlace(anchor.placement);
+        const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
+        // A flag set without a move has no hand place; it still goes to the twin, the place stays.
+        if (!partner || (!hand && !anchor.layer)) continue;
+        const target = twinRowOf(stepRows, anchor.piece, partner, hand, geoms);
+        if (!target || (hand && !target.place)) continue;
+        const key = `${target.row.seamKey}:${target.twin}`;
+        const placed = target.place
+          ? withHandPlace(target.row, target.twin, target.place)
+          : target.row;
+        const twinLayer = (side: readonly EdgeAnchor[]) =>
+          side.map((candidate) =>
+            candidate.piece === target.twin ? withLayer(candidate, anchor) : candidate,
+          );
+        updates.set(key, {
+          row: { ...placed, sideA: twinLayer(placed.sideA), sideB: twinLayer(placed.sideB) },
+          piece: target.twin,
+        });
+      }
+    }
+  }
+  return [...updates.values()];
+}
+
+export type TwinPose = { piece: string; host: string; placement: SeamPlacement; layer?: SeamLayer };
+
+/** The right anchor takes the left anchor's under/over (or none). */
+function withLayer(anchor: EdgeAnchor, left: EdgeAnchor | undefined): EdgeAnchor {
+  return withSeamLayer(anchor, left?.layer);
+}
+
+/**
+ * Right pieces of this step posed as the mirror of their left twins' stored poses (piece and host
+ * both have a right twin here). Only on the owner's `mirror left` click; nothing calls it alone.
+ */
+export function mirrorLeftPoses(
+  stepPieces: readonly string[],
+  cardPoses: Iterable<StoredPose>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): TwinPose[] {
+  const out = new Map<string, TwinPose>();
+  for (const row of cardPoses) {
+    const pose = poseOf(row);
+    if (!pose || geoms.get(pose.piece)?.hand !== 'L') continue;
+    const piece = rightTwinOf(pose.piece, stepPieces, geoms)?.key;
+    const host = rightTwinOf(pose.host, stepPieces, geoms)?.key;
+    if (!piece || !host) continue;
+    const placement = mirroredOnTwins(pose.host, pose.piece, pose.placement, host, piece, geoms);
+    const layer = row.sideA[0]?.layer;
+    if (placement) out.set(piece, { piece, host, placement, ...(layer ? { layer } : {}) });
+  }
+  return [...out.values()];
+}
+
+export { cycleLayerHit, type LayerHit } from './pose-picking';
 
 /**
  * One click on the canvas. An inner line (a slit, a placement line) is a host on its own: it takes

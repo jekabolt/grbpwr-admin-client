@@ -19,6 +19,8 @@ import {
   type StepProposal,
 } from './step-seams-model';
 import { recordSeamDecision } from './seam-decisions';
+import { drawsStepResult } from './draws-result';
+import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import { frameSeamsOf, useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
 import { SeamTile } from './step-seams-row';
@@ -230,6 +232,10 @@ const QuizTile = memo(
     onOpen: () => void;
   }) {
     const scene = useStepScene(index);
+    const results = useStepResults();
+    const result = drawsStepResult(results, index) ? results?.[index] : undefined;
+    const ownedLayout = result?.layout;
+    const ownedLayers = result?.layers;
     const proposalRef = useRef<StepProposal | null | undefined>(undefined);
     if (proposalRef.current === undefined && scene.geo?.dep.status !== 'pending') {
       proposalRef.current = scene.suggestions[0] ?? null;
@@ -266,12 +272,14 @@ const QuizTile = memo(
       <SeamTile
         scene={scene}
         seams={seams}
-        marks={marks}
-        dashed={!!proposal || !!surface}
+        layout={ownedLayout}
+        layers={ownedLayers}
+        marks={ownedLayout ? [] : marks}
+        dashed={!ownedLayout && (!!proposal || !!surface)}
         current={current}
         status={status}
-        emptyLabel={proposal || surface || drawable ? undefined : 'no seam'}
-        caption={proposal || surface || !drawable ? undefined : 'pick'}
+        emptyLabel={ownedLayout || proposal || surface || drawable ? undefined : 'no seam'}
+        caption={ownedLayout || proposal || surface || !drawable ? undefined : 'pick'}
         onOpen={onOpen}
       />
     );

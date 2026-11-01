@@ -35,6 +35,15 @@ import {
   pinPoses,
   posePinsOf,
 } from 'components/managers/tech-card/components/step-seams/step-pose';
+import {
+  OWNER_FIT,
+  stepResults,
+  type StepResult,
+} from 'components/managers/tech-card/components/step-seams/step-result';
+import {
+  drawsStepResult,
+  ROWLESS_CARDS_FOLLOW_EDITOR,
+} from 'components/managers/tech-card/components/step-seams/draws-result';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
@@ -63,6 +72,15 @@ import {
 } from '../derive-assembly';
 import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
+import {
+  normalIntoPiece,
+  pressMode,
+  pressScreenAim,
+  pressTowardPiece,
+  pressWord,
+  seamMidNormal,
+  type PressMode,
+} from '../press-arrows';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
 import { own, useT, type PdfT } from '../i18n';
 const ASM_CSS = String.raw`
@@ -79,7 +97,8 @@ const ASM_CSS = String.raw`
 .asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
 .asm-picture-box > svg { max-width: 100%; max-height: 100%; }
-.asm-picture-key { position: absolute; left: 4px; top: 4px; z-index: 1; background: var(--color-bgColor); }
+.asm-table td.asm-key-cell { padding-left: 0 !important; padding-right: 0 !important; }
+.asm-key-cell svg { stroke-width: 1; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
 .asm-what b { font-weight: 700; }
@@ -103,8 +122,8 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 40, keyH: 34 },
-  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 40, keyH: 34 },
+  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 28, keyH: 20 },
+  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 28, keyH: 20 },
 } as const;
 
 const ROWS_PER_SHEET = 6;
@@ -114,9 +133,15 @@ const CELL_PAD_X = 12;
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
 
+export type ResultStepPicture = StepPicture & {
+  resultLayers?: readonly string[];
+  resultLower?: readonly string[];
+  resultStacked?: StepResult['stacked'];
+};
+
 type Row = AsmRow & {
   pic?: SvgMarkup;
-  editorPic?: StepPicture;
+  editorPic?: ResultStepPicture;
   sil?: SvgMarkup | null;
   photoCount: number;
 };
@@ -3271,7 +3296,7 @@ function restoreFinishedInputPictures(
 export function editorOperationPictures(
   techCard: common_TechCard,
   model: AssemblyModel,
-): Map<number, StepPicture> | null {
+): Map<number, ResultStepPicture> | null {
   try {
     const resolvedCard = model.techCard ?? techCard;
     // A pose row (P8) is not a seam: a card with poses only still reads its layout inferred.
@@ -3304,9 +3329,33 @@ export function editorOperationPictures(
       ),
     );
     const operations = sceneOperations(resolvedCard);
+    // The editor provider reads the stored/form operations before the PDF model resolves DXF
+    // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
+    const resultOperations = sceneOperations(techCard);
+    // With no stored row every result is provably rowless; keep that legacy path allocation-free
+    // until the one shared flag opts rowless cards into editor parity.
+    const ownerResults =
+      byKey.size || poses.size || ROWLESS_CARDS_FOLLOW_EDITOR
+        ? stepResults(
+            {
+              ops: resultOperations,
+              byKey,
+              poses,
+              geoms,
+              innerLines,
+              pieceKeys,
+            },
+            OWNER_FIT,
+          )
+        : [];
+    const ownedNumbers = new Set(
+      ownerResults.flatMap((result, index) =>
+        drawsStepResult(ownerResults, index) ? [resultOperations[index]?.operationNumber ?? 0] : [],
+      ),
+    );
     const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
     const rowByNumber = new Map(model.rows.map((row) => [row.n, row]));
-    const pictures = new Map<number, StepPicture>();
+    const pictures = new Map<number, ResultStepPicture>();
     const assembledByUnit = new Map<string, StepLayout>();
     const assembledByPieces = new Map<string, StepPicture>();
     const seamsAt = (number: number) =>
@@ -3358,6 +3407,27 @@ export function editorOperationPictures(
       const row = rowByNumber.get(number);
       if (!row) return;
       try {
+        const ownerResult = ownerResults[index];
+        if (ownerResult && drawsStepResult(ownerResults, index)) {
+          const picture = sceneAt(operation, index);
+          const layout: StepLayout = {
+            ...ownerResult.layout,
+            T: new Map(ownerResult.layout.T),
+            input: new Map(ownerResult.layout.input),
+          };
+          pictures.set(number, {
+            ...picture,
+            marks: [],
+            layoutLeaves: picture.leaves,
+            layout,
+            resultLayers: ownerResult.layers,
+            resultLower: ownerResult.lower,
+            resultStacked: ownerResult.stacked,
+          });
+          const output = operation.outputUnitKey?.trim();
+          if (output) assembledByUnit.set(output, layout);
+          return;
+        }
         if (joins.has(number)) {
           const picture = sceneAt(operation, index);
           const frameSeams = useInferredLayout ? seamsAt(number) : picture.frameSeams;
@@ -3460,9 +3530,10 @@ export function editorOperationPictures(
     const final = [...pictures.entries()]
       .sort(([left], [right]) => right - left)
       .find(([, picture]) => visiblePictureKeys(picture).length > 2);
-    if (final) pictures.set(final[0], compactFinalPicture(final[1]));
+    if (final && !ownedNumbers.has(final[0])) pictures.set(final[0], compactFinalPicture(final[1]));
     const completeAssemblies = new Set<number>();
     for (const [number, picture] of pictures) {
+      if (ownedNumbers.has(number)) continue;
       const rawKeys = visiblePictureKeys(picture);
       const rawRings = rawKeys.map((key) =>
         (picture.geoms.get(key)?.rs ?? []).map((point) => apply(picture.layout.T.get(key)!, point)),
@@ -3616,6 +3687,7 @@ export function editorOperationPictures(
       const operation = operations[index];
       const previousNumber = previousOperation.operationNumber ?? 0;
       const number = operation.operationNumber ?? 0;
+      if (ownedNumbers.has(number)) continue;
       const previous = pictures.get(previousNumber);
       const current = pictures.get(number);
       const inputSignature = (op: SceneOp) =>
@@ -3734,6 +3806,7 @@ export function editorOperationPictures(
       const nextOperation = operations[index + 1];
       const number = operation.operationNumber ?? 0;
       const nextNumber = nextOperation.operationNumber ?? 0;
+      if (ownedNumbers.has(number)) continue;
       const output = operation.outputUnitKey?.trim();
       const picture = pictures.get(number);
       const nextPicture = pictures.get(nextNumber);
@@ -3804,6 +3877,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      if (ownedNumbers.has(number)) continue;
       const producedInputs = (operation.inputKeys ?? []).flatMap((input) => {
         const key = input.trim();
         const source = outputPictures.get(key);
@@ -3834,7 +3908,8 @@ export function editorOperationPictures(
       }
     }
     for (const [number, picture] of pictures)
-      if (sleevedPictureNeedsRepair(picture)) {
+      if (ownedNumbers.has(number)) continue;
+      else if (sleevedPictureNeedsRepair(picture)) {
         const repaired = sleevedFinalPicture(picture);
         if (repaired) {
           pictures.set(number, repaired);
@@ -3846,6 +3921,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      if (ownedNumbers.has(number)) continue;
       const continuedCollarSource =
         operation.inputKeys?.length === 1 && collarUnits.has(operation.inputKeys[0].trim())
           ? outputPictures.get(operation.inputKeys[0].trim())
@@ -3953,6 +4029,11 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
       if (!picture) continue;
+      const output = operation.outputUnitKey?.trim();
+      if (ownedNumbers.has(number)) {
+        if (output) finalOutputs.set(output, picture);
+        continue;
+      }
       const sources = (operation.inputKeys ?? []).flatMap((input) => {
         const key = input.trim();
         const source = finalOutputs.get(key);
@@ -3962,7 +4043,6 @@ export function editorOperationPictures(
         ? restoreEdgeTreatments(restoreFinishedInputPictures(picture, sources))
         : picture;
       pictures.set(number, finalPicture);
-      const output = operation.outputUnitKey?.trim();
       if (output) finalOutputs.set(output, finalPicture);
     }
 
@@ -4019,6 +4099,7 @@ export function editorOperationPictures(
       const number = operation.operationNumber ?? 0;
       const picture = finishedPictures.get(number);
       if (!picture) return;
+      if (ownedNumbers.has(number)) return;
       const shown = visiblePictureKeys(picture);
       const shownSet = new Set(shown);
       const panelRingKeys = shown.filter(
@@ -4061,6 +4142,7 @@ export function editorOperationPictures(
         const number = operation.operationNumber ?? 0;
         const picture = pictures.get(number);
         if (!picture) return;
+        if (ownedNumbers.has(number)) return;
         const pins = posePinsOf(operations.slice(0, index + 1), poses);
         if (!pins.size) return;
         const T = new Map(picture.layout.T);
@@ -4077,6 +4159,26 @@ export function editorOperationPictures(
           },
         });
       });
+    // The legacy print normalizers above may adjust their private copies. Drawn result operations
+    // finish on a fresh copy of the shared result so no print path can mutate a later step's seed.
+    operations.forEach((operation, index) => {
+      const ownerResult = ownerResults[index];
+      const number = operation.operationNumber ?? 0;
+      const picture = pictures.get(number);
+      if (!ownerResult || !drawsStepResult(ownerResults, index) || !picture) return;
+      pictures.set(number, {
+        ...picture,
+        marks: [],
+        layout: {
+          ...ownerResult.layout,
+          T: new Map(ownerResult.layout.T),
+          input: new Map(ownerResult.layout.input),
+        },
+        resultLayers: ownerResult.layers,
+        resultLower: ownerResult.lower,
+        resultStacked: ownerResult.stacked,
+      });
+    });
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.
@@ -4096,32 +4198,8 @@ export function editorActionMarks(
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
   if (!action) return { lines: [], glyphs: [] };
   const lines: PictureActionLine[] = [];
-  const closestOutlinePoint = (piece: string, point: Pt2): Pt2 => {
-    const ring = geoms.get(piece)?.rs ?? [];
-    if (ring.length < 2) return point;
-    let closest = ring[0];
-    let best = Infinity;
-    for (let index = 0; index < ring.length; index++) {
-      const start = ring[index];
-      const end = ring[(index + 1) % ring.length];
-      const dx = end[0] - start[0];
-      const dy = end[1] - start[1];
-      const length2 = dx * dx + dy * dy;
-      const t = length2
-        ? Math.max(
-            0,
-            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
-          )
-        : 0;
-      const candidate: Pt2 = [start[0] + t * dx, start[1] + t * dy];
-      const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
-      if (distance < best) {
-        best = distance;
-        closest = candidate;
-      }
-    }
-    return closest;
-  };
+  const press =
+    action.tech === 'pressSide' || action.tech === 'press' ? pressMode(action.raw) : null;
   const offsetTowardCentre = (piece: string, points: readonly Pt2[], distance: number) => {
     const geom = geoms.get(piece);
     if (!geom) return [...points];
@@ -4135,7 +4213,7 @@ export function editorActionMarks(
     });
   };
   action.edgeParts.forEach((part, index) => {
-    const points = part.pts.map(([x, y]) => closestOutlinePoint(part.piece, [x, -y]));
+    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
     if (!points.length) return;
     if (action.tech === 'topstitch') {
       lines.push({
@@ -4148,21 +4226,13 @@ export function editorActionMarks(
       });
       return;
     }
-    if (action.tech === 'pressSide') {
-      const weight = 'ink' as const;
+    if (press) {
       lines.push({
         id: `${action.n}:${index}:press-edge`,
         piece: part.piece,
         points,
-        weight,
-        kind: 'press-side',
-      });
-      lines.push({
-        id: `${action.n}:${index}:press-offset`,
-        piece: part.piece,
-        points: offsetTowardCentre(part.piece, points, decimal(action.raw.seamAllowanceMm, 7)),
-        weight,
-        kind: 'press-side',
+        weight: 'ink',
+        kind: `press-${press}`,
       });
       return;
     }
@@ -4174,17 +4244,80 @@ export function editorActionMarks(
       kind: action.tech,
     });
   });
-  const glyphs = action.placements.map((placement): PictureActionGlyph => {
+  const glyphs: PictureActionGlyph[] = press ? pressArrowGlyphs(action, press, geoms) : [];
+  action.placements.forEach((placement) => {
     const radians = (placement.angleDeg * Math.PI) / 180;
-    return {
+    glyphs.push({
       id: placement.id,
       piece: placement.piece,
       kind: placement.kind,
       point: [placement.point[0], -placement.point[1]],
       direction: [Math.cos(radians), -Math.sin(radians)],
-    };
+      lengthMm: placement.lengthMm,
+    });
   });
   return { lines, glyphs };
+}
+
+/**
+ * Press arrows from each seam run's midpoint, square to the seam: open = one into each side, to one
+ * side = one toward the named side (into its piece; UP/DOWN/centre read on the picture; unnamed =
+ * into the run's own piece). Flat draws none. Piece geometry frame (mm, y up).
+ */
+function pressArrowGlyphs(
+  action: AsmAction,
+  press: PressMode,
+  geoms: ReadonlyMap<string, { rs: Pt2[] }>,
+): PictureActionGlyph[] {
+  if (press === 'flat') return [];
+  const toward = action.raw.press?.toward;
+  const label = pressWord(press, toward);
+  const aim = press === 'side' ? pressScreenAim(toward) : undefined;
+  const target =
+    press === 'side' && !aim ? pressTowardPiece(toward, action.partPieces ?? []) : undefined;
+  // The named piece's own runs say «into me» without reading across the seam.
+  const parts =
+    target && action.edgeParts.some((part) => part.piece === target)
+      ? action.edgeParts.filter((part) => part.piece === target)
+      : action.edgeParts;
+  return parts.flatMap((part, index) => {
+    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
+    const mid = seamMidNormal(points);
+    const ring = geoms.get(part.piece)?.rs;
+    if (!mid || !ring) return [];
+    const inward = normalIntoPiece(mid.at, mid.normal, ring);
+    const id = `${action.n}:${index}:press-arrow`;
+    if (press === 'open')
+      return [
+        {
+          id: `${id}:a`,
+          piece: part.piece,
+          kind: 'press-arrow',
+          point: mid.at,
+          direction: inward,
+          label,
+        },
+        {
+          id: `${id}:b`,
+          piece: part.piece,
+          kind: 'press-arrow',
+          point: mid.at,
+          direction: [-inward[0], -inward[1]],
+        },
+      ];
+    const across = target && target !== part.piece;
+    return [
+      {
+        id,
+        piece: part.piece,
+        kind: 'press-arrow',
+        point: mid.at,
+        direction: across ? [-inward[0], -inward[1]] : inward,
+        label,
+        aim,
+      },
+    ];
+  });
 }
 
 function pictureDimensions(orient: PrintOrient) {
@@ -4201,6 +4334,7 @@ function Cols({ orient }: { orient: PrintOrient }) {
     <colgroup>
       <col style={{ width: d.n }} />
       <col style={{ width: d.joinW + CELL_PAD_X }} />
+      <col style={{ width: d.keyW + 4 }} />
       <col />
       <col style={{ width: d.tool }} />
     </colgroup>
@@ -4214,6 +4348,7 @@ function Head() {
       <tr>
         <th>{t('assembly.op')}</th>
         <th data-align='left'>{t('assembly.picture')}</th>
+        <th />
         <th data-align='left'>{t('assembly.operation')}</th>
         <th data-align='left'>{t('assembly.machineDelta')}</th>
       </tr>
@@ -4270,7 +4405,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const actionMarks = r.editorPic
     ? editorActionMarks(r.action, r.editorPic.geoms)
     : { lines: [], glyphs: [] };
-  const showKey = asmProtoFlags().key;
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
       {r.editorPic ? (
@@ -4280,6 +4414,9 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           pad={4}
           look='print'
           layout={r.editorPic.layout}
+          layers={r.editorPic.resultLayers}
+          lower={r.editorPic.resultLower}
+          stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}
@@ -4295,7 +4432,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           label={`${r.n} ${r.words.verb}`}
         />
       ) : null}
-      {showKey && <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} className='asm-picture-key' />}
     </div>
   );
 }
@@ -4312,6 +4448,9 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
       <td className='asm-n'>{r.n}</td>
       <td data-align='left'>
         <Picture r={r} orient={orient} />
+      </td>
+      <td className='asm-key-cell'>
+        <KeyArt icon={w.icon} w={DIM[orient].keyW} h={DIM[orient].keyH} />
       </td>
       <td data-align='left'>
         <div className='asm-what'>

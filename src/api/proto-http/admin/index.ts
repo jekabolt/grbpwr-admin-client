@@ -11395,6 +11395,9 @@ export type common_TechCardSeamAnchor = {
   // inner line or a free spot rather than an edge (edge_hint "i<k>" names inner line k). Absent =
   // the client places the piece geometrically.
   placement: common_TechCardSeamPlacement | undefined;
+  // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
+  // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
+  layer: common_TechCardSeamLayer | undefined;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame
@@ -11414,6 +11417,11 @@ export type common_TechCardSeamPlacement = {
   flip: boolean | undefined;
 };
 
+// TechCardSeamLayer is an explicit stacking of a seam side's piece: under or over the other side.
+export type common_TechCardSeamLayer =
+  | "TECH_CARD_SEAM_LAYER_UNKNOWN"
+  | "TECH_CARD_SEAM_LAYER_UNDER"
+  | "TECH_CARD_SEAM_LAYER_OVER";
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;

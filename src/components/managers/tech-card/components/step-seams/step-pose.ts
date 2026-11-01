@@ -12,6 +12,57 @@ import { poseOf, type SeamPlacement, type StoredPose } from 'lib/seams';
 /** A posed piece as the layout reads it: on `host`, at `placement` (the surface encoding). */
 export type PosePin = { host: string; placement: SeamPlacement; seamKey?: string };
 
+export type PoseEditResolution = {
+  edits: Map<string, PosePin>;
+  /** Pieces whose stored pose must be removed. */
+  drop: Set<string>;
+};
+
+/**
+ * Record one pose edit without allowing a host cycle. The new edge wins: when its host already
+ * reaches the moved piece, that host's older pose is removed (pending edit and stored row alike).
+ */
+export function resolvePoseEdit(
+  storedHosts: ReadonlyMap<string, string>,
+  current: { edits: ReadonlyMap<string, PosePin>; drop: ReadonlySet<string> },
+  piece: string,
+  edit: PosePin,
+): PoseEditResolution {
+  const edits = new Map(current.edits);
+  const drop = new Set(current.drop);
+  if (piece === edit.host) return { edits, drop };
+
+  // Re-setting a piece is the latest edit, including after an earlier cycle dropped its pose.
+  edits.delete(piece);
+  edits.set(piece, edit);
+  drop.delete(piece);
+
+  const hostOf = (key: string) =>
+    edits.get(key)?.host ?? (drop.has(key) ? undefined : storedHosts.get(key));
+  const seen = new Set<string>();
+  let cursor: string | undefined = edit.host;
+  while (cursor && !seen.has(cursor) && cursor !== piece) {
+    seen.add(cursor);
+    cursor = hostOf(cursor);
+  }
+  if (cursor === piece) {
+    edits.delete(edit.host);
+    drop.add(edit.host);
+  }
+  return { edits, drop };
+}
+
+/** Recheck a complete pending save; map order is edit order, so the last move wins. */
+export function resolvePoseEdits(
+  storedHosts: ReadonlyMap<string, string>,
+  edits: ReadonlyMap<string, PosePin>,
+  drop: ReadonlySet<string> = new Set(),
+): PoseEditResolution {
+  let resolved: PoseEditResolution = { edits: new Map(edits), drop: new Set(drop) };
+  for (const [piece, edit] of edits) resolved = resolvePoseEdit(storedHosts, resolved, piece, edit);
+  return resolved;
+}
+
 const FLIP_Y: Affine = [1, 0, 0, -1, 0, 0];
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
@@ -97,6 +148,28 @@ export function posePinsOf(
 }
 
 /**
+ * What a focused picture keeps, with the host of every kept posed piece put back (and its host's in
+ * turn): a pose is laid on its host, so a posed piece drawn without it would fall back to the
+ * layout. `drawable`: the step's pieces — a host off the step stays out.
+ */
+export function withPoseHosts(
+  keep: Iterable<string>,
+  drawable: ReadonlySet<string>,
+  pose: ReadonlyMap<string, PosePin> | undefined,
+): Set<string> {
+  const out = new Set(keep);
+  if (!pose?.size) return out;
+  const queue = [...out];
+  while (queue.length) {
+    const host = pose.get(queue.pop()!)?.host;
+    if (!host || out.has(host) || !drawable.has(host)) continue;
+    out.add(host);
+    queue.push(host);
+  }
+  return out;
+}
+
+/**
  * What moves with a posed piece: the pieces hung on it (`links`: [piece, what it hangs on]) — its
  * side once its own hold is cut; the piece alone when its host hangs on that side too.
  */
@@ -123,6 +196,118 @@ export function poseGroup(
   return seen.has(host) ? [piece] : [...seen];
 }
 
+/** The result metadata needed to choose a rigid PLACE pickup. */
+export type PoseBlockLayout = {
+  blocks: readonly { pieces: readonly string[] }[];
+  transforms: ReadonlyMap<string, Affine>;
+  /** Piece-level [input, host] links from this step's laid result. */
+  hung?: readonly (readonly [string, string])[];
+};
+
+/** The rigid pieces and fixed host captured when PLACE starts dragging. */
+export type PosePickup = { group: string[]; host: string | null };
+
+const blockIndexOf = (layout: Pick<PoseBlockLayout, 'blocks'>) => {
+  const out = new Map<string, number>();
+  layout.blocks.forEach((block, index) => {
+    for (const piece of block.pieces) if (!out.has(piece)) out.set(piece, index);
+  });
+  return out;
+};
+
+/**
+ * The grabbed input block plus input blocks hanging from it by this step. The fixed host's block is
+ * always cut out, so replaying the row moves exactly the same rigid side of the join.
+ */
+export function poseBlockGroup(
+  piece: string,
+  host: string | null,
+  layout: Pick<PoseBlockLayout, 'blocks' | 'hung'>,
+): string[] {
+  const input = blockIndexOf(layout);
+  const own = input.get(piece);
+  if (own == null) return [piece];
+  const hostInput = host == null ? null : input.get(host);
+  const links = (layout.hung ?? []).flatMap(([child, parent]) => {
+    const from = input.get(child);
+    const to = input.get(parent);
+    return from == null || to == null || from === to ? [] : [[from, to] as const];
+  });
+  const included = new Set([own]);
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [child, parent] of links) {
+      if (!included.has(parent) || included.has(child) || child === hostInput) continue;
+      included.add(child);
+      changed = true;
+    }
+  }
+  return layout.blocks.flatMap((block, index) => (included.has(index) ? block.pieces : []));
+}
+
+/**
+ * Capture a PLACE drag. A seam-linked parent is the fixed host; otherwise the largest other input
+ * by total cut area supplies its largest drawn piece. The group and host are stable until drop.
+ */
+export function posePickup(
+  piece: string,
+  layout: PoseBlockLayout,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): PosePickup {
+  const input = blockIndexOf(layout);
+  const own = input.get(piece);
+  if (own == null) return { group: [piece], host: null };
+  let host: string | null = null;
+  for (const [child, parent] of layout.hung ?? []) {
+    if (input.get(child) !== own || input.get(parent) == null || input.get(parent) === own)
+      continue;
+    host = parent;
+    break;
+  }
+  if (!host) {
+    const areaOfPiece = (key: string) => Math.abs(geoms.get(key)?.areaMm2 ?? 0);
+    const candidates = layout.blocks
+      .map((block, index) => ({
+        index,
+        area: block.pieces.reduce((sum, key) => sum + areaOfPiece(key), 0),
+      }))
+      .filter(({ index }) => index !== own);
+    const other = candidates.reduce<(typeof candidates)[number] | null>(
+      (best, candidate) => (!best || candidate.area > best.area ? candidate : best),
+      null,
+    );
+    const pieces = other?.index == null ? [] : layout.blocks[other.index].pieces;
+    host =
+      pieces.reduce<string | null>(
+        (best, key) => (!best || areaOfPiece(key) > areaOfPiece(best) ? key : best),
+        null,
+      ) ?? null;
+  }
+  return { group: poseBlockGroup(piece, host, layout), host };
+}
+
+/** A dropped pose value ready to be wrapped in `poseRow`. */
+export type DroppedPose = { piece: string; host: string; placement: SeamPlacement };
+
+/**
+ * Encode a drop against the host captured at pickup. No snap target or nearby piece participates,
+ * so the row cannot be re-hosted while it is written.
+ */
+export function poseAfterDrop(
+  piece: string,
+  droppedT: Affine,
+  pickup: Pick<PosePickup, 'host'>,
+  layout: Pick<PoseBlockLayout, 'transforms'>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): DroppedPose | null {
+  const host = pickup.host;
+  const pieceGeom = geoms.get(piece);
+  const hostGeom = host ? geoms.get(host) : undefined;
+  const hostT = host ? layout.transforms.get(host) : undefined;
+  if (!host || !pieceGeom || !hostGeom || !hostT || host === piece) return null;
+  return { piece, host, placement: poseAt(hostGeom, pieceGeom, hostT, droppedT) };
+}
+
 function invert(T: Affine): Affine {
   const [a, b, c, d, e, f] = T;
   const k = a * d - b * c || 1;
@@ -144,6 +329,10 @@ export function pinPoses(
   pose: ReadonlyMap<string, PosePin>,
   geoms: ReadonlyMap<string, PieceGeom>,
   links: readonly (readonly [string, string])[],
+  opts: {
+    /** Additive override for result layouts: every member of the piece's rigid input moves. */
+    groupOf?: (piece: string, host: string) => readonly string[];
+  } = {},
 ): { pinned: string[]; moved: boolean } {
   const pins = [...pose].filter(
     ([k, p]) =>
@@ -155,7 +344,13 @@ export function pinPoses(
   );
   if (!pins.length) return { pinned: [], moved: false };
   const groups = new Map(
-    pins.map(([k, p]) => [k, poseGroup(k, p.host, links).filter((m) => T.has(m))] as const),
+    pins.map(
+      ([k, p]) =>
+        [
+          k,
+          (opts.groupOf?.(k, p.host) ?? poseGroup(k, p.host, links)).filter((m) => T.has(m)),
+        ] as const,
+    ),
   );
   let any = false;
   for (let pass = 0; pass <= pins.length; pass++) {
@@ -223,6 +418,30 @@ export function snapPose(
   return best ? { dx: best.dx, dy: best.dy, at: best.at, host: best.host } : null;
 }
 
+/** The snap candidate for the current drag delta, from the same geometry the drop will store. */
+export function snapPoseForDrag(
+  group: readonly string[],
+  D: Affine,
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  stacked: ReadonlySet<string>,
+  reach: number,
+): PoseSnap | null {
+  const movingKeys = new Set(group);
+  const ringOf = (piece: string, T: Affine) =>
+    (geoms.get(piece)?.rs ?? []).map((point) => apply(T, point));
+  const moving = group.flatMap((piece) => {
+    const T = transforms.get(piece);
+    return T ? ringOf(piece, compose(D, T)) : [];
+  });
+  const others = [...transforms].flatMap(([piece, T]) =>
+    movingKeys.has(piece) || stacked.has(piece) || (geoms.get(piece)?.rs.length ?? 0) < 3
+      ? []
+      : [{ piece, ring: ringOf(piece, T) }],
+  );
+  return snapPose(moving, others, reach);
+}
+
 /**
  * The host of a piece placed with no snap — the block's root: the biggest drawn piece of the first
  * input of its cluster that is neither the piece nor dragged with it, then of the other inputs.
@@ -265,7 +484,83 @@ export function turnAbout(ring: readonly Pt2[], quarter: -1 | 0 | 1): Affine {
   return compose(translate(cx, cy), compose(L, translate(-cx, -cy)));
 }
 
+const quarterLinear = (quarter: number): Affine => {
+  const normalized = ((quarter % 4) + 4) % 4;
+  if (normalized === 1) return [0, 1, -1, 0, 0, 0];
+  if (normalized === 2) return [-1, 0, 0, -1, 0, 0];
+  if (normalized === 3) return [0, -1, 1, 0, 0, 0];
+  return IDENTITY;
+};
+
+/** Delta that replaces `T`'s linear part while keeping the piece's cut-box centre fixed. */
+const grainDelta = (piece: PieceGeom, T: Affine, linear: Affine): Affine => {
+  const b = box(piece.rs);
+  const centre: Pt2 = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const fixed = apply(T, centre);
+  const turned = apply(linear, centre);
+  const next: Affine = [
+    linear[0],
+    linear[1],
+    linear[2],
+    linear[3],
+    fixed[0] - turned[0],
+    fixed[1] - turned[1],
+  ];
+  return compose(next, invert(T));
+};
+
+/**
+ * ⟲ (`1`) or ⟳ (`-1`) to the next exact 90° grain-up multiple. Applying the returned delta to
+ * `T` never carries an off-angle such as 37° forward by another 90°.
+ */
+export function turnToGrain(piece: PieceGeom, T: Affine, direction: -1 | 1): Affine {
+  const flipped = T[0] * T[3] - T[1] * T[2] < 0;
+  const angle = Math.atan2(flipped ? -T[1] : T[1], flipped ? -T[0] : T[0]) / (Math.PI / 2);
+  // A saved angle a hair off a quarter (89.99°) counts as that quarter: ⟲ must visibly turn.
+  const eps = 0.25 / 90;
+  const quarter = direction === 1 ? Math.floor(angle + eps) + 1 : Math.ceil(angle - eps) - 1;
+  const rotation = quarterLinear(quarter);
+  const linear = flipped ? compose(rotation, [-1, 0, 0, 1, 0, 0]) : rotation;
+  return grainDelta(piece, T, linear);
+}
+
+/** Delta to rotation 0 in the grain-up frame, with any mirror cleared. */
+export function upright(piece: PieceGeom, T: Affine): Affine {
+  return grainDelta(piece, T, IDENTITY);
+}
+
 /** The placement of `piece` laid at `T` on `host` laid at `hostT` (both picture frame). */
 export function poseAt(host: PieceGeom, piece: PieceGeom, hostT: Affine, T: Affine): SeamPlacement {
   return placementOf(host, piece, compose(invert(hostT), T));
+}
+
+/** A twin's rs frame onto this piece's rs frame: their boxes laid on each other, mirrored in x. */
+function twinMap(from: PieceGeom, to: PieceGeom, kind: 'mirror' | 'identical'): Affine {
+  const f = box(from.rs);
+  const t = box(to.rs);
+  return kind === 'mirror'
+    ? [-1, 0, 0, 1, t.x0 + f.x1, t.y0 - f.y0]
+    : [1, 0, 0, 1, t.x0 - f.x0, t.y0 - f.y0];
+}
+
+/**
+ * `mirror left` for a surface or pose placement: the twin part (the left placket) laid at `at` on
+ * the twin host (the left sleeve) gives the placement that lays `part` on `host` (the right ones)
+ * as its mirror image. `hostKind`/`partKind`: how each right piece relates to its left twin
+ * (`PieceGeom.twinOf`); a part that is its own twin passes itself with 'identical'. Two mirror
+ * twins keep the face (no flip added); a mirrored host with an identical part lays it face down.
+ */
+export function mirrorPlacement(
+  twinHost: PieceGeom,
+  twinPart: PieceGeom,
+  at: SeamPlacement,
+  host: PieceGeom,
+  part: PieceGeom,
+  hostKind: 'mirror' | 'identical',
+  partKind: 'mirror' | 'identical',
+): SeamPlacement {
+  const R = placementT(twinHost, twinPart, at);
+  const Sh = twinMap(twinHost, host, hostKind);
+  const Sp = twinMap(twinPart, part, partKind);
+  return placementOf(host, part, compose(Sh, compose(R, invert(Sp))));
 }

@@ -1,21 +1,20 @@
 // «SEAMS» GROUP OF A STEP CARD (assembly-schema T8, picker v2 owner OK 27.10): its own group, header
 // «seams» with `+ seam` (the picker) at the right. Below it every stored seam as a small step picture
 // — the inputs with the seam's edges ink solid — and a ✕ that takes the key off this step only (the
-// seam stays on the card); with nothing stored, the length proposal as a dashed picture + `accept`,
-// else red `no seam`. `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
+// seam stays on the card); with nothing stored, the length proposal as a dashed picture that opens
+// the picker (a seam is stored only there, by hand), else red `no seam`. `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import { cn } from 'lib/utility';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text } from 'ui';
-import { rowFromHand } from '../assembly-seams/seam-actions';
 import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
-import { seamOfSides } from './step-picture';
-import { recordSeamDecision } from './seam-decisions';
-import { useAttachStepSeam } from './step-seams-context';
+import { seamOfSides, type StepLayout } from './step-picture';
+import { useStepResults } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
   focusedStepLeaves,
@@ -37,22 +36,23 @@ const TILE_H = 60;
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
+  const results = useStepResults();
+  const result = drawsStepResult(results, index) ? results?.[index] : undefined;
+  const ownedLayout = result?.layout;
+  const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();
-  const attach = useAttachStepSeam(index);
   const opNumber = op?.operationNumber;
   // The proposal the picker opens on; null = closed.
   const [openAt, setOpenAt] = useState<number | null>(null);
   const open = openAt != null;
   const setOpen = (o: boolean) => setOpenAt(o ? 0 : null);
-  const [busy, setBusy] = useState(false);
 
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
     [ops, index, pieceKeys, geoms],
   );
-  const nameOf = scene.pieceName;
   // Each tile lays its pieces along the seam it shows (a stored one, or its own proposal).
   const storedFrame = useMemo(
     () => frameSeamsOf(innerSeams, storedSeams, [], crossSeams),
@@ -82,34 +82,6 @@ export function StepSeamsRow({ index }: { index: number }) {
       { replace: true },
     );
   }, [ctx, hasMultiplePieces, pick, opNumber, setParams]);
-
-  const accept = useCallback(
-    async (i: number) => {
-      const suggestion = suggestions[i];
-      if (!suggestion || !geo || ctx?.frozen || !ctx?.cardId || busy) return;
-      const row = rowFromHand(
-        suggestion.a,
-        suggestion.b,
-        geoms,
-        { pieces: [...geoms.values()], grainDeg: geo.grainDeg, nameOf },
-        { direction: 'reversed' },
-      );
-      if (!row) return;
-      setBusy(true);
-      const key = await attach(row);
-      setBusy(false);
-      if (key && opNumber)
-        recordSeamDecision({
-          cardId: ctx.cardId,
-          operationNumber: opNumber,
-          action: 'accept',
-          seamKey: key,
-          tier: suggestion.confident ? 'confident' : 'guess',
-          shown: suggestion,
-        });
-    },
-    [suggestions, geo, ctx?.frozen, ctx?.cardId, busy, geoms, nameOf, attach, opNumber],
-  );
 
   if (!ctx || !hasMultiplePieces) return null;
   const { cardId, frozen } = ctx;
@@ -150,6 +122,8 @@ export function StepSeamsRow({ index }: { index: number }) {
             no={i}
             scene={scene}
             seams={storedFrame}
+            layout={ownedLayout}
+            layers={ownedLayers}
             marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
             missing={!row}
             onRemove={frozen ? undefined : () => drop(key)}
@@ -159,29 +133,17 @@ export function StepSeamsRow({ index }: { index: number }) {
         ))}
         {keys.length === 0 &&
           suggestions.map((sug, i) => (
-            <span key={i} className='inline-flex items-center gap-2'>
-              <SeamTile
-                no={suggestions.length > 1 ? i : undefined}
-                scene={scene}
-                seams={proposalFrames[i] ?? storedFrame}
-                marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
-                dashed
-                onOpen={cardId ? () => setOpenAt(i) : undefined}
-              />
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => void accept(i)}
-                  disabled={!cardId || busy}
-                  title={cardId ? undefined : 'save first'}
-                  data-step-seams-accept=''
-                >
-                  accept
-                </Button>
-              )}
-            </span>
+            <SeamTile
+              key={i}
+              no={suggestions.length > 1 ? i : undefined}
+              scene={scene}
+              seams={proposalFrames[i] ?? storedFrame}
+              layout={ownedLayout}
+              layers={ownedLayers}
+              marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
+              dashed
+              onOpen={cardId ? () => setOpenAt(i) : undefined}
+            />
           ))}
         {keys.length === 0 && !pending && suggestions.length === 0 && (
           <Text size='micro' variant='error' tracking='label' data-step-seams-status=''>
@@ -211,6 +173,8 @@ export function StepSeamsRow({ index }: { index: number }) {
 export function SeamTile({
   scene,
   seams,
+  layout: suppliedLayout,
+  layers,
   marks,
   dashed,
   missing,
@@ -228,6 +192,10 @@ export function SeamTile({
   scene: StepScene;
   /** The seams the tile lays its pieces along. */
   seams: readonly SeamCandidate[];
+  /** An owner result bypasses tile focus, crop, proposal and inferred placement. */
+  layout?: StepLayout;
+  /** Authoritative bottom-to-top order for an owner result. */
+  layers?: readonly string[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
   dashed?: boolean;
   missing?: boolean;
@@ -244,10 +212,16 @@ export function SeamTile({
   const ids = marks.map((m) => m.id).join(',');
   // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
   const leavesRaw = useMemo(
-    () => focusedStepLeaves(scene.leaves, ids.split(',').filter(Boolean), scene.innerSeams),
-    [scene.leaves, scene.innerSeams, ids],
+    () =>
+      focusedStepLeaves(
+        scene.leaves,
+        ids.split(',').filter(Boolean),
+        scene.innerSeams,
+        scene.hands.pose,
+      ),
+    [scene.leaves, scene.innerSeams, ids, scene.hands.pose],
   );
-  const layout = useStepLayout(
+  const inferredLayout = useStepLayout(
     leavesRaw,
     seams,
     scene.geoms,
@@ -255,6 +229,7 @@ export function SeamTile({
     STEP_TILE_RASTER_MM,
     scene.hands,
   );
+  const layout = suppliedLayout ?? inferredLayout;
   return (
     <span
       role={onOpen ? 'button' : undefined}
@@ -296,6 +271,7 @@ export function SeamTile({
           pad={2}
           look='tile'
           layout={layout}
+          layers={layers}
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}

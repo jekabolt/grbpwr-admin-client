@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { pieceTilt } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
+import { toWire } from 'lib/seams';
 
 import { seamGraphOfCard, seamRowsOfCard } from '../components/card-seam-graph';
 import {
@@ -14,7 +15,17 @@ import {
   stepPictureOfOp,
   type SceneOp,
 } from '../components/step-seams/step-picture-view';
+import type { FormOpLike } from '../components/step-seams/step-seams-model';
 import { boxOf, fitBox, stepLayout, toPx } from '../components/step-seams/step-picture';
+import {
+  CARD6_CHAIN_OPS,
+  CARD6_CHAIN_POSES,
+  CARD6_CHAIN_SEAMS,
+  card6ChainGeoms,
+  card6ChainInnerLines,
+} from '../components/step-seams/card6-chain.fixture';
+import { CARD6_SEAMS, card6Geoms, card6InnerLines } from '../components/step-seams/card6.fixture';
+import { OWNER_FIT, stepResults } from '../components/step-seams/step-result';
 import {
   card83RealFixture,
   card83StoredSeamsFixture,
@@ -22,7 +33,7 @@ import {
 } from './assembly-inference.fixture';
 import { card85RealFixture, card85RealFixtureAvailable } from './assembly-card85-real.fixture';
 import { asmProtoFlags, setAsmProtoFlags } from './asm-proto-flags';
-import { deriveAssembly, type AssemblyInput } from './derive-assembly';
+import { deriveAssembly, type AsmPiece, type AssemblyInput } from './derive-assembly';
 import {
   AssemblyPage,
   editorActionMarks,
@@ -197,6 +208,199 @@ function card83WithNonJoins(): AssemblyInput {
   };
 }
 
+const CARD6_ROWLESS_NUMBER = 20;
+const CARD6_ROWLESS_INPUTS = ['SLV_L', 'FLP_L_MAIN'] as const;
+const CARD6_ROWLESS_OPERATION: FormOpLike = {
+  operationNumber: CARD6_ROWLESS_NUMBER,
+  operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+  work: 'press_flat',
+  inputKeys: CARD6_ROWLESS_INPUTS,
+  seamKeys: [],
+  poseKeys: [],
+};
+const CARD6_TEST_OPERATIONS = [
+  ...CARD6_CHAIN_OPS.filter((operation) =>
+    [30, 380, 430].includes(operation.operationNumber ?? -1),
+  ),
+  CARD6_ROWLESS_OPERATION,
+].sort((left, right) => (left.operationNumber ?? 0) - (right.operationNumber ?? 0));
+const CARD6_TEST_PIECES = new Set(['SLV_L', 'FLP_L', 'FLP_L_MAIN']);
+const CARD6_TEST_SEAMS = new Map(
+  [...CARD6_CHAIN_SEAMS].filter(([key]) =>
+    CARD6_TEST_OPERATIONS.some((operation) => operation.seamKeys?.includes(key)),
+  ),
+);
+const CARD6_TEST_POSES = new Map(
+  [...CARD6_CHAIN_POSES].filter(([key]) =>
+    CARD6_TEST_OPERATIONS.some((operation) => operation.poseKeys?.includes(key)),
+  ),
+);
+const card6TestGeoms = () =>
+  new Map([...card6ChainGeoms()].filter(([key]) => CARD6_TEST_PIECES.has(key)));
+const card6TestInnerLines = () =>
+  new Map([...card6ChainInnerLines()].filter(([key]) => CARD6_TEST_PIECES.has(key)));
+
+function card6ChainInput(owned: boolean): AssemblyInput {
+  const geoms = card6TestGeoms();
+  const innerLines = card6TestInnerLines();
+  const pieces = new Map<string, AsmPiece>(
+    [...geoms].map(([key, geom]) => [
+      key,
+      {
+        key,
+        name: geom.name,
+        code: geom.name,
+        cut: geom.rs.map(([x, y]) => [x, -y] as Pt2),
+        inner: (innerLines.get(key) ?? []).map((line) => line.map(([x, y]) => [x, -y] as Pt2)),
+        notch: [],
+        pocketing: false,
+        area: Math.abs(geom.areaMm2),
+        geom,
+      },
+    ]),
+  );
+  const operations = CARD6_TEST_OPERATIONS.map((operation) => ({
+    operationNumber: operation.operationNumber,
+    operationType: operation.operationType,
+    work: operation.work,
+    inputKeys: operation.inputKeys ?? [],
+    outputUnitKey: operation.outputUnitKey,
+    seamKeys: [...(operation.seamKeys ?? []), ...(operation.poseKeys ?? [])],
+  }));
+  const rows = owned
+    ? [...CARD6_TEST_SEAMS.values(), ...CARD6_TEST_POSES.values()].map(toWire)
+    : [];
+  return {
+    techCard: {
+      id: 6,
+      techCard: {
+        pieces: [...pieces].map(([lineKey, piece]) => ({ lineKey, name: piece.name })),
+        operations,
+      },
+      seams: rows,
+    } as AssemblyInput['techCard'],
+    pieces,
+    grainDeg: new Map([...pieces.keys()].map((key) => [key, 0])),
+  };
+}
+
+function card6ActionLineInput(owned: boolean): AssemblyInput {
+  const keys = new Set(['SLV_R', 'FLP_R']);
+  const geoms = new Map([...card6Geoms()].filter(([key]) => keys.has(key)));
+  const innerLines = new Map([...card6InnerLines()].filter(([key]) => keys.has(key)));
+  const pieces = new Map<string, AsmPiece>(
+    [...geoms].map(([key, geom]) => [
+      key,
+      {
+        key,
+        name: geom.name,
+        code: geom.name,
+        cut: geom.rs.map(([x, y]) => [x, -y] as Pt2),
+        inner: (innerLines.get(key) ?? []).map((line) => line.map(([x, y]) => [x, -y] as Pt2)),
+        notch: [],
+        pocketing: false,
+        area: Math.abs(geom.areaMm2),
+        geom,
+      },
+    ]),
+  );
+  return {
+    techCard: {
+      id: 6,
+      techCard: {
+        pieces: [...pieces].map(([lineKey, piece]) => ({ lineKey, name: piece.name })),
+        operations: [
+          {
+            operationNumber: 90,
+            operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+            work: 'join_lockstitch',
+            inputKeys: ['SLV_R', 'FLP_R'],
+            outputUnitKey: 'SLEEVE-3',
+            seamKeys: ['sleeve slit'],
+          },
+          {
+            operationNumber: 100,
+            operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+            work: 'press_to_one_side',
+            inputKeys: ['SLEEVE-3'],
+            press: { action: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE' },
+          },
+        ],
+      },
+      seams: owned ? [toWire(CARD6_SEAMS.get('sleeve slit')!)] : [],
+    } as AssemblyInput['techCard'],
+    pieces,
+    grainDeg: new Map([...pieces.keys()].map((key) => [key, 0])),
+  };
+}
+
+function placementActionInput(kind: 'button' | 'buttonhole'): AssemblyInput {
+  const source = card6Geoms().get('FLP_R')!;
+  const box = boxOf(source.rs);
+  const x = (box.x0 + box.x1) / 2;
+  const marks = Array.from({ length: 8 }, (_, index) => {
+    const y = box.y0 + ((index + 1) * (box.y1 - box.y0)) / 9;
+    return {
+      id: `FLP_R@${index}`,
+      kind: kind === 'button' ? ('drill' as const) : ('buttonhole' as const),
+      layer: 'mark',
+      closed: kind === 'button',
+      pts: [
+        [x, y - 2],
+        [x, y + 2],
+      ] as Pt2[],
+      bbox: { w: 0, h: 4, cx: x, cy: y },
+      lenMm: 4,
+    };
+  });
+  const geom = { ...source, marks };
+  const piece: AsmPiece = {
+    key: 'FLP_R',
+    name: geom.name,
+    code: geom.name,
+    cut: geom.rs.map(([px, py]) => [px, -py] as Pt2),
+    inner: [],
+    notch: [],
+    pocketing: false,
+    area: Math.abs(geom.areaMm2),
+    geom,
+  };
+  const button = kind === 'button';
+  return {
+    techCard: {
+      id: 6,
+      techCard: {
+        pieces: [{ lineKey: piece.key, name: piece.name }],
+        operations: [
+          {
+            operationNumber: button ? 860 : 750,
+            operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+            machineType: button
+              ? 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH'
+              : 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+            work: button ? 'button_attach' : 'buttonhole',
+            inputKeys: [piece.key],
+            placementLayout: { count: 8 },
+            attachmentSizeMm: { value: '11' },
+            fastening: button
+              ? {
+                  attachPattern: 'TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL',
+                  buttonHoles: 2,
+                }
+              : {
+                  buttonholeOrientation: 'TECH_CARD_BUTTONHOLE_ORIENTATION_HORIZONTAL',
+                  cutLengthMm: { value: '12' },
+                },
+          },
+        ],
+      },
+      seams: [],
+    } as unknown as AssemblyInput['techCard'],
+    pieces: new Map([[piece.key, piece]]),
+    grainDeg: new Map([[piece.key, 0]]),
+  };
+}
+
 describe('editor operation picture in the PDF', () => {
   afterEach(() => {
     setAsmProtoFlags();
@@ -209,6 +413,184 @@ describe('editor operation picture in the PDF', () => {
     expect(asmProtoFlags().pic).toBe('legacy');
     vi.stubGlobal('window', { location: { search: '?pic=editor' } });
     expect(asmProtoFlags().pic).toBe('editor');
+  });
+
+  it('draws a rowless action along its producer surface row laid-part edge', () => {
+    const input = card6ActionLineInput(true);
+    const action = deriveAssembly(input).rows.find((row) => row.n === 100)?.action;
+    const target = CARD6_SEAMS.get('sleeve slit')!.sideB[0].edgeHint;
+    const expected = input.pieces.get('FLP_R')!.geom.edges.find((edge) => edge.id === target)!.pts;
+    const marks = editorActionMarks(
+      action,
+      new Map([...input.pieces].map(([key, piece]) => [key, piece.geom])),
+    );
+    const edgeLine = marks.lines.find((line) => line.id.endsWith(':press-edge'));
+
+    expect(action?.edgeParts.map((part) => part.piece)).toEqual(['FLP_R']);
+    expect(edgeLine?.points).toEqual(expected);
+    expect(edgeLine?.points.length).toBeGreaterThan(2);
+  });
+
+  it('draws no action line when neither the step nor its producers have owner rows', () => {
+    const input = card6ActionLineInput(false);
+    const action = deriveAssembly(input).rows.find((row) => row.n === 100)?.action;
+    const marks = editorActionMarks(
+      action,
+      new Map([...input.pieces].map(([key, piece]) => [key, piece.geom])),
+    );
+
+    expect(action?.edgeParts).toEqual([]);
+    expect(marks.lines).toEqual([]);
+  });
+
+  describe('press arrows on the owner seam', () => {
+    const pressMarks = (raw: object) => {
+      const input = card6ActionLineInput(true);
+      const action = deriveAssembly(input).rows.find((row) => row.n === 100)?.action;
+      const geoms = new Map([...input.pieces].map(([key, piece]) => [key, piece.geom]));
+      return {
+        geoms,
+        marks: editorActionMarks(action && { ...action, raw: { ...action.raw, ...raw } }, geoms),
+      };
+    };
+    const inside = (point: Pt2, ring: readonly Pt2[]) => {
+      let hit = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i];
+        const [xj, yj] = ring[j];
+        if (
+          yi > point[1] !== yj > point[1] &&
+          point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi
+        )
+          hit = !hit;
+      }
+      return hit;
+    };
+    const step = (glyph: { point: Pt2; direction?: Pt2 }, mm: number): Pt2 => [
+      glyph.point[0] + (glyph.direction?.[0] ?? 0) * mm,
+      glyph.point[1] + (glyph.direction?.[1] ?? 0) * mm,
+    ];
+
+    it('press to one side: one plain line and one arrow with the side word', () => {
+      const { marks, geoms } = pressMarks({
+        press: {
+          action: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
+          toward: 'TECH_CARD_PRESS_TOWARD_BACK',
+        },
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-side', piece: 'FLP_R' });
+      expect(marks.lines.some((line) => line.id.endsWith(':press-offset'))).toBe(false);
+      const arrows = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrows).toHaveLength(1);
+      expect(arrows[0].label).toBe('to back');
+      // No back piece on this seam: the arrow goes into the run's own piece.
+      expect(inside(step(arrows[0], 3), geoms.get('FLP_R')!.rs)).toBe(true);
+    });
+
+    it('press to one side toward the other piece points across the seam', () => {
+      const { marks, geoms } = pressMarks({
+        press: {
+          action: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
+          toward: 'TECH_CARD_PRESS_TOWARD_SLEEVE',
+        },
+      });
+      const [arrow] = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrow.label).toBe('into the sleeve');
+      expect(arrow.piece).toBe('FLP_R');
+      expect(inside(step(arrow, 3), geoms.get('FLP_R')!.rs)).toBe(false);
+    });
+
+    it('press open: one plain line and two opposite arrows, one word', () => {
+      const { marks } = pressMarks({
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+        work: 'press_open',
+        press: undefined,
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-open' });
+      const arrows = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrows).toHaveLength(2);
+      const [a, b] = arrows;
+      expect(a.point).toEqual(b.point);
+      expect(a.direction![0] + b.direction![0]).toBeCloseTo(0);
+      expect(a.direction![1] + b.direction![1]).toBeCloseTo(0);
+      expect(arrows.map((arrow) => arrow.label).filter(Boolean)).toEqual(['open']);
+    });
+
+    it('press flat: the seam line only, no arrows, no word', () => {
+      const { marks } = pressMarks({
+        work: 'press_flat',
+        press: { action: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' },
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-flat' });
+      expect(marks.glyphs).toEqual([]);
+    });
+
+    it('press flat without an owner row draws nothing and is not missing a seam', () => {
+      const input = card6ActionLineInput(false);
+      const operations = input.techCard.techCard!.operations!.map((operation) =>
+        operation.operationNumber === 100
+          ? {
+              ...operation,
+              work: 'press_flat',
+              press: { action: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' as const, toward: undefined },
+            }
+          : operation,
+      );
+      const action = deriveAssembly({
+        ...input,
+        techCard: { ...input.techCard, techCard: { ...input.techCard.techCard!, operations } },
+      }).rows.find((row) => row.n === 100)?.action;
+      const marks = editorActionMarks(
+        action,
+        new Map([...input.pieces].map(([key, piece]) => [key, piece.geom])),
+      );
+      expect(action?.missing).toBeUndefined();
+      expect(marks).toEqual({ lines: [], glyphs: [] });
+    });
+
+    it('renders the arrows with their word off the seam in the print picture', () => {
+      const input = card6ActionLineInput(true);
+      const picture = sceneOf(input, 100);
+      const { marks } = pressMarks({
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+        work: 'press_open',
+        press: undefined,
+      });
+      const svg = renderedPicture(picture, marks);
+      expect(svg.match(/data-asm-mark="press-arrow"/g)).toHaveLength(2);
+      expect(svg.match(/data-asm-mark="press-open"/g)).toHaveLength(1);
+      expect(svg).toContain('>open</text>');
+    });
+  });
+
+  it('keeps eight horizontal buttonholes on eight distinct pattern marks', () => {
+    const input = placementActionInput('buttonhole');
+    const action = deriveAssembly(input).rows.find((row) => row.n === 750)?.action;
+    const glyphs = editorActionMarks(
+      action,
+      new Map([['FLP_R', input.pieces.get('FLP_R')!.geom]]),
+    ).glyphs;
+
+    expect(glyphs).toHaveLength(8);
+    expect(new Set(glyphs.map((glyph) => glyph.point.join(':'))).size).toBe(8);
+    expect(glyphs.every((glyph) => Math.abs(glyph.direction?.[0] ?? 0) > 0.999)).toBe(true);
+    expect(glyphs.every((glyph) => Math.abs(glyph.direction?.[1] ?? 1) < 0.001)).toBe(true);
+    expect(glyphs.every((glyph) => glyph.lengthMm === 12)).toBe(true);
+  });
+
+  it('keeps eight buttons on distinct pattern marks', () => {
+    const input = placementActionInput('button');
+    const action = deriveAssembly(input).rows.find((row) => row.n === 860)?.action;
+    const glyphs = editorActionMarks(
+      action,
+      new Map([['FLP_R', input.pieces.get('FLP_R')!.geom]]),
+    ).glyphs;
+
+    expect(glyphs).toHaveLength(8);
+    expect(new Set(glyphs.map((glyph) => glyph.point.join(':'))).size).toBe(8);
   });
 
   it('matches the editor tile affines for every card 83 join operation', () => {
@@ -244,6 +626,71 @@ describe('editor operation picture in the PDF', () => {
       expect(picture, `op ${row.n}`).toBeDefined();
       expectSameRetainedAffines(picture!.layout.T, expected.layout.T, `op ${row.n}`);
     }
+  }, 120_000);
+
+  it('uses the editor result for a rowless card 6 step when another step is owned', () => {
+    const ownedInput = card6ChainInput(true);
+    const ownedPictures = editorOperationPictures(ownedInput.techCard, deriveAssembly(ownedInput))!;
+    const expectedResults = stepResults(
+      {
+        ops: CARD6_TEST_OPERATIONS,
+        byKey: CARD6_TEST_SEAMS,
+        poses: CARD6_TEST_POSES,
+        geoms: card6TestGeoms(),
+        innerLines: card6TestInnerLines(),
+        pieceKeys: CARD6_TEST_PIECES,
+      },
+      OWNER_FIT,
+    );
+    const rowlessIndex = CARD6_TEST_OPERATIONS.findIndex(
+      (operation) => operation.operationNumber === CARD6_ROWLESS_NUMBER,
+    );
+    const expected = expectedResults[rowlessIndex];
+    const [leftBox, rightBox] = CARD6_ROWLESS_INPUTS.map((key) =>
+      boxOf(
+        card6TestGeoms()
+          .get(key)!
+          .rs.map((point) => apply(expected.transforms.get(key)!, point)),
+      ),
+    );
+
+    expect(expected.owned).toBe(false);
+    expect(expectedResults.some((result) => result.owned)).toBe(true);
+    expect(
+      leftBox.x1 < rightBox.x0 ||
+        rightBox.x1 < leftBox.x0 ||
+        leftBox.y1 < rightBox.y0 ||
+        rightBox.y1 < leftBox.y0,
+    ).toBe(true);
+    expectSameAffines(
+      ownedPictures.get(CARD6_ROWLESS_NUMBER)!.layout.T,
+      expected.transforms,
+      'rowless op 20',
+    );
+    expect(ownedPictures.get(CARD6_ROWLESS_NUMBER)!.resultLayers).toEqual(expected.layers);
+  }, 120_000);
+
+  it('makes a rowless card PDF equal the shared editor result', () => {
+    const rowlessInput = card6ChainInput(false);
+    const rowlessPictures = editorOperationPictures(
+      rowlessInput.techCard,
+      deriveAssembly(rowlessInput),
+    )!;
+    const expected = stepResults(
+      {
+        ops: CARD6_TEST_OPERATIONS,
+        byKey: new Map(),
+        poses: new Map(),
+        geoms: card6TestGeoms(),
+        innerLines: card6TestInnerLines(),
+        pieceKeys: CARD6_TEST_PIECES,
+      },
+      OWNER_FIT,
+    );
+    const index = CARD6_TEST_OPERATIONS.findIndex((operation) => operation.operationNumber === 430);
+
+    expectSameAffines(rowlessPictures.get(430)!.layout.T, expected[index].transforms, 'op 430');
+    expect(rowlessPictures.get(430)!.resultLayers).toEqual(expected[index].layers);
   }, 120_000);
 
   it('keeps card 83 op 200 panels and op 400 collar grain-upright', () => {
@@ -313,7 +760,8 @@ describe('editor operation picture in the PDF', () => {
     const model = deriveAssembly(legacyOnly);
     const pictures = editorOperationPictures(legacyOnly.techCard, model);
 
-    expect(pictures?.has(1070)).toBe(false);
+    expect(pictures?.has(1070)).toBe(true);
+    expect(pictures?.get(1070)?.layout.T.size).toBe(0);
     expect(() =>
       renderToStaticMarkup(
         <AssemblyPage
@@ -436,7 +884,7 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
     const spots = [...markup.matchAll(/data-asm-x="([^"]+)" data-asm-y="([^"]+)"/g)];
     expect(markup.match(/data-piece-outline=/g)?.length ?? 0).toBeGreaterThan(2);
     expect(markup).toContain(`data-asm-mark="${kind}"`);
-    expect(markup).toContain('stroke-width="3"');
+    expect(markup).toContain(kind === 'buttonhole' ? 'stroke-width="0.7"' : 'stroke-width="3"');
     expect(spots).toHaveLength(action.glyphs.length);
     for (const spot of spots) {
       const x = Number(spot[1]);

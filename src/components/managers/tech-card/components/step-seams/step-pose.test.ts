@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply, compose } from 'lib/assembly-skeleton/union/affine';
+import { apply, compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import {
   fromWire,
   newSeamKey,
@@ -25,6 +25,15 @@ import {
   useSeamsStore,
 } from '../assembly-seams/seams-store';
 import {
+  CARD6_CHAIN_OPS,
+  CARD6_CHAIN_PIECE_KEYS,
+  CARD6_CHAIN_POSES,
+  CARD6_CHAIN_SEAMS,
+  card6ChainGeoms,
+  card6ChainInnerLines,
+  card6ChainStep,
+} from './card6-chain.fixture';
+import {
   CARD6_OPS,
   CARD6_PIECE_KEYS,
   CARD6_SEAMS,
@@ -34,17 +43,26 @@ import {
 } from './card6.fixture';
 import { stepHandsOf } from './step-hand';
 import { invert, stepLayout } from './step-picture';
-import { stepPictureOfOp, type SceneOp } from './step-picture-view';
+import { focusedStepLeaves, stepPictureOfOp, type SceneOp } from './step-picture-view';
 import {
   placementOf,
   placementT,
+  poseAfterDrop,
+  poseBlockGroup,
   poseGroup,
   poseHostOf,
+  posePickup,
   posePinsOf,
   pinPoses,
+  resolvePoseEdits,
   snapPose,
+  snapPoseForDrag,
   turnAbout,
+  turnToGrain,
+  upright,
+  mirrorPlacement,
 } from './step-pose';
+import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
 
 const square = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
@@ -75,6 +93,43 @@ const relOf = (T: ReadonlyMap<string, Affine>, piece: string, host: string) =>
   compose(invert(T.get(host)!), T.get(piece)!);
 
 const AT: SeamPlacement = { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: true };
+const posePin = (host: string) => ({ host, placement: AT });
+
+describe('pose host cycles', () => {
+  it('keeps the latest edit in a direct A↔B cycle', () => {
+    const resolved = resolvePoseEdits(
+      new Map(),
+      new Map([
+        ['A', posePin('B')],
+        ['B', posePin('A')],
+      ]),
+    );
+
+    expect([...resolved.edits]).toEqual([['B', posePin('A')]]);
+    expect([...resolved.drop]).toEqual(['A']);
+  });
+
+  it('keeps the latest edit and drops the older head of a three-piece cycle', () => {
+    const resolved = resolvePoseEdits(
+      new Map([
+        ['A', 'B'],
+        ['B', 'C'],
+      ]),
+      new Map([['C', posePin('A')]]),
+    );
+
+    expect([...resolved.edits]).toEqual([['C', posePin('A')]]);
+    expect([...resolved.drop]).toEqual(['A']);
+  });
+
+  it('leaves an acyclic host graph unchanged', () => {
+    const edits = new Map([['C', posePin('A')]]);
+    const resolved = resolvePoseEdits(new Map([['A', 'B']]), edits);
+
+    expect([...resolved.edits]).toEqual([...edits]);
+    expect([...resolved.drop]).toEqual([]);
+  });
+});
 
 describe('pose row: the wire and the server rules', () => {
   const host = square('HOST', 0, 0, 400, 600);
@@ -264,6 +319,60 @@ describe('stepLayout: a pose is pinned last', () => {
 });
 
 describe('picker helpers', () => {
+  it('picks up every piece of the #380 sleeve block at #430', () => {
+    const geoms = card6ChainGeoms();
+    const result = stepResults(
+      {
+        ops: CARD6_CHAIN_OPS,
+        byKey: CARD6_CHAIN_SEAMS,
+        poses: CARD6_CHAIN_POSES,
+        geoms,
+        innerLines: card6ChainInnerLines(),
+        pieceKeys: CARD6_CHAIN_PIECE_KEYS,
+      },
+      { manualFit: true },
+    )[card6ChainStep(430)];
+    const sleeve = result.blocks.find((block) => block.inputKey === 'SLEEVE-2')!;
+    for (const piece of sleeve.pieces) {
+      const pickup = posePickup(piece, result, geoms);
+      expect(pickup.group).toEqual(sleeve.pieces);
+      expect(pickup.host).toBeNull();
+    }
+  });
+
+  it('keeps the pickup host when the drop lands near another input', () => {
+    const g = new Map(
+      [
+        square('A', 0, 0, 40, 40),
+        square('B', 200, 0, 100, 100),
+        square('C', 500, 0, 200, 200),
+        square('D', 50, 0, 30, 30),
+      ].map((piece) => [piece.pieceKey, piece]),
+    );
+    const layout = {
+      blocks: [{ pieces: ['A'] }, { pieces: ['B'] }, { pieces: ['C'] }, { pieces: ['D'] }],
+      transforms: new Map<string, Affine>([
+        ['A', IDENTITY],
+        ['B', IDENTITY],
+        ['C', IDENTITY],
+        ['D', IDENTITY],
+      ]),
+      hung: [
+        ['A', 'B'],
+        ['D', 'A'],
+      ] as const,
+    };
+    const pickup = posePickup('A', layout, g);
+    expect(pickup).toEqual({ group: ['A', 'D'], host: 'B' });
+    expect(poseBlockGroup('A', pickup.host, layout)).toEqual(['A', 'D']);
+    expect(posePickup('C', layout, g).host).toBe('B');
+
+    const dropped: Affine = [1, 0, 0, 1, 510, 10];
+    const row = poseAfterDrop('A', dropped, pickup, layout, g)!;
+    expect(row.host).toBe('B');
+    expect(placementT(g.get('B')!, g.get('A')!, row.placement)).toEqual(dropped);
+  });
+
   it('snaps a vertex onto a vertex first, else onto the outline', () => {
     const ring: Pt2[] = [
       [0, 0],
@@ -277,6 +386,28 @@ describe('picker helpers', () => {
     const e = snapPose([[104, 50]], [{ piece: 'H', ring }], 8);
     expect(e).toMatchObject({ host: 'H', at: [100, 50], dx: -4, dy: 0 });
     expect(snapPose([[120, 50]], [{ piece: 'H', ring }], 8)).toBeNull();
+  });
+
+  it('computes the drag-time snap from the drop transforms and skips collapsed followers', () => {
+    const moving = square('MOVING', 0, 0, 10, 10);
+    const host = square('HOST', 0, 0, 100, 100);
+    const g = new Map([
+      [moving.pieceKey, moving],
+      [host.pieceKey, host],
+    ]);
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['HOST', [1, 0, 0, 1, 100, 0]],
+    ]);
+    const D: Affine = [1, 0, 0, 1, 93, 0];
+
+    expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(), 8)).toMatchObject({
+      host: 'HOST',
+      at: [100, 0],
+      dx: -3,
+      dy: 0,
+    });
+    expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(['HOST']), 8)).toBeNull();
   });
 
   it('the block root: the biggest piece of the cluster root, not the piece nor its group', () => {
@@ -312,6 +443,25 @@ describe('picker helpers', () => {
     expect(apply(turnAbout(ring, 1), [20, 5]).map((v) => Math.round(v))).toEqual([10, 15]);
     expect(apply(turnAbout(ring, -1), [20, 5]).map((v) => Math.round(v))).toEqual([10, -5]);
     expect(apply(turnAbout(ring, 0), [0, 0])).toEqual([20, 0]);
+  });
+
+  it('turns from grain-up quarters and clears a mirror on upright', () => {
+    const piece = square('TURN', 0, 0, 20, 10);
+    let T = IDENTITY;
+    for (let turn = 0; turn < 4; turn++) T = compose(turnToGrain(piece, T, 1), T);
+    expect(near(T, IDENTITY)).toBe(true);
+
+    const angle = (37 * Math.PI) / 180;
+    const off: Affine = [Math.cos(angle), Math.sin(angle), -Math.sin(angle), Math.cos(angle), 5, 8];
+    const snapped = compose(turnToGrain(piece, off, 1), off);
+    const degrees = (Math.atan2(snapped[1], snapped[0]) * 180) / Math.PI;
+    expect(degrees / 90).toBeCloseTo(Math.round(degrees / 90), 8);
+    expect(degrees).toBeCloseTo(90, 8);
+
+    const mirrored: Affine = [-1, 0, 0, 1, 30, 40];
+    const standing = compose(upright(piece, mirrored), mirrored);
+    expect(near(standing, [1, 0, 0, 1, 10, 40])).toBe(true);
+    expect(standing[0] * standing[3] - standing[1] * standing[2]).toBeGreaterThan(0);
   });
 });
 
@@ -406,6 +556,33 @@ describe('card 6 op 720: the placket placed by hand at a free spot', () => {
     expect(near(relOf(whole.T, 'PLCK_L', 'P_L_MAIN'), want)).toBe(true);
   });
 
+  it('a tile focused on other seams draws the placket in its pose, its host along', () => {
+    // A seam of the placket and the upper front: the cut keeps no lower front, the placket's host.
+    const tile = sceneAt(720);
+    const targets = ['PLCK_L#e0', 'P_L_U#e0'];
+    const bare = focusedStepLeaves(tile.leaves, targets, tile.innerSeams);
+    expect(bare.flat()).toContain('PLCK_L');
+    expect(bare.flat()).not.toContain('P_L_MAIN');
+    const lone = stepLayout(bare, tile.frameSeams, geoms, { explode: 0.12, ...tile.hands });
+    expect(lone.posed).toBeUndefined();
+
+    const cut = focusedStepLeaves(tile.leaves, targets, tile.innerSeams, tile.hands.pose);
+    expect(cut.flat()).toEqual(expect.arrayContaining([...bare.flat(), 'P_L_MAIN']));
+    const laid = stepLayout(cut, tile.frameSeams, geoms, { explode: 0.12, ...tile.hands });
+    expect(laid.posed).toEqual(['PLCK_L']);
+    expect(near(relOf(laid.T, 'PLCK_L', 'P_L_MAIN'), want)).toBe(true);
+
+    // No pose, or a cut without the placket: the very cut as before.
+    const plain = sceneAt(720, false);
+    expect(focusedStepLeaves(plain.leaves, targets, plain.innerSeams, plain.hands.pose)).toEqual(
+      bare,
+    );
+    const front = ['P_L_U#e0', 'P_L_MAIN#e0'];
+    expect(focusedStepLeaves(tile.leaves, front, tile.innerSeams, tile.hands.pose)).toEqual(
+      focusedStepLeaves(tile.leaves, front, tile.innerSeams),
+    );
+  });
+
   it('an earlier step does not see it; no pose rows → the very layout as before', () => {
     expect(sceneAt(660).hands.pose).toBeUndefined();
     const before = sceneAt(720, false, card6Ops);
@@ -418,5 +595,54 @@ describe('card 6 op 720: the placket placed by hand at a free spot', () => {
     for (const key of ['P_L_MAIN', 'P_L_U', 'PCK_L_MAIN', 'PCK_L_BTTM'])
       if (before.layout.T.has(key))
         expect(near(posed.layout.T.get(key)!, before.layout.T.get(key)!)).toBe(true);
+  });
+});
+
+describe('mirrorPlacement: mirror left for surface and pose rows', () => {
+  const tri = (key: string, pts: Pt2[]): PieceGeom =>
+    ({
+      ...square(key, 0, 0, 1, 1),
+      rect: false,
+      corners: [0, 1, 2],
+      rs: pts,
+      areaMm2: 5000,
+    }) as PieceGeom;
+  const leftHost = square('SLV_L', 0, 0, 400, 600);
+  const rightHost = square('SLV_R', 1000, 50, 400, 600);
+  const leftPart = tri('FLP_L', [
+    [0, 0],
+    [40, 0],
+    [0, 160],
+  ]);
+  // The right placket: the left one mirrored in x, somewhere else on the sheet.
+  const rightPart = tri('FLP_R', [
+    [540, 20],
+    [500, 20],
+    [540, 180],
+  ]);
+  const mirrorX = (pts: readonly Pt2[], host: PieceGeom): Pt2[] => {
+    const xs = host.rs.map(([x]) => x);
+    const ys = host.rs.map(([, y]) => y);
+    const [x0, x1, y0] = [Math.min(...xs), Math.max(...xs), Math.min(...ys)];
+    return pts.map(([x, y]) => [x1 - (x - x0), y - y0]);
+  };
+
+  it.each([
+    { xMm: 30, yMm: 80, rotDeg: 0, flip: false },
+    { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: false },
+    { xMm: 12, yMm: 300, rotDeg: 37, flip: true },
+  ] as SeamPlacement[])('lays the right part as the mirror of the left (%o)', (at) => {
+    const right = mirrorPlacement(leftHost, leftPart, at, rightHost, rightPart, 'mirror', 'mirror');
+    expect(right.flip).toBe(at.flip);
+    const leftLaid = leftPart.rs.map((p) => apply(placementT(leftHost, leftPart, at), p));
+    const rightLaid = rightPart.rs.map((p) => apply(placementT(rightHost, rightPart, right), p));
+    // In each host's own box frame, the right outline is the left one mirrored.
+    const want = mirrorX(leftLaid, leftHost).map(([x, y]) => [x, y]);
+    const xs = rightHost.rs.map(([x]) => x);
+    const ys = rightHost.rs.map(([, y]) => y);
+    const got = rightLaid.map(([x, y]) => [x - Math.min(...xs), y - Math.min(...ys)]);
+    const sort = (pts: number[][]) =>
+      [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((p) => p.map((v) => +v.toFixed(1)));
+    expect(sort(got)).toEqual(sort(want));
   });
 });

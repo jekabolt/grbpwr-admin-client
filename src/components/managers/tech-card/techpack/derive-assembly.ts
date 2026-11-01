@@ -42,6 +42,15 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
+import {
+  rowTargetsOfAnchor,
+  storedSeamSides,
+} from 'components/managers/tech-card/components/step-seams/step-rows';
+import {
+  buttonholeDirection,
+  buttonholeLengthMm,
+  buttonholeOrientation,
+} from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
@@ -64,11 +73,16 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
-import { garmentAssemblyOfCard, type CardSeamGeometry } from '../components/card-seam-graph';
+import {
+  garmentAssemblyOfCard,
+  seamRowsOfCard,
+  type CardSeamGeometry,
+} from '../components/card-seam-graph';
 import type { GarmentAssembly } from '../components/garment-assembly';
 
 export type Pt = [number, number];
@@ -451,6 +465,7 @@ type PlacementGlyph = {
   kind: 'button' | 'buttonhole' | 'label';
   point: Pt;
   angleDeg: number;
+  lengthMm?: number;
 };
 
 export type AsmAction = {
@@ -459,6 +474,8 @@ export type AsmAction = {
   raw: common_TechCardOperation;
   edgeParts: SeamPart[];
   placements: PlacementGlyph[];
+  /** Name and code of each piece of the owner seams (press arrows read the named side). */
+  partPieces?: PressPiece[];
   missing?: 'seam' | 'position';
 };
 
@@ -2571,23 +2588,21 @@ function placementMarks(
   if (!selected) return [];
   const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
   const marks = selected.marks.slice(0, count || selected.marks.length);
-  const orientation = op.raw.fastening?.buttonholeOrientation ?? '';
   return marks.map((mark) => {
     used.add(mark.id);
     const first = mark.pts[0];
     const last = mark.pts[mark.pts.length - 1] ?? first;
     const measured = (Math.atan2(-(last[1] - first[1]), last[0] - first[0]) * 180) / Math.PI;
-    const angleDeg = orientation.includes('VERTICAL')
-      ? 90
-      : orientation.includes('HORIZONTAL')
-        ? 0
-        : measured;
+    const direction = buttonholeDirection(selected.piece.geom.rs, buttonholeOrientation(op.raw));
+    const angleDeg =
+      kind === 'buttonhole' ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI : measured;
     return {
       id: mark.id,
       piece: selected.item.p,
       kind,
       point: [mark.bbox.cx, -mark.bbox.cy],
       angleDeg,
+      lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
     };
   });
 }
@@ -2609,45 +2624,151 @@ function fallbackPlacements(
   const start = (box.y0 + box.y1 - pitch * (count - 1)) / 2;
   const kind = op.tech === 'label' ? 'label' : op.tech;
   if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
+  const direction = buttonholeDirection(piece.geom.rs, buttonholeOrientation(op.raw));
+  const angleDeg = (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI;
   return Array.from({ length: count }, (_, index) => ({
     id: `proto-position-${op.n}-${index}`,
     piece: item.p,
     kind,
     point: [(box.x0 + box.x1) / 2, start + pitch * index] as Pt,
-    angleDeg: op.raw.fastening?.buttonholeOrientation?.includes('VERTICAL') ? 90 : 0,
+    angleDeg: kind === 'buttonhole' ? angleDeg : 0,
+    lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
   }));
+}
+
+/** The closest persisted seam rows upstream of one non-join operation, per input-unit branch. */
+function actionOwnerRows(
+  op: Op,
+  opIndex: number,
+  ops: readonly Op[],
+  rows: ReadonlyMap<string, StoredSeam>,
+): StoredSeam[] {
+  const rowsOf = (candidate: Op) =>
+    (candidate.raw.seamKeys ?? []).flatMap((key) => {
+      const row = rows.get(key);
+      return row ? [row] : [];
+    });
+  const own = rowsOf(op);
+  if (own.length) return own;
+
+  const nearestForUnit = (unit: string, before: number, seen: Set<string>): StoredSeam[] => {
+    const visit = `${unit}\u0000${before}`;
+    if (seen.has(visit)) return [];
+    seen.add(visit);
+    let producer = -1;
+    for (let index = before - 1; index >= 0; index--)
+      if (ops[index].out === unit) {
+        producer = index;
+        break;
+      }
+    if (producer < 0) return [];
+    const direct = rowsOf(ops[producer]);
+    if (direct.length) return direct;
+    return ops[producer].ins.flatMap((input) =>
+      input.kind === 'unit' ? nearestForUnit(input.key, producer, seen) : [],
+    );
+  };
+
+  const found = op.ins.flatMap((input) =>
+    input.kind === 'unit' ? nearestForUnit(input.key, opIndex, new Set()) : [],
+  );
+  return [...new Map(found.map((row) => [row.seamKey, row])).values()];
+}
+
+function actionPartOfTarget(
+  target: string,
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart | null {
+  const inner = /^(.*):i(\d+)$/.exec(target);
+  if (inner) {
+    const piece = pieces.get(inner[1]);
+    const pts = piece?.inner[Number(inner[2])] ?? [];
+    if (!piece || pts.length < 2) return null;
+    return {
+      piece: piece.key,
+      pts: [...pts],
+      lenMm: polyLen(pts),
+      share: 1,
+      turn: turnOf(pts),
+    };
+  }
+  const split = target.lastIndexOf('#');
+  const piece = split >= 0 ? pieces.get(target.slice(0, split)) : undefined;
+  const edge = piece?.geom.edges.find((candidate) => candidate.id === target);
+  if (!piece || !edge?.pts.length) return null;
+  const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+  return {
+    piece: piece.key,
+    pts,
+    lenMm: polyLen(pts),
+    share: 1,
+    turn: turnOf(pts),
+    edgeId: edge.id,
+  };
+}
+
+/** Real piece-coordinate runs named by persisted owner rows, never inferred seam history. */
+function actionPartsOfRows(
+  rows: readonly StoredSeam[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart[] {
+  const targets = rows.flatMap((row) => {
+    const sides = storedSeamSides(row);
+    if (row.kind !== 'surface') return [...sides.a, ...sides.b];
+    const laidEdges = row.sideB
+      .flatMap(rowTargetsOfAnchor)
+      .filter((target) => !/:i\d+$/.test(target));
+    return laidEdges.length
+      ? laidEdges
+      : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
+  });
+  return [...new Set(targets)].flatMap((target) => {
+    const part = actionPartOfTarget(target, pieces);
+    return part ? [part] : [];
+  });
 }
 
 function buildActions(
   ops: readonly Op[],
   pieces: ReadonlyMap<string, AsmPiece>,
   targets: ReadonlyMap<number, Item[]>,
-  targetSeams: ReadonlyMap<number, AsmSeam[]>,
+  rows: ReadonlyMap<string, StoredSeam>,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const usedMarks = new Set<string>();
-  for (const op of ops) {
+  for (const [opIndex, op] of ops.entries()) {
     if (op.join) continue;
     const items = targets.get(op.n) ?? [];
     let placements = placementMarks(op, pieces, items, usedMarks);
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
-    const history = targetSeams.get(op.n) ?? [];
-    const terms = opTerms(op);
-    const historyFirst =
-      op.tech === 'topstitch' || op.tech === 'pressSide' || /lining|other/.test(terms);
-    let edgeParts = historyFirst
-      ? [...(history[history.length - 1]?.a ?? []), ...(history[history.length - 1]?.b ?? [])]
-      : [];
-    if (!edgeParts.length && ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech))
-      edgeParts = bestZoneParts(pieces, items, terms);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
+    // A flat press draws its seam only where an owner row names it; without one it stays bare
+    // (no «missing seam» — it never needed one).
+    const flatPress = op.tech === 'press' && pressMode(op.raw) !== null;
+    const ownerRows = edgeOp || flatPress ? actionOwnerRows(op, opIndex, ops, rows) : [];
+    const edgeParts = actionPartsOfRows(ownerRows, pieces);
+    // Both sides of the owner seams, so «to back» can find the back across the drawn run.
+    const seamPieces = ownerRows.flatMap((row) => {
+      const sides = storedSeamSides(row);
+      return [...sides.a, ...sides.b].map((target) => {
+        const inner = /^(.*):i\d+$/.exec(target);
+        return inner ? inner[1] : target.slice(0, Math.max(0, target.lastIndexOf('#')));
+      });
+    });
+    const partPieces = [
+      ...new Set([...edgeParts.map((part) => part.piece), ...seamPieces]),
+    ].flatMap((key) => {
+      const piece = pieces.get(key);
+      return piece ? [{ key, name: piece.name, code: piece.code }] : [];
+    });
     actions.set(op.n, {
       n: op.n,
       tech: op.tech,
       raw: op.raw,
       edgeParts,
       placements,
+      partPieces,
       missing:
         placementOp && !placements.length
           ? 'position'
@@ -3076,15 +3197,8 @@ export function deriveAssembly(
         return [op.n, stored.length ? stored : garmentSeams.get(op.n) ?? []] as const;
       }),
   );
-  const { cards, units, targets, targetSeams } = buildCards(
-    ops,
-    bound,
-    input.pieces,
-    gapSink,
-    t,
-    !garment,
-  );
-  const actions = buildActions(ops, input.pieces, targets, targetSeams);
+  const { cards, units, targets } = buildCards(ops, bound, input.pieces, gapSink, t, !garment);
+  const actions = buildActions(ops, input.pieces, targets, seamRowsOfCard(resolvedInput.techCard));
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {
@@ -3406,18 +3520,9 @@ export function silhouetteSvg(
       body += `<path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-dasharray="${f2(5 / fit)} ${f2(3 / fit)}" stroke-linecap="round"/>`;
       continue;
     }
-    if (action?.tech === 'pressSide') {
-      const allowance = num(action.raw.seamAllowanceMm) ?? 7;
-      const centre = centerOf(pieces, [path.item]);
-      const offset = path.points.map((point) => {
-        const direction = sub(centre, point);
-        const length = Math.hypot(direction[0], direction[1]) || 1;
-        return [
-          point[0] + (direction[0] / length) * allowance,
-          point[1] + (direction[1] / length) * allowance,
-        ] as Pt;
-      });
-      body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/><path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/>`;
+    if (action?.tech === 'pressSide' || action?.tech === 'press') {
+      // A press is drawn on its seam as one plain ink line; the arrows are the picture's own.
+      body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/>`;
       continue;
     }
     body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -3429,11 +3534,17 @@ export function silhouetteSvg(
       const radius = 4.2 / fit;
       body += `<circle cx="${f2(x)}" cy="${f2(y)}" r="${f2(radius)}" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" data-asm-mark="button" data-print-diameter-px="8.4"/><path d="M${f2(x - radius * 0.55)} ${f2(y)} H${f2(x + radius * 0.55)} M${f2(x)} ${f2(y - radius * 0.55)} V${f2(y + radius * 0.55)}" class="tpa-s tpa-fn" stroke-width="${f2(ink * 0.8)}"/>`;
     } else if (placement.kind === 'buttonhole') {
-      const half = 7 / fit;
       const radians = (placement.angleDeg * Math.PI) / 180;
-      const dx = Math.cos(radians) * half;
-      const dy = Math.sin(radians) * half;
-      body += `<path d="M${f2(x - dx)} ${f2(y - dy)} L${f2(x + dx)} ${f2(y + dy)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" data-asm-mark="buttonhole" data-print-length-px="14"/>`;
+      const raw: Pt = [Math.cos(radians), Math.sin(radians)];
+      const world: Pt = [
+        placement.item.T[0] * raw[0] + placement.item.T[2] * raw[1],
+        placement.item.T[1] * raw[0] + placement.item.T[3] * raw[1],
+      ];
+      const scale = Math.hypot(world[0], world[1]) || 1;
+      const half = (placement.lengthMm ?? 12) / 2;
+      const dx = (world[0] / scale) * half;
+      const dy = (world[1] / scale) * half;
+      body += `<path d="M${f2(x - dx)} ${f2(y - dy)} L${f2(x + dx)} ${f2(y + dy)}" class="tpa-s tpa-fn" stroke-width="${f2(hair)}" stroke-linecap="round" data-asm-mark="buttonhole" data-asm-length-mm="${f2(placement.lengthMm ?? 12)}"/>`;
     } else {
       const w = 18 / fit;
       const h = 11 / fit;

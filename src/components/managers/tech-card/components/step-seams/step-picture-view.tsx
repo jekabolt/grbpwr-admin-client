@@ -5,17 +5,35 @@
 
 import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { resolveEdge } from 'lib/assembly-skeleton/union';
+import {
+  LOWER_LAYER_FILL,
+  LOWER_LAYER_STROKE,
+  LOWER_LAYER_STROKE_SCALE,
+  STACKED_TWIN_OFFSET_MM,
+  orderedLayerKeys,
+  resolveEdge,
+} from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
 import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
+import { nameSpot } from './name-spot';
+import { buttonholePictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { stepHandsOf, type StepHands } from './step-hand';
+import { withPoseHosts, type PosePin } from './step-pose';
+import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
@@ -64,6 +82,9 @@ export type SceneOp = FormOpLike & {
   seamClass?: string;
   topstitchMode?: string;
   work?: string;
+  cutLengthMm?: string;
+  buttonholeOrientation?: string;
+  placementCount?: number;
 };
 
 function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
@@ -82,6 +103,9 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       seamClass: op?.seamClass,
       topstitchMode: op?.topstitchMode,
       work: op?.work,
+      cutLengthMm: op?.cutLengthMm,
+      buttonholeOrientation: op?.buttonholeOrientation,
+      placementCount: op?.placementCount,
       outputUnitName: op?.outputUnitName,
     })),
   );
@@ -289,15 +313,23 @@ export type StepPictureOptions = {
 export const STEP_TILE_EXPLODE = 0.12;
 export const STEP_TILE_RASTER_MM = 4;
 
-/** Pieces the editor's SEAMS tile keeps for the seam targets it is showing. */
+/**
+ * Pieces the editor's SEAMS tile keeps for the seam targets it is showing — a kept posed piece with
+ * its host, so it is drawn in its pose.
+ */
 export function focusedStepLeaves(
   leaves: readonly (readonly string[])[],
   targets: readonly TargetId[],
   innerSeams: readonly SeamCandidate[],
+  pose?: ReadonlyMap<string, PosePin>,
 ): string[][] {
   if (!targets.length) return leaves.map((leaf) => [...leaf]);
   const own = new Set(targets.map(pieceOfTarget));
-  return leaves.map((leaf) => focusPieces(leaf, own, innerSeams)).filter((leaf) => leaf.length > 0);
+  const cut = leaves.map((leaf) => focusPieces(leaf, own, innerSeams));
+  const kept = new Set(cut.flat());
+  const keep = withPoseHosts(kept, new Set(leaves.flat()), pose);
+  const out = keep.size > kept.size ? leaves.map((leaf) => leaf.filter((k) => keep.has(k))) : cut;
+  return out.filter((leaf) => leaf.length > 0);
 }
 
 const candidateSides = (candidate: SeamCandidate): SeamSides => ({
@@ -441,6 +473,7 @@ export function stepPictureOfOp(
     leaves,
     marks.map((mark) => mark.id),
     innerSeams,
+    hands.pose,
   );
   return {
     op: active,
@@ -607,9 +640,15 @@ export type PictureActionGlyph = {
   piece: string;
   /** Piece geometry frame (mm, y up), before the picture layout affine. */
   point: Pt2;
-  kind: 'button' | 'buttonhole' | 'label';
-  /** Unit direction in the same piece frame; only a buttonhole reads it. */
+  kind: 'button' | 'buttonhole' | 'label' | 'press-arrow';
+  /** Unit direction in the same piece frame; a buttonhole's run, a press arrow's pointing. */
   direction?: Pt2;
+  /** A press arrow's small word beyond its tip («open», «to back»). */
+  label?: string;
+  /** A press side read on the picture: the arrow keeps the seam normal, signed up/down/in/out. */
+  aim?: 'up' | 'down' | 'centre' | 'away';
+  /** Physical slit length; buttonholes default to 12 mm. */
+  lengthMm?: number;
 };
 
 type Look = {
@@ -671,9 +710,101 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
+const TWIN_NUMBER_PX = 10;
+
+/**
+ * A press arrow in screen px: shaft from just off the seam outward, an open chevron head, and the
+ * word's spot beyond the tip. ≈ 10 mm long at the picture's scale, clamped so it reads in print.
+ */
+export function pressArrowPath(
+  at: Pt2,
+  direction: Pt2,
+  mmPx: number,
+  look: { outline: number; font: number },
+) {
+  const length = Math.max(10, Math.min(18, 10 * mmPx));
+  const gap = Math.max(2, look.outline * 1.2);
+  const head = Math.max(3.5, length * 0.38);
+  const [dx, dy] = direction;
+  const start: Pt2 = [at[0] + dx * gap, at[1] + dy * gap];
+  const tip: Pt2 = [at[0] + dx * (gap + length), at[1] + dy * (gap + length)];
+  const cos = Math.cos(Math.PI / 4.5);
+  const sin = Math.sin(Math.PI / 4.5);
+  const wing = (side: number): Pt2 => [
+    tip[0] - head * (dx * cos - side * dy * sin),
+    tip[1] - head * (dy * cos + side * dx * sin),
+  ];
+  const left = wing(1);
+  const right = wing(-1);
+  const f = (value: number) => +value.toFixed(2);
+  const reach = look.font * 0.5 + 3;
+  const word: Pt2 = [tip[0] + dx * reach, tip[1] + dy * reach];
+  const anchor: 'start' | 'middle' | 'end' = dx > 0.45 ? 'start' : dx < -0.45 ? 'end' : 'middle';
+  return {
+    d: `M${f(start[0])} ${f(start[1])}L${f(tip[0])} ${f(tip[1])}M${f(left[0])} ${f(left[1])}L${f(tip[0])} ${f(tip[1])}L${f(right[0])} ${f(right[1])}`,
+    width: look.outline,
+    word,
+    anchor,
+  };
+}
+
+export function spreadGlyphFallbacks(ring: readonly Pt2[], count: number): Pt2[] {
+  if (!count) return [];
+  const box = boxOf(ring);
+  const safe = spotInside(ring);
+  const horizontal = box.x1 - box.x0 >= box.y1 - box.y0;
+  const section = (value: number): Pt2 | null => {
+    const cuts: number[] = [];
+    for (let index = 0; index < ring.length; index++) {
+      const a = ring[index];
+      const b = ring[(index + 1) % ring.length];
+      const aAxis = horizontal ? a[0] : a[1];
+      const bAxis = horizontal ? b[0] : b[1];
+      if (aAxis === bAxis || value < Math.min(aAxis, bAxis) || value >= Math.max(aAxis, bAxis))
+        continue;
+      const share = (value - aAxis) / (bAxis - aAxis);
+      cuts.push(
+        (horizontal ? a[1] : a[0]) +
+          share * ((horizontal ? b[1] : b[0]) - (horizontal ? a[1] : a[0])),
+      );
+    }
+    cuts.sort((a, b) => a - b);
+    let best: [number, number] | null = null;
+    for (let index = 0; index + 1 < cuts.length; index += 2)
+      if (!best || cuts[index + 1] - cuts[index] > best[1] - best[0])
+        best = [cuts[index], cuts[index + 1]];
+    if (!best) return null;
+    const cross = (best[0] + best[1]) / 2;
+    return horizontal ? [value, cross] : [cross, value];
+  };
+  return Array.from({ length: count }, (_, index) => {
+    const share = (index + 1) / (count + 1);
+    const value = horizontal
+      ? box.x0 + (box.x1 - box.x0) * share
+      : box.y0 + (box.y1 - box.y0) * share;
+    return section(value) ?? safe;
+  });
+}
+
+/** A fixed-pixel label near the offset twin's lower-right corner, pulled inward until it is safe. */
+const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
+  const box = boxOf(ring);
+  const safe = spotInside(ring);
+  const wanted: Pt2 = [box.x1 - TWIN_NUMBER_PX * 0.6, box.y1 - TWIN_NUMBER_PX * 0.6];
+  for (let step = 0; step <= 10; step++) {
+    const share = step / 10;
+    const candidate: Pt2 = [
+      wanted[0] + (safe[0] - wanted[0]) * share,
+      wanted[1] + (safe[1] - wanted[1]) * share,
+    ];
+    if (insideRing(candidate, ring)) return candidate;
+  }
+  return safe;
+};
 /**
  * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
- * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more.
+ * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more (card 6:
+ * marks 3–26 mm, slits 101 mm and up). Only picking reads it: every inner line is drawn.
  */
 export const DOOR_SPAN_MM = 50;
 export const spanMm = (line: readonly Pt2[]) => {
@@ -717,6 +848,9 @@ export function StepPictureSvg({
   pad,
   look,
   layout,
+  layers,
+  lower,
+  stacked,
   geoms,
   innerLines,
   marks = [],
@@ -738,6 +872,12 @@ export function StepPictureSvg({
   pad: number;
   look: keyof typeof LOOK;
   layout: StepLayout;
+  /** Authoritative bottom-to-top owner order. Omitted pictures keep the legacy drawing byte-for-byte. */
+  layers?: readonly string[];
+  /** Pieces explicitly claimed below another piece by the shared result. */
+  lower?: readonly string[];
+  /** Explicit [under, over] claims from the shared result. */
+  stacked?: readonly (readonly [string, string])[];
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   marks?: readonly EdgeMark[];
@@ -758,9 +898,61 @@ export function StepPictureSvg({
   className?: string;
 }) {
   const L = LOOK[look];
+  const form = useFormContext<TechCardFormData>();
+  const contextResults = useStepResults();
+  const contextResult = useMemo(
+    () =>
+      layers
+        ? contextResults?.find(
+            (result) =>
+              result.layout === layout || result.layout.T === layout.T || result.layers === layers,
+          )
+        : undefined,
+    [contextResults, layers, layout],
+  );
+  const operation = contextResult
+    ? (form?.getValues(`operations.${contextResult.opIndex}`) as ButtonholeOperation | undefined)
+    : undefined;
+  const automaticButtonholes = useMemo(
+    () =>
+      actionGlyphs.length ? [] : buttonholePictureGlyphs(operation, [...layout.T.keys()], geoms),
+    [actionGlyphs.length, operation, layout.T, geoms],
+  );
+  const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
+    ? actionGlyphs
+    : automaticButtonholes.map((glyph) => ({
+        id: glyph.id,
+        piece: glyph.piece,
+        point: glyph.point,
+        direction: glyph.direction,
+        lengthMm: glyph.lengthMm,
+        kind: 'buttonhole',
+      }));
+  const resultLower = lower ?? contextResult?.lower ?? [];
+  void stacked;
+  const twinNumbers = useMemo(() => {
+    const numbers = new Map<string, number>();
+    layout.stacked.forEach((stack) =>
+      stack.slice(1).forEach((piece, index) => numbers.set(piece, index + 2)),
+    );
+    return numbers;
+  }, [layout.stacked]);
   const ownBounds = useMemo(() => pictureBounds(layout, geoms, look), [layout, geoms, look]);
-  const fitBounds = bounds ?? ownBounds;
-  const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
+  const layeredBounds = useMemo(() => {
+    if (!layers) return null;
+    const points = [...layout.T].flatMap(([key, transform]) => {
+      const twin = twinNumbers.get(key);
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) : 0;
+      return (geoms.get(key)?.rs ?? []).map((point) => {
+        const [x, y] = apply(transform, point);
+        return [x + offset, y - offset] as Pt2;
+      });
+    });
+    if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
+    return points.length ? boxOf(points) : layout.bbox;
+  }, [geoms, layers, layout, look, twinNumbers]);
+  const fitBounds = bounds ?? layeredBounds ?? ownBounds;
+  const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
   const vy = view?.y ?? 0;
@@ -774,11 +966,43 @@ export function StepPictureSvg({
     for (const [key, T] of layout.T) {
       const g = geoms.get(key);
       if (!g) continue;
-      const ring = g.rs.map((p) => toPx(fit, apply(T, p)));
+      const twin = layers ? twinNumbers.get(key) : undefined;
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const ring = g.rs.map((p) => {
+        const [x, y] = toPx(fit, apply(T, p));
+        return [x + offset, y + offset] as Pt2;
+      });
       out.push({ key, ring, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
     }
     return out;
-  }, [layout, geoms, fit]);
+  }, [layout, geoms, fit, layers, twinNumbers]);
+  const ownedOrder = useMemo(
+    () =>
+      layers
+        ? orderedLayerKeys(
+            layers,
+            layout.stacked,
+            pieces.map((piece) => piece.key),
+          )
+        : [],
+    [layers, layout.stacked, pieces],
+  );
+  const ownedLowerKeys = useMemo(() => new Set(resultLower), [resultLower]);
+  const orderedOwnedPieces = useMemo(() => {
+    const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
+    return ownedOrder.flatMap((key) => {
+      const piece = byKey.get(key);
+      return piece ? [piece] : [];
+    });
+  }, [ownedOrder, pieces]);
+  const ownedLower = useMemo(
+    () => orderedOwnedPieces.filter((piece) => ownedLowerKeys.has(piece.key)),
+    [orderedOwnedPieces, ownedLowerKeys],
+  );
+  const ownedTop = useMemo(
+    () => orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key)),
+    [orderedOwnedPieces, ownedLowerKeys],
+  );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
   const { base, under } = useMemo(() => {
@@ -815,6 +1039,7 @@ export function StepPictureSvg({
       }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
+  const visibleBase = layers ? ownedTop : base;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -830,25 +1055,69 @@ export function StepPictureSvg({
     return raw?.length ? raw.map((p) => toPx(fit, apply(T, p))) : null;
   };
 
-  const doors = useMemo(() => {
-    if (!onPick && look !== 'canvas') return [];
-    const out: { id: TargetId; d: string; inner: boolean }[] = [];
-    for (const [key, T] of layout.T) {
-      const g = geoms.get(key);
-      if (!g) continue;
-      for (const e of plainEdges(g))
-        out.push({ id: e.id, d: pathOf(e.pts.map((p) => toPx(fit, apply(T, p)))), inner: false });
-      (innerLines?.get(key) ?? []).forEach((l, k) => {
-        if (spanMm(l) < DOOR_SPAN_MM) return;
-        out.push({
-          id: innerId(key, k),
-          d: pathOf(l.map((p) => toPx(fit, apply(T, p)))),
-          inner: true,
-        });
+  // Every inner line of a drawn piece — a button, a buttonhole, a slit — as a hairline that takes no
+  // click; on the canvas a door (a slit, a placement line) keeps its faint dash instead.
+  const marksDrawn = useMemo(() => {
+    if (look === 'print') return [];
+    const out: { id: string; d: string }[] = [];
+    for (const p of visibleBase) {
+      const T = layout.T.get(p.key);
+      if (!T) continue;
+      (innerLines?.get(p.key) ?? []).forEach((l, k) => {
+        if (l.length < 2 || (look === 'canvas' && spanMm(l) >= DOOR_SPAN_MM)) return;
+        const lineBox = boxOf(l);
+        const replaced = automaticButtonholes.some(
+          (glyph) =>
+            glyph.piece === p.key &&
+            Math.abs((lineBox.x0 + lineBox.x1) / 2 - glyph.markBox.cx) <= 2 &&
+            Math.abs((lineBox.y0 + lineBox.y1) / 2 - glyph.markBox.cy) <= 2,
+        );
+        if (replaced) return;
+        out.push({ id: innerId(p.key, k), d: pathOf(l.map((q) => toPx(fit, apply(T, q)))) });
       });
     }
     return out;
-  }, [onPick, look, layout, geoms, innerLines, fit]);
+  }, [look, visibleBase, layout, innerLines, fit, automaticButtonholes]);
+
+  const doors = useMemo(() => {
+    if (!onPick && look !== 'canvas') return [];
+    const out: { id: TargetId; d: string; inner: boolean }[] = [];
+    // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
+    // a stacked twin's edges follow its drawn offset.
+    const keys = layers ? ownedOrder : [...layout.T.keys()];
+    for (const key of keys) {
+      const T = layout.T.get(key);
+      const g = geoms.get(key);
+      if (!T || !g) continue;
+      const twin = layers ? twinNumbers.get(key) : undefined;
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const px = (p: Pt2): Pt2 => {
+        const [x, y] = toPx(fit, apply(T, p));
+        return [x + offset, y + offset];
+      };
+      for (const e of plainEdges(g)) out.push({ id: e.id, d: pathOf(e.pts.map(px)), inner: false });
+      (innerLines?.get(key) ?? []).forEach((l, k) => {
+        if (spanMm(l) < DOOR_SPAN_MM) return;
+        out.push({ id: innerId(key, k), d: pathOf(l.map(px)), inner: true });
+      });
+    }
+    return out;
+  }, [onPick, look, layout, geoms, innerLines, fit, layers, ownedOrder, twinNumbers]);
+  // A second click on the same spot takes the edge of the layer below (owned pictures only).
+  const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
+  const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
+    if (!layers) return id;
+    const { clientX: x, clientY: y } = event;
+    const hits = document
+      .elementsFromPoint(x, y)
+      .map((el) => el.getAttribute('data-seam-target'))
+      .filter((hit): hit is TargetId => !!hit);
+    const last = lastPick.current;
+    const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
+    const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+    lastPick.current = { x, y, id: chosen };
+    return chosen;
+  };
 
   const directPartner = new Map(layout.pieceLayers);
   const inputPartner = new Map(layout.layers);
@@ -856,12 +1125,15 @@ export function StepPictureSvg({
     layout.stacked.flatMap((stack) => stack.slice(1).map((key) => [key, stack[0]] as const)),
   );
   const actionHost = (key: string) => {
+    // Every owned piece is drawn in layers mode — a lower one hosts its own marks.
+    const own = layers ? orderedOwnedPieces.find((piece) => piece.key === key) : undefined;
+    if (own) return own;
     const direct = directPartner.get(key) ?? stackLeader.get(key);
-    if (direct) return base.find((piece) => piece.key === direct);
+    if (direct) return visibleBase.find((piece) => piece.key === direct);
     const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
     return (
-      base.find((piece) => piece.key === key) ??
-      base.find((piece) => partnerInput != null && piece.input === partnerInput)
+      visibleBase.find((piece) => piece.key === key) ??
+      visibleBase.find((piece) => partnerInput != null && piece.input === partnerInput)
     );
   };
   const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
@@ -930,45 +1202,94 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
-  const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
+  const pictureCentre: Pt2 = (() => {
+    if (!pieces.length) return [w / 2, h / 2];
+    const box = boxOf(pieces.flatMap((piece) => piece.ring));
+    return [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
+  })();
+  const glyphCandidates = drawnActionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
     if (!T || !host) return [];
     const wanted = toPx(fit, apply(T, glyph.point));
-    const hostBox = boxOf(host.ring);
-    const margin = glyph.kind === 'label' ? 9 : glyph.kind === 'buttonhole' ? 7 : 4.2;
-    const fits = (point: Pt2) =>
-      insideRing(point, host.ring) &&
-      point[0] >= hostBox.x0 + margin &&
-      point[0] <= hostBox.x1 - margin &&
-      point[1] >= hostBox.y0 + margin &&
-      point[1] <= hostBox.y1 - margin;
-    const safe = spotInside(host.ring);
-    let at = wanted;
-    if (host.key !== glyph.piece || !fits(at)) {
-      at = safe;
-      for (let step = 1; step <= 10; step++) {
-        const share = step / 10;
-        const candidate: Pt2 = [
-          wanted[0] + (safe[0] - wanted[0]) * share,
-          wanted[1] + (safe[1] - wanted[1]) * share,
-        ];
-        if (fits(candidate)) {
-          at = candidate;
-          break;
-        }
-      }
-    }
     const direction = glyph.direction ?? ([1, 0] as Pt2);
     const toward = toPx(
       fit,
       apply(T, [glyph.point[0] + direction[0], glyph.point[1] + direction[1]]),
     );
-    const dx = toward[0] - at[0];
-    const dy = toward[1] - at[1];
+    const dx = toward[0] - wanted[0];
+    const dy = toward[1] - wanted[1];
     const length = Math.hypot(dx, dy) || 1;
-    return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
+    if (glyph.kind === 'press-arrow') {
+      // A press arrow stands on its seam as drawn, never moved into a free spot of the piece.
+      const at = pointsOnDrawnPiece(glyph.piece, [wanted])?.[0] ?? wanted;
+      let unit: Pt2 = [dx / length, dy / length];
+      const aim = glyph.aim;
+      if (aim) {
+        const sign =
+          aim === 'up'
+            ? -unit[1]
+            : aim === 'down'
+              ? unit[1]
+              : (pictureCentre[0] - at[0]) * unit[0] + (pictureCentre[1] - at[1]) * unit[1];
+        if ((aim === 'away' ? -sign : sign) < 0) unit = [-unit[0], -unit[1]];
+      }
+      return [{ glyph, host, wanted: at, fallback: false, direction: unit, mmPx: length }];
+    }
+    const onDrawing = pieces.some((piece) => insideRing(wanted, piece.ring));
+    return [
+      {
+        glyph,
+        host,
+        wanted,
+        fallback: !onDrawing,
+        direction: [dx / length, dy / length] as Pt2,
+        mmPx: length,
+      },
+    ];
   });
+  const fallbackById = new Map<string, Pt2>();
+  const fallbacksByHost = new Map<string, typeof glyphCandidates>();
+  for (const candidate of glyphCandidates) {
+    if (!candidate.fallback) continue;
+    const group = fallbacksByHost.get(candidate.host.key) ?? [];
+    group.push(candidate);
+    fallbacksByHost.set(candidate.host.key, group);
+  }
+  for (const group of fallbacksByHost.values()) {
+    const spots = spreadGlyphFallbacks(group[0].host.ring, group.length);
+    group.forEach((candidate, index) => fallbackById.set(candidate.glyph.id, spots[index]));
+  }
+  const actionGlyphSpots = glyphCandidates
+    .map((candidate) => ({
+      glyph: candidate.glyph,
+      at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
+      direction: candidate.direction,
+      mmPx: candidate.mmPx,
+    }))
+    // Both sides of one seam carry the same arrow: one drawn arrow per spot and way.
+    .filter(
+      (spot, index, all) =>
+        spot.glyph.kind !== 'press-arrow' ||
+        !all
+          .slice(0, index)
+          .some(
+            (other) =>
+              other.glyph.kind === 'press-arrow' &&
+              Math.hypot(other.at[0] - spot.at[0], other.at[1] - spot.at[1]) < 8 &&
+              other.direction[0] * spot.direction[0] + other.direction[1] * spot.direction[1] > 0.8,
+          ),
+    );
+  // One press step says its word once, beside its first arrow.
+  const pressWordIds = new Set(
+    actionGlyphSpots
+      .filter((spot) => spot.glyph.kind === 'press-arrow' && spot.glyph.label)
+      .filter(
+        (spot, index, all) =>
+          all.findIndex((other) => other.glyph.label === spot.glyph.label) === index,
+      )
+      .map((spot) => spot.glyph.id),
+  );
   const hideCrowdedLabels = look === 'canvas' || look === 'result';
   const pieceSize = new Map(
     pieces.map((piece) => {
@@ -995,6 +1316,7 @@ export function StepPictureSvg({
   });
   // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
   // never across the gap between pieces that only stand together.
+  const nameBoxOf = (text: string) => ({ w: text.length * L.font * 0.66 + 16, h: L.font + 8 });
   const nameSpots = (names ?? []).flatMap((text, gi) => {
     const own = pieces.filter((p) => p.input === gi);
     const ring = [
@@ -1003,6 +1325,7 @@ export function StepPictureSvg({
     ];
     if (!ring.length || !text) return [];
     const b = boxOf(ring);
+    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
       const pb = boxOf(p.ring);
       const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
@@ -1011,16 +1334,18 @@ export function StepPictureSvg({
     const at: Pt2 = namesBelow
       ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
       : biggest
-        ? spotInside(biggest.ring)
+        ? nameSpot(
+            biggest.ring,
+            pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
+            text.length * L.font * 0.62,
+            L.font + 4,
+            ring,
+            { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text) },
+          )
         : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
-    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
-  const nameBoxes = nameSpots.map(({ text, s }) => ({
-    ...s,
-    w: text.length * L.font * 0.66 + 16,
-    h: L.font + 8,
-  }));
+  const nameBoxes = nameSpots.map(({ text, s }) => ({ ...s, ...nameBoxOf(text) }));
   const labelBoxes = labels.map(({ m, s }) => ({
     ...s,
     w: (m.label ?? '').length * L.font * 0.62,
@@ -1060,31 +1385,90 @@ export function StepPictureSvg({
       style={{ overflow: 'hidden', fontSize: L.font }}
       aria-hidden={onPick ? undefined : true}
     >
-      <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
-        {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
-        ))}
-      </g>
-      {under.length > 0 && (
+      {layers ? (
+        <>
+          <g fill={FILL} stroke='none'>
+            {ownedLower.map((piece) => (
+              <path
+                key={piece.key}
+                d={pathOf(piece.ring, true)}
+                data-lower-layer-base={piece.key}
+              />
+            ))}
+          </g>
+          <g fill={FILL} stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
+            {ownedTop.map((piece) => (
+              <path key={piece.key} d={pathOf(piece.ring, true)} data-piece-outline={piece.key} />
+            ))}
+          </g>
+          <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+            {ownedTop.map((piece) => (
+              <path key={piece.key} d={pathOf(piece.ring, true)} />
+            ))}
+          </g>
+        </>
+      ) : (
+        <>
+          <g fill='none' stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} data-piece-outline={p.key} />
+            ))}
+          </g>
+          {under.length > 0 && (
+            <g
+              fill='none'
+              stroke={GREY}
+              strokeWidth={L.hair}
+              strokeDasharray={L.dash}
+              strokeLinejoin='round'
+            >
+              {under.flatMap((piece) =>
+                piece.runs.map((run, index) => (
+                  <path
+                    key={`${piece.key}:${index}`}
+                    d={pathOf(run)}
+                    data-piece-layer={piece.key}
+                  />
+                )),
+              )}
+            </g>
+          )}
+          <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
+            {base.map((p) => (
+              <path key={p.key} d={pathOf(p.ring, true)} />
+            ))}
+          </g>
+        </>
+      )}
+      {marksDrawn.length > 0 && (
         <g
           fill='none'
-          stroke={GREY}
+          stroke={INK}
           strokeWidth={L.hair}
-          strokeDasharray={L.dash}
+          strokeLinecap='round'
           strokeLinejoin='round'
+          pointerEvents='none'
+          data-inner-marks=''
         >
-          {under.flatMap((piece) =>
-            piece.runs.map((run, index) => (
-              <path key={`${piece.key}:${index}`} d={pathOf(run)} data-piece-layer={piece.key} />
-            )),
-          )}
+          {marksDrawn.map((x) => (
+            <path key={x.id} d={x.d} />
+          ))}
         </g>
       )}
-      <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
-        {base.map((p) => (
-          <path key={p.key} d={pathOf(p.ring, true)} />
+      {layers &&
+        ownedLower.map((piece) => (
+          <path
+            key={`lower:${piece.key}`}
+            d={pathOf(piece.ring, true)}
+            fill={LOWER_LAYER_FILL}
+            stroke={LOWER_LAYER_STROKE}
+            strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
+            strokeLinejoin='round'
+            vectorEffect='non-scaling-stroke'
+            pointerEvents='none'
+            data-lower-layer={piece.key}
+          />
         ))}
-      </g>
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
@@ -1166,7 +1550,46 @@ export function StepPictureSvg({
           data-asm-piece={line.piece}
         />
       ))}
-      {actionGlyphSpots.map(({ glyph, at, direction }) => {
+      {actionGlyphSpots.map(({ glyph, at, direction, mmPx }) => {
+        if (glyph.kind === 'press-arrow') {
+          const arrow = pressArrowPath(at, direction, mmPx, L);
+          return (
+            <g
+              key={`action-glyph:${glyph.id}`}
+              pointerEvents='none'
+              data-asm-mark='press-arrow'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+              data-asm-dx={direction[0]}
+              data-asm-dy={direction[1]}
+            >
+              <path
+                d={arrow.d}
+                fill='none'
+                stroke={INK}
+                strokeWidth={arrow.width}
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              />
+              {glyph.label && pressWordIds.has(glyph.id) ? (
+                <text
+                  x={arrow.word[0]}
+                  y={arrow.word[1]}
+                  textAnchor={arrow.anchor}
+                  dominantBaseline='central'
+                  fill={INK}
+                  stroke={FILL}
+                  strokeWidth={3}
+                  paintOrder='stroke'
+                  data-asm-word='press'
+                >
+                  {glyph.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        }
         if (glyph.kind === 'button') {
           const radius = 4.2;
           return (
@@ -1190,20 +1613,24 @@ export function StepPictureSvg({
           );
         }
         if (glyph.kind === 'buttonhole') {
-          const half = 7;
+          const lengthMm = glyph.lengthMm && glyph.lengthMm > 0 ? glyph.lengthMm : 12;
+          const half = (lengthMm * mmPx) / 2;
           return (
             <path
               key={`action-glyph:${glyph.id}`}
               d={`M${at[0] - direction[0] * half} ${at[1] - direction[1] * half}L${at[0] + direction[0] * half} ${at[1] + direction[1] * half}`}
               fill='none'
               stroke={INK}
-              strokeWidth={L.mark}
+              strokeWidth={L.hair}
               strokeLinecap='round'
               pointerEvents='none'
               data-asm-mark='buttonhole'
               data-asm-piece={glyph.piece}
               data-asm-x={at[0]}
               data-asm-y={at[1]}
+              data-asm-dx={direction[0]}
+              data-asm-dy={direction[1]}
+              data-asm-length-mm={lengthMm}
             />
           );
         }
@@ -1293,6 +1720,30 @@ export function StepPictureSvg({
             </text>
           ) : null;
         })}
+      {layers &&
+        orderedOwnedPieces.flatMap((piece) => {
+          const number = twinNumbers.get(piece.key);
+          if (!number) return [];
+          const at = twinNumberSpot(piece.ring);
+          return [
+            <text
+              key={`twin:${piece.key}`}
+              x={at[0]}
+              y={at[1]}
+              textAnchor='middle'
+              dominantBaseline='central'
+              fill={INK}
+              stroke={FILL}
+              strokeWidth={3}
+              paintOrder='stroke'
+              fontSize={TWIN_NUMBER_PX}
+              pointerEvents='none'
+              data-twin-number={number}
+            >
+              {number}
+            </text>,
+          ];
+        })}
       {onPick &&
         // Lines first: where an edge runs beside a line, the edge takes the click.
         [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
@@ -1306,7 +1757,7 @@ export function StepPictureSvg({
             className='cursor-pointer'
             onPointerEnter={() => onHover?.(x.id)}
             onPointerLeave={() => onHover?.(null)}
-            onClick={() => onPick(x.id)}
+            onClick={(event) => onPick(pickAt(event, x.id))}
             data-seam-target={x.id}
           />
         ))}

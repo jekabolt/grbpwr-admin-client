@@ -39,6 +39,10 @@ export type UnionPicture = {
   overflow: string[];
   underlay: string[];
   overlap: number;
+  /** Owner-result pieces that must be redrawn as the translucent lower layer. */
+  lowerLayers?: string[];
+  /** Visible numbers for offset followers of an identical stack. */
+  twinLabels?: Record<string, number>;
 };
 
 /** Douglas–Peucker on a closed ring (split at the far point), tolerance in mm. */
