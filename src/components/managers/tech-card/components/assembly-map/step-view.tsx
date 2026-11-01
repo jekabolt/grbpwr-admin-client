@@ -37,7 +37,7 @@ function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
   const b = lengthOf(bIds, seam.evidence?.bLenMm);
   const facts: string[] = [];
   if (a != null && b != null && Math.round(a) !== Math.round(b)) {
-    facts.push(`${Math.round(a)} / ${Math.round(b)} mm`);
+    facts.push(`length ${Math.round(a)} / ${Math.round(b)} mm`);
   }
 
   const notchCount = (id: string) => {
@@ -50,7 +50,7 @@ function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
     seam.evidence?.notchesMatched ??
     ((seam.evidence?.notchScore ?? 0) >= 0.7 ? Math.min(na, nb) : 0);
   if (na !== nb || (Math.min(na, nb) > 0 && matched < Math.min(na, nb))) {
-    facts.push(`${na} / ${nb} notches`);
+    facts.push(`notches ${na} / ${nb}`);
   }
   return facts;
 }
