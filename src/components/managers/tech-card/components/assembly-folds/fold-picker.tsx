@@ -1,19 +1,18 @@
-// THE FOLDS SHEET (doll-folds T4, owner OK 01.11: variant «Inline» + tech-card option «Thumb»). A
-// fullscreen overlay over CONSTRUCTION, the seams review's shell: the card's pieces on the left (a row
-// = flat thumbnail, and once folded, the folded thumbnail + its small section), the open piece large on
-// the right. Folds are set once per PIECE; the doll and the step pictures read them from here.
+// THE FOLD PICKER (doll-folds T4, owner OK 01.11: variant «Inline»). It opens in place under a step's
+// `folds` row, on the one piece the owner tapped — no sheet, no piece list. Folds are set once per
+// PIECE; the doll and every step that uses the piece read them from here.
 //
 //   hint    a DXF / mark line is drawn dashed → `fold` on it → in / out / double → saved
 //   line    no hint: two clicks on the piece's edges (snap to notches) → the same kind choice
 //   saved   the folded result: flat faint behind, folded solid, finished mm + cut mm, `flat / folded`,
-//           `swap` (or click the other side), the big section under the canvas
+//           `swap` (or click the other side), the section under the drawing
 //
 // The smaller part flips by default. `in` turns toward the wrong side (the part goes under), `out`
 // toward the face (over), `double` = two equal inward turns (two rows). The turn animates ~250 ms
 // (double 2 × 180 ms), instant with prefers-reduced-motion. Writes are optimistic (folds-store); a
-// refused write rolls back and says so in the log.
+// refused write rolls back and says so in the log. Long pieces (plackets) draw with their short side
+// large and their long ends cropped, so the folds stay readable.
 
-import * as Dialog from '@radix-ui/react-dialog';
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
 import { foldedOutline, foldHints, type FoldHint, type FoldSource } from 'lib/folds';
@@ -29,7 +28,7 @@ import {
   type ReactNode,
   type SVGProps,
 } from 'react';
-import { Button, Chip, ChipRow, Close, Section, Text } from 'ui';
+import { Button, Chip, ChipRow, Close, Text } from 'ui';
 import { FROZEN_REFUSAL } from '../assembly-fullscreen';
 import { pieceRefKey } from '../piece-block-refs';
 import type { FoundPiece } from '../nesting/dxf-geometry';
@@ -46,19 +45,7 @@ import {
   type PickKind,
   type PieceView,
 } from './fold-model';
-import {
-  FlatThumb,
-  FoldedThumb,
-  GREY,
-  HatchDef,
-  HintIcon,
-  INK,
-  KindIcon,
-  PAPER,
-  PICK,
-  PliesSvg,
-  SectionSvg,
-} from './fold-picture';
+import { GREY, HatchDef, INK, KindIcon, PAPER, PICK, PliesSvg, SectionSvg } from './fold-picture';
 import { useFoldRows } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
 
@@ -66,7 +53,11 @@ type Shapes = ReadonlyMap<string, FoundPiece | null> | null | undefined;
 
 const W = 720;
 const H = 560;
-const PAD = 64;
+const PAD = 40;
+/** A long piece's short side, px at least (the viewBox is 720 wide). */
+const MIN_SHORT = 170;
+/** Room for the finished / cut dimensions beside the folded shape. */
+const DIM_PAD = 76;
 const r1 = (v: number) => v.toFixed(1);
 
 type Mode =
@@ -85,7 +76,7 @@ type Anim = {
   then?: () => void;
 };
 
-type PieceRead = {
+export type PieceRead = {
   geom: PieceGeom;
   deg: number;
   groups: FoldGroup[];
@@ -97,7 +88,7 @@ const ease = (x: number) => 1 - Math.pow(1 - x, 5);
 const reduced = () =>
   typeof window !== 'undefined' &&
   !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-const mmDims = (g: PieceGeom) => {
+export const mmDims = (g: PieceGeom) => {
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
@@ -111,7 +102,7 @@ const mmDims = (g: PieceGeom) => {
   return `${Math.round(x1 - x0)} × ${Math.round(y1 - y0)}`;
 };
 
-function usePieceReads(
+export function usePieceReads(
   pieces: readonly PieceGeom[],
   shapes: Shapes,
   grainDeg: ReadonlyMap<string, number> | undefined,
@@ -161,49 +152,35 @@ function usePieceReads(
   );
 }
 
-export function FoldsSheet({
-  open,
-  onClose,
+export function FoldPicker({
+  read,
   cardId,
   frozen,
-  title,
   size,
-  pieces,
-  shapes,
-  grainDeg,
-  initialKey,
+  onClose,
 }: {
-  open: boolean;
-  onClose: () => void;
+  read: PieceRead;
   cardId: number | undefined;
   frozen: boolean;
-  title: string;
   size: string;
-  pieces: readonly PieceGeom[];
-  shapes: Shapes;
-  grainDeg?: ReadonlyMap<string, number>;
-  initialKey?: string;
+  onClose: () => void;
 }) {
-  const reads = usePieceReads(pieces, shapes, grainDeg);
   const writes = useFoldWrites(cardId, frozen);
-  const [curKey, setCurKey] = useState<string | null>(initialKey ?? null);
-  const cur = reads.find((r) => r.geom.pieceKey === curKey) ?? reads[0] ?? null;
+  const cur = read;
   const [mode, setMode] = useState<Mode>({ t: 'idle' });
   const [view, setView] = useState<'flat' | 'folded'>('folded');
   const [anim, setAnim] = useState<Anim | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [live, setLive] = useState<Pt2 | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    rootRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const reset = () => {
     setMode({ t: 'idle' });
     setLive(null);
-  };
-  const pick = (key: string) => {
-    setCurKey(key);
-    reset();
-    setAnim(null);
-    setView('folded');
   };
 
   // The turn's frames: T runs 0 → n (n turns of d ms each), or back for `flat`.
@@ -236,17 +213,25 @@ export function FoldsSheet({
     setAnim({ gi, dir, n, d: n > 1 ? 180 : 250, t0: performance.now(), T: dir > 0 ? 0 : n, then });
   };
 
-  if (!cur) return null;
   const { geom, deg, groups, hints } = cur;
   const folded =
     view === 'folded' && groups.length > 0 && mode.t !== 'pending' && mode.t !== 'draw';
-  const v = pieceView(geom, deg, {
-    w: W,
-    h: H,
-    pad: PAD,
-    padRight: folded ? PAD + 72 : PAD,
-    padBottom: folded ? PAD + 72 : PAD,
-  });
+  const v0 = pieceView(geom, deg, { w: W, h: H, pad: PAD, tight: true, minShort: MIN_SHORT });
+  // Dimensions sit beside the folded shape: to the right of a lying piece, else below / right.
+  const v = folded
+    ? pieceView(geom, deg, {
+        w: W,
+        h: H,
+        pad: PAD,
+        padRight: PAD + DIM_PAD,
+        padBottom: v0.lying ? PAD : PAD + DIM_PAD,
+        tight: true,
+        minShort: MIN_SHORT,
+      })
+    : v0;
+  const VH = v.h;
+  // The visible window of a cropped piece (the dimensions' strip stays clear).
+  const clipX: [number, number] = [8, folded ? W - DIM_PAD - 52 : W - 8];
 
   const save = async (rows: Parameters<typeof writes.upsert>[0] | null) => {
     if (!rows || !rows.length) return false;
@@ -381,9 +366,28 @@ export function FoldsSheet({
     if (mode.t === 'draw') setLive(svgPoint(e));
   };
 
+  // A point along the line, `t` of the way through its VISIBLE part (a cropped piece cuts lines off).
   const anchorPct = (l: readonly [Pt2, Pt2], t = 0.5) => {
-    const m = v.toPx([l[0][0] + (l[1][0] - l[0][0]) * t, l[0][1] + (l[1][1] - l[0][1]) * t]);
-    return { left: `${Math.min((m[0] / W) * 100, 72)}%`, top: `${(m[1] / H) * 100}%` };
+    const a = v.toPx(l[0]);
+    const b = v.toPx(l[1]);
+    let lo = 0;
+    let hi = 1;
+    const dx = b[0] - a[0];
+    const x0 = clipX[0] + 24;
+    const x1 = clipX[1] - 24;
+    if (Math.abs(dx) > 1e-6) {
+      const ta = (x0 - a[0]) / dx;
+      const tb = (x1 - a[0]) / dx;
+      lo = Math.max(lo, Math.min(ta, tb));
+      hi = Math.min(hi, Math.max(ta, tb));
+    }
+    if (hi < lo) [lo, hi] = [0, 1];
+    const u = lo + (hi - lo) * t;
+    const m: Pt2 = [a[0] + dx * u, a[1] + (b[1] - a[1]) * u];
+    return {
+      left: `${Math.max(2, Math.min((m[0] / W) * 100, 72))}%`,
+      top: `${Math.max(8, Math.min((m[1] / VH) * 100, 92))}%`,
+    };
   };
 
   const ln = (l: readonly [Pt2, Pt2], props: SVGProps<SVGLineElement>, key?: string | number) => {
@@ -602,7 +606,8 @@ export function FoldsSheet({
             </g>
           );
         })}
-        {!anim && <Dims v={v} piece={geom} shape={fin} />}
+        {/* A cropped piece draws its dimensions outside the crop (below). */}
+        {!anim && !v.cropped && <Dims v={v} piece={geom} shape={fin} />}
       </>
     );
   };
@@ -633,259 +638,185 @@ export function FoldsSheet({
   const selG = mode.t === 'sel' ? groups[mode.gi] : null;
 
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className='flex flex-col border-t border-hairline pt-2 focus:outline-none'
+      data-fold-picker={geom.name}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (mode.t !== 'idle') reset();
+          else onClose();
+        } else if ((e.key === 'Backspace' || e.key === 'Delete') && mode.t === 'sel') {
+          e.preventDefault();
+          void remove(mode.gi);
+        }
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <Dialog.Content
-          data-folds-sheet=''
-          className='fixed inset-0 z-[var(--z-modal)] flex flex-col gap-gutter overflow-auto bg-pageBg p-4 text-textColor focus:outline-none'
-          onEscapeKeyDown={(e) => {
-            if (mode.t !== 'idle') {
-              e.preventDefault();
-              reset();
-            }
-          }}
-          onKeyDown={(e) => {
-            if ((e.key === 'Backspace' || e.key === 'Delete') && mode.t === 'sel') {
-              e.preventDefault();
-              void remove(mode.gi);
-            }
-          }}
+      <div className='flex items-center gap-2'>
+        <Text size='micro' component='span' className='uppercase'>
+          {geom.name}
+        </Text>
+        <Text size='micro' variant='label' component='span' className='tabular-nums'>
+          {mmDims(geom)}
+        </Text>
+        {frozen && (
+          <Text size='micro' variant='label' component='span'>
+            {FROZEN_REFUSAL}
+          </Text>
+        )}
+        <Close size='sm' aria-label='close' onClick={onClose} className='ml-auto' />
+      </div>
+      <div className='relative' data-fold-canvas={folded ? 'folded' : mode.t}>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${r1(VH)}`}
+          preserveAspectRatio='xMidYMid meet'
+          className={cn('block h-auto w-full select-none', mode.t === 'draw' && 'cursor-crosshair')}
+          onClick={onCanvasClick}
+          onPointerMove={onMove}
         >
-          <Dialog.Title className='sr-only'>folds</Dialog.Title>
-          <Dialog.Description className='sr-only'>
-            fold lines of the card&apos;s pieces
-          </Dialog.Description>
-          <Section
-            title='folds'
-            question={`${title}${size ? ` · size ${size}` : ''}`}
-            action={
-              <Chip quiet onClick={onClose} data-folds-door='close'>
-                close · esc
-              </Chip>
-            }
-            className='shrink-0'
-          >
-            {frozen && (
-              <Text size='micro' variant='label' component='p'>
-                {FROZEN_REFUSAL}
-              </Text>
-            )}
-            <div className='flex flex-col md:flex-row'>
-              <ul
-                className='shrink-0 overflow-y-auto border-hairline md:w-72 md:border-r'
-                data-fold-pieces=''
+          <HatchDef />
+          {v.cropped && (
+            <defs>
+              <clipPath id={`fold-crop-${geom.pieceKey}`}>
+                <rect x={clipX[0]} y={0} width={clipX[1] - clipX[0]} height={VH} />
+              </clipPath>
+            </defs>
+          )}
+          <g clipPath={v.cropped ? `url(#fold-crop-${geom.pieceKey})` : undefined}>
+            {folded ? foldedSvg() : flatSvg()}
+          </g>
+          {v.cropped && folded && !anim && (
+            <Dims
+              v={v}
+              piece={geom}
+              shape={foldedOutline(
+                geom.rs,
+                groups.flatMap((g) => g.flat),
+              )}
+              maxT={clipX[1] + 8}
+            />
+          )}
+        </svg>
+
+        {mode.t === 'pending' &&
+          pop(
+            mode.line,
+            <>
+              {kindChips(null)}
+              <Button variant='underline' size='xs' onClick={reset} className='self-end'>
+                cancel
+              </Button>
+            </>,
+          )}
+        {selG &&
+          pop(
+            selG.line,
+            <>
+              {kindChips(selG.kind)}
+              <span className='flex items-center justify-between gap-2'>
+                <Button
+                  variant='underline'
+                  size='xs'
+                  onClick={() => void remove((mode as { gi: number }).gi)}
+                >
+                  remove
+                </Button>
+                <Close size='sm' aria-label='close' onClick={reset} />
+              </span>
+            </>,
+          )}
+        {mode.t === 'idle' &&
+          !folded &&
+          hints.map((h, i) => (
+            <span
+              key={h.id}
+              className='absolute -translate-y-1/2 translate-x-3'
+              style={anchorPct(
+                h.lineMm,
+                hints.length > 1 ? 0.15 + (0.7 * i) / (hints.length - 1) : 0.5,
+              )}
+            >
+              <Chip
+                onClick={() => setMode({ t: 'pending', line: h.lineMm, source: h.source })}
+                data-fold-hint=''
               >
-                {reads.map((r) => {
-                  const on = r.geom.pieceKey === cur.geom.pieceKey;
-                  const isFolded = r.groups.length > 0;
-                  return (
-                    <li key={r.geom.pieceKey} className='border-b border-hairline'>
-                      <Button
-                        onClick={() => pick(r.geom.pieceKey)}
-                        aria-current={on ? 'true' : undefined}
-                        data-fold-piece={r.geom.name}
-                        className={cn(
-                          'flex w-full items-center gap-2 border-l-2 px-2 py-1.5 text-left',
-                          on ? 'border-textColor' : 'border-transparent hover:bg-pageBg',
-                        )}
-                      >
-                        <FlatThumb piece={r.geom} deg={r.deg} groups={r.groups} hints={r.hints} />
-                        {isFolded ? (
-                          <>
-                            <FoldedThumb piece={r.geom} deg={r.deg} groups={r.groups} />
-                            <SectionSvg piece={r.geom} groups={r.groups} />
-                          </>
-                        ) : null}
-                        <span className='flex min-w-0 flex-col gap-0.5'>
-                          <Text
-                            size='micro'
-                            component='span'
-                            className={cn('truncate uppercase', !on && 'text-labelColor')}
-                          >
-                            {r.geom.name}
-                          </Text>
-                          <span className='flex items-center gap-1 text-textColor'>
-                            {isFolded
-                              ? r.groups.map((g, i) => <KindIcon key={i} kind={g.kind} size={12} />)
-                              : r.hints.length > 0 && (
-                                  <span className='text-labelColor'>
-                                    <HintIcon />
-                                  </span>
-                                )}
-                          </span>
-                        </span>
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
+                fold
+              </Chip>
+            </span>
+          ))}
 
-              <div className='flex min-w-0 flex-1 flex-col'>
-                <div className='flex items-center gap-2 px-3 pt-2'>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    {geom.name}
-                  </Text>
-                  <Text size='micro' variant='label' component='span' className='tabular-nums'>
-                    {mmDims(geom)}
-                  </Text>
-                </div>
-                <div className='relative' data-fold-canvas={folded ? 'folded' : mode.t}>
-                  <svg
-                    ref={svgRef}
-                    viewBox={`0 0 ${W} ${H}`}
-                    preserveAspectRatio='xMidYMid meet'
-                    className={cn(
-                      'block h-auto w-full select-none',
-                      mode.t === 'draw' && 'cursor-crosshair',
-                    )}
-                    onClick={onCanvasClick}
-                    onPointerMove={onMove}
-                  >
-                    <HatchDef />
-                    {folded ? foldedSvg() : flatSvg()}
-                  </svg>
-
-                  {mode.t === 'pending' &&
-                    pop(
-                      mode.line,
-                      <>
-                        {kindChips(null)}
-                        <Button variant='underline' size='xs' onClick={reset} className='self-end'>
-                          cancel
-                        </Button>
-                      </>,
-                    )}
-                  {selG &&
-                    pop(
-                      selG.line,
-                      <>
-                        {kindChips(selG.kind)}
-                        <span className='flex items-center justify-between gap-2'>
-                          <Button
-                            variant='underline'
-                            size='xs'
-                            onClick={() => void remove((mode as { gi: number }).gi)}
-                          >
-                            remove
-                          </Button>
-                          <Close size='sm' aria-label='close' onClick={reset} />
-                        </span>
-                      </>,
-                    )}
-                  {mode.t === 'idle' &&
-                    !folded &&
-                    hints.map((h, i) => (
-                      <span
-                        key={h.id}
-                        className='absolute -translate-y-1/2 translate-x-3'
-                        style={anchorPct(
-                          h.lineMm,
-                          hints.length > 1 ? 0.2 + (0.5 * i) / (hints.length - 1) : 0.5,
-                        )}
-                      >
-                        <Chip
-                          onClick={() =>
-                            setMode({ t: 'pending', line: h.lineMm, source: h.source })
-                          }
-                          data-fold-hint=''
-                        >
-                          fold
-                        </Chip>
-                      </span>
-                    ))}
-
-                  <div className='absolute top-2 left-3'>
-                    {mode.t === 'draw' ? (
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        onClick={reset}
-                        className='text-warning'
-                      >
-                        cancel
-                      </Button>
-                    ) : (
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        onClick={() => {
-                          setView('flat');
-                          setMode({ t: 'draw', p1: null });
-                        }}
-                        data-fold-line=''
-                      >
-                        line
-                      </Button>
-                    )}
-                  </div>
-                  {groups.length > 0 && (
-                    <div className='absolute top-2 right-3 flex items-center gap-3'>
-                      {folded && (
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          onClick={() => void swap(mode.t === 'sel' ? mode.gi : groups.length - 1)}
-                          data-fold-swap=''
-                        >
-                          swap
-                        </Button>
-                      )}
-                      <ChipRow>
-                        <Chip
-                          selected={!folded}
-                          onClick={() => {
-                            reset();
-                            if (folded)
-                              startTurn(
-                                groups.length - 1,
-                                -1,
-                                groups[groups.length - 1].flat.length,
-                                () => setView('flat'),
-                              );
-                            else setView('flat');
-                          }}
-                        >
-                          flat
-                        </Chip>
-                        <Chip
-                          selected={folded}
-                          onClick={() => {
-                            reset();
-                            setView('folded');
-                            if (!folded)
-                              startTurn(
-                                groups.length - 1,
-                                1,
-                                groups[groups.length - 1].flat.length,
-                              );
-                          }}
-                        >
-                          folded
-                        </Chip>
-                      </ChipRow>
-                    </div>
-                  )}
-                </div>
-                {folded && (
-                  <div className='flex items-start gap-3 border-t border-hairline px-3 pt-2'>
-                    <Text size='micro' variant='label' component='span' className='uppercase'>
-                      section
-                    </Text>
-                    <SectionSvg piece={geom} groups={groups} big />
-                  </div>
-                )}
-              </div>
-            </div>
-          </Section>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        <div className='absolute top-0 left-0'>
+          {mode.t === 'draw' ? (
+            <Button variant='underline' size='xs' onClick={reset} className='text-warning'>
+              cancel
+            </Button>
+          ) : (
+            <Button
+              variant='underline'
+              size='xs'
+              onClick={() => {
+                setView('flat');
+                setMode({ t: 'draw', p1: null });
+              }}
+              data-fold-line=''
+            >
+              line
+            </Button>
+          )}
+        </div>
+        {groups.length > 0 && (
+          <div className='absolute top-0 right-0 flex items-center gap-3'>
+            {folded && (
+              <Button
+                variant='underline'
+                size='xs'
+                onClick={() => void swap(mode.t === 'sel' ? mode.gi : groups.length - 1)}
+                data-fold-swap=''
+              >
+                swap
+              </Button>
+            )}
+            <ChipRow>
+              <Chip
+                selected={!folded}
+                onClick={() => {
+                  reset();
+                  if (folded)
+                    startTurn(groups.length - 1, -1, groups[groups.length - 1].flat.length, () =>
+                      setView('flat'),
+                    );
+                  else setView('flat');
+                }}
+              >
+                flat
+              </Chip>
+              <Chip
+                selected={folded}
+                onClick={() => {
+                  reset();
+                  setView('folded');
+                  if (!folded)
+                    startTurn(groups.length - 1, 1, groups[groups.length - 1].flat.length);
+                }}
+              >
+                folded
+              </Chip>
+            </ChipRow>
+          </div>
+        )}
+      </div>
+      {folded && (
+        <div className='flex items-start gap-3 border-t border-hairline pt-2'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            section
+          </Text>
+          <SectionSvg piece={geom} groups={groups} big />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -960,10 +891,13 @@ function Dims({
   v,
   piece,
   shape,
+  maxT = Infinity,
 }: {
   v: PieceView;
   piece: PieceGeom;
   shape: ReturnType<typeof foldedOutline>;
+  /** A cropped piece: the dimensions stand at this px along their offset, not past the cut-off end. */
+  maxT?: number;
 }) {
   const l = shape.creases[shape.creases.length - 1];
   if (!l) return null;
@@ -998,7 +932,7 @@ function Dims({
   };
   const cut = span([piece.rs]);
   const fin = span(shape.plies.map((y) => y.poly));
-  const tmax = Math.max(cut.tmax, fin.tmax);
+  const tmax = Math.min(Math.max(cut.tmax, fin.tmax), maxT);
   const dim = (lo: number, hi: number, off: number, text: string, strong: boolean) => {
     const p: Pt2 = [n[0] * lo + tv[0] * off, n[1] * lo + tv[1] * off];
     const q: Pt2 = [n[0] * hi + tv[0] * off, n[1] * hi + tv[1] * off];

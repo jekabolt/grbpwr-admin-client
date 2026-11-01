@@ -175,13 +175,29 @@ export type PieceView = {
   scale: number;
   /** The piece lies on its side (drawn 90° turned). */
   lying: boolean;
+  /** The box height actually used (≤ `box.h`; less with `tight`). */
+  h: number;
+  /** A long piece drawn larger than the box: its long ends run past the box and are cut off. */
+  cropped: boolean;
 };
 
-/** Fit the piece into a box `w × h` with `pad` px around it. */
+/**
+ * Fit the piece into a box `w × h` with `pad` px around it. `tight` shrinks the height to the piece;
+ * `minShort` keeps a lying (long) piece's short side at least that many px — a placket stays
+ * readable across its folds, its long ends cropped.
+ */
 export function pieceView(
   piece: PieceGeom,
   grainDeg: number,
-  box: { w: number; h: number; pad: number; padRight?: number; padBottom?: number },
+  box: {
+    w: number;
+    h: number;
+    pad: number;
+    padRight?: number;
+    padBottom?: number;
+    tight?: boolean;
+    minShort?: number;
+  },
   polys: readonly (readonly Pt2[])[] = [piece.rs],
 ): PieceView {
   const c = frameOf(piece, grainDeg).c;
@@ -216,12 +232,18 @@ export function pieceView(
     }
   const pr = box.padRight ?? box.pad;
   const pb = box.padBottom ?? box.pad;
-  const s = Math.min(
+  let s = Math.min(
     (box.w - box.pad - pr) / (X1 - X0 || 1),
     (box.h - box.pad - pb) / (Y1 - Y0 || 1),
   );
+  let cropped = false;
+  if (box.minShort && lying && (Y1 - Y0) * s < box.minShort) {
+    s = Math.min(box.minShort, box.h - box.pad - pb) / (Y1 - Y0 || 1);
+    cropped = (X1 - X0) * s > box.w - box.pad - pr;
+  }
+  const h = box.tight ? Math.min(box.h, (Y1 - Y0) * s + box.pad + pb) : box.h;
   const ox = box.pad + (box.w - box.pad - pr - (X1 - X0) * s) / 2 - X0 * s;
-  const oy = box.pad + (box.h - box.pad - pb - (Y1 - Y0) * s) / 2 - Y0 * s;
+  const oy = box.pad + (h - box.pad - pb - (Y1 - Y0) * s) / 2 - Y0 * s;
   return {
     toPx: (p) => {
       const q = turn(up(p));
@@ -234,6 +256,8 @@ export function pieceView(
     },
     scale: s,
     lying,
+    h,
+    cropped,
   };
 }
 
