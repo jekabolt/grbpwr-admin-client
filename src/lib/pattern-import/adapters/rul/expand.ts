@@ -184,6 +184,17 @@ function gradePiece(
   moveKey: (g: Grade) => string,
 ): PieceGrades {
   const ents = piece.entities;
+  // AAMA turn / curve POINTs (layers 2 / 3) describe the chain immediately before them. At an
+  // internal-line crossing the same coordinate may lie on a later chain too, but that later line
+  // does not own the marker and may legitimately carry another grade. Remember the source chain
+  // so the marker follows that chain only.
+  const pointOwner = new Map<number, number>();
+  let precedingChain = -1;
+  ents.forEach((m, e) => {
+    if (m.kind === 'chain') precedingChain = e;
+    else if (m.kind === 'point' && (m.layer === '2' || m.layer === '3') && precedingChain >= 0)
+      pointOwner.set(e, precedingChain);
+  });
   const odd = ents.find((m) => m.kind === 'rule' && Number.isNaN(m.rule));
   if (odd)
     throw refuse(`${label}: the grade-rule text "${odd.text}" does not name an integer rule`);
@@ -297,7 +308,16 @@ function gradePiece(
     graded.add(e);
   });
   // 3 · lines without a rule of their own / isolated points: follow the graded line they lie on
-  const follow = (m: ModelEntity, s: { x: number; y: number }): Grade | null => {
+  const follow = (m: ModelEntity, source: number, s: { x: number; y: number }): Grade | null => {
+    const owner = pointOwner.get(source);
+    if (owner !== undefined && graded.has(owner)) {
+      const c = ents[owner];
+      const hit = onChain(s, ptsOf(c), c.closed, eps);
+      if (hit) {
+        const g = out.of[owner];
+        return blend(g[hit.seg]!, g[(hit.seg + 1) % c.slots.length] ?? g[hit.seg]!, hit.t);
+      }
+    }
     // every graded line the point lies on, best layer first; lines of one rank must agree
     const hits: { rank: number; g: Grade; layer: string }[] = [];
     for (const e of graded) {
@@ -331,7 +351,7 @@ function gradePiece(
       let got = false;
       m.slots.forEach((s, k) => {
         if (out.of[e][k]) return;
-        const g = follow(m, s);
+        const g = follow(m, e, s);
         if (g) {
           out.of[e][k] = g;
           out.following++;
@@ -359,13 +379,13 @@ function gradePiece(
 }
 
 /**
- * The piece's grade axes: D6673 measures the deltas along the grade reference line (layer 5) when
+ * The piece's grade axes: D6673 measures the deltas along the grade reference line (layer 7) when
  * the piece has one, else along the drawing's x / y. Two reference lines that disagree → refused.
  */
 function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   const angles: number[] = [];
   for (const m of p.entities) {
-    if (m.layer !== '5' || m.kind !== 'chain' || m.slots.length < 2) continue;
+    if (m.layer !== '7' || m.kind !== 'chain' || m.slots.length < 2) continue;
     const a = m.slots[0];
     const b = m.slots[m.slots.length - 1];
     if (Math.hypot(b.x - a.x, b.y - a.y) <= 0) continue;
@@ -375,7 +395,7 @@ function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   const t = angles[0];
   if (angles.some((a) => Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))) > 1e-6))
     throw refuse(
-      `${label}: its grade reference lines (layer 5) point different ways — the grade axes are not defined`,
+      `${label}: its grade reference lines (layer 7) point different ways — the grade axes are not defined`,
     );
   return { cos: Math.cos(t), sin: Math.sin(t) };
 }
@@ -494,7 +514,12 @@ export function expandRul(input: ExpandInput): RulExpansion {
   // compared on their ASCII letters: the two files of one export may use different codepages
   const ascii = (v: string) => v.replace(/[^\x21-\x7e]+/g, '').toUpperCase();
   const key = (v: string) => ascii(v) || v.trim().toUpperCase();
-  if (declaredTable && key(declaredTable) !== key(rul.name))
+  const fileStem = (name: string) => (name.split(/[\\/]/).pop() ?? name).replace(/\.[^.]*$/, '');
+  const cloFilenameTable =
+    /CLO/i.test(rul.author ?? '') &&
+    (key(declaredTable ?? '') === key(fileStem(input.dxfName)) ||
+      key(declaredTable ?? '') === key(fileStem(input.rulName)));
+  if (declaredTable && key(declaredTable) !== key(rul.name) && !cloFilenameTable)
     throw refuse(
       `${input.dxfName} names grade rule table "${declaredTable}", but ${input.rulName} is "${rul.name}" — they are not one export`,
     );
