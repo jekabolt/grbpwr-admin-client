@@ -95,8 +95,13 @@ const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide,
 const ROLL_FRAC = 0.4;
 
 /** Keep only candidates that came from an owner row, and rebuild their connected components. */
-function ownerGraphOf(graph: SeamGraph, warnings: readonly string[] = []): SeamGraph {
-  const chosen = graph.chosen.filter((seam) => seam.provenance?.status === 'confirmed');
+function ownerGraphOf(
+  graph: SeamGraph,
+  warnings: readonly string[] = [],
+  /** Exact step-editor candidates; unlike the graph pipeline this also keeps placed surface rows. */
+  exact?: readonly SeamCandidate[],
+): SeamGraph {
+  const chosen = (exact ?? graph.chosen).filter((seam) => seam.provenance?.status === 'confirmed');
   const rejected = graph.rejected.filter(
     (seam) => seam.kind === 'closure-not-seam' && seam.provenance?.status === 'confirmed',
   );
@@ -309,7 +314,18 @@ export function solveDoll(input: DollInput): DollReport {
       opt.assignment,
     );
   }
-  if (owner) graphIn = ownerGraphOf(graphIn, resolvedRows?.words);
+  if (owner) graphIn = ownerGraphOf(graphIn, resolvedRows?.words, resolvedRows?.forced);
+  const ownerSeamPieces = owner
+    ? new Set(
+        graphIn.chosen.flatMap((seam) =>
+          seam.surface
+            ? [seam.surface.host, seam.surface.part]
+            : [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))].map(
+                pk,
+              ),
+        ),
+      )
+    : null;
   const layerRelations = opt.seams?.layers ?? [];
   const layerScore = new Map<string, number>();
   for (const [under, over] of layerRelations) {
@@ -3764,6 +3780,8 @@ export function solveDoll(input: DollInput): DollReport {
   const graphPlaced = new Set<DollGroupId>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
+    const proposedByDoll = !owner && dollNote.has(`${s.seam.a}~${s.seam.b}`);
+    const completedFromOrder = !owner && orderNote.has(`${s.seam.a}~${s.seam.b}`);
     // Each side as sewn (sewnSide: parts walked in order, cut to their stretches) — the same path
     // the placement judged the seam by; the range of a one-piece partial stays a constraint.
     const A = sewnSide(s, 'a', false);
@@ -3797,18 +3815,18 @@ export function solveDoll(input: DollInput): DollReport {
         id: `${s.seam.a}~${s.seam.b}`,
         a: s.a,
         b: s.b,
-        kind: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'proposed-composite' : s.seam.kind,
-        origin: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'doll-proposed' : 'graph',
+        kind: proposedByDoll ? 'proposed-composite' : s.seam.kind,
+        origin: proposedByDoll ? 'doll-proposed' : 'graph',
         A,
         B,
         target: closure ? 0.5 : 1,
         note: closure
           ? suspectNote.get(`${s.seam.a}~${s.seam.b}`) ??
             'closure (buttons / zip) — drawn closed with a small gap'
-          : orderNote.get(`${s.seam.a}~${s.seam.b}`) ??
+          : (completedFromOrder ? orderNote.get(`${s.seam.a}~${s.seam.b}`) : undefined) ??
             dollNote.get(`${s.seam.a}~${s.seam.b}`) ??
             '',
-        fromOrder: orderNote.has(`${s.seam.a}~${s.seam.b}`),
+        fromOrder: completedFromOrder,
         closure,
         // A confirmed seam is sewn as stored (whole, or its stored stretch) — never re-guessed.
         partial: conf
@@ -4770,6 +4788,7 @@ export function solveDoll(input: DollInput): DollReport {
      */
     foldB = false,
   ) => {
+    if (owner) return null;
     const cutIdx = (L: { verts: number[] }, ref?: Vec3) => {
       let best = 0;
       for (let k = 0; k < L.verts.length; k++) {
@@ -6611,10 +6630,51 @@ export function solveDoll(input: DollInput): DollReport {
       stretchPct: 0,
       twisted: false,
       state: 'closed',
-      note: 'layer seam — the layers are drawn as one piece',
+      note: owner && isConf(s)
+        ? 'confirmed by a person · layer seam — the layers are drawn as one piece'
+        : 'layer seam — the layers are drawn as one piece',
       pathA: new Uint32Array(0),
       pathB: new Uint32Array(0),
+      ...(owner ? { decidedBy: isConf(s) ? ('person' as const) : ('engine' as const) } : {}),
     });
+  if (owner) {
+    const reported = new Set(seams.map((seam) => seam.id));
+    for (const candidate of graphIn.chosen) {
+      if (
+        candidate.provenance?.status !== 'confirmed' ||
+        candidate.kind === 'surface' ||
+        candidate.kind === 'closure-not-seam'
+      )
+        continue;
+      const id = `${candidate.a}~${candidate.b}`;
+      if (reported.has(id)) continue;
+      const existing = preContradictions.find((words) => words.startsWith(`${id}:`));
+      const words =
+        existing ??
+        `${id}: confirmed by a person but its named path cannot be drawn on the current pieces — the row contradicts the pattern`;
+      if (!existing) contradictions.push(words);
+      seams.push({
+        id,
+        a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
+        b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
+        kind: candidate.kind,
+        origin: 'graph',
+        lenA: candidate.evidence.aLenMm ?? 0,
+        lenB: candidate.evidence.bLenMm ?? 0,
+        residualMeanMm: 0,
+        residualMaxMm: 0,
+        residualP95Mm: 0,
+        stretchPct: 0,
+        twisted: false,
+        state: 'open',
+        decidedBy: 'person',
+        note: `CONTRADICTION — ${words}`,
+        pathA: new Uint32Array(0),
+        pathB: new Uint32Array(0),
+      });
+      reported.add(id);
+    }
+  }
 
   // Graph pairings the doll will not sew: words, not seams (never counted open).
   const notSewn: NonNullable<DollReport['notSewn']> = [
@@ -7061,6 +7121,14 @@ export function solveDoll(input: DollInput): DollReport {
     collarRep.units.push(cp.rep);
   }
   const tris = panels.reduce((t, P) => t + P.mesh.tris.length / 3, 0);
+  const ownerWords = owner
+    ? [
+        `owner rows: ${opt.seams?.selection?.used ?? opt.seams?.rows.length ?? 0} used (bound to steps) · ${opt.seams?.selection?.ignored ?? 0} ignored (unbound)`,
+        ...input.facts.pieces
+          .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
+          .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
+      ]
+    : [];
   return {
     collar: collarRep,
     panels: outPanels,
@@ -7105,6 +7173,7 @@ export function solveDoll(input: DollInput): DollReport {
             rejected: excludedPairs.length,
             closures: resolvedRows?.closures.length ?? 0,
             words: [
+              ...ownerWords,
               ...(resolvedRows?.stale ?? []).map((x) => x.words),
               ...(resolvedRows?.orphan ?? []).map((x) => x.words),
             ],

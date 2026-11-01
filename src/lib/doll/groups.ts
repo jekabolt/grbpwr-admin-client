@@ -143,7 +143,33 @@ export function groupPieces(
   const legs = facts.category === 'trousers' || facts.category === 'jumpsuit';
   const drop = new Set(opts.dropSeams ?? []);
   const dropped = (s: SeamCandidate) => drop.has(`${s.a}~${s.b}`) || drop.has(`${s.b}~${s.a}`);
-  const live = graph.chosen.filter((s) => s.kind !== 'closure-not-seam' && !dropped(s));
+  const live = graph.chosen.filter(
+    (s) => s.kind !== 'closure-not-seam' && (!opts.owner || s.kind !== 'surface') && !dropped(s),
+  );
+  const sewnAsShell = new Set(
+    live.flatMap((seam) =>
+      [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))]
+        .flatMap(edgeIdsOf)
+        .map(pk),
+    ),
+  );
+  const ownerSurfaceParts = new Set(
+    graph.chosen.flatMap((seam) => {
+      if (!opts.owner || seam.kind !== 'surface' || !seam.surface) return [];
+      const host = geomOf.get(seam.surface.host);
+      const part = geomOf.get(seam.surface.part);
+      const partName = factOf.get(seam.surface.part)?.name ?? part?.name ?? '';
+      // Legacy rows can carry the old side order. Never remove a shell panel merely because such a
+      // row calls the smaller patch its host; the exact row remains in the audit, but not placement.
+      return host &&
+        part &&
+        !sewnAsShell.has(seam.surface.part) &&
+        !BODY_ROLES.has(readName(partName).role ?? '') &&
+        areaOf(part) <= areaOf(host)
+        ? [seam.surface.part]
+        : [];
+    }),
+  );
   const closuresRaw = graph.rejected.filter((s) => s.kind === 'closure-not-seam' && !dropped(s));
 
   // ── 1. roles → groups ────────────────────────────────────────────────────────────────────
@@ -178,6 +204,14 @@ export function groupPieces(
     }
     if (g.rs.length < 3) {
       skipped.push({ pieceKey: g.pieceKey, reason: 'no contour' });
+      continue;
+    }
+    if (ownerSurfaceParts.has(g.pieceKey) && !(r && BODY_ROLES.has(r))) {
+      skipped.push({
+        pieceKey: g.pieceKey,
+        reason: 'surface piece — placed by its owner row',
+        surface: true,
+      });
       continue;
     }
     if (f && isMirroredPair(f))

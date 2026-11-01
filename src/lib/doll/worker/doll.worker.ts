@@ -41,6 +41,7 @@ export type DollWorkerRequest =
             sizes?: readonly SizePieces[];
             candidates?: readonly DollOwnerCandidate[];
             layers?: readonly DollLayerRelation[];
+            selection?: { used: number; ignored: number };
           };
         };
         /** Facts of the sizes the stored rows were confirmed on (other than the solved one). */

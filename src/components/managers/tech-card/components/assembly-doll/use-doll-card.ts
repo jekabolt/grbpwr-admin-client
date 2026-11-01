@@ -20,7 +20,12 @@
 
 import { inputFor } from 'lib/assembly-skeleton/assignment';
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
-import type { SkeletonFacts, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
+import type {
+  PieceGeom,
+  Pt2,
+  SkeletonFacts,
+  SkeletonPieceInput,
+} from 'lib/assembly-skeleton/types';
 import {
   hardwareFromOps,
   joinsFromOps,
@@ -28,7 +33,7 @@ import {
   type DeclaredJoin,
 } from 'lib/doll/joins';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
-import type { StoredSeam } from 'lib/seams/types';
+import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 
@@ -61,6 +66,8 @@ export type DollCard = {
   owner: {
     candidates: readonly DollOwnerCandidate[];
     layers: readonly DollLayerRelation[];
+    used: number;
+    ignored: number;
   } | null;
   rowsSig: string;
   joins: DeclaredJoin[];
@@ -85,6 +92,59 @@ const idOf = (o: object) => {
 };
 
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
+
+export type DollOwnerSelection = NonNullable<DollCard['owner']> & { rows: StoredSeam[] };
+
+/**
+ * The operation-bound owner rows, through the same conversion as the step editor. Kept pure so
+ * non-React readers (notably the pinned golden) cannot silently fall back to all card rows.
+ */
+export function dollOwnerSeamsOf(args: {
+  rows: readonly StoredSeam[];
+  poses: ReadonlyMap<string, StoredPose>;
+  operations: readonly { seamKeys?: readonly string[]; poseKeys?: readonly string[] }[];
+  geoms: ReadonlyMap<string, PieceGeom>;
+  innerLines: ReadonlyMap<string, Pt2[][]>;
+  stepResults: readonly { stacked: readonly DollLayerRelation[] }[] | null;
+}): DollOwnerSelection | null {
+  const byKey = new Map(args.rows.map((row) => [row.seamKey, row]));
+  const selected = new Map<
+    string,
+    { row: StoredSeam; candidate?: DollOwnerCandidate['candidate'] }
+  >();
+  const boundKeys = new Set<string>();
+  for (const op of args.operations) {
+    for (const key of op.seamKeys ?? []) {
+      const row = byKey.get(key);
+      if (!row) continue;
+      boundKeys.add(key);
+      if (row.kind === 'closure') selected.set(key, { row });
+    }
+    for (const stored of storedRowsOfStep(op, byKey, args.geoms, args.innerLines))
+      selected.set(stored.key, { row: stored.row, candidate: stored.candidate });
+    for (const key of op.poseKeys ?? []) if (args.poses.has(key)) boundKeys.add(key);
+  }
+  if (!boundKeys.size) return null;
+  const seen = new Set<string>();
+  const layers = (args.stepResults ?? []).flatMap((result) =>
+    result.stacked.filter(([under, over]) => {
+      const key = `${under}\u0000${over}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  );
+  const allKeys = new Set([...args.rows.map((row) => row.seamKey), ...args.poses.keys()]);
+  return {
+    rows: [...selected.values()].map(({ row }) => row),
+    candidates: [...selected].flatMap(([seamKey, stored]) =>
+      stored.candidate ? [{ seamKey, candidate: stored.candidate }] : [],
+    ),
+    layers,
+    used: boundKeys.size,
+    ignored: [...allKeys].filter((key) => !boundKeys.has(key)).length,
+  };
+}
 
 export function useDollCard(): DollCard | null {
   const facts = useSeamsStore((s) => s.facts);
@@ -112,42 +172,18 @@ export function useDollCard(): DollCard | null {
   const { geoms: cardGeoms, innerLines } = useCardGeoms();
   const poseRows = usePoseRows();
   const stepResults = useStepResults();
-  const ownerSeams = useMemo(() => {
-    const byKey = new Map(allRows.map((row) => [row.seamKey, row]));
-    const selected = new Map<
-      string,
-      { row: StoredSeam; candidate?: DollOwnerCandidate['candidate'] }
-    >();
-    let bound = false;
-    for (const op of operations) {
-      for (const key of op.seamKeys ?? []) {
-        const row = byKey.get(key);
-        if (!row) continue;
-        bound = true;
-        if (row.kind === 'closure') selected.set(key, { row });
-      }
-      for (const stored of storedRowsOfStep(op, byKey, cardGeoms, innerLines))
-        selected.set(stored.key, { row: stored.row, candidate: stored.candidate });
-      if ((op.poseKeys ?? []).some((key) => poseRows.has(key))) bound = true;
-    }
-    if (!bound) return null;
-    const seen = new Set<string>();
-    const layers = (stepResults ?? []).flatMap((result) =>
-      result.stacked.filter(([under, over]) => {
-        const key = `${under}\u0000${over}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
+  const ownerSeams = useMemo(
+    () =>
+      dollOwnerSeamsOf({
+        rows: allRows,
+        poses: poseRows,
+        operations,
+        geoms: cardGeoms,
+        innerLines,
+        stepResults,
       }),
-    );
-    return {
-      rows: [...selected.values()].map(({ row }) => row),
-      candidates: [...selected].flatMap(([seamKey, stored]) =>
-        stored.candidate ? [{ seamKey, candidate: stored.candidate }] : [],
-      ),
-      layers,
-    };
-  }, [allRows, operations, cardGeoms, innerLines, poseRows, stepResults]);
+    [allRows, operations, cardGeoms, innerLines, poseRows, stepResults],
+  );
   const rows = ownerSeams?.rows ?? [];
   const sig = useMemo(
     () =>
@@ -291,7 +327,14 @@ export function useDollCard(): DollCard | null {
       factsOf,
       missingOf,
       rows,
-      owner: ownerSeams ? { candidates: ownerSeams.candidates, layers: ownerSeams.layers } : null,
+      owner: ownerSeams
+        ? {
+            candidates: ownerSeams.candidates,
+            layers: ownerSeams.layers,
+            used: ownerSeams.used,
+            ignored: ownerSeams.ignored,
+          }
+        : null,
       rowsSig: sig,
       joins,
       hardware,
@@ -338,6 +381,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
               size,
               candidates: c.owner.candidates,
               layers: c.owner.layers,
+              selection: { used: c.owner.used, ignored: c.owner.ignored },
             },
           }
         : {}),

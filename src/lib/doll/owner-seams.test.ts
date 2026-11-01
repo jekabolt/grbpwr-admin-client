@@ -131,11 +131,13 @@ describe('paper doll owner seams', () => {
       facts,
       options: {
         ...fast,
+        joins: [{ label: 'unowned order join', parts: [['B'], ['C']] }],
         seams: {
           mode: 'owner',
           rows: [row],
           size: 'M',
           candidates: [{ seamKey: row.seamKey, candidate: owner }],
+          selection: { used: 1, ignored: 2 },
         },
       },
     });
@@ -147,9 +149,87 @@ describe('paper doll owner seams', () => {
       ),
     ).toBe(false);
     expect(report.seams.some((candidate) => candidate.state === 'proposed')).toBe(false);
+    expect(report.seams.some((candidate) => candidate.origin === 'doll-proposed')).toBe(false);
+    expect(report.seams.every((candidate) => candidate.decidedBy === 'person')).toBe(true);
+    expect(report.orderJoins).toEqual([]);
     expect(
       report.floating.some((piece) => piece.pieceKey === 'C' && piece.reason.includes('no seam')),
     ).toBe(true);
+    expect(report.rows?.words).toContain(
+      'owner rows: 1 used (bound to steps) · 2 ignored (unbound)',
+    );
+    expect(report.rows?.words).toContain('no seam: side');
+  });
+
+  it('keeps an impossible owner seam confirmed and reports the contradiction', () => {
+    const facts: SkeletonFacts = {
+      ...fixture().facts,
+      pieces: [rectangle('A', 'front', 1), rectangle('B', 'back', 2)].map((piece, index) =>
+        index === 0
+          ? piece
+          : {
+              ...piece,
+              piece: {
+                ...piece.piece,
+                poly: [
+                  { x: 0, y: 0 },
+                  { x: 15, y: 0 },
+                  { x: 15, y: 30 },
+                  { x: 0, y: 30 },
+                ],
+                bboxW: 15,
+                bboxH: 30,
+                areaCm2: 450,
+              },
+            },
+      ),
+    };
+    const read = readSeamGraph(facts);
+    const edgeA = [...(read.pieces.find((piece) => piece.pieceKey === 'A')?.edges ?? [])].sort(
+      (left, right) => left.lenMm - right.lenMm,
+    )[0];
+    const edgeB = [...(read.pieces.find((piece) => piece.pieceKey === 'B')?.edges ?? [])].sort(
+      (left, right) => right.lenMm - left.lenMm,
+    )[0];
+    if (!edgeA || !edgeB) throw new Error('impossible seam fixture has no edges');
+    const impossible = {
+      ...seam(edgeA.id, edgeB.id),
+      evidence: { ...evidence, twin: 'none' as const },
+    };
+    const graph: SeamGraph = {
+      ...read,
+      chosen: [impossible],
+      rejected: [],
+      components: [['A', 'B']],
+    };
+    const row = seamFromCandidate(impossible, graph.pieces, {
+      seamKey: 'impossible-owner-row',
+      status: 'confirmed',
+      source: 'manual',
+      anchoredSize: 'M',
+    });
+    if (!row) throw new Error('impossible owner row fixture did not resolve');
+
+    const report = solveDoll({
+      graph,
+      facts,
+      options: {
+        ...fast,
+        seams: {
+          mode: 'owner',
+          rows: [row],
+          size: 'M',
+          candidates: [{ seamKey: row.seamKey, candidate: impossible }],
+        },
+      },
+    });
+
+    expect(report.seams).toHaveLength(1);
+    expect(report.seams[0].decidedBy).toBe('person');
+    expect(report.seams[0].released).not.toBe(true);
+    expect(report.contradictions).toEqual(
+      expect.arrayContaining([expect.stringContaining('confirmed by a person')]),
+    );
   });
 
   it('uses the same under/over claim as step-result', () => {

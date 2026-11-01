@@ -88,6 +88,8 @@ export type DollOptions = {
     candidates?: readonly DollOwnerCandidate[];
     /** Explicit under/over claims read by step-result, including claims carried by pose rows. */
     layers?: readonly DollLayerRelation[];
+    /** Card owner rows selected by operation binding versus left unbound and deliberately ignored. */
+    selection?: { used: number; ignored: number };
   };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
