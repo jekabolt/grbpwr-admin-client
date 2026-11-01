@@ -1,0 +1,1364 @@
+{
+  "_note": "Trimmed beta card 85 snapshot for unit-step seam regression: real piece line keys, operations through step 970, and only the stored seam linked before it; geometry is the identical card-77 outline set, remapped by piece name.",
+  "pieces": [
+    {
+      "lineKey": "01M5J6VRN9PX3D9SXHQGDMK6PJ",
+      "name": "BP_MAIN"
+    },
+    {
+      "lineKey": "01M5J6VRN92KB4YT1YFXP15YXR",
+      "name": "BP_U"
+    },
+    {
+      "lineKey": "01M5J6VRN97AMFC4Z9R459JT3Q",
+      "name": "BP_U_1"
+    },
+    {
+      "lineKey": "01M5J6VRN9XB5BH7KSBRCP14GG",
+      "name": "clr_main"
+    },
+    {
+      "lineKey": "01M5J6VRN9C91JZ0JSRB9EJAMK",
+      "name": "clr_main_2"
+    },
+    {
+      "lineKey": "01M5J6VRN95R2SK2GXTRKMXCTX",
+      "name": "CLR_SECOND"
+    },
+    {
+      "lineKey": "01M5J6VRN9RMCHGVC5RTE8NBEP",
+      "name": "CLR_SECOND_2"
+    },
+    {
+      "lineKey": "01M5J6VRN9GD9CWK8ZGYAEQ77Z",
+      "name": "FLP_L"
+    },
+    {
+      "lineKey": "01M5J6VRN9VZFPDVMWRQH5EGWM",
+      "name": "FLP_L_MAIN"
+    },
+    {
+      "lineKey": "01M5J6VRN939AC61WT678ZFG95",
+      "name": "FLP_R"
+    },
+    {
+      "lineKey": "01M5J6VRN9EH2E6FTAYH35P4KB",
+      "name": "FLP_R_MAIN"
+    },
+    {
+      "lineKey": "01M5J6VRN9GN0D1TWQ67ZKEEZN",
+      "name": "nck"
+    },
+    {
+      "lineKey": "01M5J6VRN9C0H0ZCW0S6ESGNA3",
+      "name": "nck_2"
+    },
+    {
+      "lineKey": "01M5J6VRN9ZVDSQE6ZX576FF2V",
+      "name": "P_L_MAIN"
+    },
+    {
+      "lineKey": "01M5J6VRN9EFQ9ZQ4YHW8YVPG8",
+      "name": "P_L_U"
+    },
+    {
+      "lineKey": "01M5J6VRN9ZR7CFFW8TRZGWFJY",
+      "name": "P_R_MAIN"
+    },
+    {
+      "lineKey": "01M5J6VRN98VASJPA4RAD58PED",
+      "name": "P_R_U"
+    },
+    {
+      "lineKey": "01M5J6VRN9XP3FP644MYPNNWTJ",
+      "name": "PLCK_L"
+    },
+    {
+      "lineKey": "01M5J6VRN9CDDY7DPAJD7EP5E0",
+      "name": "PLCK_R"
+    },
+    {
+      "lineKey": "01M5J6VRN9CD5YPTK2BZ9WQWFZ",
+      "name": "SLV_L"
+    },
+    {
+      "lineKey": "01M5J6VRN9JYCE0JPHF3J1X3YR",
+      "name": "SLV_R"
+    },
+    {
+      "lineKey": "01M5J6YX6FRPY8BX8Z7TX0A3GA",
+      "name": "PCK_L_BTTM"
+    },
+    {
+      "lineKey": "01M5J6YX6FB4KP34F86QF2RW0H",
+      "name": "PCK_L_MAIN"
+    },
+    {
+      "lineKey": "01M5J6YX6F3TGXWG3SXYHCKR1W",
+      "name": "PCK_R_BTTM"
+    },
+    {
+      "lineKey": "01M5J6YX6FBMK7XMHGT3P8Q13T",
+      "name": "PCK_R_MAIN"
+    }
+  ],
+  "ops": [
+    {
+      "operationNumber": 10,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9CD5YPTK2BZ9WQWFZ"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 20,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9GD9CWK8ZGYAEQ77Z"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 30,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9GD9CWK8ZGYAEQ77Z", "01M5J6VRN9CD5YPTK2BZ9WQWFZ"],
+      "outputUnitKey": "SLEEVE",
+      "outputUnitName": "left sleeve with placket detail",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 40,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 50,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 60,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 70,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9JYCE0JPHF3J1X3YR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 80,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN939AC61WT678ZFG95"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 90,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9JYCE0JPHF3J1X3YR", "01M5J6VRN939AC61WT678ZFG95"],
+      "outputUnitKey": "SLEEVE-3",
+      "outputUnitName": "Right sleeve with placket detail",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 100,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-3"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 110,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-3"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 120,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-3"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 130,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9XB5BH7KSBRCP14GG"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 140,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9C91JZ0JSRB9EJAMK"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 150,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "collar",
+      "inputKeys": ["01M5J6VRN9XB5BH7KSBRCP14GG", "01M5J6VRN9C91JZ0JSRB9EJAMK"],
+      "outputUnitKey": "MAIN COLLAR",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 160,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "collar",
+      "inputKeys": ["MAIN COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 170,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "collar",
+      "inputKeys": ["MAIN COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 180,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN95R2SK2GXTRKMXCTX"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 190,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9RMCHGVC5RTE8NBEP"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 200,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "collar",
+      "inputKeys": ["01M5J6VRN95R2SK2GXTRKMXCTX", "01M5J6VRN9RMCHGVC5RTE8NBEP"],
+      "outputUnitKey": "SECOND COLLAR",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 210,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "collar",
+      "inputKeys": ["SECOND COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 220,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "collar",
+      "inputKeys": ["SECOND COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 230,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9EH2E6FTAYH35P4KB"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 240,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "outer",
+      "inputKeys": ["01M5J6VRN9EH2E6FTAYH35P4KB"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 250,
+      "operationType": "machine",
+      "work": "buttonhole",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9EH2E6FTAYH35P4KB"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 260,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9EH2E6FTAYH35P4KB", "SLEEVE-3"],
+      "outputUnitKey": "RIGHT SLEEVE",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 270,
+      "operationType": "machine",
+      "work": "hem_turned",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 280,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 290,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 300,
+      "operationType": "press",
+      "work": "press_final",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 310,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 320,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "lining",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 330,
+      "operationType": "press",
+      "work": "press_final",
+      "zone": "lining",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 340,
+      "operationType": "machine",
+      "work": "button_attach",
+      "zone": "sleeve",
+      "inputKeys": ["RIGHT SLEEVE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 350,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9VZFPDVMWRQH5EGWM"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 360,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "outer",
+      "inputKeys": ["01M5J6VRN9VZFPDVMWRQH5EGWM"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 370,
+      "operationType": "machine",
+      "work": "buttonhole",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9VZFPDVMWRQH5EGWM"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 380,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["01M5J6VRN9VZFPDVMWRQH5EGWM", "SLEEVE"],
+      "outputUnitKey": "SLEEVE-2",
+      "outputUnitName": "left sleeve",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 390,
+      "operationType": "machine",
+      "work": "hem_turned",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 400,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 410,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 420,
+      "operationType": "press",
+      "work": "press_final",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 430,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 440,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "lining",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 450,
+      "operationType": "press",
+      "work": "press_final",
+      "zone": "lining",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 460,
+      "operationType": "machine",
+      "work": "button_attach",
+      "zone": "sleeve",
+      "inputKeys": ["SLEEVE-2"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 470,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "back",
+      "inputKeys": ["01M5J6VRN92KB4YT1YFXP15YXR", "01M5J6VRN9PX3D9SXHQGDMK6PJ"],
+      "outputUnitKey": "BACK WITH UPPER DETAIL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 480,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "back",
+      "inputKeys": ["01M5J6VRN97AMFC4Z9R459JT3Q", "BACK WITH UPPER DETAIL"],
+      "outputUnitKey": "BACK",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 490,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "back",
+      "inputKeys": ["BACK"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 500,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "back",
+      "inputKeys": ["BACK"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 510,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "back",
+      "inputKeys": ["BACK"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 520,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "shoulder",
+      "inputKeys": ["BACK"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 530,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["01M5J6VRN9ZVDSQE6ZX576FF2V", "01M5J6YX6FRPY8BX8Z7TX0A3GA"],
+      "outputUnitKey": "FRONT lEFT WITH POCKET DETAIL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 540,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "outer",
+      "inputKeys": ["FRONT lEFT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 550,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "lining",
+      "inputKeys": ["FRONT lEFT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 560,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["01M5J6VRN9EFQ9ZQ4YHW8YVPG8", "01M5J6YX6FB4KP34F86QF2RW0H"],
+      "outputUnitKey": "FRONT UPPER LEFT WITH POCKET DETAIL",
+      "outputUnitName": "",
+      "seamKeys": ["01M64MFPVMT5NG62G6ADPJY087"],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 570,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "shoulder",
+      "inputKeys": ["FRONT UPPER LEFT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 580,
+      "operationType": "machine",
+      "work": "button_attach",
+      "zone": "lining",
+      "inputKeys": ["FRONT UPPER LEFT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 590,
+      "operationType": "machine",
+      "work": "button_attach",
+      "zone": "lining",
+      "inputKeys": ["01M5J6YX6FBMK7XMHGT3P8Q13T"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 600,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["01M5J6VRN98VASJPA4RAD58PED", "01M5J6YX6FBMK7XMHGT3P8Q13T"],
+      "outputUnitKey": "FRONT UPPER RIGHT WITH POCKET DETAIL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 610,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "shoulder",
+      "inputKeys": ["FRONT UPPER RIGHT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 620,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["01M5J6VRN9ZR7CFFW8TRZGWFJY", "01M5J6YX6F3TGXWG3SXYHCKR1W"],
+      "outputUnitKey": "FRONT RIGHT WITH POCKET DETAIL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 630,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "outer",
+      "inputKeys": ["FRONT RIGHT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 640,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "lining",
+      "inputKeys": ["FRONT RIGHT WITH POCKET DETAIL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 650,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "outer",
+      "inputKeys": ["FRONT UPPER LEFT WITH POCKET DETAIL", "FRONT lEFT WITH POCKET DETAIL"],
+      "outputUnitKey": "LEFT FRONT PANEL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 660,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "front",
+      "inputKeys": ["LEFT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 670,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "lining",
+      "inputKeys": ["LEFT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 680,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "lining",
+      "inputKeys": ["LEFT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 690,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9XP3FP644MYPNNWTJ"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 700,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "outer",
+      "inputKeys": ["01M5J6VRN9XP3FP644MYPNNWTJ"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 710,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["01M5J6VRN9XP3FP644MYPNNWTJ", "LEFT FRONT PANEL"],
+      "outputUnitKey": "LEFT FRONT PANEL WITH PLACKET",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 720,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "other",
+      "inputKeys": ["LEFT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 730,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "front",
+      "inputKeys": ["LEFT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 740,
+      "operationType": "machine",
+      "work": "buttonhole",
+      "zone": "front",
+      "inputKeys": ["LEFT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 750,
+      "operationType": "press",
+      "work": "press_final",
+      "zone": "outer",
+      "inputKeys": ["LEFT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 760,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["FRONT UPPER RIGHT WITH POCKET DETAIL", "FRONT RIGHT WITH POCKET DETAIL"],
+      "outputUnitKey": "RIGHT FRONT PANEL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 770,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "front",
+      "inputKeys": ["RIGHT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 780,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "lining",
+      "inputKeys": ["RIGHT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 790,
+      "operationType": "machine",
+      "work": "bind_tape_edge",
+      "zone": "lining",
+      "inputKeys": ["RIGHT FRONT PANEL"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 800,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9CDDY7DPAJD7EP5E0"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 810,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "outer",
+      "inputKeys": ["01M5J6VRN9CDDY7DPAJD7EP5E0"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 820,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["RIGHT FRONT PANEL", "01M5J6VRN9CDDY7DPAJD7EP5E0"],
+      "outputUnitKey": "RIGHT FRONT PANEL WITH PLACKET",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 830,
+      "operationType": "machine",
+      "work": "topstitch",
+      "zone": "other",
+      "inputKeys": ["RIGHT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 840,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "front",
+      "inputKeys": ["RIGHT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 850,
+      "operationType": "machine",
+      "work": "button_attach",
+      "zone": "outer",
+      "inputKeys": ["RIGHT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 860,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "collar",
+      "inputKeys": ["MAIN COLLAR", "SECOND COLLAR"],
+      "outputUnitKey": "COLLAR BASE",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 870,
+      "operationType": "press",
+      "work": "press_flat",
+      "zone": "collar",
+      "inputKeys": ["COLLAR BASE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 880,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9GN0D1TWQ67ZKEEZN"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 890,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "neckline",
+      "inputKeys": ["01M5J6VRN9GN0D1TWQ67ZKEEZN"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 900,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "neckline",
+      "inputKeys": ["COLLAR BASE", "01M5J6VRN9GN0D1TWQ67ZKEEZN"],
+      "outputUnitKey": "COLLAR WITH NECK DETAIL",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 910,
+      "operationType": "fusing",
+      "work": "fuse",
+      "zone": "interlining",
+      "inputKeys": ["01M5J6VRN9C0H0ZCW0S6ESGNA3"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 920,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "neckline",
+      "inputKeys": ["01M5J6VRN9C0H0ZCW0S6ESGNA3"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 930,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "neckline",
+      "inputKeys": ["01M5J6VRN9C0H0ZCW0S6ESGNA3", "COLLAR WITH NECK DETAIL"],
+      "outputUnitKey": "COLLAR",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 940,
+      "operationType": "press",
+      "work": "press_to_one_side",
+      "zone": "collar",
+      "inputKeys": ["COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 950,
+      "operationType": "machine",
+      "work": "attach_label",
+      "zone": "neckline",
+      "inputKeys": ["COLLAR"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 960,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "front",
+      "inputKeys": ["BACK", "LEFT FRONT PANEL WITH PLACKET", "RIGHT FRONT PANEL WITH PLACKET"],
+      "outputUnitKey": "BASE",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    },
+    {
+      "operationNumber": 970,
+      "operationType": "machine",
+      "work": "join_lockstitch",
+      "zone": "shoulder",
+      "inputKeys": ["BASE"],
+      "outputUnitKey": "",
+      "outputUnitName": "",
+      "seamKeys": [],
+      "assemblyBlockDetached": false,
+      "fullnessRatio": ""
+    }
+  ],
+  "seams": [
+    {
+      "seamKey": "01M64MFPVMT5NG62G6ADPJY087",
+      "status": "confirmed",
+      "kind": "surface",
+      "direction": "unknown",
+      "source": "manual",
+      "sideA": [
+        {
+          "len_mm": 194.4,
+          "notches": 0,
+          "samples": [
+            {
+              "u": 0.842,
+              "v": 0.435
+            },
+            {
+              "u": 0.631,
+              "v": 0.435
+            },
+            {
+              "u": 0.421,
+              "v": 0.435
+            },
+            {
+              "u": 0.21,
+              "v": 0.435
+            },
+            {
+              "u": 0,
+              "v": 0.435
+            }
+          ],
+          "range_to": 0,
+          "turn_deg": 0,
+          "edge_hint": "i0",
+          "placement": {
+            "flip": false,
+            "x_mm": 0.5,
+            "y_mm": -6.9,
+            "rot_deg": 0
+          },
+          "range_from": 0,
+          "contour_sig": "243d925601994c00",
+          "perim_share": 0.1809,
+          "piece_line_key": "01M5J6YX6FB4KP34F86QF2RW0H"
+        }
+      ],
+      "sideB": [
+        {
+          "len_mm": 194.4,
+          "notches": 2,
+          "samples": [
+            {
+              "u": 0,
+              "v": 0
+            },
+            {
+              "u": 0.21,
+              "v": 0
+            },
+            {
+              "u": 0.421,
+              "v": 0
+            },
+            {
+              "u": 0.631,
+              "v": 0
+            },
+            {
+              "u": 0.842,
+              "v": 0
+            }
+          ],
+          "range_to": 0,
+          "turn_deg": 0,
+          "edge_hint": "01M5J6VRN9EFQ9ZQ4YHW8YVPG8#3",
+          "placement": {
+            "flip": false,
+            "x_mm": 0.5,
+            "y_mm": -6.9,
+            "rot_deg": 0
+          },
+          "range_from": 0,
+          "contour_sig": "f3e35614d51a864e",
+          "perim_share": 0.2612,
+          "piece_line_key": "01M5J6VRN9EFQ9ZQ4YHW8YVPG8"
+        }
+      ],
+      "anchoredSize": "",
+      "note": ""
+    }
+  ]
+}

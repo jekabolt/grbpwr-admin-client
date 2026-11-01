@@ -22,7 +22,13 @@ const each = (xs: readonly string[], ys: readonly string[]): Pair[] =>
 
 const RULES: Readonly<Record<string, ZoneRule>> = {
   front: {
-    fits: [...each(['placket', 'facing', 'pocket', 'yoke'], ['front']), ['front', 'front']],
+    fits: [
+      ...each(['placket', 'facing', 'pocket', 'yoke'], ['front']),
+      ['front', 'front'],
+      // A BASE-building front step closes the front/back sides. Claim those before a later,
+      // explicit shoulder step reads the same assembled unit's still-open short edges.
+      ['front', 'back'],
+    ],
     not: [
       ['placket', 'pocket'],
       ['placket', 'placket'],

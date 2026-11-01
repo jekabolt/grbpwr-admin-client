@@ -31,6 +31,7 @@ import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
 
 import { outcomeOf } from './seam-ranker';
 import { isLayerCloth, withSignals, type SeamSignal } from './seam-signals';
+import { zoneAllows } from './signals/zone';
 
 export type Pt = [number, number];
 
@@ -2118,11 +2119,29 @@ function proposalsInsideUnit(
     op,
     true,
   );
+  // A unit exposes every seam its earlier steps left open, not only the seam this step names. On
+  // card 85 that includes the two halves of the right pocket bag as well as both shoulders. Keep
+  // the pairs this step's explicit zone names when it names any; otherwise retain the ordinary
+  // geometry ranking for zones that say nothing or for pieces whose roles are unknown.
+  const side = (ids: readonly EdgeId[], lenMm: number) => ({
+    ids,
+    pieces: [...new Set(ids.map(pieceOfTarget))],
+    lenMm,
+    turnDeg: 0,
+  });
+  const inZone = (rows: readonly StepProposal[]) =>
+    rows.filter(
+      (proposal) =>
+        zoneAllows(side(proposal.a, proposal.aLen), side(proposal.b, proposal.bLen), op, geoms) ===
+        true,
+    );
+  const stateZone = inZone(proposals);
+  const relevant = stateZone.length ? stateZone : proposals;
   // A finished unit commonly exposes a mirrored pair (left/right shoulders). Leaf details can
   // offer duplicate matches on the same hand; keep the ranker's best one per hand. When the
   // geometry has no hand at all, retain its ordinary unhanded proposals.
-  const handed = proposals.filter((proposal) => proposal.hand);
-  if (!handed.length) return proposals;
+  const handed = relevant.filter((proposal) => proposal.hand);
+  if (!handed.length) return relevant;
   const seen = new Set<Hand>();
   return handed.filter((proposal) => {
     if (seen.has(proposal.hand)) return false;

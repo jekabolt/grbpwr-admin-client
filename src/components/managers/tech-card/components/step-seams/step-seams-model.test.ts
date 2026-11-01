@@ -4,6 +4,14 @@ import type { Edge, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import type { EdgeAnchor, StoredSeam } from 'lib/seams';
 
 import { CARD77_OPS, CARD77_PIECE_KEYS, card77Geoms, card77Step } from './card77.fixture';
+import {
+  CARD85_OPS,
+  CARD85_PIECE_KEYS,
+  CARD85_PIECE_NAME_BY_KEY,
+  CARD85_SEAMS,
+  card85Geoms,
+  card85Step,
+} from './card85.fixture';
 import { CARD83_OPS, CARD83_PIECE_KEYS, card83Geoms, card83Step } from './card83.fixture';
 import { CARD58_OPS, CARD58_PIECE_KEYS, card58Geoms, card58Step } from './card58.fixture';
 import {
@@ -866,6 +874,55 @@ describe('card 77: both sleeves on their armholes, one proposal per side', () =>
       part: 'FLP_L',
       confident: false,
     });
+  });
+});
+
+describe('card 85: assembled BASE shoulder step', () => {
+  const ops = CARD85_OPS;
+  const keys = CARD85_PIECE_KEYS;
+  const geoms = card85Geoms();
+  const index = card85Step(970);
+  const pieceName = (target: string) =>
+    CARD85_PIECE_NAME_BY_KEY.get(target.slice(0, target.lastIndexOf('#'))) ?? 'unknown';
+
+  it('970: follows the editor scene path and offers both open shoulders', () => {
+    expect(index).toBeGreaterThanOrEqual(0);
+    const groups = inputGroups(ops, index, keys);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.key).toBe('BASE');
+    expect(groups[0]?.pieces.map((piece) => CARD85_PIECE_NAME_BY_KEY.get(piece)).sort()).toEqual([
+      'BP_MAIN',
+      'BP_U',
+      'BP_U_1',
+      'PCK_L_BTTM',
+      'PCK_L_MAIN',
+      'PCK_R_BTTM',
+      'PCK_R_MAIN',
+      'PLCK_L',
+      'PLCK_R',
+      'P_L_MAIN',
+      'P_L_U',
+      'P_R_MAIN',
+      'P_R_U',
+    ]);
+    expect(hasMultipleStepPieces(ops, index, keys, geoms)).toBe(true);
+
+    const proposals = suggestStepPairs(
+      ops,
+      index,
+      keys,
+      geoms,
+      usedEdgesBeforeStep(ops, index, CARD85_SEAMS),
+      null,
+      CARD85_SEAMS,
+    );
+    expect(proposals.map((proposal, i) => proposalLabel(proposal, i))).toEqual(['left', 'right']);
+    expect(
+      proposals.map((proposal) => [...proposal.a, ...proposal.b].map(pieceName).sort()),
+    ).toEqual([
+      ['BP_U_1', 'P_L_U'],
+      ['BP_U_1', 'P_R_U'],
+    ]);
   });
 });
 
