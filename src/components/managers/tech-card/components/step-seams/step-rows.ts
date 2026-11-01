@@ -3,10 +3,37 @@
 // resolves against today's geometry here or contributes no placement.
 
 import type { PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
+import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
 import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
 
-import { innerId, parseInner, type TargetId } from './step-seams-model';
+import { rowFromHand, type AnchorCtx } from '../assembly-seams/seam-actions';
+import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 import { seamOfSides, surfaceSeam, type SeamSides } from './step-picture';
+
+/** Edges clicked out of order still run along each piece's outline. */
+export function orderedPickSides(sides: SeamSides, geoms: ReadonlyMap<string, PieceGeom>) {
+  const along = (ids: readonly string[]) => {
+    const byPiece = new Map<string, string[]>();
+    ids.forEach((id) => {
+      const piece = pieceOfTarget(id);
+      byPiece.set(piece, [...(byPiece.get(piece) ?? []), id]);
+    });
+    return [...byPiece.values()].flatMap((run) => orderSideAlongOutline(run, geoms));
+  };
+  return { a: along(sides.a), b: along(sides.b) };
+}
+
+/** Build the edge row written by ACCEPT, independent of how the step's inputs are grouped. */
+export function edgeRowFromPick(
+  sides: SeamSides,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  anchorCtx: AnchorCtx,
+): StoredSeam | null {
+  const ordered = orderedPickSides(sides, geoms);
+  return rowFromHand(ordered.a, ordered.b, geoms, anchorCtx, {
+    direction: 'reversed',
+  });
+}
 
 /** The edge ids and inner targets an anchor names on today's drawing (by its persisted hint). */
 export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {

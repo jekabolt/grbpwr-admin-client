@@ -678,6 +678,54 @@ export function frameSeamsOf(
   return [...inner, ...(own.length ? flat(own) : cross)];
 }
 
+export type StepSeamPreviewInput = {
+  leaves: readonly (readonly string[])[];
+  innerSeams: readonly SeamCandidate[];
+  storedSeams: readonly SeamCandidate[];
+  crossSeams: readonly SeamCandidate[];
+  geoms: ReadonlyMap<string, PieceGeom>;
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
+  hands?: StepHands;
+};
+
+/** A proposal, pick, or stored unit seam laid without changing the shared owner result. */
+export function stepSeamPreview(
+  input: StepSeamPreviewInput,
+  target: { sides: SeamSides; source: 'live' | 'stored' },
+  options: { focus?: boolean; explode?: number; rasterMm?: number } = {},
+): { seams: SeamCandidate[]; layout: StepLayout } | null {
+  const own =
+    target.source === 'live' ? seamOfSides(target.sides, input.geoms, input.innerLines) : null;
+  if (target.source === 'live' && !own) return null;
+  const seams = frameSeamsOf(
+    input.innerSeams,
+    input.storedSeams,
+    own ? [own] : [],
+    input.crossSeams,
+  );
+  const leaves =
+    options.focus === false
+      ? input.leaves
+      : focusedStepLeaves(
+          input.leaves,
+          [...target.sides.a, ...target.sides.b],
+          input.innerSeams,
+          input.hands?.pose,
+        );
+  return {
+    seams,
+    layout: stepLayout(leaves, seams, input.geoms, {
+      explode: options.explode ?? STEP_TILE_EXPLODE,
+      rasterMm: options.rasterMm,
+      ...input.hands,
+    }),
+  };
+}
+
+/** Only a resolved multi-piece input needs the local seam preview path. */
+export const isUnitStepSeamPreview = (groups: readonly { pieces: readonly string[] }[]) =>
+  groups.length === 1 && groups[0].pieces.length > 1;
+
 /** `stepLayout`, memoised on the seams' identity. */
 export function useStepLayout(
   leaves: readonly (readonly string[])[],

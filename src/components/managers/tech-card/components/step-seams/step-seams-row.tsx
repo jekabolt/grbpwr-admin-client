@@ -21,6 +21,7 @@ import { useStepSeamActions } from './step-seams-context';
 import {
   focusedStepLeaves,
   frameSeamsOf,
+  isUnitStepSeamPreview,
   STEP_TILE_EXPLODE,
   STEP_TILE_RASTER_MM,
   StepPictureSvg,
@@ -44,6 +45,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
+  const unitStepPreview = isUnitStepSeamPreview(scene.groups);
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
@@ -118,9 +120,10 @@ export function StepSeamsRow({ index }: { index: number }) {
                 no={i}
                 scene={scene}
                 seams={storedFrame}
-                layout={ownedLayout}
-                layers={ownedLayers}
+                layout={unitStepPreview ? undefined : ownedLayout}
+                layers={unitStepPreview ? undefined : ownedLayers}
                 marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
+                localSeamPreview={unitStepPreview}
                 missing={!row}
                 onOpen={cardId ? () => setOpen(true) : undefined}
                 data-step-seam={key}
@@ -155,9 +158,10 @@ export function StepSeamsRow({ index }: { index: number }) {
               no={suggestions.length > 1 ? i : undefined}
               scene={scene}
               seams={proposalFrames[i] ?? storedFrame}
-              layout={ownedLayout}
-              layers={ownedLayers}
+              layout={unitStepPreview ? undefined : ownedLayout}
+              layers={unitStepPreview ? undefined : ownedLayers}
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
+              localSeamPreview={unitStepPreview}
               dashed
               onOpen={cardId ? () => setOpenAt(i) : undefined}
             />
@@ -193,6 +197,7 @@ export function SeamTile({
   layout: suppliedLayout,
   layers,
   marks,
+  localSeamPreview,
   dashed,
   missing,
   no,
@@ -213,6 +218,8 @@ export function SeamTile({
   /** Authoritative bottom-to-top order for an owner result. */
   layers?: readonly string[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
+  /** A local unit preview draws its own seam instead of the shared step highlight. */
+  localSeamPreview?: boolean;
   dashed?: boolean;
   missing?: boolean;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
@@ -290,7 +297,7 @@ export function SeamTile({
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
-          stepEdges={scene.stepEdges}
+          stepEdges={localSeamPreview ? undefined : scene.stepEdges}
         />
       )}
       {no != null && (

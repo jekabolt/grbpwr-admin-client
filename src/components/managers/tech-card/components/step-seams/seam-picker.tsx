@@ -13,7 +13,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { STACKED_TWIN_OFFSET_MM, orderSideAlongOutline } from 'lib/assembly-skeleton/union';
+import { STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
 import { apply, compose, translate } from 'lib/assembly-skeleton/union/affine';
 import {
   anchorOfRunId,
@@ -37,7 +37,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
-import { rowFromHand, runsOfSide } from '../assembly-seams/seam-actions';
+import { runsOfSide } from '../assembly-seams/seam-actions';
 import { rowPairSig, useSeamsStore } from '../assembly-seams/seams-store';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
@@ -93,7 +93,9 @@ import {
 } from './step-seams-model';
 import { boxOf, fitBox, pathOf, toPx, type SeamSides, type StepLayout } from './step-picture';
 import {
+  isUnitStepSeamPreview,
   pictureBounds,
+  stepSeamPreview,
   StepPictureSvg,
   useBoxSize,
   useStepScene,
@@ -101,6 +103,7 @@ import {
   type NoMark,
   type PictureView,
 } from './step-picture-view';
+import { edgeRowFromPick, orderedPickSides } from './step-rows';
 import { stepPictureOf } from './surface-picture';
 
 type Side = 'a' | 'b';
@@ -188,10 +191,15 @@ export function SeamPickerBody({
     byKey,
     innerLines,
     groups,
+    leaves,
     ease,
     stored,
     suggestions,
     surfaceSuggestion,
+    innerSeams,
+    storedSeams,
+    crossSeams,
+    hands,
     pieceName: nameOf,
   } = scene;
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
@@ -246,6 +254,16 @@ export function SeamPickerBody({
   const partSide = hostSide ? sel[hostSide === 'a' ? 'b' : 'a'] : [];
   const partKey = partSide.length ? pieceOfTarget(partSide[0]) : null;
 
+  const guessSelection = useMemo<Sel | null>(() => {
+    if (suggestion) return { a: [...suggestion.a], b: [...suggestion.b] };
+    if (!surfaceSuggestion) return null;
+    const line = innerId(surfaceSuggestion.host, surfaceSuggestion.inner);
+    const edge = longestEdge(geoms.get(surfaceSuggestion.part));
+    const hostAt = sideForClick(surfaceSuggestion.host, groups, EMPTY, pieceOfTarget);
+    const part = edge ? [edge] : [];
+    return hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] };
+  }, [suggestion, surfaceSuggestion, geoms, groups]);
+
   /** The pair on the table: both sides picked by hand, edge to edge. */
   const pair: SeamSides | null =
     !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
@@ -279,19 +297,9 @@ export function SeamPickerBody({
 
   const buildRow = useCallback(
     (clicked: Sel): StoredSeam | null => {
-      // Edges clicked out of order still run along each piece's outline.
-      const along = (ids: readonly TargetId[]) => {
-        const byPiece = new Map<string, TargetId[]>();
-        ids.forEach((id) =>
-          byPiece.set(pieceOfTarget(id), [...(byPiece.get(pieceOfTarget(id)) ?? []), id]),
-        );
-        return [...byPiece.values()].flatMap((run) => orderSideAlongOutline(run, geoms));
-      };
-      const s: Sel = { a: along(clicked.a), b: along(clicked.b) };
+      const s = orderedPickSides(clicked, geoms);
       const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
-      if (ins.length === 0) {
-        return rowFromHand(s.a, s.b, geoms, anchorCtx, { direction: 'reversed' });
-      }
+      if (ins.length === 0) return edgeRowFromPick(s, geoms, anchorCtx);
       const h = parseInner(ins[0]);
       const g = h ? geoms.get(h.piece) : undefined;
       const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
@@ -426,9 +434,38 @@ export function SeamPickerBody({
     setMirroredPick(null);
   };
 
-  // Outside the card-level provider the editor keeps its existing empty state. It never computes
-  // a second layout that could disagree with the step picture shown elsewhere.
-  const canvasLayout = stepPicture?.layout ?? EMPTY_CANVAS_LAYOUT;
+  const unitStepPreview = isUnitStepSeamPreview(groups);
+  const previewTarget = useMemo(() => {
+    if (pair || surface) return { sides: pick, source: 'live' as const };
+    if (stored[0]) return { sides: stored[0].sides, source: 'stored' as const };
+    return guessSelection ? { sides: guessSelection, source: 'live' as const } : null;
+  }, [pair, surface, pick, stored, guessSelection]);
+  const unitPreview = useMemo(
+    () =>
+      unitStepPreview && previewTarget
+        ? stepSeamPreview(
+            { leaves, innerSeams, storedSeams, crossSeams, geoms, innerLines, hands },
+            previewTarget,
+            { focus: false, explode: 0.08 },
+          )
+        : null,
+    [
+      unitStepPreview,
+      previewTarget,
+      leaves,
+      innerSeams,
+      storedSeams,
+      crossSeams,
+      geoms,
+      innerLines,
+      hands,
+    ],
+  );
+  // Multi-input steps keep the shared result byte-for-byte. A unit seam gets a local, reversible
+  // preview because the shared result correctly treats its one carried input as rigid.
+  const resultLayout = stepPicture?.layout ?? EMPTY_CANVAS_LAYOUT;
+  const canvasLayout = !posing && unitPreview ? unitPreview.layout : resultLayout;
+  const canvasLayers = !posing && unitPreview ? undefined : stepPicture?.layers;
   const poseLayers = stepPicture?.layers ?? [];
   const poseBlocks = stepResult?.blocks ?? [];
   const poseHung = stepResult?.hung ?? [];
@@ -436,12 +473,12 @@ export function SeamPickerBody({
   // the shared cached result remains immutable.
   const poseLayout = useMemo(() => {
     if (!posing) return null;
-    const T = new Map(canvasLayout.T);
+    const T = new Map(resultLayout.T);
     pinPoses(T, poseEdits, geoms, poseHung, {
       groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks: poseBlocks, hung: poseHung }),
     });
-    return { ...canvasLayout, T };
-  }, [posing, canvasLayout, poseEdits, geoms, poseHung, poseBlocks]);
+    return { ...resultLayout, T };
+  }, [posing, resultLayout, poseEdits, geoms, poseHung, poseBlocks]);
   const poseShown = useMemo(() => {
     if (!poseLayout || (!poseDrag && !poseFree)) return poseLayout;
     const T = new Map(poseLayout.T);
@@ -504,13 +541,13 @@ export function SeamPickerBody({
     setPoseSel(null);
     setSnapOn(false);
     setPoseDrag(null);
-    setPoseBounds(pictureBounds(canvasLayout, geoms, 'canvas'));
+    setPoseBounds(pictureBounds(resultLayout, geoms, 'canvas'));
     setPosing(true);
   };
   const pickupOf = (piece: string): PosePickup =>
     posePickup(
       piece,
-      { blocks: poseBlocks, transforms: poseLayout?.T ?? canvasLayout.T, hung: poseHung },
+      { blocks: poseBlocks, transforms: poseLayout?.T ?? resultLayout.T, hung: poseHung },
       geoms,
     );
   const putPose = (piece: string, T: Affine, pickup: PosePickup) => {
@@ -518,7 +555,7 @@ export function SeamPickerBody({
       piece,
       T,
       pickup,
-      { transforms: poseLayout?.T ?? canvasLayout.T },
+      { transforms: poseLayout?.T ?? resultLayout.T },
       geoms,
     );
     if (!dropped) {
@@ -767,21 +804,11 @@ export function SeamPickerBody({
     exitPose();
   };
 
-  // «guess»: the proposal's two sides become the pick, shown as the owner's — nothing is laid or saved.
+  // «guess»: the proposal's two sides become the pick, shown as the owner's — nothing is saved.
   const fillGuess = () => {
     if (frozen || posing) return;
-    const next: Sel | null = suggestion
-      ? { a: [...suggestion.a], b: [...suggestion.b] }
-      : surfaceSuggestion
-        ? (() => {
-            const line = innerId(surfaceSuggestion.host, surfaceSuggestion.inner);
-            const edge = longestEdge(geoms.get(surfaceSuggestion.part));
-            const hostAt = sideForClick(surfaceSuggestion.host, groups, EMPTY, pieceOfTarget);
-            const part = edge ? [edge] : [];
-            return hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] };
-          })()
-        : null;
-    if (!next) return;
+    if (!guessSelection) return;
+    const next = { a: [...guessSelection.a], b: [...guessSelection.b] };
     setRefused('');
     setSel(next);
     setFilled(next);
@@ -934,7 +961,7 @@ export function SeamPickerBody({
                 pad={phone ? 28 : 64}
                 look='canvas'
                 layout={canvasLayout}
-                layers={stepPicture?.layers}
+                layers={canvasLayers}
                 geoms={geoms}
                 innerLines={innerLines}
                 marks={marks}
