@@ -28,6 +28,7 @@ import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
+import { nameSpot } from './name-spot';
 import { PAIR_INK, pairNo } from './palette';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { useStepResults } from './step-result-context';
@@ -1198,7 +1199,13 @@ export function StepPictureSvg({
     const at: Pt2 = namesBelow
       ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
       : biggest
-        ? spotInside(biggest.ring)
+        ? nameSpot(
+            biggest.ring,
+            pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
+            text.length * L.font * 0.62,
+            L.font + 4,
+            ring,
+          )
         : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
     const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
