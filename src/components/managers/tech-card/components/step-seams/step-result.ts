@@ -6,7 +6,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseOf, type EdgeAnchor, type StoredPose, type StoredSeam } from 'lib/seams';
 
-import { decodeHandPlace, handsFromSeams } from './step-hand';
+import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
@@ -25,8 +25,8 @@ export type StepResult = {
   /** Bottom → top paint order. */
   layers: readonly string[];
   /**
-   * The owner's stacking claims in effect at this step, `[under, over]` (explicit under/over, or a
-   * legacy edge «inside» hand), carried claims included. The only source of under/over.
+   * The owner's stacking claims in effect at this step, `[under, over]` (the explicit under/over
+   * flag only), carried claims included. The only source of under/over.
    */
   stacked: readonly (readonly [string, string])[];
   /** Pieces some claim puts under another piece; every other piece is not lower. */
@@ -215,8 +215,7 @@ function orderedLayers(base: readonly string[], relations: readonly LayerRelatio
 
 /**
  * Bottom→top rule. Stacking claims come only from the owner: an anchor's explicit `layer` (the PLACE
- * under/over switch, on seam and pose rows) and, without it, an edge anchor whose decoded
- * `HandPlace.inside` is true (below its opposite-side partner). Claims made at an earlier step ride
+ * under/over switch, on seam and pose rows). A hand place's `inside` is not a claim. Claims made at an earlier step ride
  * in the carried block (`stacked`). With no claim two pieces are equal: no piece is lower
  * (`lower` stays empty), and the order is only the paint order: carried order, then input order,
  * a current surface part before its host.
@@ -235,14 +234,12 @@ function layersOf(
   for (const group of inputs)
     for (const [under, over] of group.seed?.result.stacked ?? [])
       if (group.pieces.includes(under) && group.pieces.includes(over)) stacked.push([under, over]);
-  const claim = (anchor: EdgeAnchor, other: readonly EdgeAnchor[], legacyInside: boolean) => {
+  const claim = (anchor: EdgeAnchor, other: readonly EdgeAnchor[]) => {
     const partners = unique(other.map((candidate) => candidate.piece)).filter(
       (piece) => piece !== anchor.piece,
     );
-    const under =
-      anchor.layer === 'under' ||
-      (!anchor.layer && legacyInside && decodeHandPlace(anchor.placement)?.inside === true);
-    if (under) for (const partner of partners) stacked.push([anchor.piece, partner]);
+    if (anchor.layer === 'under')
+      for (const partner of partners) stacked.push([anchor.piece, partner]);
     else if (anchor.layer === 'over')
       for (const partner of partners) stacked.push([partner, anchor.piece]);
   };
@@ -255,13 +252,12 @@ function layersOf(
   for (const stored of rows) {
     const surface = stored.candidate.kind === 'surface' ? stored.candidate.surface : undefined;
     if (surface) hints.push([surface.part, surface.host]);
-    const edge = stored.row.kind !== 'surface';
-    for (const anchor of stored.row.sideA) claim(anchor, stored.row.sideB, edge);
-    for (const anchor of stored.row.sideB) claim(anchor, stored.row.sideA, edge);
+    for (const anchor of stored.row.sideA) claim(anchor, stored.row.sideB);
+    for (const anchor of stored.row.sideB) claim(anchor, stored.row.sideA);
   }
   for (const pose of poses) {
-    for (const anchor of pose.sideA) claim(anchor, pose.sideB, false);
-    for (const anchor of pose.sideB) claim(anchor, pose.sideA, false);
+    for (const anchor of pose.sideA) claim(anchor, pose.sideB);
+    for (const anchor of pose.sideB) claim(anchor, pose.sideA);
   }
   const present = (piece: string) => transforms.has(piece);
   const claims = uniqueRelations(stacked.filter(([u, o]) => u !== o && present(u) && present(o)));

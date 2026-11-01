@@ -300,6 +300,36 @@ describe('stepResults: one carried owner result per operation', () => {
     expect(at540.stacked).toEqual([]);
   });
 
+  it('greys nothing from a legacy «inside» hand: sleeves stay white at #1030 and #1060', () => {
+    const byKey = new Map(CARD6_SEAMS);
+    for (const [key, row] of byKey) {
+      if (row.kind === 'surface') continue;
+      const inside = (side: typeof row.sideA) =>
+        side.map((anchor) => ({
+          ...anchor,
+          placement: { xMm: 0, yMm: 1, rotDeg: 0, flip: false },
+        }));
+      byKey.set(key, { ...row, sideA: inside(row.sideA), sideB: inside(row.sideB) });
+    }
+    const results = stepResults(
+      {
+        ops: CARD6_OPS,
+        byKey,
+        geoms: card6Geoms(),
+        innerLines: card6InnerLines(),
+        pieceKeys: CARD6_PIECE_KEYS,
+      },
+      { manualFit: true },
+    );
+    for (const op of [1030, 1060]) {
+      const at = results[card6Step(op)];
+      expect(at.transforms.has('SLV_L')).toBe(true);
+      expect(at.stacked).toEqual([]);
+      expect(at.lower).toEqual([]);
+    }
+    expect(results.flatMap((result) => result.lower)).toEqual([]);
+  });
+
   it.each(['under', 'over'] as const)(
     'puts the #540 bag %s its front by the owner flag and carries the claim on',
     (layer) => {
