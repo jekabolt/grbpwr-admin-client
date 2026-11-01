@@ -53,6 +53,7 @@ import {
   boxOf,
   centroidOf,
   earlierInner,
+  EMPTY_LAYOUT,
   fitBox,
   focusPieces,
   hideLabels as hideLabelSpots,
@@ -307,6 +308,12 @@ export type StepPictureOptions = {
   ready?: boolean;
   explode?: number;
   rasterMm?: number;
+  /**
+   * Leave `layout` empty. The tech pack lays every scene again itself (owner result, joined
+   * layout, cumulative garment layout) and never reads the scene's own; laying it anyway was
+   * 9.5 s of the 15.8 s cards 81 + 85 spent on their pictures (node profile, 2026-11-01).
+   */
+  skipLayout?: boolean;
 };
 
 /** The exact coarse reading used by the editor's compact SEAMS tile. */
@@ -490,7 +497,11 @@ export function stepPictureOfOp(
   geoms: ReadonlyMap<string, PieceGeom>,
   options: StepPictureOptions,
 ) {
-  const { explode = STEP_TILE_EXPLODE, rasterMm = STEP_TILE_RASTER_MM } = options;
+  const {
+    explode = STEP_TILE_EXPLODE,
+    rasterMm = STEP_TILE_RASTER_MM,
+    skipLayout = false,
+  } = options;
   const {
     active,
     innerLines,
@@ -565,7 +576,9 @@ export function stepPictureOfOp(
     marks,
     layoutLeaves,
     hands,
-    layout: stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm, ...hands }),
+    layout: skipLayout
+      ? EMPTY_LAYOUT
+      : stepLayout(layoutLeaves, frameSeams, geoms, { explode, rasterMm, ...hands }),
   };
 }
 

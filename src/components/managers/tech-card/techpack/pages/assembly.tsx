@@ -3,7 +3,7 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, HeaderNote, SectionHeader } from 'ui';
 
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
@@ -142,6 +142,8 @@ export type ResultStepPicture = StepPicture & {
 type Row = AsmRow & {
   pic?: SvgMarkup;
   editorPic?: ResultStepPicture;
+  /** `editorPic` as the print SVG takes it — marks in the stored tone, action marks — built once. */
+  print?: { marks: StepPicture['marks']; action: ReturnType<typeof editorActionMarks> };
   sil?: SvgMarkup | null;
   photoCount: number;
 };
@@ -3376,6 +3378,10 @@ export function editorOperationPictures(
         poses,
         nameOf: (key) => names.get(key) ?? key,
         explode: useInferredLayout ? 0 : undefined,
+        // Every branch below lays the scene again and overrides `layout` (owner result,
+        // `assembledLayout`, the garment `stepLayout`); the scene's own was 9.5 s of the 15.8 s
+        // cards 81 + 85 spent here (node profile, 2026-11-01).
+        skipLayout: true,
       });
     const assembledLayout = (picture: StepPicture, number: number) =>
       stepLayout(
@@ -4402,12 +4408,9 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
-  const actionMarks = r.editorPic
-    ? editorActionMarks(r.action, r.editorPic.geoms)
-    : { lines: [], glyphs: [] };
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-      {r.editorPic ? (
+      {r.editorPic && r.print ? (
         <StepPictureSvg
           w={picture.join[0]}
           h={picture.join[1]}
@@ -4419,9 +4422,9 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
-          marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}
-          actionLines={actionMarks.lines}
-          actionGlyphs={actionMarks.glyphs}
+          marks={r.print.marks}
+          actionLines={r.print.action.lines}
+          actionGlyphs={r.print.action.glyphs}
           className='asm-editor-picture'
         />
       ) : drawing ? (
@@ -4440,7 +4443,10 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
   return <div className={className}>{seg.t}</div>;
 }
 
-function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
+// Memoized on the row object: `rows` is memoized, so the same row is drawn in the hidden probe,
+// then in its paginated page, and again when the whole document renders after `onLaidOut` flips —
+// that last render redrew every picture (card 85: 109 print SVGs, seconds of markup per render).
+const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   const { t } = useT();
   const w = r.words;
   return (
@@ -4498,7 +4504,7 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
       </td>
     </tr>
   );
-}
+});
 
 /** A block = one operation row, kept whole during pagination. */
 function BlockBody({ r, orient }: { r: Row; orient: PrintOrient }) {
@@ -4710,6 +4716,10 @@ export function AssemblyPage({
         return {
           ...r,
           editorPic,
+          print: editorPic && {
+            marks: editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' })),
+            action: editorActionMarks(r.action, editorPic.geoms),
+          },
           pic:
             !editorPic && r.card?.items.length
               ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)

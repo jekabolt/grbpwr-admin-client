@@ -86,12 +86,72 @@ function area(pts: readonly Pt[]): number {
   return Math.abs(value / 2);
 }
 
-function onOutline(line: readonly Pt[], outline: readonly Pt[]): boolean {
+/** Grid cell for the outline's segments, mm; cells per axis a key tells apart (±2^19 cells). */
+const OUTLINE_CELL_MM = 10;
+const CELL_SPAN = 1 << 20;
+const cellKey = (gx: number, gy: number) => gx * CELL_SPAN + gy;
+
+type OutlineGrid = {
+  outline: readonly Pt[];
+  /** Segment indices by cell; null when the outline is too wild to grid (brute force then). */
+  cells: Map<number, number[]> | null;
+};
+
+/**
+ * The outline's segments by the cells their box, widened by ON_OUTLINE_MM and a millimetre of
+ * slack, touches. A point within ON_OUTLINE_MM of a segment lies in that widened box, so its own
+ * cell lists the segment: `onOutline` tests exactly the segments the full scan could have matched
+ * and decides with the same segDist. Built once per piece, when its first open line asks. Card 61
+ * spent 1 % of buildAssemblyPieces here; the grid keeps a piece with many inner lines from going
+ * quadratic rather than speeding that card up.
+ */
+function outlineGrid(outline: readonly Pt[]): OutlineGrid {
+  const reach = ON_OUTLINE_MM + 1;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of outline) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  const span = ((maxX - minX) / OUTLINE_CELL_MM + 2) * ((maxY - minY) / OUTLINE_CELL_MM + 2);
+  if (!Number.isFinite(span) || span > 1e6) return { outline, cells: null };
+  const cells = new Map<number, number[]>();
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    const x0 = Math.floor((Math.min(a[0], b[0]) - reach) / OUTLINE_CELL_MM);
+    const x1 = Math.floor((Math.max(a[0], b[0]) + reach) / OUTLINE_CELL_MM);
+    const y0 = Math.floor((Math.min(a[1], b[1]) - reach) / OUTLINE_CELL_MM);
+    const y1 = Math.floor((Math.max(a[1], b[1]) + reach) / OUTLINE_CELL_MM);
+    for (let gx = x0; gx <= x1; gx++)
+      for (let gy = y0; gy <= y1; gy++) {
+        const key = cellKey(gx, gy);
+        const bucket = cells.get(key);
+        if (bucket) bucket.push(i);
+        else cells.set(key, [i]);
+      }
+  }
+  return { outline, cells };
+}
+
+function onOutline(line: readonly Pt[], grid: OutlineGrid): boolean {
+  const { outline, cells } = grid;
+  const near = (point: Pt, i: number) =>
+    segDist(point, outline[i], outline[(i + 1) % outline.length]) <= ON_OUTLINE_MM;
   return line.every((point) => {
-    for (let i = 0; i < outline.length; i++) {
-      if (segDist(point, outline[i], outline[(i + 1) % outline.length]) <= ON_OUTLINE_MM)
-        return true;
+    if (!cells) {
+      for (let i = 0; i < outline.length; i++) if (near(point, i)) return true;
+      return false;
     }
+    const bucket = cells.get(
+      cellKey(Math.floor(point[0] / OUTLINE_CELL_MM), Math.floor(point[1] / OUTLINE_CELL_MM)),
+    );
+    if (!bucket) return false;
+    for (const i of bucket) if (near(point, i)) return true;
     return false;
   });
 }
@@ -167,6 +227,7 @@ export function buildAssemblyPiecesFromInput(
     const grainLayers = new Set(
       grainLayer ? [grainLayer] : (dto.grain ?? []).map((line) => line.layer).filter(Boolean),
     );
+    let cutGrid: OutlineGrid | null = null;
     for (const line of dto.inner ?? []) {
       if (line.pts.length < 2 || grainLayers.has(line.layer)) continue;
       const pts = draw(line.pts);
@@ -179,7 +240,7 @@ export function buildAssemblyPiecesFromInput(
         continue;
       }
       if (dist(pts[0], pts[pts.length - 1]) < 1e-6 && pts.length < 3) continue;
-      if (!onOutline(pts, cut)) inner.push(simplify(pts));
+      if (!onOutline(pts, (cutGrid ??= outlineGrid(cut)))) inner.push(simplify(pts));
     }
     drawn.set(key, {
       key,
