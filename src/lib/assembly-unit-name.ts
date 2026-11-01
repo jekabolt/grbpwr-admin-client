@@ -6,10 +6,13 @@ export type UnitDisplayNameSource = {
 
 /** Turn an internal unit key into the last-resort human label shown to the owner. */
 export function humanizeUnitKey(key: string): string {
-  const words = key
-    .trim()
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+  const spaced = key.trim().replace(/[_-]+/g, ' ');
+  // A mostly-uppercase key (`FRONT lEFT WITH POCKET`) is read case-insensitively: a stray
+  // lowercase letter is a typo, not a camelCase word boundary.
+  const letters = spaced.replace(/[^A-Za-z]/g, '');
+  const upper = letters.replace(/[^A-Z]/g, '').length;
+  const camel = upper * 2 <= letters.length;
+  const words = (camel ? spaced.replace(/([a-z\d])([A-Z])/g, '$1 $2') : spaced)
     .split(/\s+/)
     .filter(Boolean);
   if (words.length === 0) return 'Unit';
