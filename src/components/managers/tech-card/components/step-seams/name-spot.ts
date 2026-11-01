@@ -1,6 +1,6 @@
 // WHERE A UNIT'S NAME SITS. The name box goes inside its biggest piece, clear of every outline
 // (its own and the pieces lying on it) and never on another piece; one that fits nowhere inside
-// goes under the unit.
+// goes beside the unit, clear of every piece.
 // Pure: picture-space points in, one centre out.
 
 import type { Pt2 } from 'lib/assembly-skeleton/types';
@@ -93,6 +93,30 @@ export function nameSpot(
       }
     }
   if (best) return best;
-  const u = boxOf(unit);
-  return [(u.x0 + u.x1) / 2, u.y1 + h / 2 + 2];
+  return besideUnit(boxOf(unit), [ring, ...blockers].map(boxOf), w, h);
+}
+
+/**
+ * Outside the unit: under it, over it, right of it, left of it — the first spot clear of every
+ * piece's box (a name on another piece is hidden by the label pass), stepping outward. Nothing
+ * clear → under the unit.
+ */
+function besideUnit(u: Box, pieces: readonly Box[], w: number, h: number): Pt2 {
+  const cx = (u.x0 + u.x1) / 2;
+  const cy = (u.y0 + u.y1) / 2;
+  const clear = (c: Pt2) => {
+    const box = { x0: c[0] - w / 2, y0: c[1] - h / 2, x1: c[0] + w / 2, y1: c[1] + h / 2 };
+    return !pieces.some((p) => meets(p, box));
+  };
+  for (let gap = 2; gap <= 2 + h * 4; gap += h) {
+    const spots: Pt2[] = [
+      [cx, u.y1 + gap + h / 2],
+      [cx, u.y0 - gap - h / 2],
+      [u.x1 + gap + w / 2, cy],
+      [u.x0 - gap - w / 2, cy],
+    ];
+    const spot = spots.find(clear);
+    if (spot) return spot;
+  }
+  return [cx, u.y1 + h / 2 + 2];
 }

@@ -40,4 +40,14 @@ describe('nameSpot', () => {
     expect(at[1]).toBeGreaterThan(200);
     expect(at[0]).toBeCloseTo(30);
   });
+
+  it('steps beside the unit when under it lies another piece', () => {
+    const upper = rect(0, 0, 60, 100);
+    const lower = rect(0, 100, 60, 300);
+    const at = nameSpot(upper, [lower], 180, 12);
+    const box = boxAt(at, 180, 12);
+    const onLower = box.x0 < 60 && box.x1 > 0 && box.y0 < 400 && box.y1 > 100;
+    const onUpper = box.x0 < 60 && box.x1 > 0 && box.y0 < 100 && box.y1 > 0;
+    expect(onLower || onUpper).toBe(false);
+  });
 });
