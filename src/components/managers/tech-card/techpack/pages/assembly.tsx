@@ -87,7 +87,8 @@ const ASM_CSS = String.raw`
 .asm-seams { display: flex; min-width: 0; flex-direction: column; gap: 1px; margin-top: 2px; }
 .asm-picture-box { position: relative; display: flex; width: 100%; max-width: 100%; flex: none; align-items: center; justify-content: center; }
 .asm-picture-box > svg { max-width: 100%; max-height: 100%; }
-.asm-picture-key { position: absolute; left: 4px; top: 4px; z-index: 1; background: var(--color-bgColor); }
+.asm-table td.asm-key-cell { padding-left: 0 !important; padding-right: 0 !important; }
+.asm-key-cell svg { stroke-width: 1; }
 .asm-pic svg, .asm-table td svg { display: block; flex: none; }
 .asm-verb { font-weight: 700; }
 .asm-what b { font-weight: 700; }
@@ -111,8 +112,8 @@ const ASM_CSS = String.raw`
 `;
 
 const DIM = {
-  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 40, keyH: 34 },
-  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 40, keyH: 34 },
+  land: { n: 40, tool: 96, joinW: 212, joinH: 186, keyW: 28, keyH: 20 },
+  port: { n: 48, tool: 130, joinW: 330, joinH: 150, keyW: 28, keyH: 20 },
 } as const;
 
 const ROWS_PER_SHEET = 6;
@@ -4284,6 +4285,7 @@ function Cols({ orient }: { orient: PrintOrient }) {
     <colgroup>
       <col style={{ width: d.n }} />
       <col style={{ width: d.joinW + CELL_PAD_X }} />
+      <col style={{ width: d.keyW + 4 }} />
       <col />
       <col style={{ width: d.tool }} />
     </colgroup>
@@ -4297,6 +4299,7 @@ function Head() {
       <tr>
         <th>{t('assembly.op')}</th>
         <th data-align='left'>{t('assembly.picture')}</th>
+        <th />
         <th data-align='left'>{t('assembly.operation')}</th>
         <th data-align='left'>{t('assembly.machineDelta')}</th>
       </tr>
@@ -4353,7 +4356,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const actionMarks = r.editorPic
     ? editorActionMarks(r.action, r.editorPic.geoms)
     : { lines: [], glyphs: [] };
-  const showKey = asmProtoFlags().key;
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
       {r.editorPic ? (
@@ -4379,7 +4381,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           label={`${r.n} ${r.words.verb}`}
         />
       ) : null}
-      {showKey && <KeyArt icon={r.words.icon} w={d.keyW} h={d.keyH} className='asm-picture-key' />}
     </div>
   );
 }
@@ -4396,6 +4397,9 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
       <td className='asm-n'>{r.n}</td>
       <td data-align='left'>
         <Picture r={r} orient={orient} />
+      </td>
+      <td className='asm-key-cell'>
+        <KeyArt icon={w.icon} w={DIM[orient].keyW} h={DIM[orient].keyH} />
       </td>
       <td data-align='left'>
         <div className='asm-what'>
