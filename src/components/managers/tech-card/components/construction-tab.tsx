@@ -36,6 +36,7 @@ import { AssemblyMap } from './assembly-map/assembly-map';
 import { SeamHintsBar } from './step-seams/seam-hints-map';
 import { StepResultProvider } from './step-seams/step-result-context';
 import { StepSeamsProvider } from './step-seams/step-seams-context';
+import { FoldsHydrate } from './assembly-folds/folds-hydrate';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { gapSubjects } from '../techpack/gap-findings';
 import { usePdfGaps } from '../techpack/use-pdf-gaps';
@@ -648,6 +649,7 @@ export function ConstructionTab({
           categoryNames={categoryNames}
         >
           <StepSeamsProvider techCard={techCard} frozen={frozen} active={active}>
+            <FoldsHydrate techCard={techCard} />
             <StepResultProvider>
               <StepResultUnitPicturesProvider>
                 <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>

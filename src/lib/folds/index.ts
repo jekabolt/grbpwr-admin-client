@@ -5,9 +5,24 @@
 //   resolve   resolveFolds(rows, piecesOfOneSize, {grainDeg}) → {folds: Record<pieceKey, DollFold[]>, unresolved}
 //             — `folds` is DollOptions.folds (SPEC-T3)
 //   wire      foldToWire / foldsFromWire ↔ proto common.TechCardPieceFold
+//   folded    foldedOutline(poly, flatFolds) / foldSection → the folded shape and its cross-section (UI)
 
 export * from './types';
 export { defaultFlipMm, foldFromHint, foldFromLine, type FoldMeta } from './anchor';
 export { foldHints, type FoldHintOptions } from './hints';
 export { resolveFolds } from './resolve';
 export { foldFromWire, foldsFromWire, foldToWire } from './wire';
+export {
+  clipSide,
+  doubleTurn,
+  foldedOutline,
+  foldSection,
+  pointOnSide,
+  reflect,
+  sideOf,
+  smallerSide,
+  type FlatFold,
+  type FoldedShape,
+  type FoldPly,
+  type FoldSection,
+} from './folded';
