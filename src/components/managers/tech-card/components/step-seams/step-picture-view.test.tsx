@@ -87,7 +87,9 @@ const renderPicture = ({
   lower,
   stacked,
   marks,
+  stepEdges,
   actionGlyphs,
+  noSeamText,
   picture = layout,
   look = 'tile',
 }: {
@@ -95,7 +97,9 @@ const renderPicture = ({
   lower?: readonly string[];
   stacked?: readonly (readonly [string, string])[];
   marks?: readonly EdgeMark[];
+  stepEdges?: readonly string[];
   actionGlyphs?: readonly PictureActionGlyph[];
+  noSeamText?: string;
   picture?: StepLayout;
   look?: 'canvas' | 'result' | 'tile' | 'print';
 } = {}) =>
@@ -111,7 +115,9 @@ const renderPicture = ({
       stacked={stacked}
       geoms={geoms}
       marks={marks}
+      stepEdges={stepEdges}
       actionGlyphs={actionGlyphs}
+      noSeamText={noSeamText}
     />,
   );
 
@@ -180,7 +186,7 @@ describe('StepPictureSvg lower layers', () => {
 
       expect(overlay).toContain('data-lower-partial="1"');
       expect(overlay).toContain('clip-path="url(#lower-layer-');
-      expect(outline).toContain('stroke="var(--color-textColor)"');
+      expect(outline).toContain('stroke="var(--color-borderColor)"');
       expect(outline).not.toContain(`stroke="${LOWER_LAYER_STROKE}"`);
       expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
         markup.indexOf('data-piece-surface="strip"'),
@@ -421,6 +427,34 @@ describe('StepPictureSvg lower layers', () => {
   });
 });
 
+describe('StepPictureSvg step highlight', () => {
+  const edgeTag = (markup: string) =>
+    markup.match(/<path[^>]*data-step-seam-edge="bag#0"[^>]*>/)?.[0] ?? '';
+
+  it('draws the exact edge blue on screen and black in print at 1.26× outline width', () => {
+    const screen = renderPicture({ look: 'canvas', stepEdges: ['bag#0'] });
+    const print = renderPicture({ look: 'print', stepEdges: ['bag#0'] });
+
+    expect(edgeTag(screen)).toContain('stroke="var(--color-highlightColor)"');
+    expect(edgeTag(screen)).toContain('stroke-width="4.032"');
+    expect(edgeTag(print)).toContain('stroke="var(--color-textColor)"');
+    expect(edgeTag(print)).toContain('stroke-width="2.205"');
+    expect(screen).toContain('stroke="var(--color-borderColor)" stroke-width="3.2"');
+  });
+
+  it('marks a known rowless picture without highlighting an edge or printing a length', () => {
+    const markup = renderPicture({ look: 'canvas', stepEdges: [] });
+    const print = renderPicture({ look: 'print', stepEdges: [], noSeamText: 'no seam' });
+
+    expect(markup).not.toContain('data-step-seam-edge=');
+    expect(markup).toContain('data-step-no-seams=""');
+    expect(markup).toContain('>no seam</text>');
+    expect(markup).not.toMatch(/>[^<]*\bmm\b/i);
+    expect(print).toContain('data-step-no-seams=""');
+    expect(print).toContain('>no seam</text>');
+  });
+});
+
 describe('StepPictureSvg action glyphs', () => {
   const narrow = rectangle('narrow', 'narrow placket', 10, 100);
   const narrowGeoms = new Map([['narrow', narrow]]);
@@ -500,8 +534,10 @@ describe('StepPictureSvg action glyphs', () => {
 
     expect(direction(canvas)).toEqual(direction(pdf));
     expect(segmentLength(canvas)).toBeCloseTo(segmentLength(pdf), 8);
-    expect(tag(canvas)).toContain('stroke-width="0.8"');
-    expect(tag(pdf)).toContain('stroke-width="0.7"');
+    expect(tag(canvas)).toContain('stroke="var(--color-highlightColor)"');
+    expect(tag(canvas)).toContain('stroke-width="3"');
+    expect(tag(pdf)).toContain('stroke="var(--color-textColor)"');
+    expect(tag(pdf)).toContain('stroke-width="3"');
   });
 
   it('keeps eight narrow-host buttons on eight distinct marks', () => {

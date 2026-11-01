@@ -23,6 +23,7 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import { NO_SEAM_TEXT } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -4225,6 +4226,7 @@ export function editorActionMarks(
       lines.push({
         id: `${action.n}:${index}:topstitch`,
         piece: part.piece,
+        target: part.edgeId,
         points: offsetTowardCentre(part.piece, points, decimal(action.raw.topstitch?.widthMm, 1.5)),
         weight: 'ink',
         dashed: true,
@@ -4236,6 +4238,7 @@ export function editorActionMarks(
       lines.push({
         id: `${action.n}:${index}:press-edge`,
         piece: part.piece,
+        target: part.edgeId,
         points,
         weight: 'ink',
         kind: `press-${press}`,
@@ -4245,6 +4248,7 @@ export function editorActionMarks(
     lines.push({
       id: `${action.n}:${index}:edge`,
       piece: part.piece,
+      target: part.edgeId,
       points,
       weight: 'heavy',
       kind: action.tech,
@@ -4436,9 +4440,10 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
-          marks={r.print.marks}
+          stepEdges={r.editorPic.stepEdges}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
+          noSeamText={own(NO_SEAM_TEXT)}
           className='asm-editor-picture'
         />
       ) : drawing ? (

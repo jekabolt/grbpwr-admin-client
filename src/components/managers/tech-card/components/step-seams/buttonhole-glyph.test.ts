@@ -6,6 +6,7 @@ import {
   buttonholeDirection,
   buttonholeLengthMm,
   buttonholePictureGlyphs,
+  fasteningPictureGlyphs,
 } from './buttonhole-glyph';
 
 const placket = {
@@ -81,5 +82,26 @@ describe('buttonhole glyph geometry', () => {
     ]);
     expect(glyphs.every((glyph) => glyph.lengthMm === 14)).toBe(true);
     expect(glyphs.every((glyph) => Math.abs(glyph.direction[0]) > 0.999)).toBe(true);
+  });
+
+  it('uses drill marks for the button-attach step', () => {
+    const buttonHost = {
+      ...placket,
+      marks: placket.marks.map((mark) => ({ ...mark, kind: 'drill' as const })),
+    } satisfies PieceGeom;
+    const glyphs = fasteningPictureGlyphs(
+      {
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+        placementCount: 2,
+      },
+      [buttonHost.pieceKey],
+      new Map([[buttonHost.pieceKey, buttonHost]]),
+    );
+
+    expect(glyphs.map((glyph) => glyph.kind)).toEqual(['button', 'button']);
+    expect(glyphs.map((glyph) => glyph.point)).toEqual([
+      [5, 20],
+      [5, 50],
+    ]);
   });
 });

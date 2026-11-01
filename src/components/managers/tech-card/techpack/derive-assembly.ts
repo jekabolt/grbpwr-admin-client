@@ -46,6 +46,7 @@ import {
   rowTargetsOfAnchor,
   storedSeamSides,
 } from 'components/managers/tech-card/components/step-seams/step-rows';
+import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
@@ -2708,6 +2709,13 @@ function actionPartsOfRows(
       ? laidEdges
       : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
   });
+  return actionPartsOfTargets(targets, pieces);
+}
+
+function actionPartsOfTargets(
+  targets: readonly string[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart[] {
   return [...new Set(targets)].flatMap((target) => {
     const part = actionPartOfTarget(target, pieces);
     return part ? [part] : [];
@@ -2729,11 +2737,21 @@ function buildActions(
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
+    const finishingEdgeOp = ['topstitch', 'bind', 'hem'].includes(op.tech);
     // A flat press draws its seam only where an owner row names it; without one it stays bare
     // (no «missing seam» — it never needed one).
     const flatPress = op.tech === 'press' && pressMode(op.raw) !== null;
     const ownerRows = edgeOp || flatPress ? actionOwnerRows(op, opIndex, ops, rows) : [];
-    const edgeParts = actionPartsOfRows(ownerRows, pieces);
+    const highlighted = finishingEdgeOp
+      ? stepHighlightOf(
+          ops.map((candidate) => candidate.raw),
+          opIndex,
+          rows,
+        ).targets
+      : [];
+    const edgeParts = finishingEdgeOp
+      ? actionPartsOfTargets(highlighted, pieces)
+      : actionPartsOfRows(ownerRows, pieces);
     // Both sides of the owner seams, so «to back» can find the back across the drawn run.
     const seamPieces = ownerRows.flatMap((row) => {
       const sides = storedSeamSides(row);

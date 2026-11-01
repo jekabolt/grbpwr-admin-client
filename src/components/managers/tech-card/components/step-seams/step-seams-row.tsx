@@ -13,6 +13,7 @@ import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
+import { NO_SEAM_TEXT } from './step-highlight';
 import { seamOfSides, type StepLayout } from './step-picture';
 import { useStepResults } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
@@ -163,7 +164,7 @@ export function StepSeamsRow({ index }: { index: number }) {
           ))}
         {keys.length === 0 && !pending && suggestions.length === 0 && (
           <Text size='micro' variant='error' tracking='label' data-step-seams-status=''>
-            no seam
+            {NO_SEAM_TEXT}
           </Text>
         )}
       </div>
@@ -289,6 +290,7 @@ export function SeamTile({
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
+          stepEdges={scene.stepEdges}
         />
       )}
       {no != null && (
