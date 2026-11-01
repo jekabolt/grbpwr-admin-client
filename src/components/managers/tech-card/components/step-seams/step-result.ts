@@ -3,12 +3,12 @@
 // the layout of the latest earlier operation that produced it through `stepLayout.inputLayouts`.
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply, compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, type StoredPose, type StoredSeam } from 'lib/seams';
+import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
+import { poseOf, type EdgeAnchor, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { decodeHandPlace, handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
-import { boxOf, invert, stepLayout, type StepLayout } from './step-picture';
+import { invert, stepLayout, type StepLayout } from './step-picture';
 import { pinPoses, poseBlockGroup, type PosePin } from './step-pose';
 import { storedRowsOfStep, type StepStoredRow } from './step-rows';
 
@@ -22,8 +22,15 @@ export type StepResultBlock = {
 export type StepResult = {
   opIndex: number;
   transforms: ReadonlyMap<string, Affine>;
-  /** Bottom → top. */
+  /** Bottom → top paint order. */
   layers: readonly string[];
+  /**
+   * The owner's stacking claims in effect at this step, `[under, over]` (explicit under/over, or a
+   * legacy edge «inside» hand), carried claims included. The only source of under/over.
+   */
+  stacked: readonly (readonly [string, string])[];
+  /** Pieces some claim puts under another piece; every other piece is not lower. */
+  lower: readonly string[];
   blocks: readonly StepResultBlock[];
   /** Piece-level [input, host] links in this operation's result, for rigid PLACE pickup. */
   hung: readonly (readonly [string, string])[];
@@ -207,83 +214,73 @@ function orderedLayers(base: readonly string[], relations: readonly LayerRelatio
 }
 
 /**
- * Bottom→top rule: each carried block retains its previous total order; otherwise pieces start in
- * operation input order. A current surface part (pocket bag, facing, placket in a slit) is below
- * its host. An edge anchor whose decoded `HandPlace.inside` is true is below its opposite-side
- * partner. An edge pair with no saved hand whose laid outlines mostly overlap (a pocket bag or a
- * facing sewn along one edge and lying on its partner) puts the smaller piece below the bigger.
- * Unconstrained pieces keep their stable input order.
+ * Bottom→top rule. Stacking claims come only from the owner: an anchor's explicit `layer` (the PLACE
+ * under/over switch, on seam and pose rows) and, without it, an edge anchor whose decoded
+ * `HandPlace.inside` is true (below its opposite-side partner). Claims made at an earlier step ride
+ * in the carried block (`stacked`). With no claim two pieces are equal: no piece is lower
+ * (`lower` stays empty), and the order is only the paint order: carried order, then input order,
+ * a current surface part before its host.
  */
 function layersOf(
   inputs: readonly ResolvedInput[],
   rows: readonly StepStoredRow[],
+  poses: readonly StoredPose[],
   transforms: ReadonlyMap<string, Affine>,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): string[] {
+): { layers: string[]; stacked: LayerRelation[]; lower: string[] } {
   const base = inputs.flatMap((group) => {
     const carried = group.seed?.result.layers.filter((piece) => group.pieces.includes(piece)) ?? [];
     return [...carried, ...group.pieces.filter((piece) => !carried.includes(piece))];
   });
-  const relations: LayerRelation[] = [];
+  const stacked: LayerRelation[] = [];
+  for (const group of inputs)
+    for (const [under, over] of group.seed?.result.stacked ?? [])
+      if (group.pieces.includes(under) && group.pieces.includes(over)) stacked.push([under, over]);
+  const claim = (anchor: EdgeAnchor, other: readonly EdgeAnchor[], legacyInside: boolean) => {
+    const partners = unique(other.map((candidate) => candidate.piece)).filter(
+      (piece) => piece !== anchor.piece,
+    );
+    const under =
+      anchor.layer === 'under' ||
+      (!anchor.layer && legacyInside && decodeHandPlace(anchor.placement)?.inside === true);
+    if (under) for (const partner of partners) stacked.push([anchor.piece, partner]);
+    else if (anchor.layer === 'over')
+      for (const partner of partners) stacked.push([partner, anchor.piece]);
+  };
+  const hints: LayerRelation[] = [];
   for (const group of inputs) {
     const carried = group.seed?.result.layers.filter((piece) => group.pieces.includes(piece)) ?? [];
     for (let index = 1; index < carried.length; index++)
-      relations.push([carried[index - 1], carried[index]]);
+      hints.push([carried[index - 1], carried[index]]);
   }
   for (const stored of rows) {
     const surface = stored.candidate.kind === 'surface' ? stored.candidate.surface : undefined;
-    if (surface) relations.push([surface.part, surface.host]);
-    if (stored.row.kind === 'surface') continue;
-    for (const [own, other] of [
-      [stored.row.sideA, stored.row.sideB],
-      [stored.row.sideB, stored.row.sideA],
-    ] as const)
-      for (const anchor of own) {
-        if (!decodeHandPlace(anchor.placement)?.inside) continue;
-        const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
-        if (partner) relations.push([anchor.piece, partner]);
-      }
-    const handSet = [...stored.row.sideA, ...stored.row.sideB].some(
-      (anchor) => decodeHandPlace(anchor.placement) != null,
-    );
-    if (handSet) continue;
-    for (const a of unique(stored.row.sideA.map((anchor) => anchor.piece)))
-      for (const b of unique(stored.row.sideB.map((anchor) => anchor.piece))) {
-        if (a === b) continue;
-        const under = lyingOn(a, b, transforms, geoms);
-        if (under) relations.push(under);
-      }
+    if (surface) hints.push([surface.part, surface.host]);
+    const edge = stored.row.kind !== 'surface';
+    for (const anchor of stored.row.sideA) claim(anchor, stored.row.sideB, edge);
+    for (const anchor of stored.row.sideB) claim(anchor, stored.row.sideA, edge);
   }
-  return orderedLayers(
-    base.filter((piece) => transforms.has(piece)),
-    relations,
-  );
+  for (const pose of poses) {
+    for (const anchor of pose.sideA) claim(anchor, pose.sideB, false);
+    for (const anchor of pose.sideB) claim(anchor, pose.sideA, false);
+  }
+  const present = (piece: string) => transforms.has(piece);
+  const claims = uniqueRelations(stacked.filter(([u, o]) => u !== o && present(u) && present(o)));
+  const claimed = new Set(claims.map(([u, o]) => `${u}\u0000${o}`));
+  const layers = orderedLayers(base.filter(present), [
+    ...claims,
+    ...hints.filter(([u, o]) => !claimed.has(`${o}\u0000${u}`)),
+  ]);
+  return { layers, stacked: claims, lower: unique(claims.map(([under]) => under)) };
 }
 
-/** Box overlap share of the smaller laid piece at which it counts as lying on its partner. */
-const LYING_ON = 0.5;
-
-/** `[smaller, bigger]` when the smaller laid piece mostly lies on the bigger one, else null. */
-function lyingOn(
-  a: string,
-  b: string,
-  transforms: ReadonlyMap<string, Affine>,
-  geoms: ReadonlyMap<string, PieceGeom>,
-): LayerRelation | null {
-  const ga = geoms.get(a);
-  const gb = geoms.get(b);
-  const Ta = transforms.get(a);
-  const Tb = transforms.get(b);
-  if (!ga || !gb || !Ta || !Tb || ga.rs.length < 3 || gb.rs.length < 3) return null;
-  const ba = boxOf(ga.rs.map((p) => apply(Ta, p)));
-  const bb = boxOf(gb.rs.map((p) => apply(Tb, p)));
-  const w = Math.min(ba.x1, bb.x1) - Math.max(ba.x0, bb.x0);
-  const h = Math.min(ba.y1, bb.y1) - Math.max(ba.y0, bb.y0);
-  if (w <= 0 || h <= 0) return null;
-  const area = (box: typeof ba) => (box.x1 - box.x0) * (box.y1 - box.y0);
-  const [small, big] = Math.abs(ga.areaMm2) <= Math.abs(gb.areaMm2) ? [a, b] : [b, a];
-  const share = (w * h) / Math.min(area(ba), area(bb));
-  return share >= LYING_ON ? [small, big] : null;
+function uniqueRelations(relations: readonly LayerRelation[]): LayerRelation[] {
+  const seen = new Set<string>();
+  return relations.filter(([u, o]) => {
+    const key = `${u}\u0000${o}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function neutralLayout(
@@ -344,10 +341,18 @@ function computeStep(
   const transforms = new Map(layout.T);
   const ownRow =
     stored.length > 0 || (op?.poseKeys ?? []).some((key) => input.poses?.has(key) ?? false);
+  const ignored = new Set(ignoredPoses);
+  const currentPoses = (op?.poseKeys ?? []).flatMap((key) => {
+    const row = ignored.has(key) ? undefined : input.poses?.get(key);
+    return row ? [row] : [];
+  });
+  const stacking = layersOf(inputs, stored, currentPoses, transforms);
   const result: StepResult = {
     opIndex: index,
     transforms,
-    layers: layersOf(inputs, stored, transforms, input.geoms),
+    layers: stacking.layers,
+    stacked: stacking.stacked,
+    lower: stacking.lower,
     blocks: inputs.map((group, groupIndex) => ({
       inputKey: group.key,
       pieces: group.pieces.filter((piece) => transforms.has(piece)),

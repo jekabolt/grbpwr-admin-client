@@ -65,6 +65,9 @@ const anchorToWire = (a: EdgeAnchor): TechCardSeamAnchorWire => {
     edgeHint: a.edgeHint,
     contourSig: a.contourSig,
     ...(a.placement ? { placement: { ...a.placement } } : {}),
+    ...(a.layer
+      ? { layer: a.layer === 'under' ? 'TECH_CARD_SEAM_LAYER_UNDER' : 'TECH_CARD_SEAM_LAYER_OVER' }
+      : {}),
   };
 };
 
@@ -92,6 +95,11 @@ const anchorFromWire = (w: TechCardSeamAnchorWire): EdgeAnchor => {
           },
         }
       : {}),
+    ...(w.layer === 'TECH_CARD_SEAM_LAYER_UNDER'
+      ? { layer: 'under' as const }
+      : w.layer === 'TECH_CARD_SEAM_LAYER_OVER'
+        ? { layer: 'over' as const }
+        : {}),
   };
 };
 

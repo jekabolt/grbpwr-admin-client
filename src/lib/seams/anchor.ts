@@ -7,6 +7,7 @@ import { contourSig, frameOf, runById, runSamples, type SeamRun } from './frame'
 import {
   SEAMS,
   type EdgeAnchor,
+  type SeamLayer,
   type SeamPlacement,
   type StoredPose,
   type StoredSeam,
@@ -169,6 +170,8 @@ export function poseRow(o: {
   host: PieceGeom;
   placement: SeamPlacement;
   grainDeg?: ReadonlyMap<string, number>;
+  /** The owner's under/over of the moved piece against its host; absent = unset. */
+  layer?: SeamLayer;
 }): StoredPose {
   return {
     seamKey: o.seamKey,
@@ -176,7 +179,12 @@ export function poseRow(o: {
     kind: 'pose',
     direction: 'unknown',
     source: 'manual',
-    sideA: [outlineAnchor(o.piece, o.grainDeg?.get(o.piece.pieceKey) ?? 0, o.placement)],
+    sideA: [
+      {
+        ...outlineAnchor(o.piece, o.grainDeg?.get(o.piece.pieceKey) ?? 0, o.placement),
+        ...(o.layer ? { layer: o.layer } : {}),
+      },
+    ],
     sideB: [outlineAnchor(o.host, o.grainDeg?.get(o.host.pieceKey) ?? 0)],
     anchoredSize: '',
     note: '',
@@ -216,4 +224,11 @@ export function newSeamKey(now = Date.now(), rand: () => number = Math.random): 
   else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(rand() * 256);
   for (let i = 0; i < 16; i++) tail += CROCKFORD[bytes[i] % 32];
   return time + tail;
+}
+
+/** The anchor with its under/over set to `layer`, or without one (no claim) when there is none. */
+export function withSeamLayer(anchor: EdgeAnchor, layer: SeamLayer | null | undefined): EdgeAnchor {
+  const next = { ...anchor };
+  delete next.layer;
+  return layer ? { ...next, layer } : next;
 }

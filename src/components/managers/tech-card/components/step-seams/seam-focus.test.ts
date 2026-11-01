@@ -160,6 +160,17 @@ describe('mirror left', () => {
       slideMm: -12,
     });
   });
+
+  it('copies a left flag set without a move onto the right twin, leaving its place alone', () => {
+    const geoms = card6Geoms();
+    const base = row('left', 'SLV_L', 'P_L_MAIN');
+    const left = { ...base, sideA: [{ ...base.sideA[0], layer: 'over' as const }] };
+    const right = row('right', 'SLV_R', 'P_R_MAIN');
+    const [update] = mirrorLeftRows([right], [left, right], geoms);
+    expect(update.piece).toBe('SLV_R');
+    expect(update.row.sideA[0].layer).toBe('over');
+    expect(update.row.sideA[0].placement).toBeUndefined();
+  });
 });
 
 describe('mirror left: surface and pose', () => {

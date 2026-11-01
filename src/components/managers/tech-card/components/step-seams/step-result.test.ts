@@ -283,7 +283,7 @@ describe('stepResults: one carried owner result per operation', () => {
     );
   });
 
-  it('lays a pocket bag sewn along one edge under its front (#540, no hand saved)', () => {
+  it('claims no stacking without the owner: #540 bag and front are equal (no hand, no flag)', () => {
     const results = stepResults(
       {
         ops: CARD6_OPS,
@@ -295,8 +295,46 @@ describe('stepResults: one carried owner result per operation', () => {
       { manualFit: true },
     );
     const at540 = results[card6Step(540)];
-    expect(at540.layers.indexOf('PCK_L_BTTM')).toBeLessThan(at540.layers.indexOf('P_L_MAIN'));
+    expect(at540.lower).not.toContain('PCK_L_BTTM');
+    expect(at540.lower).not.toContain('P_L_MAIN');
+    expect(at540.stacked).toEqual([]);
   });
+
+  it.each(['under', 'over'] as const)(
+    'puts the #540 bag %s its front by the owner flag and carries the claim on',
+    (layer) => {
+      const op = CARD6_OPS[card6Step(540)];
+      const byKey = new Map(CARD6_SEAMS);
+      for (const key of op.seamKeys ?? []) {
+        const row = byKey.get(key);
+        if (!row) continue;
+        const flag = (side: typeof row.sideA) =>
+          side.map((anchor) => (anchor.piece === 'PCK_L_BTTM' ? { ...anchor, layer } : anchor));
+        byKey.set(key, { ...row, sideA: flag(row.sideA), sideB: flag(row.sideB) });
+      }
+      const results = stepResults(
+        {
+          ops: CARD6_OPS,
+          byKey,
+          geoms: card6Geoms(),
+          innerLines: card6InnerLines(),
+          pieceKeys: CARD6_PIECE_KEYS,
+        },
+        { manualFit: true },
+      );
+      const at540 = results[card6Step(540)];
+      const [under, over] =
+        layer === 'under' ? ['PCK_L_BTTM', 'P_L_MAIN'] : ['P_L_MAIN', 'PCK_L_BTTM'];
+      expect(at540.stacked).toContainEqual([under, over]);
+      expect(at540.lower).toContain(under);
+      expect(at540.lower).not.toContain(over);
+      expect(at540.layers.indexOf(under)).toBeLessThan(at540.layers.indexOf(over));
+      const later = results
+        .slice(card6Step(540) + 1)
+        .find((result) => result.transforms.has('PCK_L_BTTM') && result.transforms.has('P_L_MAIN'));
+      if (later) expect(later.stacked).toContainEqual([under, over]);
+    },
+  );
 
   it('marks a rowless card as not owned', () => {
     const results = stepResults({ ...chainInput, byKey: new Map(), poses: new Map() });

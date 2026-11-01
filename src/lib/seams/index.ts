@@ -23,6 +23,7 @@ export {
   poseRow,
   seamFromCandidate,
   storedKindOf,
+  withSeamLayer,
 } from './anchor';
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';

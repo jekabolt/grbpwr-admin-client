@@ -1769,6 +1769,11 @@ export type AssemblyResolutionBasis =
   // Unresolved: the component card has neither colours nor an output material — it was never wired to
   // the warehouse. Fix on the card.
   | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
+// TechCardSeamLayer is an explicit stacking of a seam side's piece: under or over the other side.
+export type TechCardSeamLayer =
+  | "TECH_CARD_SEAM_LAYER_UNKNOWN"
+  | "TECH_CARD_SEAM_LAYER_UNDER"
+  | "TECH_CARD_SEAM_LAYER_OVER";
 // TechCardSeamStatus is the technologist's decision on a seam.
 export type TechCardSeamStatus =
   | "TECH_CARD_SEAM_STATUS_UNKNOWN"
@@ -4663,6 +4668,9 @@ export type TechCardSeamAnchor = {
   // inner line or a free spot rather than an edge (edge_hint "i<k>" names inner line k). Absent =
   // the client places the piece geometrically.
   placement: TechCardSeamPlacement | undefined;
+  // Which way THIS anchor's piece lies against the other side's pieces in the step that sews the
+  // row (the owner's under/over switch). UNKNOWN = unset: the client's own rule, as before.
+  layer: TechCardSeamLayer | undefined;
 };
 
 // TechCardSeamSample is one point of an edge's shape, in the piece's own bbox-normalised frame

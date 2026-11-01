@@ -21,8 +21,10 @@ import {
   poseOf,
   poseRow,
   type EdgeAnchor,
+  type SeamLayer,
   type StoredPose,
   type StoredSeam,
+  withSeamLayer,
 } from 'lib/seams';
 import { cn } from 'lib/utility';
 import {
@@ -52,13 +54,7 @@ import {
   type LayerHit,
 } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
-import {
-  decodeHandPlace,
-  DEFAULT_HAND,
-  isHandSeamKind,
-  stepHandsOf,
-  withHandPlace,
-} from './step-hand';
+import { decodeHandPlace, isHandSeamKind, stepHandsOf } from './step-hand';
 import { useStepResult } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
 import {
@@ -211,6 +207,10 @@ export function SeamPickerBody({
   const [posing, setPosing] = useState(false);
   const [poseEdits, setPoseEdits] = useState<Map<string, PosePin>>(() => new Map());
   const [handEdits, setHandEdits] = useState<Map<string, StoredSeam>>(() => new Map());
+  // The under/over switch on a pose row: piece → layer, null = cleared; saved with «done».
+  const [poseLayerEdits, setPoseLayerEdits] = useState<Map<string, SeamLayer | null>>(
+    () => new Map(),
+  );
   const [poseSel, setPoseSel] = useState<string | null>(null);
   const [snapOn, setSnapOn] = useState(false);
   const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
@@ -357,6 +357,7 @@ export function SeamPickerBody({
           host: hg,
           placement: pose.placement,
           grainDeg: geo?.grainDeg,
+          layer: pose.layer,
         }),
       ];
     });
@@ -504,6 +505,7 @@ export function SeamPickerBody({
     setPosing(false);
     setPoseEdits(new Map());
     setHandEdits(new Map());
+    setPoseLayerEdits(new Map());
     setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
@@ -516,6 +518,7 @@ export function SeamPickerBody({
     setRefused('');
     setPoseEdits(new Map());
     setHandEdits(new Map());
+    setPoseLayerEdits(new Map());
     setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
@@ -583,29 +586,56 @@ export function SeamPickerBody({
   };
 
   const editedStepRows = stepRows.map((row) => handEdits.get(row.seamKey) ?? row);
+  // The under/over switch: the selected piece against the host fixed at pickup, on this step's row
+  // that joins them (seam, surface) or the piece's own pose row. The flag is the only stacking claim;
+  // an edge row's legacy «inside» hand reads as under until the owner sets the flag.
   const layerTarget = (() => {
     const piece = poseSel;
     const host = piece ? pickupOf(piece).host : null;
     if (!piece || !host) return null;
-    for (const row of editedStepRows) {
-      if (!isHandSeamKind(row.kind)) continue;
+    for (const row of editedStepRows)
       for (const [own, other] of [
         [row.sideA, row.sideB],
         [row.sideB, row.sideA],
       ] as const) {
         const anchor = own.find((candidate) => candidate.piece === piece);
         if (!anchor || !other.some((candidate) => candidate.piece === host)) continue;
-        return { row, piece, host, hand: decodeHandPlace(anchor.placement) ?? DEFAULT_HAND };
+        const legacy =
+          isHandSeamKind(row.kind) && decodeHandPlace(anchor.placement)?.inside ? 'under' : null;
+        return {
+          kind: 'row' as const,
+          row,
+          piece,
+          layer: anchor.layer ?? legacy,
+          explicit: anchor.layer,
+        };
       }
-    }
-    return null;
+    const own = ownPoseRows.get(piece);
+    if (!poseEdits.has(piece) && !own) return null;
+    const layer = poseLayerEdits.has(piece)
+      ? poseLayerEdits.get(piece)!
+      : own?.sideA[0]?.layer ?? null;
+    return { kind: 'pose' as const, piece, layer, explicit: layer };
   })();
-  const setLayer = (inside: boolean) => {
+  const setLayer = (layer: SeamLayer) => {
     if (!layerTarget || busy) return;
-    const row = withHandPlace(layerTarget.row, layerTarget.piece, {
-      ...layerTarget.hand,
-      inside,
-    });
+    // A second press on a set switch clears it: no claim, the two pieces are equal. A legacy
+    // «inside» lit as under is not a flag; pressing under then writes the flag over it.
+    const next = layerTarget.explicit === layer ? null : layer;
+    if (layerTarget.kind === 'pose') {
+      setPoseLayerEdits((current) => new Map(current).set(layerTarget.piece, next));
+      return;
+    }
+    const flag = (side: readonly EdgeAnchor[]) =>
+      side.map((anchor) => {
+        if (anchor.piece !== layerTarget.piece) return anchor;
+        return withSeamLayer(anchor, next);
+      });
+    const row = {
+      ...layerTarget.row,
+      sideA: flag(layerTarget.row.sideA),
+      sideB: flag(layerTarget.row.sideB),
+    };
     setHandEdits((current) => new Map(current).set(row.seamKey, row));
   };
   const shownPoseLayers = useMemo(() => {
@@ -625,10 +655,17 @@ export function SeamPickerBody({
         for (const anchor of own) {
           const hand = decodeHandPlace(anchor.placement);
           const host = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
-          if (hand && host) move(anchor.piece, host, hand.inside);
+          if (!host) continue;
+          if (anchor.layer) move(anchor.piece, host, anchor.layer === 'under');
+          else if (hand) move(anchor.piece, host, hand.inside);
         }
+    for (const [piece, layer] of poseLayerEdits) {
+      const own = ownPoseRows.get(piece);
+      const host = poseEdits.get(piece)?.host ?? (own ? poseOf(own)?.host : undefined);
+      if (layer && host) move(piece, host, layer === 'under');
+    }
     return order;
-  }, [poseLayers, handEdits]);
+  }, [poseLayers, handEdits, poseLayerEdits, poseEdits, ownPoseRows]);
 
   const resetPose = () => {
     if (busy) return;
@@ -649,11 +686,19 @@ export function SeamPickerBody({
           next.delete(key);
       return next;
     });
+    setPoseLayerEdits((current) => {
+      if (!selected) return new Map();
+      const next = new Map(current);
+      for (const piece of current.keys()) if (selected.has(piece)) next.delete(piece);
+      return next;
+    });
     setPoseSnap(null);
   };
   const finishPose = async () => {
     if (!posing || busy) return;
     const put: StoredPose[] = [];
+    const layerOf = (piece: string, own: StoredPose | undefined) =>
+      (poseLayerEdits.has(piece) ? poseLayerEdits.get(piece) : own?.sideA[0]?.layer) ?? undefined;
     for (const [piece, pin] of poseEdits) {
       const own = ownPoseRows.get(piece);
       const pg = geoms.get(piece);
@@ -666,8 +711,16 @@ export function SeamPickerBody({
           host: hg,
           placement: pin.placement,
           grainDeg: geo?.grainDeg,
+          layer: layerOf(piece, own),
         }),
       );
+    }
+    // A switch flipped on a saved pose that was not moved: the stored row with the new flag only.
+    for (const piece of poseLayerEdits.keys()) {
+      const own = ownPoseRows.get(piece);
+      if (poseEdits.has(piece) || !own?.sideA[0]) continue;
+      const layer = layerOf(piece, own);
+      put.push({ ...own, sideA: [withSeamLayer(own.sideA[0], layer), ...own.sideA.slice(1)] });
     }
     if (!put.length && !handEdits.size) {
       exitPose();
@@ -965,17 +1018,17 @@ export function SeamPickerBody({
               </Chip>
               <ChipRow>
                 <Chip
-                  selected={!!layerTarget?.hand.inside}
-                  pressed={!!layerTarget?.hand.inside}
-                  onClick={() => setLayer(true)}
+                  selected={layerTarget?.layer === 'under'}
+                  pressed={layerTarget?.layer === 'under'}
+                  onClick={() => setLayer('under')}
                   disabled={!layerTarget || busy}
                 >
                   under
                 </Chip>
                 <Chip
-                  selected={!!layerTarget && !layerTarget.hand.inside}
-                  pressed={!!layerTarget && !layerTarget.hand.inside}
-                  onClick={() => setLayer(false)}
+                  selected={layerTarget?.layer === 'over'}
+                  pressed={layerTarget?.layer === 'over'}
+                  onClick={() => setLayer('over')}
                   disabled={!layerTarget || busy}
                 >
                   over
@@ -987,7 +1040,9 @@ export function SeamPickerBody({
                 variant='underline'
                 size='xs'
                 onClick={resetPose}
-                disabled={(!poseEdits.size && !handEdits.size && !poseFree) || busy}
+                disabled={
+                  (!poseEdits.size && !handEdits.size && !poseLayerEdits.size && !poseFree) || busy
+                }
                 data-seam-pose-reset=''
               >
                 reset

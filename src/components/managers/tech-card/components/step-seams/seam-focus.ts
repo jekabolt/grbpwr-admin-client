@@ -1,6 +1,14 @@
 import type { PieceGeom } from 'lib/assembly-skeleton/types';
 import { codeName } from 'lib/pattern-import/dictionary/codes';
-import { poseOf, type SeamPlacement, type StoredPose, type StoredSeam } from 'lib/seams';
+import {
+  poseOf,
+  type EdgeAnchor,
+  type SeamLayer,
+  type SeamPlacement,
+  type StoredPose,
+  type StoredSeam,
+  withSeamLayer,
+} from 'lib/seams';
 
 import { decodeHandPlace, isHandSeamKind, twinRowOf, withHandPlace } from './step-hand';
 import { mirrorPlacement } from './step-pose';
@@ -153,8 +161,12 @@ export function mirrorLeftRows(
         updates.set(`${target.seamKey}:${partR}`, {
           row: {
             ...target,
-            sideA: target.sideA.map((anchor) => ({ ...anchor, placement })),
-            sideB: target.sideB.map((anchor) => ({ ...anchor, placement })),
+            sideA: target.sideA.map((anchor) =>
+              withLayer({ ...anchor, placement }, source.sideA[0]),
+            ),
+            sideB: target.sideB.map((anchor) =>
+              withLayer({ ...anchor, placement }, source.sideB[0]),
+            ),
           },
           piece: partR,
         });
@@ -170,12 +182,20 @@ export function mirrorLeftRows(
         if (geoms.get(anchor.piece)?.hand !== 'L') continue;
         const hand = decodeHandPlace(anchor.placement);
         const partner = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
-        if (!hand || !partner) continue;
+        // A flag set without a move has no hand place; it still goes to the twin, the place stays.
+        if (!partner || (!hand && !anchor.layer)) continue;
         const target = twinRowOf(stepRows, anchor.piece, partner, hand, geoms);
-        if (!target?.place) continue;
+        if (!target || (hand && !target.place)) continue;
         const key = `${target.row.seamKey}:${target.twin}`;
+        const placed = target.place
+          ? withHandPlace(target.row, target.twin, target.place)
+          : target.row;
+        const twinLayer = (side: readonly EdgeAnchor[]) =>
+          side.map((candidate) =>
+            candidate.piece === target.twin ? withLayer(candidate, anchor) : candidate,
+          );
         updates.set(key, {
-          row: withHandPlace(target.row, target.twin, target.place),
+          row: { ...placed, sideA: twinLayer(placed.sideA), sideB: twinLayer(placed.sideB) },
           piece: target.twin,
         });
       }
@@ -184,7 +204,12 @@ export function mirrorLeftRows(
   return [...updates.values()];
 }
 
-export type TwinPose = { piece: string; host: string; placement: SeamPlacement };
+export type TwinPose = { piece: string; host: string; placement: SeamPlacement; layer?: SeamLayer };
+
+/** The right anchor takes the left anchor's under/over (or none). */
+function withLayer(anchor: EdgeAnchor, left: EdgeAnchor | undefined): EdgeAnchor {
+  return withSeamLayer(anchor, left?.layer);
+}
 
 /**
  * Right pieces of this step posed as the mirror of their left twins' stored poses (piece and host
@@ -203,7 +228,8 @@ export function mirrorLeftPoses(
     const host = rightTwinOf(pose.host, stepPieces, geoms)?.key;
     if (!piece || !host) continue;
     const placement = mirroredOnTwins(pose.host, pose.piece, pose.placement, host, piece, geoms);
-    if (placement) out.set(piece, { piece, host, placement });
+    const layer = row.sideA[0]?.layer;
+    if (placement) out.set(piece, { piece, host, placement, ...(layer ? { layer } : {}) });
   }
   return [...out.values()];
 }

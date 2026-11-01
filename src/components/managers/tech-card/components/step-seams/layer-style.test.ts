@@ -206,7 +206,7 @@ describe('layerStyle', () => {
     expect(result.pieces.has('missing-geom')).toBe(false);
   });
 
-  it('keeps card 6 pocket layering without greying edge-to-edge front pieces', () => {
+  it('greys nothing on card 6 without the owner flag: equal pieces at 540 and 660', () => {
     const geoms = card6Geoms();
     const results = stepResults(
       {
@@ -218,36 +218,19 @@ describe('layerStyle', () => {
       },
       { manualFit: true },
     );
-    const at540 = results[card6Step(540)];
-    const pocket = layerStyle({
-      layers: at540.layers,
-      T: at540.transforms,
-      geoms,
-      mode: 'canvas',
-    });
-
-    expect(pocket.pieces.get('PCK_L_BTTM')?.depth).toBe(1);
-    expect(pocket.pieces.get('P_L_MAIN')?.depth).toBe(0);
-
-    const at660 = results[card6Step(660)];
-    const panel = layerStyle({
-      layers: at660.layers,
-      T: at660.transforms,
-      geoms,
-      mode: 'canvas',
-    });
-    expect(panel.pieces.get('P_L_U')?.coveredBy).toEqual(['PCK_L_MAIN']);
-    expect(panel.pieces.get('P_L_MAIN')?.depth).toBe(0);
-
-    const frontKeys = ['P_L_U', 'P_L_MAIN'];
-    const edgePair = layerStyle({
-      layers: at660.layers.filter((key) => frontKeys.includes(key)),
-      T: new Map(frontKeys.map((key) => [key, at660.transforms.get(key)!])),
-      geoms,
-      mode: 'canvas',
-    });
-    expect(edgePair.pieces.get('P_L_U')?.depth).toBe(0);
-    expect(edgePair.pieces.get('P_L_MAIN')?.depth).toBe(0);
+    for (const step of [540, 660]) {
+      const at = results[card6Step(step)];
+      expect(at.stacked).toEqual([]);
+      const style = layerStyle({
+        layers: at.layers,
+        T: at.transforms,
+        geoms,
+        stacked: at.stacked,
+        mode: 'canvas',
+      });
+      expect(style.lower).toEqual([]);
+      for (const piece of style.pieces.values()) expect(piece.depth).toBe(0);
+    }
   });
 
   it('uses only engine claims when stacked is given', () => {

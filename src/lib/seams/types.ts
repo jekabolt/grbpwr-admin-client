@@ -49,7 +49,14 @@ export type EdgeAnchor = {
    * are never applied as a free pose, so grading cannot pull the piece away from its seam.
    */
   placement?: SeamPlacement;
+  /**
+   * The owner's under/over of this anchor's piece against the other side in the step that sews the
+   * row (PLACE footer switch). Absent = unset: no stacking claimed.
+   */
+  layer?: SeamLayer;
 };
+
+export type SeamLayer = 'under' | 'over';
 
 export type SeamPlacement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
 
@@ -114,6 +121,10 @@ export type TechCardSeamAnchorWire = {
         flip: boolean | undefined;
       }
     | undefined;
+  layer?:
+    | 'TECH_CARD_SEAM_LAYER_UNKNOWN'
+    | 'TECH_CARD_SEAM_LAYER_UNDER'
+    | 'TECH_CARD_SEAM_LAYER_OVER';
 };
 export type TechCardSeamSideWire = { parts: TechCardSeamAnchorWire[] | undefined };
 export type TechCardSeamStatusWire =
