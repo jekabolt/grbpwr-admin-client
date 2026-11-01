@@ -93,6 +93,7 @@ export type RollPrintPlan = {
   search?: {
     /** Paper of the deterministic plan the search started from, mm (furniture included). */
     seedLengthMm: number;
+    seedMs: number;
     source: 'seed' | 'search';
     generations: number;
     searchMs: number;
@@ -266,6 +267,7 @@ export async function planRollPrint(
     markerLengthMm: planned.reduce((sum, sheet) => sum + sheet.usedLengthCm * 10, 0),
     search: {
       seedLengthMm: sheetPaperMm(search.seed),
+      seedMs: search.seedMs,
       source: search.source,
       generations: search.generations,
       searchMs: search.searchMs,
