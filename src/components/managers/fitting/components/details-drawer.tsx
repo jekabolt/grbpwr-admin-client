@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Drawer, GroupLabel, InputField, SelectField, Text } from 'ui';
 import { Mannequin } from './mannequin';
+import { PatternsFields } from './patterns-fields';
 import { RecordedByField } from './recorded-by-field';
 import { FittingFormData } from './schema';
 import { TechCardField } from './tech-card-field';
@@ -20,18 +21,20 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 // «Details» drawer of the fitting workspace: the session links (tech card, sample, model, date,
-// recorded by) and the model's measurements on the mannequin. Every field is form-backed, so the
+// recorded by), the pattern files tried on, and the model's measurements on the mannequin. Every field is form-backed, so the
 // shell's autosave stores it like any other change.
 export function DetailsDrawer({
   open,
   onOpenChange,
   models,
   readOnly,
+  sampleSizeId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   models: common_Model[];
   readOnly: boolean;
+  sampleSizeId?: number;
 }) {
   const { control, setValue } = useFormContext<FittingFormData>();
   const techCardId = useWatch({ control, name: 'techCardId' }) || 0;
@@ -79,6 +82,7 @@ export function DetailsDrawer({
         <SelectField name='modelId' label='model' items={modelOptions} valueAsNumber />
         <InputField name='fittingDate' type='date' label='date' />
         <RecordedByField isEditMode />
+        <PatternsFields sampleSizeId={sampleSizeId} />
         {!!model && (
           <>
             <GroupLabel>{`${model.model?.name || `#${model.id}`} · mm`}</GroupLabel>

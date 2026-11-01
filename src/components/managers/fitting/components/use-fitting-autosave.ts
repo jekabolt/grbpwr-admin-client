@@ -22,6 +22,7 @@ const DEBOUNCE_MS = 800;
 const TRACKED = [
   'mediaIds',
   'callouts',
+  'patterns',
   'comment',
   'outcome',
   'status',
