@@ -188,6 +188,48 @@ describe('StepPictureSvg lower layers', () => {
     },
   );
 
+  it('clips a live «under» without a claimed pair to the pieces above it', () => {
+    const upper = rectangle('upper', 'upper front', 100, 100);
+    const front = rectangle('front', 'front', 100, 100);
+    const liveGeoms = new Map([
+      ['front', front],
+      ['upper', upper],
+    ]);
+    const liveLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['front', translate(0, 60)],
+        ['upper', IDENTITY],
+      ]),
+      input: new Map([
+        ['front', 0],
+        ['upper', 1],
+      ]),
+      bbox: boxOf([
+        [0, 0],
+        [100, 160],
+      ]),
+      layers: [[0, 1]],
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={140}
+        h={200}
+        pad={4}
+        look='canvas'
+        layout={liveLayout}
+        layers={['upper', 'front']}
+        lower={['upper']}
+        stacked={[]}
+        geoms={liveGeoms}
+      />,
+    );
+    const overlay = markup.match(/<path[^>]*data-lower-layer="upper"[^>]*>/)?.[0];
+
+    expect(overlay).toContain('data-lower-partial="1"');
+    expect(overlay).toContain('clip-path="url(#lower-layer-');
+  });
+
   it('clips the graph glyph through the same lower-layer fill renderer', () => {
     const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
     const strip = rectangle('strip', 'strip', 10, 80);

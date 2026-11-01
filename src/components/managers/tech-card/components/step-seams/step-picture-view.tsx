@@ -1297,18 +1297,16 @@ export function StepPictureSvg({
   const ownedDepth = (key: string) =>
     ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0);
   const ownedTints = useMemo(() => {
-    const claims = orderedOwnedPieces.flatMap((piece): LowerLayerClaim[] => {
+    const claims = orderedOwnedPieces.flatMap((piece, index): LowerLayerClaim[] => {
       const depth =
         ownedStyle?.pieces.get(piece.key)?.depth || (ownedLowerKeys.has(piece.key) ? 1 : 0);
-      return depth
-        ? [
-            {
-              key: piece.key,
-              depth,
-              coveredBy: ownedStyle?.pieces.get(piece.key)?.coveredBy ?? [],
-            },
-          ]
-        : [];
+      const claimed = ownedStyle?.pieces.get(piece.key)?.coveredBy ?? [];
+      // a live «under» (PLACE) carries no pair yet: every piece above it may cover it, and the
+      // tint is clipped to what they actually overlap
+      const coveredBy = claimed.length
+        ? claimed
+        : orderedOwnedPieces.slice(index + 1).map((upper) => upper.key);
+      return depth ? [{ key: piece.key, depth, coveredBy }] : [];
     });
     return lowerLayerTints(
       orderedOwnedPieces.map((piece) => ({
