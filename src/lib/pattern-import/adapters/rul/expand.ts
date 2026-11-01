@@ -8,9 +8,12 @@
 //      of the block at that place; `# -1` is a point explicitly without a rule;
 //   2. the other points of a line that has graded points move by the arc-length interpolation of
 //      the two graded points around them (closed lines wrap; open lines hold the end's grade);
-//   3. a line without a rule of its own follows the graded lines its points lie on, and its other
-//      points interpolate between those; an isolated point (drill, notch, turn/curve marker) follows
-//      its rule, else the graded line it lies on;
+//   3. a line without a rule of its own follows the graded lines its points lie on; an internal
+//      coordinate on no line takes the mean-value (Floater) grade of its place in the layer-1
+//      outline; an isolated point (drill, notch, turn/curve marker) follows its rule, else the
+//      graded line it lies on; a button / drill MARK (a small closed shape and what is drawn inside
+//      it) moves as one thing by the grade of its centre — its rule, the graded line it lies on,
+//      else its proportional place inside the graded outline;
 //   4. everything else stays as drawn in every size (an ungraded line, a label) — said in a note.
 // Refused, never partially graded: a malformed table, a rule number the table lacks, a rule text
 // that sits on no point, two rules at one place, a DXF that already holds several sizes or is drawn
@@ -27,6 +30,11 @@ import type { RulTable } from './types';
 
 /** Two coordinates closer than this (mm) are one place (a rule text sits ON its point). */
 export const RUL_SAME_PLACE_MM = 0.01;
+/**
+ * A closed internal shape up to this across (mm) is a button / drill MARK (CLO's 20-gon circle of
+ * 10–15 mm, our 10 mm square), graded as one rigid thing — the drill ceiling of the DXF reader.
+ */
+export const RUL_MARK_MAX_MM = 15;
 
 /** One weighted rule term: the point moves by `w` × that rule's delta. */
 type Term = { rule: number; w: number };
@@ -42,6 +50,8 @@ export type RulExpandStats = {
   interpolated: number;
   /** Coordinates that follow the graded line they lie on (notches, line ends on the boundary). */
   following: number;
+  /** Rule-less internal coordinates graded by their mean-value place inside the layer-1 outline. */
+  interior: number;
   /** Coordinates of pieces with rules that stay as drawn (no rule, on no graded line). */
   still: number;
   /** Pieces with no rule at all (identical in every size). */
@@ -161,6 +171,7 @@ type PieceGrades = {
   ruled: number;
   interpolated: number;
   following: number;
+  interior: number;
   still: number;
   rules: Set<number>;
 };
@@ -176,14 +187,78 @@ const QV_PARTNER: Record<string, string[]> = {
 /** Layer priority for a point that follows a graded line: its own layer, then cut, sew, others. */
 const layerRank = (own: string, l: string) => (l === own ? 0 : l === '1' ? 1 : l === '14' ? 2 : 3);
 
+/** AAMA layers a button / drill mark is drawn on: internal lines, drill holes. */
+const MARK_LAYERS = new Set(['8', '13']);
+
+/** Ray casting: is c strictly inside the closed polygon? */
+function contains(pts: readonly PtMm[], c: PtMm): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i];
+    const b = pts[j];
+    if (a.y > c.y !== b.y > c.y && c.x < ((b.x - a.x) * (c.y - a.y)) / (b.y - a.y) + a.x)
+      inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * The grade of a point inside a graded closed outline: the mean value coordinates (Floater) of
+ * the outline's vertices — a proportional place, exact for an affine grade, smooth otherwise.
+ * Null when c sits on the outline (that is `follow`'s case) or the weights do not resolve.
+ */
+function meanValueGrade(pts: readonly PtMm[], g: readonly Grade[], c: PtMm): Grade | null {
+  const n = pts.length;
+  const d: number[] = [];
+  for (let i = 0; i < n; i++) {
+    d.push(Math.hypot(pts[i].x - c.x, pts[i].y - c.y));
+    if (d[i] < 1e-9) return [...g[i]];
+  }
+  // tan(α/2) = sin α / (1 + cos α) of the angle at c between consecutive vertices, signed, so the
+  // outline's winding cancels out of the normalised weights
+  const t: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ux = (pts[i].x - c.x) / d[i];
+    const uy = (pts[i].y - c.y) / d[i];
+    const vx = (pts[j].x - c.x) / d[j];
+    const vy = (pts[j].y - c.y) / d[j];
+    const cos = Math.max(-1, Math.min(1, ux * vx + uy * vy));
+    if (1 + cos < 1e-12) return null;
+    t.push((ux * vy - uy * vx) / (1 + cos));
+  }
+  const w: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    w.push((t[(i - 1 + n) % n] + t[i]) / d[i]);
+    sum += w[i];
+  }
+  if (!(Math.abs(sum) > 1e-12)) return null;
+  const out: Grade = [];
+  for (let i = 0; i < n; i++) add(out, g[i], w[i] / sum);
+  return out.filter((x) => Math.abs(x.w) > 1e-12);
+}
+
 function gradePiece(
   piece: PieceBlock,
   eps: number,
+  markMax: number,
   label: string,
   sameRow: (a: number, b: number) => boolean,
   moveKey: (g: Grade) => string,
 ): PieceGrades {
   const ents = piece.entities;
+  // AAMA turn / curve POINTs (layers 2 / 3) describe the chain immediately before them. At an
+  // internal-line crossing the same coordinate may lie on a later chain too, but that later line
+  // does not own the marker and may legitimately carry another grade. Remember the source chain
+  // so the marker follows that chain only.
+  const pointOwner = new Map<number, number>();
+  let precedingChain = -1;
+  ents.forEach((m, e) => {
+    if (m.kind === 'chain') precedingChain = e;
+    else if (m.kind === 'point' && (m.layer === '2' || m.layer === '3') && precedingChain >= 0)
+      pointOwner.set(e, precedingChain);
+  });
   const odd = ents.find((m) => m.kind === 'rule' && Number.isNaN(m.rule));
   if (odd)
     throw refuse(`${label}: the grade-rule text "${odd.text}" does not name an integer rule`);
@@ -251,14 +326,19 @@ function gradePiece(
     ruled: 0,
     interpolated: 0,
     following: 0,
+    interior: 0,
     still: 0,
     rules: new Set(),
   };
   const gradable = (m: ModelEntity) => m.kind === 'chain' || m.kind === 'point';
+  // Keep absent rule text distinct from CLO's explicit `# -1`: only the former may use the
+  // proportional interior fallback below. Both continue to interpolate/follow exactly as before.
+  const sourceRule: (number | null | undefined)[][] = ents.map((m) => m.slots.map(() => undefined));
   ents.forEach((m, e) => {
     if (!gradable(m)) return;
     m.slots.forEach((s, k) => {
       const r = ruleAt(m, s.x, s.y);
+      sourceRule[e][k] = r;
       if (typeof r === 'number') {
         out.of[e][k] = [{ rule: r, w: 1 }];
         out.rules.add(r);
@@ -297,7 +377,16 @@ function gradePiece(
     graded.add(e);
   });
   // 3 · lines without a rule of their own / isolated points: follow the graded line they lie on
-  const follow = (m: ModelEntity, s: { x: number; y: number }): Grade | null => {
+  const follow = (m: ModelEntity, source: number, s: { x: number; y: number }): Grade | null => {
+    const owner = pointOwner.get(source);
+    if (owner !== undefined && graded.has(owner)) {
+      const c = ents[owner];
+      const hit = onChain(s, ptsOf(c), c.closed, eps);
+      if (hit) {
+        const g = out.of[owner];
+        return blend(g[hit.seg]!, g[(hit.seg + 1) % c.slots.length] ?? g[hit.seg]!, hit.t);
+      }
+    }
     // every graded line the point lies on, best layer first; lines of one rank must agree
     const hits: { rank: number; g: Grade; layer: string }[] = [];
     for (const e of graded) {
@@ -323,15 +412,116 @@ function gradePiece(
       );
     return top[0].g;
   };
+  // 2b · button / drill / buttonhole MARKS move as one rigid thing. A mark is a cluster of small
+  // ungraded internal entities (each within RUL_MARK_MAX_MM, centres closer than half of it): CLO's
+  // 20-gon circle with its cross lines, our square with its centre point, a 12 mm buttonhole slit
+  // with its ticks, a bare drill point. Every coordinate of the cluster takes the grade of the
+  // cluster's CENTRE — its rule text, else the graded line it lies on, else its proportional place
+  // inside the graded outline. Graded vertex by vertex a circle would be a different ellipse in
+  // every size; left still, every size's button would stay at the sample's place. A member that
+  // itself touches a graded line is not claimed: it follows that line (step 3).
+  const inside = (c: PtMm): Grade | null => {
+    for (const layer of ['1', '14'])
+      for (const e of graded) {
+        const b = ents[e];
+        if (b.layer !== layer || !b.closed || b.slots.length < 3) continue;
+        const pts = ptsOf(b);
+        if (!contains(pts, c)) continue;
+        return meanValueGrade(pts, out.of[e] as Grade[], c);
+      }
+    return null;
+  };
+  type Box = { minX: number; maxX: number; minY: number; maxY: number };
+  const boxOf = (m: ModelEntity): Box => ({
+    minX: Math.min(...m.slots.map((s) => s.x)),
+    maxX: Math.max(...m.slots.map((s) => s.x)),
+    minY: Math.min(...m.slots.map((s) => s.y)),
+    maxY: Math.max(...m.slots.map((s) => s.y)),
+  });
+  const members: { e: number; b: Box }[] = [];
+  ents.forEach((m, e) => {
+    if (!m.slots.length || graded.has(e) || out.of[e].some(Boolean)) return;
+    if (m.kind === 'chain' ? !MARK_LAYERS.has(m.layer) : m.kind !== 'point' || m.layer !== '13')
+      return;
+    const b = boxOf(m);
+    if (b.maxX - b.minX <= markMax && b.maxY - b.minY <= markMax) members.push({ e, b });
+  });
+  const root = members.map((_, i) => i);
+  const find = (i: number): number => (root[i] === i ? i : (root[i] = find(root[i])));
+  const mid = (b: Box): PtMm => ({ x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 });
+  for (let i = 0; i < members.length; i++)
+    for (let j = i + 1; j < members.length; j++) {
+      const a = mid(members[i].b);
+      const b = mid(members[j].b);
+      if (Math.hypot(a.x - b.x, a.y - b.y) <= markMax / 2) root[find(i)] = find(j);
+    }
+  const clusters = new Map<number, number[]>();
+  members.forEach((_, i) => {
+    const r = find(i);
+    (clusters.get(r) ?? clusters.set(r, []).get(r)!).push(i);
+  });
+  for (const idx of clusters.values()) {
+    const box: Box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const i of idx) {
+      const b = members[i].b;
+      box.minX = Math.min(box.minX, b.minX);
+      box.maxX = Math.max(box.maxX, b.maxX);
+      box.minY = Math.min(box.minY, b.minY);
+      box.maxY = Math.max(box.maxY, b.maxY);
+    }
+    // a chain of small things is not one mark
+    if (box.maxX - box.minX > 2 * markMax || box.maxY - box.minY > 2 * markMax) continue;
+    const c = mid(box);
+    const m0 = ents[members[idx[0]].e];
+    const r = ruleAt(m0, c.x, c.y);
+    let g: Grade | null = null;
+    if (typeof r === 'number') {
+      g = [{ rule: r, w: 1 }];
+      out.rules.add(r);
+    }
+    g ??= follow(m0, members[idx[0]].e, c) ?? inside(c);
+    if (!g) continue;
+    for (const i of idx) {
+      const e = members[i].e;
+      const m = ents[e];
+      if (m.slots.some((s) => follow(m, e, s))) continue;
+      out.of[e] = m.slots.map(() => [...g!]);
+      out.following += m.slots.length;
+      if (m.kind === 'chain') graded.add(e);
+    }
+  }
+
+  // 3a · genuinely rule-less internal geometry follows the piece rather than staying at the
+  // sample coordinates. Boundary endpoints take the exact grade of that edge; every other vertex
+  // takes the mean-value (Floater) grade of its place in the layer-1 outline. Run this after rigid
+  // marks so a circle/buttonhole keeps its shape, and only for coordinates with no source rule
+  // text: an explicit rule was handled above, while `# -1` keeps its existing interpolation/follow
+  // semantics.
+  ents.forEach((m, e) => {
+    if (!gradable(m) || graded.has(e) || (m.layer !== '8' && m.layer !== '14')) return;
+    m.slots.forEach((s, k) => {
+      if (out.of[e][k] || sourceRule[e][k] !== undefined) return;
+      const edge = follow(m, e, s);
+      const g = edge ?? inside(s);
+      if (!g) return;
+      out.of[e][k] = g;
+      if (edge) out.following++;
+      else out.interior++;
+    });
+    if (m.kind === 'chain' && out.of[e].every(Boolean)) graded.add(e);
+  });
+
   // to a fixed point: a line graded by following can carry the points that lie on it in turn
   for (let grew = true; grew; ) {
     grew = false;
     ents.forEach((m, e) => {
-      if (!gradable(m) || graded.has(e)) return;
+      // Layer 7 is the grain line (reference geometry consumed downstream), not a mark that
+      // follows a boundary it happens to touch: without rules of its own it stays as drawn.
+      if (!gradable(m) || graded.has(e) || m.layer === '7') return;
       let got = false;
       m.slots.forEach((s, k) => {
         if (out.of[e][k]) return;
-        const g = follow(m, s);
+        const g = follow(m, e, s);
         if (g) {
           out.of[e][k] = g;
           out.following++;
@@ -361,6 +551,9 @@ function gradePiece(
 /**
  * The piece's grade axes: D6673 measures the deltas along the grade reference line (layer 5) when
  * the piece has one, else along the drawing's x / y. Two reference lines that disagree → refused.
+ * The grain line (layer 7) is NOT the grade reference: CLO exports no layer 5 and its rules are in
+ * the drawing's x / y — the golden shirt's pocket bottoms (grain 90°, mirrored hands) only expand to
+ * exact mirrors with growing areas in world axes; along the grain they drift apart by size.
  */
 function gradeAxes(p: PieceBlock, label: string): { cos: number; sin: number } {
   const angles: number[] = [];
@@ -494,7 +687,12 @@ export function expandRul(input: ExpandInput): RulExpansion {
   // compared on their ASCII letters: the two files of one export may use different codepages
   const ascii = (v: string) => v.replace(/[^\x21-\x7e]+/g, '').toUpperCase();
   const key = (v: string) => ascii(v) || v.trim().toUpperCase();
-  if (declaredTable && key(declaredTable) !== key(rul.name))
+  const fileStem = (name: string) => (name.split(/[\\/]/).pop() ?? name).replace(/\.[^.]*$/, '');
+  const cloFilenameTable =
+    /CLO/i.test(rul.author ?? '') &&
+    (key(declaredTable ?? '') === key(fileStem(input.dxfName)) ||
+      key(declaredTable ?? '') === key(fileStem(input.rulName)));
+  if (declaredTable && key(declaredTable) !== key(rul.name) && !cloFilenameTable)
     throw refuse(
       `${input.dxfName} names grade rule table "${declaredTable}", but ${input.rulName} is "${rul.name}" — they are not one export`,
     );
@@ -510,6 +708,7 @@ export function expandRul(input: ExpandInput): RulExpansion {
     gradePiece(
       p,
       eps,
+      RUL_MARK_MAX_MM / units.mmPerUnit,
       `${input.dxfName} · ${p.block.name}`,
       (a, b) => {
         const A = rul.rules.get(a);
@@ -770,9 +969,10 @@ export function expandRul(input: ExpandInput): RulExpansion {
       ruled: a.ruled + g.ruled,
       interpolated: a.interpolated + g.interpolated,
       following: a.following + g.following,
+      interior: a.interior + g.interior,
       still: a.still + (g.rules.size ? g.still : 0),
     }),
-    { ruled: 0, interpolated: 0, following: 0, still: 0 },
+    { ruled: 0, interpolated: 0, following: 0, interior: 0, still: 0 },
   );
   if (ungradedPieces.length)
     warnings.push(
@@ -781,6 +981,10 @@ export function expandRul(input: ExpandInput): RulExpansion {
   if (tot.interpolated)
     warnings.push(
       `${tot.interpolated} curve point${tot.interpolated > 1 ? 's' : ''} without a rule graded by arc-length interpolation between the graded points around them — the source CAD may smooth a graded curve differently`,
+    );
+  if (tot.interior)
+    warnings.push(
+      `${tot.interior} internal point${tot.interior > 1 ? 's' : ''} without a source rule graded by mean-value position inside the layer-1 outline`,
     );
   if (tot.still)
     warnings.push(

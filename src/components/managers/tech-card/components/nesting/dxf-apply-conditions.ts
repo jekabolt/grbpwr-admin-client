@@ -25,9 +25,26 @@ import type { DxfBundle, DxfIndex } from './dxf-geometry';
  * Индекс замера строится по НЕОТФИЛЬТРОВАННОМУ разбору: на наборе, суженном до одного слоя,
  * второго контура блока нет по построению, и замер выродился бы в 'unknown' на каждом слое
  * (см. contour-layer.ts).
+ * The uncached reference is also used by the fixture equality benchmark.
  */
-export function applyLayerOptions(bundle: DxfBundle, index: DxfIndex): LayerOption[] {
+export function buildApplyLayerOptions(bundle: DxfBundle, index: DxfIndex): LayerOption[] {
   return layerOptions(bundle.pieces, index.split.codeById, buildAllowanceIndex(bundle.pieces));
+}
+
+const layerOptionsCache = new WeakMap<DxfBundle, WeakMap<DxfIndex, LayerOption[]>>();
+
+export function applyLayerOptions(bundle: DxfBundle, index: DxfIndex): LayerOption[] {
+  let byIndex = layerOptionsCache.get(bundle);
+  if (!byIndex) {
+    byIndex = new WeakMap<DxfIndex, LayerOption[]>();
+    layerOptionsCache.set(bundle, byIndex);
+  }
+  let options = byIndex.get(index);
+  if (!options) {
+    options = buildApplyLayerOptions(bundle, index);
+    byIndex.set(index, options);
+  }
+  return options;
 }
 
 /**

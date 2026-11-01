@@ -5,13 +5,21 @@ import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
   LOWER_LAYER_FILL,
   LOWER_LAYER_STROKE,
+  unionPictureOfLayout,
   type UnionPicture,
 } from 'lib/assembly-skeleton/union';
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
 import { UnitGlyph } from '../unit-silhouette';
-import { boxOf, type StepLayout } from './step-picture';
-import { StepPictureSvg, type EdgeMark, type PictureActionGlyph } from './step-picture-view';
+import { boxOf, fitBox, toPx, type StepLayout } from './step-picture';
+import {
+  buttonGlyphGeometry,
+  buttonHostChord,
+  buttonRadiusPx,
+  StepPictureSvg,
+  type EdgeMark,
+  type PictureActionGlyph,
+} from './step-picture-view';
 
 const rectangle = (pieceKey: string, name: string, width: number, height: number) =>
   ({
@@ -43,8 +51,8 @@ const geoms = new Map([
   ['front', rectangle('front', 'front', 100, 100)],
 ]);
 const transforms = new Map([
-  ['bag', IDENTITY],
-  ['front', translate(15, 15)],
+  ['bag', translate(15, 15)],
+  ['front', IDENTITY],
 ]);
 const points = [...transforms].flatMap(([key, transform]) =>
   geoms
@@ -79,7 +87,9 @@ const renderPicture = ({
   lower,
   stacked,
   marks,
+  stepEdges,
   actionGlyphs,
+  noSeamText,
   picture = layout,
   look = 'tile',
 }: {
@@ -87,7 +97,9 @@ const renderPicture = ({
   lower?: readonly string[];
   stacked?: readonly (readonly [string, string])[];
   marks?: readonly EdgeMark[];
+  stepEdges?: readonly string[];
   actionGlyphs?: readonly PictureActionGlyph[];
+  noSeamText?: string;
   picture?: StepLayout;
   look?: 'canvas' | 'result' | 'tile' | 'print';
 } = {}) =>
@@ -103,24 +115,156 @@ const renderPicture = ({
       stacked={stacked}
       geoms={geoms}
       marks={marks}
+      stepEdges={stepEdges}
       actionGlyphs={actionGlyphs}
+      noSeamText={noSeamText}
     />,
   );
 
 describe('StepPictureSvg lower layers', () => {
-  it('overlays only an owner-claimed lower bag', () => {
-    const markup = renderPicture({
-      layers: ['bag', 'front'],
-      lower: ['bag'],
-      stacked: [['bag', 'front']],
-      look: 'canvas',
-    });
-    const overlay = markup.match(/<path[^>]*data-lower-layer="bag"[^>]*>/)?.[0];
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'tints the whole bag when the front fully covers it in the %s renderer',
+    (look) => {
+      const markup = renderPicture({
+        layers: ['bag', 'front'],
+        lower: ['bag'],
+        stacked: [['bag', 'front']],
+        look,
+      });
+      const overlay = markup.match(/<path[^>]*data-lower-layer="bag"[^>]*>/)?.[0];
 
-    expect(overlay).toBeDefined();
-    expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
-    expect(overlay).toContain(`stroke="${LOWER_LAYER_STROKE}"`);
-    expect(overlay).toContain('pointer-events="none"');
+      expect(overlay).toBeDefined();
+      expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
+      expect(overlay).toContain('pointer-events="none"');
+      expect(overlay).toContain('clip-path="url(#lower-layer-');
+      expect(overlay).not.toContain('data-lower-partial');
+      expect(markup).toContain('data-layer-depth="1"');
+      expect(markup.indexOf('data-lower-layer="bag"')).toBeGreaterThan(
+        markup.indexOf('data-piece-surface="front"'),
+      );
+      expect(markup).not.toContain('data-covered-layer');
+    },
+  );
+
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'clips a sleeve tint to its narrow cover in the %s renderer',
+    (look) => {
+      const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
+      const strip = rectangle('strip', 'placket strip', 10, 80);
+      const partialGeoms = new Map([
+        ['sleeve', sleeve],
+        ['strip', strip],
+      ]);
+      const partialLayout: StepLayout = {
+        ...layout,
+        T: new Map([
+          ['sleeve', IDENTITY],
+          ['strip', translate(45, 10)],
+        ]),
+        input: new Map([
+          ['sleeve', 0],
+          ['strip', 1],
+        ]),
+        bbox: boxOf(sleeve.rs),
+        layers: [[0, 1]],
+      };
+      const markup = renderToStaticMarkup(
+        <StepPictureSvg
+          w={140}
+          h={120}
+          pad={4}
+          look={look}
+          layout={partialLayout}
+          layers={['sleeve', 'strip']}
+          lower={['sleeve']}
+          stacked={[['sleeve', 'strip']]}
+          geoms={partialGeoms}
+        />,
+      );
+      const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
+      const outline = markup.match(/<path[^>]*data-piece-outline="sleeve"[^>]*>/)?.[0];
+
+      expect(overlay).toContain('data-lower-partial="1"');
+      expect(overlay).toContain('clip-path="url(#lower-layer-');
+      expect(outline).toContain('stroke="var(--color-borderColor)"');
+      expect(outline).not.toContain(`stroke="${LOWER_LAYER_STROKE}"`);
+      expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
+        markup.indexOf('data-piece-surface="strip"'),
+      );
+    },
+  );
+
+  it('clips a live «under» without a claimed pair to the pieces above it', () => {
+    const upper = rectangle('upper', 'upper front', 100, 100);
+    const front = rectangle('front', 'front', 100, 100);
+    const liveGeoms = new Map([
+      ['front', front],
+      ['upper', upper],
+    ]);
+    const liveLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['front', translate(0, 60)],
+        ['upper', IDENTITY],
+      ]),
+      input: new Map([
+        ['front', 0],
+        ['upper', 1],
+      ]),
+      bbox: boxOf([
+        [0, 0],
+        [100, 160],
+      ]),
+      layers: [[0, 1]],
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={140}
+        h={200}
+        pad={4}
+        look='canvas'
+        layout={liveLayout}
+        layers={['upper', 'front']}
+        lower={['upper']}
+        stacked={[]}
+        geoms={liveGeoms}
+      />,
+    );
+    const overlay = markup.match(/<path[^>]*data-lower-layer="upper"[^>]*>/)?.[0];
+
+    expect(overlay).toContain('data-lower-partial="1"');
+    expect(overlay).toContain('clip-path="url(#lower-layer-');
+  });
+
+  it('clips the graph glyph through the same lower-layer fill renderer', () => {
+    const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
+    const strip = rectangle('strip', 'strip', 10, 80);
+    const picture = unionPictureOfLayout(
+      {
+        T: new Map([
+          ['sleeve', IDENTITY],
+          ['strip', translate(45, 10)],
+        ]),
+        stacked: [],
+        onRuns: [],
+      },
+      new Map([
+        ['sleeve', sleeve],
+        ['strip', strip],
+      ]),
+      ['sleeve', 'strip'],
+      { lower: ['sleeve'], stacked: [['sleeve', 'strip']] },
+    );
+    const markup = renderToStaticMarkup(<UnitGlyph picture={picture} name='sleeve unit' />);
+    const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
+
+    expect(picture.lowerLayerCovers).toEqual({ sleeve: ['strip'] });
+    expect(picture.lowerLayerDepths).toEqual({ sleeve: 1 });
+    expect(overlay).toContain('data-lower-partial="1"');
+    expect(overlay).toContain('clip-path="url(#lower-layer-');
+    expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
+      markup.indexOf('data-lower-layer-base="sleeve"'),
+    );
   });
 
   it('marks a picked edge above the lower-piece tint', () => {
@@ -175,6 +319,68 @@ describe('StepPictureSvg lower layers', () => {
     expect(markup).not.toContain('data-covered-layer=');
   });
 
+  it('hides a covered button under the piece above it', () => {
+    const markup = renderPicture({
+      layers: ['bag', 'front'],
+      lower: ['bag'],
+      stacked: [['bag', 'front']],
+      look: 'canvas',
+      actionGlyphs: [
+        { id: 'covered-button', piece: 'bag', kind: 'button', point: [30, 30], sizeMm: 15 },
+      ],
+    });
+
+    expect(markup).not.toContain('data-asm-mark="button"');
+  });
+
+  it('keeps a claimed coincident twin at zero offset with its dashed edge underneath', () => {
+    const lining = rectangle('lining', 'lining', 70, 70);
+    const shell = rectangle('shell', 'shell', 70, 70);
+    const twinGeoms = new Map([
+      ['lining', lining],
+      ['shell', shell],
+    ]);
+    const twinLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['lining', IDENTITY],
+        ['shell', IDENTITY],
+      ]),
+      input: new Map([
+        ['lining', 0],
+        ['shell', 1],
+      ]),
+      stacked: [['shell', 'lining']],
+      bbox: boxOf(shell.rs),
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={160}
+        h={120}
+        pad={20}
+        look='canvas'
+        layout={twinLayout}
+        layers={['lining', 'shell']}
+        lower={['lining']}
+        stacked={[['lining', 'shell']]}
+        geoms={twinGeoms}
+        names={['lining', 'shell']}
+      />,
+    );
+    const surfacePath = (piece: string) => {
+      const tag = markup.match(new RegExp(`<path[^>]*data-piece-surface="${piece}"[^>]*>`))?.[0];
+      return tag?.match(/ d="([^"]+)"/)?.[1];
+    };
+    const underlay = markup.match(/<path[^>]*data-stacked-underlay="lining"[^>]*>/)?.[0];
+
+    expect(surfacePath('lining')).toBe(surfacePath('shell'));
+    expect(underlay).toContain('stroke-dasharray=');
+    expect(markup.indexOf('data-stacked-underlay="lining"')).toBeLessThan(
+      markup.indexOf('data-piece-surface="shell"'),
+    );
+    expect(markup).toContain('data-stacked-name-leader="lining"');
+  });
+
   it('does not add a lower overlay to a rowless picture', () => {
     expect(renderPicture()).not.toContain('data-lower-layer=');
   });
@@ -221,6 +427,34 @@ describe('StepPictureSvg lower layers', () => {
   });
 });
 
+describe('StepPictureSvg step highlight', () => {
+  const edgeTag = (markup: string) =>
+    markup.match(/<path[^>]*data-step-seam-edge="bag#0"[^>]*>/)?.[0] ?? '';
+
+  it('draws the exact edge blue on screen and black in print at 1.26× outline width', () => {
+    const screen = renderPicture({ look: 'canvas', stepEdges: ['bag#0'] });
+    const print = renderPicture({ look: 'print', stepEdges: ['bag#0'] });
+
+    expect(edgeTag(screen)).toContain('stroke="var(--color-highlightColor)"');
+    expect(edgeTag(screen)).toContain('stroke-width="4.032"');
+    expect(edgeTag(print)).toContain('stroke="var(--color-textColor)"');
+    expect(edgeTag(print)).toContain('stroke-width="2.205"');
+    expect(screen).toContain('stroke="var(--color-borderColor)" stroke-width="3.2"');
+  });
+
+  it('marks a known rowless picture without highlighting an edge or printing a length', () => {
+    const markup = renderPicture({ look: 'canvas', stepEdges: [] });
+    const print = renderPicture({ look: 'print', stepEdges: [], noSeamText: 'no seam' });
+
+    expect(markup).not.toContain('data-step-seam-edge=');
+    expect(markup).toContain('data-step-no-seams=""');
+    expect(markup).toContain('>no seam</text>');
+    expect(markup).not.toMatch(/>[^<]*\bmm\b/i);
+    expect(print).toContain('data-step-no-seams=""');
+    expect(print).toContain('>no seam</text>');
+  });
+});
+
 describe('StepPictureSvg action glyphs', () => {
   const narrow = rectangle('narrow', 'narrow placket', 10, 100);
   const narrowGeoms = new Map([['narrow', narrow]]);
@@ -239,6 +473,7 @@ describe('StepPictureSvg action glyphs', () => {
       kind,
       point: [5, 10 + index * 11],
       direction: [1, 0],
+      sizeMm: 11,
       lengthMm: kind === 'buttonhole' ? 12 : undefined,
     }));
   const renderNarrow = (glyphs: readonly PictureActionGlyph[]) =>
@@ -299,8 +534,10 @@ describe('StepPictureSvg action glyphs', () => {
 
     expect(direction(canvas)).toEqual(direction(pdf));
     expect(segmentLength(canvas)).toBeCloseTo(segmentLength(pdf), 8);
-    expect(tag(canvas)).toContain('stroke-width="0.8"');
-    expect(tag(pdf)).toContain('stroke-width="0.7"');
+    expect(tag(canvas)).toContain('stroke="var(--color-highlightColor)"');
+    expect(tag(canvas)).toContain('stroke-width="3"');
+    expect(tag(pdf)).toContain('stroke="var(--color-textColor)"');
+    expect(tag(pdf)).toContain('stroke-width="3"');
   });
 
   it('keeps eight narrow-host buttons on eight distinct marks', () => {
@@ -313,6 +550,22 @@ describe('StepPictureSvg action glyphs', () => {
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
   });
 
+  it('centres an edge button across its narrow host and caps it at ninety percent', () => {
+    const point: Pt2 = [10, 50];
+    const markup = renderNarrow([{ ...marks('button')[0], point, direction: [1, 0], sizeMm: 11 }]);
+    const tag = markup.match(/<g[^>]*data-asm-mark="button"[^>]*>/)?.[0] ?? '';
+    const attribute = (name: string) =>
+      Number(tag.match(new RegExp(`${name}="([^"]+)"`))?.[1] ?? Number.NaN);
+    const fit = fitBox(narrowLayout.bbox, 120, 140, 7);
+    const left = toPx(fit, [0, point[1]]);
+    const right = toPx(fit, [10, point[1]]);
+    const hostWidth = Math.abs(right[0] - left[0]);
+
+    expect(attribute('data-asm-x')).toBeCloseTo((left[0] + right[0]) / 2, 1);
+    expect(attribute('data-asm-y')).toBeCloseTo(left[1], 1);
+    expect(attribute('data-asm-radius') * 2).toBeLessThanOrEqual(hostWidth * 0.9 + 1e-9);
+  });
+
   it('spreads truly outside fallbacks along the narrow host', () => {
     const markup = renderNarrow(
       marks('button').map((glyph) => ({ ...glyph, point: [30, glyph.point[1]] })),
@@ -323,5 +576,52 @@ describe('StepPictureSvg action glyphs', () => {
 
     expect(centres).toHaveLength(8);
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
+  });
+
+  it('uses true button size with a sixteen-pixel minimum on a wide host', () => {
+    expect(buttonRadiusPx(2, 1, 100)).toBe(8);
+    expect(buttonRadiusPx(20, 2, 100)).toBe(20);
+    expect(buttonRadiusPx(undefined, 2, 100)).toBe(15);
+  });
+
+  it('lets a ten-pixel host override the sixteen-pixel minimum', () => {
+    expect(buttonRadiusPx(20, 2, 10)).toBe(4.5);
+  });
+
+  it('takes the host chord containing the mark', () => {
+    const chord = buttonHostChord(
+      [0, 40],
+      [1, 0],
+      [
+        [0, 0],
+        [10, 0],
+        [10, 100],
+        [0, 100],
+      ],
+    );
+
+    expect(chord?.at[0]).toBeCloseTo(5, 6);
+    expect(chord?.at[1]).toBeCloseTo(40, 6);
+    expect(chord?.width).toBeCloseTo(10, 6);
+  });
+
+  it.each([
+    ['cross_x', 2],
+    ['parallel', 2],
+    ['square', 1],
+    ['u_shape', 1],
+    ['other', 0],
+  ] as const)('draws the %s attach pattern with visible four holes', (pattern, moves) => {
+    const geometry = buttonGlyphGeometry([20, 20], 8, 4, pattern);
+
+    expect(geometry.holes).toHaveLength(4);
+    expect(geometry.thread.match(/M/g)?.length ?? 0).toBe(moves);
+  });
+
+  it('draws two holes with one thread bar', () => {
+    const geometry = buttonGlyphGeometry([20, 20], 8, 2, 'cross_x');
+
+    expect(geometry.holes).toHaveLength(2);
+    expect(geometry.thread.match(/M/g)).toHaveLength(1);
   });
 });

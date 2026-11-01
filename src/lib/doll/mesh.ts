@@ -11,7 +11,16 @@ export type PieceMesh = {
   /** Boundary vertices in contour order: local vertex id + the `rs` index it sits on. */
   bVert: number[];
   bRs: number[];
+  /**
+   * Fold lines creased into the mesh, one per `creases` input, as local vertex ids from the first
+   * end to the second: every consecutive pair is an edge of the triangulation, so no triangle
+   * straddles a crease. Empty for a line that could not be creased (the caller says so in words).
+   */
+  creases?: number[][];
 };
+
+/** A fold line to crease into the mesh: the `rs` indices of its two ends on the contour. */
+export type MeshCrease = { s: number; e: number };
 
 const orient = (a: Pt2, b: Pt2, c: Pt2) =>
   (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
@@ -236,10 +245,21 @@ export function delaunay(input: readonly Pt2[]): number[] {
 
 /**
  * Mesh a piece. `keep` = rs indices that must be vertices (edge ends, notches); `h` = lattice step.
+ * `creases` = fold lines (contour index to contour index) creased into the mesh: sampled every
+ * boundary step, the lattice kept clear of them exactly as of the contour, so every crease segment
+ * is a Gabriel edge of the point set and therefore an edge of the Delaunay triangulation — no
+ * triangle straddles a fold. Without creases the mesh is exactly what it was.
  */
-export function meshPiece(rs: readonly Pt2[], keep: readonly number[], h: number): PieceMesh {
+export function meshPiece(
+  rs: readonly Pt2[],
+  keep: readonly number[],
+  h: number,
+  creases: readonly MeshCrease[] = [],
+): PieceMesh {
   const n = rs.length;
-  const forced = [...new Set(keep.map((i) => ((i % n) + n) % n))].sort((a, b) => a - b);
+  const wrap = (i: number) => ((i % n) + n) % n;
+  const creaseEnds = creases.flatMap((c) => [c.s, c.e]);
+  const forced = [...new Set([...keep, ...creaseEnds].map(wrap))].sort((a, b) => a - b);
   if (forced.length === 0) forced.push(0);
   const step = Math.max(2, 0.6 * h); // rs is 1 mm resampled: index distance ≈ mm
   const bRs: number[] = [];
@@ -252,6 +272,38 @@ export function meshPiece(rs: readonly Pt2[], keep: readonly number[], h: number
   }
   const pts: Pt2[] = bRs.map((i) => [rs[i][0], rs[i][1]]);
   const ring: Pt2[] = pts.slice();
+  // Crease points: the ends are boundary vertices (forced), the inside sampled every `step`.
+  const creaseIds: number[][] = [];
+  const creaseSegs: [Pt2, Pt2][] = [];
+  for (const c of creases) {
+    const s = wrap(c.s);
+    const e = wrap(c.e);
+    const i0 = bRs.indexOf(s);
+    const i1 = bRs.indexOf(e);
+    if (s === e || i0 < 0 || i1 < 0) {
+      creaseIds.push([]);
+      continue;
+    }
+    const A = rs[s];
+    const B = rs[e];
+    const parts = Math.max(1, Math.round(Math.hypot(B[0] - A[0], B[1] - A[1]) / step));
+    const ids = [i0];
+    let inside = true;
+    for (let j = 1; j < parts; j++) {
+      const q: Pt2 = [A[0] + ((B[0] - A[0]) * j) / parts, A[1] + ((B[1] - A[1]) * j) / parts];
+      if (!pointInPolygon(q, ring)) inside = false;
+      ids.push(pts.length);
+      pts.push(q);
+    }
+    ids.push(i1);
+    if (!inside) {
+      pts.length -= parts - 1; // the line leaves the piece: not a crease of it
+      creaseIds.push([]);
+      continue;
+    }
+    creaseIds.push(ids);
+    creaseSegs.push([A, B]);
+  }
 
   let x0 = Infinity;
   let y0 = Infinity;
@@ -285,6 +337,9 @@ export function meshPiece(rs: readonly Pt2[], keep: readonly number[], h: number
           ok = false;
           break;
         }
+      }
+      for (const [A, B] of creaseSegs) {
+        if (ok && segDist2(q, A, B) < clear2) ok = false;
       }
       if (ok) pts.push(q);
     }
@@ -327,5 +382,20 @@ export function meshPiece(rs: readonly Pt2[], keep: readonly number[], h: number
       tris[t + 2] = s;
     }
   }
-  return { pts, tris: Uint32Array.from(tris), bVert: bRs.map((_, i) => i), bRs };
+  const mesh: PieceMesh = { pts, tris: Uint32Array.from(tris), bVert: bRs.map((_, i) => i), bRs };
+  if (creases.length) {
+    // A crease holds only when every one of its segments came out as a triangle edge.
+    const edges = new Set<number>();
+    const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
+    for (let t = 0; t < tris.length; t += 3) {
+      edges.add(key(tris[t], tris[t + 1]));
+      edges.add(key(tris[t + 1], tris[t + 2]));
+      edges.add(key(tris[t + 2], tris[t]));
+    }
+    mesh.creases = creaseIds.map((ids) => {
+      for (let k = 0; k + 1 < ids.length; k++) if (!edges.has(key(ids[k], ids[k + 1]))) return [];
+      return ids.length >= 2 ? ids : [];
+    });
+  }
+  return mesh;
 }

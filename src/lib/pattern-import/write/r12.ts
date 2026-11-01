@@ -25,7 +25,7 @@
 import type { PtMm } from '../types';
 import type { PlannedBlock } from './plan';
 import { GRAIN_SHAFT_MM, halfOnFoldText } from './plan';
-import { drillSquare, insertsOf, labelAnchor } from './r2000';
+import { drillMark, insertsOf, labelAnchor } from './r2000';
 import { type Tag, asciiText, num, serialize } from './format';
 
 /** AAMA layers we write: name, ACI colour, linetype, what the layer means. */
@@ -211,11 +211,11 @@ export function writeR12(
       pl(b.foldIsMirror && i >= firstFold ? '6' : '8', ip.pts, ip.closed),
     );
     for (const d of b.drills) {
-      pl('8', drillSquare(d), true);
+      pl('8', drillMark(d), true);
       E(0, 'POINT');
       E(8, '13');
-      E(10, num(d.x));
-      E(20, num(d.y));
+      E(10, num(d.at.x));
+      E(20, num(d.at.y));
       E(30, num(0));
     }
     for (const n of b.notches) line('4', n.a, n.b);

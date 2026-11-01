@@ -1,10 +1,9 @@
 // THE STEP'S SEAMS, WIRING (assembly-schema T8). One provider over the operations rail hands every
 // step card the saved card, its frozen state and ONE seam writer; it also keeps the form honest:
 //
-// - the card's seam rows are in the seams store even while the assembly map (whose door hydrates
-//   it) is folded away;
-// - a seam that leaves the card (removed in the review, dropped by a DXF re-upload, deleted by a
-//   colleague) leaves every step's `seamKeys` at once — the server refuses a save that names a key
+// - the card's seam rows are in the seams store even while the assembly map is folded away;
+// - a seam that leaves the card (dropped by a DXF re-upload or deleted by a colleague) leaves every
+//   step's `seamKeys` at once — the server refuses a save that names a key
 //   it no longer holds (InvalidArgument), and the autosave would retry that refusal forever;
 // - the same for a POSE row (P8, a piece placed by hand) and the steps' `poseKeys`.
 
@@ -23,9 +22,11 @@ import {
 import { useFormContext } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
+import { flipped } from '../assembly-seams/seam-actions';
 import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
+import { planStepSeamRemoval } from './step-seam-actions';
 import { dropKeys } from './step-seams-model';
 
 export type StepSeamsCtx = {
@@ -71,6 +72,38 @@ export function useAttachStepSeam(index: number) {
   );
 }
 
+/** Remove or flip one of this step's stored seams through the shared seam writer. */
+export function useStepSeamActions(index: number) {
+  const ctx = useStepSeams();
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+
+  const remove = useCallback(
+    async (seamKey: string, row: StoredSeam | undefined): Promise<boolean> => {
+      if (!ctx || ctx.frozen) return false;
+      const operations = getValues('operations') ?? [];
+      const removal = planStepSeamRemoval(operations, index, seamKey);
+      if (removal.deleteRow && row && !(await ctx.writes.remove([row]))) return false;
+      const field = `operations.${index}.seamKeys` as const;
+      const seamKeys = removal.deleteRow
+        ? ((getValues(field) ?? []) as string[]).filter((key) => key !== seamKey)
+        : removal.seamKeys;
+      setValue(field, seamKeys, { shouldDirty: true });
+      return true;
+    },
+    [ctx, getValues, index, setValue],
+  );
+
+  const flip = useCallback(
+    async (row: StoredSeam): Promise<boolean> => {
+      if (!ctx || ctx.frozen) return false;
+      return ctx.writes.upsert([{ ...row, direction: flipped(row.direction) }]);
+    },
+    [ctx],
+  );
+
+  return { remove, flip };
+}
+
 /**
  * Store a step's pose rows (P8) and keep this form step's `poseKeys` with them: `drop` is deleted
  * before `put` is upserted (so a replacement cannot briefly make a host cycle). True when the
@@ -105,21 +138,25 @@ export function StepSeamsProvider({
   techCard,
   frozen,
   active = false,
+  loadGeometry = false,
   children,
 }: {
   techCard: common_TechCard | undefined;
   frozen: boolean;
   /** The construction screen is in view (all card tabs stay mounted). */
   active?: boolean;
+  /** Non-interactive print surfaces still need the geometry without activating hint writes. */
+  loadGeometry?: boolean;
   children: ReactNode;
 }) {
   const cardId = techCard?.id;
   const writes = useSeamWrites(cardId, frozen);
-  const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard);
+  // Every card tab stays mounted. The assembly worker belongs to the visible construction tab;
+  // another tab's cached DXF must not make this hidden provider segment every piece.
+  const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard, active || loadGeometry);
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
-  // The store follows the card read here too: the assembly map's door hydrates it only while the
-  // map is open, and resets it when the door unmounts.
+  // The store follows the card read while the construction surface is mounted.
   const wire = techCard?.seams as TechCardSeamWire[] | undefined;
   const wireRef = useRef(wire);
   wireRef.current = wire;

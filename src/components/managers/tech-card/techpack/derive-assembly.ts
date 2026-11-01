@@ -46,6 +46,7 @@ import {
   rowTargetsOfAnchor,
   storedSeamSides,
 } from 'components/managers/tech-card/components/step-seams/step-rows';
+import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
@@ -73,6 +74,7 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
@@ -539,22 +541,7 @@ const NOT_JOIN = new Set(['button_attach', 'buttonhole', 'topstitch', 'bind_tape
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-const CODE_TOKEN = /^[A-Z0-9][A-Z0-9._/-]*$/i;
-
-/** Piece codes printed in assembly diagrams/text. Stable storage keys are deliberately rejected. */
-export function assemblyPieceCode(pieceName?: string, dxfAlias?: string): string {
-  const code = (value: string | undefined, requireCodeShape: boolean) => {
-    const candidate = (value ?? '').trim();
-    const codeShaped = candidate === candidate.toUpperCase() || /[0-9_./-]/.test(candidate);
-    return candidate.length <= 24 &&
-      CODE_TOKEN.test(candidate) &&
-      !ULID.test(candidate) &&
-      (!requireCodeShape || codeShaped)
-      ? candidate
-      : '';
-  };
-  return code(pieceName, true) || code(dxfAlias, false);
-}
+export { assemblyPieceCode } from './assembly-piece-code';
 
 const num = (v?: { value?: string }) => {
   const x = Number(v?.value);
@@ -2722,6 +2709,13 @@ function actionPartsOfRows(
       ? laidEdges
       : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
   });
+  return actionPartsOfTargets(targets, pieces);
+}
+
+function actionPartsOfTargets(
+  targets: readonly string[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart[] {
   return [...new Set(targets)].flatMap((target) => {
     const part = actionPartOfTarget(target, pieces);
     return part ? [part] : [];
@@ -2743,11 +2737,21 @@ function buildActions(
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
+    const finishingEdgeOp = ['topstitch', 'bind', 'hem'].includes(op.tech);
     // A flat press draws its seam only where an owner row names it; without one it stays bare
     // (no «missing seam» — it never needed one).
     const flatPress = op.tech === 'press' && pressMode(op.raw) !== null;
     const ownerRows = edgeOp || flatPress ? actionOwnerRows(op, opIndex, ops, rows) : [];
-    const edgeParts = actionPartsOfRows(ownerRows, pieces);
+    const highlighted = finishingEdgeOp
+      ? stepHighlightOf(
+          ops.map((candidate) => candidate.raw),
+          opIndex,
+          rows,
+        ).targets
+      : [];
+    const edgeParts = finishingEdgeOp
+      ? actionPartsOfTargets(highlighted, pieces)
+      : actionPartsOfRows(ownerRows, pieces);
     // Both sides of the owner seams, so «to back» can find the back across the drawn run.
     const seamPieces = ownerRows.flatMap((row) => {
       const sides = storedSeamSides(row);

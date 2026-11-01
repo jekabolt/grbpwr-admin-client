@@ -15,7 +15,7 @@ import type {
   SkeletonFacts,
 } from 'lib/assembly-skeleton/types';
 
-import type { DollGroupId } from './types';
+import type { DollGroupId, DollLayerRelation } from './types';
 
 export type GroupedPiece = {
   key: string;
@@ -130,6 +130,10 @@ export function groupPieces(
      * its facing, two belt strips into a strap) still stacks.
      */
     panels?: ReadonlySet<string>;
+    /** Explicit bottom → top claims from the step editor. */
+    layers?: readonly DollLayerRelation[];
+    /** No same-shape/area stacking unless an owner claim or seam says so. */
+    owner?: boolean;
   } = {},
 ): Grouping {
   const warnings: string[] = [];
@@ -139,7 +143,33 @@ export function groupPieces(
   const legs = facts.category === 'trousers' || facts.category === 'jumpsuit';
   const drop = new Set(opts.dropSeams ?? []);
   const dropped = (s: SeamCandidate) => drop.has(`${s.a}~${s.b}`) || drop.has(`${s.b}~${s.a}`);
-  const live = graph.chosen.filter((s) => s.kind !== 'closure-not-seam' && !dropped(s));
+  const live = graph.chosen.filter(
+    (s) => s.kind !== 'closure-not-seam' && (!opts.owner || s.kind !== 'surface') && !dropped(s),
+  );
+  const sewnAsShell = new Set(
+    live.flatMap((seam) =>
+      [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))]
+        .flatMap(edgeIdsOf)
+        .map(pk),
+    ),
+  );
+  const ownerSurfaceParts = new Set(
+    graph.chosen.flatMap((seam) => {
+      if (!opts.owner || seam.kind !== 'surface' || !seam.surface) return [];
+      const host = geomOf.get(seam.surface.host);
+      const part = geomOf.get(seam.surface.part);
+      const partName = factOf.get(seam.surface.part)?.name ?? part?.name ?? '';
+      // Legacy rows can carry the old side order. Never remove a shell panel merely because such a
+      // row calls the smaller patch its host; the exact row remains in the audit, but not placement.
+      return host &&
+        part &&
+        !sewnAsShell.has(seam.surface.part) &&
+        !BODY_ROLES.has(readName(partName).role ?? '') &&
+        areaOf(part) <= areaOf(host)
+        ? [seam.surface.part]
+        : [];
+    }),
+  );
   const closuresRaw = graph.rejected.filter((s) => s.kind === 'closure-not-seam' && !dropped(s));
 
   // ── 1. roles → groups ────────────────────────────────────────────────────────────────────
@@ -174,6 +204,14 @@ export function groupPieces(
     }
     if (g.rs.length < 3) {
       skipped.push({ pieceKey: g.pieceKey, reason: 'no contour' });
+      continue;
+    }
+    if (ownerSurfaceParts.has(g.pieceKey) && !(r && BODY_ROLES.has(r))) {
+      skipped.push({
+        pieceKey: g.pieceKey,
+        reason: 'surface piece — placed by its owner row',
+        surface: true,
+      });
       continue;
     }
     if (f && isMirroredPair(f))
@@ -279,6 +317,24 @@ export function groupPieces(
 
   // ── 3. layers: identical twins sewn to each other, same-shape layers of a ring ──────────
   const leaderOf = new Map<string, string>();
+  const layerNext = new Map<string, string[]>();
+  for (const [under, over] of opts.layers ?? [])
+    layerNext.set(under, [...(layerNext.get(under) ?? []), over]);
+  const isUnder = (under: string, over: string) => {
+    const todo = [under];
+    const seen = new Set(todo);
+    while (todo.length) {
+      const key = todo.shift()!;
+      for (const candidate of layerNext.get(key) ?? []) {
+        if (candidate === over) return true;
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          todo.push(candidate);
+        }
+      }
+    }
+    return false;
+  };
   const lead = (k: string) => {
     let x = k;
     while (leaderOf.has(x)) x = leaderOf.get(x)!;
@@ -290,7 +346,14 @@ export function groupPieces(
     if (la === lb) return;
     const ga = geomOf.get(la)!;
     const gb = geomOf.get(lb)!;
-    const [L, F] = areaOf(ga) >= areaOf(gb) ? [la, lb] : [lb, la];
+    // The drawn leader is the visible (over) ply. Area remains the exact historical fallback.
+    const [L, F] = isUnder(la, lb)
+      ? [lb, la]
+      : isUnder(lb, la)
+        ? [la, lb]
+        : areaOf(ga) >= areaOf(gb)
+          ? [la, lb]
+          : [lb, la];
     leaderOf.set(F, L);
   };
   const noStack = opts.panels ?? new Set<string>();
@@ -314,6 +377,7 @@ export function groupPieces(
       const b = keys[j];
       const g = group.get(a)!;
       if (g !== group.get(b) || !RING_GROUPS.has(g) || role.get(a) !== role.get(b)) continue;
+      if (opts.owner && !isUnder(a, b) && !isUnder(b, a)) continue;
       if (noStack.has(a) || noStack.has(b)) continue;
       const [wa, ha] = dims(geomOf.get(a)!);
       const [wb, hb] = dims(geomOf.get(b)!);

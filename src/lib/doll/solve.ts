@@ -61,6 +61,28 @@ export type SolverState = {
   contacts?: { i: Int32Array; j: Int32Array; gap: number; ax: number; az: number }[];
   /** Point-to-point ties between two cloth points inside triangles (a buttoned overlap). */
   ties?: Tie[];
+  /** Fold contacts (a piece folded on itself): a vertex stays on its side of another ply. */
+  foldContacts?: FoldContact[];
+};
+
+/**
+ * Fold contacts (options.folds): vertex `v` of one ply lies over the triangle (a, b, c) of another
+ * ply of the same piece (barycentric w0..w2 in the folded footprint) and must stay `gap` mm from
+ * it on its side of the stack — `sgn` turns the triangle's own normal (its pattern winding) into
+ * the direction `v` must keep to. Zero interpenetration of the plies is this, not luck.
+ */
+export type FoldContact = {
+  v: Int32Array;
+  a: Int32Array;
+  b: Int32Array;
+  c: Int32Array;
+  w0: Float64Array;
+  w1: Float64Array;
+  w2: Float64Array;
+  sgn: Int8Array;
+  gap: Float64Array;
+  /** The panel the pairs belong to (the report groups the gaps by piece). */
+  panel: number;
 };
 
 /**
@@ -359,6 +381,71 @@ export function pass(S: SolverState, ramp: number): void {
       if (wj) {
         p[j3] -= nx * corr * wj;
         p[j3 + 2] -= nz * corr * wj;
+      }
+    }
+  }
+  // Fold contacts (after everything else, like the one-sided contacts): the vertex and the
+  // triangle share the correction by their weights (all masses equal).
+  for (const F of S.foldContacts ?? []) {
+    for (let q = 0; q < F.v.length; q++) {
+      const v = F.v[q];
+      const a = F.a[q];
+      const b = F.b[q];
+      const c = F.c[q];
+      const mvv = mv[v];
+      const ma = mv[a];
+      const mb = mv[b];
+      const mc = mv[c];
+      if (!mvv && !ma && !mb && !mc) continue;
+      const a3 = a * 3;
+      const b3 = b * 3;
+      const c3 = c * 3;
+      const v3 = v * 3;
+      const ex = p[b3] - p[a3];
+      const ey = p[b3 + 1] - p[a3 + 1];
+      const ez = p[b3 + 2] - p[a3 + 2];
+      const fx = p[c3] - p[a3];
+      const fy = p[c3 + 1] - p[a3 + 1];
+      const fz = p[c3 + 2] - p[a3 + 2];
+      let nx = ey * fz - ez * fy;
+      let ny = ez * fx - ex * fz;
+      let nz = ex * fy - ey * fx;
+      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (nl < 1e-9) continue;
+      nx /= nl;
+      ny /= nl;
+      nz /= nl;
+      const s = F.sgn[q];
+      const w0 = F.w0[q];
+      const w1 = F.w1[q];
+      const w2 = F.w2[q];
+      const qx = w0 * p[a3] + w1 * p[b3] + w2 * p[c3];
+      const qy = w0 * p[a3 + 1] + w1 * p[b3 + 1] + w2 * p[c3 + 1];
+      const qz = w0 * p[a3 + 2] + w1 * p[b3 + 2] + w2 * p[c3 + 2];
+      const d = s * ((p[v3] - qx) * nx + (p[v3 + 1] - qy) * ny + (p[v3 + 2] - qz) * nz);
+      if (d >= F.gap[q]) continue;
+      const wsum = mvv + ma * w0 * w0 + mb * w1 * w1 + mc * w2 * w2;
+      if (wsum <= 0) continue;
+      const lam = ((F.gap[q] - d) / wsum) * s;
+      if (mvv) {
+        p[v3] += lam * nx;
+        p[v3 + 1] += lam * ny;
+        p[v3 + 2] += lam * nz;
+      }
+      if (ma) {
+        p[a3] -= lam * w0 * nx;
+        p[a3 + 1] -= lam * w0 * ny;
+        p[a3 + 2] -= lam * w0 * nz;
+      }
+      if (mb) {
+        p[b3] -= lam * w1 * nx;
+        p[b3 + 1] -= lam * w1 * ny;
+        p[b3 + 2] -= lam * w1 * nz;
+      }
+      if (mc) {
+        p[c3] -= lam * w2 * nx;
+        p[c3 + 1] -= lam * w2 * ny;
+        p[c3 + 2] -= lam * w2 * nz;
       }
     }
   }

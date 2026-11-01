@@ -277,6 +277,7 @@ import {
   type FormOpLike,
 } from './step-seams/step-seams-model';
 import { StepSeamsRow } from './step-seams/step-seams-row';
+import { StepFoldsRow } from './assembly-folds/step-folds-row';
 import type { PieceShapeMap } from './use-piece-shapes';
 import {
   rankOrphanBlocks,
@@ -4910,6 +4911,7 @@ function OperationEditor({
         />
       </div>
       <StepSeamsRow index={index} />
+      <StepFoldsRow index={index} />
       {addingMaterial && unlinkedBySection.length > 0 && (
         <div className='mt-2 space-y-2'>
           {unlinkedBySection.map(([section, lines]) => (

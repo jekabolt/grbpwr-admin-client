@@ -1,6 +1,11 @@
 // The pattern pieces the assembly drawings are made of: the card's DXF, read the same way the
-// editor reads it (patterns → scoped sheets → nesting/dxf-geometry → block refs → findPiece), then
-// segmented by the assembly engine so the stored seams (TechCard.seams) resolve on today's edges.
+// editor reads it (patterns -> scoped sheets -> nesting/dxf-geometry -> block refs -> findPiece),
+// then segmented by the assembly engine so the stored seams resolve on today's edges.
+//
+// Segmenting and classifying the internal paths is deliberately done in a worker. Card 61 spends
+// hundreds of milliseconds there (and much longer under load); doing it in this hook used to make
+// the already-hidden construction tab stop the whole card after the DXF worker had answered.
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import type { common_TechCard } from 'api/proto-http/admin';
@@ -10,6 +15,7 @@ import {
   scopeKeyOfBinding,
 } from 'components/managers/tech-card/components/bom-purpose';
 import {
+  filesSignature,
   findPiece,
   useDxfGeometry,
   useDxfIndex,
@@ -21,223 +27,155 @@ import {
   pieceRefKey,
   rollGoodsScopes,
 } from 'components/managers/tech-card/components/piece-block-refs';
-import { seamPieceOf, segmentPiece, twins } from 'lib/assembly-skeleton/geometry';
-import { readablePieceName } from 'lib/assembly-skeleton/names';
-import type { ClothState } from 'lib/assembly-skeleton/types';
-import type { PieceDTO } from 'lib/nesting/types';
-import { grainRotation } from 'lib/pom/upright';
 import { isDxfUrl } from 'utils/pattern';
 
-import { assemblyPieceCode, type AsmPiece, type Pt } from './derive-assembly';
+import {
+  assemblyCardInput,
+  type AssemblyCardInput,
+  type BuiltAssemblyPieces,
+} from './assembly-geometry-build';
+import type {
+  AssemblyGeometryWorkerRequest,
+  AssemblyGeometryWorkerResponse,
+} from './assembly-geometry.worker';
 import type { TechpackPieceGeometry } from './derive-pieces';
 
-type Ins = NonNullable<common_TechCard['techCard']>;
+export { buildAssemblyPieces } from './assembly-geometry-build';
 
-const CLOTH: Record<string, ClothState> = {
-  TECH_CARD_BOM_PURPOSE_MAIN: 'main',
-  TECH_CARD_BOM_PURPOSE_LINING: 'lining',
-  TECH_CARD_BOM_PURPOSE_POCKETING: 'pocketing',
-  TECH_CARD_BOM_PURPOSE_INTERFACING: 'interfacing',
-  TECH_CARD_BOM_PURPOSE_INSULATION: 'insulation',
-  TECH_CARD_BOM_PURPOSE_CONTRAST: 'contrast',
-  TECH_CARD_BOM_PURPOSE_BINDING: 'contrast',
-  TECH_CARD_BOM_PURPOSE_MESH: 'mesh',
-  TECH_CARD_BOM_PURPOSE_OTHER: 'other',
-};
+const EMPTY_BUILT: BuiltAssemblyPieces = { pieces: new Map(), grainDeg: new Map() };
 
-const NOTCH_LAYER = '4';
-const SIMPLIFY_MM = 0.3;
-const ON_OUTLINE_MM = 2;
-
-const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-
-function segDist(p: Pt, a: Pt, b: Pt): number {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  const l2 = dx * dx + dy * dy;
-  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
-  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
-}
-
-/** Douglas–Peucker: the drawing does not need the DXF's every vertex. */
-function simplify(pts: readonly Pt[], tol = SIMPLIFY_MM): Pt[] {
-  if (pts.length < 3) return [...pts];
-  const keep = new Uint8Array(pts.length);
-  keep[0] = 1;
-  keep[pts.length - 1] = 1;
-  const stack: [number, number][] = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [s, e] = stack.pop()!;
-    let worst = -1;
-    let at = -1;
-    for (let i = s + 1; i < e; i++) {
-      const d = segDist(pts[i], pts[s], pts[e]);
-      if (d > worst) {
-        worst = d;
-        at = i;
-      }
+function buildInWorker(
+  input: AssemblyCardInput,
+  found: Map<string, FoundPiece>,
+  grainLayer: string,
+  signal: AbortSignal,
+): Promise<BuiltAssemblyPieces> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('assembly geometry cancelled', 'AbortError'));
+      return;
     }
-    if (worst > tol && at > 0) {
-      keep[at] = 1;
-      stack.push([s, at], [at, e]);
-    }
-  }
-  return pts.filter((_, i) => keep[i]);
-}
-
-function area(pts: readonly Pt[]): number {
-  let a = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++)
-    a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
-  return Math.abs(a / 2);
-}
-
-function onOutline(line: readonly Pt[], outline: readonly Pt[]): boolean {
-  return line.every((p) => {
-    for (let i = 0; i < outline.length; i++) {
-      if (segDist(p, outline[i], outline[(i + 1) % outline.length]) <= ON_OUTLINE_MM) return true;
-    }
-    return false;
+    const worker = new Worker(new URL('./assembly-geometry.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    const finish = () => {
+      signal.removeEventListener('abort', abort);
+      worker.terminate();
+    };
+    const abort = () => {
+      finish();
+      reject(new DOMException('assembly geometry cancelled', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    worker.onmessage = (event: MessageEvent<AssemblyGeometryWorkerResponse>) => {
+      const message = event.data;
+      finish();
+      if ('error' in message) reject(new Error(message.error));
+      else resolve(message.result);
+    };
+    worker.onerror = (event) => {
+      finish();
+      reject(new Error(event.message || 'assembly geometry worker failed'));
+    };
+    worker.postMessage({ id: 1, input, found, grainLayer } satisfies AssemblyGeometryWorkerRequest);
   });
 }
 
-/** PieceDTO (cm, y up) → the drawing frame (mm, y down). */
-const draw = (pts: readonly { x: number; y: number }[]): Pt[] =>
-  pts.map((q) => [q.x * 10, -q.y * 10]);
-
-function cloth(ins: Ins, piece: NonNullable<Ins['pieces']>[number]): ClothState | null {
-  const line = piece.materials?.[0]?.bomLineKey;
-  const bom = line ? ins.bomItems?.find((b) => b.lineKey === line) : undefined;
-  return bom?.purpose ? CLOTH[bom.purpose] ?? null : null;
-}
-
-/** Card pieces + what the DXF holds for each → the drawings' pieces (pure). */
-export function buildAssemblyPieces(
-  techCard: common_TechCard,
+function inputSignature(
+  filesSig: string,
+  input: AssemblyCardInput,
+  refs: ReadonlyMap<string, readonly { scopeKey: string; block: string }[]>,
   found: ReadonlyMap<string, FoundPiece>,
-  grainLayer = '',
-): { pieces: Map<string, AsmPiece>; grainDeg: Map<string, number> } {
-  const ins = techCard.techCard;
-  const pieces = new Map<string, AsmPiece>();
-  const grainDeg = new Map<string, number>();
-  if (!ins) return { pieces, grainDeg };
-  const geoms = [];
-  const drawn = new Map<string, Omit<AsmPiece, 'geom'>>();
-  for (const p of ins.pieces ?? []) {
-    const key = p.lineKey ?? '';
-    const f = key ? found.get(key) : undefined;
-    if (!f) continue;
-    const dto: PieceDTO = seamPieceOf(f.layers?.length ? f.layers : [f.piece]) ?? f.piece;
-    const name = readablePieceName(p.name ?? '') || p.name || key;
-    const c = cloth(ins, p);
-    geoms.push(
-      segmentPiece({
-        pieceKey: key,
-        name,
-        piece: dto,
-        piecesPerGarment: p.piecesPerGarment || 1,
-        cutSymmetry: p.cutSymmetry ?? null,
-        cloth: c,
-        fused: false,
-      }),
-    );
-    grainDeg.set(key, grainRotation(f.piece));
-    // the cut line is the biggest closed loop the block draws (the sewing line sits inside it)
-    const loops = [
-      draw(dto.poly),
-      ...(dto.inner ?? []).filter((l) => l.closed).map((l) => draw(l.pts)),
-    ]
-      .filter((l) => l.length >= 3)
-      .map((pts) => ({ pts, a: area(pts) }))
-      .sort((x, y) => y.a - x.a);
-    const cut = loops[0]?.pts ?? [];
-    const cutArea = loops[0]?.a ?? 0;
-    const inner: Pt[][] = [];
-    const notch: Pt[][] = [];
-    const grainLayers = new Set(
-      grainLayer ? [grainLayer] : (dto.grain ?? []).map((line) => line.layer).filter(Boolean),
-    );
-    for (const l of dto.inner ?? []) {
-      if (l.pts.length < 2) continue;
-      if (grainLayers.has(l.layer)) continue;
-      const pts = draw(l.pts);
-      if (l.layer === NOTCH_LAYER) {
-        notch.push(pts);
-        continue;
-      }
-      if (l.closed) {
-        if (area(pts) < cutArea * 0.5) inner.push(simplify([...pts, pts[0]]));
-        continue;
-      }
-      if (dist(pts[0], pts[pts.length - 1]) < 1e-6 && pts.length < 3) continue;
-      if (!onOutline(pts, cut)) inner.push(simplify(pts));
-    }
-    drawn.set(key, {
+  grainLayer: string,
+): string {
+  return JSON.stringify([
+    filesSig,
+    grainLayer,
+    (input.pieces ?? []).map((piece) => [
+      piece.lineKey,
+      piece.name,
+      piece.piecesPerGarment,
+      piece.cutSymmetry,
+      piece.materials?.[0]?.bomLineKey,
+    ]),
+    (input.bomItems ?? []).map((item) => [item.lineKey, item.purpose]),
+    [...refs].map(([key, pieceRefs]) => [key, pieceRefs.map((ref) => [ref.scopeKey, ref.block])]),
+    [...found].map(([key, hit]) => [
       key,
-      name: p.name || name,
-      code: assemblyPieceCode(p.name, f.block),
-      cut: simplify(cut),
-      inner,
-      notch,
-      pocketing: c === 'pocketing',
-      area: cutArea,
-    });
-  }
-  for (const g of twins(geoms)) {
-    const d = drawn.get(g.pieceKey);
-    if (d) pieces.set(g.pieceKey, { ...d, geom: g });
-  }
-  return { pieces, grainDeg };
+      hit.piece.id,
+      hit.block,
+      hit.size,
+      hit.layers?.map((piece) => piece.id),
+    ]),
+  ]);
 }
 
 export type AssemblyGeometry = {
-  pieces: Map<string, AsmPiece>;
-  grainDeg: Map<string, number>;
+  pieces: BuiltAssemblyPieces['pieces'];
+  grainDeg: BuiltAssemblyPieces['grainDeg'];
   /** Each card piece's DXF block, for the cut-pieces sheet (null while the DXF is unread). */
   shapes: TechpackPieceGeometry;
   dep: PrintDep;
 };
 
 /** The card's DXF pieces for the assembly drawings; `dep` feeds the print-ready gate. */
-export function useAssemblyGeometry(techCard: common_TechCard): AssemblyGeometry {
+export function useAssemblyGeometry(techCard: common_TechCard, enabled = true): AssemblyGeometry {
   const ins = techCard.techCard;
   const scopes = useMemo(() => rollGoodsScopes((ins?.bomItems ?? []) as never), [ins?.bomItems]);
   const files = useMemo(() => {
     const sheets = bindingScopes(scopes, ins?.patterns ?? []);
     return (ins?.patterns ?? [])
-      .filter((p) => p.url && isDxfUrl(p.url))
-      .map((p) => ({
-        scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, sheets),
-        name: patternSheetName(p),
-        url: p.url ?? '',
+      .filter((pattern) => pattern.url && isDxfUrl(pattern.url))
+      .map((pattern) => ({
+        scopeKey: scopeKeyOfBinding(pattern.fabricPurpose, pattern.bomLineKey, sheets),
+        name: patternSheetName(pattern),
+        url: pattern.url ?? '',
       }));
   }, [ins?.patterns, scopes]);
   const refs = useMemo(
     () => pieceBlockRefs((ins?.pieceDxfAliases?.items ?? []) as never, scopes),
     [ins?.pieceDxfAliases, scopes],
   );
-  const query = useDxfGeometry(files, true);
-  const index = useDxfIndex(query.data);
-  const built = useMemo(() => {
+  const geometry = useDxfGeometry(files, enabled);
+  // A passive hidden reader may receive another tab's cached parse. Indexing is cheap after the
+  // shared cache, but assembly segmentation is not, so the hidden construction tab stops here.
+  const index = useDxfIndex(enabled ? geometry.data : undefined);
+  const matched = useMemo(() => {
     const found = new Map<string, FoundPiece>();
     const shapeByKey = index ? new Map<string, FoundPiece | null>() : null;
-    for (const p of ins?.pieces ?? []) {
-      const key = p.lineKey ?? '';
-      const f = key ? findPiece(index, refs.get(pieceRefKey(key)) ?? []) : null;
-      if (f) found.set(key, f);
-      if (key) shapeByKey?.set(pieceRefKey(key), f);
+    for (const piece of ins?.pieces ?? []) {
+      const key = piece.lineKey ?? '';
+      const hit = key ? findPiece(index, refs.get(pieceRefKey(key)) ?? []) : null;
+      if (hit) found.set(key, hit);
+      if (key) shapeByKey?.set(pieceRefKey(key), hit);
     }
-    return {
-      ...buildAssemblyPieces(techCard, found, index?.grainLayer),
-      shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' },
-    };
-  }, [techCard, ins?.pieces, index, refs]);
-  const status = files.length ? depStatus(query.isLoading, query.isError) : 'ok';
+    return { found, shapes: { shapeByKey, grainLayer: index?.grainLayer ?? '' } };
+  }, [ins?.pieces, index, refs]);
+  const input = useMemo(() => assemblyCardInput(techCard), [ins?.pieces, ins?.bomItems]);
+  const signature = useMemo(
+    () =>
+      inputSignature(filesSignature(files), input, refs, matched.found, index?.grainLayer ?? ''),
+    [files, input, refs, matched.found, index?.grainLayer],
+  );
+  const built = useQuery<BuiltAssemblyPieces, Error>({
+    queryKey: ['techpack-assembly-geometry', signature],
+    queryFn: ({ signal }) => buildInWorker(input, matched.found, index?.grainLayer ?? '', signal),
+    enabled: enabled && files.length > 0 && !!index,
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const parseStatus = files.length ? depStatus(geometry.isLoading, geometry.isError) : 'ok';
+  const buildStatus =
+    files.length === 0 ? 'ok' : index ? depStatus(built.isLoading, built.isError) : 'pending';
+  const status = parseStatus === 'ok' ? buildStatus : parseStatus;
   return {
-    ...built,
+    ...(built.data ?? EMPTY_BUILT),
+    shapes: matched.shapes,
     dep: {
       label: 'pattern geometry',
-      status: status === 'ok' && files.length && !index ? 'pending' : status,
+      status,
     },
   };
 }

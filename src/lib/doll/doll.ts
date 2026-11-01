@@ -6,11 +6,21 @@
 import { edgeIdsOf, orderUnits } from 'lib/assembly-skeleton/geometry';
 import { legPanels, sameLeg } from 'lib/assembly-skeleton/geometry/legs';
 import { readSeamGraph } from 'lib/assembly-skeleton/pipeline';
-import type { Edge, EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
-import { grainDegOf } from 'lib/seams/frame';
+import { apply, det } from 'lib/assembly-skeleton/union/affine';
+import type {
+  Edge,
+  EdgeId,
+  PieceGeom,
+  Pt2,
+  SeamCandidate,
+  SeamGraph,
+} from 'lib/assembly-skeleton/types';
+import { rotatePt } from 'lib/pom/upright';
+import { frameOf, grainDegOf, type PieceFrame } from 'lib/seams/frame';
 import { resolveAcrossSizes, type SizeResolved } from 'lib/seams/transfer';
 
 import { buildChart, toChart, type Chart, type ChartSeam } from './chart';
+import { foldPlies } from './fold-outline';
 import {
   baseCurve,
   closedNeckPath,
@@ -43,11 +53,12 @@ import {
 import { liningByName } from 'lib/assembly-skeleton/names';
 import { readName } from 'lib/assembly-skeleton/skeleton';
 import { findLoops, loopPath, type RawLoop } from './loops';
-import { meshPiece, pointInPolygon, type PieceMesh } from './mesh';
+import { meshPiece, pointInPolygon, type MeshCrease, type PieceMesh } from './mesh';
 import { type Ring, ringsFromJoins } from './rings';
 import { surfaceFit, surfaceHosts } from './surface';
 import {
   anchoredRows,
+  type FoldContact,
   pass,
   rowGaps,
   seamRows,
@@ -64,6 +75,8 @@ import type {
   DollCollarReport,
   DollClosureReport,
   DollCollarUnit,
+  DollFold,
+  DollFoldReport,
   DollGroupId,
   DollInput,
   DollLoop,
@@ -84,7 +97,62 @@ const ARM_DEG = 42; // A-pose: arms 42° off vertical
 const PROXY_K = 0.93; // proxies push to 93 % of the cloth's own girth: a guide, never a stretcher
 // One-piece collar (no separate stand): where it rolls over, as a share of its depth from the
 // neck edge. The pattern carries no roll-line mark; a shirt collar stands ~40 % and falls ~60 %.
+// TODO(doll-folds, step «collar»): the roll becomes an outward DollFold along the roll line once
+// the collar step lands (options.folds on the collar piece); ROLL_FRAC and the stand / fall split
+// below stay until then.
 const ROLL_FRAC = 0.4;
+// Folds (options.folds): the plies of a folded piece lie this far apart, mm, ramped to 0 at the crease.
+const PLY = 1.0;
+/** The ply offset ramps from 0 at the crease to PLY over this length, mm: the two plies meet at
+ * the crease at ≤ 8° (atan PLY / RAMP), whatever the mesh step. */
+const RAMP = 7 * PLY;
+
+/** Keep only candidates that came from an owner row, and rebuild their connected components. */
+function ownerGraphOf(
+  graph: SeamGraph,
+  warnings: readonly string[] = [],
+  /** Exact step-editor candidates; unlike the graph pipeline this also keeps placed surface rows. */
+  exact?: readonly SeamCandidate[],
+): SeamGraph {
+  const chosen = (exact ?? graph.chosen).filter((seam) => seam.provenance?.status === 'confirmed');
+  const rejected = graph.rejected.filter(
+    (seam) => seam.kind === 'closure-not-seam' && seam.provenance?.status === 'confirmed',
+  );
+  const parent = new Map(graph.pieces.map((piece) => [piece.pieceKey, piece.pieceKey]));
+  const find = (key: string): string => {
+    const next = parent.get(key);
+    if (!next || next === key) return key;
+    const root = find(next);
+    parent.set(key, root);
+    return root;
+  };
+  const join = (left: string, right: string) => {
+    const a = find(left);
+    const b = find(right);
+    if (a !== b) parent.set(b, a);
+  };
+  for (const seam of chosen) {
+    if (seam.kind === 'closure-not-seam') continue;
+    const keys = [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))]
+      .map(pk)
+      .filter((key) => parent.has(key));
+    for (let index = 1; index < keys.length; index++) join(keys[0], keys[index]);
+  }
+  const components = new Map<string, string[]>();
+  for (const { pieceKey } of graph.pieces) {
+    const root = find(pieceKey);
+    components.set(root, [...(components.get(root) ?? []), pieceKey]);
+  }
+  return {
+    ...graph,
+    chosen,
+    rejected,
+    components: [...components.values()],
+    warnings: [...warnings],
+    assignment: undefined,
+    shadow: undefined,
+  };
+}
 
 type Panel = GroupedPiece & {
   idx: number;
@@ -94,7 +162,274 @@ type Panel = GroupedPiece & {
   nb: number;
   ringPos: Map<number, number>;
   mirrored: boolean;
+  /** Set when options.folds fold this piece: `mesh.pts` / `geom` hold the folded footprint. */
+  fold?: PanelFold;
 };
+
+/** A piece folded on itself (options.folds): what the mesh, the placement and the solve need. */
+type PanelFold = {
+  /** The piece's geometry folded (rs, edge points, marks): what charts and placement lay out. */
+  geom: PieceGeom;
+  /** Every vertex as cut, mm, the piece's own frame — rest lengths and the report's `uv`. */
+  flat: Pt2[];
+  /** Stack rank per vertex: 0 the base ply, −1 one ply under (toward the body), +1 one over. */
+  ply: Int8Array;
+  /** Ply offset along the outward normal, mm: ply · PLY, ramped to 0 over RAMP from a crease. */
+  off: Float64Array;
+  /** Distance of each vertex from the nearest crease, mm, as cut. */
+  creaseD: Float64Array;
+  /** Per triangle: 1 when the folds turned it face down (an odd number of reflections). */
+  triFlip: Uint8Array;
+  /**
+   * Stack rank per triangle: that of its vertex farthest from the creases (a crease vertex is
+   * shared by two plies and carries one of them by chance; no triangle straddles a crease).
+   */
+  triPly: Int8Array;
+  /** Edge keys (a < b: a·1e6 + b, local ids) lying on a crease: hinged, never bent the ordinary way. */
+  creaseEdge: Set<number>;
+  /** The creases as applied, in seq order: local vertex ids end to end, the line as cut. */
+  creases: {
+    seq: number;
+    kind: DollFold['kind'];
+    verts: number[];
+    a: Pt2;
+    b: Pt2;
+    flipAt: Pt2;
+    report: DollFoldReport;
+  }[];
+  /**
+   * The folded footprint as the polygons of its plies, the piece's frame (what the chart's overlap
+   * test and the ring widths read: the mapped contour is self-overlapping, blind to even-odd).
+   */
+  plies: Pt2[][];
+  /** The same in chart coordinates, once the chart laid the piece. */
+  pliesChart?: Pt2[][];
+  /** The ply offsets were added to the placed positions (once, by whichever placement ran). */
+  plyDone: boolean;
+};
+
+const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+/** A seam-frame point back into the piece's own mm (the inverse of lib/seams `toUV`). */
+const fromUV = (f: PieceFrame, p: readonly [number, number]): Pt2 => {
+  const q: Pt2 = [f.x0 + p[0] * f.w, f.y0 + p[1] * f.h];
+  return f.deg ? rotatePt(q, -f.deg, f.c) : q;
+};
+
+const segDist2D = (p: Pt2, a: Pt2, b: Pt2): number => {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  let t = l2 > 0 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]);
+};
+
+/**
+ * Where the fold line a–b, extended, leaves the contour on either side of its middle: the `rs`
+ * indices the crease runs between (the 1 mm contour sample nearest each crossing). Null when the
+ * line does not cross the contour on both sides of its middle.
+ */
+function creaseEndsOf(rs: readonly Pt2[], f: PieceFrame, fold: DollFold): MeshCrease | null {
+  const A = fromUV(f, fold.a);
+  const B = fromUV(f, fold.b);
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  if (L < 1e-6) return null;
+  const dx = (B[0] - A[0]) / L;
+  const dy = (B[1] - A[1]) / L;
+  const n = rs.length;
+  const side = (p: Pt2) => (p[0] - A[0]) * -dy + (p[1] - A[1]) * dx;
+  const along = (p: Pt2) => (p[0] - A[0]) * dx + (p[1] - A[1]) * dy;
+  const tMid = L / 2;
+  let lo: { t: number; i: number } | null = null;
+  let hi: { t: number; i: number } | null = null;
+  for (let i = 0; i < n; i++) {
+    const p = rs[i];
+    const q = rs[(i + 1) % n];
+    const sp = side(p);
+    const sq = side(q);
+    if (sp > 0 === sq > 0) continue;
+    const fr = sp / (sp - sq);
+    const x: Pt2 = [p[0] + (q[0] - p[0]) * fr, p[1] + (q[1] - p[1]) * fr];
+    const t = along(x);
+    const idx = fr < 0.5 ? i : (i + 1) % n;
+    if (t <= tMid && (!lo || t > lo.t)) lo = { t, i: idx };
+    if (t > tMid && (!hi || t < hi.t)) hi = { t, i: idx };
+  }
+  if (!lo || !hi || lo.i === hi.i) return null;
+  return { s: lo.i, e: hi.i };
+}
+
+/**
+ * Fold a meshed piece on itself: every fold in seq order turns the side holding `flipAt` (as cut)
+ * over the crease's current line — a plain reflection of the vertices on that side, so a second
+ * fold over a turned part rolls or zigzags it as paper would. `mesh.pts` becomes the folded
+ * footprint; the piece as cut stays in `flat`. Stack ranks: the turned package goes under
+ * (inward) or over (outward) the rest, its own order reversed as a flipped stack is.
+ */
+function foldPanel(
+  g: PieceGeom,
+  mesh: PieceMesh,
+  folds: readonly DollFold[],
+  frame: PieceFrame,
+  h: number,
+  warnings: string[],
+  reports: DollFoldReport[],
+): PanelFold | undefined {
+  const count = mesh.pts.length;
+  const flat: Pt2[] = mesh.pts.map((p) => [p[0], p[1]]);
+  const cur = mesh.pts;
+  const plyOf = new Int8Array(count);
+  const creases: PanelFold['creases'] = [];
+  const chain: { sideOf: (q: Pt2) => number; sF: number; a1: Pt2; b1: Pt2 }[] = [];
+  const reflectTo = (p: Pt2, a1: Pt2, b1: Pt2): Pt2 => {
+    const L = Math.hypot(b1[0] - a1[0], b1[1] - a1[1]) || 1;
+    const nx = -(b1[1] - a1[1]) / L;
+    const ny = (b1[0] - a1[0]) / L;
+    const d = (p[0] - a1[0]) * nx + (p[1] - a1[1]) * ny;
+    return [p[0] - 2 * d * nx, p[1] - 2 * d * ny];
+  };
+  const blank = (fold: DollFold, note: string): DollFoldReport => ({
+    pieceKey: g.pieceKey,
+    seq: fold.seq,
+    kind: fold.kind,
+    applied: false,
+    creaseDevMm: NaN,
+    dihedralMinDeg: NaN,
+    dihedralMeanDeg: NaN,
+    plyGapMm: null,
+    interpenetrating: 0,
+    cutWidthMm: NaN,
+    finishedWidthMm: NaN,
+    drawnWidthMm: NaN,
+    note,
+  });
+  const refuse = (fold: DollFold, why: string) => {
+    const r = blank(fold, `${why} — not folded`);
+    reports.push(r);
+    warnings.push(`${g.pieceKey} fold ${fold.seq}: ${r.note}`);
+  };
+  folds.forEach((fold, k) => {
+    const verts = mesh.creases?.[k] ?? [];
+    if (verts.length < 2) {
+      refuse(
+        fold,
+        'the fold line does not cross the piece as one straight crease from contour to contour',
+      );
+      return;
+    }
+    const a = flat[verts[0]];
+    const b = flat[verts[verts.length - 1]];
+    const sideOf = (q: Pt2) =>
+      Math.sign((b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]));
+    const flipAt = fromUV(frame, fold.flipAt);
+    const sF = sideOf(flipAt);
+    if (!sF) {
+      refuse(fold, 'the side to turn (flipAt) lies on the fold line');
+      return;
+    }
+    const onCrease = new Set(verts);
+    const moving: number[] = [];
+    for (let i = 0; i < count; i++) if (!onCrease.has(i) && sideOf(flat[i]) === sF) moving.push(i);
+    if (!moving.length) {
+      refuse(fold, 'nothing of the piece lies on the side to turn');
+      return;
+    }
+    const a1: Pt2 = [cur[verts[0]][0], cur[verts[0]][1]];
+    const b1: Pt2 = [cur[verts[verts.length - 1]][0], cur[verts[verts.length - 1]][1]];
+    const mv = new Uint8Array(count);
+    for (const i of moving) {
+      cur[i] = reflectTo(cur[i], a1, b1);
+      mv[i] = 1;
+    }
+    let lo = Infinity;
+    let hi = -Infinity;
+    let minM = Infinity;
+    let maxM = -Infinity;
+    for (let i = 0; i < count; i++) {
+      if (mv[i]) {
+        minM = Math.min(minM, plyOf[i]);
+        maxM = Math.max(maxM, plyOf[i]);
+      } else {
+        lo = Math.min(lo, plyOf[i]);
+        hi = Math.max(hi, plyOf[i]);
+      }
+    }
+    for (const i of moving)
+      plyOf[i] = fold.kind === 'inward' ? lo - 1 - (plyOf[i] - minM) : hi + 1 + (maxM - plyOf[i]);
+    chain.push({ sideOf, sF, a1, b1 });
+    const report = blank(
+      fold,
+      `${fold.kind} fold creased along ${verts.length - 1} mesh edges · ${moving.length} of ${count} vertices turned ${fold.kind === 'inward' ? 'under' : 'over'} the rest`,
+    );
+    report.applied = true;
+    reports.push(report);
+    creases.push({ seq: fold.seq, kind: fold.kind, verts, a, b, flipAt, report });
+  });
+  if (!creases.length) return undefined;
+  const foldPt = (q: Pt2): Pt2 => {
+    let p: Pt2 = [q[0], q[1]];
+    for (const c of chain) if (c.sideOf(q) === c.sF) p = reflectTo(p, c.a1, c.b1);
+    return p;
+  };
+  const creaseD = new Float64Array(count);
+  const off = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    let d = Infinity;
+    for (const c of creases) d = Math.min(d, segDist2D(flat[i], c.a, c.b));
+    creaseD[i] = d;
+    off[i] = plyOf[i] * PLY * Math.min(1, d / RAMP);
+  }
+  const T = mesh.tris;
+  const triFlip = new Uint8Array(T.length / 3);
+  for (let t = 0; t < T.length; t += 3) {
+    const A = flat[T[t]];
+    const B = flat[T[t + 1]];
+    const C = flat[T[t + 2]];
+    const cen: Pt2 = [(A[0] + B[0] + C[0]) / 3, (A[1] + B[1] + C[1]) / 3];
+    let f = 0;
+    for (const c of chain) if (c.sideOf(cen) === c.sF) f ^= 1;
+    triFlip[t / 3] = f;
+  }
+  const triPly = new Int8Array(T.length / 3);
+  for (let t = 0; t < T.length; t += 3) {
+    let far = T[t];
+    for (const v of [T[t + 1], T[t + 2]]) if (creaseD[v] > creaseD[far]) far = v;
+    triPly[t / 3] = plyOf[far];
+  }
+  const creaseEdge = new Set<number>();
+  const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
+  for (const c of creases)
+    for (let k = 0; k + 1 < c.verts.length; k++) creaseEdge.add(key(c.verts[k], c.verts[k + 1]));
+  const geom: PieceGeom = {
+    ...g,
+    rs: g.rs.map(foldPt),
+    edges: g.edges.map((e) => ({ ...e, pts: e.pts.map(foldPt) })),
+    ...(g.marks ? { marks: g.marks.map((m) => ({ ...m, pts: m.pts.map(foldPt) })) } : {}),
+  };
+  const plies = foldPlies(
+    g.rs,
+    creases.map((c) => ({ seq: c.seq, a: c.a, b: c.b, flipAt: c.flipAt, kind: c.kind })),
+  ).plies.map((ply) => ply.poly);
+  return {
+    geom,
+    flat,
+    ply: plyOf,
+    off,
+    creaseD,
+    triFlip,
+    triPly,
+    creaseEdge,
+    creases,
+    plies,
+    plyDone: false,
+  };
+}
 
 type Work = {
   id: string;
@@ -125,6 +460,10 @@ type Work = {
   fromOrder?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
   confirmed?: boolean;
+  /** Owner mode: whether an operation names this confirmed row. */
+  inStep?: boolean;
+  /** Owner mode: a sewing step named no row — sewn by its step picture's guess (drawn dashed). */
+  guess?: { step: number };
   /** L4: a doll proposal on a pair a person rejected — not sewn, not reported as a seam. */
   rejectedByPerson?: boolean;
   /** L4: a closure drawn overlapped (the buttoned centre fronts). */
@@ -192,12 +531,31 @@ export function solveDoll(input: DollInput): DollReport {
   const t0 = now();
   const opt = input.options ?? {};
   const warnings: string[] = [];
-  // L4: stored seams. The graph is re-read with them resolved for this size (confirmed seams taken
-  // first, rejected pairs dropped, closures blocking their edges). No rows → exactly as before.
-  const l4 = !!opt.seams?.rows.length;
+  // L4: stored seams. Owner mode is stricter: after resolution only the confirmed owner candidates
+  // remain. The historical rows-without-mode path is unchanged for probes and archived goldens.
+  const owner = opt.seams?.mode === 'owner';
+  const l4 = owner || !!opt.seams?.rows.length;
+  const ownerInStepKeys = new Set([
+    ...(opt.seams?.inStepKeys ?? []),
+    ...(opt.seams?.candidates ?? [])
+      .filter((candidate) => candidate.inStep && !candidate.guess)
+      .map((candidate) => candidate.seamKey),
+  ]);
+  /** Owner mode: the step each guess candidate was guessed for, by its synthetic key. */
+  const guessStepOf = new Map(
+    (opt.seams?.candidates ?? [])
+      .filter((candidate) => candidate.guess)
+      .map((candidate) => [candidate.seamKey, candidate.guess!.step] as const),
+  );
+  const isGuess = (c: SeamCandidate) =>
+    c.provenance?.source === 'doll' && guessStepOf.has(c.provenance.seamKey);
+  const declaredJoins = owner ? undefined : opt.joins;
+  const proposalsAllowed = !owner && opt.proposeComposite !== false;
   let resolvedRows: SizeResolved | undefined;
+  /** By steps: confirmed rows no step names — not sewn, kept only as cues for laying composites. */
+  let joinsNotSewn: SeamCandidate[] = [];
   let graphIn = input.graph;
-  if (l4) {
+  if (l4 && opt.seams?.rows.length) {
     const S = opt.seams!;
     const grain = grainDegOf(input.facts);
     graphIn = readSeamGraph(
@@ -209,6 +567,63 @@ export function solveDoll(input: DollInput): DollReport {
           { size: S.size, pieces, grainDeg: grain },
           ...(S.sizes ?? []).filter((x) => x.size !== S.size),
         ]).get(S.size)!;
+        if (owner && S.candidates) {
+          const rowByKey = new Map(S.rows.map((row) => [row.seamKey, row]));
+          const edgeIds = new Set(pieces.flatMap((piece) => piece.edges.map((edge) => edge.id)));
+          const pieceKeys = new Set(pieces.map((piece) => piece.pieceKey));
+          const exactKeys = new Set(S.candidates.map(({ seamKey }) => seamKey));
+          const ignoredWords = new Set(
+            [...r.stale, ...r.orphan]
+              .filter(({ seam }) => exactKeys.has(seam.seamKey))
+              .map(({ words }) => words),
+          );
+          r.words = r.words.filter((words) => !ignoredWords.has(words));
+          // By steps: a closure row no step names is not drawn buttoned either.
+          if (S.inStepKeys)
+            r.closures = r.closures.filter((c) => ownerInStepKeys.has(c.provenance?.seamKey ?? ''));
+          // A confirmed row no step names is not sewn here — but a person confirmed the pieces
+          // meet there, so it still says which of two parts sits above the other when a composite
+          // path is laid (the yoke above the front it is sewn on, not hanging under it).
+          if (S.inStepKeys)
+            joinsNotSewn = r.forced.filter(
+              (c) => !c.surface && !ownerInStepKeys.has(c.provenance?.seamKey ?? ''),
+            );
+          r.forced = S.candidates.flatMap(({ seamKey, candidate, guess }) => {
+            const row = guess ? undefined : rowByKey.get(seamKey);
+            if (!guess && (!row || row.status !== 'confirmed')) return [];
+            const present = candidate.surface
+              ? pieceKeys.has(candidate.surface.host) && pieceKeys.has(candidate.surface.part)
+              : [
+                  ...(candidate.aParts ?? edgeIdsOf(candidate.a)),
+                  ...(candidate.bParts ?? edgeIdsOf(candidate.b)),
+                ]
+                  .flatMap(edgeIdsOf)
+                  .every((edge) => edgeIds.has(edge));
+            if (!present) return [];
+            // A guess rides as a confirmed candidate (ownerGraphOf keeps those) under a synthetic
+            // provenance the doll recognises (`isGuess`): sewn, drawn dashed, never a contradiction.
+            const provenance = row
+              ? {
+                  seamKey,
+                  status: row.status,
+                  source: row.source,
+                  direction: row.direction,
+                  by: row.updatedBy || row.createdBy || 'owner',
+                  at: row.updatedAt || row.createdAt || '',
+                  how: 'hint' as const,
+                }
+              : {
+                  seamKey,
+                  status: 'confirmed' as const,
+                  source: 'doll' as const,
+                  direction: 'unknown' as const,
+                  by: 'doll',
+                  at: '',
+                  how: 'shape' as const,
+                };
+            return [{ ...candidate, provenance }];
+          });
+        }
         resolvedRows = r;
         return r;
       },
@@ -217,7 +632,50 @@ export function solveDoll(input: DollInput): DollReport {
       opt.assignment,
     );
   }
-  const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed';
+  if (owner) graphIn = ownerGraphOf(graphIn, resolvedRows?.words, resolvedRows?.forced);
+  const ownerSeamPieces = owner
+    ? new Set(
+        graphIn.chosen.flatMap((seam) =>
+          seam.surface
+            ? [seam.surface.host, seam.surface.part]
+            : [...(seam.aParts ?? edgeIdsOf(seam.a)), ...(seam.bParts ?? edgeIdsOf(seam.b))].map(
+                pk,
+              ),
+        ),
+      )
+    : null;
+  const layerRelations = opt.seams?.layers ?? [];
+  const layerScore = new Map<string, number>();
+  for (const [under, over] of layerRelations) {
+    layerScore.set(under, (layerScore.get(under) ?? 0) - 1);
+    layerScore.set(over, (layerScore.get(over) ?? 0) + 1);
+  }
+  /** Today's role/area offset is used only when none of these pieces has an explicit claim. */
+  const claimedLayer = (keys: Iterable<string>, fallback: number): number => {
+    const scores = [...keys].flatMap((key) => (layerScore.has(key) ? [layerScore.get(key)!] : []));
+    if (!scores.length) return fallback;
+    const score = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    return score === 0 ? 0 : score > 0 ? 3 : -3;
+  };
+  const isUnder = (under: Iterable<string>, over: Iterable<string>): boolean => {
+    const targets = new Set(over);
+    const next = new Map<string, string[]>();
+    for (const [a, b] of layerRelations) next.set(a, [...(next.get(a) ?? []), b]);
+    const todo = [...under];
+    const seen = new Set(todo);
+    while (todo.length) {
+      const key = todo.shift()!;
+      for (const candidate of next.get(key) ?? []) {
+        if (targets.has(candidate)) return true;
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          todo.push(candidate);
+        }
+      }
+    }
+    return false;
+  };
+  const isConf = (c: SeamCandidate) => l4 && c.provenance?.status === 'confirmed' && !isGuess(c);
   const excludedPairs = (resolvedRows?.excluded ?? []).filter((x) => !x.surface);
   /** A pair of runs a person rejected (any edge of a on one side, any of b on the other). */
   const isExcluded = (a: readonly EdgeId[], b: readonly EdgeId[]) => {
@@ -479,6 +937,7 @@ export function solveDoll(input: DollInput): DollReport {
     lining,
     dropSeams: opt.dropSeams,
     hardware: hardwareOf,
+    ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   const suspect0 = suspectsIn(G0);
   // NOT A GARMENT (bags, covers, flat accessories): the card names no garment and no piece reads as
@@ -518,8 +977,8 @@ export function solveDoll(input: DollInput): DollReport {
   // tops; two rings meet base to base. The graph's pairings across two rings are refused. Their
   // panels are never stacked as plies.
   const ringNotSewn: NonNullable<DollReport['notSewn']> = [];
-  const ringsR = opt.joins?.length
-    ? ringsFromJoins(graph, opt.joins, notShell, (k) => {
+  const ringsR = declaredJoins?.length
+    ? ringsFromJoins(graph, declaredJoins, notShell, (k) => {
         const g = graph.pieces.find((x) => x.pieceKey === k);
         return !!g && isSurfacePiece(g, graph);
       })
@@ -549,9 +1008,9 @@ export function solveDoll(input: DollInput): DollReport {
   // (trousers only for now: a shirt's order is read by the free-loop proposals as before)
   const legsCat0 =
     facts.category === 'trousers' || facts.category === 'jumpsuit' || facts.category === 'bottom';
-  if (legsCat0 && (opt.joins?.length || hardwareOf.size)) {
+  if (legsCat0 && (declaredJoins?.length || hardwareOf.size)) {
     const skipK = unitSkipKeys(graph, facts, lining, hardwareOf);
-    const u = orderUnits(graph, opt.joins ?? [], skipK, hardwareOf);
+    const u = orderUnits(graph, declaredJoins ?? [], skipK, hardwareOf);
     graph = u.graph;
     for (const x of u.added) {
       unitNotes.set(`${x.seam.a}~${x.seam.b}`, x.note);
@@ -570,15 +1029,15 @@ export function solveDoll(input: DollInput): DollReport {
   // POCKET BAGS (joins.ts): two pocket pieces the order puts on different sides of one operation,
   // with equal edges, are sewn to each other round the bag — reported as a seam, drawn on the panel
   // they are sewn onto (surface pieces are not solved).
-  const bagSeams = opt.joins?.length ? pocketBagJoins(graph, opt.joins, notShell) : [];
+  const bagSeams = declaredJoins?.length ? pocketBagJoins(graph, declaredJoins, notShell) : [];
   for (const x of bagSeams) {
     orderJoins.push({ join: x.join, seam: `${x.seam.a}~${x.seam.b}`, note: x.note });
     warnings.push(x.note);
   }
-  if (opt.joins?.length) {
+  if (declaredJoins?.length) {
     const r = completeFromJoins(
       graph,
-      opt.joins,
+      declaredJoins,
       notShell,
       new Set([...suspect0].filter(([, v]) => v.kind === 'drop').map(([k]) => k)),
       facts.category === 'trousers' || facts.category === 'jumpsuit',
@@ -611,7 +1070,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const l of r.left) warnings.push(`technologist's order — not found: ${l}`);
     if (opt.debug)
       warnings.push(
-        `debug: order joins ${opt.joins.length} · added ${r.added.map((x) => `${x.seam.a}~${x.seam.b}`).join(' ')} · by loops ${r.byLoops.map((x) => x.part.join('+')).join(' | ')} · ignored ${[...suspect0.keys()].join(' ')}`,
+        `debug: order joins ${declaredJoins.length} · added ${r.added.map((x) => `${x.seam.a}~${x.seam.b}`).join(' ')} · by loops ${r.byLoops.map((x) => x.part.join('+')).join(' | ')} · ignored ${[...suspect0.keys()].join(' ')}`,
       );
     orderSurface.push(...r.surface);
     for (const x of r.surface)
@@ -624,6 +1083,7 @@ export function solveDoll(input: DollInput): DollReport {
     dropSeams: opt.dropSeams,
     hardware: hardwareOf,
     panels: ringsR?.panels,
+    ...(owner ? { layers: layerRelations, owner: true } : {}),
   });
   warnings.push(...G.warnings);
   // LEGS FROM THE DRAWING (trousers). A leg is the front and the back sewn by their inseam /
@@ -719,6 +1179,7 @@ export function solveDoll(input: DollInput): DollReport {
   // run below). Proposed by the doll, said in words.
   const dollNote = new Map<string, string>();
   const bandExt: { key: string; mm: number } | null = (() => {
+    if (owner) return null;
     const band = G.pieces.filter((P) => P.group === 'WAISTBAND');
     if (band.length !== 2) return null;
     const [A, B] = band;
@@ -987,14 +1448,39 @@ export function solveDoll(input: DollInput): DollReport {
   const gridH = h;
   const panels: Panel[] = [];
   let N = 0;
+  // Folds (options.folds), per piece key (a second instance `key@n` takes its piece's folds).
+  const foldsIn = opt.folds ?? {};
+  const grainFold = Object.values(foldsIn).some((list) => list?.length)
+    ? grainDegOf(input.facts)
+    : null;
+  const foldsOf = (key: string): DollFold[] => {
+    const at = key.lastIndexOf('@');
+    const list = foldsIn[key] ?? (at > 0 ? foldsIn[key.slice(0, at)] : undefined) ?? [];
+    return [...list].sort((x, y) => x.seq - y.seq);
+  };
+  const foldReports: DollFoldReport[] = [];
+  /** Folded pieces: the polygons of their plies, for the chart's overlap test. */
+  const footprints = new Map<string, Pt2[][]>();
   for (const p of G.pieces) {
     const g = p.geom;
     const keep = [...g.edges.flatMap((e) => [e.s, e.e]), ...g.notchIdx, ...g.corners];
-    const mesh = meshPiece(g.rs, keep, h);
+    const folds = grainFold ? foldsOf(p.key) : [];
+    const frame = folds.length ? frameOf(g, grainFold!.get(g.pieceKey) ?? 0) : null;
+    const mesh = frame
+      ? meshPiece(
+          g.rs,
+          keep,
+          h,
+          folds.map((f) => creaseEndsOf(g.rs, frame, f) ?? { s: 0, e: 0 }),
+        )
+      : meshPiece(g.rs, keep, h);
+    const fold = frame ? foldPanel(g, mesh, folds, frame, h, warnings, foldReports) : undefined;
+    if (fold) footprints.set(p.key, fold.plies);
     const ringPos = new Map<number, number>();
     mesh.bRs.forEach((r, i) => ringPos.set(r, i));
     panels.push({
       ...p,
+      ...(fold ? { geom: fold.geom, fold } : {}),
       idx: panels.length,
       mesh,
       offset: N,
@@ -1253,11 +1739,14 @@ export function solveDoll(input: DollInput): DollReport {
           let fixed: boolean | null = unitLeg(g) ? true : null;
           const k0 = pk(many[0]);
           const k1 = pk(many[1]);
-          const join = G.seams.find(
-            (sm) =>
-              (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
-              (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0)),
-          );
+          const joins = (sm: { a: readonly string[]; b: readonly string[] }) =>
+            (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
+            (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0));
+          const join =
+            G.seams.find(joins) ??
+            joinsNotSewn
+              .map((c) => ({ a: c.aParts ?? edgeIdsOf(c.a), b: c.bParts ?? edgeIdsOf(c.b) }))
+              .find(joins);
           const my = (pts: readonly Pt2[]) =>
             pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
           if (join && fixed === null) {
@@ -1336,6 +1825,8 @@ export function solveDoll(input: DollInput): DollReport {
           list.map((P) => P.geom),
           csWith(),
           root,
+          false,
+          footprints,
         ),
         sel(),
       );
@@ -1347,6 +1838,8 @@ export function solveDoll(input: DollInput): DollReport {
           list.map((P) => P.geom),
           csWith(),
           root,
+          false,
+          footprints,
         ),
         sel(),
       );
@@ -1358,6 +1851,8 @@ export function solveDoll(input: DollInput): DollReport {
             list.map((P) => P.geom),
             csWith(),
             root,
+            false,
+            footprints,
           ),
           sel(),
         );
@@ -1374,6 +1869,8 @@ export function solveDoll(input: DollInput): DollReport {
       list.map((P) => P.geom),
       cs,
       root,
+      false,
+      footprints,
     );
     if (gid === 'BODY') {
       // Which way round does the strip run? Seen from outside, a back's drawing-left is the doll's
@@ -1439,6 +1936,7 @@ export function solveDoll(input: DollInput): DollReport {
         cs,
         root,
         true,
+        footprints,
       );
       const a1 = judge(alt);
       // Names first (a reading that puts every left piece on the left makes the strip as drawn);
@@ -1464,6 +1962,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const P of list) {
       const pl = chart.place.get(P.key)!;
       P.mirrored = pl.mirror;
+      if (P.fold) P.fold.pliesChart = P.fold.plies.map((poly) => poly.map((q) => toChart(pl, q)));
       for (let i = 0; i < P.count; i++) {
         const v = P.offset + i;
         const c = toChart(pl, [uv[2 * v], uv[2 * v + 1]]);
@@ -1489,8 +1988,7 @@ export function solveDoll(input: DollInput): DollReport {
   };
   const crossings = (list: Panel[], v: number) => {
     const iv: [number, number][] = [];
-    for (const P of list) {
-      const ring = boundaryChart(P);
+    const cut = (ring: readonly Pt2[], into: [number, number][]) => {
       const xs: number[] = [];
       for (let i = 0; i < ring.length; i++) {
         const a = ring[i];
@@ -1498,7 +1996,20 @@ export function solveDoll(input: DollInput): DollReport {
         if (a[1] > v !== b[1] > v) xs.push(a[0] + ((v - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
       }
       xs.sort((x, y) => x - y);
-      for (let k = 0; k + 1 < xs.length; k += 2) iv.push([xs[k], xs[k + 1]]);
+      for (let k = 0; k + 1 < xs.length; k += 2) into.push([xs[k], xs[k + 1]]);
+    };
+    for (const P of list) {
+      if (P.fold?.pliesChart) {
+        // A folded piece covers the union of its plies (its ring doubles back on itself).
+        const own: [number, number][] = [];
+        for (const ply of P.fold.pliesChart) cut(ply, own);
+        own.sort((x, y) => x[0] - y[0]);
+        let run: [number, number] | null = null;
+        for (const [a, b] of own) {
+          if (run && a <= run[1]) run[1] = Math.max(run[1], b);
+          else iv.push((run = [a, b]));
+        }
+      } else cut(boundaryChart(P), iv);
     }
     iv.sort((x, y) => x[0] - y[0]);
     return iv;
@@ -2586,7 +3097,7 @@ export function solveDoll(input: DollInput): DollReport {
       const hosts: Panel[] = [];
       let host = null as Panel | null;
       let join = '';
-      for (const J of opt.joins ?? []) {
+      for (const J of declaredJoins ?? []) {
         const mine = J.parts.findIndex((X) => X.some((k) => keys.has(k)));
         if (mine < 0) continue;
         for (const [i, X] of J.parts.entries()) {
@@ -2954,11 +3465,23 @@ export function solveDoll(input: DollInput): DollReport {
             const per = torsoAt(yy)!.tab[torsoAt(yy)!.tab.length - 1];
             th = thP + (TAU * (u - uP) * (1 - EPS_WRAP)) / per;
           }
-          setPos(v, torsoPoint(th, yy, CLEAR + layer + (P.role === 'placket' ? 2 : 0)));
+          // A placket without a fold is lifted 2 mm so it reads as a strip on the front; a folded
+          // one has real plies instead (their offsets below).
+          setPos(
+            v,
+            torsoPoint(
+              th,
+              yy,
+              CLEAR +
+                claimedLayer([P.key], layer + (P.role === 'placket' && !P.fold ? 2 : 0)) +
+                (P.fold ? P.fold.off[i] : 0),
+            ),
+          );
           if (y > vSh + 10) pos[3 * v + 1] = y; // above the shoulder line: keep the height
           proxyOf[v] = tIdx;
           placed[v] = 1;
         }
+        if (P.fold) P.fold.plyDone = true;
       }
     };
     wrapComp(main, thetaBack, uRef, 0);
@@ -3403,10 +3926,17 @@ export function solveDoll(input: DollInput): DollReport {
 
   // ── constraints (distances) ─────────────────────────────────────────────────────────────
   const built = new Set<number>();
+  const foldContacts: FoldContact[] = [];
+  /** The same pairs nearer the crease than the contacts reach: measured for the report, not held. */
+  const foldProbes: FoldContact[] = [];
   const buildPanel = (P: Panel) => {
     if (built.has(P.idx)) return;
     built.add(P.idx);
     const T = P.mesh.tris;
+    const F = P.fold;
+    // Rest lengths come from the piece as cut (a fold is an isometry: the folded footprint has the
+    // same lengths, bar rounding).
+    const fp = F ? F.flat : P.mesh.pts;
     const edgeOpp = new Map<number, number>();
     const seen = new Set<number>();
     const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
@@ -3418,7 +3948,7 @@ export function solveDoll(input: DollInput): DollReport {
       const B = P.offset + b;
       di.push(A);
       dj.push(B);
-      dr.push(Math.hypot(uv[2 * B] - uv[2 * A], uv[2 * B + 1] - uv[2 * A + 1]));
+      dr.push(Math.hypot(fp[b][0] - fp[a][0], fp[b][1] - fp[a][1]));
       dk.push(1);
     };
     for (let t = 0; t < T.length; t += 3) {
@@ -3430,12 +3960,25 @@ export function solveDoll(input: DollInput): DollReport {
         const k = key(a, b);
         const o = edgeOpp.get(k);
         if (o === undefined) edgeOpp.set(k, c);
-        else {
+        else if (F && F.creaseEdge.has(k)) {
+          // Hinge: across a crease the two faces meet at the folded rest (the ply gap included),
+          // as stiff as the paper itself — no ordinary bending there.
+          const A = P.offset + o;
+          const B = P.offset + c;
+          const d2 = Math.hypot(
+            P.mesh.pts[c][0] - P.mesh.pts[o][0],
+            P.mesh.pts[c][1] - P.mesh.pts[o][1],
+          );
+          bi.push(A);
+          bj.push(B);
+          br.push(Math.hypot(d2, F.off[c] - F.off[o]));
+          bk.push(1);
+        } else {
           const A = P.offset + o;
           const B = P.offset + c;
           bi.push(A);
           bj.push(B);
-          br.push(Math.hypot(uv[2 * B] - uv[2 * A], uv[2 * B + 1] - uv[2 * A + 1]));
+          br.push(Math.hypot(fp[c][0] - fp[o][0], fp[c][1] - fp[o][1]));
           bk.push(0.03);
         }
       }
@@ -3446,11 +3989,11 @@ export function solveDoll(input: DollInput): DollReport {
     const cell = h;
     const grid = new Map<string, number[]>();
     for (let i = 0; i < P.count; i++) {
-      const k = `${Math.floor(P.mesh.pts[i][0] / cell)},${Math.floor(P.mesh.pts[i][1] / cell)}`;
+      const k = `${Math.floor(fp[i][0] / cell)},${Math.floor(fp[i][1] / cell)}`;
       if (!grid.has(k)) grid.set(k, []);
       grid.get(k)!.push(i);
     }
-    const ring = P.mesh.pts.slice(0, P.nb);
+    const ring = fp.slice(0, P.nb);
     const near = (x: number, y: number) => {
       let best = -1;
       let bd = (0.7 * h) ** 2;
@@ -3459,27 +4002,145 @@ export function solveDoll(input: DollInput): DollReport {
       for (let a = gx - 1; a <= gx + 1; a++)
         for (let b = gy - 1; b <= gy + 1; b++)
           for (const j of grid.get(`${a},${b}`) ?? []) {
-            const d = (P.mesh.pts[j][0] - x) ** 2 + (P.mesh.pts[j][1] - y) ** 2;
+            const d = (fp[j][0] - x) ** 2 + (fp[j][1] - y) ** 2;
             if (d < bd) [best, bd] = [j, d];
           }
       return best;
     };
     for (let i = 0; i < P.count; i += 2) {
-      const [x, y] = P.mesh.pts[i];
+      const [x, y] = fp[i];
       for (const deg of [0, 60, 120]) {
         const r = (deg * Math.PI) / 180;
         const D = 5 * h;
         const j = near(x + D * Math.cos(r), y + D * Math.sin(r));
         if (j < 0 || j === i) continue;
         const ok = [0.25, 0.5, 0.75].every((t) =>
-          pointInPolygon([x + (P.mesh.pts[j][0] - x) * t, y + (P.mesh.pts[j][1] - y) * t], ring),
+          pointInPolygon([x + (fp[j][0] - x) * t, y + (fp[j][1] - y) * t], ring),
         );
         if (!ok) continue;
         li.push(P.offset + i);
         lj.push(P.offset + j);
-        lr.push(Math.hypot(P.mesh.pts[j][0] - x, P.mesh.pts[j][1] - y));
+        lr.push(Math.hypot(fp[j][0] - x, fp[j][1] - y));
       }
     }
+    if (!F) return;
+    // A placement that knows no plies (a sleeve, a cuff, a collar) placed every ply on one surface:
+    // offset along the vertex normals, out of the garment by the triangle winding and the fold.
+    if (!F.plyDone) {
+      F.plyDone = true;
+      const nrm = new Float64Array(3 * P.count);
+      for (let t = 0; t < T.length; t += 3) {
+        const a = T[t];
+        const b = T[t + 1];
+        const c = T[t + 2];
+        const sgn = P.mirrored !== (F.triFlip[t / 3] === 1) ? -1 : 1;
+        const A = getPos(P.offset + a);
+        const n = cross3(sub3(getPos(P.offset + b), A), sub3(getPos(P.offset + c), A));
+        for (const v of [a, b, c]) for (let d = 0; d < 3; d++) nrm[3 * v + d] += sgn * n[d];
+      }
+      for (let i = 0; i < P.count; i++) {
+        const nl = Math.hypot(nrm[3 * i], nrm[3 * i + 1], nrm[3 * i + 2]);
+        if (!(nl > 1e-9) || !placed[P.offset + i]) continue;
+        for (let d = 0; d < 3; d++) pos[3 * (P.offset + i) + d] += (F.off[i] * nrm[3 * i + d]) / nl;
+      }
+    }
+    // Fold contacts: every vertex over a triangle of another ply (in the folded footprint, past
+    // the ramp at the crease) stays on its side of that ply, `gap` mm away. Static pairs. The
+    // vertices inside the ramp are paired too, as probes: measured, never held (their offset is
+    // still growing there, and the hinge holds the crease).
+    const band = Math.max(0.5 * h, RAMP);
+    const cellT = new Map<string, number[]>();
+    for (let t = 0; t < T.length; t += 3) {
+      const a = T[t];
+      const b = T[t + 1];
+      const c = T[t + 2];
+      const xs = [P.mesh.pts[a][0], P.mesh.pts[b][0], P.mesh.pts[c][0]];
+      const ys = [P.mesh.pts[a][1], P.mesh.pts[b][1], P.mesh.pts[c][1]];
+      const gx0 = Math.floor(Math.min(...xs) / cell);
+      const gx1 = Math.floor(Math.max(...xs) / cell);
+      const gy0 = Math.floor(Math.min(...ys) / cell);
+      const gy1 = Math.floor(Math.max(...ys) / cell);
+      for (let gx = gx0; gx <= gx1; gx++)
+        for (let gy = gy0; gy <= gy1; gy++) {
+          const k = `${gx},${gy}`;
+          if (!cellT.has(k)) cellT.set(k, []);
+          cellT.get(k)!.push(t);
+        }
+    }
+    type Pairs = {
+      cv: number[];
+      ca: number[];
+      cb: number[];
+      cc: number[];
+      w0: number[];
+      w1: number[];
+      w2: number[];
+      sg: number[];
+      gp: number[];
+    };
+    const pairs = (): Pairs => ({
+      cv: [],
+      ca: [],
+      cb: [],
+      cc: [],
+      w0: [],
+      w1: [],
+      w2: [],
+      sg: [],
+      gp: [],
+    });
+    const held = pairs();
+    const probed = pairs();
+    for (let i = 0; i < P.count; i++) {
+      if (!(F.creaseD[i] > 1e-9)) continue;
+      const { cv, ca, cb, cc, w0, w1, w2, sg, gp } = F.creaseD[i] >= band ? held : probed;
+      const p = P.mesh.pts[i];
+      const k = `${Math.floor(p[0] / cell)},${Math.floor(p[1] / cell)}`;
+      for (const t of cellT.get(k) ?? []) {
+        const a = T[t];
+        const b = T[t + 1];
+        const c = T[t + 2];
+        const dp = F.ply[i] - F.triPly[t / 3];
+        if (!dp) continue;
+        const A = P.mesh.pts[a];
+        const B = P.mesh.pts[b];
+        const C = P.mesh.pts[c];
+        const det = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+        if (Math.abs(det) < 1e-9) continue;
+        const u = ((B[1] - C[1]) * (p[0] - C[0]) + (C[0] - B[0]) * (p[1] - C[1])) / det;
+        const v = ((C[1] - A[1]) * (p[0] - C[0]) + (A[0] - C[0]) * (p[1] - C[1])) / det;
+        const w = 1 - u - v;
+        if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
+        const sgn = P.mirrored !== (F.triFlip[t / 3] === 1) ? -1 : 1;
+        cv.push(P.offset + i);
+        ca.push(P.offset + a);
+        cb.push(P.offset + b);
+        cc.push(P.offset + c);
+        w0.push(u);
+        w1.push(v);
+        w2.push(w);
+        sg.push(Math.sign(dp) * sgn);
+        gp.push(0.6 * PLY * Math.abs(dp));
+        break; // one triangle holds the vertex
+      }
+    }
+    for (const [list, into] of [
+      [held, foldContacts],
+      [probed, foldProbes],
+    ] as const)
+      if (list.cv.length)
+        into.push({
+          v: Int32Array.from(list.cv),
+          a: Int32Array.from(list.ca),
+          b: Int32Array.from(list.cb),
+          c: Int32Array.from(list.cc),
+          w0: Float64Array.from(list.w0),
+          w1: Float64Array.from(list.w1),
+          w2: Float64Array.from(list.w2),
+          sgn: Int8Array.from(list.sg),
+          gap: Float64Array.from(list.gp),
+          panel: P.idx,
+        });
   };
 
   let state: SolverState | null = null;
@@ -3510,6 +4171,7 @@ export function solveDoll(input: DollInput): DollReport {
       anchorK,
       contacts,
       ...(ties.length ? { ties } : {}),
+      ...(foldContacts.length ? { foldContacts } : {}),
     };
     return state;
   };
@@ -3630,6 +4292,8 @@ export function solveDoll(input: DollInput): DollReport {
   const graphPlaced = new Set<DollGroupId>();
   const graphWork = (s: GroupedSeam, born: number, closure = false) => {
     const conf = isConf(s.seam);
+    const proposedByDoll = !owner && dollNote.has(`${s.seam.a}~${s.seam.b}`);
+    const completedFromOrder = !owner && orderNote.has(`${s.seam.a}~${s.seam.b}`);
     // Each side as sewn (sewnSide: parts walked in order, cut to their stretches) — the same path
     // the placement judged the seam by; the range of a one-piece partial stays a constraint.
     const A = sewnSide(s, 'a', false);
@@ -3663,18 +4327,18 @@ export function solveDoll(input: DollInput): DollReport {
         id: `${s.seam.a}~${s.seam.b}`,
         a: s.a,
         b: s.b,
-        kind: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'proposed-composite' : s.seam.kind,
-        origin: dollNote.has(`${s.seam.a}~${s.seam.b}`) ? 'doll-proposed' : 'graph',
+        kind: proposedByDoll ? 'proposed-composite' : s.seam.kind,
+        origin: proposedByDoll ? 'doll-proposed' : 'graph',
         A,
         B,
         target: closure ? 0.5 : 1,
         note: closure
           ? suspectNote.get(`${s.seam.a}~${s.seam.b}`) ??
             'closure (buttons / zip) — drawn closed with a small gap'
-          : orderNote.get(`${s.seam.a}~${s.seam.b}`) ??
+          : (completedFromOrder ? orderNote.get(`${s.seam.a}~${s.seam.b}`) : undefined) ??
             dollNote.get(`${s.seam.a}~${s.seam.b}`) ??
             '',
-        fromOrder: orderNote.has(`${s.seam.a}~${s.seam.b}`),
+        fromOrder: completedFromOrder,
         closure,
         // A confirmed seam is sewn as stored (whole, or its stored stretch) — never re-guessed.
         partial: conf
@@ -3697,6 +4361,9 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
+    if (owner && isGuess(s.seam))
+      w0.guess = { step: guessStepOf.get(s.seam.provenance!.seamKey) ?? 0 };
     if (s.seam.partRange) {
       // (keys on the side's original edge ids → the grouped side's ids, position for position)
       const pr: Record<string, [number, number]> = {};
@@ -4060,6 +4727,9 @@ export function solveDoll(input: DollInput): DollReport {
           kind: s.seam.kind,
           origin: 'graph',
           fromOrder: w0.fromOrder,
+          confirmed: w0.confirmed,
+          inStep: w0.inStep,
+          guess: w0.guess,
           A: A2,
           B: B2,
           target: 1,
@@ -4087,6 +4757,7 @@ export function solveDoll(input: DollInput): DollReport {
     kind: Work['kind'],
     born: number,
   ) => {
+    if (owner) return;
     const ch = charts.get(gid);
     const list = groups.get(gid);
     if (!ch || !list) return;
@@ -4235,7 +4906,7 @@ export function solveDoll(input: DollInput): DollReport {
       for (const a of (sc.aParts ?? [sc.a]).map(pk))
         for (const b of (sc.bParts ?? [sc.b]).map(pk)) linkedP.add(`${a}|${b}`).add(`${b}|${a}`);
     const geomMap = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
-    for (const J of opt.joins ?? [])
+    for (const J of declaredJoins ?? [])
       J.parts.forEach((X, i) =>
         J.parts.forEach((Y, j) => {
           if (j <= i) return;
@@ -4248,7 +4919,7 @@ export function solveDoll(input: DollInput): DollReport {
         }),
       );
   }
-  for (const f of facingPairs(new Set(['BODY']), 100, 0.15)) {
+  for (const f of owner ? [] : facingPairs(new Set(['BODY']), 100, 0.15)) {
     const A = pathOf([f.x.e.id])!;
     const B = pathOf([f.y.e.id])!;
     const Px = panelByKey.get(pk(f.x.e.id));
@@ -4635,6 +5306,7 @@ export function solveDoll(input: DollInput): DollReport {
      */
     foldB = false,
   ) => {
+    if (owner) return null;
     const cutIdx = (L: { verts: number[] }, ref?: Vec3) => {
       let best = 0;
       for (let k = 0; k < L.verts.length; k++) {
@@ -4968,7 +5640,7 @@ export function solveDoll(input: DollInput): DollReport {
       'proposed-composite',
       passes,
     );
-    if (sewnNear(gid, 'BODY') || opt.proposeComposite === false) continue;
+    if (sewnNear(gid, 'BODY') || !proposalsAllowed) continue;
     // L4: a sleeve a person sewed to the body by a confirmed seam is not proposed again.
     if (
       l4 &&
@@ -5073,7 +5745,7 @@ export function solveDoll(input: DollInput): DollReport {
       };
     }
   }
-  if (!confNeck && neckGroups.length && groups.has('BODY') && opt.proposeComposite !== false) {
+  if (!confNeck && neckGroups.length && groups.has('BODY') && proposalsAllowed) {
     const r = findNeckPath(cctx, neckLoop ? [neckLoop] : bodyLoops, vArm);
     if (opt.debug) warnings.push(`debug: neck walk ${r.debug}`);
     const ratioOf = (x: NeckPath) => (chestMm > 0 ? x.path.len / chestMm : NaN);
@@ -5456,7 +6128,7 @@ export function solveDoll(input: DollInput): DollReport {
         (a.keys.has(pk(sm.a[0])) && b.keys.has(pk(sm.b[0]))) ||
         (b.keys.has(pk(sm.a[0])) && a.keys.has(pk(sm.b[0]))),
     ) ||
-    (opt.joins ?? []).some((J) =>
+    (declaredJoins ?? []).some((J) =>
       J.parts.some(
         (X, i) =>
           X.some((k) => a.keys.has(k)) &&
@@ -5582,9 +6254,11 @@ export function solveDoll(input: DollInput): DollReport {
   const placeOnNeck = (units: Unit[], role: 'stand' | 'collar', label: string) => {
     if (!neck) return;
     const N0n = neck;
-    const ordered = [...units].sort((x, y) => y.area - x.area);
+    const ordered = [...units].sort((x, y) =>
+      isUnder(x.keys, y.keys) ? 1 : isUnder(y.keys, x.keys) ? -1 : y.area - x.area,
+    );
     ordered.forEach((U, idx) => {
-      const layer = 3 * (ordered.length - 1 - idx);
+      const layer = claimedLayer(U.keys, 3 * (ordered.length - 1 - idx));
       // L4: the unit the confirmed neck seam names is mapped by the folded plan on ITS base.
       const cn =
         confNeck && U.keys.has(pk((confNeck.unit === 'a' ? confNeck.g.a : confNeck.g.b)[0]))
@@ -5683,7 +6357,7 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const work = cn
         ? confWork
-        : graphSewn || off
+        : graphSewn || off || owner
           ? null
           : anchoredWork(
               id,
@@ -5735,7 +6409,9 @@ export function solveDoll(input: DollInput): DollReport {
   }
   if (groups.has('COLLAR')) {
     const units = unitsOf('COLLAR');
-    const ordered = [...units].sort((x, y) => y.area - x.area);
+    const ordered = [...units].sort((x, y) =>
+      isUnder(x.keys, y.keys) ? 1 : isUnder(y.keys, x.keys) ? -1 : y.area - x.area,
+    );
     for (let i = 1; i < ordered.length; i++)
       if (!joinedUnits(ordered[i], ordered[0]))
         warnings.push(
@@ -5791,7 +6467,7 @@ export function solveDoll(input: DollInput): DollReport {
       for (const P of stand) for (let i = 0; i < P.count; i++) standV.push(P.offset + i);
       const planOf = new Map<Unit, ReturnType<typeof topAnchors>>();
       ordered.forEach((U0, idx) => {
-        const layer = 3 * (ordered.length - 1 - idx);
+        const layer = claimedLayer(U0.keys, 3 * (ordered.length - 1 - idx));
         // Turned down = the drawn piece rotated 180° (u and v both reversed): its face shows.
         const U: Unit = { ...U0, attach: [...U0.attach].reverse(), other: [...U0.other].reverse() };
         const plan = topAnchors(U, top);
@@ -5890,7 +6566,7 @@ export function solveDoll(input: DollInput): DollReport {
         }
         const work = confFall
           ? confW
-          : graphSewn
+          : graphSewn || owner
             ? null
             : anchoredWork(
                 label,
@@ -5964,7 +6640,7 @@ export function solveDoll(input: DollInput): DollReport {
     for (const P of groups.get(gid)!) buildPanel(P);
     for (const sm of G.seams)
       if (inGroups(sm.a, new Set([gid])) && inGroups(sm.b, new Set([gid]))) graphWork(sm, passes);
-    if (runs && wrist && !graphTouches(gid, new Set([sl])) && opt.proposeComposite !== false)
+    if (runs && wrist && !graphTouches(gid, new Set([sl])) && proposalsAllowed)
       propose(
         `${s === 'L' ? 'left' : 'right'} cuff ↔ wrist`,
         { verts: runs.top, closed: false },
@@ -6040,7 +6716,7 @@ export function solveDoll(input: DollInput): DollReport {
       2,
     );
     for (const P of groups.get(gid)!) buildPanel(P);
-    if (runs && target && opt.proposeComposite !== false) {
+    if (runs && target && proposalsAllowed) {
       let run = gid === 'WAISTBAND' ? runs.bottom : runs.top;
       // Halves joined end to end: the run is their long edges, not the short ends it turns into.
       if (gid === 'WAISTBAND' && dollNote.size) {
@@ -6126,7 +6802,7 @@ export function solveDoll(input: DollInput): DollReport {
     if (!P.layers.length) return null;
     const keys = new Set([P.key, ...P.layers]);
     const want = new Set<string>();
-    for (const J of opt.joins ?? [])
+    for (const J of declaredJoins ?? [])
       if (J.parts.some((X) => X.some((k) => keys.has(k))))
         for (const X of J.parts) for (const k of X) if (!keys.has(k)) want.add(k);
     const others = [...want].slice(0, 4);
@@ -6145,31 +6821,78 @@ export function solveDoll(input: DollInput): DollReport {
   // (a bag has no hem line vLo: its pieces stand level with its bottom)
   const yBase = bag && Number.isFinite(yLow) ? yLow : vLo + 200;
   const floating: DollReport['floating'] = [];
+  // Pieces a chart laid together that no seam carries to the placed doll (a front whose side seam
+  // no step names, with its yoke and the placket sewn onto it) float as ONE lot: laid as the chart
+  // laid them, mirror included, so the seams among them are drawn from where they lie (a lot never
+  // moves; they close as far as the chart matched them). A lone piece lies as cut, face up.
+  const lotOf = (P: Panel): Panel[] => {
+    for (const ch of charts.values())
+      for (const c of ch.components)
+        if (c.keys.includes(P.key)) {
+          const lot = c.keys
+            .map((k) => panelByKey.get(k))
+            .filter((Q): Q is Panel => !!Q && (Q.group === 'FLOAT' || !placed[Q.offset]));
+          return lot.length > 1 ? lot : [P];
+        }
+    return [P];
+  };
+  const lots: Panel[][] = [];
+  const lotted = new Set<number>();
   for (const P of panels) {
-    if (P.group !== 'FLOAT' && placed[P.offset]) continue;
+    if ((P.group !== 'FLOAT' && placed[P.offset]) || lotted.has(P.idx)) continue;
+    const lot = lotOf(P);
+    for (const Q of lot) lotted.add(Q.idx);
+    lots.push(lot);
+  }
+  for (const lot of lots) {
+    const asChart = lot.length > 1;
+    const at = asChart ? cuv : uv;
     let x0 = Infinity;
     let x1 = -Infinity;
     let y0 = Infinity;
-    for (let i = 0; i < P.count; i++) {
-      x0 = Math.min(x0, uv[2 * (P.offset + i)]);
-      x1 = Math.max(x1, uv[2 * (P.offset + i)]);
-      y0 = Math.min(y0, uv[2 * (P.offset + i) + 1]);
-    }
-    for (let i = 0; i < P.count; i++) {
-      const v = P.offset + i;
-      setPos(v, [xCursor + uv[2 * v] - x0, yBase + uv[2 * v + 1] - y0, 0]);
-      placed[v] = 1;
+    for (const P of lot)
+      for (let i = 0; i < P.count; i++) {
+        x0 = Math.min(x0, at[2 * (P.offset + i)]);
+        x1 = Math.max(x1, at[2 * (P.offset + i)]);
+        y0 = Math.min(y0, at[2 * (P.offset + i) + 1]);
+      }
+    for (const P of lot) {
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, [
+          xCursor + at[2 * v] - x0,
+          yBase + at[2 * v + 1] - y0,
+          P.fold ? P.fold.off[i] : 0,
+        ]);
+        placed[v] = 1;
+      }
+      // Laid as cut, it is face up whatever the chart decided: its fold's plies are measured by it.
+      if (!asChart) P.mirrored = false;
+      if (P.fold) P.fold.plyDone = true;
+      const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
+      floating.push({
+        pieceKey: P.key,
+        reason:
+          plyWords(P) ??
+          (asChart
+            ? `drawn apart with ${lot
+                .filter((Q) => Q !== P)
+                .map((Q) => Q.key)
+                .join(', ')} — sewn to each other, no seam reaches the placed pieces`
+            : has
+              ? 'sewn only to pieces outside any wrap group — drawn apart'
+              : 'no seam found for any of its edges — drawn apart'),
+      });
     }
     xCursor += x1 - x0 + 60;
-    const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
-    floating.push({
-      pieceKey: P.key,
-      reason:
-        plyWords(P) ??
-        (has
-          ? 'sewn only to pieces outside any wrap group — drawn apart'
-          : 'no seam found for any of its edges — drawn apart'),
-    });
+    if (!asChart) continue;
+    // The seams inside the lot: drawn from where the chart laid them.
+    const keys = new Set(lot.map((P) => P.key));
+    for (const sm of G.seams) {
+      if (handled.has(sm) || ![...sm.a, ...sm.b].every((id) => keys.has(pk(id)))) continue;
+      handled.add(sm);
+      graphWork(sm, passes);
+    }
   }
 
   // ── phase 2: everything ─────────────────────────────────────────────────────────────────
@@ -6181,6 +6904,9 @@ export function solveDoll(input: DollInput): DollReport {
     anchorK[v] = bag ? 0.001 : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT' ? 0 : 0.002;
   }
   for (const P of buildPanelLater) buildPanel(P);
+  // A folded piece drawn apart never moves, but its fold contacts are paired all the same: the
+  // report measures its ply gaps from them.
+  for (const P of panels) if (P.fold && !built.has(P.idx)) buildPanel(P);
   for (let v = 0; v < N; v++) moving[v] = groupOfV[v] !== 'FLOAT' && proxyOf[v] >= 0 ? 1 : 0;
   const tSolve = now();
   // Probe switch: the pose as placed, before phase 2 (debugging placement priors).
@@ -6408,6 +7134,8 @@ export function solveDoll(input: DollInput): DollReport {
         note = `CONTRADICTION — ${words}`;
       } else note = `confirmed by a person · ${note}`;
     } else if (w.confirmed && w.overlap) note = `confirmed by a person · ${note}`;
+    else if (w.guess)
+      note = `step ${w.guess.step} names no row — the step picture's guess · ${note}`;
     seams.push({
       id: w.id,
       a: w.a,
@@ -6432,11 +7160,13 @@ export function solveDoll(input: DollInput): DollReport {
         ? {
             decidedBy: w.confirmed
               ? ('person' as const)
-              : w.origin === 'graph' && !w.fromOrder
+              : w.origin === 'graph' && !w.fromOrder && !w.guess
                 ? ('engine' as const)
                 : ('doll' as const),
           }
         : {}),
+      ...(owner && w.confirmed ? { inStep: w.inStep ?? false } : {}),
+      ...(w.guess ? { guessed: true } : {}),
     });
   }
   // A contradiction next to a confirmed seam stretched > 20 % on the same pieces: that seam is the
@@ -6472,13 +7202,81 @@ export function solveDoll(input: DollInput): DollReport {
       stretchPct: 0,
       twisted: false,
       state: 'closed',
-      note: 'layer seam — the layers are drawn as one piece',
+      note:
+        owner && isConf(s)
+          ? 'confirmed by a person · layer seam — the layers are drawn as one piece'
+          : owner && isGuess(s)
+            ? `step ${guessStepOf.get(s.provenance!.seamKey)} names no row — the step picture's guess · layer seam — the layers are drawn as one piece`
+            : 'layer seam — the layers are drawn as one piece',
       pathA: new Uint32Array(0),
       pathB: new Uint32Array(0),
+      ...(owner
+        ? {
+            decidedBy: isConf(s)
+              ? ('person' as const)
+              : isGuess(s)
+                ? ('doll' as const)
+                : ('engine' as const),
+          }
+        : {}),
+      ...(owner && isConf(s) ? { inStep: ownerInStepKeys.has(s.provenance?.seamKey ?? '') } : {}),
+      ...(owner && isGuess(s) ? { guessed: true } : {}),
     });
+  const undrawnGuesses: NonNullable<DollReport['notSewn']> = [];
+  if (owner) {
+    const reported = new Set(seams.map((seam) => seam.id));
+    for (const candidate of graphIn.chosen) {
+      if (
+        candidate.provenance?.status !== 'confirmed' ||
+        candidate.kind === 'surface' ||
+        candidate.kind === 'closure-not-seam'
+      )
+        continue;
+      const id = `${candidate.a}~${candidate.b}`;
+      if (reported.has(id)) continue;
+      if (isGuess(candidate)) {
+        // A guess the doll could not draw is no contradiction: said, not counted open.
+        undrawnGuesses.push({
+          id,
+          a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
+          b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
+          note: `step ${guessStepOf.get(candidate.provenance.seamKey)} names no row — the step picture's guess could not be drawn on the current pieces`,
+        });
+        reported.add(id);
+        continue;
+      }
+      const existing = preContradictions.find((words) => words.startsWith(`${id}:`));
+      const words =
+        existing ??
+        `${id}: confirmed by a person but its named path cannot be drawn on the current pieces — the row contradicts the pattern`;
+      if (!existing) contradictions.push(words);
+      seams.push({
+        id,
+        a: (candidate.aParts ?? edgeIdsOf(candidate.a)).flatMap(edgeIdsOf),
+        b: (candidate.bParts ?? edgeIdsOf(candidate.b)).flatMap(edgeIdsOf),
+        kind: candidate.kind,
+        origin: 'graph',
+        lenA: candidate.evidence.aLenMm ?? 0,
+        lenB: candidate.evidence.bLenMm ?? 0,
+        residualMeanMm: 0,
+        residualMaxMm: 0,
+        residualP95Mm: 0,
+        stretchPct: 0,
+        twisted: false,
+        state: 'open',
+        decidedBy: 'person',
+        inStep: ownerInStepKeys.has(candidate.provenance?.seamKey ?? ''),
+        note: `CONTRADICTION — ${words}`,
+        pathA: new Uint32Array(0),
+        pathB: new Uint32Array(0),
+      });
+      reported.add(id);
+    }
+  }
 
   // Graph pairings the doll will not sew: words, not seams (never counted open).
   const notSewn: NonNullable<DollReport['notSewn']> = [
+    ...undrawnGuesses,
     ...suspects.map(({ s: sm, note }) => ({
       id: `${sm.seam.a}~${sm.seam.b}`,
       a: sm.a,
@@ -6512,7 +7310,7 @@ export function solveDoll(input: DollInput): DollReport {
       ...(l4 ? { decidedBy: 'doll' as const } : {}),
     });
   // Free edges facing each other (a seam the pattern has not got): reported open, never solved.
-  const freeAll = panels
+  const freeAll = (owner ? [] : panels)
     .filter((P) => P.group !== 'FLOAT')
     .flatMap((P) =>
       freeEdges(P)
@@ -6636,11 +7434,20 @@ export function solveDoll(input: DollInput): DollReport {
   const surfacePanels: DollReport['panels'] = [];
   const surfacePos: number[] = [];
   {
+    const ownerSurface = new Map(
+      graph.chosen.flatMap((candidate) =>
+        owner && candidate.kind === 'surface' && candidate.surface
+          ? [[candidate.surface.part, candidate.surface] as const]
+          : [],
+      ),
+    );
     // (trousers for now: a top's pockets / facings stay listed as before — except the two pieces
     // of a pocket bag the order sews round: drawn on their panel on any garment)
     const bagPieces = new Set(bagSeams.flatMap((x) => [pk(x.seam.a), pk(x.seam.b)]));
     const surf = G.skipped
-      .filter((x) => x.surface && (legsCat0 || bagPieces.has(x.pieceKey)))
+      .filter(
+        (x) => x.surface && (ownerSurface.has(x.pieceKey) || legsCat0 || bagPieces.has(x.pieceKey)),
+      )
       .map((x) => x.pieceKey);
     // Hosts are the garment's panels (a leg, the body) — never a band, a collar or a cuff.
     const drawnArea = new Map(
@@ -6648,7 +7455,9 @@ export function solveDoll(input: DollInput): DollReport {
         .filter((P) => P.group === 'LEG_L' || P.group === 'LEG_R' || P.group === 'BODY')
         .map((P) => [P.key, Math.abs(P.geom.areaMm2)]),
     );
-    const hosts = surfaceHosts(surf, opt.joins ?? [], drawnArea);
+    const hosts = surfaceHosts(surf, declaredJoins ?? [], drawnArea);
+    for (const [part, surface] of ownerSurface)
+      hosts.set(part, { host: surface.host, join: 'owner row' });
     const geomOfKey = new Map(graph.pieces.map((g) => [g.pieceKey, g]));
     const stack = new Map<string, number>();
     let M = N;
@@ -6662,13 +7471,22 @@ export function solveDoll(input: DollInput): DollReport {
           host: null,
           join: null,
           placed: false,
-          note: opt.joins?.length
+          note: declaredJoins?.length
             ? 'no join of the order sews it to a drawn panel — not placed'
             : "no technologist's order to say which panel carries it — not placed",
         });
         continue;
       }
-      const fit = surfaceFit(S, H.geom);
+      const ownerPlacement = ownerSurface.get(k);
+      const fit = ownerPlacement
+        ? {
+            map: (point: Pt2) => apply(ownerPlacement.T, point),
+            flip: det(ownerPlacement.T) < 0,
+            cover: 1,
+            past: 0,
+            how: 'owner placement',
+          }
+        : surfaceFit(S, H.geom);
       if (!fit) {
         surfaceRep.push({
           pieceKey: k,
@@ -6681,19 +7499,21 @@ export function solveDoll(input: DollInput): DollReport {
       }
       const mesh = meshPiece(S.rs, [...S.edges.flatMap((e) => [e.s, e.e]), ...S.corners], gridH);
       const flipH = H.mirrored !== faceFlip.has(H.idx);
-      // Host vertex normals, out of the garment (the report's winding).
+      // Host vertex normals, out of the garment (the report's winding, a folded part turned).
       const nrm = new Float64Array(3 * H.count);
       const T = H.mesh.tris;
       for (let t = 0; t < T.length; t += 3) {
+        const flipT = flipH !== (H.fold?.triFlip[t / 3] === 1);
         const a = T[t];
-        const b = flipH ? T[t + 2] : T[t + 1];
-        const c = flipH ? T[t + 1] : T[t + 2];
+        const b = flipT ? T[t + 2] : T[t + 1];
+        const c = flipT ? T[t + 1] : T[t + 2];
         const A = getPos(H.offset + a);
         const n = cross(sub(getPos(H.offset + b), A), sub(getPos(H.offset + c), A));
         for (const v of [a, b, c]) for (let d = 0; d < 3; d++) nrm[3 * v + d] += n[d];
       }
       const lift = 2 + 2 * (stack.get(H.key) ?? 0);
       stack.set(H.key, (stack.get(H.key) ?? 0) + 1);
+      const layerDirection = isUnder([H.key], [k]) ? 1 : -1;
       const hp = H.mesh.pts;
       for (const q of mesh.pts) {
         const p = fit.map(q);
@@ -6737,7 +7557,7 @@ export function solveDoll(input: DollInput): DollReport {
         const nl = Math.hypot(Nn[0], Nn[1], Nn[2]) || 1;
         // Inside the panel: a fly shield, a pocket bag, a facing lie under the face they are sewn
         // to (a patch pocket would lie over it — the drawing does not tell which).
-        for (let d = 0; d < 3; d++) surfacePos.push(X[d] - (liftQ * Nn[d]) / nl);
+        for (let d = 0; d < 3; d++) surfacePos.push(X[d] + (layerDirection * liftQ * Nn[d]) / nl);
       }
       const flip = flipH !== fit.flip;
       const tris = new Uint32Array(mesh.tris.length);
@@ -6759,7 +7579,10 @@ export function solveDoll(input: DollInput): DollReport {
         layers: [],
       });
       M += mesh.pts.length;
-      const note = `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
+      const side = layerDirection > 0 ? 'over' : 'under';
+      const note = owner
+        ? `sewn onto ${H.key} (${hk.join}) — ${fit.how}; drawn ${lift} mm ${side} its face, not solved`
+        : `sewn onto ${H.key} (order «${hk.join}») — ${fit.how}; drawn ${lift} mm under its face (inside the garment), not solved`;
       surfaceRep.push({
         pieceKey: k,
         host: H.key,
@@ -6779,14 +7602,21 @@ export function solveDoll(input: DollInput): DollReport {
     positions[3 * N + i] = Number.isFinite(surfacePos[i]) ? surfacePos[i] : 0;
   const outPanels: DollReport['panels'] = panels.map((P) => {
     const tris = new Uint32Array(P.mesh.tris.length);
+    const flipP = P.mirrored !== faceFlip.has(P.idx);
     for (let t = 0; t < tris.length; t += 3) {
       tris[t] = P.mesh.tris[t];
-      const flip = P.mirrored !== faceFlip.has(P.idx);
+      // A part a fold turned over is wound the other way (its face now looks in).
+      const flip = flipP !== (P.fold?.triFlip[t / 3] === 1);
       tris[t + 1] = flip ? P.mesh.tris[t + 2] : P.mesh.tris[t + 1];
       tris[t + 2] = flip ? P.mesh.tris[t + 1] : P.mesh.tris[t + 2];
     }
     const uvf = new Float32Array(2 * P.count);
-    for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
+    if (P.fold)
+      for (let i = 0; i < P.count; i++) {
+        uvf[2 * i] = P.fold.flat[i][0];
+        uvf[2 * i + 1] = P.fold.flat[i][1];
+      }
+    else for (let i = 0; i < 2 * P.count; i++) uvf[i] = uv[2 * P.offset + i];
     return {
       pieceKey: P.key,
       instance: 0 as const,
@@ -6898,6 +7728,178 @@ export function solveDoll(input: DollInput): DollReport {
     collarRep.units.push(cp.rep);
   }
   const tris = panels.reduce((t, P) => t + P.mesh.tris.length / 3, 0);
+  const ownerWords = owner
+    ? (() => {
+        const confirmed =
+          opt.seams?.selection?.confirmed ??
+          opt.seams?.rows.filter((row) => row.status === 'confirmed').length ??
+          0;
+        const inSteps =
+          opt.seams?.selection?.inSteps ??
+          opt.seams?.candidates?.filter((candidate) => candidate.inStep && !candidate.guess)
+            .length ??
+          0;
+        const rejected =
+          opt.seams?.selection?.rejected ??
+          opt.seams?.rows.filter((row) => row.status === 'rejected').length ??
+          0;
+        const guessed = opt.seams?.selection?.guessed ?? guessStepOf.size;
+        // A confirmed row no step names: not sewn, named by its pieces and edges (never by key).
+        const nameOfPiece = new Map(
+          input.facts.pieces.map((piece) => [piece.pieceKey, piece.name.trim() || piece.pieceKey]),
+        );
+        const sideWords = (side: readonly { piece: string; edgeHint: string }[]) =>
+          side
+            .map((anchor) => {
+              const at = anchor.edgeHint.lastIndexOf('#');
+              const edge = at >= 0 ? anchor.edgeHint.slice(at) : anchor.edgeHint;
+              return `${nameOfPiece.get(anchor.piece) ?? anchor.piece} ${edge}`.trim();
+            })
+            .join(' + ');
+        const unbound = (opt.seams?.inStepKeys ? opt.seams.rows : [])
+          .filter((row) => row.status === 'confirmed' && !ownerInStepKeys.has(row.seamKey))
+          .map(
+            (row) =>
+              `not sewn, no step names it: ${sideWords(row.sideA)} ↔ ${sideWords(row.sideB)}${row.kind === 'closure' ? ' (closure)' : ''}`,
+          );
+        return [
+          `rows: confirmed ${confirmed} · sewn by steps ${inSteps} · no step ${Math.max(0, confirmed - inSteps)} (not sewn) · rejected ${rejected} (not sewn) · guessed ${guessed} (steps without a row, dashed)`,
+          ...unbound,
+          ...input.facts.pieces
+            .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
+            .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
+        ];
+      })()
+    : [];
+  // ── folds: the numbers as drawn ──
+  if (foldReports.length) {
+    const gapOf = (C: FoldContact, q: number): number => {
+      const a = C.a[q];
+      const b = C.b[q];
+      const c = C.c[q];
+      const A = getPos(a);
+      const n = cross3(sub3(getPos(b), A), sub3(getPos(c), A));
+      const nl = Math.hypot(n[0], n[1], n[2]);
+      if (!(nl > 1e-9)) return NaN;
+      const Q: Vec3 = [0, 0, 0];
+      for (let d = 0; d < 3; d++)
+        Q[d] = C.w0[q] * pos[3 * a + d] + C.w1[q] * pos[3 * b + d] + C.w2[q] * pos[3 * c + d];
+      const Pv = getPos(C.v[q]);
+      return (
+        (C.sgn[q] * ((Pv[0] - Q[0]) * n[0] + (Pv[1] - Q[1]) * n[1] + (Pv[2] - Q[2]) * n[2])) / nl
+      );
+    };
+    for (const P of panels) {
+      const F = P.fold;
+      if (!F) continue;
+      const T = P.mesh.tris;
+      const byEdge = new Map<number, number[]>();
+      const key = (a: number, b: number) => (a < b ? a * 1e6 + b : b * 1e6 + a);
+      for (let t = 0; t < T.length; t += 3)
+        for (let e = 0; e < 3; e++) {
+          const k = key(T[t + e], T[t + ((e + 1) % 3)]);
+          if (!byEdge.has(k)) byEdge.set(k, []);
+          byEdge.get(k)!.push(t);
+        }
+      const faceN = (t: number): Vec3 => {
+        const A = getPos(P.offset + T[t]);
+        const n = cross3(
+          sub3(getPos(P.offset + T[t + 1]), A),
+          sub3(getPos(P.offset + T[t + 2]), A),
+        );
+        const nl = Math.hypot(n[0], n[1], n[2]) || 1;
+        return [n[0] / nl, n[1] / nl, n[2] / nl];
+      };
+      // Ply gaps at this piece's fold contacts and probes (shared by its folds).
+      const gaps: number[] = [];
+      for (const C of [...foldContacts, ...foldProbes]) {
+        if (C.panel !== P.idx) continue;
+        for (let q = 0; q < C.v.length; q++) {
+          const g = gapOf(C, q);
+          if (Number.isFinite(g)) gaps.push(g);
+        }
+      }
+      gaps.sort((x, y) => x - y);
+      const plyGap = gaps.length
+        ? {
+            min: gaps[0],
+            median: gaps[Math.floor(gaps.length / 2)],
+            max: gaps[gaps.length - 1],
+            pairs: gaps.length,
+          }
+        : null;
+      const through = gaps.filter((g) => g < -0.05).length;
+      for (const c of F.creases) {
+        const r = c.report;
+        const e0 = getPos(P.offset + c.verts[0]);
+        const e1 = getPos(P.offset + c.verts[c.verts.length - 1]);
+        const dir = sub3(e1, e0);
+        const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+        const du: Vec3 = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
+        // The crease's kink: each vertex against the chord of its two neighbours. A crease that
+        // follows the body's curve stays near 0; a wrinkled or wandering one does not.
+        let dev = 0;
+        for (let k = 1; k + 1 < c.verts.length; k++) {
+          const A = getPos(P.offset + c.verts[k - 1]);
+          const B = getPos(P.offset + c.verts[k + 1]);
+          const q = sub3(getPos(P.offset + c.verts[k]), A);
+          const ab = sub3(B, A);
+          const al = Math.hypot(ab[0], ab[1], ab[2]) || 1;
+          const t = Math.max(0, Math.min(al, (q[0] * ab[0] + q[1] * ab[1] + q[2] * ab[2]) / al));
+          dev = Math.max(
+            dev,
+            Math.hypot(q[0] - (t * ab[0]) / al, q[1] - (t * ab[1]) / al, q[2] - (t * ab[2]) / al),
+          );
+        }
+        r.creaseDevMm = dev;
+        let dMin = Infinity;
+        let dSum = 0;
+        let dN = 0;
+        for (let k = 0; k + 1 < c.verts.length; k++) {
+          const ts = byEdge.get(key(c.verts[k], c.verts[k + 1])) ?? [];
+          if (ts.length !== 2) continue;
+          const n0 = faceN(ts[0]);
+          const n1 = faceN(ts[1]);
+          const cosA = Math.max(-1, Math.min(1, n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]));
+          const deg = (Math.acos(cosA) * 180) / Math.PI;
+          dMin = Math.min(dMin, deg);
+          dSum += deg;
+          dN++;
+        }
+        r.dihedralMinDeg = dN ? dMin : NaN;
+        r.dihedralMeanDeg = dN ? dSum / dN : NaN;
+        r.plyGapMm = plyGap;
+        r.interpenetrating = through;
+        // Width across the fold line: as cut (both sides), folded flat, and as drawn in 3D (the
+        // farthest vertex from the crease line).
+        const L2 = Math.hypot(c.b[0] - c.a[0], c.b[1] - c.a[1]) || 1;
+        const nx = -(c.b[1] - c.a[1]) / L2;
+        const ny = (c.b[0] - c.a[0]) / L2;
+        let lo = Infinity;
+        let hi = -Infinity;
+        let flo = Infinity;
+        let fhi = -Infinity;
+        let drawn = 0;
+        for (let i = 0; i < P.count; i++) {
+          const d = (F.flat[i][0] - c.a[0]) * nx + (F.flat[i][1] - c.a[1]) * ny;
+          lo = Math.min(lo, d);
+          hi = Math.max(hi, d);
+          const fd = (P.mesh.pts[i][0] - c.a[0]) * nx + (P.mesh.pts[i][1] - c.a[1]) * ny;
+          flo = Math.min(flo, fd);
+          fhi = Math.max(fhi, fd);
+          const q = sub3(getPos(P.offset + i), e0);
+          const along = q[0] * du[0] + q[1] * du[1] + q[2] * du[2];
+          drawn = Math.max(
+            drawn,
+            Math.hypot(q[0] - along * du[0], q[1] - along * du[1], q[2] - along * du[2]),
+          );
+        }
+        r.cutWidthMm = hi - lo;
+        r.finishedWidthMm = fhi - flo;
+        r.drawnWidthMm = drawn;
+      }
+    }
+  }
   return {
     collar: collarRep,
     panels: outPanels,
@@ -6912,6 +7914,7 @@ export function solveDoll(input: DollInput): DollReport {
         return { pieceKey: x.pieceKey, reason: why ? `${x.reason} · ${why.note}` : x.reason };
       }),
     ...(surfaceRep.length ? { surface: surfaceRep } : {}),
+    ...(foldReports.length ? { folds: foldReports } : {}),
     proxies: proxyReport,
     stats: {
       vertices: NV,
@@ -6938,10 +7941,11 @@ export function solveDoll(input: DollInput): DollReport {
           closures: closureReps,
           rows: {
             applied: resolvedRows?.applied.length ?? 0,
-            confirmed: resolvedRows?.forced.length ?? 0,
+            confirmed: (resolvedRows?.forced ?? []).filter((c) => !isGuess(c)).length,
             rejected: excludedPairs.length,
             closures: resolvedRows?.closures.length ?? 0,
             words: [
+              ...ownerWords,
               ...(resolvedRows?.stale ?? []).map((x) => x.words),
               ...(resolvedRows?.orphan ?? []).map((x) => x.words),
             ],

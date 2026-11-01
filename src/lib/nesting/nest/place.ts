@@ -104,7 +104,11 @@ function strictlyInsideLoops(
 // feasibility).
 function feasible(neighbours: readonly Neighbour[], cx: number, cy: number): boolean {
   for (const nb of neighbours) {
-    if (strictlyInsideLoops(nb.nfp.parts, nb.nfp.partBoxes, cx - nb.ox, cy - nb.oy)) return false;
+    const px = cx - nb.ox;
+    const py = cy - nb.oy;
+    const box = nb.nfp.partBox;
+    if (box && (px < box.minX || px > box.maxX || py < box.minY || py > box.maxY)) continue;
+    if (strictlyInsideLoops(nb.nfp.parts, nb.nfp.partBoxes, px, py)) return false;
   }
   return true;
 }
@@ -150,7 +154,14 @@ function addLineHits(
 const MAX_VERIFY = 64;
 
 // Squared distance from point p to segment uv (cm).
-function pointSegDist2(px: number, py: number, ux: number, uy: number, vx: number, vy: number): number {
+function pointSegDist2(
+  px: number,
+  py: number,
+  ux: number,
+  uy: number,
+  vx: number,
+  vy: number,
+): number {
   const dx = vx - ux;
   const dy = vy - uy;
   const l2 = dx * dx + dy * dy;
@@ -223,6 +234,15 @@ function bestPositionFor(
   // Candidate coordinate pairs, flat [x0,y0, x1,y1, …].
   const cands: number[] = [xLo, yLo, xHi, yLo, xLo, yHi, xHi, yHi];
   for (const nb of neighbours) {
+    const box = nb.nfp.box;
+    if (
+      box &&
+      (box.maxX + nb.ox < xLo ||
+        box.minX + nb.ox > xHi ||
+        box.maxY + nb.oy < yLo ||
+        box.minY + nb.oy > yHi)
+    )
+      continue;
     for (const path of nb.nfp.paths) {
       const n = path.length;
       for (let i = 0; i < n; i++) {
@@ -347,7 +367,8 @@ export function placeOrder(
         ) {
           continue; // bboxes farther apart than the gap — cannot violate
         }
-        if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap)) return false;
+        if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap))
+          return false;
       }
       return true;
     };
@@ -527,7 +548,8 @@ export async function compactPlacements(
           ) {
             continue;
           }
-          if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap)) return false;
+          if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap))
+            return false;
         }
         return true;
       };

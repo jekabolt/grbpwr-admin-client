@@ -10,12 +10,12 @@
 //   • a card-like order (the proposal's steps with their own seams stripped) gets back EVERY seam the
 //     proposal carried, through the cross-input rule alone; joins without seams = template-only;
 //   • every STEP picture's overlap ≤ SKELETON.overlapMax (15 %) — the explode only adds distance;
-//   • PIECES: 14 families on SS26-005 (mirror twins and identical layers collapsed), members cover
+//   • piece families: 14 on SS26-005 (mirror twins and identical layers collapsed), members cover
 //     every contoured piece once.
 // UI (chromium, real AssemblyMap + OperationsField + providers on real cards from prod-run stands):
 //   SS26-005 (the technologist's own 47 steps): STEP for a geometry join, a join with no read edges,
-//   a twin join; PIECES with numbers; hover rail → map, map number → rail; click = sticky, Esc
-//   clears; THEN opens the step in the rail. Blazer (46 pieces, the skeleton's order applied). A card
+//   and a twin join; hover rail → map; click = sticky, Esc clears; THEN opens the step in the rail.
+//   Blazer (46 pieces, the skeleton's order applied). A card
 //   with no DXF: the block is the sketch, no switch. Print: SEAM MAP on A4 landscape, nothing off the
 //   sheet, nothing under 10 pt.
 import { build as esbuild } from 'esbuild';
@@ -174,7 +174,7 @@ head('LIB — SS26-005 through the real pipeline');
   const members = fams.flatMap((f) => f.members);
   ck(
     fams.length === 14,
-    'PIECES: 14 families on SS26-005',
+    '14 piece families on SS26-005',
     `${fams.length}: ${fams.map((f) => f.name + (f.tag ? ` ${f.tag}` : '')).join(', ')}`,
   );
   ck(
@@ -301,8 +301,10 @@ const shot = async (name, el = '[data-map-column]') => {
   else await page.screenshot({ path, fullPage: false });
   console.log(`  shot → ${path}`);
 };
-const mount = async (stand) => {
+const mount = async (stand, legacyPieces = false) => {
   await page.goto('http://probe.local/');
+  if (legacyPieces)
+    await page.evaluate(() => localStorage.setItem('plm.techcard.assembly-map.view.1', 'pieces'));
   await page.addScriptTag({ content: bundle });
   await page.evaluate((c) => window.__map.mount(c), stand);
   await page.waitForTimeout(400);
@@ -321,10 +323,6 @@ const toList = async () => {
   if (await list.count()) await list.first().click();
   await page.waitForTimeout(150);
 };
-const chooseView = async (v) => {
-  await page.locator('[aria-label="assembly map view"] [role="radio"]', { hasText: v }).click();
-  await page.waitForTimeout(120);
-};
 const away = async () => {
   await page.mouse.move(1430, 1090);
   await page.waitForTimeout(80);
@@ -333,10 +331,14 @@ const away = async () => {
 // ── SS26-005 ──
 head('UI — SS26-005, the technologist’s own order');
 await page.evaluate(() => localStorage.clear()).catch(() => {});
-await mount(ss);
+await mount(ss, true);
 ck(await waitGraph(), 'the provider reads the seam graph for the map');
 await page.waitForTimeout(200);
 await toList();
+ck(
+  (await page.locator('[data-assembly-map]').getAttribute('data-assembly-map')) === 'step',
+  'a persisted PIECES view falls back to STEP',
+);
 const pick = await page.evaluate(() => window.__map.pick());
 console.log(
   `  ${pick.steps} steps · ${pick.machineJoins} machine joins · ${pick.withSeams} with read seams · ${pick.families} families · ${pick.numbered} numbered edges`,
@@ -348,7 +350,13 @@ ck(
 );
 ck(
   (await page.locator('[aria-label="assembly map view"]').count()) === 1,
-  'the switch STEP · PIECES · SKETCH is there',
+  'the STEP · SKETCH switch is there',
+);
+ck(
+  (await page
+    .locator('[aria-label="assembly map view"] [role="radio"]', { hasText: 'pieces' })
+    .count()) === 0,
+  'the PIECES option is gone',
 );
 const first = await mapStep();
 const firstMachine = pick.firstMachine;
@@ -419,48 +427,11 @@ if (pick.twin != null) {
   await page.locator(`[data-rail-step="${pick.twin}"]`).click();
   await away();
   await shot('ss26-step-twin');
-  await chooseView('pieces');
-  ck(
-    (await page
-      .locator(`[data-map-family="${pick.twinFamily}"][data-map-family-hot="1"]`)
-      .count()) === 1,
-    'twin join: PIECES lights the L·R tile drawn as the other hand',
-    `${(pick.twin + 1) * 10}`,
-  );
-  ck(
-    (await page
-      .locator(`[data-map-family="${pick.twinFamily}"] [data-map-number="${pick.twin}"]`)
-      .count()) >= 1,
-    '… and its number sits on that tile',
-  );
-  await shot('ss26-pieces-twin');
 } else {
   ck(false, 'SS26-005 has a twin join to show');
-  await chooseView('pieces');
 }
 await page.keyboard.press('Escape');
 await away();
-
-// PIECES with numbers, map → rail
-const nums = await page.locator('[data-map-number]').count();
-ck(
-  pick.families === (await page.locator('[data-map-family]').count()),
-  'PIECES: one tile per family',
-  `${pick.families}`,
-);
-ck(nums >= pick.numbered, 'PIECES: a step number at every sewn edge', `${nums} numbers`);
-await shot('ss26-pieces');
-const num = page.locator(`[data-map-number="${pick.geometry}"]`).first();
-await num.hover();
-await page.waitForTimeout(120);
-ck(
-  (await page.locator(`[data-map-lit="1"]:has([data-rail-step="${pick.geometry}"])`).count()) === 1,
-  'hover an edge number → the rail lights that step',
-);
-ck((await page.locator('[data-map-hot="1"]').count()) >= 1, '… and its edges go bold on the map');
-await shot('ss26-pieces-hover', null);
-await away();
-await chooseView('step');
 
 // keyboard
 await page.locator('[data-assembly-map]').focus();
@@ -470,7 +441,7 @@ ck((await mapStep()) === first + 1, '↓ in the block walks to the next step');
 await page.keyboard.press('Escape');
 
 // ── how it is sewn ──
-head('UI — «how it is sewn» strip and the seams legend');
+head('UI — «how it is sewn» strip');
 const set = (path, v) => page.evaluate(([p, x]) => window.__map.set(p, x), [path, v]);
 const showStep = async (i) => {
   await page.locator(`[data-rail-step="${i}"]`).click();
@@ -570,25 +541,6 @@ ck(
   'overlock family «504 / 514 / 516»: words only, no stitch glyph',
 );
 await shot('ss26-sewn-overlock-family');
-// (e) the legend on PIECES after filling three steps
-await chooseView('pieces');
-const rows = await page.locator('[data-map-legend-row]').count();
-const legendText = await page.locator('[data-map-legend]').innerText();
-console.log(`  legend: ${legendText.split('\n').slice(1).join(' / ')}`);
-ck(rows >= 3, 'PIECES: «seams on this garment» lists each distinct seam', `${rows} rows`);
-await page.keyboard.press('Escape');
-const row = page.locator('[data-map-legend-row]').first();
-const rowSteps = (await row.getAttribute('data-map-legend-row')).split(',').map(Number);
-await row.hover();
-await page.waitForTimeout(120);
-ck(
-  (await page.locator('[data-map-lit="1"]').count()) === rowSteps.length,
-  'hover a legend row: the rail lights every step of that seam',
-  `${rowSteps.length}`,
-);
-await shot('ss26-pieces-legend', null);
-await away();
-await chooseView('step');
 await page.keyboard.press('Escape');
 
 // ── print ──
@@ -663,12 +615,6 @@ if (blazer) {
     );
     await shot('blazer-sewn-door', null);
   }
-  await chooseView('pieces');
-  ck(
-    (await page.locator('[data-map-family]').count()) === b.families,
-    'blazer: PIECES draws every family',
-  );
-  await shot('blazer-pieces');
   const bp = await page.evaluate(() => window.__map.print('BLAZER'));
   console.log(`  print: ${bp.w} × ${bp.h} mm · ${bp.out} off-sheet`);
   ck(bp.out === 0, 'blazer print: nothing off the sheet');

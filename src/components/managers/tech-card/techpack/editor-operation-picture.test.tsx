@@ -581,7 +581,7 @@ describe('editor operation picture in the PDF', () => {
     expect(glyphs.every((glyph) => glyph.lengthMm === 12)).toBe(true);
   });
 
-  it('keeps eight buttons on distinct pattern marks', () => {
+  it('keeps eight buttons on distinct marks and carries their fastening style', () => {
     const input = placementActionInput('button');
     const action = deriveAssembly(input).rows.find((row) => row.n === 860)?.action;
     const glyphs = editorActionMarks(
@@ -591,6 +591,9 @@ describe('editor operation picture in the PDF', () => {
 
     expect(glyphs).toHaveLength(8);
     expect(new Set(glyphs.map((glyph) => glyph.point.join(':'))).size).toBe(8);
+    expect(glyphs.every((glyph) => glyph.pattern === 'parallel')).toBe(true);
+    expect(glyphs.every((glyph) => glyph.holes === 2)).toBe(true);
+    expect(glyphs.every((glyph) => glyph.sizeMm === 11)).toBe(true);
   });
 
   it('matches the editor tile affines for every card 83 join operation', () => {
@@ -884,7 +887,7 @@ describe.skipIf(!card85RealFixtureAvailable())('real card 85 finishing pictures'
     const spots = [...markup.matchAll(/data-asm-x="([^"]+)" data-asm-y="([^"]+)"/g)];
     expect(markup.match(/data-piece-outline=/g)?.length ?? 0).toBeGreaterThan(2);
     expect(markup).toContain(`data-asm-mark="${kind}"`);
-    expect(markup).toContain(kind === 'buttonhole' ? 'stroke-width="0.7"' : 'stroke-width="3"');
+    expect(markup).toContain('stroke-width="0.7"');
     expect(spots).toHaveLength(action.glyphs.length);
     for (const spot of spots) {
       const x = Number(spot[1]);

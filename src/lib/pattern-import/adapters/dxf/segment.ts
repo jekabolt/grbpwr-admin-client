@@ -134,6 +134,14 @@ function rankSizes(tokens: string[]): string[] {
 
 const isUniToken = (t: string) => bareSize(t) === 'UNI';
 
+/**
+ * A closed internal shape up to this across (mm) is a drill / button mark: CLO's 10 mm drill
+ * square and its 10–15 mm button circles (the PDF path's DRILL_MAX_MM, RUL_MARK_MAX_MM alike).
+ */
+const DRILL_MARK_MAX_MM = 15;
+/** DXF coordinates are rounded independently; a nominal 15 mm mark can span a few microns more. */
+const DRILL_MARK_TOL_MM = 0.01;
+
 /** Size tail of every block name, decided over the whole file (FP_L is left, FP_L_L is size L). */
 function sizeTailsByName(names: string[]): Map<string, string> {
   const out = new Map<string, string>();
@@ -697,7 +705,8 @@ function blockPiece(
   const grain = grainOf(grainPaths);
   for (const p of grainPaths) roles[p.id] = 'grain';
 
-  // drills: AAMA 13 + small closed squares/circles on 8 (CLO writes a 10×10 square)
+  // drills: AAMA 13 + small closed squares/circles on 8 (CLO writes a 10×10 square for a drill
+  // hole and a 20-gon circle of the button's diameter, 10–15 mm, for a button)
   const drills: DxfBlockPiece['drills'] = [];
   for (const p of by('drill')) {
     roles[p.id] = 'drill';
@@ -706,6 +715,7 @@ function blockPiece(
       at: { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 },
       path: p.id,
       form: p.pts.length === 1 ? 'point' : p.pts.length === 4 ? 'square' : 'circle',
+      sizeMm: p.pts.length === 1 ? 0 : (bb.maxX - bb.minX + bb.maxY - bb.minY) / 2,
     });
   }
   for (const p of internalPaths) {
@@ -714,18 +724,30 @@ function blockPiece(
       const bb = bboxOf(p.pts);
       const w = bb.maxX - bb.minX;
       const h = bb.maxY - bb.minY;
-      if (w <= 12 && h <= 12 && w > 0 && h > 0 && w / h > 0.75 && w / h < 1.33) {
+      if (
+        w <= DRILL_MARK_MAX_MM + DRILL_MARK_TOL_MM &&
+        h <= DRILL_MARK_MAX_MM + DRILL_MARK_TOL_MM &&
+        w > 0 &&
+        h > 0 &&
+        w / h > 0.75 &&
+        w / h < 1.33
+      ) {
         roles[p.id] = 'drill';
         const at = { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
         // W3: our R12 writes each drill twice — CLO's square here and the AAMA POINT on 13
         if (!drills.some((d) => Math.hypot(d.at.x - at.x, d.at.y - at.y) <= 0.05))
-          drills.push({ at, path: p.id, form: p.pts.length === 4 ? 'square' : 'circle' });
+          drills.push({
+            at,
+            path: p.id,
+            form: p.pts.length === 4 ? 'square' : 'circle',
+            sizeMm: (w + h) / 2,
+          });
         continue;
       }
     }
     if (p.pts.length === 1) {
       roles[p.id] = 'drill';
-      drills.push({ at: p.pts[0], path: p.id, form: 'point' });
+      drills.push({ at: p.pts[0], path: p.id, form: 'point', sizeMm: 0 });
       continue;
     }
     roles[p.id] = 'internal';
@@ -943,6 +965,30 @@ function dedupeNotches(
     }
     const d = distToContour(n.at, target);
     if (d > reach) {
+      // CLO writes every notch twice, on the cut line and on the seam line. The seam copy pairs
+      // with its cut twin above when the two sit one allowance apart along the notch; where THAT
+      // edge's allowance is not the piece's (the placket's 25 mm hem under a 7 mm seam, a flap's
+      // 23 mm top), or the seam copy has no twin (a 1 mm seam-line mark), the pair is missed and
+      // the copy travelled on as a notch of its own: beyond reach, so unprojected ('none'), then
+      // kept by semantics (it lies on the seam ring) and snapped by the writer 20 mm onto the cut
+      // line, on top of its twin — a double notch the card parser drops (G5). Keeping the cut
+      // line, a notch drawn ON the seam line and out of reach of the cut line is that seam copy:
+      // folded into the cut notch it points at, else dropped — never a notch of its own.
+      if (on === 'cut' && n.on === 'seam') {
+        const twin = raw.findIndex((m, j) => {
+          if (j === i || !live[j] || m.on !== 'cut') return false;
+          const v = { x: m.at.x - n.at.x, y: m.at.y - n.at.y };
+          const L = Math.hypot(v.x, v.y);
+          return (
+            L >= 0.5 &&
+            Math.abs(v.x * n.dir.x + v.y * n.dir.y) / L >= 0.9 &&
+            Math.abs(n.dir.x * m.dir.x + n.dir.y * m.dir.y) >= 0.8
+          );
+        });
+        if (twin >= 0) raw[twin].paths.push(...n.paths);
+        piece.notchStats.twins++;
+        continue;
+      }
       out.push({ ...n, on: 'none', distMm: d });
       continue;
     }

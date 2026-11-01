@@ -118,6 +118,8 @@
     "patimport:f12": "node scripts/pattern-import/f12-vector.mjs",
     "patimport:f17": "node scripts/pattern-import/f17.mjs",
     "patimport:rul": "node scripts/pattern-import/rul.mjs",
+    "patimport:clo-shirt": "node scripts/pattern-import/clo-shirt.mjs",
+    "patimport:btn": "node scripts/pattern-import/btn.mjs",
     "test:rul-export": "node scripts/pattern-export/rul.mjs",
     "patimport:semantics": "node scripts/pattern-import/semantics.mjs",
     "patimport:fabrics": "node scripts/pattern-import/fabrics.mjs",

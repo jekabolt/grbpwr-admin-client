@@ -1,0 +1,258 @@
+import { describe, expect, it } from 'vitest';
+
+import { segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
+import type { PieceGeom, PieceMark, Pt2, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
+import type { PieceDTO } from 'lib/nesting/types';
+import { frameOf } from 'lib/seams/frame';
+import { fromUV } from './geom';
+import {
+  foldFromHint,
+  foldFromLine,
+  foldFromWire,
+  foldHints,
+  foldToWire,
+  resolveFolds,
+  type DollFold,
+  type StoredFold,
+} from './index';
+
+const KEY = '01PLACKETPIECE000000000001';
+
+type Inner = NonNullable<PieceDTO['inner']>;
+
+/** A rectangle piece, w × h cm, CCW, origin at the bbox min (the PieceDTO convention). */
+function dto(wCm: number, hCm: number, inner: Inner = [], unfolded = false): PieceDTO {
+  return {
+    name: 'PLACKET',
+    layer: '1',
+    poly: [
+      { x: 0, y: 0 },
+      { x: wCm, y: 0 },
+      { x: wCm, y: hCm },
+      { x: 0, y: hCm },
+    ],
+    inner,
+    manifest: unfolded ? { unfolded: true, halfFold: false } : undefined,
+  } as unknown as PieceDTO;
+}
+
+function input(piece: PieceDTO): SkeletonPieceInput {
+  return {
+    pieceKey: KEY,
+    name: 'PLACKET',
+    piece,
+    piecesPerGarment: 1,
+    cutSymmetry: null,
+    cloth: null,
+    fused: false,
+  };
+}
+
+const geomOf = (wCm: number, hCm: number): PieceGeom => segmentPiece(input(dto(wCm, hCm)));
+
+/** The resolved line back in mm on that size: the y of both ends (a horizontal hem). */
+function yMm(piece: PieceGeom, fold: DollFold): [number, number] {
+  const f = frameOf(piece, 0);
+  return [fromUV(f, fold.a)[1], fromUV(f, fold.b)[1]];
+}
+
+const S = geomOf(40, 30);
+const L = geomOf(44, 33);
+const XS = geomOf(36, 27);
+
+// A 30 mm hem along the bottom edge, drawn on size S, the bottom strip flips.
+const hemS = (edge?: null): StoredFold =>
+  foldFromLine(
+    S,
+    [
+      [0, 30],
+      [400, 30],
+    ],
+    [200, 15],
+    { seq: 1, kind: 'inward', source: 'owner', foldKey: '01FDKEY0000000000000000001', edge },
+  );
+
+describe('foldFromLine', () => {
+  it('finds the edge the line runs along and measures the offset from it', () => {
+    const row = hemS();
+    expect(row.edge).not.toBeNull();
+    expect(row.edge!.offsetMm).toBeCloseTo(30, 1);
+    expect(row.edge!.samples).toHaveLength(5);
+    for (const [, v] of row.edge!.samples) expect(v).toBeCloseTo(0, 3);
+    expect(row.line[0][1]).toBeCloseTo(0.1, 3);
+    expect(row.contourSig).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe('resolveFolds — grading keeps offset_mm', () => {
+  it('lays the hem 30 mm from its edge on S, L and XS', () => {
+    const row = hemS();
+    for (const piece of [S, L, XS]) {
+      const r = resolveFolds([row], [piece]);
+      expect(r.unresolved).toEqual([]);
+      const fold = r.folds[KEY][0];
+      const [ya, yb] = yMm(piece, fold);
+      expect(ya).toBeCloseTo(30, 0);
+      expect(yb).toBeCloseTo(30, 0);
+      expect(Math.abs(ya - 30)).toBeLessThan(0.5);
+      // The line spans the piece and keeps its direction; the bottom strip still flips.
+      expect(fold.a[0]).toBeCloseTo(0, 3);
+      expect(fold.b[0]).toBeCloseTo(1, 3);
+      expect(fold.flipAt[1]).toBeLessThan(fold.a[1]);
+      expect(fold.kind).toBe('inward');
+      expect(fold.seq).toBe(1);
+    }
+    expect(resolveFolds([row], [S]).via[row.foldKey]).toBe('hint');
+    expect(resolveFolds([row], [L]).via[row.foldKey]).toBe('shape');
+  });
+
+  it('survives the wire (three-decimal samples)', () => {
+    const back = foldFromWire(foldToWire(hemS()));
+    expect(back).not.toBeNull();
+    const fold = resolveFolds([back!], [L]).folds[KEY][0];
+    expect(Math.abs(yMm(L, fold)[0] - 30)).toBeLessThan(0.5);
+  });
+
+  it('without a locator scales with the piece (the (u, v) fallback)', () => {
+    const row = hemS(null);
+    expect(row.edge).toBeNull();
+    const r = resolveFolds([row], [L]);
+    expect(r.via[row.foldKey]).toBe('uv');
+    expect(yMm(L, r.folds[KEY][0])[0]).toBeCloseTo(33, 0);
+  });
+
+  it('falls back to (u, v) when the edge is not on the piece any more', () => {
+    const row = hemS();
+    // Samples of an edge no run of this piece matches.
+    row.edge = {
+      ...row.edge!,
+      hint: '',
+      samples: row.edge!.samples.map(([u]) => [u * 0.3, 0.5] as Pt2),
+    };
+    const r = resolveFolds([row], [L]);
+    expect(r.unresolved).toEqual([]);
+    expect(r.via[row.foldKey]).toBe('uv');
+  });
+});
+
+describe('resolveFolds — order and refusals', () => {
+  it('orders a piece by seq', () => {
+    const one = hemS();
+    const two = foldFromLine(
+      S,
+      [
+        [0, 60],
+        [400, 60],
+      ],
+      [200, 45],
+      { seq: 2, kind: 'outward', source: 'owner', foldKey: '01FDKEY0000000000000000002' },
+    );
+    const r = resolveFolds([two, one], [L]);
+    expect(r.folds[KEY].map((f) => f.seq)).toEqual([1, 2]);
+    expect(r.folds[KEY][1].kind).toBe('outward');
+  });
+
+  it('reports a stale row and a missing piece in words, never a key', () => {
+    const stale = { ...hemS(), stale: true };
+    const orphan = {
+      ...hemS(),
+      foldKey: '01FDKEY0000000000000000003',
+      pieceKey: '01GONEPIECE000000000000001',
+    };
+    const r = resolveFolds([stale, orphan], [L], {
+      nameOf: (k) => (k === KEY ? 'placket' : 'cuff'),
+    });
+    expect(r.folds).toEqual({});
+    expect(r.unresolved).toHaveLength(2);
+    for (const u of r.unresolved) {
+      expect(u.words).not.toMatch(/[0-9A-Z]{26}/);
+    }
+    expect(r.unresolved.map((u) => u.words).join(' ')).toContain('placket');
+  });
+
+  it('re-synthesises flipAt when the stored point falls off the piece', () => {
+    const row = hemS();
+    row.flipAt = [0.5, 0.0005]; // on the very edge: outside after rounding on another size
+    const fold = resolveFolds([row], [L]).folds[KEY][0];
+    expect(fold.flipAt[1]).toBeLessThan(fold.a[1]);
+    expect(fold.flipAt[1]).toBeGreaterThan(0);
+  });
+});
+
+describe('foldHints', () => {
+  const vertical8: Inner[number] = {
+    layer: '8',
+    closed: false,
+    pts: [
+      { x: 20, y: 0 },
+      { x: 20, y: 30 },
+    ],
+  };
+  const vertical6: Inner[number] = { ...vertical8, layer: '6' };
+  const short8: Inner[number] = {
+    layer: '8',
+    closed: false,
+    pts: [
+      { x: 5, y: 10 },
+      { x: 15, y: 10 },
+    ],
+  };
+
+  it('reads the layer-8 line of an unfolded piece as a strong dxf hint across the piece', () => {
+    const piece = dto(40, 30, [vertical8, short8], true);
+    const hints = foldHints(input(piece), segmentPiece(input(piece)));
+    expect(hints).toHaveLength(1);
+    const [h] = hints;
+    expect(h.origin).toBe('unfolded');
+    expect(h.strength).toBe('strong');
+    expect(h.source).toBe('dxf');
+    expect(h.line[0][0]).toBeCloseTo(0.5, 3);
+    expect(Math.abs(h.lineMm[1][1] - h.lineMm[0][1])).toBeCloseTo(300, 0);
+  });
+
+  it('ignores layer 8 on a piece that was not unfolded unless the manifest says so', () => {
+    const piece = dto(40, 30, [vertical8], false);
+    expect(foldHints(input(piece), segmentPiece(input(piece)))).toEqual([]);
+    expect(
+      foldHints(input(piece), segmentPiece(input(piece)), { unfoldedFold: true }),
+    ).toHaveLength(1);
+  });
+
+  it('reads the layer-6 mirror line as a weak hint and collapses duplicates', () => {
+    const only6 = dto(40, 30, [vertical6]);
+    const h6 = foldHints(input(only6), segmentPiece(input(only6)));
+    expect(h6.map((h) => [h.origin, h.strength])).toEqual([['mirror', 'weak']]);
+    const both = dto(40, 30, [vertical8, vertical6], true);
+    const hb = foldHints(input(both), segmentPiece(input(both)));
+    expect(hb.map((h) => h.origin)).toEqual(['unfolded']);
+  });
+
+  it('turns a fold mark into a hem hint that, accepted, keeps 30 mm on another size', () => {
+    const piece = dto(40, 30);
+    const mark: PieceMark = {
+      id: `${KEY}@0`,
+      kind: 'fold',
+      layer: '8',
+      closed: false,
+      pts: [
+        [10, 30],
+        [390, 30],
+      ],
+      bbox: { w: 380, h: 0, cx: 200, cy: 30 },
+      lenMm: 380,
+    };
+    const geom = { ...segmentPiece(input(piece)), marks: [mark] };
+    const [h] = foldHints(input(piece), geom);
+    expect(h.origin).toBe('mark');
+    expect(h.source).toBe('accepted_hint');
+    expect(h.edge?.offsetMm).toBeCloseTo(30, 1);
+    expect(h.lineMm[0][0]).toBeCloseTo(0, 0); // extended to the contour
+
+    const row = foldFromHint(geom, h, { seq: 1, kind: 'inward' });
+    expect(row).not.toBeNull();
+    expect(row!.source).toBe('accepted_hint');
+    const fold = resolveFolds([row!], [L]).folds[KEY][0];
+    expect(Math.abs(yMm(L, fold)[0] - 30)).toBeLessThan(0.5);
+    expect(fold.flipAt[1]).toBeLessThan(fold.a[1]); // the allowance strip flips by default
+  });
+});

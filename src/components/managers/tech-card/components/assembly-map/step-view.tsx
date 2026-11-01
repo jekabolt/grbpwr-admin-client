@@ -3,11 +3,11 @@ import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map'
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
-import { useMemo } from 'react';
 import { Text } from 'ui';
+import { stepHighlightOf } from '../step-seams/step-highlight';
 import { useStepResults } from '../step-seams/step-result-context';
 import type { StepResult } from '../step-seams/step-result';
-import { StepPictureSvg, useCardGeoms } from '../step-seams/step-picture-view';
+import { StepPictureSvg, useCardGeoms, useSeamRows } from '../step-seams/step-picture-view';
 import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
 import type { MapModel } from './use-map-model';
@@ -60,18 +60,10 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const results = useStepResults();
   const picture = mapStepPictureOf(results, index);
   const { geoms, innerLines } = useCardGeoms();
+  const byKey = useSeamRows();
   const op = ops[index];
-  const marks = useMemo(
-    () =>
-      (read?.seams[index] ?? []).flatMap((seam) =>
-        [
-          ...(seam.aParts?.length ? seam.aParts : [seam.a]),
-          ...(seam.bParts?.length ? seam.bParts : [seam.b]),
-        ].map((id) => ({ id, tone: 'stored' as const })),
-      ),
-    [read, index],
-  );
   if (!op) return null;
+  const stepEdges = stepHighlightOf(ops, index, byKey).targets;
 
   const inputs = (op.inputKeys ?? []).filter(Boolean);
   const nameOf = (key: string) => (isUnit(key) ? unitName(key) : pieceName(key));
@@ -129,7 +121,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
             layers={picture.layers}
             geoms={geoms}
             innerLines={innerLines}
-            marks={marks}
+            stepEdges={stepEdges}
             names={inputNames}
           />
         ) : (

@@ -163,6 +163,8 @@ type DxfExtra = {
     instances?: number;
     /** The block's own QUANTITY label (AAMA/CLO), if it carries one. */
     quantity?: number | null;
+    /** Exact per-size geometry expanded from the source's RUL table. */
+    rulGraded?: boolean;
   };
 };
 type Blocked = SemanticsOutput['blocked'][number];
@@ -2208,7 +2210,8 @@ export function buildPieceSpecsDetailed(
       intendedHere = gs.intended;
     }
     // operator grain given after a size already borrowed nothing: fine. Monotone growth (G8).
-    if (!p.ungraded && sizes.length > 1) {
+    const exactRulGrade = p.cands.every(({ c }) => c.dxf?.rulGraded);
+    if (!p.ungraded && sizes.length > 1 && !exactRulGrade) {
       const grows = sizes.every((s, i) => i === 0 || s.areaMm2 > sizes[i - 1].areaMm2);
       if (!grows) {
         if (sizes.length > 2) {
@@ -2427,7 +2430,10 @@ export function buildPieceSpecsDetailed(
         { hand: s.pairHand, of: s.pairOf },
         isSizeToken,
       );
-      if (why) gram = `${s.identity}: ${why}`;
+      // In a RUL package the size is an explicit label, so a source identity such as PLCK_L cannot
+      // be mistaken for identity PLCK in size L. The manifest keeps that split authoritative.
+      if (why && !(exactRulGrade && /reads as a size of the run/.test(why)))
+        gram = `${s.identity}: ${why}`;
     }
     if (gram) {
       block(seed, 'grammar', gram, {

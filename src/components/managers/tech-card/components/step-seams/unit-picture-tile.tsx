@@ -23,6 +23,7 @@ import {
   useStepLayout,
 } from './step-picture-view';
 import type { FormOpLike } from './step-seams-model';
+import { stepHighlightOf } from './step-highlight';
 
 /** The row tile's raster: a 72 px picture needs no finer reading of what touches what. */
 const RASTER_MM = 4;
@@ -58,16 +59,18 @@ export function UnitPictureTile({
   }, [graph?.chosen, inputs, geoms, innerLines, byKey, ops, pieceKeys]);
   const inner = useStable(innerRaw, seamSig(innerRaw));
   const inferredLayout = useStepLayout(inputs, inner, geoms, 0, RASTER_MM);
-  const ownedResult = useMemo(() => {
+  const producer = useMemo(() => {
     let producer = -1;
     for (let index = 0; index < Math.min(stepIndex, ops.length); index++) {
       const operation = ops[index];
       if (!operation?.assemblyBlockDetached && (operation?.outputUnitKey ?? '').trim() === unitKey)
         producer = index;
     }
-    const result = producer >= 0 ? results?.[producer] : undefined;
-    return producer >= 0 && drawsStepResult(results, producer) ? result : undefined;
-  }, [ops, results, stepIndex, unitKey]);
+    return producer;
+  }, [ops, stepIndex, unitKey]);
+  const ownedResult =
+    producer >= 0 && drawsStepResult(results, producer) ? results?.[producer] : undefined;
+  const stepEdges = producer >= 0 ? stepHighlightOf(ops, producer, byKey).targets : undefined;
   const layout = ownedResult?.layout ?? inferredLayout;
   const [boxEl, box] = useBoxSize();
   if (layout.T.size === 0) return <Tile name={name} sub='unit' className='justify-center' />;
@@ -87,6 +90,7 @@ export function UnitPictureTile({
             layers={ownedResult?.layers}
             geoms={geoms}
             innerLines={innerLines}
+            stepEdges={stepEdges}
           />
         )}
       </span>

@@ -28,6 +28,9 @@ import { variantPoly, type Placement, type Pt, type RotationDeg } from 'lib/nest
 
 /** Wall-clock budget of the GA phase, counted after the seed is laid. */
 export const ROLL_GA_BUDGET_MS = 4_000;
+// Large seeds spend more time warming the shared NFP cache, so leave them slightly more of the
+// dialog's wall-clock allowance while small cache-warmed jobs retain the full search budget.
+const LARGE_ROLL_GA_BUDGET_MS = 3_500;
 // A keep-out whose convex hull adds at most this share of area is searched as its hull: one
 // convex part makes every NFP a single Minkowski sum, and the true outline of such a piece has
 // nothing a neighbour could tuck into anyway. Collars, crotch curves and the like stay concave.
@@ -41,6 +44,14 @@ const SEARCH_EPS_CM = 0.02;
 // tolerance: their parts cover the true outline, so fewer parts cost no overlap, only up to twice
 // this much extra spacing around the few pieces that stay concave.
 const CONCAVE_CM = 0.3;
+// Large-roll complexity cap. Once a pair exceeds 16 Minkowski paths, each piece is conservatively
+// folded to 2 convex parts (5 for 81+ items) by least-added-area hull merges. Candidate generation
+// reads those raw parts directly, never the 100-path clipper2 cliff documented in nfp.ts. Every
+// merge grows the forbidden region, and final acceptance still runs against the unsimplified
+// keep-outs; small roll jobs and the shared marker engine keep exact NFPs.
+const MAX_EXACT_NFP_PARTS = 16;
+const MEDIUM_APPROX_PIECE_PARTS = 2;
+const LARGE_APPROX_PIECE_PARTS = 5;
 const MAX_GENERATIONS = 400;
 
 export type RollSearchItem = { pieceId: number; instance: number; allowedRots: RotationDeg[] };
@@ -125,7 +136,17 @@ function prepare(job: RollSearchJob): Prepared {
       areaCm2: area(footprint),
     });
   }
-  return { pieces, nfps: new NfpCache(job.gapCm + 2 * SEARCH_EPS_CM, job.gapCm), job };
+  const approximateLargeJob = job.items.length > 32;
+  return {
+    pieces,
+    nfps: new NfpCache(
+      job.gapCm + 2 * SEARCH_EPS_CM,
+      job.gapCm,
+      approximateLargeJob ? MAX_EXACT_NFP_PARTS : Infinity,
+      job.items.length > 80 ? LARGE_APPROX_PIECE_PARTS : MEDIUM_APPROX_PIECE_PARTS,
+    ),
+    job,
+  };
 }
 
 const itemKey = (item: { pieceId: number; instance: number }) => `${item.pieceId}|${item.instance}`;
@@ -169,19 +190,21 @@ function trialGenes(items: readonly RollSearchItem[], prepared: Prepared): Gene[
       Math.min(along(b, 0), across(b, 0)) - Math.min(along(a, 0), across(a, 0)) || tie(a, b),
   );
   const areaFirst = [...items].sort((a, b) => piece(b).areaCm2 - piece(a).areaCm2 || tie(a, b));
-  const trials: Gene[][] = [];
+  // Large jobs try every generic size/area ordering under the rotation policy that minimizes
+  // initial roll length. This preserves order diversity while bounding pair/rotation cache growth.
+  const modes = items.length > 32 ? [0] : [1, 3, 0, 2];
+  const policies: Array<[RollSearchItem[], number]> = [];
   for (const order of [longFirst, broadFirst, areaFirst])
-    for (const mode of [1, 3, 0, 2])
-      trials.push(
-        order.map((item, index) => ({
-          piece: piece(item),
-          instance: item.instance,
-          rot: choose(item, mode, index),
-          flip: 0,
-          allowedRots: item.allowedRots,
-        })),
-      );
-  return trials;
+    for (const mode of modes) policies.push([order, mode]);
+  return policies.map(([order, mode]) =>
+    order.map((item, index) => ({
+      piece: piece(item),
+      instance: item.instance,
+      rot: choose(item, mode, index),
+      flip: 0,
+      allowedRots: item.allowedRots,
+    })),
+  );
 }
 
 function placeSheet(genes: readonly Gene[], prepared: Prepared, abort?: () => boolean) {
@@ -315,7 +338,9 @@ export async function rollSearch(
     lMaxCm: job.sheetCm,
     lengthCapped: true,
     nfps: prepared.nfps,
-    deadlineMs: searchStarted + (job.budgetMs ?? ROLL_GA_BUDGET_MS),
+    deadlineMs:
+      searchStarted +
+      (job.budgetMs ?? (job.items.length > 32 ? LARGE_ROLL_GA_BUDGET_MS : ROLL_GA_BUDGET_MS)),
     maxGenerations: MAX_GENERATIONS,
     seed: hashString(
       JSON.stringify({

@@ -33,6 +33,9 @@ export type LayerOutlineFit = {
 
 type Sample = { p: Pt2; t: Pt2 };
 
+/** Cells per axis a grid key tells apart: ±2^19 cells, over ±2 km at the 4 mm cell. */
+const CELL_SPAN = 1 << 20;
+
 const signedArea = (ring: readonly Pt2[]) => {
   let area = 0;
   for (let i = 0; i < ring.length; i++) {
@@ -166,24 +169,32 @@ export function fitLayerToHostUnion(
   }
   if (!exposed.length) return null;
 
+  // The exposed samples in cells of `outlineMm`. nearOutline's 3.3 s of self time on cards 81 + 85
+  // (node profile, 2026-11-01) was a string key built per cell looked up and a hypot per sample;
+  // cell numbers key the map now, and the axis gaps reject first. A point is near when a sample
+  // in the 3×3 cells around it lies within `outlineMm`, decided as before by hypot — the reject
+  // is exact since hypot is never under either gap.
   const cell = outlineMm;
-  const grid = new Map<string, Pt2[]>();
-  const cellKey = (x: number, y: number) => `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+  const cellKey = (gx: number, gy: number) => gx * CELL_SPAN + gy;
+  const grid = new Map<number, Pt2[]>();
   for (const sample of exposed) {
-    const key = cellKey(sample.p[0], sample.p[1]);
-    grid.set(key, [...(grid.get(key) ?? []), sample.p]);
+    const key = cellKey(Math.floor(sample.p[0] / cell), Math.floor(sample.p[1] / cell));
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(sample.p);
+    else grid.set(key, [sample.p]);
   }
   const nearOutline = ([x, y]: Pt2) => {
     const gx = Math.floor(x / cell);
     const gy = Math.floor(y / cell);
     for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 1; dy++)
-        if (
-          (grid.get(`${gx + dx}:${gy + dy}`) ?? []).some(
-            (point) => Math.hypot(x - point[0], y - point[1]) <= outlineMm,
-          )
-        )
-          return true;
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = grid.get(cellKey(gx + dx, gy + dy));
+        if (!bucket) continue;
+        for (const point of bucket) {
+          if (Math.abs(x - point[0]) > outlineMm || Math.abs(y - point[1]) > outlineMm) continue;
+          if (Math.hypot(x - point[0], y - point[1]) <= outlineMm) return true;
+        }
+      }
     return false;
   };
 

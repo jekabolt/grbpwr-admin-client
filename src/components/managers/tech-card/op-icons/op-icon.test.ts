@@ -76,6 +76,21 @@ describe('operation icon registry', () => {
   });
 });
 
+describe('button operation icon art', () => {
+  it('draws a thin cross icon with four filled hole dots', () => {
+    const markup = renderToStaticMarkup(
+      createElement(OpIconArt, { icon: { key: 'button_cross_x' }, w: 28, h: 20 }),
+    );
+    const svg = markup.match(/^<svg[^>]*>/)?.[0] ?? '';
+    const dots = [...markup.matchAll(/<circle[^>]*r="1.15"[^>]*>/g)].map((match) => match[0]);
+
+    expect(svg).toContain('stroke-width="1"');
+    expect(dots).toHaveLength(4);
+    expect(dots.every((dot) => dot.includes('fill="currentColor"'))).toBe(true);
+    expect(dots.every((dot) => dot.includes('stroke="none"'))).toBe(true);
+  });
+});
+
 describe('a turned edge with rows', () => {
   it('draws three plies folded into a «3», bars straight through all three', () => {
     expect(BAR_BASE.faced_split?.family).toBe('faced');

@@ -230,7 +230,8 @@ export type DxfBlockPiece = {
   grain: DxfGrain | null;
   notches: DxfNotch[];
   notchStats: { raw: number; exactDuplicates: number; twins: number; derived: number };
-  drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point' }[];
+  /** `sizeMm`: the drawn mark across (a square's side, a circle's diameter); 0 for a bare point. */
+  drills: { at: PtMm; path: PathId; form: 'square' | 'circle' | 'point'; sizeMm: number }[];
   roles: Record<PathId, PathRole>;
   texts: TextId[];
   gradePoints: { turn: number; curve: number };
@@ -316,5 +317,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     instances?: number;
     /** The block's QUANTITY label (D3: the CAD's count, read by semantics). */
     quantity?: number;
+    /** This per-size block was expanded from an explicit AAMA grade-rule table. */
+    rulGraded?: boolean;
   };
 };

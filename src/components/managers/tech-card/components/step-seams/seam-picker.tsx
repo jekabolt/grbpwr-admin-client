@@ -54,7 +54,9 @@ import { usePictureZoom } from './picture-zoom';
 import {
   cycleLayerHit,
   piecesUnder,
+  pendingStacking,
   posePieceOrder,
+  type PendingLayerClaim,
   snapAtDuringDrag,
   type LayerHit,
 } from './pose-picking';
@@ -618,17 +620,7 @@ export function SeamPickerBody({
     setHandEdits((current) => new Map(current).set(row.seamKey, row));
   };
   const shownPoseStacking = useMemo(() => {
-    const order = [...poseLayers];
-    const lower = new Set(stepResult?.lower ?? []);
-    const place = (piece: string, host: string, under: boolean) => {
-      const from = order.indexOf(piece);
-      if (from < 0 || !order.includes(host)) return;
-      order.splice(from, 1);
-      const at = order.indexOf(host);
-      order.splice(under ? at : at + 1, 0, piece);
-      if (under) lower.add(piece);
-      else lower.delete(piece);
-    };
+    const claims: PendingLayerClaim[] = [];
     for (const row of handEdits.values())
       for (const [own, other] of [
         [row.sideA, row.sideB],
@@ -638,24 +630,64 @@ export function SeamPickerBody({
           const hand = decodeHandPlace(anchor.placement);
           const host = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
           if (!host) continue;
-          if (anchor.layer) place(anchor.piece, host, anchor.layer === 'under');
-          else if (hand) place(anchor.piece, host, hand.inside);
+          if (anchor.layer)
+            claims.push({ piece: anchor.piece, host, under: anchor.layer === 'under' });
+          else if (hand) claims.push({ piece: anchor.piece, host, under: hand.inside });
         }
     for (const [piece, layer] of poseLayerEdits) {
       const own = ownPoseRows.get(piece);
       const host = poseEdits.get(piece)?.host ?? (own ? poseOf(own)?.host : undefined);
-      if (layer && host) place(piece, host, layer === 'under');
-      else if (!layer) lower.delete(piece);
+      if (layer && host) claims.push({ piece, host, under: layer === 'under' });
+      else if (!layer) claims.push({ piece, under: null });
     }
-    return { layers: order, lower: order.filter((piece) => lower.has(piece)) };
-  }, [poseLayers, stepResult?.lower, handEdits, poseLayerEdits, poseEdits, ownPoseRows]);
+    return pendingStacking(
+      {
+        layers: poseLayers,
+        lower: stepResult?.lower ?? [],
+        stacked: stepResult?.stacked ?? [],
+      },
+      claims,
+    );
+  }, [
+    poseLayers,
+    stepResult?.lower,
+    stepResult?.stacked,
+    handEdits,
+    poseLayerEdits,
+    poseEdits,
+    ownPoseRows,
+  ]);
   const shownPoseLayers = shownPoseStacking.layers;
   const shownPoseLower = shownPoseStacking.lower;
+  const shownPoseStacked = shownPoseStacking.stacked;
 
-  const resetPose = () => {
+  const resetPose = async () => {
     if (busy) return;
-    setPoseFree(null);
     const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
+    const inScope = (piece: string) => !selected || selected.has(piece);
+    const unsaved =
+      (!selected && !!poseFree) ||
+      [...poseEdits.keys()].some((piece) =>
+        selected ? pickupOf(piece).group.some((member) => selected.has(member)) : true,
+      ) ||
+      [...poseChanges.drop].some(inScope) ||
+      [...handEdits.values()].some((row) =>
+        [...row.sideA, ...row.sideB].some((anchor) => inScope(anchor.piece)),
+      ) ||
+      [...poseLayerEdits.keys()].some(inScope);
+    // Nothing unsaved left to undo: «reset» removes this step's saved poses (the picked block's,
+    // else all of them) and the step is laid automatically again.
+    if (!unsaved) {
+      const drop = [...ownPoseRows].filter(([piece]) => inScope(piece)).map(([, row]) => row);
+      if (!drop.length) return;
+      setBusy(true);
+      setRefused('');
+      const ok = await attachPose([], drop);
+      setBusy(false);
+      if (!ok) setRefused(useSeamsStore.getState().errors[drop[0].seamKey] ?? 'not saved');
+      return;
+    }
+    setPoseFree(null);
     setPoseChanges((current) => {
       if (!selected) return { edits: new Map(), drop: new Set() };
       const next = new Map(current.edits);
@@ -862,6 +894,7 @@ export function SeamPickerBody({
                   layout={poseShown}
                   layers={shownPoseLayers}
                   lower={shownPoseLower}
+                  stacked={shownPoseStacked}
                   geoms={geoms}
                   innerLines={innerLines}
                   ghostName={nameOf}
@@ -1031,9 +1064,14 @@ export function SeamPickerBody({
                 type='button'
                 variant='underline'
                 size='xs'
-                onClick={resetPose}
+                onClick={() => void resetPose()}
                 disabled={
-                  (!poseEdits.size && !handEdits.size && !poseLayerEdits.size && !poseFree) || busy
+                  (!poseEdits.size &&
+                    !handEdits.size &&
+                    !poseLayerEdits.size &&
+                    !poseFree &&
+                    !ownPoseRows.size) ||
+                  busy
                 }
                 data-seam-pose-reset=''
               >

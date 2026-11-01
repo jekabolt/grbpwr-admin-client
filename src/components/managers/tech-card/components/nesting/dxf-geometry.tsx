@@ -186,6 +186,52 @@ export type DxfIndex = {
   filesOfScope: Map<string, number[]>;
 };
 
+type SizeTokenLookup = { has(token: string): boolean };
+
+/** The uncached reference derivation, exported for the fixture equality benchmark. */
+export function buildDxfIndex(bundle: DxfBundle, dictTokens: SizeTokenLookup): DxfIndex {
+  const split = splitPiecesBySize(bundle.pieces, dictTokens);
+  const contourLayer = defaultContourLayer(layerOptions(bundle.pieces, split.codeById));
+  const grainLayer = defaultGrainLayer(grainLayerOptions(bundle.pieces));
+  const byKey = new Map<string, Map<string, PieceDTO[]>>();
+  const filesOfScope = new Map<string, number[]>();
+  for (const [fileIndex, scope] of bundle.scopeByFile) {
+    filesOfScope.set(scope, [...(filesOfScope.get(scope) ?? []), fileIndex]);
+  }
+  for (const piece of bundle.pieces) {
+    const code = split.codeById.get(piece.id);
+    const identity = normBlock(code?.identity ?? piece.blockName ?? '');
+    if (!identity) continue; // безымянный контур ни к какой детали кроя не привязан
+    const scope = bundle.scopeByFile.get(piece.fileIndex ?? -1) ?? '';
+    const key = `${scope}|${identity.toLowerCase()}`;
+    const bySize = byKey.get(key) ?? new Map<string, PieceDTO[]>();
+    const size = code?.size ?? '';
+    bySize.set(size, [...(bySize.get(size) ?? []), piece]);
+    byKey.set(key, bySize);
+  }
+  return { split, contourLayer, grainLayer, byKey, filesOfScope };
+}
+
+// React Query gives every reader the same bundle object, and the dictionary token map is stable
+// until the dictionary changes. Cache on both identities so nine mounted readers share literally
+// one index without extending either object's lifetime.
+const dxfIndexCache = new WeakMap<DxfBundle, WeakMap<object, DxfIndex>>();
+
+export function cachedDxfIndex(bundle: DxfBundle, dictTokens: SizeTokenLookup): DxfIndex {
+  const tokenKey = dictTokens as object;
+  let byTokens = dxfIndexCache.get(bundle);
+  if (!byTokens) {
+    byTokens = new WeakMap<object, DxfIndex>();
+    dxfIndexCache.set(bundle, byTokens);
+  }
+  let index = byTokens.get(tokenKey);
+  if (!index) {
+    index = buildDxfIndex(bundle, dictTokens);
+    byTokens.set(tokenKey, index);
+  }
+  return index;
+}
+
 /**
  * Контуры, разложенные по (скоуп, деталь чертежа, размер).
  *
@@ -197,29 +243,7 @@ export type DxfIndex = {
  */
 export function useDxfIndex(bundle: DxfBundle | undefined): DxfIndex | null {
   const dictTokens = useDictionarySizeTokens();
-  return useMemo(() => {
-    if (!bundle) return null;
-    const split = splitPiecesBySize(bundle.pieces, dictTokens);
-    const contourLayer = defaultContourLayer(layerOptions(bundle.pieces, split.codeById));
-    const grainLayer = defaultGrainLayer(grainLayerOptions(bundle.pieces));
-    const byKey = new Map<string, Map<string, PieceDTO[]>>();
-    const filesOfScope = new Map<string, number[]>();
-    for (const [fileIndex, scope] of bundle.scopeByFile) {
-      filesOfScope.set(scope, [...(filesOfScope.get(scope) ?? []), fileIndex]);
-    }
-    for (const p of bundle.pieces) {
-      const code = split.codeById.get(p.id);
-      const identity = normBlock(code?.identity ?? p.blockName ?? '');
-      if (!identity) continue; // безымянный контур ни к какой детали кроя не привязан
-      const scope = bundle.scopeByFile.get(p.fileIndex ?? -1) ?? '';
-      const key = `${scope}|${identity.toLowerCase()}`;
-      const bySize = byKey.get(key) ?? new Map<string, PieceDTO[]>();
-      const size = code?.size ?? '';
-      bySize.set(size, [...(bySize.get(size) ?? []), p]);
-      byKey.set(key, bySize);
-    }
-    return { split, contourLayer, grainLayer, byKey, filesOfScope };
-  }, [bundle, dictTokens]);
+  return useMemo(() => (bundle ? cachedDxfIndex(bundle, dictTokens) : null), [bundle, dictTokens]);
 }
 
 export type FoundPiece = {

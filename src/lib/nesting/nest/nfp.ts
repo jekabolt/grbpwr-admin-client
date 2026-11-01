@@ -66,7 +66,14 @@
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
 import type { Pt, RotationDeg } from '../types';
 import { SCALE, toPath64 } from '../geom/clipper';
-import { gapOctagon, minkowskiSumConvex, negate } from '../geom/convex';
+import {
+  convexHull,
+  gapOctagon,
+  minkowskiSumConvex,
+  minkowskiSumConvexLinear,
+  negate,
+} from '../geom/convex';
+import { area, ensureCCW } from '../geom/polygon';
 
 // Хиральность варианта: 0 — как разобрано, 1 — зеркало (types.ts, M: x ↦ −x, ДО поворота).
 // Число, а не boolean, потому что этим индексируется геометрия варианта.
@@ -104,14 +111,17 @@ export type IntBox = { minX: number; minY: number; maxX: number; maxY: number };
 //
 // TWO representations of the same forbidden region travel together, with different
 // jobs (see the module header on why they may DISAGREE):
-//   paths/boxes — the clipper union, compact: candidate GENERATION only;
+//   paths/boxes — compact candidate GENERATION boundaries (the exact clipper union, or the
+//     roll-only conservative cover's raw parts);
 //   parts/partBoxes — the raw convex Minkowski hulls, authoritative: candidate
 //     ACCEPTANCE. A point is forbidden iff strictly inside ANY part.
 export type NfpPaths = {
   paths: readonly Path64[];
   boxes: readonly IntBox[];
+  box?: IntBox;
   parts: readonly Path64[];
   partBoxes: readonly IntBox[];
+  partBox?: IntBox;
 };
 
 // One-sided NFP boundary decimation: drop a vertex ONLY when the replacing chord GROWS
@@ -219,6 +229,20 @@ function boxOf(path: Path64): IntBox {
     if (q.x > maxX) maxX = q.x;
     if (q.y < minY) minY = q.y;
     if (q.y > maxY) maxY = q.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function boxOfBoxes(boxes: readonly IntBox[]): IntBox {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    if (box.minX < minX) minX = box.minX;
+    if (box.minY < minY) minY = box.minY;
+    if (box.maxX > maxX) maxX = box.maxX;
+    if (box.maxY > maxY) maxY = box.maxY;
   }
   return { minX, minY, maxX, maxY };
 }
@@ -345,14 +369,17 @@ function clonePath64(path: Path64): Path64 {
   return out;
 }
 
-type CanonicalNfp = { paths: Path64[]; parts: Path64[] };
+type CanonicalNfp = { paths: Path64[]; parts: Path64[]; approximate: boolean };
 
 export class NfpCache {
   // key `${minId}|${maxId}|${rel}` → canonical (rot 0) union paths + raw convex parts.
   private cache = new Map<string, CanonicalNfp>();
   // key `${canonicalKey}|${outRot}` → rotated variant with bboxes (cache-owned, readonly).
   private rotated = new Map<string, NfpPaths>();
+  private coarseParts = new WeakMap<PreparedPiece, readonly [Pt[][], Pt[][]]>();
   private gapOct: Pt[];
+  private maxExactParts: number;
+  private maxApproxPieceParts: number;
   computed = 0;
 
   // gapCm here must already include the RDP compensation (+2·rdpEps): NFP inputs are the
@@ -369,9 +396,52 @@ export class NfpCache {
   // built from simplified contours and were measured accepting short positions.
   readonly verifyGapCm: number;
 
-  constructor(gapCm: number, verifyGapCm = gapCm) {
+  constructor(
+    gapCm: number,
+    verifyGapCm = gapCm,
+    maxExactParts = Infinity,
+    maxApproxPieceParts = 1,
+  ) {
     this.gapOct = gapOctagon(gapCm + NFP_SAFETY_CM);
     this.verifyGapCm = verifyGapCm;
+    this.maxExactParts = maxExactParts;
+    this.maxApproxPieceParts = maxApproxPieceParts;
+  }
+
+  // Roll-print only (the default Infinity threshold never enters here). Replacing two convex
+  // regions by their hull can only GROW the keep-out. Greedily take the least area growth until
+  // the per-piece cap is reached; candidate quality may fall, but an overlap cannot be admitted.
+  private coarsePartsOf(piece: PreparedPiece, flip: Flip): Pt[][] {
+    let variants = this.coarseParts.get(piece);
+    if (!variants) {
+      // The linear Minkowski merge below needs CCW inputs. Decomposition currently provides
+      // them, but normalizing once here keeps that implementation detail out of the fast path;
+      // reflection reverses winding, so normalize that cached variant too.
+      const work = piece.parts0[0].map((part) => ensureCCW([...part]));
+      while (work.length > this.maxApproxPieceParts) {
+        let bestI = 0;
+        let bestJ = 1;
+        let bestHull = convexHull([...work[0], ...work[1]]);
+        let bestAdded = area(bestHull) - area(work[0]) - area(work[1]);
+        for (let i = 0; i < work.length; i++) {
+          for (let j = i + 1; j < work.length; j++) {
+            const hull = convexHull([...work[i], ...work[j]]);
+            const added = area(hull) - area(work[i]) - area(work[j]);
+            if (added < bestAdded) {
+              bestI = i;
+              bestJ = j;
+              bestHull = hull;
+              bestAdded = added;
+            }
+          }
+        }
+        work[bestI] = bestHull;
+        work.splice(bestJ, 1);
+      }
+      variants = [work, mirrorParts(work).map(ensureCCW)];
+      this.coarseParts.set(piece, variants);
+    }
+    return variants[flip];
   }
 
   // Canonical NFP for the UNORDERED pair, at relative rotation `rel`, with the
@@ -388,15 +458,30 @@ export class NfpCache {
     const key = `${a.id}|${b.id}|${rel}|${bFlip}`;
     let entry = this.cache.get(key);
     if (!entry) {
+      const partProduct = a.parts0[0].length * b.parts0[bFlip].length;
+      const approximate = partProduct > this.maxExactParts;
+      const aParts = approximate ? this.coarsePartsOf(a, 0) : a.parts0[0];
+      const bParts = approximate ? this.coarsePartsOf(b, bFlip) : b.parts0[bFlip];
+      const transformedB = approximate
+        ? bParts.map((part) => negate(rotPart(part, rel)))
+        : undefined;
+      const sum = approximate ? minkowskiSumConvexLinear : minkowskiSumConvex;
       const parts: Path64[] = [];
-      for (const pa of a.parts0[0]) {
-        for (const pb of b.parts0[bFlip]) {
-          const hull = minkowskiSumConvex(pa, negate(rotPart(pb, rel)));
-          const withGap = this.gapOct.length > 1 ? minkowskiSumConvex(hull, this.gapOct) : hull;
+      for (const pa of aParts) {
+        for (let pbi = 0; pbi < bParts.length; pbi++) {
+          // Preserve the marker's exact path and timing: only roll-print's coarse branch hoists
+          // this allocation out of the A-parts loop.
+          const pb = transformedB?.[pbi] ?? negate(rotPart(bParts[pbi], rel));
+          const hull = sum(pa, pb);
+          const withGap = this.gapOct.length > 1 ? sum(hull, this.gapOct) : hull;
           parts.push(toPath64(withGap));
         }
       }
-      const union = unionBatched(parts);
+      // The coarse roll cover is already a union of at most 25 convex forbidden parts. Feeding
+      // those parts directly to candidate generation avoids thousands of BooleanOps; acceptance
+      // still checks every part and then the true contours. Exact marker NFPs keep the guarded
+      // Clipper tree above, including its mutation copies and coverage fallback.
+      const union = approximate ? parts : unionBatched(parts);
       // DROP degenerate paths: clipper's union emits zero-area sliver loops, and a
       // sliver's edge deep inside the real outer reads as "on the region boundary" to the
       // placement contact test — measured 459 cm² of piece overlap from exactly that. A
@@ -410,12 +495,12 @@ export class NfpCache {
       const paths = union
         .filter((p) => Math.abs(Clipper.area(p)) >= minPathArea)
         .map((p) => decimateOneSided(p));
-      // The RAW parts are retained as the acceptance authority: verification proved the
+      // The parts are retained as the acceptance authority: verification proved the
       // clipper union carries bites up to 1.09 cm deep that Difference AGREES with, so a
       // union-derived coverage check is structurally blind to them (25/32 pair-rels
-      // affected on the benchmark set). The parts are exact by construction (convex hull
-      // of a Minkowski sum of convex operands) and never touched a boolean op.
-      entry = { paths, parts };
+      // affected on the benchmark set). Exact-cache parts are exact; roll coarse-cache parts
+      // conservatively cover them. Neither representation ever touches a boolean op.
+      entry = { paths, parts, approximate };
       this.cache.set(key, entry);
       this.computed++;
     }
@@ -445,7 +530,16 @@ export class NfpCache {
     if (!v) {
       const rp = xformPath64(entry.paths, rot, flip);
       const rparts = xformPath64(entry.parts, rot, flip);
-      v = { paths: rp, boxes: rp.map(boxOf), parts: rparts, partBoxes: rparts.map(boxOf) };
+      const boxes = rp.map(boxOf);
+      const partBoxes = rparts.map(boxOf);
+      v = {
+        paths: rp,
+        boxes,
+        box: entry.approximate ? boxOfBoxes(boxes) : undefined,
+        parts: rparts,
+        partBoxes,
+        partBox: entry.approximate ? boxOfBoxes(partBoxes) : undefined,
+      };
       this.rotated.set(key, v);
     }
     return v;

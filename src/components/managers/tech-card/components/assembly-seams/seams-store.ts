@@ -6,14 +6,13 @@
 //     for the decisions of the facts it is about to read, and appends `useCardSeamsSig()` to its
 //     facts signature — so a decision re-reads the graph the ASSEMBLY MAP, the pictograms and the
 //     doll draw;
-//   • the SEAMS review reads `resolved` (stale / orphan / applied rows) and `facts` (grain lines for
-//     the anchors, piece inputs for the POM role words) off the very read the graph came from;
+//   • retained seam readers use `resolved` and `facts` from the same graph read;
 //   • a POSE row (P8, a piece placed by hand in a step) rides the same table but is not a seam: the
 //     one split is `readWire` (lib/seams `splitWire`) — poses land in `poses` / `posePending`, read
-//     by `posesOf`, and never reach `server`, `rowsOf`, the resolver or the review.
+//     by `posesOf`, and never reach `server`, `rowsOf` or the resolver.
 //
-// A store and not a context: the provider sits ABOVE the door that hydrates it (the door is a child
-// of the map, the map a child of the provider), and a context only flows down.
+// A store and not a context: hydration and graph readers are siblings, while a context only flows
+// down.
 
 import type { SeamDecisions, PieceGeom, SkeletonFacts } from 'lib/assembly-skeleton/types';
 import {
@@ -25,6 +24,7 @@ import {
   type StoredSeam,
   type TechCardSeamWire,
 } from 'lib/seams';
+import { useEffect } from 'react';
 import { create } from 'zustand';
 
 export type PendingOp = { kind: 'upsert'; row: StoredSeam } | { kind: 'delete'; row?: StoredSeam };
@@ -181,6 +181,15 @@ export function hydrateSeams(cardId: number | null, wire: readonly TechCardSeamW
 
 export function resetSeams() {
   useSeamsStore.setState(EMPTY);
+}
+
+/** Keep the open card's saved decisions available to every seam-graph reader. */
+export function useHydrateSeams(
+  cardId: number | null,
+  wire: readonly TechCardSeamWire[] | undefined,
+) {
+  useEffect(() => hydrateSeams(cardId, wire), [cardId, wire]);
+  useEffect(() => () => resetSeams(), []);
 }
 
 /**

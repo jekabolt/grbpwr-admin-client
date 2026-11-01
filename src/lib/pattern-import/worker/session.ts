@@ -947,7 +947,7 @@ export class Session {
               const r2: DxfRead = { doc: applyScale(read.doc, d), meta: read.meta };
               return { read: r2, seg: segmentDxf(r2) };
             })();
-      this.fast = dxfFastPath(scaled.read, scaled.seg);
+      this.fast = dxfFastPath(scaled.read, scaled.seg, !!this.rul);
       if (this.dxfSet) this.fast = attributeSizes(this.fast, this.setSizes);
       ctx.progress(1, 1);
     } else {

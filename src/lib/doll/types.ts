@@ -23,6 +23,70 @@ import type { DeclaredJoin } from './joins';
 
 export type Vec3 = [number, number, number];
 
+/** An explicit owner stacking claim, in the editor's bottom → top order. */
+export type DollLayerRelation = readonly [under: string, over: string];
+
+/**
+ * One seam the doll sews in owner mode: the step editor's exact conversion of a confirmed row an
+ * operation names, or (`guess`) the edge guess the step picture draws for a sewing step that names
+ * no row — sewn as a doll guess, drawn dashed, never a contradiction when it does not close.
+ */
+export type DollOwnerCandidate = {
+  /** The row's key, or a synthetic `guess:<step index>:<n>` for a guess. */
+  seamKey: string;
+  candidate: SeamCandidate;
+  /** Whether an operation names this row in its seam keys (always true since the doll sews by steps). */
+  inStep: boolean;
+  /** Set on a guess: the operation (its number in the order) it was guessed for. */
+  guess?: { step: number };
+};
+
+/** A point in the piece's seam (u, v) frame (lib/seams/frame.ts `toUV`): the unit square. */
+export type UV = readonly [u: number, v: number];
+
+/**
+ * One fold of a piece (a placket folded on itself, a cuff, a hem): the line a–b in the piece's
+ * seam (u, v) frame; the side holding `flipAt` turns over it — `inward` toward the body (under the
+ * rest of the piece), `outward` away from it. A piece's folds apply in `seq` order, each on the
+ * result of the previous ones («double» = two folds). Storage writes them; the doll only applies.
+ */
+export type DollFold = {
+  seq: number;
+  a: UV;
+  b: UV;
+  flipAt: UV;
+  kind: 'inward' | 'outward';
+};
+
+/** One fold as drawn: the numbers the proof asks for, per fold, in mm and degrees. */
+export type DollFoldReport = {
+  pieceKey: string;
+  seq: number;
+  kind: DollFold['kind'];
+  /** The crease was creased into the mesh and the fold drawn; otherwise `note` says why not. */
+  applied: boolean;
+  /**
+   * The crease's kink, mm: the farthest any crease vertex sits from the chord of its two
+   * neighbours (≤ 1.5 wanted). A crease following the body's curve stays near 0.
+   */
+  creaseDevMm: number;
+  /** Angle between the pattern-face normals across the crease, degrees: 180 = folded flat. */
+  dihedralMinDeg: number;
+  dihedralMeanDeg: number;
+  /**
+   * Signed gap between the plies, mm, over every vertex of one ply that lies over a triangle of
+   * another in the folded footprint (positive = in stack order); null when no vertex does.
+   */
+  plyGapMm: { min: number; median: number; max: number; pairs: number } | null;
+  /** Of those vertex ↔ triangle pairs, how many have the vertex through the other ply (0 wanted). */
+  interpenetrating: number;
+  /** Extent across the fold line: the piece as cut, as folded (flat), and as drawn (3D), mm. */
+  cutWidthMm: number;
+  finishedWidthMm: number;
+  drawnWidthMm: number;
+  note: string;
+};
+
 export type DollOptions = {
   /** Interior mesh step, mm; default adaptive (≈ 7 000 vertices for the whole garment). */
   gridMm?: number;
@@ -42,6 +106,12 @@ export type DollOptions = {
   dropSeams?: string[];
   /** Extra lines in `warnings` (charts, loops) for probes. */
   debug?: boolean;
+  /**
+   * Folds per piece key (a placket folded on itself, a cuff, a hem), each list in `seq` order.
+   * The piece is meshed with the crease, laid out and placed by its folded footprint, its plies
+   * stacked ~1 mm apart and kept from passing through each other. No folds → the doll as before.
+   */
+  folds?: Record<string, DollFold[]>;
   /**
    * Declared joins (the technologist's order, or the skeleton's units): which pieces must be sewn
    * together. A join the graph has no seam for is searched for between those pieces only and
@@ -69,7 +139,27 @@ export type DollOptions = {
    * collar unit gives the neck path (tucks / pleats on it folded), a strip sewn by a confirmed seam
    * onto the top of the body is the waistband ring. No rows → the doll exactly as before.
    */
-  seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
+  seams?: {
+    /**
+     * `owner` is the assembly editor contract: the doll sews BY STEPS — `candidates` are the rows
+     * the operations name (in step order) plus the guesses of sewing steps that name no row; a
+     * confirmed row no step names is listed, not sewn. Omitted keeps the historical L4 behaviour
+     * for probes and callers that hand the doll all card rows.
+     */
+    mode?: 'owner';
+    /** Every card row (rejected pairs stay excluded, stale / orphan rows keep their words). */
+    rows: readonly StoredSeam[];
+    size: string;
+    sizes?: readonly SizePieces[];
+    /** What is sewn: exact candidates of the named rows, then guesses; closures have none. */
+    candidates?: readonly DollOwnerCandidate[];
+    /** Confirmed row keys named by an operation, including closures without exact candidates. */
+    inStepKeys?: readonly string[];
+    /** Explicit under/over claims read by step-result, including claims carried by pose rows. */
+    layers?: readonly DollLayerRelation[];
+    /** Counts for the owner-row report. */
+    selection?: { confirmed: number; inSteps: number; rejected: number; guessed?: number };
+  };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
   /**
@@ -151,6 +241,10 @@ export type DollSeamReport = {
   /** L4 (rows given): who says this seam exists — confirmed by a person (stored row), proposed by the
    *  doll, or read by the engine and not decided. Absent without rows. */
   decidedBy?: 'person' | 'doll' | 'engine';
+  /** Owner mode: whether an operation names this confirmed row. */
+  inStep?: boolean;
+  /** Owner mode: a sewing step named no row — sewn by the step picture's guess (drawn dashed). */
+  guessed?: boolean;
   /** In words, with millimetres. */
   note: string;
   /** Global vertex ids of side A / side B polylines (for drawing). */
@@ -230,6 +324,8 @@ export type DollReport = {
   }[];
   /** The neck path and the units sewn onto it (stand, fall, one-piece collar) — 04-COLLAR.md. */
   collar?: DollCollarReport;
+  /** The folds asked for (`options.folds`), each with its numbers as drawn; absent without folds. */
+  folds?: DollFoldReport[];
   /** The honesty line every view carries. */
   honesty: string;
   /**

@@ -93,6 +93,7 @@ export type RollPrintPlan = {
   search?: {
     /** Paper of the deterministic plan the search started from, mm (furniture included). */
     seedLengthMm: number;
+    seedMs: number;
     source: 'seed' | 'search';
     generations: number;
     searchMs: number;
@@ -148,6 +149,8 @@ export async function planRollPrint(
   copies: SizeCopies,
   roll: RollSpec,
   signal?: AbortSignal,
+  /** The deterministic first layout, before the search improves it: step 3 shows it as a draft. */
+  onDraft?: (draft: RollPrintPlan) => void,
 ): Promise<RollPrintPlan> {
   throwIfAborted(signal);
   const source = readRollSourceModel(dxf, fileName);
@@ -217,61 +220,78 @@ export async function planRollPrint(
     sheetFurnitureCm: furnitureMm / 10,
     gapCm: ROLL_GAP_MM / 10,
   };
-  const search = await runRollSearch(job, signal);
-  throwIfAborted(signal);
-  const planned = search.best.sheets.map((sheet) => ({
-    // The search works on the printable strip; the roll's dead edge is added only here.
-    placements: sheet.placements.map((placement) => ({
-      ...placement,
-      y: placement.y + roll.edgeMm / 10,
-      flipped: false,
-    })),
-    usedLengthCm: sheet.usedLengthCm,
-  }));
-  const placedCount = planned.reduce((sum, sheet) => sum + sheet.placements.length, 0);
-  if (placedCount !== items.length)
-    throw new Error(`roll print laid ${placedCount} of ${items.length} pieces`);
-
   const itemByKey = new Map(
     items.map((item) => [`${item.template.piece.id}|${item.instance}`, item] as const),
   );
-  const drawings = planned.map((sheet, index) => {
-    const lengthMm = Math.min(
-      sheetLimitMm,
-      Math.max(furnitureMm + 1, furnitureMm + sheet.usedLengthCm * 10),
-    );
-    const drawing = drawingFromRollPlacements(
-      sheet.placements,
-      itemByKey,
-      widthMm,
-      lengthMm,
-      source.title,
-      source.warnings,
-      furnitureMm,
-    );
-    return {
-      drawing: addRollFurniture(drawing, index + 1, planned.length, roll, source.title),
-      lengthMm,
-    };
-  });
   const sheetPaperMm = (plan: RollSearchPlan) =>
     plan.sheets.reduce((sum, sheet) => sum + furnitureMm + sheet.usedLengthCm * 10, 0);
-  return {
-    sheets: drawings,
-    lengthMm: drawings.reduce((sum, sheet) => sum + sheet.lengthMm, 0),
-    placed: items.length,
-    total,
-    tooWide,
-    tooLong,
-    markerLengthMm: planned.reduce((sum, sheet) => sum + sheet.usedLengthCm * 10, 0),
-    search: {
-      seedLengthMm: sheetPaperMm(search.seed),
-      source: search.source,
-      generations: search.generations,
-      searchMs: search.searchMs,
-    },
-    warnings: [...source.warnings],
+  // One conversion for the draft (seed) and the final (best) plan, so the draft is drawn exactly
+  // as the result will be — same edge offset, same furniture, same labels.
+  const toPlan = (best: RollSearchPlan, search?: RollPrintPlan['search']): RollPrintPlan => {
+    const planned = best.sheets.map((sheet) => ({
+      // The search works on the printable strip; the roll's dead edge is added only here.
+      placements: sheet.placements.map((placement) => ({
+        ...placement,
+        y: placement.y + roll.edgeMm / 10,
+        flipped: false,
+      })),
+      usedLengthCm: sheet.usedLengthCm,
+    }));
+    const placedCount = planned.reduce((sum, sheet) => sum + sheet.placements.length, 0);
+    if (placedCount !== items.length)
+      throw new Error(`roll print laid ${placedCount} of ${items.length} pieces`);
+
+    const drawings = planned.map((sheet, index) => {
+      const lengthMm = Math.min(
+        sheetLimitMm,
+        Math.max(furnitureMm + 1, furnitureMm + sheet.usedLengthCm * 10),
+      );
+      const drawing = drawingFromRollPlacements(
+        sheet.placements,
+        itemByKey,
+        widthMm,
+        lengthMm,
+        source.title,
+        source.warnings,
+        furnitureMm,
+      );
+      return {
+        drawing: addRollFurniture(drawing, index + 1, planned.length, roll, source.title),
+        lengthMm,
+      };
+    });
+    return {
+      sheets: drawings,
+      lengthMm: drawings.reduce((sum, sheet) => sum + sheet.lengthMm, 0),
+      placed: items.length,
+      total,
+      tooWide,
+      tooLong,
+      markerLengthMm: planned.reduce((sum, sheet) => sum + sheet.usedLengthCm * 10, 0),
+      ...(search ? { search } : {}),
+      warnings: [...source.warnings],
+    };
   };
+  // A draft that fails to convert must not sink the real result: the draft is only a preview.
+  const onSeed = onDraft
+    ? (seed: RollSearchPlan) => {
+        if (signal?.aborted) return;
+        try {
+          onDraft(toPlan(seed));
+        } catch {
+          // ignored: the final plan is checked on its own
+        }
+      }
+    : undefined;
+  const search = await runRollSearch(job, signal, onSeed);
+  throwIfAborted(signal);
+  return toPlan(search.best, {
+    seedLengthMm: sheetPaperMm(search.seed),
+    seedMs: search.seedMs,
+    source: search.source,
+    generations: search.generations,
+    searchMs: search.searchMs,
+  });
 }
 
 /** The PDF: one page per sheet, page width = roll width exactly, 1:1. */
@@ -379,11 +399,15 @@ const abortError = () => {
  * Abort rejects at once and kills the worker. A worker that fails after posting its seed still
  * yields a layout: the seed is a complete plan, only unsearched.
  */
-async function runRollSearch(job: RollSearchJob, signal?: AbortSignal): Promise<RollSearchResult> {
+async function runRollSearch(
+  job: RollSearchJob,
+  signal?: AbortSignal,
+  onSeed?: (seed: RollSearchPlan) => void,
+): Promise<RollSearchResult> {
   throwIfAborted(signal);
   if (typeof Worker === 'undefined') {
     try {
-      return await rollSearch(job, () => signal?.aborted === true);
+      return await rollSearch(job, () => signal?.aborted === true, onSeed);
     } catch (error) {
       throw error instanceof RollSearchAborted ? abortError() : error;
     }
@@ -394,6 +418,7 @@ async function runRollSearch(job: RollSearchJob, signal?: AbortSignal): Promise<
   let seed: RollSearchPlan | null = null;
   const run = client.rollSearch(job, (plan) => {
     seed = plan;
+    onSeed?.(plan);
   });
   // Terminating the worker rejects `run.done`, so an abort settles the race immediately.
   const abort = () => client.terminate();

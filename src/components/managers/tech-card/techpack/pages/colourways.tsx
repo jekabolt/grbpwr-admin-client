@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { common_TechCard } from 'api/proto-http/admin';
 import { DataTable, GroupLabel, HeaderNote, SectionHeader } from 'ui';
 import { deriveColourways, type ColourwaysModel } from '../derive-colourways';
@@ -182,12 +183,13 @@ function ColourwaysBody({
 
 export function ColourwaysContent({ techCard, n }: { techCard: common_TechCard; n: string }) {
   const { t } = useT();
-  return <ColourwaysBody model={deriveColourways(techCard, undefined, t)} n={n} />;
+  const model = useMemo(() => deriveColourways(techCard, undefined, t), [techCard, t]);
+  return <ColourwaysBody model={model} n={n} />;
 }
 
 export function ColourwaysPage({ techCard, orient, docline, n }: TechpackPageProps) {
   const { t } = useT();
-  const model = deriveColourways(techCard, undefined, t);
+  const model = useMemo(() => deriveColourways(techCard, undefined, t), [techCard, t]);
   const land = orient === 'land';
   const recipeColumns = land ? 6 : 4;
   const fabricColumns = land ? 5 : 3;

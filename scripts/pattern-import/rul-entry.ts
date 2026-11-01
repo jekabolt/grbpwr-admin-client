@@ -37,7 +37,7 @@ const REPO = process.env.PATIMPORT_REPO ?? process.cwd();
 const CORPUS =
   process.env.PATIMPORT_CORPUS ??
   '/Users/jekabolt/go/src/github.com/jekabolt/tmp/plans/pdf-to-dxf/corpus/';
-const OUT = resolve(CORPUS, 'synthetic/rul');
+const OUT = process.env.PATIMPORT_OUT ?? resolve(CORPUS, 'synthetic/rul');
 mkdirSync(OUT, { recursive: true });
 const LEGACY = pathToFileURL(resolve(REPO, 'node_modules/pdfjs-dist/legacy/build/pdf.mjs')).href;
 setPdfjsLoader(() => import(LEGACY) as Promise<PdfjsModule>);
@@ -169,7 +169,8 @@ function sectionA(): RulTable {
 // FRONT, drawn in 36: a 200 × 300 box on layer 1, corners A(0,0) #1, B(200,0) #2, C(200,300) #3,
 // D(0,300) #2; a curve vertex E(200,150) on B–C with `# -1`; a notch POINT on layer 4 at (100,0)
 // (on A–B, no rule: follows the boundary); a drill on layer 13 at (100,150) with #3; a grain LINE
-// on layer 7 without rules (stays as drawn); labels; model-space Units / Sample Size.
+// on layer 7 without rules (stays as drawn — the grain is not the grade axis, D6673 layer 5 is);
+// labels; model-space Units / Sample Size.
 const T = (layer: string, x: number, y: number, s: string) =>
   `  0\r\nTEXT\r\n  8\r\n${layer}\r\n 10\r\n${x}\r\n 20\r\n${y}\r\n 30\r\n0.0\r\n 40\r\n0.25\r\n  1\r\n${s}\r\n`;
 const P = (layer: string, x: number, y: number) =>
@@ -184,8 +185,10 @@ function baseDxf(
     sample?: string;
     texts?: string;
     drill?: string;
+    drillAt?: [number, number];
   } = {},
 ) {
+  const [drillX, drillY] = o.drillAt ?? [100, 150];
   const pts: [number, number][] = [
     [0, 0],
     [200, 0],
@@ -214,8 +217,8 @@ function baseDxf(
         T('1', 0, 300, '# 2'),
       ].join(''),
     P('4', 100, 0),
-    P('13', 100, 150),
-    o.drill ?? T('13', 100, 150, '# 3'),
+    P('13', drillX, drillY),
+    o.drill ?? T('13', drillX, drillY, '# 3'),
     '  0\r\nLINE\r\n  8\r\n7\r\n 10\r\n50\r\n 20\r\n50\r\n 30\r\n0.0\r\n 11\r\n50\r\n 21\r\n250\r\n 31\r\n0.0\r\n',
     o.extra ?? '',
     T('1', 20, 280, 'Piece Name: FRONT'),
@@ -309,6 +312,20 @@ async function sectionB(t: RulTable) {
     ex.warnings.some((w) => /interpolation/.test(w)),
     ex.warnings.join(' | '),
   );
+  const exInternal = expandRul({
+    dxf: enc(baseDxf({ drillAt: [120, 150], extra: P('8', 100, 150) })),
+    dxfName: 'FRONT-internal.dxf',
+    rul: t,
+    rulName: 'B9000.rul',
+  });
+  const internal48 = blocksOf(exInternal.text).get('FRONT_48')!.pts['8'][0];
+  const internalDx = (2 * R2.at(-1)! + R3.at(-1)!) / 4;
+  check(
+    'B',
+    'rule-less layer-8 point uses its mean-value place in the graded outline',
+    near(internal48, 100 + internalDx, 150) && exInternal.stats.interior === 1,
+    `${JSON.stringify(internal48)} · interior ${exInternal.stats.interior}`,
+  );
   writeFileSync(resolve(OUT, 'B9000-FRONT.expanded.dxf'), ex.text);
   // the importer's own reader sees 8 sizes of one piece
   const read = await readDxf(
@@ -367,6 +384,15 @@ async function sectionB(t: RulTable) {
     'layer-5 grade axis at 90°: dx is applied along +y',
     near(bR.cut[1], 200, -37.98),
     JSON.stringify(bR.cut[1]),
+  );
+  // the grain line (layer 7, vertical in the base) is not the grade axis: with no layer 5 the
+  // table's dx runs along the drawing's x (CLO exports no layer 5; its rules are in world x / y)
+  const bW = blocksOf(ex.text).get('FRONT_48')!;
+  check(
+    'B',
+    'no layer 5: dx runs along the drawing x, not along the vertical grain line',
+    near(bW.cut[1], 200 - 37.98, 0),
+    JSON.stringify(bW.cut[1]),
   );
 }
 
@@ -971,7 +997,8 @@ async function sectionE() {
         );
         continue;
       }
-      // areas grow away from the sample (sign sanity on real data)
+      // areas grow away from the sample (sign sanity on real data; the CLO sleeve that "dropped
+      // 0.047 % from XS to S" did so only with the deltas turned along its grain line)
       const area = (pts: { x: number; y: number }[]) =>
         Math.abs(
           pts.reduce((a, p, i) => {
@@ -983,6 +1010,7 @@ async function sectionE() {
       const sizes = ex.sizes;
       let mono = 0;
       let tot = 0;
+      const odd: string[] = [];
       for (const stem of new Set(Object.values(ex.pieces))) {
         const a = sizes
           .map((s) => blocks.get(`${stem}_${s.replace(/[\s_]+/g, '-')}`)?.cut ?? [])
@@ -990,12 +1018,13 @@ async function sectionE() {
         if (a.some((x) => !x)) continue;
         tot++;
         if (a.every((x, i) => i === 0 || x >= a[i - 1] - 1e-6)) mono++;
+        else odd.push(`${stem}: ${a.map((value) => value.toFixed(1)).join('→')}`);
       }
       check(
         'E',
         `${who}: cut areas grow with the size (sign / units sanity)`,
         tot > 0 && mono === tot,
-        `${mono}/${tot} pieces monotone`,
+        `${mono}/${tot} pieces monotone${odd.length ? ` · ${odd.join(' | ')}` : ''}`,
       );
     } catch (e) {
       check(
@@ -1149,7 +1178,7 @@ export async function main(): Promise<number> {
   sectionC(t);
   await sectionD();
   await sectionE();
-  await sectionF();
+  if (!process.env.RUL_SKIP_F) await sectionF();
   // RULHOOK: the storage choice through the real wizard hook
   await sectionH({
     check,

@@ -20,24 +20,43 @@
 
 import { inputFor } from 'lib/assembly-skeleton/assignment';
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
-import type { SkeletonFacts, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
+import type {
+  PieceGeom,
+  Pt2,
+  SeamCandidate,
+  SkeletonFacts,
+  SkeletonPieceInput,
+} from 'lib/assembly-skeleton/types';
 import {
   hardwareFromOps,
   joinsFromOps,
   type DeclaredHardware,
   type DeclaredJoin,
 } from 'lib/doll/joins';
-import type { StoredSeam } from 'lib/seams/types';
+import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
+import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 
 import { rowsOf, rowsSig, useSeamsStore } from '../assembly-seams/seams-store';
+import { useCardSeamGraph } from '../card-unit-pictures';
 import { useCardDxfPack } from '../nesting/card-dxf-pack';
 import { findPiece, useDxfGeometry, useDxfIndex } from '../nesting/dxf-geometry';
 import { sizeTokensOf } from '../nesting/block-code';
 import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-refs';
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
+import { useStepResults } from '../step-seams/step-result-context';
+import { candidateOfStoredSeam } from '../step-seams/step-rows';
+import { isJoinStep } from '../step-seams/step-seams-model';
+import {
+  stepGuessOf,
+  stepSeamsOfOp,
+  useCardGeoms,
+  useCardPieceKeys,
+  usePoseRows,
+  type SceneOp,
+} from '../step-seams/step-picture-view';
 
 export type DollCard = {
   cardId: number | null;
@@ -51,7 +70,21 @@ export type DollCard = {
   factsOf: (size: string) => SkeletonFacts | null;
   /** Pieces without a contour in that size (left out of its doll, said so). */
   missingOf: (size: string) => string[];
+  /** Every confirmed or rejected seam row on the card. */
   rows: StoredSeam[];
+  /** Owner mode is also active for a bound pose even when the card has no seam row. */
+  owner: {
+    /** What the doll sews, in step order: the rows the steps name, the guesses of rowless steps. */
+    candidates: readonly DollOwnerCandidate[];
+    layers: readonly DollLayerRelation[];
+    /** Confirmed rows some step names (closures too); the rest are listed, not sewn. */
+    inStepKeys: readonly string[];
+    confirmed: number;
+    inSteps: number;
+    rejected: number;
+    /** Guesses sewn for sewing steps that name no row. */
+    guessed: number;
+  } | null;
   rowsSig: string;
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
@@ -76,13 +109,117 @@ const idOf = (o: object) => {
 
 type FormOp = NonNullable<TechCardFormData['operations']>[number];
 
+export type DollOwnerSelection = NonNullable<DollCard['owner']> & { rows: StoredSeam[] };
+
+/** The seam graph's pairs the doll could double-sew: a pair by its two sides, either way round. */
+const pairIdOf = (candidate: SeamCandidate) => {
+  const a = (candidate.aParts ?? [candidate.a]).join('+');
+  const b = (candidate.bParts ?? [candidate.b]).join('+');
+  return a < b ? `${a}~${b}` : `${b}~${a}`;
+};
+
+/**
+ * The doll sews BY STEPS (owner decision 1.11): walking the assembly order, every confirmed row an
+ * operation names (through the same conversion as the step editor, in the operation's order). A
+ * confirmed row no step names is not sewn (the doll lists it); a rejected row never is. A sewing
+ * step that names no row is sewn by the guess its step picture draws (`stepGuessOf`), as a doll
+ * guess the views draw dashed. All rows still travel to the doll: rejected pairs stay excluded,
+ * stale / orphan rows keep their words. Kept pure so non-React readers (the pinned golden) stay
+ * identical.
+ */
+export function dollOwnerSeamsOf(args: {
+  rows: readonly StoredSeam[];
+  poses: ReadonlyMap<string, StoredPose>;
+  operations: readonly SceneOp[];
+  geoms: ReadonlyMap<string, PieceGeom>;
+  innerLines: ReadonlyMap<string, Pt2[][]>;
+  stepResults: readonly { stacked: readonly DollLayerRelation[] }[] | null;
+  /** The card's seam graph (the step pictures' `crossSeams` come from it); null = no reading yet. */
+  graph?: { chosen: readonly SeamCandidate[] } | null;
+  /** Every piece the card knows (the step pictures' input groups are cut by it). */
+  pieceKeys?: ReadonlySet<string>;
+}): DollOwnerSelection | null {
+  const byKey = new Map(args.rows.map((row) => [row.seamKey, row]));
+  const pieceKeys = args.pieceKeys ?? new Set(args.geoms.keys());
+  const ops = args.operations;
+  let boundPose = false;
+  for (const op of ops)
+    for (const key of op.poseKeys ?? []) if (args.poses.has(key)) boundPose = true;
+  if (!args.rows.length && !boundPose) return null;
+  const confirmedRows = args.rows.filter((row) => row.status === 'confirmed');
+  // Pass 1 — the rows the steps name, in step order; a row named twice is sewn once.
+  const inStepKeys: string[] = [];
+  const bound = new Set<string>();
+  const boundPairs = new Set<string>();
+  const perStep: DollOwnerCandidate[][] = ops.map((op) => {
+    const out: DollOwnerCandidate[] = [];
+    for (const key of op.seamKeys ?? []) {
+      const row = byKey.get(key);
+      if (!row || row.status !== 'confirmed' || bound.has(key)) continue;
+      bound.add(key);
+      inStepKeys.push(key);
+      const candidate = candidateOfStoredSeam(row, args.geoms, args.innerLines);
+      if (!candidate) continue;
+      boundPairs.add(pairIdOf(candidate));
+      out.push({ seamKey: key, candidate, inStep: true });
+    }
+    return out;
+  });
+  // Pass 2 — a sewing step that names no row: the guess its picture draws, never over a pair a
+  // named row already sews (an earlier guess may coincide with a row of a later step).
+  let guessed = 0;
+  ops.forEach((op, index) => {
+    if (op.seamKeys?.length || !isJoinStep(ops, index, pieceKeys, args.geoms)) return;
+    const seams = stepSeamsOfOp(op, args.graph ?? null, args.geoms, {
+      operations: ops,
+      index,
+      pieceKeys,
+      innerLines: args.innerLines,
+      byKey,
+      poses: args.poses,
+    });
+    const step = op.operationNumber ?? index + 1;
+    for (const candidate of stepGuessOf(seams)) {
+      const pair = pairIdOf(candidate);
+      if (boundPairs.has(pair)) continue;
+      boundPairs.add(pair);
+      perStep[index].push({
+        seamKey: `guess:${index}:${perStep[index].length}`,
+        candidate,
+        inStep: true,
+        guess: { step },
+      });
+      guessed++;
+    }
+  });
+  const candidates = perStep.flat();
+  const seen = new Set<string>();
+  const layers = (args.stepResults ?? []).flatMap((result) =>
+    result.stacked.filter(([under, over]) => {
+      const key = `${under}\u0000${over}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  );
+  return {
+    rows: [...args.rows],
+    candidates,
+    layers,
+    inStepKeys,
+    confirmed: confirmedRows.length,
+    inSteps: inStepKeys.length,
+    rejected: args.rows.filter((row) => row.status === 'rejected').length,
+    guessed,
+  };
+}
+
 export function useDollCard(): DollCard | null {
   const facts = useSeamsStore((s) => s.facts);
   const cardId = useSeamsStore((s) => s.cardId);
   const server = useSeamsStore((s) => s.server);
   const pending = useSeamsStore((s) => s.pending);
-  const rows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
-  const sig = useMemo(() => rowsSig(rows), [rows]);
+  const allRows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
 
   const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
@@ -95,6 +232,41 @@ export function useDollCard(): DollCard | null {
   const cardSizes = useMemo(
     () => sizeIds.map((id) => sizeById.get(id) ?? '').filter(Boolean),
     [sizeIds, sizeById],
+  );
+
+  // The doll is mounted under StepResultProvider. Select rows through the exact conversion used by
+  // the step editor. A closure is a stored owner action but not a seam candidate, so it rides
+  // beside converted rows; pose rows remain operation-bound placement claims.
+  const { geoms: cardGeoms, innerLines } = useCardGeoms();
+  const poseRows = usePoseRows();
+  const stepResults = useStepResults();
+  const { graph } = useCardSeamGraph();
+  const pieceKeys = useCardPieceKeys();
+  const ownerSeams = useMemo(
+    () =>
+      dollOwnerSeamsOf({
+        rows: allRows,
+        poses: poseRows,
+        operations: operations as SceneOp[],
+        geoms: cardGeoms,
+        innerLines,
+        stepResults,
+        graph,
+        pieceKeys,
+      }),
+    [allRows, operations, cardGeoms, innerLines, poseRows, stepResults, graph, pieceKeys],
+  );
+  const rows = ownerSeams?.rows ?? [];
+  // The selection is part of the solve's identity: binding a row to a step, or a step's guess
+  // changing with the reading, must re-solve even though the rows themselves did not change.
+  const sig = useMemo(
+    () =>
+      `${ownerSeams ? 'owner' : 'engine'}|${rowsSig(rows)}|${JSON.stringify(ownerSeams?.layers ?? [])}|${(
+        ownerSeams?.candidates ?? []
+      )
+        .map((c) => `${c.seamKey}:${pairIdOf(c.candidate)}`)
+        .join(',')}`,
+    [ownerSeams, rows],
   );
 
   // The same parse the piece tiles drew from — passive: a cold card downloads nothing here.
@@ -233,6 +405,17 @@ export function useDollCard(): DollCard | null {
       factsOf,
       missingOf,
       rows,
+      owner: ownerSeams
+        ? {
+            candidates: ownerSeams.candidates,
+            layers: ownerSeams.layers,
+            inStepKeys: ownerSeams.inStepKeys,
+            confirmed: ownerSeams.confirmed,
+            inSteps: ownerSeams.inSteps,
+            rejected: ownerSeams.rejected,
+            guessed: ownerSeams.guessed,
+          }
+        : null,
       rowsSig: sig,
       joins,
       hardware,
@@ -241,7 +424,7 @@ export function useDollCard(): DollCard | null {
       readId: idOf(facts),
       inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
     };
-  }, [facts, sized, rows, sig, joins, hardware, gender, cardId, cardSizes]);
+  }, [facts, sized, rows, ownerSeams, sig, joins, hardware, gender, cardId, cardSizes]);
 }
 
 /** The key a solve is cached under: the read, the size, the rows, lining. */
@@ -267,12 +450,30 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
     options: {
       lining,
       oneSize: c.sizes.length === 1,
-      joins: c.joins,
+      ...(!c.owner ? { joins: c.joins } : {}),
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
-      ...(c.rows.length ? { seams: { rows: c.rows, size } } : {}),
+      ...(c.owner
+        ? {
+            proposeComposite: false,
+            seams: {
+              mode: 'owner' as const,
+              rows: c.rows,
+              size,
+              candidates: c.owner.candidates,
+              inStepKeys: c.owner.inStepKeys,
+              layers: c.owner.layers,
+              selection: {
+                confirmed: c.owner.confirmed,
+                inSteps: c.owner.inSteps,
+                rejected: c.owner.rejected,
+                guessed: c.owner.guessed,
+              },
+            },
+          }
+        : {}),
       // VITE_SEAM_ASSIGNMENT: the worker reads the graph the way the flag says (greedy = as before).
-      ...(assignment ? { assignment } : {}),
+      ...(!c.owner && assignment ? { assignment } : {}),
     },
     ...(anchors.length ? { anchors } : {}),
   };

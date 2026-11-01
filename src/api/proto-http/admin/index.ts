@@ -10745,6 +10745,12 @@ export type common_TechCard = {
   // These are deleted sheets, newest first. They stay visible here so snapshot_id can restore the
   // whole pre-delete card and history_id can remove an unwanted retained revision.
   removedPatternHistory: common_TechCardPatternRevision[] | undefined;
+  // OUTPUT-ONLY: the fold lines on the card's pieces (placket folded in half, cuff, hem turn-up),
+  // in seq order per piece, with the server's staleness verdict resolved on this read. Written ONLY
+  // through UpsertTechCardPieceFolds / DeleteTechCardPieceFolds — never through TechCardInsert, so a
+  // full card save cannot erase them; those RPCs never bump lock_version and the rows enter no
+  // section digest (the seams doctrine, seams = 32). Ignored on write.
+  pieceFolds: common_TechCardPieceFold[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -11422,6 +11428,62 @@ export type common_TechCardSeamLayer =
   | "TECH_CARD_SEAM_LAYER_UNKNOWN"
   | "TECH_CARD_SEAM_LAYER_UNDER"
   | "TECH_CARD_SEAM_LAYER_OVER";
+// TechCardPieceFold is one stored fold line, keyed by a client-minted ULID.
+export type common_TechCardPieceFold = {
+  // ULID (26 chars), client-minted, the row's identity across saves.
+  foldKey: string | undefined;
+  // tech_card_piece.line_key of the folded piece — never a block name, never an id.
+  pieceLineKey: string | undefined;
+  // 1-based order of application on this piece; unique per piece.
+  seq: number | undefined;
+  kind: common_TechCardPieceFoldKind | undefined;
+  // Exactly two points of the straight fold line in the piece's frame (u, v in [0, 1]); the client
+  // extends the line to the contour.
+  line: common_TechCardSeamSample[] | undefined;
+  // A point on the part that flips — which side moves is data, not «the smaller area».
+  flipAt: common_TechCardSeamSample | undefined;
+  // EDGE LOCATOR, all or nothing. edge_samples = five points of the edge the fold runs along (the
+  // shape of TechCardSeamAnchor.samples, walk order), offset_mm = the fold's distance from that edge
+  // inward, mm (> 0). On another size or after a re-upload the client finds the edge again and lays
+  // the line at offset_mm from it; without a locator it uses `line` as is. edge_hint = the engine's
+  // run id when written ('PLCK_L#2') — fast path + diagnostics, never trusted alone.
+  edgeHint: string | undefined;
+  edgeSamples: common_TechCardSeamSample[] | undefined;
+  offsetMm: number | undefined;
+  // The piece contour's signature when written (the fast path's guard).
+  contourSig: string | undefined;
+  source: common_TechCardPieceFoldSource | undefined;
+  // Size code the line was written on — honesty for display.
+  anchoredSize: string | undefined;
+  // The owner's words, at most 255 characters.
+  note: string | undefined;
+  // OUTPUT ONLY (ignored on write): the server's verdict and provenance, as on TechCardSeam — stale =
+  // the source of the piece (sheets AND block→piece links of its fabric scopes) moved since the row
+  // was written; a stale row is shown and offered for re-confirm, not applied as is.
+  stale: boolean | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardPieceFoldKind is which way the flipping part of the piece goes.
+export type common_TechCardPieceFoldKind =
+  | "TECH_CARD_PIECE_FOLD_KIND_UNKNOWN"
+  // The flap lands on the piece's inside face (toward the body).
+  | "TECH_CARD_PIECE_FOLD_KIND_INWARD"
+  // The flap lands on the piece's outside face.
+  | "TECH_CARD_PIECE_FOLD_KIND_OUTWARD";
+// TechCardPieceFoldSource is where the fold line came from.
+export type common_TechCardPieceFoldSource =
+  | "TECH_CARD_PIECE_FOLD_SOURCE_UNKNOWN"
+  // The line is drawn in the DXF (layer 8 of an unfolded piece, the layer-6 axis of a band) and the
+  // owner gave it a kind.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_DXF"
+  // Drawn or edited by the owner.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_OWNER"
+  // A suggestion (a fold mark parallel to an edge) the owner accepted unchanged.
+  | "TECH_CARD_PIECE_FOLD_SOURCE_ACCEPTED_HINT";
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -14220,6 +14282,27 @@ export type DeleteTechCardSeamsRequest = {
 
 export type DeleteTechCardSeamsResponse = {
   seams: common_TechCardSeam[] | undefined;
+  deleted: number | undefined;
+};
+
+export type UpsertTechCardPieceFoldsRequest = {
+  techCardId: number | undefined;
+  // Rows to insert or replace whole, by fold_key. Output-only fields (stale, *_by, *_at) are ignored.
+  folds: common_TechCardPieceFold[] | undefined;
+};
+
+export type UpsertTechCardPieceFoldsResponse = {
+  folds: common_TechCardPieceFold[] | undefined;
+  written: number | undefined;
+};
+
+export type DeleteTechCardPieceFoldsRequest = {
+  techCardId: number | undefined;
+  foldKeys: string[] | undefined;
+};
+
+export type DeleteTechCardPieceFoldsResponse = {
+  folds: common_TechCardPieceFold[] | undefined;
   deleted: number | undefined;
 };
 
@@ -20780,6 +20863,16 @@ export interface AdminService {
   // or a decision the technologist takes back). Unknown keys are not an error. Same lock, same
   // released-card refusal, same echo of the full list as UpsertTechCardSeams.
   DeleteTechCardSeams(request: DeleteTechCardSeamsRequest): Promise<DeleteTechCardSeamsResponse>;
+  // UpsertTechCardPieceFolds stores fold lines on the card's pieces (placket, cuff, hem turn-up) —
+  // construction data the paper doll folds before the solve.
+  // KEYED AND PARTIAL, as UpsertTechCardSeams: a row per fold_key is inserted or replaced whole; rows
+  // not named are untouched. seq must stay unique per piece after the write. The server stamps each
+  // row's source fingerprint from its own tables and echoes the card's full list with `stale`
+  // resolved. NO lock_version bump, NO section digest; a released card refuses. wr(tech_cards).
+  UpsertTechCardPieceFolds(request: UpsertTechCardPieceFoldsRequest): Promise<UpsertTechCardPieceFoldsResponse>;
+  // DeleteTechCardPieceFolds removes fold lines by fold_key. Unknown keys are not an error. Same
+  // lock, same released-card refusal, same echo of the full list as UpsertTechCardPieceFolds.
+  DeleteTechCardPieceFolds(request: DeleteTechCardPieceFoldsRequest): Promise<DeleteTechCardPieceFoldsResponse>;
   // AddTechCardSeamDecisions appends what the technologist did with the seam guesses — accept,
   // own pick, skip, refuse — one immutable row each, ≤ 50 per call. A log beside the seams: it never
   // touches tech_card_seam, never moves lock_version, enters no digest, and works on a released card
@@ -27592,6 +27685,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardSeams",
       }) as Promise<DeleteTechCardSeamsResponse>;
+    },
+    UpsertTechCardPieceFolds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/piece-folds`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardPieceFolds",
+      }) as Promise<UpsertTechCardPieceFoldsResponse>;
+    },
+    DeleteTechCardPieceFolds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/piece-folds:delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardPieceFolds",
+      }) as Promise<DeleteTechCardPieceFoldsResponse>;
     },
     AddTechCardSeamDecisions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

@@ -298,7 +298,7 @@ const isSheetDrag = (e: React.DragEvent) =>
 // What a slot takes: DXF uploads directly, everything else goes through the import wizard
 // (its files step accepts the same list, pattern-import/steps/files.tsx).
 const SLOT_ACCEPT_DXF = '.dxf,image/vnd.dxf';
-const SLOT_ACCEPT_ALL = `${SLOT_ACCEPT_DXF},.pdf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff`;
+const SLOT_ACCEPT_ALL = `${SLOT_ACCEPT_DXF},.pdf,.plt,.hpgl,.hpg,.svg,.ai,.eps,.png,.jpg,.jpeg,.tif,.tiff,.rul,.zip`;
 const IMPORT_EXT = new Set(SLOT_ACCEPT_ALL.split(',').filter((x) => x.startsWith('.')));
 
 // The parser's warning for a sheet without $INSUNITS (lib/nesting/worker/parse-files.ts):

@@ -17,9 +17,10 @@ export type ButtonholeOperation = {
 export type ButtonholePictureGlyph = {
   id: string;
   piece: string;
+  kind: 'button' | 'buttonhole';
   point: Pt2;
   direction: Pt2;
-  lengthMm: number;
+  lengthMm?: number;
   markBox: { w: number; h: number; cx: number; cy: number };
 };
 
@@ -40,6 +41,14 @@ export const isButtonholeOperation = (op: ButtonholeOperation | undefined): bool
     String(value ?? '')
       .toUpperCase()
       .includes('BUTTONHOLE'),
+  );
+
+export const isButtonOperation = (op: ButtonholeOperation | undefined): boolean =>
+  !isButtonholeOperation(op) &&
+  [op?.operationType, op?.machineType, op?.work].some((value) =>
+    String(value ?? '')
+      .toUpperCase()
+      .includes('BUTTON'),
   );
 
 /** Principal axis of a piece contour. Its sign is stable, though callers only read it as a line. */
@@ -79,16 +88,23 @@ export function buttonholeDirection(ring: readonly Pt2[], orientation: string | 
 const placementCount = (op: ButtonholeOperation): number =>
   Math.max(0, op.placementCount ?? op.placementLayout?.count ?? 0);
 
-/** Exact classified buttonholes for the most likely closure host in this operation's picture. */
-export function buttonholePictureGlyphs(
+/** Exact classified fastening marks for the most likely closure host in this operation's picture. */
+export function fasteningPictureGlyphs(
   op: ButtonholeOperation | undefined,
   pieceKeys: readonly string[],
   geoms: ReadonlyMap<string, PieceGeom>,
 ): ButtonholePictureGlyph[] {
-  if (!op || !isButtonholeOperation(op)) return [];
+  const kind = isButtonholeOperation(op)
+    ? ('buttonhole' as const)
+    : isButtonOperation(op)
+      ? ('button' as const)
+      : null;
+  if (!op || !kind) return [];
   const candidates = pieceKeys.flatMap((key) => {
     const geom = geoms.get(key);
-    const marks = (geom?.marks ?? []).filter((mark) => mark.kind === 'buttonhole');
+    const marks = (geom?.marks ?? []).filter((mark) =>
+      kind === 'buttonhole' ? mark.kind === 'buttonhole' : mark.kind === 'drill',
+    );
     if (!geom || !marks.length) return [];
     const closureHost = /PLCK|PLACKET|P_[LR]|FRONT/i.test(`${geom.pieceKey} ${geom.name}`);
     return [{ key, geom, marks, score: marks.length * 10 + (closureHost ? 200 : 0) }];
@@ -100,9 +116,20 @@ export function buttonholePictureGlyphs(
   return selected.marks.slice(0, count || selected.marks.length).map((mark) => ({
     id: mark.id,
     piece: selected.key,
+    kind,
     point: [mark.bbox.cx, mark.bbox.cy],
     direction,
-    lengthMm: buttonholeLengthMm(op),
+    lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op) : undefined,
     markBox: mark.bbox,
   }));
+}
+
+/** Exact classified buttonholes for the most likely closure host in this operation's picture. */
+export function buttonholePictureGlyphs(
+  op: ButtonholeOperation | undefined,
+  pieceKeys: readonly string[],
+  geoms: ReadonlyMap<string, PieceGeom>,
+): ButtonholePictureGlyph[] {
+  if (!isButtonholeOperation(op)) return [];
+  return fasteningPictureGlyphs(op, pieceKeys, geoms);
 }

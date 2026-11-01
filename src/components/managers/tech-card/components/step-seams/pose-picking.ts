@@ -49,3 +49,43 @@ export function cycleLayerHit(
 export function snapAtDuringDrag(drag: { snap: { at: Pt2 } | null } | null): Pt2 | null {
   return drag?.snap?.at ?? null;
 }
+
+/** One layer switch in the order PLACE applies it: under / over a host, or cleared (`null`). */
+export type PendingLayerClaim = { piece: string; host?: string; under: boolean | null };
+
+/**
+ * The paint order, lower pieces and [under, over] claims PLACE shows: the shared result with the
+ * unsaved switches applied in order, so the canvas draws exactly what «done» will save.
+ */
+export function pendingStacking(
+  base: {
+    layers: readonly string[];
+    lower: readonly string[];
+    stacked: readonly (readonly [string, string])[];
+  },
+  claims: readonly PendingLayerClaim[],
+): { layers: string[]; lower: string[]; stacked: [string, string][] } {
+  const order = [...base.layers];
+  const lower = new Set(base.lower);
+  let stacked = base.stacked.map(([u, o]) => [u, o] as [string, string]);
+  for (const { piece, host, under } of claims) {
+    if (under === null) {
+      lower.delete(piece);
+      stacked = stacked.filter(([u]) => u !== piece);
+      continue;
+    }
+    if (!host) continue;
+    const from = order.indexOf(piece);
+    if (from < 0 || !order.includes(host)) continue;
+    order.splice(from, 1);
+    const at = order.indexOf(host);
+    order.splice(under ? at : at + 1, 0, piece);
+    if (under) lower.add(piece);
+    else lower.delete(piece);
+    stacked = stacked.filter(
+      ([u, o]) => !((u === piece && o === host) || (u === host && o === piece)),
+    );
+    stacked.push(under ? [piece, host] : [host, piece]);
+  }
+  return { layers: order, lower: order.filter((piece) => lower.has(piece)), stacked };
+}

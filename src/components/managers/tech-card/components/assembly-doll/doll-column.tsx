@@ -4,10 +4,8 @@
 // still is the door into the fullscreen view; the map's 3D chip opens it too.
 
 import { lazy, Suspense, useEffect } from 'react';
-import { useWatch } from 'react-hook-form';
 import { Chip, Text } from 'ui';
 
-import type { TechCardFormData } from '../schema';
 import {
   closeDoll,
   isSolving,
@@ -25,8 +23,6 @@ const DollOverlay = lazy(() => import('./doll-overlay'));
 export function DollColumn() {
   const card = useDollCard();
   const open = useDollStore((s) => s.open);
-  const approval = useWatch<TechCardFormData>({ name: 'approvalState' }) as string | undefined;
-  const frozen = approval === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   const key = card ? dollKey(card, card.baseSize, false) : null;
   const solve = useDollStore((s) => (key ? s.solves[key] : undefined));
 
@@ -100,9 +96,24 @@ export function DollColumn() {
       </Text>
       {open && (
         <Suspense fallback={null}>
-          <DollOverlay open={open} onClose={closeDoll} frozen={frozen} />
+          <DollOverlay open={open} onClose={closeDoll} />
         </Suspense>
       )}
     </div>
+  );
+}
+
+// The doll's mount without the still: the assembly map's `3d` button opens the fullscreen view
+// through the store, and this is what renders it. The overlay solves the size it shows itself.
+export function DollDoor() {
+  const card = useDollCard();
+  const open = useDollStore((s) => s.open);
+  const cardId = card?.cardId ?? null;
+  useEffect(() => () => resetDoll(), [cardId]);
+  if (!card || !open) return null;
+  return (
+    <Suspense fallback={null}>
+      <DollOverlay open={open} onClose={closeDoll} />
+    </Suspense>
   );
 }

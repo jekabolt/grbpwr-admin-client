@@ -17,7 +17,7 @@ export type PieceLayerStyle = {
 
 export type MarkLayerStyle = {
   id: string;
-  draw: 'solid' | 'dashed' | 'hidden';
+  draw: 'solid' | 'hidden';
   at: Pt2;
 };
 
@@ -319,11 +319,10 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
           ? isCovered
             ? 'hidden'
             : 'solid'
-          : !isCovered
-            ? 'solid'
-            : input.mode === 'thumb'
-              ? 'hidden'
-              : 'dashed';
+          : // The owner's pick (layer mockup, case 3 A): an upper piece hides what it covers.
+            isCovered
+            ? 'hidden'
+            : 'solid';
     marks.set(mark.id, { id: mark.id, draw, at });
   }
 

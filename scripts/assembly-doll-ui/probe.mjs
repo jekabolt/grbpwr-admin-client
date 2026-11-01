@@ -4,7 +4,7 @@
 //   node scripts/assembly-doll-ui/probe.mjs
 //   SHOT_DIR=… PLANS=…   (defaults: ../tmp/plans/assembly-3d-doll/p3-ui, ../tmp/plans)
 //
-// The REAL AssemblyMap (3D chip) + SeamsDoor + the doll overlay under the REAL providers, on:
+// The REAL AssemblyMap (3D chip) + the doll overlay under the REAL providers, on:
 //   • SS26-005 — the prod-run stand's form + the card's DXF (probe copy), without and with the gold
 //     seam rows (scripts/doll/gold/ss26.seams.json, remapped onto the card's line keys);
 //   • prod card 6 (SS26-006) — a card read built from prod-data/cards.json + its two DXFs, without
@@ -300,7 +300,7 @@ const overlayDone = (size) =>
     size,
   );
 const open3d = async () => {
-  await page.locator('[aria-label="assembly map view"] [role="radio"]', { hasText: '3d' }).click();
+  await page.getByRole('button', { name: '3d', exact: true }).click();
   await page.locator('[data-doll-overlay]').waitFor();
 };
 const timings = [];
@@ -371,10 +371,8 @@ if (!ONLY) {
   m = await mount(ss);
   ck(m.ok, 'the provider reads the seam graph', `DXF parsed in ${m.parseMs.toFixed(0)} ms`);
   ck(
-    (await page
-      .locator('[aria-label="assembly map view"] [role="radio"]', { hasText: '3d' })
-      .count()) === 1,
-    'the map shows the fourth chip: STEP · PIECES · SKETCH · 3D',
+    (await page.getByRole('button', { name: '3d', exact: true }).count()) === 1,
+    'the map shows the 3D door',
   );
   await open3d();
   ck(await overlayDone(), 'the overlay solves the doll in the worker');
@@ -461,35 +459,6 @@ if (!ONLY) {
   await shot('05-size-switch-S');
   await page.locator('[aria-label="size"] [role="radio"]', { hasText: /^M$/ }).click();
   ck(await overlayDone('M'), 'back to M: the cached doll');
-  // fix in seams review
-  const fixDoors = page.locator('[data-doll-door="fix"]');
-  if ((await fixDoors.count()) > 0) {
-    await fixDoors.first().click();
-    await page.locator('[data-seams-review]').waitFor();
-    await wait(500);
-    const sel = await page.locator('[data-seam-row][aria-selected="true"]').count();
-    const hand = await page.locator('[data-connect-words]').count();
-    ck(
-      sel === 1 || hand === 1,
-      '«fix in seams review» opens SEAMS on that seam (row selected, or laid in the connect strip)',
-      `selected ${sel} · strip ${hand}`,
-    );
-    await shot('06-fix-in-seams-review');
-    await page.keyboard.press('Escape');
-    await wait(200);
-    if (await page.locator('[data-connect-words]').count()) {
-      await page.keyboard.press('Escape');
-      await wait(200);
-    }
-    if (await page.locator('[data-seams-review]').count()) {
-      await page.locator('[data-seams-door="close"]').click();
-      await wait(300);
-    }
-    ck(
-      (await page.locator('[data-seams-review]').count()) === 0,
-      'the review closes back onto the doll',
-    );
-  }
   await page.keyboard.press('Escape');
   await wait(400);
   ck((await page.locator('[data-doll-overlay]').count()) === 0, 'Esc closes the overlay');
@@ -525,7 +494,7 @@ if (!ONLY) {
 // ════ beta card 49 — a double yoke (two plies BP + BP_2 over the back BP_1) ════
 // The card as the LIVE app builds it: pieces under their line keys, block links by the DXF block,
 // the technologist's order with piece line keys and unit codes. Rows are written in the page by
-// lib/seams' own seamFromCandidate on the live graph (the review's path) — no remap.
+// lib/seams' own seamFromCandidate on the live graph — no remap.
 const b49 = JSON.parse(
   readFileSync(resolve(PLANS, 'assembly-3d-doll/beta-data/card49.json'), 'utf8'),
 );
@@ -640,7 +609,7 @@ ck(
 await shot('10-card49-engine');
 await page.keyboard.press('Escape');
 
-// The rows beta had stored at 18:02 (two clients), written the review's way.
+// The rows beta had stored at 18:02 (two clients), anchored on the live graph.
 const pairs49 = (b49['stored_seams_on_beta_2026-10-10_18:02'] ?? []).flatMap((line) => {
   const mm = /(\S+#[\d+]+)\s*<->\s*(\S+#[\d+]+)/.exec(line);
   return mm
@@ -734,124 +703,6 @@ ck(
 await shot('11-card49-rows');
 await page.keyboard.press('Escape');
 await wait(300);
-
-// SEAMS review on the same rows: the ply pair once, the duplicated row once.
-await page.locator('[data-seams-door="review"]').click();
-await page.locator('[data-seams-review]').waitFor();
-await wait(600);
-const titles49 = await page.locator('[data-seam-row]').allInnerTexts();
-ck(
-  titles49.some((t) => /^\d*\s*BP( 2)? \+ BP( 2)? · two plies, sewn to each other/m.test(t)),
-  'review: the ply↔ply row reads «BP 2 + BP · two plies, sewn to each other …»',
-);
-ck(
-  titles49.filter((t) => /BP( 2)? \+ BP( 2)? · two plies/.test(t)).length === 1 &&
-    titles49.some((t) => /stored 2 times/.test(t)),
-  'review: the same pair stored twice is ONE row, «stored 2 times … read as one»',
-);
-console.log(`  progress: ${await page.locator('[data-seams-progress]').innerText()}`);
-await shot('12-card49-review');
-
-const sheetLabels = await page
-  .locator('[data-sheet-piece] > text')
-  .evaluateAll((els) => els.map((e) => e.textContent ?? ''));
-ck(
-  sheetLabels.some((t) => /ply of/i.test(t)),
-  'sheet: each ply is labelled «· ply of …»',
-  sheetLabels.filter((t) => /ply of/i.test(t)).join(' | '),
-);
-await page.locator('[data-seams-door="close"]').click();
-await wait(300);
-
-// Another client confirms a proposal's pair a moment before this tab accepts it: the accept goes
-// onto the other client's key — one pair, one row. (This tab's card read lacks the FP R side row,
-// so that seam is still a proposal here.)
-const noSide = rows49.filter((_, i) => !/FP_R#4/.test(hem49[i][0] + hem49[i][1]));
-m = await mount(card49, { seams: noSide });
-await wait(1500);
-await page.locator('[data-seams-door="review"]').click();
-await page.locator('[data-seams-review]').waitFor();
-await wait(600);
-const decideId = await page
-  .locator('[data-seam-group="decide"]')
-  .first()
-  .getAttribute('data-seam-row');
-const [ea, eb] = decideId.slice(2).split('~');
-const OTHER = '01OTHERC11ENT0000000000000';
-const other = await page.evaluate(
-  ([a, b, sz, k]) => window.__doll.rowsFor([[a, b, 'graph']], sz, [k]),
-  [ea, eb, size49, OTHER],
-);
-await page.evaluate((w) => window.__doll.serverWrite(w), other);
-await page.locator(`[data-seam-row="${decideId}"]`).click();
-await page.locator(`[data-seam-row="${decideId}"] [data-seam-door="accept"]`).click();
-await wait(1200);
-const tbl = await page.evaluate(() => window.__doll.table());
-const sigOf = (w) =>
-  [
-    w.sideA.parts
-      .map((x) => x.edgeHint)
-      .sort()
-      .join('+'),
-    w.sideB.parts
-      .map((x) => x.edgeHint)
-      .sort()
-      .join('+'),
-  ]
-    .sort()
-    .join('~');
-const sameRows = tbl.filter((w) => sigOf(w) === sigOf(other[0]));
-const putsNow = await page.evaluate(() => window.__doll.puts());
-console.log(
-  `  accepted ${decideId}: ${sameRows.length} row(s) for the pair · last write keys ${JSON.stringify(putsNow.at(-1))}`,
-);
-ck(
-  sameRows.length === 1 && putsNow.at(-1)?.[0]?.seamKey === OTHER,
-  'accept after another client confirmed the same pair → written onto ITS key (the card list was read again first)',
-);
-
-// Connect by hand: two hems → a plain warning line before connect (still allowed).
-await page.locator('[data-seams-door="hand"]').click();
-await wait(150);
-const clickHit = (id, shift = false) =>
-  page.evaluate(
-    ([i, sh]) =>
-      document
-        .querySelector(`[data-sheet-hit="${i}"]`)
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: sh })),
-    [id, shift],
-  );
-await clickHit(`${lk49.FP_L}#4`);
-await clickHit(`${lk49.FP_R}#5`);
-await wait(200);
-const warn = (await page.locator('[data-connect-warning]').count())
-  ? await page.locator('[data-connect-warning]').innerText()
-  : '';
-console.log(`  strip: ${await page.locator('[data-connect-words]').innerText()}`);
-ck(
-  /two hems are not usually sewn together/.test(warn),
-  'hem ↔ hem by hand: «two hems are not usually sewn together — sure?»',
-  warn,
-);
-ck(
-  !(await page.locator('[data-connect-door="connect"]').isDisabled()),
-  'still allowed: connect stays enabled',
-);
-await shot('13-card49-hem-warning');
-// A side seam by hand: no warning.
-await clickHit(`${lk49.FP_R}#4`);
-await clickHit(`${lk49.BP_1}#0`);
-await wait(200);
-ck(
-  (await page.locator('[data-connect-warning]').count()) === 0,
-  'side ↔ side by hand: no warning',
-);
-await page.keyboard.press('Escape');
-await wait(150);
-ck(
-  (await page.evaluate(() => window.__doll.puts().length)) === 1,
-  'the only write of the section is the accept (the doll, the review read and the hand strip write nothing)',
-);
 
 // MUTATION: a row keyed to a piece that is not on the card → said in the doll, never dropped.
 const badRows = rows49.map((w, i) =>

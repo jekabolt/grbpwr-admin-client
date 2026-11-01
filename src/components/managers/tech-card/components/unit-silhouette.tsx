@@ -7,13 +7,13 @@
 // живут в трёх разных деревьях (полотно, полка, рельс) и пропу пришлось бы пройти пять слоёв ради
 // данных, которых пока нет.
 import {
-  LOWER_LAYER_FILL,
   LOWER_LAYER_STROKE,
   LOWER_LAYER_STROKE_SCALE,
   type UnionPicture,
 } from 'lib/assembly-skeleton/union';
 import { cn } from 'lib/utility';
-import { createContext, useContext, type ComponentProps, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ComponentProps, type ReactNode } from 'react';
+import { LowerLayerFills, lowerLayerTints } from './lower-layer-fill';
 import { fmtCm } from './nesting/dxf-geometry';
 import { UnitShape } from './nesting/unit-shape';
 import { TILE_BOX } from './piece-silhouette';
@@ -85,11 +85,30 @@ function LowerLayerUnitShape({
   label,
   plain,
 }: ComponentProps<typeof UnitShape>) {
-  const lower = new Set(picture.lowerLayers ?? []);
+  const lower = useMemo(() => new Set(picture.lowerLayers ?? []), [picture.lowerLayers]);
   const pad = Math.max(picture.w, picture.h, 1) * 0.06;
   const box = { x: -pad, y: -pad, w: picture.w + 2 * pad, h: picture.h + 2 * pad };
-  const bases = picture.shapes.filter((shape) => lower.has(shape.pieceKey));
-  const top = picture.shapes.filter((shape) => !lower.has(shape.pieceKey));
+  const bases = useMemo(
+    () => picture.shapes.filter((shape) => lower.has(shape.pieceKey)),
+    [lower, picture.shapes],
+  );
+  const tints = useMemo(
+    () =>
+      lowerLayerTints(
+        picture.shapes.map((shape) => ({
+          key: shape.pieceKey,
+          ring: shape.pts,
+          path: `M${shapePoints(shape.pts)}Z`.replaceAll(' ', 'L'),
+        })),
+        bases.map((shape) => ({
+          key: shape.pieceKey,
+          depth: picture.lowerLayerDepths?.[shape.pieceKey] ?? 1,
+          coveredBy: picture.lowerLayerCovers?.[shape.pieceKey] ?? [],
+        })),
+      ),
+    [bases, picture.lowerLayerCovers, picture.lowerLayerDepths, picture.shapes],
+  );
+  const tintByKey = new Map(tints.map((tint) => [tint.key, tint]));
   const twinLabels = bases
     .flatMap((shape) => {
       const number = picture.twinLabels?.[shape.pieceKey];
@@ -110,26 +129,23 @@ function LowerLayerUnitShape({
         className='block h-full w-full'
         aria-hidden='true'
       >
-        {bases.map((shape) => (
-          <polygon
-            key={`base:${shape.pieceKey}`}
-            points={shapePoints(shape.pts)}
-            fill='var(--color-bgColor)'
-            stroke='none'
-            data-lower-layer-base={shape.pieceKey}
-          />
-        ))}
-        {top.map((shape) => (
+        {picture.shapes.map((shape) => (
           <g key={shape.pieceKey}>
             <polygon
               points={shapePoints(shape.pts)}
               fill='var(--color-bgColor)'
-              stroke='var(--color-textColor)'
+              stroke={
+                !lower.has(shape.pieceKey) || tintByKey.get(shape.pieceKey)?.partial
+                  ? 'var(--color-textColor)'
+                  : 'none'
+              }
               strokeWidth={1}
               strokeLinejoin='round'
               vectorEffect='non-scaling-stroke'
+              data-lower-layer-base={lower.has(shape.pieceKey) ? shape.pieceKey : undefined}
             />
             {!plain &&
+              !lower.has(shape.pieceKey) &&
               shape.lines.map((line, index) => (
                 <polyline
                   key={index}
@@ -143,19 +159,22 @@ function LowerLayerUnitShape({
               ))}
           </g>
         ))}
-        {bases.map((shape) => (
-          <polygon
-            key={`overlay:${shape.pieceKey}`}
-            points={shapePoints(shape.pts)}
-            fill={LOWER_LAYER_FILL}
-            stroke={LOWER_LAYER_STROKE}
-            strokeWidth={LOWER_LAYER_STROKE_SCALE}
-            strokeLinejoin='round'
-            vectorEffect='non-scaling-stroke'
-            pointerEvents='none'
-            data-lower-layer={shape.pieceKey}
-          />
-        ))}
+        <LowerLayerFills tints={tints} />
+        {tints
+          .filter((tint) => !tint.partial)
+          .map((tint) => (
+            <path
+              key={`outline:${tint.key}`}
+              d={tint.path}
+              fill='none'
+              stroke={LOWER_LAYER_STROKE}
+              strokeWidth={LOWER_LAYER_STROKE_SCALE}
+              strokeLinejoin='round'
+              vectorEffect='non-scaling-stroke'
+              pointerEvents='none'
+              data-lower-layer-outline={tint.key}
+            />
+          ))}
       </svg>
       {twinLabels.length > 0 && (
         <svg

@@ -171,6 +171,7 @@ export function TechpackDocument({
       .sort((a, b) => a.op - b.op);
   }, [model]);
   const publicOrigin = viewerOrigin();
+  // section 06 is derived once (`model`); it rides along so the gaps pass does not derive it again
   const pdfGaps = useMemo(
     () =>
       model
@@ -178,8 +179,7 @@ export function TechpackDocument({
             techCard,
             sampleSizeName,
             revisionLabel,
-            pieces: geometry.pieces,
-            grainDeg: geometry.grainDeg,
+            assembly: model,
             pieceGeometry: geometry.shapes,
             measurements: sizing.measurements,
             sizeChart: sizing.sizeChart,
@@ -199,8 +199,6 @@ export function TechpackDocument({
       techCard,
       sampleSizeName,
       revisionLabel,
-      geometry.pieces,
-      geometry.grainDeg,
       geometry.shapes,
       sizing.measurements,
       sizing.sizeChart,

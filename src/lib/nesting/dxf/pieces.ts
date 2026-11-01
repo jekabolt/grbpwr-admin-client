@@ -39,9 +39,11 @@ export type InnerPath = { layer: string; closed: boolean; pts: Pt[] };
 const MAX_INNER_POINTS = 4000;
 
 // Свёрла конвертера — квадрат 1×1 см на слое внутренних линий (pattern-import write/plan.ts
-// DRILL_SQUARE_MM = 10). Здесь только чтобы СЧИТАТЬ их, не рисовать.
+// DRILL_SQUARE_MM = 10) или кружок пуговицы: замкнутый 20-угольник до 1.5 см (write/r2000.ts
+// drillCircle — как рисует CLO). Здесь только чтобы СЧИТАТЬ их, не рисовать.
 export const DRILL_SQUARE_CM = 1;
 const DRILL_SQUARE_TOL_CM = 0.05;
+const DRILL_CIRCLE_MAX_CM = 1.5;
 
 // СЧЁТ ВНУТРЕННЕЙ ГЕОМЕТРИИ БЕЗ ПОТОЛКА (F14f, Codex R2). `inner` — картинка, урезанная бюджетом
 // MAX_INNER_POINTS: шов на 5001 вершину съедает его целиком, и надсечка за ним в `inner` не попадает.
@@ -50,12 +52,21 @@ const DRILL_SQUARE_TOL_CM = 0.05;
 export type InnerTally = Record<string, { paths: number; drillSquares: number }>;
 
 function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
-  if (!c.closed || c.pts.length !== 4) return false;
+  if (!c.closed) return false;
   const q = bounds(c.pts);
-  return (
-    Math.abs(q.maxX - q.minX - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM &&
-    Math.abs(q.maxY - q.minY - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM
-  );
+  const w = q.maxX - q.minX;
+  const h = q.maxY - q.minY;
+  if (c.pts.length === 4)
+    return (
+      Math.abs(w - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM &&
+      Math.abs(h - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM
+    );
+  if (c.pts.length < 8 || w > DRILL_CIRCLE_MAX_CM || h > DRILL_CIRCLE_MAX_CM) return false;
+  // кружок: все вершины на одном расстоянии от центра рамки
+  const cx = (q.minX + q.maxX) / 2;
+  const cy = (q.minY + q.maxY) / 2;
+  const r = c.pts.map((p) => Math.hypot(p.x - cx, p.y - cy));
+  return Math.max(...r) - Math.min(...r) <= DRILL_SQUARE_TOL_CM;
 }
 
 export type RawPiece = {

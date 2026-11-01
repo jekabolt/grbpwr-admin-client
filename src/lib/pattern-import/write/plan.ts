@@ -55,15 +55,21 @@ export function halfOnFoldText(piecesPerGarment: number): string {
 /** Simplification tolerance for written polylines, mm (well under the 0.05 mm sagitta). */
 export const WRITE_SIMPLIFY_MM = 0.01;
 export const DEFAULT_NOTCH_DEPTH_MM = 5;
+/** A notch farther than this from the cut line was not drawn on it (semantics keeps ≤ 1.5 mm). */
+const NOTCH_SNAP_WARN_MM = 1.5;
 export const GRAIN_SHAFT_MM = 180;
 export const GRAIN_BARB_BACK_MM = 27;
 export const GRAIN_BARB_SIDE_MM = 13.5;
 export const DRILL_SQUARE_MM = 10;
+/** A button mark is written as CLO draws it: a closed 20-gon of the button's diameter. */
+export const DRILL_CIRCLE_SEGMENTS = 20;
 export const LAYOUT_GAP_MM = 50;
 export const LAYOUT_ROW_MAX_MM = 4000;
 export const UNI_TOKEN = 'UNI';
 
 export type PlannedNotch = { a: PtMm; b: PtMm; depthMm: number; angleDeg: number };
+/** A drill / button mark: a circle keeps the diameter it was drawn with; anything else is the square. */
+export type PlannedDrill = { at: PtMm; form: 'square' | 'circle' | 'point'; sizeMm: number };
 export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
 
 export type PlannedBlock = {
@@ -97,7 +103,7 @@ export type PlannedBlock = {
    * is only a reference (layer 8): a mirror line there would double the piece.
    */
   foldIsMirror: boolean;
-  drills: PtMm[];
+  drills: PlannedDrill[];
   grain: PlannedGrain | null;
   notches: PlannedNotch[];
   /** Source frame → written frame (translation, possibly after a derived mirror). */
@@ -235,6 +241,12 @@ function grainArrow(g: GrainFeature): PlannedGrain | null {
 
 function plannedNotch(cut: PtMm[], n: NotchFeature, warnings: string[], who: string): PlannedNotch {
   const { q, seg } = closestOnPolyline(n.at, cut, true);
+  // A notch is written on the cut line; semantics keeps one within 1.5 mm of the cut or seam ring
+  // (build.ts). One farther off was drawn on another line (a seam-line copy the adapter did not
+  // fold) and lands on top of its twin — the written count still matches, so say so here.
+  const moved = dist(n.at, q);
+  if (moved > NOTCH_SNAP_WARN_MM)
+    warnings.push(`${who}: notch snapped ${moved.toFixed(1)} mm onto the cut line`);
   const a = cut[seg];
   const b = cut[(seg + 1) % cut.length];
   const L = dist(a, b) || 1;
@@ -453,7 +465,11 @@ export function planBlocks(
         internal,
         foldLines,
         foldIsMirror,
-        drills: s.drills.map((d) => d.at),
+        drills: s.drills.map((d) => ({
+          at: d.at,
+          form: d.form ?? 'square',
+          sizeMm: d.form === 'circle' && d.sizeMm ? d.sizeMm : DRILL_SQUARE_MM,
+        })),
         grain,
         notches,
         transform: compose(T, srcT),

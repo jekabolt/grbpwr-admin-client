@@ -16,7 +16,13 @@ import type { StoredSeam } from 'lib/seams/types';
 
 import { solveDoll } from '../doll';
 import { paintDollThumb } from '../thumb';
-import type { DollInput, DollMesh, DollReport } from '../types';
+import type {
+  DollInput,
+  DollLayerRelation,
+  DollMesh,
+  DollOwnerCandidate,
+  DollReport,
+} from '../types';
 
 type DollWorkerOptions = Omit<NonNullable<DollInput['options']>, 'onFrame' | 'onMesh' | 'seams'>;
 
@@ -28,7 +34,16 @@ export type DollWorkerRequest =
         graph?: SeamGraph;
         facts: SkeletonFacts;
         options?: DollWorkerOptions & {
-          seams?: { rows: readonly StoredSeam[]; size: string; sizes?: readonly SizePieces[] };
+          seams?: {
+            mode?: 'owner';
+            rows: readonly StoredSeam[];
+            size: string;
+            sizes?: readonly SizePieces[];
+            candidates?: readonly DollOwnerCandidate[];
+            inStepKeys?: readonly string[];
+            layers?: readonly DollLayerRelation[];
+            selection?: { confirmed: number; inSteps: number; rejected: number; guessed?: number };
+          };
         };
         /** Facts of the sizes the stored rows were confirmed on (other than the solved one). */
         anchors?: { size: string; facts: SkeletonFacts }[];

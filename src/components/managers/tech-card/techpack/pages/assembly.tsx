@@ -3,7 +3,7 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DataTable, HeaderNote, SectionHeader } from 'ui';
 
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
@@ -23,6 +23,7 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import { NO_SEAM_TEXT } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -142,6 +143,8 @@ export type ResultStepPicture = StepPicture & {
 type Row = AsmRow & {
   pic?: SvgMarkup;
   editorPic?: ResultStepPicture;
+  /** `editorPic` as the print SVG takes it — marks in the stored tone, action marks — built once. */
+  print?: { marks: StepPicture['marks']; action: ReturnType<typeof editorActionMarks> };
   sil?: SvgMarkup | null;
   photoCount: number;
 };
@@ -3376,6 +3379,10 @@ export function editorOperationPictures(
         poses,
         nameOf: (key) => names.get(key) ?? key,
         explode: useInferredLayout ? 0 : undefined,
+        // Every branch below lays the scene again and overrides `layout` (owner result,
+        // `assembledLayout`, the garment `stepLayout`); the scene's own was 9.5 s of the 15.8 s
+        // cards 81 + 85 spent here (node profile, 2026-11-01).
+        skipLayout: true,
       });
     const assembledLayout = (picture: StepPicture, number: number) =>
       stepLayout(
@@ -4219,6 +4226,7 @@ export function editorActionMarks(
       lines.push({
         id: `${action.n}:${index}:topstitch`,
         piece: part.piece,
+        target: part.edgeId,
         points: offsetTowardCentre(part.piece, points, decimal(action.raw.topstitch?.widthMm, 1.5)),
         weight: 'ink',
         dashed: true,
@@ -4230,6 +4238,7 @@ export function editorActionMarks(
       lines.push({
         id: `${action.n}:${index}:press-edge`,
         piece: part.piece,
+        target: part.edgeId,
         points,
         weight: 'ink',
         kind: `press-${press}`,
@@ -4239,11 +4248,19 @@ export function editorActionMarks(
     lines.push({
       id: `${action.n}:${index}:edge`,
       piece: part.piece,
+      target: part.edgeId,
       points,
       weight: 'heavy',
       kind: action.tech,
     });
   });
+  const buttonPattern = (value: string | undefined): PictureActionGlyph['pattern'] => {
+    if (value?.endsWith('CROSS_X')) return 'cross_x';
+    if (value?.endsWith('PARALLEL')) return 'parallel';
+    if (value?.endsWith('SQUARE')) return 'square';
+    if (value?.endsWith('U_SHAPE')) return 'u_shape';
+    return 'other';
+  };
   const glyphs: PictureActionGlyph[] = press ? pressArrowGlyphs(action, press, geoms) : [];
   action.placements.forEach((placement) => {
     const radians = (placement.angleDeg * Math.PI) / 180;
@@ -4254,6 +4271,13 @@ export function editorActionMarks(
       point: [placement.point[0], -placement.point[1]],
       direction: [Math.cos(radians), -Math.sin(radians)],
       lengthMm: placement.lengthMm,
+      ...(placement.kind === 'button'
+        ? {
+            pattern: buttonPattern(action.raw.fastening?.attachPattern),
+            holes: action.raw.fastening?.buttonHoles === 2 ? (2 as const) : (4 as const),
+            sizeMm: decimal(action.raw.attachmentSizeMm, 15),
+          }
+        : {}),
     });
   });
   return { lines, glyphs };
@@ -4402,12 +4426,9 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
-  const actionMarks = r.editorPic
-    ? editorActionMarks(r.action, r.editorPic.geoms)
-    : { lines: [], glyphs: [] };
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-      {r.editorPic ? (
+      {r.editorPic && r.print ? (
         <StepPictureSvg
           w={picture.join[0]}
           h={picture.join[1]}
@@ -4419,9 +4440,10 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
-          marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}
-          actionLines={actionMarks.lines}
-          actionGlyphs={actionMarks.glyphs}
+          stepEdges={r.editorPic.stepEdges}
+          actionLines={r.print.action.lines}
+          actionGlyphs={r.print.action.glyphs}
+          noSeamText={own(NO_SEAM_TEXT)}
           className='asm-editor-picture'
         />
       ) : drawing ? (
@@ -4440,7 +4462,10 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
   return <div className={className}>{seg.t}</div>;
 }
 
-function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
+// Memoized on the row object: `rows` is memoized, so the same row is drawn in the hidden probe,
+// then in its paginated page, and again when the whole document renders after `onLaidOut` flips —
+// that last render redrew every picture (card 85: 109 print SVGs, seconds of markup per render).
+const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   const { t } = useT();
   const w = r.words;
   return (
@@ -4498,7 +4523,7 @@ function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
       </td>
     </tr>
   );
-}
+});
 
 /** A block = one operation row, kept whole during pagination. */
 function BlockBody({ r, orient }: { r: Row; orient: PrintOrient }) {
@@ -4710,6 +4735,10 @@ export function AssemblyPage({
         return {
           ...r,
           editorPic,
+          print: editorPic && {
+            marks: editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' })),
+            action: editorActionMarks(r.action, editorPic.geoms),
+          },
           pic:
             !editorPic && r.card?.items.length
               ? joinSvg(model!, r.card, true, picture.join, THUMB_BADGE_PX)

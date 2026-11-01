@@ -208,6 +208,60 @@ describe('stepResults: one carried owner result per operation', () => {
       closeAffine(again.transforms.get(piece)!, apart.transforms.get(piece)!);
   });
 
+  it('a later step cannot pose a reverse of an earlier pose: both pieces are one input by then', () => {
+    const surface = CARD6_CHAIN_SEAMS.get(CARD6_CHAIN_SURFACE_KEY)!;
+    const geoms = card6ChainGeoms();
+    const forward = 'sleeve on front';
+    const reverse = 'front on sleeve, later';
+    const poseRows: StoredPose[] = [
+      poseRow({
+        seamKey: forward,
+        piece: geoms.get('SLV_L')!,
+        host: geoms.get('FLP_L_MAIN')!,
+        placement: { xMm: 20, yMm: 40, rotDeg: 90, flip: false },
+      }),
+      poseRow({
+        seamKey: reverse,
+        piece: geoms.get('FLP_L_MAIN')!,
+        host: geoms.get('SLV_L')!,
+        placement: { xMm: 300, yMm: 400, rotDeg: 180, flip: true },
+      }),
+    ];
+    const ops: FormOpLike[] = [
+      {
+        operationNumber: 30,
+        inputKeys: ['SLV_L', 'FLP_L'],
+        outputUnitKey: 'SLEEVE',
+        seamKeys: [surface.seamKey],
+      },
+      {
+        operationNumber: 380,
+        inputKeys: ['SLEEVE', 'FLP_L_MAIN'],
+        outputUnitKey: 'SLEEVE-2',
+        poseKeys: [forward],
+      },
+      {
+        operationNumber: 430,
+        inputKeys: ['SLEEVE-2'],
+        outputUnitKey: 'SLEEVE-3',
+        poseKeys: [reverse],
+      },
+    ];
+    const posed = stepResults({
+      ops,
+      byKey: new Map([[surface.seamKey, surface]]),
+      poses: new Map(poseRows.map((row) => [row.seamKey, row])),
+      geoms,
+      innerLines: card6ChainInnerLines(),
+      pieceKeys: new Set(['SLV_L', 'FLP_L', 'FLP_L_MAIN']),
+    });
+
+    expect(posed[1].ignoredPoses).not.toContain(forward);
+    expect(posed[2].ignoredPoses).toEqual([reverse]);
+    for (const piece of ['SLV_L', 'FLP_L', 'FLP_L_MAIN'])
+      closeAffine(posed[2].transforms.get(piece)!, posed[1].transforms.get(piece)!);
+  });
+
   it('ignores same-input poses and moves every piece of a valid pose block', () => {
     const surface = CARD6_CHAIN_SEAMS.get(CARD6_CHAIN_SURFACE_KEY)!;
     const geoms = card6ChainGeoms();

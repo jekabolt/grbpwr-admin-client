@@ -454,7 +454,8 @@ export function focusPieces(
   return withHosts(keep);
 }
 
-const EMPTY_LAYOUT: StepLayout = {
+/** No piece laid: `stepLayout` of nothing drawable, and the scene whose layout is made elsewhere. */
+export const EMPTY_LAYOUT: StepLayout = {
   T: new Map(),
   input: new Map(),
   ghosts: [],
@@ -469,6 +470,73 @@ const EMPTY_LAYOUT: StepLayout = {
 };
 
 const worldOf = (g: PieceGeom, T: Affine) => g.rs.map((p) => apply(T, p));
+
+/** `boxOf` over the rings' points together, without concatenating them. */
+function boxOfRings(rings: readonly (readonly Pt2[])[]): Box {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const ring of rings)
+    for (const [x, y] of ring) {
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  return Number.isFinite(x0) ? { x0, y0, x1, y1 } : { x0: 0, y0: 0, x1: 1, y1: 1 };
+}
+
+/** A motion's six numbers as a key; `-0` stays apart from `0`, as `apply` keeps them apart. */
+const motionKey = (T: Affine) => T.map((v) => (v === 0 && 1 / v < 0 ? '-0' : String(v))).join(',');
+
+/**
+ * How many motions a piece's world rings are kept for. The ones read over and over (its local
+ * place, its input's settled place) recur within a few candidates of each other; a long search
+ * along a seam normal must not hold every position it tried.
+ */
+const WORLD_RINGS_PER_PIECE = 32;
+
+/**
+ * World rings and rasters for one layout call. `stepLayout` reads a piece under the same motion
+ * many times over — its local box, a candidate position's raster coarse, then fine, then once
+ * settled, the cluster centroids and boxes, the final bbox — and the owner-row layouts of cards
+ * 81 + 85 spent 2.1 s of their 3.5 s in `apply` alone (node profile, 2026-11-01). A ring is keyed
+ * by its piece and the motion's six numbers, so only the very same doubles share one, and it is
+ * computed with `apply`'s arithmetic in `apply`'s order, so it is bit for bit the ring it stands
+ * for. A raster is keyed by the ring it was read from. Nothing in this file writes into a ring or
+ * raster it reads; the sharing relies on that.
+ */
+function layoutCache() {
+  const rings = new Map<PieceGeom, Map<string, Pt2[]>>();
+  const rasters = new WeakMap<Pt2[], Map<number, Raster>>();
+  const world = (g: PieceGeom, T: Affine): Pt2[] => {
+    let mine = rings.get(g);
+    if (!mine) rings.set(g, (mine = new Map()));
+    const key = motionKey(T);
+    const hit = mine.get(key);
+    if (hit) return hit;
+    const [a, b, c, d, e, f] = T;
+    const out: Pt2[] = new Array(g.rs.length);
+    for (let i = 0; i < g.rs.length; i++) {
+      const p = g.rs[i];
+      out[i] = [a * p[0] + c * p[1] + e, b * p[0] + d * p[1] + f];
+    }
+    if (mine.size >= WORLD_RINGS_PER_PIECE) mine.clear();
+    mine.set(key, out);
+    return out;
+  };
+  const ringRaster = (ring: Pt2[], step: number): Raster => {
+    let mine = rasters.get(ring);
+    if (!mine) rasters.set(ring, (mine = new Map()));
+    const hit = mine.get(step);
+    if (hit) return hit;
+    const out = rasterize(ring, step);
+    mine.set(step, out);
+    return out;
+  };
+  return { world, ringRaster };
+}
 
 /** A polyline window in millimetres along its own direction. */
 function rangedLine(pts: readonly Pt2[], range?: readonly [number, number]): Pt2[] {
@@ -769,6 +837,7 @@ export function stepLayout(
   );
   if (keys.length === 0) return EMPTY_LAYOUT;
   const drawnKeys = new Set(keys);
+  const { world, ringRaster } = layoutCache();
   const raster = opts.rasterMm ? { rasterMm: opts.rasterMm } : {};
   const explode = opts.explode ?? 0;
   const rigidInputs = !!opts.inputLayouts?.some(Boolean);
@@ -862,7 +931,7 @@ export function stepLayout(
         for (const [piece, input] of previous.input)
           if (input === layerInput && ks.includes(piece)) pieceLayers.push([piece, partner]);
       }
-    localBox.set(i, boxOf(ks.flatMap((k) => worldOf(geoms.get(k)!, local.get(k)!))));
+    localBox.set(i, boxOfRings(ks.map((k) => world(geoms.get(k)!, local.get(k)!))));
   }
   const standing = new Set(apart);
   // A layer under its identical twin is not a shape of its own: it leans as the twin's edge says.
@@ -884,7 +953,7 @@ export function stepLayout(
     }
   }
   const ringsOf = (i: number, M: Affine = IDENTITY): Pt2[][] => [
-    ...keysOf(i).map((k) => worldOf(geoms.get(k)!, compose(M, local.get(k)!))),
+    ...keysOf(i).map((k) => world(geoms.get(k)!, compose(M, local.get(k)!))),
     ...ghostsLocal.filter((g) => g.input === i).map((g) => g.ring.map((p) => apply(M, p))),
   ];
 
@@ -934,7 +1003,7 @@ export function stepLayout(
   const step = Math.max(2, unit / 120);
   /** The row step a hair is read at: a quarter of the coarse one, never under a millimetre. */
   const fine = Math.max(1, step / 4);
-  const rastersOf = (i: number, M: Affine) => ringsOf(i, M).map((r) => rasterize(r, step));
+  const rastersOf = (i: number, M: Affine) => ringsOf(i, M).map((r) => ringRaster(r, step));
   const order = [...ins].sort((p, q) => area(q) - area(p));
 
   // Hand placements across inputs: the piece's input laid on its partner's by the placement.
@@ -1008,10 +1077,10 @@ export function stepLayout(
     };
     const overlapFine = (j: number, M: Affine, skip?: number) => {
       placedFine ??= new Map(
-        placedKeys.map((p) => [p.i, ringsOf(p.i, p.M).map((r) => rasterize(r, fine))]),
+        placedKeys.map((p) => [p.i, ringsOf(p.i, p.M).map((r) => ringRaster(r, fine))]),
       );
       let o = 0;
-      const mine = ringsOf(j, M).map((ring) => rasterize(ring, fine));
+      const mine = ringsOf(j, M).map((ring) => ringRaster(ring, fine));
       for (const [k, rs] of placedFine) {
         if (k === skip) continue;
         for (const r of mine) for (const p of rs) o = Math.max(o, pairOverlap(r, p));
@@ -1119,9 +1188,9 @@ export function stepLayout(
         return compose(Tt, invert(local.get(ka)!));
       }
       if (opts.garmentLayout && !asLayer && /crotch:/.test(c.evidence.rule ?? '')) {
-        const mineBox = boxOf(mineKeys.flatMap((key) => worldOf(geoms.get(key)!, local.get(key)!)));
-        const hostBox = boxOf(
-          keysOf(i).flatMap((key) => worldOf(geoms.get(key)!, compose(Ht, local.get(key)!))),
+        const mineBox = boxOfRings(mineKeys.map((key) => world(geoms.get(key)!, local.get(key)!)));
+        const hostBox = boxOfRings(
+          keysOf(i).map((key) => world(geoms.get(key)!, compose(Ht, local.get(key)!))),
         );
         const isLeft = mineKeys.some((key) => {
           const geom = geoms.get(key)!;
@@ -1135,9 +1204,9 @@ export function stepLayout(
       if (opts.garmentLayout && !asLayer && /waistband follows/.test(c.evidence.rule ?? '')) {
         const target = midAlong(A).p;
         const source = midAlong(myRun ?? B).p;
-        const mineBox = boxOf(mineKeys.flatMap((key) => worldOf(geoms.get(key)!, local.get(key)!)));
-        const hostBox = boxOf(
-          keysOf(i).flatMap((key) => worldOf(geoms.get(key)!, compose(Ht, local.get(key)!))),
+        const mineBox = boxOfRings(mineKeys.map((key) => world(geoms.get(key)!, local.get(key)!)));
+        const hostBox = boxOfRings(
+          keysOf(i).map((key) => world(geoms.get(key)!, compose(Ht, local.get(key)!))),
         );
         // The waistband is sewn along the waist and rises above it; aligning edge midpoints alone
         // put the complete band below the legs when its paired long edge was digitised on top.
@@ -1158,9 +1227,9 @@ export function stepLayout(
         ? centroidOf(
             keysOf(i)
               .filter((k) => !standing.has(k))
-              .flatMap((k) => worldOf(geoms.get(k)!, compose(Ht, local.get(k)!))),
+              .flatMap((k) => world(geoms.get(k)!, compose(Ht, local.get(k)!))),
           )
-        : centroidOf(worldOf(geoms.get(kb)!, Tt));
+        : centroidOf(world(geoms.get(kb)!, Tt));
       const mid: Pt2 = [(a0[0] + a1[0]) / 2, (a0[1] + a1[1]) / 2];
       const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
       let nx = -(a1[1] - a0[1]) / len;
@@ -1173,7 +1242,7 @@ export function stepLayout(
       // page's (a sleeve out of an opened armhole, a collar above the neckline).
       const away = (M: Affine) => {
         const c = centroidOf(
-          mineKeys.flatMap((k) => worldOf(geoms.get(k)!, compose(M, local.get(k)!))),
+          mineKeys.flatMap((k) => world(geoms.get(k)!, compose(M, local.get(k)!))),
         );
         return (c[0] - mid[0]) * nx + (c[1] - mid[1]) * ny > 0;
       };
@@ -1299,7 +1368,7 @@ export function stepLayout(
         // onto it first (its own way up whichever edge the seam names); only a twin drawn another
         // way is covered by turning along the seam.
         if (explode > 0 || placedKeys.length > 1) return null;
-        const mc = centroidOf(worldOf(geoms.get(ka)!, local.get(ka)!));
+        const mc = centroidOf(world(geoms.get(ka)!, local.get(ka)!));
         const M = translate(hc[0] - mc[0], hc[1] - mc[1]);
         best = { M, score: -overlapAt(j, M) * 1000 + (upright(M) ? 0 : 500) };
       }
@@ -1320,7 +1389,7 @@ export function stepLayout(
         const dy = mid[1] - hc[1];
         for (const s of sidewaysTrials(A, B)) {
           const c = centroidOf(
-            mineKeys.flatMap((k) => worldOf(geoms.get(k)!, compose(s.T, local.get(k)!))),
+            mineKeys.flatMap((k) => world(geoms.get(k)!, compose(s.T, local.get(k)!))),
           );
           if ((c[0] - mid[0]) * dx + (c[1] - mid[1]) * dy <= 0) continue;
           settle(s.T, s.mirrored ? 50 : 0);
@@ -1634,7 +1703,7 @@ export function stepLayout(
     // single input, so cluster packing above cannot see it. Keep each existing body rigid and dock
     // every smaller one at an outline support point. This is the final corpus-wide invariant: every
     // visible cut outline belongs to one touching picture, never a loose row beside it.
-    const rings = new Map(keys.map((key) => [key, worldOf(geoms.get(key)!, T.get(key)!)]));
+    const rings = new Map(keys.map((key) => [key, world(geoms.get(key)!, T.get(key)!)]));
     const root = new Map(keys.map((key) => [key, key]));
     const find = (key: string): string => {
       const parent = root.get(key)!;
@@ -2099,9 +2168,9 @@ export function stepLayout(
   // Poses last (P8): every seam, explode and shelf has had its say.
   const posed = opts.pose?.size ? pinPoses(T, opts.pose, geoms, hung).pinned : [];
 
-  const bbox = boxOf([
-    ...keys.flatMap((k) => worldOf(geoms.get(k)!, T.get(k)!)),
-    ...ghosts.flatMap((g) => g.ring),
+  const bbox = boxOfRings([
+    ...keys.map((k) => world(geoms.get(k)!, T.get(k)!)),
+    ...ghosts.map((g) => g.ring),
   ]);
   return {
     T,

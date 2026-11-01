@@ -17,7 +17,7 @@ export type SeamGuessTier = 'confident' | 'guess' | 'none';
 
 export type SeamDecision = {
   cardId: number;
-  /** The step's operation number; 0 = the card-level seam review. */
+  /** The step's operation number; 0 = a card-level source. */
   operationNumber: number;
   action: SeamDecisionAction;
   /** Key of the row written (accept / own) or rejected (refuse); none on skip. */

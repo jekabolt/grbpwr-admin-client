@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { HeaderNote, SectionHeader, Tile } from 'ui';
 import { PieceShape } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import { derivePieces, type TechpackPieceGeometry } from '../derive-pieces';
@@ -60,7 +61,10 @@ function paginateGroups<T extends { key: string; tiles: unknown[] }>(
 
 export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPageProps) {
   const { t } = useT();
-  const model = derivePieces(techCard, geometry, undefined, t);
+  const model = useMemo(
+    () => derivePieces(techCard, geometry, undefined, t),
+    [techCard, geometry, t],
+  );
   const land = orient === 'land';
   const columns = land ? 5 : 3;
   const tileCount = model.groups.reduce((sum, group) => sum + group.tiles.length, 0);

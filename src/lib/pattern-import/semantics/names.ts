@@ -3,9 +3,10 @@
 // Where a name comes from, strongest first:
 //   1. `pieceOverrides[seed]` — the operator's or the AI's answer (code, mods, displayName,
 //      nameOrigin incl. 'ai-auto', aiConfidence) — taken as given, only CHECKED;
-//   2. the DXF block identity (F8 `dxf.identity`: block name minus size / AAMA PIECE NAME) —
-//      upper-cased, the author's `UNI` token read as "ungraded" and removed, modifiers put in
-//      grammar order (R/L → F/B → n → #), a trailing size token of the run removed;
+//   2. the DXF block identity (F8 `dxf.identity`: block name minus size / AAMA PIECE NAME) — the
+//      source spelling stays the display name; its internal identity is upper-cased, the author's
+//      `UNI` token read as "ungraded" and removed, modifiers put in grammar order (R/L → F/B → n
+//      → #), a trailing size token of the run removed;
 //   3. printed text inside the piece (`dictionary/ readPieceText`: EN/DE/RU/FR/NL/PL/ES/DA) → code
 //      + F/B; a lining label makes the code `LIN_<code>` (K1: lining names differ from the shell's).
 // Size tokens are NEVER part of an identity: the card reads the last token as the size (FP_L vs L)
@@ -162,12 +163,16 @@ export function parseIdentity(
     notes.push(`size token ${kept[kept.length - 1]} removed from the name`);
     kept.pop();
   }
-  const code: string[] = [];
-  let i = 0;
-  while (i < kept.length && (code.length === 0 || modStage(kept[i]) < 0)) code.push(kept[i++]);
-  const mods = kept.slice(i);
-  if (!code.length) return null;
+  if (!kept.length || modStage(kept[0]) >= 0) return null;
+  // Vendor codes commonly put their hand before a final code word (P_L_MAIN, PCK_R_BTTM). Keep
+  // every non-modifier as the code and canonicalise the modifiers after it, as the identity grammar
+  // promises, instead of treating the later code word as an invalid modifier.
+  const code = kept.filter((token) => modStage(token) < 0);
+  const mods = kept.filter((token) => modStage(token) >= 0);
   const ordered = [...mods].sort((a, b) => modStage(a) - modStage(b));
+  const canonical = [...code, ...ordered];
+  if (canonical.join('_') !== kept.join('_'))
+    notes.push(`code/modifiers reordered ${kept.join('_')} → ${canonical.join('_')}`);
   if (ordered.join('_') !== mods.join('_'))
     notes.push(`modifiers reordered ${mods.join('_')} → ${ordered.join('_')}`);
   const hands = ordered.filter((m) => m === 'L' || m === 'R');
@@ -238,7 +243,7 @@ export function readName(opts: {
     if (p && !identityGrammarProblem([p.code, ...p.mods].join('_'))) {
       return {
         ...p,
-        displayName: override?.displayName ?? defaultDisplayName(p.code, p.mods, p.hand),
+        displayName: override?.displayName ?? dxfIdentity.trim(),
         nameOrigin: 'text',
         notes: [`name from the DXF block ${dxfIdentity}`, ...p.notes],
       };

@@ -588,6 +588,36 @@ export function packRul(
     }
   for (const f of fams) {
     const b = f.bySize.get(base)!;
+    // D6673: the deltas run along the grade reference line (layer 5) when the piece has one, else
+    // the drawing's x / y — never the grain line (layer 7), which expandRul leaves alone too.
+    const referenceAngles = b.entities.flatMap((entity) => {
+      if (entity.layer !== '5' || entity.kind !== 'chain' || entity.slots.length < 2) return [];
+      const first = entity.slots[0];
+      const last = entity.slots[entity.slots.length - 1];
+      return Math.hypot(last.x - first.x, last.y - first.y) > 0
+        ? [Math.atan2(last.y - first.y, last.x - first.x)]
+        : [];
+    });
+    const referenceAngle = referenceAngles[0] ?? 0;
+    if (
+      referenceAngles.some(
+        (angle) =>
+          Math.abs(Math.atan2(Math.sin(angle - referenceAngle), Math.cos(angle - referenceAngle))) >
+          1e-6,
+      )
+    ) {
+      reasons.push(`${f.piece}: its layer-5 grade reference lines point different ways`);
+      continue;
+    }
+    const gradeCos = Math.cos(referenceAngle);
+    const gradeSin = Math.sin(referenceAngle);
+    // Drawing-space movement → the RUL's axes. expandRul applies the inverse transform along the
+    // layer-5 grade reference, so writer and reader remain exact for rotated pieces.
+    const ruleDelta = (basePoint: PtMm, sizePoint: PtMm): RulDelta => {
+      const x = (sizePoint.x - basePoint.x) * mmU;
+      const y = (sizePoint.y - basePoint.y) * mmU;
+      return { dx: x * gradeCos + y * gradeSin, dy: -x * gradeSin + y * gradeCos };
+    };
     // Markers drawn alike in every size are graded and proved too. When a CAD regenerates its
     // turn/curve/validation markers independently per size, they are auxiliary samples rather
     // than piece geometry: keep the base markers and let the reader make them follow the graded
@@ -703,7 +733,8 @@ export function packRul(
       sizes
         .map((s) => {
           const os = aligned.get(s)![ei][k];
-          return `${((os.x - bs.x) * mmU).toFixed(DIGITS)},${((os.y - bs.y) * mmU).toFixed(DIGITS)}`;
+          const delta = ruleDelta(bs, os);
+          return `${delta.dx.toFixed(DIGITS)},${delta.dy.toFixed(DIGITS)}`;
         })
         .join(' ');
     const toward = (line: PtMm[], k: number, amount: number): PtMm | null => {
@@ -789,9 +820,7 @@ export function packRul(
       aligned.get(base)![ei].forEach((bs, k) => {
         const row: RulDelta[] = sizes.map((s, si) => {
           const os = aligned.get(s)![ei][k];
-          return si === bi
-            ? { dx: 0, dy: 0 }
-            : { dx: (os.x - bs.x) * mmU, dy: (os.y - bs.y) * mmU };
+          return si === bi ? { dx: 0, dy: 0 } : ruleDelta(bs, os);
         });
         const rounded = row.map((d) => ({
           dx: Number(d.dx.toFixed(DIGITS)),

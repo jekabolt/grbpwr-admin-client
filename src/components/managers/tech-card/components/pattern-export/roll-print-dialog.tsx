@@ -25,6 +25,7 @@ import {
 import { type RollPrintPaper, zipRollPrintPdfs } from 'lib/pattern-export/roll-print-zip';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
+import { cn } from 'lib/utility';
 import { CheckboxCommon, ConfirmationModal, EmptyCell, GroupLabel, Input, Text } from 'ui';
 
 import {
@@ -143,6 +144,8 @@ type LoadedSlot = {
 type SlotResult = {
   slot: RollPrintSlot;
   laid: Laid | null;
+  /** Roll only: the first layout, shown dimmed until `laid` replaces it. */
+  draft?: Laid | null;
   error: string | null;
 };
 
@@ -277,20 +280,47 @@ export function RollPrintDialog({
       selectedLoaded.map(async (item): Promise<SlotResult> => {
         if (!item.bytes || !item.source)
           return { slot: item.slot, laid: null, error: item.error ?? 'file not read' };
+        // Each slot lands on screen as soon as it is laid, not when the slowest one is: a big
+        // main-material sheet must not hold back the pocketing that was ready in a second.
+        const land = (result: SlotResult) => {
+          if (ac.signal.aborted) return result;
+          setResults((prev) => prev.map((r) => (r.slot.key === result.slot.key ? result : r)));
+          return result;
+        };
+        const onDraft =
+          paper === 'roll'
+            ? (draft: RollPrintPlan) => {
+                if (ac.signal.aborted) return;
+                setResults((prev) =>
+                  prev.map((r) =>
+                    r.slot.key === item.slot.key && !r.laid
+                      ? { ...r, draft: { kind: 'roll', plan: draft } }
+                      : r,
+                  ),
+                );
+              }
+            : undefined;
         try {
-          const plan = await planRollPrint(item.bytes, item.slot.fileName, copies, spec, ac.signal);
+          const plan = await planRollPrint(
+            item.bytes,
+            item.slot.fileName,
+            copies,
+            spec,
+            ac.signal,
+            onDraft,
+          );
           if (paper === 'roll')
-            return { slot: item.slot, laid: { kind: 'roll', plan }, error: null };
+            return land({ slot: item.slot, laid: { kind: 'roll', plan }, error: null });
           const drawing = stackSheets(plan, title);
-          return {
+          return land({
             slot: item.slot,
             laid: { kind: 'tiles', plan, drawing, pdf: planPdf(drawing, { kind: 'tiles', paper }) },
             error: null,
-          };
+          });
         } catch (error) {
           if (ac.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
             throw error;
-          return { slot: item.slot, laid: null, error: errText(error) };
+          return land({ slot: item.slot, laid: null, error: errText(error) });
         }
       }),
     )
@@ -464,6 +494,7 @@ export function RollPrintDialog({
         paper={paper}
         widthCm={widthCm}
         laid={results[0]?.laid ?? null}
+        draft={results[0]?.draft ?? null}
         running={running}
         error={results[0]?.error ?? null}
         onGo={setStep}
@@ -658,6 +689,7 @@ function ResultStep({
   paper,
   widthCm,
   laid,
+  draft,
   running,
   error,
   onGo,
@@ -666,6 +698,7 @@ function ResultStep({
   paper: Paper;
   widthCm: number;
   laid: Laid | null;
+  draft: Laid | null;
   running: boolean;
   error: string | null;
   onGo: (s: Step) => void;
@@ -727,7 +760,7 @@ function ResultStep({
           ))}
         </ul>
       )}
-      <PaperCanvas laid={laid} running={running} />
+      <PaperCanvas laid={laid} draft={draft} running={running} />
     </div>
   );
 }
@@ -786,7 +819,9 @@ function BatchResultStep({
             ? result.laid.kind === 'roll'
               ? `${(result.laid.plan.lengthMm / 1000).toFixed(1)} m`
               : plural(result.laid.pdf.pages.length, 'page')
-            : null;
+            : result.draft
+              ? 'draft'
+              : null;
           return (
             <div key={result.slot.key} className='min-w-0'>
               <GroupLabel
@@ -803,7 +838,7 @@ function BatchResultStep({
                 {measure ? ` · ${measure}` : ''}
               </GroupLabel>
               {((result.laid?.plan.placed ?? 0) > 0 || (!problem && !result.laid)) && (
-                <PaperCanvas laid={result.laid} running={running} />
+                <PaperCanvas laid={result.laid} draft={result.draft ?? null} running={running} />
               )}
             </div>
           );
@@ -818,7 +853,19 @@ function BatchResultStep({
  * length runs to the right and scrolls. Each roll sheet is its own panel; the gap is the cut.
  * Tiles: the stacked drawing with the page grid over it.
  */
-function PaperCanvas({ laid, running }: { laid: Laid | null; running: boolean }) {
+function PaperCanvas({
+  laid: final,
+  draft,
+  running,
+}: {
+  laid: Laid | null;
+  draft: Laid | null;
+  running: boolean;
+}) {
+  // The draft is the same drawing the result will be, only not yet improved: dimmed, so it never
+  // reads as the final layout.
+  const isDraft = !final && !!draft && running;
+  const laid = final ?? (isDraft ? draft : null);
   if (!laid || laid.plan.sheets.length === 0)
     return (
       <div className='flex h-64 w-full items-center justify-center border border-borderColor bg-bgColor'>
@@ -832,7 +879,12 @@ function PaperCanvas({ laid, running }: { laid: Laid | null; running: boolean })
       ? laid.plan.sheets.map((s, i) => ({ drawing: s.drawing, lengthMm: s.lengthMm, grid: null }))
       : [{ drawing: laid.drawing, lengthMm: laid.drawing.h, grid: laid.pdf.grid ?? null }];
   return (
-    <div className='h-72 w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-pageBg p-2'>
+    <div
+      className={cn(
+        'h-72 w-full overflow-x-auto overflow-y-hidden border border-borderColor bg-pageBg p-2',
+        isDraft && 'opacity-35',
+      )}
+    >
       <div className='flex h-full w-max gap-4'>
         {panels.map((p, i) => (
           <div key={i} className='flex h-full flex-col gap-1'>
