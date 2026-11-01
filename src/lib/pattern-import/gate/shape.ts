@@ -23,17 +23,15 @@ import { bboxOf } from '../write/geom';
 import { LAYERS } from '../write/manifest-build';
 import { UNI_TOKEN } from '../write/plan';
 import type { GateCtx } from './checks';
+import { drillMarkOf } from './drill-mark';
 
 export function shapeGateOff(): boolean {
   return typeof process !== 'undefined' && !!process.env?.SHAPE_GATE_OFF;
 }
 
 const isPoly = (t: string) => t === 'LWPOLYLINE' || t === 'POLYLINE';
-const isDrillSquare = (e: { closed?: boolean; pts: PtMm[] }) => {
-  if (!e.closed || e.pts.length !== 4) return false;
-  const b = bboxOf(e.pts);
-  return Math.abs(b.maxX - b.minX - 10) <= 0.05 && Math.abs(b.maxY - b.minY - 10) <= 0.05;
-};
+/** A drill square or a button circle (gate/drill-mark.ts). */
+const isDrillMark = (e: { closed?: boolean; pts: PtMm[] }) => drillMarkOf(e) !== null;
 
 /** The blocks of identities whose sizes differ, and why (one note per identity). */
 export function shapeFamilies(ctx: GateCtx): {
@@ -91,7 +89,7 @@ export function shapeFamilies(ctx: GateCtx): {
       }
       const notches = ents.filter((e) => e.layer === LAYERS.notch && e.type === 'LINE').length;
       const drills = ents.filter(
-        (e) => e.layer === LAYERS.internal && isPoly(e.type) && isDrillSquare(e),
+        (e) => e.layer === LAYERS.internal && isPoly(e.type) && isDrillMark(e),
       ).length;
       const seam = seamDrawn ? ctx.contours.get(b.block)?.get(LAYERS.seam) ?? null : null;
       rows.push({

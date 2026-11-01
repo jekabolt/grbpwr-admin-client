@@ -11,6 +11,7 @@ import type {
   GateCheck,
   GateCheckId,
   GateExpectation,
+  GrainFeature,
   IdentityGeometry,
   ManifestBlock,
   PieceSizeSpec,
@@ -46,7 +47,13 @@ import { identityProblem } from '../manifest/identity';
 import { f0Off } from '../pieces/identity';
 import { SIZE_RUN, sizeRunProblems } from '../pieces/gfit/silent';
 import { foldShapeProblem } from '../semantics/fold';
-import { GRAIN_INSIDE_TOL_MM, grainOutsideMm, pointOnRings } from '../semantics/grain-inside';
+import {
+  GRAIN_INSIDE_TOL_MM,
+  GRAIN_PROPOSAL_MIN_MM,
+  grainOutsideMm,
+  pointOnRings,
+} from '../semantics/grain-inside';
+import { drillMarkKey, drillMarkKeyOf, drillMarkOf } from './drill-mark';
 import { MITER_LIMIT, parallelDeviation } from '../semantics/offset';
 import { glyphCellKey, undashed } from '../semantics/glyphs';
 import { CHROME_GATE, ChromeIndex, hairpins, onChrome } from './chrome';
@@ -144,12 +151,27 @@ const rawCut = (ctx: GateCtx, block: string): PtMm[] | null =>
   onLayer(rawOf(ctx, block), LAYERS.cut).find(
     (e) => (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') && e.closed,
   )?.pts ?? null;
-const isDrill = (e: RawEntity) => {
-  if (!e.closed || e.pts.length !== 4) return false;
-  const b = bboxOf(e.pts);
-  return Math.abs(b.maxX - b.minX - 10) <= 0.05 && Math.abs(b.maxY - b.minY - 10) <= 0.05;
-};
+/** A drill square or a button circle (gate/drill-mark.ts) — anything else on layer 8 is a line. */
+const isDrill = (e: RawEntity) => drillMarkOf(e) !== null;
 const isPoly = (e: RawEntity) => e.type === 'LWPOLYLINE' || e.type === 'POLYLINE';
+/**
+ * A source DXF's own grain arrow (its layer, its author) is a fixed-length marker laid through the
+ * piece's box, not fitted to its outline: on a crescent (CLO's collar stand, neckband) the box's
+ * middle is in the bay, and the 180 mm shaft crosses the piece at its ends only. Such an arrow is
+ * on its piece when its middle is, or when at least this much of the shaft runs on the piece — the
+ * length below which a line is no grainline to lay a piece by. An arrow clicked beside the piece
+ * (nothing of it on the piece) still fails.
+ */
+const GRAIN_THROUGH_MIN_MM = GRAIN_PROPOSAL_MIN_MM;
+const drawnGrain = (g: GrainFeature | null | undefined): boolean =>
+  !!g && g.origin !== 'operator' && (g.evidence ?? []).includes('dxf-layer');
+/** The arrow a→b lies on the ring: its middle is on it, or (a drawn arrow) enough of it runs on it. */
+const grainOnRing = (a: PtMm, b: PtMm, ring: readonly PtMm[], drawn: boolean) => {
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  if (pointOnRings(mid, [ring])) return { ok: true, throughMm: NaN };
+  const throughMm = dist(a, b) - grainOutsideMm(a, b, [ring]);
+  return { ok: drawn && throughMm >= GRAIN_THROUGH_MIN_MM, throughMm };
+};
 
 // ── G1 ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -703,10 +725,14 @@ export function g5(ctx: GateCtx): GateCheck {
             bad(`grain direction off by ${((dd * 180) / Math.PI).toFixed(2)}°`);
         }
         // GRAIN lane: the written arrow is centred on the piece (its 180 mm shaft may outrun a
-        // short piece by design; its middle may not leave it)
+        // short piece by design; its middle may not leave it) — or, a drawn arrow on a crescent,
+        // runs through the piece (GRAIN_THROUGH_MIN_MM)
         if (cut && cut.length >= 3) {
-          const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-          if (!pointOnRings(mid, [cut])) bad('the grain arrow is centred outside the cut line');
+          const on = grainOnRing(p0, p1, cut, drawnGrain(s.grain));
+          if (!on.ok)
+            bad(
+              `the grain arrow is centred outside the cut line${Number.isFinite(on.throughMm) ? ` (${on.throughMm.toFixed(1)} mm of it on the piece)` : ''}`,
+            );
         }
       }
     }
@@ -714,13 +740,16 @@ export function g5(ctx: GateCtx): GateCheck {
     // GRAIN lane: the grainline lies on its piece — one measured on another size's outline, on an
     // unfolded half's mirror image, or clicked beside the piece would lay the marker by a line the
     // piece does not have. A source DXF's own grain arrow (its layer, its author) is a fixed-length
-    // marker that may outrun a short piece (CLO's 180 mm shaft on a 116 mm collar): its middle only.
+    // marker that may outrun a short piece (CLO's 180 mm shaft on a 116 mm collar): its middle, or
+    // on a crescent (the middle of the box in the bay) GRAIN_THROUGH_MIN_MM of it on the piece.
     else if (s.cut.length >= 3) {
       const g = s.grain;
-      if (g.origin !== 'operator' && (g.evidence ?? []).includes('dxf-layer')) {
-        const mid = { x: (g.a.x + g.b.x) / 2, y: (g.a.y + g.b.y) / 2 };
-        if (!pointOnRings(mid, [s.cut]))
-          bad(`the source's grain arrow (${g.origin}) is centred outside the cut line`);
+      if (drawnGrain(g)) {
+        const on = grainOnRing(g.a, g.b, s.cut, true);
+        if (!on.ok)
+          bad(
+            `the source's grain arrow (${g.origin}) is centred outside the cut line and only ${on.throughMm.toFixed(1)} mm of it runs on the piece (≥ ${GRAIN_THROUGH_MIN_MM})`,
+          );
       } else {
         const off = grainOutsideMm(g.a, g.b, [s.cut]);
         if (off > 0)
@@ -755,6 +784,13 @@ export function g5(ctx: GateCtx): GateCheck {
     }
     if (drills.length !== s.drills.length)
       bad(`drills ${drills.length} ≠ source ${s.drills.length}`);
+    else {
+      // each mark in the form and size the source drew (a button: a circle of its own diameter)
+      const have = drills.map((e) => drillMarkKeyOf(drillMarkOf(e)!)).sort();
+      const want = s.drills.map(drillMarkKey).sort();
+      if (have.join(',') !== want.join(','))
+        bad(`drill marks ${have.join(', ')} ≠ source ${want.join(', ')}`);
+    }
     const wantInternal = s.internal.length + (s.fold ? 1 : 0);
     if (internal.length !== wantInternal)
       bad(`internal lines ${internal.length} ≠ source ${wantInternal}`);
@@ -1330,10 +1366,20 @@ export function g12(ctx: GateCtx): GateCheck {
         continue;
       }
       // The writer's own transform (semantics/pairs.ts): `_R` = `_L` reflected across `_L`'s grain;
-      // layout then translates the hands apart, so align the grain tails.
+      // layout then translates the hands apart, so align the grain tails. The mirror axis is a
+      // LINE: a source whose other hand carries the grain line reversed (CLO's mirrored piece —
+      // the arrow's mirror image, tail and head swapped) is the same axis, so L's tail then lands
+      // on R's head. A grain that is not parallel is another axis — R is not L's mirror across it.
+      const ang = (g: [PtMm, PtMm]) => Math.atan2(g[1].y - g[0].y, g[1].x - g[0].x);
+      let dd = Math.abs(ang(lg) - ang(rg)) % (2 * Math.PI);
+      if (dd > Math.PI) dd = 2 * Math.PI - dd;
+      const ddDeg = (dd * 180) / Math.PI;
+      const reversed = Math.abs(ddDeg - 180) <= 0.5;
+      if (!(ddDeg <= 0.5 || reversed)) bad(`grain directions differ (${ddDeg.toFixed(2)}°)`);
+      const anchor = reversed ? rg[1] : rg[0];
       const T = reflection(lg[0], lg[1]);
-      const dx = rg[0].x - lg[0].x;
-      const dy = rg[0].y - lg[0].y;
+      const dx = anchor.x - lg[0].x;
+      const dy = anchor.y - lg[0].y;
       const M = lc.map((p) => {
         const q = applyAffine(T, p);
         return { x: q.x + dx, y: q.y + dy };
@@ -1346,10 +1392,6 @@ export function g12(ctx: GateCtx): GateCheck {
         Math.abs(bm.maxX - br.maxX),
         Math.abs(bm.maxY - br.maxY),
       );
-      const ang = (g: [PtMm, PtMm]) => Math.atan2(g[1].y - g[0].y, g[1].x - g[0].x);
-      let dd = Math.abs(ang(lg) - ang(rg)) % (2 * Math.PI);
-      if (dd > Math.PI) dd = 2 * Math.PI - dd;
-      if (!((dd * 180) / Math.PI <= 0.5)) bad('grain directions differ');
       worstBox = Math.max(worstBox, box);
       if (!(box <= PATIMPORT.pairBboxTolMm))
         bad(`R is not the mirror of L across the grain (bbox off ${box.toFixed(3)} mm)`);

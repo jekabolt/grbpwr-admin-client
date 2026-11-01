@@ -348,6 +348,23 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
   );
   s.close();
   const sc = w.scopes[0];
+  // the writer's quality gate on the golden: every button a recognised drill mark (G5), every
+  // mirrored hand the mirror of its sibling (G12) — a CLO button is a circle, a CLO grain arrow on
+  // a crescent is centred in the bay, a CLO mirrored hand carries its grain line reversed, and a
+  // CLO seam-line notch copy is never a notch of its own
+  const gate = w.gate[MAIN.scopeKey];
+  const gateBad = gate.checks.filter((k) => !k.ok);
+  const featurePair = gateBad.filter((k) => k.id === 'G5-features' || k.id === 'G12-pair');
+  check(
+    'B',
+    'the quality gate: G5 features and G12 pairs clean on the golden',
+    featurePair.length === 0,
+    featurePair.length
+      ? featurePair
+          .map((k) => `${k.id} [${k.blocks.length} blocks]: ${k.note.slice(0, 400)}`)
+          .join(' | ')
+      : `${gate.checks.length - gateBad.length}/${gate.checks.length} checks ok${gateBad.length ? ` · other: ${gateBad.map((k) => `${k.id} (${k.severity})`).join(', ')}` : ''}`,
+  );
   const ours = blocksOf(sc.dxfText);
   const byStem = buttonsByStem(ours);
 
