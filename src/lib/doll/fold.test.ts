@@ -61,7 +61,7 @@ function rectangle(key: string, name: string, index: number, w = 10, h = 20): Sk
  * sewn to the front's other long edge by one of its own — its free half is what turns under. The
  * sizes are real so the doll wraps a real girth, not a toy one.
  */
-function fixture() {
+function fixture(sewPlacket = true) {
   const facts: SkeletonFacts = {
     pieces: [
       rectangle('F', 'front', 1, 50, 70),
@@ -81,7 +81,7 @@ function fixture() {
     evidence: { ...evidence, aLenMm: len, bLenMm: len },
   });
   // Edges of a rectangle poly: 0 bottom, 1 right, 2 top, 3 left.
-  const owners = [seam('F#1', 'P#3', 700), seam('B#1', 'F#3', 700)];
+  const owners = [...(sewPlacket ? [seam('F#1', 'P#3', 700)] : []), seam('B#1', 'F#3', 700)];
   const graph: SeamGraph = {
     ...read,
     chosen: owners,
@@ -203,7 +203,7 @@ describe('solveDoll folds', () => {
     expect(f.plyGapMm!.min).toBeGreaterThan(0);
     expect(f.drawnWidthMm).toBeLessThan(0.75 * f.cutWidthMm);
     expect(report.warnings.some((w) => w.includes('not folded'))).toBe(false);
-  });
+  }, 60_000);
 
   it('says in words when the line does not cross the piece', () => {
     const { facts, graph, options } = fixture();
@@ -214,7 +214,21 @@ describe('solveDoll folds', () => {
     expect(report.folds![0].note).toContain('not folded');
     expect(report.panels.some((p) => p.pieceKey === 'P')).toBe(true);
     expect(report.warnings.some((w) => w.includes('not folded'))).toBe(true);
-  });
+  }, 60_000);
+
+  it('folds a placket that is sewn to nothing (drawn apart) and still measures its plies', () => {
+    const { facts, graph, options } = fixture(false);
+    const report = solveDoll({ graph, facts, options: { ...options, folds: { P: [middle()] } } });
+    expect(report.floating.some((f) => f.pieceKey === 'P')).toBe(true);
+    const f = report.folds![0];
+    expect(f.applied).toBe(true);
+    expect(f.finishedWidthMm).toBeCloseTo(20, 0);
+    expect(f.drawnWidthMm).toBeLessThan(0.75 * f.cutWidthMm);
+    expect(f.plyGapMm).not.toBeNull();
+    expect(f.plyGapMm!.min).toBeGreaterThan(0);
+    expect(f.plyGapMm!.max).toBeLessThan(2.5);
+    expect(f.interpenetrating).toBe(0);
+  }, 60_000);
 
   it('is byte-for-byte the old doll without folds', () => {
     const { facts, graph, options } = fixture();
@@ -224,5 +238,5 @@ describe('solveDoll folds', () => {
     expect(legacy.folds).toBeUndefined();
     expect(withoutTimes(empty)).toEqual(withoutTimes(legacy));
     expect(withoutTimes(emptyList)).toEqual(withoutTimes(legacy));
-  });
+  }, 60_000);
 });

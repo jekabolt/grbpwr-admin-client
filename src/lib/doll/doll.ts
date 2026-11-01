@@ -6811,6 +6811,9 @@ export function solveDoll(input: DollInput): DollReport {
     anchorK[v] = bag ? 0.001 : bodyLike.has(groupOfV[v]) || groupOfV[v] === 'FLOAT' ? 0 : 0.002;
   }
   for (const P of buildPanelLater) buildPanel(P);
+  // A folded piece drawn apart never moves, but its fold contacts are paired all the same: the
+  // report measures its ply gaps from them.
+  for (const P of panels) if (P.fold && !built.has(P.idx)) buildPanel(P);
   for (let v = 0; v < N; v++) moving[v] = groupOfV[v] !== 'FLOAT' && proxyOf[v] >= 0 ? 1 : 0;
   const tSolve = now();
   // Probe switch: the pose as placed, before phase 2 (debugging placement priors).
