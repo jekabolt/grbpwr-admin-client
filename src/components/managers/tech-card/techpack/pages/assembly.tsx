@@ -39,6 +39,10 @@ import {
   OWNER_FIT,
   stepResults,
 } from 'components/managers/tech-card/components/step-seams/step-result';
+import {
+  drawsStepResult,
+  ROWLESS_CARDS_FOLLOW_EDITOR,
+} from 'components/managers/tech-card/components/step-seams/draws-result';
 import type { Affine, Pt2 } from 'lib/assembly-skeleton/types';
 import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-skeleton/union';
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
@@ -3310,12 +3314,16 @@ export function editorOperationPictures(
       ),
     );
     const operations = sceneOperations(resolvedCard);
-    // With no stored row every result is provably rowless; keep that legacy path allocation-free.
+    // The editor provider reads the stored/form operations before the PDF model resolves DXF
+    // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
+    const resultOperations = sceneOperations(techCard);
+    // With no stored row every result is provably rowless; keep that legacy path allocation-free
+    // until the one shared flag opts rowless cards into editor parity.
     const ownerResults =
-      byKey.size || poses.size
+      byKey.size || poses.size || ROWLESS_CARDS_FOLLOW_EDITOR
         ? stepResults(
             {
-              ops: operations,
+              ops: resultOperations,
               byKey,
               poses,
               geoms,
@@ -3327,7 +3335,7 @@ export function editorOperationPictures(
         : [];
     const ownedNumbers = new Set(
       ownerResults.flatMap((result, index) =>
-        result.owned ? [operations[index]?.operationNumber ?? 0] : [],
+        drawsStepResult(ownerResults, index) ? [resultOperations[index]?.operationNumber ?? 0] : [],
       ),
     );
     const joins = new Set(model.rows.filter((row) => row.card).map((row) => row.n));
@@ -3385,7 +3393,7 @@ export function editorOperationPictures(
       if (!row) return;
       try {
         const ownerResult = ownerResults[index];
-        if (ownerResult?.owned && ownerResult.layout.T.size) {
+        if (ownerResult && drawsStepResult(ownerResults, index)) {
           const picture = sceneAt(operation, index);
           const layout: StepLayout = {
             ...ownerResult.layout,
@@ -3400,7 +3408,7 @@ export function editorOperationPictures(
             resultLayers: ownerResult.layers,
           });
           const output = operation.outputUnitKey?.trim();
-          if (output) assembledByUnit.set(output, ownerResult.layout);
+          if (output) assembledByUnit.set(output, layout);
           return;
         }
         if (joins.has(number)) {
@@ -4134,14 +4142,23 @@ export function editorOperationPictures(
           },
         });
       });
-    // The legacy print normalizers above may adjust their private copies. Owner operations finish
-    // on the shared result itself so every view reads the exact same transforms.
+    // The legacy print normalizers above may adjust their private copies. Drawn result operations
+    // finish on a fresh copy of the shared result so no print path can mutate a later step's seed.
     operations.forEach((operation, index) => {
       const ownerResult = ownerResults[index];
       const number = operation.operationNumber ?? 0;
       const picture = pictures.get(number);
-      if (!ownerResult?.owned || !picture) return;
-      pictures.set(number, { ...picture, marks: [], layout: ownerResult.layout });
+      if (!ownerResult || !drawsStepResult(ownerResults, index) || !picture) return;
+      pictures.set(number, {
+        ...picture,
+        marks: [],
+        layout: {
+          ...ownerResult.layout,
+          T: new Map(ownerResult.layout.T),
+          input: new Map(ownerResult.layout.input),
+        },
+        resultLayers: ownerResult.layers,
+      });
     });
     return pictures;
   } catch {

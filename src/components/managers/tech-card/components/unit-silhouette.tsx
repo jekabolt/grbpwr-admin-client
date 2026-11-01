@@ -46,111 +46,147 @@ export function useUnitPicture(unitKey: string | null | undefined): UnionPicture
 // Паддинги обёртки — те же, что у PieceTile (`p-1 pb-3.5`): 4+4 и 4+14.
 const TILE_PAD_X = 8;
 const TILE_PAD_Y = 18;
-const SHAPE_BOX_FALLBACK = { w: 48, h: 38 };
-const TWIN_BADGE_PX = 9;
+const TWIN_BADGE_PX = 10;
 
 const shapePoints = (points: readonly [number, number][]) =>
   points.map(([x, y]) => `${x},${y}`).join(' ');
+
+const insideRing = ([x, y]: readonly [number, number], ring: readonly [number, number][]) => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
+
+/** A shape-relative lower-right point; the label itself remains in a pixel-coordinate SVG. */
+const twinLabelSpot = (ring: readonly [number, number][]) => {
+  const xs = ring.map(([x]) => x);
+  const ys = ring.map(([, y]) => y);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const w = Math.max(...xs) - x0;
+  const h = Math.max(...ys) - y0;
+  const candidates = Array.from({ length: 9 }, (_, yi) =>
+    Array.from(
+      { length: 9 },
+      (_, xi) => [x0 + w * (0.9 - xi * 0.1), y0 + h * (0.9 - yi * 0.1)] as const,
+    ),
+  ).flat();
+  return candidates.find((point) => insideRing(point, ring)) ?? ring[0] ?? ([x0, y0] as const);
+};
 
 /** Owner-result graph drawing. Legacy unit pictures continue through UnitShape unchanged. */
 function LowerLayerUnitShape({
   picture,
   className,
-  hatchW,
-  hatchH,
   label,
   plain,
 }: ComponentProps<typeof UnitShape>) {
   const lower = new Set(picture.lowerLayers ?? []);
   const pad = Math.max(picture.w, picture.h, 1) * 0.06;
   const box = { x: -pad, y: -pad, w: picture.w + 2 * pad, h: picture.h + 2 * pad };
-  const px = Math.min(
-    (hatchW && hatchW > 0 ? hatchW : SHAPE_BOX_FALLBACK.w) / box.w,
-    (hatchH && hatchH > 0 ? hatchH : SHAPE_BOX_FALLBACK.h) / box.h,
-  );
-  const u = 1 / (px || 1);
   const bases = picture.shapes.filter((shape) => lower.has(shape.pieceKey));
   const top = picture.shapes.filter((shape) => !lower.has(shape.pieceKey));
+  const twinLabels = bases
+    .flatMap((shape) => {
+      const number = picture.twinLabels?.[shape.pieceKey];
+      return number ? [{ number, at: twinLabelSpot(shape.pts) }] : [];
+    })
+    .sort((left, right) => left.number - right.number);
+  const lastTwin = twinLabels.at(-1)?.number ?? 0;
 
   return (
-    <svg
-      xmlns='http://www.w3.org/2000/svg'
-      viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
-      className={className ?? 'block h-full w-full'}
+    <span
+      className={cn('relative block h-full w-full', className)}
       role='img'
       aria-label={label ?? `unit pictogram, ${picture.pieceCount} pieces`}
     >
-      {bases.map((shape) => (
-        <polygon
-          key={`base:${shape.pieceKey}`}
-          points={shapePoints(shape.pts)}
-          fill='var(--color-bgColor)'
-          stroke='none'
-          data-lower-layer-base={shape.pieceKey}
-        />
-      ))}
-      {top.map((shape) => (
-        <g key={shape.pieceKey}>
+      <svg
+        xmlns='http://www.w3.org/2000/svg'
+        viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
+        className='block h-full w-full'
+        aria-hidden='true'
+      >
+        {bases.map((shape) => (
           <polygon
+            key={`base:${shape.pieceKey}`}
             points={shapePoints(shape.pts)}
             fill='var(--color-bgColor)'
-            stroke='var(--color-textColor)'
-            strokeWidth={1}
+            stroke='none'
+            data-lower-layer-base={shape.pieceKey}
+          />
+        ))}
+        {top.map((shape) => (
+          <g key={shape.pieceKey}>
+            <polygon
+              points={shapePoints(shape.pts)}
+              fill='var(--color-bgColor)'
+              stroke='var(--color-textColor)'
+              strokeWidth={1}
+              strokeLinejoin='round'
+              vectorEffect='non-scaling-stroke'
+            />
+            {!plain &&
+              shape.lines.map((line, index) => (
+                <polyline
+                  key={index}
+                  points={shapePoints(line)}
+                  fill='none'
+                  stroke='var(--color-textColor)'
+                  strokeWidth={0.6}
+                  strokeLinejoin='round'
+                  vectorEffect='non-scaling-stroke'
+                />
+              ))}
+          </g>
+        ))}
+        {bases.map((shape) => (
+          <polygon
+            key={`overlay:${shape.pieceKey}`}
+            points={shapePoints(shape.pts)}
+            fill={LOWER_LAYER_FILL}
+            stroke={LOWER_LAYER_STROKE}
+            strokeWidth={LOWER_LAYER_STROKE_SCALE}
             strokeLinejoin='round'
             vectorEffect='non-scaling-stroke'
-          />
-          {!plain &&
-            shape.lines.map((line, index) => (
-              <polyline
-                key={index}
-                points={shapePoints(line)}
-                fill='none'
-                stroke='var(--color-textColor)'
-                strokeWidth={0.6}
-                strokeLinejoin='round'
-                vectorEffect='non-scaling-stroke'
-              />
-            ))}
-        </g>
-      ))}
-      {bases.map((shape) => (
-        <polygon
-          key={`overlay:${shape.pieceKey}`}
-          points={shapePoints(shape.pts)}
-          fill={LOWER_LAYER_FILL}
-          stroke={LOWER_LAYER_STROKE}
-          strokeWidth={LOWER_LAYER_STROKE_SCALE}
-          strokeLinejoin='round'
-          vectorEffect='non-scaling-stroke'
-          pointerEvents='none'
-          data-lower-layer={shape.pieceKey}
-        />
-      ))}
-      {bases.flatMap((shape) => {
-        const number = picture.twinLabels?.[shape.pieceKey];
-        if (!number) return [];
-        const x = Math.max(...shape.pts.map(([value]) => value));
-        const y = Math.min(...shape.pts.map(([, value]) => value)) + TWIN_BADGE_PX * u;
-        return [
-          <text
-            key={`twin:${shape.pieceKey}`}
-            x={Math.min(x, picture.w)}
-            y={Math.max(y, 0)}
-            textAnchor='end'
-            fill='var(--color-textColor)'
-            stroke='var(--color-bgColor)'
-            strokeWidth={3 * u}
-            paintOrder='stroke'
-            fontSize={TWIN_BADGE_PX * u}
-            fontWeight={700}
             pointerEvents='none'
-            data-twin-number={number}
-          >
-            {number}
-          </text>,
-        ];
-      })}
-    </svg>
+            data-lower-layer={shape.pieceKey}
+          />
+        ))}
+      </svg>
+      {twinLabels.length > 0 && (
+        <svg
+          xmlns='http://www.w3.org/2000/svg'
+          width='100%'
+          height='100%'
+          className='pointer-events-none absolute inset-0 block overflow-visible'
+          aria-hidden='true'
+        >
+          {twinLabels.map(({ number, at }) => (
+            <text
+              key={number}
+              x={`${((at[0] - box.x) / box.w) * 100}%`}
+              y={`${((at[1] - box.y) / box.h) * 100}%`}
+              dx={-2 - (lastTwin - number) * 3}
+              dy={-2 - (lastTwin - number) * 3}
+              textAnchor='end'
+              fill='var(--color-textColor)'
+              stroke='var(--color-bgColor)'
+              strokeWidth={3}
+              paintOrder='stroke'
+              fontSize={TWIN_BADGE_PX}
+              fontWeight={700}
+              data-twin-number={number}
+            >
+              {number}
+            </text>
+          ))}
+        </svg>
+      )}
+    </span>
   );
 }
 

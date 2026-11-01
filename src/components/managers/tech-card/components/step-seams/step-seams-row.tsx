@@ -11,9 +11,10 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text } from 'ui';
 import type { TechCardFormData } from '../schema';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
 import { seamOfSides, type StepLayout } from './step-picture';
-import { useStepResult } from './step-result-context';
+import { useStepResults } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import {
   focusedStepLeaves,
@@ -35,9 +36,10 @@ const TILE_H = 60;
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
-  const result = useStepResult(index);
-  const ownedLayout = result?.owned ? result.layout : undefined;
-  const ownedLayers = result?.owned ? result.layers : undefined;
+  const results = useStepResults();
+  const result = drawsStepResult(results, index) ? results?.[index] : undefined;
+  const ownedLayout = result?.layout;
+  const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
   const { setValue, getValues } = useFormContext<TechCardFormData>();

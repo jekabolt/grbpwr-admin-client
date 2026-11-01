@@ -8,6 +8,7 @@ import { useWatch } from 'react-hook-form';
 import { Tile } from 'ui';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
+import { drawsStepResult } from './draws-result';
 import { seamSig } from './step-picture';
 import { useStepResults } from './step-result-context';
 import {
@@ -65,7 +66,7 @@ export function UnitPictureTile({
         producer = index;
     }
     const result = producer >= 0 ? results?.[producer] : undefined;
-    return result?.owned ? result : undefined;
+    return producer >= 0 && drawsStepResult(results, producer) ? result : undefined;
   }, [ops, results, stepIndex, unitKey]);
   const layout = ownedResult?.layout ?? inferredLayout;
   const [boxEl, box] = useBoxSize();

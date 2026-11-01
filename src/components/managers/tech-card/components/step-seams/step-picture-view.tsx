@@ -686,17 +686,22 @@ const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
-const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+const TWIN_NUMBER_PX = 10;
 
-const twinLabelOf = (
-  look: keyof typeof LOOK,
-  key: string,
-  number: number,
-  geoms: ReadonlyMap<string, PieceGeom>,
-) => {
-  if (look === 'tile') return String(number);
-  const name = geoms.get(key)?.name.trim();
-  return name && name !== key && !ULID.test(name) ? name : String(number);
+/** A fixed-pixel label near the offset twin's lower-right corner, pulled inward until it is safe. */
+const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
+  const box = boxOf(ring);
+  const safe = spotInside(ring);
+  const wanted: Pt2 = [box.x1 - TWIN_NUMBER_PX * 0.6, box.y1 - TWIN_NUMBER_PX * 0.6];
+  for (let step = 0; step <= 10; step++) {
+    const share = step / 10;
+    const candidate: Pt2 = [
+      wanted[0] + (safe[0] - wanted[0]) * share,
+      wanted[1] + (safe[1] - wanted[1]) * share,
+    ];
+    if (insideRing(candidate, ring)) return candidate;
+  }
+  return safe;
 };
 /**
  * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
@@ -1485,7 +1490,7 @@ export function StepPictureSvg({
         ownedLower.flatMap((piece) => {
           const number = twinNumbers.get(piece.key);
           if (!number) return [];
-          const at = spotInside(piece.ring);
+          const at = twinNumberSpot(piece.ring);
           return [
             <text
               key={`twin:${piece.key}`}
@@ -1497,11 +1502,11 @@ export function StepPictureSvg({
               stroke={FILL}
               strokeWidth={3}
               paintOrder='stroke'
-              fontSize={L.font}
+              fontSize={TWIN_NUMBER_PX}
               pointerEvents='none'
               data-twin-number={number}
             >
-              {twinLabelOf(look, piece.key, number, geoms)}
+              {number}
             </text>,
           ];
         })}

@@ -2,9 +2,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { LOWER_LAYER_FILL, LOWER_LAYER_STROKE } from 'lib/assembly-skeleton/union';
+import {
+  LOWER_LAYER_FILL,
+  LOWER_LAYER_STROKE,
+  type UnionPicture,
+} from 'lib/assembly-skeleton/union';
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
+import { UnitGlyph } from '../unit-silhouette';
 import { boxOf, type StepLayout } from './step-picture';
 import { StepPictureSvg, type EdgeMark } from './step-picture-view';
 
@@ -116,5 +121,46 @@ describe('StepPictureSvg lower layers', () => {
 
   it('does not add a lower overlay to a rowless picture', () => {
     expect(renderPicture()).not.toContain('data-lower-layer=');
+  });
+
+  it('keeps stacked-twin numbers at ten screen pixels', () => {
+    const stacked = renderPicture(['bag', 'front'], undefined, {
+      ...layout,
+      stacked: [['front', 'bag']],
+    });
+    const tileLabel = stacked.match(/<text[^>]*data-twin-number="2"[^>]*>/)?.[0];
+
+    expect(tileLabel).toContain('font-size="10"');
+    expect(tileLabel).toContain('paint-order="stroke"');
+
+    const picture: UnionPicture = {
+      w: 100,
+      h: 100,
+      shapes: [
+        {
+          pieceKey: 'bag',
+          pts: bag.rs,
+          cloth: null,
+          count: 1,
+          hung: false,
+          surface: false,
+          mark: null,
+          share: 1,
+          lines: [],
+        },
+      ],
+      pieceCount: 2,
+      overflow: [],
+      underlay: [],
+      overlap: 0,
+      lowerLayers: ['bag'],
+      twinLabels: { bag: 2 },
+    };
+    const graph = renderToStaticMarkup(<UnitGlyph picture={picture} name='bag' />);
+    const graphLabel = graph.match(/<text[^>]*data-twin-number="2"[^>]*>/)?.[0];
+
+    expect(graphLabel).toContain('font-size="10"');
+    expect(graphLabel).toContain('paint-order="stroke"');
+    expect(graph).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"');
   });
 });

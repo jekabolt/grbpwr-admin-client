@@ -15,6 +15,7 @@ import {
   stepPictureOfOp,
   type SceneOp,
 } from '../components/step-seams/step-picture-view';
+import type { FormOpLike } from '../components/step-seams/step-seams-model';
 import { boxOf, fitBox, stepLayout, toPx } from '../components/step-seams/step-picture';
 import {
   CARD6_CHAIN_OPS,
@@ -206,9 +207,22 @@ function card83WithNonJoins(): AssemblyInput {
   };
 }
 
-const CARD6_TEST_OPERATIONS = CARD6_CHAIN_OPS.filter((operation) =>
-  [30, 380, 430].includes(operation.operationNumber ?? -1),
-);
+const CARD6_ROWLESS_NUMBER = 20;
+const CARD6_ROWLESS_INPUTS = ['SLV_L', 'FLP_L_MAIN'] as const;
+const CARD6_ROWLESS_OPERATION: FormOpLike = {
+  operationNumber: CARD6_ROWLESS_NUMBER,
+  operationType: 'TECH_CARD_OPERATION_TYPE_PRESS',
+  work: 'press_flat',
+  inputKeys: CARD6_ROWLESS_INPUTS,
+  seamKeys: [],
+  poseKeys: [],
+};
+const CARD6_TEST_OPERATIONS = [
+  ...CARD6_CHAIN_OPS.filter((operation) =>
+    [30, 380, 430].includes(operation.operationNumber ?? -1),
+  ),
+  CARD6_ROWLESS_OPERATION,
+].sort((left, right) => (left.operationNumber ?? 0) - (right.operationNumber ?? 0));
 const CARD6_TEST_PIECES = new Set(['SLV_L', 'FLP_L', 'FLP_L_MAIN']);
 const CARD6_TEST_SEAMS = new Map(
   [...CARD6_CHAIN_SEAMS].filter(([key]) =>
@@ -326,10 +340,10 @@ describe('editor operation picture in the PDF', () => {
     }
   }, 120_000);
 
-  it('uses card 6 owner results and preserves the rowless print layout', () => {
+  it('uses the editor result for a rowless card 6 step when another step is owned', () => {
     const ownedInput = card6ChainInput(true);
     const ownedPictures = editorOperationPictures(ownedInput.techCard, deriveAssembly(ownedInput))!;
-    const expected = stepResults(
+    const expectedResults = stepResults(
       {
         ops: CARD6_TEST_OPERATIONS,
         byKey: CARD6_TEST_SEAMS,
@@ -339,14 +353,42 @@ describe('editor operation picture in the PDF', () => {
         pieceKeys: CARD6_TEST_PIECES,
       },
       OWNER_FIT,
-    )[CARD6_TEST_OPERATIONS.findIndex((operation) => operation.operationNumber === 430)];
-    expectSameAffines(ownedPictures.get(430)!.layout.T, expected.transforms, 'owned op 430');
+    );
+    const rowlessIndex = CARD6_TEST_OPERATIONS.findIndex(
+      (operation) => operation.operationNumber === CARD6_ROWLESS_NUMBER,
+    );
+    const expected = expectedResults[rowlessIndex];
+    const [leftBox, rightBox] = CARD6_ROWLESS_INPUTS.map((key) =>
+      boxOf(
+        card6TestGeoms()
+          .get(key)!
+          .rs.map((point) => apply(expected.transforms.get(key)!, point)),
+      ),
+    );
 
+    expect(expected.owned).toBe(false);
+    expect(expectedResults.some((result) => result.owned)).toBe(true);
+    expect(
+      leftBox.x1 < rightBox.x0 ||
+        rightBox.x1 < leftBox.x0 ||
+        leftBox.y1 < rightBox.y0 ||
+        rightBox.y1 < leftBox.y0,
+    ).toBe(true);
+    expectSameAffines(
+      ownedPictures.get(CARD6_ROWLESS_NUMBER)!.layout.T,
+      expected.transforms,
+      'rowless op 20',
+    );
+    expect(ownedPictures.get(CARD6_ROWLESS_NUMBER)!.resultLayers).toEqual(expected.layers);
+  }, 120_000);
+
+  it('preserves a rowless card PDF while the rollout flag is off', () => {
     const rowlessInput = card6ChainInput(false);
     const rowlessPictures = editorOperationPictures(
       rowlessInput.techCard,
       deriveAssembly(rowlessInput),
     )!;
+
     expect(affineSnapshot(rowlessPictures.get(430)!.layout.T)).toEqual([
       ['FLP_L', [1, 0, 0, 1, -52.1, 411.9]],
       ['FLP_L_MAIN', [1, -0.000627, 0.000627, 1, 468, 571.5]],

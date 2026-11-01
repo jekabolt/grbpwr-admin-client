@@ -31,6 +31,7 @@ import { seamGraphOfCard } from './card-seam-graph';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { toPurposeEnum, type TechCardFormData } from './schema';
+import { drawsStepResult } from './step-seams/draws-result';
 import { useStepResults } from './step-seams/step-result-context';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPicturesProvider, UnitTile, useUnitPictures } from './unit-silhouette';
@@ -291,7 +292,7 @@ export function StepResultUnitPicturesProvider({ children }: { children: ReactNo
     let changed = false;
     for (const [unit, index] of latest) {
       const result = results[index];
-      if (!result?.owned) continue;
+      if (!result || !drawsStepResult(results, index)) continue;
       const picture = unionPictureOfLayout(result.layout, geoms, result.layers);
       if (!picture.shapes.length) continue;
       next.set(unit, picture);
