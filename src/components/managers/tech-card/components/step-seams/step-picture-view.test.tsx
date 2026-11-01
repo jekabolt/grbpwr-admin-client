@@ -114,7 +114,7 @@ const renderPicture = ({
   );
 
 describe('StepPictureSvg lower layers', () => {
-  it('overlays only an owner-claimed lower bag', () => {
+  it('tints an owned bag at depth one and omits its covered outline', () => {
     const markup = renderPicture({
       layers: ['bag', 'front'],
       lower: ['bag'],
@@ -125,8 +125,10 @@ describe('StepPictureSvg lower layers', () => {
 
     expect(overlay).toBeDefined();
     expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
-    expect(overlay).toContain(`stroke="${LOWER_LAYER_STROKE}"`);
     expect(overlay).toContain('pointer-events="none"');
+    expect(markup).toContain('data-layer-depth="1"');
+    expect(markup).toContain(`stroke="${LOWER_LAYER_STROKE}"`);
+    expect(markup).not.toContain('data-covered-layer');
   });
 
   it('marks a picked edge above the lower-piece tint', () => {
@@ -179,6 +181,74 @@ describe('StepPictureSvg lower layers', () => {
 
     expect(markup).not.toContain('data-lower-layer=');
     expect(markup).not.toContain('data-covered-layer=');
+  });
+
+  it('draws a covered button as an empty dashed outline', () => {
+    const markup = renderPicture({
+      layers: ['bag', 'front'],
+      lower: ['bag'],
+      stacked: [['bag', 'front']],
+      look: 'canvas',
+      actionGlyphs: [
+        { id: 'covered-button', piece: 'bag', kind: 'button', point: [30, 30], sizeMm: 15 },
+      ],
+    });
+    const group = markup.match(/<g[^>]*data-asm-mark="button"[^>]*>[\s\S]*?<\/g>/)?.[0] ?? '';
+
+    expect(group).toContain('stroke-dasharray=');
+    expect(group).not.toContain('data-button-hole=');
+    expect(group).not.toContain('data-button-thread=');
+    expect(markup.indexOf('data-asm-mark="button"')).toBeGreaterThan(
+      markup.indexOf('data-piece-outline="front"'),
+    );
+  });
+
+  it('keeps a claimed coincident twin at zero offset with its dashed edge underneath', () => {
+    const lining = rectangle('lining', 'lining', 70, 70);
+    const shell = rectangle('shell', 'shell', 70, 70);
+    const twinGeoms = new Map([
+      ['lining', lining],
+      ['shell', shell],
+    ]);
+    const twinLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['lining', IDENTITY],
+        ['shell', IDENTITY],
+      ]),
+      input: new Map([
+        ['lining', 0],
+        ['shell', 1],
+      ]),
+      stacked: [['shell', 'lining']],
+      bbox: boxOf(shell.rs),
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={160}
+        h={120}
+        pad={20}
+        look='canvas'
+        layout={twinLayout}
+        layers={['lining', 'shell']}
+        lower={['lining']}
+        stacked={[['lining', 'shell']]}
+        geoms={twinGeoms}
+        names={['lining', 'shell']}
+      />,
+    );
+    const surfacePath = (piece: string) => {
+      const tag = markup.match(new RegExp(`<path[^>]*data-piece-surface="${piece}"[^>]*>`))?.[0];
+      return tag?.match(/ d="([^"]+)"/)?.[1];
+    };
+    const underlay = markup.match(/<path[^>]*data-stacked-underlay="lining"[^>]*>/)?.[0];
+
+    expect(surfacePath('lining')).toBe(surfacePath('shell'));
+    expect(underlay).toContain('stroke-dasharray=');
+    expect(markup.indexOf('data-stacked-underlay="lining"')).toBeLessThan(
+      markup.indexOf('data-piece-surface="shell"'),
+    );
+    expect(markup).toContain('data-stacked-name-leader="lining"');
   });
 
   it('does not add a lower overlay to a rowless picture', () => {

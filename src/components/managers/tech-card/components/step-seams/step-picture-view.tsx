@@ -31,6 +31,7 @@ import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { buttonholePictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
+import { layerStyle } from './layer-style';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { withPoseHosts, type PosePin } from './step-pose';
 import { useStepResults } from './step-result-context';
@@ -918,6 +919,24 @@ const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
   }
   return safe;
 };
+
+function coincidentNameLeader(
+  at: Pt2,
+  ring: readonly Pt2[],
+  pictureWidth: number,
+): { at: Pt2; anchor: 'start' | 'end'; line: Pt2[] } {
+  const box = boxOf(ring);
+  const right = pictureWidth - box.x1 >= box.x0;
+  const direction = right ? 1 : -1;
+  const y = Math.max(box.y0, Math.min(box.y1, at[1]));
+  const edge: Pt2 = [right ? box.x1 : box.x0, y];
+  const end: Pt2 = [edge[0] + direction * 14, y];
+  return {
+    at: [end[0] + direction * 4, end[1]],
+    anchor: right ? 'start' : 'end',
+    line: [edge, end],
+  };
+}
 /**
  * An inner line is a door for a seam only when it spans a slit or a placement line: on 23 cards
  * button and buttonhole marks span under 50 mm (most under 20), the slits 80 mm and more (card 6:
@@ -1125,7 +1144,11 @@ export function StepPictureSvg({
         kind: 'buttonhole',
       }));
   const resultLower = lower ?? contextResult?.lower ?? [];
-  void stacked;
+  const resultStacked = stacked ?? contextResult?.stacked ?? [];
+  const claimedStackedKeys = useMemo(
+    () => new Set(resultStacked.flatMap(([under, over]) => [under, over])),
+    [resultStacked],
+  );
   const twinNumbers = useMemo(() => {
     const numbers = new Map<string, number>();
     layout.stacked.forEach((stack) =>
@@ -1138,7 +1161,7 @@ export function StepPictureSvg({
     if (!layers) return null;
     const points = [...layout.T].flatMap(([key, transform]) => {
       const twin = twinNumbers.get(key);
-      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) : 0;
+      const offset = twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) : 0;
       return (geoms.get(key)?.rs ?? []).map((point) => {
         const [x, y] = apply(transform, point);
         return [x + offset, y - offset] as Pt2;
@@ -1146,7 +1169,7 @@ export function StepPictureSvg({
     });
     if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
     return points.length ? boxOf(points) : layout.bbox;
-  }, [geoms, layers, layout, look, twinNumbers]);
+  }, [claimedStackedKeys, geoms, layers, layout, look, twinNumbers]);
   const fitBounds = bounds ?? layeredBounds ?? ownBounds;
   const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
@@ -1163,7 +1186,8 @@ export function StepPictureSvg({
       const g = geoms.get(key);
       if (!g) continue;
       const twin = layers ? twinNumbers.get(key) : undefined;
-      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const offset =
+        twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
       const px = (p: Pt2): Pt2 => {
         const [x, y] = toPx(fit, apply(T, p));
         return [x + offset, y + offset];
@@ -1174,7 +1198,7 @@ export function StepPictureSvg({
       out.push({ key, ring, drawn, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
     }
     return out;
-  }, [layout, geoms, fit, layers, twinNumbers]);
+  }, [claimedStackedKeys, layout, geoms, fit, layers, twinNumbers]);
   const ownedOrder = useMemo(
     () =>
       layers
@@ -1187,6 +1211,20 @@ export function StepPictureSvg({
     [layers, layout.stacked, pieces],
   );
   const ownedLowerKeys = useMemo(() => new Set(resultLower), [resultLower]);
+  const ownedStyle = useMemo(
+    () =>
+      layers
+        ? layerStyle({
+            layers: ownedOrder,
+            T: layout.T,
+            geoms,
+            marks: actionGlyphs,
+            stacked: resultStacked,
+            mode: look === 'tile' ? 'thumb' : look === 'print' ? 'print' : 'canvas',
+          })
+        : null,
+    [actionGlyphs, geoms, layers, layout.T, look, ownedOrder, resultStacked],
+  );
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
     return ownedOrder.flatMap((key) => {
@@ -1194,14 +1232,17 @@ export function StepPictureSvg({
       return piece ? [piece] : [];
     });
   }, [ownedOrder, pieces]);
-  const ownedLower = useMemo(
-    () => orderedOwnedPieces.filter((piece) => ownedLowerKeys.has(piece.key)),
-    [orderedOwnedPieces, ownedLowerKeys],
-  );
-  const ownedTop = useMemo(
-    () => orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key)),
-    [orderedOwnedPieces, ownedLowerKeys],
-  );
+  const ownedPath = (key: string, points: readonly Pt2[]) => {
+    const twin = twinNumbers.get(key);
+    const offset =
+      twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+    return points.map((point) => {
+      const [x, y] = toPx(fit, point);
+      return [x + offset, y + offset] as Pt2;
+    });
+  };
+  const ownedDepth = (key: string) =>
+    ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0);
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
   const { base, under } = useMemo(() => {
@@ -1238,7 +1279,9 @@ export function StepPictureSvg({
       }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
-  const visibleBase = layers ? ownedTop : base;
+  const visibleBase = layers
+    ? orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key))
+    : base;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -1289,7 +1332,8 @@ export function StepPictureSvg({
       const g = geoms.get(key);
       if (!T || !g) continue;
       const twin = layers ? twinNumbers.get(key) : undefined;
-      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      const offset =
+        twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
       const px = (p: Pt2): Pt2 => {
         const [x, y] = toPx(fit, apply(T, p));
         return [x + offset, y + offset];
@@ -1301,7 +1345,18 @@ export function StepPictureSvg({
       });
     }
     return out;
-  }, [onPick, look, layout, geoms, innerLines, fit, layers, ownedOrder, twinNumbers]);
+  }, [
+    onPick,
+    look,
+    layout,
+    geoms,
+    innerLines,
+    fit,
+    layers,
+    ownedOrder,
+    twinNumbers,
+    claimedStackedKeys,
+  ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
   const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
@@ -1465,6 +1520,7 @@ export function StepPictureSvg({
       at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
       direction: candidate.direction,
       mmPx: candidate.mmPx,
+      draw: ownedStyle?.marks.get(candidate.glyph.id)?.draw ?? ('solid' as const),
     }))
     // Both sides of one seam carry the same arrow: one drawn arrow per spot and way.
     .filter(
@@ -1544,7 +1600,26 @@ export function StepPictureSvg({
         : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
-  const nameBoxes = nameSpots.map(({ text, s }) => ({ ...s, ...nameBoxOf(text) }));
+  const namedInputs = (names ?? []).flatMap((text, input) => (text ? [input] : []));
+  const coincidentNamePieces = new Map(
+    orderedOwnedPieces.flatMap((piece) =>
+      ownedStyle?.pieces.get(piece.key)?.fullyCovered ? [[piece.input, piece] as const] : [],
+    ),
+  );
+  const pieceInput = new Map(orderedOwnedPieces.map((piece) => [piece.key, piece.input]));
+  const coincidentNameInputs = new Set<number>();
+  for (const [input, piece] of coincidentNamePieces) {
+    coincidentNameInputs.add(input);
+    for (const cover of ownedStyle?.pieces.get(piece.key)?.coveredBy ?? []) {
+      const coverInput = pieceInput.get(cover);
+      if (coverInput != null) coincidentNameInputs.add(coverInput);
+    }
+  }
+  const nameBoxes = nameSpots.map(({ text, s }, index) => ({
+    ...s,
+    ...nameBoxOf(text),
+    required: coincidentNameInputs.has(namedInputs[index]) || undefined,
+  }));
   const labelBoxes = labels.map(({ m, s }) => ({
     ...s,
     w: (m.label ?? '').length * L.font * 0.62,
@@ -1586,24 +1661,73 @@ export function StepPictureSvg({
     >
       {layers ? (
         <>
-          <g fill={FILL} stroke='none'>
-            {ownedLower.map((piece) => (
-              <path
-                key={piece.key}
-                d={pathOf(piece.drawn, true)}
-                data-lower-layer-base={piece.key}
-              />
-            ))}
+          <g stroke='none'>
+            {orderedOwnedPieces.map((piece) => {
+              const depth = ownedDepth(piece.key);
+              const fullyCovered = ownedStyle?.pieces.get(piece.key)?.fullyCovered ?? false;
+              return (
+                <g key={piece.key} data-layer-depth={depth}>
+                  <path
+                    d={pathOf(piece.drawn, true)}
+                    fill={FILL}
+                    data-piece-surface={piece.key}
+                    data-lower-layer-base={depth ? piece.key : undefined}
+                  />
+                  {depth > 0 && (
+                    <path
+                      d={pathOf(piece.drawn, true)}
+                      fill={LOWER_LAYER_FILL}
+                      pointerEvents='none'
+                      data-lower-layer={piece.key}
+                    />
+                  )}
+                  {depth > 1 && (
+                    <path
+                      d={pathOf(piece.drawn, true)}
+                      fill={LOWER_LAYER_FILL}
+                      pointerEvents='none'
+                      data-lower-layer-depth='2'
+                    />
+                  )}
+                  {fullyCovered && (
+                    <path
+                      d={pathOf(piece.drawn, true)}
+                      fill='none'
+                      stroke={LOWER_LAYER_STROKE}
+                      strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
+                      strokeDasharray={L.dash}
+                      strokeLinejoin='round'
+                      pointerEvents='none'
+                      data-stacked-underlay={piece.key}
+                    />
+                  )}
+                </g>
+              );
+            })}
           </g>
-          <g fill={FILL} stroke={INK} strokeWidth={L.outline} strokeLinejoin='round'>
-            {ownedTop.map((piece) => (
-              <path key={piece.key} d={pathOf(piece.drawn, true)} data-piece-outline={piece.key} />
-            ))}
+          <g fill='none' strokeLinejoin='round'>
+            {orderedOwnedPieces.flatMap((piece) =>
+              (ownedStyle?.pieces.get(piece.key)?.visible ?? []).map((line, index) => (
+                <path
+                  key={`${piece.key}:${index}`}
+                  d={pathOf(ownedPath(piece.key, line))}
+                  stroke={ownedDepth(piece.key) ? LOWER_LAYER_STROKE : INK}
+                  strokeWidth={
+                    ownedDepth(piece.key) ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline
+                  }
+                  data-piece-outline={piece.key}
+                />
+              )),
+            )}
           </g>
           <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
-            {ownedTop.map((piece) => (
-              <path key={piece.key} d={pathOf(piece.drawn, true)} />
-            ))}
+            {orderedOwnedPieces.flatMap((piece) =>
+              ownedDepth(piece.key)
+                ? []
+                : (ownedStyle?.pieces.get(piece.key)?.visible ?? []).map((line, index) => (
+                    <path key={`${piece.key}:${index}`} d={pathOf(ownedPath(piece.key, line))} />
+                  )),
+            )}
           </g>
         </>
       ) : (
@@ -1654,20 +1778,6 @@ export function StepPictureSvg({
           ))}
         </g>
       )}
-      {layers &&
-        ownedLower.map((piece) => (
-          <path
-            key={`lower:${piece.key}`}
-            d={pathOf(piece.drawn, true)}
-            fill={LOWER_LAYER_FILL}
-            stroke={LOWER_LAYER_STROKE}
-            strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
-            strokeLinejoin='round'
-            vectorEffect='non-scaling-stroke'
-            pointerEvents='none'
-            data-lower-layer={piece.key}
-          />
-        ))}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}
@@ -1749,7 +1859,8 @@ export function StepPictureSvg({
           data-asm-piece={line.piece}
         />
       ))}
-      {actionGlyphSpots.map(({ glyph, at, direction, mmPx }) => {
+      {actionGlyphSpots.map(({ glyph, at, direction, mmPx, draw }) => {
+        if (draw === 'hidden') return null;
         if (glyph.kind === 'press-arrow') {
           const arrow = pressArrowPath(at, direction, mmPx, L);
           return (
@@ -1811,21 +1922,28 @@ export function StepPictureSvg({
               data-asm-holes={glyph.holes ?? 4}
               data-asm-pattern={glyph.pattern ?? 'other'}
             >
-              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.hair} />
-              {geometry.thread && (
+              <circle
+                cx={at[0]}
+                cy={at[1]}
+                r={radius}
+                strokeWidth={L.hair}
+                strokeDasharray={draw === 'dashed' ? L.dash : undefined}
+              />
+              {draw === 'solid' && geometry.thread && (
                 <path d={geometry.thread} fill='none' strokeWidth={L.hair} data-button-thread='' />
               )}
-              {geometry.holes.map((point, index) => (
-                <circle
-                  key={index}
-                  cx={point[0]}
-                  cy={point[1]}
-                  r={Math.max(0.8, radius * 0.1)}
-                  fill={INK}
-                  stroke='none'
-                  data-button-hole=''
-                />
-              ))}
+              {draw === 'solid' &&
+                geometry.holes.map((point, index) => (
+                  <circle
+                    key={index}
+                    cx={point[0]}
+                    cy={point[1]}
+                    r={Math.max(0.8, radius * 0.1)}
+                    fill={INK}
+                    stroke='none'
+                    data-button-hole=''
+                  />
+                ))}
             </g>
           );
         }
@@ -1918,23 +2036,34 @@ export function StepPictureSvg({
       {look !== 'tile' &&
         nameSpots.map((s, i) => {
           const at = nameAt(i);
+          const coincident = coincidentNamePieces.get(namedInputs[i]);
+          const leader = at && coincident ? coincidentNameLeader(at, coincident.ring, w) : null;
           return at ? (
-            <text
-              key={`u:${i}`}
-              x={at[0]}
-              y={at[1]}
-              textAnchor='middle'
-              dominantBaseline='central'
-              fill={GREY}
-              stroke={FILL}
-              strokeWidth={4}
-              paintOrder='stroke'
-              letterSpacing='0.04em'
-              pointerEvents='none'
-              data-unit-name=''
-            >
-              {s.text}
-            </text>
+            <g key={`u:${i}`} pointerEvents='none'>
+              {leader && (
+                <path
+                  d={pathOf(leader.line)}
+                  fill='none'
+                  stroke={GREY}
+                  strokeWidth={L.hair}
+                  data-stacked-name-leader={coincident?.key}
+                />
+              )}
+              <text
+                x={leader?.at[0] ?? at[0]}
+                y={leader?.at[1] ?? at[1]}
+                textAnchor={leader?.anchor ?? 'middle'}
+                dominantBaseline='central'
+                fill={GREY}
+                stroke={FILL}
+                strokeWidth={4}
+                paintOrder='stroke'
+                letterSpacing='0.04em'
+                data-unit-name=''
+              >
+                {s.text}
+              </text>
+            </g>
           ) : null;
         })}
       {layers &&
