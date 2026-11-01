@@ -234,21 +234,7 @@ export function mirrorLeftPoses(
   return [...out.values()];
 }
 
-export type LayerHit = { piece: string; at: readonly [number, number] };
-
-/** Top-first hit, cycling down while repeated clicks stay within `tolerance` screen pixels. */
-export function cycleLayerHit(
-  hits: readonly string[],
-  at: readonly [number, number],
-  previous: LayerHit | null,
-  tolerance = 4,
-): string | null {
-  if (!hits.length) return null;
-  const sameSpot =
-    previous && Math.hypot(at[0] - previous.at[0], at[1] - previous.at[1]) <= tolerance;
-  const previousIndex = sameSpot ? hits.indexOf(previous.piece) : -1;
-  return hits[(previousIndex + 1) % hits.length];
-}
+export { cycleLayerHit, type LayerHit } from './pose-picking';
 
 /**
  * One click on the canvas. An inner line (a slit, a placement line) is a host on its own: it takes

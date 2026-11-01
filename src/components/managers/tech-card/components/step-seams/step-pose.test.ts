@@ -55,6 +55,7 @@ import {
   posePinsOf,
   pinPoses,
   snapPose,
+  snapPoseForDrag,
   turnAbout,
   turnToGrain,
   upright,
@@ -347,6 +348,28 @@ describe('picker helpers', () => {
     const e = snapPose([[104, 50]], [{ piece: 'H', ring }], 8);
     expect(e).toMatchObject({ host: 'H', at: [100, 50], dx: -4, dy: 0 });
     expect(snapPose([[120, 50]], [{ piece: 'H', ring }], 8)).toBeNull();
+  });
+
+  it('computes the drag-time snap from the drop transforms and skips collapsed followers', () => {
+    const moving = square('MOVING', 0, 0, 10, 10);
+    const host = square('HOST', 0, 0, 100, 100);
+    const g = new Map([
+      [moving.pieceKey, moving],
+      [host.pieceKey, host],
+    ]);
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['HOST', [1, 0, 0, 1, 100, 0]],
+    ]);
+    const D: Affine = [1, 0, 0, 1, 93, 0];
+
+    expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(), 8)).toMatchObject({
+      host: 'HOST',
+      at: [100, 0],
+      dx: -3,
+      dy: 0,
+    });
+    expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(['HOST']), 8)).toBeNull();
   });
 
   it('the block root: the biggest piece of the cluster root, not the piece nor its group', () => {

@@ -367,6 +367,30 @@ export function snapPose(
   return best ? { dx: best.dx, dy: best.dy, at: best.at, host: best.host } : null;
 }
 
+/** The snap candidate for the current drag delta, from the same geometry the drop will store. */
+export function snapPoseForDrag(
+  group: readonly string[],
+  D: Affine,
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  stacked: ReadonlySet<string>,
+  reach: number,
+): PoseSnap | null {
+  const movingKeys = new Set(group);
+  const ringOf = (piece: string, T: Affine) =>
+    (geoms.get(piece)?.rs ?? []).map((point) => apply(T, point));
+  const moving = group.flatMap((piece) => {
+    const T = transforms.get(piece);
+    return T ? ringOf(piece, compose(D, T)) : [];
+  });
+  const others = [...transforms].flatMap(([piece, T]) =>
+    movingKeys.has(piece) || stacked.has(piece) || (geoms.get(piece)?.rs.length ?? 0) < 3
+      ? []
+      : [{ piece, ring: ringOf(piece, T) }],
+  );
+  return snapPose(moving, others, reach);
+}
+
 /**
  * The host of a piece placed with no snap — the block's root: the biggest drawn piece of the first
  * input of its cluster that is neither the piece nor dragged with it, then of the other inputs.

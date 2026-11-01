@@ -13,7 +13,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
+import { STACKED_TWIN_OFFSET_MM, orderSideAlongOutline } from 'lib/assembly-skeleton/union';
 import { apply, compose, translate } from 'lib/assembly-skeleton/union/affine';
 import {
   anchorOfRunId,
@@ -44,16 +44,21 @@ import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
 import {
-  cycleLayerHit,
   isGuess,
   mirrorLeftPoses,
   mirrorLeftRows,
   pickTarget,
   seamSideName,
   sideForClick,
-  type LayerHit,
 } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
+import {
+  cycleLayerHit,
+  piecesUnder,
+  posePieceOrder,
+  snapAtDuringDrag,
+  type LayerHit,
+} from './pose-picking';
 import { decodeHandPlace, isHandSeamKind } from './step-hand';
 import { useStepResults } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
@@ -62,7 +67,7 @@ import {
   poseAfterDrop,
   poseBlockGroup,
   posePickup,
-  snapPose,
+  snapPoseForDrag,
   turnToGrain,
   turnAbout,
   upright,
@@ -83,15 +88,7 @@ import {
   type TargetId,
   targetsLen,
 } from './step-seams-model';
-import {
-  boxOf,
-  fitBox,
-  insideRing,
-  pathOf,
-  toPx,
-  type SeamSides,
-  type StepLayout,
-} from './step-picture';
+import { boxOf, fitBox, pathOf, toPx, type SeamSides, type StepLayout } from './step-picture';
 import {
   pictureBounds,
   StepPictureSvg,
@@ -219,8 +216,11 @@ export function SeamPickerBody({
   );
   const [poseSel, setPoseSel] = useState<string | null>(null);
   const [snapOn, setSnapOn] = useState(false);
-  const [poseSnap, setPoseSnap] = useState<Pt2 | null>(null);
-  const [poseDrag, setPoseDrag] = useState<{ group: string[]; D: Affine } | null>(null);
+  const [poseDrag, setPoseDrag] = useState<{
+    group: string[];
+    D: Affine;
+    snap: PoseSnap | null;
+  } | null>(null);
   // A step of one block has nothing to sit against: its drag moves the whole picture, stored nowhere.
   const [poseFree, setPoseFree] = useState<Affine | null>(null);
   const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
@@ -498,7 +498,6 @@ export function SeamPickerBody({
     setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
-    setPoseSnap(null);
     setPoseDrag(null);
     setPoseBounds(undefined);
   };
@@ -511,7 +510,7 @@ export function SeamPickerBody({
     setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
-    setPoseSnap(null);
+    setPoseDrag(null);
     setPoseBounds(pictureBounds(canvasLayout, geoms, 'canvas'));
     setPosing(true);
   };
@@ -550,7 +549,6 @@ export function SeamPickerBody({
     if (!T0) return;
     const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
     putPose(piece, compose(moved, T0), pickup);
-    setPoseSnap(snapOn && snap ? snap.at : null);
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
@@ -569,7 +567,7 @@ export function SeamPickerBody({
                 g.rs.map((point) => apply(T0, point)),
                 0,
               );
-    setPoseSnap(null);
+    setPoseDrag(null);
     if (free) setPoseFree((current) => (current ? compose(D, current) : D));
     else putPose(piece, compose(D, T0), pickupOf(piece));
   };
@@ -627,14 +625,17 @@ export function SeamPickerBody({
     };
     setHandEdits((current) => new Map(current).set(row.seamKey, row));
   };
-  const shownPoseLayers = useMemo(() => {
+  const shownPoseStacking = useMemo(() => {
     const order = [...poseLayers];
-    const move = (piece: string, host: string, under: boolean) => {
+    const lower = new Set(stepResult?.lower ?? []);
+    const place = (piece: string, host: string, under: boolean) => {
       const from = order.indexOf(piece);
       if (from < 0 || !order.includes(host)) return;
       order.splice(from, 1);
       const at = order.indexOf(host);
       order.splice(under ? at : at + 1, 0, piece);
+      if (under) lower.add(piece);
+      else lower.delete(piece);
     };
     for (const row of handEdits.values())
       for (const [own, other] of [
@@ -645,16 +646,19 @@ export function SeamPickerBody({
           const hand = decodeHandPlace(anchor.placement);
           const host = other.find((candidate) => candidate.piece !== anchor.piece)?.piece;
           if (!host) continue;
-          if (anchor.layer) move(anchor.piece, host, anchor.layer === 'under');
-          else if (hand) move(anchor.piece, host, hand.inside);
+          if (anchor.layer) place(anchor.piece, host, anchor.layer === 'under');
+          else if (hand) place(anchor.piece, host, hand.inside);
         }
     for (const [piece, layer] of poseLayerEdits) {
       const own = ownPoseRows.get(piece);
       const host = poseEdits.get(piece)?.host ?? (own ? poseOf(own)?.host : undefined);
-      if (layer && host) move(piece, host, layer === 'under');
+      if (layer && host) place(piece, host, layer === 'under');
+      else if (!layer) lower.delete(piece);
     }
-    return order;
-  }, [poseLayers, handEdits, poseLayerEdits, poseEdits, ownPoseRows]);
+    return { layers: order, lower: order.filter((piece) => lower.has(piece)) };
+  }, [poseLayers, stepResult?.lower, handEdits, poseLayerEdits, poseEdits, ownPoseRows]);
+  const shownPoseLayers = shownPoseStacking.layers;
+  const shownPoseLower = shownPoseStacking.lower;
 
   const resetPose = () => {
     if (busy) return;
@@ -681,7 +685,7 @@ export function SeamPickerBody({
       for (const piece of current.keys()) if (selected.has(piece)) next.delete(piece);
       return next;
     });
-    setPoseSnap(null);
+    setPoseDrag(null);
   };
   const finishPose = async () => {
     if (!posing || busy) return;
@@ -859,6 +863,7 @@ export function SeamPickerBody({
                   look='canvas'
                   layout={poseShown}
                   layers={shownPoseLayers}
+                  lower={shownPoseLower}
                   geoms={geoms}
                   innerLines={innerLines}
                   ghostName={nameOf}
@@ -874,17 +879,18 @@ export function SeamPickerBody({
                   view={zoom.view}
                   layout={poseShown}
                   layerOrder={shownPoseLayers}
+                  lower={shownPoseLower}
                   geoms={geoms}
                   nameOf={nameOf}
                   selected={poseSel}
-                  snapAt={poseDrag ? null : poseSnap}
+                  snapAt={snapAtDuringDrag(poseDrag)}
                   disabled={frozen || busy}
                   pickupOf={pickupOf}
                   onSelect={(piece) => {
                     setPoseSel(piece);
-                    setPoseSnap(null);
+                    setPoseDrag(null);
                   }}
-                  onDrag={(group, D) => setPoseDrag({ group, D })}
+                  onDrag={(group, D, snap) => setPoseDrag({ group, D, snap })}
                   onDrop={dropPose}
                   snap={snapOn}
                   onCancel={() => setPoseDrag(null)}
@@ -998,7 +1004,7 @@ export function SeamPickerBody({
                 pressed={snapOn}
                 onClick={() => {
                   setSnapOn((on) => !on);
-                  setPoseSnap(null);
+                  setPoseDrag(null);
                 }}
                 disabled={busy}
               >
@@ -1218,6 +1224,7 @@ function PoseOverlay({
   view,
   layout,
   layerOrder,
+  lower,
   geoms,
   nameOf,
   selected,
@@ -1239,6 +1246,8 @@ function PoseOverlay({
   layout: StepLayout;
   /** Bottom to top, from the shared step result. */
   layerOrder: readonly string[];
+  /** Pieces explicitly painted below the remaining layers. */
+  lower: readonly string[];
   geoms: ReadonlyMap<string, PieceGeom>;
   nameOf: (piece: string) => string;
   selected: string | null;
@@ -1247,7 +1256,7 @@ function PoseOverlay({
   disabled: boolean;
   pickupOf: (piece: string) => PosePickup;
   onSelect: (piece: string | null) => void;
-  onDrag: (group: string[], D: Affine) => void;
+  onDrag: (group: string[], D: Affine, snap: PoseSnap | null) => void;
   onDrop: (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => void;
   onCancel: () => void;
 }) {
@@ -1255,31 +1264,49 @@ function PoseOverlay({
     const f = fitBox(bounds, w, h, pad);
     return { s: f.s * view.k, tx: f.tx * view.k + view.x, ty: f.ty * view.k + view.y };
   }, [bounds, w, h, pad, view.k, view.x, view.y]);
-  const stacked = useMemo(() => new Set(layout.stacked.flatMap((g) => g.slice(1))), [layout]);
+  const stacked = useMemo(
+    () => new Set(layout.stacked.flatMap((group) => group.slice(1))),
+    [layout.stacked],
+  );
+  const twinNumbers = useMemo(() => {
+    const numbers = new Map<string, number>();
+    layout.stacked.forEach((group) =>
+      group.slice(1).forEach((piece, index) => numbers.set(piece, index + 2)),
+    );
+    return numbers;
+  }, [layout.stacked]);
   const pieces = useMemo(() => {
-    const keys = [...layout.T.keys()];
-    const present = new Set(keys);
-    const ordered = new Set(layerOrder.filter((piece) => present.has(piece)));
-    const bottomToTop = [
-      ...keys.filter((piece) => !ordered.has(piece)),
-      ...layerOrder.filter((piece) => present.has(piece)),
-    ];
+    const keys = [...layout.T.keys()].filter((piece) => (geoms.get(piece)?.rs.length ?? 0) >= 3);
+    const bottomToTop = posePieceOrder(layerOrder, layout.stacked, keys, lower);
     return bottomToTop.flatMap((piece) => {
       const transform = layout.T.get(piece)!;
       const geom = geoms.get(piece);
       if (!geom || geom.rs.length < 3) return [];
-      return [{ piece, ring: geom.rs.map((point) => toPx(fit, apply(transform, point))) }];
+      const twin = twinNumbers.get(piece);
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      return [
+        {
+          piece,
+          ring: geom.rs.map((point) => {
+            const [x, y] = toPx(fit, apply(transform, point));
+            return [x + offset, y + offset] as Pt2;
+          }),
+        },
+      ];
     });
-  }, [layout, layerOrder, geoms, fit]);
+  }, [layout.T, layout.stacked, layerOrder, lower, geoms, fit, twinNumbers]);
   const lastHit = useRef<LayerHit | null>(null);
   const drag = useRef<{
     piece: string;
-    pickup: PosePickup;
+    clickPiece: string;
+    at: Pt2;
+    pickup: PosePickup | null;
+    transforms: ReadonlyMap<string, Affine>;
     clientX: number;
     clientY: number;
     moved: boolean;
-    /** The shift last handed to `onDrag`: the layout drawn under the drop carries it. */
     D: Affine;
+    snap: PoseSnap | null;
   } | null>(null);
   const scale = Math.max(fit.s, 1e-6);
   const shiftOf = (e: PointerEvent, state: NonNullable<typeof drag.current>): Affine =>
@@ -1289,30 +1316,23 @@ function PoseOverlay({
     const state = drag.current;
     if (!state) return;
     drag.current = null;
-    if (cancelled || state.moved) lastHit.current = null;
-    if (cancelled || !state.moved) {
+    if (cancelled) {
+      lastHit.current = null;
       onCancel();
       return;
     }
-    const D = state.D;
-    const group = new Set(state.pickup.group);
-    // The layout under the drag already carries D: the dragged rings are read as drawn.
-    const ringOf = (k: string, T: Affine) => (geoms.get(k)?.rs ?? []).map((p) => apply(T, p));
-    const moving = state.pickup.group.flatMap((k) => {
-      const T = layout.T.get(k);
-      return T ? ringOf(k, T) : [];
-    });
-    const others = [...layout.T].flatMap(([k, T]) =>
-      group.has(k) || stacked.has(k) || (geoms.get(k)?.rs.length ?? 0) < 3
-        ? []
-        : [{ piece: k, ring: ringOf(k, T) }],
-    );
-    onDrop(
-      state.piece,
-      state.pickup,
-      D,
-      snap ? snapPose(moving, others, POSE_SNAP_PX / scale) : null,
-    );
+    if (!state.moved) {
+      lastHit.current = { piece: state.clickPiece, at: state.at };
+      onSelect(state.clickPiece);
+      onCancel();
+      return;
+    }
+    lastHit.current = null;
+    if (!state.pickup) {
+      onCancel();
+      return;
+    }
+    onDrop(state.piece, state.pickup, state.D, state.snap);
   };
 
   if (w < 2 || h < 2) return null;
@@ -1329,10 +1349,26 @@ function PoseOverlay({
         if (!state) return;
         if (!state.moved && Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) <= 2)
           return;
+        const started = !state.moved;
         state.moved = true;
         lastHit.current = null;
+        if (!state.pickup) {
+          onCancel();
+          return;
+        }
+        if (started) onSelect(state.piece);
         state.D = shiftOf(e, state);
-        onDrag(state.pickup.group, state.D);
+        state.snap = snap
+          ? snapPoseForDrag(
+              state.pickup.group,
+              state.D,
+              state.transforms,
+              geoms,
+              stacked,
+              POSE_SNAP_PX / scale,
+            )
+          : null;
+        onDrag(state.pickup.group, state.D, state.snap);
       }}
       onPointerUp={() => finish()}
       onPointerCancel={() => finish(true)}
@@ -1372,23 +1408,21 @@ function PoseOverlay({
                   ((e.clientY - rect.top) * h) / Math.max(rect.height, 1),
                 ]
               : [e.clientX, e.clientY];
-            const hits = [...pieces]
-              .reverse()
-              .filter((candidate) => insideRing(at, candidate.ring))
-              .map((candidate) => candidate.piece);
-            if (!hits.includes(item.piece)) hits.push(item.piece);
-            const piece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
-            lastHit.current = { piece, at };
-            onSelect(piece);
-            if (disabled) return;
+            const hits = piecesUnder(at, pieces);
+            const clickPiece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
+            const piece = selected && hits.includes(selected) ? selected : clickPiece;
             e.currentTarget.setPointerCapture?.(e.pointerId);
             drag.current = {
               piece,
-              pickup: pickupOf(piece),
+              clickPiece,
+              at,
+              pickup: disabled ? null : pickupOf(piece),
+              transforms: new Map(layout.T),
               clientX: e.clientX,
               clientY: e.clientY,
               moved: false,
               D: [1, 0, 0, 1, 0, 0],
+              snap: null,
             };
           }}
           data-seam-pose-piece={item.piece}
