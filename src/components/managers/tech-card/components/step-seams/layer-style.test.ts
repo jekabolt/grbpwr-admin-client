@@ -249,4 +249,39 @@ describe('layerStyle', () => {
     expect(edgePair.pieces.get('P_L_U')?.depth).toBe(0);
     expect(edgePair.pieces.get('P_L_MAIN')?.depth).toBe(0);
   });
+
+  it('uses only engine claims when stacked is given', () => {
+    const front = rectangle('front', 0, 0, 10, 10);
+    const bag = rectangle('bag', 2, 2, 6, 6);
+    const placket = rectangle('placket', 6, 0, 4, 10);
+    const marks: PictureActionGlyph[] = [
+      { id: 'b', piece: 'bag', kind: 'button', point: [4, 4] },
+      { id: 'p', piece: 'front', kind: 'button', point: [8, 5] },
+    ];
+    const claimed = syntheticStyle([bag, front, placket], ['bag', 'front', 'placket'], { marks });
+    expect(claimed.lower).toEqual(['bag', 'front']);
+
+    const result = layerStyle({
+      layers: ['bag', 'front', 'placket'],
+      T: new Map([bag, front, placket].map((geom) => [geom.pieceKey, IDENTITY])),
+      geoms: new Map([bag, front, placket].map((geom) => [geom.pieceKey, geom])),
+      marks,
+      stacked: [['bag', 'front']],
+      mode: 'canvas',
+    });
+    expect(result.lower).toEqual(['bag']);
+    expect(result.pieces.get('bag')).toMatchObject({ depth: 1, coveredBy: ['front'] });
+    expect(result.pieces.get('front')).toMatchObject({ depth: 0, covered: [], coveredBy: [] });
+    expect(result.marks.get('b')?.draw).toBe('dashed');
+    expect(result.marks.get('p')?.draw).toBe('solid');
+
+    const none = layerStyle({
+      layers: ['bag', 'front', 'placket'],
+      T: new Map([bag, front, placket].map((geom) => [geom.pieceKey, IDENTITY])),
+      geoms: new Map([bag, front, placket].map((geom) => [geom.pieceKey, geom])),
+      stacked: [],
+      mode: 'canvas',
+    });
+    expect(none.lower).toEqual([]);
+  });
 });

@@ -35,6 +35,9 @@ export type LayerStyleInput = {
   marks?: readonly PictureActionGlyph[];
   /** Explicit placement metadata; `layers` remains the authoritative drawing order. */
   flags?: ReadonlyMap<string, 'under' | 'over'>;
+  /** [under, over] claims from the engine (StepResult.stacked). Given → only these pairs cover;
+   *  the ≥30 % overlap rule is off and unclaimed pieces stay equal. */
+  stacked?: readonly (readonly [string, string])[];
   mode: 'canvas' | 'thumb' | 'print';
 };
 
@@ -238,32 +241,45 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
   const covering = ordered.map(() => [] as number[]);
   const sameShapeCover = ordered.map(() => false);
 
+  const claims = input.stacked
+    ? new Set(input.stacked.map(([under, over]) => `${under}\u0000${over}`))
+    : undefined;
   for (let lower = 0; lower < ordered.length; lower++) {
-    for (let upper = lower + 1; upper < ordered.length; upper++) {
+    for (let upper = 0; upper < ordered.length; upper++) {
+      if (
+        upper === lower ||
+        (claims ? !claims.has(`${ordered[lower].key}\u0000${ordered[upper].key}`) : upper < lower)
+      )
+        continue;
       const a = ordered[lower];
       const b = ordered[upper];
       const area = intersectionArea(a, b);
       const smaller = Math.min(a.area, b.area);
-      if (smaller <= EPS || area / smaller + EPS < COVER_SHARE) continue;
+      if (!claims && (smaller <= EPS || area / smaller + EPS < COVER_SHARE)) continue;
       covering[lower].push(upper);
-      const equalArea = smaller / Math.max(a.area, b.area) + EPS >= EQUAL_AREA_SHARE;
+      const equalArea =
+        smaller > EPS && smaller / Math.max(a.area, b.area) + EPS >= EQUAL_AREA_SHARE;
       if (equalArea && area / smaller + EPS >= EQUAL_OVERLAP_SHARE) sameShapeCover[lower] = true;
     }
   }
 
+  // claims need not follow `layers`, so settle depths by relaxation (capped at 2, so ≤ 3 passes)
   const depths = ordered.map((): LayerTone => 0);
-  for (let index = ordered.length - 1; index >= 0; index--) {
-    if (!covering[index].length) continue;
-    depths[index] = Math.min(
-      2,
-      Math.max(...covering[index].map((upper) => 1 + depths[upper])),
-    ) as LayerTone;
-  }
+  for (let pass = 0; pass < 3; pass++)
+    for (let index = ordered.length - 1; index >= 0; index--) {
+      if (!covering[index].length) continue;
+      depths[index] = Math.min(
+        2,
+        Math.max(...covering[index].map((upper) => 1 + depths[upper])),
+      ) as LayerTone;
+    }
 
   const pieces = new Map<string, PieceLayerStyle>();
   for (let index = 0; index < ordered.length; index++) {
     const piece = ordered[index];
-    const above = ordered.slice(index + 1);
+    const above = claims
+      ? covering[index].map((upper) => ordered[upper])
+      : ordered.slice(index + 1);
     const runs = depths[index] > 0 ? outlineRuns(piece, above) : [];
     const visible =
       input.mode === 'thumb' || depths[index] === 0
@@ -291,7 +307,10 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
     const T = input.T.get(mark.piece);
     if (pieceIndex == null || !T) continue;
     const at = apply(T, mark.point);
-    const isCovered = ordered.slice(pieceIndex + 1).some((piece) => pointInPiece(at, piece));
+    const above = claims
+      ? covering[pieceIndex].map((upper) => ordered[upper])
+      : ordered.slice(pieceIndex + 1);
+    const isCovered = above.some((piece) => pointInPiece(at, piece));
     const draw: MarkLayerStyle['draw'] =
       mark.kind === 'buttonhole'
         ? 'solid'
