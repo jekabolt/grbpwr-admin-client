@@ -386,7 +386,16 @@ function markAnswer(
     if (!r.ok) return { ok: false, why: r.why };
     const m0 = t.members[0];
     const label = f === 'internal' ? sizes[m0.k].internal[m0.i]?.label : undefined;
-    adds.push(...r.add.map((x) => ({ ...x, ...(label ? { label } : {}) })));
+    // a drawn mark's form (a circle of this diameter) carries to its placed copies
+    const drawn = f === 'drills' ? sizes[m0.k].drills[m0.i] : undefined;
+    adds.push(
+      ...r.add.map((x) => ({
+        ...x,
+        ...(label ? { label } : {}),
+        ...(drawn?.form ? { form: drawn.form } : {}),
+        ...(drawn?.sizeMm ? { sizeMm: drawn.sizeMm } : {}),
+      })),
+    );
   }
   const out = sizes.map((s, k) => {
     const mine = adds.filter((x) => x.k === k);

@@ -3,8 +3,8 @@
 // deterministic; `golden-min.dxf` is the structural fixture (scripts/pattern-import/f6-entry.ts).
 
 import type { PtMm } from '../types';
-import type { PlannedBlock } from './plan';
-import { DRILL_SQUARE_MM } from './plan';
+import type { PlannedBlock, PlannedDrill } from './plan';
+import { DRILL_CIRCLE_SEGMENTS, DRILL_SQUARE_MM } from './plan';
 import { type Tag, hex, num, serialize, txt } from './format';
 
 /** CLO's 8 layers (name, ACI colour). */
@@ -31,6 +31,19 @@ export function drillSquare(c: PtMm, s = DRILL_SQUARE_MM): PtMm[] {
     { x: c.x - s / 2, y: c.y + s / 2 },
   ];
 }
+
+/** A button circle as CLO draws it: a 20-gon from the top, counter-clockwise. */
+export function drillCircle(c: PtMm, dMm: number, n = DRILL_CIRCLE_SEGMENTS): PtMm[] {
+  const r = dMm / 2;
+  return Array.from({ length: n }, (_, i) => {
+    const a = Math.PI / 2 + (2 * Math.PI * i) / n;
+    return { x: c.x + r * Math.cos(a), y: c.y + r * Math.sin(a) };
+  });
+}
+
+/** The closed layer-8 polyline of a drill / button mark. */
+export const drillMark = (d: PlannedDrill): PtMm[] =>
+  d.form === 'circle' ? drillCircle(d.at, d.sizeMm) : drillSquare(d.at);
 
 export function labelLines(b: PlannedBlock): string[] {
   const lines = [
@@ -316,7 +329,7 @@ export function writeR2000(blocks: readonly PlannedBlock[]): string {
     lw(o, '1', b.cut, true); // final cutting line
     for (const loop of b.cutLoops) lw(o, '1', loop, true);
     for (const ip of b.internal) lw(o, '8', ip.pts, ip.closed);
-    for (const d of b.drills) lw(o, '8', drillSquare(d), true);
+    for (const d of b.drills) lw(o, '8', drillMark(d), true);
     if (b.grain) lw(o, '7', [b.grain.tail, b.grain.tip, b.grain.barb], false);
     for (const n of b.notches) {
       ent('LINE', o, '4', 'AcDbLine');

@@ -359,6 +359,8 @@ function candidateOf(
     features.push({
       kind: 'drill',
       at: d.at,
+      form: d.form,
+      ...(d.sizeMm > 0 ? { sizeMm: d.sizeMm } : {}),
       origin: 'detected',
       ranges: [range(d.path)],
       confidence: 1,

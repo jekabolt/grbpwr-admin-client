@@ -59,11 +59,15 @@ export const GRAIN_SHAFT_MM = 180;
 export const GRAIN_BARB_BACK_MM = 27;
 export const GRAIN_BARB_SIDE_MM = 13.5;
 export const DRILL_SQUARE_MM = 10;
+/** A button mark is written as CLO draws it: a closed 20-gon of the button's diameter. */
+export const DRILL_CIRCLE_SEGMENTS = 20;
 export const LAYOUT_GAP_MM = 50;
 export const LAYOUT_ROW_MAX_MM = 4000;
 export const UNI_TOKEN = 'UNI';
 
 export type PlannedNotch = { a: PtMm; b: PtMm; depthMm: number; angleDeg: number };
+/** A drill / button mark: a circle keeps the diameter it was drawn with; anything else is the square. */
+export type PlannedDrill = { at: PtMm; form: 'square' | 'circle' | 'point'; sizeMm: number };
 export type PlannedGrain = { tail: PtMm; tip: PtMm; barb: PtMm; u: PtMm };
 
 export type PlannedBlock = {
@@ -97,7 +101,7 @@ export type PlannedBlock = {
    * is only a reference (layer 8): a mirror line there would double the piece.
    */
   foldIsMirror: boolean;
-  drills: PtMm[];
+  drills: PlannedDrill[];
   grain: PlannedGrain | null;
   notches: PlannedNotch[];
   /** Source frame → written frame (translation, possibly after a derived mirror). */
@@ -453,7 +457,11 @@ export function planBlocks(
         internal,
         foldLines,
         foldIsMirror,
-        drills: s.drills.map((d) => d.at),
+        drills: s.drills.map((d) => ({
+          at: d.at,
+          form: d.form ?? 'square',
+          sizeMm: d.form === 'circle' && d.sizeMm ? d.sizeMm : DRILL_SQUARE_MM,
+        })),
         grain,
         notches,
         transform: compose(T, srcT),

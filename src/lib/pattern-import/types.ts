@@ -1459,6 +1459,13 @@ export type NotchFeature = FeatureBase & {
 export type DrillFeature = FeatureBase & {
   kind: 'drill';
   at: PtMm;
+  /**
+   * How the source drew the mark (the DXF reader): CLO's 10 mm square for a drill hole, a circle
+   * (20-gon) of `sizeMm` across for a button, a bare point. Absent (a PDF, a derived mark) — written
+   * as the default square. A circle is written back as a circle of its own diameter.
+   */
+  form?: 'square' | 'circle' | 'point';
+  sizeMm?: number;
   /** GRADE P1: not drawn in this size — placed by the operator's "in every size" at its graded place */
   graded?: { from: string[]; answered?: boolean };
 };
