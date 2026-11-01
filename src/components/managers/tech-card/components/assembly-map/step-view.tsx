@@ -25,10 +25,16 @@ export const mapStepPictureOf = (
 ): SurfacePicture | null => stepPictureOf(results, index);
 
 function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
-  const lengthOf = (id: string, evidence?: number) =>
-    evidence ?? resolveEdge(id, read.geoms)?.len ?? null;
-  const a = lengthOf(seam.a, seam.evidence?.aLenMm);
-  const b = lengthOf(seam.b, seam.evidence?.bLenMm);
+  // A side sewn along several runs (upper + main front edge) is as long as all its runs.
+  const lengthOf = (ids: readonly string[], evidence?: number) => {
+    if (evidence != null) return evidence;
+    const lens = ids.map((id) => resolveEdge(id, read.geoms)?.len);
+    return lens.every((len) => len != null) ? lens.reduce((sum, len) => sum! + len!, 0)! : null;
+  };
+  const aIds = seam.aParts?.length ? seam.aParts : [seam.a];
+  const bIds = seam.bParts?.length ? seam.bParts : [seam.b];
+  const a = lengthOf(aIds, seam.evidence?.aLenMm);
+  const b = lengthOf(bIds, seam.evidence?.bLenMm);
   const facts: string[] = [];
   if (a != null && b != null && Math.round(a) !== Math.round(b)) {
     facts.push(`${Math.round(a)} / ${Math.round(b)} mm`);
@@ -38,8 +44,8 @@ function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
     const geom = read.geoms.get(pieceKeyOf(id));
     return geom ? edgesOf(id, geom).reduce((total, edge) => total + edge.notchesMm.length, 0) : 0;
   };
-  const na = notchCount(seam.a);
-  const nb = notchCount(seam.b);
+  const na = aIds.reduce((total, id) => total + notchCount(id), 0);
+  const nb = bIds.reduce((total, id) => total + notchCount(id), 0);
   const matched =
     seam.evidence?.notchesMatched ??
     ((seam.evidence?.notchScore ?? 0) >= 0.7 ? Math.min(na, nb) : 0);
