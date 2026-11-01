@@ -1,7 +1,7 @@
 import type { StepResult } from './step-result';
 
-/** Cards without any owner row: owner 01.11 wants them apart like the editor; on once their tests follow. */
-export const ROWLESS_CARDS_FOLLOW_EDITOR = false;
+/** Cards without any owner row draw the same apart-piece result as the editor. */
+export const ROWLESS_CARDS_FOLLOW_EDITOR = true;
 
 /** One switch for every non-canvas view that may draw the shared sequential step result. */
 export function drawsStepResult(

@@ -293,7 +293,10 @@ export function StepResultUnitPicturesProvider({ children }: { children: ReactNo
     for (const [unit, index] of latest) {
       const result = results[index];
       if (!result || !drawsStepResult(results, index)) continue;
-      const picture = unionPictureOfLayout(result.layout, geoms, result.layers);
+      const picture = unionPictureOfLayout(result.layout, geoms, result.layers, {
+        lower: result.lower,
+        stacked: result.stacked,
+      });
       if (!picture.shapes.length) continue;
       next.set(unit, picture);
       changed = true;

@@ -18,14 +18,6 @@ export const LOWER_LAYER_STROKE = '#8a8a8a';
 export const LOWER_LAYER_STROKE_SCALE = 0.9;
 export const STACKED_TWIN_OFFSET_MM = 3;
 
-export type LayerBox = {
-  key: string;
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-};
-
 /** Bottom-to-top result order, with collapsed stack followers placed below their visible leader. */
 export function orderedLayerKeys(
   layers: readonly string[],
@@ -45,24 +37,16 @@ export function orderedLayerKeys(
   return ordered;
 }
 
-/** A piece is lower only when a later result layer overlaps its transformed bounding box. */
-export function lowerLayerKeys(layers: readonly string[], boxes: readonly LayerBox[]): string[] {
-  const byKey = new Map(boxes.map((box) => [box.key, box]));
-  const ordered = layers.filter((key) => byKey.has(key));
-  return ordered.filter((key, index) => {
-    const box = byKey.get(key)!;
-    return ordered.slice(index + 1).some((later) => {
-      const above = byKey.get(later)!;
-      return box.x0 < above.x1 && above.x0 < box.x1 && box.y0 < above.y1 && above.y0 < box.y1;
-    });
-  });
-}
-
 type StepLayoutPicture = {
   T: ReadonlyMap<string, Affine>;
   stacked: readonly (readonly string[])[];
   onRuns: readonly string[];
   hung?: readonly (readonly [piece: string, host: string])[];
+};
+
+export type OwnerLayerClaims = {
+  lower: readonly string[];
+  stacked: readonly (readonly [under: string, over: string])[];
 };
 
 const layoutBox = (
@@ -89,6 +73,7 @@ export function unionPictureOfLayout(
   layout: StepLayoutPicture,
   geoms: ReadonlyMap<string, PieceGeom>,
   layers: readonly string[],
+  claims: OwnerLayerClaims,
 ): UnionPicture {
   const ordered = orderedLayerKeys(layers, layout.stacked, [...layout.T.keys()]).filter(
     (piece) => layout.T.has(piece) && geoms.has(piece),
@@ -120,20 +105,8 @@ export function unionPictureOfLayout(
     underlay: [],
     overlap: 0,
   };
-  const boxes = placements.map((placement): LayerBox => {
-    const points = geoms.get(placement.pieceKey)!.rs.map((point) => apply(placement.T, point));
-    const xs = points.map(([x]) => x);
-    const ys = points.map(([, y]) => y);
-    return {
-      key: placement.pieceKey,
-      x0: Math.min(...xs),
-      y0: Math.min(...ys),
-      x1: Math.max(...xs),
-      y1: Math.max(...ys),
-    };
-  });
-  const lower = new Set(lowerLayerKeys(ordered, boxes));
-  twinLabels.forEach((_, piece) => lower.add(piece));
+  const claimedUnder = new Set(claims.stacked.map(([under]) => under));
+  const lower = new Set(claims.lower.filter((piece) => claimedUnder.has(piece)));
   const picture = unionPicture(union, geoms);
   if (!lower.size) return picture;
   return {

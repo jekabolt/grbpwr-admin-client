@@ -10,7 +10,6 @@ import {
   LOWER_LAYER_STROKE,
   LOWER_LAYER_STROKE_SCALE,
   STACKED_TWIN_OFFSET_MM,
-  lowerLayerKeys,
   orderedLayerKeys,
   resolveEdge,
 } from 'lib/assembly-skeleton/union';
@@ -31,6 +30,7 @@ import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
 import { PAIR_INK, pairNo } from './palette';
 import { stepHandsOf, type StepHands } from './step-hand';
+import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
@@ -688,6 +688,44 @@ const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
 const TWIN_NUMBER_PX = 10;
 
+export function spreadGlyphFallbacks(ring: readonly Pt2[], count: number): Pt2[] {
+  if (!count) return [];
+  const box = boxOf(ring);
+  const safe = spotInside(ring);
+  const horizontal = box.x1 - box.x0 >= box.y1 - box.y0;
+  const section = (value: number): Pt2 | null => {
+    const cuts: number[] = [];
+    for (let index = 0; index < ring.length; index++) {
+      const a = ring[index];
+      const b = ring[(index + 1) % ring.length];
+      const aAxis = horizontal ? a[0] : a[1];
+      const bAxis = horizontal ? b[0] : b[1];
+      if (aAxis === bAxis || value < Math.min(aAxis, bAxis) || value >= Math.max(aAxis, bAxis))
+        continue;
+      const share = (value - aAxis) / (bAxis - aAxis);
+      cuts.push(
+        (horizontal ? a[1] : a[0]) +
+          share * ((horizontal ? b[1] : b[0]) - (horizontal ? a[1] : a[0])),
+      );
+    }
+    cuts.sort((a, b) => a - b);
+    let best: [number, number] | null = null;
+    for (let index = 0; index + 1 < cuts.length; index += 2)
+      if (!best || cuts[index + 1] - cuts[index] > best[1] - best[0])
+        best = [cuts[index], cuts[index + 1]];
+    if (!best) return null;
+    const cross = (best[0] + best[1]) / 2;
+    return horizontal ? [value, cross] : [cross, value];
+  };
+  return Array.from({ length: count }, (_, index) => {
+    const share = (index + 1) / (count + 1);
+    const value = horizontal
+      ? box.x0 + (box.x1 - box.x0) * share
+      : box.y0 + (box.y1 - box.y0) * share;
+    return section(value) ?? safe;
+  });
+}
+
 /** A fixed-pixel label near the offset twin's lower-right corner, pulled inward until it is safe. */
 const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
   const box = boxOf(ring);
@@ -751,6 +789,8 @@ export function StepPictureSvg({
   look,
   layout,
   layers,
+  lower,
+  stacked,
   geoms,
   innerLines,
   marks = [],
@@ -774,6 +814,10 @@ export function StepPictureSvg({
   layout: StepLayout;
   /** Authoritative bottom-to-top owner order. Omitted pictures keep the legacy drawing byte-for-byte. */
   layers?: readonly string[];
+  /** Pieces explicitly claimed below another piece by the shared result. */
+  lower?: readonly string[];
+  /** Explicit [under, over] claims from the shared result. */
+  stacked?: readonly (readonly [string, string])[];
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines?: ReadonlyMap<string, Pt2[][]>;
   marks?: readonly EdgeMark[];
@@ -794,6 +838,19 @@ export function StepPictureSvg({
   className?: string;
 }) {
   const L = LOOK[look];
+  const contextResults = useStepResults();
+  const contextResult = useMemo(
+    () =>
+      layers
+        ? contextResults?.find(
+            (result) =>
+              result.layout === layout || result.layout.T === layout.T || result.layers === layers,
+          )
+        : undefined,
+    [contextResults, layers, layout],
+  );
+  const resultLower = lower ?? contextResult?.lower ?? [];
+  void stacked;
   const twinNumbers = useMemo(() => {
     const numbers = new Map<string, number>();
     layout.stacked.forEach((stack) =>
@@ -851,13 +908,7 @@ export function StepPictureSvg({
         : [],
     [layers, layout.stacked, pieces],
   );
-  const ownedLowerKeys = useMemo(() => {
-    if (!layers) return new Set<string>();
-    const boxes = pieces.map((piece) => ({ key: piece.key, ...boxOf(piece.ring) }));
-    const lower = new Set(lowerLayerKeys(ownedOrder, boxes));
-    twinNumbers.forEach((_, piece) => lower.add(piece));
-    return lower;
-  }, [layers, ownedOrder, pieces, twinNumbers]);
+  const ownedLowerKeys = useMemo(() => new Set(resultLower), [resultLower]);
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
     return ownedOrder.flatMap((key) => {
@@ -1064,45 +1115,47 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
-  const actionGlyphSpots = actionGlyphs.flatMap((glyph) => {
+  const glyphCandidates = actionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
     if (!T || !host) return [];
     const wanted = toPx(fit, apply(T, glyph.point));
-    const hostBox = boxOf(host.ring);
-    const margin = glyph.kind === 'label' ? 9 : glyph.kind === 'buttonhole' ? 7 : 4.2;
-    const fits = (point: Pt2) =>
-      insideRing(point, host.ring) &&
-      point[0] >= hostBox.x0 + margin &&
-      point[0] <= hostBox.x1 - margin &&
-      point[1] >= hostBox.y0 + margin &&
-      point[1] <= hostBox.y1 - margin;
-    const safe = spotInside(host.ring);
-    let at = wanted;
-    if (host.key !== glyph.piece || !fits(at)) {
-      at = safe;
-      for (let step = 1; step <= 10; step++) {
-        const share = step / 10;
-        const candidate: Pt2 = [
-          wanted[0] + (safe[0] - wanted[0]) * share,
-          wanted[1] + (safe[1] - wanted[1]) * share,
-        ];
-        if (fits(candidate)) {
-          at = candidate;
-          break;
-        }
-      }
-    }
     const direction = glyph.direction ?? ([1, 0] as Pt2);
     const toward = toPx(
       fit,
       apply(T, [glyph.point[0] + direction[0], glyph.point[1] + direction[1]]),
     );
-    const dx = toward[0] - at[0];
-    const dy = toward[1] - at[1];
+    const dx = toward[0] - wanted[0];
+    const dy = toward[1] - wanted[1];
     const length = Math.hypot(dx, dy) || 1;
-    return [{ glyph, at, direction: [dx / length, dy / length] as Pt2 }];
+    const onDrawing = pieces.some((piece) => insideRing(wanted, piece.ring));
+    return [
+      {
+        glyph,
+        host,
+        wanted,
+        fallback: !onDrawing,
+        direction: [dx / length, dy / length] as Pt2,
+      },
+    ];
   });
+  const fallbackById = new Map<string, Pt2>();
+  const fallbacksByHost = new Map<string, typeof glyphCandidates>();
+  for (const candidate of glyphCandidates) {
+    if (!candidate.fallback) continue;
+    const group = fallbacksByHost.get(candidate.host.key) ?? [];
+    group.push(candidate);
+    fallbacksByHost.set(candidate.host.key, group);
+  }
+  for (const group of fallbacksByHost.values()) {
+    const spots = spreadGlyphFallbacks(group[0].host.ring, group.length);
+    group.forEach((candidate, index) => fallbackById.set(candidate.glyph.id, spots[index]));
+  }
+  const actionGlyphSpots = glyphCandidates.map((candidate) => ({
+    glyph: candidate.glyph,
+    at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
+    direction: candidate.direction,
+  }));
   const hideCrowdedLabels = look === 'canvas' || look === 'result';
   const pieceSize = new Map(
     pieces.map((piece) => {
@@ -1397,6 +1450,8 @@ export function StepPictureSvg({
               data-asm-piece={glyph.piece}
               data-asm-x={at[0]}
               data-asm-y={at[1]}
+              data-asm-dx={direction[0]}
+              data-asm-dy={direction[1]}
             />
           );
         }
@@ -1487,7 +1542,7 @@ export function StepPictureSvg({
           ) : null;
         })}
       {layers &&
-        ownedLower.flatMap((piece) => {
+        orderedOwnedPieces.flatMap((piece) => {
           const number = twinNumbers.get(piece.key);
           if (!number) return [];
           const at = twinNumberSpot(piece.ring);

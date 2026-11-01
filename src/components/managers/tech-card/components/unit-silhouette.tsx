@@ -191,7 +191,7 @@ function LowerLayerUnitShape({
 }
 
 function UnitPictureShape(props: ComponentProps<typeof UnitShape>) {
-  return props.picture.lowerLayers?.length ? (
+  return props.picture.lowerLayers?.length || Object.keys(props.picture.twinLabels ?? {}).length ? (
     <LowerLayerUnitShape {...props} />
   ) : (
     <UnitShape {...props} />

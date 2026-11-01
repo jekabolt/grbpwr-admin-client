@@ -42,6 +42,10 @@ import {
   opIconInputOf,
   type OpIcon,
 } from 'components/managers/tech-card/op-icons';
+import {
+  rowTargetsOfAnchor,
+  storedSeamSides,
+} from 'components/managers/tech-card/components/step-seams/step-rows';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
@@ -68,7 +72,11 @@ import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
 import { machineText, operationVerb, pressEquipmentText } from './i18n/vocabulary';
-import { garmentAssemblyOfCard, type CardSeamGeometry } from '../components/card-seam-graph';
+import {
+  garmentAssemblyOfCard,
+  seamRowsOfCard,
+  type CardSeamGeometry,
+} from '../components/card-seam-graph';
 import type { GarmentAssembly } from '../components/garment-assembly';
 
 export type Pt = [number, number];
@@ -2618,30 +2626,116 @@ function fallbackPlacements(
   }));
 }
 
+/** The closest persisted seam rows upstream of one non-join operation, per input-unit branch. */
+function actionOwnerRows(
+  op: Op,
+  opIndex: number,
+  ops: readonly Op[],
+  rows: ReadonlyMap<string, StoredSeam>,
+): StoredSeam[] {
+  const rowsOf = (candidate: Op) =>
+    (candidate.raw.seamKeys ?? []).flatMap((key) => {
+      const row = rows.get(key);
+      return row ? [row] : [];
+    });
+  const own = rowsOf(op);
+  if (own.length) return own;
+
+  const nearestForUnit = (unit: string, before: number, seen: Set<string>): StoredSeam[] => {
+    const visit = `${unit}\u0000${before}`;
+    if (seen.has(visit)) return [];
+    seen.add(visit);
+    let producer = -1;
+    for (let index = before - 1; index >= 0; index--)
+      if (ops[index].out === unit) {
+        producer = index;
+        break;
+      }
+    if (producer < 0) return [];
+    const direct = rowsOf(ops[producer]);
+    if (direct.length) return direct;
+    return ops[producer].ins.flatMap((input) =>
+      input.kind === 'unit' ? nearestForUnit(input.key, producer, seen) : [],
+    );
+  };
+
+  const found = op.ins.flatMap((input) =>
+    input.kind === 'unit' ? nearestForUnit(input.key, opIndex, new Set()) : [],
+  );
+  return [...new Map(found.map((row) => [row.seamKey, row])).values()];
+}
+
+function actionPartOfTarget(
+  target: string,
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart | null {
+  const inner = /^(.*):i(\d+)$/.exec(target);
+  if (inner) {
+    const piece = pieces.get(inner[1]);
+    const pts = piece?.inner[Number(inner[2])] ?? [];
+    if (!piece || pts.length < 2) return null;
+    return {
+      piece: piece.key,
+      pts: [...pts],
+      lenMm: polyLen(pts),
+      share: 1,
+      turn: turnOf(pts),
+    };
+  }
+  const split = target.lastIndexOf('#');
+  const piece = split >= 0 ? pieces.get(target.slice(0, split)) : undefined;
+  const edge = piece?.geom.edges.find((candidate) => candidate.id === target);
+  if (!piece || !edge?.pts.length) return null;
+  const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+  return {
+    piece: piece.key,
+    pts,
+    lenMm: polyLen(pts),
+    share: 1,
+    turn: turnOf(pts),
+    edgeId: edge.id,
+  };
+}
+
+/** Real piece-coordinate runs named by persisted owner rows, never inferred seam history. */
+function actionPartsOfRows(
+  rows: readonly StoredSeam[],
+  pieces: ReadonlyMap<string, AsmPiece>,
+): SeamPart[] {
+  const targets = rows.flatMap((row) => {
+    const sides = storedSeamSides(row);
+    if (row.kind !== 'surface') return [...sides.a, ...sides.b];
+    const laidEdges = row.sideB
+      .flatMap(rowTargetsOfAnchor)
+      .filter((target) => !/:i\d+$/.test(target));
+    return laidEdges.length
+      ? laidEdges
+      : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
+  });
+  return [...new Set(targets)].flatMap((target) => {
+    const part = actionPartOfTarget(target, pieces);
+    return part ? [part] : [];
+  });
+}
+
 function buildActions(
   ops: readonly Op[],
   pieces: ReadonlyMap<string, AsmPiece>,
   targets: ReadonlyMap<number, Item[]>,
-  targetSeams: ReadonlyMap<number, AsmSeam[]>,
+  rows: ReadonlyMap<string, StoredSeam>,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const usedMarks = new Set<string>();
-  for (const op of ops) {
+  for (const [opIndex, op] of ops.entries()) {
     if (op.join) continue;
     const items = targets.get(op.n) ?? [];
     let placements = placementMarks(op, pieces, items, usedMarks);
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
-    const history = targetSeams.get(op.n) ?? [];
-    const terms = opTerms(op);
-    const historyFirst =
-      op.tech === 'topstitch' || op.tech === 'pressSide' || /lining|other/.test(terms);
-    let edgeParts = historyFirst
-      ? [...(history[history.length - 1]?.a ?? []), ...(history[history.length - 1]?.b ?? [])]
-      : [];
-    if (!edgeParts.length && ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech))
-      edgeParts = bestZoneParts(pieces, items, terms);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
+    const edgeParts = edgeOp
+      ? actionPartsOfRows(actionOwnerRows(op, opIndex, ops, rows), pieces)
+      : [];
     actions.set(op.n, {
       n: op.n,
       tech: op.tech,
@@ -3076,15 +3170,8 @@ export function deriveAssembly(
         return [op.n, stored.length ? stored : garmentSeams.get(op.n) ?? []] as const;
       }),
   );
-  const { cards, units, targets, targetSeams } = buildCards(
-    ops,
-    bound,
-    input.pieces,
-    gapSink,
-    t,
-    !garment,
-  );
-  const actions = buildActions(ops, input.pieces, targets, targetSeams);
+  const { cards, units, targets } = buildCards(ops, bound, input.pieces, gapSink, t, !garment);
+  const actions = buildActions(ops, input.pieces, targets, seamRowsOfCard(resolvedInput.techCard));
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {

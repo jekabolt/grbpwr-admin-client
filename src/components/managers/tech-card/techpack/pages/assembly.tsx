@@ -38,6 +38,7 @@ import {
 import {
   OWNER_FIT,
   stepResults,
+  type StepResult,
 } from 'components/managers/tech-card/components/step-seams/step-result';
 import {
   drawsStepResult,
@@ -123,7 +124,11 @@ const CELL_PAD_X = 12;
 /** Edge letters in the table thumbnails: half the letter box, px. */
 const THUMB_BADGE_PX = 5.5;
 
-type ResultStepPicture = StepPicture & { resultLayers?: readonly string[] };
+export type ResultStepPicture = StepPicture & {
+  resultLayers?: readonly string[];
+  resultLower?: readonly string[];
+  resultStacked?: StepResult['stacked'];
+};
 
 type Row = AsmRow & {
   pic?: SvgMarkup;
@@ -3407,6 +3412,8 @@ export function editorOperationPictures(
             layoutLeaves: picture.leaves,
             layout,
             resultLayers: ownerResult.layers,
+            resultLower: ownerResult.lower,
+            resultStacked: ownerResult.stacked,
           });
           const output = operation.outputUnitKey?.trim();
           if (output) assembledByUnit.set(output, layout);
@@ -4159,6 +4166,8 @@ export function editorOperationPictures(
           input: new Map(ownerResult.layout.input),
         },
         resultLayers: ownerResult.layers,
+        resultLower: ownerResult.lower,
+        resultStacked: ownerResult.stacked,
       });
     });
     return pictures;
@@ -4180,32 +4189,6 @@ export function editorActionMarks(
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
   if (!action) return { lines: [], glyphs: [] };
   const lines: PictureActionLine[] = [];
-  const closestOutlinePoint = (piece: string, point: Pt2): Pt2 => {
-    const ring = geoms.get(piece)?.rs ?? [];
-    if (ring.length < 2) return point;
-    let closest = ring[0];
-    let best = Infinity;
-    for (let index = 0; index < ring.length; index++) {
-      const start = ring[index];
-      const end = ring[(index + 1) % ring.length];
-      const dx = end[0] - start[0];
-      const dy = end[1] - start[1];
-      const length2 = dx * dx + dy * dy;
-      const t = length2
-        ? Math.max(
-            0,
-            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
-          )
-        : 0;
-      const candidate: Pt2 = [start[0] + t * dx, start[1] + t * dy];
-      const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
-      if (distance < best) {
-        best = distance;
-        closest = candidate;
-      }
-    }
-    return closest;
-  };
   const offsetTowardCentre = (piece: string, points: readonly Pt2[], distance: number) => {
     const geom = geoms.get(piece);
     if (!geom) return [...points];
@@ -4219,7 +4202,7 @@ export function editorActionMarks(
     });
   };
   action.edgeParts.forEach((part, index) => {
-    const points = part.pts.map(([x, y]) => closestOutlinePoint(part.piece, [x, -y]));
+    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
     if (!points.length) return;
     if (action.tech === 'topstitch') {
       lines.push({
@@ -4366,6 +4349,8 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           look='print'
           layout={r.editorPic.layout}
           layers={r.editorPic.resultLayers}
+          lower={r.editorPic.resultLower}
+          stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           marks={r.editorPic.marks.map((mark) => ({ ...mark, tone: 'stored' }))}

@@ -23,11 +23,10 @@ export {
   LOWER_LAYER_STROKE,
   LOWER_LAYER_STROKE_SCALE,
   STACKED_TWIN_OFFSET_MM,
-  lowerLayerKeys,
   orderedLayerKeys,
   unionPictureOfLayout,
   unitLeaves,
   unitPictures,
-  type LayerBox,
+  type OwnerLayerClaims,
   type UnitStep,
 } from './unit-pictures';
