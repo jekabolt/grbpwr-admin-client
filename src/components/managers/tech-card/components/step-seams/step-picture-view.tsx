@@ -29,6 +29,7 @@ import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
+import { buttonholePictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { withPoseHosts, type PosePin } from './step-pose';
@@ -81,6 +82,9 @@ export type SceneOp = FormOpLike & {
   seamClass?: string;
   topstitchMode?: string;
   work?: string;
+  cutLengthMm?: string;
+  buttonholeOrientation?: string;
+  placementCount?: number;
 };
 
 function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
@@ -99,6 +103,9 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       seamClass: op?.seamClass,
       topstitchMode: op?.topstitchMode,
       work: op?.work,
+      cutLengthMm: op?.cutLengthMm,
+      buttonholeOrientation: op?.buttonholeOrientation,
+      placementCount: op?.placementCount,
       outputUnitName: op?.outputUnitName,
     })),
   );
@@ -640,6 +647,8 @@ export type PictureActionGlyph = {
   label?: string;
   /** A press side read on the picture: the arrow keeps the seam normal, signed up/down/in/out. */
   aim?: 'up' | 'down' | 'centre' | 'away';
+  /** Physical slit length; buttonholes default to 12 mm. */
+  lengthMm?: number;
 };
 
 type Look = {
@@ -889,6 +898,7 @@ export function StepPictureSvg({
   className?: string;
 }) {
   const L = LOOK[look];
+  const form = useFormContext<TechCardFormData>();
   const contextResults = useStepResults();
   const contextResult = useMemo(
     () =>
@@ -900,6 +910,24 @@ export function StepPictureSvg({
         : undefined,
     [contextResults, layers, layout],
   );
+  const operation = contextResult
+    ? (form?.getValues(`operations.${contextResult.opIndex}`) as ButtonholeOperation | undefined)
+    : undefined;
+  const automaticButtonholes = useMemo(
+    () =>
+      actionGlyphs.length ? [] : buttonholePictureGlyphs(operation, [...layout.T.keys()], geoms),
+    [actionGlyphs.length, operation, layout.T, geoms],
+  );
+  const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
+    ? actionGlyphs
+    : automaticButtonholes.map((glyph) => ({
+        id: glyph.id,
+        piece: glyph.piece,
+        point: glyph.point,
+        direction: glyph.direction,
+        lengthMm: glyph.lengthMm,
+        kind: 'buttonhole',
+      }));
   const resultLower = lower ?? contextResult?.lower ?? [];
   void stacked;
   const twinNumbers = useMemo(() => {
@@ -924,7 +952,7 @@ export function StepPictureSvg({
     return points.length ? boxOf(points) : layout.bbox;
   }, [geoms, layers, layout, look, twinNumbers]);
   const fitBounds = bounds ?? layeredBounds ?? ownBounds;
-  const fitPad = actionGlyphs.length ? Math.max(pad, 7) : pad;
+  const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
   const vy = view?.y ?? 0;
@@ -1037,11 +1065,19 @@ export function StepPictureSvg({
       if (!T) continue;
       (innerLines?.get(p.key) ?? []).forEach((l, k) => {
         if (l.length < 2 || (look === 'canvas' && spanMm(l) >= DOOR_SPAN_MM)) return;
+        const lineBox = boxOf(l);
+        const replaced = automaticButtonholes.some(
+          (glyph) =>
+            glyph.piece === p.key &&
+            Math.abs((lineBox.x0 + lineBox.x1) / 2 - glyph.markBox.cx) <= 2 &&
+            Math.abs((lineBox.y0 + lineBox.y1) / 2 - glyph.markBox.cy) <= 2,
+        );
+        if (replaced) return;
         out.push({ id: innerId(p.key, k), d: pathOf(l.map((q) => toPx(fit, apply(T, q)))) });
       });
     }
     return out;
-  }, [look, visibleBase, layout, innerLines, fit]);
+  }, [look, visibleBase, layout, innerLines, fit, automaticButtonholes]);
 
   const doors = useMemo(() => {
     if (!onPick && look !== 'canvas') return [];
@@ -1171,7 +1207,7 @@ export function StepPictureSvg({
     const box = boxOf(pieces.flatMap((piece) => piece.ring));
     return [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
   })();
-  const glyphCandidates = actionGlyphs.flatMap((glyph) => {
+  const glyphCandidates = drawnActionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
     if (!T || !host) return [];
@@ -1577,14 +1613,15 @@ export function StepPictureSvg({
           );
         }
         if (glyph.kind === 'buttonhole') {
-          const half = 7;
+          const lengthMm = glyph.lengthMm && glyph.lengthMm > 0 ? glyph.lengthMm : 12;
+          const half = (lengthMm * mmPx) / 2;
           return (
             <path
               key={`action-glyph:${glyph.id}`}
               d={`M${at[0] - direction[0] * half} ${at[1] - direction[1] * half}L${at[0] + direction[0] * half} ${at[1] + direction[1] * half}`}
               fill='none'
               stroke={INK}
-              strokeWidth={L.mark}
+              strokeWidth={L.hair}
               strokeLinecap='round'
               pointerEvents='none'
               data-asm-mark='buttonhole'
@@ -1593,6 +1630,7 @@ export function StepPictureSvg({
               data-asm-y={at[1]}
               data-asm-dx={direction[0]}
               data-asm-dy={direction[1]}
+              data-asm-length-mm={lengthMm}
             />
           );
         }

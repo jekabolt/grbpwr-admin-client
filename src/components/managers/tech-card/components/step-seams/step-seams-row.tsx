@@ -138,6 +138,8 @@ export function StepSeamsRow({ index }: { index: number }) {
               no={suggestions.length > 1 ? i : undefined}
               scene={scene}
               seams={proposalFrames[i] ?? storedFrame}
+              layout={ownedLayout}
+              layers={ownedLayers}
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
               dashed
               onOpen={cardId ? () => setOpenAt(i) : undefined}

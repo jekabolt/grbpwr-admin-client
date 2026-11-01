@@ -46,6 +46,11 @@ import {
   rowTargetsOfAnchor,
   storedSeamSides,
 } from 'components/managers/tech-card/components/step-seams/step-rows';
+import {
+  buttonholeDirection,
+  buttonholeLengthMm,
+  buttonholeOrientation,
+} from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
@@ -460,6 +465,7 @@ type PlacementGlyph = {
   kind: 'button' | 'buttonhole' | 'label';
   point: Pt;
   angleDeg: number;
+  lengthMm?: number;
 };
 
 export type AsmAction = {
@@ -2582,23 +2588,21 @@ function placementMarks(
   if (!selected) return [];
   const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
   const marks = selected.marks.slice(0, count || selected.marks.length);
-  const orientation = op.raw.fastening?.buttonholeOrientation ?? '';
   return marks.map((mark) => {
     used.add(mark.id);
     const first = mark.pts[0];
     const last = mark.pts[mark.pts.length - 1] ?? first;
     const measured = (Math.atan2(-(last[1] - first[1]), last[0] - first[0]) * 180) / Math.PI;
-    const angleDeg = orientation.includes('VERTICAL')
-      ? 90
-      : orientation.includes('HORIZONTAL')
-        ? 0
-        : measured;
+    const direction = buttonholeDirection(selected.piece.geom.rs, buttonholeOrientation(op.raw));
+    const angleDeg =
+      kind === 'buttonhole' ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI : measured;
     return {
       id: mark.id,
       piece: selected.item.p,
       kind,
       point: [mark.bbox.cx, -mark.bbox.cy],
       angleDeg,
+      lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
     };
   });
 }
@@ -2620,12 +2624,15 @@ function fallbackPlacements(
   const start = (box.y0 + box.y1 - pitch * (count - 1)) / 2;
   const kind = op.tech === 'label' ? 'label' : op.tech;
   if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
+  const direction = buttonholeDirection(piece.geom.rs, buttonholeOrientation(op.raw));
+  const angleDeg = (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI;
   return Array.from({ length: count }, (_, index) => ({
     id: `proto-position-${op.n}-${index}`,
     piece: item.p,
     kind,
     point: [(box.x0 + box.x1) / 2, start + pitch * index] as Pt,
-    angleDeg: op.raw.fastening?.buttonholeOrientation?.includes('VERTICAL') ? 90 : 0,
+    angleDeg: kind === 'buttonhole' ? angleDeg : 0,
+    lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
   }));
 }
 
@@ -3527,11 +3534,17 @@ export function silhouetteSvg(
       const radius = 4.2 / fit;
       body += `<circle cx="${f2(x)}" cy="${f2(y)}" r="${f2(radius)}" class="tpa-s tpa-fw" stroke-width="${f2(ink)}" data-asm-mark="button" data-print-diameter-px="8.4"/><path d="M${f2(x - radius * 0.55)} ${f2(y)} H${f2(x + radius * 0.55)} M${f2(x)} ${f2(y - radius * 0.55)} V${f2(y + radius * 0.55)}" class="tpa-s tpa-fn" stroke-width="${f2(ink * 0.8)}"/>`;
     } else if (placement.kind === 'buttonhole') {
-      const half = 7 / fit;
       const radians = (placement.angleDeg * Math.PI) / 180;
-      const dx = Math.cos(radians) * half;
-      const dy = Math.sin(radians) * half;
-      body += `<path d="M${f2(x - dx)} ${f2(y - dy)} L${f2(x + dx)} ${f2(y + dy)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" data-asm-mark="buttonhole" data-print-length-px="14"/>`;
+      const raw: Pt = [Math.cos(radians), Math.sin(radians)];
+      const world: Pt = [
+        placement.item.T[0] * raw[0] + placement.item.T[2] * raw[1],
+        placement.item.T[1] * raw[0] + placement.item.T[3] * raw[1],
+      ];
+      const scale = Math.hypot(world[0], world[1]) || 1;
+      const half = (placement.lengthMm ?? 12) / 2;
+      const dx = (world[0] / scale) * half;
+      const dy = (world[1] / scale) * half;
+      body += `<path d="M${f2(x - dx)} ${f2(y - dy)} L${f2(x + dx)} ${f2(y + dy)}" class="tpa-s tpa-fn" stroke-width="${f2(hair)}" stroke-linecap="round" data-asm-mark="buttonhole" data-asm-length-mm="${f2(placement.lengthMm ?? 12)}"/>`;
     } else {
       const w = 18 / fit;
       const h = 11 / fit;

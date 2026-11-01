@@ -239,6 +239,7 @@ describe('StepPictureSvg action glyphs', () => {
       kind,
       point: [5, 10 + index * 11],
       direction: [1, 0],
+      lengthMm: kind === 'buttonhole' ? 12 : undefined,
     }));
   const renderNarrow = (glyphs: readonly PictureActionGlyph[]) =>
     renderToStaticMarkup(
@@ -265,6 +266,41 @@ describe('StepPictureSvg action glyphs', () => {
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
     expect(centres.every((match) => Math.abs(Number(match[3]) - 1) < 1e-9)).toBe(true);
     expect(centres.every((match) => Math.abs(Number(match[4])) < 1e-9)).toBe(true);
+    expect(markup.match(/data-asm-length-mm="12"/g)).toHaveLength(8);
+    expect(markup).not.toMatch(/mm²|мм²/);
+  });
+
+  it('uses the same buttonhole angle and scaled length on the editor canvas and PDF', () => {
+    const glyph = marks('buttonhole')[0];
+    const canvas = renderToStaticMarkup(
+      <StepPictureSvg
+        w={120}
+        h={140}
+        pad={4}
+        look='canvas'
+        layout={narrowLayout}
+        geoms={narrowGeoms}
+        actionGlyphs={[glyph]}
+      />,
+    );
+    const pdf = renderNarrow([glyph]);
+    const tag = (markup: string) =>
+      markup.match(/<path[^>]*data-asm-mark="buttonhole"[^>]*>/)?.[0] ?? '';
+    const direction = (markup: string) => [
+      Number(tag(markup).match(/data-asm-dx="([^"]+)"/)?.[1]),
+      Number(tag(markup).match(/data-asm-dy="([^"]+)"/)?.[1]),
+    ];
+    const segmentLength = (markup: string) => {
+      const path = tag(markup).match(/\sd="([^"]+)"/)?.[1] ?? '';
+      const values = (path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi) ?? []).map(Number);
+      expect(values, tag(markup)).toHaveLength(4);
+      return Math.hypot(values[2] - values[0], values[3] - values[1]);
+    };
+
+    expect(direction(canvas)).toEqual(direction(pdf));
+    expect(segmentLength(canvas)).toBeCloseTo(segmentLength(pdf), 8);
+    expect(tag(canvas)).toContain('stroke-width="0.8"');
+    expect(tag(pdf)).toContain('stroke-width="0.7"');
   });
 
   it('keeps eight narrow-host buttons on eight distinct marks', () => {

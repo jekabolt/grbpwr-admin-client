@@ -4253,6 +4253,7 @@ export function editorActionMarks(
       kind: placement.kind,
       point: [placement.point[0], -placement.point[1]],
       direction: [Math.cos(radians), -Math.sin(radians)],
+      lengthMm: placement.lengthMm,
     });
   });
   return { lines, glyphs };
