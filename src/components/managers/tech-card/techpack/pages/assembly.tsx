@@ -72,6 +72,15 @@ import {
 } from '../derive-assembly';
 import { gapHref, gapSection, gapSubjects, gapWhere } from '../gap-findings';
 import { gapKey, type Gap } from '../gaps';
+import {
+  normalIntoPiece,
+  pressMode,
+  pressScreenAim,
+  pressTowardPiece,
+  pressWord,
+  seamMidNormal,
+  type PressMode,
+} from '../press-arrows';
 import { BODY_PX, chunksOf, TechpackSheet } from '../sheet';
 import { own, useT, type PdfT } from '../i18n';
 const ASM_CSS = String.raw`
@@ -4189,6 +4198,8 @@ export function editorActionMarks(
 ): { lines: PictureActionLine[]; glyphs: PictureActionGlyph[] } {
   if (!action) return { lines: [], glyphs: [] };
   const lines: PictureActionLine[] = [];
+  const press =
+    action.tech === 'pressSide' || action.tech === 'press' ? pressMode(action.raw) : null;
   const offsetTowardCentre = (piece: string, points: readonly Pt2[], distance: number) => {
     const geom = geoms.get(piece);
     if (!geom) return [...points];
@@ -4215,21 +4226,13 @@ export function editorActionMarks(
       });
       return;
     }
-    if (action.tech === 'pressSide') {
-      const weight = 'ink' as const;
+    if (press) {
       lines.push({
         id: `${action.n}:${index}:press-edge`,
         piece: part.piece,
         points,
-        weight,
-        kind: 'press-side',
-      });
-      lines.push({
-        id: `${action.n}:${index}:press-offset`,
-        piece: part.piece,
-        points: offsetTowardCentre(part.piece, points, decimal(action.raw.seamAllowanceMm, 7)),
-        weight,
-        kind: 'press-side',
+        weight: 'ink',
+        kind: `press-${press}`,
       });
       return;
     }
@@ -4241,17 +4244,79 @@ export function editorActionMarks(
       kind: action.tech,
     });
   });
-  const glyphs = action.placements.map((placement): PictureActionGlyph => {
+  const glyphs: PictureActionGlyph[] = press ? pressArrowGlyphs(action, press, geoms) : [];
+  action.placements.forEach((placement) => {
     const radians = (placement.angleDeg * Math.PI) / 180;
-    return {
+    glyphs.push({
       id: placement.id,
       piece: placement.piece,
       kind: placement.kind,
       point: [placement.point[0], -placement.point[1]],
       direction: [Math.cos(radians), -Math.sin(radians)],
-    };
+    });
   });
   return { lines, glyphs };
+}
+
+/**
+ * Press arrows from each seam run's midpoint, square to the seam: open = one into each side, to one
+ * side = one toward the named side (into its piece; UP/DOWN/centre read on the picture; unnamed =
+ * into the run's own piece). Flat draws none. Piece geometry frame (mm, y up).
+ */
+function pressArrowGlyphs(
+  action: AsmAction,
+  press: PressMode,
+  geoms: ReadonlyMap<string, { rs: Pt2[] }>,
+): PictureActionGlyph[] {
+  if (press === 'flat') return [];
+  const toward = action.raw.press?.toward;
+  const label = pressWord(press, toward);
+  const aim = press === 'side' ? pressScreenAim(toward) : undefined;
+  const target =
+    press === 'side' && !aim ? pressTowardPiece(toward, action.partPieces ?? []) : undefined;
+  // The named piece's own runs say «into me» without reading across the seam.
+  const parts =
+    target && action.edgeParts.some((part) => part.piece === target)
+      ? action.edgeParts.filter((part) => part.piece === target)
+      : action.edgeParts;
+  return parts.flatMap((part, index) => {
+    const points = part.pts.map(([x, y]) => [x, -y] as Pt2);
+    const mid = seamMidNormal(points);
+    const ring = geoms.get(part.piece)?.rs;
+    if (!mid || !ring) return [];
+    const inward = normalIntoPiece(mid.at, mid.normal, ring);
+    const id = `${action.n}:${index}:press-arrow`;
+    if (press === 'open')
+      return [
+        {
+          id: `${id}:a`,
+          piece: part.piece,
+          kind: 'press-arrow',
+          point: mid.at,
+          direction: inward,
+          label,
+        },
+        {
+          id: `${id}:b`,
+          piece: part.piece,
+          kind: 'press-arrow',
+          point: mid.at,
+          direction: [-inward[0], -inward[1]],
+        },
+      ];
+    const across = target && target !== part.piece;
+    return [
+      {
+        id,
+        piece: part.piece,
+        kind: 'press-arrow',
+        point: mid.at,
+        direction: across ? [-inward[0], -inward[1]] : inward,
+        label,
+        aim,
+      },
+    ];
+  });
 }
 
 function pictureDimensions(orient: PrintOrient) {

@@ -312,7 +312,8 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
       : ordered.slice(pieceIndex + 1);
     const isCovered = above.some((piece) => pointInPiece(at, piece));
     const draw: MarkLayerStyle['draw'] =
-      mark.kind === 'buttonhole'
+      // A press arrow points at a seam, it is not a mark on the cloth: never covered.
+      mark.kind === 'buttonhole' || mark.kind === 'press-arrow'
         ? 'solid'
         : mark.kind === 'label'
           ? isCovered

@@ -68,6 +68,7 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
 import { partNoun, type PartNounId } from './i18n/part-nouns';
@@ -467,6 +468,8 @@ export type AsmAction = {
   raw: common_TechCardOperation;
   edgeParts: SeamPart[];
   placements: PlacementGlyph[];
+  /** Name and code of each piece of the owner seams (press arrows read the named side). */
+  partPieces?: PressPiece[];
   missing?: 'seam' | 'position';
 };
 
@@ -2733,15 +2736,32 @@ function buildActions(
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
-    const edgeParts = edgeOp
-      ? actionPartsOfRows(actionOwnerRows(op, opIndex, ops, rows), pieces)
-      : [];
+    // A flat press draws its seam only where an owner row names it; without one it stays bare
+    // (no «missing seam» — it never needed one).
+    const flatPress = op.tech === 'press' && pressMode(op.raw) !== null;
+    const ownerRows = edgeOp || flatPress ? actionOwnerRows(op, opIndex, ops, rows) : [];
+    const edgeParts = actionPartsOfRows(ownerRows, pieces);
+    // Both sides of the owner seams, so «to back» can find the back across the drawn run.
+    const seamPieces = ownerRows.flatMap((row) => {
+      const sides = storedSeamSides(row);
+      return [...sides.a, ...sides.b].map((target) => {
+        const inner = /^(.*):i\d+$/.exec(target);
+        return inner ? inner[1] : target.slice(0, Math.max(0, target.lastIndexOf('#')));
+      });
+    });
+    const partPieces = [
+      ...new Set([...edgeParts.map((part) => part.piece), ...seamPieces]),
+    ].flatMap((key) => {
+      const piece = pieces.get(key);
+      return piece ? [{ key, name: piece.name, code: piece.code }] : [];
+    });
     actions.set(op.n, {
       n: op.n,
       tech: op.tech,
       raw: op.raw,
       edgeParts,
       placements,
+      partPieces,
       missing:
         placementOp && !placements.length
           ? 'position'
@@ -3493,18 +3513,9 @@ export function silhouetteSvg(
       body += `<path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-dasharray="${f2(5 / fit)} ${f2(3 / fit)}" stroke-linecap="round"/>`;
       continue;
     }
-    if (action?.tech === 'pressSide') {
-      const allowance = num(action.raw.seamAllowanceMm) ?? 7;
-      const centre = centerOf(pieces, [path.item]);
-      const offset = path.points.map((point) => {
-        const direction = sub(centre, point);
-        const length = Math.hypot(direction[0], direction[1]) || 1;
-        return [
-          point[0] + (direction[0] / length) * allowance,
-          point[1] + (direction[1] / length) * allowance,
-        ] as Pt;
-      });
-      body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/><path d="${pathData(offset)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/>`;
+    if (action?.tech === 'pressSide' || action?.tech === 'press') {
+      // A press is drawn on its seam as one plain ink line; the arrows are the picture's own.
+      body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(ink)}" stroke-linecap="round"/>`;
       continue;
     }
     body += `<path d="${pathData(path.points)}" class="tpa-s tpa-fn" stroke-width="${f2(heavy)}" stroke-linecap="round" stroke-linejoin="round"/>`;

@@ -623,9 +623,13 @@ export type PictureActionGlyph = {
   piece: string;
   /** Piece geometry frame (mm, y up), before the picture layout affine. */
   point: Pt2;
-  kind: 'button' | 'buttonhole' | 'label';
-  /** Unit direction in the same piece frame; only a buttonhole reads it. */
+  kind: 'button' | 'buttonhole' | 'label' | 'press-arrow';
+  /** Unit direction in the same piece frame; a buttonhole's run, a press arrow's pointing. */
   direction?: Pt2;
+  /** A press arrow's small word beyond its tip («open», «to back»). */
+  label?: string;
+  /** A press side read on the picture: the arrow keeps the seam normal, signed up/down/in/out. */
+  aim?: 'up' | 'down' | 'centre' | 'away';
 };
 
 type Look = {
@@ -688,6 +692,42 @@ const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
 const FAINT = 'var(--color-borderColor)';
 const TWIN_NUMBER_PX = 10;
+
+/**
+ * A press arrow in screen px: shaft from just off the seam outward, an open chevron head, and the
+ * word's spot beyond the tip. ≈ 10 mm long at the picture's scale, clamped so it reads in print.
+ */
+export function pressArrowPath(
+  at: Pt2,
+  direction: Pt2,
+  mmPx: number,
+  look: { outline: number; font: number },
+) {
+  const length = Math.max(10, Math.min(18, 10 * mmPx));
+  const gap = Math.max(2, look.outline * 1.2);
+  const head = Math.max(3.5, length * 0.38);
+  const [dx, dy] = direction;
+  const start: Pt2 = [at[0] + dx * gap, at[1] + dy * gap];
+  const tip: Pt2 = [at[0] + dx * (gap + length), at[1] + dy * (gap + length)];
+  const cos = Math.cos(Math.PI / 4.5);
+  const sin = Math.sin(Math.PI / 4.5);
+  const wing = (side: number): Pt2 => [
+    tip[0] - head * (dx * cos - side * dy * sin),
+    tip[1] - head * (dy * cos + side * dx * sin),
+  ];
+  const left = wing(1);
+  const right = wing(-1);
+  const f = (value: number) => +value.toFixed(2);
+  const reach = look.font * 0.5 + 3;
+  const word: Pt2 = [tip[0] + dx * reach, tip[1] + dy * reach];
+  const anchor: 'start' | 'middle' | 'end' = dx > 0.45 ? 'start' : dx < -0.45 ? 'end' : 'middle';
+  return {
+    d: `M${f(start[0])} ${f(start[1])}L${f(tip[0])} ${f(tip[1])}M${f(left[0])} ${f(left[1])}L${f(tip[0])} ${f(tip[1])}L${f(right[0])} ${f(right[1])}`,
+    width: look.outline,
+    word,
+    anchor,
+  };
+}
 
 export function spreadGlyphFallbacks(ring: readonly Pt2[], count: number): Pt2[] {
   if (!count) return [];
@@ -1116,6 +1156,11 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
+  const pictureCentre: Pt2 = (() => {
+    if (!pieces.length) return [w / 2, h / 2];
+    const box = boxOf(pieces.flatMap((piece) => piece.ring));
+    return [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
+  })();
   const glyphCandidates = actionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
@@ -1129,6 +1174,22 @@ export function StepPictureSvg({
     const dx = toward[0] - wanted[0];
     const dy = toward[1] - wanted[1];
     const length = Math.hypot(dx, dy) || 1;
+    if (glyph.kind === 'press-arrow') {
+      // A press arrow stands on its seam as drawn, never moved into a free spot of the piece.
+      const at = pointsOnDrawnPiece(glyph.piece, [wanted])?.[0] ?? wanted;
+      let unit: Pt2 = [dx / length, dy / length];
+      const aim = glyph.aim;
+      if (aim) {
+        const sign =
+          aim === 'up'
+            ? -unit[1]
+            : aim === 'down'
+              ? unit[1]
+              : (pictureCentre[0] - at[0]) * unit[0] + (pictureCentre[1] - at[1]) * unit[1];
+        if ((aim === 'away' ? -sign : sign) < 0) unit = [-unit[0], -unit[1]];
+      }
+      return [{ glyph, host, wanted: at, fallback: false, direction: unit, mmPx: length }];
+    }
     const onDrawing = pieces.some((piece) => insideRing(wanted, piece.ring));
     return [
       {
@@ -1137,6 +1198,7 @@ export function StepPictureSvg({
         wanted,
         fallback: !onDrawing,
         direction: [dx / length, dy / length] as Pt2,
+        mmPx: length,
       },
     ];
   });
@@ -1152,11 +1214,36 @@ export function StepPictureSvg({
     const spots = spreadGlyphFallbacks(group[0].host.ring, group.length);
     group.forEach((candidate, index) => fallbackById.set(candidate.glyph.id, spots[index]));
   }
-  const actionGlyphSpots = glyphCandidates.map((candidate) => ({
-    glyph: candidate.glyph,
-    at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
-    direction: candidate.direction,
-  }));
+  const actionGlyphSpots = glyphCandidates
+    .map((candidate) => ({
+      glyph: candidate.glyph,
+      at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
+      direction: candidate.direction,
+      mmPx: candidate.mmPx,
+    }))
+    // Both sides of one seam carry the same arrow: one drawn arrow per spot and way.
+    .filter(
+      (spot, index, all) =>
+        spot.glyph.kind !== 'press-arrow' ||
+        !all
+          .slice(0, index)
+          .some(
+            (other) =>
+              other.glyph.kind === 'press-arrow' &&
+              Math.hypot(other.at[0] - spot.at[0], other.at[1] - spot.at[1]) < 8 &&
+              other.direction[0] * spot.direction[0] + other.direction[1] * spot.direction[1] > 0.8,
+          ),
+    );
+  // One press step says its word once, beside its first arrow.
+  const pressWordIds = new Set(
+    actionGlyphSpots
+      .filter((spot) => spot.glyph.kind === 'press-arrow' && spot.glyph.label)
+      .filter(
+        (spot, index, all) =>
+          all.findIndex((other) => other.glyph.label === spot.glyph.label) === index,
+      )
+      .map((spot) => spot.glyph.id),
+  );
   const hideCrowdedLabels = look === 'canvas' || look === 'result';
   const pieceSize = new Map(
     pieces.map((piece) => {
@@ -1419,7 +1506,46 @@ export function StepPictureSvg({
           data-asm-piece={line.piece}
         />
       ))}
-      {actionGlyphSpots.map(({ glyph, at, direction }) => {
+      {actionGlyphSpots.map(({ glyph, at, direction, mmPx }) => {
+        if (glyph.kind === 'press-arrow') {
+          const arrow = pressArrowPath(at, direction, mmPx, L);
+          return (
+            <g
+              key={`action-glyph:${glyph.id}`}
+              pointerEvents='none'
+              data-asm-mark='press-arrow'
+              data-asm-piece={glyph.piece}
+              data-asm-x={at[0]}
+              data-asm-y={at[1]}
+              data-asm-dx={direction[0]}
+              data-asm-dy={direction[1]}
+            >
+              <path
+                d={arrow.d}
+                fill='none'
+                stroke={INK}
+                strokeWidth={arrow.width}
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              />
+              {glyph.label && pressWordIds.has(glyph.id) ? (
+                <text
+                  x={arrow.word[0]}
+                  y={arrow.word[1]}
+                  textAnchor={arrow.anchor}
+                  dominantBaseline='central'
+                  fill={INK}
+                  stroke={FILL}
+                  strokeWidth={3}
+                  paintOrder='stroke'
+                  data-asm-word='press'
+                >
+                  {glyph.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        }
         if (glyph.kind === 'button') {
           const radius = 4.2;
           return (

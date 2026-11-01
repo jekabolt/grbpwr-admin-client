@@ -443,6 +443,129 @@ describe('editor operation picture in the PDF', () => {
     expect(marks.lines).toEqual([]);
   });
 
+  describe('press arrows on the owner seam', () => {
+    const pressMarks = (raw: object) => {
+      const input = card6ActionLineInput(true);
+      const action = deriveAssembly(input).rows.find((row) => row.n === 100)?.action;
+      const geoms = new Map([...input.pieces].map(([key, piece]) => [key, piece.geom]));
+      return {
+        geoms,
+        marks: editorActionMarks(action && { ...action, raw: { ...action.raw, ...raw } }, geoms),
+      };
+    };
+    const inside = (point: Pt2, ring: readonly Pt2[]) => {
+      let hit = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i];
+        const [xj, yj] = ring[j];
+        if (
+          yi > point[1] !== yj > point[1] &&
+          point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi
+        )
+          hit = !hit;
+      }
+      return hit;
+    };
+    const step = (glyph: { point: Pt2; direction?: Pt2 }, mm: number): Pt2 => [
+      glyph.point[0] + (glyph.direction?.[0] ?? 0) * mm,
+      glyph.point[1] + (glyph.direction?.[1] ?? 0) * mm,
+    ];
+
+    it('press to one side: one plain line and one arrow with the side word', () => {
+      const { marks, geoms } = pressMarks({
+        press: {
+          action: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
+          toward: 'TECH_CARD_PRESS_TOWARD_BACK',
+        },
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-side', piece: 'FLP_R' });
+      expect(marks.lines.some((line) => line.id.endsWith(':press-offset'))).toBe(false);
+      const arrows = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrows).toHaveLength(1);
+      expect(arrows[0].label).toBe('to back');
+      // No back piece on this seam: the arrow goes into the run's own piece.
+      expect(inside(step(arrows[0], 3), geoms.get('FLP_R')!.rs)).toBe(true);
+    });
+
+    it('press to one side toward the other piece points across the seam', () => {
+      const { marks, geoms } = pressMarks({
+        press: {
+          action: 'TECH_CARD_PRESS_ACTION_TO_ONE_SIDE',
+          toward: 'TECH_CARD_PRESS_TOWARD_SLEEVE',
+        },
+      });
+      const [arrow] = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrow.label).toBe('into the sleeve');
+      expect(arrow.piece).toBe('FLP_R');
+      expect(inside(step(arrow, 3), geoms.get('FLP_R')!.rs)).toBe(false);
+    });
+
+    it('press open: one plain line and two opposite arrows, one word', () => {
+      const { marks } = pressMarks({
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+        work: 'press_open',
+        press: undefined,
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-open' });
+      const arrows = marks.glyphs.filter((glyph) => glyph.kind === 'press-arrow');
+      expect(arrows).toHaveLength(2);
+      const [a, b] = arrows;
+      expect(a.point).toEqual(b.point);
+      expect(a.direction![0] + b.direction![0]).toBeCloseTo(0);
+      expect(a.direction![1] + b.direction![1]).toBeCloseTo(0);
+      expect(arrows.map((arrow) => arrow.label).filter(Boolean)).toEqual(['open']);
+    });
+
+    it('press flat: the seam line only, no arrows, no word', () => {
+      const { marks } = pressMarks({
+        work: 'press_flat',
+        press: { action: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' },
+      });
+      expect(marks.lines).toHaveLength(1);
+      expect(marks.lines[0]).toMatchObject({ weight: 'ink', kind: 'press-flat' });
+      expect(marks.glyphs).toEqual([]);
+    });
+
+    it('press flat without an owner row draws nothing and is not missing a seam', () => {
+      const input = card6ActionLineInput(false);
+      const operations = input.techCard.techCard!.operations!.map((operation) =>
+        operation.operationNumber === 100
+          ? {
+              ...operation,
+              work: 'press_flat',
+              press: { action: 'TECH_CARD_PRESS_ACTION_PRESS_FLAT' as const, toward: undefined },
+            }
+          : operation,
+      );
+      const action = deriveAssembly({
+        ...input,
+        techCard: { ...input.techCard, techCard: { ...input.techCard.techCard!, operations } },
+      }).rows.find((row) => row.n === 100)?.action;
+      const marks = editorActionMarks(
+        action,
+        new Map([...input.pieces].map(([key, piece]) => [key, piece.geom])),
+      );
+      expect(action?.missing).toBeUndefined();
+      expect(marks).toEqual({ lines: [], glyphs: [] });
+    });
+
+    it('renders the arrows with their word off the seam in the print picture', () => {
+      const input = card6ActionLineInput(true);
+      const picture = sceneOf(input, 100);
+      const { marks } = pressMarks({
+        operationType: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
+        work: 'press_open',
+        press: undefined,
+      });
+      const svg = renderedPicture(picture, marks);
+      expect(svg.match(/data-asm-mark="press-arrow"/g)).toHaveLength(2);
+      expect(svg.match(/data-asm-mark="press-open"/g)).toHaveLength(1);
+      expect(svg).toContain('>open</text>');
+    });
+  });
+
   it('keeps eight horizontal buttonholes on eight distinct pattern marks', () => {
     const input = placementActionInput('buttonhole');
     const action = deriveAssembly(input).rows.find((row) => row.n === 750)?.action;

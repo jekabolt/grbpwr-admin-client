@@ -145,6 +145,7 @@ describe('layerStyle', () => {
       { id: 'label-under', piece: 'lower', kind: 'label', point: [2, 2] },
       { id: 'button-clear', piece: 'lower', kind: 'button', point: [8, 2] },
       { id: 'button-top', piece: 'upper', kind: 'button', point: [2, 2] },
+      { id: 'press-under', piece: 'lower', kind: 'press-arrow', point: [2, 2], direction: [1, 0] },
     ];
     const T = new Map<string, Affine>([
       ['lower', [1, 0, 0, 1, 3, 4]],
@@ -161,6 +162,8 @@ describe('layerStyle', () => {
     expect(result.marks.get('label-under')?.draw).toBe('hidden');
     expect(result.marks.get('button-clear')?.draw).toBe('solid');
     expect(result.marks.get('button-top')?.draw).toBe('solid');
+    // A press arrow points at a seam; it is never a covered mark.
+    expect(result.marks.get('press-under')?.draw).toBe('solid');
   });
 
   it('hides covered buttons in thumbnails but keeps depths and the full outline', () => {
