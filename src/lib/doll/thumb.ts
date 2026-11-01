@@ -87,15 +87,16 @@ export function paintDollThumb(ctx: Ctx2D, report: DollReport, w: number, h: num
     ctx.fill();
     ctx.stroke();
   }
-  // Seams on top, by state in weight (monochrome): closed thin ink, proposed dashed, open heavy.
+  // Seams on top, by state in weight: closed thin, unbound owner rows dashed, open heavy.
   ctx.lineJoin = 'round';
   for (const seam of report.seams) {
     if (seam.origin === 'layer') continue;
     const open = seam.state === 'open' || seam.state === 'twisted';
-    const proposed = seam.state === 'proposed';
+    const dashed =
+      (seam.decidedBy === 'person' && seam.inStep === false) || seam.state === 'proposed';
     ctx.strokeStyle = '#000000';
     ctx.lineWidth = open ? 2.2 : 0.9;
-    ctx.setLineDash(proposed ? [3, 3] : []);
+    ctx.setLineDash(dashed ? [3, 3] : []);
     for (const path of open ? [seam.pathA, seam.pathB] : [seam.pathA]) {
       if (path.length < 2) continue;
       ctx.beginPath();

@@ -26,8 +26,13 @@ export type Vec3 = [number, number, number];
 /** An explicit owner stacking claim, in the editor's bottom → top order. */
 export type DollLayerRelation = readonly [under: string, over: string];
 
-/** The step editor's exact conversion of one operation-bound row. */
-export type DollOwnerCandidate = { seamKey: string; candidate: SeamCandidate };
+/** The step editor's exact conversion of one confirmed owner row. */
+export type DollOwnerCandidate = {
+  seamKey: string;
+  candidate: SeamCandidate;
+  /** Whether an operation names this row in its seam keys. */
+  inStep: boolean;
+};
 
 /** A point in the piece's seam (u, v) frame (lib/seams/frame.ts `toUV`): the unit square. */
 export type UV = readonly [u: number, v: number];
@@ -129,19 +134,22 @@ export type DollOptions = {
    */
   seams?: {
     /**
-     * `owner` is the assembly editor contract: only rows attached to operations are sewn. Omitted
-     * keeps the historical L4 behaviour for probes and callers that hand the doll all card rows.
+     * `owner` is the assembly editor contract: every confirmed card row is sewn, whether or not an
+     * operation names it. Omitted keeps the historical L4 behaviour for probes and callers that
+     * hand the doll all card rows.
      */
     mode?: 'owner';
     rows: readonly StoredSeam[];
     size: string;
     sizes?: readonly SizePieces[];
-    /** Exact candidates produced by `storedRowsOfStep`; closures deliberately have none. */
+    /** Exact candidates produced from confirmed rows; closures deliberately have none. */
     candidates?: readonly DollOwnerCandidate[];
+    /** Confirmed row keys named by an operation, including closures without exact candidates. */
+    inStepKeys?: readonly string[];
     /** Explicit under/over claims read by step-result, including claims carried by pose rows. */
     layers?: readonly DollLayerRelation[];
-    /** Card owner rows selected by operation binding versus left unbound and deliberately ignored. */
-    selection?: { used: number; ignored: number };
+    /** Counts for the owner-row report. */
+    selection?: { confirmed: number; inSteps: number; rejected: number };
   };
   /** The card's gender (front closure: left over right for men, the default; right over left for women). */
   gender?: 'MALE' | 'FEMALE' | null;
@@ -224,6 +232,8 @@ export type DollSeamReport = {
   /** L4 (rows given): who says this seam exists — confirmed by a person (stored row), proposed by the
    *  doll, or read by the engine and not decided. Absent without rows. */
   decidedBy?: 'person' | 'doll' | 'engine';
+  /** Owner mode: whether an operation names this confirmed row. */
+  inStep?: boolean;
   /** In words, with millimetres. */
   note: string;
   /** Global vertex ids of side A / side B polylines (for drawing). */

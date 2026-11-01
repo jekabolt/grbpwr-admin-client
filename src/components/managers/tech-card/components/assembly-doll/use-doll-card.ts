@@ -45,7 +45,7 @@ import { pieceBlockRefs, pieceRefKey, rollGoodsScopes } from '../piece-block-ref
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import type { TechCardFormData } from '../schema';
 import { useStepResults } from '../step-seams/step-result-context';
-import { storedRowsOfStep } from '../step-seams/step-rows';
+import { candidateOfStoredSeam } from '../step-seams/step-rows';
 import { useCardGeoms, usePoseRows } from '../step-seams/step-picture-view';
 
 export type DollCard = {
@@ -60,14 +60,16 @@ export type DollCard = {
   factsOf: (size: string) => SkeletonFacts | null;
   /** Pieces without a contour in that size (left out of its doll, said so). */
   missingOf: (size: string) => string[];
-  /** Only rows attached to an operation and accepted by the step editor's row conversion. */
+  /** Every confirmed or rejected seam row on the card. */
   rows: StoredSeam[];
-  /** Owner mode is also active for a bound pose even when it contributes no seam. */
+  /** Owner mode is also active for a bound pose even when the card has no seam row. */
   owner: {
     candidates: readonly DollOwnerCandidate[];
     layers: readonly DollLayerRelation[];
-    used: number;
-    ignored: number;
+    inStepKeys: readonly string[];
+    confirmed: number;
+    inSteps: number;
+    rejected: number;
   } | null;
   rowsSig: string;
   joins: DeclaredJoin[];
@@ -96,8 +98,8 @@ type FormOp = NonNullable<TechCardFormData['operations']>[number];
 export type DollOwnerSelection = NonNullable<DollCard['owner']> & { rows: StoredSeam[] };
 
 /**
- * The operation-bound owner rows, through the same conversion as the step editor. Kept pure so
- * non-React readers (notably the pinned golden) cannot silently fall back to all card rows.
+ * Every owner row, through the same conversion as the step editor. Operation binding is metadata,
+ * not a sewing filter. Kept pure so non-React readers (notably the pinned golden) stay identical.
  */
 export function dollOwnerSeamsOf(args: {
   rows: readonly StoredSeam[];
@@ -107,24 +109,21 @@ export function dollOwnerSeamsOf(args: {
   innerLines: ReadonlyMap<string, Pt2[][]>;
   stepResults: readonly { stacked: readonly DollLayerRelation[] }[] | null;
 }): DollOwnerSelection | null {
-  const byKey = new Map(args.rows.map((row) => [row.seamKey, row]));
-  const selected = new Map<
-    string,
-    { row: StoredSeam; candidate?: DollOwnerCandidate['candidate'] }
-  >();
-  const boundKeys = new Set<string>();
+  const seamKeys = new Set(args.rows.map((row) => row.seamKey));
+  const inStepKeys = new Set<string>();
+  let boundPose = false;
   for (const op of args.operations) {
-    for (const key of op.seamKeys ?? []) {
-      const row = byKey.get(key);
-      if (!row) continue;
-      boundKeys.add(key);
-      if (row.kind === 'closure') selected.set(key, { row });
-    }
-    for (const stored of storedRowsOfStep(op, byKey, args.geoms, args.innerLines))
-      selected.set(stored.key, { row: stored.row, candidate: stored.candidate });
-    for (const key of op.poseKeys ?? []) if (args.poses.has(key)) boundKeys.add(key);
+    for (const key of op.seamKeys ?? []) if (seamKeys.has(key)) inStepKeys.add(key);
+    for (const key of op.poseKeys ?? []) if (args.poses.has(key)) boundPose = true;
   }
-  if (!boundKeys.size) return null;
+  if (!args.rows.length && !boundPose) return null;
+  const confirmedRows = args.rows.filter((row) => row.status === 'confirmed');
+  const candidates = confirmedRows.flatMap((row): DollOwnerCandidate[] => {
+    const candidate = candidateOfStoredSeam(row, args.geoms, args.innerLines);
+    return candidate
+      ? [{ seamKey: row.seamKey, candidate, inStep: inStepKeys.has(row.seamKey) }]
+      : [];
+  });
   const seen = new Set<string>();
   const layers = (args.stepResults ?? []).flatMap((result) =>
     result.stacked.filter(([under, over]) => {
@@ -134,15 +133,16 @@ export function dollOwnerSeamsOf(args: {
       return true;
     }),
   );
-  const allKeys = new Set([...args.rows.map((row) => row.seamKey), ...args.poses.keys()]);
   return {
-    rows: [...selected.values()].map(({ row }) => row),
-    candidates: [...selected].flatMap(([seamKey, stored]) =>
-      stored.candidate ? [{ seamKey, candidate: stored.candidate }] : [],
-    ),
+    rows: [...args.rows],
+    candidates,
     layers,
-    used: boundKeys.size,
-    ignored: [...allKeys].filter((key) => !boundKeys.has(key)).length,
+    inStepKeys: confirmedRows
+      .filter((row) => inStepKeys.has(row.seamKey))
+      .map((row) => row.seamKey),
+    confirmed: confirmedRows.length,
+    inSteps: confirmedRows.filter((row) => inStepKeys.has(row.seamKey)).length,
+    rejected: args.rows.filter((row) => row.status === 'rejected').length,
   };
 }
 
@@ -167,8 +167,8 @@ export function useDollCard(): DollCard | null {
   );
 
   // The doll is mounted under StepResultProvider. Select rows through the exact conversion used by
-  // the step editor; a legacy row not named by an operation is deliberately invisible here. A
-  // closure is a stored owner action but not a seam candidate, so it rides beside converted rows.
+  // the step editor. A closure is a stored owner action but not a seam candidate, so it rides
+  // beside converted rows; pose rows remain operation-bound placement claims.
   const { geoms: cardGeoms, innerLines } = useCardGeoms();
   const poseRows = usePoseRows();
   const stepResults = useStepResults();
@@ -331,8 +331,10 @@ export function useDollCard(): DollCard | null {
         ? {
             candidates: ownerSeams.candidates,
             layers: ownerSeams.layers,
-            used: ownerSeams.used,
-            ignored: ownerSeams.ignored,
+            inStepKeys: ownerSeams.inStepKeys,
+            confirmed: ownerSeams.confirmed,
+            inSteps: ownerSeams.inSteps,
+            rejected: ownerSeams.rejected,
           }
         : null,
       rowsSig: sig,
@@ -380,8 +382,13 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
               rows: c.rows,
               size,
               candidates: c.owner.candidates,
+              inStepKeys: c.owner.inStepKeys,
               layers: c.owner.layers,
-              selection: { used: c.owner.used, ignored: c.owner.ignored },
+              selection: {
+                confirmed: c.owner.confirmed,
+                inSteps: c.owner.inSteps,
+                rejected: c.owner.rejected,
+              },
             },
           }
         : {}),

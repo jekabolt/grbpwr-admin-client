@@ -10,6 +10,7 @@ import type {
 } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
 import { seamFromCandidate, withSeamLayer, type StoredSeam } from 'lib/seams';
+import { dollOwnerSeamsOf } from 'components/managers/tech-card/components/assembly-doll/use-doll-card';
 import {
   OWNER_FIT,
   stepResults,
@@ -71,6 +72,7 @@ function fixture(): {
   graph: SeamGraph;
   row: StoredSeam;
   owner: SeamCandidate;
+  extra: SeamCandidate;
 } {
   const facts: SkeletonFacts = {
     pieces: [rectangle('A', 'front', 1), rectangle('B', 'front_1', 2), rectangle('C', 'side', 3)],
@@ -102,7 +104,7 @@ function fixture(): {
     anchoredSize: 'M',
   });
   if (!row) throw new Error('owner row fixture did not resolve');
-  return { facts, graph, row, owner };
+  return { facts, graph, row, owner, extra };
 }
 
 const fast: DollOptions = {
@@ -118,13 +120,33 @@ const withoutTimes = (report: DollReport): DollReport => ({
 });
 
 describe('paper doll owner seams', () => {
-  it("does not add the engine's unowned seam or any proposed seam", () => {
-    const { facts, graph, row, owner } = fixture();
+  it('sews an unbound confirmed row, rejects a rejected row, and adds no proposals', () => {
+    const { facts, graph, row, extra } = fixture();
+    const rejected = seamFromCandidate(extra, graph.pieces, {
+      seamKey: 'rejected-row',
+      status: 'rejected',
+      source: 'manual',
+      anchoredSize: 'M',
+    });
+    if (!rejected) throw new Error('rejected row fixture did not resolve');
     expect(
       graph.chosen.some(
         (candidate) => candidate.a.startsWith('C#') || candidate.b.startsWith('C#'),
       ),
     ).toBe(true);
+    const selected = dollOwnerSeamsOf({
+      rows: [row, rejected],
+      poses: new Map(),
+      operations: [],
+      geoms: new Map(graph.pieces.map((piece) => [piece.pieceKey, piece])),
+      innerLines: new Map(),
+      stepResults: [],
+    });
+    if (!selected) throw new Error('owner rows were not selected');
+    expect(selected.rows).toEqual([row, rejected]);
+    expect(selected.candidates).toHaveLength(1);
+    expect(selected.candidates[0].seamKey).toBe(row.seamKey);
+    expect(selected.candidates[0].inStep).toBe(false);
 
     const report = solveDoll({
       graph,
@@ -134,10 +156,15 @@ describe('paper doll owner seams', () => {
         joins: [{ label: 'unowned order join', parts: [['B'], ['C']] }],
         seams: {
           mode: 'owner',
-          rows: [row],
+          rows: selected.rows,
           size: 'M',
-          candidates: [{ seamKey: row.seamKey, candidate: owner }],
-          selection: { used: 1, ignored: 2 },
+          candidates: selected.candidates,
+          inStepKeys: selected.inStepKeys,
+          selection: {
+            confirmed: selected.confirmed,
+            inSteps: selected.inSteps,
+            rejected: selected.rejected,
+          },
         },
       },
     });
@@ -151,12 +178,13 @@ describe('paper doll owner seams', () => {
     expect(report.seams.some((candidate) => candidate.state === 'proposed')).toBe(false);
     expect(report.seams.some((candidate) => candidate.origin === 'doll-proposed')).toBe(false);
     expect(report.seams.every((candidate) => candidate.decidedBy === 'person')).toBe(true);
+    expect(report.seams[0].inStep).toBe(false);
     expect(report.orderJoins).toEqual([]);
     expect(
       report.floating.some((piece) => piece.pieceKey === 'C' && piece.reason.includes('no seam')),
     ).toBe(true);
     expect(report.rows?.words).toContain(
-      'owner rows: 1 used (bound to steps) · 2 ignored (unbound)',
+      'rows: confirmed 1 (in steps 0 · not in any step 1) · rejected 1 (not sewn)',
     );
     expect(report.rows?.words).toContain('no seam: side');
   });
@@ -219,7 +247,8 @@ describe('paper doll owner seams', () => {
           mode: 'owner',
           rows: [row],
           size: 'M',
-          candidates: [{ seamKey: row.seamKey, candidate: impossible }],
+          candidates: [{ seamKey: row.seamKey, candidate: impossible, inStep: true }],
+          inStepKeys: [row.seamKey],
         },
       },
     });
@@ -262,7 +291,8 @@ describe('paper doll owner seams', () => {
           mode: 'owner',
           rows: [layered],
           size: 'M',
-          candidates: [{ seamKey: layered.seamKey, candidate: owner }],
+          candidates: [{ seamKey: layered.seamKey, candidate: owner, inStep: true }],
+          inStepKeys: [layered.seamKey],
           layers: result.stacked,
         },
       },

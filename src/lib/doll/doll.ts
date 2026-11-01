@@ -460,6 +460,8 @@ type Work = {
   fromOrder?: boolean;
   /** L4: a seam a person confirmed (stored row) — never released; open at the end = contradiction. */
   confirmed?: boolean;
+  /** Owner mode: whether an operation names this confirmed row. */
+  inStep?: boolean;
   /** L4: a doll proposal on a pair a person rejected — not sewn, not reported as a seam. */
   rejectedByPerson?: boolean;
   /** L4: a closure drawn overlapped (the buttoned centre fronts). */
@@ -531,6 +533,12 @@ export function solveDoll(input: DollInput): DollReport {
   // remain. The historical rows-without-mode path is unchanged for probes and archived goldens.
   const owner = opt.seams?.mode === 'owner';
   const l4 = owner || !!opt.seams?.rows.length;
+  const ownerInStepKeys = new Set([
+    ...(opt.seams?.inStepKeys ?? []),
+    ...(opt.seams?.candidates ?? [])
+      .filter((candidate) => candidate.inStep)
+      .map((candidate) => candidate.seamKey),
+  ]);
   const declaredJoins = owner ? undefined : opt.joins;
   const proposalsAllowed = !owner && opt.proposeComposite !== false;
   let resolvedRows: SizeResolved | undefined;
@@ -4320,6 +4328,7 @@ export function solveDoll(input: DollInput): DollReport {
           : 380,
     );
     if (conf) w0.confirmed = true;
+    if (owner && conf) w0.inStep = ownerInStepKeys.has(s.seam.provenance?.seamKey ?? '');
     if (s.seam.partRange) {
       // (keys on the side's original edge ids → the grouped side's ids, position for position)
       const pr: Record<string, [number, number]> = {};
@@ -4683,6 +4692,8 @@ export function solveDoll(input: DollInput): DollReport {
           kind: s.seam.kind,
           origin: 'graph',
           fromOrder: w0.fromOrder,
+          confirmed: w0.confirmed,
+          inStep: w0.inStep,
           A: A2,
           B: B2,
           target: 1,
@@ -7070,6 +7081,7 @@ export function solveDoll(input: DollInput): DollReport {
                 : ('doll' as const),
           }
         : {}),
+      ...(owner && w.confirmed ? { inStep: w.inStep ?? false } : {}),
     });
   }
   // A contradiction next to a confirmed seam stretched > 20 % on the same pieces: that seam is the
@@ -7112,6 +7124,7 @@ export function solveDoll(input: DollInput): DollReport {
       pathA: new Uint32Array(0),
       pathB: new Uint32Array(0),
       ...(owner ? { decidedBy: isConf(s) ? ('person' as const) : ('engine' as const) } : {}),
+      ...(owner && isConf(s) ? { inStep: ownerInStepKeys.has(s.provenance?.seamKey ?? '') } : {}),
     });
   if (owner) {
     const reported = new Set(seams.map((seam) => seam.id));
@@ -7144,6 +7157,7 @@ export function solveDoll(input: DollInput): DollReport {
         twisted: false,
         state: 'open',
         decidedBy: 'person',
+        inStep: ownerInStepKeys.has(candidate.provenance?.seamKey ?? ''),
         note: `CONTRADICTION — ${words}`,
         pathA: new Uint32Array(0),
         pathB: new Uint32Array(0),
@@ -7606,12 +7620,26 @@ export function solveDoll(input: DollInput): DollReport {
   }
   const tris = panels.reduce((t, P) => t + P.mesh.tris.length / 3, 0);
   const ownerWords = owner
-    ? [
-        `owner rows: ${opt.seams?.selection?.used ?? opt.seams?.rows.length ?? 0} used (bound to steps) · ${opt.seams?.selection?.ignored ?? 0} ignored (unbound)`,
-        ...input.facts.pieces
-          .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
-          .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
-      ]
+    ? (() => {
+        const confirmed =
+          opt.seams?.selection?.confirmed ??
+          opt.seams?.rows.filter((row) => row.status === 'confirmed').length ??
+          0;
+        const inSteps =
+          opt.seams?.selection?.inSteps ??
+          opt.seams?.candidates?.filter((candidate) => candidate.inStep).length ??
+          0;
+        const rejected =
+          opt.seams?.selection?.rejected ??
+          opt.seams?.rows.filter((row) => row.status === 'rejected').length ??
+          0;
+        return [
+          `rows: confirmed ${confirmed} (in steps ${inSteps} · not in any step ${Math.max(0, confirmed - inSteps)}) · rejected ${rejected} (not sewn)`,
+          ...input.facts.pieces
+            .filter((piece) => !ownerSeamPieces?.has(piece.pieceKey))
+            .map((piece) => `no seam: ${piece.name.trim() || '(unnamed piece)'}`),
+        ];
+      })()
     : [];
   // ── folds: the numbers as drawn ──
   if (foldReports.length) {

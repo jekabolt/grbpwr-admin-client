@@ -40,8 +40,9 @@ export type DollWorkerRequest =
             size: string;
             sizes?: readonly SizePieces[];
             candidates?: readonly DollOwnerCandidate[];
+            inStepKeys?: readonly string[];
             layers?: readonly DollLayerRelation[];
-            selection?: { used: number; ignored: number };
+            selection?: { confirmed: number; inSteps: number; rejected: number };
           };
         };
         /** Facts of the sizes the stored rows were confirmed on (other than the solved one). */

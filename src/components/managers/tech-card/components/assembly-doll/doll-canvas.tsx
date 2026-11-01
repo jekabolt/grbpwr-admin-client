@@ -1,8 +1,8 @@
 // THE DOLL ON SCREEN (01-DESIGN-L0 §5.4, §6): one WebGL canvas, orbit + four preset cameras, the
 // paper in two greys (outside light, inside darker), seams by state in WEIGHT (closed thin ink,
-// proposed dashed, open heavy ink and named in words), POM lines lifted from the flat pattern (grey
-// 2 px all, the hovered one 4 px ink with «chest · 54.0 cm»). A faint floor grid and axis only —
-// no mannequin (design §8 q1).
+// confirmed outside an operation dashed, open heavy ink and named in words), POM lines lifted from
+// the flat pattern (grey 2 px all, the hovered one 4 px ink with «chest · 54.0 cm»). A faint floor
+// grid and axis only — no mannequin (design §8 q1).
 //
 // Rendering is ON DEMAND: a frame is drawn when the camera moves, a solve frame arrives or a hover
 // changes — an idle doll costs nothing. While the worker solves, its frames stream in through the
@@ -453,7 +453,14 @@ export function DollCanvas({
       for (const s of report.seams as DollSeamReport[]) {
         if (s.origin === 'layer') continue;
         const open = s.state === 'open' || s.state === 'twisted';
-        const m = open ? heavy : s.state === 'proposed' ? dashed : closed;
+        const m =
+          s.decidedBy === 'person' && s.inStep === false
+            ? dashed
+            : open
+              ? heavy
+              : s.state === 'proposed'
+                ? dashed
+                : closed;
         for (const path of open ? [s.pathA, s.pathB] : [s.pathA])
           if (path.length >= 2) a.seams.add(line(pathPoints(P, path), m));
         if (open) {
