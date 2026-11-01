@@ -6,7 +6,6 @@
 import { withSeamHints } from 'lib/seam-hints';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import {
-  LOWER_LAYER_FILL,
   LOWER_LAYER_STROKE,
   LOWER_LAYER_STROKE_SCALE,
   STACKED_TWIN_OFFSET_MM,
@@ -27,6 +26,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
+import { LowerLayerFills, lowerLayerTints, type LowerLayerClaim } from '../lower-layer-fill';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { buttonholePictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
@@ -1265,6 +1265,19 @@ export function StepPictureSvg({
         : null,
     [actionGlyphs, geoms, layers, layout.T, look, ownedOrder, resultStacked],
   );
+  const ownedCoverageStyle = useMemo(
+    () =>
+      layers && look === 'tile'
+        ? layerStyle({
+            layers: ownedOrder,
+            T: layout.T,
+            geoms,
+            stacked: resultStacked,
+            mode: 'canvas',
+          })
+        : ownedStyle,
+    [geoms, layers, layout.T, look, ownedOrder, ownedStyle, resultStacked],
+  );
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
     return ownedOrder.flatMap((key) => {
@@ -1283,6 +1296,33 @@ export function StepPictureSvg({
   };
   const ownedDepth = (key: string) =>
     ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0);
+  const ownedTints = useMemo(() => {
+    const claims = orderedOwnedPieces.flatMap((piece): LowerLayerClaim[] => {
+      const depth =
+        ownedStyle?.pieces.get(piece.key)?.depth || (ownedLowerKeys.has(piece.key) ? 1 : 0);
+      return depth
+        ? [
+            {
+              key: piece.key,
+              depth,
+              coveredBy: ownedStyle?.pieces.get(piece.key)?.coveredBy ?? [],
+            },
+          ]
+        : [];
+    });
+    return lowerLayerTints(
+      orderedOwnedPieces.map((piece) => ({
+        key: piece.key,
+        ring: piece.ring,
+        path: pathOf(piece.drawn, true),
+      })),
+      claims,
+    );
+  }, [orderedOwnedPieces, ownedLowerKeys, ownedStyle]);
+  const ownedTintByKey = useMemo(
+    () => new Map(ownedTints.map((tint) => [tint.key, tint])),
+    [ownedTints],
+  );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
   const { base, under } = useMemo(() => {
@@ -1724,22 +1764,6 @@ export function StepPictureSvg({
                     data-piece-surface={piece.key}
                     data-lower-layer-base={depth ? piece.key : undefined}
                   />
-                  {depth > 0 && (
-                    <path
-                      d={pathOf(piece.drawn, true)}
-                      fill={LOWER_LAYER_FILL}
-                      pointerEvents='none'
-                      data-lower-layer={piece.key}
-                    />
-                  )}
-                  {depth > 1 && (
-                    <path
-                      d={pathOf(piece.drawn, true)}
-                      fill={LOWER_LAYER_FILL}
-                      pointerEvents='none'
-                      data-lower-layer-depth='2'
-                    />
-                  )}
                   {fullyCovered && (
                     <path
                       d={pathOf(piece.drawn, true)}
@@ -1756,20 +1780,26 @@ export function StepPictureSvg({
               );
             })}
           </g>
+          <LowerLayerFills tints={ownedTints} />
           <g fill='none' strokeLinejoin='round'>
-            {orderedOwnedPieces.flatMap((piece) =>
-              (ownedStyle?.pieces.get(piece.key)?.visible ?? []).map((line, index) => (
+            {orderedOwnedPieces.flatMap((piece) => {
+              const tint = ownedTintByKey.get(piece.key);
+              const depth = ownedDepth(piece.key);
+              const lines = tint?.partial
+                ? ownedCoverageStyle?.pieces.get(piece.key)?.visible ?? []
+                : ownedStyle?.pieces.get(piece.key)?.visible ?? [];
+              return lines.map((line, index) => (
                 <path
                   key={`${piece.key}:${index}`}
                   d={pathOf(ownedPath(piece.key, line))}
-                  stroke={ownedDepth(piece.key) ? LOWER_LAYER_STROKE : INK}
+                  stroke={depth && !tint?.partial ? LOWER_LAYER_STROKE : INK}
                   strokeWidth={
-                    ownedDepth(piece.key) ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline
+                    depth && !tint?.partial ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline
                   }
                   data-piece-outline={piece.key}
                 />
-              )),
-            )}
+              ));
+            })}
           </g>
           <g fill='none' stroke={GREY} strokeWidth={L.hair} strokeLinejoin='round'>
             {orderedOwnedPieces.flatMap((piece) =>

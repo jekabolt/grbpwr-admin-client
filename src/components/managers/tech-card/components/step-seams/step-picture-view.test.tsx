@@ -5,6 +5,7 @@ import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import {
   LOWER_LAYER_FILL,
   LOWER_LAYER_STROKE,
+  unionPictureOfLayout,
   type UnionPicture,
 } from 'lib/assembly-skeleton/union';
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
@@ -50,8 +51,8 @@ const geoms = new Map([
   ['front', rectangle('front', 'front', 100, 100)],
 ]);
 const transforms = new Map([
-  ['bag', IDENTITY],
-  ['front', translate(15, 15)],
+  ['bag', translate(15, 15)],
+  ['front', IDENTITY],
 ]);
 const points = [...transforms].flatMap(([key, transform]) =>
   geoms
@@ -115,21 +116,107 @@ const renderPicture = ({
   );
 
 describe('StepPictureSvg lower layers', () => {
-  it('tints an owned bag at depth one and omits its covered outline', () => {
-    const markup = renderPicture({
-      layers: ['bag', 'front'],
-      lower: ['bag'],
-      stacked: [['bag', 'front']],
-      look: 'canvas',
-    });
-    const overlay = markup.match(/<path[^>]*data-lower-layer="bag"[^>]*>/)?.[0];
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'tints the whole bag when the front fully covers it in the %s renderer',
+    (look) => {
+      const markup = renderPicture({
+        layers: ['bag', 'front'],
+        lower: ['bag'],
+        stacked: [['bag', 'front']],
+        look,
+      });
+      const overlay = markup.match(/<path[^>]*data-lower-layer="bag"[^>]*>/)?.[0];
 
-    expect(overlay).toBeDefined();
-    expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
-    expect(overlay).toContain('pointer-events="none"');
-    expect(markup).toContain('data-layer-depth="1"');
-    expect(markup).toContain(`stroke="${LOWER_LAYER_STROKE}"`);
-    expect(markup).not.toContain('data-covered-layer');
+      expect(overlay).toBeDefined();
+      expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
+      expect(overlay).toContain('pointer-events="none"');
+      expect(overlay).toContain('clip-path="url(#lower-layer-');
+      expect(overlay).not.toContain('data-lower-partial');
+      expect(markup).toContain('data-layer-depth="1"');
+      expect(markup.indexOf('data-lower-layer="bag"')).toBeGreaterThan(
+        markup.indexOf('data-piece-surface="front"'),
+      );
+      expect(markup).not.toContain('data-covered-layer');
+    },
+  );
+
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'clips a sleeve tint to its narrow cover in the %s renderer',
+    (look) => {
+      const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
+      const strip = rectangle('strip', 'placket strip', 10, 80);
+      const partialGeoms = new Map([
+        ['sleeve', sleeve],
+        ['strip', strip],
+      ]);
+      const partialLayout: StepLayout = {
+        ...layout,
+        T: new Map([
+          ['sleeve', IDENTITY],
+          ['strip', translate(45, 10)],
+        ]),
+        input: new Map([
+          ['sleeve', 0],
+          ['strip', 1],
+        ]),
+        bbox: boxOf(sleeve.rs),
+        layers: [[0, 1]],
+      };
+      const markup = renderToStaticMarkup(
+        <StepPictureSvg
+          w={140}
+          h={120}
+          pad={4}
+          look={look}
+          layout={partialLayout}
+          layers={['sleeve', 'strip']}
+          lower={['sleeve']}
+          stacked={[['sleeve', 'strip']]}
+          geoms={partialGeoms}
+        />,
+      );
+      const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
+      const outline = markup.match(/<path[^>]*data-piece-outline="sleeve"[^>]*>/)?.[0];
+
+      expect(overlay).toContain('data-lower-partial="1"');
+      expect(overlay).toContain('clip-path="url(#lower-layer-');
+      expect(outline).toContain('stroke="var(--color-textColor)"');
+      expect(outline).not.toContain(`stroke="${LOWER_LAYER_STROKE}"`);
+      expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
+        markup.indexOf('data-piece-surface="strip"'),
+      );
+    },
+  );
+
+  it('clips the graph glyph through the same lower-layer fill renderer', () => {
+    const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
+    const strip = rectangle('strip', 'strip', 10, 80);
+    const picture = unionPictureOfLayout(
+      {
+        T: new Map([
+          ['sleeve', IDENTITY],
+          ['strip', translate(45, 10)],
+        ]),
+        stacked: [],
+        onRuns: [],
+      },
+      new Map([
+        ['sleeve', sleeve],
+        ['strip', strip],
+      ]),
+      ['sleeve', 'strip'],
+      { lower: ['sleeve'], stacked: [['sleeve', 'strip']] },
+    );
+    const markup = renderToStaticMarkup(<UnitGlyph picture={picture} name='sleeve unit' />);
+    const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
+
+    expect(picture.lowerLayerCovers).toEqual({ sleeve: ['strip'] });
+    expect(picture.lowerLayerDepths).toEqual({ sleeve: 1 });
+    expect(overlay).toContain('data-lower-partial="1"');
+    expect(overlay).toContain('clip-path="url(#lower-layer-');
+    expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
+      markup.indexOf('data-lower-layer-base="sleeve"'),
+    );
   });
 
   it('marks a picked edge above the lower-piece tint', () => {

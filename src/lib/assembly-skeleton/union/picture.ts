@@ -41,6 +41,10 @@ export type UnionPicture = {
   overlap: number;
   /** Owner-result pieces that must be redrawn as the translucent lower layer. */
   lowerLayers?: string[];
+  /** Claimed upper pieces whose union clips each lower-layer tint. */
+  lowerLayerCovers?: Record<string, string[]>;
+  /** One translucent pass per depth level, capped at two. */
+  lowerLayerDepths?: Record<string, 1 | 2>;
   /** Visible numbers for offset followers of an identical stack. */
   twinLabels?: Record<string, number>;
 };

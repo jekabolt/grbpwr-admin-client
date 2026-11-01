@@ -109,9 +109,26 @@ export function unionPictureOfLayout(
   const lower = new Set(claims.lower.filter((piece) => claimedUnder.has(piece)));
   const picture = unionPicture(union, geoms);
   if (!lower.size) return picture;
+  const covers = new Map<string, string[]>();
+  for (const [under, over] of claims.stacked) {
+    if (!lower.has(under) || !ordered.includes(over)) continue;
+    const current = covers.get(under) ?? [];
+    if (!current.includes(over)) current.push(over);
+    covers.set(under, current);
+  }
+  const depths = new Map<string, 1 | 2>();
+  for (let pass = 0; pass < 3; pass++)
+    for (const piece of [...ordered].reverse()) {
+      if (!lower.has(piece)) continue;
+      const above = covers.get(piece) ?? [];
+      const depth = Math.min(2, Math.max(1, ...above.map((key) => 1 + (depths.get(key) ?? 0))));
+      depths.set(piece, depth as 1 | 2);
+    }
   return {
     ...picture,
     lowerLayers: ordered.filter((piece) => lower.has(piece)),
+    lowerLayerCovers: Object.fromEntries(covers),
+    lowerLayerDepths: Object.fromEntries(depths),
     twinLabels: Object.fromEntries(twinLabels),
   };
 }
