@@ -10,7 +10,7 @@ type OpIconArtProps = {
   title?: string;
 };
 
-function shapeElement(shape: Shape, key: string): JSX.Element {
+function shapeElement(shape: Shape, key: string, button: boolean): JSX.Element {
   const dashed =
     (shape[0] === 'p' && shape[2] === 1) ||
     (shape[0] === 'c' && shape[4] === 1) ||
@@ -21,8 +21,13 @@ function shapeElement(shape: Shape, key: string): JSX.Element {
     vectorEffect: 'non-scaling-stroke' as const,
   };
   if (shape[0] === 'p') return <path key={key} {...common} d={shape[1]} />;
-  if (shape[0] === 'c')
+  if (shape[0] === 'c') {
+    if (button && shape[3] <= 2)
+      return (
+        <circle key={key} cx={shape[1]} cy={shape[2]} r={1.15} fill='currentColor' stroke='none' />
+      );
     return <circle key={key} {...common} cx={shape[1]} cy={shape[2]} r={shape[3]} />;
+  }
   return (
     <rect
       key={key}
@@ -36,8 +41,8 @@ function shapeElement(shape: Shape, key: string): JSX.Element {
   );
 }
 
-const shapes = (items: readonly Shape[], prefix: string): JSX.Element[] =>
-  items.map((shape, index) => shapeElement(shape, `${prefix}-${index}`));
+const shapes = (items: readonly Shape[], prefix: string, button = false): JSX.Element[] =>
+  items.map((shape, index) => shapeElement(shape, `${prefix}-${index}`, button));
 
 function genericChip(chip: Extract<IconChip, 'CTR' | 'LAP' | 'EXP' | 'FLY'>) {
   return (
@@ -51,6 +56,7 @@ function genericChip(chip: Extract<IconChip, 'CTR' | 'LAP' | 'EXP' | 'FLY'>) {
 }
 
 export function OpIconArt({ icon, w = 32, h = 24, className, title }: OpIconArtProps) {
+  const button = icon.key.startsWith('button_');
   const barBase = icon.bars ? BAR_BASE[icon.key] : undefined;
   const baseShapes: readonly Shape[] = barBase?.shapes ?? ICONS[icon.key];
   const barShapes =
@@ -75,7 +81,7 @@ export function OpIconArt({ icon, w = 32, h = 24, className, title }: OpIconArtP
       height={h}
       fill='none'
       stroke='currentColor'
-      strokeWidth={1.5}
+      strokeWidth={button ? 1 : 1.5}
       strokeLinecap='round'
       strokeLinejoin='round'
       className={['opi', className].filter(Boolean).join(' ')}
@@ -84,7 +90,7 @@ export function OpIconArt({ icon, w = 32, h = 24, className, title }: OpIconArtP
       data-op-icon={icon.key}
     >
       {title ? <title>{title}</title> : null}
-      {shapes(baseShapes, 'base')}
+      {shapes(baseShapes, 'base', button)}
       {barShapes ? (
         <g transform={mode?.dx ? `translate(${mode.dx} 0)` : undefined}>
           {shapes(barShapes, 'bar')}

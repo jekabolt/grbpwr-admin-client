@@ -10,9 +10,10 @@ import {
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
 import { UnitGlyph } from '../unit-silhouette';
-import { boxOf, type StepLayout } from './step-picture';
+import { boxOf, fitBox, toPx, type StepLayout } from './step-picture';
 import {
   buttonGlyphGeometry,
+  buttonHostChord,
   buttonRadiusPx,
   StepPictureSvg,
   type EdgeMark,
@@ -390,6 +391,22 @@ describe('StepPictureSvg action glyphs', () => {
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
   });
 
+  it('centres an edge button across its narrow host and caps it at ninety percent', () => {
+    const point: Pt2 = [10, 50];
+    const markup = renderNarrow([{ ...marks('button')[0], point, direction: [1, 0], sizeMm: 11 }]);
+    const tag = markup.match(/<g[^>]*data-asm-mark="button"[^>]*>/)?.[0] ?? '';
+    const attribute = (name: string) =>
+      Number(tag.match(new RegExp(`${name}="([^"]+)"`))?.[1] ?? Number.NaN);
+    const fit = fitBox(narrowLayout.bbox, 120, 140, 7);
+    const left = toPx(fit, [0, point[1]]);
+    const right = toPx(fit, [10, point[1]]);
+    const hostWidth = Math.abs(right[0] - left[0]);
+
+    expect(attribute('data-asm-x')).toBeCloseTo((left[0] + right[0]) / 2, 1);
+    expect(attribute('data-asm-y')).toBeCloseTo(left[1], 1);
+    expect(attribute('data-asm-radius') * 2).toBeLessThanOrEqual(hostWidth * 0.9 + 1e-9);
+  });
+
   it('spreads truly outside fallbacks along the narrow host', () => {
     const markup = renderNarrow(
       marks('button').map((glyph) => ({ ...glyph, point: [30, glyph.point[1]] })),
@@ -402,10 +419,31 @@ describe('StepPictureSvg action glyphs', () => {
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
   });
 
-  it('uses true button size with a sixteen-pixel minimum', () => {
-    expect(buttonRadiusPx(2, 1)).toBe(8);
-    expect(buttonRadiusPx(20, 2)).toBe(20);
-    expect(buttonRadiusPx(undefined, 2)).toBe(15);
+  it('uses true button size with a sixteen-pixel minimum on a wide host', () => {
+    expect(buttonRadiusPx(2, 1, 100)).toBe(8);
+    expect(buttonRadiusPx(20, 2, 100)).toBe(20);
+    expect(buttonRadiusPx(undefined, 2, 100)).toBe(15);
+  });
+
+  it('lets a ten-pixel host override the sixteen-pixel minimum', () => {
+    expect(buttonRadiusPx(20, 2, 10)).toBe(4.5);
+  });
+
+  it('takes the host chord containing the mark', () => {
+    const chord = buttonHostChord(
+      [0, 40],
+      [1, 0],
+      [
+        [0, 0],
+        [10, 0],
+        [10, 100],
+        [0, 100],
+      ],
+    );
+
+    expect(chord?.at[0]).toBeCloseTo(5, 6);
+    expect(chord?.at[1]).toBeCloseTo(40, 6);
+    expect(chord?.width).toBeCloseTo(10, 6);
   });
 
   it.each([

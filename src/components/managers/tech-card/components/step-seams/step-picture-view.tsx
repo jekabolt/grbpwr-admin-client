@@ -901,8 +901,48 @@ export function buttonGlyphGeometry(
   return { holes: points, thread };
 }
 
-export const buttonRadiusPx = (sizeMm: number | undefined, scale: number) =>
-  Math.max(8, ((sizeMm ?? 15) * scale) / 2);
+/** The interior host chord through a drill mark, measured along the glyph's cross-piece axis. */
+export function buttonHostChord(
+  mark: Pt2,
+  direction: Pt2,
+  ring: readonly Pt2[],
+): { at: Pt2; width: number } | null {
+  const directionLength = Math.hypot(direction[0], direction[1]);
+  if (ring.length < 3 || directionLength < 1e-6) return null;
+  const axis: Pt2 = [direction[0] / directionLength, direction[1] / directionLength];
+  const cross = (a: Pt2, b: Pt2) => a[0] * b[1] - a[1] * b[0];
+  const cuts: number[] = [];
+  for (let index = 0; index < ring.length; index++) {
+    const start = ring[index];
+    const end = ring[(index + 1) % ring.length];
+    const edge: Pt2 = [end[0] - start[0], end[1] - start[1]];
+    const denominator = cross(axis, edge);
+    if (Math.abs(denominator) < 1e-6) continue;
+    const fromMark: Pt2 = [start[0] - mark[0], start[1] - mark[1]];
+    const edgeShare = cross(fromMark, axis) / denominator;
+    if (edgeShare < -1e-6 || edgeShare > 1 + 1e-6) continue;
+    cuts.push(cross(fromMark, edge) / denominator);
+  }
+  cuts.sort((a, b) => a - b);
+  const unique = cuts.filter((cut, index) => !index || Math.abs(cut - cuts[index - 1]) > 1e-6);
+  for (let index = 0; index + 1 < unique.length; index++) {
+    const low = unique[index];
+    const high = unique[index + 1];
+    const width = high - low;
+    if (width < 1e-6 || low > 1e-6 || high < -1e-6) continue;
+    const middle = (low + high) / 2;
+    const at: Pt2 = [mark[0] + axis[0] * middle, mark[1] + axis[1] * middle];
+    if (insideRing(at, ring)) return { at, width };
+  }
+  return null;
+}
+
+export const buttonRadiusPx = (sizeMm: number | undefined, scale: number, hostWidth?: number) => {
+  const radius = Math.max(8, ((sizeMm ?? 15) * scale) / 2);
+  return hostWidth != null && Number.isFinite(hostWidth) && hostWidth > 1e-6
+    ? Math.min(radius, hostWidth * 0.45)
+    : radius;
+};
 
 /** A fixed-pixel label near the offset twin's lower-right corner, pulled inward until it is safe. */
 const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
@@ -1474,6 +1514,7 @@ export function StepPictureSvg({
     const dx = toward[0] - wanted[0];
     const dy = toward[1] - wanted[1];
     const length = Math.hypot(dx, dy) || 1;
+    const screenDirection: Pt2 = [dx / length, dy / length];
     if (glyph.kind === 'press-arrow') {
       // A press arrow stands on its seam as drawn, never moved into a free spot of the piece.
       const at = pointsOnDrawnPiece(glyph.piece, [wanted])?.[0] ?? wanted;
@@ -1491,13 +1532,15 @@ export function StepPictureSvg({
       return [{ glyph, host, wanted: at, fallback: false, direction: unit, mmPx: length }];
     }
     const onDrawing = pieces.some((piece) => insideRing(wanted, piece.ring));
+    const buttonChord =
+      glyph.kind === 'button' ? buttonHostChord(wanted, screenDirection, host.ring) : null;
     return [
       {
         glyph,
         host,
         wanted,
-        fallback: !onDrawing,
-        direction: [dx / length, dy / length] as Pt2,
+        fallback: !onDrawing && !buttonChord,
+        direction: screenDirection,
         mmPx: length,
       },
     ];
@@ -1515,13 +1558,21 @@ export function StepPictureSvg({
     group.forEach((candidate, index) => fallbackById.set(candidate.glyph.id, spots[index]));
   }
   const actionGlyphSpots = glyphCandidates
-    .map((candidate) => ({
-      glyph: candidate.glyph,
-      at: fallbackById.get(candidate.glyph.id) ?? candidate.wanted,
-      direction: candidate.direction,
-      mmPx: candidate.mmPx,
-      draw: ownedStyle?.marks.get(candidate.glyph.id)?.draw ?? ('solid' as const),
-    }))
+    .map((candidate) => {
+      const mark = fallbackById.get(candidate.glyph.id) ?? candidate.wanted;
+      const chord =
+        candidate.glyph.kind === 'button'
+          ? buttonHostChord(mark, candidate.direction, candidate.host.ring)
+          : null;
+      return {
+        glyph: candidate.glyph,
+        at: chord?.at ?? mark,
+        direction: candidate.direction,
+        mmPx: candidate.mmPx,
+        hostWidth: chord?.width,
+        draw: ownedStyle?.marks.get(candidate.glyph.id)?.draw ?? ('solid' as const),
+      };
+    })
     // Both sides of one seam carry the same arrow: one drawn arrow per spot and way.
     .filter(
       (spot, index, all) =>
@@ -1859,7 +1910,7 @@ export function StepPictureSvg({
           data-asm-piece={line.piece}
         />
       ))}
-      {actionGlyphSpots.map(({ glyph, at, direction, mmPx, draw }) => {
+      {actionGlyphSpots.map(({ glyph, at, direction, mmPx, hostWidth, draw }) => {
         if (draw === 'hidden') return null;
         if (glyph.kind === 'press-arrow') {
           const arrow = pressArrowPath(at, direction, mmPx, L);
@@ -1901,7 +1952,7 @@ export function StepPictureSvg({
           );
         }
         if (glyph.kind === 'button') {
-          const radius = buttonRadiusPx(glyph.sizeMm, mmPx);
+          const radius = buttonRadiusPx(glyph.sizeMm, mmPx, hostWidth);
           const geometry = buttonGlyphGeometry(
             at,
             radius,
