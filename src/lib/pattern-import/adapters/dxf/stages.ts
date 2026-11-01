@@ -133,7 +133,7 @@ export function dxfScaleCandidates(read: DxfRead): ScaleCandidate[] {
   ];
 }
 
-export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
+export function dxfFastPath(read: DxfRead, seg: DxfSegmentation, rulGraded = false): DxfFastPath {
   const page = read.doc.pages[0];
   const pathById = new Map(page.paths.map((p) => [p.id, p]));
   const edges = (id: PathId) => {
@@ -256,7 +256,7 @@ export function dxfFastPath(read: DxfRead, seg: DxfSegmentation): DxfFastPath {
       variant: null,
     });
     const candidates: DxfPieceCandidate[] = ps.map((p) =>
-      candidateOf(p, k, id.mode === 'A', seg, chainOf, range, read, pathById),
+      candidateOf(p, k, id.mode === 'A', seg, chainOf, range, read, pathById, rulGraded),
     );
     // a refused size has no area: growth is judged over the outlines that are given
     const areas = candidates.filter((c) => c.outcome !== 'refused').map((c) => c.areaMm2);
@@ -308,6 +308,7 @@ function candidateOf(
   range: (id: PathId) => PathRange,
   read: DxfRead,
   pathById: Map<PathId, IRPath>,
+  rulGraded: boolean,
 ): DxfPieceCandidate {
   const rank = p.size ? seg.sizes.findIndex((s) => s.token === p.size) : 0;
   if (p.nested) return refusedNested(p, seed, Math.max(0, rank));
@@ -420,6 +421,7 @@ function candidateOf(
       ...(p.instances ? { instances: p.instances } : {}),
       // D3: the block's QUANTITY label is the CAD's word on the count (semantics reads it)
       ...(p.labels.quantity != null ? { quantity: p.labels.quantity } : {}),
+      ...(rulGraded ? { rulGraded: true } : {}),
     },
   };
   // H1c-4: one same-look loop inside the outline at a uniform offset reads as the sew line ONLY

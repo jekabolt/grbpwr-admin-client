@@ -139,6 +139,8 @@ const isUniToken = (t: string) => bareSize(t) === 'UNI';
  * square and its 10–15 mm button circles (the PDF path's DRILL_MAX_MM, RUL_MARK_MAX_MM alike).
  */
 const DRILL_MARK_MAX_MM = 15;
+/** DXF coordinates are rounded independently; a nominal 15 mm mark can span a few microns more. */
+const DRILL_MARK_TOL_MM = 0.01;
 
 /** Size tail of every block name, decided over the whole file (FP_L is left, FP_L_L is size L). */
 function sizeTailsByName(names: string[]): Map<string, string> {
@@ -723,8 +725,8 @@ function blockPiece(
       const w = bb.maxX - bb.minX;
       const h = bb.maxY - bb.minY;
       if (
-        w <= DRILL_MARK_MAX_MM &&
-        h <= DRILL_MARK_MAX_MM &&
+        w <= DRILL_MARK_MAX_MM + DRILL_MARK_TOL_MM &&
+        h <= DRILL_MARK_MAX_MM + DRILL_MARK_TOL_MM &&
         w > 0 &&
         h > 0 &&
         w / h > 0.75 &&

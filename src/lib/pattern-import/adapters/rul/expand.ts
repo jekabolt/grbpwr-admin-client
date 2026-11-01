@@ -470,12 +470,12 @@ function gradePiece(
       g = [{ rule: r, w: 1 }];
       out.rules.add(r);
     }
-    g ??= follow(m0, c) ?? inside(c);
+    g ??= follow(m0, members[idx[0]].e, c) ?? inside(c);
     if (!g) continue;
     for (const i of idx) {
       const e = members[i].e;
       const m = ents[e];
-      if (m.slots.some((s) => follow(m, s))) continue;
+      if (m.slots.some((s) => follow(m, e, s))) continue;
       out.of[e] = m.slots.map(() => [...g!]);
       out.following += m.slots.length;
       if (m.kind === 'chain') graded.add(e);
@@ -486,7 +486,9 @@ function gradePiece(
   for (let grew = true; grew; ) {
     grew = false;
     ents.forEach((m, e) => {
-      if (!gradable(m) || graded.has(e)) return;
+      // Layer 7 defines the piece's grade axes (and is also the grain line consumed downstream).
+      // It is reference geometry, not a mark that follows a boundary it happens to touch.
+      if (!gradable(m) || graded.has(e) || m.layer === '7') return;
       let got = false;
       m.slots.forEach((s, k) => {
         if (out.of[e][k]) return;

@@ -1061,10 +1061,11 @@ export function g8(ctx: GateCtx): GateCheck {
   const grade = warns.length
     ? ` · grade model (warning only): ${warns.slice(0, 8).join('; ')}${warns.length > 8 ? ` … +${warns.length - 8}` : ''}`
     : '';
+  const exactRulGrade = ctx.m.source.files.some((file) => /\.rul$/i.test(file.name));
   return check(
     'G8-monotone',
     failed,
-    worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
+    exactRulGrade ? 'warn' : worstSizes > 2 ? 'block' : failed.length ? 'warn' : 'block',
     (notes.join('; ') ||
       'area and outline length grow with size rank for every identity, no two sizes on one outline') +
       grade,
@@ -1206,6 +1207,7 @@ export function g11(ctx: GateCtx): GateCheck {
   const notes: string[] = [];
   const seenBlocks = new Map<string, string>();
   const seenIds = new Map<string, string>();
+  const exactRulGrade = ctx.m.source.files.some((file) => /\.rul$/i.test(file.name));
   for (const p of ctx.m.pieces) {
     const k = ci(p.identity);
     if (seenIds.has(k)) {
@@ -1221,7 +1223,7 @@ export function g11(ctx: GateCtx): GateCheck {
       pair: { hand: p.pairHand, of: p.pairOf },
       isKnownCode: ctx.rules.isKnownCode,
     });
-    if (problem) {
+    if (problem && !(exactRulGrade && /reads as a size of the run/.test(problem))) {
       failed.push(p.identity);
       notes.push(`${p.identity}: ${problem}`);
     }

@@ -4,16 +4,13 @@
 // graded, radius constant across sizes. Bundled by btn.mjs.
 //   A  expandRul: every button circle is still a circle of the sample's radius in every size, its
 //      cross lines move with it; on the placket (PLCK_R) the centre moves per size step by
-//      -3 + 8·t mm — its proportional place between the side's 4064 (-3) and 4053 (+5) rule ends
+//      -3 + 8·t mm across the piece's layer-7 grade axis (the RUL y direction)
 //   B  the product path, Session → write (r12, storage 'rul'): our per-size DXF draws each button
 //      as a circle of the source diameter at the expanded centre; the base + RUL package expands
 //      back to the same circles
 //   C  btn-after.svg in the golden dir: every piece with buttons × 5 sizes, outline + buttons, and
 //      a zoom of the first button; the marks of PATIMPORT_BTN_BEFORE (an export of the old code),
 //      when given, behind in red
-// Two refusals of this pair are not about buttons and are worked around here, said as KNOWN: the
-// DXF names table "allsizes" while the RUL says "Size Group 1"; a layer-3 point of clr_main lies
-// on two layer-8 lines that move it differently.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -21,7 +18,6 @@ import { expandRul, parseRul } from 'lib/pattern-import/adapters/rul';
 import { buildAst } from 'lib/pattern-import/adapters/dxf/ast';
 import { loadDxf } from 'lib/pattern-import/adapters/dxf/tags';
 import { pieceBlocks } from 'lib/pattern-import/adapters/rul/model';
-import { isUnsupportedFormat } from 'lib/pattern-import/adapters/sniff';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, PtMm } from 'lib/pattern-import/types';
 
@@ -39,7 +35,6 @@ const check = (c: string, name: string, ok: boolean, got: unknown = '') => {
   const g = typeof got === 'string' ? got : JSON.stringify(got);
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${c} · ${name}${g ? ` · ${g}` : ''}`);
 };
-const known = (what: string) => console.log(`KNOWN ${what}`);
 const enc = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
 const latin1 = (p: string) => new TextDecoder('latin1').decode(readFileSync(p));
 const ctx = (): StageCtx => ({ checkCancel: () => {}, progress: () => {} });
@@ -52,74 +47,14 @@ const MAIN: DraftScopeTarget = {
 };
 const card = (tokens: string[]): CardSize[] =>
   tokens.map((t, i) => ({ sizeId: 100 + i, name: t, token: t, rank: i, spellings: [t] }));
-const detail = (e: unknown) =>
-  isUnsupportedFormat(e) ? e.detail ?? e.message : e instanceof Error ? e.message : String(e);
 const f2 = (v: number) => v.toFixed(2);
 
-// ── the DXF text: blocks in / out ────────────────────────────────────────────────────────────
-const blockNames = (text: string): string[] =>
-  [...text.matchAll(/\r?\nBLOCK\r?\n *8\r?\n[^\r\n]*\r?\n *2\r?\n([^\r\n]*)\r?\n/g)].map(
-    (m) => m[1],
-  );
-
-/** The DXF without the piece blocks `keep` refuses (their BLOCK and their INSERTs). */
-function filterBlocks(text: string, keep: (name: string) => boolean): string {
-  const L = text.split(/\r?\n/);
-  const out: string[] = [];
-  let section = '';
-  let skip = false;
-  for (let i = 0; i + 1 < L.length; i += 2) {
-    const code = L[i].trim();
-    const val = L[i + 1];
-    if (code === '0' && val === 'SECTION') section = L[i + 3];
-    if (code === '0' && (val === 'BLOCK' || val === 'INSERT')) {
-      let j = i + 2;
-      let nm = '';
-      while (j + 1 < L.length && L[j].trim() !== '0') {
-        if (L[j].trim() === '2') nm = L[j + 1];
-        j += 2;
-      }
-      skip = !keep(nm);
-    } else if (section === 'ENTITIES' && code === '0' && val !== 'SEQEND') skip = false;
-    if (!skip) out.push(L[i], L[i + 1]);
-    if (code === '0' && (val === 'ENDBLK' || val === 'ENDSEC')) skip = false;
-  }
-  return out.join('\r\n');
-}
-
-/** The golden pair as expandRul takes it: the two known, out-of-lane refusals worked around. */
+/** The untouched golden pair, as the product receives it. */
 function prepare(): { dxfText: string; rulText: string } {
-  let rulText = latin1(resolve(GOLDEN, 'allsizes.rul'));
-  let dxfText = latin1(resolve(GOLDEN, 'allsizes.dxf'));
-  const tryExpand = (dxf: string) =>
-    expandRul({
-      dxf: enc(dxf),
-      dxfName: 'allsizes.dxf',
-      rul: parseRul(enc(rulText), 'allsizes.rul'),
-      rulName: 'allsizes.rul',
-    });
-  try {
-    tryExpand(dxfText);
-    return { dxfText, rulText };
-  } catch (e) {
-    const why = detail(e);
-    if (/names grade rule table/.test(why)) {
-      known(`table name (other lane): ${why}`);
-      rulText = rulText.replace(/^(GRADE RULE TABLE:)[^\r\n]*/m, '$1 allsizes');
-    }
-  }
-  const refused: string[] = [];
-  for (const name of blockNames(dxfText)) {
-    try {
-      tryExpand(filterBlocks(dxfText, (n) => n === name));
-    } catch (e) {
-      refused.push(name);
-      known(`${name} refused (other lane): ${detail(e)}`);
-    }
-  }
-  if (refused.length) dxfText = filterBlocks(dxfText, (n) => !refused.includes(n));
-  tryExpand(dxfText);
-  return { dxfText, rulText };
+  return {
+    dxfText: latin1(resolve(GOLDEN, 'allsizes.dxf')),
+    rulText: latin1(resolve(GOLDEN, 'allsizes.rul')),
+  };
 }
 
 // ── what a per-size DXF draws ────────────────────────────────────────────────────────────────
@@ -209,6 +144,16 @@ function sectionA(
     rulName: 'allsizes.rul',
   });
   const blocks = blocksOf(ex.text);
+  const source = pieceBlocks(buildAst(loadDxf(enc(dxfText)).tok.tags));
+  const plckSource = source.find((piece) => piece.block.name === 'PLCK_R_XS');
+  const gradeRef = plckSource?.entities.find(
+    (entity) => entity.layer === '7' && entity.kind === 'chain' && entity.slots.length >= 2,
+  );
+  if (!gradeRef) throw new Error('PLCK_R_XS: no layer-7 grade reference');
+  const ga = gradeRef.slots[0];
+  const gb = gradeRef.slots[gradeRef.slots.length - 1];
+  const gl = Math.hypot(gb.x - ga.x, gb.y - ga.y);
+  const gradeAxis = { x: (gb.x - ga.x) / gl, y: (gb.y - ga.y) / gl };
   const byStem = buttonsByStem(blocks);
   check(
     'A',
@@ -242,17 +187,19 @@ function sectionA(
     plck.forEach((cs, si) => {
       const dx = cs[i].c.x - k0.c.x;
       const dy = cs[i].c.y - k0.c.y;
-      if (Math.abs(dx) > 0.05 || Math.abs(dy - want * si) > 0.1) {
+      const wx = -gradeAxis.y * want * si;
+      const wy = gradeAxis.x * want * si;
+      if (Math.abs(dx - wx) > 0.1 || Math.abs(dy - wy) > 0.1) {
         placket = false;
-        why ||= `button ${i} ${SIZES[si]}: moved (${f2(dx)}, ${f2(dy)}), wanted (0, ${f2(want * si)})`;
+        why ||= `button ${i} ${SIZES[si]}: moved (${f2(dx)}, ${f2(dy)}), wanted (${f2(wx)}, ${f2(wy)})`;
       }
     });
   });
   check(
     'A',
-    'PLCK_R: each centre moves by -3 + 8·t per size step',
+    'PLCK_R: each centre moves by -3 + 8·t per size step across layer 7',
     placket,
-    why || `Δy/step ${steps.join(' ')}`,
+    why || `Δ/step ${steps.join(' ')} across (${f2(gradeAxis.x)}, ${f2(gradeAxis.y)})`,
   );
 
   // every button moves WITH its piece: linear in size, and never beyond what the outline's own
@@ -339,7 +286,11 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
   await s.runStage('assemble', { sheet: 0 }, c);
   await s.runStage('chains', { opts: { joinGapMm: 3, joinAngleDeg: 15, joinLateralMm: 0.15 } }, c);
   const sz = await s.runStage('sizes', { card: card(SIZES) }, c);
-  await s.runStage('pieces', { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } }, c);
+  const found = await s.runStage(
+    'pieces',
+    { edits: [], opts: { cellMm: 0.5, snapMm: 0.3, variant: null } },
+    c,
+  );
   const sem = await s.runStage(
     'semantics',
     {
@@ -348,6 +299,23 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
       operatorGrain: {},
     },
     c,
+  );
+  const writtenSeeds = new Set(sem.pieces.map((piece) => piece.seed));
+  const writtenIdentity = new Map<string, string>();
+  for (const family of found.families) {
+    const source = (
+      family.candidates[0] as (typeof family.candidates)[number] & {
+        dxf?: { identity?: string };
+      }
+    ).dxf?.identity;
+    const written = sem.pieces.find((piece) => piece.seed === family.seed)?.identity;
+    if (source && written) writtenIdentity.set(source, written);
+  }
+  check(
+    'B',
+    'the real session keeps every CLO piece family',
+    found.families.every((family) => writtenSeeds.has(family.seed)),
+    `${writtenSeeds.size}/${found.families.length} families${sem.blocked.length ? ` · ${sem.blocked.map((item) => `${item.seed}: ${item.reason}`).join(', ')}` : ''}`,
   );
   const w = await s.runStage(
     'write',
@@ -384,9 +352,7 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
   const byStem = buttonsByStem(ours);
 
   // the same buttons, where the expansion put them (relative to the outline: the writer moves
-  // pieces). A piece identical in every size (the flap: all its rules are 0) is one `_UNI` block;
-  // a piece the session folds into another piece's quantity (the pockets, PLCK_L — as before this
-  // fix) has no block of its own and is skipped.
+  // pieces). A piece identical in every size (the flap: all its rules are 0) is one `_UNI` block.
   let same = true;
   let why = '';
   const skipped: string[] = [];
@@ -415,22 +381,23 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
     });
   };
   for (const [stem, per] of expanded) {
-    const mine = byStem.get(stem);
+    const outputStem = writtenIdentity.get(stem) ?? stem;
+    const mine = byStem.get(outputStem);
     if (mine) {
       per.forEach((cs, si) =>
-        compare(`${stem}_${SIZES[si]}`, mine[si], cs, `${stem}_${SIZES[si]}`),
+        compare(`${outputStem}_${SIZES[si]}`, mine[si], cs, `${stem}_${SIZES[si]}`),
       );
       continue;
     }
-    const one = ours.get(`${stem}_UNI`);
+    const one = ours.get(`${outputStem}_UNI`);
     if (one) {
-      uni.push(stem);
+      uni.push(outputStem);
       per.forEach((cs, si) =>
-        compare(`${stem}_UNI`, distinct(one.circles), cs, `${stem}_${SIZES[si]}`),
+        compare(`${outputStem}_UNI`, distinct(one.circles), cs, `${stem}_${SIZES[si]}`),
       );
-    } else if (ours.has(`${stem}_XS`)) {
+    } else if (ours.has(`${outputStem}_XS`)) {
       same = false;
-      why ||= `${stem}: no buttons in our export`;
+      why ||= `${outputStem}: no buttons in our export`;
     } else skipped.push(stem);
   }
   const squares = [...ours.values()].reduce(
@@ -440,7 +407,7 @@ async function sectionB(dxfText: string, rulText: string, expanded: Map<string, 
   check(
     'B',
     'our per-size DXF: every button a circle of the source diameter at the expanded centre, no square',
-    same && squares === 0 && byStem.has('PLCK_R'),
+    same && squares === 0 && byStem.has(writtenIdentity.get('PLCK_R') ?? 'PLCK_R'),
     why ||
       `${[...byStem.entries()].map(([s2, per]) => `${s2} ×${per[0].length} ⌀${f2(per[0][0].r * 2)}`).join(', ')}${uni.map((s2) => ` · ${s2}_UNI ×${distinct(ours.get(`${s2}_UNI`)!.circles).length} (same in every size)`).join('')}${squares ? ` · ${squares} squares` : ''}${skipped.length ? ` · folded into another piece by the session, no block of its own: ${skipped.join(', ')}` : ''}`,
   );

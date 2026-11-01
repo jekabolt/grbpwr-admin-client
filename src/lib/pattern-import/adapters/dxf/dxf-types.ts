@@ -317,5 +317,7 @@ export type DxfPieceCandidate = PieceCandidate & {
     instances?: number;
     /** The block's QUANTITY label (D3: the CAD's count, read by semantics). */
     quantity?: number;
+    /** This per-size block was expanded from an explicit AAMA grade-rule table. */
+    rulGraded?: boolean;
   };
 };
