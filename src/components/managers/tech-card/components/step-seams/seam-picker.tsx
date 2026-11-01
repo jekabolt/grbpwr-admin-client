@@ -66,12 +66,14 @@ import {
   poseAfterDrop,
   poseBlockGroup,
   posePickup,
+  resolvePoseEdit,
+  resolvePoseEdits,
   snapPoseForDrag,
   turnToGrain,
   turnAbout,
   upright,
+  type PoseEditResolution,
   type PosePickup,
-  type PosePin,
   type PoseSnap,
 } from './step-pose';
 import { stepWords } from './step-words';
@@ -207,7 +209,11 @@ export function SeamPickerBody({
   const [mirroredPick, setMirroredPick] = useState<StoredSeam | null>(null);
   // «place» (P8): pieces moved by hand, kept here until «done».
   const [posing, setPosing] = useState(false);
-  const [poseEdits, setPoseEdits] = useState<Map<string, PosePin>>(() => new Map());
+  const [poseChanges, setPoseChanges] = useState<PoseEditResolution>(() => ({
+    edits: new Map(),
+    drop: new Set(),
+  }));
+  const poseEdits = poseChanges.edits;
   const [handEdits, setHandEdits] = useState<Map<string, StoredSeam>>(() => new Map());
   // The under/over switch on a pose row: piece → layer, null = cleared; saved with «done».
   const [poseLayerEdits, setPoseLayerEdits] = useState<Map<string, SeamLayer | null>>(
@@ -255,6 +261,14 @@ export function SeamPickerBody({
     }
     return out;
   }, [op?.poseKeys, poses]);
+  const storedPoseHosts = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const [piece, row] of ownPoseRows) {
+      const pose = poseOf(row);
+      if (pose) out.set(piece, pose.host);
+    }
+    return out;
+  }, [ownPoseRows]);
 
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
@@ -469,7 +483,7 @@ export function SeamPickerBody({
   // ── «place» (P8): any piece moved by hand, stored as a pose on «done»; the pick is left as it is ──
   const exitPose = () => {
     setPosing(false);
-    setPoseEdits(new Map());
+    setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
     setPoseLayerEdits(new Map());
     setPoseFree(null);
@@ -481,7 +495,7 @@ export function SeamPickerBody({
   const startPose = () => {
     if (posing || !stepPicture) return;
     setRefused('');
-    setPoseEdits(new Map());
+    setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
     setPoseLayerEdits(new Map());
     setPoseFree(null);
@@ -510,11 +524,12 @@ export function SeamPickerBody({
       return;
     }
     setRefused('');
-    setPoseEdits((current) => {
-      const next = new Map(current);
-      next.set(piece, { host: dropped.host, placement: dropped.placement });
-      return next;
-    });
+    setPoseChanges((current) =>
+      resolvePoseEdit(storedPoseHosts, current, piece, {
+        host: dropped.host,
+        placement: dropped.placement,
+      }),
+    );
   };
   const dropPose = (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => {
     setPoseDrag(null);
@@ -641,12 +656,12 @@ export function SeamPickerBody({
     if (busy) return;
     setPoseFree(null);
     const selected = poseSel ? new Set(pickupOf(poseSel).group) : null;
-    setPoseEdits((current) => {
-      if (!selected) return new Map();
-      const next = new Map(current);
-      for (const piece of current.keys())
+    setPoseChanges((current) => {
+      if (!selected) return { edits: new Map(), drop: new Set() };
+      const next = new Map(current.edits);
+      for (const piece of current.edits.keys())
         if (pickupOf(piece).group.some((member) => selected.has(member))) next.delete(piece);
-      return next;
+      return resolvePoseEdits(storedPoseHosts, next);
     });
     setHandEdits((current) => {
       if (!selected) return new Map();
@@ -666,10 +681,12 @@ export function SeamPickerBody({
   };
   const finishPose = async () => {
     if (!posing || busy) return;
+    // Recheck at the write boundary too: no stale render or future caller may persist a cycle.
+    const safeChanges = resolvePoseEdits(storedPoseHosts, poseChanges.edits, poseChanges.drop);
     const put: StoredPose[] = [];
     const layerOf = (piece: string, own: StoredPose | undefined) =>
       (poseLayerEdits.has(piece) ? poseLayerEdits.get(piece) : own?.sideA[0]?.layer) ?? undefined;
-    for (const [piece, pin] of poseEdits) {
+    for (const [piece, pin] of safeChanges.edits) {
       const own = ownPoseRows.get(piece);
       const pg = geoms.get(piece);
       const hg = geoms.get(pin.host);
@@ -688,11 +705,15 @@ export function SeamPickerBody({
     // A switch flipped on a saved pose that was not moved: the stored row with the new flag only.
     for (const piece of poseLayerEdits.keys()) {
       const own = ownPoseRows.get(piece);
-      if (poseEdits.has(piece) || !own?.sideA[0]) continue;
+      if (safeChanges.edits.has(piece) || safeChanges.drop.has(piece) || !own?.sideA[0]) continue;
       const layer = layerOf(piece, own);
       put.push({ ...own, sideA: [withSeamLayer(own.sideA[0], layer), ...own.sideA.slice(1)] });
     }
-    if (!put.length && !handEdits.size) {
+    const drop = [...safeChanges.drop].flatMap((piece) => {
+      const row = ownPoseRows.get(piece);
+      return row ? [row] : [];
+    });
+    if (!put.length && !drop.length && !handEdits.size) {
       exitPose();
       return;
     }
@@ -704,10 +725,10 @@ export function SeamPickerBody({
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
       return;
     }
-    const ok = !put.length || (await attachPose(put));
+    const ok = (!put.length && !drop.length) || (await attachPose(put, drop));
     setBusy(false);
     if (!ok) {
-      const key = put[0]?.seamKey ?? '';
+      const key = put[0]?.seamKey ?? drop[0]?.seamKey ?? '';
       setRefused(useSeamsStore.getState().errors[key] ?? 'not saved');
       return;
     }

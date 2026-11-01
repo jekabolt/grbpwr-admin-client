@@ -54,6 +54,7 @@ import {
   posePickup,
   posePinsOf,
   pinPoses,
+  resolvePoseEdits,
   snapPose,
   snapPoseForDrag,
   turnAbout,
@@ -92,6 +93,43 @@ const relOf = (T: ReadonlyMap<string, Affine>, piece: string, host: string) =>
   compose(invert(T.get(host)!), T.get(piece)!);
 
 const AT: SeamPlacement = { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: true };
+const posePin = (host: string) => ({ host, placement: AT });
+
+describe('pose host cycles', () => {
+  it('keeps the latest edit in a direct A↔B cycle', () => {
+    const resolved = resolvePoseEdits(
+      new Map(),
+      new Map([
+        ['A', posePin('B')],
+        ['B', posePin('A')],
+      ]),
+    );
+
+    expect([...resolved.edits]).toEqual([['B', posePin('A')]]);
+    expect([...resolved.drop]).toEqual(['A']);
+  });
+
+  it('keeps the latest edit and drops the older head of a three-piece cycle', () => {
+    const resolved = resolvePoseEdits(
+      new Map([
+        ['A', 'B'],
+        ['B', 'C'],
+      ]),
+      new Map([['C', posePin('A')]]),
+    );
+
+    expect([...resolved.edits]).toEqual([['C', posePin('A')]]);
+    expect([...resolved.drop]).toEqual(['A']);
+  });
+
+  it('leaves an acyclic host graph unchanged', () => {
+    const edits = new Map([['C', posePin('A')]]);
+    const resolved = resolvePoseEdits(new Map([['A', 'B']]), edits);
+
+    expect([...resolved.edits]).toEqual([...edits]);
+    expect([...resolved.drop]).toEqual([]);
+  });
+});
 
 describe('pose row: the wire and the server rules', () => {
   const host = square('HOST', 0, 0, 400, 600);

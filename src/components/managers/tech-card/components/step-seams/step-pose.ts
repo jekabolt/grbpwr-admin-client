@@ -12,6 +12,57 @@ import { poseOf, type SeamPlacement, type StoredPose } from 'lib/seams';
 /** A posed piece as the layout reads it: on `host`, at `placement` (the surface encoding). */
 export type PosePin = { host: string; placement: SeamPlacement; seamKey?: string };
 
+export type PoseEditResolution = {
+  edits: Map<string, PosePin>;
+  /** Pieces whose stored pose must be removed. */
+  drop: Set<string>;
+};
+
+/**
+ * Record one pose edit without allowing a host cycle. The new edge wins: when its host already
+ * reaches the moved piece, that host's older pose is removed (pending edit and stored row alike).
+ */
+export function resolvePoseEdit(
+  storedHosts: ReadonlyMap<string, string>,
+  current: { edits: ReadonlyMap<string, PosePin>; drop: ReadonlySet<string> },
+  piece: string,
+  edit: PosePin,
+): PoseEditResolution {
+  const edits = new Map(current.edits);
+  const drop = new Set(current.drop);
+  if (piece === edit.host) return { edits, drop };
+
+  // Re-setting a piece is the latest edit, including after an earlier cycle dropped its pose.
+  edits.delete(piece);
+  edits.set(piece, edit);
+  drop.delete(piece);
+
+  const hostOf = (key: string) =>
+    edits.get(key)?.host ?? (drop.has(key) ? undefined : storedHosts.get(key));
+  const seen = new Set<string>();
+  let cursor: string | undefined = edit.host;
+  while (cursor && !seen.has(cursor) && cursor !== piece) {
+    seen.add(cursor);
+    cursor = hostOf(cursor);
+  }
+  if (cursor === piece) {
+    edits.delete(edit.host);
+    drop.add(edit.host);
+  }
+  return { edits, drop };
+}
+
+/** Recheck a complete pending save; map order is edit order, so the last move wins. */
+export function resolvePoseEdits(
+  storedHosts: ReadonlyMap<string, string>,
+  edits: ReadonlyMap<string, PosePin>,
+  drop: ReadonlySet<string> = new Set(),
+): PoseEditResolution {
+  let resolved: PoseEditResolution = { edits: new Map(edits), drop: new Set(drop) };
+  for (const [piece, edit] of edits) resolved = resolvePoseEdit(storedHosts, resolved, piece, edit);
+  return resolved;
+}
+
 const FLIP_Y: Affine = [1, 0, 0, -1, 0, 0];
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
