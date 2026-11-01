@@ -1,11 +1,14 @@
 // STEP — the active operation reduced to its result, seam picture, exceptions, and sewn values.
-import { isJoin, pairPicture, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map';
+import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map';
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { useMemo } from 'react';
 import { Text } from 'ui';
-import { PairShape } from './pair-shape';
+import { useStepResults } from '../step-seams/step-result-context';
+import type { StepResult } from '../step-seams/step-result';
+import { StepPictureSvg, useCardGeoms } from '../step-seams/step-picture-view';
+import { stepPictureOf, type SurfacePicture } from '../step-seams/surface-picture';
 import { SewnStrip } from './sewn-strip';
 import type { MapModel } from './use-map-model';
 
@@ -14,6 +17,12 @@ export const MAP_W = 286;
 const PIC_H = 230;
 
 const num = (i: number) => (i + 1) * 10;
+
+/** The ASSEMBLY MAP uses the same selector as every other step surface. */
+export const mapStepPictureOf = (
+  results: readonly StepResult[] | null | undefined,
+  index: number,
+): SurfacePicture | null => stepPictureOf(results, index);
 
 function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
   const lengthOf = (id: string, evidence?: number) =>
@@ -42,8 +51,20 @@ function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
 
 export function StepView({ model, index }: { model: MapModel; index: number }) {
   const { read, ops, pieceName, unitName, isUnit } = model;
+  const results = useStepResults();
+  const picture = mapStepPictureOf(results, index);
+  const { geoms, innerLines } = useCardGeoms();
   const op = ops[index];
-  const picture = useMemo(() => (read ? pairPicture(read, index) : null), [read, index]);
+  const marks = useMemo(
+    () =>
+      (read?.seams[index] ?? []).flatMap((seam) =>
+        [
+          ...(seam.aParts?.length ? seam.aParts : [seam.a]),
+          ...(seam.bParts?.length ? seam.bParts : [seam.b]),
+        ].map((id) => ({ id, tone: 'stored' as const })),
+      ),
+    [read, index],
+  );
   if (!op) return null;
 
   const inputs = (op.inputKeys ?? []).filter(Boolean);
@@ -67,6 +88,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const facts = read
     ? [...new Set((read.seams[index] ?? []).flatMap((seam) => mismatchFacts(read, seam)))]
     : [];
+  const drawn = !!picture && picture.layout.T.size > 0;
 
   return (
     <div className='flex flex-col gap-1.5' data-map-step={index}>
@@ -86,15 +108,23 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
 
       <div
         className='flex items-center justify-center bg-pageBg'
-        style={{ height: picture ? PIC_H : undefined, minHeight: picture ? undefined : 120 }}
+        style={{ height: drawn ? PIC_H : undefined, minHeight: drawn ? undefined : 120 }}
+        role={drawn ? 'img' : undefined}
+        aria-label={drawn ? `step ${num(index)}: ${inputNames.join(', ')}` : undefined}
+        data-map-step-picture={drawn ? '' : undefined}
       >
-        {picture ? (
-          <PairShape
-            picture={picture}
+        {drawn ? (
+          <StepPictureSvg
+            w={MAP_W}
+            h={PIC_H}
+            pad={8}
+            look='tile'
+            layout={picture.layout}
+            layers={picture.layers}
+            geoms={geoms}
+            innerLines={innerLines}
+            marks={marks}
             names={inputNames}
-            boxW={MAP_W}
-            boxH={PIC_H}
-            label={`step ${num(index)}: ${inputNames.join(', ')}`}
           />
         ) : (
           <div className='flex flex-wrap items-center justify-center gap-2 p-2' data-map-names=''>

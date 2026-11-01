@@ -54,8 +54,8 @@ import {
   type LayerHit,
 } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
-import { decodeHandPlace, isHandSeamKind, stepHandsOf } from './step-hand';
-import { useStepResult } from './step-result-context';
+import { decodeHandPlace, isHandSeamKind } from './step-hand';
+import { useStepResults } from './step-result-context';
 import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
 import {
   pinPoses,
@@ -89,7 +89,6 @@ import {
   fitBox,
   insideRing,
   pathOf,
-  seamSig,
   toPx,
   type SeamSides,
   type StepLayout,
@@ -98,21 +97,31 @@ import {
   pictureBounds,
   StepPictureSvg,
   useBoxSize,
-  useStable,
-  useStepLayout,
   useStepScene,
-  frameSeamsOf,
   type EdgeMark,
   type NoMark,
   type PictureView,
 } from './step-picture-view';
+import { stepPictureOf } from './surface-picture';
 
 type Side = 'a' | 'b';
 type Sel = { a: TargetId[]; b: TargetId[] };
 const EMPTY: Sel = { a: [], b: [] };
 
-/** Share of the extent the inputs stand apart on the canvas. */
-const EXPLODE = 0.08;
+const EMPTY_CANVAS_LAYOUT: StepLayout = {
+  T: new Map(),
+  input: new Map(),
+  ghosts: [],
+  stacked: [],
+  onRuns: [],
+  apart: [],
+  clusters: [],
+  layers: [],
+  pieceLayers: [],
+  hand: new Map(),
+  hung: [],
+  bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
+};
 
 const sameSel = (x: Sel, y: Sel) =>
   x.a.length === y.a.length &&
@@ -170,22 +179,20 @@ export function SeamPickerBody({
   readOnly?: boolean;
 }) {
   const scene = useStepScene(index);
-  const stepResult = useStepResult(index);
+  const stepResults = useStepResults();
+  const stepPicture = stepPictureOf(stepResults, index);
+  const stepResult = stepResults?.[index];
   const {
     op,
     geo,
     geoms,
-    ops,
     byKey,
     innerLines,
     groups,
-    leaves,
     ease,
     stored,
     suggestions,
     surfaceSuggestion,
-    innerSeams,
-    storedSeams,
     pieceName: nameOf,
   } = scene;
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
@@ -248,13 +255,7 @@ export function SeamPickerBody({
   const canAccept =
     !frozen && !busy && !!cardId && (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
 
-  // The legacy frame remains only as the loading/outside-provider fallback. Its stored placements
-  // match the old canvas while the shared result is unavailable.
   const poses = scene.poses;
-  const savedHands = useMemo(
-    () => stepHandsOf(ops, index, byKey, poses),
-    [ops, index, byKey, poses],
-  );
   // This step's stored pose rows retain their key when PLACE updates them.
   const ownPoseRows = useMemo(() => {
     const out = new Map<string, StoredPose>();
@@ -420,23 +421,12 @@ export function SeamPickerBody({
     setMirroredPick(null);
   };
 
-  // The old frame is retained only as a fallback outside the card-level result provider.
-  const frameRaw = frameSeamsOf(innerSeams, storedSeams, [], []);
-  const frameSeams = useStable(frameRaw, seamSig(frameRaw));
-  const fallbackLayout = useStepLayout(leaves, frameSeams, geoms, EXPLODE, undefined, savedHands);
-  const canvasLayout = stepResult?.layout ?? fallbackLayout;
-  const poseLayers = useMemo(
-    () => stepResult?.layers ?? [...canvasLayout.T.keys()],
-    [stepResult?.layers, canvasLayout],
-  );
-  const poseBlocks = useMemo(
-    () => stepResult?.blocks ?? groups.map((group) => ({ pieces: group.pieces })),
-    [stepResult?.blocks, groups],
-  );
-  const poseHung = useMemo(
-    () => stepResult?.hung ?? canvasLayout.hung ?? [],
-    [stepResult?.hung, canvasLayout.hung],
-  );
+  // Outside the card-level provider the editor keeps its existing empty state. It never computes
+  // a second layout that could disagree with the step picture shown elsewhere.
+  const canvasLayout = stepPicture?.layout ?? EMPTY_CANVAS_LAYOUT;
+  const poseLayers = stepPicture?.layers ?? [];
+  const poseBlocks = stepResult?.blocks ?? [];
+  const poseHung = stepResult?.hung ?? [];
   // PLACE starts from the exact result transforms. Unsaved drops are pinned over a fresh map so
   // the shared cached result remains immutable.
   const poseLayout = useMemo(() => {
@@ -514,7 +504,7 @@ export function SeamPickerBody({
     setPoseBounds(undefined);
   };
   const startPose = () => {
-    if (posing) return;
+    if (posing || !stepPicture) return;
     setRefused('');
     setPoseEdits(new Map());
     setHandEdits(new Map());
@@ -909,7 +899,7 @@ export function SeamPickerBody({
                 pad={phone ? 28 : 64}
                 look='canvas'
                 layout={canvasLayout}
-                layers={stepResult?.layers}
+                layers={stepPicture?.layers}
                 geoms={geoms}
                 innerLines={innerLines}
                 marks={marks}
