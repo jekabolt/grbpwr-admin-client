@@ -61,12 +61,15 @@ function rectangle(key: string, name: string, index: number, w = 10, h = 20): Sk
  * sewn to the front's other long edge by one of its own — its free half is what turns under. The
  * sizes are real so the doll wraps a real girth, not a toy one.
  */
-function fixture(sewPlacket = true) {
+function fixture(sewPlacket = true, apart = false) {
   const facts: SkeletonFacts = {
     pieces: [
       rectangle('F', 'front', 1, 50, 70),
       rectangle('P', 'PLCK_L', 2, 4, 70),
-      rectangle('B', 'back', 3, 50, 70),
+      // `apart`: the back is the bigger piece (the chart's root) with a yoke sewn on top of it, and
+      // no seam reaches the front — the front and its placket float together, as one lot.
+      rectangle('B', 'back', 3, apart ? 52 : 50, 70),
+      ...(apart ? [rectangle('Y', 'back yoke', 4, 52, 20)] : []),
     ],
     category: 'shirt',
     bom: { zipper: 0, buttons: 0, snaps: 0, tape: 0, elastic: 0, drawcord: 0, interlining: 0 },
@@ -81,12 +84,20 @@ function fixture(sewPlacket = true) {
     evidence: { ...evidence, aLenMm: len, bLenMm: len },
   });
   // Edges of a rectangle poly: 0 bottom, 1 right, 2 top, 3 left.
-  const owners = [...(sewPlacket ? [seam('F#1', 'P#3', 700)] : []), seam('B#1', 'F#3', 700)];
+  const owners = [
+    ...(sewPlacket ? [seam('F#1', 'P#3', 700)] : []),
+    apart ? seam('B#2', 'Y#0', 520) : seam('B#1', 'F#3', 700),
+  ];
   const graph: SeamGraph = {
     ...read,
     chosen: owners,
     rejected: [],
-    components: [['F', 'P', 'B']],
+    components: apart
+      ? [
+          ['F', 'P'],
+          ['B', 'Y'],
+        ]
+      : [['F', 'P', 'B']],
   };
   const rows = owners.map((owner, i) => {
     const row = seamFromCandidate(owner, graph.pieces, {
@@ -224,6 +235,29 @@ describe('solveDoll folds', () => {
     expect(f.applied).toBe(true);
     expect(f.finishedWidthMm).toBeCloseTo(20, 0);
     expect(f.drawnWidthMm).toBeLessThan(0.75 * f.cutWidthMm);
+    expect(f.plyGapMm).not.toBeNull();
+    expect(f.plyGapMm!.min).toBeGreaterThan(0);
+    expect(f.plyGapMm!.max).toBeLessThan(2.5);
+    expect(f.interpenetrating).toBe(0);
+  }, 60_000);
+
+  it('floats a front and its placket as one lot: the seam between them drawn, the plies apart', () => {
+    const { facts, graph, options } = fixture(true, true);
+    const report = solveDoll({ graph, facts, options: { ...options, folds: { P: [middle()] } } });
+    expect(report.stats.nan).toBe(0);
+    // Both drift from the body as one lot, laid as the chart laid them — the front says so.
+    expect(report.floating.map((f) => f.pieceKey).sort()).toEqual(['F', 'P']);
+    expect(report.floating.find((f) => f.pieceKey === 'F')!.reason).toContain('drawn apart with P');
+    // The seam inside the lot is a seam, drawn closed — not a row that "cannot be drawn".
+    const fp = report.seams.find((s) => s.id === 'F#1~P#3');
+    expect(fp).toBeDefined();
+    expect(fp!.state).not.toBe('open');
+    expect(fp!.residualP95Mm).toBeLessThan(5);
+    expect((report.contradictions ?? []).some((c) => c.includes('cannot be drawn'))).toBe(false);
+    // The placket folds on the lot as it would on the doll: its plies lie apart, none through.
+    const f = report.folds![0];
+    expect(f.applied).toBe(true);
+    expect(f.finishedWidthMm).toBeCloseTo(20, 0);
     expect(f.plyGapMm).not.toBeNull();
     expect(f.plyGapMm!.min).toBeGreaterThan(0);
     expect(f.plyGapMm!.max).toBeLessThan(2.5);

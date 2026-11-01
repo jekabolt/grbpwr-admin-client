@@ -552,6 +552,8 @@ export function solveDoll(input: DollInput): DollReport {
   const declaredJoins = owner ? undefined : opt.joins;
   const proposalsAllowed = !owner && opt.proposeComposite !== false;
   let resolvedRows: SizeResolved | undefined;
+  /** By steps: confirmed rows no step names — not sewn, kept only as cues for laying composites. */
+  let joinsNotSewn: SeamCandidate[] = [];
   let graphIn = input.graph;
   if (l4 && opt.seams?.rows.length) {
     const S = opt.seams!;
@@ -579,6 +581,13 @@ export function solveDoll(input: DollInput): DollReport {
           // By steps: a closure row no step names is not drawn buttoned either.
           if (S.inStepKeys)
             r.closures = r.closures.filter((c) => ownerInStepKeys.has(c.provenance?.seamKey ?? ''));
+          // A confirmed row no step names is not sewn here — but a person confirmed the pieces
+          // meet there, so it still says which of two parts sits above the other when a composite
+          // path is laid (the yoke above the front it is sewn on, not hanging under it).
+          if (S.inStepKeys)
+            joinsNotSewn = r.forced.filter(
+              (c) => !c.surface && !ownerInStepKeys.has(c.provenance?.seamKey ?? ''),
+            );
           r.forced = S.candidates.flatMap(({ seamKey, candidate, guess }) => {
             const row = guess ? undefined : rowByKey.get(seamKey);
             if (!guess && (!row || row.status !== 'confirmed')) return [];
@@ -1730,11 +1739,14 @@ export function solveDoll(input: DollInput): DollReport {
           let fixed: boolean | null = unitLeg(g) ? true : null;
           const k0 = pk(many[0]);
           const k1 = pk(many[1]);
-          const join = G.seams.find(
-            (sm) =>
-              (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
-              (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0)),
-          );
+          const joins = (sm: { a: readonly string[]; b: readonly string[] }) =>
+            (sm.a.some((id) => pk(id) === k0) && sm.b.some((id) => pk(id) === k1)) ||
+            (sm.a.some((id) => pk(id) === k1) && sm.b.some((id) => pk(id) === k0));
+          const join =
+            G.seams.find(joins) ??
+            joinsNotSewn
+              .map((c) => ({ a: c.aParts ?? edgeIdsOf(c.a), b: c.bParts ?? edgeIdsOf(c.b) }))
+              .find(joins);
           const my = (pts: readonly Pt2[]) =>
             pts.reduce((t, q) => t + q[1], 0) / Math.max(1, pts.length);
           if (join && fixed === null) {
@@ -6809,32 +6821,78 @@ export function solveDoll(input: DollInput): DollReport {
   // (a bag has no hem line vLo: its pieces stand level with its bottom)
   const yBase = bag && Number.isFinite(yLow) ? yLow : vLo + 200;
   const floating: DollReport['floating'] = [];
+  // Pieces a chart laid together that no seam carries to the placed doll (a front whose side seam
+  // no step names, with its yoke and the placket sewn onto it) float as ONE lot: laid as the chart
+  // laid them, mirror included, so the seams among them are drawn from where they lie (a lot never
+  // moves; they close as far as the chart matched them). A lone piece lies as cut, face up.
+  const lotOf = (P: Panel): Panel[] => {
+    for (const ch of charts.values())
+      for (const c of ch.components)
+        if (c.keys.includes(P.key)) {
+          const lot = c.keys
+            .map((k) => panelByKey.get(k))
+            .filter((Q): Q is Panel => !!Q && (Q.group === 'FLOAT' || !placed[Q.offset]));
+          return lot.length > 1 ? lot : [P];
+        }
+    return [P];
+  };
+  const lots: Panel[][] = [];
+  const lotted = new Set<number>();
   for (const P of panels) {
-    if (P.group !== 'FLOAT' && placed[P.offset]) continue;
+    if ((P.group !== 'FLOAT' && placed[P.offset]) || lotted.has(P.idx)) continue;
+    const lot = lotOf(P);
+    for (const Q of lot) lotted.add(Q.idx);
+    lots.push(lot);
+  }
+  for (const lot of lots) {
+    const asChart = lot.length > 1;
+    const at = asChart ? cuv : uv;
     let x0 = Infinity;
     let x1 = -Infinity;
     let y0 = Infinity;
-    for (let i = 0; i < P.count; i++) {
-      x0 = Math.min(x0, uv[2 * (P.offset + i)]);
-      x1 = Math.max(x1, uv[2 * (P.offset + i)]);
-      y0 = Math.min(y0, uv[2 * (P.offset + i) + 1]);
+    for (const P of lot)
+      for (let i = 0; i < P.count; i++) {
+        x0 = Math.min(x0, at[2 * (P.offset + i)]);
+        x1 = Math.max(x1, at[2 * (P.offset + i)]);
+        y0 = Math.min(y0, at[2 * (P.offset + i) + 1]);
+      }
+    for (const P of lot) {
+      for (let i = 0; i < P.count; i++) {
+        const v = P.offset + i;
+        setPos(v, [
+          xCursor + at[2 * v] - x0,
+          yBase + at[2 * v + 1] - y0,
+          P.fold ? P.fold.off[i] : 0,
+        ]);
+        placed[v] = 1;
+      }
+      // Laid as cut, it is face up whatever the chart decided: its fold's plies are measured by it.
+      if (!asChart) P.mirrored = false;
+      if (P.fold) P.fold.plyDone = true;
+      const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
+      floating.push({
+        pieceKey: P.key,
+        reason:
+          plyWords(P) ??
+          (asChart
+            ? `drawn apart with ${lot
+                .filter((Q) => Q !== P)
+                .map((Q) => Q.key)
+                .join(', ')} — sewn to each other, no seam reaches the placed pieces`
+            : has
+              ? 'sewn only to pieces outside any wrap group — drawn apart'
+              : 'no seam found for any of its edges — drawn apart'),
+      });
     }
-    for (let i = 0; i < P.count; i++) {
-      const v = P.offset + i;
-      setPos(v, [xCursor + uv[2 * v] - x0, yBase + uv[2 * v + 1] - y0, P.fold ? P.fold.off[i] : 0]);
-      placed[v] = 1;
-    }
-    if (P.fold) P.fold.plyDone = true;
     xCursor += x1 - x0 + 60;
-    const has = G.seams.some((s) => pk(s.a[0]) === P.key || pk(s.b[0]) === P.key);
-    floating.push({
-      pieceKey: P.key,
-      reason:
-        plyWords(P) ??
-        (has
-          ? 'sewn only to pieces outside any wrap group — drawn apart'
-          : 'no seam found for any of its edges — drawn apart'),
-    });
+    if (!asChart) continue;
+    // The seams inside the lot: drawn from where the chart laid them.
+    const keys = new Set(lot.map((P) => P.key));
+    for (const sm of G.seams) {
+      if (handled.has(sm) || ![...sm.a, ...sm.b].every((id) => keys.has(pk(id)))) continue;
+      handled.add(sm);
+      graphWork(sm, passes);
+    }
   }
 
   // ── phase 2: everything ─────────────────────────────────────────────────────────────────
