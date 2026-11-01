@@ -56,9 +56,21 @@ function segmentHitsBox(a: Pt2, b: Pt2, box: Box): boolean {
 const ringHitsBox = (ring: readonly Pt2[], box: Box) =>
   ring.some((a, i) => segmentHitsBox(a, ring[(i + 1) % ring.length], box));
 
+/** Where the label pass will judge the name: the frame it must stay in and the box it checks. */
+export type NameRoom = {
+  /** The canvas: a name box leaving it is hidden. */
+  frame?: Box;
+  /** Boxes the label pass keeps this name off (other inputs' pieces). */
+  avoid?: readonly Box[];
+  /** The label pass's box for this name (wider than the text); defaults to `w`×`h`. */
+  w?: number;
+  h?: number;
+};
+
 /**
  * The centre of a `w`×`h` name box inside `ring`, crossing no outline of `ring` or `blockers`,
- * nearest the ring's own safe spot. None fits → centred under `unit` (the whole unit's box).
+ * nearest the ring's own safe spot. None fits → beside `unit` (the whole unit's box), clear of
+ * every piece and inside `room.frame`.
  */
 export function nameSpot(
   ring: readonly Pt2[],
@@ -66,14 +78,23 @@ export function nameSpot(
   w: number,
   h: number,
   unit: readonly Pt2[] = ring,
+  room: NameRoom = {},
 ): Pt2 {
+  const W = Math.max(w, room.w ?? w);
+  const H = Math.max(h, room.h ?? h);
+  const judged = (c: Pt2) => {
+    const box = { x0: c[0] - W / 2, y0: c[1] - H / 2, x1: c[0] + W / 2, y1: c[1] + H / 2 };
+    const f = room.frame;
+    if (f && (box.x0 < f.x0 || box.x1 > f.x1 || box.y0 < f.y0 || box.y1 > f.y1)) return false;
+    return !room.avoid?.some((a) => meets(a, box));
+  };
   const b = boxOf(ring);
   const safe = spotInside(ring);
   const near = blockers.filter((other) => meets(boxOf(other), b));
   const fits = (c: Pt2) => {
     const box = { x0: c[0] - w / 2, y0: c[1] - h / 2, x1: c[0] + w / 2, y1: c[1] + h / 2 };
     if (box.x0 < b.x0 || box.x1 > b.x1 || box.y0 < b.y0 || box.y1 > b.y1) return false;
-    if (!insideRing(c, ring)) return false;
+    if (!insideRing(c, ring) || !judged(c)) return false;
     if (ringHitsBox(ring, box)) return false;
     return !near.some(
       (other) => insideRing(c, other) || (meets(boxOf(other), box) && ringHitsBox(other, box)),
@@ -93,30 +114,45 @@ export function nameSpot(
       }
     }
   if (best) return best;
-  return besideUnit(boxOf(unit), [ring, ...blockers].map(boxOf), w, h);
+  return besideUnit(boxOf(unit), [ring, ...blockers].map(boxOf), W, H, room.frame);
 }
 
 /**
  * Outside the unit: under it, over it, right of it, left of it — the first spot clear of every
- * piece's box (a name on another piece is hidden by the label pass), stepping outward. Nothing
- * clear → under the unit.
+ * piece's box (a name on another piece is hidden by the label pass) and inside the frame, slid
+ * along the unit's side to stay in it, stepping outward. Nothing clear → under the unit, pulled
+ * into the frame when the unit shows there at all.
  */
-function besideUnit(u: Box, pieces: readonly Box[], w: number, h: number): Pt2 {
+function besideUnit(u: Box, pieces: readonly Box[], w: number, h: number, frame?: Box): Pt2 {
   const cx = (u.x0 + u.x1) / 2;
   const cy = (u.y0 + u.y1) / 2;
-  const clear = (c: Pt2) => {
-    const box = { x0: c[0] - w / 2, y0: c[1] - h / 2, x1: c[0] + w / 2, y1: c[1] + h / 2 };
-    return !pieces.some((p) => meets(p, box));
+  const clamp = (v: number, lo: number, hi: number) =>
+    lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v));
+  const slideX = (x: number) => (frame ? clamp(x, frame.x0 + w / 2, frame.x1 - w / 2) : x);
+  const slideY = (y: number) => (frame ? clamp(y, frame.y0 + h / 2, frame.y1 - h / 2) : y);
+  const boxAt = (c: Pt2) => ({
+    x0: c[0] - w / 2,
+    y0: c[1] - h / 2,
+    x1: c[0] + w / 2,
+    y1: c[1] + h / 2,
+  });
+  const inFrame = (c: Pt2) => {
+    if (!frame) return true;
+    const box = boxAt(c);
+    return box.x0 >= frame.x0 && box.x1 <= frame.x1 && box.y0 >= frame.y0 && box.y1 <= frame.y1;
   };
+  const clear = (c: Pt2) => inFrame(c) && !pieces.some((p) => meets(p, boxAt(c)));
   for (let gap = 2; gap <= 2 + h * 4; gap += h) {
     const spots: Pt2[] = [
-      [cx, u.y1 + gap + h / 2],
-      [cx, u.y0 - gap - h / 2],
-      [u.x1 + gap + w / 2, cy],
-      [u.x0 - gap - w / 2, cy],
+      [slideX(cx), u.y1 + gap + h / 2],
+      [slideX(cx), u.y0 - gap - h / 2],
+      [u.x1 + gap + w / 2, slideY(cy)],
+      [u.x0 - gap - w / 2, slideY(cy)],
     ];
     const spot = spots.find(clear);
     if (spot) return spot;
   }
-  return [cx, u.y1 + h / 2 + 2];
+  const under: Pt2 = [cx, u.y1 + h / 2 + 2];
+  const shows = !frame || meets(u, frame);
+  return shows ? [slideX(under[0]), slideY(under[1])] : under;
 }

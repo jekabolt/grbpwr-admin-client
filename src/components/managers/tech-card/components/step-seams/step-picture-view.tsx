@@ -1280,6 +1280,7 @@ export function StepPictureSvg({
   });
   // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
   // never across the gap between pieces that only stand together.
+  const nameBoxOf = (text: string) => ({ w: text.length * L.font * 0.66 + 16, h: L.font + 8 });
   const nameSpots = (names ?? []).flatMap((text, gi) => {
     const own = pieces.filter((p) => p.input === gi);
     const ring = [
@@ -1288,6 +1289,7 @@ export function StepPictureSvg({
     ];
     if (!ring.length || !text) return [];
     const b = boxOf(ring);
+    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
       const pb = boxOf(p.ring);
       const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
@@ -1302,16 +1304,12 @@ export function StepPictureSvg({
             text.length * L.font * 0.62,
             L.font + 4,
             ring,
+            { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text) },
           )
         : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
-    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
     return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
   });
-  const nameBoxes = nameSpots.map(({ text, s }) => ({
-    ...s,
-    w: text.length * L.font * 0.66 + 16,
-    h: L.font + 8,
-  }));
+  const nameBoxes = nameSpots.map(({ text, s }) => ({ ...s, ...nameBoxOf(text) }));
   const labelBoxes = labels.map(({ m, s }) => ({
     ...s,
     w: (m.label ?? '').length * L.font * 0.62,

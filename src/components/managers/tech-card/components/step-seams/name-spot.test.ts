@@ -50,4 +50,41 @@ describe('nameSpot', () => {
     const onUpper = box.x0 < 60 && box.x1 > 0 && box.y0 < 100 && box.y1 > 0;
     expect(onLower || onUpper).toBe(false);
   });
+
+  // 660 on #87: an upper front + pocket over the lower front, a name wider than the upper piece.
+  // Under it lies the lower front; over it the canvas ends — the name goes beside, in the canvas.
+  it('stays in the canvas when over the unit is off it and under it is another piece', () => {
+    const frame = { x0: 0, y0: 0, x1: 800, y1: 420 };
+    const upper = rect(250, 10, 140, 120);
+    const lower = rect(250, 130, 170, 280);
+    const room = { frame, w: 290, h: 20 };
+    const at = nameSpot(upper, [lower], 260, 16, upper, room);
+    const box = boxAt(at, room.w, room.h);
+    expect(box.x0).toBeGreaterThanOrEqual(0);
+    expect(box.x1).toBeLessThanOrEqual(800);
+    expect(box.y0).toBeGreaterThanOrEqual(0);
+    expect(box.y1).toBeLessThanOrEqual(420);
+    const meets = (r: { x0: number; y0: number; x1: number; y1: number }) =>
+      box.x0 <= r.x1 && r.x0 <= box.x1 && box.y0 <= r.y1 && r.y0 <= box.y1;
+    expect(meets({ x0: 250, y0: 10, x1: 390, y1: 130 })).toBe(false);
+    expect(meets({ x0: 250, y0: 130, x1: 420, y1: 410 })).toBe(false);
+  });
+
+  it('slides a name under a unit near the canvas edge back into the canvas', () => {
+    const frame = { x0: 0, y0: 0, x1: 300, y1: 300 };
+    const narrow = rect(0, 0, 40, 200);
+    const at = nameSpot(narrow, [], 180, 12, narrow, { frame, w: 200, h: 20 });
+    const box = boxAt(at, 200, 20);
+    expect(box.x0).toBeGreaterThanOrEqual(0);
+    expect(box.y0).toBeGreaterThan(200);
+  });
+
+  it('leaves its piece for a spot clear of the boxes the label pass avoids', () => {
+    const front = rect(0, 0, 300, 300);
+    const other = { x0: 0, y0: 100, x1: 300, y1: 200 }; // another input's box over the middle
+    const at = nameSpot(front, [], 100, 12, front, { avoid: [other], w: 110, h: 20 });
+    const box = boxAt(at, 110, 20);
+    const onOther = box.y0 <= other.y1 && box.y1 >= other.y0;
+    expect(onOther).toBe(false);
+  });
 });
