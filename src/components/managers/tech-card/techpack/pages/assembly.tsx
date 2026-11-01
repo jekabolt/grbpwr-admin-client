@@ -4250,6 +4250,13 @@ export function editorActionMarks(
       kind: action.tech,
     });
   });
+  const buttonPattern = (value: string | undefined): PictureActionGlyph['pattern'] => {
+    if (value?.endsWith('CROSS_X')) return 'cross_x';
+    if (value?.endsWith('PARALLEL')) return 'parallel';
+    if (value?.endsWith('SQUARE')) return 'square';
+    if (value?.endsWith('U_SHAPE')) return 'u_shape';
+    return 'other';
+  };
   const glyphs: PictureActionGlyph[] = press ? pressArrowGlyphs(action, press, geoms) : [];
   action.placements.forEach((placement) => {
     const radians = (placement.angleDeg * Math.PI) / 180;
@@ -4260,6 +4267,13 @@ export function editorActionMarks(
       point: [placement.point[0], -placement.point[1]],
       direction: [Math.cos(radians), -Math.sin(radians)],
       lengthMm: placement.lengthMm,
+      ...(placement.kind === 'button'
+        ? {
+            pattern: buttonPattern(action.raw.fastening?.attachPattern),
+            holes: action.raw.fastening?.buttonHoles === 2 ? (2 as const) : (4 as const),
+            sizeMm: decimal(action.raw.attachmentSizeMm, 15),
+          }
+        : {}),
     });
   });
   return { lines, glyphs };

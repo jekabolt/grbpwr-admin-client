@@ -11,7 +11,13 @@ import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
 import { UnitGlyph } from '../unit-silhouette';
 import { boxOf, type StepLayout } from './step-picture';
-import { StepPictureSvg, type EdgeMark, type PictureActionGlyph } from './step-picture-view';
+import {
+  buttonGlyphGeometry,
+  buttonRadiusPx,
+  StepPictureSvg,
+  type EdgeMark,
+  type PictureActionGlyph,
+} from './step-picture-view';
 
 const rectangle = (pieceKey: string, name: string, width: number, height: number) =>
   ({
@@ -239,6 +245,7 @@ describe('StepPictureSvg action glyphs', () => {
       kind,
       point: [5, 10 + index * 11],
       direction: [1, 0],
+      sizeMm: 11,
       lengthMm: kind === 'buttonhole' ? 12 : undefined,
     }));
   const renderNarrow = (glyphs: readonly PictureActionGlyph[]) =>
@@ -323,5 +330,31 @@ describe('StepPictureSvg action glyphs', () => {
 
     expect(centres).toHaveLength(8);
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
+  });
+
+  it('uses true button size with a sixteen-pixel minimum', () => {
+    expect(buttonRadiusPx(2, 1)).toBe(8);
+    expect(buttonRadiusPx(20, 2)).toBe(20);
+    expect(buttonRadiusPx(undefined, 2)).toBe(15);
+  });
+
+  it.each([
+    ['cross_x', 2],
+    ['parallel', 2],
+    ['square', 1],
+    ['u_shape', 1],
+    ['other', 0],
+  ] as const)('draws the %s attach pattern with visible four holes', (pattern, moves) => {
+    const geometry = buttonGlyphGeometry([20, 20], 8, 4, pattern);
+
+    expect(geometry.holes).toHaveLength(4);
+    expect(geometry.thread.match(/M/g)?.length ?? 0).toBe(moves);
+  });
+
+  it('draws two holes with one thread bar', () => {
+    const geometry = buttonGlyphGeometry([20, 20], 8, 2, 'cross_x');
+
+    expect(geometry.holes).toHaveLength(2);
+    expect(geometry.thread.match(/M/g)).toHaveLength(1);
   });
 });

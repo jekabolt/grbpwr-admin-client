@@ -725,6 +725,9 @@ export type PictureActionGlyph = {
   label?: string;
   /** A press side read on the picture: the arrow keeps the seam normal, signed up/down/in/out. */
   aim?: 'up' | 'down' | 'centre' | 'away';
+  pattern?: 'cross_x' | 'parallel' | 'square' | 'u_shape' | 'other';
+  holes?: 2 | 4;
+  sizeMm?: number;
   /** Physical slit length; buttonholes default to 12 mm. */
   lengthMm?: number;
 };
@@ -863,6 +866,42 @@ export function spreadGlyphFallbacks(ring: readonly Pt2[], count: number): Pt2[]
     return section(value) ?? safe;
   });
 }
+
+export function buttonGlyphGeometry(
+  at: Pt2,
+  radius: number,
+  holes: 2 | 4,
+  pattern: NonNullable<PictureActionGlyph['pattern']>,
+): { holes: Pt2[]; thread: string } {
+  const offset = radius * 0.32;
+  if (holes === 2) {
+    const points: Pt2[] = [
+      [at[0] - offset, at[1]],
+      [at[0] + offset, at[1]],
+    ];
+    return { holes: points, thread: pathOf(points) };
+  }
+  const points: Pt2[] = [
+    [at[0] - offset, at[1] - offset],
+    [at[0] + offset, at[1] - offset],
+    [at[0] + offset, at[1] + offset],
+    [at[0] - offset, at[1] + offset],
+  ];
+  const thread =
+    pattern === 'cross_x'
+      ? `${pathOf([points[0], points[2]])}${pathOf([points[1], points[3]])}`
+      : pattern === 'parallel'
+        ? `${pathOf([points[0], points[3]])}${pathOf([points[1], points[2]])}`
+        : pattern === 'square'
+          ? pathOf([...points, points[0]])
+          : pattern === 'u_shape'
+            ? pathOf([points[0], points[3], points[2], points[1]])
+            : '';
+  return { holes: points, thread };
+}
+
+export const buttonRadiusPx = (sizeMm: number | undefined, scale: number) =>
+  Math.max(8, ((sizeMm ?? 15) * scale) / 2);
 
 /** A fixed-pixel label near the offset twin's lower-right corner, pulled inward until it is safe. */
 const twinNumberSpot = (ring: readonly Pt2[]): Pt2 => {
@@ -1751,7 +1790,13 @@ export function StepPictureSvg({
           );
         }
         if (glyph.kind === 'button') {
-          const radius = 4.2;
+          const radius = buttonRadiusPx(glyph.sizeMm, mmPx);
+          const geometry = buttonGlyphGeometry(
+            at,
+            radius,
+            glyph.holes ?? 4,
+            glyph.pattern ?? 'other',
+          );
           return (
             <g
               key={`action-glyph:${glyph.id}`}
@@ -1762,13 +1807,25 @@ export function StepPictureSvg({
               data-asm-piece={glyph.piece}
               data-asm-x={at[0]}
               data-asm-y={at[1]}
+              data-asm-radius={radius}
+              data-asm-holes={glyph.holes ?? 4}
+              data-asm-pattern={glyph.pattern ?? 'other'}
             >
-              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.mark} />
-              <path
-                d={`M${at[0] - radius * 0.55} ${at[1]}H${at[0] + radius * 0.55}M${at[0]} ${at[1] - radius * 0.55}V${at[1] + radius * 0.55}`}
-                fill='none'
-                strokeWidth={L.mark * 0.8}
-              />
+              <circle cx={at[0]} cy={at[1]} r={radius} strokeWidth={L.hair} />
+              {geometry.thread && (
+                <path d={geometry.thread} fill='none' strokeWidth={L.hair} data-button-thread='' />
+              )}
+              {geometry.holes.map((point, index) => (
+                <circle
+                  key={index}
+                  cx={point[0]}
+                  cy={point[1]}
+                  r={Math.max(0.8, radius * 0.1)}
+                  fill={INK}
+                  stroke='none'
+                  data-button-hole=''
+                />
+              ))}
             </g>
           );
         }
