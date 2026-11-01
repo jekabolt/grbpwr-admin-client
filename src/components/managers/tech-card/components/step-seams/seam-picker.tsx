@@ -71,7 +71,6 @@ import {
   type PoseSnap,
 } from './step-pose';
 import { stepWords } from './step-words';
-import { StepHintRow } from './step-hint-row';
 import {
   deltaMm,
   fmtMm,
@@ -822,7 +821,6 @@ export function SeamPickerBody({
             {stepName}
           </Text>
         )}
-        <StepHintRow op={op} />
         {onClose && (
           <div className='ml-auto'>
             <Close onClick={onClose} aria-label='close' />
