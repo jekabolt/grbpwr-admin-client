@@ -105,17 +105,22 @@ export function StepSeamsProvider({
   techCard,
   frozen,
   active = false,
+  loadGeometry = false,
   children,
 }: {
   techCard: common_TechCard | undefined;
   frozen: boolean;
   /** The construction screen is in view (all card tabs stay mounted). */
   active?: boolean;
+  /** Non-interactive print surfaces still need the geometry without activating hint writes. */
+  loadGeometry?: boolean;
   children: ReactNode;
 }) {
   const cardId = techCard?.id;
   const writes = useSeamWrites(cardId, frozen);
-  const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard);
+  // Every card tab stays mounted. The assembly worker belongs to the visible construction tab;
+  // another tab's cached DXF must not make this hidden provider segment every piece.
+  const geometry = useAssemblyGeometry((techCard ?? {}) as common_TechCard, active || loadGeometry);
   const { getValues, setValue } = useFormContext<TechCardFormData>();
 
   // The store follows the card read here too: the assembly map's door hydrates it only while the

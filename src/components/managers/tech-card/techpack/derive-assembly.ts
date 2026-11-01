@@ -73,6 +73,7 @@ import { FRAMES, inFrame, reverses, rmsFit, runById, runSamples } from 'lib/seam
 import { hitOf } from 'lib/seams/resolve';
 
 import { GapSink, type Gap } from './gaps';
+import { assemblyPieceCode } from './assembly-piece-code';
 import { pressMode, type PressPiece } from './press-arrows';
 import { asmProtoFlags } from './asm-proto-flags';
 import { englishT, own, type PdfT } from './i18n';
@@ -539,22 +540,7 @@ const NOT_JOIN = new Set(['button_attach', 'buttonhole', 'topstitch', 'bind_tape
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-const CODE_TOKEN = /^[A-Z0-9][A-Z0-9._/-]*$/i;
-
-/** Piece codes printed in assembly diagrams/text. Stable storage keys are deliberately rejected. */
-export function assemblyPieceCode(pieceName?: string, dxfAlias?: string): string {
-  const code = (value: string | undefined, requireCodeShape: boolean) => {
-    const candidate = (value ?? '').trim();
-    const codeShaped = candidate === candidate.toUpperCase() || /[0-9_./-]/.test(candidate);
-    return candidate.length <= 24 &&
-      CODE_TOKEN.test(candidate) &&
-      !ULID.test(candidate) &&
-      (!requireCodeShape || codeShaped)
-      ? candidate
-      : '';
-  };
-  return code(pieceName, true) || code(dxfAlias, false);
-}
+export { assemblyPieceCode } from './assembly-piece-code';
 
 const num = (v?: { value?: string }) => {
   const x = Number(v?.value);

@@ -322,7 +322,7 @@ function PrintUnitPictures({
       cloth={cloth}
       categoryNames={categoryNames}
     >
-      <StepSeamsProvider techCard={techCard} frozen>
+      <StepSeamsProvider techCard={techCard} frozen loadGeometry>
         <StepResultProvider>
           <StepResultUnitPicturesProvider>{children}</StepResultUnitPicturesProvider>
         </StepResultProvider>
