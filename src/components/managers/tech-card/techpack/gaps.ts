@@ -6,7 +6,7 @@ import type {
   common_TechCardMarker,
 } from 'api/proto-http/admin';
 
-import { deriveAssembly, type AsmPiece } from './derive-assembly';
+import { deriveAssembly, type AsmPiece, type AssemblyModel } from './derive-assembly';
 import { deriveColourways } from './derive-colourways';
 import { deriveCover } from './derive-cover';
 import { deriveLabels } from './derive-labels';
@@ -87,6 +87,15 @@ export type CollectPdfGapsInput = {
   revisionLabel?: string;
   pieces?: ReadonlyMap<string, AsmPiece>;
   grainDeg?: ReadonlyMap<string, number>;
+  /**
+   * The assembly the caller already derived from the same card, pieces, grain and `t` (the
+   * document derives it once for section 06). Handed over, it replaces the second
+   * `deriveAssembly` here — this pass drops from 0.15–0.36 s warm (1.7 s for card 81 on a loaded
+   * machine) to under 10 ms on cards 83 / 81 / 85 — and its `gaps` take the sink's first places
+   * in registration order, which is exactly what the derivation would have written: every gap
+   * `deriveAssembly` registers is section 06, so `model.gaps` is the whole of its sink.
+   */
+  assembly?: AssemblyModel;
   pieceGeometry?: TechpackPieceGeometry;
   measurements?: readonly TechpackMeasurement[];
   sizeChart?: common_StyleSizeChart;
@@ -105,9 +114,15 @@ export type CollectPdfGapsInput = {
 export function collectPdfGaps(input: CollectPdfGapsInput): Gap[] {
   const t = input.t ?? englishT;
   const sink = new GapSink();
-  const pieces = input.pieces ?? new Map<string, AsmPiece>();
-  const grainDeg = input.grainDeg ?? new Map<string, number>();
-  const assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg, t }, sink);
+  let assembly: AssemblyModel;
+  if (input.assembly) {
+    assembly = input.assembly;
+    for (const gap of assembly.gaps) sink.add(gap);
+  } else {
+    const pieces = input.pieces ?? new Map<string, AsmPiece>();
+    const grainDeg = input.grainDeg ?? new Map<string, number>();
+    assembly = deriveAssembly({ techCard: input.techCard, pieces, grainDeg, t }, sink);
+  }
   deriveCover(
     input.techCard,
     { sampleSizeName: input.sampleSizeName, revisionLabel: input.revisionLabel },

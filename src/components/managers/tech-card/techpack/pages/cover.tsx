@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { GrbpwrMark, GroupLabel, Pill, Row } from 'ui';
 import { KV } from 'components/managers/print/sheet';
 import { deriveCover, type CoverDeriveOptions } from '../derive-cover';
@@ -48,7 +49,10 @@ export function CoverPage({
   pdfGaps = [],
 }: CoverPageProps) {
   const { t } = useT();
-  const model = deriveCover(techCard, { sampleSizeName, revisionLabel }, undefined, t);
+  const model = useMemo(
+    () => deriveCover(techCard, { sampleSizeName, revisionLabel }, undefined, t),
+    [techCard, sampleSizeName, revisionLabel, t],
+  );
   const land = orient === 'land';
   const fabrics = model.fabrics
     .map((fabric) => [own(fabric.name), own(fabric.colour)].filter(Boolean).join(' · '))

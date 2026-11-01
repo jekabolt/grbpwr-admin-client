@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { DataTable, EmptyCell, GroupLabel, HeaderNote, Pill, SectionHeader } from 'ui';
@@ -47,14 +48,18 @@ export function QcSignoffPage({
 }: Props) {
   const { t } = useT();
   const land = orient === 'land';
-  const model = deriveQcSignoffPage({
-    techCard,
-    measurementRows,
-    sizeNames,
-    seamDeltas,
-    labelPlacement,
-    t,
-  });
+  const model = useMemo(
+    () =>
+      deriveQcSignoffPage({
+        techCard,
+        measurementRows,
+        sizeNames,
+        seamDeltas,
+        labelPlacement,
+        t,
+      }),
+    [techCard, measurementRows, sizeNames, seamDeltas, labelPlacement, t],
+  );
   const roles = [t('qc.designer'), t('qc.patternMaker'), t('qc.technologist'), t('qc.sample')];
   const hasRevisions = model.revisions.length > 0;
   const status = cardStatus(techCard);

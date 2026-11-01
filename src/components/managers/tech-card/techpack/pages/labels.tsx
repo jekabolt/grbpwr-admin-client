@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { GrbpwrMark, HeaderNote, SectionHeader } from 'ui';
 import { deriveLabels, type LabelsDeriveOptions } from '../derive-labels';
 import { Missing, TechpackDrawing } from './bits';
@@ -48,7 +48,10 @@ function PhysicalTape({
 
 export function LabelsPage({ techCard, orient, docline, n, sampleSizeName }: LabelsPageProps) {
   const { t } = useT();
-  const model = deriveLabels(techCard, { sampleSizeName }, undefined, t);
+  const model = useMemo(
+    () => deriveLabels(techCard, { sampleSizeName }, undefined, t),
+    [techCard, sampleSizeName, t],
+  );
   const land = orient === 'land';
   const scale = land ? 5.2 : 5.4;
   const tapes = (

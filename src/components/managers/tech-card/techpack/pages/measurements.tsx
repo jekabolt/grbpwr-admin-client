@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { common_StyleSizeChart, common_TechCard } from 'api/proto-http/admin';
 import type { PrintOrient } from 'components/managers/print/scope';
 import { DataTable, EmptyCell, HeaderNote, SectionHeader } from 'ui';
@@ -62,7 +63,10 @@ export function MeasurementsPage({
   release = false,
 }: Props) {
   const { t } = useT();
-  const model = deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames, t });
+  const model = useMemo(
+    () => deriveMeasurementsPage({ techCard, measurements, sizeChart, sizeNames, t }),
+    [techCard, measurements, sizeChart, sizeNames, t],
+  );
   const land = orient === 'land';
   // port: two flats side by side are ~340px wide each, so the panel need not be taller
   const figureHeight = land ? 340 : 400;

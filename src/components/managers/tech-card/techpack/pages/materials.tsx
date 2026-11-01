@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { DataTable, GroupLabel, HeaderNote, SectionHeader, TotalRow } from 'ui';
 import { deriveMaterials, type MaterialsModel, type Spot } from '../derive-materials';
 import { formatNumber } from '../derive-shared';
@@ -305,7 +306,7 @@ function packBlocks(blocks: MaterialBlock[], land: boolean): MaterialBlock[][] {
 
 export function MaterialsPage({ techCard, orient, docline, n }: TechpackPageProps) {
   const { t } = useT();
-  const model = deriveMaterials(techCard, undefined, t);
+  const model = useMemo(() => deriveMaterials(techCard, undefined, t), [techCard, t]);
   const land = orient === 'land';
   const itemCount =
     model.fabrics.length +
