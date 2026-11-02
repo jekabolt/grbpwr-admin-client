@@ -20,6 +20,7 @@
 
 import { inputFor } from 'lib/assembly-skeleton/assignment';
 import { seamPieceOf } from 'lib/assembly-skeleton/geometry';
+import { segmentAll } from 'lib/assembly-skeleton/pipeline';
 import type {
   PieceGeom,
   Pt2,
@@ -34,10 +35,13 @@ import {
   type DeclaredJoin,
 } from 'lib/doll/joins';
 import type { DollLayerRelation, DollOwnerCandidate } from 'lib/doll/types';
+import { resolveFolds, type StoredFold } from 'lib/folds';
+import { grainDegOf } from 'lib/seams/frame';
 import type { StoredPose, StoredSeam } from 'lib/seams/types';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 
+import { useFoldRows, useFoldRowsSig, useFoldsStore } from '../assembly-folds/folds-store';
 import { rowsOf, rowsSig, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
 import { useCardDxfPack } from '../nesting/card-dxf-pack';
@@ -86,6 +90,10 @@ export type DollCard = {
     guessed: number;
   } | null;
   rowsSig: string;
+  /** Stored fold rows, resolved against the selected size only when its request is built. */
+  foldRows: StoredFold[];
+  /** Fold inputs in the solve identity: a saved fold always builds a new doll. */
+  foldRowsSig: string;
   joins: DeclaredJoin[];
   /** The order's hardware (HARDWARE_SET: elastic, tape): listed, never sewn. */
   hardware: DeclaredHardware[];
@@ -220,6 +228,9 @@ export function useDollCard(): DollCard | null {
   const server = useSeamsStore((s) => s.server);
   const pending = useSeamsStore((s) => s.pending);
   const allRows = useMemo(() => rowsOf({ server, pending }), [server, pending]);
+  const foldCardId = useFoldsStore((s) => s.cardId);
+  const foldRows = useFoldRows();
+  const foldRowsSignature = useFoldRowsSig();
 
   const aliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
@@ -358,7 +369,10 @@ export function useDollCard(): DollCard | null {
   }, [facts, operations]);
 
   return useMemo(() => {
-    if (!facts || !sized) return null;
+    // FoldsHydrate mounts before the step-result/map subtree, but hydration is a passive effect.
+    // Refuse the card until both stores name the same card so the map's 3d door cannot start one
+    // empty-fold solve in that first commit and replace it a moment later.
+    if (!facts || !sized || foldCardId !== cardId) return null;
     // '' is the size of an ungraded pattern: its key is its words (no «base» that finds nothing).
     const keyOf = (s: string) => (s === '' ? sized.oneSize || 'one size' : s);
     const rawOf = (s: string) => (sized.sizes.includes('') && s === keyOf('') ? '' : s);
@@ -417,6 +431,8 @@ export function useDollCard(): DollCard | null {
           }
         : null,
       rowsSig: sig,
+      foldRows,
+      foldRowsSig: foldRowsSignature,
       joins,
       hardware,
       gender:
@@ -424,17 +440,36 @@ export function useDollCard(): DollCard | null {
       readId: idOf(facts),
       inputSig: `${gender ?? ''}|${joins.map((j) => `${j.label}:${j.parts.map((x) => x.join('+')).join('/')}`).join(',')}|${hardware.map((h) => `${h.label}:${h.pieces.join('+')}`).join(',')}`,
     };
-  }, [facts, sized, rows, ownerSeams, sig, joins, hardware, gender, cardId, cardSizes]);
+  }, [
+    facts,
+    sized,
+    foldCardId,
+    cardId,
+    rows,
+    ownerSeams,
+    sig,
+    foldRows,
+    foldRowsSignature,
+    joins,
+    hardware,
+    gender,
+    cardSizes,
+  ]);
 }
 
-/** The key a solve is cached under: the read, the size, the rows, lining. */
+/** The key a solve is cached under: the read, the size, seam/fold rows, lining. */
 export const dollKey = (c: DollCard, size: string, lining: boolean) =>
-  `${c.readId}|${size}|${lining ? 'L' : '-'}|${c.rowsSig}|${c.inputSig}`;
+  `${c.readId}|${size}|${lining ? 'L' : '-'}|${c.rowsSig}|${c.foldRowsSig}|${c.inputSig}`;
 
 /** The worker's doll request for a size. */
 export function dollRequest(c: DollCard, size: string, lining: boolean) {
   const facts = c.factsOf(size);
   if (!facts) return null;
+  // Resolve against this size's segmented facts. The resolver and doll both use grainDegOf(facts)
+  // with lib/seams/frame.ts, so the returned (u, v) is exactly the doll's seam frame.
+  const folds = c.foldRows.length
+    ? resolveFolds(c.foldRows, segmentAll(facts), { grainDeg: grainDegOf(facts) }).folds
+    : null;
   const anchorSizes = [...new Set(c.rows.map((r) => r.anchoredSize).filter(Boolean))].filter(
     (s) => s !== size,
   );
@@ -453,6 +488,7 @@ export function dollRequest(c: DollCard, size: string, lining: boolean) {
       ...(!c.owner ? { joins: c.joins } : {}),
       ...(c.hardware.length ? { hardware: c.hardware } : {}),
       gender: c.gender,
+      ...(folds ? { folds } : {}),
       ...(c.owner
         ? {
             proposeComposite: false,

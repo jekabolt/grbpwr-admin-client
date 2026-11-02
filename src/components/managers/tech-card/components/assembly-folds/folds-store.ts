@@ -1,7 +1,7 @@
 // PIECE FOLDS OF THE OPEN CARD — the stored fold lines (doll-folds SPEC-T2), one store for every
 // reader. The card read (`TechCard.pieceFolds`) and every RPC echo land in `server`, the optimistic
 // writes in `pending`; `foldRowsOf` is the list everybody reads (server with pending laid over it).
-// Mirrors assembly-seams/seams-store.ts; no UI reads it yet (the doll wires it in SPEC-T3).
+// Mirrors assembly-seams/seams-store.ts; the picker and doll both read the merged list.
 
 import { foldsFromWire, type StoredFold, type TechCardPieceFoldWire } from 'lib/folds';
 import { useEffect } from 'react';
