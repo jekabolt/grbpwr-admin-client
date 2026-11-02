@@ -10,6 +10,17 @@ import { rowFromHand, type AnchorCtx } from '../assembly-seams/seam-actions';
 import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
 import { seamOfSides, surfaceSeam, type SeamSides } from './step-picture';
 
+/** A suggestion tile opens with its unit pair selected; every other picker entry stays empty. */
+export function initialPickerPick(
+  proposal: SeamSides | null | undefined,
+  fromSuggestionTile: boolean,
+  unitStep: boolean,
+): { a: TargetId[]; b: TargetId[] } | null {
+  return proposal && fromSuggestionTile && unitStep
+    ? { a: [...proposal.a], b: [...proposal.b] }
+    : null;
+}
+
 /** Edges clicked out of order still run along each piece's outline. */
 export function orderedPickSides(sides: SeamSides, geoms: ReadonlyMap<string, PieceGeom>) {
   const along = (ids: readonly string[]) => {

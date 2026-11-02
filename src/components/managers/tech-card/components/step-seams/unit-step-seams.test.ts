@@ -10,16 +10,21 @@ import {
   CARD85_SEAMS,
   card85Geoms,
   card85Step,
+  card85WithStoredShoulder,
 } from './card85.fixture';
 import { CARD6_OPS, CARD6_PIECE_KEYS, CARD6_SEAMS, card6Geoms, card6Step } from './card6.fixture';
+import { seamEdgeWord } from './seam-focus';
+import { fitBox } from './step-picture';
 import {
   isUnitStepSeamPreview,
+  nearestPictureTarget,
   pictureBounds,
+  picturePickTargets,
   stepPictureOfOp,
   stepSeamPreview,
   type SceneOp,
 } from './step-picture-view';
-import { edgeRowFromPick } from './step-rows';
+import { edgeRowFromPick, initialPickerPick } from './step-rows';
 import {
   pieceOfTarget,
   suggestStepPairs,
@@ -73,6 +78,88 @@ describe('card 85 op 970 unit seam preview', () => {
       expect(bounds.x1 - bounds.x0).toBeGreaterThan(0);
       expect(bounds.y1 - bounds.y0).toBeGreaterThan(0);
     }
+  });
+
+  it('hits the drawn right back shoulder instead of a hidden placket edge', () => {
+    const right = scene.suggestions.find((proposal) => proposal.hand === 'R');
+    expect(right).toBeDefined();
+    const shoulder = right!.a.find((id) => seamEdgeWord([id], geoms) === 'shoulder');
+    expect(shoulder).toBeDefined();
+
+    const preview = stepSeamPreview(
+      {
+        leaves: scene.leaves,
+        innerSeams: scene.innerSeams,
+        storedSeams: scene.storedSeams,
+        crossSeams: scene.crossSeams,
+        geoms,
+        innerLines,
+        hands: scene.hands,
+      },
+      { sides: right!, source: 'live' },
+      { focus: false, explode: 0.08 },
+    );
+    expect(preview).not.toBeNull();
+    const bounds = pictureBounds(preview!.layout, geoms, 'canvas');
+    const targets = picturePickTargets(
+      preview!.layout,
+      geoms,
+      innerLines,
+      fitBox(bounds, 960, 720, 64),
+      {
+        hiddenTargets: new Set(
+          scene.suggestions.flatMap((proposal) => [...proposal.a, ...proposal.b]),
+        ),
+      },
+    );
+    const shoulderTarget = targets.find((target) => target.id === shoulder);
+    expect(shoulderTarget).toBeDefined();
+    const point = shoulderTarget!.points[Math.floor(shoulderTarget!.points.length / 2)];
+    expect(nearestPictureTarget(point, targets)?.id).toBe(shoulder);
+    expect(pieceOfTarget(nearestPictureTarget(point, targets)!.id)).toBe(pieceOfTarget(shoulder!));
+  });
+
+  it('keeps the right shoulder proposed after the left shoulder is stored', () => {
+    const left = scene.suggestions.find((proposal) => proposal.hand === 'L');
+    const right = scene.suggestions.find((proposal) => proposal.hand === 'R');
+    expect(left).toBeDefined();
+    expect(right).toBeDefined();
+    const row = edgeRowFromPick(left!, geoms, {
+      pieces: [...geoms.values()],
+      grainDeg: null,
+      nameOf: (piece) => CARD85_PIECE_NAME_BY_KEY.get(piece) ?? piece,
+    });
+    expect(row).not.toBeNull();
+
+    const variant = card85WithStoredShoulder(row!);
+    const storedOperations: SceneOp[] = variant.operations.map((operation) => ({
+      ...operation,
+      fullnessRatio: operation.fullnessRatio == null ? undefined : String(operation.fullnessRatio),
+    }));
+    const storedScene = stepPictureOfOp(storedOperations[index], null, geoms, {
+      operations: storedOperations,
+      index,
+      pieceKeys: CARD85_PIECE_KEYS,
+      innerLines,
+      byKey: variant.seams,
+      nameOf: (piece) => CARD85_PIECE_NAME_BY_KEY.get(piece) ?? piece,
+      ready: true,
+      skipLayout: true,
+    });
+    expect(storedScene.stored).toHaveLength(1);
+    expect(storedScene.suggestions).toHaveLength(1);
+    expect(storedScene.suggestions[0]?.hand).toBe('R');
+    expect([...storedScene.suggestion!.a, ...storedScene.suggestion!.b].sort()).toEqual(
+      [...right!.a, ...right!.b].sort(),
+    );
+  });
+
+  it('preselects a clicked unit suggestion without changing two-input picker defaults', () => {
+    const right = scene.suggestions.find((proposal) => proposal.hand === 'R');
+    expect(right).toBeDefined();
+    expect(initialPickerPick(right!, true, true)).toEqual({ a: right!.a, b: right!.b });
+    expect(initialPickerPick(right!, true, false)).toBeNull();
+    expect(initialPickerPick(right!, false, true)).toBeNull();
   });
 });
 

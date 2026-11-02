@@ -31,7 +31,8 @@ import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
 
 import { outcomeOf } from './seam-ranker';
 import { isLayerCloth, withSignals, type SeamSignal } from './seam-signals';
-import { zoneAllows } from './signals/zone';
+import { edgeWordPredicate } from './signals/edge-words';
+import { zoneAllows, zoneOf } from './signals/zone';
 
 export type Pt = [number, number];
 
@@ -2130,11 +2131,13 @@ function proposalsInsideUnit(
     turnDeg: 0,
   });
   const inZone = (rows: readonly StepProposal[]) =>
-    rows.filter(
-      (proposal) =>
-        zoneAllows(side(proposal.a, proposal.aLen), side(proposal.b, proposal.bLen), op, geoms) ===
-        true,
-    );
+    rows.filter((proposal) => {
+      const a = side(proposal.a, proposal.aLen);
+      const b = side(proposal.b, proposal.bLen);
+      if (zoneAllows(a, b, op, geoms) !== true) return false;
+      const edgeFits = edgeWordPredicate(zoneOf(op?.zone));
+      return !edgeFits || (edgeFits(a, geoms) === true && edgeFits(b, geoms) === true);
+    });
   const stateZone = inZone(proposals);
   const relevant = stateZone.length ? stateZone : proposals;
   // A finished unit commonly exposes a mirrored pair (left/right shoulders). Leaf details can

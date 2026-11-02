@@ -103,7 +103,7 @@ import {
   type NoMark,
   type PictureView,
 } from './step-picture-view';
-import { edgeRowFromPick, orderedPickSides } from './step-rows';
+import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { stepPictureOf } from './surface-picture';
 
 type Side = 'a' | 'b';
@@ -140,12 +140,15 @@ export default function SeamPicker({
   open,
   onClose,
   proposal: initialProposal = 0,
+  preselectProposal = false,
 }: {
   index: number;
   open: boolean;
   onClose: () => void;
   /** Which of the step's proposals the picker opens on. */
   proposal?: number;
+  /** A suggestion tile opens with that proposal already selected. */
+  preselectProposal?: boolean;
 }) {
   return (
     <Dialog.Root
@@ -156,7 +159,13 @@ export default function SeamPicker({
     >
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <SeamPickerBody index={index} proposal={initialProposal} mode='dialog' onClose={onClose} />
+        <SeamPickerBody
+          index={index}
+          proposal={initialProposal}
+          preselectProposal={preselectProposal}
+          mode='dialog'
+          onClose={onClose}
+        />
       </Dialog.Portal>
     </Dialog.Root>
   );
@@ -165,6 +174,7 @@ export default function SeamPicker({
 export function SeamPickerBody({
   index,
   proposal: initialProposal = 0,
+  preselectProposal = false,
   mode = 'inline',
   onClose,
   onAccepted,
@@ -174,6 +184,8 @@ export function SeamPickerBody({
   index: number;
   /** Which of the step's proposals is selected first. */
   proposal?: number;
+  /** Whether the picker was opened from that suggestion tile. */
+  preselectProposal?: boolean;
   mode?: 'dialog' | 'inline';
   onClose?: () => void;
   onAccepted?: () => void;
@@ -209,13 +221,15 @@ export function SeamPickerBody({
   const errors = useSeamsStore((s) => s.errors);
   const { catalog: workCatalog } = useOperationWorkCatalog();
 
-  const [sel, setSel] = useState<Sel>(EMPTY);
+  const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
+  const unitStepPreview = isUnitStepSeamPreview(groups);
+  const initialPick = initialPickerPick(suggestion, preselectProposal, unitStepPreview);
+  const [sel, setSel] = useState<Sel>(() => initialPick ?? EMPTY);
   const [hover, setHover] = useState<TargetId | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
-  // «guess» only fills the pick from the proposal the picker opened on; the owner sees it and accepts.
-  const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
-  const [filled, setFilled] = useState<Sel | null>(null);
+  // A tile preloads its proposal; GUESS does the same from the manual + seam entry.
+  const [filled, setFilled] = useState<Sel | null>(() => initialPick);
   const [mirroredPick, setMirroredPick] = useState<StoredSeam | null>(null);
   // «place» (P8): pieces moved by hand, kept here until «done».
   const [posing, setPosing] = useState(false);
@@ -434,7 +448,6 @@ export function SeamPickerBody({
     setMirroredPick(null);
   };
 
-  const unitStepPreview = isUnitStepSeamPreview(groups);
   const previewTarget = useMemo(() => {
     if (pair || surface) return { sides: pick, source: 'live' as const };
     if (stored[0]) return { sides: stored[0].sides, source: 'stored' as const };
@@ -972,6 +985,18 @@ export function SeamPickerBody({
                 hover={hover}
                 onHover={setHover}
                 onPick={frozen ? undefined : toggle}
+                pickTargets={
+                  unitStepPreview
+                    ? [
+                        ...new Set([
+                          ...suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b]),
+                          ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]),
+                          ...sel.a,
+                          ...sel.b,
+                        ]),
+                      ]
+                    : undefined
+                }
                 view={zoom.view}
                 className='absolute inset-0'
               />

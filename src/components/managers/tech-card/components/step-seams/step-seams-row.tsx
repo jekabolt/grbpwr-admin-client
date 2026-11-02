@@ -49,10 +49,10 @@ export function StepSeamsRow({ index }: { index: number }) {
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
-  // The proposal the picker opens on; null = closed.
-  const [openAt, setOpenAt] = useState<number | null>(null);
-  const open = openAt != null;
-  const setOpen = (o: boolean) => setOpenAt(o ? 0 : null);
+  // A suggestion tile carries its pair into the picker; + seam and stored tiles start empty.
+  const [picker, setPicker] = useState<{ proposal: number; preselect: boolean } | null>(null);
+  const open = picker != null;
+  const setOpen = (next: boolean) => setPicker(next ? { proposal: 0, preselect: false } : null);
 
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
@@ -77,7 +77,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   const pick = params.get('pick');
   useEffect(() => {
     if (!ctx || !hasMultiplePieces || !pick || !opNumber || String(opNumber) !== pick) return;
-    setOpenAt(0);
+    setPicker({ proposal: 0, preselect: false });
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
@@ -151,11 +151,11 @@ export function StepSeamsRow({ index }: { index: number }) {
             </div>
           );
         })}
-        {keys.length === 0 &&
+        {(keys.length === 0 || unitStepPreview) &&
           suggestions.map((sug, i) => (
             <SeamTile
               key={i}
-              no={suggestions.length > 1 ? i : undefined}
+              no={stored.length + suggestions.length > 1 ? stored.length + i : undefined}
               scene={scene}
               seams={proposalFrames[i] ?? storedFrame}
               layout={unitStepPreview ? undefined : ownedLayout}
@@ -163,7 +163,7 @@ export function StepSeamsRow({ index }: { index: number }) {
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
               localSeamPreview={unitStepPreview}
               dashed
-              onOpen={cardId ? () => setOpenAt(i) : undefined}
+              onOpen={cardId ? () => setPicker({ proposal: i, preselect: true }) : undefined}
             />
           ))}
         {keys.length === 0 && !pending && suggestions.length === 0 && (
@@ -177,7 +177,8 @@ export function StepSeamsRow({ index }: { index: number }) {
           <SeamPicker
             index={index}
             open={open}
-            proposal={openAt ?? 0}
+            proposal={picker?.proposal ?? 0}
+            preselectProposal={picker?.preselect ?? false}
             onClose={() => setOpen(false)}
           />
         </Suspense>

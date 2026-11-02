@@ -76,6 +76,22 @@ export const CARD85_SEAMS: ReadonlyMap<string, StoredSeam> = new Map(
 export const card85Step = (operationNumber: number) =>
   CARD85_OPS.findIndex((operation) => operation.operationNumber === operationNumber);
 
+/** Card 85 after one shoulder of op 970 has been accepted. */
+export function card85WithStoredShoulder(row: StoredSeam): {
+  operations: Card85Op[];
+  seams: Map<string, StoredSeam>;
+} {
+  const index = card85Step(970);
+  const operations = CARD85_OPS.map((operation, operationIndex) =>
+    operationIndex === index
+      ? { ...operation, seamKeys: [...(operation.seamKeys ?? []), row.seamKey] }
+      : { ...operation },
+  );
+  const seams = new Map(CARD85_SEAMS);
+  seams.set(row.seamKey, row);
+  return { operations, seams };
+}
+
 /** The geometry map built with the same opaque line keys that `useCardPieceKeys` returns. */
 export function card85Geoms(): Map<string, PieceGeom> {
   const keyByName = new Map(real.pieces.map((piece) => [piece.name, piece.lineKey]));
