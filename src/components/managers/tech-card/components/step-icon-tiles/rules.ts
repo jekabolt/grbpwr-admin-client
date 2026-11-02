@@ -222,7 +222,7 @@ export function articleHoles(
     const line = bomLines.find((l) => (l.lineKey ?? '').trim() === key.trim());
     if (!line?.materialId) continue;
     const holes = materialHoles(line.materialId);
-    if (holes === 2 || holes === 4) found.add(holes);
+    if (holes === 2 || holes === 3 || holes === 4) found.add(holes);
   }
   return found.size === 1 ? [...found][0] : 0;
 }

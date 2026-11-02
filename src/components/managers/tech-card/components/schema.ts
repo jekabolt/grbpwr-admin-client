@@ -1800,11 +1800,11 @@ const operationSchema = z
     // ДЫРКИ ПУГОВИЦЫ (0436) — настройка той же пришивной машинки, что и рисунок, и две дырки
     // креста, квадрата и U не дают (сервер: needs_four_holes). Зеркало, чтобы отказ встал на плитке.
     const stepHoles = o.buttonHoles ?? 0;
-    if (stepHoles !== 0 && stepHoles !== 2 && stepHoles !== 4) {
+    if (stepHoles !== 0 && stepHoles !== 2 && stepHoles !== 3 && stepHoles !== 4) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['buttonHoles'],
-        message: 'a button has 2 or 4 holes',
+        message: 'a button has 2, 3 or 4 holes',
       });
     }
     needsMachineType(

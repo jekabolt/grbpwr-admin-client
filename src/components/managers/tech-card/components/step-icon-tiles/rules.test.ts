@@ -166,6 +166,7 @@ describe('button holes', () => {
     expect(articleHoles(['a', 'b'], lines, of)).toBe(0);
     expect(articleHoles(['c'], lines, of)).toBe(0);
     expect(articleHoles([], lines, of)).toBe(0);
+    expect(articleHoles(['a'], lines, () => 3)).toBe(3);
     expect(holesDefaultFits(0, 4, CROSS)).toBe(true);
     expect(holesDefaultFits(0, 2, CROSS)).toBe(false);
     expect(holesDefaultFits(0, 2, PARALLEL)).toBe(true);

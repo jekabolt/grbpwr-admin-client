@@ -175,6 +175,7 @@ describe('op icon field checks mirror the server', () => {
     expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X')).toContain('attachPattern');
     expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL')).toContain('attachPattern');
     expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE')).not.toContain('attachPattern');
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE')).not.toContain('buttonHoles');
     expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE')).not.toContain('attachPattern');
   });
 
