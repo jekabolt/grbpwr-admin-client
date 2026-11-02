@@ -1464,30 +1464,16 @@ const distToSegment = (p: Pt2, a: Pt2, b: Pt2): number => {
 };
 
 /**
- * Douglas–Peucker over a closed ring (first point not repeated), keeping the original point
- * objects. The ring is cut at its first point and the point farthest from it, so neither chord
- * degenerates; each half is then thinned on its own.
+ * Douglas–Peucker over the index ranges on `stack`: a range keeps the point farthest from its chord
+ * when that is more than `tol` away, then splits there. `at` reads a point (modulo n for a ring, so
+ * a range may end at n); the ends of every range are kept by the caller.
  */
-function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
-  const n = ring.length;
-  if (n < 4) return [...ring];
-  const at = (i: number) => ring[i % n];
-  let far = 1;
-  let farD = 0;
-  for (let i = 1; i < n; i++) {
-    const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
-    if (d > farD) {
-      far = i;
-      farD = d;
-    }
-  }
-  const keep = new Uint8Array(n);
-  keep[0] = 1;
-  keep[far] = 1;
-  const stack: [number, number][] = [
-    [0, far],
-    [far, n],
-  ];
+function thinRanges(
+  at: (i: number) => Pt2,
+  keep: Uint8Array,
+  stack: [number, number][],
+  tol: number,
+) {
   while (stack.length) {
     const [s, e] = stack.pop()!;
     let worst = -1;
@@ -1504,12 +1490,76 @@ function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
       stack.push([s, worstAt], [worstAt, e]);
     }
   }
+}
+
+/**
+ * Douglas–Peucker over a closed ring (first point not repeated), keeping the original point
+ * objects. The ring is cut at its first point and the point farthest from it, so neither chord
+ * degenerates; each half is then thinned on its own.
+ */
+function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
+  const n = ring.length;
+  if (n < 4) return [...ring];
+  let far = 1;
+  let farD = 0;
+  for (let i = 1; i < n; i++) {
+    const d = Math.hypot(ring[i][0] - ring[0][0], ring[i][1] - ring[0][1]);
+    if (d > farD) {
+      far = i;
+      farD = d;
+    }
+  }
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[far] = 1;
+  thinRanges(
+    (i) => ring[i % n],
+    keep,
+    [
+      [0, far],
+      [far, n],
+    ],
+    tol,
+  );
   const out: Pt2[] = [];
   for (let i = 0; i < n; i++) if (keep[i]) out.push(ring[i]);
   return out;
 }
 
+/**
+ * Douglas–Peucker over an open polyline, keeping both ends and the original point objects. A run
+ * that returns to its start (`layerStyle` closes a whole outline by repeating its first point) has
+ * a zero-length chord, so its first split lands on the point farthest from that end — the same
+ * cut `simplifyClosed` makes.
+ */
+function simplifyOpen(line: readonly Pt2[], tol: number): Pt2[] {
+  const n = line.length;
+  if (n < 3) return [...line];
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[n - 1] = 1;
+  thinRanges((i) => line[i], keep, [[0, n - 1]], tol);
+  const out: Pt2[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(line[i]);
+  return out;
+}
+
 const drawnRings = new WeakMap<readonly Pt2[], readonly Pt2[]>();
+const drawnRuns = new WeakMap<readonly Pt2[], readonly Pt2[]>();
+
+/**
+ * An outline run from `layerStyle` (world mm) thinned to DRAWN_RING_TOL_MM for drawing only. The
+ * layers branch plotted the dense runs as they came: on card 81 its 300 `data-piece-outline` paths
+ * were 3.4 MB of the 3.6 MB of path data, 324k vertices where 7.5k draw the same line. Cached per
+ * run array, so a memoised style thins once across re-renders; hit tests keep the dense ring.
+ */
+function drawnRun(line: readonly Pt2[]): readonly Pt2[] {
+  const hit = drawnRuns.get(line);
+  if (hit) return hit;
+  const out = simplifyOpen(line, DRAWN_RING_TOL_MM);
+  drawnRuns.set(line, out);
+  return out;
+}
 
 /**
  * The outline a piece is drawn with: `g.rs` thinned to DRAWN_RING_TOL_MM. Only the drawn path uses
@@ -1770,17 +1820,22 @@ export function StepPictureSvg({
       return piece ? [piece] : [];
     });
   }, [ownedOrder, pieces]);
-  const ownedPath = (key: string, points: readonly Pt2[]) => {
-    const twin = twinNumbers.get(key);
-    const offset =
-      twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-    return points.map((point) => {
-      const [x, y] = toPx(fit, point);
-      return [x + offset, y + offset] as Pt2;
-    });
-  };
-  const ownedDepth = (key: string) =>
-    ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0);
+  const ownedPath = useCallback(
+    (key: string, points: readonly Pt2[]) => {
+      const twin = twinNumbers.get(key);
+      const offset =
+        twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      return points.map((point) => {
+        const [x, y] = toPx(fit, point);
+        return [x + offset, y + offset] as Pt2;
+      });
+    },
+    [claimedStackedKeys, fit, twinNumbers],
+  );
+  const ownedDepth = useCallback(
+    (key: string) => ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0),
+    [ownedLowerKeys, ownedStyle],
+  );
   const ownedTints = useMemo(() => {
     const claims = orderedOwnedPieces.flatMap((piece, index): LowerLayerClaim[] => {
       const depth =
@@ -1805,6 +1860,34 @@ export function StepPictureSvg({
   const ownedTintByKey = useMemo(
     () => new Map(ownedTints.map((tint) => [tint.key, tint])),
     [ownedTints],
+  );
+  // Every owned piece's outline paths. Memoised: their `d` strings were 74 % of what a picker
+  // hover still rendered, and nothing here moves on hover.
+  const ownedOutlinePaths = useMemo(
+    () =>
+      orderedOwnedPieces.flatMap((piece) => {
+        const tint = ownedTintByKey.get(piece.key);
+        const depth = ownedDepth(piece.key);
+        const style = (tint?.partial ? ownedCoverageStyle : ownedStyle)?.pieces.get(piece.key);
+        // A whole outline is the ring the surface is filled with (`drawnRing`, thinned once per
+        // geometry), closed by its first point again as `layerStyle` closes it; only a covered
+        // piece's uncovered runs are thinned here. Card 81 draws 300 outlines, all whole, so the
+        // thinning pass they would need (89 ms a render) never runs.
+        const lines =
+          style?.whole && style.visible.length && piece.drawn.length > 1
+            ? [[...piece.drawn, piece.drawn[0]]]
+            : (style?.visible ?? []).map((line) => ownedPath(piece.key, drawnRun(line)));
+        return lines.map((line, index) => (
+          <path
+            key={`${piece.key}:${index}`}
+            d={pathOf(line)}
+            stroke={FAINT}
+            strokeWidth={depth && !tint?.partial ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline}
+            data-piece-outline={piece.key}
+          />
+        ));
+      }),
+    [L, orderedOwnedPieces, ownedCoverageStyle, ownedDepth, ownedPath, ownedStyle, ownedTintByKey],
   );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
@@ -2306,24 +2389,7 @@ export function StepPictureSvg({
           </g>
           <LowerLayerFills tints={ownedTints} />
           <g fill='none' strokeLinejoin='round'>
-            {orderedOwnedPieces.flatMap((piece) => {
-              const tint = ownedTintByKey.get(piece.key);
-              const depth = ownedDepth(piece.key);
-              const lines = tint?.partial
-                ? ownedCoverageStyle?.pieces.get(piece.key)?.visible ?? []
-                : ownedStyle?.pieces.get(piece.key)?.visible ?? [];
-              return lines.map((line, index) => (
-                <path
-                  key={`${piece.key}:${index}`}
-                  d={pathOf(ownedPath(piece.key, line))}
-                  stroke={FAINT}
-                  strokeWidth={
-                    depth && !tint?.partial ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline
-                  }
-                  data-piece-outline={piece.key}
-                />
-              ));
-            })}
+            {ownedOutlinePaths}
           </g>
         </>
       ) : (

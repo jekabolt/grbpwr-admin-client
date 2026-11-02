@@ -10,6 +10,8 @@ export type PieceLayerStyle = {
   key: string;
   depth: LayerTone;
   fullyCovered: boolean;
+  /** `visible` is the whole ring, closed by its first point again (a top piece, or any in a thumb). */
+  whole: boolean;
   visible: Pt2[][];
   covered: Pt2[][];
   coveredBy: string[];
@@ -281,10 +283,10 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
       ? covering[index].map((upper) => ordered[upper])
       : ordered.slice(index + 1);
     const runs = depths[index] > 0 ? outlineRuns(piece, above) : [];
-    const visible =
-      input.mode === 'thumb' || depths[index] === 0
-        ? closedOutline(piece)
-        : runs.filter((run) => !run.covered).map((run) => run.points);
+    const whole = input.mode === 'thumb' || depths[index] === 0;
+    const visible = whole
+      ? closedOutline(piece)
+      : runs.filter((run) => !run.covered).map((run) => run.points);
     const covered =
       input.mode === 'thumb' ? [] : runs.filter((run) => run.covered).map((run) => run.points);
     pieces.set(piece.key, {
@@ -295,6 +297,7 @@ export function layerStyle(input: LayerStyleInput): LayerStyle {
         sameShapeCover[index] &&
         runs.length > 0 &&
         runs.every((run) => run.covered),
+      whole,
       visible,
       covered,
       coveredBy: covering[index].map((upper) => ordered[upper].key),

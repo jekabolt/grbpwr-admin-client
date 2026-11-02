@@ -16,6 +16,7 @@ import {
   buttonGlyphGeometry,
   buttonHostChord,
   buttonRadiusPx,
+  drawnRing,
   StepPictureSvg,
   withoutCoveredDoors,
   type EdgeMark,
@@ -709,5 +710,98 @@ describe('StepPictureSvg action glyphs', () => {
 
     expect(geometry.holes).toHaveLength(2);
     expect(geometry.thread.match(/M/g)).toHaveLength(1);
+  });
+});
+
+describe('StepPictureSvg drawn outline', () => {
+  it('draws a layered outline thinned like its surface, closed by its first point again', () => {
+    const n = 720;
+    const rs = Array.from({ length: n }, (_, i): Pt2 => {
+      const a = (2 * Math.PI * i) / n;
+      return [50 + 50 * Math.cos(a), 50 + 50 * Math.sin(a)];
+    });
+    const disc = { ...rectangle('disc', 'disc', 100, 100), rs, corners: [] } as PieceGeom;
+    const discLayout: StepLayout = {
+      ...layout,
+      T: new Map([['disc', IDENTITY]]),
+      input: new Map([['disc', 0]]),
+      bbox: boxOf(rs),
+      clusters: [[0]],
+      layers: [],
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={140}
+        h={120}
+        pad={4}
+        look='print'
+        layout={discLayout}
+        layers={['disc']}
+        geoms={new Map([['disc', disc]])}
+      />,
+    );
+    const d = (tag: string) =>
+      / d="([^"]*)"/.exec(
+        markup.match(new RegExp(`<path[^>]*${tag}="disc"[^>]*>`))?.[0] ?? '',
+      )?.[1] ?? '';
+    const outline = d('data-piece-outline');
+    const surface = d('data-piece-surface');
+    const vertices = (s: string) => s.replace(/Z$/, '').split(/[ML]/).filter(Boolean);
+
+    expect(drawnRing(rs).length).toBeLessThan(n / 10);
+    expect(vertices(surface)).toHaveLength(drawnRing(rs).length);
+    expect(surface.endsWith('Z')).toBe(true);
+    expect(vertices(outline)).toEqual([...vertices(surface), vertices(surface)[0]]);
+    expect(outline.endsWith('Z')).toBe(false);
+  });
+
+  it('thins a covered piece’s uncovered run to the same tolerance', () => {
+    const n = 720;
+    const rs = Array.from({ length: n }, (_, i): Pt2 => {
+      const a = (2 * Math.PI * i) / n;
+      return [50 + 50 * Math.cos(a), 50 + 50 * Math.sin(a)];
+    });
+    const disc = { ...rectangle('disc', 'disc', 100, 100), rs, corners: [] } as PieceGeom;
+    const lid = rectangle('lid', 'lid', 100, 60);
+    const coverLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['disc', IDENTITY],
+        ['lid', translate(0, 40)],
+      ]),
+      input: new Map([
+        ['disc', 0],
+        ['lid', 1],
+      ]),
+      bbox: boxOf(rs),
+      layers: [[0, 1]],
+    };
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={140}
+        h={120}
+        pad={4}
+        look='print'
+        layout={coverLayout}
+        layers={['disc', 'lid']}
+        lower={['disc']}
+        stacked={[['disc', 'lid']]}
+        geoms={
+          new Map([
+            ['disc', disc],
+            ['lid', lid],
+          ])
+        }
+      />,
+    );
+    const runs = [...markup.matchAll(/<path[^>]*data-piece-outline="disc"[^>]*>/g)].map(
+      (m) => / d="([^"]*)"/.exec(m[0])?.[1] ?? '',
+    );
+    const vertices = runs.map((run) => run.split(/[ML]/).filter(Boolean).length);
+
+    expect(runs.length).toBeGreaterThan(0);
+    // the uncovered arc is under half the disc: a dense run of ~300 points, drawn with a few dozen
+    expect(Math.max(...vertices)).toBeLessThan(60);
+    expect(Math.min(...vertices)).toBeGreaterThan(2);
   });
 });

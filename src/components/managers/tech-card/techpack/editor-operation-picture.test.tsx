@@ -744,6 +744,27 @@ describe('editor operation picture in the PDF', () => {
     }
   }, 120_000);
 
+  it('measures rows in the hidden probe without drawing their pictures', () => {
+    const input = card83RealFixture();
+    const model = deriveAssembly(input);
+    const markup = renderToStaticMarkup(
+      <AssemblyPage
+        techCard={input.techCard}
+        orient='land'
+        docline='test'
+        n='06'
+        model={model}
+        pdfGaps={[]}
+        onLaidOut={() => undefined}
+      />,
+    );
+    const probe = markup.slice(markup.indexOf('class="asm-measure"'));
+
+    expect(probe.match(/class="asm-picture-box"/g)).toHaveLength(model.rows.length);
+    expect(probe).not.toContain('asm-editor-picture');
+    expect(probe).not.toContain('data-piece-outline');
+  });
+
   it('returns no editor picture when an operation has no geometry', () => {
     const input = card83StoredSeamsFixture();
     const picture = sceneOf({ ...input, pieces: new Map() }, 400);

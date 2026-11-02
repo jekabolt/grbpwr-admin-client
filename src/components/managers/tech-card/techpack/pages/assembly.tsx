@@ -3,7 +3,16 @@
 // (TechCard.seams on today's DXF), every other op draws the key of its technique next to the
 // outline of what it acts on. Rows are measured in the DOM once the print font is in and paginated
 // so an operation row never splits.
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { DataTable, HeaderNote, SectionHeader } from 'ui';
 
 import type { common_TechCard, common_TechCardOperationMedia } from 'api/proto-http/admin';
@@ -4426,13 +4435,22 @@ export function Delta({ metrics }: { metrics: readonly SeamMetric[] }) {
   );
 }
 
+/**
+ * true inside the hidden measuring probe. A row's height does not depend on its picture: the
+ * `.asm-picture-box` carries an inline width × height and caps its svg at 100%, so the probe draws
+ * the empty box. Before, it drew the whole picture — on card 81 that was 65 print svgs (3.4 MB of
+ * path data) rendered, committed and discarded before the paginated sheets drew them once more.
+ */
+const MeasureOnly = createContext(false);
+
 function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
   const d = DIM[orient];
   const picture = pictureDimensions(orient);
   const drawing = r.pic ?? r.sil;
+  const measureOnly = useContext(MeasureOnly);
   return (
     <div className='asm-picture-box' style={{ width: d.joinW, height: d.joinH }}>
-      {r.editorPic && r.print ? (
+      {measureOnly ? null : r.editorPic && r.print ? (
         <StepPictureSvg
           w={picture.join[0]}
           h={picture.join[1]}
@@ -4465,9 +4483,10 @@ function SegLine({ seg, className }: { seg: Seg; className?: string }) {
   return <div className={className}>{seg.t}</div>;
 }
 
-// Memoized on the row object: `rows` is memoized, so the same row is drawn in the hidden probe,
-// then in its paginated page, and again when the whole document renders after `onLaidOut` flips —
-// that last render redrew every picture (card 85: 109 print SVGs, seconds of markup per render).
+// Memoized on the row object: `rows` is memoized, so the same row is measured in the hidden probe
+// (without its picture), then drawn in its paginated page, and again when the whole document
+// renders after `onLaidOut` flips — that last render redrew every picture (card 85: 109 print SVGs,
+// seconds of markup per render).
 const OpRow = memo(function OpRow({ r, orient }: { r: Row; orient: PrintOrient }) {
   const { t } = useT();
   const w = r.words;
@@ -4835,20 +4854,22 @@ export function AssemblyPage({
     <>
       <style>{KEYS_CSS + ASM_CSS}</style>
       {rows.length > 0 && !cols && (
-        <div
-          ref={probe}
-          className='asm-measure'
-          style={{ width: BODY_PX[orient].w + 90, height: BODY_PX[orient].h + 106 }}
-        >
-          <div className='tp-body'>
-            <SectionHeader title={title} action={<HeaderNote>0</HeaderNote>} />
-            <div className='asm-cols' data-orient={orient}>
-              <div className='asm-col'>
-                <Table col={rows} orient={orient} />
+        <MeasureOnly.Provider value>
+          <div
+            ref={probe}
+            className='asm-measure'
+            style={{ width: BODY_PX[orient].w + 90, height: BODY_PX[orient].h + 106 }}
+          >
+            <div className='tp-body'>
+              <SectionHeader title={title} action={<HeaderNote>0</HeaderNote>} />
+              <div className='asm-cols' data-orient={orient}>
+                <div className='asm-col'>
+                  <Table col={rows} orient={orient} />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </MeasureOnly.Provider>
       )}
       {pages.map((pg, pageIndex) => {
         const first = pg[0][0].n;

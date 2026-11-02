@@ -2264,10 +2264,27 @@ export function fitBox(b: Box, w: number, h: number, pad: number): Fit {
 /** A picture-frame point (mm, y up) on screen (px, y down). */
 export const toPx = (f: Fit, p: Pt2): Pt2 => [p[0] * f.s + f.tx, -p[1] * f.s + f.ty];
 
-export const pathOf = (pts: readonly Pt2[], closed = false) =>
-  pts.length
-    ? `M${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}${closed ? 'Z' : ''}`
-    : '';
+/**
+ * Path data at 0.1 px. Consecutive points that print the same are written once: a 1 mm resample
+ * at 0.3–0.5 px/mm lands on the cell it just left often (card 81: 66k of 324k outline vertices),
+ * and a zero-length segment plots nothing — the stroker skips it, and round caps belong to the two
+ * ends of a run, which always stay (a run keeps at least two points, so a dot is still a dot).
+ */
+export const pathOf = (pts: readonly Pt2[], closed = false) => {
+  if (!pts.length) return '';
+  let d = '';
+  let last = '';
+  let n = 0;
+  for (const [x, y] of pts) {
+    const at = `${x.toFixed(1)},${y.toFixed(1)}`;
+    if (at === last) continue;
+    d += (n ? 'L' : 'M') + at;
+    last = at;
+    n++;
+  }
+  if (n === 1 && pts.length > 1) d += 'L' + last;
+  return closed ? d + 'Z' : d;
+};
 
 /** The reflection across the line through `p` along the unit direction `t`. */
 function reflectAcross(p: Pt2, t: Pt2): Affine {

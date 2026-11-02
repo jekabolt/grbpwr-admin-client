@@ -53,6 +53,7 @@ import {
   labelSpot,
   midAlong,
   partnerOf,
+  pathOf,
   seamOfSides,
   seamSig,
   splitSeams,
@@ -142,6 +143,50 @@ describe('fitBox', () => {
   it('survives a degenerate box', () => {
     const f = fitBox({ x0: 5, y0: 5, x1: 5, y1: 5 }, 100, 100, 10);
     expect(Number.isFinite(f.s)).toBe(true);
+  });
+});
+
+describe('pathOf', () => {
+  it('writes a point once when its neighbour prints the same 0.1 px', () => {
+    expect(
+      pathOf([
+        [1, 1],
+        [1.01, 1.04],
+        [1.04, 0.96],
+        [2, 2],
+        [2.02, 2.01],
+      ]),
+    ).toBe('M1.0,1.0L2.0,2.0');
+    expect(
+      pathOf(
+        [
+          [0, 0],
+          [3, 0],
+          [3, 0.01],
+          [3, 3],
+        ],
+        true,
+      ),
+    ).toBe('M0.0,0.0L3.0,0.0L3.0,3.0Z');
+  });
+
+  it('keeps a dot two points long and a repeat that is not adjacent', () => {
+    expect(
+      pathOf([
+        [5, 5],
+        [5, 5],
+        [5.02, 4.98],
+      ]),
+    ).toBe('M5.0,5.0L5.0,5.0');
+    expect(pathOf([[5, 5]])).toBe('M5.0,5.0');
+    expect(
+      pathOf([
+        [0, 0],
+        [4, 0],
+        [0, 0],
+      ]),
+    ).toBe('M0.0,0.0L4.0,0.0L0.0,0.0');
+    expect(pathOf([])).toBe('');
   });
 });
 
