@@ -128,7 +128,9 @@ function sentrySourceMaps(env: Record<string, string>, release: string): PluginO
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const sentryOn = Boolean(env.VITE_SENTRY_DSN?.trim());
-  const release = sentryOn ? gitRelease(env) : '';
+  // The release also versions persistent parser data; it must exist even when Sentry is disabled.
+  // Vercel supplies the commit SHA, while local/other builds read HEAD.
+  const release = gitRelease(env);
   const sentryPlugins = sentryOn && command === 'build' ? sentrySourceMaps(env, release) : [];
   const apiProxyTarget = env.VITE_API_BASE_URL || 'http://localhost:3999';
 

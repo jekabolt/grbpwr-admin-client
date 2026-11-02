@@ -1,16 +1,41 @@
+/* global __APP_RELEASE__ */
 // Worker entry: owns the parsed pieces (keyed by parse job) so re-nesting with new
 // settings never re-parses, and the GA runs off the main thread with cooperative yields
 // so cancel/progress messages drain mid-run.
 import type { NestConfig, ParseOpts, PieceDTO, WorkerRequest, WorkerResponse } from '../types';
 import { parseSheets, type SheetBytes } from './parse-files';
+import { packPieces } from './piece-transfer';
+import { IndexedDbParseCacheStorage, ParseCache } from './parse-cache';
+import {
+  parseCachedSources,
+  type CachedParsedSheet,
+  type ParseSource,
+} from './parse-cached-sources';
 import { orientToGrain } from '../geom/grain-orient';
 import { applySeamAllowance } from '../geom/seam-allowance';
 import { nest } from '../nest';
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { rollSearch, type RollSearchJob } from 'lib/pattern-export/roll-search';
 
-const post = (msg: WorkerResponse) => {
-  (self as unknown as { postMessage: (m: WorkerResponse) => void }).postMessage(msg);
+const post = (msg: WorkerResponse, transfer: ArrayBuffer[] = []) => {
+  (
+    self as unknown as {
+      postMessage: (message: WorkerResponse, transfer: ArrayBuffer[]) => void;
+    }
+  ).postMessage(msg, transfer);
 };
+
+const PARSE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const release = typeof __APP_RELEASE__ === 'string' ? __APP_RELEASE__.trim() : '';
+// Production worker filenames are content-hashed. The git release is preferable because it also
+// changes when parser inputs outside this chunk's graph change; keeping the hashed URL as well
+// protects builds made from a dirty tree or without release metadata. Either changing invalidates
+// the entry, while the schema prefix lets transport/cache migrations invalidate explicitly.
+const parserVersion = `packed-v1:${release || 'no-release'}:${new URL(self.location.href).pathname}`;
+const parseCache = new ParseCache<CachedParsedSheet>(
+  new IndexedDbParseCacheStorage<CachedParsedSheet>(),
+  PARSE_CACHE_MAX_BYTES,
+);
 
 // The live parse, keyed by its job id — a nest request must name the parse it was
 // configured against, so a job racing a newer parse is rejected instead of silently
@@ -19,6 +44,56 @@ const post = (msg: WorkerResponse) => {
 let currentParse: { id: number; pieces: PieceDTO[] } | null = null;
 let parseSeq = 0;
 const cancelled = new Set<number>();
+
+function postParsed(
+  id: number,
+  seq: number,
+  out: Awaited<ReturnType<typeof parseSheets>>,
+  expectedFiles: number,
+  sourceIndices?: number[],
+  downloadFailedIndices?: number[],
+): void {
+  const {
+    pieces,
+    detectedUnit,
+    warnings,
+    failedFiles,
+    skippedBlocks,
+    blockNames,
+    manifests,
+    manifestDistrust,
+  } = out;
+
+  // Every file that reached parsing failed → that's an error, not a note with an empty piece list.
+  // Zero means URL downloads all failed; the main thread owns that localized verdict.
+  if (expectedFiles > 0 && failedFiles === expectedFiles) {
+    post({ type: 'error', id, message: warnings.join('; ') || "couldn't parse DXF" });
+    return;
+  }
+  if (pieces.length === 0 && warnings.length === 0 && expectedFiles > 0)
+    warnings.push('no closed piece contours were found in the files');
+  // Commit only when no newer parse started while this one awaited.
+  if (seq === parseSeq) currentParse = { id, pieces };
+
+  const packedPieces = packPieces(pieces);
+  post(
+    {
+      type: 'parsed',
+      id,
+      packedPieces,
+      detectedUnit,
+      warnings,
+      failedFiles,
+      skippedBlocks,
+      blockNames,
+      manifests,
+      manifestDistrust,
+      ...(sourceIndices ? { sourceIndices } : {}),
+      ...(downloadFailedIndices ? { downloadFailedIndices } : {}),
+    },
+    [packedPieces.coordinates.buffer as ArrayBuffer],
+  );
+}
 
 async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<void> {
   const seq = ++parseSeq;
@@ -32,45 +107,37 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
 
   // Same call the node probe makes (scripts/nest-probe.mjs) — the measurement has to walk
   // the pipeline the operator walks, not a second copy of it.
-  const {
-    pieces: out,
-    detectedUnit: detected,
-    warnings,
-    failedFiles,
-    skippedBlocks,
-    blockNames,
-    manifests,
-    manifestDistrust,
-  } = await parseSheets(sheets, opts);
-
-  // Every file failed → that's an error, not a note with an empty piece list.
-  if (files.length > 0 && failedFiles === files.length) {
-    post({ type: 'error', id, message: warnings.join('; ') || "couldn't parse DXF" });
-    return;
-  }
-
-  if (out.length === 0 && warnings.length === 0)
-    warnings.push('no closed piece contours were found in the files');
-  // Commit only when no newer parse started while this one awaited.
-  if (seq === parseSeq) currentParse = { id, pieces: out };
+  const parsed = await parseSheets(sheets, opts);
   // failedFiles едет вместе с блоками: «часть листов не прочиталась» — это разница между
   // «в чертеже такого блока нет» и «мы про него ничего не знаем», и различить их может только
   // главный поток, у которого есть карточка. skippedBlocks — та же разница, но ВНУТРИ листа,
   // который прочитался: пропущенная вставка блока делает набор дырявым, ничем себя не выдавая.
   // blockNames — третья: блок прочитан, но контура из него не вышло, и `pieces` про него молчит,
   // хотя в чертеже он есть. Присутствие спрашивают у него, геометрию — у `pieces`.
-  post({
-    type: 'parsed',
+  postParsed(id, seq, parsed, files.length);
+}
+
+async function handleParseSources(
+  id: number,
+  sources: ParseSource[],
+  opts: ParseOpts,
+): Promise<void> {
+  const seq = ++parseSeq;
+  const result = await parseCachedSources(
+    sources,
+    opts,
+    parserVersion,
+    parseCache,
+    async (source) => (await fetchMediaBlob(source.url)).arrayBuffer(),
+  );
+  postParsed(
     id,
-    pieces: out,
-    detectedUnit: detected,
-    warnings,
-    failedFiles,
-    skippedBlocks,
-    blockNames,
-    manifests,
-    manifestDistrust,
-  });
+    seq,
+    result.parsed,
+    result.sourceIndices.length,
+    result.sourceIndices,
+    result.downloadFailedIndices,
+  );
 }
 
 async function handleNest(id: number, parseId: number, config: NestConfig): Promise<void> {
@@ -146,6 +213,11 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
   switch (msg.type) {
     case 'parse':
       void handleParse(msg.id, msg.files, msg.opts).catch((e) =>
+        post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
+      );
+      break;
+    case 'parse-sources':
+      void handleParseSources(msg.id, msg.sources, msg.opts).catch((e) =>
         post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
       );
       break;
