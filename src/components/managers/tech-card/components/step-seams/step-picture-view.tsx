@@ -765,8 +765,12 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 
 // ─── the svg ──────────────────────────────────────────────────────────────────────────────────────
 
-/** `hint` — an edge the card's AI joins map names for this step (line F): blue dashed. */
-export type Tone = 'proposal' | 'pick' | 'stored' | 'hint';
+/**
+ * `hint` — an edge the card's AI joins map names for this step (line F): blue dashed.
+ * `pickFirst` — side 1 of a seam being picked (what is sewn): black, thicker, its piece shaded.
+ * `pick` — side 2 (where it goes): blue.
+ */
+export type Tone = 'proposal' | 'pickFirst' | 'pick' | 'stored' | 'hint';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
 export type PictureActionLine = {
@@ -987,6 +991,9 @@ const INK = 'var(--color-textColor)';
 const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
+const isPick = (tone: Tone) => tone === 'pick' || tone === 'pickFirst';
+const PICK_FIRST_STROKE_SCALE = 1.5;
+const PICK_FIRST_FILL_OPACITY = 0.08;
 const FAINT = 'var(--color-borderColor)';
 const TWIN_NUMBER_PX = 10;
 
@@ -1947,8 +1954,12 @@ export function StepPictureSvg({
     const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
     return shown ? [{ m, pts: shown }] : [];
   });
+  const pickFirstKeys = new Set(
+    marks.flatMap((m) => (m.tone === 'pickFirst' ? [pieceOfId(m.id)] : [])),
+  );
+  const pickFirstPieces = pieces.filter((piece) => pickFirstKeys.has(piece.key));
   const stepLines = (stepEdges ?? []).flatMap((id) => {
-    if (marks.some((m) => m.id === id && m.tone === 'pick')) return [];
+    if (marks.some((m) => m.id === id && isPick(m.tone))) return [];
     const points = ptsOf(id);
     const shown = points && pointsOnDrawnPiece(pieceOfId(id), points);
     return shown ? [{ id, points: shown }] : [];
@@ -2171,7 +2182,7 @@ export function StepPictureSvg({
   const stepColor = look === 'print' ? INK : 'var(--color-highlightColor)';
   const stepWidth = L.outline * 1.26;
   const noStepSeams =
-    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => m.tone === 'pick');
+    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
   if (w < 2 || h < 2) return null;
@@ -2315,21 +2326,40 @@ export function StepPictureSvg({
           pointerEvents='none'
         />
       )}
+      {pickFirstPieces.map((piece) => (
+        <path
+          key={`pick-first:${piece.key}`}
+          d={pathOf(piece.drawn, true)}
+          fill={INK}
+          fillOpacity={PICK_FIRST_FILL_OPACITY}
+          stroke='none'
+          pointerEvents='none'
+          data-seam-side-fill={piece.key}
+        />
+      ))}
       {markLines.map(({ m, pts }) => (
         <path
           key={`${m.tone}:${m.id}`}
           d={pathOf(pts)}
           fill='none'
           stroke={
-            m.tone === 'pick' || m.tone === 'hint'
-              ? PICK
-              : stepEdges !== undefined
-                ? FAINT
-                : m.tone === 'stored'
-                  ? PAIR_INK
-                  : INK
+            m.tone === 'pickFirst'
+              ? INK
+              : m.tone === 'pick' || m.tone === 'hint'
+                ? PICK
+                : stepEdges !== undefined
+                  ? FAINT
+                  : m.tone === 'stored'
+                    ? PAIR_INK
+                    : INK
           }
-          strokeWidth={m.tone === 'stored' ? L.stored : L.mark}
+          strokeWidth={
+            m.tone === 'stored'
+              ? L.stored
+              : m.tone === 'pickFirst'
+                ? L.mark * PICK_FIRST_STROKE_SCALE
+                : L.mark
+          }
           strokeDasharray={m.tone === 'proposal' || m.tone === 'hint' ? L.dash : undefined}
           strokeLinecap={m.tone === 'proposal' || m.tone === 'hint' ? 'butt' : 'round'}
           pointerEvents='none'

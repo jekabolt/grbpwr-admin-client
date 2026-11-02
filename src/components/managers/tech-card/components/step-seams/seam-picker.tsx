@@ -515,7 +515,7 @@ export function SeamPickerBody({
     const first = s.sides.a[0] ?? s.sides.b[0];
     if (first) nos.push({ id: first, i });
   });
-  sideMarks(sel.a, 'pick');
+  sideMarks(sel.a, 'pickFirst');
   sideMarks(sel.b, 'pick');
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
@@ -1170,6 +1170,7 @@ export function SeamPickerBody({
                 </Chip>
                 <Chip
                   selected={sel.b.length > 0}
+                  tone={sel.b.length ? 'attention' : 'default'}
                   onClick={() => clearSide('b')}
                   disabled={!sel.b.length}
                   data-seam-side='2'

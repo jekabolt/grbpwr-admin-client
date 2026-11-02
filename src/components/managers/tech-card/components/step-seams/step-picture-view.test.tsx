@@ -290,6 +290,21 @@ describe('StepPictureSvg lower layers', () => {
     expect(mark).toBeGreaterThan(markup.indexOf('data-lower-layer="bag"'));
   });
 
+  it('draws seam side 1 black and thicker with its piece shaded, side 2 blue', () => {
+    const tagOf = (markup: string, attribute: string) => {
+      const at = markup.indexOf(attribute);
+      return markup.slice(markup.lastIndexOf('<path', at), markup.indexOf('/>', at));
+    };
+    const first = renderPicture({ look: 'canvas', marks: [{ id: 'bag#0', tone: 'pickFirst' }] });
+    const second = renderPicture({ look: 'canvas', marks: [{ id: 'bag#0', tone: 'pick' }] });
+
+    expect(tagOf(first, 'data-seam-mark="pickFirst"')).toContain('stroke="var(--color-textColor)"');
+    expect(tagOf(first, 'data-seam-mark="pickFirst"')).toContain('stroke-width="4.5"');
+    expect(first).toContain('data-seam-side-fill="bag"');
+    expect(tagOf(second, 'data-seam-mark="pick"')).toContain('stroke="var(--color-warning)"');
+    expect(second).not.toContain('data-seam-side-fill');
+  });
+
   it('offers no door for an edge sewn under a piece of the same unit', () => {
     const square = (x: number, size: number): Pt2[] => [
       [x, 0],
