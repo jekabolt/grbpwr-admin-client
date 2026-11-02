@@ -19,6 +19,9 @@ import { expandRul, parseRul } from 'lib/pattern-import/adapters/rul';
 import { buildAst } from 'lib/pattern-import/adapters/dxf/ast';
 import { loadDxf } from 'lib/pattern-import/adapters/dxf/tags';
 import { pieceBlocks } from 'lib/pattern-import/adapters/rul/model';
+import { isDrillSquare } from 'lib/nesting/dxf/pieces';
+import { NEST_DEFAULTS } from 'lib/nesting/types';
+import { parseSheets } from 'lib/nesting/worker/parse-files';
 import { Session, type StageCtx } from 'lib/pattern-import/worker/session';
 import type { CardSize, DraftScopeTarget, PtMm } from 'lib/pattern-import/types';
 
@@ -626,6 +629,49 @@ export async function main(): Promise<number> {
   const a = sectionA(dxfText, rulText);
   for (const [name, b] of blocksOf(a.text)) expandedMin.set(name, minOf(b.outline));
   const afterText = await sectionB(dxfText, rulText, a.byStem);
+  // The card reads the saved file back: a Ø15 button at x = 158.44812 mm is 1.5000000000000018 cm
+  // wide, and a strict limit there dropped the drill and the card stopped trusting the manifest.
+  const ring = Array.from({ length: 20 }, (_, i) => ({
+    x: (158.44812 + 7.5 * Math.cos((i * Math.PI) / 10)) * 0.1,
+    y: (976.625671 + 7.5 * Math.sin((i * Math.PI) / 10)) * 0.1,
+  }));
+  check(
+    'D',
+    'Ø15 button counts as a drill despite float width',
+    isDrillSquare({ closed: true, pts: ring }),
+  );
+  const bytes = new TextEncoder().encode(afterText).buffer as ArrayBuffer;
+  const read = await parseSheets([{ name: 'after.dxf', open: async () => bytes }], {
+    unit: 'auto',
+    tol: NEST_DEFAULTS.tol,
+    tolChain: NEST_DEFAULTS.tolChain,
+  });
+  check(
+    'D',
+    'card trusts the manifest of the written file',
+    read.manifestDistrust[0] == null,
+    read.manifestDistrust[0],
+  );
+  const saved = process.env.PATIMPORT_BTN_SAVED;
+  if (saved) {
+    const b = readFileSync(saved);
+    const back = await parseSheets(
+      [
+        {
+          name: 'saved.dxf',
+          open: async () =>
+            b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer,
+        },
+      ],
+      { unit: 'auto', tol: NEST_DEFAULTS.tol, tolChain: NEST_DEFAULTS.tolChain },
+    );
+    check(
+      'D',
+      'saved beta file: manifest trusted',
+      back.manifestDistrust[0] == null,
+      back.manifestDistrust[0],
+    );
+  }
   const svg = sectionC(afterText, process.env.PATIMPORT_BTN_BEFORE);
   const out = process.env.PATIMPORT_BTN_OUT ?? resolve(GOLDEN, 'btn-after.svg');
   writeFileSync(out, svg);

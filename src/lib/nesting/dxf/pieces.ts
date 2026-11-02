@@ -51,7 +51,7 @@ const DRILL_CIRCLE_MAX_CM = 1.5;
 // пошли бы в `inner` без бюджета, по слою — сколько путей и сколько из них квадратов свёрл.
 export type InnerTally = Record<string, { paths: number; drillSquares: number }>;
 
-function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
+export function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
   if (!c.closed) return false;
   const q = bounds(c.pts);
   const w = q.maxX - q.minX;
@@ -61,7 +61,9 @@ function isDrillSquare(c: { closed: boolean; pts: readonly Pt[] }): boolean {
       Math.abs(w - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM &&
       Math.abs(h - DRILL_SQUARE_CM) <= DRILL_SQUARE_TOL_CM
     );
-  if (c.pts.length < 8 || w > DRILL_CIRCLE_MAX_CM || h > DRILL_CIRCLE_MAX_CM) return false;
+  // с допуском: Ø15 мм после мм → см выходит шириной 1.5000000000000018 (зависит от координаты)
+  const max = DRILL_CIRCLE_MAX_CM + DRILL_SQUARE_TOL_CM;
+  if (c.pts.length < 8 || w > max || h > max) return false;
   // кружок: все вершины на одном расстоянии от центра рамки
   const cx = (q.minX + q.maxX) / 2;
   const cy = (q.minY + q.maxY) / 2;
