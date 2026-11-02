@@ -1193,6 +1193,8 @@ export type PicturePickTarget = {
   box: Box;
 };
 
+const COVER_EDGE_PX = 2;
+
 const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
   let best = ring[0] ?? point;
   let distance = Infinity;
@@ -1246,6 +1248,29 @@ const pointsOnDrawnRing = (
     return hidden || (!insideRing(point, hostRing) && nearest.distance > 4) ? nearest.point : point;
   });
 };
+
+/** Edges of a piece sewn under another in an earlier step sit inside the unit: no door for them. */
+export function withoutCoveredDoors<T extends { id: TargetId; points: readonly Pt2[] }>(
+  doors: readonly T[],
+  pieces: readonly { key: string; ring: readonly Pt2[]; input: number }[],
+  coveredBy: (key: string) => readonly string[],
+): T[] {
+  const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
+  return doors.filter(({ id, points }) => {
+    const piece = byKey.get(pieceOfTarget(id));
+    if (!piece) return true;
+    const covers = coveredBy(piece.key).flatMap((key) => {
+      const cover = byKey.get(key);
+      return cover && cover.input === piece.input ? [cover.ring] : [];
+    });
+    if (!covers.length) return true;
+    const hidden = (point: Pt2) =>
+      covers.some(
+        (ring) => insideRing(point, ring) || nearestOnRing(point, ring).distance <= COVER_EDGE_PX,
+      );
+    return !points.every(hidden);
+  });
+}
 
 /**
  * Pick doors in the exact fitted frame the picture draws. Without an owner layer order, folded-in
@@ -1821,7 +1846,7 @@ export function StepPictureSvg({
     if (!onPick && look !== 'canvas') return [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
     // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
-    return picturePickTargets(
+    const targets = picturePickTargets(
       layout,
       geoms,
       innerLines,
@@ -1841,7 +1866,12 @@ export function StepPictureSvg({
             hiddenTargets: onPick && pickTargets ? new Set(pickTargets) : undefined,
           },
     );
+    return layers
+      ? withoutCoveredDoors(targets, pieces, (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [])
+      : targets;
   }, [
+    pieces,
+    ownedStyle,
     onPick,
     look,
     layout,
