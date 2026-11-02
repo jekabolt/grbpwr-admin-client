@@ -2998,6 +2998,9 @@ function wordsOf(
     'button_square',
     'button_u_shape',
     'button_other',
+    'button_three_triangle',
+    'button_three_v',
+    'button_three_other',
   ]).has(icon.key);
   const zipperApplicationInIcon =
     icon.key === 'zip_invisible' ||

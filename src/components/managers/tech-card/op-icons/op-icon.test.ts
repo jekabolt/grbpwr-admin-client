@@ -17,7 +17,7 @@ const card = { defaultSeamClass: 'TECH_CARD_SEAM_CLASS_SS_FRENCH' };
 
 describe('operation icon registry', () => {
   it('gives every key a drawing and declares every identical alias', () => {
-    expect(Object.keys(ICONS)).toHaveLength(201);
+    expect(Object.keys(ICONS)).toHaveLength(205);
     for (const [key, drawing] of Object.entries(ICONS)) {
       expect(drawing.length, key).toBeGreaterThan(0);
     }
@@ -314,6 +314,25 @@ describe('opIcon modifiers and fallbacks', () => {
         card,
       ),
     ).toEqual({ key: 'button_two_hole' });
+  });
+
+  it.each([
+    ['SQUARE', 'button_three_triangle'],
+    ['U_SHAPE', 'button_three_v'],
+    ['OTHER', 'button_three_other'],
+    ['CROSS_X', 'button_three_not_stated'],
+    ['UNKNOWN', 'button_three_not_stated'],
+  ])('draws three holes with %s as %s', (pattern, key) => {
+    expect(
+      opIcon(
+        {
+          work: 'button_attach',
+          buttonHoles: 3,
+          attachPattern: `TECH_CARD_BUTTON_ATTACH_PATTERN_${pattern}`,
+        },
+        card,
+      ),
+    ).toEqual({ key });
   });
 
   it('does not derive from an inherited class', () => {

@@ -138,6 +138,21 @@ describe('button holes', () => {
     expect(patternAfterHoles(4, CROSS)).toBe(CROSS);
   });
 
+  it('offers triangle, V and other on three holes', () => {
+    expect(patternTiles(3, NO_ATTACH_PATTERN).map((t) => t.label)).toEqual(['triangle', 'V', 'other']);
+  });
+
+  it('crossing three holes keeps only other, so a square never turns into a triangle', () => {
+    const SQUARE = 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE';
+    expect(patternAfterHoles(3, SQUARE, 4)).toBe(NO_ATTACH_PATTERN);
+    expect(patternAfterHoles(4, SQUARE, 3)).toBe(NO_ATTACH_PATTERN);
+    expect(patternAfterHoles(0, SQUARE, 3)).toBe(NO_ATTACH_PATTERN);
+    expect(patternAfterHoles(3, OTHER, 4)).toBe(OTHER);
+    expect(patternAfterHoles(3, SQUARE, 3)).toBe(SQUARE);
+    expect(holesDefaultFits(0, 3, SQUARE)).toBe(false);
+    expect(holesDefaultFits(0, 3, NO_ATTACH_PATTERN)).toBe(true);
+  });
+
   it('the article default: one agreed count, only into an unset step, never against the pattern', () => {
     const lines = [
       { lineKey: 'a', materialId: 1 },
@@ -151,6 +166,7 @@ describe('button holes', () => {
     expect(articleHoles(['a', 'b'], lines, of)).toBe(0);
     expect(articleHoles(['c'], lines, of)).toBe(0);
     expect(articleHoles([], lines, of)).toBe(0);
+    expect(articleHoles(['a'], lines, () => 3)).toBe(3);
     expect(holesDefaultFits(0, 4, CROSS)).toBe(true);
     expect(holesDefaultFits(0, 2, CROSS)).toBe(false);
     expect(holesDefaultFits(0, 2, PARALLEL)).toBe(true);

@@ -122,6 +122,7 @@ import {
 import { SLIT_OVERCAST_WORK } from './operation-work';
 import {
   FOUR_HOLE_PATTERNS,
+  NOT_ON_THREE_HOLES,
   MAX_TOPSTITCH_ROWS,
   SEAM_KIND_BINDING_STYLE,
   seamKindDef,
@@ -1479,7 +1480,7 @@ const operationSchema = z
       .default('TECH_CARD_BUTTONHOLE_ORIENTATION_UNKNOWN'),
     bartackLengthMm: z.string().optional().default(''), // мм, 1..40
     attachPattern: z.string().optional().default('TECH_CARD_BUTTON_ATTACH_PATTERN_UNKNOWN'),
-    // Holes of the button sewn on (0436): 2 | 4, 0 = unset.
+    // Holes of the button sewn on (0436): 2 | 3 | 4, 0 = unset.
     buttonHoles: z.number().optional().default(0),
     zipperApplication: z.string().optional().default('TECH_CARD_ZIPPER_APPLICATION_UNKNOWN'),
 
@@ -1799,11 +1800,11 @@ const operationSchema = z
     // ДЫРКИ ПУГОВИЦЫ (0436) — настройка той же пришивной машинки, что и рисунок, и две дырки
     // креста, квадрата и U не дают (сервер: needs_four_holes). Зеркало, чтобы отказ встал на плитке.
     const stepHoles = o.buttonHoles ?? 0;
-    if (stepHoles !== 0 && stepHoles !== 2 && stepHoles !== 4) {
+    if (stepHoles !== 0 && stepHoles !== 2 && stepHoles !== 3 && stepHoles !== 4) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['buttonHoles'],
-        message: 'a button has 2 or 4 holes',
+        message: 'a button has 2, 3 or 4 holes',
       });
     }
     needsMachineType(
@@ -1817,6 +1818,13 @@ const operationSchema = z
         code: z.ZodIssueCode.custom,
         path: ['attachPattern'],
         message: 'a two-hole button takes one bar — pick parallel, or four holes',
+      });
+    }
+    if (stepHoles === 3 && NOT_ON_THREE_HOLES.has(o.attachPattern ?? '')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['attachPattern'],
+        message: 'a three-hole button takes triangle, V or other — pick one, or change the holes',
       });
     }
     // ВИД ШВА (0436): класс шага обязан быть ЯВНЫМ и равным классу вида, окантовка несёт своё

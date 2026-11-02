@@ -797,7 +797,7 @@ export type PictureActionGlyph = {
   /** A press side read on the picture: the arrow keeps the seam normal, signed up/down/in/out. */
   aim?: 'up' | 'down' | 'centre' | 'away';
   pattern?: 'cross_x' | 'parallel' | 'square' | 'u_shape' | 'other';
-  holes?: 2 | 4;
+  holes?: 2 | 3 | 4;
   sizeMm?: number;
   /** Physical slit length; buttonholes default to 12 mm. */
   lengthMm?: number;
@@ -1074,7 +1074,7 @@ export function spreadGlyphFallbacks(ring: readonly Pt2[], count: number): Pt2[]
 export function buttonGlyphGeometry(
   at: Pt2,
   radius: number,
-  holes: 2 | 4,
+  holes: 2 | 3 | 4,
   pattern: NonNullable<PictureActionGlyph['pattern']>,
 ): { holes: Pt2[]; thread: string } {
   const offset = radius * 0.32;
@@ -1084,6 +1084,24 @@ export function buttonGlyphGeometry(
       [at[0] + offset, at[1]],
     ];
     return { holes: points, thread: pathOf(points) };
+  }
+  if (holes === 3) {
+    // Vertex up, the same triangle as the icon sheet. Square = closed thread, U = open (V).
+    const reach = radius * 0.49;
+    const side = reach * Math.cos(Math.PI / 6);
+    const low = reach * Math.sin(Math.PI / 6);
+    const points: Pt2[] = [
+      [at[0], at[1] - reach],
+      [at[0] + side, at[1] + low],
+      [at[0] - side, at[1] + low],
+    ];
+    const thread =
+      pattern === 'square'
+        ? pathOf([...points, points[0]])
+        : pattern === 'u_shape'
+          ? pathOf([points[1], points[0], points[2]])
+          : '';
+    return { holes: points, thread };
   }
   const points: Pt2[] = [
     [at[0] - offset, at[1] - offset],

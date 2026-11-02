@@ -169,6 +169,16 @@ describe('op icon field checks mirror the server', () => {
     ).toContain('buttonHoles');
   });
 
+  it('refuses a pattern three holes cannot make, and allows the ones they can', () => {
+    const holes3 = (attachPattern: string) =>
+      issuesAt([op({ ...button, fastening: { buttonHoles: 3, attachPattern } })]);
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X')).toContain('attachPattern');
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL')).toContain('attachPattern');
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE')).not.toContain('attachPattern');
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE')).not.toContain('buttonHoles');
+    expect(holes3('TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE')).not.toContain('attachPattern');
+  });
+
   it('refuses a type without its work', () => {
     expect(issuesAt([op({ ...zip, work: '' })])).toContain('workVariant');
   });

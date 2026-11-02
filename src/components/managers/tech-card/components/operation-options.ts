@@ -1386,8 +1386,12 @@ export const trimActionLabel = (v?: string): string => enumText(TRIM_ACTION_LABE
 export const cleaningKindLabel = (v?: string): string => enumText(CLEANING_KIND_LABELS, v);
 export const inspectCoverageLabel = (v?: string): string => enumText(INSPECT_COVERAGE_LABELS, v);
 export const wetProcessKindLabel = (v?: string): string => enumText(WET_PROCESS_KIND_LABELS, v);
-export const buttonAttachPatternLabel = (v?: string): string =>
-  enumText(BUTTON_ATTACH_PATTERN_LABELS, v);
+export const buttonAttachPatternLabel = (v?: string, holes?: number): string => {
+  // Three holes reuse the tokens by thread shape: closed = triangle, open = V.
+  if (holes === 3 && v === 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE') return 'button sewn triangle';
+  if (holes === 3 && v === 'TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE') return 'button sewn V';
+  return enumText(BUTTON_ATTACH_PATTERN_LABELS, v);
+};
 export const zipperApplicationLabel = (v?: string): string =>
   enumText(ZIPPER_APPLICATION_LABELS, v);
 export const pressActionLabel = (v?: string): string => enumText(PRESS_ACTION_LABELS, v);
@@ -1468,6 +1472,7 @@ export type StepFacts = {
     buttonholeOrientation?: string;
     bartackLengthMm?: string;
     attachPattern?: string;
+    buttonHoles?: number;
     zipperApplication?: string;
   };
 };
@@ -1639,7 +1644,7 @@ export function stepToolFactParts(
     { field: 'residualTail', text: tail ? `thread tails max ${tail}` : '' },
     { field: 'buttonhole', text: buttonhole },
     { field: 'bartack', text: bartack ? `bartack ${bartack}` : '' },
-    { field: 'buttonPattern', text: buttonAttachPatternLabel(f?.attachPattern) },
+    { field: 'buttonPattern', text: buttonAttachPatternLabel(f?.attachPattern, f?.buttonHoles) },
     { field: 'zipper', text: zipperApplicationLabel(f?.zipperApplication) },
   ]);
 }

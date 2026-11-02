@@ -697,6 +697,14 @@ describe('StepPictureSvg action glyphs', () => {
   });
 
   it('draws two holes with one thread bar', () => {
+    const three = buttonGlyphGeometry([20, 20], 8, 3, 'square');
+    expect(three.holes).toHaveLength(3);
+    expect(three.holes[0][0]).toBeCloseTo(20, 8);
+    expect(three.holes[0][1]).toBeLessThan(three.holes[1][1]);
+    expect(three.holes[1][1]).toBeCloseTo(three.holes[2][1], 8);
+    expect(three.thread.match(/L/g)).toHaveLength(3);
+    expect(buttonGlyphGeometry([20, 20], 8, 3, 'u_shape').thread.match(/L/g)).toHaveLength(2);
+    expect(buttonGlyphGeometry([20, 20], 8, 3, 'other').thread).toBe('');
     const geometry = buttonGlyphGeometry([20, 20], 8, 2, 'cross_x');
 
     expect(geometry.holes).toHaveLength(2);

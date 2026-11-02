@@ -163,12 +163,26 @@ const FOUR_HOLE_TILES: readonly PatternTile[] = [
 
 const OTHER_PATTERN = 'TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER';
 
+/** Three holes reuse the tokens by thread shape: SQUARE = closed (triangle), U_SHAPE = open (V). */
+const THREE_HOLE_TILES: readonly PatternTile[] = [
+  { value: 'TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE', label: 'triangle', icon: 'button_three_triangle' },
+  { value: 'TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE', label: 'V', icon: 'button_three_v' },
+  { value: OTHER_PATTERN, label: 'other', icon: 'button_three_other' },
+];
+
+/** Patterns that cannot be sewn on three holes (server: not_on_three_holes). */
+export const NOT_ON_THREE_HOLES: ReadonlySet<string> = new Set([
+  'TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X',
+  'TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL',
+]);
+
 /**
  * Pattern tiles for a hole count. Two holes take one bar only (parallel); «other» stays visible
  * there only while it is the stored value (the server allows it, the mockup does not offer it).
  * Unset holes offer the full four-hole set, as the select did before holes existed.
  */
 export function patternTiles(holes: number, pattern: string): readonly PatternTile[] {
+  if (holes === 3) return THREE_HOLE_TILES;
   if (holes !== 2) return FOUR_HOLE_TILES;
   const tiles: PatternTile[] = [
     {
@@ -182,8 +196,15 @@ export function patternTiles(holes: number, pattern: string): readonly PatternTi
   return tiles;
 }
 
-/** Switching to two holes drops a pattern only four holes can make. */
-export function patternAfterHoles(holes: number, pattern: string): string {
+/**
+ * Switching to two holes drops a pattern only four holes can make. Crossing into or out of three
+ * holes keeps only «other»: the same token draws a different thread there, and a square must not
+ * quietly become a triangle.
+ */
+export function patternAfterHoles(holes: number, pattern: string, fromHoles = 0): string {
+  if ((holes === 3) !== (fromHoles === 3)) {
+    return pattern === OTHER_PATTERN ? pattern : NO_ATTACH_PATTERN;
+  }
   return holes === 2 && FOUR_HOLE_PATTERNS.has(pattern) ? NO_ATTACH_PATTERN : pattern;
 }
 
@@ -201,7 +222,7 @@ export function articleHoles(
     const line = bomLines.find((l) => (l.lineKey ?? '').trim() === key.trim());
     if (!line?.materialId) continue;
     const holes = materialHoles(line.materialId);
-    if (holes === 2 || holes === 4) found.add(holes);
+    if (holes === 2 || holes === 3 || holes === 4) found.add(holes);
   }
   return found.size === 1 ? [...found][0] : 0;
 }
@@ -209,7 +230,7 @@ export function articleHoles(
 /** May the article's holes be copied onto the step? Only into an unset count, never against a
  *  pattern the copied count would make illegal. */
 export function holesDefaultFits(stepHoles: number, articleHoleCount: number, pattern: string) {
-  if (stepHoles !== 0 || (articleHoleCount !== 2 && articleHoleCount !== 4)) return false;
+  if (stepHoles !== 0 || ![2, 3, 4].includes(articleHoleCount)) return false;
   return patternAfterHoles(articleHoleCount, pattern) === pattern;
 }
 
