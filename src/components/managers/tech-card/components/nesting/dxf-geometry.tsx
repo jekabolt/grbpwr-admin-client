@@ -346,11 +346,14 @@ export const PieceShape = memo(function PieceShape({
   hatchRole,
   hatchW,
   hatchH,
+  grainAtAnySize,
 }: {
   piece: PieceDTO;
   grainLayer: string;
   className?: string;
   outlineOnly?: boolean;
+  /** Paper is cut from: a small piece still shows its grain line. */
+  grainAtAnySize?: boolean;
   hatchRole?: PieceClothState;
   hatchW?: number;
   hatchH?: number;
@@ -471,13 +474,14 @@ export const PieceShape = memo(function PieceShape({
       )}
       {/* Ровно один отрезок = то, что ориентация считает долевой (см. grain.ts). Несколько —
           значит слой несёт не только её, и показывать «долевую» было бы выдумкой. */}
-      {grainSegment && !outlineOnly && Math.min(renderW, renderH) >= 24 && (
+      {grainSegment && !outlineOnly && (grainAtAnySize || Math.min(renderW, renderH) >= 24) && (
         <GrainArrow
           segment={{
             a: { x: grainSegment.a.x, y: vy(grainSegment.a.y) },
             b: { x: grainSegment.b.x, y: vy(grainSegment.b.y) },
           }}
           pxPerUnit={px}
+          minRenderedLengthPx={grainAtAnySize ? 0 : undefined}
         />
       )}
     </svg>
