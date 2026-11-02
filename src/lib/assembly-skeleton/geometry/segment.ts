@@ -16,7 +16,8 @@ import {
   type SkeletonPieceInput,
 } from '../types';
 import { liningByName } from '../names';
-import { collectMarks } from './marks';
+import { PointGrid } from './grid';
+import { collectMarks, SEW_CELL_MM } from './marks';
 import { handOf } from './twins';
 
 const MM_PER_CM = 10;
@@ -128,19 +129,6 @@ export function findCorners(pts: readonly Pt2[]): number[] {
     merged.pop();
   }
   return merged;
-}
-
-function nearestIdx(pts: readonly Pt2[], p: Pt2): { idx: number; d: number } {
-  let idx = 0;
-  let d = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const di = dist(pts[i], p);
-    if (di < d) {
-      d = di;
-      idx = i;
-    }
-  }
-  return { idx, d };
 }
 
 // ── which contour is the sewing line ────────────────────────────────────────────────────────
@@ -290,13 +278,17 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
   const rs = loop.length >= 3 ? resample(loop, SKELETON.resampleMm) : [];
   const n = rs.length;
   const corners = n ? findCorners(rs) : [];
+  // The resample on a grid, built once: the notches snap to its nearest point here, the marks read
+  // their sewing line through it below (card 61: the notch scan over every point was 7 % of the build).
+  const grid = n ? new PointGrid(rs, SEW_CELL_MM) : undefined;
 
   // Notches: snapped to the resample, one per ±NOTCH_DEDUPE_MM along the contour.
   const dedupe = Math.round(NOTCH_DEDUPE_MM / SKELETON.resampleMm);
   const notchIdx: number[] = [];
-  for (const np of n ? notchPoints(input.piece) : []) {
-    const pr = nearestIdx(rs, np);
-    if (pr.d > NOTCH_SNAP_MM) continue;
+  for (const np of grid ? notchPoints(input.piece) : []) {
+    // The nearest resample point within NOTCH_SNAP_MM — the lowest index on a tie, as the scan had it.
+    const pr = grid!.nearest(np, NOTCH_SNAP_MM);
+    if (pr.idx < 0) continue;
     const dup = notchIdx.some((i) => {
       const d = Math.abs(i - pr.idx);
       return d <= dedupe || n - d <= dedupe;
@@ -374,7 +366,7 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
     twinOf: [],
   };
   // P2 step 0: the internal marks, read against this sewing line (03-P2-DESIGN §2).
-  geom.marks = marksOf(input, geom);
+  geom.marks = marksOf(input, geom, grid);
   return geom;
 }
 
@@ -384,10 +376,10 @@ export function segmentPiece(input: SkeletonPieceInput): PieceGeom {
  * reuses them: ~1.5 ms a piece on a lined blazer. Shared between graphs — read-only.
  */
 const MARKS = new WeakMap<PieceDTO, Map<string, PieceMark[]>>();
-function marksOf(input: SkeletonPieceInput, geom: PieceGeom): PieceMark[] {
+function marksOf(input: SkeletonPieceInput, geom: PieceGeom, grid?: PointGrid): PieceMark[] {
   let byKey = MARKS.get(input.piece);
   if (!byKey) MARKS.set(input.piece, (byKey = new Map()));
   let marks = byKey.get(input.pieceKey);
-  if (!marks) byKey.set(input.pieceKey, (marks = collectMarks(input, geom)));
+  if (!marks) byKey.set(input.pieceKey, (marks = collectMarks(input, geom, grid)));
   return marks;
 }
