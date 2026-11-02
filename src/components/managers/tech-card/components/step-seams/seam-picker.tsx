@@ -523,7 +523,7 @@ export function SeamPickerBody({
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
   const delta = pair
     ? deltaMm(sideLen(pair.a), sideLen(pair.b), ease)
-    : stored.length === 1 && edgeToEdge(stored[0].sides)
+    : stored.length === 1 && !sel.a.length && !sel.b.length && edgeToEdge(stored[0].sides)
       ? deltaMm(sideLen(stored[0].sides.a), sideLen(stored[0].sides.b), ease)
       : null;
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
