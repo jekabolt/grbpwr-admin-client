@@ -997,6 +997,22 @@ const PICK_FIRST_FILL_OPACITY = 0.08;
 const FAINT = 'var(--color-borderColor)';
 const TWIN_NUMBER_PX = 10;
 
+/** The box a unit's name needs at this font. */
+const nameBoxOf = (text: string, font: number) => ({
+  w: text.length * font * 0.66 + 16,
+  h: font + 8,
+});
+// One shared empty per optional list prop. A `= []` default is a new array every render, and it
+// sits in the keys of `ownedStyle` (layerStyle), the tints and the doors: the seam picker's hover
+// re-ran all of them per pointer event. With these, the memoised doors and name spots and a stable
+// `onPick`, a hover on a 23-piece step went 31 → 7 ms (node, production React, median of 40).
+const NO_MARKS: readonly EdgeMark[] = [];
+const NO_ACTION_LINES: readonly PictureActionLine[] = [];
+const NO_ACTION_GLYPHS: readonly PictureActionGlyph[] = [];
+const NO_NOS: readonly NoMark[] = [];
+const NO_KEYS: readonly string[] = [];
+const NO_STACKED: readonly (readonly [string, string])[] = [];
+
 /**
  * A press arrow in screen px: shaft from just off the seam outward, an open chevron head, and the
  * word's spot beyond the tip. ≈ 10 mm long at the picture's scale, clamped so it reads in print.
@@ -1547,12 +1563,12 @@ export function StepPictureSvg({
   stacked,
   geoms,
   innerLines,
-  marks = [],
+  marks = NO_MARKS,
   stepEdges: suppliedStepEdges,
-  actionLines = [],
-  actionGlyphs = [],
+  actionLines = NO_ACTION_LINES,
+  actionGlyphs = NO_ACTION_GLYPHS,
   noSeamText,
-  nos = [],
+  nos = NO_NOS,
   names,
   namesBelow,
   ghostName,
@@ -1652,8 +1668,8 @@ export function StepPictureSvg({
           kind: glyph.kind,
         })),
       ];
-  const resultLower = lower ?? contextResult?.lower ?? [];
-  const resultStacked = stacked ?? contextResult?.stacked ?? [];
+  const resultLower = lower ?? contextResult?.lower ?? NO_KEYS;
+  const resultStacked = stacked ?? contextResult?.stacked ?? NO_STACKED;
   const claimedStackedKeys = useMemo(
     () => new Set(resultStacked.flatMap(([under, over]) => [under, over])),
     [resultStacked],
@@ -1867,8 +1883,11 @@ export function StepPictureSvg({
     return out;
   }, [look, visibleBase, layout, innerLines, fit, automaticFastenings]);
 
+  // The doors depend on whether the picture is pickable, not on which closure picks: a caller's
+  // `onPick` changes with its selection (or every render), and keying on it rebuilt every door.
+  const pickable = !!onPick;
   const doors = useMemo(() => {
-    if (!onPick && look !== 'canvas') return [];
+    if (!pickable && look !== 'canvas') return [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
     // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
     const targets = picturePickTargets(
@@ -1888,7 +1907,7 @@ export function StepPictureSvg({
             },
           }
         : {
-            hiddenTargets: onPick && pickTargets ? new Set(pickTargets) : undefined,
+            hiddenTargets: pickable && pickTargets ? new Set(pickTargets) : undefined,
           },
     );
     return layers
@@ -1897,7 +1916,7 @@ export function StepPictureSvg({
   }, [
     pieces,
     ownedStyle,
-    onPick,
+    pickable,
     look,
     layout,
     geoms,
@@ -1911,38 +1930,41 @@ export function StepPictureSvg({
   ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
-  const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
-    const { clientX: x, clientY: y } = event;
-    if (!layers) {
-      const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-      if (!rect) return id;
-      const point: Pt2 = [
-        ((x - rect.left) * w) / Math.max(rect.width, 1),
-        ((y - rect.top) * h) / Math.max(rect.height, 1),
-      ];
-      const hits = new Set(
-        document
-          .elementsFromPoint(x, y)
-          .map((element) => element.getAttribute('data-seam-target'))
-          .filter((hit): hit is TargetId => !!hit),
-      );
-      return (
-        nearestPictureTarget(
-          point,
-          doors.filter((target) => hits.has(target.id)),
-        )?.id ?? id
-      );
-    }
-    const hits = document
-      .elementsFromPoint(x, y)
-      .map((el) => el.getAttribute('data-seam-target'))
-      .filter((hit): hit is TargetId => !!hit);
-    const last = lastPick.current;
-    const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
-    const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
-    lastPick.current = { x, y, id: chosen };
-    return chosen;
-  };
+  const pickAt = useCallback(
+    (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
+      const { clientX: x, clientY: y } = event;
+      if (!layers) {
+        const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+        if (!rect) return id;
+        const point: Pt2 = [
+          ((x - rect.left) * w) / Math.max(rect.width, 1),
+          ((y - rect.top) * h) / Math.max(rect.height, 1),
+        ];
+        const hits = new Set(
+          document
+            .elementsFromPoint(x, y)
+            .map((element) => element.getAttribute('data-seam-target'))
+            .filter((hit): hit is TargetId => !!hit),
+        );
+        return (
+          nearestPictureTarget(
+            point,
+            doors.filter((target) => hits.has(target.id)),
+          )?.id ?? id
+        );
+      }
+      const hits = document
+        .elementsFromPoint(x, y)
+        .map((el) => el.getAttribute('data-seam-target'))
+        .filter((hit): hit is TargetId => !!hit);
+      const last = lastPick.current;
+      const again = last && Math.hypot(last.x - x, last.y - y) <= 4 ? hits.indexOf(last.id) : -1;
+      const chosen = again >= 0 && hits.length > 1 ? hits[(again + 1) % hits.length] : id;
+      lastPick.current = { x, y, id: chosen };
+      return chosen;
+    },
+    [layers, doors, w, h],
+  );
 
   const directPartner = new Map(layout.pieceLayers);
   const inputPartner = new Map(layout.layers);
@@ -1994,11 +2016,11 @@ export function StepPictureSvg({
     const points = pointsOnDrawnPiece(line.piece, raw);
     return points?.length ? [{ line, points }] : [];
   });
-  const pictureCentre: Pt2 = (() => {
+  const pictureCentre = useMemo((): Pt2 => {
     if (!pieces.length) return [w / 2, h / 2];
     const box = boxOf(pieces.flatMap((piece) => piece.ring));
     return [(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2];
-  })();
+  }, [pieces, w, h]);
   const glyphCandidates = drawnActionGlyphs.flatMap((glyph) => {
     const T = layout.T.get(glyph.piece);
     const host = actionHost(glyph.piece);
@@ -2095,11 +2117,15 @@ export function StepPictureSvg({
       .map((spot) => spot.glyph.id),
   );
   const hideCrowdedLabels = look === 'canvas' || look === 'result';
-  const pieceSize = new Map(
-    pieces.map((piece) => {
-      const box = boxOf(piece.ring);
-      return [piece.key, Math.min(box.x1 - box.x0, box.y1 - box.y0)] as const;
-    }),
+  const pieceSize = useMemo(
+    () =>
+      new Map(
+        pieces.map((piece) => {
+          const box = boxOf(piece.ring);
+          return [piece.key, Math.min(box.x1 - box.x0, box.y1 - box.y0)] as const;
+        }),
+      ),
+    [pieces],
   );
   const offsetOf = (id: TargetId, extra = 0) => {
     if (!hideCrowdedLabels) return 16 + extra;
@@ -2120,35 +2146,40 @@ export function StepPictureSvg({
   });
   // A unit's name sits inside its own shape — in its biggest piece, on the widest run across it —
   // never across the gap between pieces that only stand together.
-  const nameBoxOf = (text: string) => ({ w: text.length * L.font * 0.66 + 16, h: L.font + 8 });
-  const nameSpots = (names ?? []).flatMap((text, gi) => {
-    const own = pieces.filter((p) => p.input === gi);
-    const ring = [
-      ...own.flatMap((p) => p.ring),
-      ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
-    ];
-    if (!ring.length || !text) return [];
-    const b = boxOf(ring);
-    const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
-    const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
-      const pb = boxOf(p.ring);
-      const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
-      return !m || area > m.area ? { ring: p.ring, area } : m;
-    }, null);
-    const at: Pt2 = namesBelow
-      ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
-      : biggest
-        ? nameSpot(
-            biggest.ring,
-            pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
-            text.length * L.font * 0.62,
-            L.font + 4,
-            ring,
-            { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text) },
-          )
-        : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
-    return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
-  });
+  // The name search walks every ring of the step (≈ 5 ms on a whole-garment step); a hover or a
+  // pick changes none of its inputs, so it is kept until the pieces or the frame move.
+  const nameSpots = useMemo(
+    () =>
+      (names ?? []).flatMap((text, gi) => {
+        const own = pieces.filter((p) => p.input === gi);
+        const ring = [
+          ...own.flatMap((p) => p.ring),
+          ...ghosts.filter((g) => g.input === gi).flatMap((g) => g.ring),
+        ];
+        if (!ring.length || !text) return [];
+        const b = boxOf(ring);
+        const avoid = pieces.filter((p) => p.input !== gi).map((p) => boxOf(p.ring));
+        const biggest = own.reduce<{ ring: Pt2[]; area: number } | null>((m, p) => {
+          const pb = boxOf(p.ring);
+          const area = (pb.x1 - pb.x0) * (pb.y1 - pb.y0);
+          return !m || area > m.area ? { ring: p.ring, area } : m;
+        }, null);
+        const at: Pt2 = namesBelow
+          ? [(b.x0 + b.x1) / 2, b.y1 + L.font + 2]
+          : biggest
+            ? nameSpot(
+                biggest.ring,
+                pieces.filter((p) => p.ring !== biggest.ring).map((p) => p.ring),
+                text.length * L.font * 0.62,
+                L.font + 4,
+                ring,
+                { frame: { x0: 0, y0: 0, x1: w, y1: h }, avoid, ...nameBoxOf(text, L.font) },
+              )
+            : [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+        return [{ text, s: { at, anchor: 'middle' as const, t: [0, 1] as Pt2, avoid } }];
+      }),
+    [names, pieces, ghosts, namesBelow, L, w, h],
+  );
   const namedInputs = (names ?? []).flatMap((text, input) => (text ? [input] : []));
   const coincidentNamePieces = new Map(
     orderedOwnedPieces.flatMap((piece) =>
@@ -2166,7 +2197,7 @@ export function StepPictureSvg({
   }
   const nameBoxes = nameSpots.map(({ text, s }, index) => ({
     ...s,
-    ...nameBoxOf(text),
+    ...nameBoxOf(text, L.font),
     required: coincidentNameInputs.has(namedInputs[index]) || undefined,
   }));
   const labelBoxes = labels.map(({ m, s }) => ({
@@ -2202,6 +2233,36 @@ export function StepPictureSvg({
   const noStepSeams =
     stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
+
+  // The door strokes are the densest paths of the picture (every edge and inner line, twice: the
+  // faint dash and the wide transparent hit stroke). Their `d` strings and elements are kept across
+  // hovers — only the highlight path above them changes per pointer event.
+  const innerDoorPaths = useMemo(
+    () => doors.filter((x) => x.inner).map((x) => <path key={x.id} d={pathOf(x.points)} />),
+    [doors],
+  );
+  const doorHits = useMemo(
+    () =>
+      onPick
+        ? // Lines first: where an edge runs beside a line, the edge takes the click.
+          [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
+            <path
+              key={`h:${x.id}`}
+              d={pathOf(x.points)}
+              fill='none'
+              stroke='transparent'
+              strokeWidth={14}
+              pointerEvents='stroke'
+              className='cursor-pointer'
+              onPointerEnter={() => onHover?.(x.id)}
+              onPointerLeave={() => onHover?.(null)}
+              onClick={(event) => onPick(pickAt(event, x.id))}
+              data-seam-target={x.id}
+            />
+          ))
+        : null,
+    [doors, onPick, onHover, pickAt],
+  );
 
   if (w < 2 || h < 2) return null;
   return (
@@ -2327,11 +2388,7 @@ export function StepPictureSvg({
         })}
       {look === 'canvas' && (
         <g fill='none' stroke={FAINT} strokeWidth={1} strokeDasharray='4 3'>
-          {doors
-            .filter((x) => x.inner)
-            .map((x) => (
-              <path key={x.id} d={pathOf(x.points)} />
-            ))}
+          {innerDoorPaths}
         </g>
       )}
       {hover && !marks.some((m) => m.id === hover) && ptsOf(hover) && (
@@ -2665,23 +2722,7 @@ export function StepPictureSvg({
             </text>,
           ];
         })}
-      {onPick &&
-        // Lines first: where an edge runs beside a line, the edge takes the click.
-        [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
-          <path
-            key={`h:${x.id}`}
-            d={pathOf(x.points)}
-            fill='none'
-            stroke='transparent'
-            strokeWidth={14}
-            pointerEvents='stroke'
-            className='cursor-pointer'
-            onPointerEnter={() => onHover?.(x.id)}
-            onPointerLeave={() => onHover?.(null)}
-            onClick={(event) => onPick(pickAt(event, x.id))}
-            data-seam-target={x.id}
-          />
-        ))}
+      {doorHits}
     </svg>
   );
 }

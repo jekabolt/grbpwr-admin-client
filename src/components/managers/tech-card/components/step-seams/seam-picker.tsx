@@ -440,13 +440,18 @@ export function SeamPickerBody({
     onClose?.();
   };
 
-  const toggle = (id: TargetId) => {
-    if (frozen || posing) return;
-    const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
-    setRefused('');
-    setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
-    setMirroredPick(null);
-  };
+  // Stable while the selection stands: the canvas keeps its hit layer across hovers (a fresh
+  // closure per render re-created every hit path of the picture on each pointer event).
+  const toggle = useCallback(
+    (id: TargetId) => {
+      if (frozen || posing) return;
+      const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      setRefused('');
+      setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
+      setMirroredPick(null);
+    },
+    [frozen, posing, groups, sel],
+  );
 
   const previewTarget = useMemo(() => {
     if (pair || surface) return { sides: pick, source: 'live' as const };
@@ -502,21 +507,40 @@ export function SeamPickerBody({
     }
     return { ...poseLayout, T };
   }, [poseLayout, poseDrag, poseFree]);
-  const marks: EdgeMark[] = [];
-  const nos: NoMark[] = [];
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
-  const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) => {
-    ids.forEach((id) => marks.push({ id, tone }));
-  };
-  // A stored seam reads as a proposal does: its edges, its number on the first.
-  stored.forEach((s, i) => {
-    sideMarks(s.sides.a, 'stored');
-    sideMarks(s.sides.b, 'stored');
-    const first = s.sides.a[0] ?? s.sides.b[0];
-    if (first) nos.push({ id: first, i });
-  });
-  sideMarks(sel.a, 'pickFirst');
-  sideMarks(sel.b, 'pick');
+  // Kept until a seam is stored or the selection moves: the canvas keys its layers on these.
+  const { marks, nos } = useMemo(() => {
+    const marks: EdgeMark[] = [];
+    const nos: NoMark[] = [];
+    const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) => {
+      ids.forEach((id) => marks.push({ id, tone }));
+    };
+    // A stored seam reads as a proposal does: its edges, its number on the first.
+    stored.forEach((s, i) => {
+      sideMarks(s.sides.a, 'stored');
+      sideMarks(s.sides.b, 'stored');
+      const first = s.sides.a[0] ?? s.sides.b[0];
+      if (first) nos.push({ id: first, i });
+    });
+    sideMarks(sel.a, 'pickFirst');
+    sideMarks(sel.b, 'pick');
+    return { marks, nos };
+  }, [stored, sel]);
+  const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
+  const canvasPickTargets = useMemo(
+    () =>
+      unitStepPreview
+        ? [
+            ...new Set([
+              ...suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b]),
+              ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]),
+              ...sel.a,
+              ...sel.b,
+            ]),
+          ]
+        : undefined,
+    [unitStepPreview, suggestions, stored, sel],
+  );
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
@@ -979,24 +1003,13 @@ export function SeamPickerBody({
                 innerLines={innerLines}
                 marks={marks}
                 nos={nos}
-                names={groups.map((g) => g.name)}
+                names={groupNames}
                 namesBelow={phone}
                 ghostName={nameOf}
                 hover={hover}
                 onHover={setHover}
                 onPick={frozen ? undefined : toggle}
-                pickTargets={
-                  unitStepPreview
-                    ? [
-                        ...new Set([
-                          ...suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b]),
-                          ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]),
-                          ...sel.a,
-                          ...sel.b,
-                        ]),
-                      ]
-                    : undefined
-                }
+                pickTargets={canvasPickTargets}
                 view={zoom.view}
                 className='absolute inset-0'
               />
