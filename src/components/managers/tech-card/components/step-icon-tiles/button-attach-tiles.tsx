@@ -14,11 +14,11 @@ import {
 } from './rules';
 import { useStepWrite } from './use-step-write';
 
-const HOLE_COUNTS = [2, 4] as const;
+const HOLE_COUNTS = [2, 3, 4] as const;
 const EMPTY_KEYS: string[] = [];
 
 /**
- * The button step's «holes» toggle (2 | 4) and its pattern as icon tiles. Two holes take one bar
+ * The button step's «holes» toggle (2 | 3 | 4) and its pattern as icon tiles. Two holes take one bar
  * only; switching to two drops a four-hole pattern. The linked BOM article's hole count is copied
  * into an unset step once, as an edit — when a person links the article, turns the step into a
  * button step, or picks a pattern — never on opening the step (opening never edits).
@@ -86,10 +86,12 @@ export function ButtonAttachTiles({
   const pickHoles = (n: number) => {
     if (holes === n) {
       write('buttonHoles', 0);
+      const cleared = patternAfterHoles(0, pattern, holes);
+      if (cleared !== pattern) write('attachPattern', cleared);
       return;
     }
     write('buttonHoles', n);
-    const next = patternAfterHoles(n, pattern);
+    const next = patternAfterHoles(n, pattern, holes);
     if (next !== pattern) write('attachPattern', next);
   };
 
@@ -117,7 +119,7 @@ export function ButtonAttachTiles({
           // The article's count, while the step does not state one: outlined, not picked.
           className={cn(
             'min-w-7 tabular-nums',
-            n === 4 && '-ml-px',
+            n !== HOLE_COUNTS[0] && '-ml-px',
             holes === 0 && articleHoleCount === n && 'border-dashed border-textColor',
           )}
         >

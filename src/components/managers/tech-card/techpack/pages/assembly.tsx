@@ -4273,7 +4273,12 @@ export function editorActionMarks(
       ...(placement.kind === 'button'
         ? {
             pattern: buttonPattern(action.raw.fastening?.attachPattern),
-            holes: action.raw.fastening?.buttonHoles === 2 ? (2 as const) : (4 as const),
+            holes:
+              action.raw.fastening?.buttonHoles === 2
+                ? (2 as const)
+                : action.raw.fastening?.buttonHoles === 3
+                  ? (3 as const)
+                  : (4 as const),
             sizeMm: decimal(action.raw.attachmentSizeMm, 15),
           }
         : {}),

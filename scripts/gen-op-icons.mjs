@@ -85,7 +85,7 @@ const cards = source
     shapes: firstSvg(line),
   }));
 
-if (cards.length !== 202) throw new Error(`expected 202 sheet cards, got ${cards.length}`);
+if (cards.length !== 206) throw new Error(`expected 206 sheet cards, got ${cards.length}`);
 const cardByToken = new Map(cards.map((card) => [card.token, card]));
 if (cardByToken.size !== cards.length) throw new Error('sheet card tokens are not unique');
 
@@ -124,6 +124,10 @@ const cardKeys = new Map([
   ['u_shape', ['button_u_shape']],
   ['other (б)', ['button_other']],
   ['two_hole', ['button_two_hole']],
+  ['three_triangle', ['button_three_triangle']],
+  ['three_v', ['button_three_v']],
+  ['three_other', ['button_three_other']],
+  ['three_not_stated', ['button_three_not_stated']],
   ['not_stated', ['button_not_stated']],
   ['steam', ['press_steam']],
   ['final', ['press_final']],

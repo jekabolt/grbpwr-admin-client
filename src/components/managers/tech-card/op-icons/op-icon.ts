@@ -308,6 +308,14 @@ const PRESS_TOWARD_CHIP: Readonly<Record<string, IconChip>> = {
   TECH_CARD_PRESS_TOWARD_OTHER: '?',
 };
 
+// Three holes have no tokens of their own: SQUARE is the closed thread (triangle), U_SHAPE the open
+// one (V). Cross and parallel cannot be sewn there, so they fall to «not stated».
+const THREE_HOLE_PATTERN_ICON: Readonly<Record<string, IconKey>> = {
+  TECH_CARD_BUTTON_ATTACH_PATTERN_SQUARE: 'button_three_triangle',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_U_SHAPE: 'button_three_v',
+  TECH_CARD_BUTTON_ATTACH_PATTERN_OTHER: 'button_three_other',
+};
+
 const BUTTON_PATTERN_ICON: Readonly<Record<string, IconKey>> = {
   TECH_CARD_BUTTON_ATTACH_PATTERN_CROSS_X: 'button_cross_x',
   TECH_CARD_BUTTON_ATTACH_PATTERN_PARALLEL: 'button_parallel',
@@ -429,7 +437,9 @@ export function opIcon(op: OpIconInput, card: OpIconCard): OpIcon {
     key =
       op.buttonHoles === 2
         ? 'button_two_hole'
-        : BUTTON_PATTERN_ICON[clean(op.attachPattern)] ?? 'button_not_stated';
+        : op.buttonHoles === 3
+          ? THREE_HOLE_PATTERN_ICON[clean(op.attachPattern)] ?? 'button_three_not_stated'
+          : BUTTON_PATTERN_ICON[clean(op.attachPattern)] ?? 'button_not_stated';
   }
 
   if (work === 'set_zip' || key === 'set_zip') {
