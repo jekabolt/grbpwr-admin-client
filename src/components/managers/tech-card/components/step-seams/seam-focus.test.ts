@@ -69,6 +69,15 @@ describe('click-order sides', () => {
   const pieceOf = (id: string) => id.split(':')[0];
   const oneInput = [{ pieces: ['SLEEVE', 'PLACKET'] }];
 
+  it('splits a step of three inputs by what was clicked, so a second seam reaches both sides', () => {
+    const groups = [{ pieces: ['LEFT'] }, { pieces: ['RIGHT'] }, { pieces: ['FRONT', 'BACK'] }];
+
+    expect(sideForClick('RIGHT', groups, { a: [], b: [] }, pieceOf)).toBe('a');
+    expect(sideForClick('FRONT', groups, { a: ['RIGHT:0'], b: [] }, pieceOf)).toBe('b');
+    expect(sideForClick('BACK', groups, { a: ['RIGHT:0'], b: ['FRONT:0'] }, pieceOf)).toBe('b');
+    expect(sideForClick('RIGHT', groups, { a: [], b: ['FRONT:0'] }, pieceOf)).toBe('a');
+  });
+
   it('keeps runs of the first piece on side 1 and opens side 2 on another piece', () => {
     expect(sideForClick('SLEEVE', oneInput, { a: [], b: [] }, pieceOf)).toBe('a');
     expect(sideForClick('SLEEVE', oneInput, { a: ['SLEEVE:0'], b: [] }, pieceOf)).toBe('a');

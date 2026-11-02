@@ -368,7 +368,7 @@ describe('assembly raw-card fallbacks', () => {
     expect(markup.body).toContain('>BP_1</text>');
     expect(markup.body).not.toContain('data-asm-piece-number=');
     expect(model.words.get(10)?.ins).toEqual(['1 BP', '2 BP_1']);
-    expect(model.words.get(10)?.seams).toEqual(['① BP_1 ↔ BP · slit']);
+    expect(model.words.get(10)?.seams).toEqual(['slit']);
     expect(JSON.stringify(model.words.get(10))).not.toMatch(/[0-9A-HJKMNP-TV-Z]{26}/i);
     expect(markup.body).not.toContain('data-asm-code-placement=');
     expect(markup.body).not.toContain('tpa-asm-code-leader');

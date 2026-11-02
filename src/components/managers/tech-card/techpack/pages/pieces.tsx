@@ -68,8 +68,8 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
   const land = orient === 'land';
   const columns = land ? 5 : 3;
   const tileCount = model.groups.reduce((sum, group) => sum + group.tiles.length, 0);
-  const pageCapacity = land ? 15 : 12;
-  const rowBudget = land ? 5 : 7;
+  const pageCapacity = 15;
+  const rowBudget = land ? 3 : 5;
   const rowUnits = model.groups.reduce(
     (sum, group) => sum + 0.35 + Math.ceil(group.tiles.length / columns),
     0,
@@ -169,6 +169,7 @@ export function PiecesPage({ techCard, orient, docline, n, geometry }: PiecesPag
                               <PieceShape
                                 piece={tile.shape.piece}
                                 grainLayer={model.grainLayer}
+                                grainAtAnySize
                                 hatchRole={group.hatchRole}
                                 className='block h-full w-full'
                               />

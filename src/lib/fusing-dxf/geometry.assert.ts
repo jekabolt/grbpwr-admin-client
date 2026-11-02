@@ -259,6 +259,37 @@ export async function main() {
   assert.equal(carried[0].pieceLineKey, 'piece-old', 'the previous identity wins on a new file');
   assert.equal(carried[0].previouslyBound, true, 'a stored owner alias is already reviewed');
 
+  // «L» here is the left side, not the size: the file has SHLD_1_L beside SHLD_1_R, and the stored
+  // alias of the left piece must count as reviewed exactly like the right one.
+  const sideNames = ['SHLD_1_L', 'SHLD_1_R', 'SHLD_1_L_1', 'SHLD_1_R_1'];
+  const sides = matchInterliningImport({
+    blocks: sideNames.map((name, i) => dxfPiece(1100 + i, name, 70)),
+    mainBlocks: [],
+    mainAliases: [],
+    previousAliases: sideNames.map((name) => ({ blockName: name, pieceLineKey: `piece-${name}` })),
+    pieces: sideNames.map((name) => ({ lineKey: `piece-${name}`, name })),
+    sizeTokens: new Set(['xs', 's', 'm', 'l', 'xl']),
+  });
+  assert.deepEqual(
+    sides.map((m) => [m.identity, m.pieceLineKey, m.previouslyBound]),
+    sideNames.map((name) => [name, `piece-${name}`, true]),
+    'a size-looking side tail on a stored alias stays bound',
+  );
+
+  // The same stored names on a graded sheet: there the tail IS the size, and all of them fold.
+  const gradedSides = matchInterliningImport({
+    blocks: ['S', 'M', 'L'].map((size, i) => dxfPiece(1110 + i, `SHLD_1_${size}`, 70)),
+    mainBlocks: [],
+    mainAliases: [],
+    previousAliases: [{ blockName: 'SHLD_1_L', pieceLineKey: 'piece-shld' }],
+    pieces: [{ lineKey: 'piece-shld', name: 'shoulder pad' }],
+    sizeTokens: new Set(['s', 'm', 'l']),
+  });
+  assert.equal(gradedSides.length, 1);
+  assert.equal(gradedSides[0].identity, 'SHLD_1');
+  assert.equal(gradedSides[0].pieceLineKey, 'piece-shld');
+  assert.equal(gradedSides[0].previouslyBound, true);
+
   assert.equal(
     canonicalInterliningIdentity({
       blockName: 'SIDE_F',

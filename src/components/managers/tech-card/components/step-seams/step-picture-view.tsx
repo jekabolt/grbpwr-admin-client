@@ -765,8 +765,12 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
 
 // ─── the svg ──────────────────────────────────────────────────────────────────────────────────────
 
-/** `hint` — an edge the card's AI joins map names for this step (line F): blue dashed. */
-export type Tone = 'proposal' | 'pick' | 'stored' | 'hint';
+/**
+ * `hint` — an edge the card's AI joins map names for this step (line F): blue dashed.
+ * `pickFirst` — side 1 of a seam being picked (what is sewn): black, thicker, its piece shaded.
+ * `pick` — side 2 (where it goes): blue.
+ */
+export type Tone = 'proposal' | 'pickFirst' | 'pick' | 'stored' | 'hint';
 export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
 export type NoMark = { id: TargetId; i: number };
 export type PictureActionLine = {
@@ -987,6 +991,9 @@ const INK = 'var(--color-textColor)';
 const GREY = 'var(--color-labelColor)';
 const FILL = 'var(--color-bgColor)';
 const PICK = 'var(--color-warning)';
+const isPick = (tone: Tone) => tone === 'pick' || tone === 'pickFirst';
+const PICK_FIRST_STROKE_SCALE = 1.5;
+const PICK_FIRST_FILL_OPACITY = 0.08;
 const FAINT = 'var(--color-borderColor)';
 const TWIN_NUMBER_PX = 10;
 
@@ -1193,6 +1200,8 @@ export type PicturePickTarget = {
   box: Box;
 };
 
+const COVER_EDGE_PX = 2;
+
 const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
   let best = ring[0] ?? point;
   let distance = Infinity;
@@ -1246,6 +1255,29 @@ const pointsOnDrawnRing = (
     return hidden || (!insideRing(point, hostRing) && nearest.distance > 4) ? nearest.point : point;
   });
 };
+
+/** Edges of a piece sewn under another in an earlier step sit inside the unit: no door for them. */
+export function withoutCoveredDoors<T extends { id: TargetId; points: readonly Pt2[] }>(
+  doors: readonly T[],
+  pieces: readonly { key: string; ring: readonly Pt2[]; input: number }[],
+  coveredBy: (key: string) => readonly string[],
+): T[] {
+  const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
+  return doors.filter(({ id, points }) => {
+    const piece = byKey.get(pieceOfTarget(id));
+    if (!piece) return true;
+    const covers = coveredBy(piece.key).flatMap((key) => {
+      const cover = byKey.get(key);
+      return cover && cover.input === piece.input ? [cover.ring] : [];
+    });
+    if (!covers.length) return true;
+    const hidden = (point: Pt2) =>
+      covers.some(
+        (ring) => insideRing(point, ring) || nearestOnRing(point, ring).distance <= COVER_EDGE_PX,
+      );
+    return !points.every(hidden);
+  });
+}
 
 /**
  * Pick doors in the exact fitted frame the picture draws. Without an owner layer order, folded-in
@@ -1821,7 +1853,7 @@ export function StepPictureSvg({
     if (!onPick && look !== 'canvas') return [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
     // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
-    return picturePickTargets(
+    const targets = picturePickTargets(
       layout,
       geoms,
       innerLines,
@@ -1841,7 +1873,12 @@ export function StepPictureSvg({
             hiddenTargets: onPick && pickTargets ? new Set(pickTargets) : undefined,
           },
     );
+    return layers
+      ? withoutCoveredDoors(targets, pieces, (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [])
+      : targets;
   }, [
+    pieces,
+    ownedStyle,
     onPick,
     look,
     layout,
@@ -1917,7 +1954,12 @@ export function StepPictureSvg({
     const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
     return shown ? [{ m, pts: shown }] : [];
   });
+  const pickFirstKeys = new Set(
+    marks.flatMap((m) => (m.tone === 'pickFirst' ? [pieceOfId(m.id)] : [])),
+  );
+  const pickFirstPieces = pieces.filter((piece) => pickFirstKeys.has(piece.key));
   const stepLines = (stepEdges ?? []).flatMap((id) => {
+    if (marks.some((m) => m.id === id && isPick(m.tone))) return [];
     const points = ptsOf(id);
     const shown = points && pointsOnDrawnPiece(pieceOfId(id), points);
     return shown ? [{ id, points: shown }] : [];
@@ -2139,7 +2181,8 @@ export function StepPictureSvg({
     hideCrowdedLabels ? spots[i] : spots[nameSpots.length + labels.length + i];
   const stepColor = look === 'print' ? INK : 'var(--color-highlightColor)';
   const stepWidth = L.outline * 1.26;
-  const noStepSeams = stepEdges !== undefined && stepEdges.length === 0;
+  const noStepSeams =
+    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => isPick(m.tone));
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
   if (w < 2 || h < 2) return null;
@@ -2283,21 +2326,40 @@ export function StepPictureSvg({
           pointerEvents='none'
         />
       )}
+      {pickFirstPieces.map((piece) => (
+        <path
+          key={`pick-first:${piece.key}`}
+          d={pathOf(piece.drawn, true)}
+          fill={INK}
+          fillOpacity={PICK_FIRST_FILL_OPACITY}
+          stroke='none'
+          pointerEvents='none'
+          data-seam-side-fill={piece.key}
+        />
+      ))}
       {markLines.map(({ m, pts }) => (
         <path
           key={`${m.tone}:${m.id}`}
           d={pathOf(pts)}
           fill='none'
           stroke={
-            stepEdges !== undefined
-              ? FAINT
+            m.tone === 'pickFirst'
+              ? INK
               : m.tone === 'pick' || m.tone === 'hint'
                 ? PICK
-                : m.tone === 'stored'
-                  ? PAIR_INK
-                  : INK
+                : stepEdges !== undefined
+                  ? FAINT
+                  : m.tone === 'stored'
+                    ? PAIR_INK
+                    : INK
           }
-          strokeWidth={m.tone === 'stored' ? L.stored : L.mark}
+          strokeWidth={
+            m.tone === 'stored'
+              ? L.stored
+              : m.tone === 'pickFirst'
+                ? L.mark * PICK_FIRST_STROKE_SCALE
+                : L.mark
+          }
           strokeDasharray={m.tone === 'proposal' || m.tone === 'hint' ? L.dash : undefined}
           strokeLinecap={m.tone === 'proposal' || m.tone === 'hint' ? 'butt' : 'round'}
           pointerEvents='none'

@@ -34,7 +34,15 @@ export function sideForClick(
   picked: PickSides,
   pieceOf: (id: string) => string,
 ): 'a' | 'b' {
-  if (groups.length >= 2) return groups[0].pieces.includes(piece) ? 'a' : 'b';
+  if (groups.length === 2) return groups[0].pieces.includes(piece) ? 'a' : 'b';
+  if (groups.length > 2) {
+    // Each of the step's seams joins two of its inputs: a side holds the input clicked first.
+    const inputOf = (key: string) => groups.findIndex((group) => group.pieces.includes(key));
+    const input = inputOf(piece);
+    if (picked.a.some((id) => inputOf(pieceOf(id)) === input)) return 'a';
+    if (picked.b.some((id) => inputOf(pieceOf(id)) === input)) return 'b';
+    return picked.a.length ? 'b' : 'a';
+  }
   if (picked.a.some((id) => pieceOf(id) === piece)) return 'a';
   if (picked.b.some((id) => pieceOf(id) === piece)) return 'b';
   return picked.a.length ? 'b' : 'a';

@@ -23,7 +23,6 @@ import {
   useStepLayout,
 } from './step-picture-view';
 import type { FormOpLike } from './step-seams-model';
-import { stepHighlightOf } from './step-highlight';
 
 /** The row tile's raster: a 72 px picture needs no finer reading of what touches what. */
 const RASTER_MM = 4;
@@ -70,7 +69,6 @@ export function UnitPictureTile({
   }, [ops, stepIndex, unitKey]);
   const ownedResult =
     producer >= 0 && drawsStepResult(results, producer) ? results?.[producer] : undefined;
-  const stepEdges = producer >= 0 ? stepHighlightOf(ops, producer, byKey).targets : undefined;
   const layout = ownedResult?.layout ?? inferredLayout;
   const [boxEl, box] = useBoxSize();
   if (layout.T.size === 0) return <Tile name={name} sub='unit' className='justify-center' />;
@@ -90,7 +88,6 @@ export function UnitPictureTile({
             layers={ownedResult?.layers}
             geoms={geoms}
             innerLines={innerLines}
-            stepEdges={stepEdges}
           />
         )}
       </span>

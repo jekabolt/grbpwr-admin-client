@@ -7,6 +7,7 @@ import {
   buttonholeLengthMm,
   buttonholePictureGlyphs,
   fasteningPictureGlyphs,
+  isFrontHost,
 } from './buttonhole-glyph';
 
 const placket = {
@@ -103,5 +104,17 @@ describe('buttonhole glyph geometry', () => {
       [5, 20],
       [5, 50],
     ]);
+  });
+});
+
+describe('isFrontHost', () => {
+  it('takes a front or a placket by its whole code', () => {
+    for (const code of ['P_L_MAIN', 'P_R_U', 'PLCK_L', 'front panel'])
+      expect(isFrontHost(code)).toBe(true);
+  });
+
+  it('does not read a cuff placket as a front', () => {
+    for (const code of ['FLP_L', 'FLP_R_MAIN', 'nck', 'PCK_L_MAIN', 'BP_U'])
+      expect(isFrontHost(code)).toBe(false);
   });
 });

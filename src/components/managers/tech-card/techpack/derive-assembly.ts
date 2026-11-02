@@ -51,6 +51,7 @@ import {
   buttonholeDirection,
   buttonholeLengthMm,
   buttonholeOrientation,
+  isFrontHost,
 } from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
@@ -548,7 +549,6 @@ const num = (v?: { value?: string }) => {
   return v?.value != null && v.value !== '' && Number.isFinite(x) ? x : null;
 };
 const mm = (x: number) => `${+x.toFixed(1)}`;
-const circled = (index: number) => String.fromCodePoint(0x2460 + Math.min(index, 19));
 
 function assemblyGap(
   sink: GapSink | undefined,
@@ -2531,16 +2531,12 @@ function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[
   // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
   // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
   // the final shirt's button is printed at the neck instead of on its closure.
-  if (
-    (op.tech === 'button' || op.tech === 'buttonhole') &&
-    /(PLCK|PLACKET|P_[LR]|FRONT)/.test(code)
-  )
-    score += 200;
+  if ((op.tech === 'button' || op.tech === 'buttonhole') && isFrontHost(code)) score += 200;
   if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
   if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
-  if (/front/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 100;
+  if (/front/.test(terms) && isFrontHost(code)) score += 100;
   if (/lining/.test(terms) && /(PCK|POCKET)/.test(code)) score += 100;
-  if (/outer/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 40;
+  if (/outer/.test(terms) && isFrontHost(code)) score += 40;
   return score;
 }
 
@@ -2574,7 +2570,24 @@ function placementMarks(
   const selected = candidates.sort((a, b) => b.score - a.score)[0];
   if (!selected) return [];
   const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
-  const marks = selected.marks.slice(0, count || selected.marks.length);
+  // A piece marked at both ends closes on itself: the button goes to the end away from its hole.
+  const partners = (selected.piece.geom.marks ?? []).filter(
+    (mark) =>
+      used.has(mark.id) &&
+      (kind === 'button'
+        ? mark.kind === 'buttonhole'
+        : kind === 'buttonhole' && mark.kind === 'drill'),
+  );
+  const awayFromPartner = (mark: PieceMark) =>
+    Math.min(
+      ...partners.map((partner) =>
+        Math.hypot(mark.bbox.cx - partner.bbox.cx, mark.bbox.cy - partner.bbox.cy),
+      ),
+    );
+  const ordered = partners.length
+    ? [...selected.marks].sort((a, b) => awayFromPartner(b) - awayFromPartner(a))
+    : selected.marks;
+  const marks = ordered.slice(0, count || ordered.length);
   return marks.map((mark) => {
     used.add(mark.id);
     const first = mark.pts[0];
@@ -2846,13 +2859,11 @@ function wordsOf(
         : ULID.test(x.key)
           ? ''
           : x.key;
-  const nameOf = (x: Input) => {
-    const name = plainNameOf(x);
-    const step = x.kind === 'unit' ? ctx.unitStep.get(x.key) : undefined;
-    const pieceNumber = x.kind === 'piece' ? ctx.card?.pieceNumbers.get(x.key) : undefined;
-    if (pieceNumber) return `${pieceNumber} ${name}`;
-    return step ? `${name} (${step})` : name;
-  };
+  const inputOf = (x: Input): InputName => ({
+    name: plainNameOf(x),
+    step: x.kind === 'unit' ? ctx.unitStep.get(x.key) : undefined,
+    pieceNumber: x.kind === 'piece' ? ctx.card?.pieceNumbers.get(x.key) : undefined,
+  });
   const rawNote = own((o.note ?? '').trim());
   const normalizedNote = rawNote.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
   const normalizedVerb = verb.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -3055,35 +3066,13 @@ function wordsOf(
     assemblyGap(ctx.sink, 'pdf_machine_missing', t('gaps.machine'), op.n, 'machine');
   }
 
-  const seamLines = (ctx.card?.seams ?? []).map((seam, index) => {
-    const groupIndex = (parts: readonly SeamPart[]) =>
-      op.groups.findIndex(
-        (group) => parts.length > 0 && parts.every((part) => group.has(part.piece)),
-      );
-    const names = (parts: readonly SeamPart[]) => {
-      const inputIndex = groupIndex(parts);
-      if (inputIndex >= 0) return plainNameOf(op.ins[inputIndex]);
-      return [...new Set(parts.map((part) => pieceName(part.piece)).filter(Boolean))].join(' + ');
-    };
-    const sideAGroup = groupIndex(seam.a);
-    const sideBGroup = groupIndex(seam.b);
-    const [leftParts, rightParts] =
-      sideBGroup >= 0 && sideAGroup > sideBGroup ? [seam.b, seam.a] : [seam.a, seam.b];
-    let left = names(leftParts);
-    let right = names(rightParts);
-    if (seam.kind === 'surface') {
-      const host = seam.inner?.piece || seam.a[0]?.piece || '';
-      const movingIndex = op.ins.findIndex((_, group) => !op.groups[group]?.has(host));
-      const moving = op.ins[movingIndex];
-      const hostIndex = op.groups.findIndex((group) => group.has(host));
-      left = moving ? plainNameOf(moving) : '';
-      right = hostIndex >= 0 ? plainNameOf(op.ins[hostIndex]) : pieceName(host);
-    }
+  // Only what the heading and the picture do not say: a seam's own remark, never its two names.
+  const seamNotes = (ctx.card?.seams ?? []).map((seam) => {
     const storedDetail = own(seam.note)
       .replace(/\bop\s*\d+\b/gi, '')
       .replace(/^[\s,.:;·/-]+|[\s,.:;·/-]+$/g, '')
       .trim();
-    const seamParts = [...leftParts, ...rightParts];
+    const seamParts = [...seam.a, ...seam.b];
     const pocketBag =
       seamParts.length > 0 &&
       seamParts.every((part) => ctx.input.pieces.get(part.piece)?.pocketing);
@@ -3093,7 +3082,7 @@ function wordsOf(
     else if (!detail && pocketBag) detail = t('assembly.bag');
     else if (!detail && (ctx.card?.seams.length ?? 0) === 1 && seam.kind === 'composite' && zone)
       detail = `${own(zone)} ${t('assembly.edge')}`;
-    return `${circled(index)} ${left || t('assembly.edge')} ↔ ${right || t('assembly.fold')}${detail ? ` · ${detail}` : ''}`;
+    return detail;
   });
   if (icon.missing) {
     const gap: Gap = {
@@ -3109,10 +3098,10 @@ function wordsOf(
     tech,
     icon,
     verb,
-    ins: op.ins.map(nameOf).filter(Boolean),
+    ins: compactInputNames(op.ins.map(inputOf)),
     out: op.out ? ctx.unitName.get(op.out) ?? unitDisplayName({ key: op.out }) : undefined,
     line,
-    seams: seamLines,
+    seams: [...new Set(seamNotes.filter(Boolean))],
     tool,
     mc,
     params: [...new Set(params)],
@@ -3140,6 +3129,53 @@ function mirrorSets(
 }
 
 // ── the model ───────────────────────────────────────────────────────────────────────────────────
+
+type InputName = { name: string; step?: string | number; pieceNumber?: string | number };
+
+/** Pieces that differ only by a run of consecutive numbers read as one range: `part_1–8_OS`. */
+function numberedRange(inputs: readonly InputName[]): Map<InputName, string> {
+  const groups = new Map<string, { input: InputName; n: number }[]>();
+  for (const input of inputs) {
+    const runs = input.name.match(/\d+/g);
+    if (runs?.length !== 1) continue;
+    const key = input.name.replace(/\d+/, '#');
+    groups.set(key, [...(groups.get(key) ?? []), { input, n: Number(runs[0]) }]);
+  }
+  const ranges = new Map<InputName, string>();
+  for (const [key, group] of groups) {
+    const numbers = group.map((entry) => entry.n).sort((a, b) => a - b);
+    if (numbers.length < 3 || numbers.some((n, i) => i > 0 && n !== numbers[i - 1] + 1)) continue;
+    const label = key.replace('#', `${numbers[0]}–${numbers[numbers.length - 1]}`);
+    group.forEach(({ input }) => ranges.set(input, label));
+  }
+  return ranges;
+}
+
+/**
+ * The words of a step's inputs: a tail every input shares («with pocket detail») adds nothing, and
+ * a source step number is kept only where it tells two equally named inputs apart.
+ */
+export function compactInputNames(inputs: readonly InputName[]): string[] {
+  const named = inputs.filter((input) => input.name);
+  const ranges = numberedRange(named);
+  const tail = named[0]?.name.match(/\swith\s.+$/i)?.[0];
+  const sharedTail =
+    named.length > 1 && tail && named.every((input) => input.name.endsWith(tail)) ? tail : '';
+  const short = (name: string) => (sharedTail ? name.slice(0, -sharedTail.length) : name);
+  const count = new Map<string, number>();
+  for (const input of named) {
+    const name = short(input.name);
+    count.set(name, (count.get(name) ?? 0) + 1);
+  }
+  const words = named.map((input) => {
+    const range = ranges.get(input);
+    if (range) return range;
+    const name = short(input.name);
+    if (input.pieceNumber) return `${input.pieceNumber} ${name}`;
+    return input.step && (count.get(name) ?? 0) > 1 ? `${name} (${input.step})` : name;
+  });
+  return words.filter((word, i) => !ranges.has(named[i]) || words.indexOf(word) === i);
+}
 
 export function deriveAssembly(
   input: AssemblyInput,

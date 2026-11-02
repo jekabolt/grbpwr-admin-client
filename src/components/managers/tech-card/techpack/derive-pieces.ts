@@ -1,4 +1,5 @@
 import type { common_TechCard } from 'api/proto-http/admin';
+import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import {
   cutSymmetryPrintCaption,
   grainlineText,
@@ -215,7 +216,7 @@ export function derivePieces(
         role: group.ref
           ? materialRoleText(group.ref.item, materialRole(group.ref), t)
           : t('pieces.unassigned'),
-        composition: clean(group.ref?.item.composition),
+        composition: formatCompositionCell(group.ref?.item.composition),
         colour: colour.name,
         swatch: colour.swatch,
         // the main cloth reads plain; every other cloth carries its hatch

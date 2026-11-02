@@ -17,6 +17,7 @@ import {
   buttonHostChord,
   buttonRadiusPx,
   StepPictureSvg,
+  withoutCoveredDoors,
   type EdgeMark,
   type PictureActionGlyph,
 } from './step-picture-view';
@@ -287,6 +288,83 @@ describe('StepPictureSvg lower layers', () => {
 
     expect(mark).toBeGreaterThan(-1);
     expect(mark).toBeGreaterThan(markup.indexOf('data-lower-layer="bag"'));
+  });
+
+  it('draws seam side 1 black and thicker with its piece shaded, side 2 blue', () => {
+    const tagOf = (markup: string, attribute: string) => {
+      const at = markup.indexOf(attribute);
+      return markup.slice(markup.lastIndexOf('<path', at), markup.indexOf('/>', at));
+    };
+    const first = renderPicture({ look: 'canvas', marks: [{ id: 'bag#0', tone: 'pickFirst' }] });
+    const second = renderPicture({ look: 'canvas', marks: [{ id: 'bag#0', tone: 'pick' }] });
+
+    expect(tagOf(first, 'data-seam-mark="pickFirst"')).toContain('stroke="var(--color-textColor)"');
+    expect(tagOf(first, 'data-seam-mark="pickFirst"')).toContain('stroke-width="4.5"');
+    expect(first).toContain('data-seam-side-fill="bag"');
+    expect(tagOf(second, 'data-seam-mark="pick"')).toContain('stroke="var(--color-warning)"');
+    expect(second).not.toContain('data-seam-side-fill');
+  });
+
+  it('offers no door for an edge sewn under a piece of the same unit', () => {
+    const square = (x: number, size: number): Pt2[] => [
+      [x, 0],
+      [x + size, 0],
+      [x + size, size],
+      [x, size],
+    ];
+    const doors = [
+      {
+        id: 'bag#0',
+        points: [
+          [10, 10],
+          [20, 10],
+        ] as Pt2[],
+      },
+      {
+        id: 'bag#1',
+        points: [
+          [10, 10],
+          [150, 10],
+        ] as Pt2[],
+      },
+      {
+        id: 'front#0',
+        points: [
+          [0, 0],
+          [100, 0],
+        ] as Pt2[],
+      },
+    ];
+    const coveredBy = (key: string) => (key === 'bag' ? ['front'] : []);
+    const inUnit = [
+      { key: 'bag', ring: square(5, 50), input: 0 },
+      { key: 'front', ring: square(0, 100), input: 0 },
+    ];
+    const beingSewn = [inUnit[0], { ...inUnit[1], input: 1 }];
+
+    expect(withoutCoveredDoors(doors, inUnit, coveredBy).map((door) => door.id)).toEqual([
+      'bag#1',
+      'front#0',
+    ]);
+    expect(withoutCoveredDoors(doors, beingSewn, coveredBy)).toHaveLength(3);
+  });
+
+  it('keeps a picked edge visible while the step highlight is on', () => {
+    const none = renderPicture({
+      look: 'canvas',
+      stepEdges: [],
+      marks: [{ id: 'bag#0', tone: 'pick' }],
+    });
+    const worked = renderPicture({
+      look: 'canvas',
+      stepEdges: ['bag#0'],
+      marks: [{ id: 'bag#0', tone: 'pick' }],
+    });
+
+    expect(none).toMatch(/stroke="var\(--color-warning\)"[^>]*data-seam-mark="pick"/);
+    expect(none).not.toContain('data-step-no-seams=""');
+    expect(worked).toMatch(/stroke="var\(--color-warning\)"[^>]*data-seam-mark="pick"/);
+    expect(worked).not.toContain('data-step-seam-edge="bag#0"');
   });
 
   it('does not tint an edge-to-edge pair without an owner claim', () => {
