@@ -1918,6 +1918,7 @@ export function StepPictureSvg({
     return shown ? [{ m, pts: shown }] : [];
   });
   const stepLines = (stepEdges ?? []).flatMap((id) => {
+    if (marks.some((m) => m.id === id && m.tone === 'pick')) return [];
     const points = ptsOf(id);
     const shown = points && pointsOnDrawnPiece(pieceOfId(id), points);
     return shown ? [{ id, points: shown }] : [];
@@ -2139,7 +2140,8 @@ export function StepPictureSvg({
     hideCrowdedLabels ? spots[i] : spots[nameSpots.length + labels.length + i];
   const stepColor = look === 'print' ? INK : 'var(--color-highlightColor)';
   const stepWidth = L.outline * 1.26;
-  const noStepSeams = stepEdges !== undefined && stepEdges.length === 0;
+  const noStepSeams =
+    stepEdges !== undefined && stepEdges.length === 0 && !marks.some((m) => m.tone === 'pick');
   const noStepSeamLabel = noSeamText ?? (look === 'print' ? '' : NO_SEAM_TEXT);
 
   if (w < 2 || h < 2) return null;
@@ -2289,10 +2291,10 @@ export function StepPictureSvg({
           d={pathOf(pts)}
           fill='none'
           stroke={
-            stepEdges !== undefined
-              ? FAINT
-              : m.tone === 'pick' || m.tone === 'hint'
-                ? PICK
+            m.tone === 'pick' || m.tone === 'hint'
+              ? PICK
+              : stepEdges !== undefined
+                ? FAINT
                 : m.tone === 'stored'
                   ? PAIR_INK
                   : INK

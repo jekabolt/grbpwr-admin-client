@@ -289,6 +289,24 @@ describe('StepPictureSvg lower layers', () => {
     expect(mark).toBeGreaterThan(markup.indexOf('data-lower-layer="bag"'));
   });
 
+  it('keeps a picked edge visible while the step highlight is on', () => {
+    const none = renderPicture({
+      look: 'canvas',
+      stepEdges: [],
+      marks: [{ id: 'bag#0', tone: 'pick' }],
+    });
+    const worked = renderPicture({
+      look: 'canvas',
+      stepEdges: ['bag#0'],
+      marks: [{ id: 'bag#0', tone: 'pick' }],
+    });
+
+    expect(none).toMatch(/stroke="var\(--color-warning\)"[^>]*data-seam-mark="pick"/);
+    expect(none).not.toContain('data-step-no-seams=""');
+    expect(worked).toMatch(/stroke="var\(--color-warning\)"[^>]*data-seam-mark="pick"/);
+    expect(worked).not.toContain('data-step-seam-edge="bag#0"');
+  });
+
   it('does not tint an edge-to-edge pair without an owner claim', () => {
     const beside = new Map([
       ['bag', bag],
