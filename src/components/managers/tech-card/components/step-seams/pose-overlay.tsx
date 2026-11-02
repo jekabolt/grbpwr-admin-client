@@ -1,0 +1,256 @@
+import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
+import { apply, translate } from 'lib/assembly-skeleton/union/affine';
+import { cn } from 'lib/utility';
+import { useMemo, useRef, type PointerEvent } from 'react';
+import { cycleLayerHit, piecesUnder, posePieceOrder, type LayerHit } from './pose-picking';
+import { snapPoseForDrag, type PosePickup, type PoseSnap } from './step-pose';
+import { boxOf, fitBox, pathOf, toPx, type StepLayout } from './step-picture';
+import type { PictureView } from './step-picture-view';
+
+/** A drop snaps within this many screen px (P8 pose). */
+const POSE_SNAP_PX = 8;
+
+/**
+ * «place» (P8): every drawn piece a handle — a press selects it, a drag moves
+ * it with the pieces hung on it, a drop snaps a vertex of theirs onto another piece's vertex or
+ * outline within POSE_SNAP_PX. The picture under it is the same layout with the drag laid in.
+ */
+export function PoseOverlay({
+  w,
+  h,
+  pad,
+  bounds,
+  view,
+  layout,
+  layerOrder,
+  lower,
+  geoms,
+  nameOf,
+  selected,
+  snapAt,
+  snap,
+  disabled,
+  pickupOf,
+  onSelect,
+  onDrag,
+  onDrop,
+  onCancel,
+}: {
+  w: number;
+  h: number;
+  pad: number;
+  bounds: ReturnType<typeof boxOf>;
+  /** The canvas zoom: the overlay sits over the picture as zoomed (screen = fitted × k + x, y). */
+  view: PictureView;
+  layout: StepLayout;
+  /** Bottom to top, from the shared step result. */
+  layerOrder: readonly string[];
+  /** Pieces explicitly painted below the remaining layers. */
+  lower: readonly string[];
+  geoms: ReadonlyMap<string, PieceGeom>;
+  nameOf: (piece: string) => string;
+  selected: string | null;
+  snapAt: Pt2 | null;
+  snap: boolean;
+  disabled: boolean;
+  pickupOf: (piece: string) => PosePickup;
+  onSelect: (piece: string | null) => void;
+  onDrag: (group: string[], D: Affine, snap: PoseSnap | null) => void;
+  onDrop: (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => void;
+  onCancel: () => void;
+}) {
+  const fit = useMemo(() => {
+    const f = fitBox(bounds, w, h, pad);
+    return { s: f.s * view.k, tx: f.tx * view.k + view.x, ty: f.ty * view.k + view.y };
+  }, [bounds, w, h, pad, view.k, view.x, view.y]);
+  const stacked = useMemo(
+    () => new Set(layout.stacked.flatMap((group) => group.slice(1))),
+    [layout.stacked],
+  );
+  const twinNumbers = useMemo(() => {
+    const numbers = new Map<string, number>();
+    layout.stacked.forEach((group) =>
+      group.slice(1).forEach((piece, index) => numbers.set(piece, index + 2)),
+    );
+    return numbers;
+  }, [layout.stacked]);
+  const pieces = useMemo(() => {
+    const keys = [...layout.T.keys()].filter((piece) => (geoms.get(piece)?.rs.length ?? 0) >= 3);
+    const bottomToTop = posePieceOrder(layerOrder, layout.stacked, keys, lower);
+    return bottomToTop.flatMap((piece) => {
+      const transform = layout.T.get(piece)!;
+      const geom = geoms.get(piece);
+      if (!geom || geom.rs.length < 3) return [];
+      const twin = twinNumbers.get(piece);
+      const offset = twin ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
+      return [
+        {
+          piece,
+          ring: geom.rs.map((point) => {
+            const [x, y] = toPx(fit, apply(transform, point));
+            return [x + offset, y + offset] as Pt2;
+          }),
+        },
+      ];
+    });
+  }, [layout.T, layout.stacked, layerOrder, lower, geoms, fit, twinNumbers]);
+  const lastHit = useRef<LayerHit | null>(null);
+  const drag = useRef<{
+    piece: string;
+    clickPiece: string;
+    at: Pt2;
+    pickup: PosePickup | null;
+    transforms: ReadonlyMap<string, Affine>;
+    clientX: number;
+    clientY: number;
+    moved: boolean;
+    D: Affine;
+    snap: PoseSnap | null;
+  } | null>(null);
+  const scale = Math.max(fit.s, 1e-6);
+  const shiftOf = (e: PointerEvent, state: NonNullable<typeof drag.current>): Affine =>
+    translate((e.clientX - state.clientX) / scale, -(e.clientY - state.clientY) / scale);
+
+  const finish = (cancelled = false) => {
+    const state = drag.current;
+    if (!state) return;
+    drag.current = null;
+    if (cancelled) {
+      lastHit.current = null;
+      onCancel();
+      return;
+    }
+    if (!state.moved) {
+      lastHit.current = { piece: state.clickPiece, at: state.at };
+      onSelect(state.clickPiece);
+      onCancel();
+      return;
+    }
+    lastHit.current = null;
+    if (!state.pickup) {
+      onCancel();
+      return;
+    }
+    onDrop(state.piece, state.pickup, state.D, state.snap);
+  };
+
+  if (w < 2 || h < 2) return null;
+  const selectedRing = pieces.find((item) => item.piece === selected)?.ring;
+  const snapPx = snapAt ? toPx(fit, snapAt) : null;
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className='absolute inset-0 touch-none'
+      onPointerMove={(e) => {
+        const state = drag.current;
+        if (!state) return;
+        if (!state.moved && Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) <= 2)
+          return;
+        const started = !state.moved;
+        state.moved = true;
+        lastHit.current = null;
+        if (!state.pickup) {
+          onCancel();
+          return;
+        }
+        if (started) onSelect(state.piece);
+        state.D = shiftOf(e, state);
+        state.snap = snap
+          ? snapPoseForDrag(
+              state.pickup.group,
+              state.D,
+              state.transforms,
+              geoms,
+              stacked,
+              POSE_SNAP_PX / scale,
+            )
+          : null;
+        onDrag(state.pickup.group, state.D, state.snap);
+      }}
+      onPointerUp={() => finish()}
+      onPointerCancel={() => finish(true)}
+      data-seam-pose-canvas=''
+    >
+      {pieces.map((item) => (
+        <path
+          key={item.piece}
+          d={pathOf(item.ring, true)}
+          fill='transparent'
+          stroke='transparent'
+          pointerEvents='all'
+          tabIndex={0}
+          role='button'
+          aria-label={nameOf(item.piece)}
+          aria-pressed={selected === item.piece}
+          className={cn(
+            disabled ? 'cursor-pointer' : 'cursor-move',
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+          )}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            e.stopPropagation();
+            lastHit.current = null;
+            onSelect(selected === item.piece ? null : item.piece);
+          }}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            // A press on a piece moves it; only a press on the empty canvas pans.
+            e.stopPropagation();
+            const svg = e.currentTarget.ownerSVGElement;
+            const rect = svg?.getBoundingClientRect();
+            const at: [number, number] = rect
+              ? [
+                  ((e.clientX - rect.left) * w) / Math.max(rect.width, 1),
+                  ((e.clientY - rect.top) * h) / Math.max(rect.height, 1),
+                ]
+              : [e.clientX, e.clientY];
+            const hits = piecesUnder(at, pieces);
+            const clickPiece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
+            const piece = selected && hits.includes(selected) ? selected : clickPiece;
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            drag.current = {
+              piece,
+              clickPiece,
+              at,
+              pickup: disabled ? null : pickupOf(piece),
+              transforms: new Map(layout.T),
+              clientX: e.clientX,
+              clientY: e.clientY,
+              moved: false,
+              D: [1, 0, 0, 1, 0, 0],
+              snap: null,
+            };
+          }}
+          data-seam-pose-piece={item.piece}
+        />
+      ))}
+      {selectedRing && (
+        <path
+          d={pathOf(selectedRing, true)}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={2.6}
+          strokeLinejoin='round'
+          pointerEvents='none'
+          data-seam-pose-selected=''
+        />
+      )}
+      {snapPx && (
+        <circle
+          cx={snapPx[0]}
+          cy={snapPx[1]}
+          r={6}
+          fill='none'
+          stroke='var(--color-warning)'
+          strokeWidth={2.4}
+          pointerEvents='none'
+          data-seam-pose-snap-at=''
+        />
+      )}
+    </svg>
+  );
+}
