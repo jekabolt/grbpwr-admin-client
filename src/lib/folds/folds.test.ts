@@ -1,5 +1,10 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import type { FoundPiece } from 'components/managers/tech-card/components/nesting/dxf-geometry';
+import { pieceRefKey } from 'components/managers/tech-card/components/piece-block-refs';
+import { StepFoldsGroup } from 'components/managers/tech-card/components/assembly-folds/step-folds-row';
 import { segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
 import type { PieceGeom, PieceMark, Pt2, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
 import type { PieceDTO } from 'lib/nesting/types';
@@ -254,5 +259,161 @@ describe('foldHints', () => {
     const fold = resolveFolds([row!], [L]).folds[KEY][0];
     expect(Math.abs(yMm(L, fold)[0] - 30)).toBeLessThan(0.5);
     expect(fold.flipAt[1]).toBeLessThan(fold.a[1]); // the allowance strip flips by default
+  });
+
+  it('offers a straight 204 mm assembly-map inner line as a weak dxf hint', () => {
+    const piece = dto(20.4, 30);
+    const geom = segmentPiece(input(piece));
+    const hints = foldHints(input(piece), geom, {
+      innerLines: [
+        [
+          [0, 150],
+          [204, 150],
+        ],
+      ],
+    });
+
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatchObject({
+      id: `${KEY}:inner:0`,
+      origin: 'inner',
+      strength: 'weak',
+      source: 'dxf',
+    });
+    const row = foldFromHint(geom, hints[0], { seq: 1, kind: 'inward' });
+    expect(row).not.toBeNull();
+    expect(row!.source).toBe('dxf');
+  });
+
+  it('extends an inner vent line whose ends stop inside the piece', () => {
+    const piece = dto(40, 30);
+    const geom = segmentPiece(input(piece));
+    const [hint] = foldHints(input(piece), geom, {
+      innerLines: [
+        [
+          [200, 90],
+          [200, 210],
+        ],
+      ],
+    });
+
+    expect(hint.origin).toBe('inner');
+    expect(Math.abs(hint.lineMm[1][1] - hint.lineMm[0][1])).toBeCloseTo(300, 0);
+  });
+
+  it('does not offer 3, 12 or 25 mm inner lines', () => {
+    const piece = dto(40, 30);
+    const geom = segmentPiece(input(piece));
+    expect(
+      foldHints(input(piece), geom, {
+        innerLines: [
+          [
+            [50, 50],
+            [53, 50],
+          ],
+          [
+            [50, 80],
+            [62, 80],
+          ],
+          [
+            [50, 110],
+            [75, 110],
+          ],
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not offer a curved inner line', () => {
+    const piece = dto(20.4, 30);
+    const geom = segmentPiece(input(piece));
+    expect(
+      foldHints(input(piece), geom, {
+        innerLines: [
+          [
+            [0, 150],
+            [102, 175],
+            [204, 150],
+          ],
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not offer an inner line running along the contour', () => {
+    const piece = dto(20.4, 30);
+    const geom = segmentPiece(input(piece));
+    expect(
+      foldHints(input(piece), geom, {
+        innerLines: [
+          [
+            [0, 0],
+            [204, 0],
+          ],
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps an identical fold mark as the one hint', () => {
+    const piece = dto(20.4, 30);
+    const line: [Pt2, Pt2] = [
+      [0, 150],
+      [204, 150],
+    ];
+    const mark: PieceMark = {
+      id: `${KEY}@0`,
+      kind: 'fold',
+      layer: '8',
+      closed: false,
+      pts: line,
+      bbox: { w: 204, h: 0, cx: 102, cy: 150 },
+      lenMm: 204,
+    };
+    const geom = { ...segmentPiece(input(piece)), marks: [mark] };
+    const hints = foldHints(input(piece), geom, { innerLines: [line] });
+
+    expect(hints).toHaveLength(1);
+    expect(hints[0].origin).toBe('mark');
+    expect(hints[0].id).toBe(`${KEY}:mark:0`);
+  });
+});
+
+describe('StepFoldsGroup', () => {
+  it('draws inner polylines without a dashed hint line or row icon', () => {
+    const piece = dto(20.4, 30);
+    const geom = segmentPiece(input(piece));
+    const found: FoundPiece = {
+      piece,
+      block: 'PLACKET',
+      size: 'M',
+      instances: 1,
+      layer: '1',
+      sizes: ['M'],
+    };
+    const markup = renderToStaticMarkup(
+      createElement(StepFoldsGroup, {
+        stepKey: 'test',
+        pieces: [geom],
+        shapes: new Map([[pieceRefKey(KEY), found]]),
+        grainDeg: new Map([[KEY, 0]]),
+        innerLines: new Map<string, Pt2[][]>([
+          [
+            KEY,
+            [
+              [
+                [0, 150],
+                [204, 150],
+              ],
+            ],
+          ],
+        ]),
+        cardId: undefined,
+        frozen: false,
+      }),
+    );
+
+    expect(markup).toContain('data-fold-inner=""');
+    expect(markup).not.toContain('stroke-dasharray');
   });
 });

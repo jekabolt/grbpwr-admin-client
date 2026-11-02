@@ -46,8 +46,8 @@ export type StoredFold = {
 
 // ── hints (never saved until the owner accepts one) ─────────────────────────────────────────
 
-/** Where a hint came from: a classified fold mark, the layer-8 line of an unfolded piece, the AAMA mirror line. */
-export type FoldHintOrigin = 'mark' | 'unfolded' | 'mirror';
+/** Where a hint came from: a classified fold mark, an unfolded/mirror line, or a drawn inner line. */
+export type FoldHintOrigin = 'mark' | 'unfolded' | 'mirror' | 'inner';
 
 export type FoldHint = {
   /** Stable for one geometry: `${pieceKey}:${origin}:${i}`. */
@@ -96,6 +96,8 @@ export const FOLDS = {
   flipProbeMm: [5, 2, 1, 10] as readonly number[],
   /** A drawn line is straight when no vertex is further than this from its chord. */
   straightMm: 1.5,
+  /** A generic inner line must be at least this long to be offered as a fold. */
+  innerMinMm: 30,
   /** An edge is «along» a line when their directions differ by less than this. */
   parallelDeg: 3,
   /** …and the line is no further from it than this (marks.ts search reach). */

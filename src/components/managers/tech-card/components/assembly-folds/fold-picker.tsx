@@ -79,6 +79,7 @@ type Anim = {
 export type PieceRead = {
   geom: PieceGeom;
   deg: number;
+  inner: Pt2[][];
   groups: FoldGroup[];
   hints: FoldHint[];
   maxSeq: number;
@@ -106,6 +107,7 @@ export function usePieceReads(
   pieces: readonly PieceGeom[],
   shapes: Shapes,
   grainDeg: ReadonlyMap<string, number> | undefined,
+  innerLines?: ReadonlyMap<string, readonly Pt2[][]>,
 ): PieceRead[] {
   const rows = useFoldRows();
   return useMemo(
@@ -118,6 +120,7 @@ export function usePieceReads(
             ? seamPieceOf(found.layers?.length ? found.layers : [found.piece]) ?? found.piece
             : null;
           const deg = grainDeg?.get(geom.pieceKey) ?? (dto ? grainRotation(dto) : 0);
+          const inner = [...(innerLines?.get(geom.pieceKey) ?? [])];
           const { groups } = foldGroupsOf(geom, rows, deg);
           let hints: FoldHint[] = [];
           if (dto) {
@@ -133,7 +136,7 @@ export function usePieceReads(
                   fused: false,
                 },
                 geom,
-                { grainDeg: deg },
+                { grainDeg: deg, innerLines: inner },
               );
             } catch {
               hints = [];
@@ -143,12 +146,13 @@ export function usePieceReads(
           return {
             geom,
             deg,
+            inner,
             groups,
             hints: openHints(hints, groups),
             maxSeq: own.reduce((m, r) => Math.max(m, r.seq), 0),
           };
         }),
-    [pieces, shapes, grainDeg, rows],
+    [pieces, shapes, grainDeg, innerLines, rows],
   );
 }
 
@@ -213,7 +217,7 @@ export function FoldPicker({
     setAnim({ gi, dir, n, d: n > 1 ? 180 : 250, t0: performance.now(), T: dir > 0 ? 0 : n, then });
   };
 
-  const { geom, deg, groups, hints } = cur;
+  const { geom, deg, inner, groups, hints } = cur;
   const folded =
     view === 'folded' && groups.length > 0 && mode.t !== 'pending' && mode.t !== 'draw';
   const v0 = pieceView(geom, deg, { w: W, h: H, pad: PAD, tight: true, minShort: MIN_SHORT });
@@ -417,6 +421,16 @@ export function FoldPicker({
           strokeWidth={3.2}
           strokeLinejoin='round'
         />
+        {inner.map((polyline, i) => (
+          <polyline
+            key={`i${i}`}
+            points={ptsAttr(v, polyline)}
+            fill='none'
+            stroke={GREY}
+            strokeWidth={1}
+            pointerEvents='none'
+          />
+        ))}
         {/* The part that will flip, previewed light: under for in (dashed), over for out. */}
         {groups.map((g, i) => {
           const shape = foldedOutline(geom.rs, g.flat);
@@ -468,16 +482,20 @@ export function FoldPicker({
           );
         })}
         {mode.t !== 'draw' &&
-          hints.map((h) => {
-            const on = hover === h.id || (pend && pend.line === h.lineMm);
+          [
+            ...hints.filter((h) => h.origin === 'inner'),
+            ...hints.filter((h) => h.origin !== 'inner'),
+          ].map((h) => {
+            const on = hover === h.id;
             return (
               <g key={h.id}>
-                {ln(h.lineMm, {
-                  stroke: on ? PICK : INK,
-                  strokeWidth: on ? 3 : 2,
-                  strokeDasharray: '9 6',
-                  pointerEvents: 'none',
-                })}
+                {(h.origin !== 'inner' || on) &&
+                  ln(h.lineMm, {
+                    stroke: on ? PICK : INK,
+                    strokeWidth: on ? 3 : 2,
+                    strokeDasharray: '9 6',
+                    pointerEvents: 'none',
+                  })}
                 {ln(h.lineMm, {
                   stroke: 'transparent',
                   strokeWidth: 18,

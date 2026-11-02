@@ -4,7 +4,7 @@
 // hint nobody took yet. A tap opens the fold picker in place under the row, on that piece. Folds
 // belong to the PIECE, not the step: the same piece reads the same in every step.
 
-import type { PieceGeom } from 'lib/assembly-skeleton/types';
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -34,6 +34,19 @@ export function StepFoldsRow({ index }: { index: number }) {
     }
     return out;
   }, [inputKeys, geo?.pieces]);
+  const innerLines = useMemo(() => {
+    const out = new Map<string, Pt2[][]>();
+    for (const raw of inputKeys ?? []) {
+      const key = raw.trim();
+      const piece = geo?.pieces.get(key);
+      if (!piece) continue;
+      out.set(
+        key,
+        piece.inner.map((line) => line.map(([x, y]) => [x, -y])),
+      );
+    }
+    return out;
+  }, [inputKeys, geo?.pieces]);
 
   if (!ctx || !geo || !pieces.length) return null;
   return (
@@ -42,6 +55,7 @@ export function StepFoldsRow({ index }: { index: number }) {
       pieces={pieces}
       shapes={geo.shapes.shapeByKey}
       grainDeg={geo.grainDeg}
+      innerLines={innerLines}
       cardId={ctx.cardId}
       frozen={ctx.frozen}
     />
@@ -54,6 +68,7 @@ export function StepFoldsGroup({
   pieces,
   shapes,
   grainDeg,
+  innerLines,
   cardId,
   frozen,
 }: {
@@ -61,10 +76,11 @@ export function StepFoldsGroup({
   pieces: readonly PieceGeom[];
   shapes: ReadonlyMap<string, FoundPiece | null> | null;
   grainDeg: ReadonlyMap<string, number>;
+  innerLines?: ReadonlyMap<string, readonly Pt2[][]>;
   cardId: number | undefined;
   frozen: boolean;
 }) {
-  const reads = usePieceReads(pieces, shapes, grainDeg);
+  const reads = usePieceReads(pieces, shapes, grainDeg, innerLines);
   const [open, setOpen] = useState<string | null>(null);
   const size = useMemo(() => sizeOf(shapes), [shapes]);
   const openRead = reads.find((r) => r.geom.pieceKey === open) ?? null;
@@ -88,7 +104,13 @@ export function StepFoldsGroup({
               )}
               data-step-fold-piece={r.geom.name}
             >
-              <FlatThumb piece={r.geom} deg={r.deg} groups={r.groups} hints={r.hints} />
+              <FlatThumb
+                piece={r.geom}
+                deg={r.deg}
+                inner={r.inner}
+                groups={r.groups}
+                hints={r.hints}
+              />
               {isFolded && (
                 <>
                   <FoldedThumb piece={r.geom} deg={r.deg} groups={r.groups} />
@@ -106,7 +128,7 @@ export function StepFoldsGroup({
                 <span className='flex items-center gap-1'>
                   {isFolded
                     ? r.groups.map((x, i) => <KindIcon key={i} kind={x.kind} size={12} />)
-                    : r.hints.length > 0 && (
+                    : r.hints.some((h) => h.origin !== 'inner') && (
                         <span className='text-labelColor'>
                           <HintIcon size={12} />
                         </span>
