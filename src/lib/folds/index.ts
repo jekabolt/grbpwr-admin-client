@@ -12,6 +12,7 @@ export { defaultFlipMm, foldFromHint, foldFromLine, type FoldMeta } from './anch
 export { foldHints, type FoldHintOptions } from './hints';
 export { resolveFolds } from './resolve';
 export { foldFromWire, foldsFromWire, foldToWire } from './wire';
+export { activeFoldKeys, foldMap, type FoldMapGeometry, type FoldStep } from './fold-map';
 export {
   clipSide,
   doubleTurn,
