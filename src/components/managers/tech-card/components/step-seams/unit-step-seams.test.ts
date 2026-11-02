@@ -154,6 +154,41 @@ describe('card 85 op 970 unit seam preview', () => {
     );
   });
 
+  it('offers nothing outside the zone once both shoulders are stored', () => {
+    const rowOf = (hand: 'L' | 'R') =>
+      edgeRowFromPick(scene.suggestions.find((proposal) => proposal.hand === hand)!, geoms, {
+        pieces: [...geoms.values()],
+        grainDeg: null,
+        nameOf: (piece) => CARD85_PIECE_NAME_BY_KEY.get(piece) ?? piece,
+      })!;
+    const left = card85WithStoredShoulder(rowOf('L'));
+    const right = rowOf('R');
+    const both = {
+      operations: left.operations.map((operation, operationIndex) =>
+        operationIndex === index
+          ? { ...operation, seamKeys: [...(operation.seamKeys ?? []), right.seamKey] }
+          : operation,
+      ),
+      seams: new Map([...left.seams, [right.seamKey, right]]),
+    };
+    const storedOperations: SceneOp[] = both.operations.map((operation) => ({
+      ...operation,
+      fullnessRatio: operation.fullnessRatio == null ? undefined : String(operation.fullnessRatio),
+    }));
+    const storedScene = stepPictureOfOp(storedOperations[index], null, geoms, {
+      operations: storedOperations,
+      index,
+      pieceKeys: CARD85_PIECE_KEYS,
+      innerLines,
+      byKey: both.seams,
+      nameOf: (piece) => CARD85_PIECE_NAME_BY_KEY.get(piece) ?? piece,
+      ready: true,
+      skipLayout: true,
+    });
+    expect(storedScene.stored).toHaveLength(2);
+    expect(storedScene.suggestions).toHaveLength(0);
+  });
+
   it('preselects a clicked unit suggestion without changing two-input picker defaults', () => {
     const right = scene.suggestions.find((proposal) => proposal.hand === 'R');
     expect(right).toBeDefined();

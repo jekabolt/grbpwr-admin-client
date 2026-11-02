@@ -2139,7 +2139,8 @@ function proposalsInsideUnit(
       return !edgeFits || (edgeFits(a, geoms) === true && edgeFits(b, geoms) === true);
     });
   const stateZone = inZone(proposals);
-  const relevant = stateZone.length ? stateZone : proposals;
+  // Once the step holds its own seams, leftovers outside its zone are noise, not a fallback.
+  const relevant = stateZone.length || keyedOf(op) ? stateZone : proposals;
   // A finished unit commonly exposes a mirrored pair (left/right shoulders). Leaf details can
   // offer duplicate matches on the same hand; keep the ranker's best one per hand. When the
   // geometry has no hand at all, retain its ordinary unhanded proposals.
@@ -2173,7 +2174,7 @@ export function suggestStepPairs(
   if (groups.length === 1) {
     if (groups[0].pieces.length >= 2 && joinsUnitPieces(op)) {
       const internal = proposalsInsideUnit(groups[0], geoms, state, used, ease, op);
-      if (internal.length) return internal;
+      if (internal.length || keyedOf(op)) return internal;
     }
     if (!selfJoin(op, groups[0], geoms)) return [];
     const best = selfPairs(groups[0], geoms, new Set([...used, ...state.stored]))[0];
