@@ -51,7 +51,8 @@ import {
   buttonholeDirection,
   buttonholeLengthMm,
   buttonholeOrientation,
-  isFrontHost,
+  walkPlacementMarks,
+  type PlacementMarkSelection,
 } from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
@@ -2524,85 +2525,24 @@ function buildCards(
   return { cards, units, targets, targetSeams };
 }
 
-function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[]): number {
-  const code = `${piece.code ?? ''} ${piece.name}`.toLocaleUpperCase();
-  const terms = opTerms(op);
-  let score = marks.length;
-  // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
-  // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
-  // the final shirt's button is printed at the neck instead of on its closure.
-  if ((op.tech === 'button' || op.tech === 'buttonhole') && isFrontHost(code)) score += 200;
-  if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
-  if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
-  if (/front/.test(terms) && isFrontHost(code)) score += 100;
-  if (/lining/.test(terms) && /(PCK|POCKET)/.test(code)) score += 100;
-  if (/outer/.test(terms) && isFrontHost(code)) score += 40;
-  return score;
-}
-
-function placementMarks(
-  op: Op,
-  pieces: ReadonlyMap<string, AsmPiece>,
-  items: readonly Item[],
-  used: Set<string>,
-): PlacementGlyph[] {
-  const kind = op.tech === 'label' ? 'label' : op.tech;
-  if (kind !== 'button' && kind !== 'buttonhole' && kind !== 'label') return [];
-  const candidates = items.flatMap((item) => {
-    const piece = pieces.get(item.p);
-    if (!piece) return [];
-    const available = (piece.geom.marks ?? []).filter((mark) => !used.has(mark.id));
-    const exact = available.filter((mark) =>
-      kind === 'buttonhole'
-        ? mark.kind === 'buttonhole'
-        : kind === 'button'
-          ? mark.kind === 'drill'
-          : mark.kind === 'placement',
-    );
-    const fallback =
-      exact.length || kind === 'label'
-        ? exact
-        : available.filter((mark) => mark.kind === 'drill' || mark.kind === 'buttonhole');
-    return fallback.length
-      ? [{ item, piece, marks: fallback, score: placementPieceScore(piece, op, fallback) }]
-      : [];
-  });
-  const selected = candidates.sort((a, b) => b.score - a.score)[0];
+function placementGlyphs(op: Op, selected: PlacementMarkSelection | null): PlacementGlyph[] {
   if (!selected) return [];
-  const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
-  // A piece marked at both ends closes on itself: the button goes to the end away from its hole.
-  const partners = (selected.piece.geom.marks ?? []).filter(
-    (mark) =>
-      used.has(mark.id) &&
-      (kind === 'button'
-        ? mark.kind === 'buttonhole'
-        : kind === 'buttonhole' && mark.kind === 'drill'),
-  );
-  const awayFromPartner = (mark: PieceMark) =>
-    Math.min(
-      ...partners.map((partner) =>
-        Math.hypot(mark.bbox.cx - partner.bbox.cx, mark.bbox.cy - partner.bbox.cy),
-      ),
-    );
-  const ordered = partners.length
-    ? [...selected.marks].sort((a, b) => awayFromPartner(b) - awayFromPartner(a))
-    : selected.marks;
-  const marks = ordered.slice(0, count || ordered.length);
-  return marks.map((mark) => {
-    used.add(mark.id);
+  return selected.marks.map((mark) => {
     const first = mark.pts[0];
     const last = mark.pts[mark.pts.length - 1] ?? first;
     const measured = (Math.atan2(-(last[1] - first[1]), last[0] - first[0]) * 180) / Math.PI;
-    const direction = buttonholeDirection(selected.piece.geom.rs, buttonholeOrientation(op.raw));
+    const direction = buttonholeDirection(selected.host.geom.rs, buttonholeOrientation(op.raw));
     const angleDeg =
-      kind === 'buttonhole' ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI : measured;
+      selected.kind === 'buttonhole'
+        ? (Math.atan2(-direction[1], direction[0]) * 180) / Math.PI
+        : measured;
     return {
       id: mark.id,
-      piece: selected.item.p,
-      kind,
+      piece: selected.host.key,
+      kind: selected.kind,
       point: [mark.bbox.cx, -mark.bbox.cy],
       angleDeg,
-      lengthMm: kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
+      lengthMm: selected.kind === 'buttonhole' ? buttonholeLengthMm(op.raw) : undefined,
     };
   });
 }
@@ -2742,11 +2682,19 @@ function buildActions(
   rows: ReadonlyMap<string, StoredSeam>,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
-  const usedMarks = new Set<string>();
+  const placementSelections = walkPlacementMarks(
+    ops.map((op) => ({
+      operation: op.raw,
+      hosts: [...new Set((targets.get(op.n) ?? []).map((item) => item.p))].flatMap((key) => {
+        const piece = pieces.get(key);
+        return piece ? [{ key, name: piece.name, code: piece.code, geom: piece.geom }] : [];
+      }),
+    })),
+  );
   for (const [opIndex, op] of ops.entries()) {
     if (op.join) continue;
     const items = targets.get(op.n) ?? [];
-    let placements = placementMarks(op, pieces, items, usedMarks);
+    let placements = placementGlyphs(op, placementSelections[opIndex]);
     if (!placements.length) placements = fallbackPlacements(op, pieces, items);
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);

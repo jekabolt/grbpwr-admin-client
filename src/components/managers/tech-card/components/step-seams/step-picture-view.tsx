@@ -36,7 +36,7 @@ import { useCardSeamGraph } from '../card-unit-pictures';
 import { LowerLayerFills, lowerLayerTints, type LowerLayerClaim } from '../lower-layer-fill';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
-import { fasteningPictureGlyphs, type ButtonholeOperation } from './buttonhole-glyph';
+import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
@@ -1138,7 +1138,7 @@ export function buttonGlyphGeometry(
   return { holes: points, thread };
 }
 
-/** The interior host chord through a drill mark, measured along the glyph's cross-piece axis. */
+/** The interior host chord through a drill mark, used only to cap the glyph's width. */
 export function buttonHostChord(
   mark: Pt2,
   direction: Pt2,
@@ -1168,8 +1168,8 @@ export function buttonHostChord(
     const width = high - low;
     if (width < 1e-6 || low > 1e-6 || high < -1e-6) continue;
     const middle = (low + high) / 2;
-    const at: Pt2 = [mark[0] + axis[0] * middle, mark[1] + axis[1] * middle];
-    if (insideRing(at, ring)) return { at, width };
+    const inside: Pt2 = [mark[0] + axis[0] * middle, mark[1] + axis[1] * middle];
+    if (insideRing(inside, ring)) return { at: [mark[0], mark[1]], width };
   }
   return null;
 }
@@ -1694,17 +1694,17 @@ export function StepPictureSvg({
     [operation, stepEdges, geoms, innerLines],
   );
   const drawnActionLines = actionLines.length ? actionLines : automaticActions.lines;
-  const automaticFastenings = useMemo(
-    () =>
-      actionGlyphs.length
-        ? []
-        : fasteningPictureGlyphs(
-            operation as ButtonholeOperation | undefined,
-            [...layout.T.keys()],
-            geoms,
-          ),
-    [actionGlyphs.length, operation, layout.T, geoms],
-  );
+  const automaticFastenings = useMemo(() => {
+    if (actionGlyphs.length || !contextResult || !contextResults) return [];
+    const steps = operations.slice(0, contextResult.opIndex + 1).map((candidate, index) => ({
+      operation: candidate as ButtonholeOperation,
+      hosts: [...(contextResults[index]?.layout.T.keys() ?? [])].flatMap((key) => {
+        const geom = geoms.get(key);
+        return geom ? [{ key, name: geom.name, geom }] : [];
+      }),
+    }));
+    return placementPictureGlyphsForStep(steps, contextResult.opIndex);
+  }, [actionGlyphs.length, contextResult, contextResults, operations, operation, geoms]);
   const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
     ? actionGlyphs
     : [
@@ -2169,7 +2169,7 @@ export function StepPictureSvg({
           : null;
       return {
         glyph: candidate.glyph,
-        at: chord?.at ?? mark,
+        at: mark,
         direction: candidate.direction,
         mmPx: candidate.mmPx,
         hostWidth: chord?.width,

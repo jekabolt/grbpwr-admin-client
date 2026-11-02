@@ -629,7 +629,7 @@ describe('StepPictureSvg action glyphs', () => {
     expect(new Set(centres.map((match) => `${match[1]}:${match[2]}`)).size).toBe(8);
   });
 
-  it('centres an edge button across its narrow host and caps it at ninety percent', () => {
+  it('keeps an edge button on its mark and caps it at ninety percent of the narrow host', () => {
     const point: Pt2 = [10, 50];
     const markup = renderNarrow([{ ...marks('button')[0], point, direction: [1, 0], sizeMm: 11 }]);
     const tag = markup.match(/<g[^>]*data-asm-mark="button"[^>]*>/)?.[0] ?? '';
@@ -638,11 +638,64 @@ describe('StepPictureSvg action glyphs', () => {
     const fit = fitBox(narrowLayout.bbox, 120, 140, 7);
     const left = toPx(fit, [0, point[1]]);
     const right = toPx(fit, [10, point[1]]);
+    const mark = toPx(fit, point);
     const hostWidth = Math.abs(right[0] - left[0]);
 
-    expect(attribute('data-asm-x')).toBeCloseTo((left[0] + right[0]) / 2, 1);
-    expect(attribute('data-asm-y')).toBeCloseTo(left[1], 1);
+    expect(attribute('data-asm-x')).toBeCloseTo(mark[0], 1);
+    expect(attribute('data-asm-y')).toBeCloseTo(mark[1], 1);
     expect(attribute('data-asm-radius') * 2).toBeLessThanOrEqual(hostWidth * 0.9 + 1e-9);
+  });
+
+  it('keeps seven wide-host button centres on their collinear pattern marks within one millimetre', () => {
+    const ring: Pt2[] = [
+      [0, 0],
+      [350, 0],
+      [390, 35],
+      [375, 220],
+      [15, 220],
+      [-20, 125],
+    ];
+    const wide = { ...rectangle('wide', 'wide front', 390, 220), rs: ring } as PieceGeom;
+    const wideLayout: StepLayout = {
+      ...narrowLayout,
+      T: new Map([['wide', IDENTITY]]),
+      input: new Map([['wide', 0]]),
+      bbox: boxOf(ring),
+    };
+    const glyphs: PictureActionGlyph[] = Array.from({ length: 7 }, (_, index) => ({
+      id: `wide-${index}`,
+      piece: 'wide',
+      kind: 'button',
+      point: [273, 30 + index * 25],
+      direction: [1, 0],
+      sizeMm: 11,
+    }));
+    const markup = renderToStaticMarkup(
+      <StepPictureSvg
+        w={120}
+        h={140}
+        pad={4}
+        look='print'
+        layout={wideLayout}
+        geoms={new Map([['wide', wide]])}
+        actionGlyphs={glyphs}
+      />,
+    );
+    const centres = [
+      ...markup.matchAll(/data-asm-mark="button"[^>]*data-asm-x="([^"]+)" data-asm-y="([^"]+)"/g),
+    ].map((match) => [Number(match[1]), Number(match[2])] as Pt2);
+    const fit = fitBox(wideLayout.bbox, 120, 140, 7);
+
+    expect(centres).toHaveLength(7);
+    centres.forEach((centre, index) => {
+      const expected = toPx(fit, glyphs[index].point);
+      expect(
+        Math.hypot(centre[0] - expected[0], centre[1] - expected[1]) / fit.s,
+      ).toBeLessThanOrEqual(1);
+    });
+    expect(
+      Math.max(...centres.map(([x]) => x)) - Math.min(...centres.map(([x]) => x)),
+    ).toBeLessThan(fit.s);
   });
 
   it('spreads truly outside fallbacks along the narrow host', () => {
@@ -667,7 +720,7 @@ describe('StepPictureSvg action glyphs', () => {
     expect(buttonRadiusPx(20, 2, 10)).toBe(4.5);
   });
 
-  it('takes the host chord containing the mark', () => {
+  it('measures the host chord without moving the mark', () => {
     const chord = buttonHostChord(
       [0, 40],
       [1, 0],
@@ -679,7 +732,7 @@ describe('StepPictureSvg action glyphs', () => {
       ],
     );
 
-    expect(chord?.at[0]).toBeCloseTo(5, 6);
+    expect(chord?.at[0]).toBeCloseTo(0, 6);
     expect(chord?.at[1]).toBeCloseTo(40, 6);
     expect(chord?.width).toBeCloseTo(10, 6);
   });
