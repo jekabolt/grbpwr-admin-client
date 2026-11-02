@@ -21,6 +21,7 @@ import { useStepSeamActions } from './step-seams-context';
 import {
   focusedStepLeaves,
   frameSeamsOf,
+  isUnitStepSeamPreview,
   STEP_TILE_EXPLODE,
   STEP_TILE_RASTER_MM,
   StepPictureSvg,
@@ -44,13 +45,14 @@ export function StepSeamsRow({ index }: { index: number }) {
   const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
   const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
+  const unitStepPreview = isUnitStepSeamPreview(scene.groups);
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
-  // The proposal the picker opens on; null = closed.
-  const [openAt, setOpenAt] = useState<number | null>(null);
-  const open = openAt != null;
-  const setOpen = (o: boolean) => setOpenAt(o ? 0 : null);
+  // A suggestion tile carries its pair into the picker; + seam and stored tiles start empty.
+  const [picker, setPicker] = useState<{ proposal: number; preselect: boolean } | null>(null);
+  const open = picker != null;
+  const setOpen = (next: boolean) => setPicker(next ? { proposal: 0, preselect: false } : null);
 
   const hasMultiplePieces = useMemo(
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
@@ -75,7 +77,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   const pick = params.get('pick');
   useEffect(() => {
     if (!ctx || !hasMultiplePieces || !pick || !opNumber || String(opNumber) !== pick) return;
-    setOpenAt(0);
+    setPicker({ proposal: 0, preselect: false });
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
@@ -118,9 +120,10 @@ export function StepSeamsRow({ index }: { index: number }) {
                 no={i}
                 scene={scene}
                 seams={storedFrame}
-                layout={ownedLayout}
-                layers={ownedLayers}
+                layout={unitStepPreview ? undefined : ownedLayout}
+                layers={unitStepPreview ? undefined : ownedLayers}
                 marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
+                localSeamPreview={unitStepPreview}
                 missing={!row}
                 onOpen={cardId ? () => setOpen(true) : undefined}
                 data-step-seam={key}
@@ -148,18 +151,19 @@ export function StepSeamsRow({ index }: { index: number }) {
             </div>
           );
         })}
-        {keys.length === 0 &&
+        {(keys.length === 0 || unitStepPreview) &&
           suggestions.map((sug, i) => (
             <SeamTile
               key={i}
-              no={suggestions.length > 1 ? i : undefined}
+              no={stored.length + suggestions.length > 1 ? stored.length + i : undefined}
               scene={scene}
               seams={proposalFrames[i] ?? storedFrame}
-              layout={ownedLayout}
-              layers={ownedLayers}
+              layout={unitStepPreview ? undefined : ownedLayout}
+              layers={unitStepPreview ? undefined : ownedLayers}
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
+              localSeamPreview={unitStepPreview}
               dashed
-              onOpen={cardId ? () => setOpenAt(i) : undefined}
+              onOpen={cardId ? () => setPicker({ proposal: i, preselect: true }) : undefined}
             />
           ))}
         {keys.length === 0 && !pending && suggestions.length === 0 && (
@@ -173,7 +177,8 @@ export function StepSeamsRow({ index }: { index: number }) {
           <SeamPicker
             index={index}
             open={open}
-            proposal={openAt ?? 0}
+            proposal={picker?.proposal ?? 0}
+            preselectProposal={picker?.preselect ?? false}
             onClose={() => setOpen(false)}
           />
         </Suspense>
@@ -193,6 +198,7 @@ export function SeamTile({
   layout: suppliedLayout,
   layers,
   marks,
+  localSeamPreview,
   dashed,
   missing,
   no,
@@ -213,6 +219,8 @@ export function SeamTile({
   /** Authoritative bottom-to-top order for an owner result. */
   layers?: readonly string[];
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
+  /** A local unit preview draws its own seam instead of the shared step highlight. */
+  localSeamPreview?: boolean;
   dashed?: boolean;
   missing?: boolean;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
@@ -290,7 +298,7 @@ export function SeamTile({
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
-          stepEdges={scene.stepEdges}
+          stepEdges={localSeamPreview ? undefined : scene.stepEdges}
         />
       )}
       {no != null && (

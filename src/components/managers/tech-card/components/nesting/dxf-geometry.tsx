@@ -13,12 +13,11 @@
 // url, то есть с новым ключом, — инвалидировать нечего.
 //
 // ОГОВОРКА К КЛЮЧУ: в подпись входит и скоуп, а не только url. Перепривязка листа к другой ткани
-// (и разбор строк BOM по назначениям, от которого скоупы схлопываются) поэтому сбрасывает кэш и
-// заставляет качать всё заново, хотя файлы те же. Так сделано сознательно: скоуп едет ВНУТРИ
-// ответа (`scopeByFile`), и разделять «геометрию» и «чья это ткань» на два кэша значило бы
-// научиться собирать соответствие индексов заново на каждом читателе — ровно та арифметика, из-за
-// которой недокачанный файл однажды приписывал детали чужой материал. Перепривязка — редкое
-// действие, повторное скачивание — его цена.
+// (и разбор строк BOM по назначениям, от которого скоупы схлопываются) поэтому собирает НОВЫЙ
+// bundle: `scopeByFile` — часть ответа, и старый нельзя переиспользовать целиком. Сам файл при этом
+// больше не качается и не разбирается: воркер держит постоянный per-url parse cache и возвращает
+// `sourceIndices`, по которому соответствие скоупов строится заново. Индексы по-прежнему считаются
+// только среди доехавших файлов — недокачанный лист не может сдвинуть детали к чужой ткани.
 //
 // `enabled` больше НЕ означает «человек нажал кнопку»: кнопок разбора не осталось, панели
 // включаются сами. Он означает «экран, которому нужны эти файлы, ОТКРЫТ» — вкладки карточки
@@ -26,7 +25,6 @@
 // десятки мегабайт всякому, кто зашёл править BOM. Заплатив один раз, оператор получает и покрытие
 // размеров, и формы деталей, и миниатюры листов: обе панели вкладки просят одну и ту же пачку.
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { fetchMediaBlob } from 'lib/features/media-blob';
 import { grainDisplaySegment } from 'lib/nesting/geom/grain-display';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
@@ -103,34 +101,28 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
       const abort = () => client.terminate();
       signal.addEventListener('abort', abort);
       try {
-        // allSettled: одна недоступная ссылка не должна отменять файлы, которые скачались.
-        const settled = await Promise.allSettled(
-          snapshot.map(async (f) => new File([await fetchMediaBlob(f.url)], f.name)),
+        // Cache lookup, parallel download of misses, and parsing all live in the worker. Besides
+        // keeping IndexedDB's own structured clone off the main thread, this lets a cache hit skip
+        // the network entirely. A failed download remains one warning; other files still open.
+        if (signal.aborted) throw new Error('parsing cancelled');
+        const out = await client.parseSources(
+          snapshot.map(({ name, url }) => ({ name, url })),
+          {
+            unit: 'auto',
+            tol: NEST_DEFAULTS.tol,
+            tolChain: NEST_DEFAULTS.tolChain,
+          },
         );
-        const fetched: File[] = [];
+        if (out.sourceIndices.length === 0) throw new Error(NO_DXF_DOWNLOADED);
         const scopeByFile = new Map<number, string>();
         const urlByFile = new Map<number, string>();
-        const warnings: string[] = [];
-        settled.forEach((s, i) => {
-          if (s.status === 'fulfilled') {
-            scopeByFile.set(fetched.length, snapshot[i].scopeKey);
-            urlByFile.set(fetched.length, snapshot[i].url);
-            fetched.push(s.value);
-          } else {
-            warnings.push(sheetDownloadFailed(snapshot[i].name));
-          }
+        out.sourceIndices.forEach((sourceIndex, fileIndex) => {
+          scopeByFile.set(fileIndex, snapshot[sourceIndex].scopeKey);
+          urlByFile.set(fileIndex, snapshot[sourceIndex].url);
         });
-        if (fetched.length === 0) throw new Error(NO_DXF_DOWNLOADED);
-        // ПРОВЕРКА ОТМЕНЫ ПЕРЕД РАЗБОРОМ. `fetchMediaBlob` не принимает signal, поэтому скачивание
-        // само по себе не прерывается; а вот спавнить воркер и разбирать десятки мегабайт ради
-        // результата, который уже никто не ждёт, незачем — до первого `parse` воркера ещё нет, и
-        // `terminate()` по abort'у был no-op.
-        if (signal.aborted) throw new Error('parsing cancelled');
-        const out = await client.parse(fetched, {
-          unit: 'auto',
-          tol: NEST_DEFAULTS.tol,
-          tolChain: NEST_DEFAULTS.tolChain,
-        });
+        const warnings = out.downloadFailedIndices.map((index) =>
+          sheetDownloadFailed(snapshot[index].name),
+        );
         const manifestByUrl = new Map<string, ConversionManifest>();
         (out.manifests ?? []).forEach((m, i) => {
           const url = urlByFile.get(i);

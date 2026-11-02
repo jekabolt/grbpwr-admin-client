@@ -30,7 +30,9 @@ import { runSamples } from 'lib/seams/frame';
 import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
 
 import { outcomeOf } from './seam-ranker';
-import { isLayerCloth, withSignals } from './seam-signals';
+import { isLayerCloth, withSignals, type SeamSignal } from './seam-signals';
+import { edgeWordPredicate } from './signals/edge-words';
+import { zoneAllows, zoneOf } from './signals/zone';
 
 export type Pt = [number, number];
 
@@ -187,6 +189,7 @@ const typeOf = (op: FormOpLike | undefined) =>
   (op?.operationType ?? '').trim().replace(TYPE_PREFIX, '').toLowerCase();
 const workOf = (op: FormOpLike | undefined) => (op?.work ?? '').trim().toLowerCase();
 const keyedOf = (op: FormOpLike | undefined) => (op?.seamKeys?.length ?? 0) > 0;
+const joinsUnitPieces = (op: FormOpLike | undefined) => JOIN_WORK.test(workOf(op));
 
 /** A press, a fuse, a button, a bartack…: the step touches its inputs but sews none to another. */
 export function sewsNothing(op: FormOpLike | undefined): boolean {
@@ -195,9 +198,10 @@ export function sewsNothing(op: FormOpLike | undefined): boolean {
 }
 
 /**
- * True when the step makes a seam its row can show: WITH resolves to two or more live inputs and
- * the step is not a press / fuse / button step (a stored row always counts), or — with the
- * geometry — one input alone that a join closes on itself (a sleeve's underarm, a cuff's ends).
+ * True when the step makes a seam its row can show: WITH resolves to two or more live inputs, or
+ * one live input is an earlier unit of two or more pieces, and the step is not a press / fuse /
+ * button step (a stored row always counts). With geometry, one piece alone may also be a join that
+ * closes on itself (a sleeve's underarm, a cuff's ends).
  */
 export function isJoinStep(
   ops: readonly FormOpLike[],
@@ -210,12 +214,13 @@ export function isJoinStep(
   if (groups.length >= 2) return keyedOf(op) || !sewsNothing(op);
   if (groups.length !== 1) return false;
   if (keyedOf(op)) return true;
+  if (groups[0].pieces.length >= 2) return joinsUnitPieces(op);
   return (
     !!geoms && selfJoin(op, groups[0], geoms) && selfPairs(groups[0], geoms, new Set()).length > 0
   );
 }
 
-/** Kept for the picker API; eligibility is input-unit count, not flattened piece count. */
+/** Kept for the picker API; eligibility includes the leaf pieces of one resolved input unit. */
 export function hasMultipleStepPieces(
   ops: readonly FormOpLike[],
   index: number,
@@ -1099,6 +1104,8 @@ function chainSides(
 
 type Scored = {
   score: number;
+  /** Bounded non-geometric terms applied by the ranker. */
+  signals?: SeamSignal[];
   /** Length mismatch before role and shape signals; corresponding twin edges use this as anchor. */
   fitRel: number;
   a: Side;
@@ -1777,6 +1784,8 @@ function applyStep(
   const ease = easeOf(op);
   if (groups.length === 1) {
     // One input a join closes on itself: its best self pair, unless a row says what it sews.
+    // Seams between several pieces of one unit are proposed for this step, but are not replayed
+    // here until the owner stores them; that keeps later direct-input ranking unchanged.
     if (rows.length || !selfJoin(op, groups[0], geoms)) return;
     const cand = selfPairs(groups[0], geoms, occupied).find(
       (c) => ![...c.a.ids, ...c.b.ids].some((id) => taken.has(id)),
@@ -1997,6 +2006,7 @@ function proposalsOf(
   ease: number | null,
   connecting?: Scored[],
   op?: FormOpLike,
+  zoneFollowups = false,
 ): StepProposal[] {
   const handOf = handReader(geoms);
   const groupOf = new Map<string, number>();
@@ -2057,7 +2067,13 @@ function proposalsOf(
   for (const cand of scored) {
     if (parts <= 1) break;
     if (out.length && cand.score > PANEL_OK) break;
-    if (out.length && (!long(cand) || (cand.score > GUESS_OK && !panels(cand)))) continue;
+    const zoneFit =
+      cand.signals?.some((signal) => signal.term === 'zone' && signal.delta < 0) ?? false;
+    if (
+      out.length &&
+      (!long(cand) || (cand.score > GUESS_OK && !panels(cand) && !(zoneFollowups && zoneFit)))
+    )
+      continue;
     if ([...cand.a.ids, ...cand.b.ids].some((id) => taken.has(id))) continue;
     const i = find(groupOf.get(cand.a.pieces[0]) ?? -1);
     const j = find(groupOf.get(cand.b.pieces[0]) ?? -1);
@@ -2085,6 +2101,59 @@ function proposalsOf(
     .map(({ p }) => p);
 }
 
+/** Still-open seams between the leaf pieces of one resolved input unit. */
+function proposalsInsideUnit(
+  group: InputGroup,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  state: SewnState,
+  used: ReadonlySet<EdgeId>,
+  ease: number | null,
+  op: FormOpLike | undefined,
+): StepProposal[] {
+  const proposals = proposalsOf(
+    group.pieces.map((piece) => ({ pieces: [piece] })),
+    geoms,
+    state,
+    used,
+    ease,
+    undefined,
+    op,
+    true,
+  );
+  // A unit exposes every seam its earlier steps left open, not only the seam this step names. On
+  // card 85 that includes the two halves of the right pocket bag as well as both shoulders. Keep
+  // the pairs this step's explicit zone names when it names any; otherwise retain the ordinary
+  // geometry ranking for zones that say nothing or for pieces whose roles are unknown.
+  const side = (ids: readonly EdgeId[], lenMm: number) => ({
+    ids,
+    pieces: [...new Set(ids.map(pieceOfTarget))],
+    lenMm,
+    turnDeg: 0,
+  });
+  const inZone = (rows: readonly StepProposal[]) =>
+    rows.filter((proposal) => {
+      const a = side(proposal.a, proposal.aLen);
+      const b = side(proposal.b, proposal.bLen);
+      if (zoneAllows(a, b, op, geoms) !== true) return false;
+      const edgeFits = edgeWordPredicate(zoneOf(op?.zone));
+      return !edgeFits || (edgeFits(a, geoms) === true && edgeFits(b, geoms) === true);
+    });
+  const stateZone = inZone(proposals);
+  // Once the step holds its own seams, leftovers outside its zone are noise, not a fallback.
+  const relevant = stateZone.length || keyedOf(op) ? stateZone : proposals;
+  // A finished unit commonly exposes a mirrored pair (left/right shoulders). Leaf details can
+  // offer duplicate matches on the same hand; keep the ranker's best one per hand. When the
+  // geometry has no hand at all, retain its ordinary unhanded proposals.
+  const handed = relevant.filter((proposal) => proposal.hand);
+  if (!handed.length) return relevant;
+  const seen = new Set<Hand>();
+  return handed.filter((proposal) => {
+    if (seen.has(proposal.hand)) return false;
+    seen.add(proposal.hand);
+    return true;
+  });
+}
+
 /**
  * Every seam one step proposes (see `proposalsOf`): one per pair of inputs, best first — a step
  * that sets both sleeves offers the left cap on the left armhole and the right on the right.
@@ -2100,9 +2169,13 @@ export function suggestStepPairs(
 ): StepProposal[] {
   const op = ops[index];
   const groups = inputGroups(ops, index, pieceKeys);
-  if (!groups.length || (groups.length >= 2 && sewsNothing(op) && !keyedOf(op))) return [];
+  if (!groups.length || (sewsNothing(op) && !keyedOf(op))) return [];
   const state = stateBefore(ops, index, pieceKeys, geoms, seams);
   if (groups.length === 1) {
+    if (groups[0].pieces.length >= 2 && joinsUnitPieces(op)) {
+      const internal = proposalsInsideUnit(groups[0], geoms, state, used, ease, op);
+      if (internal.length || keyedOf(op)) return internal;
+    }
     if (!selfJoin(op, groups[0], geoms)) return [];
     const best = selfPairs(groups[0], geoms, new Set([...used, ...state.stored]))[0];
     return best

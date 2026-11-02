@@ -1,12 +1,21 @@
 // Main-thread handle on the nesting worker: spawn lazily, promise-based parse/nest with
 // live progress, cancel via message + terminate() as the hard fallback, safe respawn.
-import type { NestConfig, NestResult, ParseOpts, PieceDTO, Unit, WorkerResponse } from '../types';
+import type {
+  NestConfig,
+  NestResult,
+  ParseOpts,
+  PieceDTO,
+  Unit,
+  WorkerRequest,
+  WorkerResponse,
+} from '../types';
 import type { ConversionManifest } from 'lib/pattern-import/types';
 import type {
   RollSearchJob,
   RollSearchPlan,
   RollSearchResult,
 } from 'lib/pattern-export/roll-search';
+import { unpackPieces } from './piece-transfer';
 
 export type ParseOutcome = {
   // Names this parse inside the worker — nest() must present it back (stale-parse guard).
@@ -29,6 +38,15 @@ export type ParseOutcome = {
   manifests: (ConversionManifest | null)[];
   // Codex C3: почему манифест файла не принят, по индексу (null — принят или его нет).
   manifestDistrust: (string | null)[];
+  /** Present for URL-backed parsing: original indices in compacted parse order. */
+  sourceIndices?: number[];
+  /** Present for URL-backed parsing: original indices whose download failed. */
+  downloadFailedIndices?: number[];
+};
+
+export type SourceParseOutcome = ParseOutcome & {
+  sourceIndices: number[];
+  downloadFailedIndices: number[];
 };
 
 export type NestProgressMsg = {
@@ -82,8 +100,8 @@ export class NestingWorkerClient {
     return w;
   }
 
-  parse(files: File[], opts: ParseOpts): Promise<ParseOutcome> {
-    const id = this.nextId++;
+  private parseRequest(request: Extract<WorkerRequest, { type: 'parse' | 'parse-sources' }>) {
+    const { id } = request;
     const w = this.spawn();
     return new Promise<ParseOutcome>((resolve, reject) => {
       this.handlers.set(id, {
@@ -91,7 +109,7 @@ export class NestingWorkerClient {
           if (msg.type === 'parsed') {
             resolve({
               parseId: id,
-              pieces: msg.pieces,
+              pieces: unpackPieces(msg.packedPieces),
               detectedUnit: msg.detectedUnit,
               warnings: msg.warnings,
               failedFiles: msg.failedFiles,
@@ -99,13 +117,32 @@ export class NestingWorkerClient {
               blockNames: msg.blockNames,
               manifests: msg.manifests,
               manifestDistrust: msg.manifestDistrust ?? [],
+              sourceIndices: msg.sourceIndices,
+              downloadFailedIndices: msg.downloadFailedIndices,
             });
           } else reject(new Error('unexpected worker reply'));
         },
         reject,
       });
-      w.postMessage({ type: 'parse', id, files, opts });
+      w.postMessage(request);
     });
+  }
+
+  parse(files: File[], opts: ParseOpts): Promise<ParseOutcome> {
+    const id = this.nextId++;
+    return this.parseRequest({ type: 'parse', id, files, opts });
+  }
+
+  parseSources(
+    sources: Array<{ name: string; url: string }>,
+    opts: ParseOpts,
+  ): Promise<SourceParseOutcome> {
+    const id = this.nextId++;
+    return this.parseRequest({ type: 'parse-sources', id, sources, opts }).then((out) => ({
+      ...out,
+      sourceIndices: out.sourceIndices ?? [],
+      downloadFailedIndices: out.downloadFailedIndices ?? [],
+    }));
   }
 
   nest(

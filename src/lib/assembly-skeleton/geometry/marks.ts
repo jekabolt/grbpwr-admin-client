@@ -32,6 +32,7 @@ import {
   type Pt2,
   type SkeletonPieceInput,
 } from '../types';
+import { bboxOf, boxDist, PointGrid, PolylineChunks, PRUNE_EPS_MM, type BBox } from './grid';
 
 const MM_PER_CM = 10;
 const NOTCH_LAYER = '4';
@@ -109,25 +110,8 @@ function areaOf(pts: readonly Pt2[]): number {
   return Math.abs(a / 2);
 }
 
-type BBox = { x0: number; y0: number; x1: number; y1: number };
-function bboxOf(pts: readonly Pt2[]): BBox {
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
-  for (const [x, y] of pts) {
-    if (x < x0) x0 = x;
-    if (y < y0) y0 = y;
-    if (x > x1) x1 = x;
-    if (y > y1) y1 = y;
-  }
-  return { x0, y0, x1, y1 };
-}
 const bw = (b: BBox) => b.x1 - b.x0;
 const bh = (b: BBox) => b.y1 - b.y0;
-/** Distance from a point to a bbox (0 inside): a lower bound of its distance to anything in it. */
-const boxDist = (p: Pt2, b: BBox) =>
-  Math.hypot(Math.max(b.x0 - p[0], 0, p[0] - b.x1), Math.max(b.y0 - p[1], 0, p[1] - b.y1));
 const bboxNear = (a: BBox, b: BBox, pad: number) =>
   a.x0 - pad <= b.x1 && b.x0 - pad <= a.x1 && a.y0 - pad <= b.y1 && b.y0 - pad <= a.y1;
 
@@ -153,15 +137,6 @@ function segDist(p: Pt2, a: Pt2, b: Pt2): number {
   let t = l2 > 1e-12 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2 : 0;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy));
-}
-
-function polyDist(p: Pt2, pts: readonly Pt2[], closed: boolean): number {
-  if (pts.length === 1) return dist(p, pts[0]);
-  let best = Infinity;
-  const n = pts.length;
-  for (let i = 0; i + 1 < n; i++) best = Math.min(best, segDist(p, pts[i], pts[i + 1]));
-  if (closed && n > 2) best = Math.min(best, segDist(p, pts[n - 1], pts[0]));
-  return best;
 }
 
 /** Angle between two directions, 0..90°, orientation-free. */
@@ -200,22 +175,23 @@ function turnAt(pts: readonly Pt2[], i: number, w: number): number {
 
 // ── the sewing line, indexed ────────────────────────────────────────────────────────────────
 
-const CELL_MM = 10;
-/** Grid cell → one number (cells stay well inside ±2^20 for any garment in mm). */
-const cellKey = (gx: number, gy: number) => (gx + 1048576) * 2097152 + (gy + 1048576);
+/** Grid cell of the sewing line's points; segmentPiece builds the same grid for its notches. */
+export const SEW_CELL_MM = 10;
 
 /** Nearest point of the sewing line (`rs`, 1 mm resample) and the edge it lies on, via a grid. */
 class SewLine {
-  private readonly grid = new Map<number, number[]>();
+  private readonly grid: PointGrid;
   private readonly edgeOf: Int32Array;
   private readonly alongOf: Float64Array;
   /** The line's bbox: a path wholly outside it ± a threshold cannot be near the line. */
   readonly box: BBox;
   /** The line every 8 mm: distances far from it (cut line 10–80 mm out) without the grid's cost. */
   private readonly coarse: Pt2[];
+  private readonly coarseChunks: PolylineChunks;
   constructor(
     readonly rs: readonly Pt2[],
     readonly edges: readonly Edge[],
+    grid?: PointGrid,
   ) {
     const n = rs.length;
     this.edgeOf = new Int32Array(n).fill(-1);
@@ -233,13 +209,9 @@ class SewLine {
       }
     });
     this.coarse = rs.filter((_, i) => i % 8 === 0);
-    this.box = bboxOf(rs);
-    rs.forEach((p, i) => {
-      const key = cellKey(Math.floor(p[0] / CELL_MM), Math.floor(p[1] / CELL_MM));
-      const cell = this.grid.get(key);
-      if (cell) cell.push(i);
-      else this.grid.set(key, [i]);
-    });
+    this.coarseChunks = new PolylineChunks(this.coarse, true);
+    this.grid = grid ?? new PointGrid(rs, SEW_CELL_MM);
+    this.box = this.grid.box;
   }
 
   /**
@@ -247,46 +219,49 @@ class SewLine {
    * search grows rings of grid cells, so its cost is (radius / cell)²: an annotation a metre or two
    * away from the piece (a title block, a size table on the same block) must not walk hundreds of
    * empty rings per sample — the CONSTRUCTION tab runs this on the main thread.
+   * Ties go to the first point met in ring / cell / index order (callers' marks depend on it, so
+   * the order is kept as it was — PointGrid.nearestFirstMet); rings beyond the limit are not
+   * walked and the cells are read off two typed arrays (card 61: 1.5 M Map lookups → 1.1 M cells
+   * without a lookup or an allocation; the misses at the 66 mm limit are the half that remains).
    */
   nearest(p: Pt2, maxD = NEAR_MAX_MM): { idx: number; d: number } {
     if (!this.rs.length) return { idx: -1, d: Infinity };
     const limit = Math.min(maxD, NEAR_MAX_MM);
     // Further from the line's bbox than the limit: nothing to find, no ring walked.
     if (boxDist(p, this.box) > limit) return { idx: -1, d: Infinity };
-    const cx = Math.floor(p[0] / CELL_MM);
-    const cy = Math.floor(p[1] / CELL_MM);
-    let idx = -1;
-    let d = Infinity;
-    const rings = Math.ceil(limit / CELL_MM) + 1;
-    for (let r = 0; r <= rings; r++) {
-      // Ring r: once a hit is closer than the ring's inner reach, no farther ring can beat it.
-      if (idx >= 0 && d <= (r - 1) * CELL_MM) break;
-      const visit = (gx: number, gy: number) => {
-        for (const i of this.grid.get(cellKey(gx, gy)) ?? []) {
-          const di = dist(p, this.rs[i]);
-          if (di < d) {
-            d = di;
-            idx = i;
-          }
-        }
-      };
-      if (r === 0) visit(cx, cy);
-      // The ring's perimeter only: top and bottom rows, then the two side columns.
-      for (let gx = cx - r; r > 0 && gx <= cx + r; gx++) {
-        visit(gx, cy - r);
-        visit(gx, cy + r);
-      }
-      for (let gy = cy - r + 1; r > 0 && gy <= cy + r - 1; gy++) {
-        visit(cx - r, gy);
-        visit(cx + r, gy);
-      }
-    }
-    return d <= limit ? { idx, d } : { idx: -1, d: Infinity };
+    return this.grid.nearestFirstMet(p, limit);
   }
 
-  /** Distance to the line through its 8 mm chords (≤ 0.1 mm off on garment curves). */
+  /**
+   * Distance to the line through its 8 mm chords (≤ 0.1 mm off on garment curves). The minimum
+   * over the chords — a value, order-free — so chunks of them provably no nearer than the best so
+   * far are skipped, and the chord the previous call ended on is measured first: callers walk a
+   * path sample by sample, so it bounds the minimum tightly before any chunk is looked at.
+   */
+  private farSeed = -1;
   far(p: Pt2): number {
-    return polyDist(p, this.coarse, true);
+    const pts = this.coarse;
+    const n = pts.length;
+    if (n === 1) return dist(p, pts[0]);
+    const chunks = this.coarseChunks;
+    let best = Infinity;
+    let seg = -1;
+    const seed = this.farSeed;
+    if (seed >= 0 && seed < n) {
+      best = segDist(p, pts[seed], pts[seed + 1 < n ? seed + 1 : 0]);
+      seg = seed;
+    }
+    for (let c = 0; c < chunks.count; c++) {
+      if (chunks.boxDist(p, c) > best + PRUNE_EPS_MM) continue;
+      const end = chunks.end[c];
+      for (let i = chunks.first[c]; i < end; i++) {
+        const d = segDist(p, pts[i], pts[i + 1 < n ? i + 1 : 0]);
+        if (d < best) seg = i;
+        best = Math.min(best, d); // Math.min as before: a NaN coordinate still poisons the result
+      }
+    }
+    this.farSeed = seg;
+    return best;
   }
 
   /** Nearest edge of a point within `maxD` (≤ NEAR_MAX_MM): its id, distance, foot along it. */
@@ -346,6 +321,9 @@ const TWIN_SAMPLES = 48;
 /** Share of one path's samples that must lie on the other: same line twice / clipped copy. */
 const TWIN_SHARE = 0.9;
 const CLIPPED_SHARE = 0.95;
+
+/** Grid cell → one number (cells stay well inside ±2^20 for any garment in mm). */
+const cellKey = (gx: number, gy: number) => (gx + 1048576) * 2097152 + (gy + 1048576);
 
 /** Points of a path every ≤ 1 mm in a grid of TWIN_DIST_MM cells: «is p within 2 mm of it». */
 class PathGrid {
@@ -410,11 +388,13 @@ export function classifyMarks(
   input: SkeletonPieceInput,
   geom: PieceGeom,
   opts: MarkOptions = {},
+  /** `geom.rs` on a SEW_CELL_MM grid when the caller already built one (segmentPiece did, for its notches). */
+  grid?: PointGrid,
 ): MarkReport {
   const o = { twins: true, seamCopy: true, parallel: true, straight: true, ...opts };
   const dropped = { twins: 0, seamCopies: 0, ticks: 0 };
   const contourLayer = input.piece.layer ?? '';
-  const sew = new SewLine(geom.rs, geom.edges);
+  const sew = new SewLine(geom.rs, geom.edges, grid);
 
   // 1. inner paths in mm
   let paths: Path[] = [];
@@ -638,8 +618,12 @@ export function classifyMarks(
 }
 
 /** P2 step 0: the classified internal marks of a piece (seam copies, twins, ticks left out). */
-export function collectMarks(input: SkeletonPieceInput, geom: PieceGeom): PieceMark[] {
-  return classifyMarks(input, geom).marks;
+export function collectMarks(
+  input: SkeletonPieceInput,
+  geom: PieceGeom,
+  grid?: PointGrid,
+): PieceMark[] {
+  return classifyMarks(input, geom, {}, grid).marks;
 }
 
 // ── classifiers ─────────────────────────────────────────────────────────────────────────────
@@ -674,11 +658,11 @@ function isSeamCopy(p: Path, sew: SewLine, geom: PieceGeom): boolean {
     );
   };
   if (!bigLoop) return onLine();
-  const cb = bboxOf(geom.rs);
+  const cb = sew.box; // = bboxOf(geom.rs), gathered once with the grid, not per path
   if (area >= geom.areaMm2) {
     // The cut line around the sewing line.
     const probe = geom.rs.filter((_, i) => i % 16 === 0);
-    if (probe.filter((q) => pointInPoly(q, p.pts)).length < 0.95 * probe.length) return onLine();
+    if (!encloses(probe, p.pts)) return onLine();
     return sample(p.pts, true, Math.max(SAMPLE_MM, p.len / 40)).every(
       (q) => sew.far(q) <= SEAM_ALLOWANCE_MAX_MM,
     );
@@ -697,6 +681,22 @@ function isSeamCopy(p: Path, sew: SewLine, geom: PieceGeom): boolean {
       Math.abs(dw - 2 * d) <= tol &&
       Math.abs(dh - 2 * d) <= tol)
   );
+}
+
+/**
+ * `probe.filter(q => pointInPoly(q, poly)).length >= 0.95 * probe.length`, decided as soon as the
+ * probes left cannot change it: once the ones inside reach the bar, or the ones left cannot lift
+ * the count to it (same expression, same rounding, so the same verdict).
+ */
+function encloses(probe: readonly Pt2[], poly: readonly Pt2[]): boolean {
+  const bar = 0.95 * probe.length;
+  let inside = 0;
+  for (let i = 0; i < probe.length; i++) {
+    if (inside >= bar) return true;
+    if (inside + (probe.length - i) < bar) return false;
+    if (pointInPoly(probe[i], poly)) inside++;
+  }
+  return inside >= bar;
 }
 
 function pointInPoly(p: Pt2, poly: readonly Pt2[]): boolean {
@@ -775,35 +775,73 @@ function segDistLine(p: Pt2, a: Pt2, b: Pt2): number {
   return Math.abs(vx * (p[1] - a[1]) - vy * (p[0] - a[0])) / (Math.hypot(vx, vy) || 1);
 }
 
-/** Nearest point of an edge (its 1 mm points as a polyline): distance, foot, foot along the edge. */
 /** An edge's 1 mm points every EDGE_STEP-th (and the last): ample for distances, 4× cheaper. */
 const EDGE_STEP = 4;
-const coarse = new WeakMap<Edge, Pt2[]>();
-function coarseOf(e: Edge): Pt2[] {
-  let c = coarse.get(e);
-  if (!c) {
-    c = e.pts.filter((_, i) => i % EDGE_STEP === 0 || i === e.pts.length - 1);
-    coarse.set(e, c);
+/**
+ * What `parallelOf` asks of an edge, built once per Edge object (a rebuild over the same geometry
+ * makes new edges — the cache is weak): the coarse polyline in chunks with boxes, the running
+ * length at each coarse point (the same left-to-right sum the plain scan accumulated, so `along`
+ * is bit-equal), and the bbox of the full edge for the cheap reject.
+ */
+type EdgeIndex = { pts: Pt2[]; chunks: PolylineChunks; along: Float64Array; box: BBox };
+const EDGE_INDEX = new WeakMap<Edge, EdgeIndex>();
+function edgeIndexOf(e: Edge): EdgeIndex {
+  let x = EDGE_INDEX.get(e);
+  if (!x) {
+    const pts = e.pts.filter((_, i) => i % EDGE_STEP === 0 || i === e.pts.length - 1);
+    const along = new Float64Array(pts.length);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const vx = pts[i + 1][0] - pts[i][0];
+      const vy = pts[i + 1][1] - pts[i][1];
+      along[i + 1] = along[i] + Math.sqrt(vx * vx + vy * vy);
+    }
+    x = { pts, chunks: new PolylineChunks(pts, false), along, box: bboxOf(e.pts) };
+    EDGE_INDEX.set(e, x);
   }
-  return c;
+  return x;
 }
 
-function edgeFoot(p: Pt2, e: Edge): { d: number; foot: Pt2; along: number } {
-  const pts = coarseOf(e);
-  let best = { d: Infinity, foot: pts[0], along: 0 };
-  let along = 0;
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    const vx = b[0] - a[0];
-    const vy = b[1] - a[1];
-    const l2 = vx * vx + vy * vy;
-    let t = l2 > 1e-12 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2 : 0;
-    t = Math.max(0, Math.min(1, t));
-    const f: Pt2 = [a[0] + t * vx, a[1] + t * vy];
-    const d = dist(p, f);
-    if (d < best.d) best = { d, foot: f, along: along + t * Math.sqrt(l2) };
-    along += Math.sqrt(l2);
+/**
+ * Nearest point of an edge (its coarse points as a polyline): distance, foot, foot along the edge,
+ * and the winning segment. The first segment (in order) at the least distance wins, as in a plain
+ * scan; a chunk of segments whose box is farther than the best so far cannot hold a winner and is
+ * skipped. `seed` — the segment the previous sample of the same line landed on — is measured first
+ * as a bound only (an upper bound of the minimum, since it is a real segment): the scan itself
+ * still runs in order with the same strict `<`, so ties fall where they always did, but with the
+ * bound in hand the chunks away from the foot are skipped before any of them is measured. Past
+ * `maxD` the answer may be {∞, pts[0], 0} instead of the true far foot: the caller treats any
+ * d > maxD alike (card 61: 3.8 M segment tests → a fraction; this was half of buildAssemblyPieces).
+ */
+function edgeFoot(
+  p: Pt2,
+  e: Edge,
+  maxD = Infinity,
+  seed = -1,
+): { d: number; foot: Pt2; along: number; seg: number } {
+  const { pts, chunks, along } = edgeIndexOf(e);
+  let best = { d: Infinity, foot: pts[0], along: 0, seg: -1 };
+  let bound = maxD;
+  if (seed >= 0 && seed + 1 < pts.length) {
+    const a = pts[seed];
+    const b = pts[seed + 1];
+    const sd = segDist(p, a, b);
+    if (sd < bound) bound = sd;
+  }
+  for (let c = 0; c < chunks.count; c++) {
+    if (chunks.boxDist(p, c) > Math.min(best.d, bound) + PRUNE_EPS_MM) continue;
+    const end = chunks.end[c];
+    for (let i = chunks.first[c]; i < end; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const vx = b[0] - a[0];
+      const vy = b[1] - a[1];
+      const l2 = vx * vx + vy * vy;
+      let t = l2 > 1e-12 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const f: Pt2 = [a[0] + t * vx, a[1] + t * vy];
+      const d = dist(p, f);
+      if (d < best.d) best = { d, foot: f, along: along[i] + t * Math.sqrt(l2), seg: i };
+    }
   }
   return best;
 }
@@ -838,18 +876,33 @@ function parallelOf(
     return rms > PARALLEL_RMS_MM ? null : { k, cover, offset, on };
   };
   let best: Fit | null = null;
+  // Every sample `on` an offset ≤ markFoldOffsetMm lies within this of its edge: farther feet never
+  // count, so a distance beyond it need not be exact (edgeFoot's maxD), and samples beyond it that
+  // alone deny PARALLEL_COVER make fitOf null before any foot is measured.
+  const reach = SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM;
+  const coverable = (far: number) => (sp.length - far) / sp.length >= PARALLEL_COVER;
   for (let k = 0; k < geom.edges.length; k++) {
     const e = geom.edges[k];
     // Cheap reject: the line's bbox must come within reach of the edge's.
-    const eb = bboxOf(e.pts);
+    const eb = edgeIndexOf(e).box;
     if (!bboxNear(p.box, eb, SKELETON.markFoldOffsetMm)) continue;
     // A sample out of reach of this edge's bbox cannot sit at a fold offset from it: not scanned.
-    const reach = SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM;
+    const feet: (Foot | null)[] = sp.map((q) =>
+      boxDist(q, eb) > reach ? { q, d: Infinity, foot: q, along: 0 } : null,
+    );
+    let far = 0;
+    for (const f of feet) if (f) far++;
+    if (!coverable(far)) continue;
+    // Consecutive samples land on neighbouring segments: each foot seeds the next one's bound.
+    let seg = -1;
     const fit = fitOf(
       k,
-      sp.map((q) =>
-        boxDist(q, eb) > reach ? { q, d: Infinity, foot: q, along: 0 } : { q, ...edgeFoot(q, e) },
-      ),
+      feet.map((f, j) => {
+        if (f) return f;
+        const r = edgeFoot(sp[j], e, reach, seg);
+        seg = r.seg;
+        return { q: sp[j], d: r.d, foot: r.foot, along: r.along };
+      }),
     );
     if (
       fit &&
@@ -873,9 +926,15 @@ function parallelOf(
   // offset from the sewing line as a whole, not from any single edge. Parallel, never a fold.
   const feet: Foot[] = [];
   const edgeCount = new Map<number, number>();
+  let misses = 0;
   for (const q of sp) {
-    const ne = sew.nearEdge(q, SKELETON.markFoldOffsetMm + 1.5 * PARALLEL_RMS_MM);
-    if (!ne) continue;
+    const ne = sew.nearEdge(q, reach);
+    if (!ne) {
+      // Misses alone deny PARALLEL_COVER: fitOf would be null — a mark in the middle of the piece
+      // stops asking after 40 % of its samples instead of walking every ring for all of them.
+      if (!coverable(++misses)) return null;
+      continue;
+    }
     feet.push({ q, d: ne.offsetMm, foot: q, along: ne.alongMm });
     edgeCount.set(ne.k, (edgeCount.get(ne.k) ?? 0) + 1);
   }

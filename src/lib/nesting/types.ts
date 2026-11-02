@@ -173,6 +173,29 @@ export type PieceDTO = {
   fold?: { kind: 'unit'; halfAreaCm2: number } | { kind: 'refused'; reason: string };
 };
 
+// Worker wire format for PieceDTO geometry. The ordinary object shape above is deliberately kept
+// at every reader: only the worker boundary is packed. Sending 80k individual `{x,y}` objects
+// through structured clone dominated card 61's hand-over; one transferable Float64Array crosses
+// that boundary without a second copy and the client rebuilds the exact PieceDTO shape.
+export type PackedPointRange = [start: number, length: number];
+
+export type PackedPieceDTO = Omit<PieceDTO, 'poly' | 'grain' | 'displayGrain' | 'inner'> & {
+  poly: PackedPointRange;
+  grain?: Array<{
+    layer: string;
+    angleDeg: number;
+    lengthCm: number;
+    points: PackedPointRange;
+  }>;
+  displayGrain?: { layer: string; points: PackedPointRange };
+  inner?: Array<{ layer: string; closed: boolean; pts: PackedPointRange }>;
+};
+
+export type PackedPieces = {
+  pieces: PackedPieceDTO[];
+  coordinates: Float64Array;
+};
+
 export type NestPieceConfig = {
   pieceId: number;
   quantity: number;
@@ -422,6 +445,16 @@ export type WorkerRequest =
   // parseId on nest ties the job to the parse it was configured against — a nest that
   // races a newer parse is rejected instead of silently nesting the wrong geometry.
   | { type: 'parse'; id: number; files: File[]; opts: ParseOpts }
+  // URL-backed parsing is the persistent-cache path. Cache lookup and any download both happen in
+  // the worker, so an IndexedDB hit never clones the large parsed value onto the main thread and
+  // never touches the network. Successful downloads are compacted in source order exactly like
+  // the old Promise.allSettled caller; sourceIndices carries that mapping back explicitly.
+  | {
+      type: 'parse-sources';
+      id: number;
+      sources: Array<{ name: string; url: string }>;
+      opts: ParseOpts;
+    }
   | { type: 'nest'; id: number; parseId: number; config: NestConfig }
   /** Roll print layout (pattern-export/roll-search.ts): seed first, then the budgeted GA. */
   | { type: 'roll-search'; id: number; job: RollSearchJob }
@@ -431,7 +464,7 @@ export type WorkerResponse =
   | {
       type: 'parsed';
       id: number;
-      pieces: PieceDTO[];
+      packedPieces: PackedPieces;
       detectedUnit: Exclude<Unit, 'auto'>;
       warnings: string[];
       // Сколько листов пачки разобрать НЕ удалось. Число едет наружу отдельно от warnings, потому
@@ -456,6 +489,10 @@ export type WorkerResponse =
       manifests: (ConversionManifest | null)[];
       // Codex C3: почему манифест файла не принят (null — принят или его нет).
       manifestDistrust?: (string | null)[];
+      /** Original source indices that reached parsing, in their compacted batch order. */
+      sourceIndices?: number[];
+      /** Original source indices whose download failed; these are never cached. */
+      downloadFailedIndices?: number[];
     }
   | {
       type: 'progress';

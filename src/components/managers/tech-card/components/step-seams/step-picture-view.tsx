@@ -78,6 +78,7 @@ import {
   stepLayout,
   toPx,
   type Box,
+  type Fit,
   type SeamSides,
   type StepLayout,
 } from './step-picture';
@@ -678,6 +679,54 @@ export function frameSeamsOf(
   return [...inner, ...(own.length ? flat(own) : cross)];
 }
 
+export type StepSeamPreviewInput = {
+  leaves: readonly (readonly string[])[];
+  innerSeams: readonly SeamCandidate[];
+  storedSeams: readonly SeamCandidate[];
+  crossSeams: readonly SeamCandidate[];
+  geoms: ReadonlyMap<string, PieceGeom>;
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>;
+  hands?: StepHands;
+};
+
+/** A proposal, pick, or stored unit seam laid without changing the shared owner result. */
+export function stepSeamPreview(
+  input: StepSeamPreviewInput,
+  target: { sides: SeamSides; source: 'live' | 'stored' },
+  options: { focus?: boolean; explode?: number; rasterMm?: number } = {},
+): { seams: SeamCandidate[]; layout: StepLayout } | null {
+  const own =
+    target.source === 'live' ? seamOfSides(target.sides, input.geoms, input.innerLines) : null;
+  if (target.source === 'live' && !own) return null;
+  const seams = frameSeamsOf(
+    input.innerSeams,
+    input.storedSeams,
+    own ? [own] : [],
+    input.crossSeams,
+  );
+  const leaves =
+    options.focus === false
+      ? input.leaves
+      : focusedStepLeaves(
+          input.leaves,
+          [...target.sides.a, ...target.sides.b],
+          input.innerSeams,
+          input.hands?.pose,
+        );
+  return {
+    seams,
+    layout: stepLayout(leaves, seams, input.geoms, {
+      explode: options.explode ?? STEP_TILE_EXPLODE,
+      rasterMm: options.rasterMm,
+      ...input.hands,
+    }),
+  };
+}
+
+/** Only a resolved multi-piece input needs the local seam preview path. */
+export const isUnitStepSeamPreview = (groups: readonly { pieces: readonly string[] }[]) =>
+  groups.length === 1 && groups[0].pieces.length > 1;
+
 /** `stepLayout`, memoised on the seams' identity. */
 export function useStepLayout(
   leaves: readonly (readonly string[])[],
@@ -1137,6 +1186,199 @@ export const spanMm = (line: readonly Pt2[]) => {
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 };
 
+export type PicturePickTarget = {
+  id: TargetId;
+  points: Pt2[];
+  inner: boolean;
+  box: Box;
+};
+
+const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
+  let best = ring[0] ?? point;
+  let distance = Infinity;
+  let segment = 0;
+  ring.forEach((start, index) => {
+    const end = ring[(index + 1) % ring.length];
+    const dx = end[0] - start[0];
+    const dy = end[1] - start[1];
+    const length2 = dx * dx + dy * dy;
+    const share = length2
+      ? Math.max(
+          0,
+          Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
+        )
+      : 0;
+    const candidate: Pt2 = [start[0] + share * dx, start[1] + share * dy];
+    const candidateDistance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+    if (candidateDistance < distance) {
+      best = candidate;
+      distance = candidateDistance;
+      segment = index;
+    }
+  });
+  return { point: best, distance, segment };
+};
+
+const pointsOnDrawnRing = (
+  points: readonly Pt2[],
+  hostRing: readonly Pt2[],
+  hidden: boolean,
+): Pt2[] => {
+  if (hidden && points.length > 1 && hostRing.length > 2) {
+    const start = nearestOnRing(points[0], hostRing);
+    const end = nearestOnRing(points[points.length - 1], hostRing);
+    const count = hostRing.length;
+    const forward: Pt2[] = [];
+    for (let index = (start.segment + 1) % count; index !== (end.segment + 1) % count; ) {
+      forward.push(hostRing[index]);
+      index = (index + 1) % count;
+    }
+    const backward: Pt2[] = [];
+    for (let index = start.segment; index !== end.segment; ) {
+      backward.push(hostRing[index]);
+      index = (index - 1 + count) % count;
+    }
+    const arc = forward.length <= backward.length ? forward : backward;
+    return [start.point, ...arc, end.point];
+  }
+  return points.map((point) => {
+    const nearest = nearestOnRing(point, hostRing);
+    return hidden || (!insideRing(point, hostRing) && nearest.distance > 4) ? nearest.point : point;
+  });
+};
+
+/**
+ * Pick doors in the exact fitted frame the picture draws. Without an owner layer order, folded-in
+ * pieces project onto the same visible host contour as their marks, so no raw invisible outline can
+ * intercept another piece.
+ */
+export function picturePickTargets(
+  layout: StepLayout,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]> | undefined,
+  fit: Fit,
+  options: {
+    keys?: readonly string[];
+    offsetPx?: (key: string) => number;
+    projectHidden?: boolean;
+    hiddenTargets?: ReadonlySet<TargetId>;
+  } = {},
+): PicturePickTarget[] {
+  const layered = new Set(layout.layers.map(([input]) => input));
+  const laidIn = new Set(layout.pieceLayers.map(([piece]) => piece));
+  const stacked = new Set(layout.stacked.flatMap((group) => group.slice(1)));
+  const baseKeys = new Set(
+    [...layout.T.keys()].filter(
+      (key) => !stacked.has(key) && !layered.has(layout.input.get(key) ?? -1) && !laidIn.has(key),
+    ),
+  );
+  const bases = [...baseKeys].flatMap((key) => {
+    const transform = layout.T.get(key);
+    const geom = geoms.get(key);
+    if (!transform || !geom) return [];
+    const offset = options.offsetPx?.(key) ?? 0;
+    return [
+      {
+        key,
+        input: layout.input.get(key) ?? 0,
+        ring: geom.rs.map((point) => {
+          const [x, y] = toPx(fit, apply(transform, point));
+          return [x + offset, y + offset] as Pt2;
+        }),
+      },
+    ];
+  });
+  const projectHidden = options.projectHidden ?? options.keys == null;
+  const directPartner = new Map(layout.pieceLayers);
+  const inputPartner = new Map(layout.layers);
+  const stackLeader = new Map(
+    layout.stacked.flatMap((group) => group.slice(1).map((key) => [key, group[0]] as const)),
+  );
+  const hostOf = (key: string) => {
+    const own = bases.find((piece) => piece.key === key);
+    if (own) return own;
+    const direct = directPartner.get(key) ?? stackLeader.get(key);
+    if (direct) return bases.find((piece) => piece.key === direct);
+    const partnerInput = inputPartner.get(layout.input.get(key) ?? -1);
+    return bases.find((piece) => partnerInput != null && piece.input === partnerInput);
+  };
+  const keys = options.keys ?? [...layout.T.keys()];
+  const out: PicturePickTarget[] = [];
+  const add = (id: TargetId, points: Pt2[], inner: boolean) => {
+    if (points.length > 1) out.push({ id, points, inner, box: boxOf(points) });
+  };
+  for (const key of keys) {
+    const transform = layout.T.get(key);
+    const geom = geoms.get(key);
+    if (!transform || !geom) continue;
+    const offset = options.offsetPx?.(key) ?? 0;
+    const px = (point: Pt2): Pt2 => {
+      const [x, y] = toPx(fit, apply(transform, point));
+      return [x + offset, y + offset];
+    };
+    const shown = (points: Pt2[]) => {
+      if (!projectHidden) return points;
+      const host = hostOf(key);
+      if (!host) return null;
+      return host.key === key ? points : pointsOnDrawnRing(points, host.ring, true);
+    };
+    for (const edge of plainEdges(geom)) {
+      if (
+        projectHidden &&
+        !baseKeys.has(key) &&
+        options.hiddenTargets &&
+        !options.hiddenTargets.has(edge.id)
+      )
+        continue;
+      const points = shown(edge.pts.map(px));
+      if (points) add(edge.id, points, false);
+    }
+    (innerLines?.get(key) ?? []).forEach((line, index) => {
+      if (spanMm(line) < DOOR_SPAN_MM) return;
+      const id = innerId(key, index);
+      if (
+        projectHidden &&
+        !baseKeys.has(key) &&
+        options.hiddenTargets &&
+        !options.hiddenTargets.has(id)
+      )
+        return;
+      const points = shown(line.map(px));
+      if (points) add(id, points, true);
+    });
+  }
+  return out;
+}
+
+/** The nearest fitted door to a point, used after the SVG's broad stroke catches the click. */
+export function nearestPictureTarget(
+  point: Pt2,
+  targets: readonly PicturePickTarget[],
+): PicturePickTarget | null {
+  let nearest: PicturePickTarget | null = null;
+  let distance = Infinity;
+  const boxDistance = (box: Box) =>
+    Math.hypot(
+      point[0] < box.x0 ? box.x0 - point[0] : point[0] > box.x1 ? point[0] - box.x1 : 0,
+      point[1] < box.y0 ? box.y0 - point[1] : point[1] > box.y1 ? point[1] - box.y1 : 0,
+    );
+  const candidates = targets
+    .map((target) => ({ target, distance: boxDistance(target.box) }))
+    .sort((a, b) => a.distance - b.distance);
+  for (const candidate of candidates) {
+    if (candidate.distance > distance) break;
+    const target = candidate.target;
+    for (let index = 1; index < target.points.length; index++) {
+      const next = pointSegmentDistance(point, target.points[index - 1], target.points[index]);
+      if (next < distance) {
+        nearest = target;
+        distance = next;
+      }
+    }
+  }
+  return nearest;
+}
+
 /**
  * How far a drawn outline may leave the dense ring, in garment mm. A step picture is 0.3–0.5 px/mm
  * and `pathOf` rounds to 0.1 px, so 0.3 mm is under a sixth of a pixel (0.04 mm on paper, a fifth of
@@ -1241,8 +1483,8 @@ export function pictureBounds(
 /**
  * The step picture fitted into w × h px. `marks` identify edges and inner lines; `nos` put a stored
  * seam's number beside it; `names` (one per input) sit on
- * the input's centre, or under it with `namesBelow`. With `onPick` every plain edge and inner line
- * of every piece is a door — the base a patch was sewn on keeps its slit.
+ * the input's centre, or under it with `namesBelow`. With `onPick` every visible plain edge and
+ * inner line is a door; active hidden targets project onto the contour that represents them.
  */
 export function StepPictureSvg({
   w,
@@ -1267,6 +1509,7 @@ export function StepPictureSvg({
   hover,
   onHover,
   onPick,
+  pickTargets,
   view,
   bounds,
   className,
@@ -1299,6 +1542,8 @@ export function StepPictureSvg({
   hover?: TargetId | null;
   onHover?: (id: TargetId | null) => void;
   onPick?: (id: TargetId) => void;
+  /** Hidden/folded targets that remain pickable on their projected visible host contour. */
+  pickTargets?: readonly TargetId[];
   /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
   view?: PictureView;
   /** Fit to this box instead of the picture's own (a piece dragged by hand keeps the frame). */
@@ -1574,28 +1819,28 @@ export function StepPictureSvg({
 
   const doors = useMemo(() => {
     if (!onPick && look !== 'canvas') return [];
-    const out: { id: TargetId; d: string; inner: boolean }[] = [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
-    // a stacked twin's edges follow its drawn offset.
-    const keys = layers ? ownedOrder : [...layout.T.keys()];
-    for (const key of keys) {
-      const T = layout.T.get(key);
-      const g = geoms.get(key);
-      if (!T || !g) continue;
-      const twin = layers ? twinNumbers.get(key) : undefined;
-      const offset =
-        twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-      const px = (p: Pt2): Pt2 => {
-        const [x, y] = toPx(fit, apply(T, p));
-        return [x + offset, y + offset];
-      };
-      for (const e of plainEdges(g)) out.push({ id: e.id, d: pathOf(e.pts.map(px)), inner: false });
-      (innerLines?.get(key) ?? []).forEach((l, k) => {
-        if (spanMm(l) < DOOR_SPAN_MM) return;
-        out.push({ id: innerId(key, k), d: pathOf(l.map(px)), inner: true });
-      });
-    }
-    return out;
+    // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
+    return picturePickTargets(
+      layout,
+      geoms,
+      innerLines,
+      fit,
+      layers
+        ? {
+            keys: ownedOrder,
+            projectHidden: false,
+            offsetPx: (key) => {
+              const twin = twinNumbers.get(key);
+              return twin && !claimedStackedKeys.has(key)
+                ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s
+                : 0;
+            },
+          }
+        : {
+            hiddenTargets: onPick && pickTargets ? new Set(pickTargets) : undefined,
+          },
+    );
   }, [
     onPick,
     look,
@@ -1607,12 +1852,32 @@ export function StepPictureSvg({
     ownedOrder,
     twinNumbers,
     claimedStackedKeys,
+    pickTargets,
   ]);
   // A second click on the same spot takes the edge of the layer below (owned pictures only).
   const lastPick = useRef<{ x: number; y: number; id: TargetId } | null>(null);
   const pickAt = (event: ReactMouseEvent<SVGPathElement>, id: TargetId): TargetId => {
-    if (!layers) return id;
     const { clientX: x, clientY: y } = event;
+    if (!layers) {
+      const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+      if (!rect) return id;
+      const point: Pt2 = [
+        ((x - rect.left) * w) / Math.max(rect.width, 1),
+        ((y - rect.top) * h) / Math.max(rect.height, 1),
+      ];
+      const hits = new Set(
+        document
+          .elementsFromPoint(x, y)
+          .map((element) => element.getAttribute('data-seam-target'))
+          .filter((hit): hit is TargetId => !!hit),
+      );
+      return (
+        nearestPictureTarget(
+          point,
+          doors.filter((target) => hits.has(target.id)),
+        )?.id ?? id
+      );
+    }
     const hits = document
       .elementsFromPoint(x, y)
       .map((el) => el.getAttribute('data-seam-target'))
@@ -1641,58 +1906,10 @@ export function StepPictureSvg({
       visibleBase.find((piece) => partnerInput != null && piece.input === partnerInput)
     );
   };
-  const nearestOnRing = (point: Pt2, ring: readonly Pt2[]) => {
-    let best = ring[0] ?? point;
-    let distance = Infinity;
-    let segment = 0;
-    ring.forEach((start, index) => {
-      const end = ring[(index + 1) % ring.length];
-      const dx = end[0] - start[0];
-      const dy = end[1] - start[1];
-      const length2 = dx * dx + dy * dy;
-      const share = length2
-        ? Math.max(
-            0,
-            Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length2),
-          )
-        : 0;
-      const candidate: Pt2 = [start[0] + share * dx, start[1] + share * dy];
-      const candidateDistance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
-      if (candidateDistance < distance) {
-        best = candidate;
-        distance = candidateDistance;
-        segment = index;
-      }
-    });
-    return { point: best, distance, segment };
-  };
   const pointsOnDrawnPiece = (key: string, points: readonly Pt2[]) => {
     const host = actionHost(key);
     if (!host) return null;
-    const hidden = host.key !== key;
-    if (hidden && points.length > 1 && host.ring.length > 2) {
-      const start = nearestOnRing(points[0], host.ring);
-      const end = nearestOnRing(points[points.length - 1], host.ring);
-      const count = host.ring.length;
-      const forward: Pt2[] = [];
-      for (let index = (start.segment + 1) % count; index !== (end.segment + 1) % count; ) {
-        forward.push(host.ring[index]);
-        index = (index + 1) % count;
-      }
-      const backward: Pt2[] = [];
-      for (let index = start.segment; index !== end.segment; ) {
-        backward.push(host.ring[index]);
-        index = (index - 1 + count) % count;
-      }
-      const arc = forward.length <= backward.length ? forward : backward;
-      return [start.point, ...arc, end.point];
-    }
-    return points.map((point) => {
-      const nearest = nearestOnRing(point, host.ring);
-      return hidden || (!insideRing(point, host.ring) && nearest.distance > 4)
-        ? nearest.point
-        : point;
-    });
+    return pointsOnDrawnRing(points, host.ring, host.key !== key);
   };
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const markLines = marks.flatMap((m) => {
@@ -2052,7 +2269,7 @@ export function StepPictureSvg({
           {doors
             .filter((x) => x.inner)
             .map((x) => (
-              <path key={x.id} d={x.d} />
+              <path key={x.id} d={pathOf(x.points)} />
             ))}
         </g>
       )}
@@ -2373,7 +2590,7 @@ export function StepPictureSvg({
         [...doors.filter((x) => x.inner), ...doors.filter((x) => !x.inner)].map((x) => (
           <path
             key={`h:${x.id}`}
-            d={x.d}
+            d={pathOf(x.points)}
             fill='none'
             stroke='transparent'
             strokeWidth={14}

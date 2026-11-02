@@ -56,6 +56,12 @@ describe('zone signal (card 6, step 720: placket on the left front)', () => {
     );
   });
 
+  it('reads a front/back pair as part of a front assembly step', () => {
+    const result = signalsOf(side('BP_MAIN#3'), side('P_L_MAIN#4'), { op: FRONT, geoms });
+    expect(result.delta).toBeLessThan(0);
+    expect(result.signals.map((signal) => signal.term)).toContain('zone');
+  });
+
   it('says nothing in a zone that names no part', () => {
     for (const zone of ['outer', 'TECH_CARD_GARMENT_ZONE_OTHER', 'lining', undefined])
       expect(signalsOf(...placketOnPocket, { op: { zone }, geoms: geoms }).delta).toBe(0);
