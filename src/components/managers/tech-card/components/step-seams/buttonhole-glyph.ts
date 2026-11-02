@@ -85,6 +85,11 @@ export function buttonholeDirection(ring: readonly Pt2[], orientation: string | 
     : [axis[1], -axis[0]];
 }
 
+/** A front or its placket by code or name. `P_L` counts as a whole code: FLP_L is a cuff placket. */
+const FRONT_HOST = /PLCK|PLACKET|(?:^|[^A-Z0-9])P_[LR]|FRONT/i;
+
+export const isFrontHost = (text: string): boolean => FRONT_HOST.test(text);
+
 const placementCount = (op: ButtonholeOperation): number =>
   Math.max(0, op.placementCount ?? op.placementLayout?.count ?? 0);
 
@@ -106,7 +111,7 @@ export function fasteningPictureGlyphs(
       kind === 'buttonhole' ? mark.kind === 'buttonhole' : mark.kind === 'drill',
     );
     if (!geom || !marks.length) return [];
-    const closureHost = /PLCK|PLACKET|P_[LR]|FRONT/i.test(`${geom.pieceKey} ${geom.name}`);
+    const closureHost = isFrontHost(`${geom.pieceKey} ${geom.name}`);
     return [{ key, geom, marks, score: marks.length * 10 + (closureHost ? 200 : 0) }];
   });
   const selected = candidates.sort((left, right) => right.score - left.score)[0];

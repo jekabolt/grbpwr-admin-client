@@ -23,7 +23,6 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
-import { NO_SEAM_TEXT } from 'components/managers/tech-card/components/step-seams/step-highlight';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -4443,7 +4442,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           stepEdges={r.editorPic.stepEdges}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
-          noSeamText={own(NO_SEAM_TEXT)}
           className='asm-editor-picture'
         />
       ) : drawing ? (

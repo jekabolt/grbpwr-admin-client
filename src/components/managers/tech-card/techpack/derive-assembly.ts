@@ -51,6 +51,7 @@ import {
   buttonholeDirection,
   buttonholeLengthMm,
   buttonholeOrientation,
+  isFrontHost,
 } from 'components/managers/tech-card/components/step-seams/buttonhole-glyph';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
@@ -2531,16 +2532,12 @@ function placementPieceScore(piece: AsmPiece, op: Op, marks: readonly PieceMark[
   // Whole-garment fastening rows name the neckline, but their repeated closure marks live on the
   // front/placket. Without this material cue a collar-stand buttonhole wins on the zone word and
   // the final shirt's button is printed at the neck instead of on its closure.
-  if (
-    (op.tech === 'button' || op.tech === 'buttonhole') &&
-    /(PLCK|PLACKET|P_[LR]|FRONT)/.test(code)
-  )
-    score += 200;
+  if ((op.tech === 'button' || op.tech === 'buttonhole') && isFrontHost(code)) score += 200;
   if (/neck|collar/.test(terms) && /(NCK|CLR|COLLAR)/.test(code)) score += 100;
   if (/sleeve/.test(terms) && /(SLV|FLP|SLEEVE)/.test(code)) score += 100;
-  if (/front/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 100;
+  if (/front/.test(terms) && isFrontHost(code)) score += 100;
   if (/lining/.test(terms) && /(PCK|POCKET)/.test(code)) score += 100;
-  if (/outer/.test(terms) && /(PLCK|P_[LR]|FRONT)/.test(code)) score += 40;
+  if (/outer/.test(terms) && isFrontHost(code)) score += 40;
   return score;
 }
 
@@ -2574,7 +2571,22 @@ function placementMarks(
   const selected = candidates.sort((a, b) => b.score - a.score)[0];
   if (!selected) return [];
   const count = Math.max(0, op.raw.placementLayout?.count ?? selected.marks.length);
-  const marks = selected.marks.slice(0, count || selected.marks.length);
+  // A piece marked at both ends closes on itself: the button goes to the end away from its hole.
+  const partners = (selected.piece.geom.marks ?? []).filter(
+    (mark) =>
+      used.has(mark.id) &&
+      (kind === 'button' ? mark.kind === 'buttonhole' : kind === 'buttonhole' && mark.kind === 'drill'),
+  );
+  const awayFromPartner = (mark: PieceMark) =>
+    Math.min(
+      ...partners.map((partner) =>
+        Math.hypot(mark.bbox.cx - partner.bbox.cx, mark.bbox.cy - partner.bbox.cy),
+      ),
+    );
+  const ordered = partners.length
+    ? [...selected.marks].sort((a, b) => awayFromPartner(b) - awayFromPartner(a))
+    : selected.marks;
+  const marks = ordered.slice(0, count || ordered.length);
   return marks.map((mark) => {
     used.add(mark.id);
     const first = mark.pts[0];

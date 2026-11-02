@@ -213,7 +213,7 @@ export function deriveMaterials(techCard: common_TechCard, sink?: GapSink, t: Pd
       return {
         key: ref.key,
         name: clean(ref.item.name),
-        detail: clean(ref.item.composition) || clean(ref.item.spec),
+        detail: formatCompositionCell(ref.item.composition) || clean(ref.item.spec),
         kind: bomKindText(
           ref.item.kind,
           t('common.generated', {
