@@ -221,7 +221,17 @@ export function matchInterliningImport(args: {
     groups.set(key, group);
   }
 
+  // An alias naming a block of this file takes that block's identity: the file has already decided
+  // whether a tail is a size, and by the shape of the name alone SHLD_1_L loses its «left». The
+  // shape only speaks for a block the file no longer has.
+  const identityOfBlock = new Map<string, string>();
+  for (const block of blocks) {
+    const identity = codes.get(block.id)?.identity;
+    if (identity) identityOfBlock.set(loose(block.blockName ?? ''), identity);
+  }
   const previous = groupedAliases(previousAliases, (block) => {
+    const known = identityOfBlock.get(loose(block));
+    if (known) return known;
     const parsed = splitBlockSize(block, sizeTokens);
     return canonicalInterliningIdentity({
       blockName: block,
