@@ -292,7 +292,7 @@ function ArtworkTile({
 }): JSX.Element {
   const busy = progress !== undefined;
   return (
-    <div className='relative h-10 shrink-0' style={{ width: wide ? 134 : 64 }}>
+    <div className='group relative h-10 shrink-0' style={{ width: wide ? 134 : 64 }}>
       <Tile
         dashed={!full && !busy}
         tone={!full && !busy ? 'error' : 'default'}
@@ -315,7 +315,7 @@ function ArtworkTile({
           size='sm'
           aria-label={`remove ${label}`}
           onClick={onRemove}
-          className='absolute right-0 top-0 bg-bgColor'
+          className='absolute right-0 top-0 bg-bgColor opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
         />
       ) : null}
     </div>

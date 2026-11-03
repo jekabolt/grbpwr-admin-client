@@ -6,12 +6,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 
-import { LabelsBlock, PackagingBlock } from 'components/managers/tech-card/components/labels-blocks';
+import {
+  LabelsBlock,
+  PackagingBlock,
+} from 'components/managers/tech-card/components/labels-blocks';
 import {
   techCardDefaultData,
   techCardSchema,
   type TechCardFormData,
 } from 'components/managers/tech-card/components/schema';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 
 type Probe = {
   mount: () => void;
@@ -46,7 +50,9 @@ probe.mount = () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={qc}>
-      <Harness />
+      <DictionaryProvider>
+        <Harness />
+      </DictionaryProvider>
     </QueryClientProvider>,
   );
 };
