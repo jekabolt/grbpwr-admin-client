@@ -215,9 +215,7 @@ function nestedArrayIdentityChanged(before: unknown, after: unknown): boolean {
   if (Array.isArray(before) && Array.isArray(after)) {
     const key = stableRowKey(before, after);
     if (!key) return !sameValue(before, after);
-    const beforeKeys = before.map(
-      (row) => (row as Record<string, unknown>)[key] as PrimitiveKey,
-    );
+    const beforeKeys = before.map((row) => (row as Record<string, unknown>)[key] as PrimitiveKey);
     const afterKeys = after.map((row) => (row as Record<string, unknown>)[key] as PrimitiveKey);
     if (!sameValue(beforeKeys, afterKeys)) return true;
     const afterByKey = new Map(
@@ -437,4 +435,23 @@ export function redoHistoryStep<T>(state: UndoHistoryState, current: T) {
 
 export function historyBarrier(state: UndoHistoryState): UndoHistoryState {
   return emptyUndoHistory(state.nextId);
+}
+
+/** The two stacks behind one UNDO: the card's own, and the screen that owns its form subtree. */
+export type HistorySide = 'page' | 'owner';
+
+/**
+ * Which stack the next UNDO or REDO takes: the side that acted last while it still has an entry,
+ * otherwise the other one. The stacks write disjoint form subtrees, so a strict global order is
+ * not needed; the last gesture coming back first is.
+ */
+export function pickHistorySide(
+  last: HistorySide,
+  pageDepth: number,
+  ownerDepth: number,
+): HistorySide | null {
+  const depth = { page: pageDepth, owner: ownerDepth };
+  if (depth[last] > 0) return last;
+  const other: HistorySide = last === 'page' ? 'owner' : 'page';
+  return depth[other] > 0 ? other : null;
 }

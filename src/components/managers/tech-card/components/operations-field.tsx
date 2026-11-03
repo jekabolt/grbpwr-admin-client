@@ -201,6 +201,7 @@ import {
   type ScopedDxfFile,
 } from './nesting/dxf-geometry';
 import { bindingForScope, bindingScopes, scopeKeyOfBinding } from './bom-purpose';
+import { useUndoHistory } from './undo-history';
 import {
   pieceBlockRefs,
   pieceRefKey,
@@ -7852,9 +7853,37 @@ export function OperationsField({
   // «create в фулскрине → закрыл → дописал заметку в списке → открыл → ⌘Z» сносил шаг ВМЕСТЕ с
   // заметкой — ровно то, от чего точка 6 стережёт добор детали. Отмена обещает «ой» сразу после
   // жеста; жест из прошлого визита — уже не «сразу».
+  //
+  // A REMOVAL OUTLIVES THE BORDER: it is keyed by `historyKey` and returns the step whole, so a step
+  // removed in the list can still come back from the fullscreen and the other way round.
   useEffect(() => {
-    dropFormHistory();
-  }, [fsOpen, dropFormHistory]);
+    clearFormHistory();
+  }, [fsOpen, clearFormHistory]);
+
+  // The list has no chip of its own: the card's UNDO is its door. REMOVE takes the focus away with
+  // its button, so ⌘Z lands outside `data-history-owner` and has to reach this stack from there too.
+  // The fullscreen answers for itself. A layout move has nothing to show here and stays in it.
+  const undoHistoryApi = useUndoHistory();
+  const setHistoryOwner = undoHistoryApi.setOwner;
+  const historyDoors = useRef({ undo: undoGesture, redo: redoGesture });
+  historyDoors.current = { undo: undoGesture, redo: redoGesture };
+  useEffect(() => {
+    if (fsOpen) {
+      setHistoryOwner(null);
+      return;
+    }
+    const undoTop = peekUndo(histView);
+    const redoTop = peekRedo(histView);
+    setHistoryOwner({
+      undoDepth: undoTop && undoTop.kind !== 'move' ? histView.undo.length : 0,
+      redoDepth: redoTop && redoTop.kind !== 'move' ? histView.redo.length : 0,
+      undoLabel: undoTop?.label,
+      redoLabel: redoTop?.label,
+      undo: () => historyDoors.current.undo(),
+      redo: () => historyDoors.current.redo(),
+    });
+  }, [fsOpen, histView, setHistoryOwner]);
+  useEffect(() => () => setHistoryOwner(null), [setHistoryOwner]);
 
   const routeHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.altKey)
