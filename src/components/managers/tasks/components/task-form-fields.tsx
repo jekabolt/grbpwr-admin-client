@@ -7,12 +7,13 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { addDays, format, startOfDay } from 'date-fns';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
-import { AddDoor, Button, Chip, ChipRow, Close, Input, Text } from 'ui';
+import { AddDoor, Button, Chip, ChipRow, Close, Input, Progress, Text } from 'ui';
 import type { Task, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
 import { boardNameOf, tasksKeys, useTaskBoards } from '../hooks/useTasks';
+import { useTaskAttachmentIntake } from '../hooks/useTaskAttachmentIntake';
 import { PRIORITIES, PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '../utils/meta';
 import { AvatarStack } from './avatar-stack';
 import { EntityPicker } from './entity-picker';
@@ -413,7 +414,7 @@ function LinkRow({
   );
 }
 
-type AddKind = LinkType | 'file' | 'media';
+type AddKind = LinkType | 'file' | 'media' | 'upload';
 
 export function AttachField({
   phone,
@@ -440,6 +441,32 @@ export function AttachField({
   const [step, setStep] = useState<LinkType | null>(null);
   const [filePicker, setFilePicker] = useState(false);
   const mediaTrigger = useRef<HTMLButtonElement>(null);
+  const uploadTrigger = useRef<HTMLInputElement>(null);
+  const fileIdsRef = useRef(fileIds);
+  const mediaIdsRef = useRef(mediaIds);
+
+  useEffect(() => {
+    fileIdsRef.current = fileIds;
+  }, [fileIds]);
+  useEffect(() => {
+    mediaIdsRef.current = mediaIds;
+  }, [mediaIds]);
+
+  const attachmentIntake = useTaskAttachmentIntake({
+    enabled: true,
+    onMedia: (id) => {
+      if (mediaIdsRef.current.includes(id)) return;
+      const next = [...mediaIdsRef.current, id];
+      mediaIdsRef.current = next;
+      setMediaIds(next);
+    },
+    onFile: (id) => {
+      if (fileIdsRef.current.includes(id)) return;
+      const next = [...fileIdsRef.current, id];
+      fileIdsRef.current = next;
+      setFileIds(next);
+    },
+  });
 
   const setLinks = LINK_TYPES.filter((t) => isSet(links[t.field], t.config.empty));
 
@@ -460,13 +487,14 @@ export function AttachField({
   };
 
   const choose = (kind: AddKind) => {
-    if (kind === 'file' || kind === 'media') {
+    if (kind === 'file' || kind === 'media' || kind === 'upload') {
       openAdd(false);
       // Шторка сначала закрывается и возвращает фокус, потом открывается пикер — иначе возврат
       // фокуса шторки выдернул бы его из только что открытого окна.
       setTimeout(() => {
         if (kind === 'file') setFilePicker(true);
-        else mediaTrigger.current?.click();
+        else if (kind === 'media') mediaTrigger.current?.click();
+        else uploadTrigger.current?.click();
       }, 0);
       return;
     }
@@ -476,7 +504,27 @@ export function AttachField({
   const hasAny = setLinks.length + fileIds.length > 0;
 
   return (
-    <div className='flex flex-col gap-2'>
+    <div {...attachmentIntake.dropProps} className='relative isolate flex flex-col gap-2'>
+      {attachmentIntake.dragging && (
+        <div
+          aria-hidden
+          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textColor bg-bgColor/95'
+        >
+          <Text size='micro' variant='uppercase' tracking='section' component='span'>
+            drop files
+          </Text>
+        </div>
+      )}
+
+      {attachmentIntake.busy && (
+        <div className='flex flex-col gap-1.5'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            adding files
+          </Text>
+          <Progress value={attachmentIntake.progress} />
+        </div>
+      )}
+
       {hasAny && (
         <div className='flex flex-col border border-borderColor'>
           {setLinks.map((t) => (
@@ -556,6 +604,7 @@ export function AttachField({
               </OptionRow>
             ))}
             <OptionRow onClick={() => choose('file')}>library file</OptionRow>
+            <OptionRow onClick={() => choose('upload')}>upload file</OptionRow>
             <OptionRow onClick={() => choose('media')}>site media · public</OptionRow>
           </>
         )}
@@ -575,6 +624,18 @@ export function AttachField({
             site media
           </Button>
         }
+      />
+
+      <input
+        ref={uploadTrigger}
+        type='file'
+        multiple
+        hidden
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          attachmentIntake.openFiles(files);
+        }}
       />
 
       {filePicker && (

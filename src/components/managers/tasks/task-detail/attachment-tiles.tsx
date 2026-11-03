@@ -40,6 +40,8 @@ export function AttachmentTiles({
   annotations,
   onOpenMedia,
   onAdd,
+  onAddMedia,
+  addDisabled,
 }: {
   taskId: number;
   media: TaskMedia[];
@@ -57,8 +59,11 @@ export function AttachmentTiles({
    * которой считает `useTaskMediaViewer`.
    */
   onOpenMedia: (index: number) => void;
-  /** «+ file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
+  /** «+ add file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
   onAdd?: () => void;
+  /** «+ media» открывает медиатеку; «+ add file» берёт файл с устройства. */
+  onAddMedia?: () => void;
+  addDisabled?: boolean;
 }) {
   const qc = useQueryClient();
   const { canRead } = usePermissions();
@@ -198,9 +203,24 @@ export function AttachmentTiles({
           />
         ))}
 
-        {onAdd && (
-          <AddDoor shape='tile' className='aspect-square w-full' onClick={onAdd}>
+        {onAddMedia && (
+          <AddDoor
+            shape='tile'
+            className='aspect-square w-full'
+            disabled={addDisabled}
+            onClick={onAddMedia}
+          >
             media
+          </AddDoor>
+        )}
+        {onAdd && (
+          <AddDoor
+            shape='tile'
+            className='aspect-square w-full'
+            disabled={addDisabled}
+            onClick={onAdd}
+          >
+            add file
           </AddDoor>
         )}
       </Tiles>

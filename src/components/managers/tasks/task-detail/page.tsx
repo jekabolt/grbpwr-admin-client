@@ -1,11 +1,10 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { differenceInCalendarDays, format } from 'date-fns';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import {
-  AddDoor,
   BackLink,
   Button,
   CalloutBox,
@@ -15,6 +14,7 @@ import {
   Arrow,
   GenericPopover,
   Pill,
+  Progress,
   Section,
   SectionStack,
   Select,
@@ -51,6 +51,7 @@ import { ParentPicker, TaskRelations } from '../components/task-relations';
 import { openBlockers } from '../utils/relations';
 import { PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { taskLinks } from '../utils/links';
+import { useTaskAttachmentIntake } from '../hooks/useTaskAttachmentIntake';
 import {
   dueMeta,
   PRIORITIES,
@@ -171,7 +172,13 @@ export function TaskDetail() {
   const [moreOpen, setMoreOpen] = useState(false);
   const phone = useMediaQuery(PHONE_QUERY);
   const mediaTrigger = useRef<HTMLButtonElement>(null);
+  const fileTrigger = useRef<HTMLInputElement>(null);
+  const taskRef = useRef(task);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    taskRef.current = task;
+  }, [task]);
 
   function editDescriptionOnClick(e: React.MouseEvent<HTMLDivElement>) {
     // ТОЛЬКО ИЗ СВОЕГО DOM. Просмотрщик вложений, открытый из описания, рисуется порталом, а
@@ -210,6 +217,30 @@ export function TaskDetail() {
       return false;
     }
   }
+
+  const attachmentIntake = useTaskAttachmentIntake({
+    enabled: canWrite,
+    onMedia: async (id) => {
+      const current = taskRef.current;
+      if (!current || current.task.mediaIds.includes(id)) return;
+      const seen = current.task.mediaIds;
+      const next = [...seen, id];
+      if (!(await patchInline({ mediaIds: next }, { mediaIds: seen }))) {
+        throw new Error('not attached');
+      }
+      taskRef.current = { ...current, task: { ...current.task, mediaIds: next } };
+    },
+    onFile: async (id) => {
+      const current = taskRef.current;
+      if (!current || current.task.fileIds.includes(id)) return;
+      const seen = current.task.fileIds;
+      const next = [...seen, id];
+      if (!(await patchInline({ fileIds: next }, { fileIds: seen }))) {
+        throw new Error('not attached');
+      }
+      taskRef.current = { ...current, task: { ...current.task, fileIds: next } };
+    },
+  });
 
   /**
    * ИНЛАЙН-ЗАПИСЬ С ЭТОЙ СТРАНИЦЫ РАЗРЕШЕНА РОВНО ЧЕРЕЗ `useInlineTaskPatch` — И БОЛЬШЕ НИКАК.
@@ -296,7 +327,7 @@ export function TaskDetail() {
   const archiveBusy = archiveTask.isPending || unarchiveTask.isPending;
   const attachmentCount = media.length + task.files.length;
 
-  /** Пока летит инлайн-запись, «+ media» (тоже инлайновая дверь) ждёт: `isPending` из кэша записей. */
+  /** Пока летит инлайн-запись, «+ file» ждёт: `isPending` из кэша записей. */
   const editLocked = inlinePatch.isPending;
 
   const moveTo = (boardId: number, status: TaskStatus) =>
@@ -305,13 +336,12 @@ export function TaskDetail() {
     (boardId !== task.boardId || status !== task.status) &&
     move.mutate({ id: task.id, boardId, status, position: 0 });
 
-  /**
-   * «+ MEDIA» ОТКРЫВАЕТ МЕДИАТЕКУ, А НЕ МОДАЛКУ ПРАВКИ (владелец 19.10: «+ file открывает не
-   * селектор файлов, а edit task»). Выбранное дописывается к `mediaIds` той же инлайн-дверью, что
-   * и остальные поля, — со сверкой по тому списку, какой был на экране при открытии.
-   */
   const openMediaPicker = () => {
     if (!editLocked) mediaTrigger.current?.click();
+  };
+
+  const openFilePicker = () => {
+    if (!editLocked) fileTrigger.current?.click();
   };
 
   const overdue = due.state === 'overdue';
@@ -456,7 +486,20 @@ export function TaskDetail() {
   );
 
   return (
-    <div className='mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 overflow-x-clip pb-10'>
+    <div
+      {...attachmentIntake.dropProps}
+      className='relative isolate mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 overflow-x-clip pb-10'
+    >
+      {attachmentIntake.dragging && (
+        <div
+          aria-hidden
+          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textColor bg-bgColor/95'
+        >
+          <Text size='micro' variant='uppercase' tracking='section' component='span'>
+            drop files
+          </Text>
+        </div>
+      )}
       {/* ── 1. Верхняя полоса: дорога назад и меню действий ─────────────────────────────── */}
       <div className='flex items-center justify-between gap-3 border-b border-borderColor'>
         <BackLink className='inline-flex min-h-11 items-center sm:min-h-8' to={ROUTES.tasks}>
@@ -784,27 +827,27 @@ export function TaskDetail() {
                 самой карточки, и если сервер не разрешил какой-то id, два экрана назвали бы одно
                 вложение разными номерами.
 
-                Пусто — секция всё равно стоит (с правом записи): одна дверь «+ media», чтобы
-                было видно, что к задаче можно добавить медиа. */
+                Пусто — секция всё равно стоит (с правом записи): одна дверь «+ add file»,
+                чтобы было видно, что к задаче можно добавить вложение. */
           <Section title={`attachments · ${attachmentCount}`} className='min-w-0'>
-            {attachmentCount > 0 ? (
-              <AttachmentTiles
-                taskId={task.id}
-                media={media}
-                files={task.files}
-                annotations={annotations}
-                onOpenMedia={attachments.openIndex}
-                onAdd={canWrite && !editLocked ? openMediaPicker : undefined}
-              />
-            ) : (
-              <AddDoor
-                className='min-h-11 justify-center py-6'
-                disabled={editLocked}
-                onClick={openMediaPicker}
-              >
-                media
-              </AddDoor>
+            {attachmentIntake.busy && (
+              <div className='flex flex-col gap-1.5'>
+                <Text size='micro' variant='label' component='span' className='uppercase'>
+                  adding files
+                </Text>
+                <Progress value={attachmentIntake.progress} />
+              </div>
             )}
+            <AttachmentTiles
+              taskId={task.id}
+              media={media}
+              files={task.files}
+              annotations={annotations}
+              onOpenMedia={attachments.openIndex}
+              onAdd={canWrite ? openFilePicker : undefined}
+              onAddMedia={canWrite ? openMediaPicker : undefined}
+              addDisabled={editLocked}
+            />
           </Section>
         )}
 
@@ -832,8 +875,6 @@ export function TaskDetail() {
 
       {attachments.node}
 
-      {/* Медиатека держит своё окно сама и открывается только своим триггером; триггер спрятан,
-          его жмут «+ media» секции вложений и плитка «+ media». */}
       {canWrite && (
         <MediaSelector
           label='media'
@@ -851,6 +892,20 @@ export function TaskDetail() {
               media
             </Button>
           }
+        />
+      )}
+
+      {canWrite && (
+        <input
+          ref={fileTrigger}
+          type='file'
+          multiple
+          hidden
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            attachmentIntake.openFiles(files);
+          }}
         />
       )}
 
