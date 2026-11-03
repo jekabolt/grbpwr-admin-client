@@ -124,9 +124,14 @@ export function rowsSig(rows: readonly StoredSeam[]): string {
 
 /** A row's pair, order-free: kind + both sides' run hints (the same pair from two clients agrees). */
 export function rowPairSig(r: StoredSeam): string {
+  // Two spans of one edge are two seams: a real range is part of the pair, a whole edge reads as before.
+  const span = (a: StoredSeam['sideA'][number]) =>
+    r.kind !== 'edge' && (a.range[0] > 0.0001 || a.range[1] < 0.9999)
+      ? `@${a.range[0].toFixed(3)}-${a.range[1].toFixed(3)}`
+      : '';
   const side = (xs: StoredSeam['sideA']) =>
     xs
-      .map((a) => a.edgeHint)
+      .map((a) => `${a.edgeHint}${span(a)}`)
       .sort()
       .join('+');
   return `${r.kind}|${[side(r.sideA), side(r.sideB)].sort().join('~')}`;

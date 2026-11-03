@@ -13,6 +13,7 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows, type FoldStep } from 'lib/folds';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { anchorOfRunId, type EdgeAnchor, type SidePart, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -25,10 +26,23 @@ import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
 import { isGuess, pickTarget, seamSideName, sideForClick } from './seam-focus';
 import { usePictureZoom } from './picture-zoom';
+import {
+  edgeBreaks,
+  NO_SPANS,
+  pickFreeSpan,
+  pickSegment,
+  repeatsStoredSeam,
+  segmentAt,
+  sideParts,
+  snapToBreak,
+  storedSeamAt,
+  type SidePick,
+  type SpanRange,
+} from './span-pick';
 import { snapAtDuringDrag } from './pose-picking';
 import { PoseOverlay } from './pose-overlay';
 import { useStepResults } from './step-result-context';
-import { useAttachStepPose, useAttachStepSeam } from './step-seams-context';
+import { useAttachStepPose, useAttachStepSeam, useStepSeamActions } from './step-seams-context';
 import { stepWords } from './step-words';
 import {
   deltaMm,
@@ -49,6 +63,7 @@ import {
   useBoxSize,
   useStepScene,
   type EdgeMark,
+  type EdgeTick,
   type NoMark,
 } from './step-picture-view';
 import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
@@ -58,10 +73,18 @@ import { useMirrorStep } from './use-mirror-step';
 import { usePoseEdit } from './use-pose-edit';
 
 type Side = 'a' | 'b';
-type Sel = { a: TargetId[]; b: TargetId[] };
-const EMPTY: Sel = { a: [], b: [] };
+type Sel = SidePick;
+const EMPTY: Sel = { a: [], b: [], spans: NO_SPANS };
+const wholeSel = (sides: { a: readonly TargetId[]; b: readonly TargetId[] }): Sel => ({
+  a: [...sides.a],
+  b: [...sides.b],
+  spans: NO_SPANS,
+});
+type SpanHover = { id: TargetId; range: SpanRange };
 
 const sameSel = (x: Sel, y: Sel) =>
+  !Object.keys(x.spans.a).length &&
+  !Object.keys(x.spans.b).length &&
   x.a.length === y.a.length &&
   x.b.length === y.b.length &&
   x.a.every((id) => y.a.includes(id)) &&
@@ -150,6 +173,7 @@ export function SeamPickerBody({
   const cardId = scene.ctx?.cardId;
   const attach = useAttachStepSeam(index);
   const attachPose = useAttachStepPose(index);
+  const seamActions = useStepSeamActions(index);
   const errors = useSeamsStore((s) => s.errors);
   const foldRows = useFoldRows();
   const { catalog: workCatalog } = useOperationWorkCatalog();
@@ -157,14 +181,23 @@ export function SeamPickerBody({
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
   const unitStep = isUnitStep(groups);
   const initialPick = initialPickerPick(suggestion, preselectProposal, unitStep);
-  const [sel, setSel] = useState<Sel>(() => initialPick ?? EMPTY);
-  const [hover, setHover] = useState<TargetId | null>(null);
+  const [sel, setSel] = useState<Sel>(() => (initialPick ? wholeSel(initialPick) : EMPTY));
+  const [hover, setHover] = useState<SpanHover | null>(null);
+  const [spanDrag, setSpanDrag] = useState<SpanHover | null>(null);
+  const [activeSeam, setActiveSeam] = useState<string | null>(null);
+  const [clearingSeams, setClearingSeams] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState('');
   const [replaceMirrorOpen, setReplaceMirrorOpen] = useState(false);
   // A tile preloads its proposal; GUESS does the same from the manual + seam entry.
-  const [filled, setFilled] = useState<Sel | null>(() => initialPick);
-  const fitSource = useMemo(() => fitSourceOf({ a: sel.a, b: sel.b }), [sel]);
+  const [filled, setFilled] = useState<Sel | null>(() =>
+    initialPick ? wholeSel(initialPick) : null,
+  );
+  // FIT and the corner snap work on what is in hand: the spans, not the whole edges.
+  const fitSource = useMemo(
+    () => fitSourceOf({ a: sideParts(sel.a, sel.spans.a), b: sideParts(sel.b, sel.spans.b) }),
+    [sel],
+  );
   const poses = scene.poses;
   const stepRows = useMemo(
     () => (op?.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []),
@@ -240,6 +273,7 @@ export function SeamPickerBody({
       otherSideMm: otherIds.length ? plainSideLen(otherIds) : null,
       grainDeg: geo?.grainDeg,
     });
+  const pickParts = (side: Side) => sideParts(sel[side], sel.spans[side]);
 
   // ── what «accept» would write: only what the owner picked ──
   const pick: Sel = sel;
@@ -251,20 +285,25 @@ export function SeamPickerBody({
   const partKey = partSide.length ? pieceOfTarget(partSide[0]) : null;
 
   const guessSelection = useMemo<Sel | null>(() => {
-    if (suggestion) return { a: [...suggestion.a], b: [...suggestion.b] };
+    if (suggestion) return wholeSel(suggestion);
     if (!surfaceSuggestion) return null;
     const line = innerId(surfaceSuggestion.host, surfaceSuggestion.inner);
     const edge = longestEdge(geoms.get(surfaceSuggestion.part));
     const hostAt = sideForClick(surfaceSuggestion.host, groups, EMPTY, pieceOfTarget);
     const part = edge ? [edge] : [];
-    return hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] };
+    return wholeSel(hostAt === 'a' ? { a: [line], b: part } : { a: part, b: [line] });
   }, [suggestion, surfaceSuggestion, geoms, groups]);
 
   /** The pair on the table: both sides picked by hand, edge to edge. */
   const pair: SeamSides | null =
     !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
+  const repeatsSeam = !!pair && repeatsStoredSeam(pickParts('a'), pickParts('b'), stored, geoms);
   const canAccept =
-    !frozen && !busy && !!cardId && (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
+    !frozen &&
+    !busy &&
+    !!cardId &&
+    !repeatsSeam &&
+    (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
 
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
@@ -275,7 +314,17 @@ export function SeamPickerBody({
     (clicked: Sel): StoredSeam | null => {
       const s = orderedPickSides(clicked, geoms);
       const ins = [...s.a, ...s.b].filter((t) => parseInner(t));
-      if (ins.length === 0) return edgeRowFromPick(s, geoms, anchorCtx);
+      if (ins.length === 0) {
+        const ranged = Object.keys(clicked.spans.a).length || Object.keys(clicked.spans.b).length;
+        return edgeRowFromPick(
+          s,
+          geoms,
+          anchorCtx,
+          ranged
+            ? { a: sideParts(s.a, clicked.spans.a), b: sideParts(s.b, clicked.spans.b) }
+            : undefined,
+        );
+      }
       const h = parseInner(ins[0]);
       const g = h ? geoms.get(h.piece) : undefined;
       const line = h ? pieces?.get(h.piece)?.inner[h.k] : undefined;
@@ -299,6 +348,7 @@ export function SeamPickerBody({
     setSel(EMPTY);
     setRefused('');
     setFilled(null);
+    setActiveSeam(null);
   };
 
   const draftRow = useMemo(
@@ -348,14 +398,75 @@ export function SeamPickerBody({
 
   // Stable while the selection stands: the canvas keeps its hit layer across hovers (a fresh
   // closure per render re-created every hit path of the picture on each pointer event).
+  const pickRules = useMemo(
+    () => ({ isInner: (t: string) => !!parseInner(t), pieceOf: pieceOfTarget }),
+    [],
+  );
   const toggle = useCallback(
-    (id: TargetId) => {
+    (id: TargetId, atMm?: number) => {
       if (frozen || posing) return;
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      const length = resolveEdge(id, geoms)?.len ?? 0;
+      const picked = (side: Side) =>
+        sel[side].includes(id) &&
+        (atMm == null ||
+          !sel.spans[side][id] ||
+          (atMm >= sel.spans[side][id][0] && atMm <= sel.spans[side][id][1]));
       setRefused('');
-      setSel(pickTarget(sel, side, id, (t) => !!parseInner(t), pieceOfTarget));
+      // A stored seam's part is that seam, not a new pick; what is in hand comes off first.
+      if (!picked('a') && !picked('b')) {
+        const at = storedSeamAt(stored, id, atMm, geoms);
+        if (at >= 0) {
+          setSel(EMPTY);
+          setFilled(null);
+          setActiveSeam((current) => (current === stored[at].key ? null : stored[at].key));
+          return;
+        }
+      }
+      setActiveSeam(null);
+      if (atMm == null || parseInner(id) || !(length > 0)) {
+        const next = pickTarget(sel, side, id, pickRules.isInner, pickRules.pieceOf);
+        setSel(next);
+        return;
+      }
+      const segment = segmentAt(edgeBreaks(id, geoms), length, atMm);
+      setSel(pickSegment(sel, side, id, segment, length, pickRules));
     },
-    [frozen, posing, groups, sel],
+    [frozen, posing, groups, sel, geoms, stored, pickRules],
+  );
+  const onHoverAt = useCallback(
+    (id: TargetId | null, atMm: number | null) => {
+      const length = id ? resolveEdge(id, geoms)?.len ?? 0 : 0;
+      const free =
+        id && atMm != null && length > 0 && storedSeamAt(stored, id, atMm, geoms) < 0
+          ? segmentAt(edgeBreaks(id, geoms), length, atMm)
+          : null;
+      setHover((current) =>
+        current?.id === id && current?.range[0] === free?.[0] && current?.range[1] === free?.[1]
+          ? current
+          : id && free
+            ? { id, range: free }
+            : null,
+      );
+    },
+    [geoms, stored],
+  );
+  const onSpanDrag = useCallback(
+    (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
+      if (frozen || posing) return;
+      const breaks = edgeBreaks(id, geoms);
+      const range: SpanRange = [snapToBreak(breaks, fromMm), snapToBreak(breaks, toMm)];
+      if (!done) {
+        setSpanDrag({ id, range });
+        return;
+      }
+      setSpanDrag(null);
+      setRefused('');
+      setActiveSeam(null);
+      const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
+      setSel(pickFreeSpan(sel, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules));
+    },
+    [frozen, posing, groups, sel, geoms, pickRules],
   );
 
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
@@ -363,20 +474,50 @@ export function SeamPickerBody({
   const { marks, nos } = useMemo(() => {
     const marks: EdgeMark[] = [];
     const nos: NoMark[] = [];
-    const sideMarks = (ids: readonly TargetId[], tone: EdgeMark['tone']) => {
-      ids.forEach((id) => marks.push({ id, tone }));
-    };
     // A stored seam reads as a proposal does: its edges, its number on the first.
     stored.forEach((s, i) => {
-      sideMarks(s.sides.a, 'stored');
-      sideMarks(s.sides.b, 'stored');
-      const first = s.sides.a[0] ?? s.sides.b[0];
-      if (first) nos.push({ id: first, i });
+      const parts = [...s.parts.a, ...s.parts.b];
+      const active = s.key === activeSeam;
+      parts.forEach(({ target, range }) =>
+        marks.push({ id: target, tone: 'stored', ...(range ? { range } : {}), active }),
+      );
+      const first = s.parts.a[0] ?? s.parts.b[0];
+      if (first) nos.push({ id: first.target, i, ...(first.range ? { range: first.range } : {}) });
     });
-    sideMarks(sel.a, 'pickFirst');
-    sideMarks(sel.b, 'pick');
+    const sideMarks = (side: Side, tone: EdgeMark['tone']) =>
+      sel[side].forEach((id) => {
+        const range = sel.spans[side][id];
+        marks.push({ id, tone, ...(range ? { range } : {}) });
+      });
+    sideMarks('a', 'pickFirst');
+    sideMarks('b', 'pick');
+    if (spanDrag)
+      marks.push({
+        id: spanDrag.id,
+        tone:
+          sideForClick(pieceOfTarget(spanDrag.id), groups, sel, pieceOfTarget) === 'a'
+            ? 'pickFirst'
+            : 'pick',
+        range: [
+          Math.min(spanDrag.range[0], spanDrag.range[1]),
+          Math.max(spanDrag.range[0], spanDrag.range[1]),
+        ],
+      });
     return { marks, nos };
-  }, [stored, sel]);
+  }, [stored, sel, activeSeam, spanDrag, groups]);
+  // The break points of every edge in hand: what a segment or a drag can land on.
+  const ticks = useMemo<EdgeTick[]>(() => {
+    const ids = new Set([...sel.a, ...sel.b].filter((id) => !parseInner(id)));
+    if (hover) ids.add(hover.id);
+    if (spanDrag) ids.add(spanDrag.id);
+    return [...ids].flatMap((id) =>
+      edgeBreaks(id, geoms).map((point) => ({
+        id,
+        atMm: point.atMm,
+        notch: point.kind === 'notch',
+      })),
+    );
+  }, [sel, hover, spanDrag, geoms]);
   const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
   const canvasPickTargets = useMemo(
     () =>
@@ -396,12 +537,19 @@ export function SeamPickerBody({
   // Edge to edge on both sides (a part on its host's line has no Δ).
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
+  const shownSeam =
+    stored.find((s) => s.key === activeSeam) ??
+    (stored.length === 1 && !sel.a.length && !sel.b.length ? stored[0] : undefined);
   const delta = pair
-    ? deltaMm(sideLen(pair.a, pair.b), sideLen(pair.b, pair.a), ease)
-    : stored.length === 1 && !sel.a.length && !sel.b.length && edgeToEdge(stored[0].sides)
+    ? deltaMm(
+        sideLen(pickParts('a'), pickParts('b')),
+        sideLen(pickParts('b'), pickParts('a')),
+        ease,
+      )
+    : shownSeam && edgeToEdge(shownSeam.sides)
       ? deltaMm(
-          sideLen(stored[0].parts.a, stored[0].parts.b),
-          sideLen(stored[0].parts.b, stored[0].parts.a),
+          sideLen(shownSeam.parts.a, shownSeam.parts.b),
+          sideLen(shownSeam.parts.b, shownSeam.parts.a),
           ease,
         )
       : null;
@@ -415,7 +563,8 @@ export function SeamPickerBody({
   const fillGuess = () => {
     if (frozen || posing) return;
     if (!guessSelection) return;
-    const next = { a: [...guessSelection.a], b: [...guessSelection.b] };
+    const next = wholeSel(guessSelection);
+    setActiveSeam(null);
     setRefused('');
     setSel(next);
     setFilled(next);
@@ -441,7 +590,7 @@ export function SeamPickerBody({
       else exitPose();
       return true;
     }
-    if (sel.a.length || sel.b.length) {
+    if (sel.a.length || sel.b.length || activeSeam) {
       reset();
       return true;
     }
@@ -452,13 +601,38 @@ export function SeamPickerBody({
   const seamName = (sides: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     [sideName(sides.a), sideName(sides.b)].filter(Boolean).join(' · ');
   // The footer lists a pair once: a row stored twice, or the pick of a stored pair, is not repeated.
-  const sidesSig = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
-    [[...s.a].sort().join('+'), [...s.b].sort().join('+')].sort().join('~');
+  const sidesSig = (s: (typeof stored)[number]) =>
+    [s.parts.a, s.parts.b]
+      .map((parts) =>
+        parts
+          .map((part) => `${part.target}@${part.range?.join('-') ?? ''}`)
+          .sort()
+          .join('+'),
+      )
+      .sort()
+      .join('~');
   const listed = stored.filter(
-    (s, i) => stored.findIndex((o) => sidesSig(o.sides) === sidesSig(s.sides)) === i,
+    (s, i) => stored.findIndex((o) => sidesSig(o) === sidesSig(s)) === i,
   );
+  const removeSeam = async (seam: (typeof stored)[number]) => {
+    setBusy(true);
+    setRefused('');
+    const ok = await seamActions.remove(seam.key, seam.row);
+    setBusy(false);
+    if (!ok) setRefused(useSeamsStore.getState().errors[seam.key] ?? 'not saved');
+    setActiveSeam(null);
+    return ok;
+  };
+  const clearSeams = async () => {
+    setClearingSeams(false);
+    for (const seam of listed) if (!(await removeSeam(seam))) return;
+  };
   const clearSide = (side: Side) => {
-    setSel((current) => ({ ...current, [side]: [] }));
+    setSel((current) => ({
+      ...current,
+      [side]: [],
+      spans: { ...current.spans, [side]: {} },
+    }));
     setFilled(null);
     setRefused('');
   };
@@ -467,7 +641,12 @@ export function SeamPickerBody({
 
   const loading = geo?.dep.status === 'pending';
   const drawn = resultLayout.T.size > 0;
-  const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
+  const error =
+    refused ||
+    stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) ||
+    (repeatsSeam ? 'already sewn' : '');
+  const shownActive = stored.find((s) => s.key === activeSeam);
+  const activeIndex = shownActive ? stored.indexOf(shownActive) : -1;
 
   const content = (
     <>
@@ -575,8 +754,13 @@ export function SeamPickerBody({
                 names={groupNames}
                 namesBelow={phone}
                 ghostName={nameOf}
-                hover={hover}
-                onHover={setHover}
+                hover={spanDrag?.id ?? hover?.id ?? null}
+                hoverRange={spanDrag?.range ?? hover?.range ?? null}
+                ticks={ticks}
+                activeNo={activeIndex >= 0 ? activeIndex : null}
+                onClearNo={frozen || !shownActive ? undefined : () => void removeSeam(shownActive)}
+                onHoverAt={frozen ? undefined : onHoverAt}
+                onSpanDrag={frozen ? undefined : onSpanDrag}
                 onPick={frozen ? undefined : toggle}
                 pickTargets={canvasPickTargets}
                 view={zoom.view}
@@ -739,18 +923,43 @@ export function SeamPickerBody({
                   {error}
                 </Text>
               )}
-              {listed.map((s) => (
-                <span
-                  key={s.key}
-                  className='flex min-w-0 items-center gap-2'
-                  data-seam-stored={s.key}
-                >
-                  <PairNo i={stored.indexOf(s)} />
-                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                    {seamName(s.sides)}
-                  </Text>
-                </span>
-              ))}
+              {listed.map((s) => {
+                const on = s.key === activeSeam;
+                return (
+                  <span
+                    key={s.key}
+                    className='flex min-w-0 items-center gap-2'
+                    data-seam-stored={s.key}
+                  >
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      aria-pressed={on}
+                      onClick={() => {
+                        setSel(EMPTY);
+                        setFilled(null);
+                        setActiveSeam(on ? null : s.key);
+                      }}
+                    >
+                      <PairNo i={stored.indexOf(s)} />
+                    </Button>
+                    {(on || listed.length === 1) && (
+                      <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                        {seamName(s.sides)}
+                      </Text>
+                    )}
+                    {on && !frozen && (
+                      <Close
+                        onClick={() => void removeSeam(s)}
+                        disabled={busy}
+                        aria-label='remove seam'
+                        data-seam-remove=''
+                      />
+                    )}
+                  </span>
+                );
+              })}
               <ChipRow>
                 <Chip
                   selected={sel.a.length > 0}
@@ -758,7 +967,9 @@ export function SeamPickerBody({
                   disabled={!sel.a.length}
                   data-seam-side='1'
                 >
-                  {sel.a.length ? `1 ${sideName(sel.a)} ${mmText(sideLen(sel.a, sel.b))}` : '1'}
+                  {sel.a.length
+                    ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
+                    : '1'}
                 </Chip>
                 <Chip
                   selected={sel.b.length > 0}
@@ -767,7 +978,9 @@ export function SeamPickerBody({
                   disabled={!sel.b.length}
                   data-seam-side='2'
                 >
-                  {sel.b.length ? `2 ${sideName(sel.b)} ${mmText(sideLen(sel.b, sel.a))}` : '2'}
+                  {sel.b.length
+                    ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
+                    : '2'}
                 </Chip>
               </ChipRow>
               {delta != null ? (
@@ -846,6 +1059,18 @@ export function SeamPickerBody({
                   clear
                 </Button>
               )}
+              {!frozen && listed.length > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => setClearingSeams(true)}
+                  disabled={busy}
+                  data-seam-clear-all=''
+                >
+                  clear seams
+                </Button>
+              )}
               {!frozen && drawn && !!cardId && (
                 <Button
                   type='button'
@@ -884,6 +1109,19 @@ export function SeamPickerBody({
         confirmLabel='REPLACE'
       >
         {null}
+      </ConfirmationModal>
+      <ConfirmationModal
+        open={clearingSeams}
+        onOpenChange={setClearingSeams}
+        onConfirm={() => void clearSeams()}
+        title='clear seams'
+        confirmLabel='clear'
+      >
+        <ChipRow>
+          {listed.map((s) => (
+            <PairNo key={s.key} i={stored.indexOf(s)} />
+          ))}
+        </ChipRow>
       </ConfirmationModal>
     </>
   );

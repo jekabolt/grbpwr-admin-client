@@ -35,6 +35,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
@@ -43,6 +44,8 @@ import { useCardSeamGraph } from '../card-unit-pictures';
 import { LowerLayerFills, lowerLayerTints, type LowerLayerClaim } from '../lower-layer-fill';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
+import { mmOnPoints } from './span-pick';
+import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
@@ -772,8 +775,12 @@ export type EdgeMark = {
   tone: Tone;
   label?: string;
   range?: readonly [number, number];
+  /** The stored seam the owner selected: drawn heavier. */
+  active?: boolean;
 };
-export type NoMark = { id: TargetId; i: number };
+export type NoMark = { id: TargetId; i: number; range?: readonly [number, number] };
+/** A break point shown on an edge in hand: a notch is a square, an end or a turn a circle. */
+export type EdgeTick = { id: TargetId; atMm: number; notch: boolean };
 export type PictureActionLine = {
   id: string;
   piece: string;
@@ -1008,6 +1015,11 @@ const nameBoxOf = (text: string, font: number) => ({
 // re-ran all of them per pointer event. With these, the memoised doors and name spots and a stable
 // `onPick`, a hover on a 23-piece step went 31 → 7 ms (node, production React, median of 40).
 const NO_MARKS: readonly EdgeMark[] = [];
+const NO_TICKS: readonly EdgeTick[] = [];
+const SPAN_DRAG_PX = 6;
+const STORED_ACTIVE_SCALE = 1.5;
+const TICK_NOTCH_PX = 5;
+const TICK_POINT_R_PX = 2.5;
 const NO_ACTION_LINES: readonly PictureActionLine[] = [];
 const NO_ACTION_GLYPHS: readonly PictureActionGlyph[] = [];
 const NO_NOS: readonly NoMark[] = [];
@@ -1665,6 +1677,12 @@ export function StepPictureSvg({
   namesBelow,
   ghostName,
   hover,
+  hoverRange,
+  ticks = NO_TICKS,
+  activeNo,
+  onClearNo,
+  onHoverAt,
+  onSpanDrag,
   onHover,
   onPick,
   pickTargets,
@@ -1700,8 +1718,17 @@ export function StepPictureSvg({
   /** A shapeless piece's name, written in its empty square (not on a tile). */
   ghostName?: (key: string) => string;
   hover?: TargetId | null;
+  /** The hovered segment of `hover`, mm from the edge's start. */
+  hoverRange?: readonly [number, number] | null;
+  ticks?: readonly EdgeTick[];
+  /** The selected stored seam's number: drawn inverted, with × beside it. */
+  activeNo?: number | null;
+  onClearNo?: () => void;
+  onHoverAt?: (id: TargetId | null, atMm: number | null) => void;
+  /** A drag that began on an edge, in mm along it; `done` on release. */
+  onSpanDrag?: (id: TargetId, fromMm: number, toMm: number, done: boolean) => void;
   onHover?: (id: TargetId | null) => void;
-  onPick?: (id: TargetId) => void;
+  onPick?: (id: TargetId, atMm?: number) => void;
   /** Hidden/folded targets that remain pickable on their projected visible host contour. */
   pickTargets?: readonly TargetId[];
   /** A zoom over the fitted picture: screen = fitted × k + (x, y). Lines and text keep their size. */
@@ -2102,6 +2129,65 @@ export function StepPictureSvg({
     },
     [layers, doors, w, h],
   );
+  const pointerAt = useCallback(
+    (svg: SVGSVGElement | null, x: number, y: number): Pt2 | null => {
+      const rect = svg?.getBoundingClientRect();
+      return rect
+        ? [
+            ((x - rect.left) * w) / Math.max(rect.width, 1),
+            ((y - rect.top) * h) / Math.max(rect.height, 1),
+          ]
+        : null;
+    },
+    [w, h],
+  );
+  const mmOfDoor = useCallback(
+    (id: TargetId, at: Pt2 | null): number | null => {
+      const door = doors.find((candidate) => candidate.id === id);
+      const length = resolveEdge(id, geoms)?.len ?? 0;
+      return door && at && !door.inner && length > 0 ? mmOnPoints(door.points, at, length) : null;
+    },
+    [doors, geoms],
+  );
+  // The click that ends a drag is not a pick. A drag holds no capture: the click keeps its target.
+  const dragEnded = useRef(false);
+  const startSpanDrag = useCallback(
+    (event: ReactPointerEvent<SVGPathElement>, id: TargetId) => {
+      if (!onSpanDrag || event.button !== 0) return;
+      const svg = event.currentTarget.ownerSVGElement;
+      const from = mmOfDoor(id, pointerAt(svg, event.clientX, event.clientY));
+      if (from == null) return;
+      // An edge's drag is the edge's, not the zoom's pan.
+      event.stopPropagation();
+      const { clientX: startX, clientY: startY, pointerId } = event;
+      let dragging = false;
+      let to = from;
+      const onMove = (move: PointerEvent) => {
+        if (move.pointerId !== pointerId) return;
+        if (!dragging && Math.hypot(move.clientX - startX, move.clientY - startY) < SPAN_DRAG_PX)
+          return;
+        dragging = true;
+        to = mmOfDoor(id, pointerAt(svg, move.clientX, move.clientY)) ?? to;
+        onSpanDrag(id, from, to, false);
+      };
+      const finish = (end: PointerEvent) => {
+        if (end.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        if (!dragging) return;
+        onSpanDrag(id, from, to, end.type === 'pointerup');
+        dragEnded.current = true;
+        window.setTimeout(() => {
+          dragEnded.current = false;
+        }, 0);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
+    },
+    [onSpanDrag, mmOfDoor, pointerAt],
+  );
 
   const directPartner = new Map(layout.pieceLayers);
   const inputPartner = new Map(layout.layers);
@@ -2279,8 +2365,9 @@ export function StepPictureSvg({
       m,
       s: labelSpot(pts, centreOf.get(pieceOfId(m.id)) ?? pts[0], offsetOf(m.id)),
     }));
-  const noSpots = nos.flatMap(({ id, i }) => {
-    const pts = ptsOf(id);
+  const noSpots = nos.flatMap(({ id, i, range }) => {
+    const whole = ptsOf(id);
+    const pts = whole && rangedPicturePoints(whole, range, resolveEdge(id, geoms)?.len ?? 0);
     return pts
       ? [{ i, id, s: labelSpot(pts, centreOf.get(pieceOfId(id)) ?? pts[0], offsetOf(id, 2)) }]
       : [];
@@ -2396,13 +2483,41 @@ export function StepPictureSvg({
               pointerEvents='stroke'
               className='cursor-pointer'
               onPointerEnter={() => onHover?.(x.id)}
-              onPointerLeave={() => onHover?.(null)}
-              onClick={(event) => onPick(pickAt(event, x.id))}
+              onPointerMove={
+                onHoverAt
+                  ? (event) =>
+                      onHoverAt(
+                        x.id,
+                        mmOfDoor(
+                          x.id,
+                          pointerAt(
+                            event.currentTarget.ownerSVGElement,
+                            event.clientX,
+                            event.clientY,
+                          ),
+                        ),
+                      )
+                  : undefined
+              }
+              onPointerLeave={() => {
+                onHover?.(null);
+                onHoverAt?.(null, null);
+              }}
+              onPointerDown={onSpanDrag ? (event) => startSpanDrag(event, x.id) : undefined}
+              onClick={(event) => {
+                if (dragEnded.current) return;
+                const id = pickAt(event, x.id);
+                const atMm = mmOfDoor(
+                  id,
+                  pointerAt(event.currentTarget.ownerSVGElement, event.clientX, event.clientY),
+                );
+                onPick(id, atMm ?? undefined);
+              }}
               data-seam-target={x.id}
             />
           ))
         : null,
-    [doors, onPick, onHover, pickAt],
+    [doors, onPick, onHover, onHoverAt, onSpanDrag, startSpanDrag, mmOfDoor, pointerAt, pickAt],
   );
 
   if (w < 2 || h < 2) return null;
@@ -2515,9 +2630,15 @@ export function StepPictureSvg({
           {innerDoorPaths}
         </g>
       )}
-      {hover && !marks.some((m) => m.id === hover) && ptsOf(hover) && (
+      {hover && (hoverRange || !marks.some((m) => m.id === hover)) && ptsOf(hover) && (
         <path
-          d={pathOf(ptsOf(hover)!)}
+          d={pathOf(
+            rangedPicturePoints(
+              ptsOf(hover)!,
+              hoverRange ?? undefined,
+              resolveEdge(hover, geoms)?.len ?? 0,
+            ),
+          )}
           fill='none'
           stroke={INK}
           strokeWidth={L.mark}
@@ -2538,7 +2659,7 @@ export function StepPictureSvg({
       ))}
       {markLines.map(({ m, pts }) => (
         <path
-          key={`${m.tone}:${m.id}`}
+          key={`${m.tone}:${m.id}:${m.range?.join('-') ?? ''}`}
           d={pathOf(pts)}
           fill='none'
           stroke={
@@ -2554,7 +2675,9 @@ export function StepPictureSvg({
           }
           strokeWidth={
             m.tone === 'stored'
-              ? L.stored
+              ? m.active
+                ? L.stored * STORED_ACTIVE_SCALE
+                : L.stored
               : m.tone === 'pickFirst'
                 ? L.mark * PICK_FIRST_STROKE_SCALE
                 : L.mark
@@ -2765,27 +2888,60 @@ export function StepPictureSvg({
       {look !== 'tile' &&
         noSpots.map(({ id, i }, n) => {
           const at = noAt(n);
+          const on = activeNo === i;
           return at ? (
-            <g key={`n:${id}`} pointerEvents='none' data-pair-no={i + 1}>
+            <g key={`n:${id}:${i}`} data-pair-no={i + 1}>
               <rect
                 x={at[0] - 9}
                 y={at[1] - 9}
                 width={18}
                 height={18}
-                fill={FILL}
+                fill={on ? PAIR_INK : FILL}
                 stroke={PAIR_INK}
                 strokeWidth={1}
+                pointerEvents='none'
               />
               <text
                 x={at[0]}
                 y={at[1]}
                 textAnchor='middle'
                 dominantBaseline='central'
-                fill={PAIR_INK}
+                fill={on ? FILL : PAIR_INK}
                 fontSize={10}
+                pointerEvents='none'
               >
                 {pairNo(i)}
               </text>
+              {on && onClearNo && (
+                <g
+                  className='cursor-pointer'
+                  role='button'
+                  aria-label='remove seam'
+                  onClick={onClearNo}
+                  data-seam-remove-no=''
+                >
+                  <rect
+                    x={at[0] + 11}
+                    y={at[1] - 9}
+                    width={18}
+                    height={18}
+                    fill={FILL}
+                    stroke={PAIR_INK}
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={at[0] + 20}
+                    y={at[1]}
+                    textAnchor='middle'
+                    dominantBaseline='central'
+                    fill={PAIR_INK}
+                    fontSize={12}
+                    pointerEvents='none'
+                  >
+                    ×
+                  </text>
+                </g>
+              )}
             </g>
           ) : null;
         })}
@@ -2847,6 +3003,69 @@ export function StepPictureSvg({
           ];
         })}
       {doorHits}
+      {ticks.map(({ id, atMm, notch }) => {
+        const whole = ptsOf(id);
+        const length = resolveEdge(id, geoms)?.len ?? 0;
+        const at = whole && rangedPicturePoints(whole, [0, atMm], length).at(-1);
+        if (!at) return null;
+        return notch ? (
+          <rect
+            key={`tick:${id}:${atMm}`}
+            x={at[0] - TICK_NOTCH_PX / 2}
+            y={at[1] - TICK_NOTCH_PX / 2}
+            width={TICK_NOTCH_PX}
+            height={TICK_NOTCH_PX}
+            fill={INK}
+            pointerEvents='none'
+            data-seam-tick='notch'
+          />
+        ) : (
+          <circle
+            key={`tick:${id}:${atMm}`}
+            cx={at[0]}
+            cy={at[1]}
+            r={TICK_POINT_R_PX}
+            fill={FILL}
+            stroke={INK}
+            strokeWidth={1}
+            pointerEvents='none'
+            data-seam-tick='point'
+          />
+        );
+      })}
+      {hover &&
+        hoverRange &&
+        (() => {
+          const whole = ptsOf(hover);
+          const length = resolveEdge(hover, geoms)?.len ?? 0;
+          const at =
+            whole &&
+            rangedPicturePoints(whole, [0, (hoverRange[0] + hoverRange[1]) / 2], length).at(-1);
+          if (!at) return null;
+          const text = fmtMm(Math.abs(hoverRange[1] - hoverRange[0]));
+          return (
+            <g pointerEvents='none' data-seam-span-length=''>
+              <rect
+                x={at[0] + 10}
+                y={at[1] - 26}
+                width={text.length * 6.6 + 10}
+                height={15}
+                fill={FILL}
+                stroke={FAINT}
+                strokeWidth={1}
+              />
+              <text
+                x={at[0] + 15}
+                y={at[1] - 18.5}
+                dominantBaseline='central'
+                fill={INK}
+                fontSize={10}
+              >
+                {text}
+              </text>
+            </g>
+          );
+        })()}
     </svg>
   );
 }
