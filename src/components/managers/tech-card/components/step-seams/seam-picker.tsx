@@ -13,7 +13,14 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows, type FoldStep } from 'lib/folds';
-import { anchorOfRunId, newSeamKey, poseRow, type EdgeAnchor, type StoredSeam } from 'lib/seams';
+import {
+  anchorOfRunId,
+  newSeamKey,
+  poseRow,
+  type EdgeAnchor,
+  type SidePart,
+  type StoredSeam,
+} from 'lib/seams';
 import { cn } from 'lib/utility';
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
@@ -221,9 +228,12 @@ export function SeamPickerBody({
   const foldSteps = ops.map((operation) => operation as typeof operation & FoldStep);
   const activeFolds = activeFoldRows(foldSteps, index, foldRows);
   // A stack of identical plies runs one layer long (the model's own count).
-  const plainSideLen = (ids: readonly TargetId[]) =>
+  const plainSideLen = (ids: readonly TargetId[] | readonly SidePart[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
-  const sideLen = (ids: readonly TargetId[], otherIds: readonly TargetId[]) =>
+  const sideLen = (
+    ids: readonly TargetId[] | readonly SidePart[],
+    otherIds: readonly TargetId[] | readonly SidePart[],
+  ) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []), {
       activeFolds,
       otherSideMm: otherIds.length ? plainSideLen(otherIds) : null,
@@ -442,8 +452,8 @@ export function SeamPickerBody({
     ? deltaMm(sideLen(pair.a, pair.b), sideLen(pair.b, pair.a), ease)
     : stored.length === 1 && !sel.a.length && !sel.b.length && edgeToEdge(stored[0].sides)
       ? deltaMm(
-          sideLen(stored[0].sides.a, stored[0].sides.b),
-          sideLen(stored[0].sides.b, stored[0].sides.a),
+          sideLen(stored[0].parts.a, stored[0].parts.b),
+          sideLen(stored[0].parts.b, stored[0].parts.a),
           ease,
         )
       : null;
