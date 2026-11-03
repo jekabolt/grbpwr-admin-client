@@ -1747,10 +1747,11 @@ export function StepPictureSvg({
   const drawnActionLines = foldedActionLines(
     actionLines.length ? actionLines : automaticActions.lines,
     stepFolds,
+    flatGeoms,
   );
   const givenGlyphs = useMemo(
-    () => foldedActionGlyphs(actionGlyphs, stepFolds),
-    [actionGlyphs, stepFolds],
+    () => foldedActionGlyphs(actionGlyphs, stepFolds, flatGeoms),
+    [actionGlyphs, stepFolds, flatGeoms],
   );
   const automaticFastenings = useMemo(() => {
     if (actionGlyphs.length || !contextResult || !contextResults) return [];
@@ -1764,6 +1765,7 @@ export function StepPictureSvg({
     return foldedActionGlyphs(
       placementPictureGlyphsForStep(steps, contextResult.opIndex),
       stepFolds,
+      flatGeoms,
     );
   }, [
     actionGlyphs.length,
@@ -1777,7 +1779,7 @@ export function StepPictureSvg({
   const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
     ? givenGlyphs
     : [
-        ...foldedActionGlyphs(automaticActions.glyphs, stepFolds),
+        ...foldedActionGlyphs(automaticActions.glyphs, stepFolds, flatGeoms),
         ...automaticFastenings.map((glyph) => ({
           id: glyph.id,
           piece: glyph.piece,

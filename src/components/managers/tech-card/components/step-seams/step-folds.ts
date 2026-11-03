@@ -150,14 +150,22 @@ export function cardFoldsOf(
 
 // ── drawing ────────────────────────────────────────────────────────────────────────────────
 
+const samePoint = (p: Pt2, q: Pt2) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-6;
+
+// `foldMap` reads the ring to tell a line reaching the contour from a short one, so it always gets it.
+
 /** A polyline through the folds, one line still: arc length and direction along it are kept. */
-const foldedLine = (line: readonly Pt2[], folds: readonly FlatFold[]): Pt2[] =>
-  foldMap({ rings: [], edges: [line], marks: [], innerLines: [] }, folds).edges.flatMap(
-    (part, index) => (index ? part.slice(1) : [...part]),
+const foldedLine = (line: readonly Pt2[], ring: readonly Pt2[], folds: readonly FlatFold[]) =>
+  foldMap({ rings: [ring], edges: [line], marks: [], innerLines: [] }, folds).edges.reduce<Pt2[]>(
+    (out, part) => {
+      const last = out[out.length - 1];
+      return [...out, ...(last && part[0] && samePoint(last, part[0]) ? part.slice(1) : part)];
+    },
+    [],
   );
 
-const foldedPoint = (point: Pt2, folds: readonly FlatFold[]): Pt2 =>
-  foldMap({ rings: [], edges: [], marks: [point], innerLines: [] }, folds).marks[0] as Pt2;
+const foldedPoint = (point: Pt2, ring: readonly Pt2[], folds: readonly FlatFold[]): Pt2 =>
+  foldMap({ rings: [ring], edges: [], marks: [point], innerLines: [] }, folds).marks[0] as Pt2;
 
 const ringArea = (ring: readonly Pt2[]) =>
   Math.abs(
@@ -213,26 +221,25 @@ export function foldedDrawing(
       rs: ring,
       edges: geom.edges.map((edge) => ({
         ...edge,
-        pts: foldedLine(resolveEdge(edge.id, geoms)?.pts ?? edge.pts, folds),
+        pts: foldedLine(resolveEdge(edge.id, geoms)?.pts ?? edge.pts, geom.rs, folds),
       })),
     });
     const lines = innerLines?.get(key);
     if (lines)
       foldedInner?.set(
         key,
-        lines.map((line) => foldedLine(line, folds)),
+        lines.map((line) => foldedLine(line, geom.rs, folds)),
       );
 
-    const { plies } = foldedOutline(geom.rs, folds);
+    const { outline, plies } = foldedOutline(geom.rs, folds);
     const firstKept = plies.findIndex((ply) => !ply.by);
-    const kept = plies[firstKept];
     turned.set(key, [
       ...plies.flatMap((ply, index): TurnedPly[] =>
         ply.by ? [{ ring: ply.poly, under: index < firstKept }] : [],
       ),
-      // The ring is a silhouette (the larger part turned): the kept ply's own edge still shows.
-      ...(kept && Math.abs(ringArea(ring) - ringArea(kept.poly)) > 1
-        ? [{ ring: kept.poly, under: false }]
+      // The ring is a silhouette (the larger part turned): the kept part's own edge still shows.
+      ...(outline.length && Math.abs(ringArea(ring) - ringArea(outline)) > 1
+        ? [{ ring: outline, under: false }]
         : []),
     ]);
   }
@@ -245,11 +252,13 @@ export function foldedDrawing(
 export function foldedActionLines<L extends { piece: string; points: readonly Pt2[] }>(
   lines: readonly L[],
   flat: FlatFolds | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
 ): readonly L[] {
   if (!flat?.size) return lines;
   return lines.map((line) => {
     const folds = flat.get(line.piece);
-    return folds ? { ...line, points: foldedLine(line.points, folds) } : line;
+    const geom = geoms.get(line.piece);
+    return folds && geom ? { ...line, points: foldedLine(line.points, geom.rs, folds) } : line;
   });
 }
 
@@ -263,17 +272,23 @@ export function foldedActionGlyphs<
     direction?: Pt2;
     markBox?: { cx: number; cy: number };
   },
->(glyphs: readonly G[], flat: FlatFolds | undefined): readonly G[] {
+>(
+  glyphs: readonly G[],
+  flat: FlatFolds | undefined,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): readonly G[] {
   if (!flat?.size) return glyphs;
   return glyphs.map((glyph) => {
     const folds = flat.get(glyph.piece);
-    if (!folds) return glyph;
-    const point = foldedPoint(glyph.point, folds);
+    const ring = geoms.get(glyph.piece)?.rs;
+    if (!folds || !ring) return glyph;
+    const point = foldedPoint(glyph.point, ring, folds);
     const out: G = { ...glyph, point };
     if (glyph.direction) {
       const [dx, dy] = glyph.direction;
       const toward = foldedPoint(
         [glyph.point[0] + dx * DIRECTION_STEP_MM, glyph.point[1] + dy * DIRECTION_STEP_MM],
+        ring,
         folds,
       );
       out.direction = [
@@ -282,7 +297,7 @@ export function foldedActionGlyphs<
       ];
     }
     if (glyph.markBox) {
-      const [cx, cy] = foldedPoint([glyph.markBox.cx, glyph.markBox.cy], folds);
+      const [cx, cy] = foldedPoint([glyph.markBox.cx, glyph.markBox.cy], ring, folds);
       out.markBox = { ...glyph.markBox, cx, cy };
     }
     return out;
@@ -291,10 +306,15 @@ export function foldedActionGlyphs<
 
 // ── coincident edges ───────────────────────────────────────────────────────────────────────
 
-const neverMoved = (part: RunPart, folds: readonly FlatFold[] | undefined) =>
+const neverMoved = (
+  part: RunPart,
+  ring: readonly Pt2[] | undefined,
+  folds: readonly FlatFold[] | undefined,
+) =>
   !folds?.length ||
+  !ring ||
   part.pts.every((point) => {
-    const [x, y] = foldedPoint(point, folds);
+    const [x, y] = foldedPoint(point, ring, folds);
     return Math.hypot(x - point[0], y - point[1]) < 1e-6;
   });
 
@@ -314,7 +334,7 @@ export function foldOnceOf(
       group.length > 1
         ? group.find((id) => {
             const part = byId.get(id)!;
-            return neverMoved(part, step.flat.get(part.piece));
+            return neverMoved(part, geoms.get(part.piece)?.rs, step.flat.get(part.piece));
           }) ?? group[0]
         : group[0],
     );

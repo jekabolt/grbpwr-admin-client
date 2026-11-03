@@ -201,8 +201,8 @@ describe('fold marks', () => {
   it('keeps the same arrays when nothing is folded', () => {
     const lines = [{ piece: 'FLAP', points: [[0, 0] as Pt2] }];
     const glyphs = [{ piece: 'FLAP', point: [0, 0] as Pt2 }];
-    expect(foldedActionLines(lines, undefined)).toBe(lines);
-    expect(foldedActionGlyphs(glyphs, new Map())).toBe(glyphs);
+    expect(foldedActionLines(lines, undefined, geoms)).toBe(lines);
+    expect(foldedActionGlyphs(glyphs, new Map(), geoms)).toBe(glyphs);
   });
 
   it('turns a mark on the moved half with the cloth', () => {
@@ -217,6 +217,7 @@ describe('fold marks', () => {
         },
       ],
       flat,
+      geoms,
     );
     expect(line.points).toEqual([
       [70, 0],
@@ -232,10 +233,77 @@ describe('fold marks', () => {
         },
       ],
       flat,
+      geoms,
     );
     expect(glyph.point).toEqual([70, 100]);
     expect(glyph.direction?.[0]).toBeCloseTo(-1, 6);
     expect(glyph.markBox).toEqual({ cx: 60, cy: 40 });
+  });
+});
+
+describe('how far a fold reaches', () => {
+  const inward = (a: Pt2, b: Pt2, flipAt: Pt2) => ({ a, b, flipAt, kind: 'inward' as const });
+
+  it('a line reaching the contour turns the whole side, past its ends too', () => {
+    const rs: Pt2[] = [
+      [0, 0],
+      [100, -20],
+      [100, 220],
+      [0, 200],
+    ];
+    const geoms = new Map([['FLAP', { ...flap(), rs }]]);
+    const flat = new Map([['FLAP', [inward([40, -8], [40, 208], [80, 100])]]]);
+    const [glyph] = foldedActionGlyphs([{ piece: 'FLAP', point: [90, -15] as Pt2 }], flat, geoms);
+    expect(glyph.point).toEqual([-10, -15]);
+  });
+
+  it('a short line turns its stretch only, the rest stays where it was', () => {
+    const geoms = new Map([['FLAP', flap()]]);
+    const flat = new Map([['FLAP', [inward([40, 50], [40, 150], [10, 100])]]]);
+    const [inBand, outOfBand] = foldedActionGlyphs(
+      [
+        { piece: 'FLAP', point: [10, 100] as Pt2 },
+        { piece: 'FLAP', point: [10, 20] as Pt2 },
+      ],
+      flat,
+      geoms,
+    );
+    expect(inBand.point).toEqual([70, 100]);
+    expect(outOfBand.point).toEqual([10, 20]);
+
+    const [line] = foldedActionLines(
+      [
+        {
+          piece: 'FLAP',
+          points: [
+            [10, 0],
+            [10, 200],
+          ] as Pt2[],
+        },
+      ],
+      flat,
+      geoms,
+    );
+    expect(line.points).toEqual([
+      [10, 0],
+      [10, 50],
+      [70, 50],
+      [70, 150],
+      [10, 150],
+      [10, 200],
+    ]);
+  });
+
+  it('a short fold draws its turned part alone, the kept cells are one outline', () => {
+    const geoms = new Map([['FLAP', flap()]]);
+    const flat = new Map([['FLAP', [inward([40, 50], [40, 150], [10, 100])]]]);
+    const drawing = foldedDrawing(geoms, undefined, flat);
+    const plies = drawing.turned.get('FLAP')!;
+    expect(plies).toHaveLength(1);
+    expect(plies[0].under).toBe(true);
+    const xs = plies[0].ring.map(([x]) => x);
+    expect([Math.min(...xs), Math.max(...xs)]).toEqual([40, 80]);
+    expect(drawing.geoms.get('FLAP')!.rs.length).toBeGreaterThan(4);
   });
 });
 
