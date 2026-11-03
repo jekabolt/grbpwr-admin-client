@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* A real press on a live control; a span or a link is disabled only through aria. */
+@custom-variant press (&:active:not(:disabled, [disabled], [aria-disabled='true']));
+
 @font-face {
   font-family: 'FeatureMono';
   src: url('./fonts/FeatureMono-Thin.ttf') format('truetype');

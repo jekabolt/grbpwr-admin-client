@@ -1,5 +1,6 @@
 import Text from './text';
 import { cn } from 'lib/utility';
+import { TILE_PRESS } from './tile-skin';
 
 /** Auto-filling grid of small cards. Used for anything picked by looking at it. */
 export function Tiles({
@@ -106,6 +107,7 @@ export function Tile({
         dashed ? 'border-dashed' : '',
         tone === 'error' ? 'border-error' : selected ? 'border-textColor' : 'border-borderColor',
         onClick ? 'hover:border-textColor' : '',
+        onClick ? TILE_PRESS : '',
         className,
       )}
     >

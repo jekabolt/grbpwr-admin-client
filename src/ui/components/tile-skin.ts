@@ -30,8 +30,15 @@ export const TILE_QUIET =
  * (снекбар вызывающего; плитка о записи ничего не знает). Открытое меню — инверсия, как у
  * двери `TwoStepPicker`: список висит над углом, и связь между ними видна, а не додумывается.
  */
+/** A pressed tile keeps its picture: ink border and one pixel down, never a fill. */
+export const TILE_PRESS = 'press:translate-y-px press:border-textColor';
+
 export const TILE_CORNER =
   'pointer-events-auto border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label ' +
   'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-borderColor ' +
+  'press:translate-y-px ' +
+  'press:border-textColor ' +
+  'press:bg-textColor ' +
+  'press:text-bgColor ' +
   'data-[state=open]:border-textColor data-[state=open]:bg-textColor data-[state=open]:text-bgColor ' +
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';

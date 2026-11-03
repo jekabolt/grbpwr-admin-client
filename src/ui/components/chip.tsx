@@ -4,6 +4,12 @@ import { cn } from 'lib/utility';
 import { Close } from './close';
 import { HEADER_TEXT } from './section-header';
 
+const CHIP_PRESS =
+  'press:translate-y-px ' +
+  'press:border-textColor ' +
+  'press:bg-textColor ' +
+  'press:text-bgColor';
+
 /**
  * Interactive counterpart of `Pill` — filters, toggles, removable selections.
  * `selected` fills with ink. Use `ChipRow` as the wrapper so nobody hand-rolls
@@ -127,6 +133,9 @@ export function Chip({
             )
           : chipVariants({ selected, tone, dashed }),
         spanRole.className,
+        interactive && CHIP_PRESS,
+        interactive && tone === 'error' && 'press:border-error press:bg-error',
+        interactive && tone === 'attention' && 'press:border-warning press:bg-warning',
         className,
       )}
     >

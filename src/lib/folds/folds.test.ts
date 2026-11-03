@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { FoundPiece } from 'components/managers/tech-card/components/nesting/dxf-geometry';
 import { pieceRefKey } from 'components/managers/tech-card/components/piece-block-refs';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StepFoldsGroup } from 'components/managers/tech-card/components/assembly-folds/step-folds-row';
 import { segmentPiece } from 'lib/assembly-skeleton/geometry/segment';
 import type { PieceGeom, PieceMark, Pt2, SkeletonPieceInput } from 'lib/assembly-skeleton/types';
@@ -392,25 +393,29 @@ describe('StepFoldsGroup', () => {
       sizes: ['M'],
     };
     const markup = renderToStaticMarkup(
-      createElement(StepFoldsGroup, {
-        stepKey: 'test',
-        pieces: [geom],
-        shapes: new Map([[pieceRefKey(KEY), found]]),
-        grainDeg: new Map([[KEY, 0]]),
-        innerLines: new Map<string, Pt2[][]>([
-          [
-            KEY,
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(StepFoldsGroup, {
+          stepKey: 'test',
+          pieces: [geom],
+          shapes: new Map([[pieceRefKey(KEY), found]]),
+          grainDeg: new Map([[KEY, 0]]),
+          innerLines: new Map<string, Pt2[][]>([
             [
+              KEY,
               [
-                [0, 150],
-                [204, 150],
+                [
+                  [0, 150],
+                  [204, 150],
+                ],
               ],
             ],
-          ],
-        ]),
-        cardId: undefined,
-        frozen: false,
-      }),
+          ]),
+          cardId: undefined,
+          frozen: false,
+        }),
+      ),
     );
 
     expect(markup).toContain('data-fold-inner=""');

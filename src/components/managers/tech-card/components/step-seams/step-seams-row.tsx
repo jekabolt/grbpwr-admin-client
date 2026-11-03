@@ -1,20 +1,27 @@
 // «SEAMS» GROUP OF A STEP CARD (assembly-schema T8, picker v2 owner OK 27.10): its own group, header
-// «seams» with `+ seam` (the picker) at the right. Below it every stored seam as a small step picture
-// — the inputs with the seam's edges ink solid — with remove and flip beside it; remove deletes the
-// card row only when no other step uses it. With nothing stored, the proposal is a dashed picture
-// that opens the picker (a seam is stored only there, by hand), else red `no seam`.
+// «seams» with `+ seam` (the picker) at the right. Below it every stored seam is a step-picture tile
+// with its two named, measured sides underneath and one quiet corner ×; removal deletes the card row
+// only when no other step uses it. With nothing stored, the proposal is a dashed picture that opens
+// the picker (a seam is stored only there, by hand), else red `no seam`.
 // `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
+import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, GroupLabel, Text } from 'ui';
+import { Button, Close, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
 import { NO_SEAM_TEXT } from './step-highlight';
 import { useStepResults } from './step-result-context';
-import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
+import {
+  hasMultipleStepPieces,
+  pieceOfTarget,
+  targetsLen,
+  type TargetId,
+} from './step-seams-model';
 import { useStepSeamActions } from './step-seams-context';
 import {
   isUnitStep,
@@ -27,9 +34,40 @@ import type { SurfacePicture } from './surface-picture';
 
 const SeamPicker = lazy(() => import('./seam-picker'));
 
-/** Tile picture size, px (mockup «A»: the seam ~88 × 60 inside a 72px-high tile). */
-const TILE_W = 88;
-const TILE_H = 60;
+/** Tile picture size, px: about one fifth larger than the previous 88 × 60 drawing. */
+const TILE_W = 106;
+const TILE_H = 72;
+const SEAM_CLOSE = cn(
+  'absolute top-0 right-0 z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  TILE_QUIET,
+);
+
+const polyLen = (points: readonly Pt2[]) =>
+  points.reduce(
+    (total, point, index) =>
+      index
+        ? total + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1])
+        : total,
+    0,
+  );
+
+export function seamTileSideLines(
+  sides: { a: readonly SidePart[]; b: readonly SidePart[] },
+  geoms: ReadonlyMap<string, PieceGeom>,
+  innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+): [string, string] {
+  const line = (parts: readonly SidePart[]) => {
+    const codes = [
+      ...new Set(parts.map((part) => geoms.get(pieceOfTarget(part.target))?.name).filter(Boolean)),
+    ];
+    if (codes.length === 0) return '';
+    const length = targetsLen(parts, geoms, (piece, index) =>
+      polyLen(innerLines.get(piece)?.[index] ?? []),
+    );
+    return `${codes.join(' + ')} ${Math.round(length)}`;
+  };
+  return [line(sides.a), line(sides.b)];
+}
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
@@ -88,11 +126,12 @@ export function StepSeamsRow({ index }: { index: number }) {
       >
         seams
       </GroupLabel>
-      <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
+      <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
+          const sideLines = seamTileSideLines(parts, geoms, scene.innerLines);
           return (
-            <div key={key} className='flex flex-none items-center gap-2'>
+            <div key={key} className='group relative w-30 flex-none'>
               <SeamTile
                 no={i}
                 scene={scene}
@@ -107,25 +146,24 @@ export function StepSeamsRow({ index }: { index: number }) {
                 onOpen={cardId ? () => setOpen(true) : undefined}
                 data-step-seam={key}
               />
-              <div className='flex items-center gap-1.5'>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  disabled={frozen || writing}
-                  onClick={() => void seamActions.remove(key, row)}
-                >
-                  remove
-                </Button>
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  disabled={frozen || writing || !row}
-                  onClick={() => row && void seamActions.flip(row)}
-                >
-                  flip
-                </Button>
+              <Close
+                aria-label={`remove seam ${i + 1}`}
+                disabled={frozen || writing}
+                onClick={() => void seamActions.remove(key, row)}
+                className={SEAM_CLOSE}
+              />
+              <div className='mt-1 flex flex-col'>
+                {sideLines.map((line, sideIndex) => (
+                  <Text
+                    key={sideIndex}
+                    size='micro'
+                    component='span'
+                    className='min-h-4 break-words'
+                    data-seam-side={sideIndex + 1}
+                  >
+                    {line}
+                  </Text>
+                ))}
               </div>
             </div>
           );
@@ -165,9 +203,8 @@ export function StepSeamsRow({ index }: { index: number }) {
 }
 
 /**
- * One seam as a 72px tile: only the pieces that carry its edges, laid along the step's seams between
- * them, the joined edges marked, its number at the corner (✕
- * when it can be taken off).
+ * One seam tile: only the pieces that carry its edges, laid along the step's seams between them,
+ * the joined edges marked and its number at the corner.
  */
 export function SeamTile({
   scene,
@@ -220,8 +257,8 @@ export function SeamTile({
           : undefined
       }
       className={cn(
-        'relative inline-flex h-18 min-w-24 flex-none items-center justify-center border bg-bgColor px-1.5',
-        onOpen && 'cursor-pointer hover:border-textColor',
+        'relative inline-flex h-22 w-30 flex-none items-center justify-center border bg-bgColor px-1.5',
+        onOpen && cn('cursor-pointer hover:border-textColor', TILE_PRESS),
         dashed ? 'border-dashed border-textColor' : missing ? 'border-error' : 'border-borderColor',
         current && 'border-2 border-solid border-textColor',
         status === 'skipped' && 'opacity-40',

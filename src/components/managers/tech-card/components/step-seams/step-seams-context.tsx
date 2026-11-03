@@ -22,7 +22,6 @@ import {
 import { useFormContext } from 'react-hook-form';
 import type { AssemblyGeometry } from '../../techpack/use-assembly-geometry';
 import { useAssemblyGeometry } from '../../techpack/use-assembly-geometry';
-import { flipped } from '../assembly-seams/seam-actions';
 import { hydrateSeams, rowPairSig, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useSeamWrites, type SeamWrites } from '../assembly-seams/use-seam-decisions';
 import type { TechCardFormData } from '../schema';
@@ -74,7 +73,7 @@ export function useAttachStepSeam(index: number) {
   );
 }
 
-/** Remove or flip one of this step's stored seams through the shared seam writer. */
+/** Remove one of this step's stored seams through the shared seam writer. */
 export function useStepSeamActions(index: number) {
   const ctx = useStepSeams();
   const { getValues, setValue } = useFormContext<TechCardFormData>();
@@ -95,15 +94,7 @@ export function useStepSeamActions(index: number) {
     [ctx, getValues, index, setValue],
   );
 
-  const flip = useCallback(
-    async (row: StoredSeam): Promise<boolean> => {
-      if (!ctx || ctx.frozen) return false;
-      return ctx.writes.upsert([{ ...row, direction: flipped(row.direction) }]);
-    },
-    [ctx],
-  );
-
-  return { remove, flip };
+  return { remove };
 }
 
 /**

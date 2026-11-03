@@ -56,6 +56,8 @@ import {
   InputField,
   SelectField,
   Tile,
+  TILE_PRESS,
+  TILE_QUIET,
 } from 'ui';
 import { AiTextareaField } from 'components/managers/tech-card/ai-enhance/ai-textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
@@ -206,6 +208,7 @@ import {
 } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
+import { dissolveNeedsConfirmation, dissolvePrice, type AssemblyPrice } from './assembly-cause';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
@@ -308,6 +311,10 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 // The WITH row: every tile shares one 72 px footprint, the silhouette fills it.
 const WITH_BOX = { w: 72, h: 72 };
+const WITH_CLOSE = cn(
+  'absolute top-0 right-0 z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  TILE_QUIET,
+);
 
 type ReviewPatternRow = {
   lineKey?: string;
@@ -1697,6 +1704,7 @@ function TrayChip({
         {...dragProps}
         className={cn(
           'cursor-grab border border-borderColor bg-bgColor transition-colors active:cursor-grabbing',
+          TILE_PRESS,
           'hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
           highlighted && 'motion-safe:animate-pulse border-textColor',
         )}
@@ -4522,7 +4530,7 @@ function OperationEditor({
               accept review
             </Button>
           )}
-          <span className='hidden items-center gap-3 sm:flex'>
+          <span className='hidden items-center gap-6 sm:flex'>
             <Button type='button' variant='underline' size='xs' onClick={onInsertAfter}>
               + below
             </Button>
@@ -4532,6 +4540,15 @@ function OperationEditor({
           </span>
         </div>
       </div>
+
+      <ProducesBlock
+        index={index}
+        inputKeys={selectedPieceKeys}
+        pieces={pieces}
+        assembly={assembly}
+        onDissolve={onDissolveUnit}
+        onEdit={onEdit}
+      />
 
       <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
         <div
@@ -4768,7 +4785,7 @@ function OperationEditor({
       <GroupLabel>with</GroupLabel>
       <div className='flex flex-wrap gap-1.5'>
         {chosenLivePieces.map((key) => (
-          <span key={key} className='relative inline-flex size-18 border border-borderColor'>
+          <span key={key} className='group relative inline-flex size-18 border border-borderColor'>
             <PieceTile
               found={pieceShapes?.get(pieceRefKey(key)) ?? null}
               previousFound={previousPieceShapes?.get(pieceRefKey(key)) ?? null}
@@ -4779,28 +4796,27 @@ function OperationEditor({
               className='size-18'
             />
             <Close
-              size='sm'
               aria-label={`remove piece ${byKey.get(key)?.name ?? ''}`}
-              title='remove piece'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+              className={cn(WITH_CLOSE, 'focus-visible:-outline-offset-2')}
             />
           </span>
         ))}
         {danglingPieces.map((key) => (
-          <span key={key} className='relative inline-flex size-18 border border-error'>
+          <span key={key} className='group relative inline-flex size-18 border border-error'>
             <PieceTile found={null} name='missing' pxBox={WITH_BOX} className='size-18' />
             <Close
-              size='sm'
               aria-label='remove missing piece'
-              title='remove piece'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 text-error'
+              className={cn(WITH_CLOSE, 'text-error')}
             />
           </span>
         ))}
         {chosenUnits.map((key) => (
-          <span key={`u:${key}`} className='relative inline-flex size-18 border border-borderColor'>
+          <span
+            key={`u:${key}`}
+            className='group relative inline-flex size-18 border border-borderColor'
+          >
             <UnitPictureTile
               leaves={assembly.res.units.get(key)?.leaves ?? []}
               unitKey={key}
@@ -4811,11 +4827,9 @@ function OperationEditor({
               })}
             />
             <Close
-              size='sm'
               aria-label='remove unit'
-              title='remove unit'
               onClick={() => removePieceKey(key)}
-              className='absolute top-0 right-0 bg-bgColor/80 focus-visible:-outline-offset-2'
+              className={cn(WITH_CLOSE, 'focus-visible:-outline-offset-2')}
             />
           </span>
         ))}
@@ -4824,7 +4838,7 @@ function OperationEditor({
           const previous = previousPieceShapes?.get(pieceRefKey(ghostKey)) ?? null;
           return (
             <Fragment key={`ghost:${ghostKey}`}>
-              <span className='relative inline-flex size-18 border border-dashed border-error'>
+              <span className='group relative inline-flex size-18 border border-dashed border-error'>
                 <PieceTile
                   found={null}
                   previousFound={previous}
@@ -4834,11 +4848,9 @@ function OperationEditor({
                   className='size-18'
                 />
                 <Close
-                  size='sm'
                   aria-label={`remove missing piece ${ghostName}`}
-                  title='remove piece'
                   onClick={() => onRemoveGhost(index, ghostKey)}
-                  className='absolute top-0 right-0 bg-bgColor/80 text-error'
+                  className={cn(WITH_CLOSE, 'text-error')}
                 />
               </span>
               {(candidatesByGhost.get(ghostKey) ?? []).map((candidate) => {
@@ -4868,7 +4880,7 @@ function OperationEditor({
         {linkedMaterials.map((material) => (
           <span
             key={material.lineKey}
-            className='relative size-18'
+            className='group relative size-18'
             onMouseEnter={() => onActiveBomChange?.(material.lineKey ?? null)}
             onMouseLeave={() => onActiveBomChange?.(null)}
           >
@@ -4878,14 +4890,12 @@ function OperationEditor({
               className='justify-center'
             />
             <Close
-              size='sm'
               aria-label={`remove material ${material.name?.trim() || ''}`}
-              title='remove material'
               onClick={() => {
                 if (material.lineKey && material.lineKey === applied.thread) dismiss('thread');
                 toggleBom(material.lineKey ?? '');
               }}
-              className='absolute top-0 right-0 bg-bgColor/80'
+              className={WITH_CLOSE}
             />
           </span>
         ))}
@@ -4969,15 +4979,6 @@ function OperationEditor({
           </div>
         </CalloutBox>
       )}
-
-      <ProducesBlock
-        index={index}
-        inputKeys={selectedPieceKeys}
-        pieces={pieces}
-        assembly={assembly}
-        onDissolve={onDissolveUnit}
-        onEdit={onEdit}
-      />
 
       <div className='mt-3'>
         <AiTextareaField
@@ -6605,6 +6606,11 @@ export function OperationsField({
   // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
   // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
   const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  const [dissolveWarning, setDissolveWarning] = useState<{
+    stepIndex: number;
+    unitName: string;
+    price: AssemblyPrice;
+  } | null>(null);
   // ВСЕ ОРГАНЫ СОЗДАНИЯ ВХОДЯТ ЧЕРЕЗ ЭТУ ДВЕРЬ. Ховер-полоса уже несёт явный `at`; выбор одной
   // детали или одного узла раньше нёс только состав и потому дописывал тот же шаг в общий хвост.
   const openCreate = useCallback(
@@ -6627,6 +6633,7 @@ export function OperationsField({
   useEffect(() => {
     if (!frozen) return;
     setPendingCreate(null);
+    setDissolveWarning(null);
     // (8/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
@@ -7106,6 +7113,25 @@ export function OperationsField({
         label: dissolveLabel(unitKey, unitName),
       }),
     );
+  };
+
+  /** Every dissolve door asks this gate; the mutator above stays the one writer and undo author. */
+  const requestDissolveUnit = (stepIndex: number) => {
+    if (frozen) return;
+    const price = dissolvePrice(pieces, grouping.schematicSteps, stepIndex);
+    if (!dissolveNeedsConfirmation(price)) {
+      dissolveUnit(stepIndex);
+      return;
+    }
+    const step = grouping.schematicSteps[stepIndex];
+    setDissolveWarning({
+      stepIndex,
+      unitName: unitDisplayName({
+        key: step?.outputUnitKey ?? '',
+        outputUnitName: step?.outputUnitName,
+      }),
+      price,
+    });
   };
 
   /**
@@ -7944,7 +7970,7 @@ export function OperationsField({
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
                   tailSmv={grouping.tailSmv}
-                  onDissolve={dissolveUnit}
+                  onDissolve={requestDissolveUnit}
                   positions={prefs.pos}
                   // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
                   // сделанный здесь, оказался бы невидим для истории, и первое же ⌘Z в фулскрине
@@ -8049,7 +8075,7 @@ export function OperationsField({
                   onDropPiece={addInputToOperation}
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
-                  onDissolveUnit={dissolveUnit}
+                  onDissolveUnit={requestDissolveUnit}
                   mediaUrls={operationMediaUrls}
                   frozen={frozen}
                 />
@@ -8083,7 +8109,7 @@ export function OperationsField({
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
           setPendingCreate={openCreate}
-          dissolveUnit={dissolveUnit}
+          dissolveUnit={requestDissolveUnit}
           addInputToOperation={addInputToOperation}
           // `addOperation` ФУЛСКРИНУ БОЛЬШЕ НЕ ОТДАЁТСЯ. Его «+ new operation» ведёт в диалог
           // создания (`setPendingCreate`), а не дописывает пустой шаг: там нет ни лотка, ни
@@ -8157,7 +8183,7 @@ export function OperationsField({
                 onDropPiece={addInputToOperation}
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
-                onDissolveUnit={dissolveUnit}
+                onDissolveUnit={requestDissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />
@@ -8184,6 +8210,48 @@ export function OperationsField({
           onExit={() => setFullscreen(false)}
         />
       )}
+
+      <ConfirmationModal
+        open={dissolveWarning != null}
+        onOpenChange={(open) => {
+          if (!open) setDissolveWarning(null);
+        }}
+        onConfirm={() => {
+          if (dissolveWarning) dissolveUnit(dissolveWarning.stepIndex);
+        }}
+        title={`DISSOLVE ${dissolveWarning?.unitName ?? ''}?`.toUpperCase()}
+        confirmLabel='dissolve'
+        cancelLabel='cancel'
+        onCloseAutoFocus={restoreScreenFocus}
+      >
+        {dissolveWarning && (
+          <ChipRow className='gap-2'>
+            {dissolveWarning.price.breaks.map((stepIndex) => (
+              <Chip key={stepIndex}>
+                {getValues(`operations.${stepIndex}.operationNumber`) || (stepIndex + 1) * 10}{' '}
+                {labelOfStep(stepIndex).split(' · ')[0]}
+              </Chip>
+            ))}
+            <Chip tone='error'>
+              breaks {dissolveWarning.price.breaks.length}{' '}
+              {dissolveWarning.price.breaks.length === 1 ? 'op' : 'ops'}
+            </Chip>
+            {dissolveWarning.price.unitsLost.map((key) => {
+              const producer = grouping.schematicSteps.find((step) => step.outputUnitKey === key);
+              return (
+                <Chip key={`unit:${key}`} tone='error'>
+                  lost {unitDisplayName({ key, outputUnitName: producer?.outputUnitName })}
+                </Chip>
+              );
+            })}
+            {dissolveWarning.price.piecesDropped.map((key) => (
+              <Chip key={`piece:${key}`} tone='error'>
+                dropped {pieces.find((piece) => piece.lineKey === key)?.name ?? key}
+              </Chip>
+            ))}
+          </ChipRow>
+        )}
+      </ConfirmationModal>
 
       {/* ПАНЕЛЬ РАТИФИКАЦИИ МОНТИРУЕТСЯ ЗДЕСЬ, СНАРУЖИ ОБОИХ РЕЖИМОВ РЕЛЬСА, — как и прочие
           диалоги этого файла. Открывает её счётчик неназванных, который стоит НАД обоими режимами

@@ -112,7 +112,7 @@ export { default as Textarea, type TextareaProps } from './components/text-area'
 /** @primitive Typography: every piece of text */
 export { default as Text } from './components/text';
 /** @primitive Tile corner skin tokens */
-export { TILE_CORNER, TILE_QUIET } from './components/tile-skin';
+export { TILE_CORNER, TILE_PRESS, TILE_QUIET } from './components/tile-skin';
 /** @primitive Auto-fill grid of cards */
 export { Tile, Tiles } from './components/tiles';
 /** @primitive On/off switch with label */

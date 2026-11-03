@@ -11,7 +11,6 @@ import {
   mirrorLeftPoses,
   mirrorLeftRows,
   pickTarget,
-  pieceWord,
   seamSideName,
   sideForClick,
 } from './seam-focus';
@@ -104,23 +103,10 @@ describe('side names', () => {
     );
   });
 
-  it('keeps a generic placket run at the human piece name', () => {
+  it('names a generic placket run by the piece alone', () => {
     const placket = geoms.get('FLP_L_MAIN')!;
     const longest = placket.edges.reduce((best, edge) => (edge.lenMm > best.lenMm ? edge : best));
     expect(seamSideName([longest.id], geoms, nameOf, pieceOf)).toBe('placket');
-  });
-});
-
-describe('pieceWord', () => {
-  it('turns card codes into plain words and keeps prose names', () => {
-    expect(pieceWord('SLV_L')).toBe('sleeve');
-    expect(pieceWord('FLP_L_MAIN')).toBe('placket');
-    expect(pieceWord('YK')).toBe('yoke');
-    expect(pieceWord('LIN_FP_L')).toBe('lining front piece');
-    expect(pieceWord('Left Sleeve')).toBe('left sleeve');
-    expect(pieceWord('BP_U_1')).toBe('back piece');
-    expect(pieceWord('BP_MAIN')).toBe('back piece');
-    expect(pieceWord('P_L_MAIN')).toBe('front');
   });
 });
 

@@ -222,6 +222,3 @@ export function reconfirmRow(item: ReviewItem, ctx: AnchorCtx): StoredSeam | nul
     ...opts(ctx),
   });
 }
-
-export const flipped = (d: StoredSeamDirection): StoredSeamDirection =>
-  d === 'same' ? 'reversed' : 'same';

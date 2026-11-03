@@ -308,6 +308,14 @@ export type AssemblyPrice = {
   summary: string;
 };
 
+/** Only destructive consequences stop dissolve for confirmation; a heal alone is safe. */
+export function dissolveNeedsConfirmation(price: AssemblyPrice | null): price is AssemblyPrice {
+  return (
+    !!price &&
+    (price.breaks.length > 0 || price.unitsLost.length > 0 || price.piecesDropped.length > 0)
+  );
+}
+
 /**
  * ЦЕНА = КЛАССИФИКАЦИЯ КАРТОЧКИ-ПОСЛЕ МИНУС КЛАССИФИКАЦИЯ КАРТОЧКИ-СЕЙЧАС. Ни одного правила
  * каскада здесь не записано — они все уже в свипе и в `assemblyFaults`, и спрашивать их надо, а не
