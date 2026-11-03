@@ -256,6 +256,7 @@ import {
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
+import { StepTimeField } from './step-time-field';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -4566,7 +4567,7 @@ function OperationEditor({
             className={selectNoGrow}
           />
         </div>
-        <DecimalField name={`operations.${index}.smv`} label='time, min' min={0} />
+        <StepTimeField name={`operations.${index}.smv`} label='time, min' />
         {showIdentityOperation && (
           <SelectField
             name={`operations.${index}.operationType`}
