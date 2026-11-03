@@ -120,6 +120,7 @@ function sceneOpsSignature(ops: readonly SceneOp[], index: number): string {
       outputUnitKey: op?.outputUnitKey,
       seamKeys: op?.seamKeys,
       poseKeys: op?.poseKeys,
+      foldKeys: op?.foldKeys,
       operationNumber: op?.operationNumber,
       assemblyBlockDetached: op?.assemblyBlockDetached,
       fullnessRatio: op?.fullnessRatio,
