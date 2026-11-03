@@ -64,7 +64,14 @@ export {
   type Run,
   type ScoreParts,
 } from './match';
-export { drillPoints, seamLoopOf, seamPieceOf, segmentPiece } from './segment';
+export {
+  breakPoints,
+  drillPoints,
+  seamLoopOf,
+  seamPieceOf,
+  segmentPiece,
+  type EdgeBreakPoint,
+} from './segment';
 export { handOf, handStem, shapeRelation, twinKind, twins, unprovenCopies } from './twins';
 export {
   boundaryRuns,

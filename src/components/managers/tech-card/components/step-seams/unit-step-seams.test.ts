@@ -26,6 +26,7 @@ import {
 } from './step-picture-view';
 import { edgeRowFromPick, initialPickerPick } from './step-rows';
 import {
+  fullyUsedEdges,
   pieceOfTarget,
   suggestStepPairs,
   usedEdgesBeforeStep,
@@ -211,7 +212,7 @@ describe('unit seam ACCEPT row', () => {
       index,
       pieceKeys,
       geoms,
-      usedEdgesBeforeStep(operations, index, rows),
+      fullyUsedEdges(usedEdgesBeforeStep(operations, index, rows, geoms), geoms),
       null,
       rows,
     );

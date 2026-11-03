@@ -3405,7 +3405,6 @@ export function editorOperationPictures(
               inputLayouts: picture.groups.map((group) => assembledByUnit.get(group.key)),
               stackIdentical: true,
               joinedOverlap: 0.15,
-              honorRanges: true,
               garmentLayout: true,
             }
           : {
@@ -3413,7 +3412,6 @@ export function editorOperationPictures(
               rasterMm: STEP_TILE_RASTER_MM,
               ...picture.hands,
               joinedOverlap: 0,
-              honorRanges: false,
               bagsAsLayers: false,
             },
       );
@@ -3521,7 +3519,6 @@ export function editorOperationPictures(
             inputLayouts,
             stackIdentical: true,
             joinedOverlap: 0.15,
-            honorRanges: true,
             garmentLayout: true,
           },
         );
@@ -4463,6 +4460,7 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}
           stepEdges={r.editorPic.stepEdges}
+          stepParts={r.editorPic.stepParts}
           actionLines={r.print.action.lines}
           actionGlyphs={r.print.action.glyphs}
           className='asm-editor-picture'

@@ -28,6 +28,13 @@ export {
 export { contourSig, frameOf, grainDegOf, runsOfPiece } from './frame';
 export { resolveSeamDecisions, sideEdges } from './resolve';
 export {
+  candidateSideParts,
+  expandSidePart,
+  normalizeParts,
+  sidePartEdges,
+  type SidePart,
+} from './span';
+export {
   POSE_KIND_WIRE,
   fromWire,
   isPoseWire,

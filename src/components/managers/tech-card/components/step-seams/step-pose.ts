@@ -6,8 +6,8 @@
 // Pure, below step-picture (which imports it): no import of step-picture here.
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import { apply, compose, IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, type SeamPlacement, type StoredPose } from 'lib/seams';
+import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
+import { poseOf, poseRow, type SeamPlacement, type StoredPose } from 'lib/seams';
 
 /** A posed piece as the layout reads it: on `host`, at `placement` (the surface encoding). */
 export type PosePin = { host: string; placement: SeamPlacement; seamKey?: string };
@@ -17,6 +17,73 @@ export type PoseEditResolution = {
   /** Pieces whose stored pose must be removed. */
   drop: Set<string>;
 };
+
+export type SpanFit = { T: Affine; angleDeg: number; gapMm: number };
+
+const pointAlong = (points: readonly Pt2[], share: number): Pt2 => {
+  if (points.length < 2) return points[0] ?? [0, 0];
+  const lengths = [0];
+  for (let index = 1; index < points.length; index++)
+    lengths.push(
+      lengths[index - 1] +
+        Math.hypot(
+          points[index][0] - points[index - 1][0],
+          points[index][1] - points[index - 1][1],
+        ),
+    );
+  const target = Math.max(0, Math.min(1, share)) * lengths[lengths.length - 1];
+  let index = 1;
+  while (index < lengths.length - 1 && lengths[index] < target) index++;
+  const length = lengths[index] - lengths[index - 1];
+  const at = length ? (target - lengths[index - 1]) / length : 0;
+  return [
+    points[index - 1][0] + at * (points[index][0] - points[index - 1][0]),
+    points[index - 1][1] + at * (points[index][1] - points[index - 1][1]),
+  ];
+};
+
+/** Rigid, never mirrored, span-end fit. Reversed lays the first span's start on the second's end. */
+export function fitSpan(
+  from: readonly Pt2[],
+  onto: readonly Pt2[],
+  opts: { reversed: boolean },
+): SpanFit {
+  if (from.length < 2 || onto.length < 2) return { T: IDENTITY, angleDeg: 0, gapMm: Infinity };
+  const targetStart = opts.reversed ? onto[onto.length - 1] : onto[0];
+  const targetEnd = opts.reversed ? onto[0] : onto[onto.length - 1];
+  const T = rigid(targetStart, targetEnd, from[0], from[from.length - 1], false);
+  const samples = 32;
+  let gap = 0;
+  for (let index = 0; index <= samples; index++) {
+    const share = index / samples;
+    const moved = apply(T, pointAlong(from, share));
+    const target = pointAlong(onto, opts.reversed ? 1 - share : share);
+    gap += Math.hypot(moved[0] - target[0], moved[1] - target[1]);
+  }
+  const angleDeg = (Math.atan2(T[1], T[0]) * 180) / Math.PI;
+  return { T, angleDeg, gapMm: gap / (samples + 1) };
+}
+
+/** Encode a span fit as the same placement a dropped pose writes. */
+export function poseRowFromFit(args: {
+  seamKey: string;
+  piece: PieceGeom;
+  host: PieceGeom;
+  fit: SpanFit;
+  pieceT?: Affine;
+  hostT?: Affine;
+  grainDeg?: ReadonlyMap<string, number>;
+}): StoredPose {
+  const pieceT = args.pieceT ?? IDENTITY;
+  const hostT = args.hostT ?? IDENTITY;
+  return poseRow({
+    seamKey: args.seamKey,
+    piece: args.piece,
+    host: args.host,
+    placement: poseAt(args.host, args.piece, hostT, compose(args.fit.T, pieceT)),
+    grainDeg: args.grainDeg,
+  });
+}
 
 /**
  * Record one pose edit without allowing a host cycle. The new edge wins: when its host already

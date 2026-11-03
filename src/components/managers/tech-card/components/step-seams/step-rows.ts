@@ -4,7 +4,14 @@
 
 import type { PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { orderSideAlongOutline } from 'lib/assembly-skeleton/union';
-import type { EdgeAnchor, SeamPlacement, StoredSeam } from 'lib/seams';
+import { resolveEdge } from 'lib/assembly-skeleton/union';
+import {
+  resolveSeamDecisions,
+  type EdgeAnchor,
+  type SeamPlacement,
+  type SidePart,
+  type StoredSeam,
+} from 'lib/seams';
 
 import { rowFromHand, type AnchorCtx } from '../assembly-seams/seam-actions';
 import { innerId, parseInner, pieceOfTarget, type TargetId } from './step-seams-model';
@@ -39,9 +46,10 @@ export function edgeRowFromPick(
   sides: SeamSides,
   geoms: ReadonlyMap<string, PieceGeom>,
   anchorCtx: AnchorCtx,
+  parts?: { a: readonly SidePart[]; b: readonly SidePart[] },
 ): StoredSeam | null {
   const ordered = orderedPickSides(sides, geoms);
-  return rowFromHand(ordered.a, ordered.b, geoms, anchorCtx, {
+  return rowFromHand(parts?.a ?? ordered.a, parts?.b ?? ordered.b, geoms, anchorCtx, {
     direction: 'reversed',
   });
 }
@@ -59,10 +67,34 @@ export function rowTargetsOfAnchor(anchor: EdgeAnchor): TargetId[] {
 }
 
 /** The two target runs and optional placement persisted by one owner row. */
-export function storedSeamSides(row: StoredSeam): SeamSides & { placement?: SeamPlacement } {
+export function storedSeamSides(
+  row: StoredSeam,
+  geoms?: ReadonlyMap<string, PieceGeom>,
+): SeamSides & {
+  parts: { a: SidePart[]; b: SidePart[] };
+  placement?: SeamPlacement;
+} {
+  const sideParts = (anchors: readonly EdgeAnchor[]): SidePart[] =>
+    anchors.flatMap((anchor) => {
+      const targets = rowTargetsOfAnchor(anchor);
+      if (
+        row.kind === 'edge' ||
+        row.kind === 'surface' ||
+        row.kind === 'closure' ||
+        targets.length === 0
+      )
+        return targets.map((target) => ({ target }));
+      const length = resolveEdge(anchor.edgeHint, geoms ?? new Map())?.len ?? anchor.lenMm;
+      const from = Math.max(0, Math.min(length, anchor.range[0] * length));
+      const to = Math.max(from, Math.min(length, anchor.range[1] * length));
+      if (from <= 0.05 && to >= length - 0.05) return targets.map((target) => ({ target }));
+      return [{ target: anchor.edgeHint, range: [from, to] }];
+    });
+  const parts = { a: sideParts(row.sideA), b: sideParts(row.sideB) };
   return {
     a: row.sideA.flatMap(rowTargetsOfAnchor),
     b: row.sideB.flatMap(rowTargetsOfAnchor),
+    parts,
     placement: [...row.sideA, ...row.sideB].find((anchor) => anchor.placement)?.placement,
   };
 }
@@ -78,7 +110,7 @@ export function candidateOfStoredSeam(
   innerLines: ReadonlyMap<string, Pt2[][]>,
 ): SeamCandidate | null {
   if (row.kind === 'closure') return null;
-  const { a, b, placement } = storedSeamSides(row);
+  const { a, b, parts, placement } = storedSeamSides(row, geoms);
   if (row.kind === 'surface') {
     // The persisted surface contract is side A = host, side B = laid part. Old rows may have lost
     // their `iN` hint; their kind still makes them a surface, placed by the stored numbers (or a
@@ -91,7 +123,17 @@ export function candidateOfStoredSeam(
     const edge = b.find((target) => !parseInner(target));
     return surfaceSeam(host, part, line, geoms, placement, edge);
   }
-  return seamOfSides({ a, b }, geoms, innerLines, placement);
+  const hasRealRange =
+    (row.kind === 'partial' || row.kind === 'composite') &&
+    [...row.sideA, ...row.sideB].some(
+      (anchor) =>
+        anchor.range[1] > anchor.range[0] && (anchor.range[0] > 0.0001 || anchor.range[1] < 0.9999),
+    );
+  if (hasRealRange) {
+    const resolved = resolveSeamDecisions([row], [...geoms.values()]).applied[0]?.candidate;
+    return resolved ? { ...resolved, sewn: true } : null;
+  }
+  return seamOfSides(parts, geoms, innerLines, placement);
 }
 
 export type StepStoredRow = {

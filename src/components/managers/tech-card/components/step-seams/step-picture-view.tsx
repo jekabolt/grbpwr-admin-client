@@ -20,7 +20,14 @@ import {
   resolveEdge,
 } from 'lib/assembly-skeleton/union';
 import { apply } from 'lib/assembly-skeleton/union/affine';
-import type { EdgeAnchor, SeamPlacement, StoredPose, StoredSeam } from 'lib/seams';
+import {
+  candidateSideParts,
+  type EdgeAnchor,
+  type SeamPlacement,
+  type SidePart,
+  type StoredPose,
+  type StoredSeam,
+} from 'lib/seams';
 import {
   useCallback,
   useEffect,
@@ -42,11 +49,13 @@ import { layerStyle } from './layer-style';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { withPoseHosts, type PosePin } from './step-pose';
+import { storedSeamSides } from './step-rows';
 import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
 import {
   innerId,
   inputGroups,
+  fullyUsedEdges,
   parseInner,
   pieceOfTarget,
   sewnBeforeStep,
@@ -151,6 +160,7 @@ export type StoredOnStep = {
   key: string;
   row: StoredSeam | undefined;
   sides: SeamSides;
+  parts: { a: SidePart[]; b: SidePart[] };
   /** The stored row resolved by the shared seam graph against today's geometry. */
   candidates: SeamCandidate[];
   /** A surface seam's hand placement (on its anchors). */
@@ -405,6 +415,7 @@ export function stepSeamsOfOp(
     const row = byKey.get(key);
     const candidates = chosenByKey.get(key) ?? [];
     const resolved = candidates.map(candidateSides);
+    const fallback = row ? storedSeamSides(row, geoms) : null;
     return {
       key,
       row,
@@ -414,17 +425,26 @@ export function stepSeamsOfOp(
             b: resolved.flatMap((sides) => sides.b),
           }
         : {
-            a: (row?.sideA ?? []).flatMap(targetsOfAnchor),
-            b: (row?.sideB ?? []).flatMap(targetsOfAnchor),
+            a: fallback?.a ?? [],
+            b: fallback?.b ?? [],
           },
+      parts: candidates.length
+        ? {
+            a: candidates.flatMap((candidate) => candidateSideParts(candidate, 'a', geoms)),
+            b: candidates.flatMap((candidate) => candidateSideParts(candidate, 'b', geoms)),
+          }
+        : fallback?.parts ?? { a: [], b: [] },
       candidates,
       placement: [...(row?.sideA ?? []), ...(row?.sideB ?? [])].find((anchor) => anchor.placement)
         ?.placement,
     };
   });
   const used = new Set<EdgeId>([
-    ...stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b]).filter((id) => !parseInner(id)),
-    ...usedEdgesBeforeStep(ops, index, byKey),
+    ...stored
+      .flatMap((seam) => [...seam.parts.a, ...seam.parts.b])
+      .filter((part) => !part.range && !parseInner(part.target))
+      .map((part) => part.target),
+    ...fullyUsedEdges(usedEdgesBeforeStep(ops, index + 1, byKey, geoms), geoms),
   ]);
   const suggestions = ready
     ? suggestStepPairs(ops, index, pieceKeys, geoms, used, ease, byKey)
@@ -549,16 +569,24 @@ export function stepPictureOfOp(
   );
   const marks: EdgeMark[] = [
     ...(stored.length
-      ? stored.flatMap((seam) => [...seam.sides.a, ...seam.sides.b])
+      ? stored.flatMap((seam) => [...seam.parts.a, ...seam.parts.b])
       : crossSeams.length
         ? crossSeams.flatMap((candidate) => {
             const sides = candidateSides(candidate);
-            return [...sides.a, ...sides.b];
+            return [...sides.a, ...sides.b].map((target): SidePart => ({ target }));
           })
         : surfaceMarks.length
           ? []
-          : suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b])
-    ).map((id): EdgeMark => ({ id, tone: stored.length ? 'stored' : 'proposal' })),
+          : suggestions.flatMap((candidate) =>
+              [...candidate.a, ...candidate.b].map((target): SidePart => ({ target })),
+            )
+    ).map(
+      (part): EdgeMark => ({
+        id: part.target,
+        ...(part.range ? { range: part.range } : {}),
+        tone: stored.length ? 'stored' : 'proposal',
+      }),
+    ),
     ...(crossSeams.length ? [] : surfaceMarks).map((id): EdgeMark => ({ id, tone: 'proposal' })),
   ];
   const layoutLeaves = focusedStepLeaves(
@@ -567,6 +595,7 @@ export function stepPictureOfOp(
     innerSeams,
     hands.pose,
   );
+  const highlight = stepHighlightOf(options.operations, options.index, byKey);
   return {
     op: active,
     geoms,
@@ -590,7 +619,8 @@ export function stepPictureOfOp(
     crossSeams,
     storedSeams,
     marks,
-    stepEdges: stepHighlightOf(options.operations, options.index, byKey).targets,
+    stepEdges: highlight.targets,
+    ...(highlight.parts.some((part) => !!part.range) ? { stepParts: highlight.parts } : {}),
     layoutLeaves,
     hands,
     layout: skipLayout
@@ -771,7 +801,12 @@ export function useBoxSize(): [(el: HTMLElement | null) => void, { w: number; h:
  * `pick` — side 2 (where it goes): blue.
  */
 export type Tone = 'proposal' | 'pickFirst' | 'pick' | 'stored' | 'hint';
-export type EdgeMark = { id: TargetId; tone: Tone; label?: string };
+export type EdgeMark = {
+  id: TargetId;
+  tone: Tone;
+  label?: string;
+  range?: readonly [number, number];
+};
 export type NoMark = { id: TargetId; i: number };
 export type PictureActionLine = {
   id: string;
@@ -1227,6 +1262,44 @@ export const spanMm = (line: readonly Pt2[]) => {
   return Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
 };
 
+export function rangedPicturePoints(
+  points: readonly Pt2[],
+  range: readonly [number, number] | undefined,
+  targetLength: number,
+): Pt2[] {
+  if (!range || points.length < 2 || !(targetLength > 0)) return [...points];
+  const total = points.reduce(
+    (sum, point, index) =>
+      index === 0
+        ? 0
+        : sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1]),
+    0,
+  );
+  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
+  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const out: Pt2[] = [];
+  let at = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const next = at + length;
+    if (length > 0 && next >= start && at <= end) {
+      const pointAt = (distance: number): Pt2 => {
+        const share = Math.max(0, Math.min(1, (distance - at) / length));
+        return [a[0] + share * (b[0] - a[0]), a[1] + share * (b[1] - a[1])];
+      };
+      const from = pointAt(Math.max(start, at));
+      const to = pointAt(Math.min(end, next));
+      if (!out.length) out.push(from);
+      out.push(to);
+    }
+    at = next;
+    if (at >= end) break;
+  }
+  return out.length >= 2 ? out : [...points];
+}
+
 export type PicturePickTarget = {
   id: TargetId;
   points: Pt2[];
@@ -1615,6 +1688,7 @@ export function StepPictureSvg({
   innerLines,
   marks = NO_MARKS,
   stepEdges: suppliedStepEdges,
+  stepParts: suppliedStepParts,
   actionLines = NO_ACTION_LINES,
   actionGlyphs = NO_ACTION_GLYPHS,
   noSeamText,
@@ -1646,6 +1720,8 @@ export function StepPictureSvg({
   marks?: readonly EdgeMark[];
   /** Exact owner targets worked by this step; an empty array means a known rowless step. */
   stepEdges?: readonly TargetId[];
+  /** The same owner targets with real sewn windows. */
+  stepParts?: readonly SidePart[];
   actionLines?: readonly PictureActionLine[];
   actionGlyphs?: readonly PictureActionGlyph[];
   /** Localized print wording. Screen pictures reuse the existing editor status. */
@@ -1683,11 +1759,14 @@ export function StepPictureSvg({
   const operations = (form?.getValues('operations') ?? []) as SceneOp[];
   const operation = contextResult ? operations[contextResult.opIndex] : undefined;
   const automaticHighlight = useMemo(
-    () =>
-      contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey).targets : undefined,
+    () => (contextResult ? stepHighlightOf(operations, contextResult.opIndex, byKey) : undefined),
     [contextResult, operations, byKey],
   );
-  const stepEdges = suppliedStepEdges ?? automaticHighlight;
+  const stepEdges = suppliedStepEdges ?? automaticHighlight?.targets;
+  const stepParts: readonly SidePart[] | undefined =
+    suppliedStepParts ??
+    automaticHighlight?.parts ??
+    stepEdges?.map((target): SidePart => ({ target }));
   const stepEdgeSet = useMemo(() => new Set(stepEdges ?? []), [stepEdges]);
   const automaticActions = useMemo(
     () => stepActionMarks(operation, stepEdges ?? [], geoms, innerLines ?? new Map()),
@@ -2074,18 +2153,22 @@ export function StepPictureSvg({
   const pieceOfId = (id: TargetId) => parseInner(id)?.piece ?? id.slice(0, id.lastIndexOf('#'));
   const markLines = marks.flatMap((m) => {
     const points = ptsOf(m.id);
-    const shown = points && pointsOnDrawnPiece(pieceOfId(m.id), points);
+    const edge = resolveEdge(m.id, geoms);
+    const ranged = points && rangedPicturePoints(points, m.range, edge?.len ?? 0);
+    const shown = ranged && pointsOnDrawnPiece(pieceOfId(m.id), ranged);
     return shown ? [{ m, pts: shown }] : [];
   });
   const pickFirstKeys = new Set(
     marks.flatMap((m) => (m.tone === 'pickFirst' ? [pieceOfId(m.id)] : [])),
   );
   const pickFirstPieces = pieces.filter((piece) => pickFirstKeys.has(piece.key));
-  const stepLines = (stepEdges ?? []).flatMap((id) => {
-    if (marks.some((m) => m.id === id && isPick(m.tone))) return [];
-    const points = ptsOf(id);
-    const shown = points && pointsOnDrawnPiece(pieceOfId(id), points);
-    return shown ? [{ id, points: shown }] : [];
+  const stepLines = (stepParts ?? []).flatMap((part) => {
+    if (marks.some((m) => m.id === part.target && isPick(m.tone))) return [];
+    const points = ptsOf(part.target);
+    const edge = resolveEdge(part.target, geoms);
+    const ranged = points && rangedPicturePoints(points, part.range, edge?.len ?? 0);
+    const shown = ranged && pointsOnDrawnPiece(pieceOfId(part.target), ranged);
+    return shown ? [{ id: part.target, points: shown }] : [];
   });
   const actionLinePaths = drawnActionLines.flatMap((line) => {
     if (stepEdges && line.target && !stepEdgeSet.has(line.target)) return [];

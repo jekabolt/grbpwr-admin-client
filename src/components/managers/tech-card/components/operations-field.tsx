@@ -272,6 +272,7 @@ import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
   hasMultipleStepPieces,
   easeOf,
+  fullyUsedEdges,
   suggestStepPair,
   usedEdgesBeforeStep,
   type FormOpLike,
@@ -1284,7 +1285,10 @@ function OperationsHeaderWarnings({
       ) {
         return [];
       }
-      const used = usedEdgesBeforeStep(ops, index, seamsByKey);
+      const used = fullyUsedEdges(
+        usedEdgesBeforeStep(ops, index, seamsByKey, seamGeoms),
+        seamGeoms,
+      );
       return suggestStepPair(
         ops,
         index,

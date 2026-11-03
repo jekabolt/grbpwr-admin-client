@@ -293,9 +293,12 @@ export function resolveSeamDecisions(
 
     // Ties left: the partner's length decides (one anchor a side), else stale.
     if (altA.some((x) => x.length) || altB.some((x) => x.length)) {
-      const anchoredRatio = sum(s.sideA.map((a) => a.lenMm)) / sum(s.sideB.map((a) => a.lenMm));
+      const anchoredRatio =
+        sum(s.sideA.map(anchorSewnLen(s.kind))) / sum(s.sideB.map(anchorSewnLen(s.kind)));
       const drift = (A: AnchorHit[], B: AnchorHit[]) =>
-        Math.abs(sum(A.map((h) => h.lenMm)) / sum(B.map((h) => h.lenMm)) / anchoredRatio - 1);
+        Math.abs(
+          sum(A.map(hitSewnLen(s.kind))) / sum(B.map(hitSewnLen(s.kind))) / anchoredRatio - 1,
+        );
       const combos: [AnchorHit[], AnchorHit[]][] = [];
       const optsA = ha.length === 1 ? [ha[0], ...altA[0]].map((h) => [h]) : [ha];
       const optsB = hb.length === 1 ? [hb[0], ...altB[0]].map((h) => [h]) : [hb];
@@ -341,9 +344,10 @@ export function resolveSeamDecisions(
     }
 
     // Length ratio of the two sides against the anchored one.
-    const lenA = sum(ha.map((h) => h.lenMm));
-    const lenB = sum(hb.map((h) => h.lenMm));
-    const thenRatio = sum(s.sideA.map((a) => a.lenMm)) / sum(s.sideB.map((a) => a.lenMm));
+    const lenA = sum(ha.map(hitSewnLen(s.kind)));
+    const lenB = sum(hb.map(hitSewnLen(s.kind)));
+    const thenRatio =
+      sum(s.sideA.map(anchorSewnLen(s.kind))) / sum(s.sideB.map(anchorSewnLen(s.kind)));
     const moved = lenA / lenB / thenRatio - 1;
     // A partial sews its short side onto PART of a longer run, and on another size the two grade
     // apart (a pocket facing onto a front edge, measured 4–5 % on cards 6 / 7 / 8): there it holds
@@ -405,10 +409,25 @@ export function resolveSeamDecisions(
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────
 
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+/** Share of the run a row really sews; an `edge` row's range is ignored on read. */
+const rangeShare = (anchor: EdgeAnchor, kind: StoredSeam['kind']) =>
+  kind === 'edge' ? 1 : Math.max(0, Math.min(1, anchor.range[1]) - Math.max(0, anchor.range[0]));
+const anchorSewnLen = (kind: StoredSeam['kind']) => (anchor: EdgeAnchor) =>
+  anchor.lenMm * rangeShare(anchor, kind);
+const hitSewnLen = (kind: StoredSeam['kind']) => (hit: AnchorHit) =>
+  hit.lenMm * rangeShare(hit.anchor, kind);
 
 /** A resolved pair's edges, order-free: `kind|A edges|B edges` with the sides sorted. */
 const pairSig = (ha: AnchorHit[], hb: AnchorHit[], kind: StoredSeam['kind']) => {
-  const side = (hs: AnchorHit[]) => [...new Set(hs.flatMap((h) => h.edges))].sort().join('+');
+  const isSpan = (hit: AnchorHit) =>
+    kind !== 'edge' && (hit.anchor.range[0] > 0 || hit.anchor.range[1] < 1);
+  const side = (hs: AnchorHit[]) =>
+    hs.some(isSpan)
+      ? hs
+          .map((hit) => `${[...hit.edges].sort().join('+')}@${hit.anchor.range.join(':')}`)
+          .sort()
+          .join(',')
+      : [...new Set(hs.flatMap((h) => h.edges))].sort().join('+');
   return `${kind}|${[side(ha), side(hb)].sort().join('~')}`;
 };
 
@@ -490,6 +509,25 @@ function candidateOf(
     const [x, y] = reverses(h.frame) ? [1 - t, 1 - f] : [f, t];
     return [Math.round(x * h.lenMm * 10) / 10, Math.round(y * h.lenMm * 10) / 10];
   };
+  const edgeWindows = (h: AnchorHit) => {
+    const range = rangeOf(h);
+    const whole = range[0] <= 0.05 && range[1] >= h.lenMm - 0.05;
+    let at = 0;
+    return h.edges.flatMap((id, index) => {
+      const len = h.edgeLens[index];
+      const from = Math.max(0, range[0] - at);
+      const to = Math.min(len, range[1] - at);
+      at += len;
+      if (to <= from) return [];
+      return [
+        {
+          id,
+          len,
+          range: whole || (from <= 0.05 && to >= len - 0.05) ? undefined : ([from, to] as const),
+        },
+      ];
+    });
+  };
   // A partial keeps the engine's convention (a's START on b's END): when both sides walk the other
   // way today, the sides swap.
   if (
@@ -501,23 +539,22 @@ function candidateOf(
   }
   const sideOf = (hs: AnchorHit[]) => {
     if (hs.length === 1 && s.kind !== 'composite') return { id: hs[0].run, parts: undefined };
-    const parts = hs.flatMap((h) => h.edges);
+    const windows = hs.flatMap(edgeWindows);
+    const parts = windows.map((window) => window.id);
     // The longest part names the side (the composite convention `unionPicture` hangs on).
     let longest = parts[0];
     let best = -1;
-    for (const h of hs)
-      h.edges.forEach((e, i) => {
-        if (h.edgeLens[i] > best) {
-          best = h.edgeLens[i];
-          longest = e;
-        }
-      });
+    for (const window of windows)
+      if (window.len > best) {
+        best = window.len;
+        longest = window.id;
+      }
     return { id: longest, parts: parts.length > 1 ? parts : undefined };
   };
   const A = sideOf(ha);
   const B = sideOf(hb);
-  const aLen = sum(ha.map((h) => h.lenMm));
-  const bLen = sum(hb.map((h) => h.lenMm));
+  const aLen = sum(ha.map(hitSewnLen(s.kind)));
+  const bLen = sum(hb.map(hitSewnLen(s.kind)));
   const pieces = new Set([...ha, ...hb].map((h) => h.anchor.piece));
   const kind: SeamCandidate['kind'] = s.kind === 'closure' ? 'closure-not-seam' : s.kind;
   const partialRange =
@@ -525,14 +562,14 @@ function candidateOf(
       ? { a: rangeOf(ha[0]), b: rangeOf(hb[0]) }
       : undefined;
   const isWhole = (r: [number, number], len: number) => r[0] <= 0.05 && r[1] >= len - 0.05;
-  // A composite part sewn over only a stretch of its run (one edge per anchor; a chain keeps whole).
+  // A composite chain's run range is distributed over its current individual edges.
   let partRange: Record<EdgeId, [number, number]> | undefined;
   if (s.kind === 'composite')
     for (const h of [...ha, ...hb]) {
-      if (h.edges.length !== 1) continue;
-      const r = rangeOf(h);
-      if (isWhole(r, h.lenMm)) continue;
-      (partRange ??= {})[h.edges[0]] = r;
+      for (const window of edgeWindows(h)) {
+        if (!window.range) continue;
+        (partRange ??= {})[window.id] = [window.range[0], window.range[1]];
+      }
     }
   return {
     a: A.id,

@@ -47,6 +47,7 @@ import {
   storedSeamSides,
 } from 'components/managers/tech-card/components/step-seams/step-rows';
 import { stepHighlightOf } from 'components/managers/tech-card/components/step-seams/step-highlight';
+import { sideLengthMm } from 'components/managers/tech-card/components/step-seams/seam-length';
 import {
   buttonholeDirection,
   buttonholeLengthMm,
@@ -61,6 +62,7 @@ import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import {
   contourSig,
+  candidateSideParts,
   frameOf,
   fromWire,
   resolveSeamDecisions,
@@ -69,6 +71,7 @@ import {
   SEAMS,
   type AnchorHit,
   type EdgeAnchor,
+  type SidePart,
   type StoredSeam,
   type TechCardSeamWire,
 } from 'lib/seams';
@@ -369,6 +372,8 @@ type SeamPart = {
   edgeId?: string;
   edgeName?: string;
   notches?: number;
+  /** Real sewn window, mm along `edgeId`; absent is the whole run. */
+  range?: [number, number];
 };
 
 type Placement = { xMm: number; yMm: number; rotDeg: number; flip: boolean };
@@ -404,10 +409,11 @@ function candidatePart(
     share: end - start,
     turn: turnOf(points),
     edgeId: edge.id,
+    ...(range ? { range: [start * edge.len, end * edge.len] as [number, number] } : {}),
   };
 }
 
-function seamOfCandidate(
+export function seamOfCandidate(
   candidate: SeamCandidate,
   operation: number,
   index: number,
@@ -415,11 +421,10 @@ function seamOfCandidate(
 ): AsmSeam | null {
   if (candidate.kind === 'closure-not-seam') return null;
   const side = (which: 'a' | 'b') => {
-    const ids =
-      which === 'a' ? candidate.aParts ?? [candidate.a] : candidate.bParts ?? [candidate.b];
-    const range = ids.length === 1 ? candidate.range?.[which] : undefined;
-    return ids
-      .map((id) => candidatePart(id, range, geoms))
+    return candidateSideParts(candidate, which, geoms)
+      .map((part) =>
+        candidatePart(part.target, part.range ? [part.range[0], part.range[1]] : undefined, geoms),
+      )
       .filter((part): part is SeamPart => !!part);
   };
   const a = side('a');
@@ -765,6 +770,7 @@ function partOf(hit: AnchorHit, geom: PieceGeom): SeamPart | null {
     edgeId: run.id,
     edgeName: run.edges.map(edgeNameOf).filter(Boolean).join(' + ') || undefined,
     notches: run.notches,
+    ...(whole ? {} : { range: [s * hit.lenMm, e * hit.lenMm] as [number, number] }),
   };
 }
 
@@ -2228,6 +2234,21 @@ function buildCards(
   const producer = new Map(ops.flatMap((op) => (op.out ? [[op.out, op] as const] : [])));
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
+  const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const metricLength = (parts: readonly SeamPart[]) => {
+    if (parts.every((part) => !!part.edgeId))
+      return sideLengthMm(
+        parts.map(
+          (part): SidePart => ({
+            target: part.edgeId!,
+            ...(part.range ? { range: part.range } : {}),
+          }),
+        ),
+        metricGeoms,
+        () => 0,
+      );
+    return parts.reduce((total, part) => total + part.lenMm, 0);
+  };
 
   for (const op of ops) {
     if (!op.join) {
@@ -2431,9 +2452,9 @@ function buildCards(
     }
 
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const left = s.a.reduce((t, p) => t + p.lenMm, 0);
+      const left = metricLength(s.a);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = s.b.reduce((t, p) => t + p.lenMm, 0);
+      const right = metricLength(s.b);
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const terms = opTerms(op);
@@ -2618,6 +2639,7 @@ function actionOwnerRows(
 function actionPartOfTarget(
   target: string,
   pieces: ReadonlyMap<string, AsmPiece>,
+  range?: readonly [number, number],
 ): SeamPart | null {
   const inner = /^(.*):i(\d+)$/.exec(target);
   if (inner) {
@@ -2632,18 +2654,22 @@ function actionPartOfTarget(
       turn: turnOf(pts),
     };
   }
-  const split = target.lastIndexOf('#');
-  const piece = split >= 0 ? pieces.get(target.slice(0, split)) : undefined;
-  const edge = piece?.geom.edges.find((candidate) => candidate.id === target);
+  const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
+  const edge = resolveEdge(target, geoms);
+  const piece = edge ? pieces.get(edge.pieceKey) : undefined;
   if (!piece || !edge?.pts.length) return null;
-  const pts = edge.pts.map(([x, y]) => [x, -y] as Pt);
+  const from = range ? Math.max(0, Math.min(edge.len, range[0])) : 0;
+  const to = range ? Math.max(from, Math.min(edge.len, range[1])) : edge.len;
+  const points = range ? sliceRun(edge.pts, from / edge.len, to / edge.len) : edge.pts;
+  const pts = points.map(([x, y]) => [x, -y] as Pt);
   return {
     piece: piece.key,
     pts,
-    lenMm: polyLen(pts),
-    share: 1,
+    lenMm: to - from,
+    share: (to - from) / Math.max(edge.len, 1e-6),
     turn: turnOf(pts),
     edgeId: edge.id,
+    ...(range ? { range: [from, to] as [number, number] } : {}),
   };
 }
 
@@ -2652,25 +2678,34 @@ function actionPartsOfRows(
   rows: readonly StoredSeam[],
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
+  const geoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
   const targets = rows.flatMap((row) => {
-    const sides = storedSeamSides(row);
-    if (row.kind !== 'surface') return [...sides.a, ...sides.b];
+    const sides = storedSeamSides(row, geoms);
+    if (row.kind !== 'surface') return [...sides.parts.a, ...sides.parts.b];
     const laidEdges = row.sideB
       .flatMap(rowTargetsOfAnchor)
       .filter((target) => !/:i\d+$/.test(target));
-    return laidEdges.length
-      ? laidEdges
-      : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target));
+    return (
+      laidEdges.length
+        ? laidEdges
+        : row.sideA.flatMap(rowTargetsOfAnchor).filter((target) => /:i\d+$/.test(target))
+    ).map((target) => ({ target }));
   });
   return actionPartsOfTargets(targets, pieces);
 }
 
 function actionPartsOfTargets(
-  targets: readonly string[],
+  targets: readonly string[] | readonly SidePart[],
   pieces: ReadonlyMap<string, AsmPiece>,
 ): SeamPart[] {
-  return [...new Set(targets)].flatMap((target) => {
-    const part = actionPartOfTarget(target, pieces);
+  const unique = new Map(
+    targets.map((part) => {
+      const value: SidePart = typeof part === 'string' ? { target: part } : part;
+      return [`${value.target}:${value.range?.[0] ?? ''}:${value.range?.[1] ?? ''}`, value];
+    }),
+  );
+  return [...unique.values()].flatMap((target) => {
+    const part = actionPartOfTarget(target.target, pieces, target.range);
     return part ? [part] : [];
   });
 }
@@ -2708,7 +2743,7 @@ function buildActions(
           ops.map((candidate) => candidate.raw),
           opIndex,
           rows,
-        ).targets
+        ).parts
       : [];
     const edgeParts = finishingEdgeOp
       ? actionPartsOfTargets(highlighted, pieces)

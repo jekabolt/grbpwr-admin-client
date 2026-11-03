@@ -22,12 +22,14 @@ import {
   frameOf,
   newSeamKey,
   type EdgeAnchor,
+  type SidePart,
   type SeamPlacement,
   type StoredSeam,
 } from 'lib/seams';
 import { runSamples } from 'lib/seams/frame';
 
 import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
+import { sideLengthMm } from './seam-length';
 
 import { outcomeOf } from './seam-ranker';
 import { isLayerCloth, withSignals, type SeamSignal } from './seam-signals';
@@ -256,24 +258,15 @@ export function sideOf(
  * the same edge of its identical twin layer) runs once: the layers lie on top of each other.
  */
 export function targetsLen(
-  ids: readonly TargetId[],
+  ids: readonly TargetId[] | readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLen: (piece: string, k: number) => number,
 ): number {
-  const counted: Edge[] = [];
-  const isLayerOf = (e: Edge, c: Edge) =>
-    c.k === e.k &&
-    c.pieceKey !== e.pieceKey &&
-    !!geoms.get(c.pieceKey)?.twinOf.some((t) => t.key === e.pieceKey && t.kind === 'identical') &&
-    Math.abs(c.lenMm - e.lenMm) <= LAYER_EDGE_REL * Math.max(c.lenMm, e.lenMm, 1);
-  return ids.reduce((s, id) => {
-    const inner = parseInner(id);
-    if (inner) return s + innerLen(inner.piece, inner.k);
-    const edge = edgeOf(id, geoms);
-    if (!edge || counted.some((c) => isLayerOf(edge, c))) return s;
-    counted.push(edge);
-    return s + edge.lenMm;
-  }, 0);
+  return sideLengthMm(
+    ids.map((part) => (typeof part === 'string' ? { target: part } : part)),
+    geoms,
+    innerLen,
+  );
 }
 
 /**
@@ -358,19 +351,70 @@ function surfacePartsOf(seam: StoredSeam, geoms: ReadonlyMap<string, PieceGeom>)
   return pieces.filter((piece) => !hosts.has(piece));
 }
 
-/** Edges occupied by confirmed seams attached to earlier steps. */
+/** Sewn windows of edges attached to earlier steps. A whole edge is `[0, edge length]`. */
 export function usedEdgesBeforeStep(
   ops: readonly FormOpLike[],
   index: number,
   seams: ReadonlyMap<string, StoredSeam>,
-): Set<EdgeId> {
-  const used = new Set<EdgeId>();
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Map<EdgeId, [number, number][]> {
+  const used = new Map<EdgeId, [number, number][]>();
+  const add = (id: EdgeId, range: [number, number]) =>
+    used.set(id, [...(used.get(id) ?? []), range]);
   for (let i = 0; i < index; i++) {
-    for (const seam of storedSidesOf(ops[i], seams)) {
-      for (const edge of [...seam.a, ...seam.b]) used.add(edge);
+    for (const key of ops[i]?.seamKeys ?? []) {
+      const seam = seams.get(key);
+      if (
+        !seam ||
+        seam.status !== 'confirmed' ||
+        seam.stale ||
+        seam.kind === 'surface' ||
+        seam.kind === 'closure'
+      )
+        continue;
+      for (const anchor of [...seam.sideA, ...seam.sideB]) {
+        const ids = edgeIdsOf(anchor.edgeHint);
+        const edges = ids.map((id) => edgeOf(id, geoms));
+        if (!ids.length || edges.some((edge) => !edge)) continue;
+        const total = edges.reduce((sum, edge) => sum + edge!.lenMm, 0);
+        const rawFrom = seam.kind === 'edge' ? 0 : anchor.range[0] * total;
+        const rawTo = seam.kind === 'edge' ? total : anchor.range[1] * total;
+        const from = Math.max(0, Math.min(total, Math.min(rawFrom, rawTo)));
+        const to = Math.max(from, Math.min(total, Math.max(rawFrom, rawTo)));
+        let at = 0;
+        ids.forEach((id, edgeIndex) => {
+          const length = edges[edgeIndex]!.lenMm;
+          const edgeFrom = Math.max(0, from - at);
+          const edgeTo = Math.min(length, to - at);
+          if (edgeTo > edgeFrom) add(id, [edgeFrom, edgeTo]);
+          at += length;
+        });
+      }
     }
   }
   return used;
+}
+
+/** Edges whose sewn windows cover their complete current length. */
+export function fullyUsedEdges(
+  used: ReadonlyMap<EdgeId, readonly [number, number][]>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+): Set<EdgeId> {
+  const full = new Set<EdgeId>();
+  for (const [id, ranges] of used) {
+    const length = edgeOf(id, geoms)?.lenMm;
+    if (!(length && ranges.length)) continue;
+    const sorted = ranges
+      .map(([a, b]) => [Math.max(0, Math.min(a, b)), Math.min(length, Math.max(a, b))] as const)
+      .sort((a, b) => a[0] - b[0]);
+    let to = sorted[0][0] <= 0.05 ? sorted[0][1] : -Infinity;
+    for (let range = 1; range < sorted.length && to >= 0; range++) {
+      if (sorted[range][0] > to + 0.05) break;
+      to = Math.max(to, sorted[range][1]);
+    }
+    if (to >= length - 0.05) full.add(id);
+  }
+  return full;
 }
 
 /** The live input units and only their unconsumed outer edges. */
@@ -1777,7 +1821,9 @@ function applyStep(
   // edge seam for the same two inputs both invents work and consumes the host's real boundary.
   if (surfaceRows.length) return;
   const occupied = new Set<EdgeId>([
-    ...(seams ? usedEdgesBeforeStep(ops, index, seams) : state.stored),
+    ...(seams
+      ? fullyUsedEdges(usedEdgesBeforeStep(ops, index, seams, geoms), geoms)
+      : state.stored),
     ...rows.flatMap((row) => [...row.a, ...row.b]),
   ]);
   const taken = new Set(state.sewn);
@@ -2494,7 +2540,7 @@ export function suggestStepSurfaces(
       index,
       pieceKeys,
       geoms,
-      usedEdgesBeforeStep(ops, index, knownSeams),
+      fullyUsedEdges(usedEdgesBeforeStep(ops, index, knownSeams, geoms), geoms),
       easeOf(op),
       seams,
     ).length

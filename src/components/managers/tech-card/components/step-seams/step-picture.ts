@@ -27,7 +27,7 @@ import {
 } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { unitDisplayName } from 'lib/assembly-unit-name';
-import type { SeamPlacement } from 'lib/seams';
+import { expandSidePart, type SeamPlacement, type SidePart } from 'lib/seams';
 import { isLayerCloth } from './seam-signals';
 import {
   handTargetsOf,
@@ -43,6 +43,7 @@ import { pinPoses, placementT, type PosePin } from './step-pose';
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 /** One seam as two lists of edges (a side may run over several edges). */
 export type SeamSides = { a: readonly EdgeId[]; b: readonly EdgeId[] };
+export type SeamPartSides = { a: readonly SidePart[]; b: readonly SidePart[] };
 
 export function boxOf(pts: Iterable<Pt2>): Box {
   let x0 = Infinity;
@@ -129,29 +130,59 @@ const EVIDENCE: SeamCandidate['evidence'] = {
  * the geometry holds. Inner lines and same-piece pairs place nothing → null.
  */
 export function candidateOf(
-  s: SeamSides,
+  s: SeamSides | SeamPartSides,
   geoms: ReadonlyMap<string, PieceGeom>,
+  storedKind?: 'edge' | 'partial' | 'composite',
 ): SeamCandidate | null {
-  const longest = (ids: readonly EdgeId[]) => {
+  const inputParts = (side: readonly EdgeId[] | readonly SidePart[]) =>
+    side.map((part): SidePart => (typeof part === 'string' ? { target: part } : part));
+  const aParts = inputParts(s.a).flatMap((part) => expandSidePart(part, geoms));
+  const bParts = inputParts(s.b).flatMap((part) => expandSidePart(part, geoms));
+  const longest = (parts: readonly SidePart[]) => {
     let best: { id: EdgeId; len: number } | null = null;
-    for (const id of ids) {
-      const e = resolveEdge(id, geoms);
-      if (e && (!best || e.len > best.len)) best = { id, len: e.len };
+    for (const part of parts) {
+      const e = resolveEdge(part.target, geoms);
+      if (e && (!best || e.len > best.len)) best = { id: part.target, len: e.len };
     }
     return best?.id ?? null;
   };
-  const a = longest(s.a);
-  const b = longest(s.b);
+  const a = longest(aParts);
+  const b = longest(bParts);
   if (!a || !b || pieceKeyOf(a) === pieceKeyOf(b)) return null;
+  const hasRange = [...aParts, ...bParts].some((part) => !!part.range);
+  const multiple = aParts.length > 1 || bParts.length > 1;
+  const kind = storedKind ?? (hasRange ? (multiple ? 'composite' : 'partial') : 'edge');
+  const partRange: Record<EdgeId, [number, number]> = {};
+  if (kind === 'composite')
+    for (const part of [...aParts, ...bParts])
+      if (part.range) partRange[part.target] = [part.range[0], part.range[1]];
+  const edgeLen = (id: EdgeId) => resolveEdge(id, geoms)?.len ?? 0;
   // A side of several edges (an armhole of front + back) is laid along as one run.
   return {
     a,
     b,
-    ...(s.a.length > 1 ? { aParts: [...s.a] } : {}),
-    ...(s.b.length > 1 ? { bParts: [...s.b] } : {}),
+    ...(aParts.length > 1 || kind === 'composite'
+      ? { aParts: aParts.map((part) => part.target) }
+      : {}),
+    ...(bParts.length > 1 || kind === 'composite'
+      ? { bParts: bParts.map((part) => part.target) }
+      : {}),
     score: 1,
     evidence: EVIDENCE,
-    kind: 'edge',
+    kind,
+    ...(kind === 'partial' && hasRange
+      ? {
+          range: {
+            a: aParts[0].range
+              ? [aParts[0].range[0], aParts[0].range[1]]
+              : [0, edgeLen(aParts[0].target)],
+            b: bParts[0].range
+              ? [bParts[0].range[0], bParts[0].range[1]]
+              : [0, edgeLen(bParts[0].target)],
+          },
+        }
+      : {}),
+    ...(Object.keys(partRange).length ? { partRange } : {}),
     sewn: true,
   };
 }
@@ -285,19 +316,22 @@ export function surfaceSeam(
  * (the host's line, the part the other side names), else the plain `candidateOf`.
  */
 export function seamOfSides(
-  s: SeamSides,
+  s: SeamSides | SeamPartSides,
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
   placement?: SeamPlacement,
+  storedKind?: 'edge' | 'partial' | 'composite',
 ): SeamCandidate | null {
-  const hostSide = s.a.some((t) => parseInner(t))
+  const targetOf = (part: EdgeId | SidePart) => (typeof part === 'string' ? part : part.target);
+  const hostSide = s.a.some((t) => parseInner(targetOf(t)))
     ? s.a
-    : s.b.some((t) => parseInner(t))
+    : s.b.some((t) => parseInner(targetOf(t)))
       ? s.b
       : null;
-  if (!hostSide) return candidateOf(s, geoms);
-  const h = parseInner(hostSide.find((t) => parseInner(t))!)!;
-  const other = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(t));
+  if (!hostSide) return candidateOf(s, geoms, storedKind);
+  const h = parseInner(targetOf(hostSide.find((t) => parseInner(targetOf(t)))!))!;
+  const otherPart = (hostSide === s.a ? s.b : s.a).find((t) => !parseInner(targetOf(t)));
+  const other = otherPart && targetOf(otherPart);
   if (!other) return null;
   const line = innerLines.get(h.piece)?.[h.k] ?? [];
   return surfaceSeam(h.piece, pieceOfTarget(other), line, geoms, placement, other);
@@ -807,8 +841,6 @@ export function stepLayout(
     stackIdentical?: boolean;
     /** Legal joined overlap for inferred cut shapes; stored editor layouts keep the old zero. */
     joinedOverlap?: number;
-    /** Use partial seam windows; stored editor layouts retain their historical full-edge fit. */
-    honorRanges?: boolean;
     /** Opt into cumulative whole-garment packing; ordinary editor tiles keep legacy semantics. */
     garmentLayout?: boolean;
     /** A pocket bag or lining lies on its own piece inside a unit; the tech pack opts out. */
@@ -1114,7 +1146,7 @@ export function stepLayout(
       const ea = resolveEdge(theirs, geoms)!;
       const eb = resolveEdge(mine, geoms)!;
       const rangeOf = (id: EdgeId) =>
-        opts.honorRanges === true ? (id === c.a ? c.range?.a : c.range?.b) : undefined;
+        c.partRange?.[id] ?? (id === c.a ? c.range?.a : id === c.b ? c.range?.b : undefined);
       const Tt = compose(Ht, local.get(kb)!);
       // Their side across several pieces of their input (an armhole of front + back): one run —
       // along the pieces drawn joined; one standing apart (a yoke no upright seam lays on the
@@ -1128,7 +1160,7 @@ export function stepLayout(
           const e = resolveEdge(id, geoms);
           const T = at(pieceKeyOf(id));
           if (!e || !T) return true;
-          const pts = e.pts.map((p) => apply(T, p));
+          const pts = rangedLine(e.pts, rangeOf(id)).map((p) => apply(T, p));
           const onKept = kept.some(
             (q) =>
               pts.reduce((s, p) => s + toLine(p, q), 0) / pts.length < STACKED_MM &&
@@ -1147,7 +1179,15 @@ export function stepLayout(
           ? runOf(
               theirParts.flatMap((id): RunPart[] => {
                 const e = resolveEdge(id, geoms);
-                return e ? [{ key: e.pieceKey, pts: e.pts, len: e.len }] : [];
+                if (!e) return [];
+                const range = rangeOf(id);
+                return [
+                  {
+                    key: e.pieceKey,
+                    pts: rangedLine(e.pts, range),
+                    len: range ? Math.max(0, range[1] - range[0]) : e.len,
+                  },
+                ];
               }),
               (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined),
             )
@@ -1163,7 +1203,15 @@ export function stepLayout(
           ? runOf(
               myParts.flatMap((id): RunPart[] => {
                 const e = resolveEdge(id, geoms);
-                return e ? [{ key: e.pieceKey, pts: e.pts, len: e.len }] : [];
+                if (!e) return [];
+                const range = rangeOf(id);
+                return [
+                  {
+                    key: e.pieceKey,
+                    pts: rangedLine(e.pts, range),
+                    len: range ? Math.max(0, range[1] - range[0]) : e.len,
+                  },
+                ];
               }),
               (k) => local.get(k),
             )

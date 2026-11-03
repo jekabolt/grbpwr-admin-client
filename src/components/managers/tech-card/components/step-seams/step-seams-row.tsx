@@ -112,7 +112,7 @@ export function StepSeamsRow({ index }: { index: number }) {
         seams
       </GroupLabel>
       <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-        {stored.map(({ key, row, sides }, i) => {
+        {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
           return (
             <div key={key} className='flex flex-none items-center gap-2'>
@@ -122,7 +122,11 @@ export function StepSeamsRow({ index }: { index: number }) {
                 seams={storedFrame}
                 layout={unitStepPreview ? undefined : ownedLayout}
                 layers={unitStepPreview ? undefined : ownedLayers}
-                marks={[...sides.a, ...sides.b].map((id) => ({ id, tone: 'stored' }))}
+                marks={[...parts.a, ...parts.b].map((part) => ({
+                  id: part.target,
+                  ...(part.range ? { range: part.range } : {}),
+                  tone: 'stored',
+                }))}
                 localSeamPreview={unitStepPreview}
                 missing={!row}
                 onOpen={cardId ? () => setOpen(true) : undefined}
@@ -299,6 +303,7 @@ export function SeamTile({
           innerLines={scene.innerLines}
           marks={marks}
           stepEdges={localSeamPreview ? undefined : scene.stepEdges}
+          stepParts={localSeamPreview ? undefined : scene.stepParts}
         />
       )}
       {no != null && (
