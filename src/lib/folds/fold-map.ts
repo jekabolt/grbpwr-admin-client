@@ -1,6 +1,7 @@
 import type { Pt2 } from 'lib/assembly-skeleton/types';
 import { add, mul, sideDist, sub } from './geom';
 import { foldedOutline, reflect, sideOf, type FlatFold } from './folded';
+import type { StoredFold } from './types';
 
 export type FoldMapGeometry = {
   readonly rings: readonly (readonly Pt2[])[];
@@ -92,4 +93,14 @@ export function activeFoldKeys(operations: readonly FoldStep[], stepIndex: numbe
   return operations
     .slice(0, Math.max(0, stepIndex + 1))
     .flatMap((operation) => operation.foldKeys ?? []);
+}
+
+/** Declared fold rows introduced on or before an operation index. */
+export function activeFoldRows(
+  operations: readonly FoldStep[],
+  stepIndex: number,
+  rows: readonly StoredFold[],
+): StoredFold[] {
+  const keys = new Set(activeFoldKeys(operations, stepIndex));
+  return rows.filter((row) => keys.has(row.foldKey));
 }

@@ -3,8 +3,10 @@ import { isJoin, stepConfidence, type MapRead } from 'lib/assembly-skeleton/map'
 import { edgesOf } from 'lib/assembly-skeleton/map/frame';
 import { pieceKeyOf, resolveEdge } from 'lib/assembly-skeleton/union/layout';
 import type { SeamCandidate } from 'lib/assembly-skeleton/types';
+import { activeFoldRows, type FoldStep, type StoredFold } from 'lib/folds';
 import { candidateSideParts } from 'lib/seams';
 import { Text } from 'ui';
+import { useFoldRows } from '../assembly-folds/folds-store';
 import { stepHighlightOf } from '../step-seams/step-highlight';
 import { useStepResults } from '../step-seams/step-result-context';
 import type { StepResult } from '../step-seams/step-result';
@@ -26,17 +28,35 @@ export const mapStepPictureOf = (
   index: number,
 ): SurfacePicture | null => stepPictureOf(results, index);
 
-export function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
+export function mismatchFacts(
+  read: MapRead,
+  seam: SeamCandidate,
+  activeFolds: readonly StoredFold[] = [],
+  grainDeg?: ReadonlyMap<string, number>,
+): string[] {
   const aParts = candidateSideParts(seam, 'a', read.geoms);
   const bParts = candidateSideParts(seam, 'b', read.geoms);
-  const lengthOf = (parts: typeof aParts, evidence?: number) => {
-    if (evidence != null) return evidence;
-    return parts.every((part) => resolveEdge(part.target, read.geoms))
+  const plainLengthOf = (parts: typeof aParts) =>
+    parts.every((part) => resolveEdge(part.target, read.geoms))
       ? sideLengthMm(parts, read.geoms, () => 0)
       : null;
+  const aPlain = plainLengthOf(aParts);
+  const bPlain = plainLengthOf(bParts);
+  /** The side's length once its plies lie on each other; null when no active fold changes it. */
+  const foldedOf = (parts: typeof aParts, plain: number | null, other: number | null) => {
+    if (!activeFolds.length || plain == null) return null;
+    const folded = sideLengthMm(parts, read.geoms, () => 0, {
+      activeFolds,
+      otherSideMm: other,
+      grainDeg,
+    });
+    return folded !== plain ? folded : null;
   };
-  const a = lengthOf(aParts, seam.evidence?.aLenMm);
-  const b = lengthOf(bParts, seam.evidence?.bLenMm);
+  const aFolded = foldedOf(aParts, aPlain, bPlain);
+  const bFolded = foldedOf(bParts, bPlain, aPlain);
+  // Without a fold event, evidence remains the first and byte-identical answer.
+  const a = aFolded ?? seam.evidence?.aLenMm ?? aPlain;
+  const b = bFolded ?? seam.evidence?.bLenMm ?? bPlain;
   const facts: string[] = [];
   if (a != null && b != null && Math.round(a) !== Math.round(b)) {
     facts.push(`length ${Math.round(a)} / ${Math.round(b)} mm`);
@@ -54,8 +74,13 @@ export function mismatchFacts(read: MapRead, seam: SeamCandidate): string[] {
       return total + edge.notchesMm.filter((notch) => notch > from + 3 && notch < to - 3).length;
     }, 0);
   };
-  const na = aParts.reduce((total, part) => total + notchCount(part), 0);
-  const nb = bParts.reduce((total, part) => total + notchCount(part), 0);
+  // Folded plies sew as one: a notch cut in one ply only is not a notch of this seam.
+  const notchesOf = (parts: typeof aParts, folded: number | null) =>
+    folded != null
+      ? Math.min(...parts.map(notchCount))
+      : parts.reduce((total, part) => total + notchCount(part), 0);
+  const na = notchesOf(aParts, aFolded);
+  const nb = notchesOf(bParts, bFolded);
   const matched =
     seam.evidence?.notchesMatched ??
     ((seam.evidence?.notchScore ?? 0) >= 0.7 ? Math.min(na, nb) : 0);
@@ -69,8 +94,11 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const { read, ops, pieceName, unitName, isUnit } = model;
   const results = useStepResults();
   const picture = mapStepPictureOf(results, index);
-  const { geoms, innerLines } = useCardGeoms();
+  const { geo, geoms, innerLines } = useCardGeoms();
   const byKey = useSeamRows();
+  const foldRows = useFoldRows();
+  const foldSteps = ops.map((operation) => operation as typeof operation & FoldStep);
+  const activeFolds = activeFoldRows(foldSteps, index, foldRows);
   const op = ops[index];
   if (!op) return null;
   const highlight = stepHighlightOf(ops, index, byKey);
@@ -94,7 +122,13 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
   const inputNames = inputs.map(nameOf);
   const fallbackNames = [...new Set(inputNames)];
   const facts = read
-    ? [...new Set((read.seams[index] ?? []).flatMap((seam) => mismatchFacts(read, seam)))]
+    ? [
+        ...new Set(
+          (read.seams[index] ?? []).flatMap((seam) =>
+            mismatchFacts(read, seam, activeFolds, geo?.grainDeg),
+          ),
+        ),
+      ]
     : [];
   const drawn = !!picture && picture.layout.T.size > 0;
 

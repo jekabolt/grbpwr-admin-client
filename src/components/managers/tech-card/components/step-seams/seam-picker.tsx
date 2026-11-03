@@ -12,12 +12,14 @@
 // «done» stores them; the pick stays as it was).
 
 import * as Dialog from '@radix-ui/react-dialog';
+import { activeFoldRows, type FoldStep } from 'lib/folds';
 import { anchorOfRunId, newSeamKey, poseRow, type EdgeAnchor, type StoredSeam } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Button, Chip, ChipRow, Close, Placeholder, Text } from 'ui';
 import { runsOfSide } from '../assembly-seams/seam-actions';
 import { rowPairSig, useSeamsStore } from '../assembly-seams/seams-store';
+import { useFoldRows } from '../assembly-folds/folds-store';
 import { useOperationWorkCatalog } from '../useOperationWorkCatalog';
 import { PairNo } from './pair-no';
 import { recordSeamDecision } from './seam-decisions';
@@ -136,6 +138,7 @@ export function SeamPickerBody({
   const stepPicture = stepPictureOf(stepResults, index);
   const stepResult = stepResults?.[index];
   const {
+    ops,
     op,
     geo,
     geoms,
@@ -153,6 +156,7 @@ export function SeamPickerBody({
   const attach = useAttachStepSeam(index);
   const attachPose = useAttachStepPose(index);
   const errors = useSeamsStore((s) => s.errors);
+  const foldRows = useFoldRows();
   const { catalog: workCatalog } = useOperationWorkCatalog();
 
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
@@ -214,9 +218,17 @@ export function SeamPickerBody({
   });
 
   const pieces = geo?.pieces;
+  const foldSteps = ops.map((operation) => operation as typeof operation & FoldStep);
+  const activeFolds = activeFoldRows(foldSteps, index, foldRows);
   // A stack of identical plies runs one layer long (the model's own count).
-  const sideLen = (ids: readonly TargetId[]) =>
+  const plainSideLen = (ids: readonly TargetId[]) =>
     targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []));
+  const sideLen = (ids: readonly TargetId[], otherIds: readonly TargetId[]) =>
+    targetsLen(ids, geoms, (piece, k) => polyLen(pieces?.get(piece)?.inner[k] ?? []), {
+      activeFolds,
+      otherSideMm: otherIds.length ? plainSideLen(otherIds) : null,
+      grainDeg: geo?.grainDeg,
+    });
 
   // ── what «accept» would write: only what the owner picked ──
   const pick: Sel = sel;
@@ -427,9 +439,13 @@ export function SeamPickerBody({
   const edgeToEdge = (s: { a: readonly TargetId[]; b: readonly TargetId[] }) =>
     s.a.length > 0 && s.b.length > 0 && [...s.a, ...s.b].every((id) => !parseInner(id));
   const delta = pair
-    ? deltaMm(sideLen(pair.a), sideLen(pair.b), ease)
+    ? deltaMm(sideLen(pair.a, pair.b), sideLen(pair.b, pair.a), ease)
     : stored.length === 1 && !sel.a.length && !sel.b.length && edgeToEdge(stored[0].sides)
-      ? deltaMm(sideLen(stored[0].sides.a), sideLen(stored[0].sides.b), ease)
+      ? deltaMm(
+          sideLen(stored[0].sides.a, stored[0].sides.b),
+          sideLen(stored[0].sides.b, stored[0].sides.a),
+          ease,
+        )
       : null;
   const empty = !pair && !surface && stored.length === 0 && !sel.a.length && !sel.b.length;
 
@@ -775,7 +791,7 @@ export function SeamPickerBody({
                   disabled={!sel.a.length}
                   data-seam-side='1'
                 >
-                  {sel.a.length ? `1 ${sideName(sel.a)} ${mmText(sideLen(sel.a))}` : '1'}
+                  {sel.a.length ? `1 ${sideName(sel.a)} ${mmText(sideLen(sel.a, sel.b))}` : '1'}
                 </Chip>
                 <Chip
                   selected={sel.b.length > 0}
@@ -784,7 +800,7 @@ export function SeamPickerBody({
                   disabled={!sel.b.length}
                   data-seam-side='2'
                 >
-                  {sel.b.length ? `2 ${sideName(sel.b)} ${mmText(sideLen(sel.b))}` : '2'}
+                  {sel.b.length ? `2 ${sideName(sel.b)} ${mmText(sideLen(sel.b, sel.a))}` : '2'}
                 </Chip>
               </ChipRow>
               {delta != null ? (

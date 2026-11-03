@@ -29,7 +29,7 @@ import {
 import { runSamples } from 'lib/seams/frame';
 
 import { edgeOf, pieceOf, plainEdges } from '../assembly-seams/words';
-import { sideLengthMm } from './seam-length';
+import { sideLengthMm, type SideLengthOptions } from './seam-length';
 
 import { outcomeOf } from './seam-ranker';
 import { isLayerCloth, withSignals, type SeamSignal } from './seam-signals';
@@ -261,11 +261,13 @@ export function targetsLen(
   ids: readonly TargetId[] | readonly SidePart[],
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLen: (piece: string, k: number) => number,
+  options?: SideLengthOptions,
 ): number {
   return sideLengthMm(
     ids.map((part) => (typeof part === 'string' ? { target: part } : part)),
     geoms,
     innerLen,
+    options,
   );
 }
 

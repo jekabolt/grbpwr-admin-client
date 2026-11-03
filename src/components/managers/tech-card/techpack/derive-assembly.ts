@@ -60,6 +60,7 @@ import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
 import type { Edge, PieceGeom, PieceMark, SeamCandidate } from 'lib/assembly-skeleton/types';
 import { resolveEdge } from 'lib/assembly-skeleton/union';
 import { unitDisplayName } from 'lib/assembly-unit-name';
+import { activeFoldRows, foldsFromWire, type FoldStep, type StoredFold } from 'lib/folds';
 import {
   contourSig,
   candidateSideParts,
@@ -2222,6 +2223,8 @@ function buildCards(
   ops: Op[],
   bound: Map<number, AsmSeam[]>,
   pieces: ReadonlyMap<string, AsmPiece>,
+  foldRows: readonly StoredFold[],
+  grainDeg: ReadonlyMap<string, number>,
   sink?: GapSink,
   t: PdfT = englishT,
   inferMissing = true,
@@ -2235,7 +2238,7 @@ function buildCards(
   const seamLessCard = [...bound.values()].every((seams) => seams.length === 0);
   const roles = pieceRoleMap(pieces, ops);
   const metricGeoms = new Map([...pieces].map(([key, piece]) => [key, piece.geom]));
-  const metricLength = (parts: readonly SeamPart[]) => {
+  const plainMetricLength = (parts: readonly SeamPart[]) => {
     if (parts.every((part) => !!part.edgeId))
       return sideLengthMm(
         parts.map(
@@ -2249,8 +2252,29 @@ function buildCards(
       );
     return parts.reduce((total, part) => total + part.lenMm, 0);
   };
+  const metricLength = (
+    parts: readonly SeamPart[],
+    otherSideMm: number | null,
+    activeFolds: readonly StoredFold[],
+  ) => {
+    if (parts.every((part) => !!part.edgeId))
+      return sideLengthMm(
+        parts.map(
+          (part): SidePart => ({
+            target: part.edgeId!,
+            ...(part.range ? { range: part.range } : {}),
+          }),
+        ),
+        metricGeoms,
+        () => 0,
+        { activeFolds, otherSideMm, grainDeg },
+      );
+    return parts.reduce((total, part) => total + part.lenMm, 0);
+  };
+  const foldSteps = ops.map(({ raw }) => raw as typeof raw & FoldStep);
 
-  for (const op of ops) {
+  for (const [stepIndex, op] of ops.entries()) {
+    const activeFolds = activeFoldRows(foldSteps, stepIndex, foldRows);
     if (!op.join) {
       const first = op.ins[0];
       const targetItems =
@@ -2452,9 +2476,11 @@ function buildCards(
     }
 
     const metrics: SeamMetric[] = seams.map((s, i) => {
-      const left = metricLength(s.a);
+      const leftPlain = plainMetricLength(s.a);
+      const rightPlain = plainMetricLength(s.b);
+      const left = metricLength(s.a, s.b.length ? rightPlain : null, activeFolds);
       if (!s.b.length) return { letter: String(i + 1), left, bad: false };
-      const right = metricLength(s.b);
+      const right = metricLength(s.b, leftPlain, activeFolds);
       const delta = left - right;
       const bad = Math.abs(delta) > STOP_DELTA_MM;
       const terms = opTerms(op);
@@ -3223,7 +3249,17 @@ export function deriveAssembly(
         return [op.n, stored.length ? stored : garmentSeams.get(op.n) ?? []] as const;
       }),
   );
-  const { cards, units, targets } = buildCards(ops, bound, input.pieces, gapSink, t, !garment);
+  const foldRows = foldsFromWire(resolvedInput.techCard.pieceFolds).folds;
+  const { cards, units, targets } = buildCards(
+    ops,
+    bound,
+    input.pieces,
+    foldRows,
+    input.grainDeg,
+    gapSink,
+    t,
+    !garment,
+  );
   const actions = buildActions(ops, input.pieces, targets, seamRowsOfCard(resolvedInput.techCard));
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();

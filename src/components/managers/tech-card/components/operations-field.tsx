@@ -2687,7 +2687,8 @@ function OperationEditor({
     '') as string;
   const attachPattern = (useWatch({ control, name: `operations.${index}.attachPattern` }) ??
     NONE_ATTACH_PATTERN) as string;
-  const buttonHoles = (useWatch({ control, name: `operations.${index}.buttonHoles` }) ?? 0) as number;
+  const buttonHoles = (useWatch({ control, name: `operations.${index}.buttonHoles` }) ??
+    0) as number;
   const zipperApplication = (useWatch({ control, name: `operations.${index}.zipperApplication` }) ??
     NONE_ZIPPER_APPLICATION) as string;
   const bindingStyle = (useWatch({ control, name: `operations.${index}.bindingStyle` }) ??

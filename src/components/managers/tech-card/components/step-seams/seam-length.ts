@@ -9,7 +9,7 @@ export type SideLengthOptions = {
   activeFolds?: readonly StoredFold[];
   /** The other side's length: without it a folded side keeps its plain sum. */
   otherSideMm?: number | null;
-  grainDeg?: number | null;
+  grainDeg?: number | ReadonlyMap<string, number> | null;
 };
 
 const INNER = /^(.*):i(\d+)$/;
@@ -76,7 +76,9 @@ export function sideLengthMm(
     rest +
     foldedSideLengthMm(foldable, opts.otherSideMm - rest, opts.activeFolds, (piece) => {
       const geom = geoms.get(piece);
-      return geom ? frameOf(geom, opts.grainDeg ?? 0) : null;
+      const grainDeg =
+        typeof opts.grainDeg === 'number' ? opts.grainDeg : opts.grainDeg?.get(piece) ?? 0;
+      return geom ? frameOf(geom, grainDeg) : null;
     })
   );
 }

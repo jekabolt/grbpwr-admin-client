@@ -28,7 +28,7 @@ import {
   type AssemblyInput,
 } from '../../techpack/derive-assembly';
 import { toUV } from 'lib/seams/frame';
-import type { StoredFold } from 'lib/folds';
+import { activeFoldRows, foldToWire, type StoredFold } from 'lib/folds';
 import realFixture from './fixtures/span-real-geoms.json';
 import { sideLengthMm } from './seam-length';
 import { highlightPartsOfRows } from './step-highlight';
@@ -525,45 +525,197 @@ describe('#90 op 290 placement and PDF metric', () => {
   });
 });
 
-describe('sideLengthMm with active folds', () => {
-  const flap = piece('FLAP_R');
-  const frame = frameOf(flap.geom, 0);
-  const middle = (k: number) => {
-    const pts = flap.geom.edges[k].pts;
-    return [
-      (pts[0][0] + pts[pts.length - 1][0]) / 2,
-      (pts[0][1] + pts[pts.length - 1][1]) / 2,
-    ] as Pt2;
-  };
-  const line = [toUV(frame, middle(0)), toUV(frame, middle(2))] as [Pt2, Pt2];
-  const foldRow = {
-    foldKey: 'fold',
-    pieceKey: flap.key,
-    seq: 1,
-    kind: 'inward',
-    source: 'owner',
-    line,
-    flipAt: toUV(frame, middle(1)),
-    edge: null,
-    contourSig: '',
-    anchoredSize: 'M',
-    note: '',
-    stale: false,
-  } satisfies StoredFold;
-  const both = [{ target: id('FLAP_R', 1) }, { target: id('FLAP_R', 3) }];
+const flap = piece('FLAP_R');
+const flapFrame = frameOf(flap.geom, 0);
+const flapMiddle = (k: number) => {
+  const pts = flap.geom.edges[k].pts;
+  return [
+    (pts[0][0] + pts[pts.length - 1][0]) / 2,
+    (pts[0][1] + pts[pts.length - 1][1]) / 2,
+  ] as Pt2;
+};
+const flapFoldRow = {
+  foldKey: 'fold',
+  pieceKey: flap.key,
+  seq: 1,
+  kind: 'inward',
+  source: 'owner',
+  line: [toUV(flapFrame, flapMiddle(0)), toUV(flapFrame, flapMiddle(2))],
+  flipAt: toUV(flapFrame, flapMiddle(1)),
+  edge: null,
+  contourSig: '',
+  anchoredSize: 'M',
+  note: '',
+  stale: false,
+} satisfies StoredFold;
+const flapBoth = [{ target: id('FLAP_R', 1) }, { target: id('FLAP_R', 3) }];
 
+const partnerKey = 'fixture-flap-partner';
+const partnerGeom = JSON.parse(
+  JSON.stringify(flap.geom).replaceAll(flap.key, partnerKey),
+) as PieceGeom;
+partnerGeom.name = 'FLAP_1_R';
+const foldedGeoms = new Map([
+  [flap.key, flap.geom],
+  [partnerKey, partnerGeom],
+]);
+const foldedStoredRow = rowFromHand(
+  flapBoth,
+  [{ target: `${partnerKey}#1` }],
+  foldedGeoms,
+  {
+    pieces: [flap.geom, partnerGeom],
+    grainDeg: null,
+    nameOf: (key) => (key === flap.key ? flap.name : partnerGeom.name),
+  },
+  { direction: 'reversed', seamKey: 'flap-folded' },
+);
+if (!foldedStoredRow) throw new Error('folded flap row did not anchor');
+const foldedStored: StoredSeam = foldedStoredRow;
+const foldedCandidate = candidateOfStoredSeam(foldedStored, foldedGeoms, new Map());
+if (!foldedCandidate) throw new Error('folded flap row did not resolve');
+
+function foldedAssemblyInput(withFoldKey: boolean): AssemblyInput {
+  const operation = {
+    operationNumber: 20,
+    operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+    work: 'join_lockstitch',
+    inputKeys: [flap.key, partnerKey],
+    pieceLineKeys: [flap.key, partnerKey],
+    outputUnitKey: 'FLAP',
+    seamKeys: [foldedStored.seamKey],
+    ...(withFoldKey ? { foldKeys: [flapFoldRow.foldKey] } : {}),
+  };
+  const techCard = {
+    techCard: {
+      pieces: [
+        { lineKey: flap.key, name: flap.name },
+        { lineKey: partnerKey, name: partnerGeom.name },
+      ],
+      operations: [operation],
+    },
+    seams: [toWire(foldedStored)],
+    pieceFolds: [foldToWire(flapFoldRow)],
+  } as unknown as common_TechCard;
+  return {
+    techCard,
+    pieces: new Map([
+      [flap.key, asmPiece(flap.geom)],
+      [partnerKey, asmPiece(partnerGeom)],
+    ]),
+    grainDeg: new Map([
+      [flap.key, 0],
+      [partnerKey, 0],
+    ]),
+  };
+}
+
+describe('active fold rows', () => {
+  const operations = [{}, { foldKeys: [flapFoldRow.foldKey] }, {}];
+
+  it('activates a declared row only from its own step onward', () => {
+    expect(activeFoldRows(operations, 0, [flapFoldRow])).toEqual([]);
+    expect(activeFoldRows(operations, 1, [flapFoldRow])).toEqual([flapFoldRow]);
+    expect(activeFoldRows(operations, 2, [flapFoldRow])).toEqual([flapFoldRow]);
+  });
+});
+
+describe('sideLengthMm with active folds', () => {
   it('counts two edges folded onto each other once, when the other side says so', () => {
-    expect(lengthOf(both)).toBeCloseTo(400, 0);
+    expect(lengthOf(flapBoth)).toBeCloseTo(400, 0);
     expect(
-      sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow], otherSideMm: 200 }),
+      sideLengthMm(flapBoth, pantsGeoms, () => 0, {
+        activeFolds: [flapFoldRow],
+        otherSideMm: 200,
+      }),
     ).toBeCloseTo(200, 0);
   });
 
   it('keeps the sum with no active fold, no other side, or an other side of the sum', () => {
-    expect(sideLengthMm(both, pantsGeoms, () => 0, { otherSideMm: 200 })).toBeCloseTo(400, 0);
-    expect(sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow] })).toBeCloseTo(400, 0);
+    expect(sideLengthMm(flapBoth, pantsGeoms, () => 0, { otherSideMm: 200 })).toBeCloseTo(400, 0);
+    expect(sideLengthMm(flapBoth, pantsGeoms, () => 0, { activeFolds: [flapFoldRow] })).toBeCloseTo(
+      400,
+      0,
+    );
     expect(
-      sideLengthMm(both, pantsGeoms, () => 0, { activeFolds: [foldRow], otherSideMm: 400 }),
+      sideLengthMm(flapBoth, pantsGeoms, () => 0, {
+        activeFolds: [flapFoldRow],
+        otherSideMm: 400,
+      }),
     ).toBeCloseTo(400, 0);
+  });
+
+  it("uses each folded side's other plain sum without iterating", () => {
+    const plainA = lengthOf(flapBoth);
+    const plainB = lengthOf(flapBoth);
+    const foldedA = sideLengthMm(flapBoth, pantsGeoms, () => 0, {
+      activeFolds: [flapFoldRow],
+      otherSideMm: plainB,
+    });
+    const foldedB = sideLengthMm(flapBoth, pantsGeoms, () => 0, {
+      activeFolds: [flapFoldRow],
+      otherSideMm: plainA,
+    });
+
+    expect([foldedA, foldedB]).toEqual([expect.closeTo(400, 0), expect.closeTo(400, 0)]);
+  });
+});
+
+describe('fold-aware length readers', () => {
+  it('lets a changed fold-aware map length override plain evidence', () => {
+    const mapCandidate = {
+      ...foldedCandidate,
+      a: flapBoth[0].target,
+      b: `${partnerKey}#1`,
+      aParts: flapBoth.map((part) => part.target),
+      bParts: [`${partnerKey}#1`],
+      evidence: {
+        ...foldedCandidate.evidence,
+        dLenMm: 200,
+        relLen: 0.5,
+        aLenMm: 400,
+        bLenMm: 200,
+      },
+    };
+    const read = { geoms: foldedGeoms } as unknown as MapRead;
+    const lengthFacts = (folds: readonly StoredFold[] = []) =>
+      mismatchFacts(read, mapCandidate, folds).filter((fact) => fact.startsWith('length'));
+
+    expect(lengthFacts([flapFoldRow])).toEqual([]);
+    expect(lengthFacts()).toEqual(['length 400 / 200 mm']);
+    // The notch cut in one ply only reads while flat, and stops being a fact once folded.
+    const flapKey = flapBoth[0].target.split('#')[0];
+    const flap = foldedGeoms.get(flapKey)!;
+    const notchedK = Number(flapBoth[0].target.split('#')[1]);
+    const notched = {
+      geoms: new Map(foldedGeoms).set(flapKey, {
+        ...flap,
+        edges: flap.edges.map((edge, k) =>
+          k === notchedK ? { ...edge, notchesMm: [40] } : { ...edge, notchesMm: [] },
+        ),
+      }),
+    } as unknown as MapRead;
+    expect(mismatchFacts(notched, mapCandidate, [])).toContain('notches 1 / 0');
+    expect(mismatchFacts(notched, mapCandidate, [flapFoldRow])).toEqual([]);
+  });
+
+  it('uses active fold keys for the PDF seam metric', () => {
+    const folded = deriveAssembly(foldedAssemblyInput(true), undefined, {
+      globalAssembly: false,
+    }).cards.get(20)!.metrics[0];
+    const flat = deriveAssembly(foldedAssemblyInput(false), undefined, {
+      globalAssembly: false,
+    }).cards.get(20)!.metrics[0];
+
+    expect(folded).toMatchObject({
+      left: expect.closeTo(200, 2),
+      right: expect.closeTo(200, 2),
+      bad: false,
+    });
+    expect(flat).toMatchObject({
+      left: expect.closeTo(400, 2),
+      right: expect.closeTo(200, 2),
+      bad: true,
+    });
   });
 });
