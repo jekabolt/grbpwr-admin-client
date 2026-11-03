@@ -143,7 +143,6 @@ describe('canvas, tile, map and print agree on a folded ring', () => {
           look={look}
           layout={picture.layout}
           layers={result.layers}
-          lower={result.lower}
           stacked={result.stacked}
           geoms={geoms}
           foldGhost={foldGhost}
@@ -164,7 +163,6 @@ describe('canvas, tile, map and print agree on a folded ring', () => {
           look='print'
           layout={printed.layout}
           layers={printed.resultLayers}
-          lower={printed.resultLower}
           stacked={printed.resultStacked}
           geoms={printed.geoms}
         />,
