@@ -7,9 +7,10 @@
 // proposal, in plain sight. Nothing is stored until «accept» (or Enter), live only with both sides
 // picked: then the pair becomes ONE card seam (composite when a side holds several runs, surface when
 // one side is an inner line), its key goes onto the step after the ones already there, and the
-// picker closes. «place» starts from that same result and moves any rigid input block by hand, with
-// or without a pick (snap is optional; ⟲ ⟳ ⇋, upright, layer choice and reset stay pending until
-// «done» stores them; the pick stays as it was).
+// picker closes. The same canvas moves any rigid input block by hand: a press on an edge picks or
+// spans it, a drag from inside a piece past a dead zone moves its block (snap is optional; ⟲ ⟳ ⇋,
+// upright, layer choice and reset stay pending). One ACCEPT stores the moves and the pair; a move is
+// stored by nothing else, and it leaves the pick as it was.
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { activeFoldRows, type FoldStep } from 'lib/folds';
@@ -217,10 +218,7 @@ export function SeamPickerBody({
     [op?.seamKeys, byKey],
   );
   const {
-    posing,
-    poseEdits,
-    handEdits,
-    poseLayerEdits,
+    posePending,
     poseSel,
     setPoseSel,
     snapOn,
@@ -237,14 +235,13 @@ export function SeamPickerBody({
     shownPoseStacked,
     onTop,
     pressOnTop,
-    exitPose,
-    startPose,
+    clearPose,
     pickupOf,
     dropPose,
     fitPose,
     transformPose,
     resetPose,
-    finishPose,
+    savePose,
   } = usePoseEdit({
     poseKeys: op?.poseKeys,
     poses,
@@ -310,12 +307,8 @@ export function SeamPickerBody({
   const pair: SeamSides | null =
     !inners.length && sel.a.length && sel.b.length ? { a: sel.a, b: sel.b } : null;
   const repeatsSeam = !!pair && repeatsStoredSeam(pickParts('a'), pickParts('b'), stored, geoms);
-  const canAccept =
-    !frozen &&
-    !busy &&
-    !!cardId &&
-    !repeatsSeam &&
-    (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
+  const pickReady = !repeatsSeam && (surface ? !!partKey && pick[hostSide!].length === 1 : !!pair);
+  const canAccept = !frozen && !busy && !!cardId && (pickReady || posePending);
 
   const anchorCtx = useMemo(
     () => ({ pieces: [...geoms.values()], grainDeg: geo?.grainDeg ?? new Map(), nameOf }),
@@ -379,9 +372,16 @@ export function SeamPickerBody({
 
   const commit = async () => {
     if (!canAccept) return;
-    const row = draftRow;
-    if (!row) {
+    const row = pickReady ? draftRow : null;
+    if (pickReady && !row) {
       setRefused('cannot pair');
+      return;
+    }
+    if (posePending && !(await savePose())) return;
+    // Moves alone: stored, the half-made pick stays in hand.
+    if (!row) {
+      setSaved(true);
+      onAccepted?.();
       return;
     }
     setBusy(true);
@@ -417,9 +417,10 @@ export function SeamPickerBody({
   );
   const toggle = useCallback(
     (id: TargetId, atMm?: number) => {
-      if (frozen || posing) return;
+      if (frozen) return;
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       setSaved(false);
+      setPoseSel(null);
       const length = resolveEdge(id, geoms)?.len ?? 0;
       const picked = (side: Side) =>
         sel[side].includes(id) &&
@@ -446,7 +447,7 @@ export function SeamPickerBody({
       const segment = segmentAt(edgeBreaks(id, geoms), length, atMm);
       setSel(pickSegment(sel, side, id, segment, length, pickRules));
     },
-    [frozen, posing, groups, sel, geoms, stored, pickRules],
+    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel],
   );
   const onHoverAt = useCallback(
     (id: TargetId | null, atMm: number | null) => {
@@ -467,7 +468,7 @@ export function SeamPickerBody({
   );
   const onSpanDrag = useCallback(
     (id: TargetId, fromMm: number, toMm: number, done: boolean) => {
-      if (frozen || posing) return;
+      if (frozen) return;
       const breaks = edgeBreaks(id, geoms);
       const range: SpanRange = [snapToBreak(breaks, fromMm), snapToBreak(breaks, toMm)];
       if (!done) {
@@ -476,11 +477,13 @@ export function SeamPickerBody({
       }
       setSpanDrag(null);
       setRefused('');
+      setSaved(false);
+      setPoseSel(null);
       setActiveSeam(null);
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
       setSel(pickFreeSpan(sel, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules));
     },
-    [frozen, posing, groups, sel, geoms, pickRules],
+    [frozen, groups, sel, geoms, pickRules, setPoseSel],
   );
 
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
@@ -572,7 +575,7 @@ export function SeamPickerBody({
 
   // «guess»: the proposal's two sides become the pick, shown as the owner's — nothing is saved.
   const fillGuess = () => {
-    if (frozen || posing) return;
+    if (frozen) return;
     if (!guessSelection) return;
     const next = wholeSel(guessSelection);
     setActiveSeam(null);
@@ -586,9 +589,6 @@ export function SeamPickerBody({
     if (t.closest('input, textarea')) return;
     if (!e.metaKey && !e.ctrlKey && !e.altKey && zoom.onKey(e.key)) {
       e.preventDefault();
-    } else if (e.key === 'Enter' && posing) {
-      e.preventDefault();
-      void finishPose();
     } else if (e.key === 'Enter' && canAccept) {
       e.preventDefault();
       void commit();
@@ -596,9 +596,13 @@ export function SeamPickerBody({
   };
 
   const escape = () => {
-    if (posing) {
-      if (poseSel) setPoseSel(null);
-      else exitPose();
+    if (poseSel) {
+      setPoseSel(null);
+      return true;
+    }
+    if (posePending || poseFree) {
+      clearPose();
+      setSaved(false);
       return true;
     }
     if (sel.a.length || sel.b.length || activeSeam) {
@@ -659,6 +663,38 @@ export function SeamPickerBody({
   const shownActive = stored.find((s) => s.key === activeSeam);
   const activeIndex = shownActive ? stored.indexOf(shownActive) : -1;
 
+  const movable = !frozen && !!cardId;
+  const picture = (passThrough?: string) => (
+    <StepPictureSvg
+      w={canvas.w}
+      h={canvas.h}
+      pad={phone ? 28 : 64}
+      look='canvas'
+      layout={poseShown}
+      layers={posePending ? shownPoseLayers : stepPicture?.layers}
+      stacked={posePending ? shownPoseStacked : undefined}
+      geoms={geoms}
+      innerLines={innerLines}
+      marks={marks}
+      nos={nos}
+      names={groupNames}
+      namesBelow={phone}
+      ghostName={nameOf}
+      bounds={poseBounds}
+      hover={spanDrag?.id ?? hover?.id ?? null}
+      hoverRange={spanDrag?.range ?? hover?.range ?? null}
+      ticks={ticks}
+      activeNo={activeIndex >= 0 ? activeIndex : null}
+      onClearNo={frozen || !shownActive ? undefined : () => void removeSeam(shownActive)}
+      onHoverAt={frozen ? undefined : onHoverAt}
+      onSpanDrag={frozen ? undefined : onSpanDrag}
+      onPick={frozen ? undefined : toggle}
+      pickTargets={canvasPickTargets}
+      view={zoom.view}
+      className={cn('absolute inset-0', passThrough)}
+    />
+  );
+
   const content = (
     <>
       {mode === 'dialog' && (
@@ -698,6 +734,12 @@ export function SeamPickerBody({
               zoom.zoomed && 'cursor-grab active:cursor-grabbing',
             )}
             data-seam-picker-canvas=''
+            // A press on the canvas keeps the keys here: Esc lets go, Enter accepts.
+            onPointerDownCapture={(e) =>
+              e.currentTarget
+                .closest<HTMLElement>('[data-seam-picker]')
+                ?.focus({ preventScroll: true })
+            }
             {...zoom.handlers}
           >
             {loading && !drawn ? (
@@ -708,75 +750,102 @@ export function SeamPickerBody({
               <div className='absolute inset-0 grid place-items-center'>
                 <Placeholder label={groups.length ? 'no pattern' : 'no pieces'} dashed />
               </div>
-            ) : posing && poseShown ? (
-              <>
-                <StepPictureSvg
-                  w={canvas.w}
-                  h={canvas.h}
-                  pad={phone ? 28 : 64}
-                  look='canvas'
-                  layout={poseShown}
-                  layers={shownPoseLayers}
-                  stacked={shownPoseStacked}
-                  geoms={geoms}
-                  innerLines={innerLines}
-                  ghostName={nameOf}
-                  bounds={poseBounds}
-                  view={zoom.view}
-                  className='absolute inset-0'
-                />
-                <PoseOverlay
-                  w={canvas.w}
-                  h={canvas.h}
-                  pad={phone ? 28 : 64}
-                  bounds={poseBounds ?? poseShown.bbox}
-                  view={zoom.view}
-                  layout={poseShown}
-                  layerOrder={shownPoseLayers}
-                  geoms={geoms}
-                  nameOf={nameOf}
-                  selected={poseSel}
-                  snapAt={snapAtDuringDrag(poseDrag)}
-                  snapSource={fitSource}
-                  disabled={frozen || busy}
-                  pickupOf={pickupOf}
-                  onSelect={(piece) => {
-                    setPoseSel(piece);
-                    setPoseDrag(null);
-                  }}
-                  onDrag={(group, D, snap) => setPoseDrag({ group, D, snap })}
-                  onDrop={dropPose}
-                  snap={snapOn}
-                  onCancel={() => setPoseDrag(null)}
-                />
-              </>
-            ) : (
-              <StepPictureSvg
+            ) : movable ? (
+              <PoseOverlay
                 w={canvas.w}
                 h={canvas.h}
                 pad={phone ? 28 : 64}
-                look='canvas'
-                layout={resultLayout}
-                layers={stepPicture?.layers}
-                geoms={geoms}
-                innerLines={innerLines}
-                marks={marks}
-                nos={nos}
-                names={groupNames}
-                namesBelow={phone}
-                ghostName={nameOf}
-                hover={spanDrag?.id ?? hover?.id ?? null}
-                hoverRange={spanDrag?.range ?? hover?.range ?? null}
-                ticks={ticks}
-                activeNo={activeIndex >= 0 ? activeIndex : null}
-                onClearNo={frozen || !shownActive ? undefined : () => void removeSeam(shownActive)}
-                onHoverAt={frozen ? undefined : onHoverAt}
-                onSpanDrag={frozen ? undefined : onSpanDrag}
-                onPick={frozen ? undefined : toggle}
-                pickTargets={canvasPickTargets}
+                bounds={poseBounds ?? poseShown.bbox}
                 view={zoom.view}
-                className='absolute inset-0'
-              />
+                layout={poseShown}
+                layerOrder={shownPoseLayers}
+                geoms={geoms}
+                nameOf={nameOf}
+                selected={poseSel}
+                snapAt={snapAtDuringDrag(poseDrag)}
+                snapSource={fitSource}
+                disabled={busy}
+                pickupOf={pickupOf}
+                onSelect={(piece) => {
+                  setPoseSel(piece);
+                  setPoseDrag(null);
+                }}
+                onDrag={(group, D, snap) => setPoseDrag({ group, D, snap })}
+                onDrop={dropPose}
+                snap={snapOn}
+                onCancel={() => setPoseDrag(null)}
+              >
+                {picture('pointer-events-none')}
+              </PoseOverlay>
+            ) : (
+              picture()
+            )}
+            {movable && poseSel && (
+              <div
+                className='absolute top-2 left-3 flex flex-wrap items-center gap-3'
+                data-seam-pose-tools=''
+              >
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  aria-label='turn left'
+                  onClick={() => transformPose('left')}
+                  disabled={!poseSel || busy}
+                >
+                  ⟲
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  aria-label='turn right'
+                  onClick={() => transformPose('right')}
+                  disabled={!poseSel || busy}
+                >
+                  ⟳
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  aria-label='mirror'
+                  onClick={() => transformPose('mirror')}
+                  disabled={!poseSel || busy}
+                >
+                  ⇋
+                </Button>
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={() => transformPose('upright')}
+                  disabled={!poseSel || busy}
+                >
+                  upright
+                </Button>
+                <Chip
+                  selected={snapOn}
+                  pressed={snapOn}
+                  onClick={() => {
+                    setSnapOn((on) => !on);
+                    setPoseDrag(null);
+                  }}
+                  disabled={busy}
+                >
+                  snap
+                </Chip>
+                {onTop && (
+                  <Chip
+                    selected={onTop.active}
+                    pressed={onTop.active}
+                    onClick={pressOnTop}
+                    disabled={!onTop.press || busy}
+                  >
+                    on top {onTop.input}
+                  </Chip>
+                )}
+              </div>
             )}
             {drawn && (
               <div className='absolute top-2 right-3 flex items-center gap-3' data-seam-zoom=''>
@@ -813,301 +882,191 @@ export function SeamPickerBody({
           className='sticky bottom-0 box-content flex h-21 flex-none flex-wrap content-center items-center gap-x-3 border-t border-hairline bg-bgColor px-3 pb-[env(safe-area-inset-bottom)] md:gap-4.5 md:px-5'
           data-seam-bar=''
         >
-          {posing ? (
-            <>
-              {error && (
-                <Text size='micro' variant='error' className='min-w-0 truncate'>
-                  {error}
-                </Text>
-              )}
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                aria-label='turn left'
-                onClick={() => transformPose('left')}
-                disabled={!poseSel || busy}
-              >
-                ⟲
-              </Button>
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                aria-label='turn right'
-                onClick={() => transformPose('right')}
-                disabled={!poseSel || busy}
-              >
-                ⟳
-              </Button>
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                aria-label='mirror'
-                onClick={() => transformPose('mirror')}
-                disabled={!poseSel || busy}
-              >
-                ⇋
-              </Button>
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                onClick={() => transformPose('upright')}
-                disabled={!poseSel || busy}
-              >
-                upright
-              </Button>
-              <Chip
-                selected={snapOn}
-                pressed={snapOn}
-                onClick={() => {
-                  setSnapOn((on) => !on);
-                  setPoseDrag(null);
-                }}
-                disabled={busy}
-              >
-                snap
-              </Chip>
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                onClick={fitPose}
-                disabled={!fitReady || busy || frozen}
-                data-seam-fit=''
-              >
-                FIT
-              </Button>
-              {onTop && (
-                <Chip
-                  selected={onTop.active}
-                  pressed={onTop.active}
-                  onClick={pressOnTop}
-                  disabled={!onTop.press || busy}
-                >
-                  on top {onTop.input}
-                </Chip>
-              )}
-              <span className='flex-1' />
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                onClick={() => void resetPose()}
-                disabled={
-                  (!poseEdits.size &&
-                    !handEdits.size &&
-                    !poseLayerEdits.size &&
-                    !poseFree &&
-                    !ownPoseRows.size) ||
-                  busy
-                }
-                data-seam-pose-reset=''
-              >
-                reset
-              </Button>
-              <Button
-                type='button'
-                variant='main'
-                size='sm'
-                onClick={() => void finishPose()}
-                loading={busy}
-                data-seam-pose-done=''
-              >
-                done
-              </Button>
-            </>
-          ) : (
-            <>
-              {error && (
-                <Text size='micro' variant='error' className='min-w-0 truncate'>
-                  {error}
-                </Text>
-              )}
-              {listed.map((s) => {
-                const on = s.key === activeSeam;
-                return (
-                  <span
-                    key={s.key}
-                    className='flex min-w-0 items-center gap-2'
-                    data-seam-stored={s.key}
-                  >
-                    <Button
-                      type='button'
-                      variant='underline'
-                      size='xs'
-                      aria-pressed={on}
-                      onClick={() => {
-                        setSel(EMPTY);
-                        setFilled(null);
-                        setActiveSeam(on ? null : s.key);
-                      }}
-                    >
-                      <PairNo i={stored.indexOf(s)} />
-                    </Button>
-                    {(on || listed.length === 1) && (
-                      <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
-                        {seamName(s.sides)}
-                      </Text>
-                    )}
-                    {on && !frozen && (
-                      <Close
-                        onClick={() => void removeSeam(s)}
-                        disabled={busy}
-                        aria-label='remove seam'
-                        data-seam-remove=''
-                      />
-                    )}
-                  </span>
-                );
-              })}
-              <ChipRow>
-                <Chip
-                  selected={sel.a.length > 0}
-                  onClick={() => clearSide('a')}
-                  disabled={!sel.a.length}
-                  data-seam-side='1'
-                >
-                  {sel.a.length
-                    ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
-                    : '1'}
-                </Chip>
-                <Chip
-                  selected={sel.b.length > 0}
-                  tone={sel.b.length ? 'attention' : 'default'}
-                  onClick={() => clearSide('b')}
-                  disabled={!sel.b.length}
-                  data-seam-side='2'
-                >
-                  {sel.b.length
-                    ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
-                    : '2'}
-                </Chip>
-              </ChipRow>
-              {delta != null ? (
-                <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
-                  {`Δ ${fmtMm(delta)} mm`}
-                </Text>
-              ) : empty && !loading ? (
-                drawn ? (
-                  <Text size='micro' variant='label' data-step-seams-status='pick'>
-                    pick
-                  </Text>
-                ) : (
-                  <Text size='micro' variant='error' data-step-seams-status=''>
-                    no seam
-                  </Text>
-                )
-              ) : null}
-              <span className='flex-1' />
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={fitPose}
-                  disabled={!fitReady || busy}
-                  data-seam-fit=''
-                >
-                  FIT
-                </Button>
-              )}
-              {!frozen && (suggestion || surfaceSuggestion) && !sel.a.length && !sel.b.length && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={fillGuess}
-                  data-seam-guess=''
-                >
-                  guess
-                </Button>
-              )}
-              {!frozen && mirror.visible && mirror.plan.kind === 'no-twin' && (
-                <Chip tone='error'>NO TWIN</Chip>
-              )}
-              {!frozen && mirror.visible && mirror.plan.kind === 'edge-mismatch' && (
-                <Chip tone='error'>EDGE MISMATCH</Chip>
-              )}
-              {!frozen && mirror.visible && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => {
-                    if (mirror.plan.kind === 'replace') setReplaceMirrorOpen(true);
-                    else void mirrorLeft();
-                  }}
-                  disabled={
-                    busy ||
-                    mirror.plan.kind === 'same' ||
-                    mirror.plan.kind === 'no-twin' ||
-                    mirror.plan.kind === 'edge-mismatch'
-                  }
-                  data-seam-mirror-left=''
-                >
-                  mirror left
-                </Button>
-              )}
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={reset}
-                  disabled={!sel.a.length && !sel.b.length}
-                >
-                  clear
-                </Button>
-              )}
-              {!frozen && listed.length > 0 && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={() => setClearingSeams(true)}
-                  disabled={busy}
-                  data-seam-clear-all=''
-                >
-                  clear seams
-                </Button>
-              )}
-              {!frozen && drawn && !!cardId && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  onClick={startPose}
-                  disabled={busy}
-                  data-seam-pose=''
-                >
-                  place
-                </Button>
-              )}
-              {!frozen && (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => void commit()}
-                  disabled={!canAccept}
-                  loading={busy}
-                  done={walk ? saved && !canAccept : undefined}
-                  className={
-                    walk && saved && !canAccept
-                      ? 'border-2 border-success text-success disabled:border-success disabled:text-success'
-                      : undefined
-                  }
-                  data-seam-accept=''
-                >
-                  accept
-                </Button>
-              )}
-              {footerActions}
-            </>
+          {error && (
+            <Text size='micro' variant='error' className='min-w-0 truncate'>
+              {error}
+            </Text>
           )}
+          {listed.map((s) => {
+            const on = s.key === activeSeam;
+            return (
+              <span
+                key={s.key}
+                className='flex min-w-0 items-center gap-2'
+                data-seam-stored={s.key}
+              >
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  aria-pressed={on}
+                  onClick={() => {
+                    setSel(EMPTY);
+                    setFilled(null);
+                    setActiveSeam(on ? null : s.key);
+                  }}
+                >
+                  <PairNo i={stored.indexOf(s)} />
+                </Button>
+                {(on || listed.length === 1) && (
+                  <Text size='micro' tracking='label' className='min-w-0 truncate uppercase'>
+                    {seamName(s.sides)}
+                  </Text>
+                )}
+                {on && !frozen && (
+                  <Close
+                    onClick={() => void removeSeam(s)}
+                    disabled={busy}
+                    aria-label='remove seam'
+                    data-seam-remove=''
+                  />
+                )}
+              </span>
+            );
+          })}
+          <ChipRow>
+            <Chip
+              selected={sel.a.length > 0}
+              onClick={() => clearSide('a')}
+              disabled={!sel.a.length}
+              data-seam-side='1'
+            >
+              {sel.a.length
+                ? `1 ${sideName(sel.a)} ${mmText(sideLen(pickParts('a'), pickParts('b')))}`
+                : '1'}
+            </Chip>
+            <Chip
+              selected={sel.b.length > 0}
+              tone={sel.b.length ? 'attention' : 'default'}
+              onClick={() => clearSide('b')}
+              disabled={!sel.b.length}
+              data-seam-side='2'
+            >
+              {sel.b.length
+                ? `2 ${sideName(sel.b)} ${mmText(sideLen(pickParts('b'), pickParts('a')))}`
+                : '2'}
+            </Chip>
+          </ChipRow>
+          {delta != null ? (
+            <Text size='control' className='whitespace-nowrap tabular-nums' data-seam-delta=''>
+              {`Δ ${fmtMm(delta)} mm`}
+            </Text>
+          ) : empty && !loading ? (
+            drawn ? (
+              <Text size='micro' variant='label' data-step-seams-status='pick'>
+                pick
+              </Text>
+            ) : (
+              <Text size='micro' variant='error' data-step-seams-status=''>
+                no seam
+              </Text>
+            )
+          ) : null}
+          <span className='flex-1' />
+          {!frozen && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={fitPose}
+              disabled={!fitReady || busy}
+              data-seam-fit=''
+            >
+              FIT
+            </Button>
+          )}
+          {!frozen && (suggestion || surfaceSuggestion) && !sel.a.length && !sel.b.length && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={fillGuess}
+              data-seam-guess=''
+            >
+              guess
+            </Button>
+          )}
+          {!frozen && mirror.visible && mirror.plan.kind === 'no-twin' && (
+            <Chip tone='error'>NO TWIN</Chip>
+          )}
+          {!frozen && mirror.visible && mirror.plan.kind === 'edge-mismatch' && (
+            <Chip tone='error'>EDGE MISMATCH</Chip>
+          )}
+          {!frozen && mirror.visible && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => {
+                if (mirror.plan.kind === 'replace') setReplaceMirrorOpen(true);
+                else void mirrorLeft();
+              }}
+              disabled={
+                busy ||
+                mirror.plan.kind === 'same' ||
+                mirror.plan.kind === 'no-twin' ||
+                mirror.plan.kind === 'edge-mismatch'
+              }
+              data-seam-mirror-left=''
+            >
+              mirror left
+            </Button>
+          )}
+          {!frozen && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={reset}
+              disabled={!sel.a.length && !sel.b.length}
+            >
+              clear
+            </Button>
+          )}
+          {!frozen && listed.length > 0 && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => setClearingSeams(true)}
+              disabled={busy}
+              data-seam-clear-all=''
+            >
+              clear seams
+            </Button>
+          )}
+          {!frozen && (posePending || !!poseFree || ownPoseRows.size > 0) && (
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              onClick={() => void resetPose()}
+              disabled={busy}
+              data-seam-pose-reset=''
+            >
+              reset
+            </Button>
+          )}
+          {!frozen && (
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              onClick={() => void commit()}
+              disabled={!canAccept}
+              loading={busy}
+              done={saved && !canAccept}
+              className={
+                saved && !canAccept
+                  ? 'border-2 border-success text-success disabled:border-success disabled:text-success'
+                  : undefined
+              }
+              data-seam-accept=''
+            >
+              accept
+            </Button>
+          )}
+          {footerActions}
         </div>
       </div>
       <ConfirmationModal

@@ -2919,6 +2919,7 @@ export function StepPictureSvg({
             <g
               key={`x:${id}:${i}`}
               className='cursor-pointer'
+              pointerEvents='all'
               role='button'
               aria-label='remove seam'
               onClick={onClearNo}

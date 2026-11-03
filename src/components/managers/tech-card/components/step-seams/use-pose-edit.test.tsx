@@ -66,7 +66,7 @@ describe('usePoseEdit no-press invariant', () => {
     renderToStaticMarkup(createElement(Harness));
 
     expect(snapshot?.ownPoseRows.size).toBe(1);
-    expect(snapshot?.posing).toBe(false);
+    expect(snapshot?.posePending).toBe(false);
     expect(snapshot?.poseEdits.size).toBe(0);
     expect(attach).not.toHaveBeenCalled();
     expect(attachPose).not.toHaveBeenCalled();

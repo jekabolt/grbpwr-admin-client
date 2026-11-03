@@ -2,7 +2,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
 import { apply, translate } from 'lib/assembly-skeleton/union/affine';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, type PointerEvent } from 'react';
+import { useMemo, useRef, type PointerEvent, type ReactNode } from 'react';
 import { cycleLayerHit, piecesUnder, posePieceOrder, type LayerHit } from './pose-picking';
 import {
   rotatePoseDrag,
@@ -16,11 +16,14 @@ import type { PictureView } from './step-picture-view';
 
 /** A drop snaps within this many screen px (P8 pose). */
 const POSE_SNAP_PX = 8;
+/** A press only becomes a move past this many screen px: a shaky click stays a click. */
+const POSE_DEAD_ZONE_PX = 6;
 
 /**
- * «place» (P8): every drawn piece a handle — a press selects it, a drag moves
- * it with the pieces hung on it, a drop snaps a vertex of theirs onto another piece's vertex or
- * outline within POSE_SNAP_PX. The picture under it is the same layout with the drag laid in.
+ * The canvas's hands (P8): every drawn piece a handle under the picture, whose edge doors stay on
+ * top — a press selects a piece, a drag past the dead zone moves it with the pieces hung on it, a
+ * drop snaps a vertex of theirs onto another piece's vertex or outline within POSE_SNAP_PX. The
+ * selection and its turn handle sit over the picture, passing every other pointer through.
  */
 export function PoseOverlay({
   w,
@@ -42,6 +45,7 @@ export function PoseOverlay({
   onDrag,
   onDrop,
   onCancel,
+  children,
 }: {
   w: number;
   h: number;
@@ -65,6 +69,8 @@ export function PoseOverlay({
   onDrag: (group: string[], D: Affine, snap: PoseSnap | null) => void;
   onDrop: (piece: string, pickup: PosePickup, D: Affine, snap: PoseSnap | null) => void;
   onCancel: () => void;
+  /** The picture, laid between the piece handles and the selection. */
+  children: ReactNode;
 }) {
   const fit = useMemo(() => {
     const f = fitBox(bounds, w, h, pad);
@@ -162,7 +168,7 @@ export function PoseOverlay({
     onDrop(state.piece, state.pickup, state.D, state.snap);
   };
 
-  if (w < 2 || h < 2) return null;
+  if (w < 2 || h < 2) return <>{children}</>;
   const selectedRing = pieces.find((item) => item.piece === selected)?.ring;
   const selectedPickup = selected ? pickupOf(selected) : null;
   const selectedGroup = new Set(selectedPickup?.group ?? []);
@@ -191,214 +197,236 @@ export function PoseOverlay({
     const y = rect ? ((clientY - rect.top) * h) / Math.max(rect.height, 1) : clientY;
     return screenToWorld(x, y);
   };
+  const dragHandlers = {
+    onPointerMove: (e: PointerEvent<SVGSVGElement>) => {
+      const state = drag.current;
+      if (!state) return;
+      if (
+        !state.moved &&
+        Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) <= POSE_DEAD_ZONE_PX
+      )
+        return;
+      const started = !state.moved;
+      state.moved = true;
+      lastHit.current = null;
+      if (!state.pickup) {
+        onCancel();
+        return;
+      }
+      if (started) onSelect(state.piece);
+      if (state.mode === 'rotate') {
+        state.D = rotatePoseDrag(
+          state.centre,
+          state.start,
+          worldAt(e.currentTarget, e.clientX, e.clientY),
+          e.shiftKey ? 15 : 1,
+        ).D;
+      } else {
+        state.D = shiftOf(e, state);
+        state.snap = snap
+          ? snapPoseForDrag(
+              state.pickup.group,
+              state.D,
+              state.transforms,
+              geoms,
+              stacked,
+              POSE_SNAP_PX / scale,
+              snapSource,
+            )
+          : null;
+      }
+      onDrag(state.pickup.group, state.D, state.snap);
+    },
+    onPointerUp: () => finish(),
+    onPointerCancel: () => finish(true),
+  };
   return (
-    <svg
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      className='absolute inset-0 touch-none'
-      onPointerMove={(e) => {
-        const state = drag.current;
-        if (!state) return;
-        if (!state.moved && Math.hypot(e.clientX - state.clientX, e.clientY - state.clientY) <= 2)
-          return;
-        const started = !state.moved;
-        state.moved = true;
-        lastHit.current = null;
-        if (!state.pickup) {
-          onCancel();
-          return;
-        }
-        if (started) onSelect(state.piece);
-        if (state.mode === 'rotate') {
-          state.D = rotatePoseDrag(
-            state.centre,
-            state.start,
-            worldAt(e.currentTarget, e.clientX, e.clientY),
-            e.shiftKey ? 15 : 1,
-          ).D;
-        } else {
-          state.D = shiftOf(e, state);
-          state.snap = snap
-            ? snapPoseForDrag(
-                state.pickup.group,
-                state.D,
-                state.transforms,
-                geoms,
-                stacked,
-                POSE_SNAP_PX / scale,
-                snapSource,
-              )
-            : null;
-        }
-        onDrag(state.pickup.group, state.D, state.snap);
-      }}
-      onPointerUp={() => finish()}
-      onPointerCancel={() => finish(true)}
-      data-seam-pose-canvas=''
-    >
-      {pieces.map((item) => (
-        <path
-          key={item.piece}
-          d={pathOf(item.ring, true)}
-          fill='transparent'
-          stroke='transparent'
-          pointerEvents='all'
-          tabIndex={0}
-          role='button'
-          aria-label={nameOf(item.piece)}
-          aria-pressed={selected === item.piece}
-          className={cn(
-            disabled ? 'cursor-pointer' : 'cursor-move',
-            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
-          )}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            e.preventDefault();
-            e.stopPropagation();
-            lastHit.current = null;
-            onSelect(selected === item.piece ? null : item.piece);
-          }}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            // A press on a piece moves it; only a press on the empty canvas pans.
-            e.stopPropagation();
-            const svg = e.currentTarget.ownerSVGElement;
-            const rect = svg?.getBoundingClientRect();
-            const at: [number, number] = rect
-              ? [
-                  ((e.clientX - rect.left) * w) / Math.max(rect.width, 1),
-                  ((e.clientY - rect.top) * h) / Math.max(rect.height, 1),
-                ]
-              : [e.clientX, e.clientY];
-            const hits = piecesUnder(at, pieces);
-            const clickPiece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
-            const piece = selected && hits.includes(selected) ? selected : clickPiece;
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-            drag.current = {
-              mode: 'move',
-              piece,
-              clickPiece,
-              at,
-              pickup: disabled ? null : pickupOf(piece),
-              transforms: new Map(layout.T),
-              clientX: e.clientX,
-              clientY: e.clientY,
-              moved: false,
-              D: [1, 0, 0, 1, 0, 0],
-              snap: null,
-            };
-          }}
-          data-seam-pose-piece={item.piece}
-        />
-      ))}
-      {selectedRing && (
-        <path
-          d={pathOf(selectedRing, true)}
-          fill='none'
-          stroke='var(--color-warning)'
-          strokeWidth={2.6}
-          strokeLinejoin='round'
-          pointerEvents='none'
-          data-seam-pose-selected=''
-        />
-      )}
-      {selected && selectedPickup && selectedBox && (
-        <g data-seam-pose-rotate-box=''>
-          <rect
-            x={selectedBox.x0}
-            y={selectedBox.y0}
-            width={selectedBox.x1 - selectedBox.x0}
-            height={selectedBox.y1 - selectedBox.y0}
-            fill='none'
-            stroke='var(--color-textColor)'
-            strokeWidth={1}
-            strokeDasharray='2 3'
-            pointerEvents='none'
-          />
-          <line
-            x1={(selectedBox.x0 + selectedBox.x1) / 2}
-            y1={selectedBox.y1}
-            x2={(selectedBox.x0 + selectedBox.x1) / 2}
-            y2={selectedBox.y1 + 22}
-            stroke='var(--color-textColor)'
-            strokeWidth={1}
-            pointerEvents='none'
-          />
-          <rect
-            x={(selectedBox.x0 + selectedBox.x1) / 2 - 6}
-            y={selectedBox.y1 + 16}
-            width={12}
-            height={12}
-            fill='var(--color-bgColor)'
-            stroke='var(--color-textColor)'
-            strokeWidth={1.5}
+    <>
+      <svg
+        width={w}
+        height={h}
+        viewBox={`0 0 ${w} ${h}`}
+        className='absolute inset-0 touch-none'
+        onClick={(e) => {
+          // The empty canvas lets go of the piece; its press stays the zoom's pan.
+          if (e.target === e.currentTarget && selected) onSelect(null);
+        }}
+        {...dragHandlers}
+        data-seam-pose-canvas=''
+      >
+        {pieces.map((item) => (
+          <path
+            key={item.piece}
+            d={pathOf(item.ring, true)}
+            fill='transparent'
+            stroke='transparent'
+            pointerEvents='all'
+            tabIndex={0}
             role='button'
-            aria-label='rotate'
-            aria-disabled={disabled}
-            tabIndex={disabled ? -1 : 0}
+            aria-label={nameOf(item.piece)}
+            aria-pressed={selected === item.piece}
             className={cn(
-              'touch-none cursor-grab active:cursor-grabbing',
+              disabled ? 'cursor-pointer' : 'cursor-move',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
             )}
             onKeyDown={(e) => {
-              if (disabled || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+              if (e.key !== 'Enter' && e.key !== ' ') return;
               e.preventDefault();
               e.stopPropagation();
-              const centre = screenToWorld(
-                (selectedBox.x0 + selectedBox.x1) / 2,
-                (selectedBox.y0 + selectedBox.y1) / 2,
-              );
-              const step = e.shiftKey ? 15 : 1;
-              const angle = ((e.key === 'ArrowLeft' ? step : -step) * Math.PI) / 180;
-              const rotation = rotatePoseDrag(
-                centre,
-                [centre[0] + 1, centre[1]],
-                [centre[0] + Math.cos(angle), centre[1] + Math.sin(angle)],
-                step,
-              );
-              onDrop(selected, selectedPickup, rotation.D, null);
+              lastHit.current = null;
+              onSelect(selected === item.piece ? null : item.piece);
             }}
             onPointerDown={(e) => {
-              if (disabled) return;
               e.preventDefault();
+              // A press on a piece moves it; only a press on the empty canvas pans.
               e.stopPropagation();
               const svg = e.currentTarget.ownerSVGElement;
-              const centre = screenToWorld(
-                (selectedBox.x0 + selectedBox.x1) / 2,
-                (selectedBox.y0 + selectedBox.y1) / 2,
-              );
+              const rect = svg?.getBoundingClientRect();
+              const at: [number, number] = rect
+                ? [
+                    ((e.clientX - rect.left) * w) / Math.max(rect.width, 1),
+                    ((e.clientY - rect.top) * h) / Math.max(rect.height, 1),
+                  ]
+                : [e.clientX, e.clientY];
+              const hits = piecesUnder(at, pieces);
+              const clickPiece = cycleLayerHit(hits, at, lastHit.current) ?? item.piece;
+              const piece = selected && hits.includes(selected) ? selected : clickPiece;
               e.currentTarget.setPointerCapture?.(e.pointerId);
               drag.current = {
-                mode: 'rotate',
-                piece: selected,
-                pickup: selectedPickup,
+                mode: 'move',
+                piece,
+                clickPiece,
+                at,
+                pickup: disabled ? null : pickupOf(piece),
                 transforms: new Map(layout.T),
                 clientX: e.clientX,
                 clientY: e.clientY,
                 moved: false,
-                centre,
-                start: worldAt(svg, e.clientX, e.clientY),
                 D: [1, 0, 0, 1, 0, 0],
                 snap: null,
               };
             }}
-            data-seam-pose-rotate=''
+            data-seam-pose-piece={item.piece}
           />
-        </g>
-      )}
-      {snapPx && (
-        <circle
-          cx={snapPx[0]}
-          cy={snapPx[1]}
-          r={6}
-          fill='none'
-          stroke='var(--color-warning)'
-          strokeWidth={2.4}
-          pointerEvents='none'
-          data-seam-pose-snap-at=''
-        />
-      )}
-    </svg>
+        ))}
+      </svg>
+      {children}
+      <svg
+        width={w}
+        height={h}
+        viewBox={`0 0 ${w} ${h}`}
+        className='pointer-events-none absolute inset-0 touch-none'
+        {...dragHandlers}
+      >
+        {selectedRing && (
+          <path
+            d={pathOf(selectedRing, true)}
+            fill='none'
+            stroke='var(--color-warning)'
+            strokeWidth={2.6}
+            strokeLinejoin='round'
+            pointerEvents='none'
+            data-seam-pose-selected=''
+          />
+        )}
+        {selected && selectedPickup && selectedBox && (
+          <g data-seam-pose-rotate-box=''>
+            <rect
+              x={selectedBox.x0}
+              y={selectedBox.y0}
+              width={selectedBox.x1 - selectedBox.x0}
+              height={selectedBox.y1 - selectedBox.y0}
+              fill='none'
+              stroke='var(--color-textColor)'
+              strokeWidth={1}
+              strokeDasharray='2 3'
+              pointerEvents='none'
+            />
+            <line
+              x1={(selectedBox.x0 + selectedBox.x1) / 2}
+              y1={selectedBox.y1}
+              x2={(selectedBox.x0 + selectedBox.x1) / 2}
+              y2={selectedBox.y1 + 22}
+              stroke='var(--color-textColor)'
+              strokeWidth={1}
+              pointerEvents='none'
+            />
+            <rect
+              x={(selectedBox.x0 + selectedBox.x1) / 2 - 6}
+              y={selectedBox.y1 + 16}
+              width={12}
+              height={12}
+              fill='var(--color-bgColor)'
+              stroke='var(--color-textColor)'
+              strokeWidth={1.5}
+              pointerEvents='all'
+              role='button'
+              aria-label='rotate'
+              aria-disabled={disabled}
+              tabIndex={disabled ? -1 : 0}
+              className={cn(
+                'touch-none cursor-grab active:cursor-grabbing',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+              )}
+              onKeyDown={(e) => {
+                if (disabled || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const centre = screenToWorld(
+                  (selectedBox.x0 + selectedBox.x1) / 2,
+                  (selectedBox.y0 + selectedBox.y1) / 2,
+                );
+                const step = e.shiftKey ? 15 : 1;
+                const angle = ((e.key === 'ArrowLeft' ? step : -step) * Math.PI) / 180;
+                const rotation = rotatePoseDrag(
+                  centre,
+                  [centre[0] + 1, centre[1]],
+                  [centre[0] + Math.cos(angle), centre[1] + Math.sin(angle)],
+                  step,
+                );
+                onDrop(selected, selectedPickup, rotation.D, null);
+              }}
+              onPointerDown={(e) => {
+                if (disabled) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const svg = e.currentTarget.ownerSVGElement;
+                const centre = screenToWorld(
+                  (selectedBox.x0 + selectedBox.x1) / 2,
+                  (selectedBox.y0 + selectedBox.y1) / 2,
+                );
+                e.currentTarget.setPointerCapture?.(e.pointerId);
+                drag.current = {
+                  mode: 'rotate',
+                  piece: selected,
+                  pickup: selectedPickup,
+                  transforms: new Map(layout.T),
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  moved: false,
+                  centre,
+                  start: worldAt(svg, e.clientX, e.clientY),
+                  D: [1, 0, 0, 1, 0, 0],
+                  snap: null,
+                };
+              }}
+              data-seam-pose-rotate=''
+            />
+          </g>
+        )}
+        {snapPx && (
+          <circle
+            cx={snapPx[0]}
+            cy={snapPx[1]}
+            r={6}
+            fill='none'
+            stroke='var(--color-warning)'
+            strokeWidth={2.4}
+            pointerEvents='none'
+            data-seam-pose-snap-at=''
+          />
+        )}
+      </svg>
+    </>
   );
 }

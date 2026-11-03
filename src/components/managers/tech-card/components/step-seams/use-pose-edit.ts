@@ -89,15 +89,14 @@ export function usePoseEdit({
   ) => Promise<boolean>;
   fitSource?: FitSource | null;
 }) {
-  // «place» (P8): pieces moved by hand, kept here until «done».
-  const [posing, setPosing] = useState(false);
+  // Pieces moved by hand on the canvas (P8), kept here until ACCEPT.
   const [poseChanges, setPoseChanges] = useState<PoseEditResolution>(() => ({
     edits: new Map(),
     drop: new Set(),
   }));
   const poseEdits = poseChanges.edits;
   const [handEdits, setHandEdits] = useState<Map<string, StoredSeam>>(() => new Map());
-  // The under/over switch on a pose row: piece → layer, null = cleared; saved with «done».
+  // The under/over switch on a pose row: piece → layer, null = cleared; saved with ACCEPT.
   const [poseLayerEdits, setPoseLayerEdits] = useState<Map<string, SeamLayer | null>>(
     () => new Map(),
   );
@@ -110,14 +109,13 @@ export function usePoseEdit({
   } | null>(null);
   // A step of one block has nothing to sit against: its drag moves the whole picture, stored nowhere.
   const [poseFree, setPoseFree] = useState<Affine | null>(null);
-  const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
   const fitCycle = useRef<{
     sourceKey: string;
     transforms: ReadonlyMap<string, Affine>;
     alternate: boolean;
   } | null>(null);
 
-  // This step's stored pose rows retain their key when PLACE updates them.
+  // This step's stored pose rows retain their key when a move updates them.
   const ownPoseRows = useMemo(() => {
     const out = new Map<string, StoredPose>();
     for (const key of poseKeys ?? []) {
@@ -140,18 +138,18 @@ export function usePoseEdit({
   const poseLayers = stepPicture?.layers ?? [];
   const poseBlocks = stepResult?.blocks ?? [];
   const poseHung = stepResult?.hung ?? [];
-  // PLACE starts from the exact result transforms. Unsaved drops are pinned over a fresh map so
-  // the shared cached result remains immutable.
+  // The canvas starts from the exact result transforms. Unsaved drops are pinned over a fresh map so
+  // the shared cached result remains immutable; with none, the result's own layout stands.
   const poseLayout = useMemo(() => {
-    if (!posing) return null;
+    if (!poseEdits.size) return resultLayout;
     const T = new Map(resultLayout.T);
     pinPoses(T, poseEdits, geoms, poseHung, {
       groupOf: (piece, host) => poseBlockGroup(piece, host, { blocks: poseBlocks, hung: poseHung }),
     });
     return { ...resultLayout, T };
-  }, [posing, resultLayout, poseEdits, geoms, poseHung, poseBlocks]);
+  }, [resultLayout, poseEdits, geoms, poseHung, poseBlocks]);
   const poseShown = useMemo(() => {
-    if (!poseLayout || (!poseDrag && !poseFree)) return poseLayout;
+    if (!poseDrag && !poseFree) return poseLayout;
     const T = new Map(poseLayout.T);
     if (poseFree) for (const [k, t] of T) T.set(k, compose(poseFree, t));
     for (const k of poseDrag?.group ?? []) {
@@ -160,6 +158,16 @@ export function usePoseEdit({
     }
     return { ...poseLayout, T };
   }, [poseLayout, poseDrag, poseFree]);
+  // The zoom frame stays the result's own while pieces move: a drag never rescales the picture.
+  const poseBounds = useMemo(
+    () => (stepPicture ? pictureBounds(resultLayout, geoms, 'canvas') : undefined),
+    [stepPicture, resultLayout, geoms],
+  );
+  const posePending =
+    poseEdits.size > 0 ||
+    poseChanges.drop.size > 0 ||
+    handEdits.size > 0 ||
+    poseLayerEdits.size > 0;
   const fitReady = useMemo(
     () =>
       !!fitSource &&
@@ -168,18 +176,17 @@ export function usePoseEdit({
         {
           blocks: poseBlocks,
           hung: poseHung,
-          transforms: poseLayout?.T ?? resultLayout.T,
+          transforms: poseLayout.T,
           stacked: resultLayout.stacked,
         },
         geoms,
       ),
-    [fitSource, poseBlocks, poseHung, poseLayout, resultLayout, geoms],
+    [fitSource, poseBlocks, poseHung, poseLayout, resultLayout.stacked, geoms],
   );
 
-  // ── «place» (P8): any piece moved by hand, stored as a pose on «done»; the pick is left as it is ──
-  const exitPose = () => {
+  // ── any piece moved by hand (P8), stored as a pose on ACCEPT; the pick is left as it is ──
+  const clearPose = () => {
     fitCycle.current = null;
-    setPosing(false);
     setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
     setPoseLayerEdits(new Map());
@@ -187,38 +194,13 @@ export function usePoseEdit({
     setPoseSel(null);
     setSnapOn(false);
     setPoseDrag(null);
-    setPoseBounds(undefined);
-  };
-  const startPose = () => {
-    if (posing || !stepPicture) return;
-    fitCycle.current = null;
-    setRefused('');
-    setPoseChanges({ edits: new Map(), drop: new Set() });
-    setHandEdits(new Map());
-    setPoseLayerEdits(new Map());
-    setPoseFree(null);
-    setPoseSel(null);
-    setSnapOn(false);
-    setPoseDrag(null);
-    setPoseBounds(pictureBounds(resultLayout, geoms, 'canvas'));
-    setPosing(true);
   };
   const pickupOf = (piece: string): PosePickup =>
-    posePickup(
-      piece,
-      { blocks: poseBlocks, transforms: poseLayout?.T ?? resultLayout.T, hung: poseHung },
-      geoms,
-    );
+    posePickup(piece, { blocks: poseBlocks, transforms: poseLayout.T, hung: poseHung }, geoms);
   const putPose = (piece: string, T: Affine, pickup: PosePickup) => {
     // A hand move changes what FIT measures from: the next press starts a new cycle.
     fitCycle.current = null;
-    const dropped = poseAfterDrop(
-      piece,
-      T,
-      pickup,
-      { transforms: poseLayout?.T ?? resultLayout.T },
-      geoms,
-    );
+    const dropped = poseAfterDrop(piece, T, pickup, { transforms: poseLayout.T }, geoms);
     if (!dropped) {
       setRefused('no host');
       return;
@@ -237,14 +219,14 @@ export function usePoseEdit({
       setPoseFree((free) => (free ? compose(D, free) : D));
       return;
     }
-    const T0 = poseLayout?.T.get(piece);
+    const T0 = poseLayout.T.get(piece);
     if (!T0) return;
     const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
     putPose(piece, compose(moved, T0), pickup);
   };
   const fitPose = () => {
     if (!fitSource || !fitReady || busy || !stepPicture) return;
-    const shownTransforms = poseLayout?.T ?? resultLayout.T;
+    const shownTransforms = poseLayout.T;
     const previous = fitCycle.current;
     const cycle =
       previous?.sourceKey === fitSource.key
@@ -276,30 +258,20 @@ export function usePoseEdit({
     );
     if (!dropped) return;
     fitCycle.current = { ...cycle, alternate: !cycle.alternate };
-    if (!posing) {
-      setHandEdits(new Map());
-      setPoseLayerEdits(new Map());
-      setPoseFree(null);
-      setSnapOn(false);
-      setPoseBounds(pictureBounds(resultLayout, geoms, 'canvas'));
-      setPosing(true);
-    }
     setRefused('');
     setPoseDrag(null);
     setPoseSel(plan.piece);
     setPoseChanges((current) =>
-      resolvePoseEdit(
-        storedPoseHosts,
-        posing ? current : { edits: new Map(), drop: new Set() },
-        plan.piece,
-        { host: dropped.host, placement: dropped.placement },
-      ),
+      resolvePoseEdit(storedPoseHosts, current, plan.piece, {
+        host: dropped.host,
+        placement: dropped.placement,
+      }),
     );
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
     const free = piece ? !pickupOf(piece).host : false;
-    const T0 = piece ? (free ? poseShown : poseLayout)?.T.get(piece) : undefined;
+    const T0 = piece ? (free ? poseShown : poseLayout).T.get(piece) : undefined;
     const g = piece ? geoms.get(piece) : undefined;
     if (!piece || !T0 || !g || busy) return;
     const D =
@@ -318,7 +290,7 @@ export function usePoseEdit({
     else putPose(piece, compose(D, T0), pickupOf(piece));
   };
 
-  // What «done» will save, read by the one layer rule: the canvas and the switch show exactly this.
+  // What ACCEPT will save, read by the one layer rule: the canvas and the switch show exactly this.
   const layerEdits = useMemo((): PendingLayerEdits => {
     const moved = new Map<string, { host: string; layer?: SeamLayer }>();
     for (const [piece, pin] of poseEdits)
@@ -415,8 +387,9 @@ export function usePoseEdit({
     });
     setPoseDrag(null);
   };
-  const finishPose = async () => {
-    if (!posing || busy) return;
+  /** ACCEPT's half for the moves: true when nothing is left unsaved. */
+  const savePose = async (): Promise<boolean> => {
+    if (busy) return false;
     // Recheck at the write boundary too: no stale render or future caller may persist a cycle.
     const safeChanges = resolvePoseEdits(storedPoseHosts, poseChanges.edits, poseChanges.drop);
     const put: StoredPose[] = [];
@@ -455,8 +428,8 @@ export function usePoseEdit({
       return row ? [row] : [];
     });
     if (!put.length && !drop.length && !reflag.length && !handEdits.size) {
-      exitPose();
-      return;
+      clearPose();
+      return true;
     }
     setBusy(true);
     setRefused('');
@@ -465,7 +438,7 @@ export function usePoseEdit({
       if (await attach(row, !!stored && onlyFlagsDiffer(stored, row))) continue;
       setBusy(false);
       setRefused(useSeamsStore.getState().errors[row.seamKey] ?? 'not saved');
-      return;
+      return false;
     }
     const ok =
       (!put.length && !drop.length && !reflag.length) || (await attachPose(put, drop, reflag));
@@ -473,13 +446,14 @@ export function usePoseEdit({
     if (!ok) {
       const key = put[0]?.seamKey ?? reflag[0]?.seamKey ?? drop[0]?.seamKey ?? '';
       setRefused(useSeamsStore.getState().errors[key] ?? 'not saved');
-      return;
+      return false;
     }
-    exitPose();
+    clearPose();
+    return true;
   };
 
   return {
-    posing,
+    posePending,
     poseEdits,
     handEdits,
     poseLayerEdits,
@@ -499,13 +473,12 @@ export function usePoseEdit({
     shownPoseStacked,
     onTop,
     pressOnTop,
-    exitPose,
-    startPose,
+    clearPose,
     pickupOf,
     dropPose,
     fitPose,
     transformPose,
     resetPose,
-    finishPose,
+    savePose,
   };
 }
