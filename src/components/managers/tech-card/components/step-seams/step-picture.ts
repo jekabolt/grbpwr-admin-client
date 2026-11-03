@@ -29,6 +29,7 @@ import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleto
 import { unitDisplayName } from 'lib/assembly-unit-name';
 import { expandSidePart, type SeamPlacement, type SidePart } from 'lib/seams';
 import { isLayerCloth } from './seam-signals';
+import type { StepFolds } from './step-folds';
 import {
   handTargetsOf,
   laidHands,
@@ -389,6 +390,11 @@ export type Ghost = {
 export type StepLayout = {
   /** Piece → its rs frame (mm, y up) into the picture frame (mm, y up). */
   T: Map<string, Affine>;
+  /**
+   * The folds this step sees. Absent with none. Drawing, hit targets and lengths read them; `T` and
+   * every placement stay on the flat pieces.
+   */
+  folds?: StepFolds;
   /** Piece → step input index (every leaf piece, drawn or not). */
   input: Map<string, number>;
   /** Pieces of an input with no shape: an empty square each, beside their input. */
@@ -856,6 +862,10 @@ export function stepLayout(
      * the established fitting trials.
      */
     manualFit?: boolean;
+    /** Manual fit: one edge of each part of a run folded onto itself at this step. */
+    foldOnce?: (
+      parts: readonly { id: string; piece: string; pts: readonly Pt2[]; lenMm: number }[],
+    ) => readonly string[];
     /**
      * Pieces placed by hand (P8, pose rows): pinned LAST, each on its host where its row says, the
      * pieces hung on it along — after every seam, explode and shelf, so nothing pulls it away.
@@ -1222,8 +1232,39 @@ export function stepLayout(
             )
           : null;
       if (opts.manualFit) {
-        const target = midAlong(A).p;
-        const source = midAlong(myRun ?? B).p;
+        // A run folded onto itself is taken once, by its never-moved edge: the middle of the two
+        // flat edges together is nowhere on the folded piece.
+        const foldedRun = (ids: EdgeId[], at: (k: string) => Affine | undefined) => {
+          if (!opts.foldOnce || ids.length < 2) return null;
+          const parts = ids.flatMap((id) => {
+            const e = resolveEdge(id, geoms);
+            if (!e) return [];
+            const range = rangeOf(id);
+            return [
+              {
+                id,
+                piece: e.pieceKey,
+                pts: rangedLine(e.pts, range),
+                lenMm: range ? Math.max(0, range[1] - range[0]) : e.len,
+              },
+            ];
+          });
+          const kept = new Set(opts.foldOnce(parts));
+          if (kept.size === parts.length) return null;
+          const left = parts.filter((part) => kept.has(part.id));
+          const only = left.length === 1 ? left[0] : null;
+          const T = only ? at(only.piece) : undefined;
+          if (only) return T ? only.pts.map((p) => apply(T, p)) : null;
+          return runOf(
+            left.map((part): RunPart => ({ key: part.piece, pts: part.pts, len: part.lenMm })),
+            at,
+          );
+        };
+        const target = midAlong(
+          foldedRun(theirParts, (k) => (local.has(k) ? compose(Ht, local.get(k)!) : undefined)) ??
+            A,
+        ).p;
+        const source = midAlong(foldedRun(myParts, (k) => local.get(k)) ?? myRun ?? B).p;
         return translate(target[0] - source[0], target[1] - source[1]);
       }
       const a0 = A[0];

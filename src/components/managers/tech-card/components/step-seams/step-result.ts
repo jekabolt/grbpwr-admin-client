@@ -6,6 +6,7 @@ import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
 import { poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
+import { cardFoldsOf, foldOnceOf, foldStepsOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
 import { inputGroups, type FormOpLike, type InputGroup } from './step-seams-model';
 import { invert, stepLayout, type StepLayout } from './step-picture';
@@ -88,6 +89,8 @@ export type StepResultsInput = {
   geoms: ReadonlyMap<string, PieceGeom>;
   innerLines: ReadonlyMap<string, Pt2[][]>;
   pieceKeys: ReadonlySet<string>;
+  /** The card's stored folds; only a step that sees one draws it. */
+  folds?: CardFolds;
 };
 
 export type StepResultsOptions = {
@@ -396,6 +399,7 @@ function computeStep(
   index: number,
   latestByOutput: ReadonlyMap<string, ComputedStep>,
   outputAt: ReadonlyMap<string, readonly number[]>,
+  folds: StepFolds | null,
 ): ComputedStep {
   const op = input.ops[index];
   const inputs = resolvedInputs(input, index, latestByOutput, outputAt);
@@ -416,8 +420,10 @@ function computeStep(
       inputLayouts: inputs.map((group) => group.seed?.layout),
       bagsAsLayers: false,
       manualFit: opts.manualFit === true,
+      ...(folds ? { foldOnce: foldOnceOf(folds, input.geoms, input.folds?.grainDeg) } : {}),
     },
   );
+  if (folds && layout.T.size) layout.folds = folds;
 
   const neutral = inputs.map(
     (group) => group.seed?.layout ?? neutralLayout(group.pieces, input.geoms),
@@ -512,20 +518,25 @@ export function stepResultsSignature(
   input: StepResultsInput,
   opts: StepResultsOptions = {},
 ): string {
+  const foldSteps = foldStepsOf(input.ops);
   return JSON.stringify({
-    ops: input.ops.map((op) => ({
+    ops: input.ops.map((op, index) => ({
       inputKeys: op.inputKeys,
       outputUnitKey: op.outputUnitKey,
       seamKeys: op.seamKeys,
       poseKeys: op.poseKeys,
       operationNumber: op.operationNumber,
       assemblyBlockDetached: op.assemblyBlockDetached,
+      ...(foldSteps[index]?.foldKeys?.length ? { foldKeys: foldSteps[index].foldKeys } : {}),
     })),
     rows: sortedEntries(input.byKey),
     poses: sortedEntries(input.poses ?? new Map()),
     pieceKeys: [...input.pieceKeys].sort(),
     innerLines: identityOf(input.innerLines as object),
     ...(opts.manualFit ? { manualFit: true } : {}),
+    ...(input.folds?.rows.length
+      ? { folds: input.folds.rows, grainDeg: sortedEntries(input.folds.grainDeg) }
+      : {}),
   });
 }
 
@@ -560,8 +571,16 @@ export function stepResults(
   });
   const latestByOutput = new Map<string, ComputedStep>();
   const computed: ComputedStep[] = [];
+  const foldsAt = cardFoldsOf(input.ops, input.folds, input.geoms);
   input.ops.forEach((op, index) => {
-    const step = computeStep(input, opts, index, latestByOutput, outputAt);
+    const step = computeStep(
+      input,
+      opts,
+      index,
+      latestByOutput,
+      outputAt,
+      foldsAt?.(index) ?? null,
+    );
     computed.push(step);
     const output = (op.outputUnitKey ?? '').trim();
     if (output) latestByOutput.set(output, step);

@@ -535,6 +535,8 @@ export type AssemblyModel = {
   garment?: GarmentAssembly;
   /** Operation inputs resolved against the active DXF without mutating the stored card. */
   techCard: common_TechCard;
+  /** The pieces' grain rotation; the fold lines are stored in that frame. */
+  grainDeg?: ReadonlyMap<string, number>;
 };
 
 export type DeriveAssemblyOptions = {
@@ -3360,6 +3362,7 @@ export function deriveAssembly(
     emptyGap,
     garment,
     techCard,
+    grainDeg: input.grainDeg,
   };
 }
 

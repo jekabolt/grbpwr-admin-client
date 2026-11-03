@@ -67,6 +67,7 @@ import {
   type EdgeTick,
   type NoMark,
 } from './step-picture-view';
+import { foldedDrawing, withFoldPartners } from './step-folds';
 import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
 import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
@@ -158,6 +159,7 @@ export function SeamPickerBody({
   const scene = useStepScene(index);
   const stepResults = useStepResults();
   const stepPicture = stepPictureOf(stepResults, index);
+  const stepFolds = stepPicture?.layout.folds;
   const stepResult = stepResults?.[index];
   const {
     ops,
@@ -415,6 +417,13 @@ export function SeamPickerBody({
     () => ({ isInner: (t: string) => !!parseInner(t), pieceOf: pieceOfTarget }),
     [],
   );
+  // Two flat edges folded onto each other are one line on the canvas: what the hand does to one it
+  // does to both, and the side reads as the composite row the card stores.
+  const onFolded = useCallback(
+    (pick: Sel, side: Side, id: TargetId) =>
+      withFoldPartners(pick, side, id, stepFolds, geoms, geo?.grainDeg, pickRules),
+    [stepFolds, geoms, geo?.grainDeg, pickRules],
+  );
   const toggle = useCallback(
     (id: TargetId, atMm?: number) => {
       if (frozen) return;
@@ -440,14 +449,13 @@ export function SeamPickerBody({
       }
       setActiveSeam(null);
       if (atMm == null || parseInner(id) || !(length > 0)) {
-        const next = pickTarget(sel, side, id, pickRules.isInner, pickRules.pieceOf);
-        setSel(next);
+        setSel(onFolded(pickTarget(sel, side, id, pickRules.isInner, pickRules.pieceOf), side, id));
         return;
       }
       const segment = segmentAt(edgeBreaks(id, geoms), length, atMm);
-      setSel(pickSegment(sel, side, id, segment, length, pickRules));
+      setSel(onFolded(pickSegment(sel, side, id, segment, length, pickRules), side, id));
     },
-    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel],
+    [frozen, groups, sel, geoms, stored, pickRules, setPoseSel, onFolded],
   );
   const onHoverAt = useCallback(
     (id: TargetId | null, atMm: number | null) => {
@@ -481,9 +489,15 @@ export function SeamPickerBody({
       setPoseSel(null);
       setActiveSeam(null);
       const side = sideForClick(pieceOfTarget(id), groups, sel, pieceOfTarget);
-      setSel(pickFreeSpan(sel, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules));
+      setSel(
+        onFolded(
+          pickFreeSpan(sel, side, id, range, resolveEdge(id, geoms)?.len ?? 0, pickRules),
+          side,
+          id,
+        ),
+      );
     },
-    [frozen, groups, sel, geoms, pickRules, setPoseSel],
+    [frozen, groups, sel, geoms, pickRules, setPoseSel, onFolded],
   );
 
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
@@ -759,7 +773,7 @@ export function SeamPickerBody({
                 view={zoom.view}
                 layout={poseShown}
                 layerOrder={shownPoseLayers}
-                geoms={geoms}
+                geoms={foldedDrawing(geoms, innerLines, stepFolds?.flat).geoms}
                 nameOf={nameOf}
                 selected={poseSel}
                 snapAt={snapAtDuringDrag(poseDrag)}

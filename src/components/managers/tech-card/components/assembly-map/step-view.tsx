@@ -169,6 +169,7 @@ export function StepView({ model, index }: { model: MapModel; index: number }) {
             stepEdges={highlight.targets}
             stepParts={highlight.parts}
             names={inputNames}
+            foldGhost
           />
         ) : (
           <div className='flex flex-wrap items-center justify-center gap-2 p-2' data-map-names=''>

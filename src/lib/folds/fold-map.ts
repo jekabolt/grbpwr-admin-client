@@ -1,5 +1,6 @@
+import { Clipper, FillRule, Path64, Paths64, Point64 } from 'clipper2-js';
 import type { Pt2 } from 'lib/assembly-skeleton/types';
-import { add, mul, sideDist, sub } from './geom';
+import { add, inside, mul, sideDist, sub } from './geom';
 import { foldedOutline, inFoldBand, isFoldBounded, reflect, sideOf, type FlatFold } from './folded';
 import type { StoredFold } from './types';
 
@@ -131,11 +132,47 @@ const area = (ring: readonly Pt2[]) =>
     }, 0),
   );
 
+const STICKS_OUT_MM = 1;
+const UNION_SCALE = 1000;
+
+const toRing = (point: Pt2, ring: readonly Pt2[]) =>
+  ring.reduce((best, a, i) => {
+    const b = ring[(i + 1) % ring.length];
+    const ab = sub(b, a);
+    const l2 = ab[0] * ab[0] + ab[1] * ab[1];
+    const ap = sub(point, a);
+    const t = l2 ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1]) / l2)) : 0;
+    return Math.min(best, Math.hypot(ap[0] - t * ab[0], ap[1] - t * ab[1]));
+  }, Infinity);
+
+/** The plies seen from above as one contour: what the piece covers once the larger part is turned. */
+function silhouette(plies: readonly (readonly Pt2[])[]): Pt2[] {
+  const paths = new Paths64();
+  for (const ply of plies) {
+    const path = new Path64();
+    for (const [x, y] of ply)
+      path.push(new Point64(Math.round(x * UNION_SCALE), Math.round(y * UNION_SCALE)));
+    if (!Clipper.isPositive(path)) path.reverse();
+    paths.push(path);
+  }
+  const rings = [...Clipper.Union(paths, undefined, FillRule.NonZero)].map((path) =>
+    [...path].map((point): Pt2 => [point.x / UNION_SCALE, point.y / UNION_SCALE]),
+  );
+  return rings.reduce<Pt2[]>((m, y) => (area(y) > area(m) ? y : m), []);
+}
+
 const mapRing = (ring: readonly Pt2[], folds: readonly FlatFold[]): readonly Pt2[] => {
   const { outline, plies } = foldedOutline(ring, folds);
-  if (outline.length) return outline;
   // Every ply moved (the line misses the contour on the fixed side): the piece is still there, turned.
-  return plies.reduce<readonly Pt2[]>((m, y) => (area(y.poly) > area(m) ? y.poly : m), []);
+  if (!outline.length)
+    return plies.reduce<readonly Pt2[]>((m, y) => (area(y.poly) > area(m) ? y.poly : m), []);
+  // The never-moved ply is the footprint while the smaller part flips. When the larger part flips
+  // it sticks out past that ply: the ring is what the plies cover.
+  const sticksOut = plies.some(
+    (ply) =>
+      ply.by && ply.poly.some((p) => !inside(outline, p) && toRing(p, outline) > STICKS_OUT_MM),
+  );
+  return sticksOut ? silhouette(plies.map((ply) => ply.poly)) : outline;
 };
 
 /** Fold drawing geometry without changing its piece-local frame. */

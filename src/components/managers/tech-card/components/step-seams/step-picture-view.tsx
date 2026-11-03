@@ -48,6 +48,7 @@ import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
 import { layerStyle } from './layer-style';
+import { foldedActionGlyphs, foldedActionLines, foldedDrawing } from './step-folds';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
 import { stepHandsOf, type StepHands } from './step-hand';
 import { withPoseHosts, type PosePin } from './step-pose';
@@ -1632,8 +1633,8 @@ export function StepPictureSvg({
   layout,
   layers,
   stacked,
-  geoms,
-  innerLines,
+  geoms: flatGeoms,
+  innerLines: flatInnerLines,
   marks = NO_MARKS,
   stepEdges: suppliedStepEdges,
   stepParts: suppliedStepParts,
@@ -1656,6 +1657,7 @@ export function StepPictureSvg({
   pickTargets,
   view,
   bounds,
+  foldGhost,
   className,
 }: {
   w: number;
@@ -1701,9 +1703,18 @@ export function StepPictureSvg({
   view?: PictureView;
   /** Fit to this box instead of the picture's own (a piece dragged by hand keeps the frame). */
   bounds?: Box;
+  /** A piece whose fold closes on this step also shows flat, dashed (the assembly map). */
+  foldGhost?: boolean;
   className?: string;
 }) {
   const L = LOOK[look];
+  // `geoms` and `innerLines` below are what is drawn (`T ∘ foldMap`); action marks are read on the
+  // flat pieces and carried across. With no fold these are the very maps the caller gave.
+  const stepFolds = layout.folds?.flat;
+  const { geoms, innerLines, turned } = useMemo(
+    () => foldedDrawing(flatGeoms, flatInnerLines, stepFolds),
+    [flatGeoms, flatInnerLines, stepFolds],
+  );
   const form = useFormContext<TechCardFormData>();
   const byKey = useSeamRows();
   const contextResults = useStepResults();
@@ -1730,25 +1741,43 @@ export function StepPictureSvg({
     stepEdges?.map((target): SidePart => ({ target }));
   const stepEdgeSet = useMemo(() => new Set(stepEdges ?? []), [stepEdges]);
   const automaticActions = useMemo(
-    () => stepActionMarks(operation, stepEdges ?? [], geoms, innerLines ?? new Map()),
-    [operation, stepEdges, geoms, innerLines],
+    () => stepActionMarks(operation, stepEdges ?? [], flatGeoms, flatInnerLines ?? new Map()),
+    [operation, stepEdges, flatGeoms, flatInnerLines],
   );
-  const drawnActionLines = actionLines.length ? actionLines : automaticActions.lines;
+  const drawnActionLines = foldedActionLines(
+    actionLines.length ? actionLines : automaticActions.lines,
+    stepFolds,
+  );
+  const givenGlyphs = useMemo(
+    () => foldedActionGlyphs(actionGlyphs, stepFolds),
+    [actionGlyphs, stepFolds],
+  );
   const automaticFastenings = useMemo(() => {
     if (actionGlyphs.length || !contextResult || !contextResults) return [];
     const steps = operations.slice(0, contextResult.opIndex + 1).map((candidate, index) => ({
       operation: candidate as ButtonholeOperation,
       hosts: [...(contextResults[index]?.layout.T.keys() ?? [])].flatMap((key) => {
-        const geom = geoms.get(key);
+        const geom = flatGeoms.get(key);
         return geom ? [{ key, name: geom.name, geom }] : [];
       }),
     }));
-    return placementPictureGlyphsForStep(steps, contextResult.opIndex);
-  }, [actionGlyphs.length, contextResult, contextResults, operations, operation, geoms]);
+    return foldedActionGlyphs(
+      placementPictureGlyphsForStep(steps, contextResult.opIndex),
+      stepFolds,
+    );
+  }, [
+    actionGlyphs.length,
+    contextResult,
+    contextResults,
+    operations,
+    operation,
+    flatGeoms,
+    stepFolds,
+  ]);
   const drawnActionGlyphs: readonly PictureActionGlyph[] = actionGlyphs.length
-    ? actionGlyphs
+    ? givenGlyphs
     : [
-        ...automaticActions.glyphs,
+        ...foldedActionGlyphs(automaticActions.glyphs, stepFolds),
         ...automaticFastenings.map((glyph) => ({
           id: glyph.id,
           piece: glyph.piece,
@@ -1784,7 +1813,22 @@ export function StepPictureSvg({
     if (look === 'canvas') points.push(...layout.ghosts.flatMap((ghost) => ghost.ring));
     return points.length ? boxOf(points) : layout.bbox;
   }, [claimedStackedKeys, geoms, layers, layout, look, twinNumbers]);
-  const fitBounds = bounds ?? layeredBounds ?? ownBounds;
+  const ghostPoints = useMemo(() => {
+    if (!foldGhost) return [];
+    return (layout.folds?.closing ?? []).flatMap((key) => {
+      const transform = layout.T.get(key);
+      return transform ? (flatGeoms.get(key)?.rs ?? []).map((p) => apply(transform, p)) : [];
+    });
+  }, [flatGeoms, foldGhost, layout.T, layout.folds]);
+  const ownFit = layeredBounds ?? ownBounds;
+  const fitBounds = useMemo(
+    () =>
+      bounds ??
+      (ghostPoints.length
+        ? boxOf([...ghostPoints, [ownFit.x0, ownFit.y0] as Pt2, [ownFit.x1, ownFit.y1] as Pt2])
+        : ownFit),
+    [bounds, ghostPoints, ownFit],
+  );
   const fitPad = drawnActionGlyphs.length ? Math.max(pad, 7) : pad;
   const vk = view?.k ?? 1;
   const vx = view?.x ?? 0;
@@ -1795,7 +1839,16 @@ export function StepPictureSvg({
   }, [fitBounds, w, h, fitPad, vk, vx, vy]);
 
   const pieces = useMemo(() => {
-    const out: { key: string; ring: Pt2[]; drawn: Pt2[]; input: number; centre: Pt2 }[] = [];
+    const out: {
+      key: string;
+      ring: Pt2[];
+      drawn: Pt2[];
+      input: number;
+      centre: Pt2;
+      plies?: { d: string; under: boolean }[];
+      flatGhost?: string;
+    }[] = [];
+    const ghostKeys = foldGhost ? layout.folds?.closing : undefined;
     for (const [key, T] of layout.T) {
       const g = geoms.get(key);
       if (!g) continue;
@@ -1809,10 +1862,22 @@ export function StepPictureSvg({
       // `ring` measures (centre, spots, hits); `drawn` is what the paths plot.
       const ring = g.rs.map(px);
       const drawn = drawnRing(g.rs).map(px);
-      out.push({ key, ring, drawn, input: layout.input.get(key) ?? 0, centre: centroidOf(ring) });
+      const plies = turned.get(key);
+      const flat = ghostKeys?.includes(key) ? flatGeoms.get(key) : undefined;
+      out.push({
+        key,
+        ring,
+        drawn,
+        input: layout.input.get(key) ?? 0,
+        centre: centroidOf(ring),
+        ...(plies?.length
+          ? { plies: plies.map((ply) => ({ d: pathOf(ply.ring.map(px), true), under: ply.under })) }
+          : {}),
+        ...(flat ? { flatGhost: pathOf(drawnRing(flat.rs).map(px), true) } : {}),
+      });
     }
     return out;
-  }, [claimedStackedKeys, layout, geoms, fit, layers, twinNumbers]);
+  }, [claimedStackedKeys, layout, geoms, flatGeoms, turned, foldGhost, fit, layers, twinNumbers]);
   const ownedOrder = useMemo(
     () =>
       layers
@@ -2470,6 +2535,53 @@ export function StepPictureSvg({
     [doors, onPick, onHover, onHoverAt, onSpanDrag, startSpanDrag, mmOfDoor, pointerAt, pickAt],
   );
 
+  // The flat ghost of a closing step always lies under the folded outline.
+  const foldGhostPaths = pieces.some((piece) => piece.flatGhost) ? (
+    <g
+      fill='none'
+      stroke={GREY}
+      strokeWidth={L.hair * 1.5}
+      strokeDasharray={L.dash}
+      strokeLinejoin='round'
+      pointerEvents='none'
+    >
+      {pieces.map((piece) =>
+        piece.flatGhost ? (
+          <path key={piece.key} d={piece.flatGhost} data-fold-ghost={piece.key} />
+        ) : null,
+      )}
+    </g>
+  ) : null;
+  // The turned-under part reads dashed over the outline on the canvas. A tile and the print keep the
+  // folded outline solid: their plies go under it, so only what the outline does not cover shows.
+  const onCanvas = look === 'canvas';
+  const foldPlies = pieces.some((piece) => piece.plies) ? (
+    <g fill='none' strokeLinejoin='round' pointerEvents='none'>
+      {pieces.flatMap((piece) =>
+        (piece.plies ?? []).map((ply, index) =>
+          ply.under ? (
+            <path
+              key={`${piece.key}:${index}`}
+              d={ply.d}
+              stroke={onCanvas ? GREY : FAINT}
+              strokeWidth={onCanvas ? L.hair * 1.5 : L.hair}
+              strokeDasharray={L.dash}
+              data-fold-under={piece.key}
+            />
+          ) : (
+            <path
+              key={`${piece.key}:${index}`}
+              d={ply.d}
+              stroke={FAINT}
+              strokeWidth={L.hair}
+              data-fold-over={piece.key}
+            />
+          ),
+        ),
+      )}
+    </g>
+  ) : null;
+
   if (w < 2 || h < 2) return null;
   return (
     <svg
@@ -2499,12 +2611,16 @@ export function StepPictureSvg({
               />
             ))}
           </g>
+          {foldGhostPaths}
+          {!onCanvas && foldPlies}
           <g fill='none' strokeLinejoin='round'>
             {ownedOutlinePaths}
           </g>
         </>
       ) : (
         <>
+          {foldGhostPaths}
+          {!onCanvas && foldPlies}
           <g fill='none' stroke={FAINT} strokeWidth={L.outline} strokeLinejoin='round'>
             {base.map((p) => (
               <path key={p.key} d={pathOf(p.drawn, true)} data-piece-outline={p.key} />
@@ -2531,6 +2647,7 @@ export function StepPictureSvg({
           )}
         </>
       )}
+      {look === 'canvas' && foldPlies}
       {look === 'canvas' && ghosts.length > 0 && (
         <g
           fill={FILL}

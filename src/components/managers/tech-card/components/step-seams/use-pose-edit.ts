@@ -20,6 +20,7 @@ import {
   pressLayer,
   type PendingLayerEdits,
 } from './pose-picking';
+import { foldedDrawing } from './step-folds';
 import { pictureBounds } from './step-picture-view';
 import {
   pinPoses,
@@ -160,7 +161,14 @@ export function usePoseEdit({
   }, [poseLayout, poseDrag, poseFree]);
   // The zoom frame stays the result's own while pieces move: a drag never rescales the picture.
   const poseBounds = useMemo(
-    () => (stepPicture ? pictureBounds(resultLayout, geoms, 'canvas') : undefined),
+    () =>
+      stepPicture
+        ? pictureBounds(
+            resultLayout,
+            foldedDrawing(geoms, undefined, resultLayout.folds?.flat).geoms,
+            'canvas',
+          )
+        : undefined,
     [stepPicture, resultLayout, geoms],
   );
   const posePending =

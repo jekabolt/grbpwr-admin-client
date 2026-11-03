@@ -32,6 +32,10 @@ import {
   type SceneOp,
   type StepPicture,
 } from 'components/managers/tech-card/components/step-seams/step-picture-view';
+import {
+  cardFoldsOf,
+  foldStepsOf,
+} from 'components/managers/tech-card/components/step-seams/step-folds';
 import { inputGroups } from 'components/managers/tech-card/components/step-seams/step-seams-model';
 import {
   boxOf,
@@ -58,6 +62,7 @@ import { pairOverlap, pieceKeyOf, rasterize, resolveEdge } from 'lib/assembly-sk
 import { apply, compose, rigid, translate } from 'lib/assembly-skeleton/union/affine';
 import { nameTokens, readName } from 'lib/assembly-skeleton/skeleton/model';
 import { ROLE_BOOK } from 'lib/assembly-skeleton/skeleton/template';
+import { foldsFromWire } from 'lib/folds';
 import { isPoseWire, poseKeysOfWire } from 'lib/seams';
 import { viewerOrigin } from 'utils/viewer-origin';
 import {
@@ -2941,6 +2946,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
   return (techCard.techCard?.operations ?? []).map((operation) => {
     const keys = operation.seamKeys ?? [];
     const posed = keys.filter((key) => poseKeys.has(key));
+    const foldKeys = foldStepsOf([operation])[0]?.foldKeys;
     return {
       operationNumber: operation.operationNumber,
       operationType: operation.operationType,
@@ -2950,6 +2956,7 @@ const sceneOperations = (techCard: common_TechCard): SceneOp[] => {
       outputUnitName: operation.outputUnitName,
       seamKeys: posed.length ? keys.filter((key) => !poseKeys.has(key)) : keys,
       ...(posed.length ? { poseKeys: posed } : {}),
+      ...(foldKeys?.length ? { foldKeys } : {}),
       fullnessRatio: operation.stitching?.fullnessRatio?.value,
     };
   });
@@ -3342,6 +3349,10 @@ export function editorOperationPictures(
     // The editor provider reads the stored/form operations before the PDF model resolves DXF
     // aliases. Keep that exact input for shared results; legacy pictures still use resolved keys.
     const resultOperations = sceneOperations(techCard);
+    const foldRows = foldsFromWire(techCard.pieceFolds ?? resolvedCard.pieceFolds).folds;
+    const cardFolds = foldRows.length
+      ? { rows: foldRows, grainDeg: model.grainDeg ?? new Map<string, number>() }
+      : undefined;
     // With no stored row every result is provably rowless; keep that legacy path allocation-free
     // until the one shared flag opts rowless cards into editor parity.
     const ownerResults =
@@ -3354,6 +3365,7 @@ export function editorOperationPictures(
               geoms,
               innerLines,
               pieceKeys,
+              ...(cardFolds ? { folds: cardFolds } : {}),
             },
             OWNER_FIT,
           )
@@ -4188,6 +4200,16 @@ export function editorOperationPictures(
         resultStacked: ownerResult.stacked,
       });
     });
+    // Whichever way a step's layout was reached, it draws the folds that step sees.
+    const foldsAt = cardFoldsOf(resultOperations, cardFolds, geoms);
+    if (foldsAt)
+      resultOperations.forEach((operation, index) => {
+        const number = operation.operationNumber ?? 0;
+        const picture = pictures.get(number);
+        const folds = foldsAt(index);
+        if (picture && folds && !picture.layout.folds)
+          pictures.set(number, { ...picture, layout: { ...picture.layout, folds } });
+      });
     return pictures;
   } catch {
     // A malformed pattern still prints through the legacy drawings.

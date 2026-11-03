@@ -44,6 +44,14 @@ describe('foldMap', () => {
     expect(out.rings[0]).toContainEqual([80, 20]);
   });
 
+  it('covers the turned part when the larger part folds away', () => {
+    const out = foldMap(geometry(100), [foldAt(70, 10)]);
+    const xs = out.rings[0].map(([x]) => x);
+
+    expect(Math.min(...xs)).toBeCloseTo(70, 3);
+    expect(Math.max(...xs)).toBeCloseTo(140, 3);
+  });
+
   it('applies two folds in sequence', () => {
     const out = foldMap(geometry(90), [foldAt(30, 10), foldAt(60, 45)]);
 
