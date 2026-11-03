@@ -7,13 +7,21 @@ import { barFraction, type QueueRow } from 'components/managers/files/upload/que
 import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
-import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type HTMLAttributes,
+} from 'react';
 import { rememberMedia } from '../api/tasksService';
 
 type AttachId = (id: number) => Promise<void> | void;
 
 export type TaskAttachmentDropProps = Pick<
-  HTMLAttributes<HTMLDivElement>,
+  HTMLAttributes<HTMLElement>,
   'onDragEnterCapture' | 'onDragOverCapture' | 'onDragLeaveCapture' | 'onDropCapture'
 >;
 
@@ -30,6 +38,10 @@ type UploadOutcome =
 
 const hasFiles = (dataTransfer: DataTransfer | null): boolean =>
   !!dataTransfer && Array.from(dataTransfer.types ?? []).includes('Files');
+
+/** React events cross portals: a window opened from the zone keeps its own drops. */
+const inZone = (event: ReactDragEvent<HTMLElement>): boolean =>
+  event.currentTarget.contains(event.target as Node);
 
 /**
  * A directory is reported as a zero-byte File by `dataTransfer.files`. The entry API is the only
@@ -132,6 +144,8 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
   const total = useRef(0);
   const completed = useRef(0);
   const waits = useRef<Set<AbortController>>(new Set());
+  // Bumped when the intake is switched off: a form reopened mid-upload must not get the old file.
+  const session = useRef(0);
   const live = useRef({ enabled, mayUploadFiles, onMedia, onFile });
   live.current = { enabled, mayUploadFiles, onMedia, onFile };
 
@@ -148,6 +162,26 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
     if (enabled) return;
     depth.current = 0;
     setDragging(false);
+    session.current += 1;
+    pending.current = [];
+    waits.current.forEach((controller) => controller.abort());
+    waits.current.clear();
+  }, [enabled]);
+
+  // A file missing every drop zone would otherwise replace the whole page with that file.
+  useEffect(() => {
+    if (!enabled) return;
+    const refuse = (event: DragEvent) => {
+      if (event.defaultPrevented || !hasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+    };
+    window.addEventListener('dragover', refuse);
+    window.addEventListener('drop', refuse);
+    return () => {
+      window.removeEventListener('dragover', refuse);
+      window.removeEventListener('drop', refuse);
+    };
   }, [enabled]);
 
   const publishProgress = useCallback((current = 0) => {
@@ -175,10 +209,12 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
 
   const processFile = useCallback(
     async (file: File) => {
+      const started = session.current;
+      const alive = () => mounted.current && session.current === started;
       if (isMediaFile(file)) {
         try {
           const media = await uploadMediaInput(file);
-          if (!mounted.current || !live.current.enabled) return;
+          if (!alive()) return;
           const id = Number(media.id ?? 0);
           if (!id) throw new Error('empty media response');
           rememberMedia([
@@ -198,13 +234,13 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
           return;
         } catch (error) {
           if (error instanceof Error && error.message === 'not attached') throw error;
-          if (!mounted.current || !live.current.enabled) return;
+          if (!alive()) return;
           // A media refusal is not terminal: the private file library accepts any type.
         }
       }
 
       const fileId = await uploadLibrary(file);
-      if (!mounted.current) return;
+      if (!alive()) return;
       try {
         await live.current.onFile(fileId);
       } catch {
@@ -262,27 +298,27 @@ export function useTaskAttachmentIntake({ enabled, onMedia, onFile }: IntakeOpti
   const dropProps = useMemo<TaskAttachmentDropProps>(
     () => ({
       onDragEnterCapture: (event) => {
-        if (!live.current.enabled || !hasFiles(event.dataTransfer)) return;
+        if (!live.current.enabled || !inZone(event) || !hasFiles(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
         depth.current += 1;
         setDragging(true);
       },
       onDragOverCapture: (event) => {
-        if (!live.current.enabled || !hasFiles(event.dataTransfer)) return;
+        if (!live.current.enabled || !inZone(event) || !hasFiles(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = 'copy';
       },
       onDragLeaveCapture: (event) => {
-        if (!live.current.enabled || depth.current === 0) return;
+        if (!live.current.enabled || depth.current === 0 || !inZone(event)) return;
         event.preventDefault();
         event.stopPropagation();
         depth.current = Math.max(0, depth.current - 1);
         if (!depth.current) resetDrag();
       },
       onDropCapture: (event) => {
-        if (!live.current.enabled || !hasFiles(event.dataTransfer)) return;
+        if (!live.current.enabled || !inZone(event) || !hasFiles(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
         resetDrag();
