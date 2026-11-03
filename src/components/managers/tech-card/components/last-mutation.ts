@@ -16,6 +16,7 @@ import { unitDisplayName } from 'lib/assembly-unit-name';
 //   append     удаление строки + возврат assemblyCleared  форма (RHF)
 //   rename     ВСЕ переписанные ключом места разом        форма (RHF) + раскладка
 //   move       возврат оверрайдов раскладки               localStorage, презентация
+//   remove     строка обратно по historyKey                форма (RHF)
 //
 // ПЕРЕИМЕНОВАНИЕ УЗЛА — ОДНА ЗАПИСЬ, А НЕ ТРИ. Жест переписывает три вида мест (выход
 // производителя, выход каждого ПОГЛОЩАЮЩЕГО шага, ссылки потребителей во входах), но человек
@@ -226,6 +227,26 @@ export type HistoryEntry<TRow = unknown> =
         issues: number[];
       };
       label: string;
+    }
+  | {
+      /**
+       * STEP REMOVAL. Addressed by `historyKey`, never by position: this record outlives saves and
+       * edits, so a number stored here would go stale. It undoes with an ordinary form write, and
+       * the next save carries the row back with its seam, pose and fold keys.
+       */
+      kind: 'remove';
+      historyKey: string;
+      /** The whole row as it stood; its nested lists are the step's own links. */
+      row: TRow;
+      /** Row keys before the removal, in order: the step returns after its nearest live predecessor. */
+      before: string[];
+      /** Defects that pointed at this step (their reference is cleared by the removal). */
+      issueIndexes: number[];
+      /** What the row names on the card: a later undo refuses when any of them is gone. */
+      pieceKeys: string[];
+      seamKeys: string[];
+      bomLineKeys: string[];
+      label: string;
     };
 
 /** Две стопки: чем дальше в конце, тем свежее. Вершина обеих — последний элемент. */
@@ -412,6 +433,18 @@ export function dropForm<TRow>(h: History<TRow>): History<TRow> {
 }
 
 /**
+ * THE SOFT RESET: the rows moved or a field changed. Everything addressed by position or `fieldId`
+ * dies; a removal is keyed by `historyKey` and survives, so no surviving record holds a stale index.
+ * Redo dies whole: after a new gesture «forward» no longer leads back.
+ */
+export function dropStale<TRow>(h: History<TRow>): History<TRow> {
+  const undo = h.undo.filter((e) => e.kind === 'move' || e.kind === 'remove');
+  const redo = h.redo.filter((e) => e.kind === 'move');
+  if (undo.length === h.undo.length && redo.length === h.redo.length) return h;
+  return { undo, redo };
+}
+
+/**
  * Обратное: сброс РАСКЛАДКИ («reset layout», единственное подтверждение в системе — R8) уносит все
  * ручные позиции сразу. Отмена одного давнего перетаскивания после него вернула бы ОДНУ ноду в
  * место, которого на экране больше нигде нет, — это не «отменил», а «поломал заново».
@@ -489,6 +522,42 @@ export function appendLabel(index: number): string {
  */
 export function insertLabel(index: number): string {
   return `insert step ${(index + 1) * 10}`;
+}
+
+export function removeLabel(index: number): string {
+  return `remove step ${(index + 1) * 10}`;
+}
+
+/** Where the removed step returns: right after its nearest predecessor still on the card. */
+export function removeRestoreIndex(
+  before: readonly string[],
+  historyKey: string,
+  current: readonly string[],
+): number {
+  for (let i = before.indexOf(historyKey) - 1; i >= 0; i--) {
+    const at = current.indexOf(before[i]);
+    if (at >= 0) return at + 1;
+  }
+  return 0;
+}
+
+export type RemoveUndoState = {
+  rowKeys: readonly string[];
+  pieceKeys: ReadonlySet<string>;
+  seamKeys: ReadonlySet<string>;
+  bomLineKeys: ReadonlySet<string>;
+};
+
+/** Why this removal cannot come back whole; `null` when it can. Never a partial return. */
+export function removeUndoRefusal<TRow>(
+  rec: Extract<HistoryEntry<TRow>, { kind: 'remove' }>,
+  st: RemoveUndoState,
+): string | null {
+  if (st.rowKeys.includes(rec.historyKey)) return 'step is back';
+  if (rec.pieceKeys.some((k) => !st.pieceKeys.has(k))) return 'piece deleted';
+  if (rec.seamKeys.some((k) => !st.seamKeys.has(k))) return 'seam deleted';
+  if (rec.bomLineKeys.some((k) => !st.bomLineKeys.has(k))) return 'material deleted';
+  return null;
 }
 
 /**
@@ -602,7 +671,8 @@ export function canUndo<TRow>(
 ): boolean {
   if (rec.kind === 'move') return true;
   // Каркас судится строками, а не `fieldId` — `skeletonCanUndo`; без строк ответ «нет».
-  if (rec.kind === 'skeleton') return false;
+  // Removal is judged by keys, `removeUndoRefusal`.
+  if (rec.kind === 'skeleton' || rec.kind === 'remove') return false;
   if (rec.index < 0) return false;
   if (fields[rec.index]?.id !== rec.fieldId) return false;
   // Тождество строки — весь щит и для вставки: инвертируется она тем же удалением по адресу, и
@@ -634,6 +704,7 @@ export function canRedo<TRow>(
 ): boolean {
   if (rec.kind === 'move') return true;
   if (rec.kind === 'skeleton') return skeletonCanRedo(rec, fields.length);
+  if (rec.kind === 'remove') return false;
   if (rec.index < 0) return false;
   if (rec.kind === 'append') return fields.length === rec.index;
   // У ВСТАВКИ ЩИТ ТОТ ЖЕ ПО СМЫСЛУ, НО ДРУГОЙ ПО ЧИСЛУ. Отменённой строки в форме нет, тождества

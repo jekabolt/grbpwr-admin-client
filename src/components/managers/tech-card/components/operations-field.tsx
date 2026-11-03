@@ -146,7 +146,7 @@ import {
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
-import { autoFuseRefusal, operationStepNumber } from './fusing-override';
+import { autoFuseRefusal, operationStepNumber, serverKeepsFusingStep } from './fusing-override';
 import { operationMoveMembership } from './operation-move';
 import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
@@ -225,6 +225,7 @@ import {
   canRedo,
   canUndo,
   dropForm,
+  dropStale,
   dropMove,
   dropRedoTop,
   dropUndoTop,
@@ -245,9 +246,13 @@ import {
   undoStep,
   undoTitle,
   type History,
+  type HistoryEntry,
   type PendingAppend,
   type RenameInputSite,
   type RenameOutputSite,
+  removeLabel,
+  removeRestoreIndex,
+  removeUndoRefusal,
 } from './last-mutation';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
@@ -269,7 +274,7 @@ import { type SchematicMode, useSchematicPrefs } from './use-schematic-prefs';
 import { PieceAddChip, PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
-import { rowsOf, useSeamsStore } from './assembly-seams/seams-store';
+import { posesOf, rowsOf, useSeamsStore } from './assembly-seams/seams-store';
 import { useStepSeams } from './step-seams/step-seams-context';
 import { UnitPictureTile } from './step-seams/unit-picture-tile';
 import {
@@ -5727,6 +5732,7 @@ export function OperationsField({
   // гаснуть и зажигаться, а ref никого не перерисовывает. Оба пишутся ОДНОЙ функцией, чтобы
   // разойтись им было негде.
   type Hist = History<OperationFormValue>;
+  type RemoveEntry = Extract<HistoryEntry<OperationFormValue>, { kind: 'remove' }>;
   const history = useRef<Hist>(emptyHistory<OperationFormValue>());
   const [histView, setHistView] = useState<Hist>(history.current);
   const pendingAppend = useRef<PendingAppend<OperationFormValue> | null>(null);
@@ -5751,6 +5757,13 @@ export function OperationsField({
    * хоронить вместе с формой возможность вернуть подвинутую ноду не за что.
    */
   const clearFormHistory = useCallback(() => {
+    if (applying.current) return;
+    pendingAppend.current = null;
+    setHistory(dropStale(history.current));
+  }, [setHistory]);
+
+  /** The card was replaced, frozen, or the screen left: removals die here too. */
+  const dropFormHistory = useCallback(() => {
     if (applying.current) return;
     pendingAppend.current = null;
     setHistory(dropForm(history.current));
@@ -5795,10 +5808,10 @@ export function OperationsField({
     const sub = watch((_, { name }) => {
       if (name) return;
       placeBlankOnFirstInput.current.clear();
-      clearFormHistory();
+      dropFormHistory();
     });
     return () => sub.unsubscribe();
-  }, [watch, clearFormHistory]);
+  }, [watch, dropFormHistory]);
 
   // ВТОРОЙ ТАКТ ЗАПИСИ append. `append()` из RHF ничего не возвращает, а `fields` в замыкании
   // мутатора — снимок ДО вставки: `fields[at]?.id` там всегда `undefined`, и записанный синхронно
@@ -5816,6 +5829,39 @@ export function OperationsField({
     setHistory(p.redone ? pushUndo(history.current, rec) : record(history.current, rec));
   }, [fields, setHistory]);
 
+  /** Everything a removal must return, read while the row is still on the card. */
+  const removeRecord = (index: number): RemoveEntry | null => {
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const row = operations[index];
+    if (!row?.historyKey) return null;
+    const onCard = cardKeysNow();
+    const seamKeys = [...(row.seamKeys ?? []), ...(row.poseKeys ?? [])];
+    const number = operationStepNumber(index);
+    const issueIndexes = (getValues('issues') ?? []).flatMap((issue, i) =>
+      issue.operationNumber === number ? [i] : [],
+    );
+    return {
+      kind: 'remove',
+      historyKey: row.historyKey,
+      row: structuredClone(row),
+      before: operations.map((op) => op.historyKey ?? ''),
+      issueIndexes,
+      pieceKeys: [...new Set(row.inputKeys ?? [])].filter((key) => onCard.pieceKeys.has(key)),
+      seamKeys: [...new Set(seamKeys)].filter((key) => onCard.seamKeys.has(key)),
+      bomLineKeys: [...new Set(row.bomLineKeys ?? [])].filter((key) => onCard.bomLineKeys.has(key)),
+      label: removeLabel(index),
+    };
+  };
+
+  const cardKeysNow = () => {
+    const seams = useSeamsStore.getState();
+    return {
+      pieceKeys: new Set((getValues('pieces') ?? []).map((piece) => piece.lineKey ?? '')),
+      seamKeys: new Set([...rowsOf(seams), ...posesOf(seams)].map((row) => row.seamKey)),
+      bomLineKeys: new Set((getValues('bomItems') ?? []).map((item) => item.lineKey ?? '')),
+    };
+  };
+
   // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ У КАЖДОГО МУТАТОРА, как у `appendStep` и `addInputToOperation`.
   // Сегодня все трое прикрыты косвенно: кнопки редактора и ручка перетаскивания — настоящие
   // <button> под внешним `<fieldset disabled>`, а док фулскрина обёрнут своим fieldset. Но
@@ -5823,15 +5869,22 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
-    if (foldsClosingOn(getValues('operations') ?? [], index).length > 0) {
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    if (foldsClosingOn(operations, index).length > 0) {
       refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
       return;
     }
+    if (!applying.current && serverKeepsFusingStep(operations[index], getValues('pieces') ?? [])) {
+      refuseGesture(`STEP ${operationStepNumber(index)}`, 'auto fuse', 'piece is fused');
+      return;
+    }
+    const undoRecord = applying.current ? null : removeRecord(index);
     const historyKey = getValues(`operations.${index}.historyKey`);
     if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
     remapIssues((old) => (old === index ? null : old > index ? old - 1 : old));
     remove(index);
+    if (undoRecord) setHistory(record(history.current, undoRecord));
     // Clamp the STORED index, not just the rendered one: deleting the open last row leaves
     // `selected` past the end, and the next reorder would then compute the selection from a
     // position that no longer exists and open the wrong step.
@@ -6623,8 +6676,8 @@ export function OperationsField({
     //
     // УМИРАЮТ ТОЛЬКО ФОРМОВЫЕ, и это ровно то, ради чего сброс стал по-родовым: раскладка на
     // выпущенной карточке ЗАКОННА (R10), значит и отмена перестановки обязана её пережить.
-    clearFormHistory();
-  }, [frozen, clearFormHistory]);
+    dropFormHistory();
+  }, [frozen, dropFormHistory]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -7086,7 +7139,8 @@ export function OperationsField({
     const seamsLost = savedSeamsOnStep(ops[stepIndex]?.seamKeys, rowsOf(useSeamsStore.getState()));
     const price = removePrice(pieces, grouping.schematicSteps, stepIndex, seamsLost);
     const fieldId = fields[stepIndex]?.id;
-    if (removeGate(closing, price) !== 'ask' || !price || !fieldId) {
+    const refused = serverKeepsFusingStep(ops[stepIndex], getValues('pieces') ?? []);
+    if (refused || removeGate(closing, price) !== 'ask' || !price || !fieldId) {
       removeOperation(stepIndex);
       return;
     }
@@ -7290,6 +7344,43 @@ export function OperationsField({
    * ревью Ф4 («молчание на ⌘Z хуже»). Провалившийся guard молчанием НЕ покрывается: там запись
    * БЫЛА, и молчание читалось бы как «отменил», хотя не отменено ничего.
    */
+  const undoRemoval = (rec: RemoveEntry) => {
+    const rowKeys = ((getValues('operations') ?? []) as OperationFormValue[]).map(
+      (op) => op.historyKey ?? '',
+    );
+    const refused = removeUndoRefusal(rec, { rowKeys, ...cardKeysNow() });
+    if (refused) {
+      setHistory(dropUndoTop(history.current));
+      refuseGesture('SEQUENCE', 'not undone', refused);
+      return;
+    }
+    const at = removeRestoreIndex(rec.before, rec.historyKey, rowKeys);
+    applyToForm(() => {
+      remapIssues((old) => (old >= at ? old + 1 : old));
+      insert(at, structuredClone(rec.row), { shouldFocus: false });
+      for (const i of rec.issueIndexes) {
+        if (getValues(`issues.${i}.operationNumber`)) continue;
+        setValue(`issues.${i}.operationNumber`, operationStepNumber(at), { shouldDirty: true });
+      }
+    });
+    setSelected(at);
+    setHistory(undoStep(history.current));
+  };
+
+  const redoRemoval = (rec: RemoveEntry) => {
+    const operations = (getValues('operations') ?? []) as OperationFormValue[];
+    const index = operations.findIndex((op) => op.historyKey === rec.historyKey);
+    const fresh =
+      index < 0 || foldsClosingOn(operations, index).length > 0 ? null : removeRecord(index);
+    if (!fresh) {
+      setHistory(dropRedoTop(history.current));
+      refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
+      return;
+    }
+    applyToForm(() => removeOperation(index));
+    setHistory(pushUndo(dropRedoTop(history.current), fresh));
+  };
+
   const undoGesture = () => {
     const rec = peekUndo(history.current);
     if (!rec) return; // тишина: отменять нечего, и говорить не о чем
@@ -7305,10 +7396,14 @@ export function OperationsField({
       }
       return;
     }
+    if (rec.kind === 'remove') {
+      undoRemoval(rec);
+      return;
+    }
     if (!canUndo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
       // Ряд строк уехал (чаще всего — ресет формы после save). Умирает ВСЯ формовая половина
       // истории, а не одна запись: они все из той же, уже несуществующей эпохи. Раскладочные живут.
-      setHistory(dropForm(history.current));
+      setHistory(dropStale(history.current));
       refuseGesture('SEQUENCE', 'nothing to undo', 'the sequence has changed since');
       return;
     }
@@ -7346,8 +7441,12 @@ export function OperationsField({
       refuseGesture('SEQUENCE', 'frozen', FROZEN_REFUSAL);
       return;
     }
+    if (rec.kind === 'remove') {
+      redoRemoval(rec);
+      return;
+    }
     if (!canRedo(rec, fields, outputUnitKeyOf, inputKeysOf)) {
-      setHistory(dropForm(history.current));
+      setHistory(dropStale(history.current));
       refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
       return;
     }
@@ -7700,8 +7799,8 @@ export function OperationsField({
   // заметкой — ровно то, от чего точка 6 стережёт добор детали. Отмена обещает «ой» сразу после
   // жеста; жест из прошлого визита — уже не «сразу».
   useEffect(() => {
-    clearFormHistory();
-  }, [fsOpen, clearFormHistory]);
+    dropFormHistory();
+  }, [fsOpen, dropFormHistory]);
 
   const routeHistoryKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing || event.altKey)
