@@ -4575,14 +4575,16 @@ function OperationEditor({
             className={selectNoGrow}
           />
         </div>
-        <StepTimeField name={`operations.${index}.smv`} label='time, min' />
-        <StepTimeField
-          name={`operations.${index}.seamToleranceMm`}
-          label='seam tol, mm'
-          what='tolerance'
-          step={1}
-          empty={DEFAULT_SEAM_TOLERANCE_MM}
-        />
+        <div className='grid grid-cols-2 gap-2'>
+          <StepTimeField name={`operations.${index}.smv`} label='time, min' />
+          <StepTimeField
+            name={`operations.${index}.seamToleranceMm`}
+            label='seam tol, mm'
+            what='tolerance'
+            step={1}
+            empty={DEFAULT_SEAM_TOLERANCE_MM}
+          />
+        </div>
         {showIdentityOperation && (
           <SelectField
             name={`operations.${index}.operationType`}
