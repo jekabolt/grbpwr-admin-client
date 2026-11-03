@@ -48,6 +48,7 @@ import {
 import { OWNER_FIT, stepResults } from './step-result';
 import { candidateOfStoredSeam } from './step-rows';
 import { fullyUsedEdges, usedEdgesBeforeStep } from './step-seams-model';
+import { seamTileSideLines } from './step-seams-row';
 
 type Fixture = {
   pants: { selected: Array<{ key: string; name: string; geom: PieceGeom }> };
@@ -881,6 +882,24 @@ describe('sideLengthMm with active folds', () => {
     });
 
     expect([foldedA, foldedB]).toEqual([expect.closeTo(400, 0), expect.closeTo(400, 0)]);
+  });
+});
+
+describe('seamTileSideLines with active folds', () => {
+  const sides = { a: flapBoth, b: [{ target: `${partnerKey}#1` }] };
+
+  it('prints the folded length on the tile, the same as the picker', () => {
+    expect(seamTileSideLines(sides, foldedGeoms, new Map())).toEqual([
+      'FLAP_R 400',
+      'FLAP_1_R 200',
+    ]);
+    expect(
+      seamTileSideLines(sides, foldedGeoms, new Map(), { activeFolds: [flapFoldRow] }),
+    ).toEqual(['FLAP_R 200', 'FLAP_1_R 200']);
+    expect(seamTileSideLines(sides, foldedGeoms, new Map(), { activeFolds: [] })).toEqual([
+      'FLAP_R 400',
+      'FLAP_1_R 200',
+    ]);
   });
 });
 

@@ -6,11 +6,13 @@
 // `?pick=<op number>` (a PDF-gap deep link) opens the picker on arrival.
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { activeFoldRows, type StoredFold } from 'lib/folds';
 import type { SidePart } from 'lib/seams';
 import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Close, GroupLabel, Text, TILE_PRESS, TILE_QUIET } from 'ui';
+import { useFoldRows } from '../assembly-folds/folds-store';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
@@ -55,22 +57,34 @@ export function seamTileSideLines(
   sides: { a: readonly SidePart[]; b: readonly SidePart[] },
   geoms: ReadonlyMap<string, PieceGeom>,
   innerLines: ReadonlyMap<string, readonly (readonly Pt2[])[]>,
+  folds?: {
+    activeFolds: readonly StoredFold[];
+    grainDeg?: number | ReadonlyMap<string, number> | null;
+  },
 ): [string, string] {
-  const line = (parts: readonly SidePart[]) => {
+  const innerLen = (piece: string, index: number) => polyLen(innerLines.get(piece)?.[index] ?? []);
+  const line = (parts: readonly SidePart[], other: readonly SidePart[]) => {
     const codes = [
       ...new Set(parts.map((part) => geoms.get(pieceOfTarget(part.target))?.name).filter(Boolean)),
     ];
     if (codes.length === 0) return '';
-    const length = targetsLen(parts, geoms, (piece, index) =>
-      polyLen(innerLines.get(piece)?.[index] ?? []),
+    const length = targetsLen(
+      parts,
+      geoms,
+      innerLen,
+      folds && {
+        ...folds,
+        otherSideMm: other.length ? targetsLen(other, geoms, innerLen) : null,
+      },
     );
     return `${codes.join(' + ')} ${Math.round(length)}`;
   };
-  return [line(sides.a), line(sides.b)];
+  return [line(sides.a, sides.b), line(sides.b, sides.a)];
 }
 
 export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
+  const foldRows = useFoldRows();
   const results = useStepResults();
   const result = drawsStepResult(results, index) ? results?.[index] : undefined;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
@@ -106,6 +120,7 @@ export function StepSeamsRow({ index }: { index: number }) {
   if (!ctx || !hasMultiplePieces) return null;
   const { cardId, frozen } = ctx;
   const pending = geo?.dep.status === 'pending';
+  const activeFolds = activeFoldRows(ops, index, foldRows);
 
   return (
     <div className='flex flex-col' data-step-seams={opNumber ?? ''}>
@@ -129,7 +144,10 @@ export function StepSeamsRow({ index }: { index: number }) {
       <div className='flex flex-wrap items-start gap-x-4 gap-y-2'>
         {stored.map(({ key, row, parts }, i) => {
           const writing = !!pendingWrites[key];
-          const sideLines = seamTileSideLines(parts, geoms, scene.innerLines);
+          const sideLines = seamTileSideLines(parts, geoms, scene.innerLines, {
+            activeFolds,
+            grainDeg: geo?.grainDeg,
+          });
           return (
             <div key={key} className='group relative w-30 flex-none'>
               <SeamTile
