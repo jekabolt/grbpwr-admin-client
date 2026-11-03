@@ -13,6 +13,7 @@ import {
 import {
   blockRelation,
   joinsBlocks,
+  onTopChip,
   pendingLayerRows,
   pendingStacking,
   pressEdits,
@@ -110,30 +111,24 @@ describe('layersOf: a claim is about two blocks', () => {
     expect(out.layers).toEqual(['A', 'B', 'C']);
   });
 
-  it('a claim beats the carried order and a surface hint, and always shows in the order', () => {
+  it('a claim beats the carried order and always shows in the order', () => {
     const carried = layersOf(
       [{ pieces: ['A', 'B', 'C'], layers: ['A', 'B', 'C'] }],
       [row('s', 'C:under', 'A')],
     );
     expect(carried.layers).toEqual(['C', 'A', 'B']);
     agreesWithOrder(carried);
-
-    const surface = layersOf(
-      [block('HOST'), block('PART')],
-      [{ ...row('s', 'HOST:under', 'PART'), surface: { part: 'PART', host: 'HOST' } }],
-    );
-    expect(surface.layers).toEqual(['HOST', 'PART']);
-    agreesWithOrder(surface);
   });
 
-  it('with no flag nothing is lower and the old paint order stays', () => {
-    const out = layersOf(
-      [block('HOST'), block('PART')],
-      [{ ...row('s', 'HOST', 'PART'), surface: { part: 'PART', host: 'HOST' } }],
-    );
+  it('a surface part follows the rule: with no flag the later input is on top', () => {
+    const out = layersOf([block('HOST'), block('PART')], [row('s', 'HOST', 'PART')]);
     expect(out.stacked).toEqual([]);
     expect(out.lower).toEqual([]);
-    expect(out.layers).toEqual(['PART', 'HOST']);
+    expect(out.layers).toEqual(['HOST', 'PART']);
+
+    // No hint lifts the part either: the earlier input stays under the later one.
+    const partFirst = layersOf([block('PART'), block('HOST')], [row('s', 'HOST', 'PART')]);
+    expect(partFirst.layers).toEqual(['PART', 'HOST']);
   });
 });
 
@@ -362,6 +357,135 @@ describe('pendingStacking: the same rule on the pending rows', () => {
     });
     expect(joinsBlocks(pending, ['B1', 'B2'], ['A'])).toBe(true);
     expect(sorted(layersOf(blocks, pending).stacked)).toEqual(['B1<A', 'B2<A']);
+  });
+});
+
+describe('onTopChip: one chip, never off', () => {
+  const pressChip = (
+    blocks: readonly LayerBlock[],
+    rows: readonly LayerRow[],
+    press: NonNullable<ReturnType<typeof onTopChip>>['press'],
+  ) =>
+    press!.hosts.reduce<readonly LayerRow[]>(
+      (all, host) => pressLayer(all, blocks, press!.piece, host, 'over'),
+      rows,
+    );
+  const flagsIn = (rows: readonly LayerRow[]) =>
+    rows.flatMap((one) => [...one.sideA, ...one.sideB]).filter((one) => one.layer).length;
+
+  describe('with two inputs', () => {
+    const blocks = [block('A'), block('B', 'C')];
+    const rows = [row('s', 'A', 'B C')];
+
+    it('nothing picked: names the input on top, active, and a press swaps', () => {
+      const first = onTopChip(blocks, rows, layersOf(blocks, rows).layers, null)!;
+      expect(first).toMatchObject({ input: 2, active: true });
+
+      const swapped = pressChip(blocks, rows, first.press);
+      const swappedOrder = layersOf(blocks, swapped).layers;
+      expect(swappedOrder).toEqual(['B', 'C', 'A']);
+      const second = onTopChip(blocks, swapped, swappedOrder, null)!;
+      expect(second).toMatchObject({ input: 1, active: true });
+
+      const back = pressChip(blocks, swapped, second.press);
+      expect(onTopChip(blocks, back, layersOf(blocks, back).layers, null)).toMatchObject({
+        input: 2,
+        active: true,
+      });
+      // Two presses, one pair: one fact, never an off state and never two facts.
+      expect(flagsIn(back)).toBe(1);
+    });
+
+    it('a block picked: names it, active when on top, and a press puts it on top', () => {
+      const layers = layersOf(blocks, rows).layers;
+      const low = onTopChip(blocks, rows, layers, 'A')!;
+      expect(low).toMatchObject({ input: 1, active: false });
+
+      const pressed = pressChip(blocks, rows, low.press);
+      const after = layersOf(blocks, pressed).layers;
+      expect(after.at(-1)).toBe('A');
+      expect(onTopChip(blocks, pressed, after, 'A')).toEqual({
+        input: 1,
+        active: true,
+        press: null,
+      });
+    });
+
+    it('already on top: the press writes nothing, from any piece of the block', () => {
+      const layers = layersOf(blocks, rows).layers;
+      for (const picked of ['B', 'C'])
+        expect(onTopChip(blocks, rows, layers, picked)).toEqual({
+          input: 2,
+          active: true,
+          press: null,
+        });
+    });
+
+    it('a piece of no input reads as nothing picked', () => {
+      const layers = layersOf(blocks, rows).layers;
+      const chip = onTopChip(blocks, rows, layers, 'GHOST')!;
+      expect(chip).toMatchObject({ input: 2, active: true, press: { piece: 'A' } });
+    });
+  });
+
+  describe('with three inputs, the same chip on the picked block', () => {
+    const blocks = [block('A'), block('B'), block('C')];
+    const rows = [row('ab', 'A', 'B'), row('bc', 'B', 'C'), row('ac', 'A', 'C')];
+    const layers = layersOf(blocks, rows).layers;
+
+    it('names the top with nothing picked and has nothing to swap', () => {
+      expect(onTopChip(blocks, rows, layers, null)).toEqual({
+        input: 3,
+        active: true,
+        press: null,
+      });
+    });
+
+    it('lifts the picked block over each block above it, one fact per pair', () => {
+      const bottom = onTopChip(blocks, rows, layers, 'A')!;
+      expect(bottom).toMatchObject({ input: 1, active: false });
+      expect(bottom.press?.hosts).toEqual(['B', 'C']);
+
+      const pressed = pressChip(blocks, rows, bottom.press);
+      const after = layersOf(blocks, pressed);
+      expect(after.layers.at(-1)).toBe('A');
+      expect(after.conflicts).toEqual([]);
+      expect(flagsIn(pressed)).toBe(2);
+      expect(onTopChip(blocks, pressed, after.layers, 'A')).toMatchObject({
+        active: true,
+        press: null,
+      });
+
+      const middle = onTopChip(blocks, rows, layers, 'B')!;
+      expect(middle.press?.hosts).toEqual(['C']);
+      const lifted = pressChip(blocks, rows, middle.press);
+      expect(layersOf(blocks, lifted).layers).toEqual(['A', 'C', 'B']);
+      expect(flagsIn(lifted)).toBe(1);
+    });
+  });
+
+  it('with no row between the blocks there is no fact to store', () => {
+    const blocks = [block('A'), block('B')];
+    const layers = layersOf(blocks, []).layers;
+    expect(onTopChip(blocks, [], layers, null)).toEqual({ input: 2, active: true, press: null });
+    expect(onTopChip(blocks, [], layers, 'A')).toEqual({ input: 1, active: false, press: null });
+  });
+
+  it('shows no chip when the step has no input with a piece', () => {
+    expect(onTopChip([], [], [], null)).toBeNull();
+    expect(onTopChip([block()], [], [], null)).toBeNull();
+  });
+
+  it('preview equals saved: the pending picture is the picture of the pressed rows', () => {
+    const blocks = [block('A'), block('B', 'C')];
+    const rows = [row('s', 'A', 'B C'), pose('p', 'C', 'A')];
+    const chip = onTopChip(blocks, rows, layersOf(blocks, rows).layers, 'A')!;
+    const pressed = pressChip(blocks, rows, chip.press);
+    const stored = (key: string) => rows.find((one) => one.key === key);
+    const edits = pressEdits(rows, pressed, stored, { seams: new Map(), layers: new Map() });
+
+    expect(pendingStacking({ blocks, rows }, edits)).toEqual(layersOf(blocks, pressed));
+    expect(pendingStacking({ blocks, rows }, edits).layers.at(-1)).toBe('A');
   });
 });
 

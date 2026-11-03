@@ -12,9 +12,8 @@ import {
 import { useMemo, useRef, useState } from 'react';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import {
-  blockRelation,
-  joinsBlocks,
   onlyFlagsDiffer,
+  onTopChip,
   pendingLayerRows,
   pendingStacking,
   pressEdits,
@@ -39,7 +38,7 @@ import {
   type PoseSnap,
 } from './step-pose';
 import type { StepLayout } from './step-picture';
-import type { StepResult } from './step-result';
+import type { LayerRow, StepResult } from './step-result';
 import type { SurfacePicture } from './surface-picture';
 
 const EMPTY_CANVAS_LAYOUT: StepLayout = {
@@ -339,25 +338,17 @@ export function usePoseEdit({
     [layerInput, layerEdits, poseLayers],
   );
   const shownPoseLayers = shownPoseStacking.layers;
-  const shownPoseLower = shownPoseStacking.lower;
   const shownPoseStacked = shownPoseStacking.stacked;
 
-  // The under/over switch relates the selected piece's whole block to the block of the host fixed at
-  // pickup, through any row of this step that joins the two.
-  const layerTarget = (() => {
-    if (!poseSel) return null;
-    const { host, block, hostBlock } = pickupOf(poseSel);
-    if (!host || !joinsBlocks(pendingRows, block, hostBlock)) return null;
-    return { piece: poseSel, host, layer: blockRelation(shownPoseStacked, block, hostBlock) };
-  })();
-  const setLayer = (layer: SeamLayer) => {
-    if (!layerTarget || !layerInput || busy) return;
-    const pressed = pressLayer(
+  const onTop = layerInput
+    ? onTopChip(layerInput.blocks, pendingRows, shownPoseLayers, poseSel)
+    : null;
+  const pressOnTop = () => {
+    const press = onTop?.press;
+    if (!press || !layerInput || busy) return;
+    const pressed = press.hosts.reduce<readonly LayerRow[]>(
+      (rows, host) => pressLayer(rows, layerInput.blocks, press.piece, host, 'over'),
       pendingRows,
-      layerInput.blocks,
-      layerTarget.piece,
-      layerTarget.host,
-      layer,
     );
     const { seams, layers } = pressEdits(
       pendingRows,
@@ -505,10 +496,9 @@ export function usePoseEdit({
     resultLayout,
     poseShown,
     shownPoseLayers,
-    shownPoseLower,
     shownPoseStacked,
-    layerTarget,
-    setLayer,
+    onTop,
+    pressOnTop,
     exitPose,
     startPose,
     pickupOf,

@@ -24,7 +24,6 @@ describe('PLACE piece picking', () => {
       ['BOTTOM', 'STACK_HOST', 'STACK_TWIN', 'TOP'],
       [['STACK_HOST', 'STACK_TWIN']],
       ['BOTTOM', 'STACK_HOST', 'STACK_TWIN', 'TOP'],
-      ['BOTTOM'],
     );
     expect(order).toEqual(['BOTTOM', 'STACK_TWIN', 'STACK_HOST', 'TOP']);
 

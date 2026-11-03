@@ -2,12 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
-import {
-  LOWER_LAYER_FILL,
-  LOWER_LAYER_STROKE,
-  unionPictureOfLayout,
-  type UnionPicture,
-} from 'lib/assembly-skeleton/union';
+import { levelFill, unionPictureOfLayout, type UnionPicture } from 'lib/assembly-skeleton/union';
 import { IDENTITY, translate } from 'lib/assembly-skeleton/union/affine';
 
 import { UnitGlyph } from '../unit-silhouette';
@@ -84,9 +79,14 @@ const layout: StepLayout = {
   bbox: boxOf(points),
 };
 
+const surfaceTag = (markup: string, piece: string) =>
+  markup.match(new RegExp(`<path[^>]*data-piece-surface="${piece}"[^>]*>`))?.[0] ?? '';
+
+const fillOf = (markup: string, piece: string) =>
+  / fill="([^"]*)"/.exec(surfaceTag(markup, piece))?.[1];
+
 const renderPicture = ({
   layers,
-  lower,
   stacked,
   marks,
   stepEdges,
@@ -96,7 +96,6 @@ const renderPicture = ({
   look = 'tile',
 }: {
   layers?: readonly string[];
-  lower?: readonly string[];
   stacked?: readonly (readonly [string, string])[];
   marks?: readonly EdgeMark[];
   stepEdges?: readonly string[];
@@ -113,7 +112,6 @@ const renderPicture = ({
       look={look}
       layout={picture}
       layers={layers}
-      lower={lower}
       stacked={stacked}
       geoms={geoms}
       marks={marks}
@@ -125,34 +123,88 @@ const renderPicture = ({
 
 describe('StepPictureSvg lower layers', () => {
   it.each(['canvas', 'tile', 'print'] as const)(
-    'tints the whole bag when the front fully covers it in the %s renderer',
+    'paints each piece the colour of its level, lowest first, in the %s renderer',
     (look) => {
-      const markup = renderPicture({
-        layers: ['bag', 'front'],
-        lower: ['bag'],
-        stacked: [['bag', 'front']],
-        look,
-      });
-      const overlay = markup.match(/<path[^>]*data-lower-layer="bag"[^>]*>/)?.[0];
+      for (const order of [
+        ['bag', 'front'],
+        ['front', 'bag'],
+      ]) {
+        const markup = renderPicture({ layers: order, look });
 
-      expect(overlay).toBeDefined();
-      expect(overlay).toContain(`fill="${LOWER_LAYER_FILL}"`);
-      expect(overlay).toContain('pointer-events="none"');
-      expect(overlay).toContain('clip-path="url(#lower-layer-');
-      expect(overlay).not.toContain('data-lower-partial');
-      expect(markup).toContain('data-layer-depth="1"');
-      expect(markup.indexOf('data-lower-layer="bag"')).toBeGreaterThan(
-        markup.indexOf('data-piece-surface="front"'),
-      );
-      expect(markup).not.toContain('data-covered-layer');
+        // The bag lies on the front: one level above it, whichever layer is on top.
+        expect(fillOf(markup, 'front')).toBe(levelFill(0));
+        expect(fillOf(markup, 'bag')).toBe(levelFill(1));
+        expect(surfaceTag(markup, 'bag')).toContain('data-piece-level="1"');
+        expect(markup.indexOf('data-piece-surface="bag"')).toBeGreaterThan(
+          markup.indexOf('data-piece-surface="front"'),
+        );
+        expect(markup).not.toContain('data-lower-layer-region');
+        expect(markup).not.toContain('data-layer-depth');
+        expect(markup).not.toContain('data-lower-layer-depth');
+        expect(markup).not.toContain('clip-path');
+      }
     },
   );
 
   it.each(['canvas', 'tile', 'print'] as const)(
-    'clips a sleeve tint to its narrow cover in the %s renderer',
+    'draws the top contour solid and the hidden contour dashed in the %s renderer',
+    (look) => {
+      const markup = renderPicture({ layers: ['bag', 'front'], look });
+      const tagsOf = (attribute: string) =>
+        markup.match(new RegExp(`<path[^>]*${attribute}[^>]*>`, 'g')) ?? [];
+
+      expect(tagsOf('data-piece-outline="front"').length).toBeGreaterThan(0);
+      for (const tag of tagsOf('data-piece-outline="front"'))
+        expect(tag).not.toContain('stroke-dasharray');
+      expect(tagsOf('data-piece-hidden="front"')).toEqual([]);
+
+      // Under the front, whole: every line of the bag is hidden.
+      expect(tagsOf('data-piece-outline="bag"')).toEqual([]);
+      expect(tagsOf('data-piece-hidden="bag"').length).toBeGreaterThan(0);
+      for (const tag of tagsOf('data-piece-hidden="bag"'))
+        expect(tag).toContain('stroke-dasharray');
+    },
+  );
+
+  it('draws the dashes of the mockup on a tile', () => {
+    const markup = renderPicture({ layers: ['bag', 'front'], look: 'tile' });
+
+    expect(markup).toMatch(/stroke-dasharray="3 2"[^>]*data-piece-hidden="bag"/);
+  });
+
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'gives two orders of one pair different pictures in the %s renderer',
+    (look) => {
+      const one = renderPicture({ layers: ['bag', 'front'], look });
+      const two = renderPicture({ layers: ['front', 'bag'], look });
+
+      expect(one).not.toBe(two);
+      // The order moves the line work and never the colour.
+      for (const piece of ['bag', 'front']) expect(fillOf(one, piece)).toBe(fillOf(two, piece));
+      // The bag lies inside the front: under it, it is dashed; over it, it is solid and nothing is.
+      expect(one).toContain('data-piece-hidden="bag"');
+      expect(one).not.toContain('data-piece-outline="bag"');
+      expect(two).toContain('data-piece-outline="bag"');
+      expect(two).not.toContain('data-piece-hidden=');
+    },
+  );
+
+  it('asks nothing of the flags: the order alone paints', () => {
+    const plain = renderPicture({ layers: ['bag', 'front'], look: 'canvas' });
+    const flagged = renderPicture({
+      layers: ['bag', 'front'],
+      stacked: [['bag', 'front']],
+      look: 'canvas',
+    });
+
+    expect(flagged).toBe(plain);
+  });
+
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'cuts a sleeve contour at its narrow cover in the %s renderer',
     (look) => {
       const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
-      const strip = rectangle('strip', 'placket strip', 10, 80);
+      const strip = rectangle('strip', 'placket strip', 10, 120);
       const partialGeoms = new Map([
         ['sleeve', sleeve],
         ['strip', strip],
@@ -161,13 +213,16 @@ describe('StepPictureSvg lower layers', () => {
         ...layout,
         T: new Map([
           ['sleeve', IDENTITY],
-          ['strip', translate(45, 10)],
+          ['strip', translate(45, -10)],
         ]),
         input: new Map([
           ['sleeve', 0],
           ['strip', 1],
         ]),
-        bbox: boxOf(sleeve.rs),
+        bbox: boxOf([
+          [0, -10],
+          [100, 110],
+        ]),
         layers: [[0, 1]],
       };
       const markup = renderToStaticMarkup(
@@ -178,35 +233,104 @@ describe('StepPictureSvg lower layers', () => {
           look={look}
           layout={partialLayout}
           layers={['sleeve', 'strip']}
-          lower={['sleeve']}
-          stacked={[['sleeve', 'strip']]}
           geoms={partialGeoms}
         />,
       );
-      const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
-      const outline = markup.match(/<path[^>]*data-piece-outline="sleeve"[^>]*>/)?.[0];
 
-      expect(overlay).toContain('data-lower-partial="1"');
-      expect(overlay).toContain('clip-path="url(#lower-layer-');
-      expect(outline).toContain('stroke="var(--color-borderColor)"');
-      expect(outline).not.toContain(`stroke="${LOWER_LAYER_STROKE}"`);
-      expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
-        markup.indexOf('data-piece-surface="strip"'),
-      );
+      expect(markup.match(/data-piece-outline="sleeve"/g)?.length).toBeGreaterThan(0);
+      expect(markup.match(/data-piece-hidden="sleeve"/g)?.length).toBeGreaterThan(0);
+      expect(markup).toMatch(/stroke="var\(--color-borderColor\)"[^>]*data-piece-outline="sleeve"/);
     },
   );
 
-  it('clips a live «under» without a claimed pair to the pieces above it', () => {
+  it('gives left and right pockets one tone per level in every flag combination', () => {
+    const sewn = new Map([
+      ['front', rectangle('front', 'front', 300, 100)],
+      ['bagL', rectangle('bagL', 'bag', 60, 60)],
+      ['bagR', rectangle('bagR', 'bag', 60, 60)],
+      ['facingL', rectangle('facingL', 'facing', 40, 30)],
+      ['facingR', rectangle('facingR', 'facing', 40, 30)],
+    ]);
+    const sewnLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['front', IDENTITY],
+        ['bagL', translate(20, 20)],
+        ['bagR', translate(220, 20)],
+        ['facingL', translate(30, 30)],
+        ['facingR', translate(230, 30)],
+      ]),
+      input: new Map([
+        ['front', 0],
+        ['bagL', 1],
+        ['bagR', 1],
+        ['facingL', 2],
+        ['facingR', 2],
+      ]),
+      bbox: boxOf([
+        [0, 0],
+        [300, 100],
+      ]),
+      layers: [],
+    };
+    const orders: [string[], [string, string][]][] = [
+      [['front', 'bagL', 'bagR', 'facingL', 'facingR'], []],
+      [
+        ['front', 'bagL', 'bagR', 'facingL', 'facingR'],
+        [
+          ['front', 'bagL'],
+          ['bagL', 'facingL'],
+        ],
+      ],
+      [
+        ['bagL', 'bagR', 'front', 'facingL', 'facingR'],
+        [
+          ['bagR', 'front'],
+          ['front', 'facingR'],
+        ],
+      ],
+      [['bagL', 'facingL', 'front', 'bagR', 'facingR'], [['bagL', 'front']]],
+      [['facingL', 'bagL', 'bagR', 'facingR', 'front'], [['facingL', 'bagL']]],
+    ];
+    const looks = ['canvas', 'tile', 'print'] as const;
+    for (const look of looks) {
+      const pictures = orders.map(([order, stacked]) =>
+        renderToStaticMarkup(
+          <StepPictureSvg
+            w={300}
+            h={100}
+            pad={0}
+            look={look}
+            layout={sewnLayout}
+            layers={order}
+            stacked={stacked}
+            geoms={sewn}
+          />,
+        ),
+      );
+      for (const markup of pictures) {
+        expect(fillOf(markup, 'front')).toBe(levelFill(0));
+        expect(fillOf(markup, 'bagL')).toBe(levelFill(1));
+        expect(fillOf(markup, 'bagR')).toBe(levelFill(1));
+        expect(fillOf(markup, 'facingL')).toBe(levelFill(2));
+        expect(fillOf(markup, 'facingR')).toBe(levelFill(2));
+      }
+      // Each order drew its own line work; a flag on the same order changes nothing.
+      expect(new Set(pictures).size).toBe(new Set(orders.map(([order]) => order.join())).size);
+    }
+  });
+
+  it('tones and dashes an unflagged overlap, seam allowance excluded', () => {
     const upper = rectangle('upper', 'upper front', 100, 100);
     const front = rectangle('front', 'front', 100, 100);
     const liveGeoms = new Map([
       ['front', front],
       ['upper', upper],
     ]);
-    const liveLayout: StepLayout = {
+    const liveLayout = (overlap: number): StepLayout => ({
       ...layout,
       T: new Map([
-        ['front', translate(0, 60)],
+        ['front', translate(0, 100 - overlap)],
         ['upper', IDENTITY],
       ]),
       input: new Map([
@@ -215,37 +339,38 @@ describe('StepPictureSvg lower layers', () => {
       ]),
       bbox: boxOf([
         [0, 0],
-        [100, 160],
+        [100, 200 - overlap],
       ]),
       layers: [[0, 1]],
-    };
-    const markup = renderToStaticMarkup(
-      <StepPictureSvg
-        w={140}
-        h={200}
-        pad={4}
-        look='canvas'
-        layout={liveLayout}
-        layers={['upper', 'front']}
-        lower={['upper']}
-        stacked={[]}
-        geoms={liveGeoms}
-      />,
-    );
-    const overlay = markup.match(/<path[^>]*data-lower-layer="upper"[^>]*>/)?.[0];
+    });
+    const render = (overlap: number) =>
+      renderToStaticMarkup(
+        <StepPictureSvg
+          w={140}
+          h={200}
+          pad={4}
+          look='canvas'
+          layout={liveLayout(overlap)}
+          layers={['upper', 'front']}
+          stacked={[]}
+          geoms={liveGeoms}
+        />,
+      );
 
-    expect(overlay).toContain('data-lower-partial="1"');
-    expect(overlay).toContain('clip-path="url(#lower-layer-');
+    expect(render(40)).toContain('data-piece-hidden="upper"');
+    expect(fillOf(render(40), 'upper')).not.toBe(fillOf(render(40), 'front'));
+    expect(render(10)).not.toContain('data-piece-hidden=');
+    expect(fillOf(render(10), 'upper')).toBe(fillOf(render(10), 'front'));
   });
 
-  it('clips the graph glyph through the same lower-layer fill renderer', () => {
+  it('cuts the graph glyph by the same rule', () => {
     const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
-    const strip = rectangle('strip', 'strip', 10, 80);
+    const strip = rectangle('strip', 'strip', 10, 120);
     const picture = unionPictureOfLayout(
       {
         T: new Map([
           ['sleeve', IDENTITY],
-          ['strip', translate(45, 10)],
+          ['strip', translate(45, -10)],
         ]),
         stacked: [],
         onRuns: [],
@@ -255,25 +380,136 @@ describe('StepPictureSvg lower layers', () => {
         ['strip', strip],
       ]),
       ['sleeve', 'strip'],
-      { lower: ['sleeve'], stacked: [['sleeve', 'strip']] },
     );
     const markup = renderToStaticMarkup(<UnitGlyph picture={picture} name='sleeve unit' />);
-    const overlay = markup.match(/<path[^>]*data-lower-layer="sleeve"[^>]*>/)?.[0];
 
-    expect(picture.lowerLayerCovers).toEqual({ sleeve: ['strip'] });
-    expect(picture.lowerLayerDepths).toEqual({ sleeve: 1 });
-    expect(overlay).toContain('data-lower-partial="1"');
-    expect(overlay).toContain('clip-path="url(#lower-layer-');
-    expect(markup.indexOf('data-lower-layer="sleeve"')).toBeGreaterThan(
+    expect(picture.lowerLayers).toEqual(['sleeve']);
+    expect(picture.levels).toEqual({ sleeve: 0, strip: 1 });
+    expect(picture.lowerLayerRuns?.sleeve.hidden.length).toBeGreaterThan(0);
+    expect(picture.lowerLayerRuns?.sleeve.visible.length).toBeGreaterThan(0);
+    expect(markup).toMatch(/stroke-dasharray="3 2"[^>]*data-lower-layer-hidden="sleeve"/);
+    expect(markup).toMatch(/fill="var\(--color-bgColor\)"[^>]*data-lower-layer-base="sleeve"/);
+    expect(markup).toContain(`fill="${levelFill(1)}"`);
+    // Lowest level first, so the strip's colour lies over the sleeve's.
+    expect(markup.indexOf(`fill="${levelFill(1)}"`)).toBeGreaterThan(
       markup.indexOf('data-lower-layer-base="sleeve"'),
     );
   });
 
-  it('marks a picked edge above the lower-piece tint', () => {
+  it('gives the graph glyph no levels when pieces only share seam allowance', () => {
+    const left = rectangle('left', 'left', 100, 100);
+    const right = rectangle('right', 'right', 100, 100);
+    const picture = unionPictureOfLayout(
+      {
+        T: new Map([
+          ['left', IDENTITY],
+          ['right', translate(90, 0)],
+        ]),
+        stacked: [],
+        onRuns: [],
+      },
+      new Map([
+        ['left', left],
+        ['right', right],
+      ]),
+      ['left', 'right'],
+    );
+
+    expect(picture.lowerLayers).toBeUndefined();
+    expect(picture.levels).toBeUndefined();
+  });
+
+  it('gives two pieces of one block one tone, under or over another block', () => {
+    const blockGeoms = new Map([
+      ['panel', rectangle('panel', 'panel', 300, 200)],
+      ['left', rectangle('left', 'left', 100, 60)],
+      ['right', rectangle('right', 'right', 100, 60)],
+    ]);
+    const blockLayout: StepLayout = {
+      ...layout,
+      T: new Map([
+        ['panel', IDENTITY],
+        ['left', translate(20, 140)],
+        ['right', translate(115, 140)],
+      ]),
+      input: new Map([
+        ['panel', 0],
+        ['left', 1],
+        ['right', 1],
+      ]),
+      bbox: boxOf([
+        [0, 0],
+        [300, 200],
+      ]),
+      layers: [[0, 1]],
+    };
+    const looks = ['canvas', 'tile', 'print'] as const;
+    for (const look of looks) {
+      const svgs = [
+        ['panel', 'left', 'right'],
+        ['left', 'right', 'panel'],
+      ].map((order) => {
+        const markup = renderToStaticMarkup(
+          <StepPictureSvg
+            w={300}
+            h={200}
+            pad={0}
+            look={look}
+            layout={blockLayout}
+            layers={order}
+            geoms={blockGeoms}
+          />,
+        );
+        expect(fillOf(markup, 'panel')).toBe(levelFill(0));
+        expect(fillOf(markup, 'left')).toBe(levelFill(1));
+        expect(fillOf(markup, 'right')).toBe(levelFill(1));
+        return markup;
+      });
+      expect(svgs[0]).not.toBe(svgs[1]);
+    }
+  });
+
+  it('keeps a level inside a sewn block: the pocket on its panel keeps its tone', () => {
+    const sewn = new Map([
+      ['front', rectangle('front', 'front', 100, 100)],
+      ['bag', rectangle('bag', 'bag', 70, 70)],
+    ]);
+    const sewnLayout: StepLayout = {
+      ...layout,
+      input: new Map([
+        ['front', 0],
+        ['bag', 0],
+      ]),
+    };
+    const draw = (order: string[]) =>
+      renderToStaticMarkup(
+        <StepPictureSvg
+          w={120}
+          h={100}
+          pad={4}
+          look='canvas'
+          layout={sewnLayout}
+          layers={order}
+          geoms={sewn}
+        />,
+      );
+    const bagOnTop = draw(['front', 'bag']);
+    const frontOnTop = draw(['bag', 'front']);
+
+    for (const markup of [bagOnTop, frontOnTop]) {
+      expect(fillOf(markup, 'front')).toBe(levelFill(0));
+      expect(fillOf(markup, 'bag')).toBe(levelFill(1));
+    }
+    expect(bagOnTop).toContain('data-piece-outline="bag"');
+    expect(bagOnTop).not.toContain('data-piece-hidden');
+    expect(frontOnTop).toContain('data-piece-hidden="bag"');
+    expect(frontOnTop).not.toContain('data-piece-outline="bag"');
+  });
+
+  it('marks a picked edge above the surfaces', () => {
     // One input carried as a block: no input partner to borrow a host from.
     const markup = renderPicture({
       layers: ['bag', 'front'],
-      lower: ['bag'],
       stacked: [['bag', 'front']],
       marks: [{ id: 'bag#0', tone: 'pick' }],
       picture: {
@@ -288,7 +524,7 @@ describe('StepPictureSvg lower layers', () => {
     const mark = markup.indexOf('data-seam-mark="pick"');
 
     expect(mark).toBeGreaterThan(-1);
-    expect(mark).toBeGreaterThan(markup.indexOf('data-lower-layer="bag"'));
+    expect(mark).toBeGreaterThan(markup.indexOf('data-piece-surface="bag"'));
   });
 
   it('draws seam side 1 black and thicker with its piece shaded, side 2 blue', () => {
@@ -371,7 +607,7 @@ describe('StepPictureSvg lower layers', () => {
     expect(worked).not.toContain('data-step-seam-edge="bag#0"');
   });
 
-  it('does not tint an edge-to-edge pair without an owner claim', () => {
+  it('does not grey an edge-to-edge pair: seam allowance never counts', () => {
     const beside = new Map([
       ['bag', bag],
       ['front', rectangle('front', 'front', 100, 100)],
@@ -380,7 +616,7 @@ describe('StepPictureSvg lower layers', () => {
       ...layout,
       T: new Map([
         ['bag', IDENTITY],
-        ['front', translate(70, 0)],
+        ['front', translate(85, 0)],
       ]),
     };
     const markup = renderToStaticMarkup(
@@ -391,20 +627,19 @@ describe('StepPictureSvg lower layers', () => {
         look='canvas'
         layout={besideLayout}
         layers={['bag', 'front']}
-        lower={[]}
         stacked={[]}
         geoms={beside}
       />,
     );
 
-    expect(markup).not.toContain('data-lower-layer=');
-    expect(markup).not.toContain('data-covered-layer=');
+    expect(fillOf(markup, 'bag')).toBe(levelFill(0));
+    expect(fillOf(markup, 'front')).toBe(levelFill(0));
+    expect(markup).not.toContain('data-piece-hidden=');
   });
 
   it('hides a covered button under the piece above it', () => {
     const markup = renderPicture({
       layers: ['bag', 'front'],
-      lower: ['bag'],
       stacked: [['bag', 'front']],
       look: 'canvas',
       actionGlyphs: [
@@ -415,7 +650,7 @@ describe('StepPictureSvg lower layers', () => {
     expect(markup).not.toContain('data-asm-mark="button"');
   });
 
-  it('keeps a claimed coincident twin at zero offset with its dashed edge underneath', () => {
+  it('keeps a claimed coincident twin at zero offset, its hidden contour dashed', () => {
     const lining = rectangle('lining', 'lining', 70, 70);
     const shell = rectangle('shell', 'shell', 70, 70);
     const twinGeoms = new Map([
@@ -443,7 +678,6 @@ describe('StepPictureSvg lower layers', () => {
         look='canvas'
         layout={twinLayout}
         layers={['lining', 'shell']}
-        lower={['lining']}
         stacked={[['lining', 'shell']]}
         geoms={twinGeoms}
         names={['lining', 'shell']}
@@ -453,18 +687,19 @@ describe('StepPictureSvg lower layers', () => {
       const tag = markup.match(new RegExp(`<path[^>]*data-piece-surface="${piece}"[^>]*>`))?.[0];
       return tag?.match(/ d="([^"]+)"/)?.[1];
     };
-    const underlay = markup.match(/<path[^>]*data-stacked-underlay="lining"[^>]*>/)?.[0];
+    const hidden = markup.match(/<path[^>]*data-piece-hidden="lining"[^>]*>/)?.[0];
 
     expect(surfacePath('lining')).toBe(surfacePath('shell'));
-    expect(underlay).toContain('stroke-dasharray=');
-    expect(markup.indexOf('data-stacked-underlay="lining"')).toBeLessThan(
-      markup.indexOf('data-piece-surface="shell"'),
+    expect(hidden).toContain('stroke-dasharray=');
+    // The top contour comes after it and lies on the same line: solid wins.
+    expect(markup.indexOf('data-piece-hidden="lining"')).toBeLessThan(
+      markup.indexOf('data-piece-outline="shell"'),
     );
     expect(markup).toContain('data-stacked-name-leader="lining"');
   });
 
-  it('does not add a lower overlay to a rowless picture', () => {
-    expect(renderPicture()).not.toContain('data-lower-layer=');
+  it('draws a rowless picture from the order it is given, with no dashes on a seam', () => {
+    expect(renderPicture()).not.toContain('data-lower-layer-region');
   });
 
   it('keeps stacked-twin numbers at ten screen pixels', () => {
@@ -498,6 +733,7 @@ describe('StepPictureSvg lower layers', () => {
       underlay: [],
       overlap: 0,
       lowerLayers: ['bag'],
+      lowerLayerRuns: { bag: { visible: [bag.rs], hidden: [], lines: [] } },
       twinLabels: { bag: 2 },
     };
     const graph = renderToStaticMarkup(<UnitGlyph picture={picture} name='bag' />);
@@ -506,6 +742,152 @@ describe('StepPictureSvg lower layers', () => {
     expect(graphLabel).toContain('font-size="10"');
     expect(graphLabel).toContain('paint-order="stroke"');
     expect(graph).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"');
+  });
+});
+
+describe('the back pocket and the two back tops sewn on it', () => {
+  // The world rings of that step of the owner's card, in mm, thinned to 24 points.
+  const pocketRing: Pt2[] = [
+    [80, 0],
+    [117, 3],
+    [154, 7],
+    [191, 15],
+    [228, 36],
+    [247, 67],
+    [253, 105],
+    [247, 143],
+    [242, 181],
+    [236, 218],
+    [219, 252],
+    [186, 253],
+    [149, 247],
+    [110, 243],
+    [75, 240],
+    [37, 238],
+    [8, 227],
+    [4, 190],
+    [2, 154],
+    [1, 118],
+    [0, 80],
+    [10, 39],
+    [27, 16],
+    [55, 3],
+  ];
+  const rightRing: Pt2[] = [
+    [126, 167],
+    [123, 184],
+    [121, 201],
+    [119, 218],
+    [117, 235],
+    [112, 247],
+    [94, 243],
+    [77, 240],
+    [60, 236],
+    [42, 233],
+    [25, 230],
+    [7, 227],
+    [5, 212],
+    [5, 196],
+    [5, 179],
+    [6, 163],
+    [7, 147],
+    [23, 149],
+    [40, 152],
+    [56, 155],
+    [73, 158],
+    [90, 161],
+    [107, 164],
+    [124, 167],
+  ];
+  const leftRing: Pt2[] = [
+    [124, 167],
+    [140, 169],
+    [156, 171],
+    [172, 173],
+    [187, 175],
+    [203, 178],
+    [220, 180],
+    [236, 183],
+    [238, 196],
+    [235, 212],
+    [232, 227],
+    [225, 241],
+    [217, 256],
+    [204, 259],
+    [187, 257],
+    [171, 254],
+    [155, 252],
+    [140, 250],
+    [124, 248],
+    [121, 236],
+    [121, 220],
+    [121, 204],
+    [120, 188],
+    [120, 172],
+  ];
+  const piece = (key: string, rs: Pt2[]) =>
+    ({ ...rectangle(key, key, 1, 1), rs, corners: [], rect: false }) as PieceGeom;
+  const backGeoms = new Map([
+    ['pocket', piece('pocket', pocketRing)],
+    ['right', piece('right', rightRing)],
+    ['left', piece('left', leftRing)],
+  ]);
+  const backLayout: StepLayout = {
+    ...layout,
+    T: new Map([
+      ['pocket', IDENTITY],
+      ['right', IDENTITY],
+      ['left', IDENTITY],
+    ]),
+    input: new Map([
+      ['pocket', 0],
+      ['right', 1],
+      ['left', 1],
+    ]),
+    bbox: boxOf([...pocketRing, ...rightRing, ...leftRing]),
+    layers: [[0, 1]],
+  };
+  const over = ['pocket', 'right', 'left'];
+  const under = ['right', 'left', 'pocket'];
+  const draw = (order: string[], look: 'canvas' | 'tile' | 'print') =>
+    renderToStaticMarkup(
+      <StepPictureSvg
+        w={300}
+        h={300}
+        pad={4}
+        look={look}
+        layout={backLayout}
+        layers={order}
+        geoms={backGeoms}
+      />,
+    );
+
+  it.each(['canvas', 'tile', 'print'] as const)(
+    'paints both tops one colour in both orders in the %s renderer',
+    (look) => {
+      const pictures = [over, under].map((order) => draw(order, look));
+      for (const markup of pictures) {
+        expect(fillOf(markup, 'pocket')).toBe(levelFill(0));
+        expect(fillOf(markup, 'right')).toBe(levelFill(1));
+        expect(fillOf(markup, 'left')).toBe(levelFill(1));
+      }
+      expect(pictures[0]).not.toBe(pictures[1]);
+      // Under the pocket the tops are the dashed ones; over it, the pocket is.
+      expect(pictures[0]).not.toContain('data-piece-hidden="right"');
+      expect(pictures[1]).toContain('data-piece-hidden="right"');
+      expect(pictures[1]).toContain('data-piece-hidden="left"');
+    },
+  );
+
+  it('keeps one colour on the unit pictogram too', () => {
+    for (const order of [over, under]) {
+      const picture = unionPictureOfLayout(
+        { T: backLayout.T, stacked: [], onRuns: [] },
+        backGeoms,
+        order,
+      );
+      expect(picture.levels).toEqual({ pocket: 0, right: 1, left: 1 });
+    }
   });
 });
 
@@ -840,7 +1222,6 @@ describe('StepPictureSvg drawn outline', () => {
         look='print'
         layout={coverLayout}
         layers={['disc', 'lid']}
-        lower={['disc']}
         stacked={[['disc', 'lid']]}
         geoms={
           new Map([

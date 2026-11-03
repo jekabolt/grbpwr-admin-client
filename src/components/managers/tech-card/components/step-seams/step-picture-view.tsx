@@ -14,8 +14,8 @@ import {
 } from 'components/managers/tech-card/techpack/press-arrows';
 import type { EdgeId, PieceGeom, Pt2, SeamCandidate } from 'lib/assembly-skeleton/types';
 import {
-  LOWER_LAYER_STROKE_SCALE,
   STACKED_TWIN_OFFSET_MM,
+  levelFill,
   orderedLayerKeys,
   resolveEdge,
 } from 'lib/assembly-skeleton/union';
@@ -41,7 +41,6 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { plainEdges } from '../assembly-seams/words';
 import { posesOf, rowsOf, useSeamsStore } from '../assembly-seams/seams-store';
 import { useCardSeamGraph } from '../card-unit-pictures';
-import { LowerLayerFills, lowerLayerTints, type LowerLayerClaim } from '../lower-layer-fill';
 import type { TechCardFormData } from '../schema';
 import { nameSpot } from './name-spot';
 import { mmOnPoints } from './span-pick';
@@ -957,6 +956,8 @@ const LOOK: Record<'canvas' | 'result' | 'tile' | 'print', Look> = {
   // The existing PDF weights: ordinary ink 1.75 px, active seam 3 px, monochrome hairlines.
   print: { outline: 1.75, hair: 0.7, mark: 3, stored: 3, dash: '5 3', font: 9 },
 };
+/** A hidden contour is the thinner line (mockup: 1 under 1.6, and 1 under 1 on a tile). */
+const hiddenOutline = (outline: number) => Math.min(outline, Math.max(1, outline * 0.625));
 
 const pointSegmentDistance = (point: Pt2, a: Pt2, b: Pt2) => {
   const dx = b[0] - a[0];
@@ -1003,6 +1004,8 @@ const isPick = (tone: Tone) => tone === 'pick' || tone === 'pickFirst';
 const PICK_FIRST_STROKE_SCALE = 1.5;
 const PICK_FIRST_FILL_OPACITY = 0.08;
 const FAINT = 'var(--color-borderColor)';
+/** A hidden contour must read on every level's colour, where FAINT would not. */
+const HIDDEN_CONTOUR = 'var(--color-labelColor)';
 const TWIN_NUMBER_PX = 10;
 
 /** The box a unit's name needs at this font. */
@@ -1011,7 +1014,7 @@ const nameBoxOf = (text: string, font: number) => ({
   h: font + 8,
 });
 // One shared empty per optional list prop. A `= []` default is a new array every render, and it
-// sits in the keys of `ownedStyle` (layerStyle), the tints and the doors: the seam picker's hover
+// sits in the keys of `ownedStyle` (layerStyle) and the doors: the seam picker's hover
 // re-ran all of them per pointer event. With these, the memoised doors and name spots and a stable
 // `onPick`, a hover on a 23-piece step went 31 → 7 ms (node, production React, median of 40).
 const NO_MARKS: readonly EdgeMark[] = [];
@@ -1023,7 +1026,6 @@ const TICK_POINT_R_PX = 2.5;
 const NO_ACTION_LINES: readonly PictureActionLine[] = [];
 const NO_ACTION_GLYPHS: readonly PictureActionGlyph[] = [];
 const NO_NOS: readonly NoMark[] = [];
-const NO_KEYS: readonly string[] = [];
 const NO_STACKED: readonly (readonly [string, string])[] = [];
 
 /**
@@ -1579,40 +1581,7 @@ function simplifyClosed(ring: readonly Pt2[], tol: number): Pt2[] {
   return out;
 }
 
-/**
- * Douglas–Peucker over an open polyline, keeping both ends and the original point objects. A run
- * that returns to its start (`layerStyle` closes a whole outline by repeating its first point) has
- * a zero-length chord, so its first split lands on the point farthest from that end — the same
- * cut `simplifyClosed` makes.
- */
-function simplifyOpen(line: readonly Pt2[], tol: number): Pt2[] {
-  const n = line.length;
-  if (n < 3) return [...line];
-  const keep = new Uint8Array(n);
-  keep[0] = 1;
-  keep[n - 1] = 1;
-  thinRanges((i) => line[i], keep, [[0, n - 1]], tol);
-  const out: Pt2[] = [];
-  for (let i = 0; i < n; i++) if (keep[i]) out.push(line[i]);
-  return out;
-}
-
 const drawnRings = new WeakMap<readonly Pt2[], readonly Pt2[]>();
-const drawnRuns = new WeakMap<readonly Pt2[], readonly Pt2[]>();
-
-/**
- * An outline run from `layerStyle` (world mm) thinned to DRAWN_RING_TOL_MM for drawing only. The
- * layers branch plotted the dense runs as they came: on card 81 its 300 `data-piece-outline` paths
- * were 3.4 MB of the 3.6 MB of path data, 324k vertices where 7.5k draw the same line. Cached per
- * run array, so a memoised style thins once across re-renders; hit tests keep the dense ring.
- */
-function drawnRun(line: readonly Pt2[]): readonly Pt2[] {
-  const hit = drawnRuns.get(line);
-  if (hit) return hit;
-  const out = simplifyOpen(line, DRAWN_RING_TOL_MM);
-  drawnRuns.set(line, out);
-  return out;
-}
 
 /**
  * The outline a piece is drawn with: `g.rs` thinned to DRAWN_RING_TOL_MM. Only the drawn path uses
@@ -1662,7 +1631,6 @@ export function StepPictureSvg({
   look,
   layout,
   layers,
-  lower,
   stacked,
   geoms,
   innerLines,
@@ -1697,8 +1665,6 @@ export function StepPictureSvg({
   layout: StepLayout;
   /** Authoritative bottom-to-top owner order. Omitted pictures keep the legacy drawing byte-for-byte. */
   layers?: readonly string[];
-  /** Pieces explicitly claimed below another piece by the shared result. */
-  lower?: readonly string[];
   /** Explicit [under, over] claims from the shared result. */
   stacked?: readonly (readonly [string, string])[];
   geoms: ReadonlyMap<string, PieceGeom>;
@@ -1792,7 +1758,6 @@ export function StepPictureSvg({
           kind: glyph.kind,
         })),
       ];
-  const resultLower = lower ?? contextResult?.lower ?? NO_KEYS;
   const resultStacked = stacked ?? contextResult?.stacked ?? NO_STACKED;
   const claimedStackedKeys = useMemo(
     () => new Set(resultStacked.flatMap(([under, over]) => [under, over])),
@@ -1854,38 +1819,36 @@ export function StepPictureSvg({
         ? orderedLayerKeys(
             layers,
             layout.stacked,
-            pieces.map((piece) => piece.key),
+            [...layout.T.keys()].filter((key) => geoms.has(key)),
           )
         : [],
-    [layers, layout.stacked, pieces],
+    [geoms, layers, layout.stacked, layout.T],
   );
-  const ownedLowerKeys = useMemo(() => new Set(resultLower), [resultLower]);
+  // A twin is drawn at its offset, so it covers and is covered from there. Kept off `fit`: a zoom
+  // moves no piece, and the cover test is the dear part of a whole-garment step.
+  const ownedT = useMemo(() => {
+    const out = new Map(layout.T);
+    for (const [key, twin] of twinNumbers) {
+      const T = layout.T.get(key);
+      if (!T || claimedStackedKeys.has(key)) continue;
+      const offset = STACKED_TWIN_OFFSET_MM * (twin - 1);
+      out.set(key, [T[0], T[1], T[2], T[3], T[4] + offset, T[5] - offset]);
+    }
+    return out;
+  }, [claimedStackedKeys, layout.T, twinNumbers]);
   const ownedStyle = useMemo(
     () =>
       layers
         ? layerStyle({
             layers: ownedOrder,
-            T: layout.T,
+            T: ownedT,
             geoms,
             marks: actionGlyphs,
-            stacked: resultStacked,
-            mode: look === 'tile' ? 'thumb' : look === 'print' ? 'print' : 'canvas',
+            innerLines,
+            ringOf: (geom) => drawnRing(geom.rs),
           })
         : null,
-    [actionGlyphs, geoms, layers, layout.T, look, ownedOrder, resultStacked],
-  );
-  const ownedCoverageStyle = useMemo(
-    () =>
-      layers && look === 'tile'
-        ? layerStyle({
-            layers: ownedOrder,
-            T: layout.T,
-            geoms,
-            stacked: resultStacked,
-            mode: 'canvas',
-          })
-        : ownedStyle,
-    [geoms, layers, layout.T, look, ownedOrder, ownedStyle, resultStacked],
+    [actionGlyphs, geoms, innerLines, layers, ownedOrder, ownedT],
   );
   const orderedOwnedPieces = useMemo(() => {
     const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
@@ -1894,74 +1857,51 @@ export function StepPictureSvg({
       return piece ? [piece] : [];
     });
   }, [ownedOrder, pieces]);
-  const ownedPath = useCallback(
-    (key: string, points: readonly Pt2[]) => {
-      const twin = twinNumbers.get(key);
-      const offset =
-        twin && !claimedStackedKeys.has(key) ? STACKED_TWIN_OFFSET_MM * (twin - 1) * fit.s : 0;
-      return points.map((point) => {
-        const [x, y] = toPx(fit, point);
-        return [x + offset, y + offset] as Pt2;
-      });
-    },
-    [claimedStackedKeys, fit, twinNumbers],
-  );
-  const ownedDepth = useCallback(
-    (key: string) => ownedStyle?.pieces.get(key)?.depth || (ownedLowerKeys.has(key) ? 1 : 0),
-    [ownedLowerKeys, ownedStyle],
-  );
-  const ownedTints = useMemo(() => {
-    const claims = orderedOwnedPieces.flatMap((piece, index): LowerLayerClaim[] => {
-      const depth =
-        ownedStyle?.pieces.get(piece.key)?.depth || (ownedLowerKeys.has(piece.key) ? 1 : 0);
-      const claimed = ownedStyle?.pieces.get(piece.key)?.coveredBy ?? [];
-      // a live «under» (PLACE) carries no pair yet: every piece above it may cover it, and the
-      // tint is clipped to what they actually overlap
-      const coveredBy = claimed.length
-        ? claimed
-        : orderedOwnedPieces.slice(index + 1).map((upper) => upper.key);
-      return depth ? [{ key: piece.key, depth, coveredBy }] : [];
-    });
-    return lowerLayerTints(
-      orderedOwnedPieces.map((piece) => ({
-        key: piece.key,
-        ring: piece.ring,
-        path: pathOf(piece.drawn, true),
-      })),
-      claims,
-    );
-  }, [orderedOwnedPieces, ownedLowerKeys, ownedStyle]);
-  const ownedTintByKey = useMemo(
-    () => new Map(ownedTints.map((tint) => [tint.key, tint])),
-    [ownedTints],
+  // The colours read the levels alone: the highest level is painted last, whatever the order is.
+  const ownedSurfaces = useMemo(
+    () =>
+      orderedOwnedPieces
+        .map((piece) => ({ piece, level: ownedStyle?.pieces.get(piece.key)?.level ?? 0 }))
+        .sort((a, b) => a.level - b.level),
+    [orderedOwnedPieces, ownedStyle],
   );
   // Every owned piece's outline paths. Memoised: their `d` strings were 74 % of what a picker
   // hover still rendered, and nothing here moves on hover.
   const ownedOutlinePaths = useMemo(
     () =>
       orderedOwnedPieces.flatMap((piece) => {
-        const tint = ownedTintByKey.get(piece.key);
-        const depth = ownedDepth(piece.key);
-        const style = (tint?.partial ? ownedCoverageStyle : ownedStyle)?.pieces.get(piece.key);
+        const style = ownedStyle?.pieces.get(piece.key);
+        const runs = (lines: readonly Pt2[][] = []) =>
+          lines.map((line) => line.map((point) => toPx(fit, point)));
         // A whole outline is the ring the surface is filled with (`drawnRing`, thinned once per
-        // geometry), closed by its first point again as `layerStyle` closes it; only a covered
-        // piece's uncovered runs are thinned here. Card 81 draws 300 outlines, all whole, so the
-        // thinning pass they would need (89 ms a render) never runs.
-        const lines =
+        // geometry), closed by its first point again as `layerStyle` closes it.
+        const solid =
           style?.whole && style.visible.length && piece.drawn.length > 1
             ? [[...piece.drawn, piece.drawn[0]]]
-            : (style?.visible ?? []).map((line) => ownedPath(piece.key, drawnRun(line)));
-        return lines.map((line, index) => (
-          <path
-            key={`${piece.key}:${index}`}
-            d={pathOf(line)}
-            stroke={FAINT}
-            strokeWidth={depth && !tint?.partial ? L.outline * LOWER_LAYER_STROKE_SCALE : L.outline}
-            data-piece-outline={piece.key}
-          />
-        ));
+            : runs(style?.visible);
+        return [
+          ...solid.map((line, index) => (
+            <path
+              key={`${piece.key}:${index}`}
+              d={pathOf(line)}
+              stroke={FAINT}
+              strokeWidth={L.outline}
+              data-piece-outline={piece.key}
+            />
+          )),
+          ...runs(style?.covered).map((line, index) => (
+            <path
+              key={`${piece.key}:hidden:${index}`}
+              d={pathOf(line)}
+              stroke={HIDDEN_CONTOUR}
+              strokeWidth={hiddenOutline(L.outline)}
+              strokeDasharray={L.dash}
+              data-piece-hidden={piece.key}
+            />
+          )),
+        ];
       }),
-    [L, orderedOwnedPieces, ownedCoverageStyle, ownedDepth, ownedPath, ownedStyle, ownedTintByKey],
+    [L, fit, orderedOwnedPieces, ownedStyle],
   );
   const centreOf = useMemo(() => new Map(pieces.map((p) => [p.key, p.centre])), [pieces]);
   // A folded-on layer is a thin contour over its host. Identical plies share one outline.
@@ -1999,9 +1939,7 @@ export function StepPictureSvg({
       }),
     };
   }, [pieces, layout.layers, layout.pieceLayers]);
-  const visibleBase = layers
-    ? orderedOwnedPieces.filter((piece) => !ownedLowerKeys.has(piece.key))
-    : base;
+  const visibleBase = layers ? orderedOwnedPieces : base;
   const ghosts = useMemo(
     () => layout.ghosts.map((g) => ({ ...g, ring: g.ring.map((p) => toPx(fit, p)) })),
     [layout.ghosts, fit],
@@ -2034,11 +1972,22 @@ export function StepPictureSvg({
             Math.abs((lineBox.y0 + lineBox.y1) / 2 - glyph.markBox.cy) <= 2,
         );
         if (replaced) return;
-        out.push({ id: innerId(p.key, k), d: pathOf(l.map((q) => toPx(fit, apply(T, q)))) });
+        // An owned piece shows a line only where no piece above covers it.
+        const owned = ownedStyle?.pieces.get(p.key)?.lines[k];
+        const d = owned
+          ? owned
+              .map((run) =>
+                pathOf(
+                  run.map((point) => toPx(fit, point)),
+                ),
+              )
+              .join('')
+          : pathOf(l.map((q) => toPx(fit, apply(T, q))));
+        if (d) out.push({ id: innerId(p.key, k), d });
       });
     }
     return out;
-  }, [look, visibleBase, layout, innerLines, fit, automaticFastenings]);
+  }, [look, visibleBase, layout, innerLines, fit, automaticFastenings, ownedStyle]);
 
   // The doors depend on whether the picture is pickable, not on which closure picks: a caller's
   // `onPick` changes with its selection (or every render), and keying on it rebuilt every door.
@@ -2073,13 +2022,13 @@ export function StepPictureSvg({
       ? withoutCoveredDoors(
           targets,
           pieces,
-          (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [],
+          (key) => resultStacked.flatMap(([under, over]) => (under === key ? [over] : [])),
           named,
         )
       : targets;
   }, [
     pieces,
-    ownedStyle,
+    resultStacked,
     pickable,
     look,
     layout,
@@ -2533,34 +2482,22 @@ export function StepPictureSvg({
       {layers ? (
         <>
           <g stroke='none'>
-            {orderedOwnedPieces.map((piece) => {
-              const depth = ownedDepth(piece.key);
-              const fullyCovered = ownedStyle?.pieces.get(piece.key)?.fullyCovered ?? false;
-              return (
-                <g key={piece.key} data-layer-depth={depth}>
-                  <path
-                    d={pathOf(piece.drawn, true)}
-                    fill={FILL}
-                    data-piece-surface={piece.key}
-                    data-lower-layer-base={depth ? piece.key : undefined}
-                  />
-                  {fullyCovered && (
-                    <path
-                      d={pathOf(piece.drawn, true)}
-                      fill='none'
-                      stroke={FAINT}
-                      strokeWidth={L.outline * LOWER_LAYER_STROKE_SCALE}
-                      strokeDasharray={L.dash}
-                      strokeLinejoin='round'
-                      pointerEvents='none'
-                      data-stacked-underlay={piece.key}
-                    />
-                  )}
-                </g>
-              );
-            })}
+            {ownedSurfaces.map(({ piece, level }) => (
+              <path
+                key={piece.key}
+                d={pathOf(piece.drawn, true)}
+                fill={levelFill(level)}
+                data-piece-surface={piece.key}
+                data-piece-level={level || undefined}
+                data-lower-layer-base={
+                  ownedStyle?.pieces.get(piece.key)?.coveredBy.length ||
+                  !ownedStyle?.pieces.get(piece.key)?.whole
+                    ? piece.key
+                    : undefined
+                }
+              />
+            ))}
           </g>
-          <LowerLayerFills tints={ownedTints} />
           <g fill='none' strokeLinejoin='round'>
             {ownedOutlinePaths}
           </g>

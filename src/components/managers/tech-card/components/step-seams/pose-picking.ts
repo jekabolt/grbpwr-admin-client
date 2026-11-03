@@ -15,20 +15,14 @@ import {
 
 export type PosePieceRing = { piece: string; ring: readonly Pt2[] };
 
-/** The exact bottom-to-top paint order used by the PLACE picture. */
+/** The exact bottom-to-top order of the PLACE picture's contours. */
 export function posePieceOrder(
   layers: readonly string[],
   stacked: readonly (readonly string[])[],
   keys: readonly string[],
-  lower: readonly string[],
 ): string[] {
   const present = new Set(keys);
-  const ordered = orderedLayerKeys(layers, stacked, keys).filter((piece) => present.has(piece));
-  const lowerSet = new Set(lower);
-  return [
-    ...ordered.filter((piece) => lowerSet.has(piece)),
-    ...ordered.filter((piece) => !lowerSet.has(piece)),
-  ];
+  return orderedLayerKeys(layers, stacked, keys).filter((piece) => present.has(piece));
 }
 
 /** Pieces below `point`, topmost first, from rings supplied in their paint order. */
@@ -346,4 +340,52 @@ export function pressEdits<
     });
   });
   return { seams, layers };
+}
+
+/** The one `ON TOP` chip: the input it names, from 1, and what a press does. */
+export type OnTopChip = {
+  input: number;
+  active: boolean;
+  /** Puts `piece`'s block over the block of each of `hosts`. Null: a press writes nothing. */
+  press: { piece: string; hosts: readonly string[] } | null;
+};
+
+/**
+ * Nothing picked: names the input on top, and with exactly two inputs a press swaps them. A block
+ * picked: names that block, active when it is on top, and a press lifts it over every block above it
+ * that a row joins it to, one fact per pair. A block with no such row has no fact to store.
+ */
+export function onTopChip(
+  blocks: readonly LayerBlock[],
+  rows: readonly LayerRow[],
+  layers: readonly string[],
+  picked: string | null,
+): OnTopChip | null {
+  const inputs = blocks.filter((block) => block.pieces.length);
+  const inputOf = (piece: string) => inputs.findIndex((block) => block.pieces.includes(piece));
+  const heights = inputs.map((block) =>
+    Math.max(...block.pieces.map((piece) => layers.indexOf(piece))),
+  );
+  const top = heights.indexOf(Math.max(...heights));
+  if (top < 0) return null;
+  const pickedInput = picked == null ? -1 : inputOf(picked);
+  const lift = (input: number, over: readonly number[]): OnTopChip['press'] => {
+    const hosts = over
+      .filter((other) => joinsBlocks(rows, inputs[input].pieces, inputs[other].pieces))
+      .map((other) => inputs[other].pieces[0]);
+    const piece = input === pickedInput && picked ? picked : inputs[input].pieces[0];
+    return hosts.length ? { piece, hosts } : null;
+  };
+  if (pickedInput < 0) {
+    const press = inputs.length === 2 ? lift(1 - top, [top]) : null;
+    return { input: top + 1, active: true, press };
+  }
+  const above = inputs.flatMap((_, other) =>
+    heights[other] > heights[pickedInput] ? [other] : [],
+  );
+  return {
+    input: pickedInput + 1,
+    active: pickedInput === top,
+    press: pickedInput === top ? null : lift(pickedInput, above),
+  };
 }

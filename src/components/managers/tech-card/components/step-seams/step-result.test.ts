@@ -434,7 +434,7 @@ describe('stepResults: one carried owner result per operation', () => {
       closeAffine(at430.transforms.get(piece)!, at380.transforms.get(piece)!);
   });
 
-  it('applies the #30 surface row once and carries its relative placement and lower layer', () => {
+  it('applies the #30 surface row once and carries its placement, the later input on top', () => {
     const results = stepResults(chainInput);
     const at30 = operationResult(results, 30);
     const at380 = operationResult(results, 380);
@@ -442,8 +442,9 @@ describe('stepResults: one carried owner result per operation', () => {
     const expected = relative(at30, 'FLP_L', 'SLV_L');
     closeAffine(relative(at380, 'FLP_L', 'SLV_L'), expected);
     closeAffine(relative(at430, 'FLP_L', 'SLV_L'), expected);
+    // A surface part follows the one rule: no paint hint, no flag, the later input lies above.
     for (const result of [at30, at380, at430])
-      expect(result.layers.indexOf('FLP_L')).toBeLessThan(result.layers.indexOf('SLV_L'));
+      expect(result.layers.indexOf('SLV_L')).toBeLessThan(result.layers.indexOf('FLP_L'));
   });
 
   it('breaks direct self and later-output cycles without recursion', () => {

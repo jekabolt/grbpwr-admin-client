@@ -144,7 +144,6 @@ const THUMB_BADGE_PX = 5.5;
 
 export type ResultStepPicture = StepPicture & {
   resultLayers?: readonly string[];
-  resultLower?: readonly string[];
   resultStacked?: StepResult['stacked'];
 };
 
@@ -3434,7 +3433,6 @@ export function editorOperationPictures(
             layoutLeaves: picture.leaves,
             layout,
             resultLayers: ownerResult.layers,
-            resultLower: ownerResult.lower,
             resultStacked: ownerResult.stacked,
           });
           const output = operation.outputUnitKey?.trim();
@@ -4187,7 +4185,6 @@ export function editorOperationPictures(
           input: new Map(ownerResult.layout.input),
         },
         resultLayers: ownerResult.layers,
-        resultLower: ownerResult.lower,
         resultStacked: ownerResult.stacked,
       });
     });
@@ -4455,7 +4452,6 @@ function Picture({ r, orient }: { r: Row; orient: PrintOrient }) {
           look='print'
           layout={r.editorPic.layout}
           layers={r.editorPic.resultLayers}
-          lower={r.editorPic.resultLower}
           stacked={r.editorPic.resultStacked}
           geoms={r.editorPic.geoms}
           innerLines={r.editorPic.innerLines}

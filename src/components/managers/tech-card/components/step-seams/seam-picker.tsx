@@ -230,10 +230,9 @@ export function SeamPickerBody({
     resultLayout,
     poseShown,
     shownPoseLayers,
-    shownPoseLower,
     shownPoseStacked,
-    layerTarget,
-    setLayer,
+    onTop,
+    pressOnTop,
     exitPose,
     startPose,
     pickupOf,
@@ -710,7 +709,6 @@ export function SeamPickerBody({
                   look='canvas'
                   layout={poseShown}
                   layers={shownPoseLayers}
-                  lower={shownPoseLower}
                   stacked={shownPoseStacked}
                   geoms={geoms}
                   innerLines={innerLines}
@@ -727,7 +725,6 @@ export function SeamPickerBody({
                   view={zoom.view}
                   layout={poseShown}
                   layerOrder={shownPoseLayers}
-                  lower={shownPoseLower}
                   geoms={geoms}
                   nameOf={nameOf}
                   selected={poseSel}
@@ -875,24 +872,16 @@ export function SeamPickerBody({
               >
                 FIT
               </Button>
-              <ChipRow>
+              {onTop && (
                 <Chip
-                  selected={layerTarget?.layer === 'under'}
-                  pressed={layerTarget?.layer === 'under'}
-                  onClick={() => setLayer('under')}
-                  disabled={!layerTarget || busy}
+                  selected={onTop.active}
+                  pressed={onTop.active}
+                  onClick={pressOnTop}
+                  disabled={!onTop.press || busy}
                 >
-                  under
+                  on top {onTop.input}
                 </Chip>
-                <Chip
-                  selected={layerTarget?.layer === 'over'}
-                  pressed={layerTarget?.layer === 'over'}
-                  onClick={() => setLayer('over')}
-                  disabled={!layerTarget || busy}
-                >
-                  over
-                </Chip>
-              </ChipRow>
+              )}
               <span className='flex-1' />
               <Button
                 type='button'

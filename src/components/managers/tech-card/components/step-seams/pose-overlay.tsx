@@ -30,7 +30,6 @@ export function PoseOverlay({
   view,
   layout,
   layerOrder,
-  lower,
   geoms,
   nameOf,
   selected,
@@ -54,7 +53,6 @@ export function PoseOverlay({
   /** Bottom to top, from the shared step result. */
   layerOrder: readonly string[];
   /** Pieces explicitly painted below the remaining layers. */
-  lower: readonly string[];
   geoms: ReadonlyMap<string, PieceGeom>;
   nameOf: (piece: string) => string;
   selected: string | null;
@@ -85,7 +83,7 @@ export function PoseOverlay({
   }, [layout.stacked]);
   const pieces = useMemo(() => {
     const keys = [...layout.T.keys()].filter((piece) => (geoms.get(piece)?.rs.length ?? 0) >= 3);
-    const bottomToTop = posePieceOrder(layerOrder, layout.stacked, keys, lower);
+    const bottomToTop = posePieceOrder(layerOrder, layout.stacked, keys);
     return bottomToTop.flatMap((piece) => {
       const transform = layout.T.get(piece)!;
       const geom = geoms.get(piece);
@@ -102,7 +100,7 @@ export function PoseOverlay({
         },
       ];
     });
-  }, [layout.T, layout.stacked, layerOrder, lower, geoms, fit, twinNumbers]);
+  }, [layout.T, layout.stacked, layerOrder, geoms, fit, twinNumbers]);
   const lastHit = useRef<LayerHit | null>(null);
   const drag = useRef<
     | {

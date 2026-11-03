@@ -37,7 +37,6 @@ export type LayerRow = {
   pose?: boolean;
   sideA: readonly LayerAnchor[];
   sideB: readonly LayerAnchor[];
-  surface?: { part: string; host: string };
 };
 
 export type LayerInput = { blocks: readonly LayerBlock[]; rows: readonly LayerRow[] };
@@ -276,9 +275,8 @@ function reachesAny(
  * rigid and whole. Rows are read in order and the first flag wins: a flag contrary to what is already
  * read, directly or through another block, is listed in `conflicts` and not applied (the row is not
  * rewritten). A flag between two pieces of one block stays a claim about those two pieces. Claims made
- * at an earlier step ride in the block (`stacked`). With no claim two pieces are equal: nothing is
- * lower, and the order is only the paint order: carried order, then input order, a current surface
- * part before its host.
+ * at an earlier step ride in the block (`stacked`). With no claim nothing is lower and the later input
+ * lies on top: carried order, then input order, a surface part like any other input.
  */
 export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[]): LayerStacking {
   const blockOf = new Map<string, number>();
@@ -331,7 +329,6 @@ export function layersOf(blocks: readonly LayerBlock[], rows: readonly LayerRow[
     const carried = carriedOf(block, index);
     for (let at = 1; at < carried.length; at++) hints.push([carried[at - 1], carried[at]]);
   });
-  for (const row of rows) if (row.surface) hints.push([row.surface.part, row.surface.host]);
 
   const base = blocks.flatMap((block, index) => {
     const carried = carriedOf(block, index);
@@ -416,16 +413,7 @@ function computeStep(
         : {}),
     })),
     rows: [
-      ...stored.map(
-        ({ key, row, candidate }): LayerRow => ({
-          key,
-          sideA: row.sideA,
-          sideB: row.sideB,
-          ...(candidate.kind === 'surface' && candidate.surface
-            ? { surface: { part: candidate.surface.part, host: candidate.surface.host } }
-            : {}),
-        }),
-      ),
+      ...stored.map(({ key, row }): LayerRow => ({ key, sideA: row.sideA, sideB: row.sideB })),
       ...currentPoses.map(
         (pose): LayerRow => ({
           key: pose.seamKey,
