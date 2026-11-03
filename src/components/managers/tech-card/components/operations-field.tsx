@@ -260,6 +260,7 @@ import { followOpenStep, useActiveStepStore } from './assembly-map/active-step';
 import { AssemblyFullscreen, FROZEN_REFUSAL, restoreScreenFocus } from './assembly-fullscreen';
 import { SeamWalk } from './seam-walk';
 import { StepTimeField } from './step-time-field';
+import { DEFAULT_SEAM_TOLERANCE_MM } from './step-seams/seam-length';
 import { AssemblySchematic } from './assembly-schematic';
 import { SequenceRail } from './sequence-rail';
 import {
@@ -4575,6 +4576,13 @@ function OperationEditor({
           />
         </div>
         <StepTimeField name={`operations.${index}.smv`} label='time, min' />
+        <StepTimeField
+          name={`operations.${index}.seamToleranceMm`}
+          label='seam tol, mm'
+          what='tolerance'
+          step={1}
+          empty={DEFAULT_SEAM_TOLERANCE_MM}
+        />
         {showIdentityOperation && (
           <SelectField
             name={`operations.${index}.operationType`}
