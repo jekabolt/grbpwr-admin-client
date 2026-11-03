@@ -8439,6 +8439,10 @@ export type common_TechCardInsert = {
   // «update the admin») instead of silently erasing them. Server paths set it explicitly. The flag
   // does not filter parsing. Transport, not content: enters no section digest.
   operationSeamKindAware: boolean | undefined;
+  // Declares support for TechCardOperation.fold_keys on full-replace writes. Without it a write that
+  // carries fold_keys, or that would replace a card whose steps carry them, is refused
+  // (FailedPrecondition) instead of silently leaving the pieces flat. Transport, not content.
+  operationFoldsAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -9471,6 +9475,15 @@ export type common_TechCardOperation = {
   // `operations[N].work_variant` с кодом not_for_work. Пишется только с operation_seam_kind_aware
   // (129). В дайджест — условной парой "work_variant" хвоста "work".
   workVariant: string | undefined;
+  // The piece folds that close on this step, as TechCardPieceFold.fold_key, in the order the client
+  // lists them. A fold no step names leaves its piece flat; nothing derives it. Every key must name a
+  // fold stored on THIS card (UpsertTechCardPieceFolds first), else the save is refused with
+  // InvalidArgument. One fold closes on at most one step, two folds of one piece may share a step,
+  // and on one piece a fold with a larger seq never stands on an earlier step than one with a
+  // smaller seq (fold_order). Deleting a fold drops its key from every step in the same transaction.
+  // Written only with operation_folds_aware (130). Enters no section digest: the folds themselves
+  // are outside every digest and outside lock_version.
+  foldKeys: string[] | undefined;
 };
 
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a

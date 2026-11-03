@@ -1513,6 +1513,9 @@ const operationSchema = z
     // keeps them in op.seamKeys with the seams; the form splits them off on read (no seam reader
     // ever sees a pose key) and merges them back on save.
     poseKeys: z.array(z.string()).default([]),
+    // Folds that close on this step: fold keys of the card (TechCard.pieceFolds). A fold no step
+    // names leaves its piece flat.
+    foldKeys: z.array(z.string()).default([]),
     // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
     // went with the break — the chip row was always the real answer.
     bomLineKeys: z.array(z.string()).default([]),
@@ -2851,6 +2854,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       outputUnitName: o.outputUnitName ?? '',
       seamKeys: (o.seamKeys ?? []).filter((k) => !!k && !poseKeySet.has(k)),
       poseKeys: (o.seamKeys ?? []).filter((k) => !!k && poseKeySet.has(k)),
+      foldKeys: (o.foldKeys ?? []).filter(Boolean),
       bomLineKeys: (o.bomLineKeys ?? []).filter((key) => !!key && bomSectionByKey.has(key.trim())),
       // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
       // тип на проводе, в форме и в БД — круговой рейс без округлений.
@@ -3796,6 +3800,9 @@ export function mapFormToTechCardInsert(
     // Step seams (op.seamKeys) travel on every save; without the flag the server refuses a write
     // over a card whose steps hold seams.
     operationSeamsAware: true,
+    // Step folds (op.foldKeys) likewise: without the flag the server refuses a write over a card
+    // whose steps close folds.
+    operationFoldsAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -3963,6 +3970,8 @@ export function mapFormToTechCardInsert(
             [...(o.seamKeys ?? []), ...(o.poseKeys ?? [])].map((k) => k.trim()).filter(Boolean),
           ),
         ],
+        // Same: the server refuses a key the card does not hold and a repeat on one step.
+        foldKeys: [...new Set((o.foldKeys ?? []).map((k) => k.trim()).filter(Boolean))],
         bomLineKeys: opBomKeys,
         // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
         // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие

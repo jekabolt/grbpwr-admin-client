@@ -327,6 +327,8 @@ const ECHO_AWARE = {
   operationReviewAware: true,
   // the echoed card carries each step's seamKeys as stored
   operationSeamsAware: true,
+  // and each step's foldKeys
+  operationFoldsAware: true,
   bomQtyAware: true,
   labelsAware: true,
 } satisfies Partial<common_TechCardInsert>;
