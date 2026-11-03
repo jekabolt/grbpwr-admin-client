@@ -12,8 +12,10 @@ import {
   fromWire,
   normalizeParts,
   poseOf,
+  poseRow,
   resolveSeamDecisions,
   seamFromCandidate,
+  splitWire,
   toWire,
   type SidePart,
   type StoredSeam,
@@ -34,7 +36,15 @@ import { sideLengthMm } from './seam-length';
 import { highlightPartsOfRows } from './step-highlight';
 import { candidateOf, invert, seamSig } from './step-picture';
 import { rangedPicturePoints } from './step-picture-view';
-import { fitSpan, poseRowFromFit } from './step-pose';
+import {
+  fitPlan,
+  fitSourceOf,
+  fitSpan,
+  placementT,
+  poseAfterDrop,
+  poseRowFromFit,
+  type SpanFitPlan,
+} from './step-pose';
 import { OWNER_FIT, stepResults } from './step-result';
 import { candidateOfStoredSeam } from './step-rows';
 import { fullyUsedEdges, usedEdgesBeforeStep } from './step-seams-model';
@@ -105,6 +115,37 @@ const middle = (points: readonly Pt2[]): Pt2 => {
   return [(first[0] + last[0]) / 2, (first[1] + last[1]) / 2];
 };
 const gap = (a: Pt2, b: Pt2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const pointAtShare = (points: readonly Pt2[], share: number): Pt2 => {
+  const lengths = [0];
+  for (let index = 1; index < points.length; index++)
+    lengths.push(lengths[index - 1] + gap(points[index - 1], points[index]));
+  const target = share * lengths[lengths.length - 1];
+  let index = 1;
+  while (index < lengths.length - 1 && lengths[index] < target) index++;
+  const length = lengths[index] - lengths[index - 1];
+  const at = length ? (target - lengths[index - 1]) / length : 0;
+  return [
+    points[index - 1][0] + at * (points[index][0] - points[index - 1][0]),
+    points[index - 1][1] + at * (points[index][1] - points[index - 1][1]),
+  ];
+};
+const meanGap = (from: readonly Pt2[], onto: readonly Pt2[], reversed: boolean) => {
+  let total = 0;
+  for (let index = 0; index <= 32; index++) {
+    const share = index / 32;
+    total += gap(pointAtShare(from, share), pointAtShare(onto, reversed ? 1 - share : share));
+  }
+  return total / 33;
+};
+const lineAngle = (points: readonly Pt2[]) => {
+  const first = points[0];
+  const last = points[points.length - 1];
+  return (Math.atan2(last[1] - first[1], last[0] - first[0]) * 180) / Math.PI;
+};
+const undirectedAngleGap = (a: number, b: number) => {
+  const delta = Math.abs((((a - b) % 180) + 180) % 180);
+  return Math.min(delta, 180 - delta);
+};
 
 const PCK = range('PCK_L', 0, 72, 224);
 const FRONT = range('FRONT_L', 4, 852, 1004);
@@ -435,6 +476,131 @@ function assemblyInputFor(
   };
 }
 
+describe('#90 op 250 FIT on the archived pocket pair', () => {
+  const pocket = piece('PCK_BACK_1L').geom;
+  const back = piece('Back_L').geom;
+  const seam = row('op250-edge', [{ target: id('PCK_BACK_1L', 0) }], [{ target: id('Back_L', 1) }]);
+  const oldPose = poseRow({
+    seamKey: 'op250-old-pose',
+    piece: pocket,
+    host: back,
+    placement: { xMm: -1.4, yMm: 26.36, rotDeg: 0, flip: false },
+  });
+  const operation = {
+    operationNumber: 250,
+    inputKeys: [pocket.pieceKey, back.pieceKey],
+    outputUnitKey: 'BACK-3',
+    seamKeys: [seam.seamKey],
+    poseKeys: [oldPose.seamKey],
+  };
+  const base = stepResults(
+    {
+      ops: [operation],
+      byKey: new Map([[seam.seamKey, seam]]),
+      poses: new Map([[oldPose.seamKey, oldPose]]),
+      geoms: pantsGeoms,
+      innerLines: new Map(),
+      pieceKeys: new Set(pantsGeoms.keys()),
+    },
+    OWNER_FIT,
+  )[0];
+  const source = fitSourceOf({
+    a: [{ target: id('PCK_BACK_1L', 0) }],
+    b: [{ target: id('Back_L', 1) }],
+  })!;
+  const planAt = (alternate: boolean) =>
+    fitPlan(
+      source,
+      {
+        blocks: base.blocks,
+        hung: base.hung,
+        transforms: base.transforms,
+        stacked: base.layout.stacked,
+      },
+      pantsGeoms,
+      alternate,
+    )!;
+  const resultAt = (plan: SpanFitPlan) => {
+    const dropped = poseAfterDrop(
+      plan.piece,
+      compose(plan.D, base.transforms.get(plan.piece)!),
+      { host: plan.host },
+      { transforms: base.transforms },
+      pantsGeoms,
+    )!;
+    const fittedPose = poseRow({
+      seamKey: oldPose.seamKey,
+      piece: pocket,
+      host: back,
+      placement: dropped.placement,
+    });
+    const roundTrip = splitWire([toWire(fittedPose)]).poses[0];
+    const read = poseOf(roundTrip)!;
+    expect(read.placement.xMm).toBeCloseTo(dropped.placement.xMm, 1);
+    expect(read.placement.yMm).toBeCloseTo(dropped.placement.yMm, 1);
+    expect(read.placement.rotDeg).toBeCloseTo(dropped.placement.rotDeg, 2);
+    expect(placementT(back, pocket, read.placement)).toEqual(
+      placementT(back, pocket, dropped.placement),
+    );
+    const result = stepResults(
+      {
+        ops: [operation],
+        byKey: new Map([[seam.seamKey, seam]]),
+        poses: new Map([[roundTrip.seamKey, roundTrip]]),
+        geoms: pantsGeoms,
+        innerLines: new Map(),
+        pieceKeys: new Set(pantsGeoms.keys()),
+      },
+      OWNER_FIT,
+    )[0];
+    const moving = pocket.edges[0].pts.map((point) =>
+      apply(result.transforms.get(pocket.pieceKey)!, point),
+    );
+    const fixed = back.edges[1].pts.map((point) =>
+      apply(result.transforms.get(back.pieceKey)!, point),
+    );
+    const targetStart = plan.reversed ? fixed[fixed.length - 1] : fixed[0];
+    const targetEnd = plan.reversed ? fixed[0] : fixed[fixed.length - 1];
+    return {
+      result,
+      angleDeg: undirectedAngleGap(lineAngle(moving), lineAngle(fixed)),
+      gapMm: meanGap(moving, fixed, plan.reversed),
+      endResidualMm: (gap(moving[0], targetStart) + gap(moving[moving.length - 1], targetEnd)) / 2,
+    };
+  };
+
+  it('first press seats PCK_BACK_1L on Back_L and round-trips the pending pose', () => {
+    const first = planAt(false);
+    const second = planAt(true);
+    const fitted = resultAt(first);
+
+    expect(Math.abs(first.fit.angleDeg)).toBeLessThanOrEqual(Math.abs(second.fit.angleDeg));
+    expect(fitted.angleDeg).toBeLessThan(0.5);
+    expect(fitted.gapMm).toBeLessThan(1);
+    expect(first.group).toEqual(
+      base.blocks.find((block) => block.pieces.includes(pocket.pieceKey))?.pieces,
+    );
+    console.info(
+      `[T13 #90 op250] PCK_BACK_1L -> Back_L: angle ${fitted.angleDeg.toFixed(3)}°, mean gap ${fitted.gapMm.toFixed(3)} mm`,
+    );
+  });
+
+  it('second press swaps ends with the same endpoint residual; third returns to the first', () => {
+    const first = planAt(false);
+    const second = planAt(true);
+    const third = planAt(false);
+    const firstFit = resultAt(first);
+    const secondFit = resultAt(second);
+
+    expect(second.reversed).not.toBe(first.reversed);
+    expect(secondFit.angleDeg).toBeLessThan(0.5);
+    expect(firstFit.endResidualMm).toBeLessThan(0.02);
+    expect(secondFit.endResidualMm).toBeLessThan(0.02);
+    expect(secondFit.endResidualMm).toBeCloseTo(firstFit.endResidualMm, 1);
+    expect(third.D).toEqual(first.D);
+  });
+});
+
 describe('#90 op 290 placement and PDF metric', () => {
   const stored = row('op290-placement', [PCK], [FRONT]);
   const pckEdge = pantsGeoms.get(piece('PCK_L').key)!.edges[0];
@@ -497,6 +663,63 @@ describe('#90 op 290 placement and PDF metric', () => {
     expect(gap(moved[0], onto[0])).toBeLessThan(2);
     expect(gap(moved[1], onto[1])).toBeLessThan(2);
     expect(Math.abs(fit.angleDeg)).toBeLessThanOrEqual(180);
+  });
+
+  it('FIT uses the current world layout and keeps the 72→224 / 852→1004 ranges', () => {
+    const base = stepResults(
+      {
+        ops: [operation],
+        byKey: new Map([[stored.seamKey, stored]]),
+        geoms: pantsGeoms,
+        innerLines: new Map(),
+        pieceKeys: new Set(pantsGeoms.keys()),
+      },
+      OWNER_FIT,
+    )[0];
+    const source = fitSourceOf({ a: [PCK], b: [FRONT] })!;
+    const plan = fitPlan(
+      source,
+      {
+        blocks: base.blocks,
+        hung: base.hung,
+        transforms: base.transforms,
+        stacked: base.layout.stacked,
+      },
+      pantsGeoms,
+    )!;
+    const dropped = poseAfterDrop(
+      plan.piece,
+      compose(plan.D, base.transforms.get(plan.piece)!),
+      { host: plan.host },
+      { transforms: base.transforms },
+      pantsGeoms,
+    )!;
+    const pose = poseRow({
+      seamKey: 'op290-fit-plan',
+      piece: piece('PCK_L').geom,
+      host: piece('FRONT_L').geom,
+      placement: dropped.placement,
+    });
+    const result = stepResults(
+      {
+        ops: [{ ...operation, poseKeys: [pose.seamKey] }],
+        byKey: new Map([[stored.seamKey, stored]]),
+        poses: new Map([[pose.seamKey, pose]]),
+        geoms: pantsGeoms,
+        innerLines: new Map(),
+        pieceKeys: new Set(pantsGeoms.keys()),
+      },
+      OWNER_FIT,
+    )[0];
+    const moving = pckSpan.map((point) => apply(result.transforms.get(piece('PCK_L').key)!, point));
+    const fixed = frontSpan.map((point) =>
+      apply(result.transforms.get(piece('FRONT_L').key)!, point),
+    );
+
+    expect(gap(moving[0], fixed[plan.reversed ? fixed.length - 1 : 0])).toBeLessThan(2);
+    expect(
+      gap(moving[moving.length - 1], fixed[plan.reversed ? 0 : fixed.length - 1]),
+    ).toBeLessThan(2);
   });
 
   it('the PDF metric and PDF transforms use the same 152 mm spans', () => {

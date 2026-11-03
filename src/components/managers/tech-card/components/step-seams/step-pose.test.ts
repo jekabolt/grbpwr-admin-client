@@ -47,6 +47,8 @@ import { focusedStepLeaves, stepPictureOfOp, type SceneOp } from './step-picture
 import {
   placementOf,
   placementT,
+  fitPlan,
+  fitSourceOf,
   poseAfterDrop,
   poseBlockGroup,
   poseGroup,
@@ -54,6 +56,7 @@ import {
   posePickup,
   posePinsOf,
   pinPoses,
+  rotatePoseDrag,
   resolvePoseEdits,
   snapPose,
   snapPoseForDrag,
@@ -85,6 +88,29 @@ const square = (key: string, x: number, y: number, w: number, h: number): PieceG
     perimMm: 2 * (w + h),
     areaMm2: w * h,
   }) as PieceGeom;
+
+const edgedSquare = (key: string, x: number, y: number, w: number, h: number): PieceGeom => {
+  const geom = square(key, x, y, w, h);
+  return {
+    ...geom,
+    edges: geom.rs.map((point, index) => {
+      const next = geom.rs[(index + 1) % geom.rs.length];
+      return {
+        id: `${key}#${index}`,
+        pieceKey: key,
+        k: index,
+        s: index,
+        e: (index + 1) % geom.rs.length,
+        pts: [point, next],
+        lenMm: Math.hypot(next[0] - point[0], next[1] - point[1]),
+        chordMm: Math.hypot(next[0] - point[0], next[1] - point[1]),
+        turnDeg: 0,
+        notchesMm: [],
+        kind: 'edge' as const,
+      };
+    }),
+  };
+};
 
 const near = (a: Affine, b: Affine, eps = 1e-6) =>
   a.every((v, i) => Math.abs(v - b[i]) < (i >= 4 ? Math.max(eps, 1e-4) : eps));
@@ -373,24 +399,115 @@ describe('picker helpers', () => {
     expect(placementT(g.get('B')!, g.get('A')!, row.placement)).toEqual(dropped);
   });
 
-  it('snaps a vertex onto a vertex first, else onto the outline', () => {
-    const ring: Pt2[] = [
-      [0, 0],
-      [100, 0],
-      [100, 100],
-      [0, 100],
-    ];
-    const v = snapPose([[103, 4]], [{ piece: 'H', ring }], 8);
-    expect(v).toMatchObject({ host: 'H', at: [100, 0] });
-    expect(v!.dx).toBeCloseTo(-3);
-    const e = snapPose([[104, 50]], [{ piece: 'H', ring }], 8);
-    expect(e).toMatchObject({ host: 'H', at: [100, 50], dx: -4, dy: 0 });
-    expect(snapPose([[120, 50]], [{ piece: 'H', ring }], 8)).toBeNull();
+  it('FIT moves one whole block onto a multi-part side and rejects two multi-part sides', () => {
+    const moving = edgedSquare('MOVING', 0, 0, 20, 10);
+    const follower = edgedSquare('FOLLOWER', 30, 0, 15, 10);
+    const host = edgedSquare('HOST', 100, 50, 40, 20);
+    const geoms = new Map(
+      [moving, follower, host].map((piece) => [piece.pieceKey, piece] as const),
+    );
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['FOLLOWER', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+    const layout = {
+      blocks: [{ pieces: ['MOVING', 'FOLLOWER'] }, { pieces: ['HOST'] }],
+      transforms,
+      hung: [] as const,
+      stacked: [] as const,
+    };
+    const source = fitSourceOf({
+      a: ['MOVING#0'],
+      b: ['HOST#0', 'HOST#1'],
+    })!;
+    const plan = fitPlan(source, layout, geoms);
+
+    expect(plan).toMatchObject({ piece: 'MOVING', host: 'HOST' });
+    expect(plan?.group).toEqual(['MOVING', 'FOLLOWER']);
+    const moved = new Map(transforms);
+    for (const piece of plan!.group) moved.set(piece, compose(plan!.D, transforms.get(piece)!));
+    expect(near(relOf(moved, 'FOLLOWER', 'MOVING'), relOf(transforms, 'FOLLOWER', 'MOVING'))).toBe(
+      true,
+    );
+    expect(
+      fitPlan(
+        fitSourceOf({ a: ['MOVING#0', 'MOVING#1'], b: ['HOST#0', 'HOST#1'] })!,
+        layout,
+        geoms,
+      ),
+    ).toBeNull();
+  });
+
+  it('FIT measures a stacked twin at the same offset the overlay draws', () => {
+    const leader = edgedSquare('LEADER', 0, 0, 20, 10);
+    const moving = edgedSquare('MOVING', 0, 0, 20, 10);
+    const host = edgedSquare('HOST', 100, 50, 20, 10);
+    const geoms = new Map([leader, moving, host].map((piece) => [piece.pieceKey, piece] as const));
+    const transforms = new Map<string, Affine>([
+      ['LEADER', IDENTITY],
+      ['MOVING', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+    const plan = fitPlan(
+      fitSourceOf({ a: ['MOVING#0'], b: ['HOST#0'] })!,
+      {
+        blocks: [{ pieces: ['LEADER', 'MOVING'] }, { pieces: ['HOST'] }],
+        transforms,
+        hung: [],
+        stacked: [['LEADER', 'MOVING']],
+      },
+      geoms,
+    )!;
+    const movedT = compose(plan.D, transforms.get('MOVING')!);
+    const movingPoints = moving.edges[0].pts.map((point) => {
+      const [x, y] = apply(movedT, point);
+      return [x + 3, y - 3] as Pt2;
+    });
+    const hostPoints = host.edges[0].pts;
+    const target = plan.reversed ? [...hostPoints].reverse() : hostPoints;
+
+    expect(movingPoints[0]).toEqual([
+      expect.closeTo(target[0][0], 8),
+      expect.closeTo(target[0][1], 8),
+    ]);
+    expect(movingPoints[movingPoints.length - 1]).toEqual([
+      expect.closeTo(target[target.length - 1][0], 8),
+      expect.closeTo(target[target.length - 1][1], 8),
+    ]);
+  });
+
+  it('uses span ends before notches before corners, then nearest within that priority', () => {
+    const point = (piece: string, at: Pt2) => ({ piece, at });
+    const moving = {
+      spanEnds: [point('M', [0, 0])],
+      notches: [point('M', [0, 0])],
+      corners: [point('M', [0, 0])],
+    };
+    const others = {
+      spanEnds: [point('H', [7, 0]), point('H', [6, 0])],
+      notches: [point('H', [2, 0])],
+      corners: [point('H', [1, 0])],
+    };
+
+    expect(snapPose(moving, others, 8)).toMatchObject({ at: [6, 0], dx: 6, host: 'H' });
+    expect(snapPose({ ...moving, spanEnds: [] }, others, 8)).toMatchObject({
+      at: [2, 0],
+      dx: 2,
+      host: 'H',
+    });
+    expect(
+      snapPose(
+        { ...moving, spanEnds: [], notches: [] },
+        { ...others, spanEnds: [], notches: [] },
+        8,
+      ),
+    ).toMatchObject({ at: [1, 0], dx: 1, host: 'H' });
   });
 
   it('computes the drag-time snap from the drop transforms and skips collapsed followers', () => {
-    const moving = square('MOVING', 0, 0, 10, 10);
-    const host = square('HOST', 0, 0, 100, 100);
+    const moving = edgedSquare('MOVING', 0, 0, 10, 10);
+    const host = edgedSquare('HOST', 0, 0, 100, 100);
     const g = new Map([
       [moving.pieceKey, moving],
       [host.pieceKey, host],
@@ -408,6 +525,78 @@ describe('picker helpers', () => {
       dy: 0,
     });
     expect(snapPoseForDrag(['MOVING'], D, transforms, g, new Set(['HOST']), 8)).toBeNull();
+  });
+
+  it('does not snap a corner to a resampled curve point', () => {
+    const moving = edgedSquare('MOVING', 0, 0, 10, 10);
+    const hostBase = edgedSquare('HOST', 0, 0, 100, 100);
+    const host: PieceGeom = {
+      ...hostBase,
+      rs: [
+        [0, 0],
+        [50, 0],
+        [100, 0],
+        [100, 100],
+        [0, 100],
+      ],
+      corners: [0, 2, 3, 4],
+      edges: [
+        {
+          ...hostBase.edges[0],
+          s: 0,
+          e: 2,
+          pts: [
+            [0, 0],
+            [50, 0],
+            [100, 0],
+          ],
+          lenMm: 100,
+          chordMm: 100,
+        },
+        {
+          ...hostBase.edges[1],
+          k: 1,
+          s: 2,
+          e: 3,
+          pts: [
+            [100, 0],
+            [100, 100],
+          ],
+        },
+        {
+          ...hostBase.edges[2],
+          k: 2,
+          s: 3,
+          e: 4,
+          pts: [
+            [100, 100],
+            [0, 100],
+          ],
+        },
+        {
+          ...hostBase.edges[3],
+          k: 3,
+          s: 4,
+          e: 0,
+          pts: [
+            [0, 100],
+            [0, 0],
+          ],
+        },
+      ],
+    };
+    const geoms = new Map([
+      [moving.pieceKey, moving],
+      [host.pieceKey, host],
+    ]);
+    const transforms = new Map<string, Affine>([
+      ['MOVING', IDENTITY],
+      ['HOST', IDENTITY],
+    ]);
+
+    expect(
+      snapPoseForDrag(['MOVING'], [1, 0, 0, 1, 50, 4], transforms, geoms, new Set(), 8),
+    ).toBeNull();
   });
 
   it('the block root: the biggest piece of the cluster root, not the piece nor its group', () => {
@@ -443,6 +632,27 @@ describe('picker helpers', () => {
     expect(apply(turnAbout(ring, 1), [20, 5]).map((v) => Math.round(v))).toEqual([10, 15]);
     expect(apply(turnAbout(ring, -1), [20, 5]).map((v) => Math.round(v))).toEqual([10, -5]);
     expect(apply(turnAbout(ring, 0), [0, 0])).toEqual([20, 0]);
+  });
+
+  it('rotates a rigid block in 1° or 15° steps and is identity at zero drag', () => {
+    const centre: Pt2 = [10, 5];
+    const start: Pt2 = [20, 5];
+    const at = (degrees: number): Pt2 => {
+      const angle = (degrees * Math.PI) / 180;
+      return [centre[0] + 10 * Math.cos(angle), centre[1] + 10 * Math.sin(angle)];
+    };
+    const fine = rotatePoseDrag(centre, start, at(16.4), 1);
+    const coarse = rotatePoseDrag(centre, start, at(16.4), 15);
+
+    expect(fine.angleDeg).toBe(16);
+    expect(coarse.angleDeg).toBe(15);
+    expect(rotatePoseDrag(centre, start, start, 1)).toEqual({ D: IDENTITY, angleDeg: 0 });
+    expect(apply(fine.D, centre)).toEqual([expect.closeTo(10, 8), expect.closeTo(5, 8)]);
+    const before = Math.hypot(30 - 0, 12 - -4);
+    const a = apply(fine.D, [0, -4]);
+    const b = apply(fine.D, [30, 12]);
+    expect(Math.hypot(b[0] - a[0], b[1] - a[1])).toBeCloseTo(before, 8);
+    expect(fine.D[0] * fine.D[3] - fine.D[1] * fine.D[2]).toBeCloseTo(1, 8);
   });
 
   it('turns from grain-up quarters and clears a mirror on upright', () => {

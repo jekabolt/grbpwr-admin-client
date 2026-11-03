@@ -4,7 +4,13 @@ import { apply, translate } from 'lib/assembly-skeleton/union/affine';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, type PointerEvent } from 'react';
 import { cycleLayerHit, piecesUnder, posePieceOrder, type LayerHit } from './pose-picking';
-import { snapPoseForDrag, type PosePickup, type PoseSnap } from './step-pose';
+import {
+  rotatePoseDrag,
+  snapPoseForDrag,
+  type FitSource,
+  type PosePickup,
+  type PoseSnap,
+} from './step-pose';
 import { boxOf, fitBox, pathOf, toPx, type StepLayout } from './step-picture';
 import type { PictureView } from './step-picture-view';
 
@@ -30,6 +36,7 @@ export function PoseOverlay({
   selected,
   snapAt,
   snap,
+  snapSource,
   disabled,
   pickupOf,
   onSelect,
@@ -53,6 +60,7 @@ export function PoseOverlay({
   selected: string | null;
   snapAt: Pt2 | null;
   snap: boolean;
+  snapSource?: FitSource | null;
   disabled: boolean;
   pickupOf: (piece: string) => PosePickup;
   onSelect: (piece: string | null) => void;
@@ -96,18 +104,35 @@ export function PoseOverlay({
     });
   }, [layout.T, layout.stacked, layerOrder, lower, geoms, fit, twinNumbers]);
   const lastHit = useRef<LayerHit | null>(null);
-  const drag = useRef<{
-    piece: string;
-    clickPiece: string;
-    at: Pt2;
-    pickup: PosePickup | null;
-    transforms: ReadonlyMap<string, Affine>;
-    clientX: number;
-    clientY: number;
-    moved: boolean;
-    D: Affine;
-    snap: PoseSnap | null;
-  } | null>(null);
+  const drag = useRef<
+    | {
+        mode: 'move';
+        piece: string;
+        clickPiece: string;
+        at: Pt2;
+        pickup: PosePickup | null;
+        transforms: ReadonlyMap<string, Affine>;
+        clientX: number;
+        clientY: number;
+        moved: boolean;
+        D: Affine;
+        snap: PoseSnap | null;
+      }
+    | {
+        mode: 'rotate';
+        piece: string;
+        pickup: PosePickup | null;
+        transforms: ReadonlyMap<string, Affine>;
+        clientX: number;
+        clientY: number;
+        moved: boolean;
+        centre: Pt2;
+        start: Pt2;
+        D: Affine;
+        snap: null;
+      }
+    | null
+  >(null);
   const scale = Math.max(fit.s, 1e-6);
   const shiftOf = (e: PointerEvent, state: NonNullable<typeof drag.current>): Affine =>
     translate((e.clientX - state.clientX) / scale, -(e.clientY - state.clientY) / scale);
@@ -121,9 +146,13 @@ export function PoseOverlay({
       onCancel();
       return;
     }
-    if (!state.moved) {
+    if (!state.moved && state.mode === 'move') {
       lastHit.current = { piece: state.clickPiece, at: state.at };
       onSelect(state.clickPiece);
+      onCancel();
+      return;
+    }
+    if (!state.moved) {
       onCancel();
       return;
     }
@@ -137,7 +166,33 @@ export function PoseOverlay({
 
   if (w < 2 || h < 2) return null;
   const selectedRing = pieces.find((item) => item.piece === selected)?.ring;
+  const selectedPickup = selected ? pickupOf(selected) : null;
+  const selectedGroup = new Set(selectedPickup?.group ?? []);
+  const selectedPoints = pieces
+    .filter(({ piece }) => selectedGroup.has(piece))
+    .flatMap(({ ring }) => ring);
+  const selectedBox = selectedPoints.length
+    ? selectedPoints.reduce(
+        (bounds, [x, y]) => ({
+          x0: Math.min(bounds.x0, x),
+          y0: Math.min(bounds.y0, y),
+          x1: Math.max(bounds.x1, x),
+          y1: Math.max(bounds.y1, y),
+        }),
+        { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
+      )
+    : null;
   const snapPx = snapAt ? toPx(fit, snapAt) : null;
+  const screenToWorld = (x: number, y: number): Pt2 => [
+    (x - fit.tx) / scale,
+    -(y - fit.ty) / scale,
+  ];
+  const worldAt = (svg: SVGSVGElement | null, clientX: number, clientY: number): Pt2 => {
+    const rect = svg?.getBoundingClientRect();
+    const x = rect ? ((clientX - rect.left) * w) / Math.max(rect.width, 1) : clientX;
+    const y = rect ? ((clientY - rect.top) * h) / Math.max(rect.height, 1) : clientY;
+    return screenToWorld(x, y);
+  };
   return (
     <svg
       width={w}
@@ -157,17 +212,27 @@ export function PoseOverlay({
           return;
         }
         if (started) onSelect(state.piece);
-        state.D = shiftOf(e, state);
-        state.snap = snap
-          ? snapPoseForDrag(
-              state.pickup.group,
-              state.D,
-              state.transforms,
-              geoms,
-              stacked,
-              POSE_SNAP_PX / scale,
-            )
-          : null;
+        if (state.mode === 'rotate') {
+          state.D = rotatePoseDrag(
+            state.centre,
+            state.start,
+            worldAt(e.currentTarget, e.clientX, e.clientY),
+            e.shiftKey ? 15 : 1,
+          ).D;
+        } else {
+          state.D = shiftOf(e, state);
+          state.snap = snap
+            ? snapPoseForDrag(
+                state.pickup.group,
+                state.D,
+                state.transforms,
+                geoms,
+                stacked,
+                POSE_SNAP_PX / scale,
+                snapSource,
+              )
+            : null;
+        }
         onDrag(state.pickup.group, state.D, state.snap);
       }}
       onPointerUp={() => finish()}
@@ -213,6 +278,7 @@ export function PoseOverlay({
             const piece = selected && hits.includes(selected) ? selected : clickPiece;
             e.currentTarget.setPointerCapture?.(e.pointerId);
             drag.current = {
+              mode: 'move',
               piece,
               clickPiece,
               at,
@@ -238,6 +304,90 @@ export function PoseOverlay({
           pointerEvents='none'
           data-seam-pose-selected=''
         />
+      )}
+      {selected && selectedPickup && selectedBox && (
+        <g data-seam-pose-rotate-box=''>
+          <rect
+            x={selectedBox.x0}
+            y={selectedBox.y0}
+            width={selectedBox.x1 - selectedBox.x0}
+            height={selectedBox.y1 - selectedBox.y0}
+            fill='none'
+            stroke='var(--color-textColor)'
+            strokeWidth={1}
+            strokeDasharray='2 3'
+            pointerEvents='none'
+          />
+          <line
+            x1={(selectedBox.x0 + selectedBox.x1) / 2}
+            y1={selectedBox.y1}
+            x2={(selectedBox.x0 + selectedBox.x1) / 2}
+            y2={selectedBox.y1 + 22}
+            stroke='var(--color-textColor)'
+            strokeWidth={1}
+            pointerEvents='none'
+          />
+          <rect
+            x={(selectedBox.x0 + selectedBox.x1) / 2 - 6}
+            y={selectedBox.y1 + 16}
+            width={12}
+            height={12}
+            fill='var(--color-bgColor)'
+            stroke='var(--color-textColor)'
+            strokeWidth={1.5}
+            role='button'
+            aria-label='rotate'
+            aria-disabled={disabled}
+            tabIndex={disabled ? -1 : 0}
+            className={cn(
+              'touch-none cursor-grab active:cursor-grabbing',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor',
+            )}
+            onKeyDown={(e) => {
+              if (disabled || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const centre = screenToWorld(
+                (selectedBox.x0 + selectedBox.x1) / 2,
+                (selectedBox.y0 + selectedBox.y1) / 2,
+              );
+              const step = e.shiftKey ? 15 : 1;
+              const angle = ((e.key === 'ArrowLeft' ? step : -step) * Math.PI) / 180;
+              const rotation = rotatePoseDrag(
+                centre,
+                [centre[0] + 1, centre[1]],
+                [centre[0] + Math.cos(angle), centre[1] + Math.sin(angle)],
+                step,
+              );
+              onDrop(selected, selectedPickup, rotation.D, null);
+            }}
+            onPointerDown={(e) => {
+              if (disabled) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const svg = e.currentTarget.ownerSVGElement;
+              const centre = screenToWorld(
+                (selectedBox.x0 + selectedBox.x1) / 2,
+                (selectedBox.y0 + selectedBox.y1) / 2,
+              );
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+              drag.current = {
+                mode: 'rotate',
+                piece: selected,
+                pickup: selectedPickup,
+                transforms: new Map(layout.T),
+                clientX: e.clientX,
+                clientY: e.clientY,
+                moved: false,
+                centre,
+                start: worldAt(svg, e.clientX, e.clientY),
+                D: [1, 0, 0, 1, 0, 0],
+                snap: null,
+              };
+            }}
+            data-seam-pose-rotate=''
+          />
+        </g>
       )}
       {snapPx && (
         <circle
