@@ -1224,11 +1224,10 @@ export function MediaViewer({
               {/* Phone: position and size right above the strip. */}
               <div
                 className={cn(
-                  'flex shrink-0 items-baseline justify-between gap-2 px-4 pt-2 text-micro uppercase tracking-label tabular-nums lg:hidden',
+                  'flex shrink-0 items-baseline justify-end gap-2 px-4 pt-2 text-micro uppercase tracking-label tabular-nums lg:hidden',
                   chromeClass,
                 )}
               >
-                <span>{hasMany ? label : ''}</span>
                 <span className='text-bgColor/70'>{currentSize}</span>
               </div>
 
