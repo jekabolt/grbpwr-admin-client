@@ -333,6 +333,8 @@ export const de = {
     article: 'Artikel',
     pin: 'Marke',
     placement: 'Position',
+    tooFewPatternMarks: 'zu wenige Schnittmarkierungen',
+    marksOutsideOperationZone: 'Markierungen außerhalb des Arbeitsbereichs',
     operation: 'Arbeitsgang',
     quantityTotal: 'Gesamtmenge',
     interlining: 'Einlage',

@@ -2741,6 +2741,8 @@ function buildActions(
   pieces: ReadonlyMap<string, AsmPiece>,
   targets: ReadonlyMap<number, Item[]>,
   rows: ReadonlyMap<string, StoredSeam>,
+  sink?: GapSink,
+  t: PdfT = englishT,
 ): Map<number, AsmAction> {
   const actions = new Map<number, AsmAction>();
   const placementSelections = walkPlacementMarks(
@@ -2755,8 +2757,26 @@ function buildActions(
   for (const [opIndex, op] of ops.entries()) {
     if (op.join) continue;
     const items = targets.get(op.n) ?? [];
-    let placements = placementGlyphs(op, placementSelections[opIndex]);
-    if (!placements.length) placements = fallbackPlacements(op, pieces, items);
+    const placementSelection = placementSelections[opIndex];
+    let placements = placementGlyphs(op, placementSelection);
+    if (!placements.length && !placementSelection?.issue)
+      placements = fallbackPlacements(op, pieces, items);
+    if (placementSelection?.issue === 'count-exceeds-marks')
+      assemblyGap(
+        sink,
+        'asm_placement_marks_short',
+        t('gaps.tooFewPatternMarks'),
+        op.n,
+        'position',
+      );
+    if (placementSelection?.issue === 'marks-outside-zone')
+      assemblyGap(
+        sink,
+        'asm_placement_marks_unrelated',
+        t('gaps.marksOutsideOperationZone'),
+        op.n,
+        'position',
+      );
     const placementOp = op.tech === 'button' || op.tech === 'buttonhole' || op.tech === 'label';
     const edgeOp = ['topstitch', 'pressSide', 'bind', 'hem'].includes(op.tech);
     const finishingEdgeOp = ['topstitch', 'bind', 'hem'].includes(op.tech);
@@ -3260,7 +3280,14 @@ export function deriveAssembly(
     t,
     !garment,
   );
-  const actions = buildActions(ops, input.pieces, targets, seamRowsOfCard(resolvedInput.techCard));
+  const actions = buildActions(
+    ops,
+    input.pieces,
+    targets,
+    seamRowsOfCard(resolvedInput.techCard),
+    gapSink,
+    t,
+  );
   const unitName = new Map<string, string>();
   const unitStep = new Map<string, number>();
   for (const o of ops) {

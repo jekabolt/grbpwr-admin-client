@@ -46,6 +46,79 @@ const fixture = {
   resolvedTechnicalMedia: [],
 } as unknown as common_TechCard;
 
+const fasteningPiece = (
+  key: string,
+  name: string,
+  kind: 'buttonhole' | 'drill',
+  count: number,
+): AsmPiece => {
+  const rs: [number, number][] = [
+    [0, 0],
+    [20, 0],
+    [20, 100],
+    [0, 100],
+  ];
+  return {
+    key,
+    name,
+    code: key,
+    cut: rs,
+    inner: [],
+    notch: [],
+    pocketing: false,
+    area: 2000,
+    geom: {
+      pieceKey: key,
+      name,
+      hand: null,
+      cloth: 'main',
+      rs,
+      corners: [0, 1, 2, 3],
+      notchIdx: [],
+      edges: [],
+      rect: true,
+      areaMm2: 2000,
+      perimMm: 240,
+      twinOf: [],
+      marks: Array.from({ length: count }, (_, index) => ({
+        id: `${key}@${index}`,
+        kind,
+        layer: 'mark',
+        closed: kind === 'drill',
+        pts: [
+          [10, 10 + index * 10],
+          [10, 12 + index * 10],
+        ],
+        bbox: { w: 0, h: 2, cx: 10, cy: 11 + index * 10 },
+        lenMm: 2,
+      })),
+    },
+  };
+};
+
+const fasteningCard = (piece: string, operation: Record<string, unknown>): common_TechCard =>
+  ({
+    id: 2,
+    techCard: {
+      name: 'Fastening gaps',
+      pieces: [{ lineKey: piece, name: piece }],
+      operations: [
+        {
+          operationNumber: 10,
+          operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+          inputKeys: [piece],
+          ...operation,
+        },
+      ],
+      bomItems: [],
+      patterns: [],
+    },
+    seams: [],
+    colorways: [],
+    markers: [],
+    resolvedTechnicalMedia: [],
+  }) as unknown as common_TechCard;
+
 describe('PDF gap registry', () => {
   it('collects assembly gaps without adding row markers', () => {
     const sink = new GapSink();
@@ -78,6 +151,76 @@ describe('PDF gap registry', () => {
       .filter((path) => !path.endsWith('/gaps.ts'))
       .filter((path) => readFileSync(path, 'utf8').includes('text-error'));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('fastening mark gaps', () => {
+  it('prints all available marks and reports a count shortfall', () => {
+    const front = fasteningPiece('FRONT', 'front', 'buttonhole', 7);
+    const model = deriveAssembly({
+      techCard: fasteningCard('FRONT', {
+        work: 'buttonhole',
+        machineType: 'TECH_CARD_MACHINE_TYPE_BUTTONHOLE',
+        zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
+        placementLayout: { count: 8, pitchMm: { value: '18' } },
+      }),
+      pieces: new Map([[front.key, front]]),
+      grainDeg: new Map(),
+    });
+
+    expect(model.rows[0].action?.placements).toHaveLength(7);
+    expect(model.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'asm_placement_marks_short',
+          label: 'too few pattern marks',
+          target: expect.objectContaining({ op: 10, field: 'position' }),
+        }),
+      ]),
+    );
+  });
+
+  it('does not invent a placement for marks outside the operation zone', () => {
+    const sleeve = fasteningPiece('SLV', 'sleeve', 'drill', 1);
+    const front = fasteningPiece('FRONT', 'front', 'buttonhole', 1);
+    const techCard = fasteningCard('SLV', {
+      work: 'button_attach',
+      machineType: 'TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH',
+      zone: 'TECH_CARD_GARMENT_ZONE_FRONT',
+      inputKeys: ['garment'],
+      placementLayout: { count: 1, pitchMm: { value: '18' } },
+    });
+    const card = techCard.techCard as unknown as { pieces: unknown[]; operations: unknown[] };
+    card.pieces = [
+      { lineKey: 'SLV', name: 'SLV' },
+      { lineKey: 'FRONT', name: 'FRONT' },
+    ];
+    card.operations.unshift({
+      operationNumber: 5,
+      operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+      work: 'join',
+      inputKeys: ['SLV', 'FRONT'],
+      outputUnitKey: 'garment',
+    });
+    const model = deriveAssembly({
+      techCard,
+      pieces: new Map([
+        [sleeve.key, sleeve],
+        [front.key, front],
+      ]),
+      grainDeg: new Map(),
+    });
+
+    expect(model.rows.find((row) => row.n === 10)?.action?.placements).toEqual([]);
+    expect(model.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'asm_placement_marks_unrelated',
+          label: 'marks outside operation zone',
+          target: expect.objectContaining({ op: 10, field: 'position' }),
+        }),
+      ]),
+    );
   });
 });
 

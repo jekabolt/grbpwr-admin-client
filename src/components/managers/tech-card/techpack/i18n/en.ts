@@ -377,6 +377,8 @@ export const en = {
     article: 'article',
     pin: 'pin',
     placement: 'placement',
+    tooFewPatternMarks: 'too few pattern marks',
+    marksOutsideOperationZone: 'marks outside operation zone',
     operation: 'operation',
     quantityTotal: 'qty total',
     interlining: 'interlining',

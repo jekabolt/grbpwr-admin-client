@@ -334,6 +334,8 @@ export const fr = {
     article: 'article',
     pin: 'repère',
     placement: 'emplacement',
+    tooFewPatternMarks: 'repères de patron insuffisants',
+    marksOutsideOperationZone: 'repères hors zone d’opération',
     operation: 'opération',
     quantityTotal: 'qté totale',
     interlining: 'entoilage',

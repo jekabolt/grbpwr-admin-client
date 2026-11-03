@@ -330,6 +330,8 @@ export const ja = {
     article: '品番',
     pin: 'ピン',
     placement: '付け位置',
+    tooFewPatternMarks: '型紙マーク不足',
+    marksOutsideOperationZone: '工程範囲外のマーク',
     operation: '工程',
     quantityTotal: '合計数量',
     interlining: '芯地',

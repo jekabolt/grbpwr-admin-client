@@ -330,6 +330,8 @@ export const cn = {
     article: '货号',
     pin: '定位点',
     placement: '位置',
+    tooFewPatternMarks: '纸样标记不足',
+    marksOutsideOperationZone: '标记不在工序区域',
     operation: '工序',
     quantityTotal: '总数量',
     interlining: '衬布',

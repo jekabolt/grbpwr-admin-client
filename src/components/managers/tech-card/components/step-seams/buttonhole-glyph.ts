@@ -1,5 +1,8 @@
 import type { PieceGeom, PieceMark, Pt2 } from 'lib/assembly-skeleton/types';
 
+import { roleOfName } from './signals/names';
+import { zoneOf } from './signals/zone';
+
 export type ButtonholeOperation = {
   operationType?: string;
   machineType?: string;
@@ -106,6 +109,9 @@ export type PlacementMarkSelection = {
   kind: PlacementMarkKind;
   marks: readonly PieceMark[];
   exact: boolean;
+  /** Marks this step takes out of play beyond the ones it draws. */
+  spent?: readonly PieceMark[];
+  issue?: 'count-exceeds-marks' | 'marks-outside-zone';
 };
 
 export type PlacementMarkStep = {
@@ -139,6 +145,34 @@ const zoneNamesHost = (zone: string | undefined, host: PlacementMarkHost): boole
       (word) => word.length > 2 && !['TECH', 'CARD', 'GARMENT', 'ZONE', 'OTHER'].includes(word),
     );
   return tokens.some((word) => text.includes(word));
+};
+
+const BODY_ROLES = ['front', 'back', 'side', 'yoke', 'skirt'];
+const NECK_ROLES = ['collar', 'stand', 'rib', 'hood'];
+
+// Which piece roles can carry a fastening of a zone. Narrower than the seam pairs of signals/zone:
+// a pocket piece never carries a front or back closure. A collar row may close on the front or its
+// placket. Zones missing here (outer, other, lining, closure, unknown) say nothing about a piece.
+const ZONE_HOST_ROLES: Readonly<Record<string, ReadonlySet<string>>> = {
+  front: new Set(['front', 'placket', 'facing', 'fly', 'yoke']),
+  back: new Set(['back', 'yoke']),
+  sleeve: new Set(['sleeve', 'cuff', 'placket', 'facing']),
+  armhole: new Set(['sleeve']),
+  collar: new Set([...NECK_ROLES, 'front', 'placket', 'facing']),
+  neckline: new Set([...NECK_ROLES, 'front', 'placket', 'facing']),
+  pocket: new Set(['pocket', 'sleeve', ...BODY_ROLES]),
+  // A fly coded FL reads as a flap, a pocket role, so the waist cannot rule pockets out.
+  waist: new Set(['waistband', 'loop', 'fly', 'placket', 'pocket', ...BODY_ROLES]),
+  hem: new Set(['hemband', 'facing', 'sleeve', ...BODY_ROLES]),
+  shoulder: new Set(['front', 'back', 'yoke']),
+};
+
+/** A piece of a known role the operation's zone rules out. An unread name never counts as unrelated. */
+const hostUnrelatedToZone = (zone: string | undefined, host: PlacementMarkHost): boolean => {
+  const allowed = ZONE_HOST_ROLES[zoneOf(zone)];
+  if (!allowed || zoneNamesHost(zone, host)) return false;
+  const role = roleOfName(host.geom.name);
+  return role != null && !allowed.has(role);
 };
 
 const placementHostScore = (
@@ -198,9 +232,26 @@ export function selectPlacementMarks(
       : [];
   });
   const exactCandidates = candidates.filter((candidate) => candidate.exact);
-  const ranked = exactCandidates.length ? exactCandidates : candidates;
-  const configuredCount = op.placementLayout?.count ?? op.placementCount;
-  const countForZone = Math.max(1, configuredCount ?? 0);
+  const best = exactCandidates.length ? exactCandidates : candidates;
+  const fastening = kind !== 'label';
+  // A closure never lands on a piece its zone rules out, however good the mark: no glyph, a gap.
+  // An operation that names one piece has said where it goes, whatever its zone.
+  const ranked =
+    fastening && hosts.length > 1
+      ? best.filter((candidate) => !hostUnrelatedToZone(op.zone, candidate.host))
+      : best;
+  if (best.length && !ranked.length) {
+    return {
+      host: best[0].host,
+      kind,
+      marks: [],
+      exact: best[0].exact,
+      issue: 'marks-outside-zone',
+    };
+  }
+  const rawCount = op.placementLayout?.count ?? op.placementCount;
+  const configuredCount = rawCount != null && rawCount > 0 ? rawCount : undefined;
+  const countForZone = configuredCount ?? 1;
   const zoneCandidates = ranked.filter(
     (candidate) =>
       candidate.exact &&
@@ -237,15 +288,28 @@ export function selectPlacementMarks(
         Math.hypot(mark.bbox.cx - partner.bbox.cx, mark.bbox.cy - partner.bbox.cy),
       ),
     );
+  // Piece frames are y-up, so the top mark has the largest y.
+  const topFirst = (left: PieceMark, right: PieceMark) =>
+    right.bbox.cy - left.bbox.cy || left.bbox.cx - right.bbox.cx || left.id.localeCompare(right.id);
   const ordered = partners.length
-    ? [...selected.marks].sort((left, right) => awayFromPartner(right) - awayFromPartner(left))
-    : selected.marks;
-  const count = Math.max(0, configuredCount ?? ordered.length);
+    ? [...selected.marks].sort(
+        (left, right) => awayFromPartner(right) - awayFromPartner(left) || topFirst(left, right),
+      )
+    : fastening && configuredCount == null
+      ? [...selected.marks].sort(topFirst)
+      : selected.marks;
+  // No count on a closure: one glyph. A label keeps every mark it has.
+  const count = configuredCount ?? (fastening ? 1 : ordered.length);
   return {
     host: selected.host,
     kind,
-    marks: ordered.slice(0, count || ordered.length),
+    marks: ordered.slice(0, count),
     exact: selected.exact,
+    // Drills taken as holes make that strip the hole side: its partner goes to the other strip.
+    ...(fastening && configuredCount == null && !selected.exact ? { spent: selected.marks } : {}),
+    ...(configuredCount != null && configuredCount > ordered.length
+      ? { issue: 'count-exceeds-marks' as const }
+      : {}),
   };
 }
 
@@ -256,7 +320,7 @@ export function walkPlacementMarks(
   const used = new Set<string>();
   return steps.map((step) => {
     const selected = selectPlacementMarks(step.operation, step.hosts, used);
-    selected?.marks.forEach((mark) => used.add(mark.id));
+    (selected?.spent ?? selected?.marks)?.forEach((mark) => used.add(mark.id));
     return selected;
   });
 }

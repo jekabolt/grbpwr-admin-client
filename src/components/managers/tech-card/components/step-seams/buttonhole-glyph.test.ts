@@ -219,6 +219,115 @@ const semaphoreSteps = (): PlacementMarkStep[] => {
 };
 
 describe('shared placement mark selector', () => {
+  it('draws every real mark and reports a count shortfall', () => {
+    const marks = Array.from({ length: 7 }, (_, index) =>
+      placementMark('FRONT', index, 'buttonhole', 5, 10 + index * 10),
+    );
+    const selected = selectPlacementMarks(
+      { work: 'buttonhole', zone: 'front', placementLayout: { count: 8 } },
+      [placementHost('FRONT', marks, 'front')],
+    );
+
+    expect(selected?.marks).toHaveLength(7);
+    expect(selected?.marks.map((mark) => mark.id)).toEqual(marks.map((mark) => mark.id));
+    expect(selected?.issue).toBe('count-exceeds-marks');
+  });
+
+  it('uses one deterministic mark per fastening when no count is set', () => {
+    const collar = placementHost('CLR', [
+      placementMark('CLR', 0, 'buttonhole', 10, 20),
+      placementMark('CLR', 1, 'buttonhole', 90, 20),
+      placementMark('CLR', 2, 'drill', 12, 20),
+      placementMark('CLR', 3, 'drill', 88, 20),
+    ]);
+    const [hole, button] = walkPlacementMarks([
+      { operation: { work: 'buttonhole', zone: 'collar' }, hosts: [collar] },
+      { operation: { work: 'button_attach', zone: 'collar' }, hosts: [collar] },
+    ]);
+
+    expect(hole?.marks.map((mark) => mark.bbox.cx)).toEqual([10]);
+    expect(button?.marks.map((mark) => mark.bbox.cx)).toEqual([88]);
+  });
+
+  it('rejects marks outside a specific zone but preserves generic-zone selection', () => {
+    const front = placementHost('FRONT', [], 'front');
+    const sleeve = placementHost('SLV', [placementMark('SLV', 0, 'buttonhole', 5, 20)], 'sleeve');
+    const operation = { work: 'buttonhole', zone: 'front', placementLayout: { count: 1 } };
+
+    const unrelated = selectPlacementMarks(operation, [front, sleeve]);
+    expect(unrelated?.marks).toEqual([]);
+    expect(unrelated?.issue).toBe('marks-outside-zone');
+    for (const zone of [
+      undefined,
+      'TECH_CARD_GARMENT_ZONE_OTHER',
+      'TECH_CARD_GARMENT_ZONE_OUTER',
+      'TECH_CARD_GARMENT_ZONE_LINING',
+    ]) {
+      const generic = selectPlacementMarks({ ...operation, zone }, [front, sleeve]);
+      expect(generic?.host.key, String(zone)).toBe('SLV');
+      expect(generic?.marks).toHaveLength(1);
+    }
+  });
+
+  it('reads short piece codes by role, so a front or waistband is not called unrelated', () => {
+    const front = placementHost('FR', [placementMark('FR', 0, 'drill', 5, 20)], 'FR');
+    const waist = placementHost('WS', [placementMark('WS', 0, 'buttonhole', 5, 20)], 'WS');
+
+    const onFront = selectPlacementMarks({ work: 'button_attach', zone: 'front' }, [front]);
+    const onWaist = selectPlacementMarks({ work: 'buttonhole', zone: 'waist' }, [waist]);
+
+    expect(onFront?.issue).toBeUndefined();
+    expect(onFront?.marks).toHaveLength(1);
+    expect(onWaist?.issue).toBeUndefined();
+    expect(onWaist?.marks).toHaveLength(1);
+  });
+
+  it('keeps a piece with an unread name: no evidence that it is unrelated', () => {
+    const plank = placementHost('plank', [placementMark('plank', 0, 'drill', 5, 20)], 'plank');
+    const selected = selectPlacementMarks({ work: 'button_attach', zone: 'front' }, [plank]);
+
+    expect(selected?.issue).toBeUndefined();
+    expect(selected?.marks).toHaveLength(1);
+  });
+
+  it('never moves a closure to an unrelated exact mark past a wrong mark on the right piece', () => {
+    const front = placementHost('P_L', [placementMark('P_L', 0, 'buttonhole', 5, 20)], 'P_L');
+    const pocket = placementHost('PCK_X', [placementMark('PCK_X', 0, 'drill', 5, 20)], 'PCK_X');
+
+    const selected = selectPlacementMarks({ work: 'button_attach', zone: 'front' }, [
+      front,
+      pocket,
+    ]);
+
+    expect(selected?.marks).toEqual([]);
+    expect(selected?.issue).toBe('marks-outside-zone');
+  });
+
+  it('does not spill to a sleeve once the placket marks are used up', () => {
+    const placketMark = placementMark('PLCK', 0, 'drill', 5, 20);
+    const placket = placementHost('PLCK', [placketMark], 'PLCK');
+    const sleeve = placementHost('SLV', [placementMark('SLV', 0, 'drill', 5, 20)], 'SLV');
+
+    const selected = selectPlacementMarks(
+      { work: 'button_attach', zone: 'front' },
+      [placket, sleeve],
+      new Set([placketMark.id]),
+    );
+
+    expect(selected?.marks).toEqual([]);
+    expect(selected?.issue).toBe('marks-outside-zone');
+  });
+
+  it('leaves labels out of the closure rules: every mark, on any piece', () => {
+    const marks = [0, 1, 2].map((index) => placementMark('BP', index, 'placement', 5, 10 + index));
+    const selected = selectPlacementMarks({ work: 'attach_label', zone: 'front' }, [
+      placementHost('BP', marks, 'BP'),
+    ]);
+
+    expect(selected?.issue).toBeUndefined();
+    expect(selected?.marks).toHaveLength(3);
+  });
+
   it('walks the Semaphore distribution from PLCK to all seven FR drills, then CLR', () => {
     const selected = walkPlacementMarks(semaphoreSteps());
 
@@ -328,5 +437,46 @@ describe('shared placement mark selector', () => {
         pdf[index]?.marks.map((mark) => mark.id) ?? [],
       );
     });
+  });
+
+  it('keeps a button on the one piece its operation names, whatever the zone', () => {
+    const pocket = placementHost('PCK_R_MAIN', [placementMark('PCK_R_MAIN', 0, 'drill', 10, 10)]);
+    const selected = selectPlacementMarks({ work: 'button_attach', zone: 'front' }, [pocket]);
+    expect(selected?.issue).toBeUndefined();
+    expect(selected?.marks.map((mark) => mark.id)).toEqual(['PCK_R_MAIN@0']);
+  });
+
+  it('keeps a waist button on a fly coded FL', () => {
+    const waist = placementHost('WS', [placementMark('WS', 0, 'drill', 10, 10)]);
+    const fly = placementHost(
+      'FL_2',
+      [10, 40, 70].map((y, index) => placementMark('FL_2', index, 'drill', 10, y)),
+    );
+    const selected = selectPlacementMarks(
+      { work: 'button_attach', zone: 'waist', placementCount: 3 },
+      [waist, fly],
+    );
+    expect(selected?.host.geom.name).toBe('FL_2');
+    expect(selected?.issue).toBeUndefined();
+  });
+
+  it('sends uncounted buttons to the other strip when holes took one strip as drills', () => {
+    const holeStrip = placementHost(
+      'PLCK_L',
+      [10, 40, 70].map((y, index) => placementMark('PLCK_L', index, 'drill', 10, y)),
+    );
+    const buttonStrip = placementHost(
+      'PLCK_R',
+      [10, 40].map((y, index) => placementMark('PLCK_R', index, 'drill', 10, y)),
+    );
+    const hosts = [holeStrip, buttonStrip];
+    const [hole, top, next] = walkPlacementMarks([
+      { operation: { work: 'buttonhole', zone: 'front' }, hosts: [holeStrip] },
+      { operation: { work: 'button_attach', zone: 'collar' }, hosts },
+      { operation: { work: 'button_attach', zone: 'front' }, hosts },
+    ]);
+    expect(hole?.marks.map((mark) => mark.id)).toEqual(['PLCK_L@2']);
+    expect(top?.marks.map((mark) => mark.id)).toEqual(['PLCK_R@1']);
+    expect(next?.marks.map((mark) => mark.id)).toEqual(['PLCK_R@0']);
   });
 });

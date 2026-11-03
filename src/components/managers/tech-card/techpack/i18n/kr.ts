@@ -330,6 +330,8 @@ export const kr = {
     article: '품번',
     pin: '표시점',
     placement: '부착 위치',
+    tooFewPatternMarks: '패턴 표시 부족',
+    marksOutsideOperationZone: '작업 영역 밖 표시',
     operation: '공정',
     quantityTotal: '총수량',
     interlining: '심지',
