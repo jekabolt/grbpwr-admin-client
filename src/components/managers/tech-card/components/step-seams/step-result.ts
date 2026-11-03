@@ -4,7 +4,7 @@
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
 import { compose, IDENTITY } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
+import { poseAnchorOf, poseOf, type SeamLayer, type StoredPose, type StoredSeam } from 'lib/seams';
 
 import { cardFoldsOf, foldOnceOf, type CardFolds, type StepFolds } from './step-folds';
 import { handsFromSeams } from './step-hand';
@@ -184,11 +184,12 @@ function applyCurrentPoses(
   const pins = new Map<string, PosePin>();
   for (const key of op.poseKeys) {
     const row = rows.get(key);
-    const pose = row ? poseOf(row) : null;
+    const anchor = row ? poseAnchorOf(row) : null;
+    const pose = anchor ? { ...anchor, host: anchor.piece } : row ? poseOf(row) : null;
     if (!pose) continue;
     const pieceInput = inputOf.get(pose.piece);
     const hostInput = inputOf.get(pose.host);
-    if (pieceInput != null && pieceInput === hostInput) {
+    if (!anchor && pieceInput != null && pieceInput === hostInput) {
       ignored.push(key);
       continue;
     }

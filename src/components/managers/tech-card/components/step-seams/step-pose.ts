@@ -12,6 +12,7 @@ import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleto
 import {
   expandSidePart,
   normalizeParts,
+  poseAnchorOf,
   poseOf,
   poseRow,
   type SeamPlacement,
@@ -284,12 +285,11 @@ export function resolvePoseEdit(
 ): PoseEditResolution {
   const edits = new Map(current.edits);
   const drop = new Set(current.drop);
-  if (piece === edit.host) return { edits, drop };
-
   // Re-setting a piece is the latest edit, including after an earlier cycle dropped its pose.
   edits.delete(piece);
   edits.set(piece, edit);
   drop.delete(piece);
+  if (piece === edit.host) return { edits, drop };
 
   const hostOf = (key: string) =>
     edits.get(key)?.host ?? (drop.has(key) ? undefined : storedHosts.get(key));
@@ -390,14 +390,21 @@ export function posePinsOf(
 ): Map<string, PosePin> {
   const out = new Map<string, PosePin>();
   if (!rows?.size) return out;
-  for (const step of steps)
+  steps.forEach((step, index) => {
     for (const key of step.poseKeys ?? []) {
       const row = rows.get(key);
+      const anchor = row && index === steps.length - 1 ? poseAnchorOf(row) : null;
+      if (anchor) {
+        out.delete(anchor.piece);
+        out.set(anchor.piece, { host: anchor.piece, placement: anchor.placement, seamKey: key });
+        continue;
+      }
       const pose = row ? poseOf(row) : null;
       if (!pose) continue;
       out.delete(pose.piece);
       out.set(pose.piece, { host: pose.host, placement: pose.placement, seamKey: key });
     }
+  });
   return out;
 }
 
@@ -447,7 +454,7 @@ export function poseGroup(
         seen.add(n);
         queue.push(n);
       }
-  return seen.has(host) ? [piece] : [...seen];
+  return host !== piece && seen.has(host) ? [piece] : [...seen];
 }
 
 /** The result metadata needed to choose a rigid PLACE pickup. */
@@ -608,8 +615,10 @@ export function layoutDrift(
 }
 
 export type PoseMovePlan = {
-  /** Where the moved piece is pinned; null when nothing can carry it: the whole step shifts instead. */
+  /** Where the moved piece is pinned; on itself, in the step's frame, when nothing can carry it. */
   pin: DroppedPose | null;
+  /** The group's other poses: one rigid block stands by one row, and a second would pull against it. */
+  drop: string[];
   /** Poses resting on the moved pieces, rewritten so that they stay where they are. */
   keep: DroppedPose[];
 };
@@ -617,8 +626,8 @@ export type PoseMovePlan = {
 /**
  * What one hand move writes so that only the moved pieces change place. `D` moves `group` in the
  * frame of `transforms`. A host never rests on the moved pieces (that would be a loop: the first
- * pose dropped, its piece back to the automatic place); with no such block left the move is the
- * whole step's. Every pose resting on the moved pieces is measured again from the new place.
+ * pose dropped, its piece back to the automatic place); with no such block left the piece stands in
+ * the step's frame. Every pose resting on the moved pieces is measured again from the new place.
  */
 export function planPoseMove(
   piece: string,
@@ -653,7 +662,15 @@ export function planPoseMove(
     (key) => !group.has(key) && !restsOnGroup(key) && layout.transforms.has(key),
   );
   const T0 = layout.transforms.get(piece);
-  const pin = host && T0 ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms) : null;
+  const own = geoms.get(piece);
+  const pin = !T0
+    ? null
+    : host
+      ? poseAfterDrop(piece, compose(D, T0), { host }, layout, geoms)
+      : own
+        ? { piece, host: piece, placement: placementOf(own, own, compose(D, T0)) }
+        : null;
+  const drop = [...pinHosts.keys()].filter((key) => key !== piece && group.has(key));
   const keep = [...pinHosts].flatMap(([key, on]) => {
     if (group.has(key) || !group.has(on)) return [];
     const T = layout.transforms.get(key);
@@ -661,14 +678,10 @@ export function planPoseMove(
     const hostGeom = geoms.get(on);
     const keyGeom = geoms.get(key);
     if (!T || !onT || !hostGeom || !keyGeom) return [];
-    // With a pin the host moved and the piece stood; without one the whole step moves, so the piece
-    // is measured back through the same D.
-    const placement = pin
-      ? poseAt(hostGeom, keyGeom, compose(D, onT), T)
-      : poseAt(hostGeom, keyGeom, onT, compose(invert(D), T));
-    return [{ piece: key, host: on, placement }];
+    // The host moved and the piece stood.
+    return [{ piece: key, host: on, placement: poseAt(hostGeom, keyGeom, compose(D, onT), T) }];
   });
-  return { pin, keep };
+  return { pin, drop, keep };
 }
 
 /**
@@ -689,7 +702,6 @@ export function pinPoses(
 ): { pinned: string[]; moved: boolean } {
   const pins = [...pose].filter(
     ([k, p]) =>
-      k !== p.host &&
       T.has(k) &&
       T.has(p.host) &&
       (geoms.get(k)?.rs.length ?? 0) >= 3 &&
@@ -709,10 +721,8 @@ export function pinPoses(
   for (let pass = 0; pass <= pins.length; pass++) {
     let moved = false;
     for (const [k, p] of pins) {
-      const want = compose(
-        T.get(p.host)!,
-        placementT(geoms.get(p.host)!, geoms.get(k)!, p.placement),
-      );
+      const on = placementT(geoms.get(p.host)!, geoms.get(k)!, p.placement);
+      const want = k === p.host ? on : compose(T.get(p.host)!, on);
       const D = compose(want, invert(T.get(k)!));
       if (still(D)) continue;
       for (const m of groups.get(k)!) T.set(m, m === k ? want : compose(D, T.get(m)!));

@@ -227,7 +227,6 @@ export function SeamPickerBody({
     setSnapOn,
     poseDrag,
     setPoseDrag,
-    poseFree,
     poseBounds,
     frameStale,
     fitFrame,
@@ -615,7 +614,7 @@ export function SeamPickerBody({
       setPoseSel(null);
       return true;
     }
-    if (posePending || poseFree) {
+    if (posePending) {
       clearPose();
       setSaved(false);
       return true;
@@ -1055,7 +1054,7 @@ export function SeamPickerBody({
               clear seams
             </Button>
           )}
-          {!frozen && (posePending || !!poseFree || ownPoseRows.size > 0) && (
+          {!frozen && (posePending || ownPoseRows.size > 0) && (
             <Button
               type='button'
               variant='underline'

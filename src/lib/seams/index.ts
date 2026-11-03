@@ -19,6 +19,7 @@ export {
   anchorOfRunId,
   newSeamKey,
   outlineAnchor,
+  poseAnchorOf,
   poseOf,
   poseRow,
   seamFromCandidate,

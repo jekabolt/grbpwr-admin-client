@@ -70,7 +70,7 @@ import {
 import { stepResults } from './step-result';
 import { dropKeys } from './step-seams-model';
 
-const square = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
+const globalSquare = (key: string, x: number, y: number, w: number, h: number): PieceGeom =>
   ({
     pieceKey: key,
     name: key,
@@ -122,6 +122,8 @@ const relOf = (T: ReadonlyMap<string, Affine>, piece: string, host: string) =>
 
 const AT: SeamPlacement = { xMm: 61.25, yMm: 140.5, rotDeg: 90, flip: true };
 const posePin = (host: string) => ({ host, placement: AT });
+
+const square = globalSquare;
 
 describe('pose host cycles', () => {
   it('keeps the latest edit in a direct A↔B cycle', () => {
@@ -291,16 +293,18 @@ describe('stepLayout: a pose is pinned last', () => {
     }
   });
 
-  it('a pose on a piece not drawn, or on itself, changes nothing', () => {
+  it('a pose on a piece not drawn changes nothing; one on itself stands in the step frame', () => {
     const plain = stepLayout(leaves, [], geoms, { explode: 0.1 });
     const ghost = stepLayout(leaves, [], geoms, {
       explode: 0.1,
-      pose: new Map([
-        ['NOPE', { host: 'A', placement: at }],
-        ['A', { host: 'A', placement: at }],
-      ]),
+      pose: new Map([['NOPE', { host: 'A', placement: at }]]),
     });
     expect([...ghost.T]).toEqual([...plain.T]);
+    const stood = stepLayout(leaves, [], geoms, {
+      explode: 0.1,
+      pose: new Map([['A', { host: 'A', placement: at }]]),
+    });
+    expect(stood.T.get('A')).toEqual(placementT(geoms.get('A')!, geoms.get('A')!, at));
   });
 
   it('pinPoses: the hung pieces go along; a host hanging on the piece stays', () => {
@@ -860,6 +864,7 @@ describe('mirrorPlacement: mirror left for surface and pose rows', () => {
 });
 
 describe('planPoseMove: only the moved pieces change place', () => {
+  const rect = (key: string) => globalSquare(key, 0, 0, 100, 100);
   const square = (key: string, areaMm2: number): PieceGeom =>
     ({
       key,
@@ -924,40 +929,57 @@ describe('planPoseMove: only the moved pieces change place', () => {
     expect(stands[5]).toBeCloseTo(0, 1);
   });
 
-  it('with no free block the whole step moves and the resting piece is measured back', () => {
+  it('with no free block the piece stands in the step frame and the resting piece stays', () => {
+    const turn: Affine = compose([0, 1, -1, 0, 0, 0], D);
     const plan = planPoseMove(
       'a',
       { group: ['a'], host: 'b' },
-      D,
+      turn,
       layout(['a', 'b']),
       new Map([['b', 'a']]),
       geoms,
     );
-    expect(plan.pin).toBeNull();
-    const seen = compose(
-      D,
-      compose(
-        transforms.get('a')!,
-        placementT(geoms.get('a')!, geoms.get('b')!, plan.keep[0].placement),
-      ),
-    );
-    expect(seen[4]).toBeCloseTo(200, 1);
-    expect(seen[5]).toBeCloseTo(0, 1);
+    expect(plan.pin?.host).toBe('a');
+    const T = new Map(transforms);
+    const pins = new Map([
+      ['a', { host: 'a', placement: plan.pin!.placement }],
+      ['b', { host: 'a', placement: plan.keep[0].placement }],
+    ]);
+    pinPoses(T, pins, geoms, []);
+    const a = compose(turn, transforms.get('a')!);
+    T.get('a')!.forEach((v, i) => expect(v).toBeCloseTo(a[i], 1));
+    expect(T.get('b')![4]).toBeCloseTo(200, 1);
+    expect(T.get('b')![5]).toBeCloseTo(0, 1);
   });
 
-  it('pins as usual when nothing rests on the piece', () => {
+  it('a block stands by one row: the other poses of the moved group go', () => {
     const plan = planPoseMove(
-      'b',
-      { group: ['b'], host: 'a' },
+      'a',
+      { group: ['a', 'c'], host: 'b' },
       D,
-      layout(['a', 'b']),
-      new Map(),
+      { blocks: [{ pieces: ['a', 'c'] }, { pieces: ['b'] }], transforms },
+      new Map([
+        ['b', 'a'],
+        ['c', 'b'],
+      ]),
       geoms,
     );
-    expect(plan.keep).toEqual([]);
-    const placed = laid(plan.pin!, 'b');
-    expect(placed[4]).toBeCloseTo(230, 1);
-    expect(placed[5]).toBeCloseTo(40, 1);
+    expect(plan.drop).toEqual(['c']);
+    expect(plan.pin?.host).toBe('a');
+  });
+
+  it("a stand in the step frame is the step's own: a later step does not inherit it", () => {
+    const row = poseRow({
+      seamKey: 'own',
+      piece: rect('a'),
+      host: rect('a'),
+      placement: { xMm: 5, yMm: 6, rotDeg: 30, flip: false },
+    });
+    expect(poseOf(row)).toBeNull();
+    const rows = new Map([['own', row]]);
+    const steps = [{ poseKeys: ['own'] }, {}];
+    expect(posePinsOf(steps.slice(0, 1), rows).get('a')?.host).toBe('a');
+    expect(posePinsOf(steps, rows).size).toBe(0);
   });
 });
 

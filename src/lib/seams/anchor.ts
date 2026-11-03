@@ -209,6 +209,18 @@ export function poseOf(
   return { piece: a.piece, host: b.piece, placement: a.placement };
 }
 
+/**
+ * A pose row whose piece is its own host: the block stands in the step's frame, `placement` read
+ * from the piece's own box. What a turn of the step's only root writes, there being nothing to
+ * measure it from. The step's own: a later step does not inherit it. `poseOf` does not read it.
+ */
+export function poseAnchorOf(row: StoredPose): { piece: string; placement: SeamPlacement } | null {
+  const a = row.sideA[0];
+  const b = row.sideB[0];
+  if (!a?.placement || !a.piece || a.piece !== b?.piece) return null;
+  return { piece: a.piece, placement: a.placement };
+}
+
 /** Edge ids a stored side stands for, by its hints (diagnostics only — never for resolution). */
 export const hintedEdges = (side: readonly EdgeAnchor[]): EdgeId[] =>
   side.flatMap((a) => edgeIdsOf(a.edgeHint));

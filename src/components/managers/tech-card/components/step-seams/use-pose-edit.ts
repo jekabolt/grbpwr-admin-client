@@ -2,6 +2,7 @@ import type { Affine, PieceGeom } from 'lib/assembly-skeleton/types';
 import { apply, compose, translate } from 'lib/assembly-skeleton/union/affine';
 import {
   newSeamKey,
+  poseAnchorOf,
   poseOf,
   poseRow,
   type SeamLayer,
@@ -23,7 +24,6 @@ import {
 import { foldedDrawing } from './step-folds';
 import { pictureBounds } from './step-picture-view';
 import {
-  invert,
   layoutDrift,
   pinPoses,
   fitPlan,
@@ -116,8 +116,6 @@ export function usePoseEdit({
     D: Affine;
     snap: PoseSnap | null;
   } | null>(null);
-  // A step of one block has nothing to sit against: its drag moves the whole picture, stored nowhere.
-  const [poseFree, setPoseFree] = useState<Affine | null>(null);
   const fitCycle = useRef<{
     sourceKey: string;
     transforms: ReadonlyMap<string, Affine>;
@@ -129,16 +127,16 @@ export function usePoseEdit({
     const out = new Map<string, StoredPose>();
     for (const key of poseKeys ?? []) {
       const row = poses.get(key);
-      const pose = row ? poseOf(row) : null;
-      if (row && pose) out.set(pose.piece, row);
+      const piece = row ? poseAnchorOf(row)?.piece ?? poseOf(row)?.piece : null;
+      if (row && piece) out.set(piece, row);
     }
     return out;
   }, [poseKeys, poses]);
   const storedPoseHosts = useMemo(() => {
     const out = new Map<string, string>();
     for (const [piece, row] of ownPoseRows) {
-      const pose = poseOf(row);
-      if (pose) out.set(piece, pose.host);
+      const host = poseAnchorOf(row) ? piece : poseOf(row)?.host;
+      if (host) out.set(piece, host);
     }
     return out;
   }, [ownPoseRows]);
@@ -158,15 +156,14 @@ export function usePoseEdit({
     return { ...resultLayout, T };
   }, [resultLayout, poseEdits, geoms, poseHung, poseBlocks]);
   const poseShown = useMemo(() => {
-    if (!poseDrag && !poseFree) return poseLayout;
+    if (!poseDrag) return poseLayout;
     const T = new Map(poseLayout.T);
-    if (poseFree) for (const [k, t] of T) T.set(k, compose(poseFree, t));
     for (const k of poseDrag?.group ?? []) {
       const t = T.get(k);
       if (t) T.set(k, compose(poseDrag!.D, t));
     }
     return { ...poseLayout, T };
-  }, [poseLayout, poseDrag, poseFree]);
+  }, [poseLayout, poseDrag]);
   // The canvas frame stands while this window is open: neither a move nor a write rescales the
   // picture. It is taken once the step's pieces are known, and again only by `fit`.
   const frameKey = stepPicture ? `${[...resultLayout.T.keys()].sort().join()}|${geoms.size}` : '';
@@ -204,7 +201,7 @@ export function usePoseEdit({
     const relaid = resultBefore.current !== resultLayout;
     resultBefore.current = resultLayout;
     if (!relaid && !settling.current) return;
-    if (!poseFree) settling.current = false;
+    settling.current = false;
     const drift = layoutDrift(before, poseShown.T, geoms);
     if (!drift) return;
     setFrame((held) =>
@@ -251,7 +248,6 @@ export function usePoseEdit({
     setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
     setPoseLayerEdits(new Map());
-    setPoseFree(null);
     setPoseSel(null);
     setSnapOn(false);
     setPoseDrag(null);
@@ -270,23 +266,30 @@ export function usePoseEdit({
     // A hand move changes what FIT measures from: the next press starts a new cycle.
     fitCycle.current = null;
     setRefused('');
-    const local = poseFree ? compose(invert(poseFree), compose(D, poseFree)) : D;
     const plan = planPoseMove(
       piece,
       pickup,
-      local,
+      D,
       { blocks: poseBlocks, transforms: poseLayout.T },
       pinHosts,
       geoms,
     );
-    if (!plan.pin) setPoseFree((free) => (free ? compose(D, free) : D));
+    // A flag between two blocks needs a row naming both: from a row going away to the other's row.
+    const leaving = [...plan.drop, ...(plan.pin?.host === piece ? [piece] : [])];
+    const flag = leaving
+      .map((key) => poseLayerEdits.get(key) ?? ownPoseRows.get(key)?.sideA[0]?.layer)
+      .find(Boolean);
+    const heir = plan.keep[0]?.piece;
+    if (flag && heir && !ownPoseRows.get(heir)?.sideA[0]?.layer && !poseLayerEdits.get(heir))
+      setPoseLayerEdits((current) =>
+        new Map(current).set(heir, flag === 'under' ? 'over' : 'under'),
+      );
     setPoseChanges((current) => {
       const edits = new Map(current.edits);
       const drop = new Set(current.drop);
-      // Carried by nothing: a pose it still has rests on a block resting on it, a loop.
-      if (!plan.pin && pinHosts.has(piece)) {
-        edits.delete(piece);
-        drop.add(piece);
+      for (const key of plan.drop) {
+        edits.delete(key);
+        drop.add(key);
       }
       return [...(plan.pin ? [plan.pin] : []), ...plan.keep].reduce(
         (next, { piece: key, host, placement }) =>
@@ -415,7 +418,6 @@ export function usePoseEdit({
       return inScope(piece) || (host != null && inScope(host));
     };
     const unsaved =
-      (!selected && !!poseFree) ||
       [...poseEdits.keys()].some((piece) =>
         selected ? pickupOf(piece).group.some((member) => selected.has(member)) : true,
       ) ||
@@ -436,7 +438,6 @@ export function usePoseEdit({
       if (!ok) setRefused(useSeamsStore.getState().errors[drop[0].seamKey] ?? 'not saved');
       return;
     }
-    setPoseFree(null);
     setPoseChanges((current) => {
       if (!selected) return { edits: new Map(), drop: new Set() };
       const next = new Map(current.edits);
@@ -480,7 +481,7 @@ export function usePoseEdit({
           host: hg,
           placement: pin.placement,
           grainDeg,
-          layer: layerOf(piece, own),
+          layer: pin.host === piece ? undefined : layerOf(piece, own),
         }),
       );
     }
@@ -537,7 +538,6 @@ export function usePoseEdit({
     setSnapOn,
     poseDrag,
     setPoseDrag,
-    poseFree,
     poseBounds,
     frameStale,
     fitFrame,
