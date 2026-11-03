@@ -40,7 +40,7 @@ import type { OrphanBoardState } from './orphan-pieces';
 // начнут спорить о том, где «настоящая» операция. Опасение верное, но лечится оно не запретом:
 // источник истины и так ОДИН — состояние формы. Расходятся не виды, а ЛОГИКА МУТАЦИЙ, если её
 // написать дважды. Поэтому схема не содержит ни одного собственного мутатора: `appendStep` и
-// `dissolveUnit` живут в OperationsField в одном экземпляре, и список зовёт ровно их же. Схема
+// `removeOperation` живут в OperationsField в одном экземпляре, и список зовёт ровно их же. Схема
 // собирает ЖЕСТ и передаёт его наверх; всё, что пишет в форму, — там.
 //
 // ПРОВОД ИДЁТ К СТРОКЕ-ПОТРЕБИТЕЛЮ, А НЕ К БОКСУ. Разница существенная: узел SHELL входит в
@@ -87,7 +87,6 @@ export function AssemblySchematic({
   pieceNameOf,
   onPickStep,
   onCreate,
-  onDissolve,
   pieceShapes,
   cloth,
   smvOfBlock,
@@ -112,7 +111,6 @@ export function AssemblySchematic({
    */
   onCreate: (prefill: CreatePrefill) => void;
   /** Растворить узел — по индексу его производящего шага. */
-  onDissolve: (stepIndex: number) => void;
   /**
    * Контуры деталей из чертежа. Схема — экран, на котором сборку и размечают, поэтому деталь
    * здесь обязана выглядеть деталью, а не строкой текста: полочку от подборта на глаз отличают
@@ -844,7 +842,6 @@ export function AssemblySchematic({
                 // canvas» значило бы назвать место, которого человек на этом экране не найдёт.
                 surfaceWords='in the schematic'
                 onAddOperation={addPrefill ? clickGuard(() => onCreate(addPrefill)) : undefined}
-                onDissolveUnit={clickGuard(() => onDissolve(b.producedAt))}
               />
             );
           })}

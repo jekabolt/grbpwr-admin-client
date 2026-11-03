@@ -125,7 +125,6 @@ const HELP_KEYS: [string, string, 'both' | 'schematic' | 'list'][] = [
   ['arrows', 'nudge the picked by 8px (shift: 1px)', 'schematic'],
   ['u', 'join the picked into a unit', 'schematic'],
   ['o', 'an operation on the picked', 'schematic'],
-  ['d', 'dissolve the picked unit', 'schematic'],
   ['e', "the picked unit's steps in the dock, with insertion points", 'schematic'],
   ['⌘z', 'undo — step by step, layout and sequence alike', 'both'],
   ['⇧⌘z', 'redo the gesture just undone', 'both'],
@@ -219,7 +218,6 @@ export type AssemblyFullscreenProps = {
   onPickStep: (index: number) => void;
   setPendingCreate: (p: CreatePrefill | null) => void;
   /** Потребитель — Ф4. */
-  dissolveUnit: (stepIndex: number) => void;
   /**
    * Добавить деталь во входы шага. Единственный вызыватель отсюда — РЕЖИМ ДОБОРА полки. Гейт
    * заморозки у мутатора теперь СВОЙ, первой строкой (`operations-field.tsx`, черри-пик-кандидат
@@ -472,7 +470,6 @@ export function AssemblyFullscreen({
   selectedIndex,
   onPickStep,
   setPendingCreate,
-  dissolveUnit,
   addInputToOperation,
   moveOperation,
   railFields,
@@ -1252,31 +1249,6 @@ export function AssemblyFullscreen({
     setPicked([]);
   }, [frozen, picked, freeOfPicked, setPendingCreate]);
 
-  const dissolveSelection = useCallback(() => {
-    if (frozen) {
-      refuseGesture('ASSEMBLY', 'frozen', FROZEN_REFUSAL);
-      return;
-    }
-    // ТОТ ЖЕ ГЕЙТ, ЧТО У КНОПКИ В БОКСЕ: ровно один узел, и он на столе. В прототипе это был
-    // починенный дефект — клавиша растворяла произвольного члена маркизы.
-    const free = freeOfPicked();
-    if (free.length !== 1 || !res.units.has(free[0])) {
-      refuseGesture(
-        'ASSEMBLY',
-        'not dissolved',
-        'dissolve needs exactly one unit picked, and it must still be on the table',
-      );
-      return;
-    }
-    const block = blocks.find((b) => b.key === free[0]);
-    if (!block) {
-      refuseGesture('ASSEMBLY', 'not dissolved', `“${free[0]}” has no producing step to dissolve`);
-      return;
-    }
-    dissolveUnit(block.producedAt);
-    setPicked([]);
-  }, [frozen, freeOfPicked, res, blocks, dissolveUnit]);
-
   /**
    * РЕЖИМ УЗЛА ПО КЛАВИШЕ — ЖЕСТ БЕЗ ГЕЙТА ЗАМОРОЗКИ, и это не забывчивость: читать и раскладывать
    * выпущенную карточку законно (R10), а режим узла — чтение. Править в нём нечего: точки вставки
@@ -1565,10 +1537,6 @@ export function AssemblyFullscreen({
         break;
       case 'o':
         processSelection();
-        e.preventDefault();
-        break;
-      case 'd':
-        dissolveSelection();
         e.preventDefault();
         break;
       case 'e':
@@ -2040,7 +2008,6 @@ export function AssemblyFullscreen({
                   // тот же, в который ведёт клавиша `e`: одна функция на оба, иначе орган и
                   // клавиша однажды разойдутся в том, что именно они открывают.
                   onOpenUnit={openUnitDock}
-                  onDissolve={dissolveUnit}
                   pieceShapes={pieceShapes}
                   cloth={cloth}
                   smvOfBlock={smvOfBlock}
@@ -2221,12 +2188,12 @@ export function AssemblyFullscreen({
                       onInsert={insertIntoUnit}
                     />
                   ) : (
-                    // УЗЕЛ ИСЧЕЗ, ПОКА РЕЖИМ БЫЛ ОТКРЫТ (растворили соседним жестом). Молча
+                    // УЗЕЛ ИСЧЕЗ, ПОКА РЕЖИМ БЫЛ ОТКРЫТ (удалили соседним жестом). Молча
                     // подменить содержимое редактором шага значило бы ответить не на тот вопрос:
                     // человек смотрит на узел, а увидел бы поля постороннего шага.
                     <Text size='micro' variant='label'>
                       ▣ {unitDisplayName({ key: dock.unitKey })} is not a unit any more — it was
-                      dissolved or removed
+                      removed
                     </Text>
                   )
                 ) : selectedIndex >= 0 && selectedIndex < steps.length ? (

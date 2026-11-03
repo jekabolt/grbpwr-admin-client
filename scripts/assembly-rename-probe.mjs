@@ -218,7 +218,7 @@ head('ключ нормализуется РОВНО ЗДЕСЬ — потому
   // невидимый пробел человек не найдёт никогда.
   const a = unitRenameAct(CHAIN, 0, 'BODY ', PIECES);
   is('хвостовой пробел не проносит ключ мимо занятости', a.kind, 'refuse');
-  yes('и отказ — про занятый узел', /already produced by step 20/.test(a.why));
+  yes('и отказ — про занятый узел', /remove step 20 first/.test(a.why));
 }
 {
   const a = unitRenameAct(CHAIN, 0, '  CARCASS  ', PIECES);
@@ -249,7 +249,7 @@ head('занятость спрашивается ТОЖДЕСТВОМ ПРОВ�
   // где угодно, только не в невидимом пробеле на другом шаге.
   const a = unitRenameAct(CHAIN_SPACED, 0, 'BODY', PIECES);
   is('пробел в ЛЕЖАЩЕМ ключе не проносит второго производителя', a.kind, 'refuse');
-  yes('и отказ называет тот самый шаг', /already produced by step 20/.test(a.why));
+  yes('и отказ называет тот самый шаг', /remove step 20 first/.test(a.why));
 }
 {
   // Пробел ВЕДУЩИЙ и на шаге, которого переименование не касается: на проводе это тот же BODY.
@@ -309,7 +309,7 @@ head('граница нормализации: пробелы — да, реги
   const ops = [op(['SHELL'], 'BODY '), op(['CUFF'], 'BODY')];
   const a = unitRenameAct(ops, 0, 'BODY', PIECES);
   is('чужой шаг с тем же проводом занятость составляет', a.kind, 'refuse');
-  yes('и назван он', /already produced by step 20/.test(a.why));
+  yes('и назван он', /remove step 20 first/.test(a.why));
 }
 {
   // А НАСТОЯЩИЙ ДУБЛЬ НА ТОМ ЖЕ ШАГЕ — отказ: «BODY⎵» и «BODY» стоят двумя РАЗНЫМИ позициями, и
@@ -326,7 +326,7 @@ head('три коллизии, а не одна');
   const a = unitRenameAct(CHAIN, 0, 'GARMENT', PIECES);
   is('занятый ключ отказал', a.kind, 'refuse');
   yes('и назвал ЭКРАННЫЙ номер шага', /step 40/.test(a.why));
-  yes('и предложил, что делать', /dissolve that unit first/.test(a.why));
+  yes('и предложил, что делать', /remove step 40 first/.test(a.why));
 }
 {
   // ПРОСТРАНСТВО ИМЁН ОДНО (правило 6) — этой ветки в копии не было вовсе.

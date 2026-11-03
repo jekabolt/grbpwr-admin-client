@@ -208,7 +208,7 @@ import {
 } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
 import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
-import { dissolveNeedsConfirmation, dissolvePrice, type AssemblyPrice } from './assembly-cause';
+import { removeGate, removePrice, type AssemblyPrice } from './assembly-cause';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
@@ -224,7 +224,6 @@ import {
   appendLabel,
   canRedo,
   canUndo,
-  dissolveLabel,
   dropForm,
   dropMove,
   dropRedoTop,
@@ -1754,19 +1753,12 @@ function ProducesBlock({
   inputKeys,
   pieces,
   assembly,
-  onDissolve,
   onEdit,
 }: {
   index: number;
   inputKeys: string[];
   pieces: PieceRef[];
   assembly: AssemblyView;
-  /**
-   * Мутатор растворения — ТОТ ЖЕ, что зовут полотно и схема. Свой `setValue` здесь стоял и делал
-   * ровно то же самое, только мимо истории: растворение чипом отменить было нельзя, а
-   * растворение с полотна — можно, хотя это один и тот же поступок.
-   */
-  onDissolve: (index: number) => void;
   /**
    * Шаг ИЗМЕНЁН кнопкой этого блока — гасит формовую историю отмены.
    *
@@ -1786,7 +1778,7 @@ function ProducesBlock({
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
   // Защитная гигиена для старых/внешних мутаций: без внутреннего ключа имя не имеет владельца и
-  // сервер отвергнет теневое значение. Обычный dissolve очищает оба поля одним жестом.
+  // сервер отвергнет теневое значение. Удаление шага уносит оба поля вместе со строкой.
   useEffect(() => {
     if (!outputKey && outputName) {
       setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
@@ -1827,20 +1819,7 @@ function ProducesBlock({
 
   return (
     <>
-      <GroupLabel
-        action={
-          outputKey ? (
-            // ТОТ ЖЕ МУТАТОР, ЧТО У ПОЛОТНА. Свой `setValue` здесь гасил историю вместо того,
-            // чтобы класть в неё запись, — и один и тот же поступок отменялся с полотна и не
-            // отменялся из редактора.
-            <Button type='button' variant='underline' size='xs' onClick={() => onDissolve(index)}>
-              dissolve
-            </Button>
-          ) : undefined
-        }
-      >
-        unit
-      </GroupLabel>
+      <GroupLabel>unit</GroupLabel>
       {!outputKey ? (
         <div className='mb-2 max-w-60'>
           <Input
@@ -2481,7 +2460,6 @@ function OperationEditor({
   onDropPiece,
   onReplaceGhost,
   onRemoveGhost,
-  onDissolveUnit,
   mediaUrls,
   onEdit,
   frozen = false,
@@ -2525,7 +2503,6 @@ function OperationEditor({
   /** Убрать призрака только из этого шага и перейти к следующей метке. */
   onRemoveGhost: (index: number, ghostKey: string) => void;
   /** Растворение — тот же мутатор, что зовут полотно и схема. */
-  onDissolveUnit: (index: number) => void;
   /** Адреса операционных снимков; форма возит только media_id. */
   mediaUrls?: Map<number, string>;
   /**
@@ -4547,7 +4524,6 @@ function OperationEditor({
         inputKeys={selectedPieceKeys}
         pieces={pieces}
         assembly={assembly}
-        onDissolve={onDissolveUnit}
         onEdit={onEdit}
       />
 
@@ -5893,9 +5869,9 @@ export function OperationsField({
         return;
       }
       // Производящий шаг — несущая точка графа: снятие его выхода превращает каждую позднюю ссылку
-      // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Структурное
-      // растворение остаётся отдельным явным жестом.
-      refuseGesture('SEQUENCE', 'join kept', `dissolve ▣ ${membership.outputUnitKey} explicitly`);
+      // на узел в unknown-key, а строгий свип затем не производит и все зависимые узлы. Снять его
+      // можно только явным удалением шага.
+      refuseGesture('SEQUENCE', 'join kept', `remove ▣ ${membership.outputUnitKey} explicitly`);
       return;
     }
     if (from === to && !!operation.assemblyBlockDetached === membership.assemblyBlockDetached)
@@ -6611,9 +6587,9 @@ export function OperationsField({
   // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
   // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
   const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
-  const [dissolveWarning, setDissolveWarning] = useState<{
+  const [removeWarning, setRemoveWarning] = useState<{
     stepIndex: number;
-    unitName: string;
+    fieldId: string;
     price: AssemblyPrice;
   } | null>(null);
   // ВСЕ ОРГАНЫ СОЗДАНИЯ ВХОДЯТ ЧЕРЕЗ ЭТУ ДВЕРЬ. Ховер-полоса уже несёт явный `at`; выбор одной
@@ -6638,7 +6614,7 @@ export function OperationsField({
   useEffect(() => {
     if (!frozen) return;
     setPendingCreate(null);
-    setDissolveWarning(null);
+    setRemoveWarning(null);
     // (8/10) ГОНКА RELEASE. Карточку выпустили, пока фулскрин открыт: жест, сделанный секунду
     // назад, отменять уже нельзя — правка выпущенной карточки запрещена целиком (R10). Гейт на
     // самом ⌘Z стоит тоже, но записи обязаны умереть, а не ждать, пока в них упрутся.
@@ -6722,7 +6698,7 @@ export function OperationsField({
   // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
   // корне поля перерисовывала бы всё на каждое нажатие клавиши.
   const addInputToOperation = (index: number, key: string) => {
-    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у `appendStep` и `dissolveUnit`. Внешний
+    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у `appendStep` и `removeOperation`. Внешний
     // `<fieldset disabled>` карточки глушит клик и фокус, но НЕ pointer/DnD-жест на div — а
     // единственный настоящий вызыватель этого мутатора и есть дроп чипа детали на строку рельса
     // (`onDropPiece`). То есть на ВЫПУЩЕННОЙ карточке дроп правил форму, взводя isDirty, и никакая
@@ -6881,7 +6857,7 @@ export function OperationsField({
     const next = operations.map((operation, i) => (i === index ? nextRow : operation));
     // Призрак из джойна двух оставил бы узел из одного входа: сборка такого не примет, а снятая
     // метка увела бы на следующий шаг мимо нарушения. Отказ — словами движка, как у дропа;
-    // джойн чинят входом, растворением или заменой призрака.
+    // джойн чинят входом, удалением шага или заменой призрака.
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
     const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
     const violationsOf = (ops: readonly OperationFormValue[]) =>
@@ -7097,46 +7073,20 @@ export function OperationsField({
     insertStepAt(at === undefined ? fields.length : Math.min(Math.max(at, 0), fields.length), r);
   };
 
-  /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
-  const dissolveUnit = (stepIndex: number) => {
-    if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
-    // ЗНАЧЕНИЯ ЧИТАЮТСЯ ДО ОБНУЛЕНИЯ — возвращать отмене больше неоткуда. `fieldId` здесь доступен
-    // синхронно (строка существует, массив не двигался), и второй такт не нужен.
-    const unitKey = ((getValues(`operations.${stepIndex}.outputUnitKey`) as string) ?? '').trim();
-    const unitName = ((getValues(`operations.${stepIndex}.outputUnitName`) as string) ?? '').trim();
-    const fieldId = fields[stepIndex]?.id;
-    setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
-    setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
-    if (!fieldId || !unitKey) return; // растворять было нечего — и отменять нечего
-    setHistory(
-      record(history.current, {
-        kind: 'dissolve',
-        index: stepIndex,
-        fieldId,
-        unitKey,
-        unitName,
-        label: dissolveLabel(unitKey, unitName),
-      }),
-    );
-  };
-
-  /** Every dissolve door asks this gate; the mutator above stays the one writer and undo author. */
-  const requestDissolveUnit = (stepIndex: number) => {
+  /**
+   * Every user door of REMOVE asks this gate; undo of a created step calls the mutator directly.
+   * A fold refusal comes first and stays inside the mutator, so it is said in one place.
+   */
+  const requestRemoveOperation = (stepIndex: number) => {
     if (frozen) return;
-    const price = dissolvePrice(pieces, grouping.schematicSteps, stepIndex);
-    if (!dissolveNeedsConfirmation(price)) {
-      dissolveUnit(stepIndex);
+    const closing = foldsClosingOn(getValues('operations') ?? [], stepIndex);
+    const price = removePrice(pieces, grouping.schematicSteps, stepIndex);
+    const fieldId = fields[stepIndex]?.id;
+    if (removeGate(closing, price) !== 'ask' || !price || !fieldId) {
+      removeOperation(stepIndex);
       return;
     }
-    const step = grouping.schematicSteps[stepIndex];
-    setDissolveWarning({
-      stepIndex,
-      unitName: unitDisplayName({
-        key: step?.outputUnitKey ?? '',
-        outputUnitName: step?.outputUnitName,
-      }),
-      price,
-    });
+    setRemoveWarning({ stepIndex, fieldId, price });
   };
 
   /**
@@ -7226,7 +7176,7 @@ export function OperationsField({
     prefs.reset();
   }, [prefs, setHistory]);
 
-  /** Выход шага, как его читает движок сборки: щит растворения сверяется с ним же. */
+  /** Выход шага, как его читает движок сборки: щит переименования сверяется с ним же. */
   const outputUnitKeyOf = (i: number) =>
     (getValues(`operations.${i}.outputUnitKey`) as string) ?? '';
 
@@ -7371,7 +7321,7 @@ export function OperationsField({
           setValue('assemblyCleared', rec.clearedBefore, { shouldDirty: true });
         }
       });
-    } else if (rec.kind === 'rename') {
+    } else {
       // ОДНО НАЖАТИЕ ВОЗВРАЩАЕТ ВСЕ ТРИ ВИДА МЕСТ. Тем же переписывателем, что их и правил, — по
       // адресам, записанным жестом, а не по повторному скану: шаг, дописавший ссылку на НОВЫЙ ключ
       // уже после переименования, эту ссылку сделал сам, и отмена чужой работы не касается.
@@ -7381,11 +7331,6 @@ export function OperationsField({
       prefs.restore(rec.posBack);
       // …и выделение: инверсия переименования — тоже переименование, только в другую сторону.
       setRenamedUnit({ from: rec.to, to: rec.from });
-    } else {
-      applyToForm(() => {
-        setValue(`operations.${rec.index}.outputUnitKey`, rec.unitKey, { shouldDirty: true });
-        setValue(`operations.${rec.index}.outputUnitName`, rec.unitName, { shouldDirty: true });
-      });
     }
     setHistory(undoStep(history.current));
   };
@@ -7473,17 +7418,9 @@ export function OperationsField({
       setSelected(rec.index);
       return;
     }
-    if (rec.kind === 'rename') {
-      applyToForm(() => rewriteUnitKeySites(rec, rec.to));
-      prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
-      setRenamedUnit({ from: rec.from, to: rec.to });
-      setHistory(redoStep(history.current));
-      return;
-    }
-    applyToForm(() => {
-      setValue(`operations.${rec.index}.outputUnitKey`, '', { shouldDirty: true });
-      setValue(`operations.${rec.index}.outputUnitName`, '', { shouldDirty: true });
-    });
+    applyToForm(() => rewriteUnitKeySites(rec, rec.to));
+    prefs.restore(rec.posForward); // зеркало отмены: раскладка возвращается тем же нажатием
+    setRenamedUnit({ from: rec.from, to: rec.to });
     setHistory(redoStep(history.current));
   };
 
@@ -7975,7 +7912,6 @@ export function OperationsField({
                   cloth={inlineCloth?.map ?? null}
                   smvOfBlock={grouping.smvOfBlock}
                   tailSmv={grouping.tailSmv}
-                  onDissolve={requestDissolveUnit}
                   positions={prefs.pos}
                   // ИНЛАЙНОВАЯ СХЕМА ПИШЕТ В ТУ ЖЕ ИСТОРИЮ, хотя ⌘Z в ней нет. Иначе жест,
                   // сделанный здесь, оказался бы невидим для истории, и первое же ⌘Z в фулскрине
@@ -8071,7 +8007,7 @@ export function OperationsField({
                   cloth={inlineCloth?.map ?? null}
                   pinOptions={pinOptions}
                   onInsertAfter={() => insertAfter(selectedIndex)}
-                  onRemove={() => removeOperation(selectedIndex)}
+                  onRemove={() => requestRemoveOperation(selectedIndex)}
                   onMarkReviewed={() => markReviewed(selectedIndex)}
                   onReviewAccepted={() => acceptReview(selectedIndex)}
                   onFlashPieces={flashPieces}
@@ -8080,7 +8016,6 @@ export function OperationsField({
                   onDropPiece={addInputToOperation}
                   onReplaceGhost={replaceStepGhost}
                   onRemoveGhost={removeStepGhost}
-                  onDissolveUnit={requestDissolveUnit}
                   mediaUrls={operationMediaUrls}
                   frozen={frozen}
                 />
@@ -8114,7 +8049,6 @@ export function OperationsField({
           selectedIndex={selectedIndex}
           onPickStep={pickStepInline}
           setPendingCreate={openCreate}
-          dissolveUnit={requestDissolveUnit}
           addInputToOperation={addInputToOperation}
           // `addOperation` ФУЛСКРИНУ БОЛЬШЕ НЕ ОТДАЁТСЯ. Его «+ new operation» ведёт в диалог
           // создания (`setPendingCreate`), а не дописывает пустой шаг: там нет ни лотка, ни
@@ -8179,7 +8113,7 @@ export function OperationsField({
                 cloth={inlineCloth?.map ?? null}
                 pinOptions={pinOptions}
                 onInsertAfter={() => insertAfter(selectedIndex)}
-                onRemove={() => removeOperation(selectedIndex)}
+                onRemove={() => requestRemoveOperation(selectedIndex)}
                 onMarkReviewed={() => markReviewed(selectedIndex)}
                 onReviewAccepted={() => acceptReview(selectedIndex)}
                 onFlashPieces={addPiece.onArm}
@@ -8188,7 +8122,6 @@ export function OperationsField({
                 onDropPiece={addInputToOperation}
                 onReplaceGhost={replaceStepGhost}
                 onRemoveGhost={removeStepGhost}
-                onDissolveUnit={requestDissolveUnit}
                 mediaUrls={operationMediaUrls}
                 frozen={frozen}
               />
@@ -8217,31 +8150,44 @@ export function OperationsField({
       )}
 
       <ConfirmationModal
-        open={dissolveWarning != null}
+        open={removeWarning != null}
         onOpenChange={(open) => {
-          if (!open) setDissolveWarning(null);
+          if (!open) setRemoveWarning(null);
         }}
         onConfirm={() => {
-          if (dissolveWarning) dissolveUnit(dissolveWarning.stepIndex);
+          if (!removeWarning) return;
+          // The dialog holds an address: an autosave reset or a release can move the rows under it,
+          // and removing by a stale index would delete someone else's step.
+          if (fields[removeWarning.stepIndex]?.id !== removeWarning.fieldId) {
+            refuseGesture('SEQUENCE', 'not removed', 'the sequence has changed since');
+            return;
+          }
+          removeOperation(removeWarning.stepIndex);
         }}
-        title={`DISSOLVE ${dissolveWarning?.unitName ?? ''}?`.toUpperCase()}
-        confirmLabel='dissolve'
+        title={
+          removeWarning
+            ? `REMOVE ${getValues(`operations.${removeWarning.stepIndex}.operationNumber`) || (removeWarning.stepIndex + 1) * 10} ${labelOfStep(removeWarning.stepIndex).split(' · ')[0]}?`.toUpperCase()
+            : ''
+        }
+        confirmLabel='remove'
         cancelLabel='cancel'
         onCloseAutoFocus={restoreScreenFocus}
       >
-        {dissolveWarning && (
+        {removeWarning && (
           <ChipRow className='gap-2'>
-            {dissolveWarning.price.breaks.map((stepIndex) => (
+            {removeWarning.price.breaks.map((stepIndex) => (
               <Chip key={stepIndex}>
                 {getValues(`operations.${stepIndex}.operationNumber`) || (stepIndex + 1) * 10}{' '}
                 {labelOfStep(stepIndex).split(' · ')[0]}
               </Chip>
             ))}
-            <Chip tone='error'>
-              breaks {dissolveWarning.price.breaks.length}{' '}
-              {dissolveWarning.price.breaks.length === 1 ? 'op' : 'ops'}
-            </Chip>
-            {dissolveWarning.price.unitsLost.map((key) => {
+            {removeWarning.price.breaks.length > 0 && (
+              <Chip tone='error'>
+                breaks {removeWarning.price.breaks.length}{' '}
+                {removeWarning.price.breaks.length === 1 ? 'op' : 'ops'}
+              </Chip>
+            )}
+            {removeWarning.price.unitsLost.map((key) => {
               const producer = grouping.schematicSteps.find((step) => step.outputUnitKey === key);
               return (
                 <Chip key={`unit:${key}`} tone='error'>
@@ -8249,7 +8195,7 @@ export function OperationsField({
                 </Chip>
               );
             })}
-            {dissolveWarning.price.piecesDropped.map((key) => (
+            {removeWarning.price.piecesDropped.map((key) => (
               <Chip key={`piece:${key}`} tone='error'>
                 dropped {pieces.find((piece) => piece.lineKey === key)?.name ?? key}
               </Chip>

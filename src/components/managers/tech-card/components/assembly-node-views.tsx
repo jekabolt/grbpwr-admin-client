@@ -1058,7 +1058,6 @@ export function UnitBoxView({
   tokenProps,
   surfaceWords,
   onAddOperation,
-  onDissolveUnit,
 }: {
   box: BoxLayout;
   block: AssemblyBlock;
@@ -1112,7 +1111,6 @@ export function UnitBoxView({
   surfaceWords: string;
   /** Добавить обработку на узел. Пусто — вставить некуда (`unitAddPrefill` вернул `null`). */
   onAddOperation?: () => void;
-  onDissolveUnit: () => void;
 }) {
   const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
   // Пиктограмма узла (полоса C) — только когда каркас её поставил; иначе шапка как была.
@@ -1262,19 +1260,10 @@ export function UnitBoxView({
             перегруз, на который владелец жалуется («какая-то хуйня»); из двух ушёл тот, что
             появляется только под мышью и только на живой карточке. Клавиша `e` осталась:
             клавиатурный путь органом не является и места на экране не занимает. */}
-        {hovered && !frozen && (
+        {hovered && !frozen && onAddOperation && (
           <NodeHoverBar>
-            {onAddOperation && (
-              <Chip dashed onClick={onAddOperation} title='add a processing step on this unit'>
-                + operation
-              </Chip>
-            )}
-            <Chip
-              dashed
-              onClick={onDissolveUnit}
-              title='the step stops assembling the unit; its inputs return to the table for the next steps'
-            >
-              dissolve
+            <Chip dashed onClick={onAddOperation} title='add processing step'>
+              + operation
             </Chip>
           </NodeHoverBar>
         )}

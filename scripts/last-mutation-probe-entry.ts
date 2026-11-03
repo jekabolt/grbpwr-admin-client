@@ -10,7 +10,6 @@ export {
   appendLabel,
   canRedo,
   canUndo,
-  dissolveLabel,
   dropForm,
   dropMove,
   dropRedoTop,

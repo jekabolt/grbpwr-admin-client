@@ -324,7 +324,7 @@ function RatifyPanelBody({ frozen, onClose, catalog, blanks, onOpenStep }: Ratif
   const apply = useCallback(
     (row: RatifyRow, p: RatifyProposal) => {
       // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, КАК У ВСЕХ МУТАТОРОВ КАРТОЧКИ (`removeOperation`,
-      // `moveOperation`, `addInputToOperation`, `dissolveUnit`, `renameUnit`). Тело панели на
+      // `moveOperation`, `addInputToOperation`, `renameUnit`). Тело панели на
       // выпущенной карточке не монтируется вовсе — но ПРИКРЫТИЕ РАЗМЕТКОЙ НЕ КОНТРАКТ: этот гейт
       // держится сам, без всякого предположения о том, что нарисовано выше по дереву.
       if (frozen) return;

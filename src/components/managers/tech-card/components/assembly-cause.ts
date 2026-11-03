@@ -22,7 +22,7 @@ import type {
 // А материал для вывода и так снаружи: нарушения, узлы и выходные ключи шагов. Здесь только
 // ВЫВОД по ним — ни одного нового отказа, ни одного изменённого слова движка.
 //
-// ЦЕНА СЧИТАЕТСЯ ТОЙ ЖЕ ФОРМУЛОЙ, А НЕ ВТОРОЙ. «Что рассыплется, если растворить узел» — это
+// ЦЕНА СЧИТАЕТСЯ ТОЙ ЖЕ ФОРМУЛОЙ, А НЕ ВТОРОЙ. «Что рассыплется, если удалить шаг» — это
 // вопрос «что классификация скажет о карточке, КАКОЙ ОНА СТАНЕТ после жеста», и отвечает на него
 // тот же расчёт по тому же свипу, прогнанному на карточке-после. Вторая формула для того же
 // вопроса однажды разошлась бы с первой, и разошлась бы МОЛЧА: цену читают один раз, а верят ей
@@ -308,8 +308,8 @@ export type AssemblyPrice = {
   summary: string;
 };
 
-/** Only destructive consequences stop dissolve for confirmation; a heal alone is safe. */
-export function dissolveNeedsConfirmation(price: AssemblyPrice | null): price is AssemblyPrice {
+/** Only destructive consequences stop a gesture for confirmation; a heal alone is safe. */
+export function priceNeedsConfirmation(price: AssemblyPrice | null): price is AssemblyPrice {
   return (
     !!price &&
     (price.breaks.length > 0 || price.unitsLost.length > 0 || price.piecesDropped.length > 0)
@@ -322,18 +322,20 @@ export function dissolveNeedsConfirmation(price: AssemblyPrice | null): price is
  * повторять: повтор разошёлся бы молча, а молча разошедшаяся цена лжёт человеку ровно в тот
  * момент, когда он решает, нажимать ли.
  *
- * `lead` — начало фразы («dissolving ▣ SHELL»): глагол знает только жест, а слова после него —
+ * `lead` — начало фразы («removing step 20»): глагол знает только жест, а слова после него —
  * только этот расчёт.
  *
  * КОНТРАКТ: `before` и `after` — одна и та же карточка, и индекс в обеих означает ОДИН И ТОТ ЖЕ
- * шаг. Жест, добавляющий или удаляющий шаги, сдвинул бы нумерацию, и разность превратилась бы в
- * список случайных номеров; такому жесту нужен свой способ сопоставления, а не этот.
+ * шаг. Жест, сдвигающий нумерацию, обязан передать `beforeIndexOf`: какой шаг карточки-сейчас стоит
+ * на этом индексе карточки-после. Все номера цены — в нумерации карточки-сейчас: её и видит человек
+ * в момент выбора. Шаг, которого в `after` нет, — сам жест: ни поломкой, ни починкой он не считается.
  */
 export function assemblyPrice(
   pieces: AssemblyPiece[],
   before: AssemblyStep[],
   after: AssemblyStep[],
   lead: string,
+  beforeIndexOf: (afterIndex: number) => number = (i) => i,
 ): AssemblyPrice {
   const wasRes = assemblySweep(pieces, before);
   const nowRes = assemblySweep(pieces, after);
@@ -342,17 +344,27 @@ export function assemblyPrice(
 
   const breaks: number[] = [];
   const orphans: number[] = [];
+  const afterIndex = new Map<number, number>();
+  const brokenAfter: number[] = [];
   after.forEach((_, i) => {
+    const at = beforeIndexOf(i);
+    afterIndex.set(at, i);
     // Уже сломанный шаг в цену не идёт: «сломается» про то, что сейчас работает. Иначе жест на
     // полусобранной карточке пугал бы человека его же незаконченной работой.
-    if (was.has(i) || !now.has(i)) return;
-    breaks.push(i);
-    if (now.get(i)?.kind === 'consequence') orphans.push(i);
+    if (was.has(at) || !now.has(i)) return;
+    breaks.push(at);
+    brokenAfter.push(i);
+    if (now.get(i)?.kind === 'consequence') orphans.push(at);
   });
-  const heals = [...was.keys()].filter((i) => !now.has(i)).sort((a, b) => a - b);
+  const heals = [...was.keys()]
+    .filter((at) => {
+      const i = afterIndex.get(at);
+      return i !== undefined && !now.has(i);
+    })
+    .sort((a, b) => a - b);
 
-  // Узел, исчезнувший ВМЕСТЕ со своим объявлением, — это сам жест, а не его цена: растворение
-  // ровно за тем и зовут. Потеря — это узел, который карточка по-прежнему обещает собрать, а
+  // Узел, исчезнувший ВМЕСТЕ со своим объявлением, — это сам жест, а не его цена: удаление
+  // шага ровно за тем и зовут. Потеря — это узел, который карточка по-прежнему обещает собрать, а
   // движок уже не собирает.
   const declared = new Set(after.map((s) => s.outputUnitKey).filter(Boolean));
   const unitsLost = [...wasRes.units.keys()].filter((k) => !nowRes.units.has(k) && declared.has(k));
@@ -364,9 +376,9 @@ export function assemblyPrice(
   // тогда как перед и спинка только что выпали из изделия, и увидит это разве что релизный гейт.
   //
   // Считаются ТОЛЬКО узлы, дожившие до карточки-после, и только детали, не попавшие после жеста
-  // НИ В ОДИН узел. Узел, исчезнувший целиком, — это `unitsLost` или сам жест: растворение затем
-  // и зовут, чтобы его входы вернулись на стол, и объявлять это потерей значит пересказывать
-  // человеку его же намерение.
+  // НИ В ОДИН узел. Узел, исчезнувший целиком, — это `unitsLost` или сам жест: шаг затем и удаляют,
+  // чтобы его входы вернулись на стол, и объявлять это потерей значит пересказывать человеку его
+  // же намерение.
   const inAfter = new Set<string>();
   nowRes.units.forEach((u) => u.leaves.forEach((k) => inAfter.add(k)));
   const dropped = new Set<string>();
@@ -382,7 +394,9 @@ export function assemblyPrice(
   // Дедуп: один код у двух сломанных шагов законен (поглощение), а «▣ SHELL, ▣ SHELL» — нет.
   const held = [
     ...new Set(
-      breaks.map((i) => after[i]?.outputUnitKey ?? '').filter((k) => !!k && nowRes.units.has(k)),
+      brokenAfter
+        .map((i) => after[i]?.outputUnitKey ?? '')
+        .filter((k) => !!k && nowRes.units.has(k)),
     ),
   ];
 
@@ -415,24 +429,32 @@ export function assemblyPrice(
 }
 
 /**
- * Цена растворения узла. `null` — растворять нечего (шаг ничего не собирает): это НЕ «ничего не
- * сломается», а отсутствие жеста, и говорить о нём нечего.
+ * Цена удаления шага. `null` — такого шага нет, и говорить не о чем.
  *
- * КАРТОЧКА-ПОСЛЕ СТРОИТСЯ РОВНО ТАК, КАК ПИШЕТ МУТАТОР `dissolveUnit`: гаснут ОБА поля, ключ и
- * имя. Погаси только ключ — и на карточке-после осталось бы имя без ключа, движок ответил бы
- * `shadow-name`, и цена назвала бы поломку, которой жест не делает. Потребители ключа при этом не
- * трогаются: их входы остаются висячими ссылками, и это не упущение расчёта, а то самое, что
- * человеку и надо сказать заранее.
+ * КАРТОЧКА-ПОСЛЕ СТРОИТСЯ РОВНО ТАК, КАК ПИШЕТ МУТАТОР `removeOperation`: строка уходит из массива,
+ * входы потребителей не трогаются. Их висячие ссылки — не упущение расчёта, а то самое, что человеку
+ * и надо сказать заранее. Сгибы лежат на самой строке (`foldKeys`), их разбирает `removeGate`.
  */
-export function dissolvePrice(
+export function removePrice(
   pieces: AssemblyPiece[],
   steps: AssemblyStep[],
   stepIndex: number,
 ): AssemblyPrice | null {
-  const key = (steps[stepIndex]?.outputUnitKey ?? '').trim();
-  if (!key) return null;
-  const after = steps.map((s, i) =>
-    i === stepIndex ? { ...s, outputUnitKey: '', outputUnitName: '' } : s,
+  if (!steps[stepIndex]) return null;
+  return assemblyPrice(
+    pieces,
+    steps,
+    steps.filter((_, i) => i !== stepIndex),
+    `removing step ${stepNo(stepIndex)}`,
+    (i) => (i < stepIndex ? i : i + 1),
   );
-  return assemblyPrice(pieces, steps, after, `dissolving ${unit(steps, key)}`);
+}
+
+/** What REMOVE does: a closing fold refuses before any price is shown, then the price may ask. */
+export function removeGate(
+  closingFolds: readonly string[],
+  price: AssemblyPrice | null,
+): 'refuse' | 'ask' | 'remove' {
+  if (closingFolds.length > 0) return 'refuse';
+  return priceNeedsConfirmation(price) ? 'ask' : 'remove';
 }
