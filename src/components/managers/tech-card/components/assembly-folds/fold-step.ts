@@ -61,11 +61,11 @@ export function foldStepBlocked(
   });
 }
 
-export const FOLD_STEP_REFUSAL = 'СНАЧАЛА ПЕРЕНЕСИТЕ СГИБ';
+export const FOLD_STEP_REFUSAL = 'MOVE THE FOLD FIRST';
 
 const REFUSAL_WORDS: Record<string, string> = {
-  fold_order: 'ПОРЯДОК СГИБОВ',
-  fold_on_two_steps: 'СГИБ НА ДВУХ ШАГАХ',
+  fold_order: 'FOLD ORDER',
+  fold_on_two_steps: 'FOLD ON TWO STEPS',
   fold_step_gone: FOLD_STEP_REFUSAL,
 };
 

@@ -399,19 +399,19 @@ export function FoldPicker({
             className='active:translate-y-px'
             data-fold-step-suggestion={rowNumber}
           >
-            ШАГ [{operationLabel(suggested)}]
+            STEP [{operationLabel(suggested)}]
           </Chip>
         ) : (
           <Select
             name={`fold-step-${rowNumber}`}
             items={items}
-            placeholder='ШАГ'
+            placeholder='STEP'
             value={current === undefined ? 'none' : String(current)}
             readOnly={frozen}
             size='sm'
             className='w-40 hover:border-textColor active:translate-y-px'
             itemClassName='data-[state=checked]:bg-textColor data-[state=checked]:text-bgColor'
-            renderValue={(_, item) => <span>ШАГ {item?.label}</span>}
+            renderValue={(_, item) => <span>STEP {item?.label}</span>}
             onValueChange={(value) => assignStep(value === 'none' ? null : Number(value))}
           />
         )}
@@ -422,7 +422,7 @@ export function FoldPicker({
           onClick={() => assignStep(null)}
           className='hover:text-textColor active:translate-y-px'
         >
-          БЕЗ ШАГА
+          NO STEP
         </Button>
       </div>
     );

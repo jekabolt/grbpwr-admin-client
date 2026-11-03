@@ -83,7 +83,7 @@ describe('foldRefusalOf', () => {
 
   it('names the fold refusals and leaves the rest alone', () => {
     expect(foldRefusalOf(refused('fold_order (used by operations[1]); keep the order'))).toBe(
-      'ПОРЯДОК СГИБОВ',
+      'FOLD ORDER',
     );
     expect(foldRefusalOf(refused('fold_step_gone; move the fold'))).toBe(FOLD_STEP_REFUSAL);
     expect(foldRefusalOf(refused('required'))).toBeNull();

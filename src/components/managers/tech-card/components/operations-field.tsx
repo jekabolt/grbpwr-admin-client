@@ -5823,7 +5823,7 @@ export function OperationsField({
   const removeOperation = (index: number) => {
     if (frozen) return;
     if (foldsClosingOn(getValues('operations') ?? [], index).length > 0) {
-      refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'БЕЗ ШАГА');
+      refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'NO STEP');
       return;
     }
     const historyKey = getValues(`operations.${index}.historyKey`);
