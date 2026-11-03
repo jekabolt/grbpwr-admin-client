@@ -19,7 +19,7 @@ import { useFoldsStore } from './folds-store';
 import { useFoldWrites } from './use-fold-writes';
 
 const FOLD_CLOSE = cn(
-  'absolute top-0 right-0 z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  'absolute top-px right-px z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
   TILE_QUIET,
 );
 

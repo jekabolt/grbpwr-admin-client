@@ -38,7 +38,7 @@ const SeamPicker = lazy(() => import('./seam-picker'));
 const TILE_W = 106;
 const TILE_H = 72;
 const SEAM_CLOSE = cn(
-  'absolute top-0 right-0 z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  'absolute top-px right-px z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
   TILE_QUIET,
 );
 

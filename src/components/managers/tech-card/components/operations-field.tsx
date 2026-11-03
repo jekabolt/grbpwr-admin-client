@@ -312,7 +312,7 @@ const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 // The WITH row: every tile shares one 72 px footprint, the silhouette fills it.
 const WITH_BOX = { w: 72, h: 72 };
 const WITH_CLOSE = cn(
-  'absolute top-0 right-0 z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
+  'absolute top-px right-px z-10 size-7 bg-bgColor p-0 [@media(pointer:coarse)]:size-11',
   TILE_QUIET,
 );
 
@@ -1841,7 +1841,7 @@ function ProducesBlock({
         unit
       </GroupLabel>
       {!outputKey ? (
-        <div className='max-w-60'>
+        <div className='mb-2 max-w-60'>
           <Input
             value={draftName}
             aria-label='unit name'
@@ -1861,7 +1861,7 @@ function ProducesBlock({
         </div>
       ) : (
         <>
-          <div className='max-w-60'>
+          <div className='mb-2 max-w-60'>
             {/* Имя живёт на первом производителе. Поглощающий шаг показывает то же поле, но пишет
                 в канонический адрес: сервер очищает outputUnitName на всех поглощениях, потому
                 что второе имя одного узла было бы вторым мнением о факте. */}
