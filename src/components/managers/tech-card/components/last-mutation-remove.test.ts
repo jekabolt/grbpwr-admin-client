@@ -13,6 +13,7 @@ import {
   undoStep,
   type HistoryEntry,
 } from './last-mutation';
+import { carryManagedStepKeys } from './operations-presence';
 
 type Row = {
   historyKey: string;
@@ -120,6 +121,32 @@ describe('undo of a removed step', () => {
     expect(keysOf(head)).toEqual(['y']);
   });
 
+  it('returns next to the old neighbours when the one before it lost its key', () => {
+    const list = rows('a', 'fuse', 'join', 'b');
+    const rec = remove(list, 2);
+    list[1] = { historyKey: 'fuse-minted-by-a-save' };
+    undo(list, rec);
+    expect(keysOf(list)).toEqual(['a', 'fuse-minted-by-a-save', 'join', 'b']);
+  });
+
+  it('falls to the nearest live neighbour when both sides lost their keys', () => {
+    const list = rows('a', 'fuse1', 'join', 'fuse2', 'b');
+    const rec = remove(list, 2);
+    list[1] = { historyKey: 'minted1' };
+    list[2] = { historyKey: 'minted2' };
+    undo(list, rec);
+    expect(keysOf(list)).toEqual(['a', 'join', 'minted1', 'minted2', 'b']);
+  });
+
+  it('keeps the order through another edit between remove and undo', () => {
+    const list = rows('a', 'b', 'c', 'd');
+    const rec = remove(list, 1);
+    list[1] = { ...list[1], note: 'edited' };
+    undo(list, rec);
+    expect(keysOf(list)).toEqual(['a', 'b', 'c', 'd']);
+    expect(list[2].note).toBe('edited');
+  });
+
   it('survives a field edit, and no record with a position survives with it', () => {
     const list = rows('a', 'b');
     const created: HistoryEntry<Row> = {
@@ -166,6 +193,37 @@ describe('undo of a removed step', () => {
     expect(removeUndoRefusal(rec, { ...whole, seamKeys: new Set() })).toBe('seam deleted');
     expect(removeUndoRefusal(rec, { ...whole, bomLineKeys: new Set() })).toBe('material deleted');
     expect(removeUndoRefusal(removal(list, 0), noRefusalState([]))).toBeNull();
+  });
+});
+
+describe('the key of a server-managed step across a save', () => {
+  const fuse = (historyKey: string, inputKeys: string[]) => ({
+    historyKey,
+    operationType: 'TECH_CARD_OPERATION_TYPE_FUSING',
+    draft: true,
+    inputKeys,
+  });
+  const plain = (historyKey: string) => ({ historyKey, operationType: 'SEW' });
+
+  it('stays on the same step, also when the server moved it', () => {
+    const sent = [plain('a'), fuse('f1', ['CLR']), fuse('f2', ['BODY'])];
+    const read = [fuse('new2', ['BODY']), fuse('new1', ['CLR']), plain('new3')];
+    expect(carryManagedStepKeys(sent, read).map((op) => op.historyKey)).toEqual([
+      'f2',
+      'f1',
+      'new3',
+    ]);
+  });
+
+  it('uses each sent key once and leaves a new step its own', () => {
+    const sent = [fuse('f1', ['CLR']), fuse('f2', ['CLR'])];
+    const read = [fuse('n1', ['CLR']), fuse('n2', ['CLR']), fuse('n3', ['CLR']), fuse('n4', ['X'])];
+    expect(carryManagedStepKeys(sent, read).map((op) => op.historyKey)).toEqual([
+      'f1',
+      'f2',
+      'n3',
+      'n4',
+    ]);
   });
 });
 

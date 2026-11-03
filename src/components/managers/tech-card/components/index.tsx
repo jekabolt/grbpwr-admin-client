@@ -122,6 +122,7 @@ import { TechCardFittings } from './tech-card-fittings';
 import {
   acceptOperationDrops,
   auditOperationPresence,
+  carryManagedStepKeys,
   contradictsScreen,
   hasPresenceLoss,
   mergeOperationsAfterSave,
@@ -1666,6 +1667,7 @@ export function TechCardForm({
       if (readIndex < 0 || !readOps[readIndex] || !sentOps[sentIndex]?.historyKey) return;
       readOps[readIndex] = { ...readOps[readIndex], historyKey: sentOps[sentIndex].historyKey };
     });
+    const keyedReadOps = carryManagedStepKeys(sentOps, readOps);
     if (fuseOverrides.length > 0) {
       notify({
         sev: 'warn',
@@ -1673,7 +1675,7 @@ export function TechCardForm({
         text: fusingOverrideText(fuseOverrides),
       });
     }
-    const merged = mergeOperationsAfterSave(sentOps, readOps, operationAudit);
+    const merged = mergeOperationsAfterSave(sentOps, keyedReadOps, operationAudit);
     return done(
       {
         ...sent,

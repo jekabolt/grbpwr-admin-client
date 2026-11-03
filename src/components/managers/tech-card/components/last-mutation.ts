@@ -528,15 +528,21 @@ export function removeLabel(index: number): string {
   return `remove step ${(index + 1) * 10}`;
 }
 
-/** Where the removed step returns: right after its nearest predecessor still on the card. */
+/**
+ * Where the removed step returns: next to its nearest old neighbour still on the card, the one
+ * before it first. Walking one way only would throw it past a neighbour that lost its key.
+ */
 export function removeRestoreIndex(
   before: readonly string[],
   historyKey: string,
   current: readonly string[],
 ): number {
-  for (let i = before.indexOf(historyKey) - 1; i >= 0; i--) {
-    const at = current.indexOf(before[i]);
-    if (at >= 0) return at + 1;
+  const home = before.indexOf(historyKey);
+  for (let distance = 1; distance < before.length; distance++) {
+    const previous = home - distance >= 0 ? current.indexOf(before[home - distance]) : -1;
+    if (previous >= 0) return previous + 1;
+    const next = home + distance < before.length ? current.indexOf(before[home + distance]) : -1;
+    if (next >= 0) return next;
   }
   return 0;
 }

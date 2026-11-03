@@ -220,6 +220,28 @@ function alignSteps(
   return pairs;
 }
 
+// A server-managed step never pairs (the audit leaves it out), yet the read mints it a fresh
+// client-only key. Keep the sent key on the same step, matched by what it fuses, each sent row used
+// once: otherwise every save kills the neighbour a removed step would return next to.
+const managedSignature = (op: OpLike) => `${keyList(op.inputKeys)}|${keyList(op.pieceLineKeys)}`;
+
+export function carryManagedStepKeys<T extends OpLike>(
+  sent: ReadonlyArray<T>,
+  read: ReadonlyArray<T>,
+): T[] {
+  const waiting = new Map<string, T[]>();
+  for (const op of sent) {
+    if (!isServerManagedStep(op) || !op.historyKey) continue;
+    const signature = managedSignature(op);
+    waiting.set(signature, [...(waiting.get(signature) ?? []), op]);
+  }
+  return read.map((op) => {
+    if (!isServerManagedStep(op)) return op;
+    const twin = waiting.get(managedSignature(op))?.shift();
+    return twin ? { ...op, historyKey: twin.historyKey } : op;
+  });
+}
+
 // Сверяет отправленное с прочитанным В КООРДИНАТАХ ФОРМЫ: обе стороны — строки формы, а не тела
 // провода. Прочитанное уже прошло `mapTechCardToForm`, отправленное пришло из той же формы, что
 // им и заполнялась, — значит словарь чтения у обеих сторон один, и канонизация не даёт ложных

@@ -5656,7 +5656,7 @@ export function OperationsField({
   /** The tab's own controls for the block header (pattern parsing state, the skeleton door). */
   headerAction?: ReactNode;
 } = {}) {
-  const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
+  const { clearErrors, control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
   const { fields, append, remove, insert, move, replace } = useFieldArray({
     control,
     name: 'operations',
@@ -7367,6 +7367,8 @@ export function OperationsField({
         if (getValues(`issues.${i}.operationNumber`)) continue;
         setValue(`issues.${i}.operationNumber`, operationStepNumber(at), { shouldDirty: true });
       }
+      // A refusal of the save without this step names rows by position: none of them holds now.
+      clearErrors('operations');
     });
     setSelected(at);
     setHistory(undoStep(history.current));
@@ -7382,7 +7384,10 @@ export function OperationsField({
       refuseGesture('SEQUENCE', 'nothing to redo', 'the sequence has changed since');
       return;
     }
-    applyToForm(() => removeOperation(index));
+    applyToForm(() => {
+      removeOperation(index);
+      clearErrors('operations');
+    });
     setHistory(pushUndo(dropRedoTop(history.current), fresh));
   };
 
