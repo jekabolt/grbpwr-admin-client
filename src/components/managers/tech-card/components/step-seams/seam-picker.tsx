@@ -49,8 +49,7 @@ import {
 } from './step-seams-model';
 import type { SeamSides } from './step-picture';
 import {
-  isUnitStepSeamPreview,
-  stepSeamPreview,
+  isUnitStep,
   StepPictureSvg,
   useBoxSize,
   useStepScene,
@@ -143,15 +142,10 @@ export function SeamPickerBody({
     byKey,
     innerLines,
     groups,
-    leaves,
     ease,
     stored,
     suggestions,
     surfaceSuggestion,
-    innerSeams,
-    storedSeams,
-    crossSeams,
-    hands,
     pieceName: nameOf,
   } = scene;
   const frozen = (scene.ctx?.frozen ?? true) || readOnly;
@@ -162,8 +156,8 @@ export function SeamPickerBody({
   const { catalog: workCatalog } = useOperationWorkCatalog();
 
   const suggestion = suggestions[initialProposal] ?? suggestions[0] ?? null;
-  const unitStepPreview = isUnitStepSeamPreview(groups);
-  const initialPick = initialPickerPick(suggestion, preselectProposal, unitStepPreview);
+  const unitStep = isUnitStep(groups);
+  const initialPick = initialPickerPick(suggestion, preselectProposal, unitStep);
   const [sel, setSel] = useState<Sel>(() => initialPick ?? EMPTY);
   const [hover, setHover] = useState<TargetId | null>(null);
   const [busy, setBusy] = useState(false);
@@ -394,36 +388,6 @@ export function SeamPickerBody({
     [frozen, posing, groups, sel],
   );
 
-  const previewTarget = useMemo(() => {
-    if (pair || surface) return { sides: pick, source: 'live' as const };
-    if (stored[0]) return { sides: stored[0].sides, source: 'stored' as const };
-    return guessSelection ? { sides: guessSelection, source: 'live' as const } : null;
-  }, [pair, surface, pick, stored, guessSelection]);
-  const unitPreview = useMemo(
-    () =>
-      unitStepPreview && previewTarget
-        ? stepSeamPreview(
-            { leaves, innerSeams, storedSeams, crossSeams, geoms, innerLines, hands },
-            previewTarget,
-            { focus: false, explode: 0.08 },
-          )
-        : null,
-    [
-      unitStepPreview,
-      previewTarget,
-      leaves,
-      innerSeams,
-      storedSeams,
-      crossSeams,
-      geoms,
-      innerLines,
-      hands,
-    ],
-  );
-  // Multi-input steps keep the shared result byte-for-byte. A unit seam gets a local, reversible
-  // preview because the shared result correctly treats its one carried input as rigid.
-  const canvasLayout = !posing && unitPreview ? unitPreview.layout : resultLayout;
-  const canvasLayers = !posing && unitPreview ? undefined : stepPicture?.layers;
   // Edges only: no length is drawn on the canvas (the owner, №58); the footer keeps the lengths.
   // Kept until a seam is stored or the selection moves: the canvas keys its layers on these.
   const { marks, nos } = useMemo(() => {
@@ -446,7 +410,7 @@ export function SeamPickerBody({
   const groupNames = useMemo(() => groups.map((g) => g.name), [groups]);
   const canvasPickTargets = useMemo(
     () =>
-      unitStepPreview
+      unitStep
         ? [
             ...new Set([
               ...suggestions.flatMap((candidate) => [...candidate.a, ...candidate.b]),
@@ -456,7 +420,7 @@ export function SeamPickerBody({
             ]),
           ]
         : undefined,
-    [unitStepPreview, suggestions, stored, sel],
+    [unitStep, suggestions, stored, sel],
   );
 
   // Edge to edge on both sides (a part on its host's line has no Δ).
@@ -530,7 +494,7 @@ export function SeamPickerBody({
   const stepName = stepWords(op, workCatalog) || op?.outputUnitName?.trim() || '';
 
   const loading = geo?.dep.status === 'pending';
-  const drawn = canvasLayout.T.size > 0;
+  const drawn = resultLayout.T.size > 0;
   const error = refused || stored.map((s) => (errors[s.key] ? 'refused' : '')).find(Boolean) || '';
 
   const content = (
@@ -629,8 +593,8 @@ export function SeamPickerBody({
                 h={canvas.h}
                 pad={phone ? 28 : 64}
                 look='canvas'
-                layout={canvasLayout}
-                layers={canvasLayers}
+                layout={resultLayout}
+                layers={stepPicture?.layers}
                 geoms={geoms}
                 innerLines={innerLines}
                 marks={marks}

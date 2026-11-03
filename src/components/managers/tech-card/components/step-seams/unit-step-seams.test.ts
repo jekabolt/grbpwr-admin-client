@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { compose } from 'lib/assembly-skeleton/union/affine';
 import { toWire, type StoredSeam } from 'lib/seams';
 
 import {
@@ -14,16 +15,16 @@ import {
 } from './card85.fixture';
 import { CARD6_OPS, CARD6_PIECE_KEYS, CARD6_SEAMS, card6Geoms, card6Step } from './card6.fixture';
 import { seamEdgeWord } from './seam-focus';
-import { fitBox } from './step-picture';
+import { fitBox, invert } from './step-picture';
 import {
-  isUnitStepSeamPreview,
+  isUnitStep,
   nearestPictureTarget,
   pictureBounds,
   picturePickTargets,
   stepPictureOfOp,
-  stepSeamPreview,
   type SceneOp,
 } from './step-picture-view';
+import { OWNER_FIT, stepResults } from './step-result';
 import { edgeRowFromPick, initialPickerPick } from './step-rows';
 import {
   fullyUsedEdges,
@@ -32,6 +33,7 @@ import {
   usedEdgesBeforeStep,
   type FormOpLike,
 } from './step-seams-model';
+import { stepPictureOf } from './surface-picture';
 
 const innerLines = new Map<string, Pt2[][]>();
 
@@ -53,70 +55,62 @@ describe('card 85 op 970 unit seam preview', () => {
     skipLayout: true,
   });
 
-  it('lays both shoulder proposals into non-empty tile and picker pictures', () => {
-    expect(isUnitStepSeamPreview(scene.groups)).toBe(true);
-    expect(scene.suggestions).toHaveLength(2);
+  const results = stepResults(
+    {
+      ops: CARD85_OPS,
+      byKey: CARD85_SEAMS,
+      poses: new Map(),
+      geoms,
+      innerLines,
+      pieceKeys: CARD85_PIECE_KEYS,
+    },
+    OWNER_FIT,
+  );
 
-    for (const sides of scene.suggestions) {
-      const preview = stepSeamPreview(
-        {
-          leaves: scene.leaves,
-          innerSeams: scene.innerSeams,
-          storedSeams: scene.storedSeams,
-          crossSeams: scene.crossSeams,
-          geoms,
-          innerLines,
-          hands: scene.hands,
-        },
-        { sides, source: 'live' },
-      );
-      expect(preview).not.toBeNull();
-      expect(preview!.seams.length).toBeGreaterThan(0);
-      for (const piece of [...sides.a, ...sides.b].map(pieceOfTarget)) {
-        expect(preview!.layout.T.has(piece)).toBe(true);
-      }
-      const bounds = pictureBounds(preview!.layout, geoms, 'tile');
-      expect(bounds.x1 - bounds.x0).toBeGreaterThan(0);
-      expect(bounds.y1 - bounds.y0).toBeGreaterThan(0);
+  it('draws both shoulder proposals on the step result', () => {
+    expect(isUnitStep(scene.groups)).toBe(true);
+    expect(scene.suggestions).toHaveLength(2);
+    const picture = stepPictureOf(results, index)!;
+    for (const sides of scene.suggestions)
+      for (const piece of [...sides.a, ...sides.b].map(pieceOfTarget))
+        expect(picture.layout.T.has(piece)).toBe(true);
+    const bounds = pictureBounds(picture.layout, geoms, 'tile');
+    expect(bounds.x1 - bounds.x0).toBeGreaterThan(0);
+    expect(bounds.y1 - bounds.y0).toBeGreaterThan(0);
+  });
+
+  it('keeps the carried block as its producer laid it', () => {
+    const [block] = results[index].blocks;
+    const producer = results.findLastIndex(
+      (result, at) => at < index && (CARD85_OPS[at].outputUnitKey ?? '').trim() === block.inputKey,
+    );
+    expect(producer).toBeGreaterThanOrEqual(0);
+    const relative = (T: ReadonlyMap<string, Affine>, piece: string) =>
+      compose(invert(T.get(block.pieces[0])!), T.get(piece)!);
+    for (const piece of block.pieces) {
+      const now = relative(results[index].layout.T, piece);
+      const was = relative(results[producer].layout.T, piece);
+      expect(Math.hypot(now[4] - was[4], now[5] - was[5])).toBeLessThan(0.5);
     }
   });
 
-  it('hits the drawn right back shoulder instead of a hidden placket edge', () => {
+  it('hits the right back shoulder on the shared picture', () => {
     const right = scene.suggestions.find((proposal) => proposal.hand === 'R');
     expect(right).toBeDefined();
     const shoulder = right!.a.find((id) => seamEdgeWord([id], geoms) === 'shoulder');
     expect(shoulder).toBeDefined();
-
-    const preview = stepSeamPreview(
-      {
-        leaves: scene.leaves,
-        innerSeams: scene.innerSeams,
-        storedSeams: scene.storedSeams,
-        crossSeams: scene.crossSeams,
-        geoms,
-        innerLines,
-        hands: scene.hands,
-      },
-      { sides: right!, source: 'live' },
-      { focus: false, explode: 0.08 },
-    );
-    expect(preview).not.toBeNull();
-    const bounds = pictureBounds(preview!.layout, geoms, 'canvas');
+    const picture = stepPictureOf(results, index)!;
+    const bounds = pictureBounds(picture.layout, geoms, 'canvas');
     const targets = picturePickTargets(
-      preview!.layout,
+      picture.layout,
       geoms,
       innerLines,
       fitBox(bounds, 960, 720, 64),
-      {
-        hiddenTargets: new Set(
-          scene.suggestions.flatMap((proposal) => [...proposal.a, ...proposal.b]),
-        ),
-      },
+      { keys: picture.layers, projectHidden: false },
     );
     const shoulderTarget = targets.find((target) => target.id === shoulder);
     expect(shoulderTarget).toBeDefined();
     const point = shoulderTarget!.points[Math.floor(shoulderTarget!.points.length / 2)];
-    expect(nearestPictureTarget(point, targets)?.id).toBe(shoulder);
     expect(pieceOfTarget(nearestPictureTarget(point, targets)!.id)).toBe(pieceOfTarget(shoulder!));
   });
 

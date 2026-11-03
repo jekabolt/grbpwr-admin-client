@@ -11,7 +11,6 @@ import {
 } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button, GroupLabel, Text } from 'ui';
-import { seamOfSides } from './step-picture';
 import {
   hasMultipleStepPieces,
   innerId,
@@ -22,7 +21,7 @@ import { recordSeamDecision } from './seam-decisions';
 import { drawsStepResult } from './draws-result';
 import { useStepResults } from './step-result-context';
 import { useStepSeams } from './step-seams-context';
-import { frameSeamsOf, useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
+import { useCardGeoms, useCardPieceKeys, useStepScene } from './step-picture-view';
 import { SeamTile } from './step-seams-row';
 import type { TechCardFormData } from '../schema';
 
@@ -234,30 +233,11 @@ const QuizTile = memo(
     const scene = useStepScene(index);
     const results = useStepResults();
     const result = drawsStepResult(results, index) ? results?.[index] : undefined;
-    const ownedLayout = result?.layout;
-    const ownedLayers = result?.layers;
     const proposalRef = useRef<StepProposal | null | undefined>(undefined);
     if (proposalRef.current === undefined && scene.geo?.dep.status !== 'pending') {
       proposalRef.current = scene.suggestions[0] ?? null;
     }
     const proposal = proposalRef.current ?? scene.suggestions[0] ?? null;
-    const seams = useMemo(() => {
-      const own = proposal ? seamOfSides(proposal, scene.geoms, scene.innerLines) : null;
-      return frameSeamsOf(
-        scene.innerSeams,
-        scene.storedSeams,
-        own ? [own] : proposal ? [] : scene.surfaceProposals,
-        scene.crossSeams,
-      );
-    }, [
-      proposal,
-      scene.surfaceProposals,
-      scene.crossSeams,
-      scene.geoms,
-      scene.innerLines,
-      scene.innerSeams,
-      scene.storedSeams,
-    ]);
     const surfaces = proposal ? [] : scene.surfaceSuggestions;
     const surface = surfaces.length > 0;
     // No guess yet the pieces are there: the tile draws them for a pick by hand.
@@ -271,15 +251,13 @@ const QuizTile = memo(
     return (
       <SeamTile
         scene={scene}
-        seams={seams}
-        layout={ownedLayout}
-        layers={ownedLayers}
-        marks={ownedLayout ? [] : marks}
-        dashed={!ownedLayout && (!!proposal || !!surface)}
+        picture={result}
+        marks={result ? [] : marks}
+        dashed={!result && (!!proposal || !!surface)}
         current={current}
         status={status}
-        emptyLabel={ownedLayout || proposal || surface || drawable ? undefined : 'no seam'}
-        caption={ownedLayout || proposal || surface || !drawable ? undefined : 'pick'}
+        emptyLabel={result || proposal || surface || drawable ? undefined : 'no seam'}
+        caption={result || proposal || surface || !drawable ? undefined : 'pick'}
         onOpen={onOpen}
       />
     );

@@ -719,42 +719,8 @@ export type StepSeamPreviewInput = {
   hands?: StepHands;
 };
 
-/** A proposal, pick, or stored unit seam laid without changing the shared owner result. */
-export function stepSeamPreview(
-  input: StepSeamPreviewInput,
-  target: { sides: SeamSides; source: 'live' | 'stored' },
-  options: { focus?: boolean; explode?: number; rasterMm?: number } = {},
-): { seams: SeamCandidate[]; layout: StepLayout } | null {
-  const own =
-    target.source === 'live' ? seamOfSides(target.sides, input.geoms, input.innerLines) : null;
-  if (target.source === 'live' && !own) return null;
-  const seams = frameSeamsOf(
-    input.innerSeams,
-    input.storedSeams,
-    own ? [own] : [],
-    input.crossSeams,
-  );
-  const leaves =
-    options.focus === false
-      ? input.leaves
-      : focusedStepLeaves(
-          input.leaves,
-          [...target.sides.a, ...target.sides.b],
-          input.innerSeams,
-          input.hands?.pose,
-        );
-  return {
-    seams,
-    layout: stepLayout(leaves, seams, input.geoms, {
-      explode: options.explode ?? STEP_TILE_EXPLODE,
-      rasterMm: options.rasterMm,
-      ...input.hands,
-    }),
-  };
-}
-
-/** Only a resolved multi-piece input needs the local seam preview path. */
-export const isUnitStepSeamPreview = (groups: readonly { pieces: readonly string[] }[]) =>
+/** One resolved multi-piece input: a seam inside a unit, its edges picked on the unit's picture. */
+export const isUnitStep = (groups: readonly { pieces: readonly string[] }[]) =>
   groups.length === 1 && groups[0].pieces.length > 1;
 
 /** `stepLayout`, memoised on the seams' identity. */
@@ -1368,9 +1334,11 @@ export function withoutCoveredDoors<T extends { id: TargetId; points: readonly P
   doors: readonly T[],
   pieces: readonly { key: string; ring: readonly Pt2[]; input: number }[],
   coveredBy: (key: string) => readonly string[],
+  keep?: ReadonlySet<TargetId>,
 ): T[] {
   const byKey = new Map(pieces.map((piece) => [piece.key, piece]));
   return doors.filter(({ id, points }) => {
+    if (keep?.has(id)) return true;
     const piece = byKey.get(pieceOfTarget(id));
     if (!piece) return true;
     const covers = coveredBy(piece.key).flatMap((key) => {
@@ -2051,7 +2019,9 @@ export function StepPictureSvg({
   const doors = useMemo(() => {
     if (!pickable && look !== 'canvas') return [];
     // Owned pictures: bottom → top, so the top layer's edges sit last in the DOM and take the click;
-    // a stacked twin's edges follow its drawn offset. Local unit previews use only visible bases.
+    // a stacked twin's edges follow its drawn offset. An edge the caller names stays pickable even
+    // under a piece of its own unit: a seam inside a unit joins exactly such an edge.
+    const named = pickable && pickTargets ? new Set(pickTargets) : undefined;
     const targets = picturePickTargets(
       layout,
       geoms,
@@ -2069,11 +2039,16 @@ export function StepPictureSvg({
             },
           }
         : {
-            hiddenTargets: pickable && pickTargets ? new Set(pickTargets) : undefined,
+            hiddenTargets: named,
           },
     );
     return layers
-      ? withoutCoveredDoors(targets, pieces, (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [])
+      ? withoutCoveredDoors(
+          targets,
+          pieces,
+          (key) => ownedStyle?.pieces.get(key)?.coveredBy ?? [],
+          named,
+        )
       : targets;
   }, [
     pieces,

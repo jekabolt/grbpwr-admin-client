@@ -9,27 +9,21 @@ import { cn } from 'lib/utility';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, GroupLabel, Text } from 'ui';
-import type { SeamCandidate } from 'lib/assembly-skeleton/types';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import { drawsStepResult } from './draws-result';
 import { PairNo } from './pair-no';
 import { NO_SEAM_TEXT } from './step-highlight';
-import { seamOfSides, type StepLayout } from './step-picture';
 import { useStepResults } from './step-result-context';
 import { hasMultipleStepPieces, type TargetId } from './step-seams-model';
 import { useStepSeamActions } from './step-seams-context';
 import {
-  focusedStepLeaves,
-  frameSeamsOf,
-  isUnitStepSeamPreview,
-  STEP_TILE_EXPLODE,
-  STEP_TILE_RASTER_MM,
+  isUnitStep,
   StepPictureSvg,
-  useStepLayout,
   useStepScene,
   type EdgeMark,
   type StepScene,
 } from './step-picture-view';
+import type { SurfacePicture } from './surface-picture';
 
 const SeamPicker = lazy(() => import('./seam-picker'));
 
@@ -41,11 +35,8 @@ export function StepSeamsRow({ index }: { index: number }) {
   const scene = useStepScene(index);
   const results = useStepResults();
   const result = drawsStepResult(results, index) ? results?.[index] : undefined;
-  const ownedLayout = result?.layout;
-  const ownedLayers = result?.layers;
   const { ctx, op, ops, geo, geoms, pieceKeys, keys, stored, suggestions } = scene;
-  const { innerLines, innerSeams, storedSeams, crossSeams } = scene;
-  const unitStepPreview = isUnitStepSeamPreview(scene.groups);
+  const unitStep = isUnitStep(scene.groups);
   const seamActions = useStepSeamActions(index);
   const pendingWrites = useSeamsStore((state) => state.pending);
   const opNumber = op?.operationNumber;
@@ -58,20 +49,6 @@ export function StepSeamsRow({ index }: { index: number }) {
     () => hasMultipleStepPieces(ops, index, pieceKeys, geoms),
     [ops, index, pieceKeys, geoms],
   );
-  // Each tile lays its pieces along the seam it shows (a stored one, or its own proposal).
-  const storedFrame = useMemo(
-    () => frameSeamsOf(innerSeams, storedSeams, [], crossSeams),
-    [innerSeams, storedSeams, crossSeams],
-  );
-  const proposalFrames = useMemo(
-    () =>
-      suggestions.map((sug) => {
-        const own = seamOfSides(sug, geoms, innerLines);
-        return frameSeamsOf(innerSeams, storedSeams, own ? [own] : [], crossSeams);
-      }),
-    [suggestions, innerSeams, storedSeams, crossSeams, geoms, innerLines],
-  );
-
   // A deep link from the audit's PDF gaps: open on this step, then drop the param.
   const [params, setParams] = useSearchParams();
   const pick = params.get('pick');
@@ -119,15 +96,13 @@ export function StepSeamsRow({ index }: { index: number }) {
               <SeamTile
                 no={i}
                 scene={scene}
-                seams={storedFrame}
-                layout={unitStepPreview ? undefined : ownedLayout}
-                layers={unitStepPreview ? undefined : ownedLayers}
+                picture={result}
                 marks={[...parts.a, ...parts.b].map((part) => ({
                   id: part.target,
                   ...(part.range ? { range: part.range } : {}),
                   tone: 'stored',
                 }))}
-                localSeamPreview={unitStepPreview}
+                ownMarksOnly={unitStep}
                 missing={!row}
                 onOpen={cardId ? () => setOpen(true) : undefined}
                 data-step-seam={key}
@@ -155,17 +130,15 @@ export function StepSeamsRow({ index }: { index: number }) {
             </div>
           );
         })}
-        {(keys.length === 0 || unitStepPreview) &&
+        {(keys.length === 0 || unitStep) &&
           suggestions.map((sug, i) => (
             <SeamTile
               key={i}
               no={stored.length + suggestions.length > 1 ? stored.length + i : undefined}
               scene={scene}
-              seams={proposalFrames[i] ?? storedFrame}
-              layout={unitStepPreview ? undefined : ownedLayout}
-              layers={unitStepPreview ? undefined : ownedLayers}
+              picture={result}
               marks={[...sug.a, ...sug.b].map((id) => ({ id, tone: 'proposal' }))}
-              localSeamPreview={unitStepPreview}
+              ownMarksOnly={unitStep}
               dashed
               onOpen={cardId ? () => setPicker({ proposal: i, preselect: true }) : undefined}
             />
@@ -198,11 +171,9 @@ export function StepSeamsRow({ index }: { index: number }) {
  */
 export function SeamTile({
   scene,
-  seams,
-  layout: suppliedLayout,
-  layers,
+  picture,
   marks,
-  localSeamPreview,
+  ownMarksOnly,
   dashed,
   missing,
   no,
@@ -216,15 +187,11 @@ export function SeamTile({
   /** The seam's number on the step — the one the picker shows beside it. */
   no?: number;
   scene: StepScene;
-  /** The seams the tile lays its pieces along. */
-  seams: readonly SeamCandidate[];
-  /** An owner result bypasses tile focus, crop, proposal and inferred placement. */
-  layout?: StepLayout;
-  /** Authoritative bottom-to-top order for an owner result. */
-  layers?: readonly string[];
+  /** The step's one picture; nothing is drawn until it exists. */
+  picture?: SurfacePicture | null;
   marks: { id: TargetId; tone: EdgeMark['tone'] }[];
-  /** A local unit preview draws its own seam instead of the shared step highlight. */
-  localSeamPreview?: boolean;
+  /** A seam inside a unit shows only its own marks, not the step's highlight. */
+  ownMarksOnly?: boolean;
   dashed?: boolean;
   missing?: boolean;
   /** Opens the picker on this step — the tile is a way in, as `+ seam`. */
@@ -236,27 +203,6 @@ export function SeamTile({
   caption?: string;
   'data-step-seam'?: string;
 }) {
-  const ids = marks.map((m) => m.id).join(',');
-  // The seam's pieces with the pieces of their unit between them — a yoke's armhole on the back.
-  const leavesRaw = useMemo(
-    () =>
-      focusedStepLeaves(
-        scene.leaves,
-        ids.split(',').filter(Boolean),
-        scene.innerSeams,
-        scene.hands.pose,
-      ),
-    [scene.leaves, scene.innerSeams, ids, scene.hands.pose],
-  );
-  const inferredLayout = useStepLayout(
-    leavesRaw,
-    seams,
-    scene.geoms,
-    STEP_TILE_EXPLODE,
-    STEP_TILE_RASTER_MM,
-    scene.hands,
-  );
-  const layout = suppliedLayout ?? inferredLayout;
   return (
     <span
       role={onOpen ? 'button' : undefined}
@@ -291,21 +237,21 @@ export function SeamTile({
         <Text size='nano' variant='error'>
           missing
         </Text>
-      ) : (
+      ) : picture ? (
         <StepPictureSvg
           w={TILE_W}
           h={TILE_H}
           pad={2}
           look='tile'
-          layout={layout}
-          layers={layers}
+          layout={picture.layout}
+          layers={picture.layers}
           geoms={scene.geoms}
           innerLines={scene.innerLines}
           marks={marks}
-          stepEdges={localSeamPreview ? undefined : scene.stepEdges}
-          stepParts={localSeamPreview ? undefined : scene.stepParts}
+          stepEdges={ownMarksOnly ? undefined : scene.stepEdges}
+          stepParts={ownMarksOnly ? undefined : scene.stepParts}
         />
-      )}
+      ) : null}
       {no != null && (
         <span className='absolute top-0 left-0'>
           <PairNo i={no} />

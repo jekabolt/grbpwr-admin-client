@@ -347,6 +347,9 @@ describe('StepPictureSvg lower layers', () => {
       'bag#1',
       'front#0',
     ]);
+    expect(
+      withoutCoveredDoors(doors, inUnit, coveredBy, new Set(doors.map((door) => door.id))),
+    ).toHaveLength(3);
     expect(withoutCoveredDoors(doors, beingSewn, coveredBy)).toHaveLength(3);
   });
 
