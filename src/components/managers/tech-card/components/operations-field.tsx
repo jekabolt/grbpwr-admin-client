@@ -281,6 +281,7 @@ import {
   type FormOpLike,
 } from './step-seams/step-seams-model';
 import { StepSeamsRow } from './step-seams/step-seams-row';
+import { FOLD_STEP_REFUSAL, foldsClosingOn } from './assembly-folds/fold-step';
 import { StepFoldsRow } from './assembly-folds/step-folds-row';
 import type { PieceShapeMap } from './use-piece-shapes';
 import {
@@ -5844,6 +5845,10 @@ export function OperationsField({
   // Ф6в), и первый вызыватель вне формы дописал бы перенумерацию в выпущенную карточку молча.
   const removeOperation = (index: number) => {
     if (frozen) return;
+    if (foldsClosingOn(getValues('operations') ?? [], index).length > 0) {
+      refuseGesture('FOLDS', FOLD_STEP_REFUSAL, 'БЕЗ ШАГА');
+      return;
+    }
     const historyKey = getValues(`operations.${index}.historyKey`);
     if (historyKey) placeBlankOnFirstInput.current.delete(historyKey);
     clearFormHistory(); // (1/10) массив поехал — формовые записи протухли
