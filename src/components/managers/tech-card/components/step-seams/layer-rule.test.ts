@@ -186,15 +186,12 @@ describe('layersOf with an order: the window beats the flags between blocks', ()
   it('no order, an empty one and one of stale keys all read as today, byte for byte', () => {
     const rows = [row('one', 'A:over', 'B1'), row('two', 'B2:under', 'A')];
     const today = layersOf(blocks, rows);
-    expect(today).not.toHaveProperty('ordered');
     expect(layersOf(blocks, rows, [])).toEqual(today);
     expect(layersOf(blocks, rows, ['gone'])).toEqual(today);
-    expect(layersOf(blocks, rows, ['gone'])).not.toHaveProperty('ordered');
   });
 
-  it('names every pair it set, and a block hands its own pairs on', () => {
+  it('a block hands the pairs it set on', () => {
     const out = layersOf(blocks, [], ['b', 'a']);
-    expect(sorted(out.ordered ?? [])).toEqual(['B1<A', 'B2<A']);
     const next = layersOf(
       [
         {
@@ -202,14 +199,12 @@ describe('layersOf with an order: the window beats the flags between blocks', ()
           pieces: ['A', 'B1', 'B2'],
           layers: out.layers,
           stacked: out.stacked,
-          ordered: out.ordered,
         },
         { key: 'c', pieces: ['C'] },
       ],
       [],
     );
     expect(next.layers).toEqual(['B1', 'B2', 'A', 'C']);
-    expect(sorted(next.ordered ?? [])).toEqual(['B1<A', 'B2<A']);
   });
 });
 
@@ -305,7 +300,6 @@ describe('preview equals saved', () => {
         expect(after.layers).toEqual(preview.layers);
         expect(after.stacked).toEqual(preview.stacked);
         expect(after.lower).toEqual(preview.lower);
-        expect(after.ordered).toEqual(preview.ordered);
         expect(after.layerConflicts).toEqual([]);
         // The order moves no piece.
         expect(after.transforms).toEqual(result.transforms);
@@ -337,7 +331,6 @@ describe('preview equals saved', () => {
     )!;
     for (const under of big.pieces) {
       expect(later.stacked).toContainEqual([under, small.pieces[0]]);
-      expect(later.ordered).toContainEqual([under, small.pieces[0]]);
       expect(later.layers.indexOf(under)).toBeLessThan(later.layers.indexOf(small.pieces[0]));
     }
   });

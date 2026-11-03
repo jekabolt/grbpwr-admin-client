@@ -361,6 +361,7 @@ export const de = {
     pressSide: 'Bügelseite',
     topstitch: 'Absteppung',
     button: 'Knopf',
+    label: 'Etikett',
     openIssue: 'offener Punkt',
     colour: 'Farbe',
     sectionCover: 'Deckblatt',

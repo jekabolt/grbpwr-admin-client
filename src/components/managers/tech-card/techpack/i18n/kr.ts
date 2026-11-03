@@ -358,6 +358,7 @@ export const kr = {
     pressSide: '다림질 방향',
     topstitch: '상침',
     button: '단추',
+    label: '라벨',
     openIssue: '미해결 사항',
     colour: '색상',
     sectionCover: '표지',

@@ -32,8 +32,6 @@ export type LayerBlock = {
   pieces: readonly string[];
   layers?: readonly string[];
   stacked?: readonly LayerRelation[];
-  /** The part of `stacked` an owner's order set at an earlier step. */
-  ordered?: readonly LayerRelation[];
 };
 
 /** One stored seam or pose row of a step, in the order it is read. */
@@ -60,8 +58,6 @@ export type LayerStacking = {
   stacked: LayerRelation[];
   lower: string[];
   conflicts: LayerConflict[];
-  /** The part of `stacked` an owner's order set, here or carried; absent with none. */
-  ordered?: LayerRelation[];
 };
 
 export type StepResult = {
@@ -74,8 +70,6 @@ export type StepResult = {
    * flag only), carried claims included. The only source of under/over.
    */
   stacked: readonly (readonly [string, string])[];
-  /** The part of `stacked` the owner's order set, here or at an earlier step; none = no order. */
-  ordered?: readonly LayerRelation[];
   /** Pieces some claim puts under another piece; every other piece is not lower. */
   lower: readonly string[];
   /** What `layersOf` read for this result: PLACE recomputes its preview from the same input. */
@@ -301,7 +295,7 @@ function reachesAny(
  * THE OWNER'S ORDER (`order`, the LAYERS window, bottom to top, by block key) beats the flags between
  * blocks: they are neither read nor listed. Flags inside a block read as before. A key no longer among
  * the inputs is skipped and a new input lies on top; an order naming no block is no order. Its pairs
- * ride to later steps in `stacked`, and in `ordered`, which is what the fills paint by.
+ * ride to later steps in `stacked`. The fills paint in `layers`, the same as the outlines.
  */
 export function layersOf(
   blocks: readonly LayerBlock[],
@@ -361,18 +355,9 @@ export function layersOf(
     for (let at = 1; at < carried.length; at++) hints.push([carried[at - 1], carried[at]]);
   });
 
-  const ordered: LayerRelation[] = blocks.flatMap((block, index) =>
-    (block.ordered ?? []).filter(
-      ([under, over]) => members[index].includes(under) && members[index].includes(over),
-    ),
-  );
   ranking?.forEach((lower, at) => {
     for (const upper of ranking.slice(at + 1))
-      for (const under of members[lower])
-        for (const over of members[upper]) {
-          add(under, over);
-          ordered.push([under, over]);
-        }
+      for (const under of members[lower]) for (const over of members[upper]) add(under, over);
   });
 
   const base = (ranking ?? blocks.map((_, index) => index)).flatMap((index) => {
@@ -384,7 +369,6 @@ export function layersOf(
     stacked,
     lower: unique(stacked.map(([under]) => under)),
     conflicts,
-    ...(ordered.length ? { ordered } : {}),
   };
 }
 
@@ -519,7 +503,6 @@ function computeStep(
       ...(group.seed
         ? { layers: group.seed.result.layers, stacked: group.seed.result.stacked }
         : {}),
-      ...(group.seed?.result.ordered ? { ordered: group.seed.result.ordered } : {}),
     })),
     ...(op?.layerOrder?.length ? { order: op.layerOrder } : {}),
     rows: [
@@ -541,7 +524,6 @@ function computeStep(
     layers: stacking.layers,
     stacked: stacking.stacked,
     lower: stacking.lower,
-    ...(stacking.ordered ? { ordered: stacking.ordered } : {}),
     layerInput,
     layerConflicts: stacking.conflicts,
     blocks: inputs.map((group, groupIndex) => ({

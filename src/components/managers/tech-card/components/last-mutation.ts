@@ -205,13 +205,14 @@ export type HistoryEntry<TRow = unknown> =
        * Что вернуть отменой. `rows` — ГЛУБОКИЙ снимок шагов до записи (с `media[].mediaId`), нужен
        * только `replace`: хвостовая пачка отменяется удалением своих строк. Флаги — как стояли до
        * записи: `replace` поверх фото взводит `mediaCleared`, и без отката флага сервер снял бы фото
-       * со шагов, которые отмена вернула. `issues` — номера шагов в дефектах до ремапа.
+       * со шагов, которые отмена вернула. `issues` — дефекты до ремапа целиком: номер без содержимого
+       * не говорит, чей он (`skeletonIssueLinks`).
        */
       before: {
         rows: TRow[];
         mediaCleared: boolean;
         assemblyCleared: boolean;
-        issues: number[];
+        issues: IssueLinkShape[];
       };
       /** Что вернуть повтором (⇧⌘Z): строки, как их построил каркас, и флаги после записи. */
       /**
@@ -587,25 +588,46 @@ export function issuesToRelink(
   linked: readonly IssueLinkShape[],
   current: readonly IssueLinkShape[],
 ): number[] {
+  return matchIssues(linked, current).map(([, index]) => index);
+}
+
+function matchIssues(
+  linked: readonly IssueLinkShape[],
+  current: readonly IssueLinkShape[],
+): [IssueLinkShape, number][] {
   const free = new Set(current.flatMap((issue, index) => (issue.operationNumber ? [] : [index])));
-  const take = (index: number) => {
+  const take = (issue: IssueLinkShape, index: number): [IssueLinkShape, number] => {
     free.delete(index);
-    return index;
+    return [issue, index];
   };
   const left: IssueLinkShape[] = [];
-  const out: number[] = [];
+  const out: [IssueLinkShape, number][] = [];
   for (const issue of linked) {
     const whole = issueWhole(issue);
     const same = [...free].find((index) => issueWhole(current[index]) === whole);
     if (same === undefined) left.push(issue);
-    else out.push(take(same));
+    else out.push(take(issue, same));
   }
   for (const issue of left) {
     const name = issueName(issue);
     const same = [...free].filter((index) => issueName(current[index]) === name);
-    if (same.length === 1) out.push(take(same[0]));
+    if (same.length === 1) out.push(take(issue, same[0]));
   }
   return out;
+}
+
+/**
+ * The step references an undone skeleton gives back, by position in `current`. The numbers alone
+ * cannot say whose they are: a defect deleted and another added before the undo leave the same
+ * list of zeros. Unlinked defects take part so that each keeps its own row, and write nothing.
+ */
+export function skeletonIssueLinks(
+  before: readonly IssueLinkShape[],
+  current: readonly IssueLinkShape[],
+): { index: number; operationNumber: number }[] {
+  return matchIssues(before, current).flatMap(([issue, index]) =>
+    issue.operationNumber ? [{ index, operationNumber: issue.operationNumber }] : [],
+  );
 }
 
 /** Why this removal cannot come back whole; `null` when it can. Never a partial return. */

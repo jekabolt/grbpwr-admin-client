@@ -28,6 +28,8 @@ export const tasksKeys = {
   all: ['tasks'] as const,
   list: (filter: ListTasksFilter) => [...tasksKeys.all, 'list', filter] as const,
   detail: (id: number) => [...tasksKeys.all, 'detail', id] as const,
+  fileContent: (taskId: number, fileId: number) =>
+    [...tasksKeys.all, 'file-content', taskId, fileId] as const,
   comments: (taskId: number) => [...tasksKeys.all, 'comments', taskId] as const,
   // Under `all`, so every task write that invalidates `all` refreshes the rail counts too.
   boards: () => [...tasksKeys.all, 'boards'] as const,
@@ -166,6 +168,16 @@ export function useClosedTasks(from: Date, to: Date) {
     queryFn: () => tasksService.listClosedTasks(from, to),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+  });
+}
+
+/** Up to 10 MB in memory, so nothing is kept once the viewer closes. */
+export function useTaskFileContent(taskId: number, fileId: number) {
+  return useQuery({
+    queryKey: tasksKeys.fileContent(taskId, fileId),
+    queryFn: () => tasksService.getTaskFileContent(taskId, fileId),
+    gcTime: 0,
+    retry: false,
   });
 }
 

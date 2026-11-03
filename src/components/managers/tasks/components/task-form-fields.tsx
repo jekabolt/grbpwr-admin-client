@@ -7,12 +7,13 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { addDays, format, startOfDay } from 'date-fns';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
-import { AddDoor, Button, Chip, ChipRow, Close, Input, Text } from 'ui';
+import { AddDoor, Button, Chip, ChipRow, Close, Input, Progress, Text } from 'ui';
 import type { Task, TaskMediaAnnotations, TaskPriority, TaskStatus } from '../api/types';
 import { boardNameOf, tasksKeys, useTaskBoards } from '../hooks/useTasks';
+import type { useTaskAttachmentIntake } from '../hooks/useTaskAttachmentIntake';
 import { PRIORITIES, PRIORITY_LABEL, STATUS_LABEL, STATUSES } from '../utils/meta';
 import { AvatarStack } from './avatar-stack';
 import { EntityPicker } from './entity-picker';
@@ -413,7 +414,7 @@ function LinkRow({
   );
 }
 
-type AddKind = LinkType | 'file' | 'media';
+type AddKind = LinkType | 'file' | 'media' | 'upload';
 
 export function AttachField({
   phone,
@@ -425,6 +426,7 @@ export function AttachField({
   setMediaIds,
   annotations,
   setAnnotations,
+  intake,
 }: {
   phone: boolean;
   links: Record<LinkField, number | string>;
@@ -435,11 +437,13 @@ export function AttachField({
   setMediaIds: (ids: number[]) => void;
   annotations: TaskMediaAnnotations[];
   setAnnotations: (next: TaskMediaAnnotations[]) => void;
+  intake: Pick<ReturnType<typeof useTaskAttachmentIntake>, 'busy' | 'progress' | 'openFiles'>;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [step, setStep] = useState<LinkType | null>(null);
   const [filePicker, setFilePicker] = useState(false);
   const mediaTrigger = useRef<HTMLButtonElement>(null);
+  const uploadTrigger = useRef<HTMLInputElement>(null);
 
   const setLinks = LINK_TYPES.filter((t) => isSet(links[t.field], t.config.empty));
 
@@ -460,13 +464,14 @@ export function AttachField({
   };
 
   const choose = (kind: AddKind) => {
-    if (kind === 'file' || kind === 'media') {
+    if (kind === 'file' || kind === 'media' || kind === 'upload') {
       openAdd(false);
       // Шторка сначала закрывается и возвращает фокус, потом открывается пикер — иначе возврат
       // фокуса шторки выдернул бы его из только что открытого окна.
       setTimeout(() => {
         if (kind === 'file') setFilePicker(true);
-        else mediaTrigger.current?.click();
+        else if (kind === 'media') mediaTrigger.current?.click();
+        else uploadTrigger.current?.click();
       }, 0);
       return;
     }
@@ -477,6 +482,15 @@ export function AttachField({
 
   return (
     <div className='flex flex-col gap-2'>
+      {intake.busy && (
+        <div className='flex flex-col gap-1.5'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            adding files
+          </Text>
+          <Progress value={intake.progress} />
+        </div>
+      )}
+
       {hasAny && (
         <div className='flex flex-col border border-borderColor'>
           {setLinks.map((t) => (
@@ -556,6 +570,7 @@ export function AttachField({
               </OptionRow>
             ))}
             <OptionRow onClick={() => choose('file')}>library file</OptionRow>
+            <OptionRow onClick={() => choose('upload')}>upload file</OptionRow>
             <OptionRow onClick={() => choose('media')}>site media · public</OptionRow>
           </>
         )}
@@ -575,6 +590,18 @@ export function AttachField({
             site media
           </Button>
         }
+      />
+
+      <input
+        ref={uploadTrigger}
+        type='file'
+        multiple
+        hidden
+        onChange={(event: ChangeEvent<HTMLInputElement>) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          intake.openFiles(files);
+        }}
       />
 
       {filePicker && (

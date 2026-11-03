@@ -4,6 +4,7 @@ import { Button, ConfirmationModal, Input, Text } from 'ui';
 import { orderedMedia } from '../api/tasksService';
 import { TaskFormValues } from '../api/types';
 import { FINE_POINTER_QUERY, PHONE_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
+import { useTaskAttachmentIntake } from '../hooks/useTaskAttachmentIntake';
 import { clearTaskDraft, loadTaskDraft, saveTaskDraft } from '../hooks/useTaskDraft';
 import { DescriptionEditor } from './description-editor';
 import { isSet, LINK_TYPES, type LinkField } from './link-editor';
@@ -119,6 +120,22 @@ export function TaskFormModal({
   const values = watch();
 
   const [moreOpen, setMoreOpen] = useState(false);
+  // Лежит здесь, а не в складном «more»: бросить файл можно и на сложенную форму, а свернуть
+  // «more» во время загрузки не значит её отменить.
+  const intake = useTaskAttachmentIntake({
+    enabled: open,
+    onMedia: (id) => {
+      const ids = getValues('mediaIds') ?? [];
+      if (!ids.includes(id)) setValue('mediaIds', [...ids, id], { shouldDirty: true });
+    },
+    onFile: (id) => {
+      const ids = getValues('fileIds') ?? [];
+      if (!ids.includes(id)) setValue('fileIds', [...ids, id], { shouldDirty: true });
+    },
+  });
+  useEffect(() => {
+    if (intake.busy) setMoreOpen(true);
+  }, [intake.busy]);
   const [confirmClose, setConfirmClose] = useState(false);
   /** Засев открытия — с ним сравнивается «есть ли несохранённое». */
   const seedRef = useRef<TaskFormValues>(initial);
@@ -244,8 +261,19 @@ export function TaskFormModal({
       // Неявной отправки по Enter нет: создаёт только кнопка и ⌘/Ctrl+Enter.
       onSubmit={(e) => e.preventDefault()}
       onKeyDown={onModEnter}
-      className='flex min-w-0 flex-col gap-4'
+      {...intake.dropProps}
+      className='relative isolate flex min-w-0 flex-col gap-4'
     >
+      {intake.dragging && (
+        <div
+          aria-hidden
+          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textColor bg-bgColor/95'
+        >
+          <Text size='micro' variant='uppercase' tracking='section' component='span'>
+            drop files
+          </Text>
+        </div>
+      )}
       <Controller
         control={control}
         name='title'
@@ -374,6 +402,7 @@ export function TaskFormModal({
               setMediaIds={(ids) => setValue('mediaIds', ids, { shouldDirty: true })}
               annotations={values.mediaAnnotations ?? []}
               setAnnotations={(next) => setValue('mediaAnnotations', next, { shouldDirty: true })}
+              intake={intake}
             />
           </div>
         </div>

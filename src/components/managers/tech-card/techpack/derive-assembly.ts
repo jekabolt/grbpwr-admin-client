@@ -2932,14 +2932,20 @@ function wordsOf(
     if (!toward) assemblyGap(ctx.sink, 'pdf_side_missing', t('gaps.pressSide'), op.n, 'side');
     if (note) line.push({ t: cap(note) });
   } else if (note) line.push({ t: cap(note) });
-  const hardware = (o.bomLineKeys ?? [])
-    .map((k) => ins?.bomItems?.find((b) => b.lineKey === k))
-    .filter((b) => b?.section === 'TECH_CARD_BOM_SECTION_HARDWARE')
-    .map((b) => own(b?.name ?? ''))
-    .filter(Boolean);
+  const linkedNames = (section: string) =>
+    (o.bomLineKeys ?? [])
+      .map((k) => ins?.bomItems?.find((b) => b.lineKey === k))
+      .filter((b) => b?.section === section)
+      .map((b) => own(b?.name ?? ''))
+      .filter(Boolean);
+  const hardware = linkedNames('TECH_CARD_BOM_SECTION_HARDWARE');
+  const sewnLabels = linkedNames('TECH_CARD_BOM_SECTION_LABEL');
   for (const h of hardware) line.push({ t: h });
+  for (const l of sewnLabels) line.push({ t: l });
   if (tech === 'button' && !hardware.length)
     assemblyGap(ctx.sink, 'pdf_button_missing', t('gaps.button'), op.n, 'button');
+  if (tech === 'label' && !sewnLabels.length)
+    assemblyGap(ctx.sink, 'pdf_label_missing', t('gaps.label'), op.n, 'label');
 
   const tool: Seg[] = [];
   if (op.join) {

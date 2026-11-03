@@ -47,7 +47,7 @@ import { mmOnPoints } from './span-pick';
 import { fmtMm } from './step-seams-model';
 import { placementPictureGlyphsForStep, type ButtonholeOperation } from './buttonhole-glyph';
 import { PAIR_INK, pairNo } from './palette';
-import { layerStyle, paintedOrder } from './layer-style';
+import { layerStyle } from './layer-style';
 import { foldedActionGlyphs, foldedActionLines, foldedDrawing } from './step-folds';
 import { NO_SEAM_TEXT, stepHighlightOf } from './step-highlight';
 import { stepHandsOf, type StepHands } from './step-hand';
@@ -1635,7 +1635,6 @@ export function StepPictureSvg({
   layout,
   layers,
   stacked,
-  ordered,
   onPainted,
   geoms: flatGeoms,
   innerLines: flatInnerLines,
@@ -1673,8 +1672,6 @@ export function StepPictureSvg({
   layers?: readonly string[];
   /** Explicit [under, over] claims from the shared result. */
   stacked?: readonly (readonly [string, string])[];
-  /** The part of those claims the owner's order set: the fills paint by it. */
-  ordered?: readonly (readonly [string, string])[];
   /** Told the pieces as their fills are painted, bottom to top, whenever that changes. */
   onPainted?: (bottomToTop: readonly string[]) => void;
   geoms: ReadonlyMap<string, PieceGeom>;
@@ -1798,7 +1795,6 @@ export function StepPictureSvg({
         })),
       ];
   const resultStacked = stacked ?? contextResult?.stacked ?? NO_STACKED;
-  const resultOrdered = ordered ?? contextResult?.ordered;
   const claimedStackedKeys = useMemo(
     () => new Set(resultStacked.flatMap(([under, over]) => [under, over])),
     [resultStacked],
@@ -1934,15 +1930,15 @@ export function StepPictureSvg({
       return piece ? [piece] : [];
     });
   }, [ownedOrder, pieces]);
-  // The colours read the levels alone; the paint reads them too until the owner sets an order.
-  const ownedSurfaces = useMemo(() => {
-    const byKey = new Map(orderedOwnedPieces.map((piece) => [piece.key, piece]));
-    return paintedOrder(
-      orderedOwnedPieces.map((piece) => piece.key),
-      ownedStyle?.pieces ?? new Map(),
-      resultOrdered,
-    ).map((key) => ({ piece: byKey.get(key)!, level: ownedStyle?.pieces.get(key)?.level ?? 0 }));
-  }, [orderedOwnedPieces, ownedStyle, resultOrdered]);
+  // The fills lie in the outlines' order; the colours read the levels alone.
+  const ownedSurfaces = useMemo(
+    () =>
+      orderedOwnedPieces.map((piece) => ({
+        piece,
+        level: ownedStyle?.pieces.get(piece.key)?.level ?? 0,
+      })),
+    [orderedOwnedPieces, ownedStyle],
+  );
   useEffect(
     () => onPainted?.(ownedSurfaces.map(({ piece }) => piece.key)),
     [onPainted, ownedSurfaces],

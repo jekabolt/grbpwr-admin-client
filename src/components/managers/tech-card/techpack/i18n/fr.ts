@@ -362,6 +362,7 @@ export const fr = {
     pressSide: 'côté repassage',
     topstitch: 'surpiqûre',
     button: 'bouton',
+    label: 'étiquette',
     openIssue: 'point ouvert',
     colour: 'couleur',
     sectionCover: 'couverture',

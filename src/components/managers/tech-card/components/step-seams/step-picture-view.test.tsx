@@ -123,7 +123,7 @@ const renderPicture = ({
 
 describe('StepPictureSvg lower layers', () => {
   it.each(['canvas', 'tile', 'print'] as const)(
-    'paints each piece the colour of its level, lowest first, in the %s renderer',
+    'paints each piece the colour of its level, in the order of the layers, in the %s renderer',
     (look) => {
       for (const order of [
         ['bag', 'front'],
@@ -135,8 +135,9 @@ describe('StepPictureSvg lower layers', () => {
         expect(fillOf(markup, 'front')).toBe(levelFill(0));
         expect(fillOf(markup, 'bag')).toBe(levelFill(1));
         expect(surfaceTag(markup, 'bag')).toContain('data-piece-level="1"');
-        expect(markup.indexOf('data-piece-surface="bag"')).toBeGreaterThan(
-          markup.indexOf('data-piece-surface="front"'),
+        // The fills lie in the order of the layers.
+        expect(markup.indexOf(`data-piece-surface="${order[1]}"`)).toBeGreaterThan(
+          markup.indexOf(`data-piece-surface="${order[0]}"`),
         );
         expect(markup).not.toContain('data-lower-layer-region');
         expect(markup).not.toContain('data-layer-depth');
@@ -363,7 +364,7 @@ describe('StepPictureSvg lower layers', () => {
     expect(fillOf(render(10), 'upper')).toBe(fillOf(render(10), 'front'));
   });
 
-  it('paints by level with no order, and by the order when it names the pair', () => {
+  it('paints in the order of the layers, the colour stays the level', () => {
     const sleeve = rectangle('sleeve', 'sleeve', 100, 100);
     const strip = rectangle('strip', 'strip', 10, 120);
     const liveGeoms = new Map([
@@ -386,7 +387,7 @@ describe('StepPictureSvg lower layers', () => {
       ]),
       layers: [[0, 1]],
     };
-    const render = (ordered?: readonly (readonly [string, string])[]) =>
+    const render = (layers: readonly string[]) =>
       renderToStaticMarkup(
         <StepPictureSvg
           w={140}
@@ -394,9 +395,7 @@ describe('StepPictureSvg lower layers', () => {
           pad={4}
           look='canvas'
           layout={liveLayout}
-          layers={['strip', 'sleeve']}
-          stacked={[['strip', 'sleeve']]}
-          ordered={ordered}
+          layers={layers}
           geoms={liveGeoms}
         />,
       );
@@ -405,10 +404,13 @@ describe('StepPictureSvg lower layers', () => {
         ? 'sleeve'
         : 'strip';
 
-    expect(paintsFirst(render())).toBe('sleeve');
-    expect(paintsFirst(render([['strip', 'sleeve']]))).toBe('strip');
+    const under = render(['strip', 'sleeve']);
+    const over = render(['sleeve', 'strip']);
+    expect(paintsFirst(under)).toBe('strip');
+    expect(paintsFirst(over)).toBe('sleeve');
     // The colour stays the level's either way.
-    expect(fillOf(render(), 'strip')).toBe(fillOf(render([['strip', 'sleeve']]), 'strip'));
+    expect(fillOf(under, 'strip')).toBe(levelFill(1));
+    expect(fillOf(over, 'strip')).toBe(levelFill(1));
   });
 
   it('cuts the graph glyph by the same rule', () => {
@@ -441,6 +443,27 @@ describe('StepPictureSvg lower layers', () => {
     // Lowest level first, so the strip's colour lies over the sleeve's.
     expect(markup.indexOf(`fill="${levelFill(1)}"`)).toBeGreaterThan(
       markup.indexOf('data-lower-layer-base="sleeve"'),
+    );
+    // The other way round the glyph follows the layers; the strip keeps its colour.
+    const flipped = unionPictureOfLayout(
+      {
+        T: new Map([
+          ['sleeve', IDENTITY],
+          ['strip', translate(45, -10)],
+        ]),
+        stacked: [],
+        onRuns: [],
+      },
+      new Map([
+        ['sleeve', sleeve],
+        ['strip', strip],
+      ]),
+      ['strip', 'sleeve'],
+    );
+    const flippedMarkup = renderToStaticMarkup(<UnitGlyph picture={flipped} name='sleeve unit' />);
+    expect(flipped.levels).toEqual({ sleeve: 0, strip: 1 });
+    expect(flippedMarkup.indexOf(`fill="${levelFill(1)}"`)).toBeLessThan(
+      flippedMarkup.indexOf(`fill="${levelFill(0)}"`),
     );
   });
 

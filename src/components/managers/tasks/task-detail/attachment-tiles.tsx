@@ -4,11 +4,13 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
 import { notify } from 'lib/stores/store';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { AddDoor, Button, Media, Text, Tiles } from 'ui';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { annotationsOf, NotesMark } from '../components/task-media-viewer';
 import { tasksKeys } from '../hooks/useTasks';
+import { taskFileViewOf } from './file-view/file-view';
+import { TaskFileViewer } from './file-view/task-file-viewer';
 
 /**
  * Вложения задачи ПЛИТКАМИ (`task.v2`).
@@ -40,6 +42,8 @@ export function AttachmentTiles({
   annotations,
   onOpenMedia,
   onAdd,
+  onAddMedia,
+  addDisabled,
 }: {
   taskId: number;
   media: TaskMedia[];
@@ -57,8 +61,11 @@ export function AttachmentTiles({
    * которой считает `useTaskMediaViewer`.
    */
   onOpenMedia: (index: number) => void;
-  /** «+ file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
+  /** «+ add file» — последняя плитка ряда; без пропа двери нет (нет права записи). */
   onAdd?: () => void;
+  /** «+ media» открывает медиатеку; «+ add file» берёт файл с устройства. */
+  onAddMedia?: () => void;
+  addDisabled?: boolean;
 }) {
   const qc = useQueryClient();
   const { canRead } = usePermissions();
@@ -79,7 +86,22 @@ export function AttachmentTiles({
     [qc, taskId],
   );
 
+  const [viewing, setViewing] = useState<LibraryFile | null>(null);
+
   const openFile = (f: LibraryFile) => {
+    // Таблицу и текст смотрят прямо в задаче: право здесь tasks:read, карточка файла не нужна.
+    // То, что браузеру показать нечем, сразу скачивается.
+    const view = taskFileViewOf(f.fileName, f.contentType);
+    if (view !== 'as-is' && view !== 'download') {
+      setViewing(f);
+      return;
+    }
+    if (view === 'download' && f.downloadUrl) {
+      window.open(f.downloadUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    // PDF и картинки — как раньше.
+    //
     // Открытие файла ведёт В РАЗДЕЛ ФАЙЛОВ, к его карточке: там живут темы, ответственные,
     // обсуждение и читалка, и держать их вторую копию в задаче незачем.
     //
@@ -198,12 +220,30 @@ export function AttachmentTiles({
           />
         ))}
 
-        {onAdd && (
-          <AddDoor shape='tile' className='aspect-square w-full' onClick={onAdd}>
+        {onAddMedia && (
+          <AddDoor
+            shape='tile'
+            className='aspect-square w-full'
+            disabled={addDisabled}
+            onClick={onAddMedia}
+          >
             media
           </AddDoor>
         )}
+        {onAdd && (
+          <AddDoor
+            shape='tile'
+            className='aspect-square w-full'
+            disabled={addDisabled}
+            onClick={onAdd}
+          >
+            add file
+          </AddDoor>
+        )}
       </Tiles>
+      {viewing && (
+        <TaskFileViewer taskId={taskId} file={viewing} onClose={() => setViewing(null)} />
+      )}
     </div>
   );
 }

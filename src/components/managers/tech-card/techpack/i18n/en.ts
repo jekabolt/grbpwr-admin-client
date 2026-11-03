@@ -405,6 +405,7 @@ export const en = {
     pressSide: 'press side',
     topstitch: 'topstitch',
     button: 'button',
+    label: 'label',
     openIssue: 'open issue',
     colour: 'colour',
     sectionCover: 'cover',

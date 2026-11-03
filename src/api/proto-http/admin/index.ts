@@ -5422,6 +5422,18 @@ export type GetTaskRequest = {
   id: number | undefined;
 };
 
+export type GetTaskFileContentRequest = {
+  taskId: number | undefined;
+  fileId: number | undefined;
+};
+
+export type GetTaskFileContentResponse = {
+  content: string | undefined;
+  // The file is over the viewing ceiling, content is empty. Data rather than an
+  // error: it is an ordinary state of an ordinary file, and it ends in a download.
+  tooLarge: boolean | undefined;
+};
+
 export type GetTaskResponse = {
   task: common_Task | undefined;
   // Resolved library attachments, carrying freshly minted presigned urls.
@@ -20059,6 +20071,12 @@ export interface AdminService {
   AddTask(request: AddTaskRequest): Promise<AddTaskResponse>;
   // GetTask returns a task by id.
   GetTask(request: GetTaskRequest): Promise<GetTaskResponse>;
+  // GetTaskFileContent returns the BYTES of a file attached to a task, so the task
+  // can show it in place. They travel over the RPC because JS cannot read a
+  // presigned url: the bucket has no CORS for the panel. Gated on tasks:read, like
+  // the attachment list in GetTask; a file that is not attached to this task, or
+  // that the caller may not see, is NotFound.
+  GetTaskFileContent(request: GetTaskFileContentRequest): Promise<GetTaskFileContentResponse>;
   // UpdateTask replaces a task's content (title, description, assignee, priority,
   // due_date, labels, media, entity links). Placement — board, column (status),
   // ordering — is NOT touched here; it changes only through MoveTask.
@@ -24570,6 +24588,29 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetTask",
       }) as Promise<GetTaskResponse>;
+    },
+    GetTaskFileContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.taskId) {
+        throw new Error("missing required field request.task_id");
+      }
+      if (!request.fileId) {
+        throw new Error("missing required field request.file_id");
+      }
+      const path = `api/admin/task/${request.taskId}/file/${request.fileId}/content`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTaskFileContent",
+      }) as Promise<GetTaskFileContentResponse>;
     },
     UpdateTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/task/update`; // eslint-disable-line quotes

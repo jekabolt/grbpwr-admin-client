@@ -50,7 +50,7 @@ export interface UploadQueueStore {
    */
   topicNames: Record<number, string>;
 
-  enqueue: (files: File[], topics: BatchTopics) => void;
+  enqueue: (files: File[], topics: BatchTopics) => string[];
   cancel: (id: string) => void;
   dismiss: (id: string) => void;
   retry: (id: string) => void;
@@ -218,7 +218,7 @@ export const useUploadQueueStore = create<UploadQueueStore>((set) => ({
     // Новая пачка возвращает полосу на экран: убрали её, чтобы не мешала, а не чтобы
     // не видеть следующую отправку.
     set({ hidden: false });
-    engine.enqueue(files, topics);
+    return engine.enqueue(files, topics);
   },
   cancel: (id) => engine.cancel(id),
   dismiss: (id) => engine.dismiss(id),

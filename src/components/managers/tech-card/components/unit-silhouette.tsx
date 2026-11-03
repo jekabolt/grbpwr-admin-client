@@ -95,8 +95,6 @@ function LowerLayerUnitShape({
     .sort((left, right) => left.number - right.number);
   const lastTwin = twinLabels.at(-1)?.number ?? 0;
   const levelOf = (shape: { pieceKey: string }) => picture.levels?.[shape.pieceKey] ?? 0;
-  // The highest level is painted last: the colours read the levels alone, never the order.
-  const surfaces = [...picture.shapes].sort((a, b) => levelOf(a) - levelOf(b));
 
   return (
     <span
@@ -110,7 +108,7 @@ function LowerLayerUnitShape({
         className='block h-full w-full'
         aria-hidden='true'
       >
-        {surfaces.map((shape) => (
+        {picture.shapes.map((shape) => (
           <polygon
             key={shape.pieceKey}
             points={shapePoints(shape.pts)}

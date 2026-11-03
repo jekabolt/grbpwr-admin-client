@@ -362,6 +362,7 @@ export const es = {
     pressSide: 'lado planchado',
     topstitch: 'pespunte',
     button: 'botón',
+    label: 'etiqueta',
     openIssue: 'punto abierto',
     colour: 'color',
     sectionCover: 'portada',
