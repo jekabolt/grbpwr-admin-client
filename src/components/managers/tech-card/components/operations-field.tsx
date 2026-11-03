@@ -4480,7 +4480,7 @@ function OperationEditor({
 
   const variantOneEditor = (
     <>
-      <div className='mb-3 flex min-w-0 items-center gap-2 border-b border-hairline pb-2'>
+      <div className='mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2'>
         <StepHeaderIcon index={index} />
         <Text size='default' component='h4' className='shrink-0 tabular-nums'>
           {opNumber}
@@ -4490,7 +4490,7 @@ function OperationEditor({
           variant='uppercase'
           tracking='label'
           component='span'
-          className='min-w-0 flex-1 truncate'
+          className='min-w-20 flex-1 truncate'
           data-editor-heading={index}
         >
           {editorHeading}
