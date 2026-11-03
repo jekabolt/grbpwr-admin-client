@@ -1323,6 +1323,9 @@ const operationSchema = z
     // it is gone: two time inputs with no rule about which to fill guarantee half the cards are timed
     // in the wrong one.
     smv: z.string().optional().default(''),
+    // How far apart this step's seam sides may be before the map calls them different, mm. Empty =
+    // the default; 0 is a real value.
+    seamToleranceMm: z.string().optional().default(''),
     calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
     // DRAFT (0410): the assembly skeleton wrote this step and nobody has reviewed it yet. A team mark,
     // not an instruction: the server keeps it out of the card digest. The first meaningful edit of the
@@ -2875,6 +2878,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       seamKind: (o.seamKind ?? '').trim(),
       workVariant: (o.workVariant ?? '').trim(),
       smv: decimalToInput(o.smv),
+      seamToleranceMm: decimalToInput(o.seamToleranceMm),
       draft: !!o.draft,
       review: (o.review ?? '').trim(),
       assemblyBlockDetached: !!o.assemblyBlockDetached,
@@ -3803,6 +3807,8 @@ export function mapFormToTechCardInsert(
     // Step folds (op.foldKeys) likewise: without the flag the server refuses a write over a card
     // whose steps close folds.
     operationFoldsAware: true,
+    // Step seam tolerance likewise.
+    operationSeamToleranceAware: true,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -4024,6 +4030,7 @@ export function mapFormToTechCardInsert(
         review: (o.review ?? '').trim(),
         assemblyBlockDetached: !!o.assemblyBlockDetached,
         smv: inputToDecimal(o.smv),
+        seamToleranceMm: inputToDecimal(o.seamToleranceMm),
         calloutNumber: o.calloutNumber || 0,
         seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,
         stitchesPerCm: inputToDecimal(o.stitchesPerCm),
