@@ -105,7 +105,10 @@ export function useMirrorStep({
       }),
     [step, cardOps, rowList, poseList, geoms, grainDeg],
   );
-  const visible = useMemo(() => isRightMirrorStep(step, cardOps, geoms), [step, cardOps, geoms]);
+  const visible = useMemo(
+    () => plan.kind !== 'no-twin' || isRightMirrorStep(step, cardOps, geoms),
+    [plan.kind, step, cardOps, geoms],
+  );
 
   const write = useCallback(async (): Promise<MirrorStepWriteResult> => {
     if (!ctx || ctx.frozen) return { ok: false, error: 'not saved' };

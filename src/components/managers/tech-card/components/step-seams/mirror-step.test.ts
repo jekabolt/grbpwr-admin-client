@@ -15,7 +15,7 @@ import {
 
 import { CARD85_OPS, CARD85_SEAMS, card85Geoms, card85Step } from './card85.fixture';
 import { card63Geoms, card63InnerLines } from './card63.fixture';
-import { mirrorRowSig, mirrorStepPlan } from './mirror-step';
+import { isRightMirrorStep, mirrorRowSig, mirrorStepPlan } from './mirror-step';
 import { placementT } from './step-pose';
 import { surfaceRow, type FormOpLike } from './step-seams-model';
 import { executeMirrorStep } from './use-mirror-step';
@@ -379,6 +379,18 @@ describe('range and refusal rules', () => {
       expect(read).not.toBeNull();
       expect(mirrorRowSig(read!)).toBe(mirrorRowSig(mirrored));
     }
+  });
+
+  it('says nothing about a twin on a step that holds a left piece', () => {
+    const hands = new Map(
+      [...geoms].map(([key, geom]) => [
+        key,
+        { ...geom, hand: key.endsWith('_L') ? ('L' as const) : ('R' as const) },
+      ]),
+    );
+    expect(isRightMirrorStep(ops[0], ops, hands)).toBe(false);
+    const rightOnly = { ...ops[1], inputKeys: ['PCK_BACK_R'] };
+    expect(isRightMirrorStep(rightOnly, [ops[0], rightOnly], hands)).toBe(true);
   });
 
   it('returns no-twin without rows and edge-mismatch for an unreliable twin map', () => {

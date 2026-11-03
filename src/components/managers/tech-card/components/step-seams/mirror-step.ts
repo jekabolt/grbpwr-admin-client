@@ -466,7 +466,7 @@ export function mirrorStepPlan({
   };
 }
 
-/** Right-hand steps are where the owner may request a left-to-right mirror. */
+/** Only right pieces: nothing to mirror from is worth saying. A step with a left piece stays quiet. */
 export function isRightMirrorStep(
   step: FormOpLike,
   cardOps: readonly FormOpLike[],
@@ -474,7 +474,8 @@ export function isRightMirrorStep(
 ): boolean {
   const index = stepIndexOf(step, cardOps);
   if (index < 0) return false;
-  return stepInputPieces(cardOps, index, new Set(geoms.keys())).some(
-    (key) => geoms.get(key)?.hand === 'R',
+  const hands = stepInputPieces(cardOps, index, new Set(geoms.keys())).map(
+    (key) => geoms.get(key)?.hand,
   );
+  return hands.includes('R') && !hands.includes('L');
 }
