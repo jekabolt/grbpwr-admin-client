@@ -9,7 +9,7 @@ import {
   type StoredSeam,
   withSeamLayer,
 } from 'lib/seams';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useSeamsStore } from '../assembly-seams/seams-store';
 import {
   blockRelation,
@@ -24,6 +24,7 @@ import {
 import { pictureBounds } from './step-picture-view';
 import {
   pinPoses,
+  fitPlan,
   poseAfterDrop,
   poseBlockGroup,
   posePickup,
@@ -32,6 +33,7 @@ import {
   turnAbout,
   turnToGrain,
   upright,
+  type FitSource,
   type PoseEditResolution,
   type PosePickup,
   type PoseSnap,
@@ -68,6 +70,7 @@ export function usePoseEdit({
   setRefused,
   attach,
   attachPose,
+  fitSource,
 }: {
   poseKeys: readonly string[] | undefined;
   poses: ReadonlyMap<string, StoredPose>;
@@ -85,6 +88,7 @@ export function usePoseEdit({
     drop?: readonly StoredPose[],
     reflag?: readonly StoredPose[],
   ) => Promise<boolean>;
+  fitSource?: FitSource | null;
 }) {
   // «place» (P8): pieces moved by hand, kept here until «done».
   const [posing, setPosing] = useState(false);
@@ -108,6 +112,11 @@ export function usePoseEdit({
   // A step of one block has nothing to sit against: its drag moves the whole picture, stored nowhere.
   const [poseFree, setPoseFree] = useState<Affine | null>(null);
   const [poseBounds, setPoseBounds] = useState<ReturnType<typeof pictureBounds>>();
+  const fitCycle = useRef<{
+    sourceKey: string;
+    transforms: ReadonlyMap<string, Affine>;
+    alternate: boolean;
+  } | null>(null);
 
   // This step's stored pose rows retain their key when PLACE updates them.
   const ownPoseRows = useMemo(() => {
@@ -152,9 +161,25 @@ export function usePoseEdit({
     }
     return { ...poseLayout, T };
   }, [poseLayout, poseDrag, poseFree]);
+  const fitReady = useMemo(
+    () =>
+      !!fitSource &&
+      !!fitPlan(
+        fitSource,
+        {
+          blocks: poseBlocks,
+          hung: poseHung,
+          transforms: poseLayout?.T ?? resultLayout.T,
+          stacked: resultLayout.stacked,
+        },
+        geoms,
+      ),
+    [fitSource, poseBlocks, poseHung, poseLayout, resultLayout, geoms],
+  );
 
   // ── «place» (P8): any piece moved by hand, stored as a pose on «done»; the pick is left as it is ──
   const exitPose = () => {
+    fitCycle.current = null;
     setPosing(false);
     setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
@@ -167,6 +192,7 @@ export function usePoseEdit({
   };
   const startPose = () => {
     if (posing || !stepPicture) return;
+    fitCycle.current = null;
     setRefused('');
     setPoseChanges({ edits: new Map(), drop: new Set() });
     setHandEdits(new Map());
@@ -185,6 +211,8 @@ export function usePoseEdit({
       geoms,
     );
   const putPose = (piece: string, T: Affine, pickup: PosePickup) => {
+    // A hand move changes what FIT measures from: the next press starts a new cycle.
+    fitCycle.current = null;
     const dropped = poseAfterDrop(
       piece,
       T,
@@ -214,6 +242,60 @@ export function usePoseEdit({
     if (!T0) return;
     const moved = snap ? compose(translate(snap.dx, snap.dy), D) : D;
     putPose(piece, compose(moved, T0), pickup);
+  };
+  const fitPose = () => {
+    if (!fitSource || !fitReady || busy || !stepPicture) return;
+    const shownTransforms = poseLayout?.T ?? resultLayout.T;
+    const previous = fitCycle.current;
+    const cycle =
+      previous?.sourceKey === fitSource.key
+        ? previous
+        : {
+            sourceKey: fitSource.key,
+            transforms: new Map(shownTransforms),
+            alternate: false,
+          };
+    const plan = fitPlan(
+      fitSource,
+      {
+        blocks: poseBlocks,
+        hung: poseHung,
+        transforms: cycle.transforms,
+        stacked: resultLayout.stacked,
+      },
+      geoms,
+      cycle.alternate,
+    );
+    const T0 = plan ? cycle.transforms.get(plan.piece) : undefined;
+    if (!plan || !T0) return;
+    const dropped = poseAfterDrop(
+      plan.piece,
+      compose(plan.D, T0),
+      { host: plan.host },
+      { transforms: cycle.transforms },
+      geoms,
+    );
+    if (!dropped) return;
+    fitCycle.current = { ...cycle, alternate: !cycle.alternate };
+    if (!posing) {
+      setHandEdits(new Map());
+      setPoseLayerEdits(new Map());
+      setPoseFree(null);
+      setSnapOn(false);
+      setPoseBounds(pictureBounds(resultLayout, geoms, 'canvas'));
+      setPosing(true);
+    }
+    setRefused('');
+    setPoseDrag(null);
+    setPoseSel(plan.piece);
+    setPoseChanges((current) =>
+      resolvePoseEdit(
+        storedPoseHosts,
+        posing ? current : { edits: new Map(), drop: new Set() },
+        plan.piece,
+        { host: dropped.host, placement: dropped.placement },
+      ),
+    );
   };
   const transformPose = (command: 'left' | 'right' | 'mirror' | 'upright') => {
     const piece = poseSel;
@@ -418,6 +500,7 @@ export function usePoseEdit({
     setPoseDrag,
     poseFree,
     poseBounds,
+    fitReady,
     ownPoseRows,
     resultLayout,
     poseShown,
@@ -430,6 +513,7 @@ export function usePoseEdit({
     startPose,
     pickupOf,
     dropPose,
+    fitPose,
     transformPose,
     resetPose,
     finishPose,

@@ -66,6 +66,7 @@ import {
   type NoMark,
 } from './step-picture-view';
 import { edgeRowFromPick, initialPickerPick, orderedPickSides } from './step-rows';
+import { fitSourceOf } from './step-pose';
 import { stepPictureOf } from './surface-picture';
 import { usePoseEdit } from './use-pose-edit';
 
@@ -176,6 +177,7 @@ export function SeamPickerBody({
   // A tile preloads its proposal; GUESS does the same from the manual + seam entry.
   const [filled, setFilled] = useState<Sel | null>(() => initialPick);
   const [mirroredPick, setMirroredPick] = useState<StoredSeam | null>(null);
+  const fitSource = useMemo(() => fitSourceOf({ a: sel.a, b: sel.b }), [sel]);
   const poses = scene.poses;
   const stepRows = useMemo(
     () => (op?.seamKeys ?? []).flatMap((key) => byKey.get(key) ?? []),
@@ -194,6 +196,7 @@ export function SeamPickerBody({
     setPoseDrag,
     poseFree,
     poseBounds,
+    fitReady,
     ownPoseRows,
     resultLayout,
     poseShown,
@@ -206,6 +209,7 @@ export function SeamPickerBody({
     startPose,
     pickupOf,
     dropPose,
+    fitPose,
     transformPose,
     resetPose,
     finishPose,
@@ -222,6 +226,7 @@ export function SeamPickerBody({
     setRefused,
     attach,
     attachPose,
+    fitSource,
   });
 
   const pieces = geo?.pieces;
@@ -601,6 +606,7 @@ export function SeamPickerBody({
                   nameOf={nameOf}
                   selected={poseSel}
                   snapAt={snapAtDuringDrag(poseDrag)}
+                  snapSource={fitSource}
                   disabled={frozen || busy}
                   pickupOf={pickupOf}
                   onSelect={(piece) => {
@@ -728,6 +734,16 @@ export function SeamPickerBody({
               >
                 snap
               </Chip>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                onClick={fitPose}
+                disabled={!fitReady || busy || frozen}
+                data-seam-fit=''
+              >
+                FIT
+              </Button>
               <ChipRow>
                 <Chip
                   selected={layerTarget?.layer === 'under'}
@@ -829,6 +845,18 @@ export function SeamPickerBody({
                 )
               ) : null}
               <span className='flex-1' />
+              {!frozen && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  onClick={fitPose}
+                  disabled={!fitReady || busy}
+                  data-seam-fit=''
+                >
+                  FIT
+                </Button>
+              )}
               {!frozen && (suggestion || surfaceSuggestion) && !sel.a.length && !sel.b.length && (
                 <Button
                   type='button'

@@ -6,8 +6,18 @@
 // Pure, below step-picture (which imports it): no import of step-picture here.
 
 import type { Affine, PieceGeom, Pt2 } from 'lib/assembly-skeleton/types';
+import { breakPoints } from 'lib/assembly-skeleton/geometry';
+import { pieceKeyOf, resolveEdge, STACKED_TWIN_OFFSET_MM } from 'lib/assembly-skeleton/union';
 import { apply, compose, IDENTITY, rigid, translate } from 'lib/assembly-skeleton/union/affine';
-import { poseOf, poseRow, type SeamPlacement, type StoredPose } from 'lib/seams';
+import {
+  expandSidePart,
+  normalizeParts,
+  poseOf,
+  poseRow,
+  type SeamPlacement,
+  type SidePart,
+  type StoredPose,
+} from 'lib/seams';
 
 /** A posed piece as the layout reads it: on `host`, at `placement` (the surface encoding). */
 export type PosePin = { host: string; placement: SeamPlacement; seamKey?: string };
@@ -19,6 +29,36 @@ export type PoseEditResolution = {
 };
 
 export type SpanFit = { T: Affine; angleDeg: number; gapMm: number };
+
+export type FitSides = { a: readonly SidePart[]; b: readonly SidePart[] };
+
+export type FitSource = FitSides & { key: string };
+
+type FitSideInput = { a: readonly (SidePart | string)[]; b: readonly (SidePart | string)[] };
+
+const fitPartsOf = (side: readonly (SidePart | string)[]): SidePart[] =>
+  side.map((part) => (typeof part === 'string' ? { target: part } : part));
+
+const fitSourceKey = (sides: FitSides) =>
+  (['a', 'b'] as const)
+    .map((side) =>
+      sides[side]
+        .map(({ target, range }) => `${target}@${range ? `${range[0]}:${range[1]}` : '*'}`)
+        .sort()
+        .join('+'),
+    )
+    .join('~');
+
+/** The complete live pick wins; an optional selected stored row supplies its ranged parts. */
+export function fitSourceOf(
+  current: FitSideInput | null | undefined,
+  stored?: FitSides | null,
+): FitSource | null {
+  const live = current ? { a: fitPartsOf(current.a), b: fitPartsOf(current.b) } : { a: [], b: [] };
+  const sides = live.a.length && live.b.length ? live : stored;
+  if (!sides?.a.length || !sides.b.length) return null;
+  return { a: [...sides.a], b: [...sides.b], key: fitSourceKey(sides) };
+}
 
 const pointAlong = (points: readonly Pt2[], share: number): Pt2 => {
   if (points.length < 2) return points[0] ?? [0, 0];
@@ -62,6 +102,153 @@ export function fitSpan(
   }
   const angleDeg = (Math.atan2(T[1], T[0]) * 180) / Math.PI;
   return { T, angleDeg, gapMm: gap / (samples + 1) };
+}
+
+const rangedPoints = (
+  points: readonly Pt2[],
+  range: readonly [number, number] | undefined,
+  targetLength: number,
+): Pt2[] => {
+  if (!range || points.length < 2 || !(targetLength > 0)) return [...points];
+  const lengths = [0];
+  for (let index = 1; index < points.length; index++)
+    lengths.push(
+      lengths[index - 1] +
+        Math.hypot(
+          points[index][0] - points[index - 1][0],
+          points[index][1] - points[index - 1][1],
+        ),
+    );
+  const total = lengths[lengths.length - 1];
+  const start = (Math.max(0, Math.min(targetLength, range[0])) / targetLength) * total;
+  const end = (Math.max(start, Math.min(targetLength, range[1])) / targetLength) * total;
+  const out: Pt2[] = [];
+  for (let index = 1; index < points.length; index++) {
+    const from = lengths[index - 1];
+    const to = lengths[index];
+    const length = to - from;
+    if (!(length > 0) || to < start || from > end) continue;
+    const at = (distance: number): Pt2 => {
+      const share = Math.max(0, Math.min(1, (distance - from) / length));
+      return [
+        points[index - 1][0] + share * (points[index][0] - points[index - 1][0]),
+        points[index - 1][1] + share * (points[index][1] - points[index - 1][1]),
+      ];
+    };
+    if (!out.length) out.push(at(Math.max(start, from)));
+    out.push(at(Math.min(end, to)));
+    if (to >= end) break;
+  }
+  return out.length >= 2 ? out : [...points];
+};
+
+const stackedOffsets = (stacked: readonly (readonly string[])[]) => {
+  const out = new Map<string, Pt2>();
+  stacked.forEach((group) =>
+    group.slice(1).forEach((piece, index) => {
+      const offset = STACKED_TWIN_OFFSET_MM * (index + 1);
+      out.set(piece, [offset, -offset]);
+    }),
+  );
+  return out;
+};
+
+const partWorldPoints = (
+  part: SidePart,
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  offsets: ReadonlyMap<string, Pt2>,
+): Pt2[] => {
+  const edge = resolveEdge(part.target, geoms);
+  const T = edge ? transforms.get(edge.pieceKey) : undefined;
+  if (!edge || !T) return [];
+  const [ox, oy] = offsets.get(edge.pieceKey) ?? [0, 0];
+  return rangedPoints(edge.pts, part.range, edge.len).map((point) => {
+    const world = apply(T, point);
+    return [world[0] + ox, world[1] + oy];
+  });
+};
+
+/** Join already-laid outline parts by their nearest ends, without adding resampled candidates. */
+const joinedWorldPoints = (
+  parts: readonly SidePart[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  offsets: ReadonlyMap<string, Pt2>,
+): Pt2[] => {
+  const remaining = normalizeParts(parts, geoms)
+    .flatMap((part) => expandSidePart(part, geoms))
+    .map((part) => partWorldPoints(part, transforms, geoms, offsets))
+    .filter((points) => points.length >= 2);
+  const joined = remaining.shift() ?? [];
+  while (remaining.length && joined.length) {
+    const end = joined[joined.length - 1];
+    let best = { index: 0, reverse: false, distance: Infinity };
+    remaining.forEach((points, index) => {
+      for (const reverse of [false, true]) {
+        const next = reverse ? points[points.length - 1] : points[0];
+        const distance = Math.hypot(next[0] - end[0], next[1] - end[1]);
+        if (distance < best.distance) best = { index, reverse, distance };
+      }
+    });
+    const next = remaining.splice(best.index, 1)[0];
+    if (best.reverse) next.reverse();
+    joined.push(...next.slice(best.distance <= 0.05 ? 1 : 0));
+  }
+  return joined;
+};
+
+export type SpanFitPlan = {
+  piece: string;
+  host: string;
+  group: string[];
+  D: Affine;
+  fit: SpanFit;
+  reversed: boolean;
+  sourceKey: string;
+};
+
+/**
+ * Plan one FIT press from the exact current world layout. Side A moves when both sides have one
+ * part; otherwise the only one-part side moves. Both multi-part sides are deliberately disabled.
+ */
+export function fitPlan(
+  source: FitSource,
+  layout: PoseBlockLayout & { stacked?: readonly (readonly string[])[] },
+  geoms: ReadonlyMap<string, PieceGeom>,
+  alternate = false,
+): SpanFitPlan | null {
+  const movingSide = source.a.length === 1 ? source.a : source.b.length === 1 ? source.b : null;
+  const fixedSide = movingSide === source.a ? source.b : movingSide === source.b ? source.a : null;
+  if (!movingSide || !fixedSide?.length) return null;
+  const piece = pieceKeyOf(movingSide[0].target);
+  const host = pieceKeyOf(fixedSide[0].target);
+  if (!piece || !host || piece === host) return null;
+  const pickup = posePickup(piece, layout, geoms);
+  if (!pickup.group.length || pickup.group.includes(host)) return null;
+  const offsets = stackedOffsets(layout.stacked ?? []);
+  const from = joinedWorldPoints(movingSide, layout.transforms, geoms, offsets);
+  const onto = joinedWorldPoints(fixedSide, layout.transforms, geoms, offsets);
+  if (from.length < 2 || onto.length < 2) return null;
+  const choices = [false, true]
+    .map((reversed) => ({ reversed, fit: fitSpan(from, onto, { reversed }) }))
+    .sort((a, b) => Math.abs(a.fit.angleDeg) - Math.abs(b.fit.angleDeg));
+  const choice = choices[alternate ? 1 : 0];
+  const [ox, oy] = offsets.get(piece) ?? [0, 0];
+  // FIT measures the drawn stacked offset. Conjugate it back into the stored piece transform.
+  const D =
+    ox || oy
+      ? compose(translate(-ox, -oy), compose(choice.fit.T, translate(ox, oy)))
+      : choice.fit.T;
+  return {
+    piece,
+    host,
+    group: pickup.group,
+    D,
+    fit: choice.fit,
+    reversed: choice.reversed,
+    sourceKey: source.key,
+  };
 }
 
 /** Encode a span fit as the same placement a dropped pose writes. */
@@ -452,52 +639,115 @@ export function pinPoses(
   return { pinned: pins.map(([k]) => k), moved: any };
 }
 
-/** A drop's snap: the shift that lays a vertex of the dragged pieces on `host` at `at`. */
+/** A drop's snap: the shift that lays an allowed point of the dragged pieces on `host` at `at`. */
 export type PoseSnap = { dx: number; dy: number; at: Pt2; host: string };
 
-/**
- * Where a drop snaps (picture frame): a vertex of the dragged pieces onto a vertex of another piece
- * within `reach`, else onto the nearest point of its outline within `reach`; null — it stays put.
- */
+export type PoseSnapPoint = { piece: string; at: Pt2 };
+
+export type PoseSnapCandidates = {
+  spanEnds: readonly PoseSnapPoint[];
+  notches: readonly PoseSnapPoint[];
+  corners: readonly PoseSnapPoint[];
+};
+
+/** First candidate class with a hit wins; distance only decides within that class. */
 export function snapPose(
-  moving: readonly Pt2[],
-  others: readonly { piece: string; ring: readonly Pt2[] }[],
+  moving: PoseSnapCandidates,
+  others: PoseSnapCandidates,
   reach: number,
 ): PoseSnap | null {
-  if (!moving.length || !(reach > 0)) return null;
-  const mb = box(moving);
-  let vertex: (PoseSnap & { d: number }) | null = null;
-  let edge: (PoseSnap & { d: number }) | null = null;
-  for (const o of others) {
-    const ob = box(o.ring);
-    if (
-      ob.x0 > mb.x1 + reach ||
-      ob.x1 < mb.x0 - reach ||
-      ob.y0 > mb.y1 + reach ||
-      ob.y1 < mb.y0 - reach
-    )
-      continue;
-    const r = o.ring;
-    for (const v of moving)
-      for (let i = 0; i < r.length; i++) {
-        const a = r[i];
-        const b = r[(i + 1) % r.length];
-        const dv = Math.hypot(a[0] - v[0], a[1] - v[1]);
-        if (dv <= reach && (!vertex || dv < vertex.d))
-          vertex = { d: dv, dx: a[0] - v[0], dy: a[1] - v[1], at: a, host: o.piece };
-        const ex = b[0] - a[0];
-        const ey = b[1] - a[1];
-        const l2 = ex * ex + ey * ey;
-        const t = l2 ? Math.max(0, Math.min(1, ((v[0] - a[0]) * ex + (v[1] - a[1]) * ey) / l2)) : 0;
-        const p: Pt2 = [a[0] + ex * t, a[1] + ey * t];
-        const de = Math.hypot(p[0] - v[0], p[1] - v[1]);
-        if (de <= reach && (!edge || de < edge.d))
-          edge = { d: de, dx: p[0] - v[0], dy: p[1] - v[1], at: p, host: o.piece };
+  if (!(reach > 0)) return null;
+  for (const kind of ['spanEnds', 'notches', 'corners'] as const) {
+    let best: (PoseSnap & { distance: number }) | null = null;
+    for (const from of moving[kind])
+      for (const onto of others[kind]) {
+        const distance = Math.hypot(onto.at[0] - from.at[0], onto.at[1] - from.at[1]);
+        if (distance > reach || (best && distance >= best.distance)) continue;
+        best = {
+          distance,
+          dx: onto.at[0] - from.at[0],
+          dy: onto.at[1] - from.at[1],
+          at: onto.at,
+          host: onto.piece,
+        };
+      }
+    if (best) return { dx: best.dx, dy: best.dy, at: best.at, host: best.host };
+  }
+  return null;
+}
+
+const pointAtMm = (points: readonly Pt2[], atMm: number, targetLength: number): Pt2 | null => {
+  if (points.length < 2 || !(targetLength > 0)) return points[0] ?? null;
+  const total = points.reduce(
+    (sum, point, index) =>
+      index
+        ? sum + Math.hypot(point[0] - points[index - 1][0], point[1] - points[index - 1][1])
+        : sum,
+    0,
+  );
+  const target = (Math.max(0, Math.min(targetLength, atMm)) / targetLength) * total;
+  let walked = 0;
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (walked + length >= target) {
+      const share = length ? (target - walked) / length : 0;
+      return [a[0] + share * (b[0] - a[0]), a[1] + share * (b[1] - a[1])];
+    }
+    walked += length;
+  }
+  return points[points.length - 1];
+};
+
+const uniqueSnapPoints = (points: PoseSnapPoint[]) => {
+  const seen = new Set<string>();
+  return points.filter(({ piece, at }) => {
+    const key = `${piece}:${at[0].toFixed(4)}:${at[1].toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const snapCandidatesOf = (
+  pieces: readonly string[],
+  transforms: ReadonlyMap<string, Affine>,
+  geoms: ReadonlyMap<string, PieceGeom>,
+  source?: FitSource | null,
+): PoseSnapCandidates => {
+  const present = new Set(pieces);
+  const spanParts = source ? [...source.a, ...source.b] : [];
+  const spanEnds: PoseSnapPoint[] = [];
+  const notches: PoseSnapPoint[] = [];
+  const corners: PoseSnapPoint[] = [];
+  for (const piece of pieces) {
+    const geom = geoms.get(piece);
+    const T = transforms.get(piece);
+    if (!geom || !T) continue;
+    for (const part of spanParts) {
+      const edge = resolveEdge(part.target, geoms);
+      if (!edge || edge.pieceKey !== piece) continue;
+      const points = rangedPoints(edge.pts, part.range, edge.len);
+      if (points.length < 2) continue;
+      spanEnds.push({ piece, at: apply(T, points[0]) });
+      spanEnds.push({ piece, at: apply(T, points[points.length - 1]) });
+    }
+    for (const edge of geom.edges)
+      for (const point of breakPoints(geom, edge)) {
+        const at = pointAtMm(edge.pts, point.atMm, edge.lenMm);
+        if (!at) continue;
+        const candidate = { piece, at: apply(T, at) };
+        if (point.kind === 'notch') notches.push(candidate);
+        else corners.push(candidate);
       }
   }
-  const best = vertex ?? edge;
-  return best ? { dx: best.dx, dy: best.dy, at: best.at, host: best.host } : null;
-}
+  return {
+    spanEnds: uniqueSnapPoints(spanEnds.filter(({ piece }) => present.has(piece))),
+    notches: uniqueSnapPoints(notches),
+    corners: uniqueSnapPoints(corners),
+  };
+};
 
 /** The snap candidate for the current drag delta, from the same geometry the drop will store. */
 export function snapPoseForDrag(
@@ -507,19 +757,20 @@ export function snapPoseForDrag(
   geoms: ReadonlyMap<string, PieceGeom>,
   stacked: ReadonlySet<string>,
   reach: number,
+  source?: FitSource | null,
 ): PoseSnap | null {
   const movingKeys = new Set(group);
-  const ringOf = (piece: string, T: Affine) =>
-    (geoms.get(piece)?.rs ?? []).map((point) => apply(T, point));
-  const moving = group.flatMap((piece) => {
+  const movedTransforms = new Map(transforms);
+  for (const piece of group) {
     const T = transforms.get(piece);
-    return T ? ringOf(piece, compose(D, T)) : [];
-  });
-  const others = [...transforms].flatMap(([piece, T]) =>
-    movingKeys.has(piece) || stacked.has(piece) || (geoms.get(piece)?.rs.length ?? 0) < 3
-      ? []
-      : [{ piece, ring: ringOf(piece, T) }],
+    if (T) movedTransforms.set(piece, compose(D, T));
+  }
+  const otherKeys = [...transforms.keys()].filter(
+    (piece) =>
+      !movingKeys.has(piece) && !stacked.has(piece) && (geoms.get(piece)?.rs.length ?? 0) >= 3,
   );
+  const moving = snapCandidatesOf(group, movedTransforms, geoms, source);
+  const others = snapCandidatesOf(otherKeys, transforms, geoms, source);
   return snapPose(moving, others, reach);
 }
 
@@ -549,6 +800,32 @@ export function poseHostOf(
     if (keys.length) return keys.reduce((best, k) => (area(k) > area(best) ? k : best));
   }
   return null;
+}
+
+export type PoseRotation = { D: Affine; angleDeg: number };
+
+/** Pointer rotation about a fixed block centre, rounded to the requested degree step. */
+export function rotatePoseDrag(
+  centre: Pt2,
+  start: Pt2,
+  current: Pt2,
+  stepDeg: 1 | 15,
+): PoseRotation {
+  const startAngle = Math.atan2(start[1] - centre[1], start[0] - centre[0]);
+  const currentAngle = Math.atan2(current[1] - centre[1], current[0] - centre[0]);
+  const raw =
+    (Math.atan2(Math.sin(currentAngle - startAngle), Math.cos(currentAngle - startAngle)) * 180) /
+    Math.PI;
+  const angleDeg = Math.round(raw / stepDeg) * stepDeg;
+  if (angleDeg === 0) return { D: IDENTITY, angleDeg: 0 };
+  const angle = (angleDeg * Math.PI) / 180;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const R: Affine = [c, s, -s, c, 0, 0];
+  return {
+    D: compose(translate(centre[0], centre[1]), compose(R, translate(-centre[0], -centre[1]))),
+    angleDeg,
+  };
 }
 
 /** A quarter turn (⟲ +1, ⟳ −1) or a flip (0) of a piece about its box centre, picture frame. */
