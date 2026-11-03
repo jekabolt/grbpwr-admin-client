@@ -51,6 +51,33 @@ export function IconTile({
   );
 }
 
+/** The last tile of a row: three dots over the word; opens the row's rarer kinds below. */
+export function MoreTile({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <Tile
+      onClick={onClick}
+      pressed={open}
+      title={open ? 'less' : 'more'}
+      className='h-18 items-center overflow-hidden p-1'
+    >
+      <svg viewBox='0 0 32 24' width={64} height={48} aria-hidden className='shrink-0'>
+        {[10, 16, 22].map((cx) => (
+          <circle key={cx} cx={cx} cy={12} r={1.15} fill='currentColor' />
+        ))}
+      </svg>
+      <Text
+        size='micro'
+        tracking='label'
+        variant='uppercase'
+        component='span'
+        className='mt-0.5 line-clamp-1 w-full break-words text-center leading-tight'
+      >
+        {open ? 'less' : 'more'}
+      </Text>
+    </Tile>
+  );
+}
+
 /** Field errors of one step, by flat field name (zod refines and server refusals land here). */
 export function useStepFieldErrors(index: number, fields: readonly string[]): string[] {
   const { control } = useFormContext<TechCardFormData>();
